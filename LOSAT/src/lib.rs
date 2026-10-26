@@ -18,6 +18,9 @@ pub mod blastinput;
 pub mod core;
 // NCBI objtools/blast/seqdb_reader (CSeqDB): reader of BLAST database volumes.
 pub mod seqdb;
+// NCBI objects/seqloc (CSeq_id), objects/blastdb (CBlast_def_line_set) and the id helpers
+// of objtools/align_format: the Seq-ids of database sequences.
+pub mod seqid;
 // NCBI objtools/blast/seqdb_writer (CWriteDB) and app/blastdb/makeblastdb.cpp:
 // writer of BLAST database volumes.
 pub mod writedb;

@@ -683,6 +683,10 @@ pub fn blastn_query_coverage(value: &str) -> Result<f64, String> {
 pub fn blastp_query_coverage(value: &str) -> Result<f64, String> {
     percentage(value, "BLASTP")
 }
+/// A PSIBLAST `-qcov_hsp_perc` value (`percentage`).
+pub fn psiblast_query_coverage(value: &str) -> Result<f64, String> {
+    percentage(value, "PSIBLAST")
+}
 /// A BLASTX `-qcov_hsp_perc` value (`percentage`).
 pub fn blastx_query_coverage(value: &str) -> Result<f64, String> {
     percentage(value, "BLASTX")
@@ -858,6 +862,11 @@ pub fn blastp_real(value: &str) -> Result<f64, String> {
     ncbi_double(value, "BLASTP")
 }
 
+/// A real argument of PSIBLAST (`ncbi_double`).
+pub fn psiblast_real(value: &str) -> Result<f64, String> {
+    ncbi_double(value, "PSIBLAST")
+}
+
 /// A real argument of TBLASTN (`ncbi_double`).
 pub fn tblastn_real(value: &str) -> Result<f64, String> {
     ncbi_double(value, "TBLASTN")
@@ -891,6 +900,11 @@ fn ncbi_threshold(value: &str, program: &str) -> Result<f64, String> {
 /// A BLASTP `-threshold` value (`ncbi_threshold`).
 pub fn blastp_threshold(value: &str) -> Result<f64, String> {
     ncbi_threshold(value, "BLASTP")
+}
+
+/// A PSIBLAST `-threshold` value (`ncbi_threshold`).
+pub fn psiblast_threshold(value: &str) -> Result<f64, String> {
+    ncbi_threshold(value, "PSIBLAST")
 }
 
 /// A TBLASTN `-threshold` value (`ncbi_threshold`).

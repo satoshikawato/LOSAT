@@ -65,6 +65,8 @@ impl BlastxDatabase {
     /// with the command line's errors.
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
         let db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
+        // A database with parsed Seq-ids is refused (line DBID: ID2a opens it).
+        shared::refuse_parsed_seqids(&db, PROGRAM)?;
         Ok(Self {
             db,
             name: name.to_string(),

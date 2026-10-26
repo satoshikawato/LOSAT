@@ -1,0 +1,38 @@
+sp|P11111.1|ONE_HUMAN	sp|P11111.1|ONE_HUMAN;titled	P11111	P11111.1	P11111;titled	0	0;0	titled first	titled first<>second line	N/A	0
+unnamed	unnamed	unnamed	unnamed	unnamed	0	0	N/A	N/A	N/A	0
+subject	subject	subject	subject	subject	0	0	subject seven	subject seven	N/A	0
+pat|EP|0238993|7	pat|EP|0238993|7	EP0238993_7	EP0238993_7	EP0238993_7	0	0	pre-grant patent	pre-grant patent	N/A	0
+123	123	123	123	123	0	0	numeric local	numeric local	N/A	0
+prf|ABC|DEF	prf|ABC|DEF	ABC	ABC	ABC	0	0	prf two fields	prf two fields	N/A	0
+ref|NP_000002|	ref|NP_000002|	NP_000002	NP_000002	NP_000002	0	0	ref without version	ref without version	N/A	0
+pat|EP|0123456A1|7	pat|EP|0123456A1|7	EP0123456A1_7	EP0123456A1_7	EP0123456A1_7	0	0	patent with letters	patent with letters	N/A	0
+pat|US|RE33188|1	pat|US|RE33188|1	USRE33188_1	USRE33188_1	USRE33188_1	0	0	patent reissue	patent reissue	N/A	0
+gnl|ti|123	gnl|ti|123	ti:123	ti:123	ti:123	0	0	trace id	trace id	N/A	0
+long1	long1	long1	long1	long1	0	0	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	N/A	0
+gi|3000000000|gb|AAA00100.1|	gi|3000000000|gb|AAA00100.1|	AAA00100	AAA00100.1	AAA00100	3000000000	3000000000	big gi	big gi	N/A	0
+sp|P99999|	sp|P99999|	P99999	P99999	P99999	0	0	swiss no name	swiss no name	N/A	0
+pdb|1ABC| 	pdb|1ABC| 	1ABC	1ABC	1ABC	0	0	no chain	no chain	N/A	0
+pdb|1ABC|AA	pdb|1ABC|AA	1ABC_AA	1ABC_AA	1ABC_AA	0	0	two char chain	two char chain	N/A	0
+bbm|123	bbm|123	123	123	123	0	0	gibbmt	gibbmt	N/A	0
+gpp|GPP123|	gpp|GPP123|	GPP123	GPP123	GPP123	0	0	genome pipeline	genome pipeline	N/A	0
+tpd|BK000013.1|	tpd|BK000013.1|	BK000013	BK000013.1	BK000013	0	0	third party ddbj	third party ddbj	N/A	0
+tpe|BK000012.1|	tpe|BK000012.1|	BK000012	BK000012.1	BK000012	0	0	third party embl	third party embl	N/A	0
+sp|P11111.1|ONE_HUMAN	sp|P11111.1|ONE_HUMAN;titled	P11111	P11111.1	P11111;titled	0	0;0	titled first	titled first<>second line	N/A	0
+unnamed	unnamed	unnamed	unnamed	unnamed	0	0	N/A	N/A	N/A	0
+subject	subject	subject	subject	subject	0	0	subject seven	subject seven	N/A	0
+pat|EP|0238993|7	pat|EP|0238993|7	EP0238993_7	EP0238993_7	EP0238993_7	0	0	pre-grant patent	pre-grant patent	N/A	0
+123	123	123	123	123	0	0	numeric local	numeric local	N/A	0
+prf|ABC|DEF	prf|ABC|DEF	ABC	ABC	ABC	0	0	prf two fields	prf two fields	N/A	0
+ref|NP_000002|	ref|NP_000002|	NP_000002	NP_000002	NP_000002	0	0	ref without version	ref without version	N/A	0
+pat|EP|0123456A1|7	pat|EP|0123456A1|7	EP0123456A1_7	EP0123456A1_7	EP0123456A1_7	0	0	patent with letters	patent with letters	N/A	0
+pat|US|RE33188|1	pat|US|RE33188|1	USRE33188_1	USRE33188_1	USRE33188_1	0	0	patent reissue	patent reissue	N/A	0
+gnl|ti|123	gnl|ti|123	ti:123	ti:123	ti:123	0	0	trace id	trace id	N/A	0
+long1	long1	long1	long1	long1	0	0	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	N/A	0
+gi|3000000000|gb|AAA00100.1|	gi|3000000000|gb|AAA00100.1|	AAA00100	AAA00100.1	AAA00100	3000000000	3000000000	big gi	big gi	N/A	0
+sp|P99999|	sp|P99999|	P99999	P99999	P99999	0	0	swiss no name	swiss no name	N/A	0
+pdb|1ABC| 	pdb|1ABC| 	1ABC	1ABC	1ABC	0	0	no chain	no chain	N/A	0
+pdb|1ABC|AA	pdb|1ABC|AA	1ABC_AA	1ABC_AA	1ABC_AA	0	0	two char chain	two char chain	N/A	0
+bbm|123	bbm|123	123	123	123	0	0	gibbmt	gibbmt	N/A	0
+gpp|GPP123|	gpp|GPP123|	GPP123	GPP123	GPP123	0	0	genome pipeline	genome pipeline	N/A	0
+tpd|BK000013.1|	tpd|BK000013.1|	BK000013	BK000013.1	BK000013	0	0	third party ddbj	third party ddbj	N/A	0
+tpe|BK000012.1|	tpe|BK000012.1|	BK000012	BK000012.1	BK000012	0	0	third party embl	third party embl	N/A	0

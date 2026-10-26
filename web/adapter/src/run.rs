@@ -32,6 +32,7 @@ impl Program {
             "blastn" => Ok(Self::Blastn),
             "tblastx" => Ok(Self::Tblastx),
             "blastx" => Err("blastx is not available in LOSAT Web ABI v2 yet".into()),
+            "psiblast" => Err("psiblast is not available in LOSAT Web ABI v2".into()),
             other => Err(format!("unknown program '{other}'")),
         }
     }
@@ -297,7 +298,7 @@ fn count_options(command: &Commands) -> [Option<usize>; 3] {
         Commands::Blastn(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
         Commands::Tblastx(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
         // Rejected by `Program::parse`.
-        Commands::Blastx(_) | Commands::Makedb(_) => [None; 3],
+        Commands::Blastx(_) | Commands::Psiblast(_) | Commands::Makedb(_) => [None; 3],
     }
 }
 
@@ -437,7 +438,7 @@ fn search(
                 ordinals = searched_queries(args.query_loc.as_deref(), "TBLASTX", query);
                 run_local_tblastx(args, query, subject, &mut outputs)
             }
-            Commands::Blastx(_) | Commands::Makedb(_) => {
+            Commands::Blastx(_) | Commands::Psiblast(_) | Commands::Makedb(_) => {
                 unreachable!("rejected by Program::parse")
             }
         };
@@ -780,6 +781,7 @@ mod tests {
             }
         }
         assert!(parse(&["blastx", "-query", "q", "-subject", "s"]).is_err());
+        assert!(parse(&["psiblast", "-query", "q", "-subject", "s"]).is_err());
         // An unknown program and a parser error are the CLI's messages.
         for words in [&["nosuch"][..], &["tblastx", "-query", "q"][..]] {
             let cli = LOSAT::cli::try_parse_from::<Cli, _, _>(

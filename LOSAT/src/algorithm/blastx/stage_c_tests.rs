@@ -267,6 +267,85 @@ fn statistical_validity_is_distinct_from_preparation_validity() {
     assert!(p.iter().all(|p| !p.valid));
     assert!(full.contexts.iter().all(|c| c.is_valid));
 }
+/// No NCBI counterpart (`LOSAT_X_BXKAONCE`): for a batch that is not split, the blocks `score_block`
+/// gave before `effective_lengths` (what `search_core` keeps) equal `score_block` of the chunk
+/// `split_queries` returns. Several queries with contexts that are invalid (a query of 4 bases,
+/// one of N only: its contexts are prepared valid and statistically invalid) among valid ones,
+/// gapped or not; and one query of 19,410 letters or more without gapped (`split_queries` makes
+/// one chunk, `!options.gapped`).
+#[test]
+fn kept_blocks_equal_score_block_of_the_unsplit_chunk() {
+    let mut state = 12345u64;
+    let mut random = |letters: usize| -> Vec<u8> {
+        (0..letters)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                b"ACGT"[(state >> 60) as usize & 3]
+            })
+            .collect()
+    };
+    let record = |sequence: Vec<u8>| FastaRecord {
+        internal_id: String::new(),
+        title: String::new(),
+        sequence,
+        lowercase_masks: Vec::new(),
+        warnings: Vec::new(),
+        source: None,
+    };
+    let sequence = random(600);
+    let several = vec![
+        record(sequence.clone()),
+        record(b"ACGT".to_vec()),
+        record(vec![b'N'; 300]),
+        record(sequence[100..400].to_vec()),
+    ];
+    let long = vec![record(random(19_500))];
+    for (records, gapped) in [(&several, true), (&several, false), (&long, false)] {
+        let mut o = options();
+        o.gapped = gapped;
+        let mut full = prepare_queries(records, &o).unwrap();
+        let mut params = score_block(&full);
+        if records.len() > 1 {
+            assert!(params.iter().any(|p| p.valid) && params.iter().any(|p| !p.valid));
+            // The assignment below flips a context's `is_valid` from true to false.
+            assert!(full
+                .contexts
+                .iter()
+                .zip(&params)
+                .any(|(c, p)| c.is_valid && !p.valid));
+        }
+        let kept = params.clone();
+        effective_lengths(&full, &mut params, &o, 1_000_000, 100, None).unwrap();
+        for (context, p) in full.contexts.iter_mut().zip(&params) {
+            context.is_valid = p.valid;
+        }
+        let chunks = split_queries(records, &full, &o).unwrap();
+        assert_eq!(chunks.len(), 1);
+        let again = score_block(&chunks[0].prepared);
+        assert_eq!(kept.len(), again.len());
+        for (a, b) in kept.iter().zip(&again) {
+            assert_eq!(a.valid, b.valid);
+            for (x, y) in [
+                (a.ungapped.lambda, b.ungapped.lambda),
+                (a.ungapped.k, b.ungapped.k),
+                (a.ungapped.h, b.ungapped.h),
+                (a.ungapped.alpha, b.ungapped.alpha),
+                (a.ungapped.beta, b.ungapped.beta),
+            ] {
+                assert_eq!(x.to_bits(), y.to_bits());
+            }
+            assert_eq!(a.search_space, b.search_space);
+            assert_eq!(a.length_adjustment, b.length_adjustment);
+            assert_eq!(a.word_cutoff, b.word_cutoff);
+            assert_eq!(a.word_xdrop_init, b.word_xdrop_init);
+            assert_eq!(a.word_xdrop, b.word_xdrop);
+            assert_eq!(a.hit_cutoff, b.hit_cutoff);
+            assert_eq!(a.hit_cutoff_max, b.hit_cutoff_max);
+        }
+    }
+}
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:282-292 BackboneSequenceTest
 // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:294-304 SmallboneSequenceTest
 // ```c++

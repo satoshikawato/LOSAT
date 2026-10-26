@@ -1,0 +1,889 @@
+<?xml version="1.0"?>
+<!DOCTYPE Blast4-archive PUBLIC "-//NCBI//NCBI Blast4/EN" "NCBI_Blast4.dtd">
+<Blast4-archive>
+  <Blast4-archive_request>
+    <Blast4-request>
+      <Blast4-request_ident>2.17.0+</Blast4-request_ident>
+      <Blast4-request_body>
+        <Blast4-request-body>
+          <Blast4-request-body_queue-search>
+            <Blast4-queue-search-request>
+              <Blast4-queue-search-request_program>blastn</Blast4-queue-search-request_program>
+              <Blast4-queue-search-request_service>megablast</Blast4-queue-search-request_service>
+              <Blast4-queue-search-request_queries>
+                <Blast4-queries>
+                  <Blast4-queries_bioseq-set>
+                    <Bioseq-set>
+                      <Bioseq-set_seq-set>
+                        <Seq-entry>
+                          <Seq-entry_seq>
+                            <Bioseq>
+                              <Bioseq_id>
+                                <Seq-id>
+                                  <Seq-id_local>
+                                    <Object-id>
+                                      <Object-id_str>Query_1</Object-id_str>
+                                    </Object-id>
+                                  </Seq-id_local>
+                                </Seq-id>
+                              </Bioseq_id>
+                              <Bioseq_descr>
+                                <Seq-descr>
+                                  <Seqdesc>
+                                    <Seqdesc_user>
+                                      <User-object>
+                                        <User-object_type>
+                                          <Object-id>
+                                            <Object-id_str>CFastaReader</Object-id_str>
+                                          </Object-id>
+                                        </User-object_type>
+                                        <User-object_data>
+                                          <User-field>
+                                            <User-field_label>
+                                              <Object-id>
+                                                <Object-id_str>DefLine</Object-id_str>
+                                              </Object-id>
+                                            </User-field_label>
+                                            <User-field_data>
+                                              <User-field_data_str>&gt;b1 ok</User-field_data_str>
+                                            </User-field_data>
+                                          </User-field>
+                                        </User-object_data>
+                                      </User-object>
+                                    </Seqdesc_user>
+                                  </Seqdesc>
+                                  <Seqdesc>
+                                    <Seqdesc_title>b1 ok</Seqdesc_title>
+                                  </Seqdesc>
+                                </Seq-descr>
+                              </Bioseq_descr>
+                              <Bioseq_inst>
+                                <Seq-inst>
+                                  <Seq-inst_repr value="raw"/>
+                                  <Seq-inst_mol value="na"/>
+                                  <Seq-inst_length>480</Seq-inst_length>
+                                  <Seq-inst_seq-data>
+                                    <Seq-data>
+                                      <Seq-data_ncbi2na>
+                                        <NCBI2na>049131660FBCB5C3BA3A0475B9C0240FF96E7DB02E3A185600C6A3A953A7B0E0A9EA2073E7A5660CE27A02D7CE0B38BFD758CD457E43F3A3F9E8D5C288E905528EBA0868C6F933A480EADEE8E4C2CD50BB3BBB0EB88F448D0DDD693E803C14E19C1FE201F08DF51C4EBAB4EA2049378A90410CB56CA6A831</NCBI2na>
+                                      </Seq-data_ncbi2na>
+                                    </Seq-data>
+                                  </Seq-inst_seq-data>
+                                </Seq-inst>
+                              </Bioseq_inst>
+                            </Bioseq>
+                          </Seq-entry_seq>
+                        </Seq-entry>
+                        <Seq-entry>
+                          <Seq-entry_seq>
+                            <Bioseq>
+                              <Bioseq_id>
+                                <Seq-id>
+                                  <Seq-id_local>
+                                    <Object-id>
+                                      <Object-id_str>Query_2</Object-id_str>
+                                    </Object-id>
+                                  </Seq-id_local>
+                                </Seq-id>
+                              </Bioseq_id>
+                              <Bioseq_descr>
+                                <Seq-descr>
+                                  <Seqdesc>
+                                    <Seqdesc_user>
+                                      <User-object>
+                                        <User-object_type>
+                                          <Object-id>
+                                            <Object-id_str>CFastaReader</Object-id_str>
+                                          </Object-id>
+                                        </User-object_type>
+                                        <User-object_data>
+                                          <User-field>
+                                            <User-field_label>
+                                              <Object-id>
+                                                <Object-id_str>DefLine</Object-id_str>
+                                              </Object-id>
+                                            </User-field_label>
+                                            <User-field_data>
+                                              <User-field_data_str>&gt;b2 ok</User-field_data_str>
+                                            </User-field_data>
+                                          </User-field>
+                                        </User-object_data>
+                                      </User-object>
+                                    </Seqdesc_user>
+                                  </Seqdesc>
+                                  <Seqdesc>
+                                    <Seqdesc_title>b2 ok</Seqdesc_title>
+                                  </Seqdesc>
+                                </Seq-descr>
+                              </Bioseq_descr>
+                              <Bioseq_inst>
+                                <Seq-inst>
+                                  <Seq-inst_repr value="raw"/>
+                                  <Seq-inst_mol value="na"/>
+                                  <Seq-inst_length>440</Seq-inst_length>
+                                  <Seq-inst_seq-data>
+                                    <Seq-data>
+                                      <Seq-data_ncbi2na>
+                                        <NCBI2na>BCB5C3BA3A0475B9C0240FF96E7DB02E3A185600C6A3A953A7B0E0A9EA2073E7A5660CE27A02D7CE0B38BFD758CD457E43F3A3F9E8D5C288E905528EBA0868C6F933A480EADEE8E4C2CD50BB3BBB0EB88F448D0DDD693E803C14E19C1FE201F08DF51C4EBAB4EA2049378A90410C</NCBI2na>
+                                      </Seq-data_ncbi2na>
+                                    </Seq-data>
+                                  </Seq-inst_seq-data>
+                                </Seq-inst>
+                              </Bioseq_inst>
+                            </Bioseq>
+                          </Seq-entry_seq>
+                        </Seq-entry>
+                      </Bioseq-set_seq-set>
+                    </Bioseq-set>
+                  </Blast4-queries_bioseq-set>
+                </Blast4-queries>
+              </Blast4-queue-search-request_queries>
+              <Blast4-queue-search-request_subject>
+                <Blast4-subject>
+                  <Blast4-subject_sequences>
+                    <Bioseq>
+                      <Bioseq_id>
+                        <Seq-id>
+                          <Seq-id_local>
+                            <Object-id>
+                              <Object-id_str>Subject_1</Object-id_str>
+                            </Object-id>
+                          </Seq-id_local>
+                        </Seq-id>
+                      </Bioseq_id>
+                      <Bioseq_descr>
+                        <Seq-descr>
+                          <Seqdesc>
+                            <Seqdesc_user>
+                              <User-object>
+                                <User-object_type>
+                                  <Object-id>
+                                    <Object-id_str>CFastaReader</Object-id_str>
+                                  </Object-id>
+                                </User-object_type>
+                                <User-object_data>
+                                  <User-field>
+                                    <User-field_label>
+                                      <Object-id>
+                                        <Object-id_str>DefLine</Object-id_str>
+                                      </Object-id>
+                                    </User-field_label>
+                                    <User-field_data>
+                                      <User-field_data_str>&gt;sn1 subject nucleotide alpha</User-field_data_str>
+                                    </User-field_data>
+                                  </User-field>
+                                </User-object_data>
+                              </User-object>
+                            </Seqdesc_user>
+                          </Seqdesc>
+                          <Seqdesc>
+                            <Seqdesc_title>sn1 subject nucleotide alpha</Seqdesc_title>
+                          </Seqdesc>
+                        </Seq-descr>
+                      </Bioseq_descr>
+                      <Bioseq_inst>
+                        <Seq-inst>
+                          <Seq-inst_repr value="raw"/>
+                          <Seq-inst_mol value="na"/>
+                          <Seq-inst_length>488</Seq-inst_length>
+                          <Seq-inst_seq-data>
+                            <Seq-data>
+                              <Seq-data_ncbi2na>
+                                <NCBI2na>EFE7BED928FD49E4F6C028CEE8E811D6E72090FFE5B9F6C0B8E86158031A8EA54E9E4382A7A881CF9E95983309E80B5F382FE2FF5D633515F90FCE4FE7970A33A4054A3ED821A31BE4CAD243AB7BA293093742ACEEEC1BAE20D12343775A4F9017053867079880FC237D4413AEAD3A88124DE2A41BAE1A7F82C9</NCBI2na>
+                              </Seq-data_ncbi2na>
+                            </Seq-data>
+                          </Seq-inst_seq-data>
+                        </Seq-inst>
+                      </Bioseq_inst>
+                    </Bioseq>
+                    <Bioseq>
+                      <Bioseq_id>
+                        <Seq-id>
+                          <Seq-id_local>
+                            <Object-id>
+                              <Object-id_str>Subject_2</Object-id_str>
+                            </Object-id>
+                          </Seq-id_local>
+                        </Seq-id>
+                      </Bioseq_id>
+                      <Bioseq_descr>
+                        <Seq-descr>
+                          <Seqdesc>
+                            <Seqdesc_user>
+                              <User-object>
+                                <User-object_type>
+                                  <Object-id>
+                                    <Object-id_str>CFastaReader</Object-id_str>
+                                  </Object-id>
+                                </User-object_type>
+                                <User-object_data>
+                                  <User-field>
+                                    <User-field_label>
+                                      <Object-id>
+                                        <Object-id_str>DefLine</Object-id_str>
+                                      </Object-id>
+                                    </User-field_label>
+                                    <User-field_data>
+                                      <User-field_data_str>&gt;sn2 subject nucleotide beta reverse</User-field_data_str>
+                                    </User-field_data>
+                                  </User-field>
+                                </User-object_data>
+                              </User-object>
+                            </Seqdesc_user>
+                          </Seqdesc>
+                          <Seqdesc>
+                            <Seqdesc_title>sn2 subject nucleotide beta reverse</Seqdesc_title>
+                          </Seqdesc>
+                        </Seq-descr>
+                      </Bioseq_descr>
+                      <Bioseq_inst>
+                        <Seq-inst>
+                          <Seq-inst_repr value="raw"/>
+                          <Seq-inst_mol value="na"/>
+                          <Seq-inst_length>477</Seq-inst_length>
+                          <Seq-inst_seq-data>
+                            <Seq-data>
+                              <Seq-data_ncbi2na>
+                                <NCBI2na>EFADCF303F2746F3BC7C95D279EF754E1514ECBA28DF0BF744BC9B4E9C3FD4F94888B0FEE0D117B111F11FA8C7CE4D4685BFDE146CF61F550D7A8B94DC7CA8D89025103E426E8CDA380150070131A1FD49D23C9A9A90CB9D4E57D3C494FA54C7B3FEA36D4D1F47095A403F9FF2468BBD4D8C6FCD071831C0</NCBI2na>
+                              </Seq-data_ncbi2na>
+                            </Seq-data>
+                          </Seq-inst_seq-data>
+                        </Seq-inst>
+                      </Bioseq_inst>
+                    </Bioseq>
+                  </Blast4-subject_sequences>
+                </Blast4-subject>
+              </Blast4-queue-search-request_subject>
+              <Blast4-queue-search-request_algorithm-options>
+                <Blast4-parameters>
+                  <Blast4-parameter>
+                    <Blast4-parameter_name>EvalueThreshold</Blast4-parameter_name>
+                    <Blast4-parameter_value>
+                      <Blast4-value>
+                        <Blast4-value_cutoff>
+                          <Blast4-cutoff>
+                            <Blast4-cutoff_e-value>10</Blast4-cutoff_e-value>
+                          </Blast4-cutoff>
+                        </Blast4-value_cutoff>
+                      </Blast4-value>
+                    </Blast4-parameter_value>
+                  </Blast4-parameter>
+                  <Blast4-parameter>
+                    <Blast4-parameter_name>MaskAtHash</Blast4-parameter_name>
+                    <Blast4-parameter_value>
+                      <Blast4-value>
+                        <Blast4-value_boolean value="true"/>
+                      </Blast4-value>
+                    </Blast4-parameter_value>
+                  </Blast4-parameter>
+                  <Blast4-parameter>
+                    <Blast4-parameter_name>UngappedMode</Blast4-parameter_name>
+                    <Blast4-parameter_value>
+                      <Blast4-value>
+                        <Blast4-value_boolean value="false"/>
+                      </Blast4-value>
+                    </Blast4-parameter_value>
+                  </Blast4-parameter>
+                  <Blast4-parameter>
+                    <Blast4-parameter_name>HitlistSize</Blast4-parameter_name>
+                    <Blast4-parameter_value>
+                      <Blast4-value>
+                        <Blast4-value_integer>500</Blast4-value_integer>
+                      </Blast4-value>
+                    </Blast4-parameter_value>
+                  </Blast4-parameter>
+                  <Blast4-parameter>
+                    <Blast4-parameter_name>EffectiveSearchSpace</Blast4-parameter_name>
+                    <Blast4-parameter_value>
+                      <Blast4-value>
+                        <Blast4-value_big-integer>440388</Blast4-value_big-integer>
+                      </Blast4-value>
+                    </Blast4-parameter_value>
+                  </Blast4-parameter>
+                </Blast4-parameters>
+              </Blast4-queue-search-request_algorithm-options>
+            </Blast4-queue-search-request>
+          </Blast4-request-body_queue-search>
+        </Blast4-request-body>
+      </Blast4-request_body>
+    </Blast4-request>
+  </Blast4-archive_request>
+  <Blast4-archive_results>
+    <Blast4-get-search-results-reply>
+      <Blast4-get-search-results-reply_alignments>
+        <Seq-align-set>
+          <Seq-align>
+            <Seq-align_type value="partial"/>
+            <Seq-align_dim>2</Seq-align_dim>
+            <Seq-align_score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>score</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_int>329</Score_value_int>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>blast_score</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_int>329</Score_value_int>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>e_value</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_real>2.60916226603389e-178</Score_value_real>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>bit_score</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_real>608.668029852878</Score_value_real>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>num_ident</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_int>394</Score_value_int>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>hsp_percent_coverage</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_real>88.625</Score_value_real>
+                </Score_value>
+              </Score>
+            </Seq-align_score>
+            <Seq-align_segs>
+              <Seq-align_segs_denseg>
+                <Dense-seg>
+                  <Dense-seg_dim>2</Dense-seg_dim>
+                  <Dense-seg_numseg>5</Dense-seg_numseg>
+                  <Dense-seg_ids>
+                    <Seq-id>
+                      <Seq-id_local>
+                        <Object-id>
+                          <Object-id_str>Query_1</Object-id_str>
+                        </Object-id>
+                      </Seq-id_local>
+                    </Seq-id>
+                    <Seq-id>
+                      <Seq-id_local>
+                        <Object-id>
+                          <Object-id_str>Subject_1</Object-id_str>
+                        </Object-id>
+                      </Seq-id_local>
+                    </Seq-id>
+                  </Dense-seg_ids>
+                  <Dense-seg_starts>
+                    <Dense-seg_starts_E>30</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>45</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>230</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>-1</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>234</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>245</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>-1</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>345</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>334</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>347</Dense-seg_starts_E>
+                  </Dense-seg_starts>
+                  <Dense-seg_lens>
+                    <Dense-seg_lens_E>200</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>4</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>100</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>2</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>119</Dense-seg_lens_E>
+                  </Dense-seg_lens>
+                  <Dense-seg_strands>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                  </Dense-seg_strands>
+                </Dense-seg>
+              </Seq-align_segs_denseg>
+            </Seq-align_segs>
+          </Seq-align>
+          <Seq-align>
+            <Seq-align_type value="partial"/>
+            <Seq-align_dim>2</Seq-align_dim>
+            <Seq-align_score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>score</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_int>242</Score_value_int>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>blast_score</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_int>242</Score_value_int>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>e_value</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_real>6.01914206611342e-130</Score_value_real>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>bit_score</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_real>448.009510099483</Score_value_real>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>num_ident</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_int>361</Score_value_int>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>hsp_percent_coverage</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_real>86.9583333333333</Score_value_real>
+                </Score_value>
+              </Score>
+            </Seq-align_score>
+            <Seq-align_segs>
+              <Seq-align_segs_denseg>
+                <Dense-seg>
+                  <Dense-seg_dim>2</Dense-seg_dim>
+                  <Dense-seg_numseg>9</Dense-seg_numseg>
+                  <Dense-seg_ids>
+                    <Seq-id>
+                      <Seq-id_local>
+                        <Object-id>
+                          <Object-id_str>Query_1</Object-id_str>
+                        </Object-id>
+                      </Seq-id_local>
+                    </Seq-id>
+                    <Seq-id>
+                      <Seq-id_local>
+                        <Object-id>
+                          <Object-id_str>Subject_2</Object-id_str>
+                        </Object-id>
+                      </Seq-id_local>
+                    </Seq-id>
+                  </Dense-seg_ids>
+                  <Dense-seg_starts>
+                    <Dense-seg_starts_E>286</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>40</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>282</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>-1</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>281</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>204</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>279</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>-1</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>185</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>205</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>-1</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>299</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>181</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>300</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>-1</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>304</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>35</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>306</Dense-seg_starts_E>
+                  </Dense-seg_starts>
+                  <Dense-seg_lens>
+                    <Dense-seg_lens_E>164</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>4</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>1</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>2</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>94</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>1</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>4</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>2</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>146</Dense-seg_lens_E>
+                  </Dense-seg_lens>
+                  <Dense-seg_strands>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                  </Dense-seg_strands>
+                </Dense-seg>
+              </Seq-align_segs_denseg>
+            </Seq-align_segs>
+          </Seq-align>
+          <Seq-align>
+            <Seq-align_type value="partial"/>
+            <Seq-align_dim>2</Seq-align_dim>
+            <Seq-align_score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>score</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_int>329</Score_value_int>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>blast_score</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_int>329</Score_value_int>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>e_value</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_real>2.38615694415065e-178</Score_value_real>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>bit_score</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_real>608.668029852878</Score_value_real>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>num_ident</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_int>394</Score_value_int>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>hsp_percent_coverage</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_real>96.6363636363636</Score_value_real>
+                </Score_value>
+              </Score>
+            </Seq-align_score>
+            <Seq-align_segs>
+              <Seq-align_segs_denseg>
+                <Dense-seg>
+                  <Dense-seg_dim>2</Dense-seg_dim>
+                  <Dense-seg_numseg>5</Dense-seg_numseg>
+                  <Dense-seg_ids>
+                    <Seq-id>
+                      <Seq-id_local>
+                        <Object-id>
+                          <Object-id_str>Query_2</Object-id_str>
+                        </Object-id>
+                      </Seq-id_local>
+                    </Seq-id>
+                    <Seq-id>
+                      <Seq-id_local>
+                        <Object-id>
+                          <Object-id_str>Subject_1</Object-id_str>
+                        </Object-id>
+                      </Seq-id_local>
+                    </Seq-id>
+                  </Dense-seg_ids>
+                  <Dense-seg_starts>
+                    <Dense-seg_starts_E>10</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>45</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>210</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>-1</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>214</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>245</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>-1</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>345</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>314</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>347</Dense-seg_starts_E>
+                  </Dense-seg_starts>
+                  <Dense-seg_lens>
+                    <Dense-seg_lens_E>200</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>4</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>100</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>2</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>119</Dense-seg_lens_E>
+                  </Dense-seg_lens>
+                  <Dense-seg_strands>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="plus"/>
+                  </Dense-seg_strands>
+                </Dense-seg>
+              </Seq-align_segs_denseg>
+            </Seq-align_segs>
+          </Seq-align>
+          <Seq-align>
+            <Seq-align_type value="partial"/>
+            <Seq-align_dim>2</Seq-align_dim>
+            <Seq-align_score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>score</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_int>242</Score_value_int>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>blast_score</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_int>242</Score_value_int>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>e_value</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_real>5.50468547926612e-130</Score_value_real>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>bit_score</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_real>448.009510099483</Score_value_real>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>num_ident</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_int>361</Score_value_int>
+                </Score_value>
+              </Score>
+              <Score>
+                <Score_id>
+                  <Object-id>
+                    <Object-id_str>hsp_percent_coverage</Object-id_str>
+                  </Object-id>
+                </Score_id>
+                <Score_value>
+                  <Score_value_real>94.8181818181818</Score_value_real>
+                </Score_value>
+              </Score>
+            </Seq-align_score>
+            <Seq-align_segs>
+              <Seq-align_segs_denseg>
+                <Dense-seg>
+                  <Dense-seg_dim>2</Dense-seg_dim>
+                  <Dense-seg_numseg>9</Dense-seg_numseg>
+                  <Dense-seg_ids>
+                    <Seq-id>
+                      <Seq-id_local>
+                        <Object-id>
+                          <Object-id_str>Query_2</Object-id_str>
+                        </Object-id>
+                      </Seq-id_local>
+                    </Seq-id>
+                    <Seq-id>
+                      <Seq-id_local>
+                        <Object-id>
+                          <Object-id_str>Subject_2</Object-id_str>
+                        </Object-id>
+                      </Seq-id_local>
+                    </Seq-id>
+                  </Dense-seg_ids>
+                  <Dense-seg_starts>
+                    <Dense-seg_starts_E>266</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>40</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>262</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>-1</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>261</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>204</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>259</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>-1</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>165</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>205</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>-1</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>299</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>161</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>300</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>-1</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>304</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>15</Dense-seg_starts_E>
+                    <Dense-seg_starts_E>306</Dense-seg_starts_E>
+                  </Dense-seg_starts>
+                  <Dense-seg_lens>
+                    <Dense-seg_lens_E>164</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>4</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>1</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>2</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>94</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>1</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>4</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>2</Dense-seg_lens_E>
+                    <Dense-seg_lens_E>146</Dense-seg_lens_E>
+                  </Dense-seg_lens>
+                  <Dense-seg_strands>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                    <Na-strand value="minus"/>
+                    <Na-strand value="plus"/>
+                  </Dense-seg_strands>
+                </Dense-seg>
+              </Seq-align_segs_denseg>
+            </Seq-align_segs>
+          </Seq-align>
+        </Seq-align-set>
+      </Blast4-get-search-results-reply_alignments>
+      <Blast4-get-search-results-reply_masks></Blast4-get-search-results-reply_masks>
+      <Blast4-get-search-results-reply_ka-blocks>
+        <Blast4-ka-block>
+          <Blast4-ka-block_lambda>1.33270576282382</Blast4-ka-block_lambda>
+          <Blast4-ka-block_k>0.620991117264206</Blast4-ka-block_k>
+          <Blast4-ka-block_h>1.12409184650114</Blast4-ka-block_h>
+          <Blast4-ka-block_gapped value="false"/>
+        </Blast4-ka-block>
+        <Blast4-ka-block>
+          <Blast4-ka-block_lambda>1.28</Blast4-ka-block_lambda>
+          <Blast4-ka-block_k>0.46</Blast4-ka-block_k>
+          <Blast4-ka-block_h>0.85</Blast4-ka-block_h>
+          <Blast4-ka-block_gapped value="true"/>
+        </Blast4-ka-block>
+      </Blast4-get-search-results-reply_ka-blocks>
+      <Blast4-get-search-results-reply_search-stats>
+        <Blast4-get-search-results-reply_search-stats_E>Effective search space: 440388</Blast4-get-search-results-reply_search-stats_E>
+        <Blast4-get-search-results-reply_search-stats_E>Effective search space used: 440388</Blast4-get-search-results-reply_search-stats_E>
+        <Blast4-get-search-results-reply_search-stats_E>Length adjustment: 12</Blast4-get-search-results-reply_search-stats_E>
+      </Blast4-get-search-results-reply_search-stats>
+    </Blast4-get-search-results-reply>
+  </Blast4-archive_results>
+</Blast4-archive>
+<?xml version="1.0"?>
+<!DOCTYPE Blast4-archive PUBLIC "-//NCBI//NCBI Blast4/EN" "NCBI_Blast4.dtd">
+<Blast4-archive>
+  <Blast4-archive_request>
+    <Blast4-request>
+      <Blast4-request_body>
+        <Blast4-request-body>
+          <Blast4-request-body_get-request-info>
+            <Blast4-get-request-info-request>
+              <Blast4-get-request-info-request_request-id>Error</Blast4-get-request-info-request_request-id>
+            </Blast4-get-request-info-request>
+          </Blast4-request-body_get-request-info>
+        </Blast4-request-body>
+      </Blast4-request_body>
+    </Blast4-request>
+  </Blast4-archive_request>
+  <Blast4-archive_results>
+    <Blast4-get-search-results-reply></Blast4-get-search-results-reply>
+  </Blast4-archive_results>
+  <Blast4-archive_messages>
+    <Blast4-error>
+      <Blast4-error_code>2</Blast4-error_code>
+      <Blast4-error_message>BLAST query error: CFastaReader: Near line 20, there&apos;s a line that doesn&apos;t look like plausible data, but it&apos;s not marked as defline or comment.</Blast4-error_message>
+    </Blast4-error>
+  </Blast4-archive_messages>
+</Blast4-archive>

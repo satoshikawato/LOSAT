@@ -1,0 +1,24 @@
+ref|XP_000001.1|	ref|XP_000001.1|;sp|P99999.2|TEST_HUMAN;gb|AAA00001.1|	XP_000001	XP_000001.1	XP_000001;P99999;AAA00001	0	0;0;0	alpha protein [Homo sapiens]	alpha protein [Homo sapiens]<>alpha-like protein<>hypothetical protein, partial	9606	9606;10090
+gi|123456|ref|NP_000002.1|	gi|123456|ref|NP_000002.1|	NP_000002	NP_000002.1	NP_000002	123456	123456	gi plus ref protein	gi plus ref protein	10116	10116
+sp|Q00003|ABC_MOUSE	sp|Q00003|ABC_MOUSE	Q00003	Q00003	Q00003	0	0	swissprot without version	swissprot without version	N/A	0
+emb|CAA00005.1|	emb|CAA00005.1|	CAA00005	CAA00005.1	CAA00005	0	0	emb protein	emb protein	N/A	0
+tr|A0A000|A0A000_YEAST	tr|A0A000|A0A000_YEAST	A0A000	A0A000	A0A000	0	0	trembl entry	trembl entry	N/A	0
+pdb|1ABC|A	pdb|1ABC|A	1ABC_A	1ABC_A	1ABC_A	0	0	Chain A, test structure	Chain A, test structure	N/A	0
+dbj|BAA00006.1|	dbj|BAA00006.1|	BAA00006	BAA00006.1	BAA00006	0	0	dbj protein	dbj protein	N/A	0
+pir||S00007	pir||S00007	S00007	S00007	S00007	0	0	pir protein	pir protein	N/A	0
+prf||0008123A	prf||0008123A	0008123A	0008123A	0008123A	0	0	prf protein	prf protein	N/A	0
+myprot9	myprot9	myprot9	myprot9	myprot9	0	0	local id protein	local id protein	N/A	0
+gnl|mydb|prot10	gnl|mydb|prot10	mydb:prot10	mydb:prot10	mydb:prot10	0	0	general id protein	general id protein	N/A	0
+ref|XP_000011.2|	ref|XP_000011.2|	XP_000011	XP_000011.2	XP_000011	0	0	bare refseq accession	bare refseq accession	N/A	0
+sp|P00012|	sp|P00012|	P00012	P00012	P00012	0	0	bare uniprot-like accession	bare uniprot-like accession	N/A	0
+myprot_13	myprot_13	myprot_13	myprot_13	myprot_13	0	0	bare non-accession word	bare non-accession word	N/A	0
+gb|AAA00017.1|LOCUS17	gb|AAA00017.1|LOCUS17	AAA00017	AAA00017.1	AAA00017	0	0	gb with a locus name	gb with a locus name	N/A	0
+gi|1414	gi|1414	1414	1414	1414	1414	1414	gi only	gi only	N/A	0
+gi|1818|gb|AAA00018.1|	gi|1818|gb|AAA00018.1|;gi|1819|emb|CAA00019.1|;gi|1820|ref|XP_000020.1|	AAA00018	AAA00018.1	AAA00018;CAA00019;XP_000020	1818	1818;1819;1820	N/A	N/A<>second defline<>third defline	562	562;9606
+tpg|DAA00016.1|	tpg|DAA00016.1|	DAA00016	DAA00016.1	DAA00016	0	0	third-party protein	third-party protein	N/A	0
+sp|P00019.3|NAME_HUMAN	sp|P00019.3|NAME_HUMAN	P00019	P00019.3	P00019	0	0	with taxid	with taxid	9606	9606
+gnl|mydb|prot10	gnl|mydb|prot10	mydb:prot10	mydb:prot10	mydb:prot10	0	0	general id protein	general id protein	N/A	0
+pir||S00007	pir||S00007	S00007	S00007	S00007	0	0	pir protein	pir protein	N/A	0
+sp|P00012|	sp|P00012|	P00012	P00012	P00012	0	0	bare uniprot-like accession	bare uniprot-like accession	N/A	0
+sp|P00019.3|NAME_HUMAN	sp|P00019.3|NAME_HUMAN	P00019	P00019.3	P00019	0	0	with taxid	with taxid	9606	9606
+tpg|DAA00016.1|	tpg|DAA00016.1|	DAA00016	DAA00016.1	DAA00016	0	0	third-party protein	third-party protein	N/A	0

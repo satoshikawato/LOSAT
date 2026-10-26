@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<!DOCTYPE Blast4-archive PUBLIC "-//NCBI//NCBI Blast4/EN" "NCBI_Blast4.dtd">
+<Blast4-archive>
+  <Blast4-archive_request>
+    <Blast4-request>
+      <Blast4-request_body>
+        <Blast4-request-body>
+          <Blast4-request-body_get-request-info>
+            <Blast4-get-request-info-request>
+              <Blast4-get-request-info-request_request-id>Error</Blast4-get-request-info-request_request-id>
+            </Blast4-get-request-info-request>
+          </Blast4-request-body_get-request-info>
+        </Blast4-request-body>
+      </Blast4-request_body>
+    </Blast4-request>
+  </Blast4-archive_request>
+  <Blast4-archive_results>
+    <Blast4-get-search-results-reply></Blast4-get-search-results-reply>
+  </Blast4-archive_results>
+  <Blast4-archive_messages>
+    <Blast4-error>
+      <Blast4-error_code>1</Blast4-error_code>
+      <Blast4-error_message>Warning: [blastp] The parameter -num_descriptions is ignored for output formats &gt; 4 . Use -max_target_seqs to control output</Blast4-error_message>
+    </Blast4-error>
+    <Blast4-error>
+      <Blast4-error_code>2</Blast4-error_code>
+      <Blast4-error_message>BLAST query/options error: Composition-adjusted searched are not supported with an ungapped search, please add -comp_based_stats F or do a gapped search</Blast4-error_message>
+    </Blast4-error>
+    <Blast4-error>
+      <Blast4-error_code>2</Blast4-error_code>
+      <Blast4-error_message>Please refer to the BLAST+ user manual.</Blast4-error_message>
+    </Blast4-error>
+  </Blast4-archive_messages>
+</Blast4-archive>

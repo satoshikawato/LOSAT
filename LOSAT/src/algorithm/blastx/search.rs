@@ -2,7 +2,9 @@
 use super::{
     args::ResolvedOptions,
     input::FastaRecord,
-    parameters::{effective_lengths, score_block, subject_parameters, ContextParameters},
+    parameters::{
+        effective_lengths, ka_once_on, score_block, subject_parameters, ContextParameters,
+    },
     preliminary::{gapped, purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
     query_setup::{batch_ranges, PreparedQueryBatch, BATCH_SIZE},
     reader_batch::{prepare_reader_batch, UnitPrep},
@@ -631,6 +633,10 @@ pub(crate) fn search_core(
             return Err(super::subjects::UnreadableSubjects.into());
         }
         let x_t = super::x_timing::lap();
+        // Dispatch point (LOSAT_X_BXKAONCE, in the strict set), taking the blocks: `score_block`'s
+        // raw blocks, before the lengths, kept for the one chunk of a batch that is not split (the
+        // chunk loop below). No NCBI counterpart.
+        let mut x_raw_params = ka_once_on().then(|| full_params.clone());
         effective_lengths(&full, &mut full_params, options, db_length, db_count, None)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2781-2787
         // ```c++
@@ -800,7 +806,34 @@ pub(crate) fn search_core(
             // ```
             sink.chunk_start(&chunk)?;
             let batch = &chunk.prepared;
-            let mut params = score_block(batch);
+            // Dispatch point (LOSAT_X_BXKAONCE, in the strict set): the one chunk of a batch that
+            // is not split is a clone of `full` (`split_queries`) whose contexts' `is_valid` are
+            // the raw blocks' `valid` (set above); `score_block` on it would compute the same
+            // compositions and so the same Karlin blocks, and `effective_lengths` writes only
+            // `length_adjustment` and `search_space`, never `valid` or `ungapped`, so the raw
+            // blocks kept above are its result. The chunks of a split batch have sequences of
+            // their own and keep `score_block`.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:243-246
+            // ```c++
+            //                 CRef<SInternalData> chunk_data =
+            //                     SplitQuery_CreateChunkData(chunk_qf, m_Options,
+            //                                                m_InternalData,
+            //                                                GetNumberOfThreads());
+            // ```
+            // NCBI computes the query's score block once in setup, and a chunk's own only for a
+            // split query (the loop this is in runs only `if (query_splitter->IsQuerySplit())`).
+            let mut params = match x_raw_params.take() {
+                Some(raw) if !is_split => {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BXKAONCE", true);
+                    raw
+                }
+                other => {
+                    if other.is_some() {
+                        crate::utils::xreach::x_reach!("LOSAT_X_BXKAONCE", false);
+                    }
+                    score_block(batch)
+                }
+            };
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:277-288
             // ```c++
             //             } catch (const CBlastException& e) {

@@ -1,0 +1,144 @@
+plain_description	P11111.1 titled first                                                 121     3e-41
+plain_description	unnamed protein product                                               121     3e-41
+plain_description	subject seven                                                         121     3e-41
+plain_description	EP0238993_7 pre-grant patent                                          121     3e-41
+plain_description	123 numeric local                                                     121     3e-41
+plain_description	prf|ABC|DEF prf two fields                                            121     3e-41
+plain_description	NP_000002 ref without version                                         121     3e-41
+plain_description	EP0123456A1_7 patent with letters                                     121     3e-41
+plain_description	USRE33188_1 patent reissue                                            121     3e-41
+plain_description	ti:123 trace id                                                       121     3e-41
+plain_description	long1 long title word long title word long title word long title ...  121     3e-41
+plain_description	AAA00100.1 big gi                                                     121     3e-41
+plain_description	P99999 swiss no name                                                  121     3e-41
+plain_description	1ABC no chain                                                         121     3e-41
+plain_description	123 gibbmt                                                            121     3e-41
+plain_description	GPP123 genome pipeline                                                121     3e-41
+plain_description	BK000013.1 third party ddbj                                           121     3e-41
+plain_description	BK000012.1 third party embl                                           121     3e-41
+plain_block	>P11111.1 titled first\n Subject_9 second line
+plain_block	>Subject_8 unnamed protein product
+plain_block	>Subject_7 subject seven
+plain_block	>EP0238993_7 pre-grant patent
+plain_block	>123 numeric local
+plain_block	>prf|ABC|DEF prf two fields
+plain_block	>NP_000002 ref without version
+plain_block	>EP0123456A1_7 patent with letters
+plain_block	>USRE33188_1 patent reissue
+plain_block	>ti:123 trace id
+plain_block	>long1 long title word long title word long title word long title word \nlong title word long title word long title word long title \nword long title word long title word long title word long \ntitle word long title word long title word long title word long \ntitle word long title word long title word long title word \nlong title word 
+plain_block	>AAA00100.1 big gi
+plain_block	>P99999 swiss no name
+plain_block	>1ABC no chain
+plain_block	>123 gibbmt
+plain_block	>GPP123 genome pipeline
+plain_block	>BK000013.1 third party ddbj
+plain_block	>BK000012.1 third party embl
+plain_description	P11111.1 titled first                                                 12.7    5.5  
+plain_description	unnamed protein product                                               12.7    5.5  
+plain_description	subject seven                                                         12.7    5.5  
+plain_description	EP0238993_7 pre-grant patent                                          12.7    5.5  
+plain_description	123 numeric local                                                     12.7    5.5  
+plain_description	prf|ABC|DEF prf two fields                                            12.7    5.5  
+plain_description	NP_000002 ref without version                                         12.7    5.5  
+plain_description	EP0123456A1_7 patent with letters                                     12.7    5.5  
+plain_description	USRE33188_1 patent reissue                                            12.7    5.5  
+plain_description	ti:123 trace id                                                       12.7    5.5  
+plain_description	long1 long title word long title word long title word long title ...  12.7    5.5  
+plain_description	AAA00100.1 big gi                                                     12.7    5.5  
+plain_description	P99999 swiss no name                                                  12.7    5.5  
+plain_description	1ABC no chain                                                         12.7    5.5  
+plain_description	123 gibbmt                                                            12.7    5.5  
+plain_description	GPP123 genome pipeline                                                12.7    5.5  
+plain_description	BK000013.1 third party ddbj                                           12.7    5.5  
+plain_description	BK000012.1 third party embl                                           12.7    5.5  
+plain_block	>P11111.1 titled first\n Subject_9 second line
+plain_block	>Subject_8 unnamed protein product
+plain_block	>Subject_7 subject seven
+plain_block	>EP0238993_7 pre-grant patent
+plain_block	>123 numeric local
+plain_block	>prf|ABC|DEF prf two fields
+plain_block	>NP_000002 ref without version
+plain_block	>EP0123456A1_7 patent with letters
+plain_block	>USRE33188_1 patent reissue
+plain_block	>ti:123 trace id
+plain_block	>long1 long title word long title word long title word long title word \nlong title word long title word long title word long title \nword long title word long title word long title word long \ntitle word long title word long title word long title word long \ntitle word long title word long title word long title word \nlong title word 
+plain_block	>AAA00100.1 big gi
+plain_block	>P99999 swiss no name
+plain_block	>1ABC no chain
+plain_block	>123 gibbmt
+plain_block	>GPP123 genome pipeline
+plain_block	>BK000013.1 third party ddbj
+plain_block	>BK000012.1 third party embl
+show_gis_description	sp|P11111.1|ONE_HUMANtitled first                                     121     3e-41
+show_gis_description	unnamed protein product                                               121     3e-41
+show_gis_description	subject seven                                                         121     3e-41
+show_gis_description	pat|EP|0238993|7pre-grant patent                                      121     3e-41
+show_gis_description	123numeric local                                                      121     3e-41
+show_gis_description	prf|ABC|DEFprf two fields                                             121     3e-41
+show_gis_description	ref|NP_000002|ref without version                                     121     3e-41
+show_gis_description	pat|EP|0123456A1|7patent with letters                                 121     3e-41
+show_gis_description	pat|US|RE33188|1patent reissue                                        121     3e-41
+show_gis_description	gnl|ti|123trace id                                                    121     3e-41
+show_gis_description	long1long title word long title word long title word long title w...  121     3e-41
+show_gis_description	gi|3000000000|gb|AAA00100.1|  big gi                                  121     3e-41
+show_gis_description	sp|P99999|swiss no name                                               121     3e-41
+show_gis_description	pdb|1ABC| no chain                                                    121     3e-41
+show_gis_description	bbm|123gibbmt                                                         121     3e-41
+show_gis_description	gpp|GPP123|genome pipeline                                            121     3e-41
+show_gis_description	tpd|BK000013.1|third party ddbj                                       121     3e-41
+show_gis_description	tpe|BK000012.1|third party embl                                       121     3e-41
+show_gis_block	>P11111.1 titled first\n Subject_9 second line
+show_gis_block	>Subject_8 unnamed protein product
+show_gis_block	>Subject_7 subject seven
+show_gis_block	>EP0238993_7 pre-grant patent
+show_gis_block	>123 numeric local
+show_gis_block	>prf|ABC|DEF prf two fields
+show_gis_block	>NP_000002 ref without version
+show_gis_block	>EP0123456A1_7 patent with letters
+show_gis_block	>USRE33188_1 patent reissue
+show_gis_block	>ti:123 trace id
+show_gis_block	>long1 long title word long title word long title word long title word \nlong title word long title word long title word long title \nword long title word long title word long title word long \ntitle word long title word long title word long title word long \ntitle word long title word long title word long title word \nlong title word 
+show_gis_block	>gi|3000000000|gb|AAA00100.1| big gi
+show_gis_block	>P99999 swiss no name
+show_gis_block	>1ABC no chain
+show_gis_block	>123 gibbmt
+show_gis_block	>GPP123 genome pipeline
+show_gis_block	>BK000013.1 third party ddbj
+show_gis_block	>BK000012.1 third party embl
+show_gis_description	sp|P11111.1|ONE_HUMANtitled first                                     12.7    5.5  
+show_gis_description	unnamed protein product                                               12.7    5.5  
+show_gis_description	subject seven                                                         12.7    5.5  
+show_gis_description	pat|EP|0238993|7pre-grant patent                                      12.7    5.5  
+show_gis_description	123numeric local                                                      12.7    5.5  
+show_gis_description	prf|ABC|DEFprf two fields                                             12.7    5.5  
+show_gis_description	ref|NP_000002|ref without version                                     12.7    5.5  
+show_gis_description	pat|EP|0123456A1|7patent with letters                                 12.7    5.5  
+show_gis_description	pat|US|RE33188|1patent reissue                                        12.7    5.5  
+show_gis_description	gnl|ti|123trace id                                                    12.7    5.5  
+show_gis_description	long1long title word long title word long title word long title w...  12.7    5.5  
+show_gis_description	gi|3000000000|gb|AAA00100.1|  big gi                                  12.7    5.5  
+show_gis_description	sp|P99999|swiss no name                                               12.7    5.5  
+show_gis_description	pdb|1ABC| no chain                                                    12.7    5.5  
+show_gis_description	bbm|123gibbmt                                                         12.7    5.5  
+show_gis_description	gpp|GPP123|genome pipeline                                            12.7    5.5  
+show_gis_description	tpd|BK000013.1|third party ddbj                                       12.7    5.5  
+show_gis_description	tpe|BK000012.1|third party embl                                       12.7    5.5  
+show_gis_block	>P11111.1 titled first\n Subject_9 second line
+show_gis_block	>Subject_8 unnamed protein product
+show_gis_block	>Subject_7 subject seven
+show_gis_block	>EP0238993_7 pre-grant patent
+show_gis_block	>123 numeric local
+show_gis_block	>prf|ABC|DEF prf two fields
+show_gis_block	>NP_000002 ref without version
+show_gis_block	>EP0123456A1_7 patent with letters
+show_gis_block	>USRE33188_1 patent reissue
+show_gis_block	>ti:123 trace id
+show_gis_block	>long1 long title word long title word long title word long title word \nlong title word long title word long title word long title \nword long title word long title word long title word long \ntitle word long title word long title word long title word long \ntitle word long title word long title word long title word \nlong title word 
+show_gis_block	>gi|3000000000|gb|AAA00100.1| big gi
+show_gis_block	>P99999 swiss no name
+show_gis_block	>1ABC no chain
+show_gis_block	>123 gibbmt
+show_gis_block	>GPP123 genome pipeline
+show_gis_block	>BK000013.1 third party ddbj
+show_gis_block	>BK000012.1 third party embl

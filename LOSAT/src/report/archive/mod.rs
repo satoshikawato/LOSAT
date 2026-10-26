@@ -81,7 +81,7 @@ pub enum ArchiveEncoding {
     Text,
     /// ASN.1 binary (a value that starts with `bin`, in any case).
     Binary,
-    /// XML (the value `xml` in any case): not yet written by LOSAT.
+    /// XML (the value `xml` in any case): NCBI's XML object stream (`XmlEncoder::archive`).
     Xml,
     /// Any other value: NCBI writes nothing.
     Nothing,
@@ -108,6 +108,24 @@ impl ArchiveEncoding {
     /// The encoding the environment asks for.
     pub fn from_env() -> Self {
         Self::of(std::env::var_os("ARCHIVE_FORMAT").as_deref())
+    }
+
+    /// Whether this encoding writes every byte of `text` into a VisibleString of the archive
+    /// as NCBI does, without a diagnostic.
+    ///
+    /// Text and binary: only `0x20..=0x7E` (`GoodVisibleChar`); NCBI writes `#` for any other
+    /// byte and posts a `Bad char` diagnostic for each, whose text and place LOSAT does not
+    /// reproduce. XML: the archive's stream has no encoding, so every byte is written as it
+    /// is (TAB, LF and CR as character references) except `0x01..=0x1F` without those three,
+    /// which `x_VerifyChar` (`BAD_CHAR`) replaces by `#` with a diagnostic
+    /// (objostrxml.cpp:548-565).
+    pub fn writes_text(self, text: &[u8]) -> bool {
+        match self {
+            ArchiveEncoding::Xml => !text
+                .iter()
+                .any(|byte| matches!(byte, 0x01..=0x08 | 0x0b | 0x0c | 0x0e..=0x1f)),
+            _ => text.iter().all(|&byte| is_visible(byte)),
+        }
     }
 }
 
@@ -212,24 +230,37 @@ impl ArchiveHandle {
     /// The handle of a run of `inputs.program` that writes the archive (`-outfmt 11`): the
     /// request from the recorded options, `ARCHIVE_FORMAT` read once. `database` is the
     /// `-db` argument as typed (`None` for `-subject`); `label` names the program in a refusal.
-    /// Refuses, before anything is written, what LOSAT cannot write: `ARCHIVE_FORMAT=xml`
-    /// (line OF8c) and a `-db` name with a byte outside `0x20..=0x7E`.
+    /// Refuses, before anything is written, what LOSAT cannot write: a `-db` name or a
+    /// `-window_masker_db` path with a byte that `ArchiveEncoding::writes_text` refuses (NCBI
+    /// writes `#` and diagnostics there). These are the only strings the archive copies from
+    /// the command line: the `-matrix` name is one of the supported matrices (the parser
+    /// refuses any other before the search, in letters, digits and case only), and the other
+    /// recorded options are numbers or switches.
     pub fn for_program(
         inputs: &OptionInputs,
         database: Option<&str>,
         label: &str,
     ) -> anyhow::Result<Self> {
-        let encoding = ArchiveEncoding::from_env();
-        if encoding == ArchiveEncoding::Xml {
-            anyhow::bail!(
-                "ARCHIVE_FORMAT=xml with -outfmt 11 is not supported by LOSAT's {label} yet (it writes ASN.1 text and ASN.1 binary)"
-            );
-        }
-        if let Some(name) = database {
-            if !name.bytes().all(is_visible) {
-                anyhow::bail!(
-                    "a -db name with a character outside the visible ASCII range is not supported by LOSAT's {label} with -outfmt 11"
-                );
+        Self::for_encoding(ArchiveEncoding::from_env(), inputs, database, label)
+    }
+
+    /// `for_program` for a given encoding (`ARCHIVE_FORMAT` read by the caller).
+    pub fn for_encoding(
+        encoding: ArchiveEncoding,
+        inputs: &OptionInputs,
+        database: Option<&str>,
+        label: &str,
+    ) -> anyhow::Result<Self> {
+        for (what, text) in [
+            ("-db name", database),
+            ("-window_masker_db path", inputs.window_masker_db.as_deref()),
+        ] {
+            if let Some(text) = text {
+                if !encoding.writes_text(text.as_bytes()) {
+                    anyhow::bail!(
+                        "a {what} with a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML) is not supported by LOSAT's {label} with -outfmt 11"
+                    );
+                }
             }
         }
         let program = match inputs.program {
@@ -338,21 +369,35 @@ impl ArchiveHandle {
 }
 
 /// Whether `byte` is one of NCBI's visible characters (`GoodVisibleChar`: `' '` to `'~'`).
-/// NCBI writes `#` for any other byte of a VisibleString and posts a diagnostic for each,
-/// whose text and place LOSAT does not reproduce.
+/// In the text and binary archives NCBI writes `#` for any other byte of a VisibleString and
+/// posts a diagnostic for each, whose text and place LOSAT does not reproduce (XML: see
+/// `ArchiveEncoding::writes_text`).
 fn is_visible(byte: u8) -> bool {
     (0x20..=0x7E).contains(&byte)
 }
 
-/// The refusal of a title with a byte outside `0x20..=0x7E`, which the archive's VisibleString
-/// cannot hold (see `is_visible`). `role` is `query` or `subject`.
+/// The refusal of a title that `encoding` cannot write as NCBI does (`writes_text`: in text
+/// and binary a byte outside `0x20..=0x7E`; in XML NCBI writes the byte, and only a control
+/// byte is refused). `role` is `query` or `subject`. The encoding is the environment's
+/// (`ArchiveEncoding::from_env`).
 pub fn check_titles(records: &[FastaRecord], role: &str, label: &str) -> anyhow::Result<()> {
+    check_titles_for(ArchiveEncoding::from_env(), records, role, label)
+}
+
+/// `check_titles` for a given encoding (a caller that checks record by record reads the
+/// environment once).
+pub fn check_titles_for(
+    encoding: ArchiveEncoding,
+    records: &[FastaRecord],
+    role: &str,
+    label: &str,
+) -> anyhow::Result<()> {
     if let Some(record) = records
         .iter()
-        .find(|record| !record.title.iter().all(|&byte| is_visible(byte)))
+        .find(|record| !encoding.writes_text(&record.title))
     {
         return Err(anyhow::Error::new(TitleRefusal(format!(
-            "the title of the {role} {} has a character outside the visible ASCII range, which is not supported by LOSAT's {label} with -outfmt 11",
+            "the title of the {role} {} has a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML), which is not supported by LOSAT's {label} with -outfmt 11",
             record.local_id
         ))));
     }
@@ -469,6 +514,69 @@ mod tests {
         assert_eq!(of("foo"), ArchiveEncoding::Nothing);
         assert_eq!(of("xmlx"), ArchiveEncoding::Nothing);
         assert_eq!(of("bi"), ArchiveEncoding::Nothing);
+    }
+
+    /// The strings the archive copies from the command line are refused before the first byte
+    /// where the encoding cannot write them as NCBI does: text and binary write `#` for a byte
+    /// outside `0x20..=0x7E`, XML writes every byte but a control one as it is.
+    #[test]
+    fn a_db_name_or_masker_path_the_encoding_cannot_write_is_refused() {
+        let inputs = |path: Option<&str>| {
+            let mut inputs = OptionInputs::new(Program::Blastn, "megablast");
+            inputs.window_masker_db = path.map(str::to_string);
+            inputs
+        };
+        let ok = |encoding, path: Option<&str>, db: Option<&str>| {
+            ArchiveHandle::for_encoding(encoding, &inputs(path), db, "BLASTN").is_ok()
+        };
+        for encoding in [
+            ArchiveEncoding::Text,
+            ArchiveEncoding::Binary,
+            ArchiveEncoding::Xml,
+        ] {
+            assert!(ok(encoding, None, None));
+            assert!(ok(encoding, Some("wm&<\"'q/mg.obinary"), Some("d b&<")));
+            // A control byte: NCBI writes `#` and a diagnostic, but TAB, LF and CR in XML.
+            for bad in ["a\x01b", "a\x1fb", "a\x0bb", "a\x0eb"] {
+                assert!(!ok(encoding, Some(bad), None), "{encoding:?} {bad:?}");
+                assert!(!ok(encoding, None, Some(bad)), "{encoding:?} {bad:?}");
+            }
+        }
+        for good in ["a\tb", "a\nb", "a\rb"] {
+            assert!(ok(ArchiveEncoding::Xml, Some(good), Some(good)));
+            assert!(!ok(ArchiveEncoding::Text, Some(good), None));
+        }
+        // Bytes from 0x7F up: refused in text and binary, written as they are in XML.
+        for high in ["wm\u{e9}/mg.obinary", "d\u{7f}b", "\u{1f600}"] {
+            assert!(ok(ArchiveEncoding::Xml, Some(high), Some(high)), "{high:?}");
+            for encoding in [ArchiveEncoding::Text, ArchiveEncoding::Binary] {
+                assert!(!ok(encoding, Some(high), None), "{encoding:?} {high:?}");
+                assert!(!ok(encoding, None, Some(high)), "{encoding:?} {high:?}");
+            }
+        }
+        let refusal = ArchiveHandle::for_encoding(
+            ArchiveEncoding::Text,
+            &inputs(Some("w\u{e9}")),
+            None,
+            "BLASTN",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(refusal.contains("-window_masker_db path"), "{refusal}");
+        assert!(refusal.contains("-outfmt 11"), "{refusal}");
+    }
+
+    #[test]
+    fn titles_with_high_bytes_are_refused_in_text_and_binary_only() {
+        let records = [FastaRecord::new("Query_1", "caf\u{e9}".as_bytes(), b"ACGT")];
+        for encoding in [ArchiveEncoding::Text, ArchiveEncoding::Binary] {
+            let refusal = check_titles_for(encoding, &records, "query", "BLASTN").unwrap_err();
+            assert!(refusal.is::<TitleRefusal>());
+        }
+        assert!(check_titles_for(ArchiveEncoding::Xml, &records, "query", "BLASTN").is_ok());
+        let del = [FastaRecord::new("Query_1", b"ti\x7ftle", b"ACGT")];
+        assert!(check_titles_for(ArchiveEncoding::Xml, &del, "query", "BLASTN").is_ok());
+        assert!(check_titles_for(ArchiveEncoding::Text, &del, "query", "BLASTN").is_err());
     }
 
     #[test]

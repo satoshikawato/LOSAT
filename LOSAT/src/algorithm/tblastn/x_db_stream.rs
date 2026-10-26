@@ -24,8 +24,9 @@
 //!   it read for the plans (`XDbStream::plan_with`), from whose bytes the plans of the next short
 //!   subjects are made, without a store.
 //! - The composition redo and the traceback of `-comp_based_stats 0` read a subject of their
-//!   lists when they first align it and hold it until the stage ends (`XStageSubjects`); the
-//!   reports read the sequences they show (`database::reported_subjects`), one read each.
+//!   lists when they first align it and hold it until the stage has done its last match
+//!   (`XStageSubjects`, LOSAT_X_TBNSTAGEDROP; with `=0` until the stage ends); the reports read
+//!   the sequences they show (`database::reported_subjects`), one read each.
 //! - A long sequence (a block of its own) is read once while anything holds it: the stages and
 //!   the query batches that run at the same time share it, and a thread that asks for it while
 //!   another reads it waits for that read (`XDbStream::read_shared`). With more than one thread
@@ -54,7 +55,7 @@
 //! search (a database changed or damaged after the check, an error of the file system) is an
 //! `XReadError` holding the error that the check gives for the same read: the search of the
 //! batches is then made again one batch at a time, so that the batch that reads it fails after the
-//! reports of the batches before, as with the check's error (`args.rs`).
+//! reports of the batches before, as with the check's error (`tblastn_app.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:374-376 (the sequence of
 //! the search is the mapped volume's bytes, not a copy)
@@ -423,23 +424,52 @@ thread_local! {
     static X_PLAN_BLOCK: std::cell::Cell<Option<XPlanBlock>> = const { std::cell::Cell::new(None) };
 }
 
+// No NCBI counterpart: reads the LOSAT_X_TBNSTAGEDROP variable once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNSTAGEDROP): a switch of the strict set (`utils/xswitch.rs`): a stage's
+/// subject is let go after its last match (`XStageSubjects::done`) instead of at the stage's end.
+pub(super) fn x_tbn_stage_drop() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNSTAGEDROP"))
+}
+
 /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the subjects that a stage after the preliminary search reads
 /// (the composition redo, the traceback of `-comp_based_stats 0`): with a `-db` stream, each
 /// subject of the stage's lists read when the stage first aligns it (`XDbStream::read_shared`)
-/// and held until the stage ends; otherwise the search's subjects.
+/// and held until the stage has passed its last match (LOSAT_X_TBNSTAGEDROP, `done`) or, with
+/// `LOSAT_X_TBNSTAGEDROP=0`, until the stage ends; otherwise the search's subjects.
 pub(super) enum XStageSubjects<'a> {
     All(super::x_subject_store::SubjectLetters<'a>),
     Read {
         stream: &'a XDbStream<'a>,
         /// The subjects of the lists, ascending.
         oids: Vec<usize>,
-        /// The store of each, once read.
-        stores: Vec<OnceLock<Arc<PackedNucleotide>>>,
+        /// The store of each, once read, until its last match is done.
+        stores: Vec<Mutex<Option<Arc<PackedNucleotide>>>>,
+        /// The matches of each that are not done (LOSAT_X_TBNSTAGEDROP); empty with the switch
+        /// off, where the stores stay until the stage ends.
+        left: Vec<AtomicUsize>,
     },
 }
 
+/// A subject of a stage, held while a match reads it (`XStageSubjects::held`).
+pub(super) enum XHeld<'a> {
+    Nt(SubjectNt<'a>),
+    Store(Arc<PackedNucleotide>),
+}
+
+impl XHeld<'_> {
+    /// The subject for the readers of windows.
+    pub(super) fn nt(&self) -> SubjectNt<'_> {
+        match self {
+            Self::Nt(nt) => *nt,
+            Self::Store(store) => SubjectNt::Packed(store),
+        }
+    }
+}
+
 impl<'a> XStageSubjects<'a> {
-    /// The subjects of a stage whose lists name the subjects `oids`.
+    /// The subjects of a stage whose lists name the subjects `oids` (one item per match).
     pub(super) fn new(
         subjects: super::x_subject_store::SubjectLetters<'a>,
         oids: impl Iterator<Item = usize>,
@@ -447,37 +477,101 @@ impl<'a> XStageSubjects<'a> {
         let super::x_subject_store::SubjectLetters::Stream(stream) = subjects else {
             return Self::All(subjects);
         };
-        let mut oids: Vec<usize> = oids.collect();
-        oids.sort_unstable();
-        oids.dedup();
-        let stores = oids.iter().map(|_| OnceLock::new()).collect();
+        let mut all: Vec<usize> = oids.collect();
+        all.sort_unstable();
+        let mut oids: Vec<usize> = Vec::new();
+        let mut counts: Vec<usize> = Vec::new();
+        for oid in all {
+            if oids.last() == Some(&oid) {
+                *counts.last_mut().expect("a count per subject") += 1;
+            } else {
+                oids.push(oid);
+                counts.push(1);
+            }
+        }
+        let stores = oids.iter().map(|_| Mutex::new(None)).collect();
+        let left = if x_tbn_stage_drop() {
+            counts.into_iter().map(AtomicUsize::new).collect()
+        } else {
+            Vec::new()
+        };
         Self::Read {
             stream,
             oids,
             stores,
+            left,
         }
     }
 
     /// Subject `oid` for the readers of windows (`SubjectLetters::nt`), read the first time.
-    pub(super) fn nt(&self, oid: usize) -> Result<SubjectNt<'_>> {
+    pub(super) fn held(&self, oid: usize) -> Result<XHeld<'_>> {
         match self {
-            Self::All(subjects) => Ok(subjects.nt(oid)),
+            Self::All(subjects) => Ok(XHeld::Nt(subjects.nt(oid))),
             Self::Read {
                 stream,
                 oids,
                 stores,
+                ..
             } => {
                 let at = oids
                     .binary_search(&oid)
                     .expect("every subject of the stage's lists is listed");
-                if stores[at].get().is_none() {
-                    // Two threads may read it at once: one store is kept.
-                    let _ = stores[at].set(stream.read_shared(oid)?);
+                let mut slot = stores[at].lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(store) = slot.as_ref() {
+                    return Ok(XHeld::Store(Arc::clone(store)));
                 }
-                Ok(SubjectNt::Packed(
-                    stores[at].get().expect("the store was set"),
-                ))
+                // Two threads may ask at once: the stream reads it once (`read_shared`).
+                drop(slot);
+                let store = stream.read_shared(oid)?;
+                slot = stores[at].lock().unwrap_or_else(|e| e.into_inner());
+                Ok(XHeld::Store(Arc::clone(slot.get_or_insert(store))))
             }
         }
+    }
+
+    /// A guard of one match of subject `oid` that calls `done` when it is dropped. Declared before
+    /// the match's `held`, it runs after the match let the subject go.
+    pub(super) fn x_match(&self, oid: usize) -> XMatchDone<'_, 'a> {
+        XMatchDone { stage: self, oid }
+    }
+
+    /// One match of subject `oid` is done (redone, or passed by the early termination): after its
+    /// last one the stage lets the subject go (LOSAT_X_TBNSTAGEDROP); a match that reads it later
+    /// would read it again. No NCBI counterpart: NCBI's redo fetches each match's subject and
+    /// releases it after the match (`blast_kappa.c` `s_MatchingSequenceRelease`).
+    pub(super) fn done(&self, oid: usize) {
+        let Self::Read {
+            oids, stores, left, ..
+        } = self
+        else {
+            return;
+        };
+        if left.is_empty() {
+            return;
+        }
+        let at = oids
+            .binary_search(&oid)
+            .expect("every subject of the stage's lists is listed");
+        let before = left[at].fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(
+            before > 0,
+            "more matches done than listed for subject {oid}"
+        );
+        if before == 1 {
+            let store = stores[at].lock().unwrap_or_else(|e| e.into_inner()).take();
+            drop(store);
+        }
+    }
+}
+
+/// Calls `XStageSubjects::done` for one match when it is dropped (`XStageSubjects::x_match`).
+pub(super) struct XMatchDone<'s, 'a> {
+    stage: &'s XStageSubjects<'a>,
+    oid: usize,
+}
+
+impl Drop for XMatchDone<'_, '_> {
+    fn drop(&mut self) {
+        self.stage.done(self.oid);
     }
 }

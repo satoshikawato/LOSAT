@@ -36,3 +36,5 @@ mod asn_text_octets_tests;
 mod real_tests;
 #[cfg(test)]
 mod seqalign_tests;
+#[cfg(test)]
+mod xml_archive_tests;

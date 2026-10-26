@@ -315,6 +315,7 @@ export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNDCONE=1
 export LOSAT_X_BNEIGHTSLOTS=1
 export LOSAT_X_BNFEWSUBJ=1
+export LOSAT_X_BNHLGROW=1
 export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNQDROP=1
@@ -425,6 +426,7 @@ export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNKEEPFEW=1
 export LOSAT_X_TBNLINKSETS=1
 export LOSAT_X_TBNOWNPOOLS=1
+export LOSAT_X_TBNPAIRCAP=1
 export LOSAT_X_TBNREDOLPT=1
 export LOSAT_X_TBNSCANBYTE=1
 export LOSAT_X_TBNSTAGEDROP=1
@@ -3189,6 +3191,27 @@ Scheduling (each value computed by one thread with the original function; order 
   switch leaves alone, at 8-32 threads) 0.97-1.02; megablast of 1,775 cDNAs (the loop by default) 1.00 at one thread and
   1.02-1.03 at 8 and 16 threads, within the rounds' spread (0.97-1.09) with the same page faults, TLB shootdowns, user
   and system time as dev. Max RSS: the same (the 31,168 cDNAs in the loop 236 MiB against 249).
+- `LOSAT_X_BNHLGROW=1` (BLASTN, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
+  added it (perf/bn-hl-grow): on unless it is `0`) a hit list's array (`blastn/hsp.rs` `HitList`, the preliminary
+  stage's lists per query and the final ones) is no longer reserved to NCBI's array size when a list comes
+  (`kStartValue` = 100 lists, then doubled, `blast_hits.c:3219-3240`): it doubles from 4 as lists come and never holds
+  more room than that size (`HitList::x_room_for_one`, `reserve_exact`). NCBI's array holds pointers (800 bytes for
+  100), LOSAT's holds the lists themselves (40 bytes each), so a search of many short queries with few subjects each
+  kept about 4 KB per query and per hit list (blastn-short of 30,000 reads: 114 MiB at one thread; v4-MF's arm
+  MF_HLCAP). `hsplist_current`, the number `Blast_HitListUpdate` compares with the count, is NCBI's as before; only
+  the capacity changes, and nothing but `push` reads it, so reports do not change (lib test
+  `hit_list_array_grows_as_lists_come_within_ncbi_array_size`; `tests/blastn_hl_grow.rs` compares reports with `=0`:
+  `-subject` and `-db`, 1 and 4 threads, lists past 100 subjects and lists cut by `-max_target_seqs 50`). An array
+  that its owner fills without `update` is left to `push`, as before. Evidence 2026-10-26 (v4-D12 s15, workstation,
+  head bfbc83c6 on dev ce281c9a; 30,000 reads of 24 letters against dmel_dna_3M, `-task blastn-short -evalue 0.001`,
+  every report identical and the same as NCBI's): peak RssAnon, MiB, switch / `=0`: one thread (node 0, 2 runs) 99.2,
+  99.4 / 185.4, 187.3 (NCBI 328.7); max RSS (largest VmHWM sample, node 1, 3 runs, median) `-subject` 16 threads 198.8
+  / 304.6, 32 threads 334.4 / 436.8, 48 threads 433.5 / 536.4 (NCBI `-subject` 389.3, one thread: NCBI does not thread
+  a subject search); `-db` (2 runs) 32 threads 296.6, 301.3 / 408.9, 391.5 (NCBI 444.3), 48 threads 396.4, 397.0 /
+  493.4, 502.0 (NCBI 493.7). Time: one thread, `perf stat` `:u` against `=0`, 4 rounds rotated with an A/A arm (`=0`
+  again): instructions x0.99998, cycles x0.9993 (0.986-1.012) where the A/A arm read x0.9970 (0.984-1.010), minor
+  faults 94.1k -> 40.6k, system time 0.15 -> 0.07 s; 16 threads (node 1, CPUs warmed 3 s before each run), 20 pairs in
+  alternating order: wall x0.961 (median; geometric mean x0.962; 20 of 20 pairs below 1), minor faults 115k -> 60k.
 - `LOSAT_X_BNLUTDROP=1` (BLASTN, every task, `-subject` and `-db`; in the strict set since 2026-10-24
   (perf/mb-lut-drop, evidence at the end of this entry): on unless it is `0`) a query batch drops its lookup tables
   when its preliminary stage ends, before its traceback (`blastn/blast_engine/x_lut_drop.rs`), where NCBI's traceback
@@ -4888,6 +4911,36 @@ Scheduling (each value computed by one thread with the original function; order 
   every subject, about 800), the 16S set 134 -> 19 and 152 -> 38 MiB (NCBI 9 and 11), the 5,000
   cDNAs at 8 threads 70 -> 37 MiB (NCBI 16). Before (dev 23db0a4f, `TBNSSIDE=0` (a variable that graduated 2026-10-22) against the
   default, 38 pairs): x0.980-0.994 at 4, 8 and 16 threads on the two large sets, no pair slower.
+- `LOSAT_X_TBNPAIRCAP=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-26;
+  `=0` turns it off; `tblastn/search_seed.rs` `x_scan_plan`, `X_PAIR_ROOM`): the offset-pair array that a unit's scan
+  calls fill (one per running unit; the units a thread runs one after another share theirs, `XUnitBuffers`) holds
+  32,768 + the longest chain of the lookup table, never more
+  than the 1024 x the longest chain it held before (a table whose longest chain is below 33 keeps that). NCBI's array
+  holds 4,096 + the longest chain (`lookup_wrap.c:264-266` `GetOffsetArraySize`; `blast_engine.c:992,1040-1041`
+  allocates one per thread, `aa_ungapped.c:504-505` passes its size to scansub). The size only decides where a scan
+  call stops on a full array; the next call resumes there, so the pairs reach the two-hit loop in the same order at
+  any size (unit tests `x_scan_bf_equals_ncbi_scan_on_random_subjects`, which also compares the pairs of all sizes in
+  scan order, and the two scan tests of `x_scan_byte.rs`, at 4,096 and 32,768 + the longest chain among others;
+  `tests/tblastn_scan_byte.rs` `the_offset_array_size_changes_only_the_scan_calls`: 115 proteins x MelaMJNV, the same
+  report with and without the switch at one and four threads, 646 scan calls against 339). The
+  1024 x of an early diagnostic was 864 KiB for the fly proteins of `dmel_b4.faa` (longest chain 108), against NCBI's
+  33 KiB, and the thread count multiplied it. NCBI's own size costs time here: a call that stops starts the rest of its
+  block of words again (`TBNSCANBYTE`), and at one thread `dmel_b4.faa` x zebrafish cDNAs (`-db`) took 1.0041 of the
+  instructions with 4,096 + the longest chain, 1.0016 with 8,192, 1.0004 with 16,384 and 1.0001 with 32,768 (the
+  outputs the same; with 4,096 the time at 8 / 16 threads was x1.0032 / x1.0076, 8 pairs). Always: every tblastn scan
+  plan whose longest chain is 33 or more.
+  Measured 2026-10-26 on the workstation (2x Xeon Gold 6338; base dev ce281c9a; every output of a case the same bytes in
+  every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, medians of 3 rounds in
+  rotating order, NCBI BLAST+ 2.17.0 in the same rounds): `dmel_b4.faa` x zebrafish cDNAs (`-db`, `-evalue 1e-5
+  -max_target_seqs 5`) at 1 / 16 / 32 / 40 / 48 threads 28 / 89 / 151 / 176 / 207 -> 26 / 69 / 104 / 122 / 139 MiB
+  (NCBI 118 / 137 / 149 / 156 / 162); the 595 proteins of AP027131 x AP027133 (`-db_gencode 4`) `-db` at 16 / 32 / 48
+  63 / 97 / 114 -> 60 / 88 / 107 MiB (NCBI 115 / 117 / 116), `-subject` 62 / 90 / 120 -> 55 / 74 / 93 MiB (NCBI
+  `-subject` runs one thread: 81). Time (node 1, cores warmed 3 s before each run, arms alternating in
+  order, `perf stat`): the `dmel_b4.faa` case at 1 thread x1.0000 (8 pairs; instructions x1.00006, `=0` x1.00002); at
+  8 / 16 / 32 threads x0.9994 / x1.0025 / x0.9979 against the base (16 rounds), where `=0` in the same binary, the code
+  path of the base, read x1.0001 / x1.0055 / x1.0039 (the layout of the new binary), so that the switch against `=0`
+  in one binary is x0.9986 / x0.9978 / x0.9900 (11 / 11 / 12 of 16 faster; instructions x1.00002); AP027131 `-subject`
+  x0.9963 at 1 thread (8 of 8 faster) and x0.9986 at 16.
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

@@ -546,8 +546,9 @@ fn x_s5_arm() -> u32 {
 }
 
 // PROBE: the arms of LOSAT_BPF_S5.
-pub(crate) const X_S5_ARMS: [u32; 17] =
-    [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 20, 21, 22];
+pub(crate) const X_S5_ARMS: [u32; 20] = [
+    1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 20, 21, 22, 30, 31, 32,
+];
 
 // PROBE: arm -> (hits ahead HA, bounds ahead SA, split copy, PF flags: 1 = also read ahead the
 // bound after `ahead`, 2 = the second half of a run read from `k` when the cell has 4 hits or fewer
@@ -571,7 +572,7 @@ unsafe fn x_s5_dispatch<F>(
 {
     macro_rules! go {
         ($ha:expr, $sa:expr, $split:expr, $pf:expr) => {
-            go!($ha, $sa, $split, $pf, false)
+            go!($ha, $sa, $split, $pf, 0)
         };
         ($ha:expr, $sa:expr, $split:expr, $pf:expr, $lean:expr) => {
             unsafe {
@@ -605,9 +606,12 @@ unsafe fn x_s5_dispatch<F>(
         14 => go!(12, 24, true, 7),
         15 => go!(8, 16, true, 2),
         16 => go!(16, 32, true, 3),
-        20 => go!(8, 16, false, 0, true),
-        21 => go!(8, 16, true, 7, true),
-        22 => go!(8, 16, true, 3, true),
+        20 => go!(8, 16, false, 0, 1),
+        21 => go!(8, 16, true, 7, 1),
+        22 => go!(8, 16, true, 3, 1),
+        30 => go!(8, 16, false, 0, 2),
+        31 => go!(8, 16, true, 3, 2),
+        32 => go!(8, 16, false, 3, 2),
         _ => go!(8, 16, false, 0),
     }
 }
@@ -703,7 +707,7 @@ unsafe fn x_scan_flat_stage_p<
     const SA: usize,
     const SPLIT: bool,
     const PF: u32,
-    const LEAN: bool,
+    const LEAN: u32,
     F,
 >(
     lookup: &XFlatCompressedLookup,
@@ -722,7 +726,9 @@ unsafe fn x_scan_flat_stage_p<
     assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
     assert!(HA <= SA && X_STAGE_CAP >= 2 * X_RUN);
     let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
-    if LEAN {
+    if LEAN == 2 {
+        unsafe { lookup.x_list_pairs_lean2(subject, subject_length, &mut cells) };
+    } else if LEAN == 1 {
         unsafe { lookup.x_list_pairs_lean(subject, subject_length, &mut cells) };
     } else {
         unsafe { lookup.x_list_pairs(subject, subject_length, &mut cells) };

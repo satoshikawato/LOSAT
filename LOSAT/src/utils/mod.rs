@@ -6,6 +6,9 @@ mod seg_lnfact;
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
 // (*thread)->Run(); (*thread)->Join(&result);
 pub mod threading;
+// The global allocator of the threaded Wasm builds; its tests run on every target.
+#[cfg(any(test, all(target_arch = "wasm32", feature = "wasm-threads")))]
+mod wasm_alloc;
 pub mod winmask;
 pub mod x_logclone;
 pub(crate) mod x_mapped;

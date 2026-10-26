@@ -820,6 +820,7 @@ fn run_inner(
                                 false,
                                 false,
                                 false,
+                                false,
                             )
                             .map_err(|error| match error.downcast::<HeaderReadError>() {
                                 Ok(header) => header.error,
@@ -876,6 +877,7 @@ fn run_inner(
                             matches!(options.outfmt, 6 | 7),
                             options.outfmt == 0,
                             matches!(options.outfmt, 13..=16),
+                            matches!(options.outfmt, 0 | 5 | 13..=16),
                         );
                         super::x_timing::run(XRun::Titles, x_t);
                         reported

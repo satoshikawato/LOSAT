@@ -38,7 +38,7 @@ use anyhow::Result;
 #[cfg(test)]
 use super::ncbistdaa_to_ascii;
 use super::{
-    shared, BlastpDatabase, BlastpHitList, ListedShown, ListedSubjects, ListedTitles, PROGRAM,
+    BlastpDatabase, BlastpHitList, ListedShown, ListedSubjects, ListedTitles, ParsedSubjects,
 };
 
 // No NCBI counterpart: reads the LOSAT_X_BPLISTEDLEAN switch once; it does not change any value
@@ -66,6 +66,7 @@ impl ListedSubjects {
         let mut titles: Vec<Arc<[u8]>> = vec![Arc::from(&b""[..]); ranks];
         let mut replaced_title_bytes = vec![false; ranks];
         let mut read = vec![false; ranks];
+        let mut parsed = ParsedSubjects::default();
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
                 continue;
@@ -76,15 +77,17 @@ impl ListedSubjects {
                 if std::mem::replace(&mut read[rank], true) {
                     continue;
                 }
-                let stored = shared::read_title(&database.db, self.ordinals[rank], query, PROGRAM)?;
-                titles[rank] = Arc::from(stored.title);
-                replaced_title_bytes[rank] = stored.replaced_bytes;
+                let (title, replaced) =
+                    parsed.read(database, rank, self.ordinals[rank], query, ranks)?;
+                titles[rank] = Arc::from(title);
+                replaced_title_bytes[rank] = replaced;
             }
         }
         Ok(ListedTitles {
             listed: self,
             shown: ListedShown::Lean(titles),
             replaced_title_bytes,
+            parsed: parsed.by_rank,
         })
     }
 }

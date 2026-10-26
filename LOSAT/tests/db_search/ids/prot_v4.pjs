@@ -1,0 +1,23 @@
+{
+  "version": "1.2",
+  "dbname": "prot_v4",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "prot_v4 (parsed Seq-ids)",
+  "number-of-letters": 4874,
+  "number-of-sequences": 53,
+  "last-updated": "2026-10-26T21:07:00",
+  "number-of-volumes": 1,
+  "bytes-total": 14618,
+  "bytes-to-cache": 5440,
+  "files": [
+    "prot_v4.phr",
+    "prot_v4.pin",
+    "prot_v4.pnd",
+    "prot_v4.pni",
+    "prot_v4.pog",
+    "prot_v4.psd",
+    "prot_v4.psi",
+    "prot_v4.psq"
+  ]
+}

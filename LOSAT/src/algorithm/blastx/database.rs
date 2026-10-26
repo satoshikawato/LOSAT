@@ -31,6 +31,7 @@ use super::subjects::Subjects;
 use crate::algorithm::common::database::{self as shared, PreliminaryReadError, StoredProteins};
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::blast_xml::HitTaxonomy;
+use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{SeqDb, SeqType};
 
@@ -65,8 +66,9 @@ impl BlastxDatabase {
     /// with the command line's errors.
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
         let db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
-        // A database with parsed Seq-ids is refused (line DBID: ID2a opens it).
-        shared::refuse_parsed_seqids(&db, PROGRAM)?;
+        // A database with parsed Seq-ids is read (line DBID, ID2a), unless a variable changes
+        // NCBI's choice of its Seq-ids.
+        shared::refuse_seq_id_rank_variable(&db, settings, PROGRAM)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -177,6 +179,13 @@ pub(crate) struct ReportedSubjects {
     taxids: Vec<i32>,
     taxonomy: Vec<HitTaxonomy>,
     taxdb_notes: shared::TaxdbNotes,
+    /// The sequences with parsed Seq-ids by rank (empty when the batch reports none): their
+    /// ids and titles come from their definition lines (`report::db_subject`), and `titles`
+    /// holds the title of their first definition line.
+    parsed: Vec<Option<Arc<ParsedSubject>>>,
+    /// `sacc` and `saccver` of the sequences with parsed Seq-ids by rank, with `tabular`
+    /// (empty without them; the others' are their `sseqid`).
+    tabular_accessions: Vec<Option<[String; 2]>>,
 }
 
 impl ReportedSubjects {
@@ -194,7 +203,11 @@ impl ReportedSubjects {
     /// query by query in hit-list order; NCBI's reader error stops the run at this batch
     /// (`HeaderReadError`), and a title LOSAT does not show as NCBI is its refusal
     /// (`check_reported_title`; with `tabular`, `tabular_subject_id`; with `pairwise`,
-    /// `check_shown_protein_title`).
+    /// `check_shown_protein_title`). A sequence with parsed Seq-ids is read with every Seq-id
+    /// (`shared::read_header`), with LOSAT's refusals of `shared::check_shown_parsed_subject`
+    /// (with `pairwise`), of `shared::refuse_joined_hits` (with `joined`: outfmt 0, 5 and 13 to
+    /// 16) and of `shared::refuse_parsed_taxonomy` (with `taxids`).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
         subjects: Subjects<'_>,
@@ -203,10 +216,12 @@ impl ReportedSubjects {
         tabular: bool,
         pairwise: bool,
         taxids: bool,
+        joined: bool,
     ) -> Result<Self> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
         let mut listed: BTreeMap<usize, Option<Arc<[u8]>>> = BTreeMap::new();
+        let mut parsed: BTreeMap<usize, Arc<ParsedSubject>> = BTreeMap::new();
         for batch in batches.iter() {
             for (qidx, lists) in batch.queries.iter().enumerate() {
                 for list in lists {
@@ -221,26 +236,101 @@ impl ReportedSubjects {
                         continue;
                     }
                     let ordinal = u32::try_from(list.oid)?;
-                    let stored = shared::read_title(
+                    match shared::read_header(
                         &database.db,
                         ordinal,
                         batch.query_ordinal + qidx,
                         PROGRAM,
-                    )?;
-                    shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
-                    listed.insert(list.oid, Some(Arc::from(stored.title)));
+                    )? {
+                        shared::ReportedHeader::Stored(stored) => {
+                            shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                            listed.insert(list.oid, Some(Arc::from(stored.title)));
+                        }
+                        shared::ReportedHeader::Parsed(subject) => {
+                            listed.insert(list.oid, Some(Arc::from(subject.first_title())));
+                            parsed.insert(list.oid, subject);
+                        }
+                    }
                 }
             }
         }
+        if joined && !parsed.is_empty() {
+            for batch in batches.iter() {
+                for (qidx, lists) in batch.queries.iter().enumerate() {
+                    shared::refuse_joined_hits(
+                        batch.query_ordinal + qidx,
+                        lists
+                            .iter()
+                            .filter(|list| super::report::reported(list, gapped))
+                            .map(|list| {
+                                let ordinal = u32::try_from(list.oid).ok()?;
+                                Some((ordinal, parsed.get(&list.oid)?.as_ref()))
+                            }),
+                        PROGRAM,
+                    )?;
+                }
+            }
+        }
+        let taxdb_found = database.db.taxdb_found();
         let mut reported = ReportedSubjects::default();
         for (&oid, title) in &listed {
             let ordinal = u32::try_from(oid)?;
             let shown = title.is_some();
             let title = title.clone().unwrap_or_else(|| Arc::from(&b""[..]));
-            if pairwise && shown {
+            if pairwise && shown && !parsed.contains_key(&oid) {
                 shared::check_shown_protein_title(&title, ordinal, PROGRAM)?;
             }
-            if tabular {
+            if let Some(subject) = parsed.get(&oid) {
+                // The formats that read the subject's Bioseq; the Seq-annots and the archive
+                // write its Seq-align id alone.
+                if tabular || pairwise || joined || taxids {
+                    subject
+                        .fetched()
+                        .map_err(|reason| shared::parsed_refusal(ordinal, &reason, PROGRAM))?;
+                }
+                if pairwise {
+                    shared::check_shown_parsed_subject(
+                        subject,
+                        true,
+                        taxdb_found,
+                        ordinal,
+                        PROGRAM,
+                    )?;
+                }
+                if taxids
+                    && taxdb_found
+                    && subject
+                        .deflines()
+                        .iter()
+                        .any(|defline| defline.taxid.is_some_and(|taxid| taxid != 0))
+                {
+                    return Err(super::blast_xml::XmlRefusal::of_taxonomy(
+                        shared::refuse_parsed_taxonomy(
+                            ordinal,
+                            "taxids that the XML2 and JSON descriptions name from",
+                            PROGRAM,
+                        ),
+                    ));
+                }
+                if tabular {
+                    let [id, accession, version] =
+                        subject.tabular_ids(true).map_err(|problem| {
+                            shared::parsed_refusal(ordinal, &format!("has {problem}"), PROGRAM)
+                        })?;
+                    // The ids of a stored definition line are VisibleStrings: ASCII.
+                    let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
+                    reported.tabular_ids.push(text(id));
+                    if reported.tabular_accessions.is_empty() {
+                        reported.tabular_accessions = vec![None; listed.len()];
+                    }
+                    reported.tabular_accessions[reported.ordinals.len()] =
+                        Some([text(accession), text(version)]);
+                }
+                if reported.parsed.is_empty() {
+                    reported.parsed = vec![None; listed.len()];
+                }
+                reported.parsed[reported.ordinals.len()] = Some(Arc::clone(subject));
+            } else if tabular {
                 // An unreported subject's id is never written.
                 let id = if shown {
                     shared::tabular_subject_id(&title, ordinal, true, PROGRAM)?
@@ -285,10 +375,12 @@ impl ReportedSubjects {
             // The taxid of each reported sequence, read apart from the titles for the XML2 and
             // JSON formats only (`algorithm::common::database::read_reported_taxids`); the
             // sequences with a title are the reported ones.
+            // A sequence with parsed Seq-ids carries its taxids in its descriptions
+            // (`ParsedSubject::hit_descriptions`).
             let shown: std::collections::BTreeSet<usize> = listed
-                .values()
+                .iter()
                 .enumerate()
-                .filter(|(_, title)| title.is_some())
+                .filter(|(_, (oid, title))| title.is_some() && !parsed.contains_key(oid))
                 .map(|(rank, _)| rank)
                 .collect();
             // A scientific name NCBI cannot write, or a taxonomy database LOSAT cannot read as NCBI
@@ -338,6 +430,26 @@ impl ReportedSubjects {
         &self.tabular_ids[rank]
     }
 
+    /// The tabular `sseqid`, `sacc` and `saccver` of rank `rank` (only with `tabular` in
+    /// `for_batch`): the same id for a sequence without parsed Seq-ids.
+    pub(crate) fn tabular_ids(&self, rank: usize) -> [&str; 3] {
+        let id = self.tabular_id(rank);
+        match self.tabular_accessions.get(rank).and_then(Option::as_ref) {
+            Some([accession, version]) => [id, accession, version],
+            None => [id, id, id],
+        }
+    }
+
+    /// The sequences with parsed Seq-ids by rank (empty when the batch reports none).
+    pub(crate) fn parsed(&self) -> &[Option<Arc<ParsedSubject>>] {
+        &self.parsed
+    }
+
+    /// The sequence of rank `rank` when it has parsed Seq-ids.
+    pub(crate) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
+        self.parsed.get(rank).and_then(Option::as_deref)
+    }
+
     /// The stored title of rank `rank` (`stitle`).
     pub(crate) fn title(&self, rank: usize) -> &str {
         &self.records[rank].title
@@ -353,11 +465,13 @@ impl ReportedSubjects {
     pub(crate) fn descriptions(&self) -> Vec<Arc<str>> {
         self.titles
             .iter()
-            .map(|title| {
-                let label = match crate::report::defline::generate_defline(title, true, true) {
-                    Ok(defline) => defline.text,
-                    Err(crate::report::defline::UnknownEncoding) => b"Unknown".to_vec(),
-                };
+            .enumerate()
+            .map(|(rank, title)| {
+                let label = crate::report::pairwise::database_description_label(
+                    title,
+                    self.parsed_subject(rank),
+                    true,
+                );
                 Arc::from(String::from_utf8_lossy(&label).as_ref())
             })
             .collect()

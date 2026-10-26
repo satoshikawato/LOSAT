@@ -453,16 +453,7 @@ pub(crate) fn stored_title(
     query: usize,
     program: &str,
 ) -> Result<StoredTitle> {
-    let mut deflines = deflines.map_err(|error| {
-        if error.ncbi_message().is_some() {
-            anyhow::Error::new(HeaderReadError {
-                query,
-                error: database_error(error, program),
-            })
-        } else {
-            database_error(error, program)
-        }
-    })?;
+    let mut deflines = deflines.map_err(|error| header_read_error(error, query, program))?;
     // makeblastdb without -parse_seqids writes one definition line per sequence; NCBI
     // shows the others of a sequence as ` >id title` after the first.
     if deflines.len() != 1 {
@@ -514,6 +505,170 @@ pub(crate) fn stored_title(
 // default outfmt 6, three times for `6 sseqid stitle`, five times for outfmt 0. The
 // number of readings is the formatter's, not ported; makeblastdb and `losat makedb`
 // store `#` for such a byte, so only a header file written otherwise holds one.
+/// A reader error of the header of a reported sequence where the hit list of query `query`
+/// reaches it: NCBI's own is a `HeaderReadError` that names the query; LOSAT's refusals are
+/// errors of their own.
+fn header_read_error(error: SeqDbError, query: usize, program: &str) -> anyhow::Error {
+    if error.ncbi_message().is_some() {
+        anyhow::Error::new(HeaderReadError {
+            query,
+            error: database_error(error, program),
+        })
+    } else {
+        database_error(error, program)
+    }
+}
+
+/// The header of a reported database sequence (`read_header`).
+#[derive(Debug, Clone)]
+pub(crate) enum ReportedHeader {
+    /// A sequence of a database without parsed Seq-ids: its one title (`read_title`).
+    Stored(StoredTitle),
+    /// A sequence with parsed Seq-ids (`report::db_subject`).
+    Parsed(std::sync::Arc<crate::report::db_subject::ParsedSubject>),
+}
+
+/// `read_title` of a program that also reads databases with parsed Seq-ids: the header of the
+/// sequence `ordinal`, read as `read_title` reads it, or with every Seq-id where the record has
+/// parsed ones (`SeqDb::read_header`). A parsed subject that LOSAT does not write as NCBI
+/// (`ParsedSubject::new`) is LOSAT's refusal.
+pub(crate) fn read_header(
+    db: &SeqDb,
+    ordinal: u32,
+    query: usize,
+    program: &str,
+) -> Result<ReportedHeader> {
+    match db.read_header(ordinal) {
+        Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
+            crate::report::db_subject::ParsedSubject::new(set, db.is_version5())
+                .map(|subject| ReportedHeader::Parsed(std::sync::Arc::new(subject)))
+                .map_err(|reason| parsed_refusal(ordinal, &reason, program))
+        }
+        Ok(crate::seqdb::SequenceHeader::Ordinal(deflines)) => {
+            stored_title(Ok(deflines), ordinal, query, program).map(ReportedHeader::Stored)
+        }
+        Err(error) => Err(header_read_error(error, query, program)),
+    }
+}
+
+/// LOSAT's refusal of the database sequence `ordinal` with parsed Seq-ids for `reason` (what the
+/// sequence has, `ParsedSubject`).
+pub(crate) fn parsed_refusal(ordinal: u32, reason: &str, program: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "database sequence {ordinal} {reason}; this is not supported by LOSAT's {program}"
+    )
+}
+
+/// LOSAT's refusal of a database with parsed Seq-ids where a variable changes NCBI's choice of
+/// its Seq-ids (`ApplicationSettings::seq_id_rank_variable`). A database without parsed
+/// Seq-ids (`SeqDb::check_ordinal_ids`) is searched as before.
+pub(crate) fn refuse_seq_id_rank_variable(
+    db: &SeqDb,
+    settings: &ApplicationSettings,
+    program: &str,
+) -> Result<()> {
+    let Some(name) = settings.seq_id_rank_variable else {
+        return Ok(());
+    };
+    if db
+        .check_ordinal_ids()
+        .is_err_and(|error| error.is_parsed_seqids())
+    {
+        bail!(
+            "the environment variable {name}, which changes the Seq-ids that NCBI BLAST+ chooses for a database with parsed Seq-ids, is not supported by LOSAT's {program}"
+        );
+    }
+    Ok(())
+}
+
+/// LOSAT's refusal of two parsed subjects that follow each other in the hit list of query
+/// `query` and whose Seq-align ids match (`report::db_subject::joined_in_reports`): NCBI's XML,
+/// XML2, JSON and outfmt 0 reports show their alignments as one hit, which LOSAT does not.
+/// `subjects` gives the ordinal id and the parsed subject of each HSP list of the hit list, in
+/// its order (`None` for a sequence without parsed Seq-ids).
+pub(crate) fn refuse_joined_hits<'a>(
+    query: usize,
+    subjects: impl IntoIterator<Item = Option<(u32, &'a crate::report::db_subject::ParsedSubject)>>,
+    program: &str,
+) -> Result<()> {
+    let mut previous: Option<(u32, &crate::report::db_subject::ParsedSubject)> = None;
+    for subject in subjects {
+        if let (Some((before, a)), Some((ordinal, b))) = (previous, subject) {
+            if crate::report::db_subject::joined_in_reports(a, b) {
+                bail!(
+                    "database sequences {before} and {ordinal} follow each other in the hits of query {} and have Seq-align ids that NCBI BLAST+ takes for one sequence (its XML and outfmt 0 reports show their alignments as one hit); this is not supported by LOSAT's {program}",
+                    query + 1
+                );
+            }
+        }
+        previous = subject;
+    }
+    Ok(())
+}
+
+/// LOSAT's refusal of a parsed subject whose outfmt 0 titles or XML2 and JSON descriptions
+/// depend on the taxonomy database: with `taxdb.bti` on the search path NCBI names the taxids of
+/// the definition lines (the organism in a title it makes from the source,
+/// `ParsedSubject::title_from_taxonomy`; the scientific name of each `HitDescr`), which LOSAT
+/// does not do yet for a sequence with parsed Seq-ids. A `TaxonomyRefusal`: a run that holds
+/// its XML2 or JSON document drops it (BLASTX, `XmlRefusal::of_taxonomy`).
+pub(crate) fn refuse_parsed_taxonomy(ordinal: u32, what: &str, program: &str) -> anyhow::Error {
+    anyhow::Error::new(TaxonomyRefusal(format!(
+        "database sequence {ordinal} has {what} the taxonomy database (taxdb.bti is on the search path); this is not supported by LOSAT's {program} for a database with parsed Seq-ids"
+    )))
+}
+
+/// LOSAT's refusals of the outfmt 0 description and alignment heading of the subject with
+/// parsed Seq-ids `subject` (the database sequence `ordinal`; `protein` for a protein database)
+/// that it does not write as NCBI: a title of punctuation that NCBI's `x_CleanAndCompress`
+/// reads past the end of (NCBI BLAST+ 2.17.0 crashes), a description id longer than NCBI's
+/// cut of the line leaves room for (NCBI then writes the whole title after it), and a title
+/// that NCBI makes from the sequence's taxids and the taxonomy database (`taxdb_found`,
+/// `ParsedSubject::title_from_taxonomy`).
+pub(crate) fn check_shown_parsed_subject(
+    subject: &crate::report::db_subject::ParsedSubject,
+    protein: bool,
+    taxdb_found: bool,
+    ordinal: u32,
+    program: &str,
+) -> Result<()> {
+    let (start, title) = subject.description(protein);
+    let heading_reads_past_end = subject
+        .bioseq_title(protein, false)
+        .is_ok_and(|defline| defline.reads_past_end);
+    if title.reads_past_end || heading_reads_past_end {
+        return Err(parsed_refusal(
+            ordinal,
+            "has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0)",
+            program,
+        ));
+    }
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:913-916
+    // ```c++
+    //         line_component = (line_component.empty() ? "" : "  ") + sdl->defline;
+    //         string actual_line_component;
+    //         if(line_component.size()+line_length > m_LineLen){
+    //             actual_line_component = line_component.substr(0, m_LineLen -
+    //                                                           line_length - 3);
+    // ```
+    // The unsigned length wraps for an id longer than 65 bytes.
+    if start.len() > 65 {
+        return Err(parsed_refusal(
+            ordinal,
+            "has an outfmt 0 description id longer than 65 bytes (NCBI BLAST+ writes the whole title after it)",
+            program,
+        ));
+    }
+    if taxdb_found && subject.title_from_taxonomy() {
+        return Err(refuse_parsed_taxonomy(
+            ordinal,
+            "an outfmt 0 title that NCBI BLAST+ makes from its taxids and",
+            program,
+        ));
+    }
+    Ok(())
+}
+
 /// LOSAT's rejection of the reported database sequence `ordinal` (one with rows in the
 /// final hit lists) whose stored title held a byte outside ' ' ..= '~' (`replaced_bytes`,
 /// `StoredTitle`): NCBI writes an error message for the byte each time its formatter

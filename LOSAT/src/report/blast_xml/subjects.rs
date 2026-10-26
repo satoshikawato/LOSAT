@@ -6,6 +6,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use crate::blastinput::fasta_reader::FastaRecord;
+use crate::report::db_subject::{HitDescription, ParsedSubject};
 
 use super::names::{self, Refusal};
 use super::records::HitTaxonomy;
@@ -34,6 +35,9 @@ pub enum XmlSubjects<'a> {
         /// (`HitTaxonomy`); empty where nothing was asked: every one is `Unnamed`.
         taxonomy: &'a [HitTaxonomy],
         length: &'a dyn Fn(usize) -> usize,
+        /// The subjects with parsed Seq-ids by rank (empty without them), whose names come from
+        /// their definition lines (`SubjectNames::of_parsed`).
+        parsed: &'a [Option<Arc<ParsedSubject>>],
     },
 }
 
@@ -74,6 +78,9 @@ pub struct SubjectNames {
     pub taxid: i32,
     /// What the taxonomy database said about `taxid` (XML2 and JSON only).
     pub taxonomy: HitTaxonomy,
+    /// The XML2 and JSON `HitDescr` list of a subject with parsed Seq-ids, one per definition
+    /// line (empty for the others, which have one made of `id`, `title` and `accession`).
+    pub descriptions: Vec<HitDescription>,
 }
 
 impl SubjectNames {
@@ -87,6 +94,7 @@ impl SubjectNames {
             accession: id.to_vec(),
             taxid: 0,
             taxonomy: HitTaxonomy::Unnamed,
+            descriptions: Vec::new(),
         })
     }
 
@@ -104,6 +112,25 @@ impl SubjectNames {
             accession: ordinal.to_string().into_bytes(),
             taxid,
             taxonomy,
+            descriptions: Vec::new(),
+        })
+    }
+
+    /// The names of a database sequence with parsed Seq-ids (`ParsedSubject::xml_hit` and
+    /// `hit_descriptions`): `Hit_id`, `Hit_def` and `Hit_accession` of outfmt 5, and the
+    /// `HitDescr` of each definition line of XML2 and JSON (without scientific names: LOSAT
+    /// refuses such a subject with a taxid where the taxonomy database is found).
+    pub fn of_parsed(subject: &ParsedSubject) -> Result<Self, Refusal> {
+        let (id, title, accession) = subject.xml_hit();
+        names::check_text(&id)?;
+        names::check_text(&title)?;
+        Ok(SubjectNames {
+            id,
+            title,
+            accession,
+            taxid: 0,
+            taxonomy: HitTaxonomy::Unnamed,
+            descriptions: subject.hit_descriptions(),
         })
     }
 }
@@ -125,8 +152,13 @@ impl XmlSubjects<'_> {
                 titles,
                 taxids,
                 taxonomy,
+                parsed,
                 ..
             } => {
+                if let Some(subject) = parsed.get(s_idx).and_then(Option::as_deref) {
+                    return SubjectNames::of_parsed(subject)
+                        .map_err(|refusal: Refusal| refusal.error(program, "a database title"));
+                }
                 let ordinal = *ordinals
                     .get(s_idx)
                     .context("HSP of an unknown database sequence")?;

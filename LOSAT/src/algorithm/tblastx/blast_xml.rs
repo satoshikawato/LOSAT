@@ -283,6 +283,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             taxids: &taxa.taxids,
             taxonomy: &taxa.taxonomy,
             length: &subject_length,
+            parsed: &[],
         },
         None => XmlSubjects::Records {
             records: run.subjects,

@@ -2873,11 +2873,46 @@ fn x_tabular_subject_ids_cached<'m>(
     check_tabular_subject_ids(hit_lists, subjects, meta.ids()).map(|()| meta.shown())
 }
 
+/// The tabular subject id fields of one subject: `sseqid`, `sacc` and `saccver`. They are the
+/// same id for a `-subject` record and for a database sequence without parsed Seq-ids; a
+/// database sequence with parsed Seq-ids has its own three (`ParsedSubject::tabular_ids`).
+#[derive(Clone, Copy)]
+struct SubjectIdFields<'a> {
+    seq_id: &'a [u8],
+    accession: &'a [u8],
+    accession_version: &'a [u8],
+}
+
+impl<'a> SubjectIdFields<'a> {
+    /// One id for the three fields.
+    fn same(id: &'a [u8]) -> Self {
+        SubjectIdFields {
+            seq_id: id,
+            accession: id,
+            accession_version: id,
+        }
+    }
+
+    /// The fields of subject `s_idx`: its id among `ids` (empty for none), and its `sacc` and
+    /// `saccver` among `accessions` where it has them.
+    fn of(ids: &'a [Arc<[u8]>], accessions: &'a [Option<[Arc<[u8]>; 2]>], s_idx: usize) -> Self {
+        let id = ids.get(s_idx).map_or(&b""[..], |id| id.as_ref());
+        match accessions.get(s_idx).and_then(Option::as_ref) {
+            Some([accession, version]) => SubjectIdFields {
+                seq_id: id,
+                accession,
+                accession_version: version,
+            },
+            None => SubjectIdFields::same(id),
+        }
+    }
+}
+
 fn blastp_tabular_field_text(
     field: BlastpTabularField,
     hit: &PairwiseHit,
     query_id: &[u8],
-    subject_id: &[u8],
+    subject_id: SubjectIdFields<'_>,
     subject_stitle: &[u8],
 ) -> Vec<u8> {
     let h = &hit.hit;
@@ -2892,9 +2927,11 @@ fn blastp_tabular_field_text(
         | BlastpTabularField::QueryAccession
         | BlastpTabularField::QueryAccessionVersion => return query_id.to_vec(),
         BlastpTabularField::QueryLength => h.query_length.to_string(),
-        BlastpTabularField::SubjectSeqId
-        | BlastpTabularField::SubjectAccession
-        | BlastpTabularField::SubjectAccessionVersion => return subject_id.to_vec(),
+        BlastpTabularField::SubjectSeqId => return subject_id.seq_id.to_vec(),
+        BlastpTabularField::SubjectAccession => return subject_id.accession.to_vec(),
+        BlastpTabularField::SubjectAccessionVersion => {
+            return subject_id.accession_version.to_vec()
+        }
         BlastpTabularField::SubjectLength => hit.subject_length.unwrap_or_default().to_string(),
         BlastpTabularField::QueryStart => h.q_start.to_string(),
         BlastpTabularField::QueryEnd => h.q_end.to_string(),
@@ -2999,7 +3036,7 @@ fn write_blastp_hsp_tabular_field<W: Write>(
     field: BlastpTabularField,
     hsp: &BlastpHsp,
     query_id: &[u8],
-    subject_id: &[u8],
+    subject_id: SubjectIdFields<'_>,
     subject_stitle: &[u8],
     subject_length: usize,
 ) -> std::io::Result<()> {
@@ -3008,9 +3045,11 @@ fn write_blastp_hsp_tabular_field<W: Write>(
         | BlastpTabularField::QueryAccession
         | BlastpTabularField::QueryAccessionVersion => writer.write_all(query_id),
         BlastpTabularField::QueryLength => write!(writer, "{}", hsp.query_length),
-        BlastpTabularField::SubjectSeqId
-        | BlastpTabularField::SubjectAccession
-        | BlastpTabularField::SubjectAccessionVersion => writer.write_all(subject_id),
+        BlastpTabularField::SubjectSeqId => writer.write_all(subject_id.seq_id),
+        BlastpTabularField::SubjectAccession => writer.write_all(subject_id.accession),
+        BlastpTabularField::SubjectAccessionVersion => {
+            writer.write_all(subject_id.accession_version)
+        }
         BlastpTabularField::SubjectLength => write!(writer, "{subject_length}"),
         BlastpTabularField::QueryStart => write!(writer, "{}", hsp.q_start),
         BlastpTabularField::QueryEnd => write!(writer, "{}", hsp.q_end),
@@ -3087,6 +3126,7 @@ fn write_blastp_tabular_output(
     query_ids: &[Arc<[u8]>],
     query_titles: &[Arc<[u8]>],
     subject_ids: &[Arc<[u8]>],
+    subject_accessions: &[Option<[Arc<[u8]>; 2]>],
     subject_stitles: &[Arc<[u8]>],
     query_batch_skipped: &[bool],
     hits_found: Option<&[usize]>,
@@ -3138,9 +3178,8 @@ fn write_blastp_tabular_output(
             let query_id = query_ids
                 .get(hit.hit.q_idx as usize)
                 .map_or(&b""[..], |id| id.as_ref());
-            let subject_id = subject_ids
-                .get(hit.hit.s_idx as usize)
-                .map_or(&b""[..], |id| id.as_ref());
+            let subject_id =
+                SubjectIdFields::of(subject_ids, subject_accessions, hit.hit.s_idx as usize);
             let frames_set = blastp_tabular_sets_frames(fields, hit.hit.num_ident);
             for (index, field) in fields.iter().enumerate() {
                 if index > 0 {
@@ -3220,6 +3259,7 @@ fn write_blastp_tabular_hit_lists(
     query_ids: &[Arc<[u8]>],
     query_titles: &[Arc<[u8]>],
     subject_ids: &[Arc<[u8]>],
+    subject_accessions: &[Option<[Arc<[u8]>; 2]>],
     subject_stitles: &[Arc<[u8]>],
     subjects: &[EncodedProtein],
     subject_placements: &seq_range::Placements,
@@ -3286,14 +3326,14 @@ fn write_blastp_tabular_hit_lists(
                 let query_id = query_ids
                     .get(hsp.q_idx as usize)
                     .map_or(&b""[..], |id| id.as_ref());
-                let subject_id = subject_ids
-                    .get(hsp.s_idx as usize)
-                    .map_or(&b""[..], |id| id.as_ref());
+                let subject_id =
+                    SubjectIdFields::of(subject_ids, subject_accessions, hsp.s_idx as usize);
                 if use_default_fields {
                     crate::report::outfmt6::write_hit_fields_bytes(
                         writer,
                         query_id,
-                        subject_id,
+                        // The default fields' subject is `saccver`.
+                        subject_id.accession_version,
                         hsp.identity,
                         hsp.num_ident,
                         hsp.length,
@@ -3415,7 +3455,7 @@ fn write_blastp_hsp_tabular_row(
     fields: &[BlastpTabularField],
     hsp: &BlastpHsp,
     query_id: &[u8],
-    subject_id: &[u8],
+    subject_id: SubjectIdFields<'_>,
     subject_stitle: &[u8],
     subjects: &[EncodedProtein],
     subject_placements: &seq_range::Placements,
@@ -5620,7 +5660,11 @@ fn search_cli(
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
     let database = match resolved.db.as_deref() {
-        Some(name) => Some(database::BlastpDatabase::open(name, &settings)?),
+        Some(name) => Some(database::BlastpDatabase::open(
+            name,
+            &settings,
+            args.app == BlastpApp::Blastp,
+        )?),
         None => None,
     };
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
@@ -7274,6 +7318,7 @@ fn write_reports_without_queries(
                     &[],
                     &mut writer,
                     &config,
+                    &[],
                     &[],
                     &[],
                     &[],
@@ -11544,16 +11589,47 @@ fn run_resolved_in_pool(
     // format is written.
     if let Some(titles) = listed_titles.as_ref() {
         titles.check_reported_titles(&hit_lists)?;
+        // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
+        // (the formats that read a subject's Bioseq need its sequence found by its Seq-align
+        // id; outfmt 0, 5 and 13 to 16 join the hits of matching Seq-align ids; 13 to 16 name
+        // taxids with the taxonomy database).
+        if let Some(database) = database {
+            titles.check_parsed_reports(
+                database,
+                &hit_lists,
+                format_plans.iter().any(|(outfmt, _, _)| {
+                    !matches!(outfmt, BlastpReport::Seqalign(_) | BlastpReport::Archive)
+                }),
+                format_plans.iter().any(|(outfmt, _, _)| {
+                    matches!(
+                        outfmt,
+                        BlastpReport::Text(OutputFormat::Pairwise)
+                            | BlastpReport::Xml
+                            | BlastpReport::Xml2(_)
+                    )
+                }),
+                format_plans
+                    .iter()
+                    .any(|(outfmt, _, _)| matches!(outfmt, BlastpReport::Xml2(_))),
+            )?;
+        }
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPSUBJMETA): the block
     // search's IDs made once for all blocks, with the same check (`x_tabular_subject_ids_cached`).
+    // `sacc` and `saccver` of the database sequences with parsed Seq-ids, by rank (empty
+    // without them: the others' are their `sseqid`).
+    let mut subject_accessions: Vec<Option<[Arc<[u8]>; 2]>> = Vec::new();
     let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> = if format_plans
         .iter()
         .any(|(outfmt, _, _)| outfmt.is_tabular())
     {
         match (listed_titles.as_ref(), x_meta) {
-            (Some(titles), _) => titles.tabular_subject_ids(&hit_lists)?.into(),
+            (Some(titles), _) => {
+                let (ids, accessions) = titles.tabular_subject_ids(&hit_lists)?;
+                subject_accessions = accessions;
+                ids.into()
+            }
             (None, Some(meta)) => {
                 x_tabular_subject_ids_cached(&hit_lists, subject_records, meta)?.into()
             }
@@ -11574,6 +11650,9 @@ fn run_resolved_in_pool(
         None => Vec::new().into(),
     };
     let pairwise_database = database.map(database::BlastpDatabase::pairwise_database);
+    // The reported database sequences with parsed Seq-ids by rank (empty without them).
+    let listed_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] =
+        listed_titles.as_ref().map_or(&[], |titles| &titles.parsed);
     // The warnings are written once, with the first format (`QueryWarnings`).
     let mut warning_lines: Option<&[Vec<u8>]> = Some(&query_warning_lines);
     // Each requested format prints the same final result without searching again.
@@ -11622,6 +11701,7 @@ fn run_resolved_in_pool(
                         crate::report::record::SubjectNames::Database {
                             ordinals: &listed.ordinals,
                             title: &database.definition,
+                            parsed: listed_parsed,
                         }
                     }
                     _ => crate::report::record::SubjectNames::Records(subject_records),
@@ -11663,6 +11743,7 @@ fn run_resolved_in_pool(
                         crate::report::record::SubjectNames::Database {
                             ordinals: &listed.ordinals,
                             title: &database.definition,
+                            parsed: listed_parsed,
                         }
                     }
                     _ => crate::report::record::SubjectNames::Records(subject_records),
@@ -11865,6 +11946,7 @@ fn run_resolved_in_pool(
                         taxids: &xml_taxids,
                         taxonomy: &xml_taxonomy,
                         length: &database_length,
+                        parsed: listed_parsed,
                     },
                     _ => crate::report::blast_xml::XmlSubjects::Records {
                         protein: true,
@@ -12099,7 +12181,10 @@ fn run_resolved_in_pool(
                     check_v1_shown_subject_titles(shown.iter().copied(), subject_records)?;
                 }
                 match listed_titles.as_ref() {
-                    Some(titles) => titles.check_shown_titles(&shown)?,
+                    Some(titles) => titles.check_shown_titles(
+                        database.expect("listed titles are a database's"),
+                        &shown,
+                    )?,
                     None => check_shown_subject_titles(shown.iter().copied(), subject_records)?,
                 }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:293-294
@@ -12125,6 +12210,7 @@ fn run_resolved_in_pool(
                     &pairwise_queries,
                     &query_titles,
                     &subject_titles,
+                    listed_parsed,
                     &pairwise_report,
                     pairwise_database.as_ref(),
                     probe.as_mut(),
@@ -12164,6 +12250,7 @@ fn run_resolved_in_pool(
                         &query_ids,
                         &query_titles,
                         &subject_ids,
+                        &subject_accessions,
                         &subject_stitles,
                         &subjects,
                         ranges.subject_placements,
@@ -12197,6 +12284,7 @@ fn run_resolved_in_pool(
                         &query_ids,
                         &query_titles,
                         &subject_ids,
+                        &subject_accessions,
                         &subject_stitles,
                         &query_batch_skipped,
                         psiblast_hits_found.as_deref(),
@@ -13472,7 +13560,7 @@ mod tests {
                 BlastpTabularField::QueryAccessionVersion,
                 &pairwise_hit,
                 b"query1",
-                b"subject1",
+                SubjectIdFields::same(b"subject1"),
                 blastp_subject_stitle(&[], 0),
             ),
             b"query1"
@@ -13483,7 +13571,7 @@ mod tests {
                 BlastpTabularField::SubjectTitle,
                 &pairwise_hit,
                 b"query1",
-                b"subject1",
+                SubjectIdFields::same(b"subject1"),
                 blastp_subject_stitle(&[], 0),
             ),
             b"N/A"
@@ -13493,7 +13581,7 @@ mod tests {
                 BlastpTabularField::Btop,
                 &pairwise_hit,
                 b"query1",
-                b"subject1",
+                SubjectIdFields::same(b"subject1"),
                 blastp_subject_stitle(&[], 0),
             ),
             b"2-D1"
@@ -13532,7 +13620,7 @@ mod tests {
                 BlastpTabularField::SubjectTitle,
                 &pairwise_hit,
                 b"query1",
-                b"sp|P1|A_HUMAN",
+                SubjectIdFields::same(b"sp|P1|A_HUMAN"),
                 blastp_subject_stitle(&stitles, 0),
             ),
             b"sp|P1|A_HUMAN first protein"
@@ -13572,14 +13660,20 @@ mod tests {
                 field,
                 &hsp,
                 b"query1",
-                b"subject1",
+                SubjectIdFields::same(b"subject1"),
                 b"N/A",
                 30,
             )
             .expect("tabular field writes");
             assert_eq!(
                 rendered,
-                blastp_tabular_field_text(field, &pairwise_hit, b"query1", b"subject1", b"N/A")
+                blastp_tabular_field_text(
+                    field,
+                    &pairwise_hit,
+                    b"query1",
+                    SubjectIdFields::same(b"subject1"),
+                    b"N/A"
+                )
             );
         }
     }

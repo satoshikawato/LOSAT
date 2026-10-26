@@ -442,6 +442,7 @@ pub fn search_preliminary(
             &mut DiagnosticOnly,
             pool,
             None,
+            &|| {},
         )
     })
 }
@@ -511,6 +512,10 @@ pub(crate) mod x_subject_flow;
 #[path = "x_bx_mem.rs"]
 pub(crate) mod x_bx_mem;
 
+/// The preliminary search of `records`; `x_tables_done` is called once the last query batch's
+/// lookup tables are dropped, before its `batch_end` (`LOSAT_X_BXCAPTABLES`, `x_bx_mem.rs`), and
+/// not at all where the last batch builds none.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn search_core(
     records: &[FastaRecord],
     subjects: Subjects<'_>,
@@ -519,6 +524,7 @@ pub(crate) fn search_core(
     sink: &mut impl PreliminarySink,
     pool: &crate::utils::threading::SearchPool<'_>,
     prep: Option<UnitPrep>,
+    x_tables_done: &dyn Fn(),
 ) -> Result<Vec<BatchStage>> {
     ensure!(
         !subjects.is_empty() || subjects.is_unreadable(),
@@ -1253,6 +1259,11 @@ pub(crate) fn search_core(
         //             m_InternalData->m_Queries = query_data->GetSequenceBlk();
         //         }
         // ```
+        // No NCBI counterpart (scheduling only): the chunk loops above have dropped every lookup
+        // table of the batch (each chunk's at the end of its iteration or of `x_compute_chunk`).
+        if range.end == records.len() {
+            x_tables_done();
+        }
         let x_t = super::x_timing::lap();
         sink.batch_end(&full, &full_params)?;
         super::x_timing::batch(XBatch::BatchEnd, x_t);

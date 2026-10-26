@@ -1101,19 +1101,36 @@ fn run_inner(
                             Some(layout) => prepare_unit(queries, layout, &options, search_subjects),
                             None => prepare_lone_unit(queries, &options),
                         },
-                        &|unit: &XUnit, alone: bool| {
+                        &|unit: &XUnit, alone: bool, x_free: &dyn Fn()| {
                             let queries = unit.queries();
                             let large = x_cap.is_some() || alone || x_large(queries);
                             crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", !large);
                             if large {
-                                let _x_live = x_cap
-                                    .map(|_| super::search::x_bx_mem::XCappedBatch::enter(pool));
-                                super::runtime::x_search_unit_in_pool(
+                                let x_live = std::cell::Cell::new(
+                                    x_cap
+                                        .map(|_| super::search::x_bx_mem::XCappedBatch::enter(pool)),
+                                );
+                                // Dispatch point (LOSAT_X_BXCAPTABLES, in the strict set): a
+                                // capped batch leaves the K once its lookup tables are dropped,
+                                // before its traceback (blastx/x_bx_mem.rs).
+                                let x_done = || {
+                                    drop(x_live.take());
+                                    x_free();
+                                };
+                                let x_tables_done: &dyn Fn() = if x_cap.is_some()
+                                    && super::search::x_bx_mem::cap_counts_tables()
+                                {
+                                    &x_done
+                                } else {
+                                    &|| {}
+                                };
+                                super::runtime::x_search_unit_in_pool_tables(
                                     queries,
                                     search_subjects,
                                     &options,
                                     pool,
                                     unit.take_prep(),
+                                    x_tables_done,
                                 )
                             } else {
                                 super::runtime::x_search_unit_serial(
@@ -1898,7 +1915,7 @@ fn x_flow(
     split: &dyn Fn(&[FastaRecord]) -> Vec<XUnit>,
     prepare: &(dyn Fn(&[FastaRecord], Option<&std::sync::Arc<ReaderBatchShape>>) -> Result<UnitPrep>
           + Sync),
-    search: &(dyn Fn(&XUnit, bool) -> Result<Vec<BatchResults>> + Sync),
+    search: &(dyn Fn(&XUnit, bool, &dyn Fn()) -> Result<Vec<BatchResults>> + Sync),
     write_unit: &mut dyn FnMut(
         &[FastaRecord],
         usize,
@@ -1936,7 +1953,7 @@ fn x_flow(
         held: std::sync::Mutex<XHeld>,
         lookahead: usize,
         max_live: usize,
-        search: &'f (dyn Fn(&XUnit, bool) -> Result<Vec<BatchResults>> + Sync),
+        search: &'f (dyn Fn(&XUnit, bool, &dyn Fn()) -> Result<Vec<BatchResults>> + Sync),
     }
     impl XLaunch<'_> {
         // The held units; a panic elsewhere cannot leave them unusable (nothing panics while
@@ -1981,10 +1998,11 @@ fn x_flow(
             }
         }
 
-        // Spawns the search of unit `index`, spawned by `release`. The search sends its result
-        // (or panic) once and then spawns again, so a place freed by a search is filled without
-        // waiting for the writing thread. A unit whose phase 1 ends after the writing ended is
-        // not searched.
+        // Spawns the search of unit `index`, spawned by `release`. The search gives its place
+        // back once: when it calls the function it is handed (a capped batch whose lookup tables
+        // are dropped, LOSAT_X_BXCAPTABLES), or else when it ends; then it spawns again, so a place
+        // freed by a search is filled without waiting for the writing thread. It sends its result
+        // (or panic) once. A unit whose phase 1 ends after the writing ended is not searched.
         fn spawn_search<'s>(
             &'s self,
             scope: &rayon::Scope<'s>,
@@ -2002,10 +2020,19 @@ fn x_flow(
             }
             let sender = sender.clone();
             scope.spawn(move |scope| {
+                let freed = std::cell::Cell::new(false);
+                let free = || {
+                    if !freed.replace(true) {
+                        self.held().live -= 1;
+                        self.release(scope, &sender);
+                    }
+                };
                 let searched = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    (self.search)(&unit, alone)
+                    (self.search)(&unit, alone, &free)
                 }));
-                self.held().live -= 1;
+                if !freed.replace(true) {
+                    self.held().live -= 1;
+                }
                 // The receiver is gone only when the run already ended at an error.
                 let _ = sender.send((index, searched));
                 self.release(scope, &sender);

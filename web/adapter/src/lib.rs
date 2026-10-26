@@ -215,12 +215,17 @@ pub unsafe extern "C" fn losat_web2_run(
     guarded(|| {
         let argv = words(text(argv_ptr, argv_len, "argv")?);
         let program = run::Program::parse(argv.first().copied().unwrap_or(""))?;
-        store::with_inputs(
+        let result = store::with_inputs(
             program,
             query_handle,
             subject_handle,
             |queries, subjects| run::run(&argv, queries, subjects),
-        )??;
+        );
+        // The threaded engine keeps no freed blocks from one search to the next (LOSAT's
+        // utils::wasm_alloc_trim).
+        #[cfg(all(target_arch = "wasm32", feature = "threads"))]
+        LOSAT::utils::wasm_alloc_trim();
+        result??;
         Ok(0)
     })
 }

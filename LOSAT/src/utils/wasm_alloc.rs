@@ -418,6 +418,52 @@ unsafe impl GlobalAlloc for ThreadCacheAlloc {
     }
 }
 
+/// Gives back to the system allocator every block that the caches no thread is using and the
+/// depot hold. A thread that allocates meanwhile is not disturbed: a cache in use is skipped. A
+/// reactor calls it after each search, so that a search does not keep the blocks of the one before
+/// (LOSAT Web, the second megablast search of a page: linear memory 119 MiB, 154 without it).
+pub(crate) fn trim() {
+    // SAFETY (both loops): every listed block is a free block that the system allocator
+    // allocated with its class's layout, and each list ends at null.
+    let release = |mut block: *mut u8, class: usize, align: usize| {
+        while !block.is_null() {
+            let next = unsafe { *(block as *mut *mut u8) };
+            unsafe { System.dealloc(block, class_layout(class, align)) };
+            block = next;
+        }
+    };
+    for cache in &CACHES {
+        if cache.locked.swap(true, Ordering::Acquire) {
+            continue;
+        }
+        // SAFETY: this thread holds the cache's lock.
+        let lists = unsafe { &mut *cache.lists.get() };
+        for align in 0..2 {
+            for class in 0..CLASSES {
+                release(lists.head[align][class], class, align);
+                lists.head[align][class] = ptr::null_mut();
+                lists.count[align][class] = 0;
+            }
+        }
+        lists.bytes = 0;
+        cache.locked.store(false, Ordering::Release);
+    }
+    for (align, shelves) in DEPOT.iter().enumerate() {
+        for (class, shelf) in shelves.iter().enumerate() {
+            shelf.lock();
+            let mut list = shelf.top.swap(ptr::null_mut(), Ordering::Relaxed);
+            shelf.locked.store(false, Ordering::Release);
+            while !list.is_null() {
+                // SAFETY: a list from the shelf holds the next list in its first block's second word.
+                let next = unsafe { *(list as *mut *mut u8).add(1) };
+                release(list, class, align);
+                DEPOT_HELD.fetch_sub(CAPS[class] as usize * SIZES[class], Ordering::Relaxed);
+                list = next;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -694,5 +740,24 @@ mod tests {
             });
         });
         check_caches();
+    }
+
+    // After trim, no cache and no shelf holds a block.
+    #[test]
+    fn trim_gives_every_block_back() {
+        let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        let blocks: Vec<Block> = (0..2000)
+            .map(|i| new_block(1 + i * 37 % 9000, [8, 16][i % 2], 3, false))
+            .collect();
+        blocks.into_iter().for_each(release);
+        trim();
+        check_caches();
+        assert_eq!(DEPOT_HELD.load(Ordering::Relaxed), 0);
+        for cache in &CACHES {
+            assert!(!cache.locked.swap(true, Ordering::Acquire));
+            // SAFETY: the lock is held.
+            assert_eq!(unsafe { &*cache.lists.get() }.bytes, 0);
+            cache.locked.store(false, Ordering::Release);
+        }
     }
 }

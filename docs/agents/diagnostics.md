@@ -6176,8 +6176,9 @@ Scheduling (each value computed by one thread with the original function; order 
   the price is the `=0` form for many small batches: 800 fly cDNAs against 8 / 50 / 200 yeast proteins 12.8-13.2 ->
   13.8-14.1, against the whole proteome `-subject` / `-db` 21.1 -> 22.0 / 13.5 -> 13.9 (NCBI `RssAnon` 17 and more).
   Time at one thread (one node-0 core, TIMED under a node load of 30-95; default against `=0`, medians of paired
-  rounds): wall x0.971-1.027 (eight cases, every range spanning 1.0 but the 200-protein case x0.971 and the
-  proteome `-db` x1.008), cycles:u x1.001-1.006, instructions:u x0.999-1.000. 16 threads (node 1): AP027131 x 543
+  rounds): wall x0.971-1.027 over eight cases (every round above 1.0 only for the proteome `-subject` x1.002 and
+  `-db` x1.008, 3 rounds each; every round below for 200 proteins x0.971), cycles:u x1.001-1.006, instructions:u
+  x0.999-1.000. 16 threads (node 1): AP027131 x 543
   proteins x1.004, 800 cDNAs x proteome `-subject` x1.000, peaks equal (65-66, 76-78 MiB).
   Forms not taken (line A DECISIONS 53, local): emptying the pool when the last batch leaves its chunk loop raised
   800 cDNAs x 50 proteins at one thread to 15.0-16.7 MiB (after the first free of a mapped table glibc's dynamic mmap

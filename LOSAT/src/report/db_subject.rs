@@ -10,6 +10,13 @@
 //!
 //! A database without parsed Seq-ids keeps its own path (the title and `gnl|BL_ORD_ID|n`,
 //! `algorithm::common::database::read_title`); `SeqDb::read_header` tells the two apart.
+//!
+//! LOSAT writes the names of the sequence it searched. NCBI's formatters look the Seq-align id
+//! up again, and where another sequence of the database has an id that the lookup also matches
+//! (the same accession in two sequences, PLAN §9.6 of line DBID) they can write that sequence's
+//! names; the test databases leave such records out (`tests/db_search/ids/make_ids.py`), and
+//! the check on NCBI's distributed databases is ID4's. The two-letter PDB chains of one
+//! molecule (`A`, `AA`, `B`) are not such a case (probe of the ID2a review).
 
 use crate::seqid::defline_set::{
     alignment_line_id, compare, description_id, seq_id_list, tabular_id, Sic, TabularId,
@@ -18,6 +25,7 @@ use crate::seqid::model::{ObjectId, PatentNumber};
 use crate::seqid::rank::{find_best, text_score};
 use crate::seqid::{label, BlastDefline, DeflineSet, ParsedSeqId};
 
+use super::blast_xml::HitTaxonomy;
 use super::defline::{
     bioseq_title_from_source, generate_bioseq_defline, BioseqIds, Defline, UnknownEncoding,
 };
@@ -44,6 +52,9 @@ pub struct HitDescription {
     pub title: Option<Vec<u8>>,
     /// Not written when 0.
     pub taxid: i32,
+    /// What the taxonomy database said about `taxid` (`Unnamed` where nothing was asked); a
+    /// `Named` scientific name is written after the taxid.
+    pub taxonomy: HitTaxonomy,
 }
 
 impl ParsedSubject {
@@ -61,11 +72,16 @@ impl ParsedSubject {
     // DBID, DECISIONS 8 (3); `LOSAT/tests/seqid/fasta/variants.fa`). In a version 5 database
     // (LMDB) a local integer id (`lcl|123`) is not found either (the same failures; probe of
     // ID2a, `blastdb-ids-20261021/R/probe`), where version 4 (ISAM) finds it. LOSAT refuses
-    // these subjects instead of repeating a defect of NCBI's.
+    // these subjects instead of repeating a defect of NCBI's. So it does where the definition
+    // line of the Bioseq is found by the content of a local id alone (`lcl|777` before the
+    // definition line of the Seq-align id `gi|777`, `DeflineSet::bioseq_defline`): NCBI 2.17.0
+    // finds no Bioseq then, in version 4 and 5 (outfmt 6 stops with a CCoreException, XML2 writes
+    // the Seq-align id alone; probe of the ID2a review).
     /// The subject of the definition lines `set` of a database of format version 5
     /// (`version5`) or 4. `Err` names what LOSAT does not write as NCBI: a stored title or
     /// Seq-id with a byte outside ' ' ..= '~' (NCBI writes an error message each time it reads
-    /// the definition line) and a set without a Seq-id.
+    /// the definition line) and a definition line without a Seq-id (NCBI's formatters take the
+    /// best of none; makeblastdb writes none such).
     pub fn new(set: DeflineSet, version5: bool) -> Result<Self, String> {
         if set
             .deflines
@@ -74,13 +90,19 @@ impl ParsedSubject {
         {
             return Err("has a stored title or Seq-id with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line)".into());
         }
+        if set.deflines.iter().any(|defline| defline.ids.is_empty()) {
+            return Err("has a definition line without a Seq-id".into());
+        }
         let Some(alignment_id) = set.alignment_id().cloned() else {
             return Err("has no Seq-id".into());
         };
-        let unfetchable = unfetchable(&alignment_id, version5);
         let Some(target) = set.bioseq_defline(&alignment_id) else {
             return Err("has no definition line that holds its Seq-align id".into());
         };
+        let unfetchable = unfetchable(&alignment_id, version5)
+            || set
+                .display_defline(&alignment_id)
+                .is_some_and(|shown| shown.index != target);
         Ok(Self {
             set,
             alignment_id,
@@ -133,26 +155,86 @@ impl ParsedSubject {
         generate_bioseq_defline(title, protein, leave_prefix_suffix, &self.bioseq_ids())
     }
 
+    /// Whether the subject Bioseq has a source: some definition line has a positive taxid
+    /// (`CSeqDBVol::x_GetTaxonomy` makes a source of each, seqdbvol.cpp:1136).
+    fn has_source(&self) -> bool {
+        !self.volume_taxids().is_empty()
+    }
+
+    /// The positive taxids of the definition lines in the order in which the volume looks them
+    /// up when it fetches the subject Bioseq (`CSeqDBVol::x_GetTaxonomy`; `x_GetTaxDefline`
+    /// puts the target first), each once.
+    pub fn volume_taxids(&self) -> Vec<i32> {
+        let mut taxids = Vec::new();
+        let order = std::iter::once(self.target()).chain(
+            (0..self.set.deflines.len())
+                .filter(|&i| i != self.target)
+                .map(|i| &self.set.deflines[i]),
+        );
+        for defline in order {
+            match defline.taxid {
+                Some(taxid) if taxid > 0 && !taxids.contains(&taxid) => taxids.push(taxid),
+                _ => {}
+            }
+        }
+        taxids
+    }
+
     /// Whether NCBI makes the subject Bioseq's title from its source (`bioseq_title_from_source`)
     /// and that source has a taxid: the title then depends on the taxonomy database.
     pub fn title_from_taxonomy(&self) -> bool {
         let title = self.target().title.as_deref().unwrap_or_default();
-        bioseq_title_from_source(title, &self.bioseq_ids())
-            && self
-                .set
-                .deflines
-                .iter()
-                .any(|defline| defline.taxid.is_some_and(|taxid| taxid != 0))
+        bioseq_title_from_source(title, &self.bioseq_ids()) && self.has_source()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3964-3972
+    // ```c++
+    //     // adjust protein partial/organelle/taxname suffix, if necessary
+    //     if ( m_IsAA && (! m_MainTitle.empty()) && (! (flags & fLeavePrefixSuffix)) ) {
+    //         if (m_Idx) {
+    //             x_AdjustProteinTitleSuffixIdx (bsh);
+    //         } else {
+    //             x_AdjustProteinTitleSuffix (bsh);
+    //         }
+    //     }
+    // ```
+    // `x_AdjustProteinTitleSuffix` (:3263-3330) returns at once for a Bioseq without a source.
+    // Otherwise a title that ends in ` [<taxname>]` (the source's name from the taxonomy
+    // database, empty without it) loses that suffix, a `(organelle)` and a `, partial` before
+    // it, and gets the name back as the taxonomy database writes it: `alpha, partial [Homo
+    // sapiens]` is written `alpha [Homo sapiens]` (probe of the ID2a review).
+    /// Whether NCBI's `GenerateDefline` without `fLeavePrefixSuffix` may rewrite the end of the
+    /// subject Bioseq's title (`x_AdjustProteinTitleSuffix`, which LOSAT does not port): a
+    /// protein whose Bioseq has a source and whose title ends in `]`.
+    pub fn title_suffix_adjusted(&self, protein: bool) -> bool {
+        let title = self.target().title.as_deref().unwrap_or_default();
+        let end = title
+            .iter()
+            .rposition(|byte| !b".,;~ ".contains(byte) && !byte.is_ascii_whitespace());
+        protein && self.has_source() && end.is_some_and(|end| title[end] == b']')
+    }
+
+    /// Whether the outfmt 0 alignment heading shows the subject Bioseq's generated title: some
+    /// definition line has no title (`heading`).
+    pub fn heading_generates_title(&self) -> bool {
+        self.set
+            .deflines
+            .iter()
+            .any(|defline| defline.title.as_deref().is_none_or(<[u8]>::is_empty))
     }
 
     /// The first word of the subject Bioseq's generated title, which `seq_id_list` puts in the
     /// place of a `gnl|BL_ORD_ID` or `lcl|Subject_` id of the Bioseq; empty when no such id is
     /// there (the title is then not made). `Err` where NCBI's `x_CleanAndCompress` reads past the
-    /// end of the title (NCBI crashes).
+    /// end of the title (NCBI crashes) and where NCBI may rewrite its end
+    /// (`title_suffix_adjusted`).
     fn title_word(&self, protein: bool) -> Result<Vec<u8>, &'static str> {
         let ids = &self.target().ids;
         if matches!(seq_id_list(ids, b"x"), std::borrow::Cow::Borrowed(_)) {
             return Ok(Vec::new());
+        }
+        if self.title_suffix_adjusted(protein) {
+            return Err("a title ending in ']' whose first word NCBI BLAST+ takes after it rewrites the title's end from the taxids (x_AdjustProteinTitleSuffix)");
         }
         let defline = self
             .bioseq_title(protein, false)
@@ -313,13 +395,15 @@ impl ParsedSubject {
                     accession,
                     title: defline.title.clone(),
                     taxid: defline.taxid.unwrap_or(0),
+                    taxonomy: HitTaxonomy::Unnamed,
                 }
             })
             .collect()
     }
 
-    /// The FASTA form of the Seq-align id (the `HitDescr` id that NCBI writes when it cannot
-    /// make the descriptions).
+    /// The FASTA form of the Seq-align id (`CSeq_id::AsFastaString`): the id of the `HitDescr`
+    /// that NCBI writes in place of the rest when the taxonomy database does not know a taxid
+    /// (blastxml2_format.cpp:422-428), and the id that LOSAT's refusals name.
     pub fn alignment_fasta(&self) -> Vec<u8> {
         let mut out = Vec::new();
         label::fasta(&self.alignment_id, &mut out);
@@ -333,9 +417,7 @@ fn unfetchable(id: &ParsedSeqId, version5: bool) -> bool {
     match id {
         ParsedSeqId::Gibbsq(_) | ParsedSeqId::NamedAnnotTrack(_) => true,
         ParsedSeqId::Local(ObjectId::Id(_)) => version5,
-        ParsedSeqId::General(dbtag) => {
-            dbtag.db.eq_ignore_ascii_case(b"PIG") || dbtag.db == b"BL_ORD_ID"
-        }
+        ParsedSeqId::General(dbtag) => dbtag.db == b"PIG" || dbtag.db == b"BL_ORD_ID",
         _ => false,
     }
 }

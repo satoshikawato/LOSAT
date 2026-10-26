@@ -349,4 +349,8 @@ makeblastdb writes: NCBI's formatters find a reported sequence again through the
 frozen outputs need them (LOSAT reads the index, sequence and header files). Queries: `ids/ids_q.faa` (three
 proteins: one hits every sequence, one hits a few weakly, one has no hit), `ids/ids_q.fna` (the same
 back-translated, for BLASTX) and `ids/ids_qw.faa` (thirty W, which hits the records of
-`LOSAT/tests/seqid/db/variants` that no NCBI formatter finds again).
+`LOSAT/tests/seqid/db/variants` that no NCBI formatter finds again). `ids/refuse_v5` (version 5, from
+`ids/refuse.faa` and `ids/taxmap_refuse.txt`) holds one record per case of the rows `db.id.*.taxdb_nf.*` and
+of LOSAT's refusals, each hit by its own query `ids/refuse_<case>.faa` (`.fna` for BLASTX) alone with
+`-evalue 1e-20`: NCBI's outfmt 0 does not end on the records `long` and `punct`, so no other query may
+report them.

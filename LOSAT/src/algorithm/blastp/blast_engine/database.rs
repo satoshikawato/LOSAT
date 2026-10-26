@@ -134,7 +134,7 @@ impl BlastpDatabase {
         // A database with parsed Seq-ids (line DBID, ID2a): BLASTP reads it; psiblast, whose
         // reports were not checked against NCBI's for one, refuses it as before.
         if parsed_seqids {
-            shared::refuse_seq_id_rank_variable(&db, settings, PROGRAM)?;
+            shared::check_seqids(&db, settings, PROGRAM)?;
         } else {
             shared::refuse_parsed_seqids(&db, PROGRAM)?;
         }
@@ -1021,8 +1021,9 @@ impl ListedTitles<'_> {
 
     /// The Blast-def-line taxid of each reported subject by rank (0 for none and for a
     /// subject in no final hit list), which the XML2 and JSON formats write in the `Hit`
-    /// description, and what the taxonomy database says about it. They are read apart from the
-    /// titles, for those formats only.
+    /// description, and what the taxonomy database says about it (for a subject with parsed
+    /// Seq-ids, about the taxid of each definition line: `shared::read_reported_taxonomy`).
+    /// They are read apart from the titles, for those formats only.
     ///
     /// NCBI writes the scientific name of a taxid when it finds `taxdb.bti` on the search path
     /// (`data4xml2format.cpp x_InitCommon`, `blastxml2_format.cpp:380-386`; validity is not
@@ -1041,19 +1042,18 @@ impl ListedTitles<'_> {
         &self,
         database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
-    ) -> Result<(Vec<i32>, Vec<HitTaxonomy>, shared::TaxdbNotes)> {
-        // A subject with parsed Seq-ids carries the taxid of each definition line in its
-        // descriptions (`ParsedSubject::hit_descriptions`); with the taxonomy database such a
-        // subject is refused (`check_parsed_reports`).
-        let reported = Self::reported(hit_lists)
-            .into_iter()
-            .filter(|&rank| self.parsed_subject(rank).is_none())
-            .collect();
-        shared::read_reported_taxids(
+    ) -> Result<(
+        Vec<i32>,
+        Vec<HitTaxonomy>,
+        Vec<Vec<HitTaxonomy>>,
+        shared::TaxdbNotes,
+    )> {
+        shared::read_reported_taxonomy(
             &database.db,
             &database.taxdb,
             &self.listed.ordinals,
-            &reported,
+            &Self::reported(hit_lists),
+            &self.parsed,
             PROGRAM,
         )
     }
@@ -1124,16 +1124,12 @@ impl ListedTitles<'_> {
     /// cannot find by its Seq-align id where a format reads its Bioseq (`fetched`: outfmt 0, 5,
     /// 6, 7, 13 to 16; `ParsedSubject::fetched`), two of them that follow each
     /// other in a hit list with matching Seq-align ids where outfmt 0, 5 or 13 to 16 is written
-    /// (`joined`, `shared::refuse_joined_hits`), and a subject with a taxid where the taxonomy
-    /// database is found and outfmt 13 to 16 is written (`descriptions`,
-    /// `shared::refuse_parsed_taxonomy`). `hit_lists` are in the order of the reports.
+    /// (`joined`, `shared::refuse_joined_hits`). `hit_lists` are in the order of the reports.
     pub(super) fn check_parsed_reports(
         &self,
-        database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
         fetched: bool,
         joined: bool,
-        descriptions: bool,
     ) -> Result<()> {
         if self.parsed.is_empty() {
             return Ok(());
@@ -1162,24 +1158,6 @@ impl ListedTitles<'_> {
                     }),
                     PROGRAM,
                 )?;
-            }
-        }
-        if descriptions && database.db.taxdb_found() {
-            for rank in Self::reported(hit_lists) {
-                let Some(subject) = self.parsed_subject(rank) else {
-                    continue;
-                };
-                if subject
-                    .deflines()
-                    .iter()
-                    .any(|defline| defline.taxid.is_some_and(|taxid| taxid != 0))
-                {
-                    return Err(shared::refuse_parsed_taxonomy(
-                        self.listed.ordinals[rank],
-                        "taxids that the XML2 and JSON descriptions name from",
-                        PROGRAM,
-                    ));
-                }
             }
         }
         Ok(())
@@ -1650,6 +1628,39 @@ mod tests {
         let database = BlastpDatabase::open(&name, &ApplicationSettings::default(), true).unwrap();
         assert_eq!(database.pairwise_database().definition, name.as_bytes());
         drop(database);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // The first header of each volume is read when the database is opened (`shared::
+    // check_seqids`), as before line DBID ID2a: a header that LOSAT does not read is refused
+    // there, and only one with parsed Seq-ids is let through (review 1 of ID2a, M2).
+    #[cfg(unix)]
+    #[test]
+    fn the_first_header_of_each_volume_is_read_at_open() {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-db-badheader-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut header = std::fs::read(fixture("prot_v4") + ".phr").unwrap();
+        header[0] = 0x31;
+        std::fs::write(dir.join("b.phr"), header).unwrap();
+        std::fs::copy(fixture("prot_v4") + ".pin", dir.join("b.pin")).unwrap();
+        std::fs::copy(fixture("prot_v4") + ".psq", dir.join("b.psq")).unwrap();
+        let name = dir.join("b").to_str().unwrap().to_string();
+        let settings = ApplicationSettings::default();
+        for parsed_seqids in [true, false] {
+            let Err(error) = BlastpDatabase::open(&name, &settings, parsed_seqids) else {
+                panic!("a damaged first header opened ({parsed_seqids})")
+            };
+            assert!(
+                format!("{error:#}").ends_with(
+                    "b.phr: header record, byte 1: tag 0x31 where Blast-def-line-set (0x30) is expected; this database is not supported by LOSAT's BLASTP"
+                ),
+                "{error:#}"
+            );
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

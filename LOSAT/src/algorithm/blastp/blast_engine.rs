@@ -11591,28 +11591,21 @@ fn run_resolved_in_pool(
         titles.check_reported_titles(&hit_lists)?;
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
         // (the formats that read a subject's Bioseq need its sequence found by its Seq-align
-        // id; outfmt 0, 5 and 13 to 16 join the hits of matching Seq-align ids; 13 to 16 name
-        // taxids with the taxonomy database).
-        if let Some(database) = database {
-            titles.check_parsed_reports(
-                database,
-                &hit_lists,
-                format_plans.iter().any(|(outfmt, _, _)| {
-                    !matches!(outfmt, BlastpReport::Seqalign(_) | BlastpReport::Archive)
-                }),
-                format_plans.iter().any(|(outfmt, _, _)| {
-                    matches!(
-                        outfmt,
-                        BlastpReport::Text(OutputFormat::Pairwise)
-                            | BlastpReport::Xml
-                            | BlastpReport::Xml2(_)
-                    )
-                }),
-                format_plans
-                    .iter()
-                    .any(|(outfmt, _, _)| matches!(outfmt, BlastpReport::Xml2(_))),
-            )?;
-        }
+        // id; outfmt 0, 5 and 13 to 16 join the hits of matching Seq-align ids).
+        titles.check_parsed_reports(
+            &hit_lists,
+            format_plans.iter().any(|(outfmt, _, _)| {
+                !matches!(outfmt, BlastpReport::Seqalign(_) | BlastpReport::Archive)
+            }),
+            format_plans.iter().any(|(outfmt, _, _)| {
+                matches!(
+                    outfmt,
+                    BlastpReport::Text(OutputFormat::Pairwise)
+                        | BlastpReport::Xml
+                        | BlastpReport::Xml2(_)
+                )
+            }),
+        )?;
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPSUBJMETA): the block
@@ -11926,15 +11919,16 @@ fn run_resolved_in_pool(
                         .length(s_idx, subject_records[s_idx].seq().len())
                 };
                 // The taxids of the reported subjects, read for the XML2 and JSON formats only.
-                let (xml_taxids, xml_taxonomy, xml_taxdb_notes): (
+                let (xml_taxids, xml_taxonomy, xml_parsed_taxonomy, xml_taxdb_notes): (
                     Vec<i32>,
                     Vec<crate::report::blast_xml::HitTaxonomy>,
+                    Vec<Vec<crate::report::blast_xml::HitTaxonomy>>,
                     crate::algorithm::common::database::TaxdbNotes,
                 ) = match (xml2_kind, listed_titles.as_ref(), database) {
                     (Some(_), Some(titles), Some(database)) => {
                         titles.read_taxids(database, &hit_lists)?
                     }
-                    _ => (Vec::new(), Vec::new(), Default::default()),
+                    _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
                 };
                 let xml_subjects = match (listed_subjects.as_ref(), listed_titles.as_ref()) {
                     // The stored titles by rank, of the records or of LOSAT_X_BPLISTEDLEAN
@@ -11947,6 +11941,7 @@ fn run_resolved_in_pool(
                         taxonomy: &xml_taxonomy,
                         length: &database_length,
                         parsed: listed_parsed,
+                        parsed_taxonomy: &xml_parsed_taxonomy,
                     },
                     _ => crate::report::blast_xml::XmlSubjects::Records {
                         protein: true,

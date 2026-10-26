@@ -727,6 +727,23 @@ impl SeqDb {
         Ok(())
     }
 
+    /// `check_ordinal_ids` of a program that reads parsed Seq-ids too: `Ok(true)` when the first
+    /// header of some volume holds parsed Seq-ids, any other error as `check_ordinal_ids` gives
+    /// it.
+    pub fn has_parsed_seqids(&self) -> Result<bool, SeqDbError> {
+        let mut parsed = false;
+        for (at, volume) in self.volumes.iter().enumerate() {
+            if volume.num_oids() > 0 {
+                match self.deflines(self.volume_starts[at]) {
+                    Ok(_) | Err(SeqDbError::NotFound(_) | SeqDbError::Open { .. }) => {}
+                    Err(error) if error.is_parsed_seqids() => parsed = true,
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        Ok(parsed)
+    }
+
     /// Whether the database is of format version 5 (its volumes' index files name an LMDB
     /// file; `open` refuses a mix of versions).
     pub fn is_version5(&self) -> bool {

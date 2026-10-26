@@ -23,6 +23,17 @@ Outputs: `prot_v4.*` (version 4, every record) and `prot_v5.*` (version 5, witho
 record `gi|1414`, after which NCBI 2.17.0's makeblastdb aborts writing the LMDB file, and without
 `lcl|123`, a local integer id that NCBI's formatters do not find in an LMDB file: LOSAT refuses
 it there, `report::db_subject::ParsedSubject::fetched`).
+
+`refuse_v5.*` (version 5): the records of `refuse.faa` with the taxids of `taxmap_refuse.txt`, each
+the subject of its own query `refuse_<case>.faa` (its sequence; `refuse_nf.fna` a back-translation):
+`nf` a taxid that the test taxonomy database (`tests/seqdb/taxdb/good`) does not know between two
+that it does (NCBI's XML2 and JSON descriptions stop there), and the refusals of LOSAT: `adj` and
+`tw` titles ending in `[Homo sapiens]` whose end NCBI rewrites (`x_AdjustProteinTitleSuffix`;
+`adj` with a definition line without a title, `tw` a `lcl|Subject_` id), `long` an outfmt 0
+description id longer than 65 bytes, `punct` a title that NCBI's `x_CleanAndCompress` reads past
+the end of, `disp` a `lcl|777` before `gi|777` (NCBI's formatters find no sequence by the
+Seq-align id `gi|777`). The queries hit their own record alone with `-evalue 1e-20` (NCBI's
+outfmt 0 of a report that shows `punct` does not end).
 """
 import argparse
 import subprocess
@@ -68,6 +79,11 @@ def main() -> int:
             check=True, stdout=subprocess.DEVNULL)
         fasta.unlink()
     work.rmdir()
+    subprocess.run(
+        [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / "refuse.faa"), "-dbtype", "prot",
+         "-parse_seqids", "-blastdb_version", "5", "-title", "refuse_v5 (parsed Seq-ids)",
+         "-taxid_map", str(HERE / "taxmap_refuse.txt"), "-out", str(args.out / "refuse_v5")],
+        check=True, stdout=subprocess.DEVNULL)
     return 0
 
 

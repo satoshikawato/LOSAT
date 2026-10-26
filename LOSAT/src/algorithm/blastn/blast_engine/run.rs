@@ -6472,6 +6472,7 @@ fn post_process_hits_and_write(
                     taxonomy: &xml_taxonomy,
                     length: &database_length,
                     parsed: &[],
+                    parsed_taxonomy: &[],
                 },
                 _ => crate::report::blast_xml::XmlSubjects::Records {
                     records: subject_records,

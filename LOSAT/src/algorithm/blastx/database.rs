@@ -59,6 +59,8 @@ pub(crate) struct BlastxDatabase {
     /// The taxonomy database of the run and the taxids its volumes have looked up (XML2 and
     /// JSON only), kept across the query batches of the run.
     taxdb: shared::TaxdbRun,
+    /// Whether the database has parsed Seq-ids (`shared::check_seqids`).
+    parsed_seqids: bool,
 }
 
 impl BlastxDatabase {
@@ -68,12 +70,19 @@ impl BlastxDatabase {
         let db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2a), unless a variable changes
         // NCBI's choice of its Seq-ids.
-        shared::refuse_seq_id_rank_variable(&db, settings, PROGRAM)?;
+        let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
         Ok(Self {
             db,
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
+            parsed_seqids,
         })
+    }
+
+    /// Whether the database has parsed Seq-ids: a batch can then refuse one of its subjects
+    /// (`ReportedSubjects::for_batch`).
+    pub(crate) fn parsed_seqids(&self) -> bool {
+        self.parsed_seqids
     }
 
     /// The `-db` value as NCBI keeps it.
@@ -178,6 +187,9 @@ pub(crate) struct ReportedSubjects {
     /// otherwise, which reads as no taxid).
     taxids: Vec<i32>,
     taxonomy: Vec<HitTaxonomy>,
+    /// What the taxonomy database says of each definition line's taxid of a sequence with
+    /// parsed Seq-ids, by rank (`shared::read_reported_taxonomy`; empty as `taxonomy`).
+    parsed_taxonomy: Vec<Vec<HitTaxonomy>>,
     taxdb_notes: shared::TaxdbNotes,
     /// The sequences with parsed Seq-ids by rank (empty when the batch reports none): their
     /// ids and titles come from their definition lines (`report::db_subject`), and `titles`
@@ -204,9 +216,10 @@ impl ReportedSubjects {
     /// (`HeaderReadError`), and a title LOSAT does not show as NCBI is its refusal
     /// (`check_reported_title`; with `tabular`, `tabular_subject_id`; with `pairwise`,
     /// `check_shown_protein_title`). A sequence with parsed Seq-ids is read with every Seq-id
-    /// (`shared::read_header`), with LOSAT's refusals of `shared::check_shown_parsed_subject`
-    /// (with `pairwise`), of `shared::refuse_joined_hits` (with `joined`: outfmt 0, 5 and 13 to
-    /// 16) and of `shared::refuse_parsed_taxonomy` (with `taxids`).
+    /// (`shared::read_header`), with LOSAT's refusals of `ParsedSubject::fetched`, of
+    /// `shared::check_shown_parsed_subject` (with `pairwise`), of `shared::refuse_joined_hits`
+    /// (with `joined`: outfmt 0, 5 and 13 to 16) and of `ParsedSubject::tabular_ids` (with
+    /// `tabular`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -297,21 +310,6 @@ impl ReportedSubjects {
                         PROGRAM,
                     )?;
                 }
-                if taxids
-                    && taxdb_found
-                    && subject
-                        .deflines()
-                        .iter()
-                        .any(|defline| defline.taxid.is_some_and(|taxid| taxid != 0))
-                {
-                    return Err(super::blast_xml::XmlRefusal::of_taxonomy(
-                        shared::refuse_parsed_taxonomy(
-                            ordinal,
-                            "taxids that the XML2 and JSON descriptions name from",
-                            PROGRAM,
-                        ),
-                    ));
-                }
                 if tabular {
                     let [id, accession, version] =
                         subject.tabular_ids(true).map_err(|problem| {
@@ -375,25 +373,30 @@ impl ReportedSubjects {
             // The taxid of each reported sequence, read apart from the titles for the XML2 and
             // JSON formats only (`algorithm::common::database::read_reported_taxids`); the
             // sequences with a title are the reported ones.
-            // A sequence with parsed Seq-ids carries its taxids in its descriptions
-            // (`ParsedSubject::hit_descriptions`).
+            // A sequence with parsed Seq-ids has the taxid of each definition line
+            // (`shared::read_reported_taxonomy`).
             let shown: std::collections::BTreeSet<usize> = listed
                 .iter()
                 .enumerate()
-                .filter(|(_, (oid, title))| title.is_some() && !parsed.contains_key(oid))
+                .filter(|(_, (_, title))| title.is_some())
                 .map(|(rank, _)| rank)
                 .collect();
             // A scientific name NCBI cannot write, or a taxonomy database LOSAT cannot read as NCBI
             // does, is LOSAT's refusal of the XML2 document (a run that holds its output drops it).
-            (reported.taxids, reported.taxonomy, reported.taxdb_notes) =
-                shared::read_reported_taxids(
-                    &database.db,
-                    &database.taxdb,
-                    &reported.ordinals,
-                    &shown,
-                    PROGRAM,
-                )
-                .map_err(super::blast_xml::XmlRefusal::of_taxonomy)?;
+            (
+                reported.taxids,
+                reported.taxonomy,
+                reported.parsed_taxonomy,
+                reported.taxdb_notes,
+            ) = shared::read_reported_taxonomy(
+                &database.db,
+                &database.taxdb,
+                &reported.ordinals,
+                &shown,
+                &reported.parsed,
+                PROGRAM,
+            )
+            .map_err(super::blast_xml::XmlRefusal::of_taxonomy)?;
         }
         Ok(reported)
     }
@@ -417,6 +420,12 @@ impl ReportedSubjects {
     /// What the taxonomy database says of that taxid (`HitTaxonomy::Unnamed` when nothing).
     pub(crate) fn taxonomy(&self, rank: usize) -> HitTaxonomy {
         self.taxonomy.get(rank).cloned().unwrap_or_default()
+    }
+
+    /// What the taxonomy database says of the taxid of each definition line of the sequence of
+    /// rank `rank` with parsed Seq-ids (empty where nothing was asked).
+    pub(crate) fn parsed_taxonomy(&self, rank: usize) -> &[HitTaxonomy] {
+        self.parsed_taxonomy.get(rank).map_or(&[], Vec::as_slice)
     }
 
     /// NCBI's messages about the taxonomy database that come before the `Hit`s' own, for the
@@ -494,6 +503,27 @@ mod tests {
     fn open(name: &str) -> BlastxDatabase {
         BlastxDatabase::open(&fixture(name), &ApplicationSettings::default())
             .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+    }
+
+    // DECISIONS 3 Q8 of line DBID: NCBI's choice of the Seq-ids of a database with parsed
+    // Seq-ids depends on SEQ_ID_PREFER_ACCESSION_OVER_GI and SEQ_ID_AVOID_GI.
+    #[test]
+    fn a_seq_id_variable_refuses_a_database_with_parsed_seqids_only() {
+        assert!(open("prot_ids_v4").parsed_seqids());
+        assert!(!open("prot_v4").parsed_seqids());
+        let settings = ApplicationSettings {
+            seq_id_rank_variable: Some("SEQ_ID_AVOID_GI"),
+            ..ApplicationSettings::default()
+        };
+        let Err(error) = BlastxDatabase::open(&fixture("prot_ids_v4"), &settings) else {
+            panic!("a database with parsed Seq-ids opened with SEQ_ID_AVOID_GI")
+        };
+        assert_eq!(
+            format!("{error:#}"),
+            "the environment variable SEQ_ID_AVOID_GI, which changes the Seq-ids that NCBI BLAST+ chooses for a database with parsed Seq-ids, is not supported by LOSAT's BLASTX"
+        );
+        BlastxDatabase::open(&fixture("prot_v4"), &settings)
+            .expect("a database without parsed Seq-ids opens with SEQ_ID_AVOID_GI");
     }
 
     #[test]

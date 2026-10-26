@@ -213,7 +213,9 @@ pub fn generate_defline(
 /// ```
 /// The other flags of `x_SetFlags` come from descriptors that the Bioseq of a database
 /// sequence does not have (MolInfo, user objects, GenBank and EMBL blocks), or change no title
-/// that a search writes.
+/// that a search writes. The source that a database Bioseq has for each definition line with a
+/// positive taxid is not modelled: the titles that depend on it are LOSAT's refusals
+/// (`ParsedSubject::title_from_taxonomy`, `ParsedSubject::title_suffix_adjusted`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BioseqIds {
     /// `m_ThirdParty`: a `tpg`, `tpe` or `tpd` id (the prefix `TPA: `).

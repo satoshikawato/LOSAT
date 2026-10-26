@@ -38,6 +38,10 @@ pub enum XmlSubjects<'a> {
         /// The subjects with parsed Seq-ids by rank (empty without them), whose names come from
         /// their definition lines (`SubjectNames::of_parsed`).
         parsed: &'a [Option<Arc<ParsedSubject>>],
+        /// What the taxonomy database said about the taxid of each definition line of a subject
+        /// with parsed Seq-ids, by rank (empty where nothing was asked;
+        /// `algorithm::common::database::read_reported_taxonomy`).
+        parsed_taxonomy: &'a [Vec<HitTaxonomy>],
     },
 }
 
@@ -81,6 +85,9 @@ pub struct SubjectNames {
     /// The XML2 and JSON `HitDescr` list of a subject with parsed Seq-ids, one per definition
     /// line (empty for the others, which have one made of `id`, `title` and `accession`).
     pub descriptions: Vec<HitDescription>,
+    /// The taxids that the volume looks up when it fetches a subject with parsed Seq-ids
+    /// (`ParsedSubject::volume_taxids`; empty for the others, whose one is `taxid`).
+    pub volume_taxids: Vec<i32>,
 }
 
 impl SubjectNames {
@@ -95,6 +102,7 @@ impl SubjectNames {
             taxid: 0,
             taxonomy: HitTaxonomy::Unnamed,
             descriptions: Vec::new(),
+            volume_taxids: Vec::new(),
         })
     }
 
@@ -113,24 +121,61 @@ impl SubjectNames {
             taxid,
             taxonomy,
             descriptions: Vec::new(),
+            volume_taxids: Vec::new(),
         })
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:380-388, 422-428
+    // ```c++
+    //         		if(defline.IsSetTaxid() && defline.GetTaxid() != ZERO_TAX_ID) {
+    //         			TTaxId tax_id = defline.GetTaxid();
+    //        				hit_exp->SetTaxid(tax_id);
+    //         			if(hasTaxDB) {
+    //         				 SSeqDBTaxInfo taxinfo;
+    //         				 CSeqDB::GetTaxInfo(tax_id, taxinfo);
+    //         				 hit_exp->SetSciname(taxinfo.scientific_name);
+    //         			}
+    //         		}
+    //         		descr_list.push_back(hit_exp);
+    //     ...
+    //     } catch (const CException&) {
+    //     	CRef<blastxml2::CHitDescr> hit_exp(new blastxml2::CHitDescr);
+    //     	hit_exp->SetId(kSeqId.AsFastaString());
+    //         hit->SetDescription().push_back(hit_exp);
+    // ```
     /// The names of a database sequence with parsed Seq-ids (`ParsedSubject::xml_hit` and
     /// `hit_descriptions`): `Hit_id`, `Hit_def` and `Hit_accession` of outfmt 5, and the
-    /// `HitDescr` of each definition line of XML2 and JSON (without scientific names: LOSAT
-    /// refuses such a subject with a taxid where the taxonomy database is found).
-    pub fn of_parsed(subject: &ParsedSubject) -> Result<Self, Refusal> {
+    /// `HitDescr` of each definition line of XML2 and JSON with what the taxonomy database said
+    /// about its taxid (`taxonomy[i]` for definition line `i`; empty where nothing was asked).
+    /// `GetTaxInfo` throws for a taxid that the taxonomy database does not know: the
+    /// descriptions before that definition line stay, and the Seq-align id alone follows them.
+    pub fn of_parsed(subject: &ParsedSubject, taxonomy: &[HitTaxonomy]) -> Result<Self, Refusal> {
         let (id, title, accession) = subject.xml_hit();
         names::check_text(&id)?;
         names::check_text(&title)?;
+        let mut descriptions = subject.hit_descriptions();
+        for (at, answer) in taxonomy.iter().enumerate().take(descriptions.len()) {
+            if matches!(answer, HitTaxonomy::NotFound(_)) {
+                descriptions.truncate(at);
+                descriptions.push(HitDescription {
+                    id: subject.alignment_fasta(),
+                    accession: Vec::new(),
+                    title: None,
+                    taxid: 0,
+                    taxonomy: answer.clone(),
+                });
+                break;
+            }
+            descriptions[at].taxonomy = answer.clone();
+        }
         Ok(SubjectNames {
             id,
             title,
             accession,
             taxid: 0,
             taxonomy: HitTaxonomy::Unnamed,
-            descriptions: subject.hit_descriptions(),
+            descriptions,
+            volume_taxids: subject.volume_taxids(),
         })
     }
 }
@@ -153,10 +198,12 @@ impl XmlSubjects<'_> {
                 taxids,
                 taxonomy,
                 parsed,
+                parsed_taxonomy,
                 ..
             } => {
                 if let Some(subject) = parsed.get(s_idx).and_then(Option::as_deref) {
-                    return SubjectNames::of_parsed(subject)
+                    let answers = parsed_taxonomy.get(s_idx).map_or(&[][..], Vec::as_slice);
+                    return SubjectNames::of_parsed(subject, answers)
                         .map_err(|refusal: Refusal| refusal.error(program, "a database title"));
                 }
                 let ordinal = *ordinals

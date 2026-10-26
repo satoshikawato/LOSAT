@@ -289,6 +289,9 @@ impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
             }
             if description.taxid != 0 {
                 int_member(enc, "taxid", 3, description.taxid);
+                if let HitTaxonomy::Named(sciname) = &description.taxonomy {
+                    string_member(enc, "sciname", 4, sciname);
+                }
             }
             enc.end_sequence();
         }

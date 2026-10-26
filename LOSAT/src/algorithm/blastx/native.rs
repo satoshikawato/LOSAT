@@ -529,8 +529,8 @@ fn run_inner(
     // LOSAT's other refusals of BLAST XML (a title with a byte NCBI's XML stream cannot write)
     // come before the first byte, though the query file is read batch by batch: the query
     // titles are checked by a read of the file before the search, and a run in which a
-    // `-subject` title (or the message of a query) could still be refused later holds the
-    // document in memory until its epilog (`blast_xml::HeldOutput`; outfmt 13 and 14: the side files
+    // `-subject` title, the message of a query or a subject of a database with parsed Seq-ids
+    // could still be refused later holds the document in memory until its epilog (`blast_xml::HeldOutput`; outfmt 13 and 14: the side files
     // too). Only with outfmt 5 and 13 to 16; the other formats read the file once.
     if let Some(held) = &held {
         // A query that is not a regular file (a pipe, `<(...)`, `/dev/stdin` from a pipe, a
@@ -556,8 +556,14 @@ fn run_inner(
             && database
                 .as_ref()
                 .is_some_and(|database| database.taxdb_found() && database.taxdb_may_refuse());
+        // A database with parsed Seq-ids: a later batch can still refuse one of its subjects
+        // (`ReportedSubjects::for_batch`), which only the batch's hits show.
+        let parsed_may_be_refused = database
+            .as_ref()
+            .is_some_and(|database| database.parsed_seqids());
         if messages_may_be_refused
             || taxdb_may_refuse
+            || parsed_may_be_refused
             || super::blast_xml::subjects_may_be_refused(&subjects)
         {
             held.hold();
@@ -894,8 +900,12 @@ fn run_inner(
                                 }
                             })
                             .inspect_err(|error| {
-                                // A refusal of the XML2 document drops what the run holds.
-                                if error.is::<super::blast_xml::XmlRefusal>() {
+                                // A refusal of the XML2 document, or of a subject with parsed
+                                // Seq-ids, drops what the run holds.
+                                if error.is::<super::blast_xml::XmlRefusal>()
+                                    || error
+                                        .is::<crate::algorithm::common::database::ParsedRefusal>()
+                                {
                                     if let Some(held) = &held {
                                         held.discard();
                                     }

@@ -441,7 +441,7 @@ pub struct ApplicationSettings {
     /// The first of `SEQ_ID_RANK_VARIABLES` that is set (with any value). NCBI's choice of the
     /// Seq-ids of a database with parsed Seq-ids depends on it; only a program that opens such
     /// a database has to refuse to run then (`algorithm::common::database::
-    /// refuse_seq_id_rank_variable`), since the ids of the other searches are local or ordinal.
+    /// check_seqids`), since the ids of the other searches are local or ordinal.
     pub seq_id_rank_variable: Option<&'static str>,
 }
 

@@ -2531,8 +2531,6 @@ fn write_description_table<W: Write>(
     writeln!(writer)
 }
 
-// The description table of BLASTN, BLASTP, TBLASTN and TBLASTX: a subject's line is the
-// title of its record (`write_description_table`).
 /// The subject of `s_idx` among `parsed` when it has parsed Seq-ids.
 fn parsed_subject(
     parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
@@ -2561,6 +2559,8 @@ pub fn database_description_label(
     }
 }
 
+// The description table of BLASTN, BLASTP, TBLASTN and TBLASTX: a subject's line is the
+// title of its record (`write_description_table`).
 fn write_blastn_description_table<W: Write>(
     writer: &mut W,
     described: &[u32],

@@ -1148,6 +1148,11 @@ fn run_local_search_with_pool(
     // composition redo and the traceback) is `search` of the common line (utils/xtiming.rs); a
     // guard, as the function has many returns. No NCBI counterpart.
     let _x_search_timer = XSearchTimer::start();
+    // PROBE (B11e): the phases of this batch.
+    let x_b11e = crate::utils::x_b11e::on();
+    if x_b11e {
+        crate::utils::x_b11e::batch_start(queries.len(), subjects.count());
+    }
     let link = parameters.link;
     let cutoff_arrays = ContextCutoffArrays::of(&parameters);
     let search = preliminary_profile(profile, scoring, gapped, &cutoff_arrays);
@@ -1226,6 +1231,9 @@ fn run_local_search_with_pool(
             pool,
         )?,
     };
+    if x_b11e {
+        crate::utils::x_b11e::phase("prelim_end");
+    }
     // NCBI c++/src/algo/blast/core/blast_hspstream.c:144-152,289-319:
     // Blast_HSPResultsReverseSort(results); stream reads from the end.
     let mut preliminary_lists: Vec<_> = preliminary_hitlists
@@ -1392,6 +1400,9 @@ fn run_local_search_with_pool(
         // the translations below read windows of it, as NCBI's do. EXPERIMENT (LOSAT_X_TBNDBSTREAM):
         // a `-db` sequence is read once for the redo (`x_stage`); EXPERIMENT (LOSAT_X_TBNSTAGEDROP):
         // the stage lets it go after its last match (`_done`, declared before `held`).
+        // PROBE (B11e): one line per item, at its end.
+        let _x_b11e_item = crate::utils::x_b11e::on()
+            .then(|| crate::utils::x_b11e::ItemGuard::new(context, oid, list.hsps.len()));
         let _done = x_stage.x_match(oid);
         let held = x_stage.held(oid)?;
         let subject = held.nt();
@@ -1570,6 +1581,9 @@ fn run_local_search_with_pool(
         preliminary_lists.len(),
         parallel_redo,
     );
+    if x_b11e {
+        crate::utils::x_b11e::phase("redo_start");
+    }
     if parallel_redo {
         #[cfg(feature = "parallel")]
         {
@@ -1605,7 +1619,8 @@ fn run_local_search_with_pool(
                 })
                 .collect::<Result<Vec<_>>>()?;
             let batch_size = pool.threads().saturating_mul(32).max(64);
-            for batch in preliminary_lists.chunks(batch_size) {
+            for (x_k, batch) in preliminary_lists.chunks(batch_size).enumerate() {
+                let x_kt = x_b11e.then(crate::utils::x_b11e::now);
                 // Early termination only becomes true as the heaps fill, so a match
                 // that is skipped now is also skipped at its turn; anything else is
                 // rechecked in order below.
@@ -1658,6 +1673,16 @@ fn run_local_search_with_pool(
                             .collect()
                     })
                 };
+                let x_ct = x_b11e.then(crate::utils::x_b11e::now);
+                if let (Some(kt), Some(ct)) = (x_kt, x_ct) {
+                    eprintln!(
+                        "[B11E] rchunk b={} k={x_k} items={} wanted={} lpt={} t0={kt:.4} t1={ct:.4}",
+                        crate::utils::x_b11e::batch(),
+                        batch.len(),
+                        wanted.iter().filter(|&&w| w).count(),
+                        u8::from(lpt),
+                    );
+                }
                 for ((context, oid, list), result) in batch.iter().zip(computed) {
                     if compo_early_termination(list.best_evalue, &heaps) {
                         // A redone match was done in redo_item (LOSAT_X_TBNSTAGEDROP).
@@ -1721,6 +1746,9 @@ fn run_local_search_with_pool(
         }
     }
     drop(keep_item);
+    if x_b11e {
+        crate::utils::x_b11e::phase("redo_end");
+    }
 
     // NCBI c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // c++/src/algo/blast/core/blast_hits.c:3243-3297,3383-3400,3420-3437:
@@ -1742,6 +1770,9 @@ fn run_local_search_with_pool(
             hitlist.sort_by_evalue_for_positive_totlen();
         }
         results.push(hitlist);
+    }
+    if x_b11e {
+        crate::utils::x_b11e::phase("end");
     }
     Ok(results)
 }
@@ -2624,6 +2655,12 @@ fn run_preliminary_subjects_into(
         // ```
         // Dispatch point: the call that runs the preliminary stage for one subject
         // (s_BlastSearchEngineCore). preliminary_protein_hsps_for_search runs the unit-wise stage.
+        // PROBE (B11e): the parts of this subject.
+        let x_b11e = crate::utils::x_b11e::on();
+        let x_b11e_t0 = x_b11e.then(|| (crate::utils::x_b11e::now(), std::time::Instant::now()));
+        if x_b11e {
+            crate::utils::x_b11e::OID.set(x_oid);
+        }
         let preliminary = super::search_gapped::preliminary_protein_hsps_for_search(
             inputs.queries,
             subject,
@@ -2637,6 +2674,7 @@ fn run_preliminary_subjects_into(
         // BLAST_LinkHsps(..., hsp_list_out, ...);
         // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
         // Even an allocated empty subject list enters link/E-value.
+        let x_b11e_pre = x_b11e.then(std::time::Instant::now);
         let mut linked = if let Some(link) = inputs.link {
             link_preliminary_hsps(
                 &preliminary,
@@ -2663,7 +2701,43 @@ fn run_preliminary_subjects_into(
                 inputs.gumbel,
             )
         };
+        let x_b11e_reap = x_b11e.then(std::time::Instant::now);
         reap_by_evalue(&mut linked, inputs.prelim_evalue);
+        if let (Some((t0, start)), Some(pre), Some(reap)) = (x_b11e_t0, x_b11e_pre, x_b11e_reap) {
+            use crate::utils::x_b11e::ms;
+            let total = crate::utils::x_b11e::ns(start);
+            let reap_ns = crate::utils::x_b11e::ns(reap);
+            let pre_ns = pre.duration_since(start).as_nanos() as u64;
+            let link_ns = reap.duration_since(pre).as_nanos() as u64;
+            let parts = crate::utils::x_b11e::PRELIM.get();
+            let l = crate::utils::x_b11e::take_link();
+            eprintln!(
+                "[B11E] subj b={} oid={x_oid} len={} thr={} t0={t0:.4} dt={:.2} pre={:.2} plan={:.2} units_wall={:.2} merge={:.2} units={} par={} link={:.2} reap={:.2} n_pre={} n_link={} l_prep={:.2} l_sort={:.2} l_win={:.2} l_loop={:.2} l_final={:.2} heads={} ctxs={} top={}",
+                crate::utils::x_b11e::batch(),
+                subject.len(),
+                crate::utils::x_b11e::thread(),
+                ms(total),
+                ms(pre_ns),
+                ms(parts.plan_ns),
+                ms(parts.units_ns),
+                ms(parts.merge_ns),
+                parts.units,
+                u8::from(parts.parallel),
+                ms(link_ns),
+                ms(reap_ns),
+                preliminary.len(),
+                linked.hsps.len(),
+                ms(l.prep_ns),
+                ms(l.sort_ns),
+                ms(l.window_ns),
+                ms(l.loop_ns),
+                ms(l.final_ns),
+                l.heads,
+                l.contexts(),
+                l.top(),
+            );
+            crate::utils::x_b11e::OID.set(usize::MAX);
+        }
         Ok((preliminary, linked))
     };
     // Subject `x_oid` for its preliminary stage: the record's letters, or (EXPERIMENT,

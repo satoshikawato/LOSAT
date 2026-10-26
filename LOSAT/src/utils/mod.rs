@@ -7,6 +7,7 @@ mod seg_lnfact;
 // (*thread)->Run(); (*thread)->Join(&result);
 pub mod threading;
 pub mod winmask;
+pub(crate) mod x_b11e;
 pub(crate) mod x_frame;
 pub mod x_logclone;
 pub(crate) mod x_mapped;

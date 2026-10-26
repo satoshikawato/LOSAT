@@ -314,6 +314,26 @@ pub(super) fn link_preliminary_hsps(
         link.longest_intron > 0,
         "TBLASTN uneven-gap link parameters required"
     );
+    // PROBE (B11e): the parts of this call.
+    let x_probe = crate::utils::x_b11e::on();
+    let x_ns = |t: Option<std::time::Instant>| t.map_or(0, crate::utils::x_b11e::ns);
+    let mut x_parts = crate::utils::x_b11e::LinkParts {
+        n: input.len(),
+        by_context: if x_probe {
+            vec![(0, 0, 0); query_lengths.len()]
+        } else {
+            Vec::new()
+        },
+        ..Default::default()
+    };
+    if x_probe {
+        for &(context, _) in input {
+            if let Some(c) = x_parts.by_context.get_mut(context) {
+                c.0 += 1;
+            }
+        }
+    }
+    let x_t = x_probe.then(std::time::Instant::now);
     ensure!(
         query_lengths.len() == lengths.len() && lengths.len() == gapped_params.len(),
         "one statistical context per query"
@@ -344,7 +364,9 @@ pub(super) fn link_preliminary_hsps(
             }
         })
         .collect();
+    x_parts.prep_ns += x_ns(x_t);
     if work.len() > 1 {
+        let x_t = x_probe.then(std::time::Instant::now);
         let mut score_order: Vec<usize> = (0..work.len()).collect();
         // NCBI c++/src/algo/blast/core/link_hsps.c:1217-1243:
         // if (h1->sum_score < h2->sum_score) return 1;
@@ -369,12 +391,16 @@ pub(super) fn link_preliminary_hsps(
                 .then(work[a].value.hsp.s_start.cmp(&work[b].value.hsp.s_start))
         });
         let end_index = query_end_prefix_index(&work, &offset_order);
+        x_parts.sort_ns += x_ns(x_t);
+        let x_t = x_probe.then(std::time::Instant::now);
         // The lookup by subject position.
         let mut x_window = Some(x_link_window::XLinkWindow::new(&work, &offset_order, link));
         #[cfg(test)]
         if x_link_window::x_whole_window_forced() {
             x_window = None;
         }
+        x_parts.window_ns += x_ns(x_t);
+        let x_loop_t = x_probe.then(std::time::Instant::now);
         let mut head = None;
         let mut index = 0;
         while index < score_order.len() {
@@ -392,6 +418,8 @@ pub(super) fn link_preliminary_hsps(
                 head = Some(score_order[index]);
             }
             let current = head.unwrap();
+            let x_t = x_probe.then(std::time::Instant::now);
+            let x_context = work[current].value.context;
             let mut tail = current;
             while let Some(next) = work[tail].next {
                 tail = next;
@@ -455,10 +483,23 @@ pub(super) fn link_preliminary_hsps(
                 head = None;
                 index += 1;
             }
+            if x_probe {
+                x_parts.heads += 1;
+                if let Some(c) = x_parts.by_context.get_mut(x_context) {
+                    c.1 += 1;
+                    c.2 += x_ns(x_t);
+                }
+            }
         }
+        x_parts.loop_ns += x_ns(x_loop_t);
     }
+    let x_t = x_probe.then(std::time::Instant::now);
     work.sort_by(|a, b| score_compare(&a.value.hsp, &b.value.hsp));
     let hsps: Vec<_> = work.into_iter().map(|item| item.value).collect();
+    x_parts.final_ns += x_ns(x_t);
+    if x_probe {
+        crate::utils::x_b11e::LINK.with(|r| *r.borrow_mut() = x_parts);
+    }
     let best_evalue = hsps
         .iter()
         .map(|hsp| hsp.evalue)

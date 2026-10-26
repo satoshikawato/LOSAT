@@ -711,7 +711,7 @@ unsafe fn block16<const TB: bool>(
 
 // No NCBI counterpart (memory placement only): see `align16`.
 #[repr(align(64))]
-struct XFrameAlign([u8; 64]);
+struct XFrameAlign(u8);
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:476-500,563,638,652-673
 // ```c
@@ -750,9 +750,10 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
 ) -> Option<XdropResult> {
     // No NCBI counterpart (memory placement only): a 64-byte-aligned local makes the compiler realign
     // this frame, so that its 32-byte register spills never cross a cache line, whatever the stack
-    // depth of the callers. It does not change any value NCBI computes.
-    let x_frame = XFrameAlign([0; 64]);
-    std::hint::black_box(&x_frame);
+    // depth of the callers. The volatile store (one byte, never read; `&mut` to a local is valid)
+    // keeps the local. It does not change any value NCBI computes.
+    let mut x_frame = XFrameAlign(0);
+    std::ptr::write_volatile(&mut x_frame.0, 0);
     sc.ops.clear();
     if len1 == 0 || len2 == 0 {
         return Some(XdropResult {
@@ -1330,9 +1331,10 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
 ) -> Option<XdropResult> {
     // No NCBI counterpart (memory placement only): a 64-byte-aligned local makes the compiler realign
     // this frame, so that its 32-byte register spills never cross a cache line, whatever the stack
-    // depth of the callers. It does not change any value NCBI computes.
-    let x_frame = XFrameAlign([0; 64]);
-    std::hint::black_box(&x_frame);
+    // depth of the callers. The volatile store (one byte, never read; `&mut` to a local is valid)
+    // keeps the local. It does not change any value NCBI computes.
+    let mut x_frame = XFrameAlign(0);
+    std::ptr::write_volatile(&mut x_frame.0, 0);
     sc.ops.clear();
     if len1 == 0 || len2 == 0 {
         return Some(XdropResult {

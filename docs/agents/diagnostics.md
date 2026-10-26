@@ -332,6 +332,7 @@ export LOSAT_X_BPDBCUT=1
 export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
 export LOSAT_X_BPFFILL=1
+export LOSAT_X_BPFLEAN=1
 export LOSAT_X_BPFSEED=1
 export LOSAT_X_BPFSTAGE=1
 export LOSAT_X_BPGAP=1
@@ -2037,6 +2038,53 @@ Rebuilding less:
   (node 1, CPUs 32-47, once, 3 rounds) the whole human proteome x the yeast proteome took 5.47 -> 5.23 s (cycles
   x0.951) and the whole Arabidopsis proteome x the zebrafish proteome 18.19 -> 16.98 s (x0.921). In the strict set
   from its first pull request (no measured case slower natively; AGENTS.md "Speed-up switches").
+- `LOSAT_X_BPFLEAN=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
+  2026-10-26, line v4-BPF s6; `=0` turns it off; acts where `LOSAT_X_BPFSTAGE`'s loop runs, on the same subjects,
+  and records its sides where that switch does, `LOSAT_X_REACH`; with `LOSAT_X_BPFSTAGE=0` it does not act) runs
+  that loop as `x_scan_flat_lean` (`blastp/x_seed_fused_clut.rs`, exactness argument in that file's header), which
+  reads differently but stages and tests the same. The scan's two-offset steps are a loop of their own, out of line
+  (`tblastx/lookup/x_clut_direct.rs` `x_list_pairs_lean`, `x_pairs_loop`), so that the offset, the list's length,
+  the preshift and the next letter stay in registers (in one loop with the other steps the list's length was kept on
+  the stack, loaded and stored at every pair), with NCBI's reciprocal for 15 as the constant `x_pairs_fit` asks for,
+  `u32` arithmetic and the subject read through a pointer a word length in; the first word, a letter outside the
+  alphabet and the last offset take `x_list_pairs`'s steps, so the list is the same. The copy is out of line and
+  makes no call (`x_lean_copy`): it stages runs until fewer than 8 of the 1,024 places are left or the list ends and
+  returns where it stopped (within a cell too); the caller gives the staged hits to the same test loop
+  (`x_stage_test`) and calls it again. A run's second half of 4 hits is read from `k + 4` only where the cell has
+  more than 4 hits left, else from `k` again (places past the run's length, left unread as before): in the probe
+  72 % of the copy's L2 misses were that half's line, unused by cells of 3.5 hits on average. The read-ahead also
+  takes the slice bound after the one it reads ahead (a line crossed 1 time in 16). The runs, their places, the
+  flushes, and so the hits, their order, the tests, the entries and the calls are those of `x_scan_flat_stage` (the
+  lib tests `the_lean_loop_is_the_staged_loop`, which replays the staging to show a flush within a cell and runs on
+  either side of the 4-hit rule, `the_flat_loop_is_the_fused_loop_on_the_reference_table` and
+  `the_staged_loop_copies_the_last_cell_of_the_hits` compare the loop with the staged loop, the reference table's loop
+  and the loop without `LOSAT_X_BPFSTAGE`; `flat_scans_give_the_reference_scans_hits` and
+  `the_pairs_scan_lists_word_length_six_and_declines_outside_its_range` the list with `for_each_cell`'s;
+  `tests/blastp_fast_stage.rs` the reports with `=0`'s). The new loops are out of line and the lean loop makes its
+  stage itself, so the loops without the switch keep their machine code: `x_scan_flat_stage`, `x_stage_test`,
+  `x_list_pairs`, `x_scan_flat_fseed_loop` and `x_scan_flat_bf` have dev's instructions (objdump of both release
+  builds; a first form that also made its stage with `XStage::new` left that function out of line in
+  `x_scan_flat_stage`, 29 instructions fewer there). Not taken (line v4-BPF s5 probes, one core on the workstation):
+  the steps' loop inlined in the scan (the list's length on the stack: x0.93 of the cycles on 3 proteins x UniRef50,
+  against x0.82 out of line, and within 2 % on the OrthoFinder tables), a read-ahead of the line of a later cell's last hit (x1.04 on 3 proteins x UniRef50), and
+  read-ahead distances of 16 and 32 cells (no difference). Timed 2026-10-26 on the workstation (node 0, one physical
+  core, its HT sibling idle, warmed 3 s before every run, 8 rounds of the pairs in alternating order; load 15-69, other
+  lines' builds and gates on node 0; dev d40021ba; every report identical between the arms; medians, `cycles:u`):
+  OrthoFinder's 1/10 of the Arabidopsis proteins x the zebrafish proteome (`-db`, `-evalue 0.001`) x0.981
+  (instructions x0.993), of the human proteins x the yeast proteome x0.988, of the yeast proteins x the yeast proteome
+  x0.992; UniRef50 volume 00 (`-db`, `-evalue 1e-5`) 3 proteins x0.817 (instructions x0.807), 10 proteins x0.927;
+  once each, the whole human proteome x the yeast proteome 62.18 -> 62.09 s (cycles x0.984) and the whole Arabidopsis
+  proteome x the zebrafish proteome 218.30 -> 215.26 s (x0.986), max RSS 83.9 -> 84.0 MiB and 75.4 -> 77.5 MiB
+  (NCBI's 95 and 115 MiB). On the 1/10 of the Arabidopsis proteins (perf record, the same core) the copy took
+  8.62 -> 7.20 G cycles with 97.7 -> 53.9 M L2 misses, the scan 2.03 -> 1.46 G. Where the switch does not act the
+  instructions are dev's: a 42-residue protein x UniRef50 (a sparse table) x1.0000 (cycles x1.000), exact blastp
+  (1/10 of the Arabidopsis proteins x the yeast proteome) x1.0000; `=0` runs dev's instructions (x1.0000-1.0004, cycles x0.994-0.999 in a confirming run of 4 rounds of the final
+  form, load 31-37, where the switch took x0.987, x0.992 and x0.815 on the first three cases above). With 16
+  threads (node 1, CPUs 32-47, once, 3 rounds) the whole human proteome x the yeast proteome took 5.25 -> 5.19 s
+  (cycles x0.991) and the whole Arabidopsis proteome x the zebrafish proteome 17.01 -> 16.75 s (x0.989), max RSS
+  123.5 -> 124.2 MiB and 106.0 -> 108.2 MiB (medians; per run 122.8-125.5 and 104.1-108.8 MiB, dev's 122.7-123.7
+  and 105.0-106.9). In the strict set from its first pull request (no measured case slower natively; AGENTS.md
+  "Speed-up switches").
 - `LOSAT_X_BPLKPFLAT=1` (BLASTP `-task blastp-fast`, speed; in the strict set since 2026-10-17, on by default
   together with `LOSAT_X_BPCLUT`; acts only where the search's pool builds the flat table of
   `LOSAT_X_BPCLUT`, with more than one thread) changes how that build is scheduled

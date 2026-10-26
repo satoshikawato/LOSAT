@@ -4867,13 +4867,16 @@ Scheduling (each value computed by one thread with the original function; order 
   default, 38 pairs): x0.980-0.994 at 4, 8 and 16 threads on the two large sets, no pair slower.
 - `LOSAT_X_TBNPAIRCAP=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-26;
   `=0` turns it off; `tblastn/search_seed.rs` `x_scan_plan`, `X_PAIR_ROOM`): the offset-pair array that a unit's scan
-  calls fill (each thread keeps one, `XUnitBuffers`) holds 32,768 + the longest chain of the lookup table, never more
+  calls fill (one per running unit; the units a thread runs one after another share theirs, `XUnitBuffers`) holds
+  32,768 + the longest chain of the lookup table, never more
   than the 1024 x the longest chain it held before (a table whose longest chain is below 33 keeps that). NCBI's array
   holds 4,096 + the longest chain (`lookup_wrap.c:264-266` `GetOffsetArraySize`; `blast_engine.c:992,1040-1041`
   allocates one per thread, `aa_ungapped.c:504-505` passes its size to scansub). The size only decides where a scan
   call stops on a full array; the next call resumes there, so the pairs reach the two-hit loop in the same order at
   any size (unit tests `x_scan_bf_equals_ncbi_scan_on_random_subjects`, which also compares the pairs of all sizes in
-  scan order, and the two scan tests of `x_scan_byte.rs`, at 4,096 and 32,768 + the longest chain among others). The
+  scan order, and the two scan tests of `x_scan_byte.rs`, at 4,096 and 32,768 + the longest chain among others;
+  `tests/tblastn_scan_byte.rs` `the_offset_array_size_changes_only_the_scan_calls`: 115 proteins x MelaMJNV, the same
+  report with and without the switch at one and four threads, 646 scan calls against 339). The
   1024 x of an early diagnostic was 864 KiB for the fly proteins of `dmel_b4.faa` (longest chain 108), against NCBI's
   33 KiB, and the thread count multiplied it. NCBI's own size costs time here: a call that stops starts the rest of its
   block of words again (`TBNSCANBYTE`), and at one thread `dmel_b4.faa` x zebrafish cDNAs (`-db`) took 1.0041 of the

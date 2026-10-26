@@ -219,6 +219,9 @@ mod culling;
 // this file).
 #[path = "x_qbatch_par.rs"]
 mod x_qbatch_par;
+// PROBE (line ST s2, never a PR): step clocks of the batch loop.
+#[path = "x_probe_gaps.rs"]
+pub(crate) mod x_probe_gaps;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603 (the query buffer
 // of a batch) and c++/src/algo/blast/core/blast_stat.c:2754-2784 (the ungapped Karlin block of
@@ -8462,6 +8465,8 @@ fn run_in_pool(
         while input_start < query_input.input_lengths.len()
             || (reading.reads_past_records() && !reading_ended)
         {
+            x_probe_gaps::next_batch();
+            x_probe_gaps::mark("L0_iter");
             let (input_end, reached_size) = next_ranged_batch(
                 &query_input.input_lengths,
                 &query_input.skipped,
@@ -8491,6 +8496,7 @@ fn run_in_pool(
                         return Err(error);
                     }
                 };
+            x_probe_gaps::mark("L1_read");
             let batch_title_warnings: Vec<u8> = batch_records
                 .input()
                 .iter()
@@ -8783,6 +8789,7 @@ fn run_in_pool(
                 input_end,
                 batch_size: batching.batch_size,
             };
+            x_probe_gaps::mark("L2_call");
             let searched = match qbp.take(key) {
                 Some(precomputed) => precomputed,
                 None => {
@@ -8885,6 +8892,7 @@ fn run_in_pool(
                     }
                 },
             };
+            x_probe_gaps::mark("L3_ret");
             // The batch's LOSAT_TIMING block, where its search wrote it before.
             if !batch.timing.is_empty() {
                 eprint!("{}", batch.timing);
@@ -9081,6 +9089,7 @@ fn run_in_pool(
                 };
                 // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the pool formats the batch's outfmt 0 report while
                 // it is idle (no thread of a LOSAT_X_QBATCHPAR slot exists).
+                x_probe_gaps::mark("L4_rep0");
                 let x_pool = qbp.x_slots_idle().then_some(parallel_pool);
                 stream.write(outputs, count, false, |outputs, written| {
                     write_reports(
@@ -9109,6 +9118,7 @@ fn run_in_pool(
                         x_pool,
                     )
                 })?;
+                x_probe_gaps::mark("L5_rep1");
                 // The written queries' warnings are not read again (the error paths write those
                 // of the current batch).
                 for query_warnings in &mut warnings[start..end] {
@@ -9127,9 +9137,11 @@ fn run_in_pool(
             }
             queries.done(input_end);
             input_start = input_end;
+            x_probe_gaps::mark("L6_end");
         }
         // EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop's kept table is freed with the loop.
         drop(x_lut_keep);
+        x_probe_gaps::mark("F0_loopend");
 
         // EXPERIMENT (LOSAT_X_QBATCHPAR): every slot has stopped before the reports are written.
         qbp.finish();
@@ -9192,6 +9204,8 @@ fn run_in_pool(
                 None,
             )
         })?;
+        x_probe_gaps::mark("F1_done");
+        x_probe_gaps::dump();
         Ok(())
     })
 }
@@ -9927,6 +9941,7 @@ fn search_query_batch(
     if x_cancelled() {
         return Err(x_qbatch_par::Cancelled.into());
     }
+    x_probe_gaps::mark("S0_entry");
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:493-555
     // ```c
@@ -10166,6 +10181,7 @@ fn search_query_batch(
     // Diagnostic (LOSAT_TIMING): the batch's DUST for the common line (utils/xtiming.rs); a
     // chunk takes the batch's masks. No NCBI counterpart.
     let t_seg = crate::utils::xtiming::clock();
+    x_probe_gaps::mark("S1_dust0");
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:445-446
     // ```c
     //     TMaskedQueryRegions mqr =
@@ -10183,6 +10199,7 @@ fn search_query_batch(
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
+    x_probe_gaps::mark("S2_dust1");
     let seq_data = prepare_sequence_data(queries, query_ids, masks, subject_metadata);
 
     // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
@@ -10382,6 +10399,7 @@ fn search_query_batch(
     // the same (`x_query_prep_par.rs`).
     // Diagnostic (LOSAT_TIMING): the batch's query encoding for the common line
     // (utils/xtiming.rs). No NCBI counterpart.
+    x_probe_gaps::mark("S3_enc0");
     let t_encode = crate::utils::xtiming::clock();
     // `-strand plus` or `minus` builds the buffer serially from the contexts that are searched
     // (`build_strand_query_blastna_buffer`); `both` is the code of the search without the option.
@@ -10400,6 +10418,7 @@ fn search_query_batch(
             strand,
         )
     };
+    x_probe_gaps::mark("S4_enc1");
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
     let encoded_query_concat_blastna_with_sentinels: &[u8] = &encoded_query_buffer;
     let encoded_query_concat_blastna: &[u8] = &encoded_query_buffer[1..query_concat_length + 1];
@@ -10962,6 +10981,7 @@ fn search_query_batch(
         // Diagnostic (LOSAT_TIMING): the batch's lookup table for the common line
         // (utils/xtiming.rs). No NCBI counterpart.
         let t_build_lookup = crate::utils::xtiming::clock();
+        x_probe_gaps::mark("S5_build0");
         let tables = build_lookup_tables(
             &config,
             &args,
@@ -10974,6 +10994,7 @@ fn search_query_batch(
             x_keep,
         );
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
+        x_probe_gaps::mark("S6_build1");
         tables
     };
 
@@ -11028,6 +11049,7 @@ fn search_query_batch(
     //     ...
     // }
     // ```
+    x_probe_gaps::mark("S7_search0");
     let t_search_start = if timing_enabled {
         Some(std::time::Instant::now())
     } else {
@@ -18103,6 +18125,7 @@ fn search_query_batch(
             }
         },
     };
+    x_probe_gaps::mark("S8_prelim1");
     if x_cancelled() {
         return Err(x_qbatch_par::Cancelled.into());
     }
@@ -18185,6 +18208,7 @@ fn search_query_batch(
     if x_cancelled() {
         return Err(x_qbatch_par::Cancelled.into());
     }
+    x_probe_gaps::mark("S9_tb1");
     let mut batch = batch_result(hit_lists, Vec::new());
     if let Some(timing) = timing.as_ref() {
         batch.timing = blastn_timing_text(timing.as_ref(), t_search_start, t_total);

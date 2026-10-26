@@ -928,6 +928,7 @@ mod tests {
                     3 * longest,
                     3 * longest + 1,
                     4096 + longest,
+                    32768 + longest,
                     longest * 1024,
                 ] {
                     let want = calls(&lookup, &presence, &subject, range, array_size, None);
@@ -1065,6 +1066,7 @@ mod tests {
                 longest + hits,
                 3 * longest,
                 4096 + longest,
+                32768 + longest,
                 longest * 1024,
             ] {
                 let range = (0, subject.len() as i32 - 4);

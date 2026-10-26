@@ -424,8 +424,9 @@ mod tests {
                     longest + 1,
                     longest + 2,
                     3 * longest,
-                    // NCBI's offset array (GetOffsetArraySize, `LOSAT_X_TBNPAIRCAP`).
+                    // NCBI's offset array (GetOffsetArraySize) and `LOSAT_X_TBNPAIRCAP`'s.
                     4096 + longest,
+                    32768 + longest,
                     longest * 1024,
                 ] {
                     let want = calls(&lookup, &subject, range, array_size, false);

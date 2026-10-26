@@ -124,15 +124,23 @@ fn in_scope(
 }
 
 /// The queries the fills read (those of `lut_word_length` letters or more) have offsets that ascend
-/// without overlap, so their words come in increasing order of offset.
+/// without overlap, and no mask ends before it starts (`build_unmasked_ranges` then gives ranges
+/// that ascend without overlap; an inverted mask would give overlapping ranges), so their words come
+/// in increasing order of offset.
 fn ascending_offsets(words: &Words<'_>) -> bool {
     let mut end = 0usize;
-    for (seq, &offset) in words.queries_blastna.iter().zip(words.query_offsets) {
+    for (q, (seq, &offset)) in words
+        .queries_blastna
+        .iter()
+        .zip(words.query_offsets)
+        .enumerate()
+    {
         if seq.len() < words.lut_word_length {
             continue;
         }
         let start = offset.max(0) as usize;
-        if start < end {
+        let masks = words.query_masks.get(q).map_or(&[][..], Vec::as_slice);
+        if start < end || masks.iter().any(|m| m.start > m.end) {
             return false;
         }
         end = start + seq.len();
@@ -201,6 +209,26 @@ impl Narrow {
     pub(super) fn wide(&self, cells: usize, next_pos_len: usize) -> (Vec<u32>, Vec<u32>) {
         (widen(&self.heads, cells), widen(&self.chain, next_pos_len))
     }
+}
+
+/// Tests only (`x_mb_lookup_once`'s `OnceStats::first_pages`): the pages of `words` (at its address)
+/// of the words that hold the first or the last byte of a cell other than 0 among the first `cells`:
+/// the pages the read-once fill's marks give for the cells it wrote.
+#[cfg(test)]
+pub(super) fn written_pages(words: &[u32], cells: usize) -> std::collections::BTreeSet<usize> {
+    const PAGE_BYTES: usize = 4096;
+    let base = words.as_ptr() as usize;
+    let mut pages = std::collections::BTreeSet::new();
+    for (w, _) in words.iter().enumerate().filter(|(_, &v)| v != 0) {
+        for cell in 4 * w / 3..=((4 * w + 3) / 3).min(cells.saturating_sub(1)) {
+            if get(words, cell) != 0 {
+                for byte in [3 * cell, 3 * cell + 2] {
+                    pages.insert((base + 4 * (byte >> 2)) / PAGE_BYTES);
+                }
+            }
+        }
+    }
+    pages
 }
 
 /// Tests only: the first `n` elements of `words` as 4-byte values.
@@ -302,7 +330,62 @@ pub(super) unsafe fn store_exact(base: *mut u32, i: usize, value: u32) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::MaskedInterval;
     use super::*;
+
+    fn words<'a>(
+        refs: &'a [&'a [u8]],
+        offsets: &'a [i32],
+        masks: &'a [Vec<MaskedInterval>],
+        lut: usize,
+    ) -> Words<'a> {
+        Words {
+            queries_blastna: refs,
+            query_offsets: offsets,
+            query_masks: masks,
+            word_length: 16,
+            lut_word_length: lut,
+            kmer_mask: (1u64 << (2 * lut)) - 1,
+            ascending_cells: false,
+        }
+    }
+
+    // The scope: 4^12 cells and `lut_word_length` 12, newest first, no database word counts or
+    // BLEMIR_DEBUG, `next_pos` of at most 2^24 elements, query offsets that ascend without overlap
+    // (queries shorter than a word do not count) and no inverted mask.
+    #[test]
+    fn the_scope_takes_ascending_queries_of_4_12_tables_only() {
+        let queries: Vec<Vec<u8>> = vec![vec![0; 100], vec![1; 5], vec![2; 50]];
+        let refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+        let plain = vec![Vec::new(); 3];
+        let ok = words(&refs, &[0, 101, 107], &plain, 12);
+        assert!(in_scope(&ok, CELLS, false, false, 158));
+        assert!(in_scope(&ok, CELLS, false, false, CELLS));
+        assert!(!in_scope(&ok, CELLS, false, false, CELLS + 1));
+        assert!(!in_scope(&ok, CELLS, true, false, 158));
+        assert!(!in_scope(&ok, CELLS, false, true, 158));
+        let lut11 = words(&refs, &[0, 101, 107], &plain, 11);
+        assert!(!in_scope(&lut11, 1 << 22, false, false, 158));
+        let ascending = Words {
+            ascending_cells: true,
+            ..words(&refs, &[0, 101, 107], &plain, 12)
+        };
+        assert!(!in_scope(&ascending, CELLS, false, false, 158));
+        // a query shorter than a word does not count; overlapping or descending ones do
+        let short_first = words(&refs, &[0, 0, 101], &plain, 12);
+        assert!(in_scope(&short_first, CELLS, false, false, 152));
+        let overlapping = words(&refs, &[0, 101, 99], &plain, 12);
+        assert!(!in_scope(&overlapping, CELLS, false, false, 150));
+        let descending = words(&refs, &[60, 0, 0], &plain, 12);
+        assert!(!in_scope(&descending, CELLS, false, false, 161));
+        let inverted = vec![
+            vec![MaskedInterval { start: 70, end: 20 }],
+            Vec::new(),
+            Vec::new(),
+        ];
+        let inverted = words(&refs, &[0, 101, 107], &inverted, 12);
+        assert!(!in_scope(&inverted, CELLS, false, false, 158));
+    }
 
     #[test]
     fn the_words_hold_the_elements_and_the_last_read() {

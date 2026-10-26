@@ -148,10 +148,11 @@ fn in_range(words: &Words<'_>, t: &XMbTables<'_>) -> bool {
         .queries_blastna
         .iter()
         .fold(0usize, |sum, seq| sum.saturating_add(seq.len()));
+    // (3-byte elements: indexes and values below 2^24 as well)
     let (cells, next_len) = if t.x_h24 {
         (
             x_mb_narrow::capacity(t.hashtable.len()),
-            x_mb_narrow::capacity(t.next_pos.len()),
+            x_mb_narrow::capacity(t.next_pos.len()).min(x_mb_narrow::CELLS),
         )
     } else {
         (t.hashtable.len(), t.next_pos.len())
@@ -159,7 +160,7 @@ fn in_range(words: &Words<'_>, t: &XMbTables<'_>) -> bool {
     (1..=16).contains(&lut_word_length)
         && words.kmer_mask == (1u64 << (2 * lut_word_length)) - 1
         && if t.x_h24 {
-            cells > last_cell && next_len <= x_mb_narrow::CELLS && !words.ascending_cells
+            cells > last_cell && !words.ascending_cells
         } else {
             cells == last_cell.wrapping_add(1)
         }

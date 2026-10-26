@@ -867,25 +867,30 @@ fn fill_mode(
         let _ = super::x_mb_lookup_once::fill(parts, words, tables, in_pool, timed, resident);
         return FillStats { once: true };
     }
-    fill_with(parts, words, tables, in_pool)
+    // LOSAT_X_MB24: the instance for 3-byte elements.
+    if tables.x_h24 {
+        fill_with::<true>(parts, words, tables, in_pool)
+    } else {
+        fill_with::<false>(parts, words, tables, in_pool)
+    }
 }
 
 /// No NCBI counterpart: `fill` without the read-once fill (the shared arrays are updated by the
 /// owners of the cells).
-fn fill_with(parts: usize, words: &Words<'_>, tables: Tables<'_>, in_pool: bool) -> FillStats {
-    let h24 = tables.x_h24;
-    let table_size = if h24 {
+/// `H24` (LOSAT_X_MB24): `tables` holds 3-byte elements (`Tables::x_h24`).
+fn fill_with<const H24: bool>(
+    parts: usize,
+    words: &Words<'_>,
+    tables: Tables<'_>,
+    in_pool: bool,
+) -> FillStats {
+    debug_assert_eq!(tables.x_h24, H24);
+    let table_size = if H24 {
         words.kmer_mask as usize + 1
     } else {
         tables.hashtable.len()
     };
     let (block_shift, owner) = plan(table_size, tables.pv_array_bts, parts);
-    // LOSAT_X_MB24: the instance for 3-byte elements.
-    let fill_part = if h24 {
-        fill_part::<true>
-    } else {
-        fill_part::<false>
-    };
     let parts = parts.clamp(1, 255);
     let shared = SharedTables {
         hashtable: Shared::new(tables.hashtable),
@@ -902,9 +907,11 @@ fn fill_with(parts: usize, words: &Words<'_>, tables: Tables<'_>, in_pool: bool)
     let ran = in_pool && {
         rayon::scope(|scope| {
             for part in 1..parts {
-                scope.spawn(move |_| fill_part(part as u8, owner, block_shift, words, shared));
+                scope.spawn(move |_| {
+                    fill_part::<H24>(part as u8, owner, block_shift, words, shared)
+                });
             }
-            fill_part(0, owner, block_shift, words, shared);
+            fill_part::<H24>(0, owner, block_shift, words, shared);
         });
         true
     };
@@ -918,7 +925,7 @@ fn fill_with(parts: usize, words: &Words<'_>, tables: Tables<'_>, in_pool: bool)
     };
     if !ran {
         for part in 0..parts {
-            fill_part(part as u8, owner, block_shift, words, shared);
+            fill_part::<H24>(part as u8, owner, block_shift, words, shared);
         }
     }
     FillStats { once: false }
@@ -1682,7 +1689,8 @@ pub(super) mod tests {
     }
 
     // LOSAT_X_MB24 at its edges. Words of the cells on both sides of block boundaries (`plan`'s
-    // blocks of 2^11 to 2^20 cells, whose owners differ), 40 of each (long chains), through the
+    // blocks of 2^11 to 2^20 cells, whose owners differ) and of the first and last cells, 40 of
+    // each (long chains), through the
     // serial build and both pool fills on pools of 2, 5 and 16 threads; and one query placed so
     // that `next_pos` has 2^24 elements (its last offset 2^24 - 1: 3-byte elements) or 2^24 + 1
     // (4-byte, as before). The chains, presence vector and counters equal the loop's.
@@ -1700,7 +1708,8 @@ pub(super) mod tests {
                 .map(|k| ((code >> (2 * k)) & 3) as u8)
                 .collect()
         };
-        let mut edges = Vec::new();
+        // and the first and last cells (the last one's 4-byte read takes the slack byte)
+        let mut edges = vec![0, cells - 1];
         for s in 11..=20 {
             for k in [1usize, 3, 7] {
                 if k << s < cells {

@@ -95,6 +95,7 @@ LOSAT_X_DPWINDOW	blastn,blastp,blastx,tblastn	conditional	required	gap	vector X-
 LOSAT_X_FOLDLEAN	blastn	conditional	required	required	the dc-megablast strips folds (PAIRPARDISC / PAIRPARDISCARR stages: 2+ threads or 1 with BNDCONE, one unmasked subject); ref = the reference fold where those stages do not run; recorded only at their decision points (nothing while both are off)
 LOSAT_X_GREEDYROWFUSE	blastn	platform			x86_64 with AVX2, BMI1, BMI2 and LZCNT only (the megablast greedy rows); other CPUs and targets run the plain three-pass rows
 LOSAT_X_GREEDYSPEC	blastn	conditional	required	required	2+ threads (AHEAD scheduling); acts only where the QGROUPPAR owner loop stays
+LOSAT_X_MB24	blastn	conditional	required	required	contiguous megablast table of 4^12 cells (query batch of ~300,000 table entries or more), newest first, next_pos of at most 2^24 elements, no db word counts or BLEMIR_DEBUG; ref = smaller tables, the blastn task's re-threaded tables, larger batches
 LOSAT_X_MBBATCH	blastn	platform			wasm/aarch64 where MBDELAY does not run
 LOSAT_X_MBDELAY	blastn	platform			x86 native (prefetch instruction); MBBATCH runs elsewhere
 LOSAT_X_MBFILL	blastn	conditional	required	gap	one-thread build (1 thread, or no pool of 2+ threads) of the contiguous megablast or the two-stage blastn table, x86_64 and wasm32 only; not with database word counts (limit_lookup, not a CLI option); ref gap: needs a target other than x86_64 and wasm32 (platform-checks arm64), or limit_lookup set by a library caller

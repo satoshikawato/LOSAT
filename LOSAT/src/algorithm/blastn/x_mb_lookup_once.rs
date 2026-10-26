@@ -1201,14 +1201,19 @@ fn fill_chunked(
             }
         });
         // Tests: the pages of `hashtable` the first chunk wrote (every written cell holds a 1-based
-        // query offset, other than 0), which the round must have touched.
+        // query offset, other than 0), which the round must have touched; for 3-byte cells
+        // (LOSAT_X_MB24) the pages of the words of their first and last bytes (a cell's last byte
+        // may be 0 on a page of its own).
         #[cfg(test)]
         if k == 0 {
             let t = fill.tables.hashtable;
             // SAFETY: between two phases; the table outlives the fill.
-            stats.first_pages = super::x_disc_lookup_par::nonzero_pages(unsafe {
-                std::slice::from_raw_parts(t.ptr, t.len)
-            });
+            let v = unsafe { std::slice::from_raw_parts(t.ptr, t.len) };
+            stats.first_pages = if h24 {
+                super::x_mb_narrow::written_pages(v, table_size)
+            } else {
+                super::x_disc_lookup_par::nonzero_pages(v)
+            };
         }
     }
     run_phase(&mut clock, 2, parts, in_pool, |i| unsafe {

@@ -6,9 +6,10 @@
 //! (`s_HitlistReapContained`, `blast_kappa.c` 224-273). The kept HSPs are the loop's (the unit tests
 //! of `x_reap_index.rs` compare them on random lists), so the property under test is that the report
 //! does not depend on the switch; that reports equal NCBI's is the business of the fixture
-//! comparisons. `LOSAT_X_REACH` shows the side each run took. Input: AP027131 proteins BDV02435.1,
-//! BDV02433.1, BDV02434.1 and BDV02232.1 (redo lists of 32 or more against the AP027133 genome: the
-//! index) and BDV02287.1 (a short list: NCBI's loop).
+//! comparisons. `LOSAT_X_REACH` shows the side each run took; whether the index removes an HSP is
+//! the unit tests' business (their random lists remove more than 10,000). Input: AP027131 proteins
+//! BDV02435.1, BDV02433.1, BDV02434.1 and BDV02232.1 (redo lists of 32 or more against the AP027133
+//! genome: the index) and BDV02287.1 (a short list: NCBI's loop).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

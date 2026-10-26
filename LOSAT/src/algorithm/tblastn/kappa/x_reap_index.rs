@@ -83,24 +83,22 @@ fn contains(outer: &GappedHsp, inner: &GappedHsp) -> bool {
 pub(super) fn x_reap_keep(hsps: &[(usize, GappedHsp)]) -> Vec<bool> {
     let mut keep = vec![true; hsps.len()];
     // (context, frame, subject start, position in `hsps`) of each HSP kept so far.
-    let mut by_start: BTreeSet<(usize, i8, i32, u32)> = BTreeSet::new();
+    let mut by_start: BTreeSet<(usize, i8, i32, usize)> = BTreeSet::new();
     let mut dmax = 0i64;
     for (read, &(context, inner)) in hsps.iter().enumerate() {
         let lo = (i64::from(inner.s_start.max(inner.s_end)) - dmax)
             .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
         let hi = inner.s_start.min(inner.s_end);
-        // Nearest start first: a containing HSP starts at or before this one, and the answer does
-        // not depend on the order.
+        // Lowest start first, the order the B11h probe counted; the answer does not depend on the
+        // order.
         let contained = lo <= hi
             && by_start
-                .range((context, inner.frame, lo, 0)..=(context, inner.frame, hi, u32::MAX))
-                .rev()
-                .any(|&(_, _, _, earlier)| contains(&hsps[earlier as usize].1, &inner));
+                .range((context, inner.frame, lo, 0)..=(context, inner.frame, hi, usize::MAX))
+                .any(|&(_, _, _, earlier)| contains(&hsps[earlier].1, &inner));
         if contained {
             keep[read] = false;
         } else {
-            let position = u32::try_from(read).expect("fewer than 2^32 HSPs per match");
-            by_start.insert((context, inner.frame, inner.s_start, position));
+            by_start.insert((context, inner.frame, inner.s_start, read));
             dmax = dmax.max(i64::from(inner.s_end) - i64::from(inner.s_start));
         }
     }
@@ -209,8 +207,11 @@ mod tests {
             };
             let row = if shape.reversed && random.next() % 6 == 0 {
                 let (context, mut h) = row;
-                std::mem::swap(&mut h.s_start, &mut h.s_end);
-                if random.next() % 2 == 0 {
+                let which = random.next() % 3;
+                if which != 1 {
+                    std::mem::swap(&mut h.s_start, &mut h.s_end);
+                }
+                if which != 0 {
                     std::mem::swap(&mut h.q_start, &mut h.q_end);
                 }
                 (context, h)
@@ -282,8 +283,9 @@ mod tests {
     }
 
     /// Edges: a list of one, equal HSPs (the first kept), equal scores, end points on the edges of
-    /// the containing HSP, one past them, another frame or context, and an HSP longer than every
-    /// other kept (dmax grows after a short one was kept).
+    /// the containing HSP, one past them, another frame or context, an HSP longer than every
+    /// other kept (dmax grows after a short one was kept), and subject coordinates at the ends of
+    /// `i32` (the range start below `i32::MIN` is clamped).
     #[test]
     fn x_reap_keep_edges() {
         let one = vec![(0, hsp(1, 5, (0, 10), (0, 10)))];
@@ -306,6 +308,16 @@ mod tests {
         ];
         assert_eq!(reap_keep(&rows), expected);
         assert_eq!(x_reap_keep(&rows), expected);
+        let ends = vec![
+            (0, hsp(1, 90, (0, 100), (i32::MIN, i32::MAX))),
+            (0, hsp(1, 80, (10, 20), (i32::MAX - 5, i32::MAX - 1))),
+            (0, hsp(1, 80, (10, 20), (i32::MIN, i32::MIN + 3))),
+            (0, hsp(1, 95, (10, 20), (0, 5))),
+            (0, hsp(-1, 10, (10, 20), (0, 5))),
+        ];
+        let expected = vec![true, false, false, true, true];
+        assert_eq!(reap_keep(&ends), expected);
+        assert_eq!(x_reap_keep(&ends), expected);
     }
 
     /// `reap_contained_postredo_hsps` gives the same list and survivors with the switch on and off,

@@ -4996,10 +4996,13 @@ Scheduling (each value computed by one thread with the original function; order 
   survivors' order and the report stay the same (unit tests `x_reap_keep_keeps_what_ncbi_keeps` (1,152 random lists
   of 2 to 800 HSPs: dense and sparse coordinates, score order and none, tied scores, nested HSPs, ends one past the
   edges, other frames and contexts, ends before starts, against NCBI's loop `reap_keep`), `x_reap_keep_edges`,
-  `the_reap_is_the_same_with_and_without_the_index`; six broken variants of the index (dmax never grown, the range
-  one short at either end, reaped HSPs indexed, the score not compared, frames of one sign sharing an index) fail
-  them; `tests/tblastn_reap_idx.rs`: TEST-INPUT, the switch on and off at 1 and 2 threads). The probe's shadow
-  of this index visited 6,326 candidates in 0.30 thread-s with no answer differing. Shorter lists keep NCBI's loop.
+  `the_reap_is_the_same_with_and_without_the_index`; six broken variants of the index fail them: dmax never grown,
+  the range one short at either end, the score not compared, frames of one sign sharing an index, the range start
+  wrapped instead of clamped at the ends of `i32`; a seventh, which also indexes the HSPs already reaped, gives the
+  same answers: an HSP inside a reaped one is inside the HSP that reaped it; `tests/tblastn_reap_idx.rs`: four
+  AP027131 proteins with long redo lists and one with a short list against the AP027133 genome, the switch on and
+  off at 1 and 2 threads, both sides reached). The probe's shadow of this index (the same range and order, lowest
+  start first) visited 6,326 candidates in 0.30 thread-s with no answer differing. Shorter lists keep NCBI's loop.
   Conditional: the new side is a match whose redo gives 32 HSPs or more (`x_reach!`, once per match), the reference
   side one with 2 to 31. Cost and floor: reap 73.6 thread-s of the 706 thread-s of the 35 proteins at 8 threads; the
   floor is the index, about 0.3 thread-s. MEASURED.

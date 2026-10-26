@@ -4451,6 +4451,29 @@ Scheduling (each value computed by one thread with the original function; order 
   and in the first record, a batch of queries without letters, a batch of skipped records, LOSAT's
   refusals; standard input and `/dev/stdin`; `-db`; the switch off unless set; `kept=0` with
   `LOSAT_X_RPTSTREAM` acting, with and without slots).
+- `LOSAT_X_QSCANPAR=1` (BLASTN: blastn, blastn-short and dc-megablast, where `LOSAT_X_QSTREAM` acts (not megablast),
+  `-subject` and `-db`, speed; in the strict set since 2026-10-26 (perf/bn-query-scan-par, evidence at the end of
+  this entry): on unless it is `0`) the first reading of `LOSAT_X_QSTREAM` (each record's length and how the reading
+  ends) is read in parts on `-num_threads` threads (the calling thread and scoped helpers: the search pool does not
+  exist yet) instead of on one thread while the others wait (`x_query_scan_par.rs`). The bytes from the reader's
+  start to the end of the file are cut at targets at most 256 KiB apart (at least four per thread); a part runs from
+  the first record start at or after its target (a `>` that begins a line, not followed by `?`) to the next part's,
+  and a new reader with the same configuration reads it with the loop of `scan` (the parts read at offsets,
+  `read_at`, so the search's reader stays where it was). A line that starts with `>` and not `>?` always starts a
+  record (`read_fasta_seq`: the defline, or the end of the record before), and what a reader carries from record to
+  record (the local-ID counter, the line number, the end-of-line style, the pushback) changes no record's letters
+  where the file has no `\r`, so the parts' lengths are the first reading's; the warnings of the records read there
+  are dropped by both (the second reading posts them per batch). No NCBI counterpart (NCBI reads its batches one at a
+  time); speed only, no floating-point operation. The rule (class conditional, `x_reach!` where `LOSAT_X_QSTREAM`
+  reads the lengths without the BLAST archive): two threads or more, a `unix` build with the `parallel` feature (not
+  WebAssembly or Windows), no BLAST archive (its title check comes from the first reading; no mark then), at least
+  4 MiB after the reader's start (`LOSAT_X_QSCANPARMIN`, tuning, sets the bytes); and, found while the parts are read,
+  no `\r` and no `>?` in the file (a gap line's length becomes that many `N`s, which no byte bound holds), a record
+  start within 256 KiB after every target (a part holds at most 512 KiB of records, so a thread holds one record of
+  at most that many letters), every byte of each part read (an I/O error or a file that ends early would look like
+  the end of its input to a reader), and every part read to its end without an `eEOF`, a reader error or LOSAT's
+  rejection of a Seq-id line. Where one of these fails the first reading runs on one thread as before and finds that
+  error with its messages. EVIDENCE_QSCANPAR
 - TBNPAR (graduated 2026-10-22; no variable, no `LOSAT_X_TBNPARSHADOW`; always on) tblastn:
   preliminary stage per (frame, chunk) and redo per match in parallel, one pool for the search. The
   unit-wise stage is the only preliminary stage of a search (at one thread, without a pool, it

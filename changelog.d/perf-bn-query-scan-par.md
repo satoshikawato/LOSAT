@@ -1,0 +1,1 @@
+- `blastn` searches that read their query file twice (many queries in a regular file, on two threads or more) read the query lengths first on all threads instead of one (`LOSAT_X_QSCANPAR`, one of the switches above; `=0` turns it off). Reports do not change.

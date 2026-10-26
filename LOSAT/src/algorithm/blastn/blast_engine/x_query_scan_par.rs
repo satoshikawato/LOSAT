@@ -1,7 +1,7 @@
 //! EXPERIMENT (LOSAT_X_QSCANPAR, in the strict set: on unless it is `0`): the first reading of
 //! LOSAT_X_QSTREAM (`x_query_stream::scan`, which keeps each query record's length and how the
-//! reading ends) cut into parts at record starts and read by the search's threads, each part by a
-//! reader of its own, before the search.
+//! reading ends) cut into parts at record starts and read on `-num_threads` threads (the calling
+//! thread and scoped helpers, before the search pool exists), each part by a reader of its own.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
 //! ```c++
@@ -41,7 +41,9 @@
 //! line, `advance_simple`), so neither the buffered window of the input nor the bytes before the
 //! part change a line. A part read to its end (its stream ends right after the line before the next
 //! part's defline, so its last record ends there, as at that defline) gives the first reading's
-//! records of those bytes.
+//! records of those bytes. Only part 0 starts where the first reading starts, so only there can the
+//! first line of the file be a Seq-id line (`read_one_seq` with the data loaders) or the reading
+//! meet an `eEOF` before a record; a later part's first line is its defline.
 //!
 //! When it does not act (the first reading runs as before, `scan` on the search's reader, which no
 //! part has moved: the parts read with `read_at`, which leaves the file position alone): the switch
@@ -49,18 +51,23 @@
 //! feature (WebAssembly, Windows); the BLAST archive (its title check, `check_titles_for`, comes
 //! from the first reading); a file of fewer than `MIN_BYTES` bytes after the reader's start
 //! (`LOSAT_X_QSCANPARMIN`, tuning, sets it); and, found while the parts are read, a `\r` anywhere in
-//! the file, a target with no record start within `MAX_REACH` bytes after it (a record that long
-//! would take that much memory in every thread that reads one), or a part whose reading ends with
-//! anything but the end of its bytes (an `eEOF`, a reader error or LOSAT's rejection of a Seq-id
-//! line: the first reading then finds it, with its messages, as before). What is read twice then
-//! is the parts' bytes up to the failure.
+//! the file, a `>?` anywhere in it (a gap line, whose length becomes that many `N`s, or a `>?_`
+//! defline), a target with no record start within `MAX_REACH` bytes after it (a record that long
+//! would take that much memory in every thread that reads one), a part whose bytes cannot all be
+//! read (an I/O error or a file that ends early: a reader takes either for the end of its input),
+//! or a part whose reading ends with anything but the end of its bytes (an `eEOF`, a reader error or
+//! LOSAT's rejection of a Seq-id line: the first reading then finds it, with its messages, as
+//! before). What is read twice then is the parts' bytes up to the failure.
 //!
-//! Memory: a part holds at most `MAX_SPAN + MAX_REACH` bytes of records, so a thread holds one
-//! record of at most that many letters and the reader's buffers at a time. No floating-point
-//! operation is involved.
+//! Memory: a part holds at most `MAX_SPAN + MAX_REACH` bytes of records, and without gap lines a
+//! record has no more letters than bytes, so a thread holds one record of at most that many letters
+//! and the reader's buffers at a time. No floating-point operation is involved.
 //!
 //! The decision is marked with `x_reach!("LOSAT_X_QSCANPAR", acts)` where LOSAT_X_QSTREAM reads
-//! the lengths and the switch is on (`acts`: the parts' lengths are taken).
+//! the lengths and the switch is on, without the BLAST archive (`acts`: the parts' lengths are
+//! taken).
+
+#![cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
 
 use std::fs::File;
 use std::sync::OnceLock;
@@ -252,7 +259,7 @@ fn record_start(file: &File, start: u64, target: u64, end: u64, max_reach: u64) 
         let looked = looked.min(usize::try_from(limit - at).unwrap_or(usize::MAX));
         for index in 0..looked {
             let byte = block[index];
-            if byte == b'>' && prev == b'\n' && block.get(index + 1) != Some(&b'?') {
+            if byte == b'>' && prev == b'\n' && block[..want].get(index + 1) != Some(&b'?') {
                 return Some(at + index as u64);
             }
             prev = byte;
@@ -263,8 +270,8 @@ fn record_start(file: &File, start: u64, target: u64, end: u64, max_reach: u64) 
 }
 
 /// The lengths of the records of bytes `from..to` of `file`, read by a new reader with the loop of
-/// `x_query_stream::scan`, or `None` if they hold a `\r`, the reading ends otherwise than at the
-/// end of the bytes, or another part failed (`failed`).
+/// `x_query_stream::scan`, or `None` if they hold a `\r` or a `>?`, cannot all be read, the reading
+/// ends otherwise than at the end of the bytes, or another part failed (`failed`).
 #[cfg(all(unix, feature = "parallel"))]
 fn read_part(
     file: &File,
@@ -280,13 +287,14 @@ fn read_part(
     if from >= to {
         return Some(lengths);
     }
-    let mut saw_cr = false;
+    let mut refused = false;
     let mut source = FastaInputSource::x_from_reader(
         PartReader {
             file,
             at: from,
             end: to,
-            saw_cr: &mut saw_cr,
+            last: b'\n',
+            refused: &mut refused,
         },
         config,
     );
@@ -303,17 +311,20 @@ fn read_part(
         }
     }
     drop(source);
-    (!saw_cr).then_some(lengths)
+    (!refused).then_some(lengths)
 }
 
 /// Bytes `at..end` of a file, read at their offsets (the file's position stays where it is), that
-/// notes a `\r` in what it returns.
+/// notes (`refused`) a `\r` or a `>?` in what it returns, and an I/O error or an end of the file
+/// before `end` (which the reader would take for the end of its input).
 #[cfg(all(unix, feature = "parallel"))]
 struct PartReader<'a> {
     file: &'a File,
     at: u64,
     end: u64,
-    saw_cr: &'a mut bool,
+    /// The last byte returned (a part starts at the start of a line).
+    last: u8,
+    refused: &'a mut bool,
 }
 
 #[cfg(all(unix, feature = "parallel"))]
@@ -326,10 +337,22 @@ impl std::io::Read for PartReader<'_> {
         if want == 0 {
             return Ok(0);
         }
-        let n = self.file.read_at(&mut buf[..want], self.at)?;
-        if buf[..n].contains(&b'\r') {
-            *self.saw_cr = true;
+        let n = match self.file.read_at(&mut buf[..want], self.at) {
+            Ok(0) | Err(_) => {
+                *self.refused = true;
+                return Ok(0);
+            }
+            Ok(n) => n,
+        };
+        let bytes = &buf[..n];
+        if bytes.contains(&b'\r')
+            || (bytes.contains(&b'?')
+                && (bytes[0] == b'?' && self.last == b'>'
+                    || bytes.windows(2).any(|pair| pair == b">?")))
+        {
+            *self.refused = true;
         }
+        self.last = bytes[n - 1];
         self.at += n as u64;
         Ok(n)
     }
@@ -405,10 +428,13 @@ mod tests {
     }
 
     /// A FASTA text with the reader's cases: ids and none, titles, lower case, IUPAC letters, `N`
-    /// runs, digits and spaces in data lines, blank and comment lines, `>?` gap lines, deflines
-    /// without letters, data before the first defline, lines of any length and no final newline.
+    /// runs, digits and spaces in data lines, blank and comment lines, deflines without letters,
+    /// data before the first defline, lines of any length and no final newline; in one text of four
+    /// `>?` gap lines and `>?_` deflines, in one of eight a line of bad letters (a reader error).
     fn random_fasta(rng: &mut Rng, records: usize) -> Vec<u8> {
         let mut text = Vec::new();
+        let gaps = rng.below(4) == 0;
+        let bad = rng.below(8) == 0;
         if rng.below(4) == 0 {
             text.extend_from_slice(b"ACGTNACGT\n");
         }
@@ -417,16 +443,17 @@ mod tests {
                 0 => text.extend_from_slice(b">\n"),
                 1 => text.extend_from_slice(format!(">lcl|q{index} title {index}\n").as_bytes()),
                 2 => text.extend_from_slice(format!(">q{index}\n").as_bytes()),
-                3 => text.extend_from_slice(b">?_x a title\n"),
+                3 if gaps => text.extend_from_slice(b">?_x a title\n"),
                 _ => text.extend_from_slice(format!(">gnl|db|{index} some words\n").as_bytes()),
             }
             let lines = rng.below(8);
             for _ in 0..lines {
-                match rng.below(12) {
+                match rng.below(14) {
                     0 => text.push(b'\n'),
                     1 => text.extend_from_slice(b"; a comment\n"),
-                    2 => text.extend_from_slice(b">?10\n"),
+                    2 if gaps => text.extend_from_slice(b">?10\n"),
                     3 => text.extend_from_slice(b"  12 acgt acgt 13\n"),
+                    4 if bad && rng.below(4) == 0 => text.extend_from_slice(b"%%%%%%%%%%%%\n"),
                     _ => {
                         let width = 1 + rng.below(90) as usize;
                         for _ in 0..width {
@@ -453,7 +480,7 @@ mod tests {
     #[test]
     fn the_parts_give_the_first_readings_lengths() {
         let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
-        let mut taken = 0;
+        let (mut taken, mut refused, mut failed) = (0, 0, 0);
         for round in 0..300 {
             let loaders = round % 2 == 0;
             let config = ReaderConfig::query("BLASTN", false, loaders);
@@ -472,15 +499,96 @@ mod tests {
                     match parallel(&text, 0, config, threads, limits) {
                         Some(lengths) => {
                             assert!(clean, "round {round}: parts taken where the reading fails");
+                            assert!(!has_gap_mark(&text), "round {round}: parts taken with `>?`");
                             assert_eq!(lengths, expected, "round {round} threads {threads}");
                             taken += 1;
                         }
-                        None => {}
+                        None => refused += 1,
+                    }
+                    if !clean {
+                        failed += 1;
                     }
                 }
             }
         }
         assert!(taken > 1000, "the parts were taken {taken} times");
+        assert!(
+            refused > 300 && failed > 30,
+            "refused {refused}, failed readings {failed}"
+        );
+    }
+
+    fn has_gap_mark(text: &[u8]) -> bool {
+        text.windows(2).any(|pair| pair == b">?")
+    }
+
+    /// The record start of `record_start` found by looking at every byte.
+    fn record_start_by_bytes(text: &[u8], target: usize, reach: usize) -> Option<usize> {
+        if target >= text.len() {
+            return Some(text.len());
+        }
+        let limit = text.len().min(target + reach);
+        (target..limit)
+            .find(|&at| {
+                text[at] == b'>' && text[at - 1] == b'\n' && text.get(at + 1) != Some(&b'?')
+            })
+            .or((limit == text.len()).then_some(text.len()))
+    }
+
+    #[test]
+    fn record_starts_across_blocks_are_those_of_every_byte() {
+        let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+        for round in 0..6 {
+            let mut text = random_fasta(&mut rng, 120 + 40 * round);
+            // Record starts at and around the block edges of the search (8,192 bytes from a target).
+            for edge in [8_190usize, 8_191, 8_192, 8_193, 16_383, 16_384] {
+                if edge + 2 < text.len() {
+                    text[edge - 1] = b'\n';
+                    text[edge] = b'>';
+                }
+            }
+            let (path, file) = file_of(&text, "rsb");
+            let end = text.len() as u64;
+            for target in (1..text.len())
+                .step_by(37)
+                .chain([1, 2, 8_190, 8_191, 8_192, 8_193])
+            {
+                for reach in [1usize, 50, 8_191, 8_192, 8_193, 20_000, 1 << 20] {
+                    assert_eq!(
+                        record_start(&file, 0, target as u64, end, reach as u64),
+                        record_start_by_bytes(&text, target, reach).map(|at| at as u64),
+                        "round {round} target {target} reach {reach}"
+                    );
+                }
+            }
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn a_part_refuses_gap_marks_across_reads_and_bytes_it_cannot_read() {
+        let config = ReaderConfig::query("BLASTN", false, true);
+        let failed = std::sync::atomic::AtomicBool::new(false);
+        // The reader's input window is 8,191 bytes: a `>` as its last byte, `?` the next read's first.
+        let mut text = b">a\n".to_vec();
+        while text.len() < 8_189 {
+            text.extend_from_slice(b"ACGTACGTAC\n");
+        }
+        text.truncate(8_189);
+        text.push(b'\n');
+        let mut gap = text.clone();
+        gap.extend_from_slice(b">?5\nACGT\n");
+        assert_eq!(gap[8_190..8_192], *b">?");
+        let mut plain = text.clone();
+        plain.extend_from_slice(b">b\nACGT\n");
+        for (bytes, taken) in [(&gap, false), (&plain, true)] {
+            let (path, file) = file_of(bytes, "gap");
+            let end = bytes.len() as u64;
+            assert_eq!(read_part(&file, 0, end, config, &failed).is_some(), taken);
+            // A part past the end of the file: the reader would take the early end for its own.
+            assert_eq!(read_part(&file, 0, end + 100, config, &failed), None);
+            let _ = std::fs::remove_file(path);
+        }
     }
 
     #[test]
@@ -507,6 +615,25 @@ mod tests {
             parts_per_thread: 1,
         };
         assert_eq!(parallel(&long, 0, config, 4, limits), None);
+        // A Seq-id line first (the data loaders' check of the first line), and comment lines only
+        // (an `eEOF`): the parts are taken only where the first reading ends at the end.
+        for text in [
+            b"NC_000913.3\n>a\nACGT\n>b\nAC\n".as_slice(),
+            b"; one\n; two\n\n",
+        ] {
+            let (expected, clean) = serial(text, config);
+            let parts = parallel(text, 0, config, 4, SMALL);
+            assert_eq!(
+                parts.is_some(),
+                clean,
+                "{:?}",
+                String::from_utf8_lossy(text)
+            );
+            if let Some(lengths) = parts {
+                assert_eq!(lengths, expected);
+            }
+        }
+        assert!(!serial(b"; one\n; two\n\n", config).1);
         // One thread, or fewer bytes than the minimum.
         assert_eq!(parallel(&good, 0, config, 1, SMALL), None);
         let (path, file) = file_of(&good, "min");

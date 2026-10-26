@@ -118,7 +118,7 @@ LOSAT_X_QBATCHPAR	blastn	conditional	gap	required	-subject only, 2+ threads, 2+ 
 LOSAT_X_QDUSTPAR	blastn	conditional	required	required	DUST on (default except blastn-short), 2+ threads and 2+ queries in the batch
 LOSAT_X_QGROUPPAR	blastn	conditional	required	required	2+ threads, one subject at a time, 2+ queries with HSPs, no query holding >1/4 of HSPs, no debug
 LOSAT_X_QPREPPAR	blastn	conditional	required	required	2+ threads and 2+ queries (encoding) or contexts (blocks)
-LOSAT_X_QSCANPAR	blastn	conditional	gap	required	where QSTREAM reads the lengths first: 2+ threads, unix, no archive, 4 MiB+ after the reader start; falls back on \r, records over ~512 KiB, any reader error; new gap: no fixture query file is 4 MiB
+LOSAT_X_QSCANPAR	blastn	conditional	gap	required	where QSTREAM reads the lengths (not megablast), no archive: 2+ threads, unix, 4 MiB+ after the reader start; falls back on \r or >? in the file, a record over 256-512 KiB, an unread byte, any reader error; new gap: no fixture query file is 4 MiB
 LOSAT_X_QSTREAM	blastn	conditional	required	required	only with RPTSTREAM; off for -task megablast, stdin/pipes, file <2x largest batch, files where QBATCHPAR slots may run
 LOSAT_X_REDOCONTAINIDX	blastp,blastx,tblastn	conditional	required	required	composition-based redo: a query's list of kept alignments in one match reaches 32 (X_INDEX_FROM) -> index by subject start; ref: every list of the match shorter
 LOSAT_X_RPTSTREAM	blastn	conditional	required	required	usually on (CLI); off for Web adapter/observers, debug, several formats, refused scoring/titles/search space (outfmt 17 streams despite titles and ambiguity: sam_despite); checks only with 2+ batches

@@ -53,6 +53,8 @@ mod blastn_query_drop;
 mod blastn_query_dust_par;
 #[path = "../blastn_query_prep_par.rs"]
 mod blastn_query_prep_par;
+#[path = "../blastn_query_scan_par.rs"]
+mod blastn_query_scan_par;
 #[path = "../blastn_query_stream.rs"]
 mod blastn_query_stream;
 #[path = "../blastn_report_stream.rs"]

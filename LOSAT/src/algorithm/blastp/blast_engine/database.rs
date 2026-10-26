@@ -54,6 +54,13 @@ use super::{
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod x_db_cut;
+// EXPERIMENT (LOSAT_X_BPDBKEEP): one search scratch and one block buffer per worker for the whole
+// preliminary stage.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+mod x_db_keep;
 mod x_listed_lean;
 mod x_redo_db_subjects;
 #[cfg(test)]
@@ -541,6 +548,23 @@ where
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
     P: PrelimSink,
 {
+    // EXPERIMENT (LOSAT_X_BPDBKEEP): `database/x_db_keep.rs`.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if x_db_keep::x_bp_db_keep() {
+        return x_db_keep::x_search_blocks_kept(
+            database,
+            pool,
+            window,
+            block_bytes,
+            blocks_per_thread,
+            new_scratch,
+            process_subject,
+            sink,
+        );
+    }
     let db = &database.db;
     #[cfg(all(
         feature = "parallel",

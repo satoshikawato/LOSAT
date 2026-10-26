@@ -81,6 +81,15 @@ pub(crate) fn x_dbidxread() -> XDbIdxRead {
     })
 }
 
+// No NCBI counterpart: reads the LOSAT_X_BPDBKEEP switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPDBKEEP): a strict-set switch, on unless it is `0`
+/// (`algorithm/blastp/blast_engine/database/x_db_keep.rs`).
+pub(crate) fn x_bp_db_keep() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPDBKEEP"))
+}
+
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): the most sequences of a range of
 /// `SeqDb::header_ranges` that the checks of every title read at once.
 pub const HEADER_RANGE_SEQS: u32 = 1024;
@@ -921,6 +930,23 @@ impl SeqDb {
             )));
         };
         volume.x_read_block_mapped(range.first, range.end, range.first_ordinal)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_block` with the bytes in `buf`
+    /// (`Volume::x_read_block_into`).
+    pub fn x_read_block_into(
+        &self,
+        range: BlockRange,
+        buf: Vec<u8>,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        let Some(volume) = self.volumes.get(range.volume) else {
+            return Err(SeqDbError::Range(format!(
+                "volume {} is outside the database ({} volumes)",
+                range.volume,
+                self.volumes.len()
+            )));
+        };
+        volume.x_read_block_into(range.first, range.end, range.first_ordinal, buf)
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_sequence` with the bytes in a buffer that glibc maps

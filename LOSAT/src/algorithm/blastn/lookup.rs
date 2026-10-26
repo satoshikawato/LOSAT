@@ -984,11 +984,11 @@ impl MbLookupTable {
         if !self.has_hits(index) {
             return;
         }
+        if let Some(narrow) = self.x_narrow.as_ref() {
+            return narrow.each(index as usize, callback);
+        }
         let Some(&head) = self.hashtable.get(index as usize) else {
-            return match self.x_narrow.as_ref() {
-                Some(narrow) => narrow.each(index as usize, callback),
-                None => self.x_csr_each(index, callback),
-            };
+            return self.x_csr_each(index, callback);
         };
         let mut q_off = head;
         while q_off != 0 {
@@ -1020,11 +1020,11 @@ impl MbLookupTable {
         if !self.has_hits(index) {
             return false;
         }
+        if let Some(narrow) = self.x_narrow.as_ref() {
+            return narrow.contains(index as usize, q_off_1);
+        }
         let Some(&head) = self.hashtable.get(index as usize) else {
-            return match self.x_narrow.as_ref() {
-                Some(narrow) => narrow.contains(index as usize, q_off_1),
-                None => x_csr(),
-            };
+            return x_csr();
         };
         let mut found = false;
         let mut q_off = head;
@@ -1043,11 +1043,11 @@ impl MbLookupTable {
         if !self.has_hits(index) {
             return 0;
         }
+        if let Some(narrow) = self.x_narrow.as_ref() {
+            return narrow.count(index as usize);
+        }
         let Some(&head) = self.hashtable.get(index as usize) else {
-            return match self.x_narrow.as_ref() {
-                Some(narrow) => narrow.count(index as usize),
-                None => x_csr(),
-            };
+            return x_csr();
         };
         let mut count = 0usize;
         let mut q_off = head;

@@ -10,10 +10,11 @@
 /// kernel's frame is realigned and its spill slots lie on 32-byte boundaries; the volatile store
 /// of one byte (never read) keeps the local. It does not change any value NCBI computes.
 ///
-/// The realigned frame takes `rbp` as its frame pointer, one general register less in the kernel:
-/// align8's traceback rows run about 1.6 % more instructions on dc-megablast (stack loads and
-/// stores of general registers). Kernels where that cost more time than the splits saved
-/// (megablast's greedy rows, blastp's restricted rows) do not call it.
+/// The realigned frame takes `rbp` as its frame pointer, one general register less in the kernel.
+/// In align8's traceback kernel that meant stack loads and stores of general registers in the row
+/// code (1.65 % more instructions on dc-megablast, 1.003 of the cycles at one thread), and in
+/// megablast's greedy rows and blastp's restricted rows it cost more time than the splits saved,
+/// so those kernels keep the ABI's frame.
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
 pub(crate) fn x_frame_align() {

@@ -1321,8 +1321,11 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
-    // No NCBI counterpart (memory placement only): see `x_frame_align`.
-    crate::utils::x_frame::x_frame_align();
+    // No NCBI counterpart (memory placement only): see `x_frame_align`. Only the score-only kernel:
+    // in the traceback kernel the realigned frame's register cost outweighed its spills (dc-megablast).
+    if !TB {
+        crate::utils::x_frame::x_frame_align();
+    }
     sc.ops.clear();
     if len1 == 0 || len2 == 0 {
         return Some(XdropResult {

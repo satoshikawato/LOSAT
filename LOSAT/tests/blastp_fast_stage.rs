@@ -233,10 +233,11 @@ fn blastp_fast_reports_do_not_depend_on_the_staged_loop() {
                 // list, the dense one with the list with the branch and the reference table.
                 // (label, variable, the sides of LOSAT_X_BPFSTAGE and of LOSAT_X_BPFLEAN)
                 let first = source == "-subject" && threads == "1";
-                let mut arms = vec![
-                    ("off", OFF, (false, false), (false, false)),
-                    ("lean off", LEAN_OFF, (dense, !dense), (false, false)),
-                ];
+                let mut arms = vec![("off", OFF, (false, false), (false, false))];
+                // The sparse table does not take the loop: its LOSAT_X_BPFLEAN=0 on one case.
+                if dense || first {
+                    arms.push(("lean off", LEAN_OFF, (dense, !dense), (false, false)));
+                }
                 if first && !dense {
                     arms.push(("every table", EVERY_TABLE, (true, false), (true, false)));
                 }

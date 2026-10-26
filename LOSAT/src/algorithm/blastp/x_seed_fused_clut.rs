@@ -645,6 +645,8 @@ struct XLeanAt {
 /// Every index in `cells` is below `starts.len() - 1` (the slice bounds are read without bounds
 /// checks), as in the list of `x_list_pairs_lean` where `x_pairs_fit` holds and the zero entries
 /// past it.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (quoted at
+// `x_scan_two_hit_compressed_flat`)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 unsafe fn x_lean_copy(
@@ -713,7 +715,9 @@ const _: () = assert!(X_RUN == 8);
 ///
 /// # Safety
 ///
-/// `k < end`, and `diffs` and `heres` have `staged + X_RUN` places.
+/// `diffs` and `heres` have `staged + X_RUN` places (`k < end` is the caller's, for the length).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (quoted at
+// `x_scan_two_hit_compressed_flat`)
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 unsafe fn x_lean_run(
@@ -728,8 +732,8 @@ unsafe fn x_lean_run(
 ) -> usize {
     let take = (end - k).min(X_RUN);
     if k + X_RUN <= hits.len() {
-        // SAFETY: k + 4 <= k + 4 * (end - k > 4) + 4 <= k + X_RUN <= hits.len() (tested), and
-        // the places are this function's contract.
+        // SAFETY: both reads end at or before hi_at + 4 <= k + X_RUN <= hits.len() (tested),
+        // and the places are this function's contract.
         unsafe {
             let p = hits.as_ptr();
             let lo = std::ptr::read_unaligned(p.add(k).cast::<[i32; 4]>());
@@ -1133,6 +1137,12 @@ mod tests {
             .find(|&i| flat.starts[i + 1] > flat.starts[i])
             .expect("a used cell");
         assert_eq!(flat.starts[last + 1] as usize, flat.hits.len());
+        // Its last run starts within X_RUN of the end, so it is copied hit by hit.
+        assert_ne!(
+            (flat.hits.len() - flat.starts[last] as usize) % X_RUN,
+            0,
+            "the last cell's runs end hit by hit"
+        );
         let scale = 15i32.pow(4);
         let letter = |digit: i32| {
             (0u8..=255)
@@ -1257,13 +1267,9 @@ mod tests {
                 Some(XFlatBuild::Table(table)) => table,
                 _ => panic!("flat table"),
             };
-            let (mut few, mut many) = (false, false);
-            for cell in 0..flat.starts.len() - 1 {
-                let hits = flat.starts[cell + 1] - flat.starts[cell];
-                few |= (1..=4).contains(&hits);
-                many |= hits > 8;
-            }
-            assert!(few && many, "threshold {threshold}: cells of either kind");
+            // The staging of the subjects' cells, replayed: a flush within a cell, runs with 4 hits
+            // or fewer left (the second half read from `k` again) and runs with more.
+            let (mut within, mut few, mut more) = (false, false, false);
             let window = 40;
             let diag_len = 4096usize;
             let diag_mask = diag_len as i32 - 1;
@@ -1284,13 +1290,28 @@ mod tests {
                 }
                 subject.push(0);
                 assert!(flat.x_pairs_fit(&subject, length));
+                let (mut hits_staged, mut staged) = (0, 0);
+                let mut cells = Vec::new();
+                flat.for_each_cell::<true, _>(&subject, length, &mut cells, |_, hits| {
+                    hits_staged += hits.len();
+                    let mut k = 0;
+                    while k < hits.len() {
+                        if staged + X_RUN > X_STAGE_CAP {
+                            within |= k > 0;
+                            staged = 0;
+                        }
+                        let left = hits.len() - k;
+                        few |= left <= 4;
+                        more |= left > 4;
+                        staged += left.min(X_RUN);
+                        k += left.min(X_RUN);
+                    }
+                });
                 if length == 5000 {
-                    let mut staged = 0;
-                    let mut cells = Vec::new();
-                    flat.for_each_cell::<true, _>(&subject, length, &mut cells, |_, hits| {
-                        staged += hits.len();
-                    });
-                    assert!(staged > 3 * X_STAGE_CAP, "{staged} hits: several flushes");
+                    assert!(
+                        hits_staged > 3 * X_STAGE_CAP,
+                        "{hits_staged} hits: several flushes"
+                    );
                 }
                 let diag_offset = window;
                 let bf = XHitBf::new(diag_offset, length, window, 5).expect("in range");
@@ -1344,6 +1365,10 @@ mod tests {
                 );
                 total += want.len();
             }
+            assert!(
+                within && few && more,
+                "threshold {threshold}: a flush within a cell and runs of either kind"
+            );
             assert!(
                 total > 0,
                 "threshold {threshold}: the test reaches the extension"

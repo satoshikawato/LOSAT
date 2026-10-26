@@ -4889,10 +4889,12 @@ Scheduling (each value computed by one thread with the original function; order 
   -max_target_seqs 5`) at 1 / 16 / 32 / 40 / 48 threads 28 / 89 / 151 / 176 / 207 -> 26 / 69 / 104 / 122 / 139 MiB
   (NCBI 118 / 137 / 149 / 156 / 162); the 595 proteins of AP027131 x AP027133 (`-db_gencode 4`) `-db` at 16 / 32 / 48
   63 / 97 / 114 -> 60 / 88 / 107 MiB (NCBI 115 / 117 / 116), `-subject` 62 / 90 / 120 -> 55 / 74 / 93 MiB (NCBI
-  `-subject` runs one thread: 81). Time (node 1, cores warmed 3 s before each run, pairs alternating in
-  order, `perf stat`; 8 pairs): the `dmel_b4.faa` case x1.0000 at 1 thread (instructions x1.00006, `=0` x1.00002), x1.0008 at 8,
-  x1.0009 at 16 and x1.0024 at 32 (cycles x1.0033, instructions x1.00002); AP027131 `-subject` x0.9963 at 1 thread (8 of 8
-  faster) and x0.9986 at 16.
+  `-subject` runs one thread: 81). Time (node 1, cores warmed 3 s before each run, arms alternating in
+  order, `perf stat`): the `dmel_b4.faa` case at 1 thread x1.0000 (8 pairs; instructions x1.00006, `=0` x1.00002); at
+  8 / 16 / 32 threads x0.9994 / x1.0025 / x0.9979 against the base (16 rounds), where `=0` in the same binary, the code
+  path of the base, read x1.0001 / x1.0055 / x1.0039 (the layout of the new binary), so that the switch against `=0`
+  in one binary is x0.9986 / x0.9978 / x0.9900 (11 / 11 / 12 of 16 faster; instructions x1.00002); AP027131 `-subject`
+  x0.9963 at 1 thread (8 of 8 faster) and x0.9986 at 16.
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

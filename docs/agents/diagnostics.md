@@ -5004,8 +5004,20 @@ Scheduling (each value computed by one thread with the original function; order 
   off at 1 and 2 threads, both sides reached). The probe's shadow of this index (the same range and order, lowest
   start first) visited 6,326 candidates in 0.30 thread-s with no answer differing. Shorter lists keep NCBI's loop.
   Conditional: the new side is a match whose redo gives 32 HSPs or more (`x_reach!`, once per match), the reference
-  side one with 2 to 31. Cost and floor: reap 73.6 thread-s of the 706 thread-s of the 35 proteins at 8 threads; the
-  floor is the index, about 0.3 thread-s. MEASURED.
+  side one with 2 to 31. Cost and floor: the reap was 73.6 thread-s (the probe) of the 706-730 s of user time of the
+  35 proteins at 8 threads after `TBNLINKSETS` (here user 730 -> 662 s); the floor is the index, about 0.3 thread-s.
+  Measured 2026-10-26 on the workstation (2x Xeon Gold 6338, cores warmed 3 s
+  before each run, pairs alternating in order, `perf stat` walls; base f5326a59; every output of a case the same
+  bytes in every arm; options `-evalue 1e-5 -max_target_seqs 5 -outfmt 6`): the first batch of HsG_b4 (35 human
+  proteins x `-db hsap_dna`) at 8 threads 93.7 -> 85.3 s (x0.904, 3 pairs, node 0 cores 24-31 with their siblings
+  idle, load 57-87; user 730 -> 662 s, instructions x0.955, max RSS x0.999; `=0` one run 105.5 s at the same cycles
+  as the base (x1.004) and instructions x1.0000, a lower clock under load), at 16 threads 47.2 -> 41.5 s (x0.877)
+  and at 32 threads 41.7 -> 36.1 s (x0.865; 3 pairs each, node 1; max RSS x0.95-0.99); at 1 thread 16 proteins x
+  E. coli and fly proteins x the fly genome 81.455 / 81.455 / 81.456 G and 127.219 G instructions in all three arms
+  (base, default, `=0`). Light cases (node 1, 8 pairs at 8 / 16 threads, instructions x1.0000, max RSS within 3 %):
+  16 proteins x E. coli x1.001 / x1.002, fly proteins x 5,000 16S x0.995 / x1.019 (no hits, 0.10-0.15 s runs;
+  per-round ratios 0.97-1.08), the same around fly 2L (`-subject`) x0.995 / x1.003, against the fly genome x1.001 /
+  x0.980, one protein against the zebrafish genome x1.001 / x0.999.
 - `LOSAT_X_TBNXLATESIMD=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule
   of that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns
   it off; `tblastn/x_subject_translate.rs`): a packed subject's six frames (`TBNSTORE`, every `-db`

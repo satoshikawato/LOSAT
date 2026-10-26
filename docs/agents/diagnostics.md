@@ -4865,6 +4865,31 @@ Scheduling (each value computed by one thread with the original function; order 
   every subject, about 800), the 16S set 134 -> 19 and 152 -> 38 MiB (NCBI 9 and 11), the 5,000
   cDNAs at 8 threads 70 -> 37 MiB (NCBI 16). Before (dev 23db0a4f, `TBNSSIDE=0` (a variable that graduated 2026-10-22) against the
   default, 38 pairs): x0.980-0.994 at 4, 8 and 16 threads on the two large sets, no pair slower.
+- `LOSAT_X_TBNPAIRCAP=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-26;
+  `=0` turns it off; `tblastn/search_seed.rs` `x_scan_plan`, `X_PAIR_ROOM`): the offset-pair array that a unit's scan
+  calls fill (each thread keeps one, `XUnitBuffers`) holds 32,768 + the longest chain of the lookup table, never more
+  than the 1024 x the longest chain it held before (a table whose longest chain is below 33 keeps that). NCBI's array
+  holds 4,096 + the longest chain (`lookup_wrap.c:264-266` `GetOffsetArraySize`; `blast_engine.c:992,1040-1041`
+  allocates one per thread, `aa_ungapped.c:504-505` passes its size to scansub). The size only decides where a scan
+  call stops on a full array; the next call resumes there, so the pairs reach the two-hit loop in the same order at
+  any size (unit tests `x_scan_bf_equals_ncbi_scan_on_random_subjects`, which also compares the pairs of all sizes in
+  scan order, and the two scan tests of `x_scan_byte.rs`, at 4,096 and 32,768 + the longest chain among others). The
+  1024 x of an early diagnostic was 864 KiB for the fly proteins of `dmel_b4.faa` (longest chain 108), against NCBI's
+  33 KiB, and the thread count multiplied it. NCBI's own size costs time here: a call that stops starts the rest of its
+  block of words again (`TBNSCANBYTE`), and at one thread `dmel_b4.faa` x zebrafish cDNAs (`-db`) took 1.0041 of the
+  instructions with 4,096 + the longest chain, 1.0016 with 8,192, 1.0004 with 16,384 and 1.0001 with 32,768 (the
+  outputs the same; with 4,096 the time at 8 / 16 threads was x1.0032 / x1.0076, 8 pairs). Always: every tblastn scan
+  plan whose longest chain is 33 or more.
+  Measured 2026-10-26 on the workstation (2x Xeon Gold 6338; base dev ce281c9a; every output of a case the same bytes in
+  every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, medians of 3 rounds in
+  rotating order, NCBI BLAST+ 2.17.0 in the same rounds): `dmel_b4.faa` x zebrafish cDNAs (`-db`, `-evalue 1e-5
+  -max_target_seqs 5`) at 1 / 16 / 32 / 40 / 48 threads 28 / 89 / 151 / 176 / 207 -> 26 / 69 / 104 / 122 / 139 MiB
+  (NCBI 118 / 137 / 149 / 156 / 162); the 595 proteins of AP027131 x AP027133 (`-db_gencode 4`) `-db` at 16 / 32 / 48
+  63 / 97 / 114 -> 60 / 88 / 107 MiB (NCBI 115 / 117 / 116), `-subject` 62 / 90 / 120 -> 55 / 74 / 93 MiB (NCBI
+  `-subject` runs one thread: 81). Time (node 1, cores warmed 3 s before each run, pairs alternating in
+  order, `perf stat`; 8 pairs): the `dmel_b4.faa` case x1.0000 at 1 thread (instructions x1.00006, `=0` x1.00002), x1.0008 at 8,
+  x1.0009 at 16 and x1.0024 at 32 (cycles x1.0033, instructions x1.00002); AP027131 `-subject` x0.9963 at 1 thread (8 of 8
+  faster) and x0.9986 at 16.
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

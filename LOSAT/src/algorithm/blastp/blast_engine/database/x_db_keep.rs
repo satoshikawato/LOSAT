@@ -126,6 +126,7 @@ where
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
     P: PrelimSink,
 {
+    crate::utils::xreach::x_reach!("LOSAT_X_BPDBKEEP", true);
     let db = &database.db;
     if super::super::blastp_should_parallelize_stage(
         "prelim",

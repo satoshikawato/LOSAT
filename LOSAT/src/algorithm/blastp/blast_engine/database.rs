@@ -565,6 +565,36 @@ where
             sink,
         );
     }
+    search_blocks_made(
+        database,
+        pool,
+        window,
+        block_bytes,
+        blocks_per_thread,
+        new_scratch,
+        process_subject,
+        sink,
+    )
+}
+
+/// `search_blocks_of` without LOSAT_X_BPDBKEEP: each task makes its scratch and reads its block
+/// into a new buffer.
+#[allow(clippy::too_many_arguments)]
+fn search_blocks_made<S, K, P>(
+    database: &BlastpDatabase,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    window: i32,
+    block_bytes: u64,
+    blocks_per_thread: usize,
+    new_scratch: &S,
+    process_subject: &K,
+    sink: &mut P,
+) -> Result<()>
+where
+    S: Fn() -> BlastpSubjectScratch + Sync,
+    K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
+    P: PrelimSink,
+{
     let db = &database.db;
     #[cfg(all(
         feature = "parallel",
@@ -1912,6 +1942,33 @@ mod tests {
             blocks_per_thread: usize,
             block_bytes: Option<u64>,
         ) -> Result<(Seen, Vec<u32>)> {
+            let driver = match block_bytes {
+                None => Driver::Cut,
+                Some(block_bytes) => Driver::Of(block_bytes),
+            };
+            search_with(database, threads, blocks_per_thread, driver)
+        }
+
+        /// The drivers of the preliminary stage that the tests call.
+        #[derive(Clone, Copy, Debug)]
+        enum Driver {
+            /// `x_search_blocks_cut`.
+            Cut,
+            /// `search_blocks_of` with blocks of this many bytes.
+            Of(u64),
+            /// `x_db_keep::x_search_blocks_kept` with blocks of this many bytes.
+            Kept(u64),
+            /// `search_blocks_made` (without LOSAT_X_BPDBKEEP) with blocks of this many bytes.
+            Made(u64),
+        }
+
+        /// `search` with the driver `driver`.
+        fn search_with(
+            database: &BlastpDatabase,
+            threads: usize,
+            blocks_per_thread: usize,
+            driver: Driver,
+        ) -> Result<(Seen, Vec<u32>)> {
             let window = 40;
             let seen = std::sync::Mutex::new(Vec::new());
             let mut hit_lists: Vec<Option<BlastpHitList>> = vec![None];
@@ -1919,21 +1976,22 @@ mod tests {
             crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                 let new_scratch = || BlastpSubjectScratch::new(16, 64, window, 21);
                 let kernel = recording_kernel(window, &seen);
-                match block_bytes {
-                    None => x_search_blocks_cut(
+                let mut sink = crate::algorithm::blastp::blast_engine::PrelimCollector {
+                    preliminary_hit_lists: &mut hit_lists,
+                    x_compact_hit_lists: &mut compact,
+                    prelim_hitlist_size: 500,
+                };
+                match driver {
+                    Driver::Cut => x_search_blocks_cut(
                         database,
                         pool,
                         window,
                         blocks_per_thread,
                         &new_scratch,
                         &kernel,
-                        &mut crate::algorithm::blastp::blast_engine::PrelimCollector {
-                            preliminary_hit_lists: &mut hit_lists,
-                            x_compact_hit_lists: &mut compact,
-                            prelim_hitlist_size: 500,
-                        },
+                        &mut sink,
                     ),
-                    Some(block_bytes) => search_blocks_of(
+                    Driver::Of(block_bytes) => search_blocks_of(
                         database,
                         pool,
                         window,
@@ -1941,11 +1999,27 @@ mod tests {
                         blocks_per_thread,
                         &new_scratch,
                         &kernel,
-                        &mut crate::algorithm::blastp::blast_engine::PrelimCollector {
-                            preliminary_hit_lists: &mut hit_lists,
-                            x_compact_hit_lists: &mut compact,
-                            prelim_hitlist_size: 500,
-                        },
+                        &mut sink,
+                    ),
+                    Driver::Kept(block_bytes) => super::super::x_db_keep::x_search_blocks_kept(
+                        database,
+                        pool,
+                        window,
+                        block_bytes,
+                        blocks_per_thread,
+                        &new_scratch,
+                        &kernel,
+                        &mut sink,
+                    ),
+                    Driver::Made(block_bytes) => search_blocks_made(
+                        database,
+                        pool,
+                        window,
+                        block_bytes,
+                        blocks_per_thread,
+                        &new_scratch,
+                        &kernel,
+                        &mut sink,
                     ),
                 }
             })?;
@@ -2134,6 +2208,54 @@ mod tests {
             let _ = std::fs::remove_dir_all(multi_dir);
         }
 
+        // No NCBI counterpart: LOSAT_X_BPDBKEEP keeps a scratch and a block buffer per worker
+        // (`x_db_keep.rs`); the kernel sees the same sequences from the same diagonal offsets, and
+        // the hit lists receive the same updates, as with a scratch and a buffer per task.
+        // At 1, 2, 3 and 7 threads, blocks of 1 MiB and of 4 KiB (the 40,000 and 70,000-letter
+        // sequences in blocks of their own, so buffers grow and shrink), in rounds of 2 and of
+        // `BLOCKS_PER_THREAD` blocks per thread, on one volume and on several.
+        #[test]
+        fn kept_scratches_and_buffers_give_the_search_without_them() {
+            let (single_dir, single_name) = generated_database("keep1", "3GB");
+            let (multi_dir, multi_name) = generated_database("keepn", "100000");
+            let single = open_path(&single_name);
+            let multi = open_path(&multi_name);
+            let (reference, reference_listed) =
+                search_with(&single, 1, 2, Driver::Made(BLOCK_BYTES)).unwrap();
+            assert_eq!(reference.len(), generated_lengths().len());
+            for threads in [1usize, 2, 3, 7] {
+                for block_bytes in [BLOCK_BYTES, 4096] {
+                    for blocks_per_thread in [2, BLOCKS_PER_THREAD] {
+                        for (what, db) in [("one volume", &single), ("volumes", &multi)] {
+                            let context = format!(
+                                "{what}, {threads} threads, {block_bytes}-byte blocks, {blocks_per_thread} blocks per thread"
+                            );
+                            let made = search_with(
+                                db,
+                                threads,
+                                blocks_per_thread,
+                                Driver::Made(block_bytes),
+                            )
+                            .unwrap();
+                            let kept = search_with(
+                                db,
+                                threads,
+                                blocks_per_thread,
+                                Driver::Kept(block_bytes),
+                            )
+                            .unwrap();
+                            assert!(made.0 == reference, "{context}");
+                            assert_eq!(made.1, reference_listed, "{context}");
+                            assert!(kept.0 == made.0, "{context}");
+                            assert_eq!(kept.1, made.1, "{context}");
+                        }
+                    }
+                }
+            }
+            let _ = std::fs::remove_dir_all(single_dir);
+            let _ = std::fs::remove_dir_all(multi_dir);
+        }
+
         fn error_text(result: Result<(Seen, Vec<u32>)>) -> String {
             match result {
                 Ok(_) => panic!("the search of the damaged database succeeded"),
@@ -2177,6 +2299,24 @@ mod tests {
                     // Without the one-thread order's error, the cut's own error differs.
                     let own = error_text(search(&database, threads, 2, Some(cut)));
                     assert_ne!(own, expected, "{threads} threads");
+                    // EXPERIMENT (LOSAT_X_BPDBKEEP): the kept buffers give the same errors.
+                    for block_bytes in [BLOCK_BYTES, cut] {
+                        assert_eq!(
+                            error_text(search_with(
+                                &database,
+                                threads,
+                                2,
+                                Driver::Kept(block_bytes)
+                            )),
+                            error_text(search_with(
+                                &database,
+                                threads,
+                                2,
+                                Driver::Made(block_bytes)
+                            )),
+                            "{threads} threads, {block_bytes}-byte blocks"
+                        );
+                    }
                     if gap {
                         assert!(own.contains("holds a gap character"), "{own}");
                     }

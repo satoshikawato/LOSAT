@@ -6259,6 +6259,10 @@ fn search(
             if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
                 crate::utils::xreach::x_reach!("LOSAT_X_DBIDXREAD", false);
             }
+            // LOSAT_X_BPDBKEEP acts on the preliminary stage of `-db` (`database/x_db_keep.rs`).
+            if crate::seqdb::x_bp_db_keep() {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPDBKEEP", false);
+            }
             BlastpSubjectSource::Fasta(&subjects.records)
         }
     };

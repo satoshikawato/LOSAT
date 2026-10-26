@@ -395,6 +395,7 @@ export LOSAT_X_DPTRACEPOOL=1
 export LOSAT_X_DPWINDOW=1
 export LOSAT_X_FOLDLEAN=1
 export LOSAT_X_GREEDYROWFUSE=1
+export LOSAT_X_MB24=1
 export LOSAT_X_MBFILL=1
 export LOSAT_X_MBLUTKEEP=1
 export LOSAT_X_MBLUTONCE=1
@@ -412,6 +413,7 @@ export LOSAT_X_QBATCHPAR=1
 export LOSAT_X_QDUSTPAR=1
 export LOSAT_X_QGROUPPAR=1
 export LOSAT_X_QPREPPAR=1
+export LOSAT_X_QSCANPAR=1
 export LOSAT_X_QSTREAM=1
 export LOSAT_X_REDOCONTAINIDX=1
 export LOSAT_X_RPTSTREAM=1
@@ -3119,6 +3121,41 @@ Scheduling (each value computed by one thread with the original function; order 
   1-16 threads), because of the slots, not of the round. On this WSL machine (THP `always`) megablast of 5 kb to 4.6
   Mb of MG1655 against LC738868 at 8 threads kept its max RSS within 0.4 MiB of the fill without the round, at 0.57-0.86
   of the time from 150 kb on.
+- `LOSAT_X_MB24=1` (BLASTN megablast, the contiguous megablast table of `build_mb_lookup` with 4^12 cells; memory; in the
+  strict set from the pull request that added it, 2026-10-26 (perf/mb-narrow); `=0` builds the 4-byte table) keeps the
+  table's head table (`hashtable`) and chains (`next_pos`) with elements of 3 bytes instead of 4 (`blastn/x_mb_narrow.rs`,
+  argument in its header). NCBI's `Int4` arrays (`blast_nalookup.c:1262`, `:979`) hold 1-based query offsets, all below
+  2^24 when `next_pos` has at most 2^24 elements, so element `i` is the low 24 bits of the little-endian `u32` at byte
+  `3 i` of a `Vec<u32>` (`(3 n + 4) / 4` words for `n` elements, so the 4-byte read of the last one stays inside): the
+  heads of a 4^12 table take 48 MiB instead of 64 and the chains 3 bytes a query position instead of 4 (Sakai's both
+  strands, 11.0 M positions: 31.5 MiB instead of 42). Where: a table of 4^12 cells (megablast of a query batch of about
+  300,000 table entries or more), newest first (not the blastn task's re-threaded order), without database word counts or
+  `BLEMIR_DEBUG`, `next_pos` of at most 2^24 elements (a batch of up to about 16.7 M positions of both strands), queries
+  whose offsets ascend without overlap and no inverted mask; the smaller tables, the blastn task and larger batches keep
+  the 4-byte table. Every fill applies the same updates in the same order in an instance of its own (`H24`): the serial
+  fills (`LOSAT_X_MBFILL`'s prefetch and batch queues, `x_fill_mb_queued`) read a head as 4 bytes and write it back with
+  the next cell's byte, and write a link as one 4-byte store whose fourth byte, the next element's first, is not written
+  yet (the words come in increasing order of offset); the pool fills (PAIRPAR's and `LOSAT_X_MBLUTONCE`'s) read and write
+  every element as exactly its 3 bytes, since the next cell or offset may be another worker's; the prefault round of
+  `LOSAT_X_MBLUTPREFAULT` marks the pages of a cell's first and last byte (12,289 pages of a 4^12 table, at least 98,304
+  positions in the first chunk). The heads are the batch loop's kept table (`LOSAT_X_MBLUTKEEP`) read as bytes: a build
+  takes its first 12,582,913 words; after a 4-byte 4^12 build in the same loop the keep holds the 64 MiB table, and the
+  3-byte builds use its start. The readers (`for_each_hit`, `contains_hit`, `count_hits`) find a 3-byte table behind the
+  bounds check of the head that already sends the CSR tables of `LOSAT_X_BNCSR` elsewhere, so the scans of 4-byte tables
+  run the same instructions (`=0` against `dev`: x1.0001-1.0010 instructions; the blastn task, 4-byte tables only,
+  x1.0000). `x_qbatch_par::batch_estimate_bytes` still counts 4 bytes a cell and a position (more than a 3-byte batch
+  takes, so the slots plan no more than before). Evidence (workstation; one node 0 core with its HT sibling idle, or node 1
+  CPUs 32-47 with theirs, membind to the node, cores warmed 3 s before each run; arms rotated every round; `dev`
+  ce281c9a, outputs identical in every arm; peak `RssAnon` and max RSS = max(`%M`, a 10 ms `VmHWM` sample)): megablast of
+  E. coli Sakai against MG1655 at one thread `RssAnon` 126.5 -> 99.9 MiB (max RSS 131.6 -> 105.4), wall x1.004 of `=0`
+  in 16 rounds (x0.954 in 8 rounds under `LOSAT_TIMING`: the build x0.92, the search x0.96), `cycles:u` x1.01-1.035
+  (instructions x1.021: the 3-byte stores and reads, about 9 a word), system time 0.08 -> 0.06 s; at 16 threads
+  `-subject` 129.4 -> 102.4 MiB (132.7 -> 102.2), wall x0.995, `-db` 129.6 -> 102.3 (131.3 -> 99.7), wall x0.987; megablast of 31,168 D. melanogaster cDNAs against dmel_dna_3M (37 batches, 18 of
+  them 4^12 tables) at one thread 156.2 -> 130.6 MiB (163.0 -> 137.1), wall x0.993, `cycles:u` x1.037, system time 0.45 ->
+  0.13 s (minor faults 232 k -> 64 k), and with `-db` at 16 threads 174.7 -> 169.6 MiB (177.2 -> 173.1), wall x0.993;
+  blastn of the cDNAs against MG1655 (no 3-byte table) wall x0.988. Wasm (the serial WASI command in Node 26.8.2, all arms'
+  modules in one process, a fresh instance per search, 8 rounds; two node 0 cores): the linear memory of Sakai against
+  MG1655 133.1 -> 106.4 MiB, x0.995 of the time, of the cDNAs 234.3 -> 208.8 MiB, x0.992.
 - `LOSAT_X_MBFILL=1` (BLASTN megablast and blastn, the one-thread fill of `build_mb_lookup`: the contiguous megablast
   table and the two-stage blastn table; speed; in the strict set from the pull request that added it, 2026-10-23; `=0`
   runs the queued loop `x_fill_mb_queued`) reads the words of the fill run by run
@@ -4473,6 +4510,41 @@ Scheduling (each value computed by one thread with the original function; order 
   and in the first record, a batch of queries without letters, a batch of skipped records, LOSAT's
   refusals; standard input and `/dev/stdin`; `-db`; the switch off unless set; `kept=0` with
   `LOSAT_X_RPTSTREAM` acting, with and without slots).
+- `LOSAT_X_QSCANPAR=1` (BLASTN: blastn, blastn-short and dc-megablast, where `LOSAT_X_QSTREAM` acts (not megablast),
+  `-subject` and `-db`, speed; in the strict set since 2026-10-26 (perf/bn-query-scan-par, evidence at the end of
+  this entry): on unless it is `0`) the first reading of `LOSAT_X_QSTREAM` (each record's length and how the reading
+  ends) is read in parts on `-num_threads` threads (the calling thread and scoped helpers: the search pool does not
+  exist yet) instead of on one thread while the others wait (`x_query_scan_par.rs`). The bytes from the reader's
+  start to the end of the file are cut at targets at most 256 KiB apart (at least four per thread); a part runs from
+  the first record start at or after its target (a `>` that begins a line, not followed by `?`) to the next part's,
+  and a new reader with the same configuration reads it with the loop of `scan` (the parts read at offsets,
+  `read_at`, so the search's reader stays where it was). A line that starts with `>` and not `>?` always starts a
+  record (`read_fasta_seq`: the defline, or the end of the record before), and what a reader carries from record to
+  record (the local-ID counter, the line number, the end-of-line style, the pushback) changes no record's letters
+  where the file has no `\r`, so the parts' lengths are the first reading's; the warnings of the records read there
+  are dropped by both (the second reading posts them per batch). No NCBI counterpart (NCBI reads its batches one at a
+  time); speed only, no floating-point operation. The rule (class conditional, `x_reach!` where `LOSAT_X_QSTREAM`
+  reads the lengths without the BLAST archive): two threads or more, a `unix` build with the `parallel` feature (not
+  WebAssembly or Windows), no BLAST archive (its title check comes from the first reading; no mark then), at least
+  4 MiB after the reader's start (`LOSAT_X_QSCANPARMIN`, tuning, sets the bytes); and, found while the parts are read,
+  no `\r` and no `>?` in the file (a gap line's length becomes that many `N`s, which no byte bound holds), a record
+  start within 256 KiB after every target (a part holds at most 512 KiB of records, so a thread holds one record of
+  at most that many letters), every byte of each part read (an I/O error or a file that ends early would look like
+  the end of its input to a reader), and every part read to its end without an `eEOF`, a reader error or LOSAT's
+  rejection of a Seq-id line. Where one of these fails the first reading runs on one thread as before and finds that
+  error with its messages. Evidence (workstation, node 1, 16 threads on
+  CPUs 32-47 with their siblings idle and `--membind=1`, probe 6179df06 on dev ce281c9a, the switch against
+  `LOSAT_X_QSCANPAR=0` in the same binary, rounds alternating, outputs identical and NCBI's where the case has NCBI
+  bytes): the busy threads of dc-megablast of 31,168 D. melanogaster cDNAs (96 MB) against 3 Mb of chromosome 2L
+  (`-subject`, sampled every 2 ms from `/proc/<pid>/task/*/schedstat`) were one for the first 0.12 s of 1.55 s, the
+  first reading (`[TIMING] read_fasta` 0.123 s); with the switch the reading takes 0.009 s on the local i9. Wall
+  time: that search x0.932 at 16 threads (20 of 20 rounds faster, 1.528 -> 1.422 s), x0.964 at 8; the same queries
+  against the database of 2L (`-db`) x0.935 at 16; blastn of them x0.972 (`-subject`) and x0.983 (`-db`); blastn of
+  1,775 cDNAs x0.978 (20 rounds); 5,000 and 1,775 cDNAs at 16 threads, whose files are below twice the slots' window
+  (`LOSAT_X_QSTREAM` does not act), x0.996 / x0.998; megablast (no `LOSAT_X_QSTREAM`) and 236 cDNAs (below the
+  minimum) within noise. At 32 threads the 31,168 cDNAs are read before the search (`LOSAT_X_QSTREAM`'s `Slots`), so
+  the switch does not act there (x1.002). Max RSS unchanged. At one thread (node 0, one core, perf stat):
+  dc-megablast of the 31,168 cDNAs `instructions:u` x1.0000, `cycles:u` x0.999; blastn of 1,775 cDNAs the same.
 - TBNPAR (graduated 2026-10-22; no variable, no `LOSAT_X_TBNPARSHADOW`; always on) tblastn:
   preliminary stage per (frame, chunk) and redo per match in parallel, one pool for the search. The
   unit-wise stage is the only preliminary stage of a search (at one thread, without a pool, it

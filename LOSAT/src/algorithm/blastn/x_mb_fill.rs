@@ -74,11 +74,17 @@
 //!
 //! The variable is read once. `LOSAT_X_MBFILL` (a switch of the strict set,
 //! `utils/xswitch.rs`: on unless it is `0`) runs this module.
+//!
+//! EXPERIMENT (LOSAT_X_MB24): a table of 3-byte elements (`x_mb_narrow.rs`, `XMbTables::x_h24`)
+//! runs its own instance of the loops (`H24`): a head is read as the 4 bytes at its element and
+//! written back with the fourth byte unchanged, a link is one 4-byte store whose fourth byte is the
+//! next element's first byte, still 0 (the words come in increasing order of offset), and the
+//! prefetch and the batch read take the element's address. The 4-byte instances are unchanged.
 
 use super::x_mb_lookup_par::Words;
-use super::{build_unmasked_ranges, XMbTables, BLAST2NA_MASK, PV_ARRAY_MASK};
+use super::{build_unmasked_ranges, x_mb_narrow, XMbTables, BLAST2NA_MASK, PV_ARRAY_MASK};
 #[cfg(test)]
-use super::{x_fill_mb_queued, x_mb_queue};
+use super::{x_fill_mb_queued, x_mb_queue, XMbQueue};
 use std::sync::OnceLock;
 
 /// `kCompressionFactor` (2048), the number of cells that share one helper counter, as a shift.
@@ -119,10 +125,13 @@ pub(super) fn fill(
     }
     // SAFETY: `in_range(words, t)` holds.
     let (n_words, ambiguous) = unsafe {
-        if words.ascending_cells {
-            fill_runs::<true, X_BATCH>(words, t)
+        if t.x_h24 {
+            // (`in_range`: a 3-byte table is newest first)
+            fill_runs::<false, X_BATCH, true>(words, t)
+        } else if words.ascending_cells {
+            fill_runs::<true, X_BATCH, false>(words, t)
         } else {
-            fill_runs::<false, X_BATCH>(words, t)
+            fill_runs::<false, X_BATCH, false>(words, t)
         }
     };
     *t.total_positions += n_words;
@@ -130,7 +139,8 @@ pub(super) fn fill(
     true
 }
 
-/// The bounds the loop relies on (module documentation).
+/// The bounds the loop relies on (module documentation). A 3-byte table (`x_h24`) holds
+/// `x_mb_narrow::capacity` elements in its words, values below 2^24, and is newest first.
 fn in_range(words: &Words<'_>, t: &XMbTables<'_>) -> bool {
     let lut_word_length = words.lut_word_length;
     let last_cell = words.kmer_mask as usize;
@@ -138,20 +148,31 @@ fn in_range(words: &Words<'_>, t: &XMbTables<'_>) -> bool {
         .queries_blastna
         .iter()
         .fold(0usize, |sum, seq| sum.saturating_add(seq.len()));
+    // (3-byte elements: indexes and values below 2^24 as well)
+    let (cells, next_len) = if t.x_h24 {
+        (
+            x_mb_narrow::capacity(t.hashtable.len()),
+            x_mb_narrow::capacity(t.next_pos.len()).min(x_mb_narrow::CELLS),
+        )
+    } else {
+        (t.hashtable.len(), t.next_pos.len())
+    };
     (1..=16).contains(&lut_word_length)
         && words.kmer_mask == (1u64 << (2 * lut_word_length)) - 1
-        && t.hashtable.len() == last_cell.wrapping_add(1)
+        && if t.x_h24 {
+            cells > last_cell && !words.ascending_cells
+        } else {
+            cells == last_cell.wrapping_add(1)
+        }
         && (last_cell >> t.pv_array_bts) < t.pv_array.len()
         && (last_cell >> K_COMPRESSION_FACTOR_SHIFT) < t.helper_array.len()
-        && t.next_pos.len() <= u32::MAX as usize
+        && next_len <= u32::MAX as usize
         && letters <= u32::MAX as usize
         && words
             .queries_blastna
             .iter()
             .zip(words.query_offsets)
-            .all(|(seq, &offset)| {
-                (offset.max(0) as usize).saturating_add(seq.len()) < t.next_pos.len()
-            })
+            .all(|(seq, &offset)| (offset.max(0) as usize).saturating_add(seq.len()) < next_len)
 }
 
 /// `1 << k`, the bit of cell `k` (mod 32) in its presence-vector word, read from a table: a shift
@@ -188,25 +209,45 @@ impl Raw {
     }
 
     /// The update of one word (`x_mb_apply` with the indexes `in_range` checked); `cells`: the
-    /// words in the order applied (`ASC`).
-    /// SAFETY: `in_range` held for the tables of `self`, and `bucket` / `q_off_1` are a word.
+    /// words in the order applied (`ASC`). `H24`: on 3-byte elements (module documentation).
+    /// SAFETY: `in_range` held for the tables of `self`, and `bucket` / `q_off_1` are a word, the
+    /// words in increasing order of `q_off_1` with `H24`.
     #[inline(always)]
-    unsafe fn apply<const ASC: bool>(
+    unsafe fn apply<const ASC: bool, const H24: bool>(
         self,
         cells: &mut Vec<(u32, u32)>,
         bucket: usize,
         q_off_1: u32,
     ) {
         unsafe {
-            let old = *self.hashtable.add(bucket);
+            let word = if H24 {
+                x_mb_narrow::load_word(self.hashtable, bucket)
+            } else {
+                0
+            };
+            let old = if H24 {
+                word & x_mb_narrow::MASK
+            } else {
+                *self.hashtable.add(bucket)
+            };
             if old == 0 {
                 *self.pv_array.add(bucket >> self.pv_array_bts) |= X_PV_BIT[bucket & PV_ARRAY_MASK];
             } else {
                 let h = self.helper_array.add(bucket >> K_COMPRESSION_FACTOR_SHIFT);
                 *h = (*h).wrapping_add(1);
             }
-            *self.next_pos.add(q_off_1 as usize) = old;
-            *self.hashtable.add(bucket) = q_off_1;
+            if H24 {
+                // the link's fourth byte is the next element's first, not written yet
+                x_mb_narrow::store_word(self.next_pos, q_off_1 as usize, old);
+                x_mb_narrow::store_word(
+                    self.hashtable,
+                    bucket,
+                    (word & !x_mb_narrow::MASK) | q_off_1,
+                );
+            } else {
+                *self.next_pos.add(q_off_1 as usize) = old;
+                *self.hashtable.add(bucket) = q_off_1;
+            }
         }
         if ASC {
             cells.push((bucket as u32, q_off_1));
@@ -225,7 +266,7 @@ struct Queue {
 /// number of words and of ambiguous bases.
 /// SAFETY: `in_range(words, t)` holds.
 #[inline(never)]
-unsafe fn fill_runs<const ASC: bool, const BATCH: bool>(
+unsafe fn fill_runs<const ASC: bool, const BATCH: bool, const H24: bool>(
     words: &Words<'_>,
     t: &mut XMbTables<'_>,
 ) -> (usize, usize) {
@@ -280,7 +321,7 @@ unsafe fn fill_runs<const ASC: bool, const BATCH: bool>(
                 // SAFETY: `in_range` holds; the words are those of `words`.
                 i = unsafe {
                     if BATCH {
-                        run_words_batch::<ASC>(
+                        run_words_batch::<ASC, H24>(
                             s,
                             i,
                             code,
@@ -292,7 +333,7 @@ unsafe fn fill_runs<const ASC: bool, const BATCH: bool>(
                             cells,
                         )
                     } else {
-                        run_words::<ASC>(
+                        run_words::<ASC, H24>(
                             s,
                             i,
                             code,
@@ -317,7 +358,7 @@ unsafe fn fill_runs<const ASC: bool, const BATCH: bool>(
     for k in queue.n - queue.n.min(X_DELAY)..queue.n {
         let (b, q) = queue.ring[k % X_DELAY];
         // SAFETY: as above.
-        unsafe { raw.apply::<ASC>(cells, b as usize, q) };
+        unsafe { raw.apply::<ASC, H24>(cells, b as usize, q) };
     }
     if BATCH {
         std::hint::black_box(touched);
@@ -331,7 +372,7 @@ unsafe fn fill_runs<const ASC: bool, const BATCH: bool>(
 /// SAFETY: `in_range` held for the tables of `raw`; the words are words of the fill.
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
-unsafe fn run_words<const ASC: bool>(
+unsafe fn run_words<const ASC: bool, const H24: bool>(
     s: &[u8],
     mut i: usize,
     mut code: u64,
@@ -352,7 +393,7 @@ unsafe fn run_words<const ASC: bool>(
             break;
         }
         code = ((code << 2) | base as u64) & kmer_mask;
-        x_prefetch(raw.hashtable, code as usize);
+        x_prefetch::<H24>(raw.hashtable, code as usize);
         ring[n] = (code as u32, index_base.wrapping_add(i) as u32);
         n += 1;
         i += 1;
@@ -363,11 +404,11 @@ unsafe fn run_words<const ASC: bool>(
                 break;
             }
             code = ((code << 2) | base as u64) & kmer_mask;
-            x_prefetch(raw.hashtable, code as usize);
+            x_prefetch::<H24>(raw.hashtable, code as usize);
             let slot = n % X_DELAY;
             let (b, q) = ring[slot];
             // SAFETY: `(b, q)` is a word of the fill.
-            unsafe { raw.apply::<ASC>(cells, b as usize, q) };
+            unsafe { raw.apply::<ASC, H24>(cells, b as usize, q) };
             ring[slot] = (code as u32, index_base.wrapping_add(i) as u32);
             n += 1;
             i += 1;
@@ -386,7 +427,7 @@ unsafe fn run_words<const ASC: bool>(
 /// SAFETY: as `run_words`.
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
-unsafe fn run_words_batch<const ASC: bool>(
+unsafe fn run_words_batch<const ASC: bool, const H24: bool>(
     s: &[u8],
     mut i: usize,
     mut code: u64,
@@ -410,12 +451,18 @@ unsafe fn run_words_batch<const ASC: bool>(
             let mut read = *touched;
             for &(b, _) in &queue.ring {
                 // SAFETY: `b` is the cell of a word of the fill.
-                read ^= unsafe { *raw.hashtable.add(b as usize) };
+                read ^= unsafe {
+                    if H24 {
+                        x_mb_narrow::load_word(raw.hashtable, b as usize)
+                    } else {
+                        *raw.hashtable.add(b as usize)
+                    }
+                };
             }
             *touched = read;
             for &(b, q) in &queue.ring {
                 // SAFETY: `(b, q)` is a word of the fill.
-                unsafe { raw.apply::<ASC>(cells, b as usize, q) };
+                unsafe { raw.apply::<ASC, H24>(cells, b as usize, q) };
             }
             n = 0;
         }
@@ -424,14 +471,19 @@ unsafe fn run_words_batch<const ASC: bool>(
     i
 }
 
-/// A prefetch of cell `bucket` of the table at `hashtable` (x86_64; nothing elsewhere).
+/// A prefetch of cell `bucket` of the table at `hashtable` (x86_64; nothing elsewhere); `H24`: of
+/// its 3-byte element.
 #[inline(always)]
-fn x_prefetch(hashtable: *mut u32, bucket: usize) {
+fn x_prefetch<const H24: bool>(hashtable: *mut u32, bucket: usize) {
     #[cfg(target_arch = "x86_64")]
     // SAFETY: a prefetch does not fault.
     unsafe {
         core::arch::x86_64::_mm_prefetch(
-            hashtable.wrapping_add(bucket) as *const i8,
+            if H24 {
+                x_mb_narrow::at(hashtable, bucket)
+            } else {
+                hashtable.wrapping_add(bucket) as *const i8
+            },
             core::arch::x86_64::_MM_HINT_T0,
         );
     }
@@ -456,7 +508,8 @@ mod tests {
         ambiguous_skipped: usize,
     }
 
-    fn build(words: &Words<'_>, fill: impl FnOnce(&mut XMbTables<'_>)) -> Built {
+    /// The arrays a fill makes; `h24`: in 3-byte elements (LOSAT_X_MB24), returned as 4-byte values.
+    fn build(words: &Words<'_>, h24: bool, fill: impl FnOnce(&mut XMbTables<'_>)) -> Built {
         let table_size = words.kmer_mask as usize + 1;
         let entries: usize = words.queries_blastna.iter().map(|q| q.len()).sum();
         let (pv_size, pv_array_bts) =
@@ -469,9 +522,10 @@ mod tests {
             .max()
             .unwrap_or(0)
             + 1;
+        let width = |n: usize| if h24 { x_mb_narrow::words_for(n) } else { n };
         let mut b = Built {
-            hashtable: vec![0; table_size],
-            next_pos: vec![0; next_len],
+            hashtable: vec![0; width(table_size)],
+            next_pos: vec![0; width(next_len)],
             pv_array: vec![0; pv_size],
             helper_array: vec![0; (table_size >> K_COMPRESSION_FACTOR_SHIFT).max(1)],
             words: Vec::new(),
@@ -487,7 +541,12 @@ mod tests {
             words: &mut b.words,
             total_positions: &mut b.total_positions,
             ambiguous_skipped: &mut b.ambiguous_skipped,
+            x_h24: h24,
         });
+        if h24 {
+            b.hashtable = x_mb_narrow::widen(&b.hashtable, table_size);
+            b.next_pos = x_mb_narrow::widen(&b.next_pos, next_len);
+        }
         b
     }
 
@@ -495,7 +554,8 @@ mod tests {
     /// `x_fill_mb_queued` on random queries (ambiguity codes, masks, several queries,
     /// `lut_word_length` 4..12, runs shorter and longer than the queue), on single queries with
     /// fewer words than the queue holds (`lut_word_length` 6, 7, 10, 12) and on long repeats (long
-    /// chains, helper counts).
+    /// chains, helper counts); newest first, so do the instances for 3-byte elements (LOSAT_X_MB24)
+    /// of both and of the queued loop.
     #[test]
     fn the_run_loop_builds_the_queued_loops_arrays() {
         let mut rng = Lcg(0x4D42_F111);
@@ -537,8 +597,8 @@ mod tests {
                     kmer_mask: (1u64 << (2 * lut_word_length)) - 1,
                     ascending_cells,
                 };
-                let reference = build(&words, |t| {
-                    x_fill_mb_queued(
+                let reference = build(&words, false, |t| {
+                    x_fill_mb_queued::<false>(
                         x_mb_queue(),
                         words.queries_blastna,
                         words.query_offsets,
@@ -553,16 +613,23 @@ mod tests {
                     )
                 });
                 assert!(reference.total_positions > 0 || queries.iter().all(|q| q.len() < 80));
-                for batch in [false, true] {
-                    let got = build(&words, |t| {
+                for (batch, h24) in [(false, false), (true, false), (false, true), (true, true)] {
+                    if h24 && ascending_cells {
+                        continue;
+                    }
+                    let got = build(&words, h24, |t| {
                         assert!(in_range(&words, t));
                         // SAFETY: checked above.
                         let (n, a) = unsafe {
-                            match (ascending_cells, batch) {
-                                (true, false) => fill_runs::<true, false>(&words, t),
-                                (false, false) => fill_runs::<false, false>(&words, t),
-                                (true, true) => fill_runs::<true, true>(&words, t),
-                                (false, true) => fill_runs::<false, true>(&words, t),
+                            match (ascending_cells, batch, h24) {
+                                (true, false, _) => fill_runs::<true, false, false>(&words, t),
+                                (false, false, false) => {
+                                    fill_runs::<false, false, false>(&words, t)
+                                }
+                                (true, true, _) => fill_runs::<true, true, false>(&words, t),
+                                (false, true, false) => fill_runs::<false, true, false>(&words, t),
+                                (false, false, true) => fill_runs::<false, false, true>(&words, t),
+                                (false, true, true) => fill_runs::<false, true, true>(&words, t),
                             }
                         };
                         *t.total_positions += n;
@@ -570,8 +637,28 @@ mod tests {
                     });
                     assert!(
                         got == reference,
-                        "case {case} ascending {ascending_cells} batch {batch}"
+                        "case {case} ascending {ascending_cells} batch {batch} h24 {h24}"
                     );
+                }
+                if !ascending_cells {
+                    for queue in [XMbQueue::Delay, XMbQueue::Batch(64)] {
+                        let got = build(&words, true, |t| {
+                            x_fill_mb_queued::<true>(
+                                queue,
+                                words.queries_blastna,
+                                words.query_offsets,
+                                words.query_masks,
+                                word_length,
+                                lut_word_length,
+                                words.kmer_mask,
+                                None,
+                                0,
+                                false,
+                                t,
+                            )
+                        });
+                        assert!(got == reference, "case {case} queued h24");
+                    }
                 }
             }
         }

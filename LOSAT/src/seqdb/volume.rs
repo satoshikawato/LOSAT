@@ -1412,12 +1412,19 @@ impl SequenceBlock {
         if base_length < 1 {
             return Err(self.format(i, "Error: could not get sequence or range."));
         }
-        // PROBE (v4-A10 s22): the padded capacity unwritten, its length zeroed. `vec![0; capacity]`
-        // is a calloc, which zeroes the whole padded block when an arena has a free chunk that
-        // large; here only the `len + 2` bytes are written in either case.
-        let mut buffer: Vec<u8> =
-            Vec::with_capacity(crate::utils::x_mapped::x_mapped_capacity(base_length + 2, 1));
-        buffer.resize(base_length + 2, 0);
+        // PROBE f3 (v4-A10 s22): a sequence whose buffer would be padded (below glibc's ceiling)
+        // takes it from `X_BYTES`, as the whole decode does (`nucleotide_blastna_in`), its
+        // `len + 2` bytes zeroed; the caller gives it back (`database::x_done_bytes`).
+        let padded =
+            crate::utils::x_mapped::x_mapped_capacity(base_length + 2, 1) > base_length + 2;
+        let mut buffer = if padded {
+            let mut buffer = Vec::new();
+            crate::utils::x_mapped::X_BYTES.reserve(&mut buffer, base_length + 2);
+            buffer.resize(base_length + 2, 0u8);
+            buffer
+        } else {
+            vec![0u8; base_length + 2]
+        };
         {
             let seq = &mut buffer[1..=base_length];
             let ranges = ranges

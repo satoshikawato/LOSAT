@@ -691,7 +691,7 @@ where
                 x_fenced: Some(&fenced),
             };
             let result = traceback(scratch, ordinal, subject, kept);
-            drop(blastna);
+            x_done_bytes(blastna);
             let fenced = fenced.into_inner();
             x_tb_range_count(length, &ranges, fenced);
             if !fenced {

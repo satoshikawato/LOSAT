@@ -27,6 +27,13 @@
 //!   window, else a new one) and gives it back when it ends, instead of a table per helper made by
 //!   the searching thread for each chunk; the chunks' subject tasks of `LOSAT_X_BXUNITCAP` do the
 //!   same.
+//! - `LOSAT_X_BXDIAGHOLD` (acts where `LOSAT_X_BXDIAGKEEP` does): a thread's kept table serves every
+//!   chunk it is long enough for (`seed::Diagonals::x_holds`, which gives the argument that a longer
+//!   table computes the same), and the thread that runs the chunk's subject loop runs it on the table
+//!   its thread keeps too. Before, a kept table of another length was freed and a new one made
+//!   (query batches of 10,002 bases take 16,384 or 32,768 entries, 64 or 128 KiB, by their letters),
+//!   and the loop's thread made a table for every chunk: 800 cDNAs x 50 yeast proteins at 64 threads
+//!   made 13.9 MiB of diagonal-table page faults with one malloc arena (4.9 at 16 threads).
 //! - `LOSAT_X_BXUNITCAP[=K]` (built-in K = 8): with more than K threads, where K units have tasks
 //!   for all threads, at most K query batches are searched at a time by the batch flow, each with the
 //!   pool inside (the subject flow, `flow_unit_cap`), instead of one batch per thread; the chunks of a
@@ -174,9 +181,10 @@ fn filled_subjects_per_task(
 
 /// No NCBI counterpart: `Some(K)` where `LOSAT_X_BXUNITCAP[=K]` caps the units searched at a time,
 /// each unit with `tasks(K)` tasks for the pool: the switch is on, there are more than K threads, K
-/// units have a task for every thread (else threads would wait that one unit per thread keeps busy),
-/// and the workers keep their diagonal tables (else each of the K units would make a table per
-/// thread). `LOSAT_X_BXCAPFILL` acts exactly where the cap does.
+/// units have a task for every thread (else threads would wait that one unit per thread keeps busy;
+/// with `LOSAT_X_BXCAPFILL` this condition is dropped), and the workers keep their diagonal tables
+/// (else each of the K units would make a table per thread). `LOSAT_X_BXCAPFILL` acts exactly where
+/// the cap does.
 fn unit_cap(
     threads: usize,
     options: &ResolvedOptions,
@@ -184,8 +192,14 @@ fn unit_cap(
     tasks: impl FnOnce(usize) -> usize,
 ) -> Option<usize> {
     let k = cap_k()?;
-    let own =
-        threads > k && k.saturating_mul(tasks(k)) >= threads && keeps_tables(options, subjects);
+    // With LOSAT_X_BXCAPFILL the cap holds wherever there are more threads than K: K units of few
+    // subjects leave threads without a subject task, but those threads take the parts of the K
+    // units' lookup-table builds (LOSAT_X_BXBUILDPAR) and the query batches prepared ahead, and a
+    // unit per thread would make a lookup table per thread.
+    let filled = cap_fill().is_some();
+    let own = threads > k
+        && (filled || k.saturating_mul(tasks(k)) >= threads)
+        && keeps_tables(options, subjects);
     crate::utils::xreach::x_reach!("LOSAT_X_BXUNITCAP", own);
     if cap_fill().is_some() {
         crate::utils::xreach::x_reach!("LOSAT_X_BXCAPFILL", own);
@@ -407,12 +421,15 @@ impl XDiagSlot {
         }
     }
 
-    // No NCBI counterpart: buffer reuse only (a new table is `Diagonals::new`, the NCBI port).
+    // No NCBI counterpart: buffer reuse only (a new table is `Diagonals::new`, the NCBI port; with
+    // `LOSAT_X_BXDIAGHOLD` a kept table of more entries stands for it, `Diagonals::x_holds`).
     /// The slot's table, taken from this thread on first use.
     pub(crate) fn get(&mut self) -> Result<&mut Diagonals> {
         if self.table.is_none() {
             let kept = X_DIAG.with(|kept| kept.borrow_mut().take());
+            let hold = diag_hold_on();
             self.table = Some(match kept {
+                Some(table) if hold && table.x_holds(self.length, self.window) => table,
                 Some(table) if table.x_fits(self.length, self.window) => table,
                 _ => Diagonals::new(self.length, self.window)?,
             });
@@ -431,6 +448,23 @@ impl Drop for XDiagSlot {
             }
         }
     }
+}
+
+/// No NCBI counterpart: whether `LOSAT_X_BXDIAGHOLD` is on (module comment).
+fn diag_hold_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXDIAGHOLD"))
+}
+
+/// No NCBI counterpart (buffer reuse, `LOSAT_X_BXDIAGHOLD`): whether the thread that runs a
+/// chunk's subject loop runs it on the table its thread keeps (`XDiagSlot`), as the flow's helpers
+/// do where `keep` (`diag_keep`: the helpers keep theirs), instead of on a table of its own.
+pub(crate) fn owner_keeps_table(keep: bool) -> bool {
+    if !diag_hold_on() {
+        return false;
+    }
+    crate::utils::xreach::x_reach!("LOSAT_X_BXDIAGHOLD", keep);
+    keep
 }
 
 /// No NCBI counterpart (buffer reuse): the diagonal table a task of the subject flow runs on: the

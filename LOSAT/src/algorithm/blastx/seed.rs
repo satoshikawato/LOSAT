@@ -138,6 +138,32 @@ impl Diagonals {
             .and_then(|n| n.max(1).checked_next_power_of_two());
         self.window == window && n == Some(self.entries.len())
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at the word
+    // finders: `diag_coord = (query_offset - subject_offset) & diag_mask`, the window test and the
+    // flag of an extension). No NCBI counterpart for the use (buffer reuse, LOSAT_X_BXDIAGHOLD,
+    // blastx/x_bx_mem.rs): a table of more entries than `new(query_length, window)` gives (a longer
+    // power of two, so a longer mask) computes what that table computes. With n0 = that length
+    // (at least the query's length plus the window) and n >= n0, diagonals d and d +- k n share a
+    // cell (k >= 1). A subject's hits come in subject order; a write for diagonal d (a hit at
+    // subject offset s, or the end of an extension from it, which stops at the query's end along d)
+    // and a read of the same cell for d' = d + k n at s' >= s would need the query offset s' - d' =
+    // (s' - d) - k n < 0, and for d' = d - k n the write lies at least k n - qlen >= window behind
+    // the read: so a cell holding another diagonal's value is read as an entry a window old, as a
+    // cleared entry is read (a new hit, the flag cleared). And no other diagonal writes the cell of
+    // d between a hit or extension of d and a read of d within the window or the extension (the same
+    // inequalities), so every read sees d's own last value or one that acts as cleared, in a table of
+    // n0 entries as in one of n. Entries of earlier subjects or chunks lie a window behind (the
+    // history argument of `x_subject_flow.rs`, under the same 2^30 condition).
+    /// Whether this table can stand for the one `new(query_length, window)` gives: the same window
+    /// and at least as many entries.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn x_holds(&self, query_length: usize, window: i32) -> bool {
+        let n = usize::try_from(window)
+            .ok()
+            .and_then(|w| query_length.checked_add(w))
+            .and_then(|n| n.max(1).checked_next_power_of_two());
+        self.window == window && n.is_some_and(|n| n <= self.entries.len())
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
     // ```c++
     // Blast_ExtendWordExit(Blast_ExtendWord * ewp, Int4 subject_length)

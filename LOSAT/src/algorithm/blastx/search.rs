@@ -894,7 +894,34 @@ pub(crate) fn search_core(
             let x_parts = 1;
             let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
             let last = batch.contexts.last().expect("BLASTX contexts");
-            let mut diagonals = Diagonals::new(last.offset + last.length, options.window_size)?;
+            #[cfg(feature = "parallel")]
+            let x_flow_k = x_subject_flow::chosen(pool, diagnostics, options, subjects);
+            // Dispatch point (LOSAT_X_BXDIAGKEEP, in the strict set): the flow's helpers run on the
+            // tables their threads keep (x_bx_mem.rs); only where the flow searches the subjects
+            // (the waves below then have nothing to do).
+            #[cfg(feature = "parallel")]
+            let x_keep =
+                pool.enabled() && x_flow_k.is_some() && x_bx_mem::diag_keep(options, subjects);
+            // Dispatch point (LOSAT_X_BXDIAGHOLD, in the strict set): there this thread's part of the
+            // flow runs on the table its thread keeps too (x_bx_mem.rs).
+            #[cfg(feature = "parallel")]
+            let mut x_own = if x_bx_mem::owner_keeps_table(x_keep) {
+                x_bx_mem::XScratch::Slot(x_bx_mem::XDiagSlot::new(
+                    last.offset + last.length,
+                    options.window_size,
+                ))
+            } else {
+                x_bx_mem::XScratch::Owned(Diagonals::new(
+                    last.offset + last.length,
+                    options.window_size,
+                )?)
+            };
+            #[cfg(feature = "parallel")]
+            let diagonals = x_own.get()?;
+            #[cfg(not(feature = "parallel"))]
+            let mut x_own = Diagonals::new(last.offset + last.length, options.window_size)?;
+            #[cfg(not(feature = "parallel"))]
+            let diagonals = &mut x_own;
             let xdrop = subject_parameters(
                 batch,
                 &mut params,
@@ -938,14 +965,6 @@ pub(crate) fn search_core(
                 1
             };
             #[cfg(feature = "parallel")]
-            let x_flow_k = x_subject_flow::chosen(pool, diagnostics, options, subjects);
-            // Dispatch point (LOSAT_X_BXDIAGKEEP, in the strict set): the flow's helpers run on the
-            // tables their threads keep (x_bx_mem.rs); only where the flow searches the subjects
-            // (the waves below then have nothing to do).
-            #[cfg(feature = "parallel")]
-            let x_keep =
-                pool.enabled() && x_flow_k.is_some() && x_bx_mem::diag_keep(options, subjects);
-            #[cfg(feature = "parallel")]
             let mut worker_diagonals = if pool.enabled() && !x_keep {
                 (0..subjects.len().min(pool.threads()))
                     .map(|_| Diagonals::new(last.offset + last.length, options.window_size))
@@ -985,7 +1004,7 @@ pub(crate) fn search_core(
                     &params,
                     options,
                     &lookup,
-                    &mut diagonals,
+                    &mut *diagonals,
                     helper_tables,
                     xdrop,
                     db_length,
@@ -1108,7 +1127,7 @@ pub(crate) fn search_core(
                             &params,
                             options,
                             &lookup,
-                            &mut diagonals,
+                            &mut *diagonals,
                             xdrop,
                             diagnostics,
                             db_length,

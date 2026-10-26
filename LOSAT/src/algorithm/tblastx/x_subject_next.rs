@@ -65,6 +65,16 @@ pub(super) fn on() -> bool {
 
 // No NCBI counterpart for the counter itself (scheduling only): NCBI's iterators share the
 // database's chunk state (module text); here one counter over the subject indices plays that part.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+thread_local! {
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the subject loop this thread called and waits for (its
+    // counter's address), 0 when none.
+    static WAITING_FOR: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Runs `search` for every subject index `0..n`, once each, on the threads of the pool this thread
 /// runs in: each thread takes the next index when it is free, with its own state from `init`, made
 /// when it takes its first index. Call it from a thread of the search pool (`SearchPool::install`);
@@ -87,7 +97,17 @@ pub(super) fn for_each_subject<S>(
     if rayon::current_thread_index().is_some() && rayon::current_num_threads() > 1 {
         let next = AtomicUsize::new(0);
         let stopped = AtomicBool::new(false);
+        // EXPERIMENT (LOSAT_X_TBXBOARD): with the board, a thread that called the subject loop of
+        // one batch and waits for it does not run another batch's part nested in that wait (its
+        // subjects and help would hold this batch's return, and so its report, until they end);
+        // the other threads take that batch's subjects.
+        let key = &next as *const AtomicUsize as usize;
+        let before = WAITING_FOR.with(|w| w.replace(key));
         rayon::broadcast(|_| {
+            let waiting_for = WAITING_FOR.with(std::cell::Cell::get);
+            if help.is_some() && waiting_for != 0 && waiting_for != key {
+                return;
+            }
             take_subjects(n, &next, &stopped, init, search);
             if let Some(help) = help {
                 if !stopped.load(Ordering::Relaxed) {
@@ -95,6 +115,7 @@ pub(super) fn for_each_subject<S>(
                 }
             }
         });
+        WAITING_FOR.with(|w| w.set(before));
         return;
     }
     let _ = help;

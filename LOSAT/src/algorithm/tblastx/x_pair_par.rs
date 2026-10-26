@@ -1244,6 +1244,17 @@ pub(super) struct XSubjectUnits {
     outputs: XUnitOutputs,
 }
 
+impl XSubjectUnits {
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the records the units returned (a bound on the HSPs the
+    // subject's merge keeps; tblastx/x_batch_pipe.rs `XGate`).
+    pub(super) fn records(&self) -> usize {
+        match &self.outputs {
+            XUnitOutputs::Full(lists) => lists.iter().map(Vec::len).sum(),
+            XUnitOutputs::Compact(lists) => lists.iter().map(Vec::len).sum(),
+        }
+    }
+}
+
 // No NCBI counterpart: the two forms of the units' saved init HSPs (section above `XUnitHsp`),
 // chosen once per subject by `run_subject_units`; `merge_subject` reads the form once per subject.
 /// The saved init HSPs of each unit, in unit order.

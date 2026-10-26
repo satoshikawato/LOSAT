@@ -23,6 +23,8 @@ mod blastn_eight_slots;
 mod blastn_few_subj;
 #[path = "../blastn_greedy_row_fuse.rs"]
 mod blastn_greedy_row_fuse;
+#[path = "../blastn_hl_grow.rs"]
+mod blastn_hl_grow;
 #[path = "../blastn_lut_drop.rs"]
 mod blastn_lut_drop;
 #[path = "../blastn_mb_fill.rs"]
@@ -53,6 +55,8 @@ mod blastn_query_drop;
 mod blastn_query_dust_par;
 #[path = "../blastn_query_prep_par.rs"]
 mod blastn_query_prep_par;
+#[path = "../blastn_query_scan_par.rs"]
+mod blastn_query_scan_par;
 #[path = "../blastn_query_stream.rs"]
 mod blastn_query_stream;
 #[path = "../blastn_report_stream.rs"]

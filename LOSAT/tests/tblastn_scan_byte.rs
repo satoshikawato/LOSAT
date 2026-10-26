@@ -30,7 +30,8 @@
 //! The queries are the first protein of `tests/fasta/PemoMJNVA.faa` (few candidate words, a sparse
 //! table) and all 115 of them (four query batches, no sparse table; the offset array fills, so the
 //! scan stops and resumes); the
-//! subject is `tests/fasta/MelaMJNV.fasta`.
+//! subject is `tests/fasta/MelaMJNV.fasta`. The last test changes the offset array size
+//! (`LOSAT_X_TBNPAIRCAP`) instead.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -230,5 +231,44 @@ fn the_report_and_the_scan_calls_are_those_of_the_scan_before() {
                 "{query:?} {variables:?}"
             );
         }
+    }
+}
+
+const PAIRCAP_OFF: (&str, &str) = ("LOSAT_X_TBNPAIRCAP", "0");
+
+/// The scan calls of whichever scan line `stderr` holds.
+fn scan_calls(stderr: &str) -> u64 {
+    byte_scans(stderr)
+        .map(|(counts, _)| counts)
+        .or_else(|| earlier_scans(stderr))
+        .expect("a scan line")[1]
+}
+
+// NCBI reference: c++/src/algo/blast/core/lookup_wrap.c:264-266
+// ```c
+//    case eAaLookupTable:
+//       offset_array_size = OFFSET_ARRAY_SIZE +
+//          ((BlastAaLookupTable*)lookup->lut)->longest_chain;
+// ```
+// `LOSAT_X_TBNPAIRCAP` (in the strict set) gives the offset array 32768 + the longest chain where
+// that is less than 1024 x the longest chain (`=0`). The size only decides where the scan calls
+// stop: the search of all proteins (whose array fills) gives the same report with and without the
+// switch, at one and four threads, and takes more scan calls with it (the smaller array).
+#[test]
+fn the_offset_array_size_changes_only_the_scan_calls() {
+    let query = &queries()[1];
+    let (expected, stderr) = tblastn(query, 1, &[PAIRCAP_OFF]);
+    assert!(!expected.is_empty(), "the search must report hits");
+    let off = scan_calls(&stderr);
+    let (report, stderr) = tblastn(query, 1, &[]);
+    assert!(report == expected, "the switch changed the report");
+    let on = scan_calls(&stderr);
+    assert!(
+        on > off,
+        "{on} scan calls with the switch, {off} without: the array did not get smaller"
+    );
+    for variables in [&[][..], &[PAIRCAP_OFF]] {
+        let (report, _) = tblastn(query, 4, variables);
+        assert!(report == expected, "{variables:?}: four threads");
     }
 }

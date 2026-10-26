@@ -191,7 +191,7 @@ pub(super) fn print_summary() {
 #[cfg(test)]
 mod tests {
     use super::super::x_mb_lookup_par::tests::{random_case, Lcg};
-    use super::super::{build_mb_lookup, MbLookupTable};
+    use super::super::{build_mb_lookup, x_mb_narrow, MbLookupTable};
     use super::*;
 
     /// The kept table's length and the number of its first elements that may be dirty.
@@ -201,14 +201,19 @@ mod tests {
     }
 
     /// The build's table (its first cells) and the other arrays and fields equal the fresh
-    /// build's.
-    fn assert_same(built: &MbLookupTable, fresh: &MbLookupTable, what: &str) {
-        let cells = fresh.hashtable.len();
-        assert!(
-            built.hashtable[..cells] == fresh.hashtable[..],
-            "{what}: hashtable"
-        );
-        assert!(built.next_pos == fresh.next_pos, "{what}: next_pos");
+    /// build's (both of 3-byte elements, LOSAT_X_MB24, or both not).
+    fn assert_same(
+        built: &MbLookupTable,
+        fresh: &MbLookupTable,
+        cells: usize,
+        next_pos_len: usize,
+        what: &str,
+    ) {
+        assert_eq!(built.x_narrow.is_some(), fresh.x_narrow.is_some(), "{what}");
+        let (built_heads, built_next) = built.x_wide(cells, next_pos_len);
+        let (fresh_heads, fresh_next) = fresh.x_wide(cells, next_pos_len);
+        assert!(built_heads == fresh_heads, "{what}: hashtable");
+        assert!(built_next == fresh_next, "{what}: next_pos");
         assert!(built.pv_array == fresh.pv_array, "{what}: pv_array");
         assert_eq!(built.pv_array_bts, fresh.pv_array_bts, "{what}");
         assert_eq!(built.longest_chain, fresh.longest_chain, "{what}");
@@ -285,7 +290,8 @@ mod tests {
     // with the `resident` flag; these queries are too short for the prefault round, which the
     // whole-search tests cover): every build equals the same build on a fresh table, every build
     // of no more cells than the kept table takes it (filled by earlier builds), and the elements
-    // past the start that builds wrote stay 0.
+    // past the start that builds wrote stay 0. With LOSAT_X_MB24 the newest-first tables of 4^12
+    // cells take the words of their 3-byte heads, fewer than 4^12.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -320,7 +326,18 @@ mod tests {
                         ascending,
                         None,
                     );
-                    let cells = 1usize << (2 * lut);
+                    let next_pos_len = queries
+                        .iter()
+                        .zip(&offsets)
+                        .map(|(q, &o)| o.max(0) as usize + q.len())
+                        .max()
+                        .unwrap_or(0)
+                        + 1;
+                    let cells = if fresh.x_narrow.is_some() {
+                        x_mb_narrow::words_for(1 << (2 * lut))
+                    } else {
+                        1 << (2 * lut)
+                    };
                     let before = keep.kept.lock().unwrap().as_ref().map(|kept| {
                         assert!(
                             kept.table[kept.dirty..].iter().all(|&cell| cell == 0),
@@ -347,28 +364,36 @@ mod tests {
                     let dirty = match before {
                         Some((len, dirty, written)) if len >= cells => {
                             assert_eq!(kept(&keep), None, "case {case}: the kept table taken");
-                            assert_eq!(built.hashtable.len(), len, "case {case}");
+                            assert_eq!(built.x_table().len(), len, "case {case}");
                             reused += 1;
                             reused_dirty += usize::from(written);
                             dirty.max(cells)
                         }
                         _ => {
-                            assert_eq!(built.hashtable.len(), cells, "case {case}: fresh");
+                            assert_eq!(built.x_table().len(), cells, "case {case}: fresh");
                             cells
                         }
                     };
                     assert_same(
                         &built,
                         &fresh,
+                        1 << (2 * lut),
+                        next_pos_len,
                         &format!("case {case} lut {lut} threads {threads}"),
                     );
-                    let len = built.hashtable.len();
+                    let len = built.x_table().len();
                     drop(built);
                     assert_eq!(kept(&keep), Some((len, dirty)), "case {case}: given back");
                 }
                 // Every build but the first (4^11) and the first 4^12, which is longer than the
-                // kept table: 14 of 16.
-                assert_eq!(reused, 14, "threads {threads}: builds on a kept table");
+                // kept table: 14 of 16. With LOSAT_X_MB24 the first 4^12 (case 5) is a 3-byte
+                // table, shorter than a 4-byte one, so the next 4^12 (case 7, ascending: 4-byte)
+                // is longer than the kept table too: 13.
+                let expected = if x_mb_narrow::on() { 13 } else { 14 };
+                assert_eq!(
+                    reused, expected,
+                    "threads {threads}: builds on a kept table"
+                );
                 assert!(
                     reused_dirty >= 7,
                     "threads {threads}: {reused_dirty} filled tables kept"

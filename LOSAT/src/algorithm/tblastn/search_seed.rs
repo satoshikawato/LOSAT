@@ -648,6 +648,24 @@ pub(super) fn x_lean_subject(
         && super::x_subject_translate::x_units_translate(length)
 }
 
+/// No NCBI counterpart: the offset array of `LOSAT_X_TBNPAIRCAP` holds this many entries more
+/// than the longest chain, eight times NCBI's OFFSET_ARRAY_SIZE (lookup_wrap.h:119). A scan call
+/// that stops on a full array starts again in the next call at the word that did not fit
+/// (`x_scan_byte.rs` builds that word's block of candidates again), which costs little per call
+/// but adds up at NCBI's size: dmel_b4.faa x zebrafish cDNAs (`-db`) at one thread took 1.0041 of
+/// the instructions with 4096 + the longest chain, 1.0016 with 8192 +, 1.0004 with 16384 + and
+/// 1.0001 with 32768 + (against 1024 x the longest chain; D14 s1 c1, 2026-10-26).
+const X_PAIR_ROOM: usize = 8 * 4096;
+
+// No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
+/// Whether a plan's offset array holds `X_PAIR_ROOM` + the longest chain entries (at most
+/// 1024 x the longest chain, the size without the switch) (`LOSAT_X_TBNPAIRCAP`, read once).
+fn x_pair_cap_on() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNPAIRCAP"))
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
 // ```c
 //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
@@ -856,7 +874,24 @@ pub(super) fn x_scan_plan(
     // NCBI builds the lookup table once per query batch: the first subject builds it and the
     // others read it.
     let lookup = std::sync::Arc::clone(x_lookup.get_or_init(x_build_lookup));
-    let pair_capacity = (lookup.longest_chain.max(1) as usize) * 1024;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266
+    // ```c
+    //    case eAaLookupTable:
+    //       offset_array_size = OFFSET_ARRAY_SIZE +
+    //          ((BlastAaLookupTable*)lookup->lut)->longest_chain;
+    // ```
+    // blast_engine.c:992,1040-1041 allocates each thread's offset array of that size and
+    // aa_ungapped.c:504-505 passes it to scansub (OFFSET_ARRAY_SIZE 4096, lookup_wrap.h:119).
+    // The size only decides where a scan call stops; the next call resumes there, so the pairs
+    // reach the caller in the same order at any size. With `LOSAT_X_TBNPAIRCAP` the array has
+    // NCBI's form with `X_PAIR_ROOM` for OFFSET_ARRAY_SIZE, never more entries than without it
+    // (1024 x the longest chain, which a table whose longest chain is below 33 keeps).
+    let longest_chain = lookup.longest_chain.max(1) as usize;
+    let pair_capacity = if x_pair_cap_on() {
+        (X_PAIR_ROOM + longest_chain).min(longest_chain.saturating_mul(1024))
+    } else {
+        longest_chain * 1024
+    };
     i32::try_from(pair_capacity).expect("NCBI offset array fits Int4");
     Ok(Some(XScanPlan {
         lookup,

@@ -213,6 +213,14 @@ where
     let db = &database.db;
     let block_bytes = x_db_cut_block_bytes(database, pool);
     crate::utils::xreach::x_reach!("LOSAT_X_BPDBCUT", block_bytes != BLOCK_BYTES);
+    // EXPERIMENT (LOSAT_X_BPDBKEEP=3, a diagnostic): rounds of as many bytes as the cut's.
+    let blocks_per_thread = if crate::seqdb::x_bp_db_byte_rounds() {
+        let threads = if pool.enabled() { pool.threads() } else { 1 };
+        let cut = x_cut_block_bytes(x_sequence_bytes(database), threads);
+        blocks_per_thread * cut.div_ceil(block_bytes) as usize
+    } else {
+        blocks_per_thread
+    };
     search_blocks_of(
         database,
         pool,

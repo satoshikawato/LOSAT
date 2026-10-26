@@ -93,12 +93,18 @@ pub(crate) fn x_bp_db_keep() -> bool {
 /// `X_KEEP_BLOCK_BYTES` (the switch's value 1, built in); the value 2 (a diagnostic) keeps the
 /// blocks of `LOSAT_X_BPDBCUT`.
 pub(crate) fn x_bp_db_small_blocks() -> bool {
-    x_bp_db_keep_value() == Some(1)
+    matches!(x_bp_db_keep_value(), Some(1 | 3))
+}
+
+/// EXPERIMENT (LOSAT_X_BPDBKEEP): whether a round of the cut blocks holds as many bytes as a round
+/// of the cut's blocks (the value 3, a diagnostic).
+pub(crate) fn x_bp_db_byte_rounds() -> bool {
+    x_bp_db_keep_value() == Some(3)
 }
 
 fn x_bp_db_keep_value() -> Option<usize> {
     static VALUE: OnceLock<Option<usize>> = OnceLock::new();
-    *VALUE.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BPDBKEEP", 1..=2, 1))
+    *VALUE.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BPDBKEEP", 1..=3, 1))
 }
 
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): the most sequences of a range of

@@ -2078,8 +2078,12 @@ Rebuilding less:
   8.62 -> 7.20 G cycles with 97.7 -> 53.9 M L2 misses, the scan 2.03 -> 1.46 G. Where the switch does not act the
   instructions are dev's: a 42-residue protein x UniRef50 (a sparse table) x1.0000 (cycles x1.000), exact blastp
   (1/10 of the Arabidopsis proteins x the yeast proteome) x1.0000; `=0` runs dev's instructions (x1.0000-1.0004, cycles x0.994-0.999 in a confirming run of 4 rounds of the final
-  form, load 31-37, where the switch took x0.987, x0.992 and x0.815 on the first three cases above). In the
-  strict set from its first pull request (no measured case slower natively; AGENTS.md "Speed-up switches").
+  form, load 31-37, where the switch took x0.987, x0.992 and x0.815 on the first three cases above). With 16
+  threads (node 1, CPUs 32-47, once, 3 rounds) the whole human proteome x the yeast proteome took 5.25 -> 5.19 s
+  (cycles x0.991) and the whole Arabidopsis proteome x the zebrafish proteome 17.01 -> 16.75 s (x0.989), max RSS
+  123.5 -> 124.2 MiB and 106.0 -> 108.2 MiB (medians; per run 122.8-125.5 and 104.1-108.8 MiB, dev's 122.7-123.7
+  and 105.0-106.9). In the strict set from its first pull request (no measured case slower natively; AGENTS.md
+  "Speed-up switches").
 - `LOSAT_X_BPLKPFLAT=1` (BLASTP `-task blastp-fast`, speed; in the strict set since 2026-10-17, on by default
   together with `LOSAT_X_BPCLUT`; acts only where the search's pool builds the flat table of
   `LOSAT_X_BPCLUT`, with more than one thread) changes how that build is scheduled

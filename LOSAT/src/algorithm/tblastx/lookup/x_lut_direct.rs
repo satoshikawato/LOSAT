@@ -1030,6 +1030,81 @@ fn x_build_direct_in(
     }))
 }
 
+// No NCBI counterpart (scheduling only): `f` on each of `parts` on tasks of the pool the caller runs
+// on. The caller and the helpers it spawns claim the parts in turn; once every part is claimed, the
+// caller waits for the parts others still run without taking other work of the pool (a part is
+// short, and a job taken while waiting, such as another batch's search, could hold the caller far
+// longer than the part). A part that panics still counts as ended, and the scope raises its panic.
+/// EXPERIMENT (LOSAT_X_BXBUILDPAR): `f(part)` for each part, its results in part order.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_claimed<T: Send, R: Send>(parts: Vec<T>, f: &(dyn Fn(T) -> R + Sync)) -> Vec<R> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Ended<'a>(&'a AtomicUsize);
+    impl Drop for Ended<'_> {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Release);
+        }
+    }
+    let n = parts.len();
+    let slots: Vec<std::sync::Mutex<Option<T>>> = parts
+        .into_iter()
+        .map(|part| std::sync::Mutex::new(Some(part)))
+        .collect();
+    let results: Vec<std::sync::Mutex<Option<R>>> =
+        (0..n).map(|_| std::sync::Mutex::new(None)).collect();
+    let (next, ended) = (AtomicUsize::new(0), AtomicUsize::new(0));
+    let work = || loop {
+        let i = next.fetch_add(1, Ordering::Relaxed);
+        if i >= n {
+            return;
+        }
+        let _ended = Ended(&ended);
+        let part = x_pool_lock(&slots[i])
+            .take()
+            .expect("each part claimed once");
+        let result = f(part);
+        *x_pool_lock(&results[i]) = Some(result);
+    };
+    rayon::in_place_scope(|scope| {
+        for _ in 1..n.min(rayon::current_num_threads()) {
+            scope.spawn(|_| work());
+        }
+        work();
+        while ended.load(Ordering::Acquire) < n {
+            std::hint::spin_loop();
+        }
+    });
+    results
+        .into_iter()
+        .map(|result| {
+            result
+                .into_inner()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .expect("each part ended")
+        })
+        .collect()
+}
+
+// No NCBI counterpart: `dst.copy_from_slice(src)` without a call of the C library's memmove for the
+// short lists of most cells and sources (the same copy, element by element).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[inline(always)]
+fn x_put(dst: &mut [i32], src: &[i32]) {
+    match (dst, src) {
+        ([d0], [s0]) => *d0 = *s0,
+        ([d0, d1], [s0, s1]) => (*d0, *d1) = (*s0, *s1),
+        ([d0, d1, d2], [s0, s1, s2]) => (*d0, *d1, *d2) = (*s0, *s1, *s2),
+        ([d0, d1, d2, d3], [s0, s1, s2, s3]) => (*d0, *d1, *d2, *d3) = (*s0, *s1, *s2, *s3),
+        (dst, src) => dst.copy_from_slice(src),
+    }
+}
+
 // No NCBI counterpart: the cells of T(s) (`x_target_list`) in the stripe [first, end), each once.
 // T(s) is `s` when the reference adds the exact offsets, then the neighbour words in the order of
 // the `s_AddWordHitsCore` recursion: the residues are tried in ascending order at each position, so
@@ -1080,7 +1155,6 @@ fn x_striped_passes(
     temps: &mut XBuildTemps,
 ) -> (Vec<BackboneCell>, Vec<u32>, Vec<i32>, i32) {
     use crate::algorithm::tblastx::lookup::PV_ARRAY_MASK;
-    use rayon::prelude::*;
     // The present source cells in ascending order and their offsets (chain order), so that the
     // tasks read plain slices.
     let mut cells = std::mem::take(&mut temps.cells);
@@ -1090,31 +1164,33 @@ fn x_striped_passes(
     starts.clear();
     offsets.clear();
     starts.push(0);
+    let mut missing = 0usize;
     for idx in 0..backbone_size {
         if let Some(offset_list) = exact_backbone[idx].as_deref() {
             cells.push(idx as u32);
             offsets.extend_from_slice(lookup_chain_entries(offset_list));
             starts.push(offsets.len() as u32);
+            missing += usize::from(lists[idx].get().is_none());
         }
     }
     let source = |i: usize| &offsets[starts[i] as usize..starts[i + 1] as usize];
     // The lists not made yet, on tasks of 256 source cells (blast_aalookup.c:490: the word at the
     // first offset).
-    (0..cells.len())
-        .into_par_iter()
-        .with_min_len(256)
-        .for_each(|i| {
-            lists[cells[i] as usize].get_or_init(|| target_list(source(i)[0] as usize));
+    if missing > 0 {
+        let chunks: Vec<usize> = (0..cells.len()).step_by(256).collect();
+        x_claimed(chunks, &|from: usize| {
+            for i in from..cells.len().min(from + 256) {
+                lists[cells[i] as usize].get_or_init(|| target_list(source(i)[0] as usize));
+            }
         });
+    }
     let list = |i: usize| -> &[u16] { lists[cells[i] as usize].get().expect("made above") };
     let stripe = backbone_size.div_ceil(stripes).next_multiple_of(32);
     // Count pass: each stripe's counts, its overflow size and its longest count.
     let mut counts = x_zeroed(std::mem::take(&mut temps.counts), backbone_size, false);
-    let sizes: Vec<(usize, i32)> = counts
-        .par_chunks_mut(stripe)
-        .with_max_len(1)
-        .enumerate()
-        .map(|(j, counts)| {
+    let sizes: Vec<(usize, i32)> = x_claimed(
+        counts.chunks_mut(stripe).enumerate().collect(),
+        &|(j, counts): (usize, &mut [u32])| {
             let (first, end) = (j * stripe, j * stripe + counts.len());
             for i in 0..cells.len() {
                 let k = source(i).len() as u32;
@@ -1133,8 +1209,8 @@ fn x_striped_passes(
                 }
             }
             (overflow_size, longest_chain)
-        })
-        .collect();
+        },
+    );
     let overflow_size = sizes.iter().map(|&(size, _)| size).sum();
     let longest_chain = sizes.iter().map(|&(_, longest)| longest).max().unwrap_or(0);
     // Layout and fill pass on the table's vectors, each stripe on its own cells, pv words and part
@@ -1170,39 +1246,49 @@ fn x_striped_passes(
         ));
         cursor += sizes[j].0;
     }
-    parts.into_par_iter().with_max_len(1).for_each(
-        |(first, cursor, counts, backbone, pv, base, fill, overflow)| {
-            let mut at = 0usize;
-            for (local, &count) in counts.iter().enumerate() {
-                if count == 0 {
-                    continue;
-                }
-                // pv_set at cell first + local; `first` is a multiple of 32.
-                pv[local >> PV_ARRAY_BTS] |= 1u32 << (local & PV_ARRAY_MASK);
-                backbone[local].num_used = count as i32;
-                if count as usize > AA_HITS_PER_CELL {
-                    backbone[local].entries[0] = (cursor + at) as i32;
-                    base[local] = at as u32;
-                    at += count as usize;
-                }
+    x_claimed(parts, &|(
+        first,
+        cursor,
+        counts,
+        backbone,
+        pv,
+        base,
+        fill,
+        overflow,
+    )| {
+        let mut at = 0usize;
+        for (local, &count) in counts.iter().enumerate() {
+            if count == 0 {
+                continue;
             }
-            let end = first + counts.len();
-            for i in 0..cells.len() {
-                let offsets = source(i);
-                for w in x_in_stripe(list(i), first, end) {
-                    let local = w - first;
-                    let at = fill[local] as usize;
-                    if counts[local] as usize <= AA_HITS_PER_CELL {
-                        backbone[local].entries[at..at + offsets.len()].copy_from_slice(offsets);
-                    } else {
-                        let start = base[local] as usize + at;
-                        overflow[start..start + offsets.len()].copy_from_slice(offsets);
-                    }
-                    fill[local] += offsets.len() as u32;
-                }
+            // pv_set at cell first + local; `first` is a multiple of 32.
+            pv[local >> PV_ARRAY_BTS] |= 1u32 << (local & PV_ARRAY_MASK);
+            backbone[local].num_used = count as i32;
+            if count as usize > AA_HITS_PER_CELL {
+                backbone[local].entries[0] = (cursor + at) as i32;
+                base[local] = at as u32;
+                at += count as usize;
             }
-        },
-    );
+        }
+        let end = first + counts.len();
+        for i in 0..cells.len() {
+            let offsets = source(i);
+            for w in x_in_stripe(list(i), first, end) {
+                let local = w - first;
+                let at = fill[local] as usize;
+                if counts[local] as usize <= AA_HITS_PER_CELL {
+                    x_put(
+                        &mut backbone[local].entries[at..at + offsets.len()],
+                        offsets,
+                    );
+                } else {
+                    let start = base[local] as usize + at;
+                    x_put(&mut overflow[start..start + offsets.len()], offsets);
+                }
+                fill[local] += offsets.len() as u32;
+            }
+        }
+    });
     temps.counts = counts;
     temps.base = base;
     temps.fill = fill;

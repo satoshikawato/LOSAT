@@ -2,13 +2,16 @@
 //! thread (`LOSAT_X_BXDIAGKEEP`), the lookup tables' neighbour lists shared and their vectors kept
 //! between builds (`LOSAT_X_BXLUTPOOL`), at most K query batches or chunks searched at a time
 //! (`LOSAT_X_BXUNITCAP[=K]`), and the capped units' threads filled with few subjects too (tasks of
-//! fewer subjects, each query batch prepared outside the cap: `LOSAT_X_BXCAPFILL`;
-//! `src/algorithm/blastx/x_bx_mem.rs`, `src/algorithm/tblastx/lookup/x_lut_direct.rs`).
+//! fewer subjects, each query batch prepared outside the cap: `LOSAT_X_BXCAPFILL`), their lookup
+//! tables built on the threads the cap leaves them (`LOSAT_X_BXBUILDPAR`), a capped batch's place
+//! freed when its tables are dropped (`LOSAT_X_BXCAPTABLES`), and the fused loop's context table
+//! made once per lookup table (`LOSAT_X_BXCTXONCE`; `src/algorithm/blastx/x_bx_mem.rs`,
+//! `src/algorithm/tblastx/lookup/x_lut_direct.rs`, `src/algorithm/blastx/x_seed_diag.rs`).
 //!
-//! The four are in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). They change which
+//! They are in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). They change which
 //! thread computes what, and the vectors the tables are built on, not what is computed, so the
 //! property under test is that the report does not depend on them: standard output equals that of
-//! the same search with all four `=0`, for several query batches (the batch flow,
+//! the same search with all of them `=0`, for several query batches (the batch flow,
 //! `LOSAT_X_BXFLOW`) and for one query split into chunks (the chunk waves, `LOSAT_X_BXPAR`), with
 //! the cap acting (`LOSAT_X_BXUNITCAP=2` at 4 threads; its built-in K = 8 needs 9 threads or more),
 //! not acting, and with each part off. `LOSAT_X_REACH` shows that the cap acted, and that it does
@@ -183,7 +186,10 @@ fn sides(
 }
 
 const ALL_OFF: &[(&str, &str)] = &[
+    ("LOSAT_X_BXBUILDPAR", "0"),
     ("LOSAT_X_BXCAPFILL", "0"),
+    ("LOSAT_X_BXCAPTABLES", "0"),
+    ("LOSAT_X_BXCTXONCE", "0"),
     ("LOSAT_X_BXDIAGKEEP", "0"),
     ("LOSAT_X_BXLUTPOOL", "0"),
     ("LOSAT_X_BXUNITCAP", "0"),
@@ -206,17 +212,36 @@ fn several_query_batches_give_the_report_without_the_switches() {
         &[("LOSAT_X_BXUNITCAP", "2")][..],
         &[("LOSAT_X_BXUNITCAP", "3"), ("LOSAT_X_BXLUTPOOL", "0")][..],
         &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXDIAGKEEP", "0")][..],
+        &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXBUILDPAR", "0")][..],
+        &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXCAPTABLES", "0")][..],
+        &[("LOSAT_X_BXUNITCAP", "3"), ("LOSAT_X_BXCTXONCE", "0")][..],
     ] {
         assert!(
             blastx(&query, &args, 4, env) == reference,
             "{env:?}: report differs"
         );
     }
-    // The cap acts with K below the thread count and only with the workers' tables kept.
+    // The cap acts with K below the thread count and only with the workers' tables kept; then
+    // the capped batches build their tables on two tasks each and free their places when the
+    // tables are dropped.
     assert_eq!(
         cap_sides(&dir, &query, &args, &[("LOSAT_X_BXUNITCAP", "2")]),
         (true, false)
     );
+    for switch in ["LOSAT_X_BXBUILDPAR", "LOSAT_X_BXCAPTABLES"] {
+        assert_eq!(
+            sides(
+                &dir,
+                &query,
+                &args,
+                4,
+                &[("LOSAT_X_BXUNITCAP", "2")],
+                switch
+            ),
+            (true, false),
+            "{switch}"
+        );
+    }
     assert_eq!(cap_sides(&dir, &query, &args, &[]), (false, true));
     assert_eq!(
         cap_sides(
@@ -291,7 +316,11 @@ fn a_split_query_gives_the_report_without_the_switches() {
         reference.iter().filter(|&&b| b == b'\n').count() > 20,
         "too few hits to test"
     );
-    for env in [&[][..], &[("LOSAT_X_BXUNITCAP", "2")][..]] {
+    for env in [
+        &[][..],
+        &[("LOSAT_X_BXUNITCAP", "2")][..],
+        &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXBUILDPAR", "0")][..],
+    ] {
         assert!(
             blastx(&query, &args, 4, env) == reference,
             "{env:?}: report differs"

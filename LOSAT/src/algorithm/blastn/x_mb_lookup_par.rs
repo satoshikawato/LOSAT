@@ -117,6 +117,12 @@
 //! each query position is read by one worker and each word handed to the owner of its cell,
 //! instead of every worker reading every word as above. That fill counts into the private
 //! copies of this module (`Copies`, `Unready::zeroed`, `flush_private`).
+//!
+//! EXPERIMENT (LOSAT_X_MB24): a table of 3-byte elements (`Tables::x_h24`, `x_mb_narrow.rs`) runs
+//! its own instance of `fill_part` (`H24`), which reads and writes every head and link as exactly
+//! its 3 bytes: the cell after the last of a block and the offset after a worker's word may be
+//! another worker's, so no 4-byte access may cover them. The plan, the reading order and the
+//! updates are the same, so the table is the same.
 
 use super::{build_unmasked_ranges, MaskedInterval, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -299,6 +305,9 @@ pub(super) struct Tables<'a> {
     pub(super) pv_array: &'a mut [PvArrayType],
     pub(super) pv_array_bts: usize,
     pub(super) helper_array: &'a mut [u32],
+    /// EXPERIMENT (LOSAT_X_MB24): `hashtable` (`kmer_mask + 1` cells of `Words`) and `next_pos`
+    /// hold 3-byte elements in their bytes (`x_mb_narrow.rs`).
+    pub(super) x_h24: bool,
 }
 
 /// The read-only inputs of the fill loop.
@@ -579,12 +588,19 @@ impl SharedTables {
     //          mb_lt->hashtable[ecode] = index;
     // ```
     // The update of one word, as in the loop of `build_mb_lookup` (same statements);
-    // the presence bit is set in the presence-vector word this worker owns.
+    // the presence bit is set in the presence-vector word this worker owns. EXPERIMENT
+    // (LOSAT_X_MB24): `H24`, on 3-byte elements, each read and written as exactly its 3 bytes
+    // (another worker may own the next cell or offset).
     /// SAFETY: the worker owns the block of `bucket` and the word at `q_off_1`.
     #[inline(always)]
-    unsafe fn apply(self, bucket: usize, q_off_1: u32) {
+    unsafe fn apply<const H24: bool>(self, bucket: usize, q_off_1: u32) {
         unsafe {
-            let head = self.hashtable.get(bucket);
+            let head = if H24 {
+                debug_assert!(3 * bucket + 3 <= 4 * self.hashtable.len);
+                super::x_mb_narrow::load_exact(self.hashtable.ptr, bucket)
+            } else {
+                self.hashtable.get(bucket)
+            };
             if head == 0 {
                 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-50
                 // ```c
@@ -603,8 +619,14 @@ impl SharedTables {
                 self.helper_array
                     .set(h, self.helper_array.get(h).saturating_add(1));
             }
-            self.next_pos.set(q_off_1 as usize, head);
-            self.hashtable.set(bucket, q_off_1);
+            if H24 {
+                debug_assert!(3 * q_off_1 as usize + 3 <= 4 * self.next_pos.len);
+                super::x_mb_narrow::store_exact(self.next_pos.ptr, q_off_1 as usize, head);
+                super::x_mb_narrow::store_exact(self.hashtable.ptr, bucket, q_off_1);
+            } else {
+                self.next_pos.set(q_off_1 as usize, head);
+                self.hashtable.set(bucket, q_off_1);
+            }
         }
     }
 }
@@ -627,8 +649,16 @@ impl SharedTables {
 ///             continue;
 /// ```
 /// One worker: the word loop of `build_mb_lookup` (same reading order, same resets), applying
-/// the update only to the words whose cell block `owner` gives to `part`.
-fn fill_part(part: u8, owner: &[u8], block_shift: usize, words: &Words<'_>, t: SharedTables) {
+/// the update only to the words whose cell block `owner` gives to `part`; `H24`: on 3-byte
+/// elements (LOSAT_X_MB24, `SharedTables::apply`; newest first).
+fn fill_part<const H24: bool>(
+    part: u8,
+    owner: &[u8],
+    block_shift: usize,
+    words: &Words<'_>,
+    t: SharedTables,
+) {
+    debug_assert!(!(H24 && words.ascending_cells));
     let lut_word_length = words.lut_word_length;
     let mut own_words: Vec<(u32, u32)> = Vec::new();
     #[cfg(target_arch = "x86_64")]
@@ -687,7 +717,11 @@ fn fill_part(part: u8, owner: &[u8], block_shift: usize, words: &Words<'_>, t: S
                     // SAFETY: `bucket` < table size (masked k-mer); a prefetch does not fault.
                     unsafe {
                         core::arch::x86_64::_mm_prefetch(
-                            t.hashtable.ptr.add(bucket) as *const i8,
+                            if H24 {
+                                super::x_mb_narrow::at(t.hashtable.ptr, bucket)
+                            } else {
+                                t.hashtable.ptr.add(bucket) as *const i8
+                            },
                             core::arch::x86_64::_MM_HINT_T0,
                         );
                     }
@@ -696,7 +730,7 @@ fn fill_part(part: u8, owner: &[u8], block_shift: usize, words: &Words<'_>, t: S
                         let (b, q) = x_ring[slot];
                         // SAFETY: the cell block of `b` is owned by this part; `q` is the
                         // offset of one of this part's words.
-                        unsafe { t.apply(b as usize, q) };
+                        unsafe { t.apply::<H24>(b as usize, q) };
                     }
                     x_ring[slot] = (bucket as u32, q_off_1);
                     x_ring_len += 1;
@@ -704,7 +738,7 @@ fn fill_part(part: u8, owner: &[u8], block_shift: usize, words: &Words<'_>, t: S
                 #[cfg(not(target_arch = "x86_64"))]
                 {
                     // SAFETY: as above.
-                    unsafe { t.apply(bucket, q_off_1) };
+                    unsafe { t.apply::<H24>(bucket, q_off_1) };
                 }
             }
         }
@@ -715,7 +749,7 @@ fn fill_part(part: u8, owner: &[u8], block_shift: usize, words: &Words<'_>, t: S
         for k in x_ring_len - pending..x_ring_len {
             let (b, q) = x_ring[k % X_DELAY];
             // SAFETY: as above.
-            unsafe { t.apply(b as usize, q) };
+            unsafe { t.apply::<H24>(b as usize, q) };
         }
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:74-76
@@ -839,8 +873,19 @@ fn fill_mode(
 /// No NCBI counterpart: `fill` without the read-once fill (the shared arrays are updated by the
 /// owners of the cells).
 fn fill_with(parts: usize, words: &Words<'_>, tables: Tables<'_>, in_pool: bool) -> FillStats {
-    let table_size = tables.hashtable.len();
+    let h24 = tables.x_h24;
+    let table_size = if h24 {
+        words.kmer_mask as usize + 1
+    } else {
+        tables.hashtable.len()
+    };
     let (block_shift, owner) = plan(table_size, tables.pv_array_bts, parts);
+    // LOSAT_X_MB24: the instance for 3-byte elements.
+    let fill_part = if h24 {
+        fill_part::<true>
+    } else {
+        fill_part::<false>
+    };
     let parts = parts.clamp(1, 255);
     let shared = SharedTables {
         hashtable: Shared::new(tables.hashtable),
@@ -986,11 +1031,17 @@ pub(super) mod tests {
                 ascending_cells,
             );
             let mb = &reference.mb_lookup;
+            // (a table of 3-byte elements, LOSAT_X_MB24, gives its chains back as 4-byte arrays)
+            let (cells, next_len) = (
+                1usize << (2 * lut_word_length),
+                next_len_of(&queries, &offsets),
+            );
+            let (mb_hashtable, mb_next_pos) = reference.x_chain_arrays(next_len);
             for parts in 1..=8usize {
-                let mut hashtable = vec![0u32; mb.hashtable.len()];
-                let mut next_pos = vec![0u32; mb.next_pos.len()];
+                let mut hashtable = vec![0u32; cells];
+                let mut next_pos = vec![0u32; next_len];
                 let mut pv_array = vec![0 as PvArrayType; mb.pv_array.len()];
-                let mut helper_array = vec![0u32; (mb.hashtable.len() >> 11).max(1)];
+                let mut helper_array = vec![0u32; (cells >> 11).max(1)];
                 let words = Words {
                     queries_blastna: &query_refs,
                     query_offsets: &offsets,
@@ -1013,6 +1064,7 @@ pub(super) mod tests {
                         pv_array: &mut pv_array,
                         pv_array_bts: mb.pv_array_bts,
                         helper_array: &mut helper_array,
+                        x_h24: false,
                     },
                     false,
                     false,
@@ -1021,12 +1073,81 @@ pub(super) mod tests {
                 for &value in &helper_array {
                     longest_chain = longest_chain.max(value as usize);
                 }
-                assert_eq!(hashtable, mb.hashtable, "case {case} parts {parts}");
-                assert_eq!(next_pos, mb.next_pos, "case {case} parts {parts}");
+                assert_eq!(hashtable, mb_hashtable, "case {case} parts {parts}");
+                assert_eq!(next_pos, mb_next_pos, "case {case} parts {parts}");
                 assert_eq!(pv_array, mb.pv_array, "case {case} parts {parts}");
                 assert_eq!(longest_chain, mb.longest_chain, "case {case} parts {parts}");
+                // LOSAT_X_MB24: the same fill into 3-byte elements (newest first only)
+                if !ascending_cells {
+                    let (h, n, pv, helper) = fill_h24(
+                        false,
+                        parts,
+                        false,
+                        &words,
+                        next_len,
+                        mb.pv_array.len(),
+                        mb.pv_array_bts,
+                    );
+                    assert_eq!(h, mb_hashtable, "case {case} parts {parts} h24");
+                    assert_eq!(n, mb_next_pos, "case {case} parts {parts} h24");
+                    assert_eq!(pv, mb.pv_array, "case {case} parts {parts} h24");
+                    assert_eq!(helper, helper_array, "case {case} parts {parts} h24");
+                }
             }
         }
+    }
+
+    /// The elements of `next_pos` for these queries (the largest offset plus length, plus 1).
+    pub(crate) fn next_len_of(queries: &[Vec<u8>], offsets: &[i32]) -> usize {
+        queries
+            .iter()
+            .zip(offsets)
+            .map(|(q, &o)| o.max(0) as usize + q.len())
+            .max()
+            .unwrap_or(0)
+            + 1
+    }
+
+    /// The fill of this module (`once`: the read-once fill) into tables of 3-byte elements
+    /// (LOSAT_X_MB24) of `words.kmer_mask + 1` cells, widened: `(hashtable, next_pos, pv_array,
+    /// helper_array)`.
+    pub(crate) fn fill_h24(
+        once: bool,
+        parts: usize,
+        in_pool: bool,
+        words: &Words<'_>,
+        next_len: usize,
+        pv_len: usize,
+        pv_array_bts: usize,
+    ) -> (Vec<u32>, Vec<u32>, Vec<PvArrayType>, Vec<u32>) {
+        use super::super::x_mb_narrow::{widen, words_for};
+        let cells = words.kmer_mask as usize + 1;
+        let mut hashtable = vec![0u32; words_for(cells)];
+        let mut next_pos = vec![0u32; words_for(next_len)];
+        let mut pv_array = vec![0 as PvArrayType; pv_len];
+        let mut helper_array = vec![0u32; (cells >> 11).max(1)];
+        fill_mode(
+            once,
+            false,
+            parts,
+            words,
+            Tables {
+                hashtable: &mut hashtable,
+                next_pos: &mut next_pos,
+                pv_array: &mut pv_array,
+                pv_array_bts,
+                helper_array: &mut helper_array,
+                x_h24: true,
+            },
+            in_pool,
+            false,
+        );
+        (
+            widen(&hashtable, cells),
+            widen(&next_pos, next_len),
+            pv_array,
+            helper_array,
+        )
     }
 
     // The same with real threads (a pool of 1..8 threads; the owner is inside the pool).
@@ -1053,16 +1174,51 @@ pub(super) mod tests {
                 ascending_cells,
             );
             let mb = &reference.mb_lookup;
+            let (cells, next_len) = (
+                1usize << (2 * lut_word_length),
+                next_len_of(&queries, &offsets),
+            );
+            let (mb_hashtable, mb_next_pos) = reference.x_chain_arrays(next_len);
             for threads in 1..=8usize {
                 let pool = rayon::ThreadPoolBuilder::new()
                     .num_threads(threads)
                     .build()
                     .unwrap();
+                let words = Words {
+                    queries_blastna: &query_refs,
+                    query_offsets: &offsets,
+                    query_masks: &masks,
+                    word_length,
+                    lut_word_length,
+                    kmer_mask: (1u64 << (2 * lut_word_length)) - 1,
+                    ascending_cells,
+                };
+                // LOSAT_X_MB24: the fill of this module and the read-once fill into 3-byte
+                // elements on the pool (newest first only)
+                if !ascending_cells {
+                    for once in [false, true] {
+                        let (h, n, pv, _) = pool.install(|| {
+                            fill_h24(
+                                once,
+                                threads,
+                                true,
+                                &words,
+                                next_len,
+                                mb.pv_array.len(),
+                                mb.pv_array_bts,
+                            )
+                        });
+                        let what = format!("case {case} threads {threads} h24 once {once}");
+                        assert_eq!(h, mb_hashtable, "{what}");
+                        assert_eq!(n, mb_next_pos, "{what}");
+                        assert_eq!(pv, mb.pv_array, "{what}");
+                    }
+                }
                 let (hashtable, next_pos, pv_array) = pool.install(|| {
-                    let mut hashtable = vec![0u32; mb.hashtable.len()];
-                    let mut next_pos = vec![0u32; mb.next_pos.len()];
+                    let mut hashtable = vec![0u32; cells];
+                    let mut next_pos = vec![0u32; next_len];
                     let mut pv_array = vec![0 as PvArrayType; mb.pv_array.len()];
-                    let mut helper_array = vec![0u32; (mb.hashtable.len() >> 11).max(1)];
+                    let mut helper_array = vec![0u32; (cells >> 11).max(1)];
                     let words = Words {
                         queries_blastna: &query_refs,
                         query_offsets: &offsets,
@@ -1083,14 +1239,15 @@ pub(super) mod tests {
                             pv_array: &mut pv_array,
                             pv_array_bts: mb.pv_array_bts,
                             helper_array: &mut helper_array,
+                            x_h24: false,
                         },
                         true,
                         false,
                     );
                     (hashtable, next_pos, pv_array)
                 });
-                assert_eq!(hashtable, mb.hashtable, "case {case} threads {threads}");
-                assert_eq!(next_pos, mb.next_pos, "case {case} threads {threads}");
+                assert_eq!(hashtable, mb_hashtable, "case {case} threads {threads}");
+                assert_eq!(next_pos, mb_next_pos, "case {case} threads {threads}");
                 assert_eq!(pv_array, mb.pv_array, "case {case} threads {threads}");
             }
         }
@@ -1135,6 +1292,7 @@ pub(super) mod tests {
                 pv_array: &mut b.pv_array,
                 pv_array_bts,
                 helper_array: &mut b.helper_array,
+                x_h24: false,
             },
             in_pool,
             false,
@@ -1209,16 +1367,17 @@ pub(super) mod tests {
                 *asc,
             );
             let mb = &reference.mb_lookup;
-            let shape = (
-                mb.hashtable.len(),
-                mb.next_pos.len(),
-                mb.pv_array.len(),
-                mb.pv_array_bts,
+            let (cells, next_len) = (
+                1usize << (2 * lut_word_length),
+                next_len_of(&queries, offsets),
             );
-            if mb.hashtable.len() >= 1 << 22 && mb.pv_array_bts > 7 {
+            // (a table of 3-byte elements, LOSAT_X_MB24, gives its chains back as 4-byte arrays)
+            let (mb_hashtable, mb_next_pos) = reference.x_chain_arrays(next_len);
+            let shape = (cells, next_len, mb.pv_array.len(), mb.pv_array_bts);
+            if cells >= 1 << 22 && mb.pv_array_bts > 7 {
                 seen_large_tables += 1;
             }
-            let helper0 = vec![0u32; (mb.hashtable.len() >> 11).max(1)];
+            let helper0 = vec![0u32; (cells >> 11).max(1)];
             let pv0 = vec![0 as PvArrayType; mb.pv_array.len()];
             let words = Words {
                 queries_blastna: &query_refs,
@@ -1230,8 +1389,8 @@ pub(super) mod tests {
                 ascending_cells: *asc,
             };
             let loop_built = build_with(1, false, &words, shape, &helper0, &pv0);
-            assert_eq!(loop_built.hashtable, mb.hashtable, "case {case}");
-            assert_eq!(loop_built.next_pos, mb.next_pos, "case {case}");
+            assert_eq!(loop_built.hashtable, mb_hashtable, "case {case}");
+            assert_eq!(loop_built.next_pos, mb_next_pos, "case {case}");
             assert_eq!(loop_built.pv_array, mb.pv_array, "case {case}");
             let chain = loop_built
                 .helper_array
@@ -1520,5 +1679,98 @@ pub(super) mod tests {
             }
         }
         assert!(shapes > 1000, "{shapes}");
+    }
+
+    // LOSAT_X_MB24 at its edges. Words of the cells on both sides of block boundaries (`plan`'s
+    // blocks of 2^11 to 2^20 cells, whose owners differ), 40 of each (long chains), through the
+    // serial build and both pool fills on pools of 2, 5 and 16 threads; and one query placed so
+    // that `next_pos` has 2^24 elements (its last offset 2^24 - 1: 3-byte elements) or 2^24 + 1
+    // (4-byte, as before). The chains, presence vector and counters equal the loop's.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn three_byte_tables_at_block_edges_and_at_the_last_offset() {
+        let lut = 12usize;
+        let cells = 1usize << (2 * lut);
+        let kmer = |code: usize| -> Vec<u8> {
+            (0..lut)
+                .rev()
+                .map(|k| ((code >> (2 * k)) & 3) as u8)
+                .collect()
+        };
+        let mut edges = Vec::new();
+        for s in 11..=20 {
+            for k in [1usize, 3, 7] {
+                if k << s < cells {
+                    edges.extend([(k << s) - 1, k << s]);
+                }
+            }
+        }
+        let mut seq = Vec::new();
+        for _ in 0..40 {
+            for &cell in &edges {
+                seq.extend(kmer(cell));
+                // an N, so that the only words are those of the edge cells
+                seq.push(14);
+            }
+        }
+        let mut rng = Lcg(0x0024_ED6E);
+        let tail: Vec<u8> = (0..200).map(|_| rng.below(4) as u8).collect();
+        for (queries, offsets) in [
+            (vec![seq.clone()], vec![0i32]),
+            (vec![tail.clone()], vec![(1i32 << 24) - 201]),
+            (vec![tail.clone()], vec![(1i32 << 24) - 200]),
+        ] {
+            let refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+            let masks = vec![Vec::new()];
+            let next_len = next_len_of(&queries, &offsets);
+            let what = format!("next_pos of {next_len}");
+            let reference =
+                build_two_stage_lookup(&refs, &offsets, 16, lut, &masks, None, 0, 1_000_000, false);
+            let mb = &reference.mb_lookup;
+            assert_eq!(
+                mb.x_narrow.is_some(),
+                super::super::x_mb_narrow::on() && next_len <= 1 << 24,
+                "{what}"
+            );
+            let words = Words {
+                queries_blastna: &refs,
+                query_offsets: &offsets,
+                query_masks: &masks,
+                word_length: 16,
+                lut_word_length: lut,
+                kmer_mask: (cells - 1) as u64,
+                ascending_cells: false,
+            };
+            let shape = (cells, next_len, mb.pv_array.len(), mb.pv_array_bts);
+            let helper0 = vec![0u32; cells >> 11];
+            let pv0 = vec![0 as PvArrayType; mb.pv_array.len()];
+            let loop_built = build_with(1, false, &words, shape, &helper0, &pv0);
+            let (hashtable, next_pos) = reference.x_chain_arrays(next_len);
+            assert!(hashtable == loop_built.hashtable, "{what}: serial heads");
+            assert!(next_pos == loop_built.next_pos, "{what}: serial chains");
+            assert_eq!(mb.pv_array, loop_built.pv_array, "{what}: serial");
+            if next_len > 1 << 24 {
+                continue;
+            }
+            for threads in [2usize, 5, 16] {
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build()
+                    .unwrap();
+                for once in [false, true] {
+                    let (h, n, pv, helper) = pool.install(|| {
+                        fill_h24(once, threads, true, &words, next_len, shape.2, shape.3)
+                    });
+                    let what = format!("{what} pool {threads} once {once}");
+                    assert!(h == loop_built.hashtable, "{what}: heads");
+                    assert!(n == loop_built.next_pos, "{what}: chains");
+                    assert_eq!(pv, loop_built.pv_array, "{what}");
+                    assert_eq!(helper, loop_built.helper_array, "{what}");
+                }
+            }
+        }
     }
 }

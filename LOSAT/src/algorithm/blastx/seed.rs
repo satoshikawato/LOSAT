@@ -323,6 +323,18 @@ impl Lookup {
         parameters: &[ContextParameters],
         options: &ResolvedOptions,
     ) -> Result<Self> {
+        Self::x_new_striped(batch, parameters, options, 1)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXBUILDPAR): [`Lookup::new`] with a pooled standard table's passes on
+    /// `stripes` tasks of the pool it runs on (`tblastx/lookup/x_lut_direct.rs`
+    /// `x_striped_passes`); the table is the same.
+    pub(crate) fn x_new_striped(
+        batch: &PreparedQueryBatch,
+        parameters: &[ContextParameters],
+        options: &ResolvedOptions,
+        stripes: usize,
+    ) -> Result<Self> {
         let query = batch.sequence_start[1..].to_vec();
         if options.word_size == 5 {
             return Ok(Self::Compressed(
@@ -368,6 +380,7 @@ impl Lookup {
                 batch.lookup_segments.clone(),
                 contexts,
                 options.threshold as i32,
+                stripes,
             ),
             x_seed_scan::XKeptPresence::new(),
         ))

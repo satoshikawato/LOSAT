@@ -1542,11 +1542,14 @@ pub(crate) fn build_ncbi_lookup_for_profile(
 //
 //     sfree(exact_backbone);
 // ```
+/// BLASTX's lookup table of a prepared query; `stripes` above 1: a pooled build's passes on that many tasks of the pool it runs on
+/// (`LOSAT_X_BXBUILDPAR`, `x_lut_direct.rs` `x_striped_passes`); the table is the same.
 pub(crate) fn build_ncbi_lookup_from_prepared(
     concat_query: Vec<u8>,
     lookup_locations: Vec<(i32, i32)>,
     contexts: Vec<QueryContext>,
     threshold: i32,
+    stripes: usize,
 ) -> BlastAaLookupTable {
     let frame_bases = contexts.iter().map(|c| c.frame_base).collect();
     let prepared = PreparedLookupQuery {
@@ -1570,7 +1573,13 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines (diagnostics
     // mode, or a backbone index wider than 16 bits) the reference builder below runs.
     let built = if x_lut_direct::x_bx_lut_pool() {
-        x_lut_direct::x_build_direct_pooled(prepared, threshold, ScoringMatrix::Blosum62, 3)
+        x_lut_direct::x_build_direct_pooled(
+            prepared,
+            threshold,
+            ScoringMatrix::Blosum62,
+            3,
+            stripes,
+        )
     } else {
         x_lut_direct::x_build_direct(prepared, threshold, ScoringMatrix::Blosum62, 3)
     };

@@ -171,13 +171,17 @@ impl XLists<'_> {
     }
 }
 
-/// No NCBI counterpart: a build's temporary vectors, kept between pooled builds.
+/// No NCBI counterpart: a build's temporary vectors, kept between pooled builds (`cells`, `starts`
+/// and `offsets`: the present source cells of a striped build, `x_striped_passes`).
 #[derive(Default)]
 struct XBuildTemps {
     counts: Vec<u32>,
     base: Vec<u32>,
     fill: Vec<u32>,
     chains: Option<LookupBackboneChains>,
+    cells: Vec<u32>,
+    starts: Vec<u32>,
+    offsets: Vec<i32>,
 }
 
 // SAFETY: the exact backbone's block pointers point into slabs it owns (boxes, which do not move
@@ -217,12 +221,15 @@ fn x_zeroed<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Ve
 //             s_AddWordHits(lookup, matrix, query->sequence,
 //                           exact_backbone[i], query_bias, row_max);
 // ```
-/// [`x_build_direct`] with the shared neighbour lists and kept vectors (`LOSAT_X_BXLUTPOOL`).
+/// [`x_build_direct`] with the shared neighbour lists and kept vectors (`LOSAT_X_BXLUTPOOL`); with
+/// `stripes` above 1, its passes on that many tasks of the pool it runs on (`LOSAT_X_BXBUILDPAR`,
+/// [`x_striped_passes`]).
 pub(super) fn x_build_direct_pooled(
     prepared: PreparedLookupQuery,
     threshold: i32,
     matrix: ScoringMatrix,
     word_length: usize,
+    stripes: usize,
 ) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
     let mut unused = None;
     x_build_direct_in(
@@ -233,6 +240,7 @@ pub(super) fn x_build_direct_pooled(
         &mut unused,
         None,
         true,
+        stripes,
     )
     .map(|table| table.expect("pooled vectors grow to any table"))
 }
@@ -412,6 +420,7 @@ impl XAaSpares {
                 &mut memo.borrow_mut(),
                 Some(&mut room),
                 false,
+                1,
             )
         });
         match built {
@@ -531,6 +540,7 @@ impl XAaSpares {
             &mut memo,
             Some(&mut room),
             false,
+            1,
         );
         *x_locked(&self.memo) = memo;
         *x_locked(&self.ahead) = room;
@@ -754,6 +764,7 @@ pub(super) fn x_build_direct(
             &mut memo.borrow_mut(),
             None,
             false,
+            1,
         )
         .map(|table| table.expect("fresh vectors have the room for any table"))
     })
@@ -762,7 +773,9 @@ pub(super) fn x_build_direct(
 /// [`x_build_direct`] with the neighbour lists of `memo` (the calling thread's, or those an
 /// `XAaSpares` keeps), and, with `room` (LOSAT_X_BPLKPAHEAD), the table's backbone, overflow and pv
 /// vectors taken from `room` instead of allocated: `Ok(None)` (nothing taken) where one of them
-/// lacks the capacity.
+/// lacks the capacity. A pooled build with `stripes` above 1 runs its passes on that many tasks of
+/// the pool it runs on ([`x_striped_passes`]).
+#[allow(clippy::too_many_arguments)]
 fn x_build_direct_in(
     prepared: PreparedLookupQuery,
     threshold: i32,
@@ -771,6 +784,7 @@ fn x_build_direct_in(
     memo: &mut Option<XNeighborMemo>,
     room: Option<&mut XAaVectors>,
     pooled: bool,
+    stripes: usize,
 ) -> std::result::Result<Option<BlastAaLookupTable>, PreparedLookupQuery> {
     let alphabet_size = LOOKUP_ALPHABET_SIZE;
     let charsize = ilog2(alphabet_size) + 1;
@@ -842,6 +856,50 @@ fn x_build_direct_in(
         Some(shared) => XLists::Shared(&shared.lists),
         None => XLists::Own(&mut memo.as_mut().expect("memo set above").lists),
     };
+
+    // Dispatch point (LOSAT_X_BXBUILDPAR, in the strict set): the passes below by stripes of target
+    // cells on the pool, for a pooled build (the shared lists) with stripes asked for.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if let (true, XLists::Shared(shared_lists), None) = (stripes > 1, &lists, &room) {
+        let (backbone, pv, overflow, longest_chain) = x_striped_passes(
+            stripes,
+            backbone_size,
+            &exact_backbone,
+            shared_lists,
+            &|first: usize| {
+                x_target_list(
+                    &concat_query[first..],
+                    alphabet_size,
+                    word_length,
+                    charsize,
+                    &row_max,
+                    threshold,
+                    matrix,
+                )
+            },
+            &mut temps,
+        );
+        temps.chains = Some(exact_backbone);
+        x_pool_lock(&X_BX_TEMPS).push(temps);
+        return Ok(Some(BlastAaLookupTable {
+            backbone,
+            overflow,
+            pv,
+            frame_bases,
+            num_contexts: contexts.len(),
+            query_length,
+            word_length: word_length as i32,
+            alphabet_size: alphabet_size as i32,
+            charsize: charsize as i32,
+            mask: mask as i32,
+            longest_chain,
+            threshold,
+            row_max,
+        }));
+    }
 
     // Count pass: count[w] = number of appends the reference makes to cell w.
     let mut counts: Vec<u32> = if pooled {
@@ -949,12 +1007,11 @@ fn x_build_direct_in(
     }
 
     if pooled {
-        x_pool_lock(&X_BX_TEMPS).push(XBuildTemps {
-            counts,
-            base,
-            fill,
-            chains: Some(exact_backbone),
-        });
+        temps.counts = counts;
+        temps.base = base;
+        temps.fill = fill;
+        temps.chains = Some(exact_backbone);
+        x_pool_lock(&X_BX_TEMPS).push(temps);
     }
     Ok(Some(BlastAaLookupTable {
         backbone,
@@ -971,6 +1028,188 @@ fn x_build_direct_in(
         threshold,
         row_max,
     }))
+}
+
+// No NCBI counterpart: the cells of T(s) (`x_target_list`) in the stripe [first, end), each once.
+// T(s) is `s` when the reference adds the exact offsets, then the neighbour words in the order of
+// the `s_AddWordHitsCore` recursion: the residues are tried in ascending order at each position, so
+// the neighbours are in ascending backbone index (`x_word_index`: the residues' bits, the first
+// residue highest). After the first entry the list ascends, and the stripe's part of it is a range.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_in_stripe(list: &[u16], first: usize, end: usize) -> impl Iterator<Item = usize> + '_ {
+    let (head, rest) = list.split_at(list.len().min(1));
+    debug_assert!(rest.windows(2).all(|pair| pair[0] < pair[1]));
+    let from = rest.partition_point(|&w| (w as usize) < first);
+    let to = rest.partition_point(|&w| (w as usize) < end);
+    head.iter()
+        .filter(move |&&w| (first..end).contains(&(w as usize)))
+        .chain(&rest[from..to])
+        .map(|&w| w as usize)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 and 283-358 (cited
+// at `x_build_direct`): the appends of s_AddWordHits for s ascending, then BlastAaLookupFinalize's
+// layout. No NCBI counterpart for the stripes (scheduling only): NCBI builds a table on one thread.
+// Here the passes of `x_build_direct_in` run on tasks of the pool, each for a stripe of target cells
+// of `STRIPE` cells (a multiple of 32, so that no pv word is shared): it walks every present source
+// cell s in ascending order and makes s's appends to its own cells only. A cell's entries are the
+// offsets of the source cells whose T(s) holds it, s ascending (each T(s) holds a cell at most once),
+// so the stripe gives each of its cells the reference's appends in the reference's order. The
+// counts, `num_used`, the pv bits and `longest_chain` are those of the counts; the overflow cursors
+// are assigned in ascending cell order as BlastAaLookupFinalize assigns them: a stripe's cells take
+// the cursors after the overflow of the stripes before it (their sizes summed in stripe order).
+// The neighbour lists of the present source cells are made first, on tasks of their own (each is a
+// function of its word alone, module comment), so that no stripe waits on another for a list.
+/// EXPERIMENT (LOSAT_X_BXBUILDPAR): the count pass, the layout and the fill pass of a pooled build
+/// (`x_build_direct_in`) on `stripes` tasks of the pool it runs on: the table's backbone, pv and
+/// overflow vectors (taken from the pool) and its `longest_chain`.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[allow(clippy::type_complexity)]
+fn x_striped_passes(
+    stripes: usize,
+    backbone_size: usize,
+    exact_backbone: &LookupBackboneChains,
+    lists: &[std::sync::OnceLock<Box<[u16]>>],
+    target_list: &(dyn Fn(usize) -> Box<[u16]> + Sync),
+    temps: &mut XBuildTemps,
+) -> (Vec<BackboneCell>, Vec<u32>, Vec<i32>, i32) {
+    use crate::algorithm::tblastx::lookup::PV_ARRAY_MASK;
+    use rayon::prelude::*;
+    // The present source cells in ascending order and their offsets (chain order), so that the
+    // tasks read plain slices.
+    let mut cells = std::mem::take(&mut temps.cells);
+    let mut starts = std::mem::take(&mut temps.starts);
+    let mut offsets = std::mem::take(&mut temps.offsets);
+    cells.clear();
+    starts.clear();
+    offsets.clear();
+    starts.push(0);
+    for idx in 0..backbone_size {
+        if let Some(offset_list) = exact_backbone[idx].as_deref() {
+            cells.push(idx as u32);
+            offsets.extend_from_slice(lookup_chain_entries(offset_list));
+            starts.push(offsets.len() as u32);
+        }
+    }
+    let source = |i: usize| &offsets[starts[i] as usize..starts[i + 1] as usize];
+    // The lists not made yet, on tasks of 256 source cells (blast_aalookup.c:490: the word at the
+    // first offset).
+    (0..cells.len())
+        .into_par_iter()
+        .with_min_len(256)
+        .for_each(|i| {
+            lists[cells[i] as usize].get_or_init(|| target_list(source(i)[0] as usize));
+        });
+    let list = |i: usize| -> &[u16] { lists[cells[i] as usize].get().expect("made above") };
+    let stripe = backbone_size.div_ceil(stripes).next_multiple_of(32);
+    // Count pass: each stripe's counts, its overflow size and its longest count.
+    let mut counts = x_zeroed(std::mem::take(&mut temps.counts), backbone_size, false);
+    let sizes: Vec<(usize, i32)> = counts
+        .par_chunks_mut(stripe)
+        .with_max_len(1)
+        .enumerate()
+        .map(|(j, counts)| {
+            let (first, end) = (j * stripe, j * stripe + counts.len());
+            for i in 0..cells.len() {
+                let k = source(i).len() as u32;
+                for w in x_in_stripe(list(i), first, end) {
+                    counts[w - first] += k;
+                }
+            }
+            let mut overflow_size = 0usize;
+            let mut longest_chain: i32 = 0;
+            for &count in counts.iter() {
+                if count as usize > AA_HITS_PER_CELL {
+                    overflow_size += count as usize;
+                }
+                if (count as i32) > longest_chain {
+                    longest_chain = count as i32;
+                }
+            }
+            (overflow_size, longest_chain)
+        })
+        .collect();
+    let overflow_size = sizes.iter().map(|&(size, _)| size).sum();
+    let longest_chain = sizes.iter().map(|&(_, longest)| longest).max().unwrap_or(0);
+    // Layout and fill pass on the table's vectors, each stripe on its own cells, pv words and part
+    // of the overflow.
+    let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
+    let kept = x_pool_lock(&X_BX_TABLES).pop().unwrap_or_default();
+    let mut backbone = x_zeroed(kept.backbone, backbone_size, false);
+    let mut pv = x_zeroed(kept.pv, pv_size, false);
+    let mut overflow = x_zeroed(kept.overflow, overflow_size, true);
+    let mut base = x_zeroed(std::mem::take(&mut temps.base), backbone_size, false);
+    let mut fill = x_zeroed(std::mem::take(&mut temps.fill), backbone_size, false);
+    let mut parts = Vec::with_capacity(sizes.len());
+    let (mut rest, mut cursor) = (&mut overflow[..], 0usize);
+    for (((((j, counts), backbone), pv), base), fill) in counts
+        .chunks(stripe)
+        .enumerate()
+        .zip(backbone.chunks_mut(stripe))
+        .zip(pv.chunks_mut(stripe >> PV_ARRAY_BTS))
+        .zip(base.chunks_mut(stripe))
+        .zip(fill.chunks_mut(stripe))
+    {
+        let (overflow, tail) = std::mem::take(&mut rest).split_at_mut(sizes[j].0);
+        rest = tail;
+        parts.push((
+            j * stripe,
+            cursor,
+            counts,
+            backbone,
+            pv,
+            base,
+            fill,
+            overflow,
+        ));
+        cursor += sizes[j].0;
+    }
+    parts.into_par_iter().with_max_len(1).for_each(
+        |(first, cursor, counts, backbone, pv, base, fill, overflow)| {
+            let mut at = 0usize;
+            for (local, &count) in counts.iter().enumerate() {
+                if count == 0 {
+                    continue;
+                }
+                // pv_set at cell first + local; `first` is a multiple of 32.
+                pv[local >> PV_ARRAY_BTS] |= 1u32 << (local & PV_ARRAY_MASK);
+                backbone[local].num_used = count as i32;
+                if count as usize > AA_HITS_PER_CELL {
+                    backbone[local].entries[0] = (cursor + at) as i32;
+                    base[local] = at as u32;
+                    at += count as usize;
+                }
+            }
+            let end = first + counts.len();
+            for i in 0..cells.len() {
+                let offsets = source(i);
+                for w in x_in_stripe(list(i), first, end) {
+                    let local = w - first;
+                    let at = fill[local] as usize;
+                    if counts[local] as usize <= AA_HITS_PER_CELL {
+                        backbone[local].entries[at..at + offsets.len()].copy_from_slice(offsets);
+                    } else {
+                        let start = base[local] as usize + at;
+                        overflow[start..start + offsets.len()].copy_from_slice(offsets);
+                    }
+                    fill[local] += offsets.len() as u32;
+                }
+            }
+        },
+    );
+    temps.counts = counts;
+    temps.base = base;
+    temps.fill = fill;
+    temps.cells = cells;
+    temps.starts = starts;
+    temps.offsets = offsets;
+    (backbone, pv, overflow, longest_chain)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469
@@ -1329,11 +1568,11 @@ mod tests {
         let pooled = |queries: &[Vec<QueryFrame>], threshold: i32, matrix: ScoringMatrix| {
             let reference =
                 build_lookup_from_prepared(prepared(queries, matrix), threshold, matrix, 3).0;
-            let table = match x_build_direct_pooled(prepared(queries, matrix), threshold, matrix, 3)
-            {
-                Ok(table) => table,
-                Err(_) => panic!("in-place builder declined"),
-            };
+            let table =
+                match x_build_direct_pooled(prepared(queries, matrix), threshold, matrix, 3, 1) {
+                    Ok(table) => table,
+                    Err(_) => panic!("in-place builder declined"),
+                };
             x_assert_same_table(&table, &reference);
             table
         };
@@ -1354,6 +1593,60 @@ mod tests {
             let mut table = pooled(queries, threshold, matrix);
             x_give_back_pooled(&mut table);
         }
+    }
+
+    // No NCBI counterpart (scheduling only): LOSAT_X_BXBUILDPAR's passes by stripes of target
+    // cells give the reference table, with stripes of 32 cells and of more than the backbone,
+    // with overflow cells (the low-complexity frame), thresholds with and without neighbours and
+    // other matrices, on vectors other builds left.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn striped_tables_equal_the_reference() {
+        let mut seed = 31u64;
+        let mut low_complexity = vec![1u8; 400];
+        low_complexity.extend(residues(&mut seed, 60));
+        let small = vec![vec![frame(residues(&mut seed, 300), vec![], 1)]];
+        let large = vec![
+            vec![
+                frame(residues(&mut seed, 2_500), vec![(100, 140)], 1),
+                frame(low_complexity, vec![(350, 399)], -1),
+            ],
+            vec![frame(residues(&mut seed, 1_800), vec![], 2)],
+        ];
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            for (queries, threshold, matrix) in [
+                (&large, 11, ScoringMatrix::Blosum62),
+                (&small, 12, ScoringMatrix::Blosum62),
+                (&large, 13, ScoringMatrix::Blosum45),
+                (&large, 0, ScoringMatrix::Blosum62),
+                (&small, 12, ScoringMatrix::Pam30),
+            ] {
+                let reference =
+                    build_lookup_from_prepared(prepared(queries, matrix), threshold, matrix, 3).0;
+                assert!(threshold == 0 || !reference.overflow.is_empty());
+                for stripes in [2, 3, 4, 7, 1_000, 100_000] {
+                    let mut table = match x_build_direct_pooled(
+                        prepared(queries, matrix),
+                        threshold,
+                        matrix,
+                        3,
+                        stripes,
+                    ) {
+                        Ok(table) => table,
+                        Err(_) => panic!("in-place builder declined"),
+                    };
+                    x_assert_same_table(&table, &reference);
+                    x_give_back_pooled(&mut table);
+                }
+            }
+        });
     }
 
     #[test]

@@ -63,6 +63,12 @@
 //!   x1.59 and 68 MiB; this switch x0.98 and 71 MiB (NCBI `-subject`, one thread: 6.0 s, 80 MiB);
 //!   200 proteins x0.74. With `LOSAT_TIMING` the preparation ahead is not in the batch's
 //!   `QuerySetup` clock.
+//! - `LOSAT_X_BXBUILDPAR` (acts where `LOSAT_X_BXUNITCAP` caps): the lookup table of a capped unit
+//!   is built on `ceil(threads / K)` tasks of the pool (the threads a unit is left), its passes by
+//!   stripes of target cells (`tblastx/lookup/x_lut_direct.rs` `x_striped_passes`, which gives
+//!   the argument that the table is the one-thread build's), instead of on the unit's thread
+//!   alone: with K units at a time the builds were the part of the unit no other thread could
+//!   take (2.7 ms of a 3.6 ms batch at 32 threads, 800 cDNAs x 8 yeast proteins).
 //! - `LOSAT_X_BXCAPTABLES` (acts where `LOSAT_X_BXUNITCAP` caps the batch flow): the K counts lookup
 //!   tables, not searches. A capped batch leaves the K (and the count of capped batches that sizes
 //!   the chunk waves) once its last lookup table is dropped (`search::search_core` calls back
@@ -244,6 +250,26 @@ pub(crate) fn chunk_unit_cap(
 /// own outside the cap (`LOSAT_X_BXCAPFILL`, module comment).
 pub(crate) fn prepares_batches_ahead() -> bool {
     cap_fill().is_some()
+}
+
+/// No NCBI counterpart: whether `LOSAT_X_BXBUILDPAR` is on.
+fn build_par_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXBUILDPAR"))
+}
+
+/// No NCBI counterpart (scheduling only, `LOSAT_X_BXBUILDPAR`): the stripes of the lookup table of
+/// a unit of `pool`'s search: `ceil(threads / K)` (the threads a unit is left) for a unit the cap K
+/// holds (`capped`: a chunk of the capped chunk waves, or any chunk inside the capped batch flow),
+/// else 1 (the build on one thread).
+pub(crate) fn build_stripes(pool: &crate::utils::threading::SearchPool<'_>, capped: bool) -> usize {
+    if !build_par_on() {
+        return 1;
+    }
+    let k = cap_k().filter(|_| capped || in_capped_batch(pool));
+    let stripes = k.map_or(1, |k| pool.threads().div_ceil(k));
+    crate::utils::xreach::x_reach!("LOSAT_X_BXBUILDPAR", stripes > 1);
+    stripes
 }
 
 /// No NCBI counterpart: whether a batch of the capped batch flow leaves the K searched at a time

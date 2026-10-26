@@ -172,6 +172,10 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BXCAPFILL` (BLASTX's capped units fill the threads with few subjects too: tasks of
 /// fewer subjects, each query batch prepared outside the cap, `blastx/x_bx_mem.rs`) joined the set
 /// in the pull request that added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_BXBUILDPAR` (BLASTX's lookup table of a capped unit built on the threads the cap
+/// leaves it, by stripes of target cells, `blastx/x_bx_mem.rs`, `tblastx/lookup/x_lut_direct.rs`)
+/// joined the set in the pull request that added it, after it was verified and timed with it on
+/// and off.
 /// `LOSAT_X_BXCAPTABLES` (BLASTX's capped batch flow counts lookup tables, not searches: a batch
 /// leaves the K once its tables are dropped, before its traceback, `blastx/x_bx_mem.rs`) joined the
 /// set in the pull request that added it, after it was verified and timed with it on and off.
@@ -242,6 +246,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPSUBJRUN",
     "LOSAT_X_BPUNGAP",
     "LOSAT_X_BPUNGAPSENT",
+    "LOSAT_X_BXBUILDPAR",
     "LOSAT_X_BXCAPFILL",
     "LOSAT_X_BXCAPTABLES",
     "LOSAT_X_BXCHUNKFLOW",

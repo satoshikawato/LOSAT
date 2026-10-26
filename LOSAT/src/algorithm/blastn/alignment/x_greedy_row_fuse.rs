@@ -305,6 +305,8 @@ pub(super) unsafe fn x_greedy_row_fused_avx2(
     xdrop_score: i32,
     st: &mut XGreedyRowState,
 ) -> bool {
+    // No NCBI counterpart (memory placement only): see `x_frame_align`.
+    crate::utils::x_frame::x_frame_align();
     if reverse {
         x_greedy_row_fused::<true>(
             seq1,

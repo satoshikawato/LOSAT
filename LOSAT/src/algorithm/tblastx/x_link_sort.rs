@@ -292,6 +292,98 @@ fn pool_allowed(site: Site) -> bool {
     }
 }
 
+// EXPERIMENT (LOSAT_X_TBXBOARD): a stable sort of `indices` by `compare` on the search's board
+// (tblastx/x_work_board.rs): equal chunks sorted by the stable `sort_by`, then rounds of two-way
+// merges that take the left element unless the right one is smaller. No NCBI counterpart: a stable
+// sort's result is the one order in which equal elements keep their input order, so this gives
+// `sort_today`'s order (and `par_sort_by`'s), element for element, however the chunks are cut and
+// whichever thread sorts or merges them. No thread waits in the pool (the board's items wait for
+// nothing).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_board_sort<C>(
+    board: &crate::algorithm::tblastx::x_work_board::XBoard,
+    indices: &mut [usize],
+    records: &[UngappedHit],
+    compare: &C,
+) where
+    C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
+{
+    use crate::algorithm::tblastx::x_work_board::XTaker;
+    const CHUNK_MIN: usize = 8192;
+    let n = indices.len();
+    let chunks = (n / CHUNK_MIN).clamp(1, rayon::current_num_threads());
+    let bounds: Vec<usize> = (0..=chunks).map(|c| c * n / chunks).collect();
+    let less = |a: usize, b: usize| compare(&records[a], &records[b]) == Ordering::Less;
+    let mut other: Vec<usize> = vec![0; n];
+    // The runs of the current round as [start, end) of the data in `src`.
+    let mut runs: Vec<(usize, usize)> = bounds.windows(2).map(|w| (w[0], w[1])).collect();
+    {
+        let base = indices.as_mut_ptr() as usize;
+        let sort_chunk = |c: usize, _: &mut XTaker| {
+            let (a, b) = runs[c];
+            // SAFETY: the runs are disjoint ranges of `indices`; the board runs index `c` once,
+            // and `run_groups` returns after every index has run.
+            let chunk =
+                unsafe { std::slice::from_raw_parts_mut((base as *mut usize).add(a), b - a) };
+            chunk.sort_by(|&lhs, &rhs| compare(&records[lhs], &records[rhs]));
+        };
+        board.run_groups(runs.len(), &sort_chunk, runs.len() - 1);
+    }
+    let mut in_indices = true;
+    while runs.len() > 1 {
+        let (src, dst): (usize, usize) = if in_indices {
+            (indices.as_mut_ptr() as usize, other.as_mut_ptr() as usize)
+        } else {
+            (other.as_mut_ptr() as usize, indices.as_mut_ptr() as usize)
+        };
+        let pairs: Vec<((usize, usize), Option<(usize, usize)>)> = runs
+            .chunks(2)
+            .map(|pair| (pair[0], pair.get(1).copied()))
+            .collect();
+        let merge = |p: usize, _: &mut XTaker| {
+            let ((a0, a1), right) = pairs[p];
+            let end = right.map_or(a1, |(_, b1)| b1);
+            // SAFETY: pair `p` reads `src[a0..end]` and writes `dst[a0..end]`, ranges disjoint
+            // from every other pair's; `src` and `dst` are different buffers of length `n`; the
+            // board runs index `p` once, and `run_groups` returns after every index has run.
+            let src = unsafe { std::slice::from_raw_parts(src as *const usize, n) };
+            let dst =
+                unsafe { std::slice::from_raw_parts_mut((dst as *mut usize).add(a0), end - a0) };
+            match right {
+                None => dst.copy_from_slice(&src[a0..a1]),
+                Some((b0, b1)) => {
+                    let (mut i, mut j, mut k) = (a0, b0, 0);
+                    while i < a1 && j < b1 {
+                        if less(src[j], src[i]) {
+                            dst[k] = src[j];
+                            j += 1;
+                        } else {
+                            dst[k] = src[i];
+                            i += 1;
+                        }
+                        k += 1;
+                    }
+                    dst[k..k + (a1 - i)].copy_from_slice(&src[i..a1]);
+                    k += a1 - i;
+                    dst[k..].copy_from_slice(&src[j..b1]);
+                }
+            }
+        };
+        board.run_groups(pairs.len(), &merge, pairs.len().saturating_sub(1));
+        runs = pairs
+            .iter()
+            .map(|&((a0, a1), right)| (a0, right.map_or(a1, |(_, b1)| b1)))
+            .collect();
+        in_indices = !in_indices;
+    }
+    if !in_indices {
+        indices.copy_from_slice(&other);
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
 // ```c
 //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
@@ -326,6 +418,20 @@ fn sort_stable<C>(
 where
     C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
 {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if (on_pool || super::x_link_slices::x_helped_now())
+        && indices.len() >= parallel_min
+        && rayon::current_num_threads() > 1
+    {
+        // EXPERIMENT (LOSAT_X_TBXBOARD): chunks and merges on the search's board.
+        if let Some((board, _)) = crate::algorithm::tblastx::x_work_board::current() {
+            x_board_sort(board, indices, records, &compare);
+            return true;
+        }
+    }
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")

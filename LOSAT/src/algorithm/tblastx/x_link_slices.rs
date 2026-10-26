@@ -359,10 +359,6 @@ fn link_slices(
     kernel_times: &KernelTimes,
     on_pool: bool,
 ) -> bool {
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
     // EXPERIMENT (LOSAT_X_TBXBOARD): the groups on the search's board (tblastx/x_work_board.rs),
     // taken before any unit, for a call on the pool and for a pipe chain (`x_helped_now`).
     #[cfg(all(
@@ -380,6 +376,10 @@ fn link_slices(
             return on_pool;
         }
     }
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     if on_pool {
         groups.into_par_iter().for_each(|group| {
             POOLS.with(|pools| {

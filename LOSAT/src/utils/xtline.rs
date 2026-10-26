@@ -22,9 +22,12 @@ pub fn rec(kind: &'static str, id: u32, t0: Instant, t1: Instant) {
         return;
     }
     let b = base();
+    #[cfg(feature = "parallel")]
     let th = rayon::current_thread_index()
         .map(|i| i as i64)
         .unwrap_or(-1);
+    #[cfg(not(feature = "parallel"))]
+    let th = -1i64;
     let a = t0.saturating_duration_since(b).as_nanos() as u64;
     let z = t1.saturating_duration_since(b).as_nanos() as u64;
     EV.lock()

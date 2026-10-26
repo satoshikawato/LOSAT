@@ -428,6 +428,7 @@ export LOSAT_X_TBNKEEPFEW=1
 export LOSAT_X_TBNLINKSETS=1
 export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNPAIRCAP=1
+export LOSAT_X_TBNREAPIDX=1
 export LOSAT_X_TBNREDOLPT=1
 export LOSAT_X_TBNSCANBYTE=1
 export LOSAT_X_TBNSTAGEDROP=1
@@ -5051,6 +5052,44 @@ Scheduling (each value computed by one thread with the original function; order 
   max RSS within 2 %): 16 proteins x E. coli x0.992 / x0.995, fly proteins x 5,000 16S x1.006 / x1.016 (0.10-0.15 s
   runs; per-round ratios 0.92-1.09), the same around fly 2L (`-subject`) x0.999 / x0.979, against the fly genome
   x0.995 / x0.991, one protein against the zebrafish genome x0.996 / x1.002.
+- `LOSAT_X_TBNREAPIDX=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-26;
+  `=0` turns it off; `tblastn/kappa/x_reap_index.rs` `x_reap_keep`, used by `kappa.rs`
+  `reap_contained_postredo_hsps`): after the composition-based redo of a match, NCBI removes every HSP whose two end
+  points lie inside an earlier HSP still kept, of the same context and frame, that scores at least as much
+  (`s_HitlistReapContained`, `blast_kappa.c` 224-273; `CONTAINED_IN_HSP`, `blast_hits_priv.h` 65-70), testing each
+  HSP against every earlier one, so a match with tens of thousands of HSPs costs the square of that: the B11h probe
+  (35 human proteins x the human genome `-db` at 8 threads, session 10 of v4-B10) counted 21.11 G iterations, 3.48 ns
+  each (73.6 thread-s, about 10 % of the user time once `TBNLINKSETS` had cut the linking). With the switch a list of
+  32 HSPs or more (`X_REAP_INDEX_FROM`) keeps the HSPs it has kept so far in a `BTreeSet` of (context, frame, subject
+  start, position), and each HSP tests only those whose subject start lies in [max(start, end) - dmax, min(start,
+  end)] (dmax: the largest `s_end - s_start` kept so far), with NCBI's whole test, the score included: an HSP that
+  contains both end points starts at or before both and ends at or after both, so it lies in that range. The answer
+  is whether some such HSP exists, which does not depend on the order they are met in, so every kept HSP, the
+  survivors' order and the report stay the same (unit tests `x_reap_keep_keeps_what_ncbi_keeps` (1,152 random lists
+  of 2 to 800 HSPs: dense and sparse coordinates, score order and none, tied scores, nested HSPs, ends one past the
+  edges, other frames and contexts, ends before starts, against NCBI's loop `reap_keep`), `x_reap_keep_edges`,
+  `the_reap_is_the_same_with_and_without_the_index`; six broken variants of the index fail them: dmax never grown,
+  the range one short at either end, the score not compared, frames of one sign sharing an index, the range start
+  wrapped instead of clamped at the ends of `i32`; a seventh, which also indexes the HSPs already reaped, gives the
+  same answers: an HSP inside a reaped one is inside the HSP that reaped it; `tests/tblastn_reap_idx.rs`: four
+  AP027131 proteins with long redo lists and one with a short list against the AP027133 genome, the switch on and
+  off at 1 and 2 threads, both sides reached). The probe's shadow of this index (the same range and order, lowest
+  start first) visited 6,326 candidates in 0.30 thread-s with no answer differing. Shorter lists keep NCBI's loop.
+  Conditional: the new side is a match whose redo gives 32 HSPs or more (`x_reach!`, once per match), the reference
+  side one with 2 to 31. Cost and floor: the reap was 73.6 thread-s (the probe) of the 706-730 s of user time of the
+  35 proteins at 8 threads after `TBNLINKSETS` (here user 730 -> 662 s); the floor is the index, about 0.3 thread-s.
+  Measured 2026-10-26 on the workstation (2x Xeon Gold 6338, cores warmed 3 s
+  before each run, pairs alternating in order, `perf stat` walls; base f5326a59; every output of a case the same
+  bytes in every arm; options `-evalue 1e-5 -max_target_seqs 5 -outfmt 6`): the first batch of HsG_b4 (35 human
+  proteins x `-db hsap_dna`) at 8 threads 93.7 -> 85.3 s (x0.904, 3 pairs, node 0 cores 24-31 with their siblings
+  idle, load 57-87; user 730 -> 662 s, instructions x0.955, max RSS x0.999; `=0` one run 105.5 s at the same cycles
+  as the base (x1.004) and instructions x1.0000, a lower clock under load), at 16 threads 47.2 -> 41.5 s (x0.877)
+  and at 32 threads 41.7 -> 36.1 s (x0.865; 3 pairs each, node 1; max RSS x0.95-0.99); at 1 thread 16 proteins x
+  E. coli and fly proteins x the fly genome 81.455 / 81.455 / 81.456 G and 127.219 G instructions in all three arms
+  (base, default, `=0`). Light cases (node 1, 8 pairs at 8 / 16 threads, instructions x1.0000, max RSS within 3 %):
+  16 proteins x E. coli x1.001 / x1.002, fly proteins x 5,000 16S x0.995 / x1.019 (no hits, 0.10-0.15 s runs;
+  per-round ratios 0.97-1.08), the same around fly 2L (`-subject`) x0.995 / x1.003, against the fly genome x1.001 /
+  x0.980, one protein against the zebrafish genome x1.001 / x0.999.
 - `LOSAT_X_TBNXLATESIMD=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule
   of that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns
   it off; `tblastn/x_subject_translate.rs`): a packed subject's six frames (`TBNSTORE`, every `-db`

@@ -281,6 +281,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_QDUSTPAR",
     "LOSAT_X_QGROUPPAR",
     "LOSAT_X_QPREPPAR",
+    "LOSAT_X_QSCANPAR",
     "LOSAT_X_QSTREAM",
     "LOSAT_X_REDOCONTAINIDX",
     "LOSAT_X_RPTSTREAM",

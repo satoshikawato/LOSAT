@@ -32,10 +32,26 @@ pub fn rec(kind: &'static str, id: u32, t0: Instant, t1: Instant) {
         .push((kind, id, th, a, z));
 }
 
+/// Kernel time buckets (ns): 0 pass setup (removals), 1 index 0, 2 index 1, 3 tree update, 4 rounds.
+static NS: [std::sync::atomic::AtomicU64; 5] = [const { std::sync::atomic::AtomicU64::new(0) }; 5];
+
+#[inline]
+pub fn add_ns(bucket: usize, ns: u64) {
+    NS[bucket].fetch_add(ns, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn dump() {
     if !on() {
         return;
     }
+    let ns: Vec<f64> = NS
+        .iter()
+        .map(|a| a.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e9)
+        .collect();
+    eprintln!(
+        "[XTLINE] kernel pass_setup {:.3}s index0 {:.3}s index1 {:.3}s tree {:.3}s rounds_total {:.3}s",
+        ns[0], ns[1], ns[2], ns[3], ns[4]
+    );
     let path = std::env::var("LOSAT_XTLINE").unwrap_or_default();
     let ev = EV.lock().unwrap_or_else(|e| e.into_inner());
     let mut s = String::new();

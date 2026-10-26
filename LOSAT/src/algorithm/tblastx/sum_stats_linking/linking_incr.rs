@@ -1235,7 +1235,12 @@ fn link_group<'g, K: LinkKey>(
             path_changed: &mut path_changed,
             active_head: &mut active_head,
         };
-        if !round.round() {
+        let x_tr = crate::utils::xtline::on().then(std::time::Instant::now);
+        let more = round.round();
+        if let Some(t) = x_tr {
+            crate::utils::xtline::add_ns(4, t.elapsed().as_nanos() as u64);
+        }
+        if !more {
             break;
         }
     }
@@ -1457,6 +1462,7 @@ impl<K: LinkKey> LinkRounds<'_, K> {
 
         if !use_current_max {
             stats.passes += 1;
+            let x_tp = crate::utils::xtline::on().then(std::time::Instant::now);
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:685
             // ```c
@@ -1512,7 +1518,11 @@ impl<K: LinkKey> LinkRounds<'_, K> {
 
             // Index 0 in list order (link_hsps.c:691-768), index 1 by the sweep in decreasing
             // q_end_trim order (link_hsps.c:771-896).
+            if let Some(t) = x_tp {
+                crate::utils::xtline::add_ns(0, t.elapsed().as_nanos() as u64);
+            }
             for m in usize::from(ignore_small_gaps)..2 {
+                let x_tm = crate::utils::xtline::on().then(std::time::Instant::now);
                 let sweep = m == 1;
                 if sweep {
                     seeds[1].clear();
@@ -1765,7 +1775,11 @@ impl<K: LinkKey> LinkRounds<'_, K> {
                     qorder.truncate(qw);
                     iorder.retain(|&j| alive[j as usize]);
                 }
+                if let Some(t) = x_tm {
+                    crate::utils::xtline::add_ns(1 + m, t.elapsed().as_nanos() as u64);
+                }
             }
+            let x_tt = crate::utils::xtline::on().then(std::time::Instant::now);
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:759-763,887-891
             // ```c
@@ -1797,6 +1811,9 @@ impl<K: LinkKey> LinkRounds<'_, K> {
                 sum_changed[m as usize][x as usize] = false;
             }
             sum_changed_list.clear();
+            if let Some(t) = x_tt {
+                crate::utils::xtline::add_ns(3, t.elapsed().as_nanos() as u64);
+            }
 
             if options.verify {
                 let (expected, expected_indeg) = verify_pass(

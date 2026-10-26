@@ -3456,6 +3456,8 @@ fn search_query_batch<S: TbxScore>(
     let extension_debug_enabled = crate::utils::xdiag::var("LOSAT_DEBUG_EXTENSION").is_ok();
     // Optional timing breakdown (disabled by default to preserve output/parity logs)
     let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
+    static X_BATCH_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let x_batch_seq = X_BATCH_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let t_total = Instant::now();
     let mut t_read_queries = Duration::ZERO;
     let mut t_build_lookup = Duration::ZERO;
@@ -4525,7 +4527,7 @@ fn search_query_batch<S: TbxScore>(
         // No NCBI counterpart: the clock of this subject for LOSAT_TIMING. The first local of
         // the closure, so it is dropped last and its last stage includes the drops of the rest.
         let mut x_lap = x_times.subject();
-        x_lap.id = s_idx as u32;
+        x_lap.id = (x_batch_seq << 8) | s_idx as u32;
         // EXPERIMENT (LOSAT_X_TBXBOARD): this thread searches a subject of the board's batch; a
         // subject that returns before its units puts none on the board.
         let _x_board_subject = x_board_batch.as_ref().map(|(board, batch)| {

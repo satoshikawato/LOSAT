@@ -389,7 +389,7 @@ fn link_slices(
                         scratch.literal_port,
                     )
                 });
-                let n = group.len() as u32;
+                let n = group.len() as u32 | group.first().map_or(0, |h| h.s_idx << 24);
                 let t0 = std::time::Instant::now();
                 kernel_times.time(|| link_one_slice(group, args, pool));
                 crate::utils::xtline::rec("kernel", n, t0, std::time::Instant::now());
@@ -404,7 +404,7 @@ fn link_slices(
         scratch.literal_port,
     );
     for group in groups {
-        let n = group.len() as u32;
+        let n = group.len() as u32 | group.first().map_or(0, |h| h.s_idx << 24);
         let t0 = std::time::Instant::now();
         kernel_times.time(|| link_one_slice(group, args, &mut pools));
         crate::utils::xtline::rec("kernel", n, t0, std::time::Instant::now());

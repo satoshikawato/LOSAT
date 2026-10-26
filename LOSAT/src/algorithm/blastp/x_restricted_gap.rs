@@ -1415,8 +1415,6 @@ unsafe fn restricted_rows16_avx2(
     p: &XParams,
     sc: &mut XRestrictedScratch,
 ) -> Option<(usize, usize, i32)> {
-    // No NCBI counterpart (memory placement only): see `x_frame_align`.
-    crate::utils::x_frame::x_frame_align();
     let x_dropoff = p.x_dropoff;
     let gap_open_extend = p.gap_open_extend;
     let gap_extend = p.gap_extend;

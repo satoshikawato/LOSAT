@@ -2689,6 +2689,15 @@ fn run_in_pool(
     batch_loop(&mut |range| search(range, None))
 }
 
+// EXPERIMENT (LOSAT_X_TBXLINKHELP): on unless `0` (prototype; read once). No NCBI counterpart:
+// it chooses which threads link a pipe chain's groups.
+fn x_link_help_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("LOSAT_X_TBXLINKHELP").map_or(true, |value| value.trim() != "0")
+    })
+}
+
 // EXPERIMENT (LOSAT_X_TBXPIPE): whether the pipe may run in this search (tblastx/x_batch_pipe.rs,
 // "Off"). No NCBI counterpart.
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -6263,6 +6272,12 @@ fn search_query_batch<S: TbxScore>(
         // later batch may run, the two linking calls below do not use the pool (`x_link_on_pool`,
         // tblastx/x_batch_pipe.rs item 6); the lists are the same with or without it.
         let x_link_on_pool = use_parallel && x_pipe_seed.end(combined_ungapped_hits.len());
+        // EXPERIMENT (LOSAT_X_TBXLINKHELP): a chain that links without the pool links its groups
+        // with helpers that wait for nothing, and sorts on this thread (tblastx/x_link_slices.rs,
+        // `x_link_help`); the guard ends with the subject.
+        let _x_helped = crate::algorithm::tblastx::sum_stats_linking::x_link_helped(
+            use_parallel && !x_link_on_pool && x_link_help_on(),
+        );
         x_lap.lap(XStage::SeedRelease);
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:561-584

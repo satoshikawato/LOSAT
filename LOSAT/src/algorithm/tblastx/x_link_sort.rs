@@ -276,7 +276,10 @@ fn pool_allowed(site: Site) -> bool {
     {
         match site {
             Site::First(allow_parallel) | Site::Final(allow_parallel) => allow_parallel,
-            Site::Dispatch => rayon::current_thread_index().is_some(),
+            // EXPERIMENT (LOSAT_X_TBXLINKHELP): a chain of the batch pipe sorts on its own thread.
+            Site::Dispatch => {
+                rayon::current_thread_index().is_some() && !super::x_link_slices::x_helped_now()
+            }
         }
     }
     #[cfg(any(

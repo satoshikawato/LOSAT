@@ -4496,7 +4496,19 @@ Scheduling (each value computed by one thread with the original function; order 
   at most that many letters), every byte of each part read (an I/O error or a file that ends early would look like
   the end of its input to a reader), and every part read to its end without an `eEOF`, a reader error or LOSAT's
   rejection of a Seq-id line. Where one of these fails the first reading runs on one thread as before and finds that
-  error with its messages. EVIDENCE_QSCANPAR
+  error with its messages. Evidence (workstation, node 1, 16 threads on
+  CPUs 32-47 with their siblings idle and `--membind=1`, probe 6179df06 on dev ce281c9a, the switch against
+  `LOSAT_X_QSCANPAR=0` in the same binary, rounds alternating, outputs identical and NCBI's where the case has NCBI
+  bytes): the busy threads of dc-megablast of 31,168 D. melanogaster cDNAs (96 MB) against 3 Mb of chromosome 2L
+  (`-subject`, sampled every 2 ms from `/proc/<pid>/task/*/schedstat`) were one for the first 0.12 s of 1.55 s, the
+  first reading (`[TIMING] read_fasta` 0.123 s); with the switch the reading takes 0.009 s on the local i9. Wall
+  time: that search x0.932 at 16 threads (20 of 20 rounds faster, 1.528 -> 1.422 s), x0.964 at 8; the same queries
+  against the database of 2L (`-db`) x0.935 at 16; blastn of them x0.972 (`-subject`) and x0.983 (`-db`); blastn of
+  1,775 cDNAs x0.978 (20 rounds); 5,000 and 1,775 cDNAs at 16 threads, whose files are below twice the slots' window
+  (`LOSAT_X_QSTREAM` does not act), x0.996 / x0.998; megablast (no `LOSAT_X_QSTREAM`) and 236 cDNAs (below the
+  minimum) within noise. At 32 threads the 31,168 cDNAs are read before the search (`LOSAT_X_QSTREAM`'s `Slots`), so
+  the switch does not act there (x1.002). Max RSS unchanged. At one thread (node 0, one core, perf stat):
+  dc-megablast of the 31,168 cDNAs `instructions:u` x1.0000, `cycles:u` x0.999; blastn of 1,775 cDNAs the same.
 - TBNPAR (graduated 2026-10-22; no variable, no `LOSAT_X_TBNPARSHADOW`; always on) tblastn:
   preliminary stage per (frame, chunk) and redo per match in parallel, one pool for the search. The
   unit-wise stage is the only preliminary stage of a search (at one thread, without a pool, it

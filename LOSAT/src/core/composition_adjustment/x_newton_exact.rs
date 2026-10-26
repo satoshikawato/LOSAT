@@ -1115,6 +1115,8 @@ unsafe fn optimize_avx2(
     ln_one: f64,
     first_iteration_shortcut: bool,
 ) -> i32 {
+    // No NCBI counterpart (memory placement only): see `x_frame_align`.
+    crate::utils::x_frame::x_frame_align();
     optimize(
         x,
         q,

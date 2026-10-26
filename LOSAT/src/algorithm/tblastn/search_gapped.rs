@@ -576,6 +576,14 @@ fn x_preliminary_protein_hsps_by_unit(
     let total_query_length = x_frames.total_query_length;
     let query_sequence = &x_frames.query_sequence;
     let init_context_offsets = &x_frames.init_context_offsets;
+    // PROBE (B11e): the parts of this call and the subject of its units.
+    let x_b11e = crate::utils::x_b11e::on();
+    let x_b11e_t = x_b11e.then(std::time::Instant::now);
+    let x_b11e_oid = crate::utils::x_b11e::OID.with(std::cell::Cell::get);
+    let mut x_b11e_parts = crate::utils::x_b11e::PrelimParts::default();
+    if x_b11e {
+        crate::utils::x_b11e::PRELIM.set(x_b11e_parts);
+    }
     // EXPERIMENT (LOSAT_X_TBNDBSTREAM): a database sequence whose plan has no residues
     // (LOSAT_X_TBNUNITXLATE, `x_lean_subject`) is read before its plan (`read_shared`) and
     // searched as the packed subject of the copy is: its units translate the store they read.
@@ -609,6 +617,7 @@ fn x_preliminary_protein_hsps_by_unit(
     else {
         return Ok(Vec::new());
     };
+    x_b11e_parts.plan_ns = x_b11e_t.map_or(0, crate::utils::x_b11e::ns);
     struct UnitState<'a> {
         two_hit: XTwoHit<'a>,
         pairs: Vec<crate::algorithm::tblastx::blast_aascan::BlastOffsetPair>,
@@ -678,6 +687,7 @@ fn x_preliminary_protein_hsps_by_unit(
             scratch,
         } = state;
         hits.clear();
+        let x_b11e_u = x_b11e.then(std::time::Instant::now);
         #[cfg(test)]
         probe_begin_unit(unit, frame.frame, chunk.offset);
         x_scan_unit(&plan, unit, subject_residues, pairs, |filled| {
@@ -693,6 +703,14 @@ fn x_preliminary_protein_hsps_by_unit(
         // next unit whatever this one returns.
         two_hit.exit(chunk.length);
         XTwoHit::sort(hits);
+        if let Some(t) = x_b11e_u {
+            crate::utils::x_b11e::UNIT.set(crate::utils::x_b11e::UnitParts {
+                scan_ns: crate::utils::x_b11e::ns(t),
+                hits: hits.len(),
+                ..Default::default()
+            });
+        }
+        let x_b11e_g = x_b11e.then(std::time::Instant::now);
         #[cfg(test)]
         probe_event(unit, || {
             PreliminaryEvent::Initial(frame.frame, chunk.offset, hits.to_vec())
@@ -720,10 +738,18 @@ fn x_preliminary_protein_hsps_by_unit(
         )?;
         #[cfg(test)]
         let gapped = probe_gapped(unit, frame.frame, chunk.offset, gapped)?;
+        let x_b11e_p = x_b11e.then(std::time::Instant::now);
         // NCBI c++/src/algo/blast/core/blast_engine.c:539-552:
         // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., TRUE);
         // Blast_HSPListSortByScore(hsp_list);
         let purged = purge_preliminary_common_endpoints(gapped);
+        if let (Some(g), Some(p)) = (x_b11e_g, x_b11e_p) {
+            let mut parts = crate::utils::x_b11e::UNIT.get();
+            parts.gapped_ns = p.duration_since(g).as_nanos() as u64;
+            parts.purge_ns = crate::utils::x_b11e::ns(p);
+            parts.hsps = purged.len();
+            crate::utils::x_b11e::UNIT.set(parts);
+        }
         #[cfg(test)]
         probe_event(unit, || {
             PreliminaryEvent::Purged(frame.frame, chunk.offset, purged.clone())
@@ -745,6 +771,37 @@ fn x_preliminary_protein_hsps_by_unit(
     // order. The results are collected by unit index.
     let unit_count = plan.subject.units.len();
     let parallel = pool.is_some_and(crate::utils::threading::SearchPool::enabled) && unit_count > 1;
+    // PROBE (B11e): one line per unit.
+    let run_unit = |state: &mut UnitState<'_>, unit: usize| -> Result<Vec<(usize, GappedHsp)>> {
+        if !x_b11e {
+            return run_unit(state, unit);
+        }
+        crate::utils::x_b11e::UNIT.set(Default::default());
+        let t0 = crate::utils::x_b11e::now();
+        let t = std::time::Instant::now();
+        let result = run_unit(state, unit);
+        let dt = crate::utils::x_b11e::ns(t);
+        let parts = crate::utils::x_b11e::UNIT.get();
+        let (frame_index, chunk, _) = &plan.subject.units[unit];
+        eprintln!(
+            "[B11E] unit b={} oid={} u={unit} f={} off={} len={} par={} thr={} t0={t0:.4} dt={:.2} scan={:.2} gapped={:.2} purge={:.2} hits={} hsps={}",
+            crate::utils::x_b11e::batch(),
+            x_b11e_oid,
+            plan.subject.frames[*frame_index].frame,
+            chunk.offset,
+            chunk.length,
+            u8::from(parallel),
+            crate::utils::x_b11e::thread(),
+            crate::utils::x_b11e::ms(dt),
+            crate::utils::x_b11e::ms(parts.scan_ns),
+            crate::utils::x_b11e::ms(parts.gapped_ns),
+            crate::utils::x_b11e::ms(parts.purge_ns),
+            parts.hits,
+            parts.hsps,
+        );
+        result
+    };
+    let x_b11e_units = x_b11e.then(std::time::Instant::now);
     // No NCBI counterpart: stage report for the thread-use statistics; it does not change any value
     // NCBI computes.
     crate::utils::threading::report_stage("tblastn", "prelim_units", unit_count, parallel);
@@ -792,6 +849,12 @@ fn x_preliminary_protein_hsps_by_unit(
     // ```
     // Replay in NCBI order: the units of a frame are merged one by one (Blast_HSPListsMerge), then
     // the frame is appended (Blast_HSPListAppend). Only this thread runs it.
+    let x_b11e_merge = x_b11e.then(std::time::Instant::now);
+    if let Some(t) = x_b11e_units {
+        x_b11e_parts.units_ns = crate::utils::x_b11e::ns(t);
+        x_b11e_parts.units = unit_count;
+        x_b11e_parts.parallel = parallel;
+    }
     let mut purged = purged.into_iter();
     let mut combined = Vec::new();
     let mut unit = 0usize;
@@ -825,6 +888,10 @@ fn x_preliminary_protein_hsps_by_unit(
         probe_push(|| {
             PreliminaryEvent::Appended(plan.subject.frames[frame_index].frame, combined.clone())
         });
+    }
+    if let Some(t) = x_b11e_merge {
+        x_b11e_parts.merge_ns = crate::utils::x_b11e::ns(t);
+        crate::utils::x_b11e::PRELIM.set(x_b11e_parts);
     }
     Ok(combined)
 }

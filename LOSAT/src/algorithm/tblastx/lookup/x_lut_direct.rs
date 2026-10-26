@@ -122,8 +122,8 @@ pub(crate) fn x_bx_pooled_builds() -> bool {
 // search's lookup (`blastx/seed.rs` `Lookup`), as NCBI builds and frees them and as `=0` of
 // LOSAT_X_BXLUTPOOL does. Kept, the pool held a table and its build's temporaries through each
 // query batch's end (the composition-based statistics and the traceback), which then took its
-// memory on top: a 660 kb genome against its 543 proteins at one thread had a peak `RssAnon` of
-// 26.0 MiB, 22.6 without the pool. Searches of two threads or more build pooled as before.
+// memory on top: a 660 kb genome (AP027131) against 543 proteins (AP027133) at one thread had a
+// peak `RssAnon` of 26.0 MiB, 22.6 without the pool. Searches of two threads or more build pooled as before.
 /// Whether a BLASTX search of `threads` threads builds its tables pooled: the builds are pooled
 /// ([`x_bx_pooled_builds`]) and, with `LOSAT_X_BXPOOLN1`, the search has two threads or more.
 pub(crate) fn x_bx_pooled_for(threads: usize) -> bool {

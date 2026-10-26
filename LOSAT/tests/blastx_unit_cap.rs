@@ -5,7 +5,7 @@
 //! (`LOSAT_X_BXUNITCAP[=K]`; `src/algorithm/blastx/x_bx_mem.rs`,
 //! `src/algorithm/tblastx/lookup/x_lut_direct.rs`).
 //!
-//! The four are in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). They change which
+//! The four are in the strict set (on unless `=0`). They change which
 //! thread computes what, and the vectors the tables are built on, not what is computed, so the
 //! property under test is that the report does not depend on them: standard output equals that of
 //! the same search with all four `=0`, for several query batches (the batch flow,
@@ -312,9 +312,9 @@ fn several_queries_give_the_report_without_ka_once() {
 }
 
 /// `LOSAT_X_BXPOOLN1` (a search on one thread builds and frees its lookup tables without the pool,
-/// `tblastx/lookup/x_lut_direct.rs`): the report equals that without it, for several query batches
-/// (one table each) and for a split query (a table per chunk), at one thread (where it acts) and at
-/// four (where it does not); `LOSAT_X_REACH` shows the side each search took.
+/// `tblastx/lookup/x_lut_direct.rs`): at one thread the report equals that without it, for several
+/// query batches (one table each) and for a split query (a table per chunk); `LOSAT_X_REACH` shows
+/// that it acts at one thread and not at four (where both build pooled).
 #[test]
 fn queries_give_the_report_without_pool_n1() {
     let dir = temp_dir("pool-n1");
@@ -322,16 +322,16 @@ fn queries_give_the_report_without_pool_n1() {
     for (pieces, length) in [(4, 4_000), (1, 45_000)] {
         let (query, set) = inputs(&dir, pieces, length, 595);
         let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+        let reference = blastx(&query, &args, 1, &off);
+        assert!(
+            reference.iter().filter(|&&b| b == b'\n').count() > 20,
+            "too few hits to test"
+        );
+        assert!(
+            blastx(&query, &args, 1, &[]) == reference,
+            "{pieces} x {length} letters: report differs"
+        );
         for threads in [1, 4] {
-            let reference = blastx(&query, &args, threads, &off);
-            assert!(
-                reference.iter().filter(|&&b| b == b'\n').count() > 20,
-                "too few hits to test"
-            );
-            assert!(
-                blastx(&query, &args, threads, &[]) == reference,
-                "{pieces} x {length} letters, {threads} threads: report differs"
-            );
             assert_eq!(
                 sides(&dir, &query, &args, threads, &[], "LOSAT_X_BXPOOLN1"),
                 (threads == 1, threads > 1),

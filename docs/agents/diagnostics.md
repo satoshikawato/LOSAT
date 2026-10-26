@@ -5633,7 +5633,8 @@ Scheduling (each value computed by one thread with the original function; order 
   Exactness: a subject's computation depends on the subject and the chunk alone, not on the table's history, while
   no diagonal offset passes 2^30 (`x_subject_flow.rs` module comment, the bound the flow already requires).
 - `LOSAT_X_BXLUTPOOL=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on unless
-  `=0` or `LOSAT_X_DEFAULT=0`; every word-size-3 table built in place, outside diagnostics mode): the lookup tables
+  `=0` or `LOSAT_X_DEFAULT=0`; every word-size-3 table built in place, outside diagnostics mode; since
+  `LOSAT_X_BXPOOLN1`, 2026-10-26, only in searches of two threads or more): the lookup tables
   are built with one set of neighbour lists shared by all threads (filled on first use as each thread's memo was,
   `tblastx/lookup/x_lut_direct.rs` `XSharedMemo`), and on vectors kept between builds: a table's backbone, overflow
   and pv vectors when the table is dropped (`blastx::seed::Lookup`'s drop), and the build's counts, layout and fill

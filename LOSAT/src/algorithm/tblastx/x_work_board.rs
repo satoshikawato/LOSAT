@@ -1,0 +1,330 @@
+//! EXPERIMENT (LOSAT_X_TBXBOARD): one board per TBLASTX search on which the subjects' units and
+//! the linking calls' groups are handed out, groups first, then units by batch and subject order.
+//!
+//! No NCBI counterpart: NCBI searches its subjects one after the other on each thread
+//! (blast_engine.c:1409-1413) and links each subject's HSP list on that thread
+//! (blast_engine.c:870-873); LOSAT splits both into independent items (the units of PAIRPAR, the
+//! groups of LINKSLICES) whose results do not depend on the thread that runs them or on when it
+//! runs them (x_pair_par.rs `run_units`, x_link_slices.rs items 2-4). This file only chooses which
+//! thread runs which item, and when.
+//!
+//! # Why
+//!
+//! With rayon's work stealing every subject of a batch (TBXNEXT) runs its units at once, so the
+//! subjects of a batch end their seed stage together and their linking chains all start at the
+//! end of the batch; a chain's link groups, pushed on its thread's deque, are stolen only by a
+//! thread that has run out of its own units. On the genome 3 x 3 input at 16 threads the search
+//! ends with one thread linking a self-comparison's largest groups after every unit has run. Here:
+//!
+//! 1. Units are taken in batch order, then subject order: a batch's first subject ends its seed
+//!    stage first, and its chain links while the later subjects' units run.
+//! 2. Groups are taken before units: a chain's groups run on the threads that take items as soon as
+//!    they are free, while the remaining units wait, so the chain ends early.
+//!
+//! # How (no thread waits in the pool)
+//!
+//! An owner (a subject's thread with its units, a chain's thread with its groups) puts an item
+//! set on the board and takes items until its set has none left to take, then blocks until the
+//! items others took have run. A helper (a thread of the batch's subject loop without a subject,
+//! or a `rayon::spawn` job of a group set) takes items until there is nothing left it may take.
+//! Items are pure work: a unit's scan and a group's kernel make no pool call and wait for nothing,
+//! so an item that was taken always ends, and a blocked owner always wakes. Taking an item never
+//! runs a pool job, so no subject or chain runs nested inside another (the problem of
+//! x_batch_pipe.rs item 6).
+//!
+//! Lifetimes: an item set's closure borrows its owner's frame; the board holds it as a raw pointer
+//! that is read only for an index below the set's length, after a successful take, and the owner
+//! returns only when every taken index has run (`XSet::wait`).
+
+use std::any::Any;
+use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+
+// No NCBI counterpart: the variable is read once per process; it chooses which thread runs which
+// unit and group, not a value NCBI computes.
+/// LOSAT_X_TBXBOARD: on unless it is `0` (prototype).
+pub(crate) fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        cfg!(all(feature = "parallel", not(target_arch = "wasm32")))
+            && std::env::var("LOSAT_X_TBXBOARD").map_or(true, |v| v.trim() != "0")
+    })
+}
+
+/// What a taker lends the items it runs: the unit path keeps its scratch here, made by the first
+/// unit the taker runs and dropped when the taker stops (as rayon's `map_init` made one per split).
+#[derive(Default)]
+pub(crate) struct XTaker {
+    pub(crate) scratch: Option<Box<dyn Any>>,
+}
+
+type Run<'a> = dyn Fn(usize, &mut XTaker) + Sync + 'a;
+
+/// A set of independent items: a subject's units, or a linking call's groups.
+pub(crate) struct XSet {
+    run: *const Run<'static>,
+    n: usize,
+    next: AtomicUsize,
+    done: Mutex<usize>,
+    all_done: Condvar,
+}
+
+// SAFETY: `run` is a `Sync` closure; it is called only for a taken index below `n`, and its owner
+// does not return before every such call has returned (`XSet::wait`).
+unsafe impl Send for XSet {}
+unsafe impl Sync for XSet {}
+
+impl XSet {
+    fn new(run: &Run<'_>, n: usize) -> Arc<Self> {
+        // SAFETY: the lifetime is erased for the takers; see the type's `Send` / `Sync`.
+        let run: *const Run<'static> = unsafe { std::mem::transmute(run) };
+        Arc::new(Self {
+            run,
+            n,
+            next: AtomicUsize::new(0),
+            done: Mutex::new(0),
+            all_done: Condvar::new(),
+        })
+    }
+
+    /// Takes and runs one item; false when none was left to take.
+    fn run_one(&self, taker: &mut XTaker) -> bool {
+        if self.next.load(Ordering::Acquire) >= self.n {
+            return false;
+        }
+        let i = self.next.fetch_add(1, Ordering::AcqRel);
+        if i >= self.n {
+            return false;
+        }
+        // SAFETY: see the type's `Send` / `Sync`.
+        unsafe { (*self.run)(i, taker) };
+        let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
+        *done += 1;
+        if *done == self.n {
+            self.all_done.notify_all();
+        }
+        true
+    }
+
+    /// Every item has been taken.
+    fn taken(&self) -> bool {
+        self.next.load(Ordering::Acquire) >= self.n
+    }
+
+    /// Blocks until every item has run.
+    fn wait(&self) {
+        let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
+        while *done < self.n {
+            done = self.all_done.wait(done).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+}
+
+/// The units of one batch's subjects, one slot per subject index.
+pub(crate) struct XBatch {
+    slots: Box<[Mutex<Option<Arc<XSet>>>]>,
+    /// The subject has put its units on the board, or it will put none.
+    closed: Box<[AtomicBool]>,
+    /// No subject below this one has units left to take (a hint).
+    lowest: AtomicUsize,
+}
+
+impl XBatch {
+    /// Every subject has put its units on the board (or will put none) and none is left to take.
+    fn drained(&self) -> bool {
+        self.closed.iter().enumerate().all(|(s, closed)| {
+            closed.load(Ordering::Acquire)
+                && self.slots[s]
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .as_ref()
+                    .is_none_or(|set| set.taken())
+        })
+    }
+
+    /// Takes and runs one unit of the lowest subject that has one left.
+    fn run_one(&self, taker: &mut XTaker) -> bool {
+        let n = self.slots.len();
+        let mut s = self.lowest.load(Ordering::Acquire);
+        let mut all_below_taken = true;
+        while s < n {
+            let set = self.slots[s]
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            match set {
+                Some(set) if !set.taken() => {
+                    if set.run_one(taker) {
+                        return true;
+                    }
+                }
+                Some(_) if all_below_taken => {
+                    self.lowest.fetch_max(s + 1, Ordering::AcqRel);
+                }
+                Some(_) => {}
+                None => {
+                    all_below_taken = false;
+                }
+            }
+            s += 1;
+        }
+        false
+    }
+
+    /// The subject `s` will put no units on the board (it returned before its units).
+    pub(crate) fn close_without_units(&self, s: usize) {
+        self.closed[s].store(true, Ordering::Release);
+    }
+}
+
+/// The board of one search.
+#[derive(Default)]
+pub(crate) struct XBoard {
+    groups: Mutex<Vec<Arc<XSet>>>,
+    batches: Mutex<Vec<Arc<XBatch>>>,
+}
+
+impl XBoard {
+    /// A batch of `subjects` subjects, taken after the batches before it.
+    pub(crate) fn batch(&self, subjects: usize) -> Arc<XBatch> {
+        let batch = Arc::new(XBatch {
+            slots: (0..subjects).map(|_| Mutex::new(None)).collect(),
+            closed: (0..subjects).map(|_| AtomicBool::new(false)).collect(),
+            lowest: AtomicUsize::new(0),
+        });
+        self.batches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(Arc::clone(&batch));
+        batch
+    }
+
+    /// The batch has ended its subject loop.
+    pub(crate) fn end_batch(&self, batch: &Arc<XBatch>) {
+        self.batches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|b| !Arc::ptr_eq(b, batch));
+    }
+
+    /// Takes and runs one item: a group of any linking call first, then a unit by batch and
+    /// subject order. False when there was none.
+    fn run_one(&self, taker: &mut XTaker) -> bool {
+        loop {
+            let set = {
+                let mut groups = self.groups.lock().unwrap_or_else(|e| e.into_inner());
+                groups.retain(|set| !set.taken());
+                groups.first().cloned()
+            };
+            match set {
+                Some(set) => {
+                    if set.run_one(taker) {
+                        return true;
+                    }
+                }
+                None => break,
+            }
+        }
+        let batches: Vec<Arc<XBatch>> = self
+            .batches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        batches.iter().any(|batch| batch.run_one(taker))
+    }
+
+    /// A subject's units: `run(i, taker)` for every `i < n`, on this thread and on the board's
+    /// takers, units of earlier subjects and groups first. Returns when every unit has run.
+    pub(crate) fn run_units(&self, batch: &XBatch, s: usize, n: usize, run: &Run<'_>) {
+        let set = XSet::new(run, n);
+        *batch.slots[s].lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::clone(&set));
+        batch.closed[s].store(true, Ordering::Release);
+        let mut taker = XTaker::default();
+        while !set.taken() {
+            if !self.run_one(&mut taker) {
+                // Nothing before this subject's units is left and they are taken.
+                set.run_one(&mut taker);
+            }
+        }
+        drop(taker);
+        set.wait();
+    }
+
+    /// A linking call's groups: `run(i, taker)` for every `i < n` (the largest group first is the
+    /// caller's order), on this thread, on the board's takers before any unit, and on up to
+    /// `helpers` pool jobs. Returns when every group has run.
+    pub(crate) fn run_groups(&self, n: usize, run: &Run<'_>, helpers: usize) {
+        let set = XSet::new(run, n);
+        self.groups
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(Arc::clone(&set));
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        for _ in 0..helpers.min(n.saturating_sub(1)) {
+            let set = Arc::clone(&set);
+            rayon::spawn(move || {
+                let mut taker = XTaker::default();
+                while set.run_one(&mut taker) {}
+            });
+        }
+        let _ = helpers;
+        let mut taker = XTaker::default();
+        while set.run_one(&mut taker) {}
+        set.wait();
+    }
+
+    /// A thread of `batch`'s subject loop without a subject: takes items until the batch's units
+    /// are all taken (it waits, without the pool, while a subject has not yet put its units).
+    pub(crate) fn help(&self, batch: &XBatch) {
+        let mut taker = XTaker::default();
+        let mut idle = 0u32;
+        loop {
+            if self.run_one(&mut taker) {
+                idle = 0;
+                continue;
+            }
+            if batch.drained() {
+                return;
+            }
+            idle += 1;
+            if idle < 64 {
+                std::hint::spin_loop();
+            } else {
+                std::thread::yield_now();
+            }
+        }
+    }
+}
+
+thread_local! {
+    // The board and batch of the subject this thread searches (`enter`).
+    static CURRENT: Cell<Option<(*const XBoard, *const XBatch)>> = const { Cell::new(None) };
+}
+
+/// The board and batch of this thread's subject until the guard drops.
+pub(crate) struct XEntered(Option<(*const XBoard, *const XBatch)>);
+
+impl Drop for XEntered {
+    fn drop(&mut self) {
+        CURRENT.with(|current| current.set(self.0));
+    }
+}
+
+/// This thread searches a subject of `batch` on `board` until the guard drops.
+pub(crate) fn enter(board: &XBoard, batch: &XBatch) -> XEntered {
+    XEntered(CURRENT.with(|current| current.replace(Some((board, batch)))))
+}
+
+/// The board and batch of this thread's subject (`enter`), if any.
+pub(crate) fn current<'a>() -> Option<(&'a XBoard, &'a XBatch)> {
+    // SAFETY: the pointers are set by `enter` from references that outlive its guard, and the
+    // guard restores the value before them on drop; the subject's work that reads them runs
+    // inside the guard's life on this thread.
+    CURRENT
+        .with(Cell::get)
+        .map(|(board, batch)| unsafe { (&*board, &*batch) })
+}

@@ -192,7 +192,7 @@ impl Drop for XHelped {
 
 // EXPERIMENT (LOSAT_X_TBXLINKHELP): the linking calls and score sorts that follow on this thread
 // are a chain of the batch pipe that must not wait in the pool: its groups are linked by
-// helpers that wait for nothing, and its sorts stay on the thread (`x_link_help`). No NCBI
+// the search's board, and its sorts stay on the thread (`x_link_board`). No NCBI
 // counterpart.
 /// Sets this thread's helped mode to `on` until the guard drops.
 pub(crate) fn x_helped(on: bool) -> XHelped {
@@ -363,6 +363,23 @@ fn link_slices(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the groups on the search's board (tblastx/x_work_board.rs),
+    // taken before any unit, for a call on the pool and for a pipe chain (`x_helped_now`).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if (on_pool || x_helped_now())
+        && groups.len() > 1
+        && rayon::current_thread_index().is_some()
+        && rayon::current_num_threads() > 1
+    {
+        if let Some((board, _)) = crate::algorithm::tblastx::x_work_board::current() {
+            x_link_board(board, groups, args, &scratch, kernel_times);
+            HELPED_LINKINGS.fetch_add(1, AtomicOrdering::Relaxed);
+            return on_pool;
+        }
+    }
     if on_pool {
         groups.into_par_iter().for_each(|group| {
             POOLS.with(|pools| {
@@ -382,19 +399,6 @@ fn link_slices(
         });
         return true;
     }
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    if x_helped_now()
-        && groups.len() > 1
-        && rayon::current_thread_index().is_some()
-        && rayon::current_num_threads() > 1
-    {
-        x_link_help(groups, args, &scratch, kernel_times);
-        HELPED_LINKINGS.fetch_add(1, AtomicOrdering::Relaxed);
-        return false;
-    }
     let _ = on_pool;
     let mut pools = buffer_pools(
         scratch.initial_lh_size,
@@ -410,44 +414,36 @@ fn link_slices(
     false
 }
 
-// EXPERIMENT (LOSAT_X_TBXLINKHELP): the groups of a TBXPIPE chain (a batch that is not the
-// plan's last links without the pool, tblastx/x_batch_pipe.rs item 6) linked by this thread and
-// by helper jobs of the pool, none of which waits in the pool. No NCBI counterpart: the groups
-// are disjoint and each kernel's result depends on its group alone (module doc, items 2-4), so
-// which thread links which group, and when, changes nothing.
-//
-// Why no wait in the pool: a thread that waits for pool tasks runs whatever the pool holds, and
-// in a pipe chain that was the next batch's subjects, nested (x_batch_pipe.rs item 6). Here the
-// helpers are `rayon::spawn` jobs; this thread links groups itself, largest first, until none is
-// left to take, then blocks (no pool work) until the groups that helpers took are linked. The
-// kernels make no pool call, so a taken group always ends. A helper that starts after the last
-// group was taken returns at once and touches only the shared counters (the `Arc`).
+// EXPERIMENT (LOSAT_X_TBXBOARD): the groups of a linking call on the search's board, the largest
+// first (tblastx/x_work_board.rs). No NCBI counterpart: the groups are disjoint and each kernel's
+// result depends on its group alone (module doc, items 2-4), so which thread links which group,
+// and when, changes nothing. No thread waits in the pool: the board's takers and this call's
+// helper jobs take groups, and this thread blocks until the groups others took are linked (the
+// kernels make no pool call).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn x_link_help(
+fn x_link_board(
+    board: &crate::algorithm::tblastx::x_work_board::XBoard,
     mut groups: Vec<&mut [UngappedHit]>,
     args: &GroupArgs<'_>,
     scratch: &Scratch,
     kernel_times: &KernelTimes,
 ) {
-    use std::sync::atomic::AtomicUsize;
-    use std::sync::{Arc, Condvar, Mutex};
-
-    // The largest group first (equal sizes in group order): the chain ends when its largest
-    // group is linked.
+    // The largest group first (equal sizes in group order): the call ends when its largest group
+    // is linked.
     groups.sort_by_key(|group| std::cmp::Reverse(group.len()));
     let n = groups.len();
     let slices: Vec<(usize, usize)> = groups
         .iter_mut()
         .map(|group| (group.as_mut_ptr() as usize, group.len()))
         .collect();
-    let run = |i: usize| {
+    let run = |i: usize, _: &mut crate::algorithm::tblastx::x_work_board::XTaker| {
         let (ptr, len) = slices[i];
         // SAFETY: the slices are disjoint parts of the list this call borrows mutably (`groups`
-        // came from `split_at_mut`); index `i` is taken once (`Help::next`), so one thread has
-        // group `i` at a time, and this function returns only after every taken index is done.
+        // came from `split_at_mut`); the board runs index `i` once, and `run_groups` returns only
+        // after every index has run.
         let group = unsafe { std::slice::from_raw_parts_mut(ptr as *mut UngappedHit, len) };
         let tag = group.len() as u32 | group.first().map_or(0, |h| h.s_idx << 24);
         let t0 = std::time::Instant::now();
@@ -464,55 +460,7 @@ fn x_link_help(
         });
         crate::utils::xtline::rec("kernel", tag, t0, std::time::Instant::now());
     };
-
-    struct Help {
-        next: AtomicUsize,
-        done: Mutex<usize>,
-        all_done: Condvar,
-        n: usize,
-        // The group step of this call, valid while the call waits (see `x_link_help`).
-        run: *const (dyn Fn(usize) + Sync),
-    }
-    // SAFETY: `run` is a `Sync` closure; it is called only for a taken index below `n`, and the
-    // call that owns it does not return before every such call has returned.
-    unsafe impl Send for Help {}
-    unsafe impl Sync for Help {}
-    impl Help {
-        fn work(&self) {
-            loop {
-                let i = self.next.fetch_add(1, AtomicOrdering::AcqRel);
-                if i >= self.n {
-                    return;
-                }
-                // SAFETY: see `Help::run`.
-                unsafe { (*self.run)(i) };
-                let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
-                *done += 1;
-                if *done == self.n {
-                    self.all_done.notify_all();
-                }
-            }
-        }
-    }
-    let run_ref: &(dyn Fn(usize) + Sync) = &run;
-    // SAFETY: the lifetime is erased for the helpers; see `Help::run`.
-    let run_ptr: *const (dyn Fn(usize) + Sync + 'static) = unsafe { std::mem::transmute(run_ref) };
-    let help = Arc::new(Help {
-        next: AtomicUsize::new(0),
-        done: Mutex::new(0),
-        all_done: Condvar::new(),
-        n,
-        run: run_ptr,
-    });
-    for _ in 1..n.min(rayon::current_num_threads()) {
-        let help = Arc::clone(&help);
-        rayon::spawn(move || help.work());
-    }
-    help.work();
-    let mut done = help.done.lock().unwrap_or_else(|e| e.into_inner());
-    while *done < n {
-        done = help.all_done.wait(done).unwrap_or_else(|e| e.into_inner());
-    }
+    board.run_groups(n, &run, rayon::current_num_threads() - 1);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531

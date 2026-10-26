@@ -108,12 +108,20 @@ fn score_gapped_chunk(
     // if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
     //                                   hit_options->min_diag_separation)) { ... }
     // BlastIntervalTreeAddHSP(new_hsp, tree, query_info, eQueryAndSubject);
-    let mut tree = BlastIntervalTree::new(
-        0,
-        total_query_length + 1,
-        0,
-        i32::try_from(chunk.length)? + 1,
-    );
+    // PROBE (line D14 s1, never a PR): LOSAT_PROBE_TBNTREEKEEP=1 resets this thread's kept tree.
+    let x_keep_tree = crate::algorithm::blastn::interval_tree::x_probe_head_keep();
+    let s_max = i32::try_from(chunk.length)? + 1;
+    let mut tree = match if x_keep_tree {
+        X_PROBE_TREE.take()
+    } else {
+        None
+    } {
+        Some(mut kept) => {
+            kept.reset_with_bounds(0, total_query_length + 1, 0, s_max);
+            kept
+        }
+        None => BlastIntervalTree::new(0, total_query_length + 1, 0, s_max),
+    };
     for hit in frame_initial {
         // NCBI c++/src/algo/blast/core/blast_gapalign.c:2371-2468:
         // context = BSearchContextInfo(init_hsp->offsets.qs_offsets.q_off, query_info);
@@ -212,7 +220,15 @@ fn score_gapped_chunk(
             results.push((context, saved));
         }
     }
+    if x_keep_tree {
+        X_PROBE_TREE.set(Some(tree));
+    }
     Ok(results)
+}
+
+thread_local! {
+    /// PROBE (line D14 s1, never a PR): this thread's kept interval tree.
+    static X_PROBE_TREE: std::cell::Cell<Option<BlastIntervalTree>> = const { std::cell::Cell::new(None) };
 }
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:

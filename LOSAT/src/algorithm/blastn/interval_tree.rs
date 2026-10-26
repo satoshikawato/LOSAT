@@ -339,6 +339,13 @@ const X_SALT_END: u64 = 0x9E37_79B9_7F4A_7C15;
 // The state of the side indexes, tied to the same query and subject ranges as the tree
 // (`q_min`, `s_min`) and emptied whenever the tree is emptied. It is derived from the
 // HSPs in the tree and holds nothing else.
+/// PROBE (line D14 s1, never a PR): `LOSAT_PROBE_TBNTREEKEEP`, read once.
+pub(crate) fn x_probe_head_keep() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_PROBE_TBNTREEKEEP").is_some())
+}
+
 struct XTreeIndex {
     /// Whether the index is used at all (off while tracing is on).
     on: bool,
@@ -407,6 +414,20 @@ impl XTreeIndex {
         let mut shift = 6u32;
         while ((q_span >> shift) + 1).saturating_mul((s_span >> shift) + 1) > X_MAX_CELLS {
             shift += 1;
+        }
+        // PROBE (line D14 s1, never a PR): LOSAT_PROBE_TBNTREEKEEP=1 keeps a head array that is
+        // large enough; `clear` sets the cells used before back to 0 first.
+        if x_probe_head_keep() {
+            self.clear();
+            self.shift = shift;
+            self.q_min = q_min;
+            self.s_min = s_min;
+            self.nq = (q_span >> shift) + 1;
+            self.ns = (s_span >> shift) + 1;
+            if self.head.len() < self.nq * self.ns {
+                self.head = Vec::new();
+            }
+            return;
         }
         self.shift = shift;
         self.q_min = q_min;

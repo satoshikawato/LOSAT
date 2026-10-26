@@ -116,7 +116,14 @@ pub(super) fn x_sequence_bytes(database: &BlastpDatabase) -> u64 {
 /// with more than one thread, else `BLOCK_BYTES`.
 pub(super) fn x_db_cut_block_bytes(database: &BlastpDatabase, pool: &SearchPool<'_>) -> u64 {
     let threads = if pool.enabled() { pool.threads() } else { 1 };
-    x_cut_block_bytes(x_sequence_bytes(database), threads)
+    let cut = x_cut_block_bytes(x_sequence_bytes(database), threads);
+    // EXPERIMENT (LOSAT_X_BPDBKEEP): blocks that a worker's kept buffer holds below glibc's mmap
+    // threshold (`x_db_keep.rs`).
+    if crate::seqdb::x_bp_db_small_blocks() {
+        cut.min(super::x_db_keep::X_KEEP_BLOCK_BYTES)
+    } else {
+        cut
+    }
 }
 
 // No NCBI counterpart: counts blocks for the unit tests; it changes no value NCBI computes.

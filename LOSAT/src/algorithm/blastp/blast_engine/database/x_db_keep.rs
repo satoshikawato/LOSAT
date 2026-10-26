@@ -42,6 +42,15 @@ use super::{
     BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, PrelimSink,
 };
 
+// No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
+/// The largest block of the preliminary stage with the switch (`x_db_cut.rs`
+/// `x_db_cut_block_bytes`): a worker's kept block buffer stays below glibc's first mmap threshold
+/// (128 KiB) and so in the worker's arena, where the space it takes is the space a task's block
+/// took without the switch, instead of a mapping of its own beside the arena (1 MiB per worker:
+/// BLASTP of 100 UniRef50 queries against UniRef50 at 32 threads peaked 12 MiB above the search
+/// without the switch with blocks of 1 MiB, v4-D12 s17).
+pub(super) const X_KEEP_BLOCK_BYTES: u64 = 96 << 10;
+
 // No NCBI counterpart: reads the LOSAT_X_BPDBKEEP switch once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BPDBKEEP): a strict-set switch, on unless it is `0`.

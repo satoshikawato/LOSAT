@@ -553,7 +553,7 @@ where
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if crate::seqdb::x_bp_db_kit() {
+    if x_db_keep::x_bp_db_keep() {
         return x_db_keep::x_search_blocks_kept(
             database,
             pool,
@@ -2150,6 +2150,15 @@ mod tests {
             (dir, name)
         }
 
+        /// EXPERIMENT (LOSAT_X_BPDBKEEP): `cut` with the switch's largest block.
+        fn x_keep_cut(cut: u64) -> u64 {
+            if crate::seqdb::x_bp_db_small_blocks() {
+                cut.min(super::super::x_db_keep::X_KEEP_BLOCK_BYTES)
+            } else {
+                cut
+            }
+        }
+
         fn open_path(name: &str) -> BlastpDatabase {
             BlastpDatabase::open(name, &ApplicationSettings::default())
                 .unwrap_or_else(|error| panic!("{name}: {error:#}"))
@@ -2175,8 +2184,8 @@ mod tests {
             // Each further volume has its own leading sentinel byte.
             assert_eq!(x_sequence_bytes(&volumes) + 5, psq_bytes(&mv));
             assert_eq!(x_sequence_bytes(&volumes), x_sequence_bytes(&single));
-            assert_eq!(cut_of(&single, 1), BLOCK_BYTES);
-            assert_eq!(cut_of(&volumes, 1), BLOCK_BYTES);
+            assert_eq!(cut_of(&single, 1), x_keep_cut(BLOCK_BYTES));
+            assert_eq!(cut_of(&volumes, 1), x_keep_cut(BLOCK_BYTES));
             for threads in [2, 3, 4, 8] {
                 assert_eq!(cut_of(&single, threads), x_cut_block_bytes(812, threads));
                 assert_eq!(cut_of(&single, threads), 4096);
@@ -2213,7 +2222,7 @@ mod tests {
             for threads in [1usize, 2, 3, 7] {
                 let cut = cut_of(&single, threads);
                 if threads == 1 {
-                    assert_eq!(cut, BLOCK_BYTES);
+                    assert_eq!(cut, x_keep_cut(BLOCK_BYTES));
                 } else {
                     assert_eq!(
                         cut,

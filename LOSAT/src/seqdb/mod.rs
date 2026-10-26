@@ -89,10 +89,10 @@ pub(crate) fn x_bp_db_keep() -> bool {
     x_bp_db_keep_value().is_some()
 }
 
-/// EXPERIMENT (LOSAT_X_BPDBKEEP): whether the workers keep a scratch and a block buffer (the
-/// switch's value 1, built in); the value 2 (a diagnostic) keeps the rest of the switch without
-/// them.
-pub(crate) fn x_bp_db_kit() -> bool {
+/// EXPERIMENT (LOSAT_X_BPDBKEEP): whether the blocks of the parallel preliminary stage are cut to
+/// `X_KEEP_BLOCK_BYTES` (the switch's value 1, built in); the value 2 (a diagnostic) keeps the
+/// blocks of `LOSAT_X_BPDBCUT`.
+pub(crate) fn x_bp_db_small_blocks() -> bool {
     x_bp_db_keep_value() == Some(1)
 }
 

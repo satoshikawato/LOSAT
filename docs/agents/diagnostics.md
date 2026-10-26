@@ -6155,6 +6155,35 @@ Scheduling (each value computed by one thread with the original function; order 
   yeast proteome at 16 threads `-subject` / `-db` x0.993 / 0.995; a 660 kb genome (AP027131, split) against 50
   proteins x0.997 at 1 thread, x0.985 at 16. The gain is largest with many queries and few subjects; a split
   query saves only the ideal block.
+- `LOSAT_X_BXPOOLN1=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-26; `=0`
+  turns it off): a search on one thread (`-num_threads 1`) builds its word-size-3 lookup tables without the pool of
+  `LOSAT_X_BXLUTPOOL`: `blastx::seed::Lookup::new` asks `x_bx_pooled_for(threads)` (`tblastx/lookup/x_lut_direct.rs`),
+  builds with `x_build_direct` (its own neighbour memo, `vec!` vectors), as NCBI and `LOSAT_X_BXLUTPOOL=0` do, and
+  marks the table unpooled (`XKeptPresence::pooled`), so the table's vectors are freed when the lookup drops; only
+  tables built pooled go back to the pool. Searches of two threads or more build pooled as before. Why: the pool moves
+  vectors between threads (no thread's glibc arena keeps a table's worth); at one thread it held a table and its
+  build's temporaries through each query batch's end (the composition-based statistics and the traceback), whose own
+  allocations came on top. Results do not change: both builders run `x_build_direct_in` (unit tests compare both with
+  the reference builder); `=0` restores the previous choice. Reach: own = a search on one thread, ref = two threads or
+  more (both required; the blastx fixtures run at 1 and 4 threads). Test: `tests/blastx_unit_cap.rs`
+  (`queries_give_the_report_without_pool_n1`: 4 x 4 kb queries and one 45 kb split query, report equal to `=0` at one
+  thread, reach sides at 1 and 4 threads).
+  Measured on ws (2x Xeon 6338; dev f5326a59 against e85c95c3 and its `=0`; outputs byte-identical): peak `RssAnon`
+  sampled every 50 ms (as v4-MEM), AP027131 (660 kb genome, 68 chunk tables) x 543 proteins (AP027133) `-subject` at
+  one thread 26.0 / 22.7 / 26.0 MiB (dev / default / `=0`, 4 runs each; the MF floor is 22.5); sampled every 2 ms
+  (one node-0 core): the same row 25.7-26.0 -> 24.1-24.6 (a 1 ms peak at the very end of the run, in every arm, is
+  caught by some runs; 22.6-22.8 otherwise), `-db` 25.9-26.0 -> 23.9-24.8, t10 against Swiss-Prot `-db` 7.0 -> 5.7;
+  the price is the `=0` form for many small batches: 800 fly cDNAs against 8 / 50 / 200 yeast proteins 12.8-13.2 ->
+  13.8-14.1, against the whole proteome `-subject` / `-db` 21.1 -> 22.0 / 13.5 -> 13.9 (NCBI `RssAnon` 17 and more).
+  Time at one thread (one node-0 core, TIMED under a node load of 30-95; default against `=0`, medians of paired
+  rounds): wall x0.971-1.027 (eight cases, every range spanning 1.0 but the 200-protein case x0.971 and the
+  proteome `-db` x1.008), cycles:u x1.001-1.006, instructions:u x0.999-1.000. 16 threads (node 1): AP027131 x 543
+  proteins x1.004, 800 cDNAs x proteome `-subject` x1.000, peaks equal (65-66, 76-78 MiB).
+  Forms not taken (line A DECISIONS 53, local): emptying the pool when the last batch leaves its chunk loop raised
+  800 cDNAs x 50 proteins at one thread to 15.0-16.7 MiB (after the first free of a mapped table glibc's dynamic mmap
+  threshold rises and each later table comes from the heap); freeing a table that lived alone raised AP027131
+  `-subject` at 16 threads by 3-5 MiB (`LOSAT_X_BXCHUNKFLOW` builds chunk tables one at a time while other threads
+  allocate).
 
 Counters and tests: `LOSAT_X_STATS=1` (counters on stderr; DP and Newton counts need the
 `xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (diagnostic build; distinct composition-adjustment inputs),

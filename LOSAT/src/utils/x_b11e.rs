@@ -40,6 +40,17 @@ pub(crate) fn ms(ns: u64) -> f64 {
     ns as f64 / 1e6
 }
 
+/// PROBE (B11e): `LOSAT_X_B11ELPTMAX` in place of `X_REDO_LPT_MAX_THREADS` (scheduling only).
+pub(crate) fn lpt_max(default: usize) -> usize {
+    static MAX: OnceLock<usize> = OnceLock::new();
+    *MAX.get_or_init(|| {
+        std::env::var("LOSAT_X_B11ELPTMAX")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default)
+    })
+}
+
 pub(crate) fn batch() -> usize {
     BATCH.load(Ordering::Relaxed)
 }

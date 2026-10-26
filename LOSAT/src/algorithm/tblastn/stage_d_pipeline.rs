@@ -1629,7 +1629,8 @@ fn run_local_search_with_pool(
                     .map(|(_, _, list)| !compo_early_termination(list.best_evalue, &heaps))
                     .collect();
                 let lpt = x_tbn_redo_lpt() && {
-                    let acts = pool.threads() <= X_REDO_LPT_MAX_THREADS
+                    let acts = pool.threads()
+                        <= crate::utils::x_b11e::lpt_max(X_REDO_LPT_MAX_THREADS)
                         && wanted.iter().filter(|&&wanted| wanted).count() > 1;
                     crate::utils::xreach::x_reach!("LOSAT_X_TBNREDOLPT", acts);
                     acts

@@ -129,11 +129,16 @@ impl XSearchTimes {
     /// The clock of one subject. It must be the first local of the closure, so that it is
     /// dropped after everything else the closure owns.
     pub(super) fn subject(&self) -> XLap<'_> {
-        let start = self.now();
+        let start = if crate::utils::xtline::on() {
+            Some(Instant::now())
+        } else {
+            self.now()
+        };
         XLap {
             times: self,
             start,
             last: start,
+            id: 0,
         }
     }
 
@@ -182,6 +187,7 @@ pub(super) struct XLap<'a> {
     times: &'a XSearchTimes,
     start: Option<Instant>,
     last: Option<Instant>,
+    pub(super) id: u32,
 }
 
 impl XLap<'_> {
@@ -191,6 +197,7 @@ impl XLap<'_> {
     pub(super) fn lap(&mut self, stage: XStage) {
         if let Some(last) = self.last {
             let now = Instant::now();
+            crate::utils::xtline::rec(STAGES[stage as usize].1, self.id, last, now);
             self.times.stage_ns[stage as usize].fetch_add(
                 now.duration_since(last).as_nanos() as u64,
                 AtomicOrdering::Relaxed,
@@ -205,6 +212,8 @@ impl Drop for XLap<'_> {
     fn drop(&mut self) {
         if let (Some(start), Some(last)) = (self.start, self.last) {
             let now = Instant::now();
+            crate::utils::xtline::rec("end", self.id, last, now);
+            crate::utils::xtline::rec("subject", self.id, start, now);
             self.times.stage_ns[XStage::End as usize].fetch_add(
                 now.duration_since(last).as_nanos() as u64,
                 AtomicOrdering::Relaxed,

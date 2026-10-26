@@ -2628,25 +2628,35 @@ fn run_in_pool(
         | TblastxMatrix::Aborts => None,
         TblastxMatrix::Table(matrix) => Some(MatrixScores::new(matrix)),
     };
-    let search: &x_batch_pipe::XSearch<'_, TblastxBatch> = &|range, seed_end| match &matrix_scores {
-        None => search_query_batch(
-            Blosum62Score,
-            &args,
-            &query_records[range],
-            search_subjects,
-            numbers,
-            parallel_pool,
-            seed_end,
-        ),
-        Some(scores) => search_query_batch(
-            scores.scorer(),
-            &args,
-            &query_records[range],
-            search_subjects,
-            numbers,
-            parallel_pool,
-            seed_end,
-        ),
+    let x_search_inner = |range: std::ops::Range<usize>,
+                          seed_end: Option<&x_batch_pipe::XSeedEnd<'_>>| {
+        match &matrix_scores {
+            None => search_query_batch(
+                Blosum62Score,
+                &args,
+                &query_records[range],
+                search_subjects,
+                numbers,
+                parallel_pool,
+                seed_end,
+            ),
+            Some(scores) => search_query_batch(
+                scores.scorer(),
+                &args,
+                &query_records[range],
+                search_subjects,
+                numbers,
+                parallel_pool,
+                seed_end,
+            ),
+        }
+    };
+    let search: &x_batch_pipe::XSearch<'_, TblastxBatch> = &|range, seed_end| {
+        let x_t0 = Instant::now();
+        let x_id = range.start as u32;
+        let x_r = x_search_inner(range, seed_end);
+        crate::utils::xtline::rec("batch", x_id, x_t0, Instant::now());
+        x_r
     };
     // The loop's result of the batch of queries `start..end`: the search above, or with
     // LOSAT_X_TBXPIPE the pipe's (`XPipe::take`).
@@ -4404,6 +4414,7 @@ fn search_query_batch<S: TbxScore>(
         // No NCBI counterpart: the clock of this subject for LOSAT_TIMING. The first local of
         // the closure, so it is dropped last and its last stage includes the drops of the rest.
         let mut x_lap = x_times.subject();
+        x_lap.id = s_idx as u32;
         // The scores of the search's matrix, an argument of the closures below.
         let sc = st.sc;
         // EXPERIMENT (LOSAT_X_TBXPIPE): this subject's part of the batch's seed-stage end, ended at

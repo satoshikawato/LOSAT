@@ -336,7 +336,10 @@ fn link_slices(
                         scratch.literal_port,
                     )
                 });
+                let n = group.len() as u32;
+                let t0 = std::time::Instant::now();
                 kernel_times.time(|| link_one_slice(group, args, pool));
+                crate::utils::xtline::rec("kernel", n, t0, std::time::Instant::now());
             })
         });
         return true;
@@ -348,7 +351,10 @@ fn link_slices(
         scratch.literal_port,
     );
     for group in groups {
+        let n = group.len() as u32;
+        let t0 = std::time::Instant::now();
         kernel_times.time(|| link_one_slice(group, args, &mut pools));
+        crate::utils::xtline::rec("kernel", n, t0, std::time::Instant::now());
     }
     false
 }

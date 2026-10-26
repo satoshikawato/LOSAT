@@ -76,6 +76,7 @@ pub fn on() -> bool {
 
 /// Takes the clock of `since_start` (the entry of `main`; nothing without `LOSAT_TIMING`).
 pub fn start() {
+    let _ = crate::utils::xtline::base();
     if on() {
         let _ = START.set(Instant::now());
     }
@@ -84,7 +85,7 @@ pub fn start() {
 /// The clock at the start of an interval: `Some` only with `LOSAT_TIMING`.
 #[inline]
 pub fn clock() -> Option<Instant> {
-    if on() {
+    if on() || crate::utils::xtline::on() {
         Some(Instant::now())
     } else {
         None
@@ -107,6 +108,7 @@ pub fn add_duration(phase: Phase, d: Duration) {
 }
 
 fn span(phase: Phase, start: Instant, end: Instant) {
+    crate::utils::xtline::rec(PHASES[phase as usize].1, 0, start, end);
     NS[phase as usize].fetch_add(
         end.saturating_duration_since(start).as_nanos() as u64,
         Ordering::Relaxed,
@@ -167,6 +169,7 @@ fn line(since: Option<Duration>, search: Duration) -> String {
 
 /// Prints the common line to stderr (only with `LOSAT_TIMING`); `main` calls it last.
 pub fn print() {
+    crate::utils::xtline::dump();
     if !on() {
         return;
     }

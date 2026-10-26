@@ -1033,7 +1033,8 @@ pub(super) fn fill(
 /// positions per 1,024 cells (4 KiB), counted on the table's size, not on the pages it spans, so
 /// that the allocation's offset in its first page (16 bytes for glibc's mapped blocks, 0 for a
 /// page-aligned one) does not move the boundary: 131,072 positions for 4^12 cells, the first chunk
-/// of 4 workers (`chunk_positions`).
+/// of 4 workers (`chunk_positions`). With LOSAT_X_MB24 `cells` is the words of the 3-byte cells
+/// (1,024 to a page): 98,304 positions for 4^12 cells.
 fn prefault_gate(first: usize, cells: usize) -> bool {
     first > 0
         && first >= PREFAULT_MIN_WORDS_PER_PAGE.saturating_mul((cells >> PAGE_ELEMS_SHIFT).max(1))

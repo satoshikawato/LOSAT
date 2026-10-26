@@ -3189,6 +3189,27 @@ Scheduling (each value computed by one thread with the original function; order 
   switch leaves alone, at 8-32 threads) 0.97-1.02; megablast of 1,775 cDNAs (the loop by default) 1.00 at one thread and
   1.02-1.03 at 8 and 16 threads, within the rounds' spread (0.97-1.09) with the same page faults, TLB shootdowns, user
   and system time as dev. Max RSS: the same (the 31,168 cDNAs in the loop 236 MiB against 249).
+- `LOSAT_X_BNHLGROW=1` (BLASTN, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
+  added it (perf/bn-hl-grow): on unless it is `0`) a hit list's array (`blastn/hsp.rs` `HitList`, the preliminary
+  stage's lists per query and the final ones) is no longer reserved to NCBI's array size when a list comes
+  (`kStartValue` = 100 lists, then doubled, `blast_hits.c:3219-3240`): it doubles from 4 as lists come and never holds
+  more room than that size (`HitList::x_room_for_one`, `reserve_exact`). NCBI's array holds pointers (800 bytes for
+  100), LOSAT's holds the lists themselves (40 bytes each), so a search of many short queries with few subjects each
+  kept about 4 KB per query and per hit list (blastn-short of 30,000 reads: 114 MiB at one thread; v4-MF's arm
+  MF_HLCAP). `hsplist_current`, the number `Blast_HitListUpdate` compares with the count, is NCBI's as before; only
+  the capacity changes, and nothing but `push` reads it, so reports do not change (lib test
+  `hit_list_array_grows_as_lists_come_within_ncbi_array_size`; `tests/blastn_hl_grow.rs` compares reports with `=0`:
+  `-subject` and `-db`, 1 and 4 threads, lists past 100 subjects and lists cut by `-max_target_seqs 50`). An array
+  that its owner fills without `update` is left to `push`, as before. Evidence 2026-10-26 (v4-D12 s15, workstation,
+  head bfbc83c6 on dev ce281c9a; 30,000 reads of 24 letters against dmel_dna_3M, `-task blastn-short -evalue 0.001`,
+  every report identical and the same as NCBI's): peak RssAnon, MiB, switch / `=0`: one thread (node 0, 2 runs) 99.2,
+  99.4 / 185.4, 187.3 (NCBI 328.7); max RSS (largest VmHWM sample, node 1, 3 runs, median) `-subject` 16 threads 198.8
+  / 304.6, 32 threads 334.4 / 436.8, 48 threads 433.5 / 536.4 (NCBI `-subject` 389.3, one thread: NCBI does not thread
+  a subject search); `-db` (2 runs) 32 threads 296.6, 301.3 / 408.9, 391.5 (NCBI 444.3), 48 threads 396.4, 397.0 /
+  493.4, 502.0 (NCBI 493.7). Time: one thread, `perf stat` `:u` against `=0`, 4 rounds rotated with an A/A arm (`=0`
+  again): instructions x0.99998, cycles x0.9993 (0.986-1.012) where the A/A arm read x0.9970 (0.984-1.010), minor
+  faults 94.1k -> 40.6k, system time 0.15 -> 0.07 s; 16 threads (node 1, CPUs warmed 3 s before each run), 20 pairs in
+  alternating order: wall x0.961 (median; geometric mean x0.962; 20 of 20 pairs below 1), minor faults 115k -> 60k.
 - `LOSAT_X_BNLUTDROP=1` (BLASTN, every task, `-subject` and `-db`; in the strict set since 2026-10-24
   (perf/mb-lut-drop, evidence at the end of this entry): on unless it is `0`) a query batch drops its lookup tables
   when its preliminary stage ends, before its traceback (`blastn/blast_engine/x_lut_drop.rs`), where NCBI's traceback

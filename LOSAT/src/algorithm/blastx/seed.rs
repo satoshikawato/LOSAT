@@ -323,17 +323,17 @@ impl Lookup {
         parameters: &[ContextParameters],
         options: &ResolvedOptions,
     ) -> Result<Self> {
-        Self::x_new_striped(batch, parameters, options, 1)
+        Self::x_new_in_parts(batch, parameters, options, 1)
     }
 
     /// EXPERIMENT (LOSAT_X_BXBUILDPAR): [`Lookup::new`] with a pooled standard table's passes on
-    /// `stripes` tasks of the pool it runs on (`tblastx/lookup/x_lut_direct.rs`
-    /// `x_striped_passes`); the table is the same.
-    pub(crate) fn x_new_striped(
+    /// `parts` tasks of the pool it runs on (`tblastx/lookup/x_lut_direct.rs`
+    /// `x_partitioned_passes`); the table is the same.
+    pub(crate) fn x_new_in_parts(
         batch: &PreparedQueryBatch,
         parameters: &[ContextParameters],
         options: &ResolvedOptions,
-        stripes: usize,
+        parts: usize,
     ) -> Result<Self> {
         let query = batch.sequence_start[1..].to_vec();
         if options.word_size == 5 {
@@ -380,7 +380,7 @@ impl Lookup {
                 batch.lookup_segments.clone(),
                 contexts,
                 options.threshold as i32,
-                stripes,
+                parts,
             ),
             x_seed_scan::XKeptPresence::new(),
         ))

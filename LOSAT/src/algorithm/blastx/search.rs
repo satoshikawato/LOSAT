@@ -734,7 +734,7 @@ pub(crate) fn search_core(
             let x_cap = x_bx_mem::chunk_unit_cap(pool, options, subjects);
             // Dispatch point (LOSAT_X_BXBUILDPAR, in the strict set): a capped wave's chunks build
             // their tables on the threads the cap leaves each (x_bx_mem.rs).
-            let x_stripes = x_bx_mem::build_stripes(pool, x_cap.is_some());
+            let x_parts = x_bx_mem::build_parts(pool, x_cap.is_some());
             let mut x_next = 0;
             while x_next < chunks.len() {
                 let x_wave = x_cap.map(|(k, _)| x_bx_mem::chunk_wave(pool, k));
@@ -758,7 +758,7 @@ pub(crate) fn search_core(
                                 min_subject_length,
                                 x_containment,
                                 x_cap.map(|(_, per_task)| per_task),
-                                x_stripes,
+                                x_parts,
                             )
                         })
                         .collect()
@@ -889,10 +889,10 @@ pub(crate) fn search_core(
             // Dispatch point (LOSAT_X_BXBUILDPAR, in the strict set): a batch of the capped batch
             // flow builds its table on the threads the cap leaves it (x_bx_mem.rs).
             #[cfg(feature = "parallel")]
-            let x_stripes = x_bx_mem::build_stripes(pool, false);
+            let x_parts = x_bx_mem::build_parts(pool, false);
             #[cfg(not(feature = "parallel"))]
-            let x_stripes = 1;
-            let lookup = Lookup::x_new_striped(batch, &params, options, x_stripes)?;
+            let x_parts = 1;
+            let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
             let last = batch.contexts.last().expect("BLASTX contexts");
             let mut diagonals = Diagonals::new(last.offset + last.length, options.window_size)?;
             let xdrop = subject_parameters(
@@ -1333,7 +1333,7 @@ pub(crate) fn search_core(
 /// Everything the chunk loop computes before it talks to the sink, for one chunk; `None` when no
 /// context of the chunk has valid Karlin parameters (the loop then skips the chunk). `x_par`: the
 /// chunk's subjects as tasks of that many subjects on the pool (`LOSAT_X_BXUNITCAP`'s waves);
-/// `x_stripes`: the stripes of its lookup table's build (`LOSAT_X_BXBUILDPAR`).
+/// `x_parts`: the parts of its lookup table's build (`LOSAT_X_BXBUILDPAR`).
 #[cfg(feature = "parallel")]
 #[allow(clippy::type_complexity)]
 fn x_compute_chunk(
@@ -1346,14 +1346,14 @@ fn x_compute_chunk(
     min_subject_length: usize,
     x_containment: bool,
     x_par: Option<usize>,
-    x_stripes: usize,
+    x_parts: usize,
 ) -> Result<Option<(Vec<ContextParameters>, Vec<(usize, SubjectComputation)>)>> {
     let batch = &chunk.prepared;
     let mut params = score_block(batch);
     if !params.iter().any(|p| p.valid) {
         return Ok(None);
     }
-    let lookup = Lookup::x_new_striped(batch, &params, options, x_stripes)?;
+    let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
     let last = batch.contexts.last().expect("BLASTX contexts");
     if let Some(per_task) = x_par {
         let xdrop = subject_parameters(

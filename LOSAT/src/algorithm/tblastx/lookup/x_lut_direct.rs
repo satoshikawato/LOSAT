@@ -114,6 +114,31 @@ pub(crate) fn x_bx_pooled_builds() -> bool {
     x_bx_lut_pool() && !diagnostics_enabled()
 }
 
+// No NCBI counterpart (buffer reuse only): LOSAT_X_BXPOOLN1, in the strict set (on unless `=0`).
+// The pool moves a table's vectors and its build's temporaries from the thread that drops them to
+// the thread that builds next, so that no thread's glibc arena keeps a table's worth after the
+// table is freed (`x_bx_lut_pool`). A search on one thread has no other thread: with the switch its
+// tables are built by `x_build_direct` (its own neighbour memo, `vec!` vectors) and freed with the
+// search's lookup (`blastx/seed.rs` `Lookup`), as NCBI builds and frees them and as `=0` of
+// LOSAT_X_BXLUTPOOL does. Kept, the pool held a table and its build's temporaries through each
+// query batch's end (the composition-based statistics and the traceback), which then took its
+// memory on top: a 660 kb genome against its 543 proteins at one thread had a peak `RssAnon` of
+// 26.0 MiB, 22.6 without the pool. Searches of two threads or more build pooled as before.
+/// Whether a BLASTX search of `threads` threads builds its tables pooled: the builds are pooled
+/// ([`x_bx_pooled_builds`]) and, with `LOSAT_X_BXPOOLN1`, the search has two threads or more.
+pub(crate) fn x_bx_pooled_for(threads: usize) -> bool {
+    static N1: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !x_bx_pooled_builds() {
+        return false;
+    }
+    if !*N1.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXPOOLN1")) {
+        return true;
+    }
+    let own = threads <= 1;
+    crate::utils::xreach::x_reach!("LOSAT_X_BXPOOLN1", own);
+    !own
+}
+
 /// No NCBI counterpart (memoised neighbour lists shared by threads, `XNeighborMemo` otherwise).
 struct XSharedMemo {
     key: (ScoringMatrix, i32, usize, usize),

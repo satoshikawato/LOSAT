@@ -31,8 +31,9 @@ pub(crate) use x_lut_direct::XAaSpares;
 // The comparison of two tables, for the unit tests (x_lut_direct.rs).
 #[cfg(test)]
 pub(crate) use x_lut_direct::{x_assert_same_table_as, x_same_table};
-// LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build.
-pub(crate) use x_lut_direct::{x_bx_pooled_builds, x_give_back_pooled};
+// LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
+// by searches of two threads or more).
+pub(crate) use x_lut_direct::{x_bx_pooled_builds, x_bx_pooled_for, x_give_back_pooled};
 // EXPERIMENT (PAIRLUT): the direct builder of the TBLASTX unit
 // path's group tables (x_pair_lut.rs, a child module of x_lut_direct.rs), used by
 // tblastx/x_pair_par.rs.
@@ -1547,6 +1548,7 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     lookup_locations: Vec<(i32, i32)>,
     contexts: Vec<QueryContext>,
     threshold: i32,
+    pooled: bool,
 ) -> BlastAaLookupTable {
     let frame_bases = contexts.iter().map(|c| c.frame_base).collect();
     let prepared = PreparedLookupQuery {
@@ -1569,7 +1571,7 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     // BLASTX: the table is filled in place from the per-cell counts, in the same append order as
     // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines (diagnostics
     // mode, or a backbone index wider than 16 bits) the reference builder below runs.
-    let built = if x_lut_direct::x_bx_lut_pool() {
+    let built = if pooled {
         x_lut_direct::x_build_direct_pooled(prepared, threshold, ScoringMatrix::Blosum62, 3)
     } else {
         x_lut_direct::x_build_direct(prepared, threshold, ScoringMatrix::Blosum62, 3)

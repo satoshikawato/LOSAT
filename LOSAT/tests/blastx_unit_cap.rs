@@ -1,13 +1,14 @@
 //! BLASTX's memory at many threads on whole searches: the workers' diagonal tables kept one per
 //! thread (`LOSAT_X_BXDIAGKEEP`), the lookup tables' neighbour lists shared and their vectors kept
-//! between builds (`LOSAT_X_BXLUTPOOL`), and at most K query batches or chunks searched at a time
+//! between builds (`LOSAT_X_BXLUTPOOL`; not in a search on one thread, `LOSAT_X_BXPOOLN1`), and at
+//! most K query batches or chunks searched at a time
 //! (`LOSAT_X_BXUNITCAP[=K]`; `src/algorithm/blastx/x_bx_mem.rs`,
 //! `src/algorithm/tblastx/lookup/x_lut_direct.rs`).
 //!
-//! The three are in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). They change which
+//! The four are in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). They change which
 //! thread computes what, and the vectors the tables are built on, not what is computed, so the
 //! property under test is that the report does not depend on them: standard output equals that of
-//! the same search with all three `=0`, for several query batches (the batch flow,
+//! the same search with all four `=0`, for several query batches (the batch flow,
 //! `LOSAT_X_BXFLOW`) and for one query split into chunks (the chunk waves, `LOSAT_X_BXPAR`), with
 //! the cap acting (`LOSAT_X_BXUNITCAP=2` at 4 threads; its built-in K = 8 needs 9 threads or more),
 //! not acting, and with each part off. `LOSAT_X_REACH` shows that the cap acted, and that it does
@@ -173,6 +174,7 @@ fn sides(
 const ALL_OFF: &[(&str, &str)] = &[
     ("LOSAT_X_BXDIAGKEEP", "0"),
     ("LOSAT_X_BXLUTPOOL", "0"),
+    ("LOSAT_X_BXPOOLN1", "0"),
     ("LOSAT_X_BXUNITCAP", "0"),
 ];
 
@@ -306,5 +308,36 @@ fn several_queries_give_the_report_without_ka_once() {
         sides(&dir, &query, &args, 1, &[], "LOSAT_X_BXKAONCE"),
         (true, false)
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `LOSAT_X_BXPOOLN1` (a search on one thread builds and frees its lookup tables without the pool,
+/// `tblastx/lookup/x_lut_direct.rs`): the report equals that without it, for several query batches
+/// (one table each) and for a split query (a table per chunk), at one thread (where it acts) and at
+/// four (where it does not); `LOSAT_X_REACH` shows the side each search took.
+#[test]
+fn queries_give_the_report_without_pool_n1() {
+    let dir = temp_dir("pool-n1");
+    let off = [("LOSAT_X_BXPOOLN1", "0")];
+    for (pieces, length) in [(4, 4_000), (1, 45_000)] {
+        let (query, set) = inputs(&dir, pieces, length, 595);
+        let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+        for threads in [1, 4] {
+            let reference = blastx(&query, &args, threads, &off);
+            assert!(
+                reference.iter().filter(|&&b| b == b'\n').count() > 20,
+                "too few hits to test"
+            );
+            assert!(
+                blastx(&query, &args, threads, &[]) == reference,
+                "{pieces} x {length} letters, {threads} threads: report differs"
+            );
+            assert_eq!(
+                sides(&dir, &query, &args, threads, &[], "LOSAT_X_BXPOOLN1"),
+                (threads == 1, threads > 1),
+                "{pieces} x {length} letters, {threads} threads: sides"
+            );
+        }
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

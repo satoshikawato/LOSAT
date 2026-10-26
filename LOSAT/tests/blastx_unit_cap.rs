@@ -255,9 +255,10 @@ fn several_query_batches_give_the_report_without_the_switches() {
     // 40 proteins: without LOSAT_X_BXCAPFILL the subject flow does not run (64 subjects or
     // fewer), so a capped batch would search on one thread, and the cap does not act. With it the
     // capped batches' subjects run as tasks of 5 (f = 4 tasks for each of the 2 threads a batch is
-    // left), each batch prepared ahead, and the cap acts; the report is the same. One protein makes
-    // one task, and the cap acts nowhere. The pieces start at the genome's start, where the 40
-    // proteins lie.
+    // left), each batch prepared ahead, and the cap acts; the report is the same. With it the cap
+    // acts for one protein too (one task: the cap holds wherever there are more threads than K),
+    // with the same report; without it the old rule leaves one protein uncapped. The pieces start
+    // at the genome's start, where the 40 proteins lie.
     let (query, few) = inputs_from(&dir, 0, 8, 4_000, 40);
     let args = ["-subject", few.to_str().unwrap(), "-outfmt", "6"];
     let cap2 = [("LOSAT_X_BXUNITCAP", "2")];
@@ -287,10 +288,18 @@ fn several_query_batches_give_the_report_without_the_switches() {
     }
     let (query, one) = inputs(&dir, 8, 4_000, 1);
     let args = ["-subject", one.to_str().unwrap(), "-outfmt", "6"];
-    assert_eq!(cap_sides(&dir, &query, &args, &cap2), (false, true));
+    assert_eq!(cap_sides(&dir, &query, &args, &cap2), (true, false));
     assert_eq!(
         sides(&dir, &query, &args, 4, &cap2, "LOSAT_X_BXCAPFILL"),
+        (true, false)
+    );
+    assert_eq!(
+        cap_sides(&dir, &query, &args, &[cap2[0], ("LOSAT_X_BXCAPFILL", "0")]),
         (false, true)
+    );
+    assert!(
+        blastx(&query, &args, 4, &cap2) == blastx(&query, &args, 4, ALL_OFF),
+        "1 protein: report differs"
     );
     // Forty queries: sixteen batches, more than the capped flow reads ahead of the writing with
     // K = 2 (`flow_bound`), so the reader waits and batches are spawned by searches that end.

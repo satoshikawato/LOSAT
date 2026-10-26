@@ -173,7 +173,8 @@ use std::ops::RangeInclusive;
 /// fewer subjects, each query batch prepared outside the cap, `blastx/x_bx_mem.rs`) joined the set
 /// in the pull request that added it, after it was verified and timed with it on and off.
 /// `LOSAT_X_BXBUILDPAR` (BLASTX's lookup table of a capped unit built on the threads the cap
-/// leaves it, by stripes of target cells, `blastx/x_bx_mem.rs`, `tblastx/lookup/x_lut_direct.rs`)
+/// leaves it, in parts by ranges of source cells, `blastx/x_bx_mem.rs`,
+/// `tblastx/lookup/x_lut_direct.rs`)
 /// joined the set in the pull request that added it, after it was verified and timed with it on
 /// and off.
 /// `LOSAT_X_BXCAPTABLES` (BLASTX's capped batch flow counts lookup tables, not searches: a batch

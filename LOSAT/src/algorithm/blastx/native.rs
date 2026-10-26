@@ -1889,6 +1889,10 @@ impl ReaderBatchResults {
 #[cfg(feature = "parallel")]
 type XSearched = std::thread::Result<Result<Vec<BatchResults>>>;
 
+/// No NCBI counterpart (scheduling only): the index `x_flow`'s searches send, with no result, when
+/// they give their place back before they end (LOSAT_X_BXCAPTABLES), to wake the writing thread.
+const X_FREED: usize = usize::MAX;
+
 // EXPERIMENT (LOSAT_X_BXFLOW): the reading loop of `run` with every query batch searched as a task
 // of its own (see the call in `run`). `search` searches one batch (the waves' function; `alone`:
 // with the pool inside), `write_batch` writes one batch's reports (or ends the run at its error),
@@ -2000,8 +2004,11 @@ fn x_flow(
 
         // Spawns the search of unit `index`, spawned by `release`. The search gives its place
         // back once: when it calls the function it is handed (a capped batch whose lookup tables
-        // are dropped, LOSAT_X_BXCAPTABLES), or else when it ends; then it spawns again, so a place
-        // freed by a search is filled without waiting for the writing thread. It sends its result
+        // are dropped, LOSAT_X_BXCAPTABLES), or else when it ends. At its end it spawns again, so a
+        // place freed by a search is filled without waiting for the writing thread. A place given
+        // back before the end is filled by the writing thread, which the search wakes (`X_FREED`):
+        // a search spawned here would go to this thread's own queue, and the batch's traceback,
+        // which joins parallel work, would run it inside itself and end late. It sends its result
         // (or panic) once. A unit whose phase 1 ends after the writing ended is not searched.
         fn spawn_search<'s>(
             &'s self,
@@ -2024,7 +2031,8 @@ fn x_flow(
                 let free = || {
                     if !freed.replace(true) {
                         self.held().live -= 1;
-                        self.release(scope, &sender);
+                        // The receiver is gone only when the run already ended at an error.
+                        let _ = sender.send((X_FREED, Ok(Ok(Vec::new()))));
                     }
                 };
                 let searched = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -2076,11 +2084,19 @@ fn x_flow(
         // pending task or waits for a result, and writes again.
         let mut write = |all: bool| -> Result<()> {
             loop {
+                let mut freed = false;
                 {
                     let mut state = state.borrow_mut();
                     while let Ok((index, searched)) = receiver.try_recv() {
-                        state.searched.insert(index, searched);
+                        if index == X_FREED {
+                            freed = true;
+                        } else {
+                            state.searched.insert(index, searched);
+                        }
                     }
+                }
+                if freed {
+                    release();
                 }
                 loop {
                     let event = {
@@ -2133,6 +2149,7 @@ fn x_flow(
                     // pending work again soon: a batch searched alone hands out parts of its
                     // search as it goes.
                     match receiver.recv_timeout(std::time::Duration::from_millis(1)) {
+                        Ok((X_FREED, _)) => release(),
                         Ok((index, searched)) => {
                             state.borrow_mut().searched.insert(index, searched);
                         }

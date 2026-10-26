@@ -53,8 +53,10 @@
 //! only the residues of the word (the exact backbone index identifies them), the matrix, the
 //! threshold, the word length and the alphabet, so a list memoised under the same key is the
 //! list the recursion would produce again. The exact backbone is built by the reference
-//! function, and every other field of the table is computed by the reference expressions.
-//! In diagnostics mode the reference builder runs (its prints read the chains).
+//! function (a partitioned build, LOSAT_X_BXBUILDPAR, takes the same cells and offsets from a
+//! counting sort of that function's loop, `x_counted_sources`), and every other field of the table
+//! is computed by the reference expressions. In diagnostics mode the reference builder runs (its
+//! prints read the chains).
 
 use super::*;
 use std::cell::RefCell;
@@ -1038,11 +1040,19 @@ fn x_build_direct_in(
     }))
 }
 
+// No NCBI counterpart: spins of `x_claimed`'s caller before it yields while it waits for parts.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+const X_CLAIM_SPINS: u32 = 1 << 12;
+
 // No NCBI counterpart (scheduling only): `f` on each of `parts` on tasks of the pool the caller runs
 // on. The caller and the helpers it spawns claim the parts in turn; once every part is claimed, the
 // caller waits for the parts others still run without taking other work of the pool (a part is
 // short, and a job taken while waiting, such as another batch's search, could hold the caller far
-// longer than the part). A part that panics still counts as ended, and the scope raises its panic.
+// longer than the part; the scope's own wait at its end, for a helper that claimed nothing, can
+// still run one). A part that panics still counts as ended, and the scope raises its panic.
 /// EXPERIMENT (LOSAT_X_BXBUILDPAR): `f(part)` for each part, its results in part order.
 #[cfg(all(
     feature = "parallel",
@@ -1081,8 +1091,16 @@ fn x_claimed<T: Send, R: Send>(parts: Vec<T>, f: &(dyn Fn(T) -> R + Sync)) -> Ve
             scope.spawn(|_| work());
         }
         work();
+        let mut spins = 0u32;
         while ended.load(Ordering::Acquire) < n {
-            std::hint::spin_loop();
+            // A part is short; past a bound the helper running it was likely preempted (more
+            // threads than CPUs), so give the CPU away instead of spinning through its timeslice.
+            if spins < X_CLAIM_SPINS {
+                spins += 1;
+                std::hint::spin_loop();
+            } else {
+                std::thread::yield_now();
+            }
         }
     });
     results
@@ -1113,12 +1131,13 @@ fn x_sized<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec
 }
 
 /// No NCBI counterpart: the most source ranges of a partitioned build (each holds a count per
-/// backbone cell, 128 KiB for words of three letters).
+/// backbone cell, 112 KiB for words of three letters, kept with the build's temporaries: about
+/// threads x 112 KiB for the K builds at a time, up to 8 parts each).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-const X_MOST_PARTS: usize = 16;
+const X_MOST_PARTS: usize = 8;
 
 /// No NCBI counterpart: the weight of a source whose neighbour list is not made yet, per offset
 /// (the ranges are cut by offsets times list length).
@@ -1928,11 +1947,11 @@ mod tests {
     }
 
     // No NCBI counterpart (scheduling only): LOSAT_X_BXBUILDPAR's passes by source ranges give the
-    // reference table, with 2 to 16 ranges (the most) and more ranges asked for than the backbone
-    // has stripes, with overflow cells (the low-complexity frame), a location shorter than a word
-    // (between the first frame's masks) and residues outside the alphabet's bits (the third query:
-    // the exact backbone skips their words), thresholds with and without neighbours and other
-    // matrices, on vectors other builds left.
+    // reference table, with 2 to 8 ranges (the most; more asked for are clamped), with overflow
+    // cells (the low-complexity frame), a location shorter than a word (between the first frame's
+    // masks) and residues outside the alphabet's bits (the third query: the exact backbone skips
+    // their words), a query of fewer source cells than ranges and an all-masked one, thresholds
+    // with and without neighbours and other matrices, on vectors other builds left.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1943,13 +1962,21 @@ mod tests {
         let mut low_complexity = vec![1u8; 400];
         low_complexity.extend(residues(&mut seed, 60));
         let small = vec![vec![frame(residues(&mut seed, 300), vec![], 1)]];
+        let mut invalid = residues(&mut seed, 700);
+        for at in [0, 5, 6, 300, 699] {
+            invalid[at] = 0x40;
+        }
         let large = vec![
             vec![
-                frame(residues(&mut seed, 2_500), vec![(100, 140)], 1),
+                frame(residues(&mut seed, 2_500), vec![(100, 140), (143, 200)], 1),
                 frame(low_complexity, vec![(350, 399)], -1),
             ],
             vec![frame(residues(&mut seed, 1_800), vec![], 2)],
+            vec![frame(invalid, vec![], 3)],
         ];
+        // Fewer source cells than parts, and none at all.
+        let tiny = vec![vec![frame(residues(&mut seed, 6), vec![], 1)]];
+        let masked = vec![vec![frame(residues(&mut seed, 50), vec![(0, 49)], 1)]];
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(4)
             .build()
@@ -1961,11 +1988,14 @@ mod tests {
                 (&large, 13, ScoringMatrix::Blosum45),
                 (&large, 0, ScoringMatrix::Blosum62),
                 (&small, 12, ScoringMatrix::Pam30),
+                (&tiny, 11, ScoringMatrix::Blosum62),
+                (&masked, 11, ScoringMatrix::Blosum62),
             ] {
                 let reference =
                     build_lookup_from_prepared(prepared(queries, matrix), threshold, matrix, 3).0;
-                assert!(threshold == 0 || !reference.overflow.is_empty());
-                for parts in [2, 3, 4, 7, 1_000, 100_000] {
+                let edge = std::ptr::eq(queries, &tiny) || std::ptr::eq(queries, &masked);
+                assert!(edge || threshold == 0 || !reference.overflow.is_empty());
+                for parts in [2, 3, 4, 7, 8, 1_000] {
                     let mut table = match x_build_direct_pooled(
                         prepared(queries, matrix),
                         threshold,

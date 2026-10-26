@@ -48,7 +48,8 @@
 //!   `capped_subjects_per_task` subjects: f tasks for each of the `ceil(threads / K)` threads a unit
 //!   is left, at least one subject and at most the size without the cap (64 for the batch flow's
 //!   subject flow, 16 for the chunk waves; a set keeps that size from 64 x f x ceil(threads / K)
-//!   subjects, 512 at 16 threads), and the cap's rule counts those tasks (`unit_cap`). And the
+//!   subjects, 512 at 16 threads), and the cap holds wherever there are more threads than K
+//!   (`unit_cap`; without the fill it also needs K units with a task for every thread). And the
 //!   capped batch flow prepares each query batch of at most two search units' letters
 //!   (translation, filtering, Karlin blocks: `reader_batch::prepare_lone_unit`, which
 //!   `search::search_core` runs when a batch prepares itself) as a task of its own when the reader
@@ -75,7 +76,9 @@
 //!   the chunk waves) once its last lookup table is dropped (`search::search_core` calls back
 //!   before `batch_end`), so that its traceback (the composition-based redo, the gapped alignments
 //!   with traceback) runs beside the next batches' builds and scans instead of holding one of the K
-//!   places. Without it a batch held its place to the end of its search.
+//!   places. The flow's writing thread spawns the batch that takes the freed place (`native.rs`
+//!   `x_flow`), not the freeing thread, whose traceback could otherwise run that search inside
+//!   itself. Without it a batch held its place to the end of its search.
 //!
 //! Exactness. A subject's computation depends on the subject and the query chunk alone, not on the
 //! diagonal table it runs on, while no diagonal offset passes 2^30 (`x_subject_flow.rs`, module
@@ -547,7 +550,8 @@ mod tests {
         assert_eq!(size(4, 64, 8, 50, 64), 2);
         assert_eq!(size(4, 16, 8, 6_600, 64), 64);
         assert_eq!(size(4, 16, 8, 6_600, 16), 16);
-        // K units then hold a task for every thread (the cap's rule, `unit_cap`) wherever K units
+        // K units then hold a task for every thread (the rule `unit_cap` keeps without the fill)
+        // wherever K units
         // of one subject each would.
         for threads in [9, 16, 17, 32, 48, 64, 128] {
             for subjects in [2, 10, 50, 200, 543, 6_600] {

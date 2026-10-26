@@ -5,7 +5,10 @@
 //! batch at a time and in batch order, while the other slot sets the next batch up. The loop's
 //! thread (the pool's thread 0) runs the pool's jobs while it waits for a slot. With
 //! `LOSAT_PROBE_BNAHEAD=2` the gate opens at the end of a batch's preliminary search, so the next
-//! batch's preliminary search runs beside its traceback. No NCBI counterpart: scheduling only.
+//! batch's preliminary search runs beside its traceback; with `=3` two batches search on the loop's
+//! pool at once (the two lowest registered), for a bound only: two passes side by side on one pool
+//! can hang where a stage uses `rayon::broadcast` (not blastn's search of one subject). No NCBI
+//! counterpart: scheduling only.
 
 use std::cell::Cell;
 use std::collections::BTreeSet;
@@ -20,6 +23,7 @@ pub(crate) fn mode() -> u8 {
     *MODE.get_or_init(|| match std::env::var("LOSAT_PROBE_BNAHEAD").as_deref() {
         Ok("1") => 1,
         Ok("2") => 2,
+        Ok("3") => 3,
         _ => 0,
     })
 }
@@ -30,7 +34,7 @@ pub(crate) fn on() -> bool {
 
 #[derive(Default)]
 struct GateState {
-    busy: bool,
+    busy: usize,
     registered: BTreeSet<usize>,
 }
 
@@ -63,8 +67,10 @@ impl Gate {
             if cancelled() {
                 return None;
             }
-            if !state.busy && state.registered.first() == Some(&start) {
-                state.busy = true;
+            let limit = if mode() == 3 { 2 } else { 1 };
+            let rank = state.registered.iter().position(|&s| s == start);
+            if state.busy < limit && rank.is_some_and(|rank| rank < limit) {
+                state.busy += 1;
                 return Some(Held {
                     gate: self,
                     start,
@@ -92,7 +98,7 @@ impl Held<'_> {
         if self.open {
             self.open = false;
             let mut state = self.gate.lock();
-            state.busy = false;
+            state.busy -= 1;
             state.registered.remove(&self.start);
             drop(state);
             self.gate.wake.notify_all();

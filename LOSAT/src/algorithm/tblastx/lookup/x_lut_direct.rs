@@ -233,6 +233,7 @@ pub(super) fn x_build_direct_pooled(
         &mut unused,
         None,
         true,
+        false,
     )
     .map(|table| table.expect("pooled vectors grow to any table"))
 }
@@ -412,6 +413,7 @@ impl XAaSpares {
                 &mut memo.borrow_mut(),
                 Some(&mut room),
                 false,
+                crate::seqdb::x_bp_db_keep(),
             )
         });
         match built {
@@ -531,6 +533,7 @@ impl XAaSpares {
             &mut memo,
             Some(&mut room),
             false,
+            crate::seqdb::x_bp_db_keep(),
         );
         *x_locked(&self.memo) = memo;
         *x_locked(&self.ahead) = room;
@@ -754,6 +757,31 @@ pub(super) fn x_build_direct(
             &mut memo.borrow_mut(),
             None,
             false,
+            false,
+        )
+        .map(|table| table.expect("fresh vectors have the room for any table"))
+    })
+}
+
+/// EXPERIMENT (LOSAT_X_BPDBKEEP): [`x_build_direct`] for BLASTP, whose chains glibc maps and
+/// unmaps without raising its mmap threshold where the switch is on
+/// (`LookupBackboneChains::x_new_unthresholded`).
+fn x_bp_build_direct(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
+    X_MEMO.with(|memo| {
+        x_build_direct_in(
+            prepared,
+            threshold,
+            matrix,
+            word_length,
+            &mut memo.borrow_mut(),
+            None,
+            false,
+            crate::seqdb::x_bp_db_keep(),
         )
         .map(|table| table.expect("fresh vectors have the room for any table"))
     })
@@ -771,6 +799,7 @@ fn x_build_direct_in(
     memo: &mut Option<XNeighborMemo>,
     room: Option<&mut XAaVectors>,
     pooled: bool,
+    x_unthresholded: bool,
 ) -> std::result::Result<Option<BlastAaLookupTable>, PreparedLookupQuery> {
     let alphabet_size = LOOKUP_ALPHABET_SIZE;
     let charsize = ilog2(alphabet_size) + 1;
@@ -813,9 +842,7 @@ fn x_build_direct_in(
         }
         // EXPERIMENT (LOSAT_X_BPDBKEEP): the chains' memory freed without raising glibc's mmap
         // threshold.
-        None if crate::seqdb::x_bp_db_keep() => {
-            LookupBackboneChains::x_new_unthresholded(backbone_size)
-        }
+        None if x_unthresholded => LookupBackboneChains::x_new_unthresholded(backbone_size),
         None => LookupBackboneChains::new(backbone_size),
     };
     let mut skipped_invalid_residue = 0usize;
@@ -1028,6 +1055,7 @@ pub(super) fn x_bp_build_lookup(
         karlin_params,
         check_ideal,
         |_| {},
+        x_bp_build_direct,
     )
 }
 
@@ -1066,6 +1094,7 @@ pub(super) fn x_tbx_build_lookup(
         karlin_params,
         check_ideal,
         |direct| crate::utils::xreach::x_reach!("LOSAT_X_TBXLUT", direct),
+        x_build_direct,
     )
 }
 
@@ -1087,6 +1116,15 @@ fn x_bp_prepared_query(queries: &[Vec<QueryFrame>], check_ideal: bool) -> Prepar
     )
 }
 
+/// The direct builder of [`x_build_ncbi_lookup_with`]: [`x_build_direct`] or BLASTP's
+/// [`x_bp_build_direct`].
+type XBuildDirect = fn(
+    PreparedLookupQuery,
+    i32,
+    ScoringMatrix,
+    usize,
+) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery>;
+
 /// The body of [`x_bp_build_lookup`] and [`x_tbx_build_lookup`]: with `direct` false it calls
 /// `build_ncbi_lookup`; with `direct` true it prepares the query as
 /// `build_ncbi_lookup_for_profile(.., Blosum62, LOOKUP_WORD_LENGTH)` does and builds the table with
@@ -1099,6 +1137,7 @@ fn x_build_ncbi_lookup_with(
     karlin_params: &KarlinParams,
     check_ideal: bool,
     reach: fn(bool),
+    build_direct: XBuildDirect,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     if !direct {
         return build_ncbi_lookup(queries, threshold, karlin_params, check_ideal);
@@ -1107,7 +1146,7 @@ fn x_build_ncbi_lookup_with(
     let prepared = x_bp_prepared_query(queries, check_ideal);
     // build_lookup_from_prepared returns the prepared contexts unchanged.
     let contexts = prepared.contexts.clone();
-    match x_build_direct(prepared, threshold, matrix, LOOKUP_WORD_LENGTH) {
+    match build_direct(prepared, threshold, matrix, LOOKUP_WORD_LENGTH) {
         Ok(table) => {
             reach(true);
             (table, contexts)

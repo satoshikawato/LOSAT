@@ -63,7 +63,8 @@ pub(crate) fn x_mapped_capacity(elements: usize, size: usize) -> usize {
 
 /// No NCBI counterpart (LOSAT_X_BPDBKEEP): the capacity, in elements of `size` bytes, of a buffer
 /// of `elements` that glibc maps whatever its size and whose free leaves the mmap threshold as it
-/// is (above glibc's ceiling; `elements` elsewhere). Its pages beyond those touched are not resident.
+/// is (above glibc's ceiling; `elements` elsewhere). Its pages beyond those touched are not
+/// resident.
 pub(crate) fn x_unthresholded_capacity(elements: usize, size: usize) -> usize {
     if X_MAPPED_ALLOCATOR {
         elements.max(X_MAPPED_BYTES.div_ceil(size.max(1)))

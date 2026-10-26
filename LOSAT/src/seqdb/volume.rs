@@ -322,8 +322,8 @@ impl Volume {
         self.read_block_in(first, end, first_ordinal, BlockBuffer::Mapped)
     }
 
-    /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_block` with the bytes in `buf` (`File::x_read_range_into`;
-    /// `SequenceBlock::x_into_data` gives the buffer back).
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_block` with the bytes in `buf`
+    /// (`File::x_read_range_into`; `SequenceBlock::x_into_data` gives the buffer back).
     pub fn x_read_block_into(
         &self,
         first: u32,

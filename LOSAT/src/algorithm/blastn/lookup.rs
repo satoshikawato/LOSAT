@@ -2027,6 +2027,13 @@ fn build_mb_lookup(
     let mut helper_array =
         vec![0u32; ((table_size + K_COMPRESSION_FACTOR - 1) / K_COMPRESSION_FACTOR).max(1)];
     let mut words: Vec<(u32, u32)> = Vec::new();
+    {
+        use crate::utils::probe_mem::{retag_vec as rv, LK_CHAIN, LK_HEAD, LK_PV};
+        rv(&hashtable, LK_HEAD);
+        rv(&next_pos, LK_CHAIN);
+        rv(&pv_array, LK_PV);
+        rv(&helper_array, LK_PV);
+    }
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
 

@@ -4235,8 +4235,15 @@ struct SubjectScratch {
 // hsp_list = Blast_HSPListFree(hsp_list);
 // BlastInitHitListReset(init_hitlist);
 // ```
+impl Drop for SubjectScratch {
+    fn drop(&mut self) {
+        crate::utils::probe_mem::scratch_dropped();
+    }
+}
+
 impl SubjectScratch {
     fn new(query_count: usize, offset_array_size: usize, window_size: usize) -> Self {
+        crate::utils::probe_mem::scratch_created();
         Self {
             hits: Vec::new(),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4076
@@ -6984,6 +6991,7 @@ fn read_cli_subjects(
     // LOSAT_X_BNSTORE the packing of each record is in this interval too. No NCBI counterpart.
     let t_read_fasta = crate::utils::xtiming::clock();
     let (read_subjects, stores) = {
+        let _pgsj = crate::utils::probe_mem::tag(crate::utils::probe_mem::SUBJ);
         let mut warn = |message: &[u8]| std::io::Write::write_all(&mut *diagnostics, message);
         // The archive writes the subjects' letters from the records, not from a packed store.
         if x_bnstore() && subject_range.is_none() && !keep_deflines {
@@ -7191,6 +7199,7 @@ fn search_cli(
     // Diagnostic (LOSAT_TIMING): the query FASTA for the common line (utils/xtiming.rs). No NCBI
     // counterpart.
     let t_read_fasta = crate::utils::xtiming::clock();
+    let _pgq = crate::utils::probe_mem::tag(crate::utils::probe_mem::QUERY);
     // EXPERIMENT (LOSAT_X_QSTREAM): with the switch acting this reading keeps only each record's
     // length and how the reading ends; the batches read their records again (`x_query_stream`).
     let mut x_packed = Vec::new();
@@ -7212,6 +7221,7 @@ fn search_cli(
         (records, end, x_query_stream::Store::off(x_opening))
     };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
+    drop(_pgq);
     drop(query_source);
     if args.archive.is_some() {
         archive::check_titles(&records, "query")?;
@@ -8483,6 +8493,7 @@ fn run_in_pool(
             // report of the batch's first query (`QueryWarnings`). Skipped records are read too.
             // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records, read now from the query file when
             // the switch acts (an error here is the file changed between the two readings).
+            let _pgqb = crate::utils::probe_mem::tag(crate::utils::probe_mem::QUERY);
             let mut batch_records =
                 match queries.batch_in(input_start..input_end, start..end, parallel_pool) {
                     Ok(records) => records,
@@ -8491,6 +8502,7 @@ fn run_in_pool(
                         return Err(error);
                     }
                 };
+            drop(_pgqb);
             let batch_title_warnings: Vec<u8> = batch_records
                 .input()
                 .iter()
@@ -9570,6 +9582,8 @@ fn write_reports(
     // batches, while other batches are searched: that part is inside `search` too. No NCBI
     // counterpart.
     let t_output = crate::utils::xtiming::clock();
+    crate::utils::probe_mem::phase(5);
+    let _pgr = crate::utils::probe_mem::tag(crate::utils::probe_mem::REPORT);
     let result = write_reports_untimed(
         args,
         query_records,
@@ -9895,6 +9909,7 @@ fn search_query_batch(
     stage: BatchStage<'_>,
     x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
 ) -> Result<QueryBatch> {
+    crate::utils::probe_mem::phase(0);
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
     // CMTArgs(...)
@@ -10401,6 +10416,7 @@ fn search_query_batch(
         )
     };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
+    crate::utils::probe_mem::retag_vec(&encoded_query_buffer, crate::utils::probe_mem::QUERY);
     let encoded_query_concat_blastna_with_sentinels: &[u8] = &encoded_query_buffer;
     let encoded_query_concat_blastna: &[u8] = &encoded_query_buffer[1..query_concat_length + 1];
     let encoded_queries_blastna: Vec<&[u8]> = query_contexts
@@ -10962,6 +10978,7 @@ fn search_query_batch(
         // Diagnostic (LOSAT_TIMING): the batch's lookup table for the common line
         // (utils/xtiming.rs). No NCBI counterpart.
         let t_build_lookup = crate::utils::xtiming::clock();
+        let _pgl = crate::utils::probe_mem::tag(crate::utils::probe_mem::LOOKUP);
         let tables = build_lookup_tables(
             &config,
             &args,
@@ -10974,6 +10991,8 @@ fn search_query_batch(
             x_keep,
         );
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
+        drop(_pgl);
+        crate::utils::probe_mem::phase(1);
         tables
     };
 
@@ -11361,6 +11380,22 @@ fn search_query_batch(
         // } BlastNaLookupTable;
         // ```
         let na_lookup_ref = lookups.and_then(|tables| tables.na_lookup.as_ref());
+        let _pg = crate::utils::probe_mem::tag(if prelim_source.is_some() { crate::utils::probe_mem::TRACE } else { crate::utils::probe_mem::PRELIM });
+        {
+            use crate::utils::probe_mem::{retag_vec as rv, SCRATCH_HELD as H};
+            let s = &*subject_scratch;
+            rv(&s.hits, H);
+            rv(&s.prelim_hits, H);
+            rv(&s.ungapped_hits, H);
+            rv(&s.cutoff_scores, H);
+            rv(&s.x_dropoff_scores, H);
+            rv(&s.reduced_cutoff_scores, H);
+            rv(&s.seq_ranges_scratch, H);
+            rv(&s.hit_level_array, H);
+            rv(&s.hit_len_array, H);
+            rv(&s.offset_pairs, H);
+            rv(&s.x_ahead_scratch, H);
+        }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
         // ```c
         //     int status = m_PrelimSearch->CheckInternalData();
@@ -11838,6 +11873,7 @@ fn search_query_batch(
                 // hit_level_array[diag] contains {last_hit, flag} (equivalent to NCBI's DiagStruct)
                 // hit_len_array[diag] contains hit length (0 = no hit, >0 = hit length)
                 // For single query: use Vec for O(1) access, otherwise use HashMap
+                let _pgs = crate::utils::probe_mem::tag(crate::utils::probe_mem::SCAN);
                 let hit_level_array = &mut subject_scratch.hit_level_array;
                 let hit_len_array = &mut subject_scratch.hit_len_array;
                 let diag_hash = &mut subject_scratch.diag_hash;
@@ -15817,6 +15853,7 @@ fn search_query_batch(
 
         // The preliminary stage gives the subject's HSPs to the collector (`search_subjects`).
         if prelim_source.is_none() {
+            crate::utils::probe_mem::retag_vec(&combined_prelim_hits, crate::utils::probe_mem::PRELIM_OUT);
             *prelim_out = combined_prelim_hits;
             return;
         }
@@ -17859,6 +17896,7 @@ fn search_query_batch(
         //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
         // ```
         let new_state = || {
+            let _pg = crate::utils::probe_mem::tag(crate::utils::probe_mem::SCRATCH_NEW);
             (
                 GapAlignScratch::new(),
                 SubjectScratch::new(queries_ref.len(), offset_array_size, window_size),
@@ -17966,6 +18004,7 @@ fn search_query_batch(
     //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
     // ```
     let new_scratch = || {
+        let _pg = crate::utils::probe_mem::tag(crate::utils::probe_mem::SCRATCH_NEW);
         (
             GapAlignScratch::new(),
             SubjectScratch::new(queries_ref.len(), offset_array_size, window_size),
@@ -18064,6 +18103,7 @@ fn search_query_batch(
                 // ```
                 // With no valid context NCBI does not search, and reads no sequence.
                 if any_valid_context {
+                    crate::utils::probe_mem::phase(2);
                     database::search_blocks(
                         database,
                         parallel_pool,
@@ -18087,7 +18127,10 @@ fn search_query_batch(
                             );
                             (!prelim_hits.is_empty()).then_some(prelim_hits)
                         },
-                        &mut |ordinal, prelim_hits| collector.add(ordinal as usize, prelim_hits),
+                        &mut |ordinal, prelim_hits| {
+                            let _pg = crate::utils::probe_mem::tag(crate::utils::probe_mem::COLLECT);
+                            collector.add(ordinal as usize, prelim_hits)
+                        },
                     )
                     .map_err(|error| {
                         database_search_error(
@@ -18098,6 +18141,7 @@ fn search_query_batch(
                             &shown,
                         )
                     })?;
+                    crate::utils::probe_mem::phase(3);
                 }
                 collector.hit_lists
             }
@@ -18172,9 +18216,13 @@ fn search_query_batch(
             // (`Blast_HSPResultsInsertHSPList`, `search_subjects`).
             let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(queries_ref.len());
             hit_lists.resize_with(queries_ref.len(), || None);
-            for hits in found {
-                update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
+            {
+                let _pg = crate::utils::probe_mem::tag(crate::utils::probe_mem::COLLECT);
+                for hits in found {
+                    update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
+                }
             }
+            crate::utils::probe_mem::phase(4);
             hit_lists
         }
     };

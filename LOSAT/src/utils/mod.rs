@@ -18,3 +18,4 @@ pub mod xreach;
 pub mod xstats;
 pub(crate) mod xswitch;
 pub mod xtiming;
+pub mod probe_mem;

@@ -14,6 +14,7 @@ fn main() -> Result<()> {
     // Diagnostic (LOSAT_TIMING): the clock of `since_start` (utils/xtiming.rs). No NCBI
     // counterpart; it reads the clock only with LOSAT_TIMING.
     LOSAT::utils::xtiming::start();
+    LOSAT::utils::probe_mem::start();
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3719-3725
     // ```c++
     // bool CDir::SetCwd(const string& dir)
@@ -281,6 +282,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bplkpflat_print_summary();
     LOSAT::algorithm::blastp::x_bp_lkp_ahead_print_summary();
     LOSAT::algorithm::blastp::x_restricted_gap_print_summary();
+    LOSAT::utils::probe_mem::report();
     LOSAT::algorithm::blastn::lookup::x_disc_lookup_par::print_summary();
     LOSAT::algorithm::blastn::lookup::x_dc_csr::print_summary();
     LOSAT::algorithm::blastn::lookup::x_mb_lookup_print_summary();

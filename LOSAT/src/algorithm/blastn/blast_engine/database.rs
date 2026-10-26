@@ -711,7 +711,10 @@ where
         let found: Vec<Result<Option<R>>> = pool.install(|| {
             listed
                 .par_iter()
-                .map_init(new_scratch, |scratch, entry| one(scratch, entry))
+                .map_init(new_scratch, |scratch, entry| {
+                    let _pg = crate::utils::probe_mem::tag(crate::utils::probe_mem::DBBLOCK);
+                    one(scratch, entry)
+                })
                 .collect()
         });
         let mut results = Vec::with_capacity(found.len());

@@ -4546,6 +4546,7 @@ pub fn greedy_gapped_alignment_with_traceback(
     x_drop: i32,
     scratch: &mut GreedyAlignScratch,
 ) -> Option<(usize, usize, usize, usize, i32, usize, Vec<GapEditOp>)> {
+    let _pgx = crate::utils::probe_mem::tag(crate::utils::probe_mem::GREEDY);
     let core = greedy_gapped_alignment_internal(
         query,
         subject,

@@ -202,6 +202,7 @@ fn gap_dp_reserve_initial(
     dp_mem_alloc: &mut usize,
     num_extra_cells: usize,
 ) {
+    let _pgs = crate::utils::probe_mem::tag(crate::utils::probe_mem::GAPSCR);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:797-808 (Blast_SemiGappedAlign dp_mem realloc)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:462-468 (ALIGN_EX dp_mem realloc)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:797-805
@@ -233,6 +234,7 @@ fn gap_dp_reserve_band(
     last_b_index: usize,
     num_extra_cells: usize,
 ) {
+    let _pgs = crate::utils::probe_mem::tag(crate::utils::probe_mem::GAPSCR);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:923-931 (Blast_SemiGappedAlign dynamic realloc)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:641-648 (ALIGN_EX dynamic realloc)
     if last_b_index + num_extra_cells + 3 >= *dp_mem_alloc {
@@ -261,6 +263,7 @@ fn gap_alloc_trace_row<'a>(
     row_capacity: usize,
     start_offset: usize,
 ) -> &'a mut Vec<u8> {
+    let _pgs = crate::utils::probe_mem::tag(crate::utils::probe_mem::GAPSCR);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:70-115 (s_GapGetState)
     let row_index = *trace_rows_used;
     *trace_rows_used += 1;

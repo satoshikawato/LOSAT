@@ -895,8 +895,12 @@ fn run_jobs<F: Fn(usize) + Sync>(parts: usize, in_pool: bool, job: F) {
         let job = &job;
         rayon::scope(|scope| {
             for i in 1..parts {
-                scope.spawn(move |_| job(i));
+                scope.spawn(move |_| {
+                    let _pg = crate::utils::probe_mem::tag(crate::utils::probe_mem::LOOKUP_POOL);
+                    job(i)
+                });
             }
+            let _pg = crate::utils::probe_mem::tag(crate::utils::probe_mem::LOOKUP_POOL);
             job(0);
         });
         return;

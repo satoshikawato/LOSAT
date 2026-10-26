@@ -482,6 +482,7 @@ impl XTreeIndex {
             return;
         }
         if self.head.is_empty() {
+            crate::utils::probe_mem::obj_add(8, 1);
             self.head = vec![0u32; self.nq * self.ns];
         }
         for q in q_a..=q_b {
@@ -531,6 +532,18 @@ pub struct BlastIntervalTree {
     x: XTreeIndex,
 }
 
+impl Drop for BlastIntervalTree {
+    fn drop(&mut self) {
+        let nodes = (self.nodes.capacity() * std::mem::size_of::<IntervalNode>()) as u64;
+        let grid = (self.x.head.capacity() * 4) as u64;
+        let ends = (self.x.ends.bits.capacity() * 8) as u64;
+        let other = (self.x.used_cells.capacity() * 4
+            + self.x.entries.capacity() * std::mem::size_of::<XCellEntry>()
+            + self.x.overflow.capacity() * 4) as u64;
+        crate::utils::probe_mem::tree_dropped(nodes, grid, ends, other);
+    }
+}
+
 impl BlastIntervalTree {
     /// Initialize a new interval tree
     /// NCBI reference: blast_itree.c:96-166 Blast_IntervalTreeInit
@@ -541,6 +554,8 @@ impl BlastIntervalTree {
     /// * `s_min` - Minimum subject offset (usually 0)
     /// * `s_max` - Maximum subject offset (subject_length + 1)
     pub fn new(q_min: i32, q_max: i32, s_min: i32, s_max: i32) -> Self {
+        let _pg = crate::utils::probe_mem::tag(crate::utils::probe_mem::TREE);
+        crate::utils::probe_mem::tree_created();
         let mut tree = Self {
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:135-153
             // ```c
@@ -575,6 +590,7 @@ impl BlastIntervalTree {
     /// Rust keeps the same node indices and insertion order, but can reserve
     /// enough Vec storage from the observed HSP count to avoid repeated reallocs.
     pub fn reserve_nodes_for_hsps(&mut self, hsp_count: usize) {
+        let _pg = crate::utils::probe_mem::tag(crate::utils::probe_mem::TREE);
         let target = hsp_count.saturating_mul(3).saturating_add(1).max(100);
         if target > self.nodes.capacity() {
             self.nodes.reserve(target - self.nodes.capacity());
@@ -615,6 +631,7 @@ impl BlastIntervalTree {
     /// s_IntervalRootNodeInit(tree, q_start, q_end, &retval);
     /// ```
     pub fn reset_with_bounds(&mut self, q_min: i32, q_max: i32, s_min: i32, s_max: i32) {
+        let _pg = crate::utils::probe_mem::tag(crate::utils::probe_mem::TREE);
         self.s_min = s_min;
         self.s_max = s_max;
         self.nodes.clear();
@@ -1135,6 +1152,7 @@ impl BlastIntervalTree {
     /// For eQueryAndSubject mode, it first checks for common endpoints and
     /// removes worse HSPs before adding.
     pub fn add_hsp(&mut self, hsp: TreeHsp, query_context_offset: i32, index_method: IndexMethod) {
+        let _pg = crate::utils::probe_mem::tag(crate::utils::probe_mem::TREE);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:537-550
         // query_start = s_GetQueryStrandOffset(query_info, hsp->context);
         // if ( index_method == eQueryOnlyStrandIndifferent &&

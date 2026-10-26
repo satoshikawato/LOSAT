@@ -137,6 +137,7 @@ LOSAT_X_TBNOIDCHUNK	tblastn	conditional	required	required	2+ threads and several
 LOSAT_X_TBNOIDNEXT	tblastn	conditional	required	required	2+ threads, several subjects, where the pool takes chunks of subjects
 LOSAT_X_TBNOIDUNITS	tblastn	conditional	required	required	2+ threads, several subjects, subject longer than chunk budget
 LOSAT_X_TBNOWNPOOLS	tblastn	conditional	required	required	native only; <2 subjects per thread; 2..threads-1 batches (<=24 Mb) else 2..threads/2
+LOSAT_X_TBNPAIRCAP	tblastn	always			every tblastn scan plan: offset array of NCBI's size (4096 + longest chain)
 LOSAT_X_TBNREDOLPT	tblastn	conditional	required	required	composition-based redo (-comp_based_stats 2, the default) on the search pool: 2-16 threads, 2+ (query, subject) matches, a chunk with 2+ matches to redo; ref: one thread (also each query batch searched side by side), more than 16 threads, one match, or a chunk with fewer than 2 to redo
 LOSAT_X_TBNSCANBYTE	tblastn	platform			AVX2 CPUs only (nothing elsewhere); word size 3, 5-bit letters tables
 LOSAT_X_TBNSSIDE	tblastn	conditional	required	required	only searches of 4+ query batches (20,000 residues each, or BATCH_SIZE); <=256 MiB of translated residues; the new side (plans that fit threads x longest plan) is reached by db.sa.arch.tbn.batch1 and db.sa.arch.tbn.warnbatches

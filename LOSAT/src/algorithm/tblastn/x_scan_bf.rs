@@ -417,11 +417,15 @@ mod tests {
                 (len as i32 / 3, last.max(len as i32 / 3)),
             ];
             for &range in &ranges {
+                // The pairs of the range in scan order, the same at every array size.
+                let mut stream: Option<Vec<(u32, u32)>> = None;
                 for array_size in [
                     longest,
                     longest + 1,
                     longest + 2,
                     3 * longest,
+                    // NCBI's offset array (GetOffsetArraySize, `LOSAT_X_TBNPAIRCAP`).
+                    4096 + longest,
                     longest * 1024,
                 ] {
                     let want = calls(&lookup, &subject, range, array_size, false);
@@ -430,6 +434,17 @@ mod tests {
                         got, want,
                         "case {case} range {range:?} array_size {array_size}"
                     );
+                    let flat: Vec<(u32, u32)> = want
+                        .iter()
+                        .flat_map(|(pairs, _)| pairs.iter().copied())
+                        .collect();
+                    match &stream {
+                        None => stream = Some(flat),
+                        Some(first) => assert_eq!(
+                            &flat, first,
+                            "case {case} range {range:?} array_size {array_size}: order"
+                        ),
+                    }
                     compared += want.iter().map(|(pairs, _)| pairs.len()).sum::<usize>();
                     stops += want.len().saturating_sub(1);
                 }

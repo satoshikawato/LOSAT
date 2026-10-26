@@ -2358,10 +2358,12 @@ impl XPairPar {
         sort: bool,
     ) -> Vec<T> {
         let run = |unit: &XUnit, scratch: &mut XScratch| {
+            let t0 = std::time::Instant::now();
             let mut list = unit_fn(self, unit, inp, scratch);
             if sort {
                 list.x_sort_in(scratch);
             }
+            crate::utils::xtline::rec("unit", inp.s_idx as u32, t0, std::time::Instant::now());
             list
         };
         #[cfg(all(

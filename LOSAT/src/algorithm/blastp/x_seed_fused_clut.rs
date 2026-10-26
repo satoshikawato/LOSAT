@@ -588,7 +588,14 @@ unsafe fn x_scan_flat_lean<F>(
     unsafe { lookup.x_list_pairs_lean(subject, subject_length, &mut cells) };
     let listed = cells.len();
     cells.extend_from_slice(&[(0, 0); X_STARTS_AHEAD]);
-    let mut stage = X_STAGE.with(Cell::take).unwrap_or_else(XStage::new);
+    // The stage made here, not by XStage::new: with a second caller that was not inlined in
+    // x_scan_flat_stage, whose code (LOSAT_X_BPFLEAN=0) then changed.
+    let mut stage = X_STAGE.with(Cell::take).unwrap_or_else(|| {
+        Box::new(XStage {
+            diffs: vec![0; X_STAGE_CAP],
+            heres: vec![0; X_STAGE_CAP],
+        })
+    });
     let (diffs, heres) = (&mut stage.diffs[..], &mut stage.heres[..]);
     let starts = &lookup.starts[..];
     let hits = &lookup.hits[..];

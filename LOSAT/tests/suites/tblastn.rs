@@ -17,6 +17,8 @@ mod tblastn_db_stream;
 mod tblastn_link_window;
 #[path = "../tblastn_oid_chunk.rs"]
 mod tblastn_oid_chunk;
+#[path = "../tblastn_reap_idx.rs"]
+mod tblastn_reap_idx;
 #[path = "../tblastn_redo_lpt.rs"]
 mod tblastn_redo_lpt;
 #[path = "../tblastn_scan_bf.rs"]

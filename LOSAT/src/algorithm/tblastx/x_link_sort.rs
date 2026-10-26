@@ -854,6 +854,41 @@ mod tests {
     // dispatch sort follows the calling thread, which is not a rayon worker off a pool (the
     // thread of a `-num_threads 1` search) and is one inside `ThreadPool::install`, where the
     // current pool has the threads it was built with.
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the board's chunk sorts and merges give today's order for every
+    // comparator, list arrangement and chunk count (lists below and above the chunk size), on pools
+    // of 2 and 8 threads.
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[test]
+    fn the_board_sort_is_todays() {
+        let mut rng = Rng(0x1319_8A2E_0370_7344);
+        for threads in [2usize, 8] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("test pool");
+            for (name, compare) in COMPARATORS {
+                for n in [0usize, 1, 7, 8191, 8192, 30_001, 70_000] {
+                    for span in [2u64, 50] {
+                        for hits in arrangements(&mut rng, n, span, compare) {
+                            let mut expected: Vec<usize> = (0..n).collect();
+                            sort_today(&mut expected, &hits, compare);
+                            let mut actual: Vec<usize> = (0..n).collect();
+                            pool.install(|| {
+                                let board =
+                                    crate::algorithm::tblastx::x_work_board::XBoard::default();
+                                x_board_sort(&board, &mut actual, &hits, &compare);
+                            });
+                            assert_eq!(
+                                actual, expected,
+                                "{name}, n {n}, span {span}, {threads} threads"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn the_pool_decision_follows_the_flag_or_the_calling_thread() {
         on_and_off_pools(|where_, in_pool| {

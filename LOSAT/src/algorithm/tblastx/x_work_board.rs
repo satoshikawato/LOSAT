@@ -328,3 +328,90 @@ pub(crate) fn current<'a>() -> Option<(&'a XBoard, &'a XBatch)> {
         .with(Cell::get)
         .map(|(board, batch)| unsafe { (&*board, &*batch) })
 }
+
+#[cfg(all(test, feature = "parallel", not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicU64;
+
+    fn work(s: usize, i: usize) -> u64 {
+        let rounds = 2_000 + ((s * 7_919 + i * 104_729) % 20_000);
+        (0..rounds as u64).fold((s * 1_000 + i) as u64, |acc, x| {
+            acc.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(x)
+        })
+    }
+
+    // Subjects that put their units on the board from the threads of a broadcast (the TBXNEXT
+    // loop), the other threads helping, and each subject linking a few groups on the board after its
+    // units: every unit and group runs once, each subject gets its own results in unit order, and
+    // the run ends at 1, 2, 4 and 8 threads with fewer, as many and more subjects than threads.
+    #[test]
+    fn every_item_runs_once_and_every_owner_gets_its_results() {
+        for threads in [1usize, 2, 4, 8] {
+            for subjects in [1usize, 2, 3, threads, threads + 3] {
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build()
+                    .expect("test pool");
+                let board = XBoard::default();
+                let batch = board.batch(subjects);
+                let next = AtomicUsize::new(0);
+                let ran = AtomicU64::new(0);
+                let checked = AtomicUsize::new(0);
+                pool.install(|| {
+                    rayon::broadcast(|_| {
+                        loop {
+                            let s = next.fetch_add(1, Ordering::Relaxed);
+                            if s >= subjects {
+                                break;
+                            }
+                            let _entered = enter(&board, &batch);
+                            if s % 5 == 4 {
+                                // A subject too short to search: no units.
+                                batch.close_without_units(s);
+                                checked.fetch_add(1, Ordering::Relaxed);
+                                continue;
+                            }
+                            let units = 3 + (s * 11) % 40;
+                            let out: Vec<OnceLock<u64>> =
+                                (0..units).map(|_| OnceLock::new()).collect();
+                            board.run_units(&batch, s, units, &|i, taker: &mut XTaker| {
+                                taker.scratch.get_or_insert_with(|| Box::new(0u64));
+                                ran.fetch_add(1, Ordering::Relaxed);
+                                out[i].set(work(s, i)).expect("a unit runs once");
+                            });
+                            for (i, cell) in out.iter().enumerate() {
+                                assert_eq!(cell.get(), Some(&work(s, i)), "subject {s} unit {i}");
+                            }
+                            let groups: Vec<OnceLock<u64>> =
+                                (0..4).map(|_| OnceLock::new()).collect();
+                            board.run_groups(
+                                4,
+                                &|g, _| {
+                                    groups[g].set(work(s + 100, g)).expect("a group runs once");
+                                },
+                                threads - 1,
+                            );
+                            for (g, cell) in groups.iter().enumerate() {
+                                assert_eq!(cell.get(), Some(&work(s + 100, g)));
+                            }
+                            checked.fetch_add(1, Ordering::Relaxed);
+                        }
+                        board.help(&batch);
+                    });
+                });
+                board.end_batch(&batch);
+                let expected: u64 = (0..subjects)
+                    .filter(|s| s % 5 != 4)
+                    .map(|s| (3 + (s * 11) % 40) as u64)
+                    .sum();
+                assert_eq!(
+                    ran.load(Ordering::Relaxed),
+                    expected,
+                    "{threads} threads, {subjects} subjects"
+                );
+                assert_eq!(checked.load(Ordering::Relaxed), subjects);
+            }
+        }
+    }
+}

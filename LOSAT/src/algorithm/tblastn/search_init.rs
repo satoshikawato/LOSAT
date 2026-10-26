@@ -238,6 +238,11 @@ impl<'a> XTwoHit<'a> {
         self.diagonals.finish_frame(subject_length);
     }
 
+    /// PROBE (line D14 s1, never a PR): the diagonal table's length.
+    pub(super) fn x_probe_table_len(&self) -> usize {
+        self.diagonals.entries.len()
+    }
+
     /// No NCBI counterpart: hands the diagonal table back for `with_table`; it does not change
     /// any value NCBI computes.
     pub(super) fn into_table(self) -> Diagonals {

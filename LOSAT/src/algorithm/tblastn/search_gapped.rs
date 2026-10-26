@@ -487,6 +487,72 @@ thread_local! {
 /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): a unit's hold on `X_UNIT_RESIDUES`, given back when the unit
 /// ends, also when it fails. The hold is a take of the cell, so a unit the thread runs while it
 /// waits (the pool's jobs) never meets a borrowed buffer.
+// PROBE (line D14 s1, never a PR): switches and counters of the parallel unit states.
+static X_PROBE_KEEP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+static X_PROBE_STATS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+static X_PROBE_HITSCAP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+static X_PROBE_JOBS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static X_PROBE_FRESH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static X_PROBE_MAX_PAIRS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static X_PROBE_MAX_HITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static X_PROBE_MAX_DIAG: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static X_PROBE_SUM_HITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn x_probe_flag(cell: &std::sync::OnceLock<bool>, name: &str) -> bool {
+    *cell.get_or_init(|| std::env::var_os(name).is_some())
+}
+
+fn x_probe_hits_cap() -> usize {
+    *X_PROBE_HITSCAP.get_or_init(|| {
+        std::env::var("LOSAT_PROBE_TBNHITSCAP")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(usize::MAX)
+    })
+}
+
+fn x_probe_count(fresh: bool) {
+    if !x_probe_flag(&X_PROBE_STATS, "LOSAT_PROBE_TBNUNITSTATS") {
+        return;
+    }
+    use std::sync::atomic::Ordering::Relaxed;
+    X_PROBE_JOBS.fetch_add(1, Relaxed);
+    if fresh {
+        X_PROBE_FRESH.fetch_add(1, Relaxed);
+    }
+}
+
+fn x_probe_note(
+    pairs: &[BlastOffsetPairProbe],
+    hits: &Vec<InitHsp>,
+    two_hit: &super::search_init::XTwoHit<'_>,
+) {
+    if !x_probe_flag(&X_PROBE_STATS, "LOSAT_PROBE_TBNUNITSTATS") {
+        return;
+    }
+    use std::sync::atomic::Ordering::Relaxed;
+    X_PROBE_MAX_PAIRS.fetch_max(pairs.len(), Relaxed);
+    X_PROBE_MAX_HITS.fetch_max(hits.capacity(), Relaxed);
+    X_PROBE_MAX_DIAG.fetch_max(two_hit.x_probe_table_len(), Relaxed);
+    X_PROBE_SUM_HITS.fetch_add(hits.capacity(), Relaxed);
+    let jobs = X_PROBE_JOBS.load(Relaxed);
+    if jobs >= 64 && jobs.is_power_of_two() {
+        eprintln!(
+            "[D14_PROBE] jobs {} fresh {} max_pairs {} ({} B each) max_hits_cap {} ({} B each) sum_hits_cap {} max_diag {} (8 B each)",
+            jobs,
+            X_PROBE_FRESH.load(Relaxed),
+            X_PROBE_MAX_PAIRS.load(Relaxed),
+            std::mem::size_of::<BlastOffsetPairProbe>(),
+            X_PROBE_MAX_HITS.load(Relaxed),
+            std::mem::size_of::<InitHsp>(),
+            X_PROBE_SUM_HITS.load(Relaxed),
+            X_PROBE_MAX_DIAG.load(Relaxed),
+        );
+    }
+}
+
+type BlastOffsetPairProbe = crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
+
 struct XUnitResidues(Vec<u8>);
 
 impl XUnitResidues {
@@ -755,12 +821,57 @@ fn x_preliminary_protein_hsps_by_unit(
     if parallel {
         use rayon::prelude::*;
         let pool = pool.expect("parallel pool selected");
+        // PROBE (line D14 s1, never a PR): LOSAT_PROBE_TBNUNITKEEP=1 runs each parallel unit on
+        // this thread's kept buffers (X_UNIT_STATE taken at the start of the job, put back at its
+        // end); LOSAT_PROBE_TBNHITSCAP=<n> shrinks a kept hit list above n entries.
+        let x_keep = x_probe_flag(&X_PROBE_KEEP, "LOSAT_PROBE_TBNUNITKEEP");
         purged = pool.install(|| {
-            (0..unit_count)
-                .into_par_iter()
-                .with_max_len(1)
-                .map_init(&new_state, |state, unit| run_unit(state, unit))
-                .collect()
+            if x_keep {
+                (0..unit_count)
+                    .into_par_iter()
+                    .with_max_len(1)
+                    .map(|unit| {
+                        let kept = X_UNIT_STATE.take();
+                        x_probe_count(kept.is_none());
+                        let mut state = state_on(kept);
+                        let result = run_unit(&mut state, unit);
+                        x_probe_note(&state.pairs, &state.hits, &state.two_hit);
+                        let UnitState {
+                            two_hit,
+                            pairs,
+                            mut hits,
+                            scratch,
+                        } = state;
+                        let cap = x_probe_hits_cap();
+                        if hits.capacity() > cap {
+                            hits = Vec::with_capacity(cap);
+                        }
+                        X_UNIT_STATE.set(Some(XUnitBuffers {
+                            diagonals: two_hit.into_table(),
+                            pairs,
+                            hits,
+                            scratch,
+                        }));
+                        result
+                    })
+                    .collect()
+            } else {
+                (0..unit_count)
+                    .into_par_iter()
+                    .with_max_len(1)
+                    .map_init(
+                        || {
+                            x_probe_count(true);
+                            new_state()
+                        },
+                        |state, unit| {
+                            let result = run_unit(state, unit);
+                            x_probe_note(&state.pairs, &state.hits, &state.two_hit);
+                            result
+                        },
+                    )
+                    .collect()
+            }
         });
     }
     if purged.is_empty() {

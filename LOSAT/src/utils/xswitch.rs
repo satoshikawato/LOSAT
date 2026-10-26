@@ -177,9 +177,6 @@ use std::ops::RangeInclusive;
 /// `tblastx/lookup/x_lut_direct.rs`)
 /// joined the set in the pull request that added it, after it was verified and timed with it on
 /// and off.
-/// `LOSAT_X_BXCAPTABLES` (BLASTX's capped batch flow counts lookup tables, not searches: a batch
-/// leaves the K once its tables are dropped, before its traceback, `blastx/x_bx_mem.rs`) joined the
-/// set in the pull request that added it, after it was verified and timed with it on and off.
 /// `LOSAT_X_BXCTXONCE` (BLASTX's context table of a query batch made once per lookup table and kept
 /// with it instead of once per thread, `blastx/x_seed_diag.rs`) joined the set in the pull request
 /// that added it, after it was verified and timed with it on and off.
@@ -250,7 +247,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPUNGAPSENT",
     "LOSAT_X_BXBUILDPAR",
     "LOSAT_X_BXCAPFILL",
-    "LOSAT_X_BXCAPTABLES",
     "LOSAT_X_BXCHUNKFLOW",
     "LOSAT_X_BXCROSS",
     "LOSAT_X_BXCROSSDEFER",

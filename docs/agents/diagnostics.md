@@ -366,7 +366,6 @@ export LOSAT_X_BPUNGAP=1
 export LOSAT_X_BPUNGAPSENT=1
 export LOSAT_X_BXBUILDPAR=1
 export LOSAT_X_BXCAPFILL=4
-export LOSAT_X_BXCAPTABLES=1
 export LOSAT_X_BXCHUNKFLOW=1
 export LOSAT_X_BXCROSS=1
 export LOSAT_X_BXCROSSDEFER=1
@@ -5735,7 +5734,7 @@ Scheduling (each value computed by one thread with the original function; order 
   in subject order and the replay gives the sink the calls of the serial chunk loop (`tests/blastx_unit_cap.rs`:
   reports equal to all of them `=0` with K = 2 and 3 at 4 threads, each part off, 16 batches with K = 2, a split
   query, `-db`). With `LOSAT_X_BXCAPFILL` (below) the capped units' subject tasks are smaller with few subjects
-  (at most 64 in the batch flow, 16 in the chunk waves, as here) and the cap's rule counts those tasks. Measured
+  (at most 64 in the batch flow, 16 in the chunk waves, as here) and the cap needs no task for every thread. Measured
   2026-10-24 on the workstation (node 1, CPUs 32..32+n-1 with their siblings and the rest of the node idle,
   `--membind=1`, 5 rounds after a warm-up in rotated order, medians; max RSS = max(`%M`, sampled VmHWM); every
   report the same bytes across arms; the pull request's first commit against dev 7164b5f7): bx_800 (the 800 fly
@@ -5750,11 +5749,13 @@ Scheduling (each value computed by one thread with the original function; order 
   16-32 threads, which the three parts of the capped flow above remove.
 - `LOSAT_X_BXCAPFILL=1` or `=f` (BLASTX, memory with few subjects; in the strict set from the pull request that
   added it, 2026-10-25: on unless `=0` or `LOSAT_X_DEFAULT=0`; a value switch, f from 2 to 64 tasks per thread,
-  otherwise 4; acts exactly where `LOSAT_X_BXUNITCAP` caps): the capped units keep the threads busy with few subjects
+  otherwise 4; acts where `LOSAT_X_BXUNITCAP` caps): the capped units keep the threads busy with few subjects
   too (`blastx/x_bx_mem.rs`). A capped unit's subjects run as tasks of ceil(subjects / (f x ceil(threads / K)))
   subjects, at least 1 and at most the size without the cap (64 for the batch flow's subject flow, 16 for the
   chunk waves of a split query; a set keeps that size from 64 x f x ceil(threads / K) subjects, 512 at 16
-  threads), and the cap's rule (K units with a task for every thread) counts those tasks. And the capped batch flow
+  threads), and the cap holds wherever there are more threads than K: without this switch it also needed K units
+  with a task for every thread, so with few subjects (fewer than 64 in the batch flow, where a batch had no subject
+  flow) it stayed off and every thread searched its own batch with its own lookup table. And the capped batch flow
   prepares each query batch of at most two search units' letters (translation, query SEG, Karlin blocks:
   `reader_batch::prepare_lone_unit`, what `search_core` runs when a batch prepares itself) as a task of its own when
   the reader delivers it, as it prepares the units of a reader batch of several, so that the cap holds only the
@@ -5772,6 +5773,31 @@ Scheduling (each value computed by one thread with the original function; order 
   0.170 -> 0.167 s, 127.5 -> 70.9 MiB; x 200 proteins 0.310 -> 0.229 s (x0.739), 71 -> 74 MiB; AP027131 x 50 / 200
   proteins x0.958 / x0.997; the full sets (800 cDNAs x 6,600 proteins `-subject` and `-db`, AP027131 x 543) at 16
   threads x0.996-1.009, +2-3 MiB (the preparations held ahead); at 8 threads (no cap) x0.99-1.01.
+- `LOSAT_X_BXBUILDPAR=1` (BLASTX, speed with few subjects at many threads; in the strict set from the pull request
+  that added it: on unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXUNITCAP` caps): the lookup table of a
+  capped unit (a batch of the capped batch flow, a chunk of the capped chunk waves) is built in ceil(threads / K)
+  parts, at most 8, on the threads the cap leaves it (`tblastx/lookup/x_lut_direct.rs` `x_partitioned_passes`,
+  `x_counted_sources`, `x_claimed`). The present source cells (the exact backbone's cells, ascending, and their
+  offsets in chain order) come from a stable counting sort of the words of `blast_lookup_index_query_exact_matches`'s
+  loop instead of chains. They are cut into ranges of about equal appends. (a) Each range counts its appends per
+  target cell. (b) Each stripe of target cells (a multiple of 32 cells) sums the counts, sets num_used and the pv
+  bits, and adds up its overflow size and longest count. (c) After the overflow of the stripes before it, each
+  stripe gives its overflow cells their cursors and each range its first position in every cell. (d) Each range
+  writes its appends at its own positions. The entries of a cell come from the ranges in source order and, within a
+  range, in the reference's order, so every cell holds the reference's entries in the reference's order (argument
+  in the comments; `partitioned_tables_equal_the_reference` against the reference builder). The caller and the
+  helpers it spawns claim the parts by an atomic counter, and the caller waits for parts others run without taking
+  other work of the pool: with rayon's `join`, a waiting batch thread took other batches' searches and the build
+  was no faster. Before, with K units at a time the builds were the part of a unit no other thread could take
+  (2.7 ms of a 3.6 ms batch at 32 threads). Build alone (workstation node 0, a 10,002-base batch's six frames,
+  threshold 11): 7.8 ms on one thread, 1.84 ms in 4 parts on 4 threads, 1.72 ms in 8 on 8 (a form by target stripes,
+  where every stripe walks all source cells: x0.68 at 4). Measured: MEAS_BUILDPAR.
+- `LOSAT_X_BXCTXONCE=1` (BLASTX, speed and memory; in the strict set from the pull request that added it: on unless
+  `=0` or `LOSAT_X_DEFAULT=0`; acts where the `LOSAT_X_BXDIAG` fused loop runs): the fused loop's context table of a
+  query batch (`XContextTable`, the binary search's index at every query offset) is made once per lookup table and
+  kept with it (`XKeptPresence`), instead of once per thread and batch. In the capped batch flow each batch's
+  subjects run on several threads, and every thread made the table again: 7 % of cycles and 2.9 MiB of page faults
+  at 32 threads (800 cDNAs x 8 yeast proteins). Exactness: the table is a function of the batch's contexts alone.
 - `LOSAT_X_BXDBSTREAM=1` or `=KiB` (BLASTX `-db`, memory; in the strict set from the pull request that added it:
   on unless `=0`; a value switch, `KiB` from 2 to 1,048,576, otherwise 256): the search reads
   the database's sequences where it searches them, a block at a time, instead of the copy of the whole database that

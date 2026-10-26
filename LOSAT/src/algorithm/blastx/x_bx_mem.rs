@@ -71,14 +71,6 @@
 //!   alone: with K units at a time the builds were the part of the unit no other thread could
 //!   take (2.7 ms of a 3.6 ms batch at 32 threads, 800 cDNAs x 8 yeast proteins). Build alone (ws,
 //!   a 10,002-base batch's six frames): 7.8 ms on one thread, 1.8 ms in 4 parts on 4 threads.
-//! - `LOSAT_X_BXCAPTABLES` (acts where `LOSAT_X_BXUNITCAP` caps the batch flow): the K counts lookup
-//!   tables, not searches. A capped batch leaves the K (and the count of capped batches that sizes
-//!   the chunk waves) once its last lookup table is dropped (`search::search_core` calls back
-//!   before `batch_end`), so that its traceback (the composition-based redo, the gapped alignments
-//!   with traceback) runs beside the next batches' builds and scans instead of holding one of the K
-//!   places. The flow's writing thread spawns the batch that takes the freed place (`native.rs`
-//!   `x_flow`), not the freeing thread, whose traceback could otherwise run that search inside
-//!   itself. Without it a batch held its place to the end of its search.
 //!
 //! Exactness. A subject's computation depends on the subject and the query chunk alone, not on the
 //! diagonal table it runs on, while no diagonal offset passes 2^30 (`x_subject_flow.rs`, module
@@ -218,9 +210,6 @@ pub(crate) fn flow_unit_cap(
             .filter(|&k| super::x_subject_flow::fits(k, pool, false, options, subjects))
             .map_or(0, |k| subjects.len().div_ceil(k))
     });
-    if cap_counts_tables() {
-        crate::utils::xreach::x_reach!("LOSAT_X_BXCAPTABLES", cap.is_some());
-    }
     cap
 }
 
@@ -281,14 +270,6 @@ pub(crate) fn build_parts(pool: &crate::utils::threading::SearchPool<'_>, capped
     let parts = k.map_or(1, |k| pool.threads().div_ceil(k));
     crate::utils::xreach::x_reach!("LOSAT_X_BXBUILDPAR", parts > 1);
     parts
-}
-
-/// No NCBI counterpart: whether a batch of the capped batch flow leaves the K searched at a time
-/// once its lookup tables are dropped, before its traceback (`LOSAT_X_BXCAPTABLES`, module
-/// comment).
-pub(crate) fn cap_counts_tables() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCAPTABLES"))
 }
 
 // No NCBI counterpart: the counts of one run's capped batch flow (scheduling only): the batches it

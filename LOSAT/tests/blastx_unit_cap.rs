@@ -3,9 +3,8 @@
 //! between builds (`LOSAT_X_BXLUTPOOL`), at most K query batches or chunks searched at a time
 //! (`LOSAT_X_BXUNITCAP[=K]`), and the capped units' threads filled with few subjects too (tasks of
 //! fewer subjects, each query batch prepared outside the cap: `LOSAT_X_BXCAPFILL`), their lookup
-//! tables built on the threads the cap leaves them (`LOSAT_X_BXBUILDPAR`), a capped batch's place
-//! freed when its tables are dropped (`LOSAT_X_BXCAPTABLES`), and the fused loop's context table
-//! made once per lookup table (`LOSAT_X_BXCTXONCE`; `src/algorithm/blastx/x_bx_mem.rs`,
+//! tables built on the threads the cap leaves them (`LOSAT_X_BXBUILDPAR`), and the fused loop's
+//! context table made once per lookup table (`LOSAT_X_BXCTXONCE`; `src/algorithm/blastx/x_bx_mem.rs`,
 //! `src/algorithm/tblastx/lookup/x_lut_direct.rs`, `src/algorithm/blastx/x_seed_diag.rs`).
 //!
 //! They are in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). They change which
@@ -188,7 +187,6 @@ fn sides(
 const ALL_OFF: &[(&str, &str)] = &[
     ("LOSAT_X_BXBUILDPAR", "0"),
     ("LOSAT_X_BXCAPFILL", "0"),
-    ("LOSAT_X_BXCAPTABLES", "0"),
     ("LOSAT_X_BXCTXONCE", "0"),
     ("LOSAT_X_BXDIAGKEEP", "0"),
     ("LOSAT_X_BXLUTPOOL", "0"),
@@ -213,7 +211,6 @@ fn several_query_batches_give_the_report_without_the_switches() {
         &[("LOSAT_X_BXUNITCAP", "3"), ("LOSAT_X_BXLUTPOOL", "0")][..],
         &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXDIAGKEEP", "0")][..],
         &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXBUILDPAR", "0")][..],
-        &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXCAPTABLES", "0")][..],
         &[("LOSAT_X_BXUNITCAP", "3"), ("LOSAT_X_BXCTXONCE", "0")][..],
     ] {
         assert!(
@@ -222,26 +219,22 @@ fn several_query_batches_give_the_report_without_the_switches() {
         );
     }
     // The cap acts with K below the thread count and only with the workers' tables kept; then
-    // the capped batches build their tables on two tasks each and free their places when the
-    // tables are dropped.
+    // the capped batches build their tables on two tasks each.
     assert_eq!(
         cap_sides(&dir, &query, &args, &[("LOSAT_X_BXUNITCAP", "2")]),
         (true, false)
     );
-    for switch in ["LOSAT_X_BXBUILDPAR", "LOSAT_X_BXCAPTABLES"] {
-        assert_eq!(
-            sides(
-                &dir,
-                &query,
-                &args,
-                4,
-                &[("LOSAT_X_BXUNITCAP", "2")],
-                switch
-            ),
-            (true, false),
-            "{switch}"
-        );
-    }
+    assert_eq!(
+        sides(
+            &dir,
+            &query,
+            &args,
+            4,
+            &[("LOSAT_X_BXUNITCAP", "2")],
+            "LOSAT_X_BXBUILDPAR"
+        ),
+        (true, false)
+    );
     assert_eq!(cap_sides(&dir, &query, &args, &[]), (false, true));
     assert_eq!(
         cap_sides(

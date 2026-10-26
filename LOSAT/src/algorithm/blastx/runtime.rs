@@ -489,19 +489,6 @@ pub(crate) fn x_search_unit_in_pool<'a>(
     pool: &crate::utils::threading::SearchPool<'_>,
     prep: Option<UnitPrep>,
 ) -> Result<Vec<BatchResults>> {
-    x_search_unit_in_pool_tables(records, subjects, options, pool, prep, &|| {})
-}
-
-/// `x_search_unit_in_pool` that calls `tables_done` once its lookup tables are dropped, before the
-/// traceback (`search_core`; LOSAT_X_BXCAPTABLES, `x_bx_mem.rs`).
-pub(crate) fn x_search_unit_in_pool_tables<'a>(
-    records: &[FastaRecord],
-    subjects: impl Into<Subjects<'a>>,
-    options: &ResolvedOptions,
-    pool: &crate::utils::threading::SearchPool<'_>,
-    prep: Option<UnitPrep>,
-    tables_done: &dyn Fn(),
-) -> Result<Vec<BatchResults>> {
     let subjects = subjects.into();
     let mut observer = Noop;
     let mut pipeline = Runtime {
@@ -517,16 +504,7 @@ pub(crate) fn x_search_unit_in_pool_tables<'a>(
         chunk: None,
         output: Vec::new(),
     };
-    search_core(
-        records,
-        subjects,
-        options,
-        false,
-        &mut pipeline,
-        pool,
-        prep,
-        tables_done,
-    )?;
+    search_core(records, subjects, options, false, &mut pipeline, pool, prep)?;
     Ok(pipeline.output)
 }
 
@@ -577,16 +555,7 @@ pub fn search_internal_observed<'a>(
         output: Vec::new(),
     };
     crate::utils::threading::with_search_pool(options.num_threads as usize, "BLASTX", |pool| {
-        search_core(
-            records,
-            subjects,
-            options,
-            false,
-            &mut pipeline,
-            pool,
-            None,
-            &|| {},
-        )
+        search_core(records, subjects, options, false, &mut pipeline, pool, None)
     })?;
     Ok(pipeline.output)
 }

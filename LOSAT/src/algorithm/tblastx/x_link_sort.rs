@@ -418,6 +418,11 @@ fn sort_stable<C>(
 where
     C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
 {
+    // EXPERIMENT (LOSAT_X_TBXBOARD): a sort inside a board item stays on its thread.
+    if crate::algorithm::tblastx::x_work_board::in_item() {
+        sort_today(indices, records, compare);
+        return false;
+    }
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")

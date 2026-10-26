@@ -97,8 +97,10 @@ impl XSet {
         if i >= self.n {
             return false;
         }
+        let was = IN_ITEM.with(|flag| flag.replace(true));
         // SAFETY: see the type's `Send` / `Sync`.
         unsafe { (*self.run)(i, taker) };
+        IN_ITEM.with(|flag| flag.set(was));
         let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
         *done += 1;
         if *done == self.n {
@@ -266,9 +268,11 @@ impl XBoard {
         ))]
         for _ in 0..helpers.min(n.saturating_sub(1)) {
             let set = Arc::clone(&set);
+            // One item per helper: a helper that a thread runs inside a pool wait (nested) holds that
+            // thread for one item at most.
             rayon::spawn(move || {
                 let mut taker = XTaker::default();
-                while set.run_one(&mut taker) {}
+                set.run_one(&mut taker);
             });
         }
         let _ = helpers;
@@ -298,6 +302,16 @@ impl XBoard {
             }
         }
     }
+}
+
+thread_local! {
+    // This thread runs a board item: the item's sorts stay on the thread (no pool, no board).
+    static IN_ITEM: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether this thread is running a board item (an item makes no pool or board call).
+pub(crate) fn in_item() -> bool {
+    IN_ITEM.with(Cell::get)
 }
 
 thread_local! {

@@ -1926,6 +1926,133 @@ impl XFlatCompressedLookup {
         unsafe { cells.set_len(listed) };
     }
 
+    // PROBE (v4-BPF s5, exp/bpf-seed5): x_list_pairs with NCBI's reciprocal as a constant (x_pairs_fit
+    // holds it), u32 arithmetic, the subject read through a pointer a word length ahead, and one loop
+    // test per pair. The same list.
+    #[inline(never)]
+    pub(crate) unsafe fn x_list_pairs_lean(
+        &self,
+        subject: &[u8],
+        subject_length: usize,
+        cells: &mut Vec<(i32, u32)>,
+    ) {
+        debug_assert!(self.x_pairs_fit(subject, subject_length));
+        // The scaled letters are at most 14 * 15^(word length - 1), so every index and preshift
+        // below stays under 15^word length.
+        let word_length = self.word_length as usize;
+        let recip = i64::from(self.reciprocal_alphabet_size);
+        let table = &self.scaled_compress_table_u8;
+        let pv = &self.pv;
+        cells.clear();
+        let s_last = subject_length.saturating_sub(word_length);
+        // SAFETY: the loops read up to s_last + word length, below subject.len() (x_pairs_fit, the
+        // caller's contract).
+        let byte_at = |i: usize| unsafe { *subject.get_unchecked(i) };
+        let bit_of = |index: i32| {
+            let ix = index as usize;
+            // SAFETY: an index is below 15^word length (the scaled letters, above), which the bits
+            // cover (x_pairs_fit, the caller's contract).
+            let word = unsafe { *pv.get_unchecked(ix >> PV_ARRAY_BTS) };
+            (word >> (ix & PV_ARRAY_MASK)) & 1
+        };
+        let div225 = |x: i32| ((i64::from(x) * 19_088_744) >> 32) as i32;
+        // 15 * 0xEEEE_EEEF = 1 modulo 2^32.
+        let div15_exact = |x: i32| (x as u32).wrapping_mul(0xEEEE_EEEF) as i32;
+
+        let mut s = 0usize;
+        let mut index = 0i32;
+        while s <= s_last {
+            let (computed, skip) = compute_compressed_index_u8(
+                word_length - 1,
+                &subject[s..s + word_length - 1],
+                15,
+                table,
+            );
+            index = computed;
+            if skip == 0 {
+                break;
+            }
+            s += 1;
+        }
+        let mut next_char = if s <= s_last {
+            byte_at(s + word_length - 1)
+        } else {
+            0
+        };
+        let mut preshift = compressed_reciprocal_divide(index, recip);
+        cells.reserve(s_last + 1 - s + X_STARTS_AHEAD);
+        let list = cells.as_mut_ptr();
+        let mut listed = 0usize;
+        let sub_w = unsafe { subject.as_ptr().add(word_length) };
+        let bit_of32 = |index: u32| {
+            let ix = index as usize;
+            // SAFETY: as in bit_of.
+            let word = unsafe { *pv.get_unchecked(ix >> PV_ARRAY_BTS) };
+            (word >> (ix & PV_ARRAY_MASK)) & 1
+        };
+        loop {
+            while s < s_last {
+                // SAFETY: s + word length < s_last + word length < subject.len() (x_pairs_fit).
+                let c1 = unsafe { *sub_w.add(s) };
+                let scaled0 = table[usize::from(next_char)];
+                let scaled1 = table[usize::from(c1)];
+                if (scaled0 | scaled1) < 0 {
+                    break;
+                }
+                let i0 = (preshift + scaled0) as u32;
+                let i1 = ((u64::from(i0) * 286_331_154) >> 32) as u32 + scaled1 as u32;
+                preshift = (((u64::from(i0) * 19_088_744) >> 32) as u32)
+                    .wrapping_add((scaled1 as u32).wrapping_mul(0xEEEE_EEEF))
+                    as i32;
+                // SAFETY: s + 1 + word length <= s_last + word length < subject.len().
+                next_char = unsafe { *sub_w.add(s + 1) };
+                let bit0 = bit_of32(i0);
+                // SAFETY: as in x_list_pairs.
+                unsafe { list.add(listed).write((s as i32, i0)) };
+                listed += bit0 as usize;
+                let bit1 = bit_of32(i1);
+                // SAFETY: as above.
+                unsafe { list.add(listed).write((s as i32 + 1, i1)) };
+                listed += bit1 as usize;
+                s += 2;
+            }
+            if s > s_last {
+                break;
+            }
+            let mut compressed_char = table[usize::from(next_char)];
+            next_char = byte_at(s + word_length);
+            if compressed_char < 0 {
+                preshift = 0;
+                s += 1;
+                let mut skip = self.word_length - 1;
+                while skip != 0 && s <= s_last {
+                    compressed_char = table[usize::from(next_char)];
+                    next_char = byte_at(s + word_length);
+                    if compressed_char < 0 {
+                        skip = self.word_length - 1;
+                        preshift = 0;
+                        s += 1;
+                        continue;
+                    }
+                    index = preshift + compressed_char;
+                    preshift = compressed_reciprocal_divide(index, recip);
+                    skip -= 1;
+                    s += 1;
+                }
+                continue;
+            }
+            index = preshift + compressed_char;
+            preshift = compressed_reciprocal_divide(index, recip);
+            let bit = bit_of(index);
+            // SAFETY: as above.
+            unsafe { list.add(listed).write((s as i32, index as u32)) };
+            listed += bit as usize;
+            s += 1;
+        }
+        // SAFETY: the first `listed` places were written above, within the reserve.
+        unsafe { cells.set_len(listed) };
+    }
+
     // No NCBI counterpart: chooses LOSAT's list form; both list the same offsets.
     /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): whether blastp-fast lists this table's offsets without a
     /// branch (`for_each_cell::<true, _>`): at least [`x_scan_bf_min`] of every 10,000 backbone
@@ -2762,6 +2889,11 @@ mod tests {
                 // SAFETY: x_pairs_fit holds (asserted above).
                 unsafe { flat.x_list_pairs(subject, length, &mut cells) };
                 assert_eq!(cells, want_list, "subject {n}: x_list_pairs's list");
+                // PROBE (v4-BPF s5): the lean scan lists the same.
+                let mut lean = Vec::new();
+                // SAFETY: x_pairs_fit holds (asserted above).
+                unsafe { flat.x_list_pairs_lean(subject, length, &mut lean) };
+                assert_eq!(lean, want_list, "subject {n}: x_list_pairs_lean's list");
                 assert!(
                     cells.capacity() >= cells.len() + X_STARTS_AHEAD,
                     "subject {n}: reserve"
@@ -2839,6 +2971,10 @@ mod tests {
                 // SAFETY: x_pairs_fit holds (asserted above).
                 unsafe { flat6.x_list_pairs(&subject, length, &mut cells) };
                 assert_eq!(cells, want_list, "length {length}: list");
+                let mut lean = Vec::new();
+                // SAFETY: as above (PROBE v4-BPF s5).
+                unsafe { flat6.x_list_pairs_lean(&subject, length, &mut lean) };
+                assert_eq!(lean, want_list, "length {length}: lean list");
                 found += want.len();
                 let got: Vec<(i32, i32)> = cells
                     .iter()

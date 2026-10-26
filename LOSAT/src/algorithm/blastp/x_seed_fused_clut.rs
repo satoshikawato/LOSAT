@@ -258,6 +258,27 @@ fn x_scan_flat_fseed<F>(
         let fits = lookup.x_pairs_fit(subject, subject_length);
         crate::utils::xreach::x_reach!("LOSAT_X_BPFSTAGE", fits);
         if fits {
+            // PROBE (v4-BPF s5, exp/bpf-seed5): LOSAT_BPF_S5 picks the staged loop's form.
+            let arm = x_s5_arm();
+            if arm != 0 {
+                // SAFETY: x_pairs_fit holds (tested above).
+                unsafe {
+                    x_s5_dispatch(
+                        arm,
+                        lookup,
+                        subject,
+                        subject_length,
+                        diag_array,
+                        diag_mask,
+                        diag_offset,
+                        window,
+                        word_size,
+                        bf,
+                        candidate,
+                    )
+                };
+                return;
+            }
             // SAFETY: x_pairs_fit holds (tested above).
             unsafe {
                 x_scan_flat_stage(
@@ -510,6 +531,344 @@ fn x_stage_test<F>(
             candidate((diff as i32).wrapping_add(s), s, last_hit, gap, entry);
         }
     }
+}
+
+// PROBE (v4-BPF s5, exp/bpf-seed5): the arm of LOSAT_BPF_S5 (0 = the dev loop).
+fn x_s5_arm() -> u32 {
+    use std::sync::OnceLock;
+    static ARM: OnceLock<u32> = OnceLock::new();
+    *ARM.get_or_init(|| {
+        std::env::var("LOSAT_BPF_S5")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0)
+    })
+}
+
+// PROBE: the arms of LOSAT_BPF_S5.
+pub(crate) const X_S5_ARMS: [u32; 17] =
+    [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 20, 21, 22];
+
+// PROBE: arm -> (hits ahead HA, bounds ahead SA, split copy, PF flags: 1 = also read ahead the
+// bound after `ahead`, 2 = the second half of a run read from `k` when the cell has 4 hits or fewer
+// left, 4 = also read ahead the line of the later cell's last hit).
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn x_s5_dispatch<F>(
+    arm: u32,
+    lookup: &XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    bf: XHitBf,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    macro_rules! go {
+        ($ha:expr, $sa:expr, $split:expr, $pf:expr) => {
+            go!($ha, $sa, $split, $pf, false)
+        };
+        ($ha:expr, $sa:expr, $split:expr, $pf:expr, $lean:expr) => {
+            unsafe {
+                x_scan_flat_stage_p::<$ha, $sa, $split, $pf, $lean, F>(
+                    lookup,
+                    subject,
+                    subject_length,
+                    diag_array,
+                    diag_mask,
+                    diag_offset,
+                    window,
+                    word_size,
+                    bf,
+                    candidate,
+                )
+            }
+        };
+    }
+    match arm {
+        1 => go!(8, 16, false, 0),
+        2 => go!(8, 16, false, 1),
+        3 => go!(8, 16, false, 2),
+        4 => go!(8, 16, false, 3),
+        5 => go!(8, 16, false, 7),
+        6 => go!(16, 32, false, 0),
+        7 => go!(16, 32, false, 7),
+        10 => go!(8, 16, true, 0),
+        11 => go!(8, 16, true, 3),
+        12 => go!(8, 16, true, 7),
+        13 => go!(16, 32, true, 7),
+        14 => go!(12, 24, true, 7),
+        15 => go!(8, 16, true, 2),
+        16 => go!(16, 32, true, 3),
+        20 => go!(8, 16, false, 0, true),
+        21 => go!(8, 16, true, 7, true),
+        22 => go!(8, 16, true, 3, true),
+        _ => go!(8, 16, false, 0),
+    }
+}
+
+// PROBE: where the split copy stopped: the next cell `n` and, of the cell before, the hits `k..end`
+// left and its offset `s`.
+struct XS5At {
+    n: usize,
+    k: usize,
+    end: usize,
+    s: i32,
+}
+
+// PROBE: the read-ahead of cell `n`'s turn (cache hints only).
+#[inline(always)]
+unsafe fn x_s5_ahead<const HA: usize, const SA: usize, const PF: u32>(
+    cells: &[(i32, u32)],
+    n: usize,
+    starts: &[u32],
+    hits: &[i32],
+) {
+    unsafe {
+        let ahead = cells.get_unchecked(n + SA).1 as usize;
+        x_prefetch_ptr(starts.as_ptr().add(ahead));
+        if PF & 1 != 0 {
+            x_prefetch_ptr(starts.as_ptr().add(ahead + 1));
+        }
+        let later = cells.get_unchecked(n + HA).1 as usize;
+        x_prefetch_ptr(
+            hits.as_ptr()
+                .wrapping_add(*starts.get_unchecked(later) as usize),
+        );
+        if PF & 4 != 0 {
+            x_prefetch_ptr(
+                hits.as_ptr()
+                    .wrapping_add(*starts.get_unchecked(later + 1) as usize)
+                    .wrapping_sub(1),
+            );
+        }
+    }
+}
+
+// PROBE: stages the run of hits `k..min(end, k + X_RUN)` at `staged`; returns its length.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn x_s5_run<const PF: u32>(
+    hits: &[i32],
+    k: usize,
+    end: usize,
+    s: i32,
+    here: u32,
+    diffs: *mut u32,
+    heres: *mut u32,
+    staged: usize,
+) -> usize {
+    let take = (end - k).min(X_RUN);
+    unsafe {
+        if k + X_RUN <= hits.len() {
+            let p = hits.as_ptr();
+            let lo = std::ptr::read_unaligned(p.add(k).cast::<[i32; 4]>());
+            // Flag 2: a cell with 4 hits or fewer left reads its first half again (no new line).
+            let k2 = if PF & 2 != 0 {
+                k + 4 * usize::from(end - k > 4)
+            } else {
+                k + 4
+            };
+            let hi = std::ptr::read_unaligned(p.add(k2).cast::<[i32; 4]>());
+            std::ptr::write_unaligned(
+                diffs.add(staged).cast::<[u32; 4]>(),
+                lo.map(|q| q.wrapping_sub(s) as u32),
+            );
+            std::ptr::write_unaligned(
+                diffs.add(staged + 4).cast::<[u32; 4]>(),
+                hi.map(|q| q.wrapping_sub(s) as u32),
+            );
+            std::ptr::write_unaligned(heres.add(staged).cast::<[u32; X_RUN]>(), [here; X_RUN]);
+        } else {
+            for j in 0..take {
+                *diffs.add(staged + j) = hits.get_unchecked(k + j).wrapping_sub(s) as u32;
+                *heres.add(staged + j) = here;
+            }
+        }
+    }
+    take
+}
+
+// PROBE: x_scan_flat_stage with the read-ahead distances HA (hits) / SA (bounds), the flags PF and,
+// with SPLIT, the copy in its own function that returns when the stage is full (no call in its loop).
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn x_scan_flat_stage_p<
+    const HA: usize,
+    const SA: usize,
+    const SPLIT: bool,
+    const PF: u32,
+    const LEAN: bool,
+    F,
+>(
+    lookup: &XFlatCompressedLookup,
+    subject: &[u8],
+    subject_length: usize,
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    bf: XHitBf,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
+    assert!(HA <= SA && X_STAGE_CAP >= 2 * X_RUN);
+    let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
+    if LEAN {
+        unsafe { lookup.x_list_pairs_lean(subject, subject_length, &mut cells) };
+    } else {
+        unsafe { lookup.x_list_pairs(subject, subject_length, &mut cells) };
+    }
+    let listed = cells.len();
+    cells.extend_from_slice(&[(0, 0); SA]);
+    let mut stage = X_STAGE.with(Cell::take).unwrap_or_else(XStage::new);
+    let starts = &lookup.starts[..];
+    let hits = &lookup.hits[..];
+    let mask = diag_mask as u32;
+    if SPLIT {
+        let mut at = XS5At {
+            n: 0,
+            k: 0,
+            end: 0,
+            s: 0,
+        };
+        loop {
+            let (diffs, heres) = (&mut stage.diffs[..], &mut stage.heres[..]);
+            let staged = unsafe {
+                x_s5_copy::<HA, SA, PF>(&cells, listed, starts, hits, diffs, heres, bf, &mut at)
+            };
+            x_stage_test(
+                &diffs[..staged],
+                &heres[..staged],
+                diag_array,
+                mask,
+                diag_offset,
+                window,
+                word_size,
+                bf,
+                candidate,
+            );
+            if at.n >= listed && at.k >= at.end {
+                break;
+            }
+        }
+    } else {
+        let (diffs, heres) = (&mut stage.diffs[..], &mut stage.heres[..]);
+        let mut staged = 0usize;
+        for n in 0..listed {
+            let (s, start, end) = unsafe {
+                let (s, index) = *cells.get_unchecked(n);
+                x_s5_ahead::<HA, SA, PF>(&cells, n, starts, hits);
+                (
+                    s,
+                    *starts.get_unchecked(index as usize) as usize,
+                    *starts.get_unchecked(index as usize + 1) as usize,
+                )
+            };
+            let here = bf.here(s);
+            let mut k = start;
+            loop {
+                if staged + X_RUN > X_STAGE_CAP {
+                    x_stage_test(
+                        &diffs[..staged],
+                        &heres[..staged],
+                        diag_array,
+                        mask,
+                        diag_offset,
+                        window,
+                        word_size,
+                        bf,
+                        candidate,
+                    );
+                    staged = 0;
+                }
+                let take = unsafe {
+                    x_s5_run::<PF>(
+                        hits,
+                        k,
+                        end,
+                        s,
+                        here,
+                        diffs.as_mut_ptr(),
+                        heres.as_mut_ptr(),
+                        staged,
+                    )
+                };
+                staged += take;
+                k += take;
+                if k >= end {
+                    break;
+                }
+            }
+        }
+        x_stage_test(
+            &diffs[..staged],
+            &heres[..staged],
+            diag_array,
+            mask,
+            diag_offset,
+            window,
+            word_size,
+            bf,
+            candidate,
+        );
+    }
+    cells.truncate(listed);
+    X_STAGE.with(|slot| slot.set(Some(stage)));
+    X_CELLS.with(|slot| slot.set(Some(cells)));
+}
+
+// PROBE: the copy of x_scan_flat_stage_p::<SPLIT = true>: from `at`, stages runs until fewer than
+// X_RUN places are left or the list ends, and returns the staged count (the stage starts empty).
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn x_s5_copy<const HA: usize, const SA: usize, const PF: u32>(
+    cells: &[(i32, u32)],
+    listed: usize,
+    starts: &[u32],
+    hits: &[i32],
+    diffs: &mut [u32],
+    heres: &mut [u32],
+    bf: XHitBf,
+    at: &mut XS5At,
+) -> usize {
+    debug_assert!(diffs.len() >= X_STAGE_CAP && heres.len() >= X_STAGE_CAP);
+    let (mut n, mut k, mut end, mut s) = (at.n, at.k, at.end, at.s);
+    let diffs = diffs.as_mut_ptr();
+    let heres = heres.as_mut_ptr();
+    let mut staged = 0usize;
+    'cells: loop {
+        let here = bf.here(s);
+        while k < end {
+            if staged + X_RUN > X_STAGE_CAP {
+                break 'cells;
+            }
+            let take = unsafe { x_s5_run::<PF>(hits, k, end, s, here, diffs, heres, staged) };
+            staged += take;
+            k += take;
+        }
+        if n >= listed {
+            break;
+        }
+        unsafe {
+            let (s1, index) = *cells.get_unchecked(n);
+            x_s5_ahead::<HA, SA, PF>(cells, n, starts, hits);
+            s = s1;
+            k = *starts.get_unchecked(index as usize) as usize;
+            end = *starts.get_unchecked(index as usize + 1) as usize;
+        }
+        n += 1;
+    }
+    *at = XS5At { n, k, end, s };
+    staged
 }
 
 /// The loop of [`x_scan_two_hit_compressed_flat`]; `BRANCH_FREE` is `for_each_cell`'s.
@@ -815,6 +1174,99 @@ mod tests {
         }
     }
 
+    // PROBE (v4-BPF s5): every arm of LOSAT_BPF_S5 has the outcomes of x_scan_flat_stage, on
+    // subjects that stage several times X_STAGE_CAP hits (the split copy's resume) and short ones.
+    #[test]
+    fn the_s5_arms_are_the_staged_loop() {
+        let mut rng = XorShift(0x3c6e_f372_fe94_f82b);
+        let mut query = Vec::new();
+        let mut locations = Vec::new();
+        for length in [700usize, 500, 800] {
+            let left = query.len() as i32;
+            query.extend((0..length).map(|_| LETTERS[rng.below(LETTERS.len())]));
+            locations.push((left, left + length as i32 - 1));
+            query.push(0);
+        }
+        let flat = match x_try_build_flat_compressed_lookup(
+            5,
+            1100,
+            &query,
+            &locations,
+            &[0..locations.len()],
+        ) {
+            Some(XFlatBuild::Table(table)) => table,
+            _ => panic!("flat table"),
+        };
+        let window = 40;
+        let diag_len = 4096usize;
+        let diag_mask = diag_len as i32 - 1;
+        let mut total = 0usize;
+        for length in [5usize, 9, 50, 300, 1017, 3000, 5000] {
+            let mut subject: Vec<u8> = (0..length)
+                .map(|_| LETTERS[rng.below(LETTERS.len())])
+                .collect();
+            if length > 50 {
+                let from = rng.below(query.len() - 50);
+                subject[..40].copy_from_slice(&query[from..from + 40]);
+            }
+            subject.push(0);
+            assert!(flat.x_pairs_fit(&subject, length));
+            let diag_offset = window;
+            let bf = XHitBf::new(diag_offset, length, window, 5).expect("in range");
+            let mut want_diag = vec![DiagStruct::default(); diag_len];
+            let mut want = Vec::new();
+            // SAFETY: x_pairs_fit holds (asserted above).
+            unsafe {
+                x_scan_flat_stage(
+                    &flat,
+                    &subject,
+                    length,
+                    &mut want_diag,
+                    diag_mask,
+                    diag_offset,
+                    window,
+                    5,
+                    bf,
+                    &mut |q, s, last_hit, diff, entry: &mut DiagStruct| {
+                        stand_in(&mut want, diag_offset, q, s, last_hit, diff, entry)
+                    },
+                )
+            };
+            for arm in X_S5_ARMS {
+                let mut got_diag = vec![DiagStruct::default(); diag_len];
+                let mut got = Vec::new();
+                // SAFETY: as above.
+                unsafe {
+                    x_s5_dispatch(
+                        arm,
+                        &flat,
+                        &subject,
+                        length,
+                        &mut got_diag,
+                        diag_mask,
+                        diag_offset,
+                        window,
+                        5,
+                        bf,
+                        &mut |q, s, last_hit, diff, entry: &mut DiagStruct| {
+                            stand_in(&mut got, diag_offset, q, s, last_hit, diff, entry)
+                        },
+                    )
+                };
+                assert_eq!(got, want, "arm {arm}, length {length}: candidates");
+                assert!(
+                    got_diag
+                        .iter()
+                        .zip(&want_diag)
+                        .all(|(a, b)| a.raw_bits() == b.raw_bits()),
+                    "arm {arm}, length {length}: diagonal table"
+                );
+            }
+            total += want.len();
+        }
+        assert!(total > 0, "the test reaches the extension");
+    }
+
     // LOSAT_X_BPFSTAGE: the cell whose slice ends the hits array is copied hit by hit (no run of
     // X_RUN reads past the array), with the outcomes of the loop without the switch.
     #[test]
@@ -914,6 +1366,37 @@ mod tests {
                 .all(|(a, b)| a.raw_bits() == b.raw_bits()),
             "diagonal table"
         );
+        // PROBE (v4-BPF s5): every arm of LOSAT_BPF_S5 too.
+        for arm in X_S5_ARMS {
+            let mut arm_diag = vec![DiagStruct::default(); diag_len];
+            let mut arm_log = Vec::new();
+            // SAFETY: x_pairs_fit holds (asserted above).
+            unsafe {
+                x_s5_dispatch(
+                    arm,
+                    &flat,
+                    &subject,
+                    length,
+                    &mut arm_diag,
+                    diag_mask,
+                    diag_offset,
+                    window,
+                    5,
+                    bf,
+                    &mut |q, s, last_hit, diff, entry: &mut DiagStruct| {
+                        stand_in(&mut arm_log, diag_offset, q, s, last_hit, diff, entry)
+                    },
+                )
+            };
+            assert_eq!(arm_log, want, "arm {arm}: candidates");
+            assert!(
+                arm_diag
+                    .iter()
+                    .zip(&want_diag)
+                    .all(|(a, b)| a.raw_bits() == b.raw_bits()),
+                "arm {arm}: diagonal table"
+            );
+        }
     }
 
     // LOSAT_X_BPFSEED's choice: on a table with the branch-free list the fused loop

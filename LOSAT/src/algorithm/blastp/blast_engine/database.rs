@@ -553,7 +553,7 @@ where
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if x_db_keep::x_bp_db_keep() {
+    if crate::seqdb::x_bp_db_kit() {
         return x_db_keep::x_search_blocks_kept(
             database,
             pool,
@@ -1142,6 +1142,31 @@ impl ListedTitles<'_> {
 // `ListedTitles::check_reported_titles`, `ListedTitles::tabular_subject_ids`, and for outfmt 0
 // `ListedTitles::check_shown_titles`). When every definition line of the database reads and none
 // of them is refused, none of these failures can happen in any batch.
+
+// No NCBI counterpart: the order of LOSAT's own checks; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPDBKEEP): whether `check` holds for every range of
+/// `db.header_ranges(HEADER_RANGE_SEQS)`, read in `pool` as the title checks read them, with each
+/// range made from its index (`SeqDb::x_header_range`): no list of the ranges is allocated, whose
+/// free (1.5 MiB for UniRef50) would raise glibc's mmap threshold before the search.
+fn x_all_header_ranges(
+    db: &crate::seqdb::SeqDb,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    check: impl Fn(&BlockRange) -> bool + Sync,
+) -> bool {
+    let seqs = crate::seqdb::HEADER_RANGE_SEQS;
+    let count = db.x_header_range_count(seqs);
+    let check_index = |index: usize| check(&db.x_header_range(seqs, index));
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pool.enabled() {
+        return pool.install(|| (0..count).into_par_iter().all(check_index));
+    }
+    let _ = pool;
+    (0..count).all(check_index)
+}
+
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether every sequence of the database has one definition line
 /// that reads, holds no byte outside ' ' ..= '~' and gives a tabular subject id as NCBI writes
@@ -1179,12 +1204,15 @@ pub(super) fn x_titles_allow_blocks(
         }
     };
     if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
-        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
         let allowed_range = |range: &BlockRange| -> bool {
             db.visit_deflines(*range, |ordinal, deflines| {
                 allowed_deflines(ordinal, deflines)
             })
         };
+        if crate::seqdb::x_bp_db_keep() {
+            return x_all_header_ranges(db, pool, allowed_range);
+        }
+        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1240,10 +1268,13 @@ pub(super) fn x_titles_read_allow_blocks(
         }
     };
     if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
-        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
         let readable_range = |range: &BlockRange| -> bool {
             db.visit_deflines(*range, |_ordinal, deflines| readable(deflines))
         };
+        if crate::seqdb::x_bp_db_keep() {
+            return x_all_header_ranges(db, pool, readable_range);
+        }
+        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1303,7 +1334,6 @@ pub(super) fn x_titles_taxids_allow_blocks(
     if crate::seqdb::x_dbidxread() == crate::seqdb::XDbIdxRead::Off {
         return x_titles_read_allow_blocks(database, pool) && x_taxids_allow_blocks(database, pool);
     }
-    let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
     let readable_range = |range: &BlockRange| -> bool {
         db.visit_deflines_taxids(*range, |_ordinal, deflines| match deflines {
             // The taxid `read_reported_taxids` takes of a sequence: its first definition
@@ -1312,6 +1342,10 @@ pub(super) fn x_titles_taxids_allow_blocks(
             Err(_) => false,
         })
     };
+    if crate::seqdb::x_bp_db_keep() {
+        return x_all_header_ranges(db, pool, readable_range) && !shared::taxdb_may_refuse(db);
+    }
+    let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")

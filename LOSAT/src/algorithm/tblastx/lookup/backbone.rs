@@ -247,6 +247,10 @@ struct XChainArena {
     free: Vec<Vec<std::ptr::NonNull<i32>>>,
     /// Slabs of `SLAB_INTS` kept by `x_reset` for the next build (`LOSAT_X_BXLUTPOOL`).
     spare: Vec<Box<[i32]>>,
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): every allocation is made by `x_allocate_unthresholded`.
+    x_unthresholded: bool,
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the allocations of `x_allocate_unthresholded`.
+    x_unthresholded_slabs: Vec<Vec<i32>>,
 }
 
 impl XChainArena {
@@ -260,6 +264,8 @@ impl XChainArena {
             remaining: 0,
             free: Vec::new(),
             spare: Vec::new(),
+            x_unthresholded: false,
+            x_unthresholded_slabs: Vec::new(),
         }
     }
 
@@ -271,6 +277,7 @@ impl XChainArena {
                 self.spare.push(slab);
             }
         }
+        self.x_unthresholded_slabs.clear();
         self.cursor = std::ptr::null_mut();
         self.remaining = 0;
         for list in &mut self.free {
@@ -286,10 +293,30 @@ impl XChainArena {
                 return start;
             }
         }
+        if self.x_unthresholded {
+            return self.x_allocate_unthresholded(ints);
+        }
         let mut slab = vec![0i32; ints].into_boxed_slice();
         let start = slab.as_mut_ptr();
         // Moving the box into the list does not move the ints.
         self.slabs.push(slab);
+        start
+    }
+
+    // No NCBI counterpart (LOSAT_X_BPDBKEEP): where the ints are allocated.
+    /// `allocate(ints)` with a capacity that glibc maps and unmaps without raising its mmap
+    /// threshold (`utils::x_mapped::x_unthresholded_capacity`; the zeroed pages are not touched).
+    #[inline(never)]
+    fn x_allocate_unthresholded(&mut self, ints: usize) -> *mut i32 {
+        let mut slab =
+            vec![
+                0i32;
+                crate::utils::x_mapped::x_unthresholded_capacity(ints, std::mem::size_of::<i32>())
+            ];
+        slab.truncate(ints);
+        let start = slab.as_mut_ptr();
+        // Moving the vector into the list does not move the ints.
+        self.x_unthresholded_slabs.push(slab);
         start
     }
 
@@ -441,6 +468,21 @@ impl LookupBackboneChains {
                 .collect(),
             arena: XChainArena::new(),
         }
+    }
+
+    // No NCBI counterpart (LOSAT_X_BPDBKEEP): where the cells and the chains are allocated.
+    /// `new(backbone_size)` whose cells and slabs glibc maps and unmaps without raising its mmap
+    /// threshold (`utils::x_mapped::x_unthresholded_capacity`): a build's one-off 446 KiB of
+    /// cells (BLASTP's 28,540) and 256 KiB slabs would raise it to their size when they are freed.
+    fn x_new_unthresholded(backbone_size: usize) -> Self {
+        let mut cells = Vec::with_capacity(crate::utils::x_mapped::x_unthresholded_capacity(
+            backbone_size,
+            std::mem::size_of::<Option<LookupChain>>(),
+        ));
+        cells.resize_with(backbone_size, || None);
+        let mut arena = XChainArena::new();
+        arena.x_unthresholded = true;
+        Self { cells, arena }
     }
 
     // No NCBI counterpart (buffer reuse, LOSAT_X_BXLUTPOOL): as `new(backbone_size)`, on this

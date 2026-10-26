@@ -811,6 +811,11 @@ fn x_build_direct_in(
             chains.x_reset(backbone_size);
             chains
         }
+        // EXPERIMENT (LOSAT_X_BPDBKEEP): the chains' memory freed without raising glibc's mmap
+        // threshold.
+        None if crate::seqdb::x_bp_db_keep() => {
+            LookupBackboneChains::x_new_unthresholded(backbone_size)
+        }
         None => LookupBackboneChains::new(backbone_size),
     };
     let mut skipped_invalid_residue = 0usize;

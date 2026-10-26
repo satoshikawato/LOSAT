@@ -6224,6 +6224,7 @@ fn post_process_hits_and_write(
                 (Some(ordinals), Some(database)) => SubjectNames::Database {
                     ordinals,
                     title: &database.definition,
+                    parsed: &[],
                 },
                 _ => SubjectNames::Records(report.subjects.records()),
             };
@@ -6249,6 +6250,7 @@ fn post_process_hits_and_write(
                 (Some(ordinals), Some(database)) => SubjectNames::Database {
                     ordinals,
                     title: &database.definition,
+                    parsed: &[],
                 },
                 _ => SubjectNames::Records(report.subjects.records()),
             };
@@ -6329,6 +6331,7 @@ fn post_process_hits_and_write(
                         SubjectNames::Database {
                             ordinals,
                             title: &database.definition,
+                            parsed: &[],
                         },
                         report.ranges.subjects.placements,
                         &super::super::sam::SubjectLengths {
@@ -6475,6 +6478,8 @@ fn post_process_hits_and_write(
                     taxids: &xml_taxids,
                     taxonomy: &xml_taxonomy,
                     length: &database_length,
+                    parsed: &[],
+                    parsed_taxonomy: &[],
                 },
                 _ => crate::report::blast_xml::XmlSubjects::Records {
                     records: subject_records,

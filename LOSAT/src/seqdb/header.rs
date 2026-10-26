@@ -79,8 +79,10 @@ impl HeaderError {
     }
 }
 
-const PARSED_SEQIDS: &str = "the database stores parsed Seq-ids (makeblastdb -parse_seqids, or a \
-     database distributed by NCBI); LOSAT reads databases built without -parse_seqids only";
+pub(super) const PARSED_SEQIDS: &str =
+    "the database stores parsed Seq-ids (makeblastdb -parse_seqids, or a \
+     database distributed by NCBI); LOSAT's blastp and blastx read them, its other programs \
+     read databases built without -parse_seqids only";
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2218
 // ```c++

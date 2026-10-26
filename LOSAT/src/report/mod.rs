@@ -1,6 +1,7 @@
 pub mod archive;
 pub mod blast_xml;
 pub mod blast_xml2;
+pub mod db_subject;
 pub mod defline;
 pub mod diag_log;
 pub mod outfmt6;

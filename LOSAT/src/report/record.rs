@@ -184,6 +184,9 @@ pub enum SubjectNames<'a> {
     Database {
         ordinals: &'a [u32],
         title: &'a [u8],
+        /// The subjects with parsed Seq-ids by rank (empty without them): their Seq-align id
+        /// (`report::db_subject::ParsedSubject::alignment_id`).
+        parsed: &'a [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     },
 }
 
@@ -208,8 +211,13 @@ impl<'a> SubjectNames<'a> {
                 searched_length: records[index].seq().len() as i32,
                 offset: offset as i32,
             },
-            SubjectNames::Database { ordinals, .. } => SubjectRecord {
-                id: SeqId::BlOrdId(ordinals[index]),
+            SubjectNames::Database {
+                ordinals, parsed, ..
+            } => SubjectRecord {
+                id: match parsed.get(index).and_then(Option::as_deref) {
+                    Some(subject) => SeqId::Db(subject.alignment_id()),
+                    None => SeqId::BlOrdId(ordinals[index]),
+                },
                 searched_length: database_length,
                 offset: 0,
             },

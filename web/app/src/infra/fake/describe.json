@@ -183,7 +183,7 @@
    },
    {
     "flag": "-db",
-    "help": "BLAST database name (a protein database without parsed Seq-ids)",
+    "help": "BLAST database name (a protein database, with or without parsed Seq-ids)",
     "takes_value": true
    },
    {

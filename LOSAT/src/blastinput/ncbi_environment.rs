@@ -438,7 +438,39 @@ pub struct ApplicationSettings {
     /// reads it; only a program that opens a database has to refuse to run then, since
     /// the entry changes nothing else.
     pub blastdb: Result<Option<String>, String>,
+    /// The first of `SEQ_ID_RANK_VARIABLES` that is set (with any value). NCBI's choice of the
+    /// Seq-ids of a database with parsed Seq-ids depends on it; only a program that opens such
+    /// a database has to refuse to run then (`algorithm::common::database::
+    /// check_seqids`), since the ids of the other searches are local or ordinal.
+    pub seq_id_rank_variable: Option<&'static str>,
 }
+
+/// The parameters that move the GIs to the end of NCBI's rank of Seq-ids (the Seq-align id of a
+/// database sequence and every choice by `Score`): `SEQ_ID_PREFER_ACCESSION_OVER_GI` and
+/// `SEQ_ID_AVOID_GI` (PLAN of line DBID §9.2, DECISIONS 3 Q8: LOSAT follows their defaults).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:3393-3413
+/// ```c++
+/// NCBI_PARAM_DECL(bool, SeqId, PreferAccessionOverGi);
+/// NCBI_PARAM_DEF_EX(bool, SeqId, PreferAccessionOverGi, false, eParam_NoThread,
+///     SEQ_ID_PREFER_ACCESSION_OVER_GI);
+/// typedef NCBI_PARAM_TYPE(SeqId, PreferAccessionOverGi) TPreferAccessionOverGi;
+///
+/// NCBI_PARAM_DECL(bool, SeqId, AvoidGi);
+/// NCBI_PARAM_DEF_EX(bool, SeqId, AvoidGi, false, eParam_NoThread,
+///     SEQ_ID_AVOID_GI);
+/// typedef NCBI_PARAM_TYPE(SeqId, AvoidGi) TAvoidGi;
+///
+///
+/// bool CSeq_id::PreferAccessionOverGi(void)
+/// {
+///     return TPreferAccessionOverGi::GetDefault() || AvoidGi();
+/// }
+/// ```
+/// (The registry entries `[SeqId] PreferAccessionOverGi` and `AvoidGi` and the variables
+/// `NCBI_CONFIG__SEQID__...` set the same parameters; LOSAT rejects both as entries it does not
+/// read.)
+pub const SEQ_ID_RANK_VARIABLES: [&str; 2] = ["SEQ_ID_PREFER_ACCESSION_OVER_GI", "SEQ_ID_AVOID_GI"];
 
 impl Default for ApplicationSettings {
     /// No registry entry and no variable: both data loaders on, no `[BLAST] BLASTDB`.
@@ -453,6 +485,7 @@ impl Default for ApplicationSettings {
         Self {
             data_loaders: true,
             blastdb: Ok(None),
+            seq_id_rank_variable: None,
         }
     }
 }
@@ -873,6 +906,9 @@ fn application_settings(
             ],
         ),
         blastdb: blastdb_of(env_blastdb, [ini_blastdb, ncbirc_blastdb]),
+        seq_id_rank_variable: SEQ_ID_RANK_VARIABLES
+            .into_iter()
+            .find(|name| env(name).is_some()),
     })
 }
 

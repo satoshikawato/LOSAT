@@ -2682,7 +2682,9 @@ fn run_in_pool(
     };
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     if let Some(plan) = x_plan {
-        if let Some(pipe) = x_batch_pipe::XPipe::new(plan, search_subjects.count(), search) {
+        if let Some(pipe) =
+            x_batch_pipe::XPipe::new(plan, search_subjects.count(), search, x_board.as_ref())
+        {
             let result = rayon::in_place_scope(|scope| {
                 let _closer = pipe.closer();
                 batch_loop(&mut |range| pipe.take(scope, range))
@@ -4661,6 +4663,13 @@ fn search_query_batch<S: TbxScore>(
                 x_lap.lap(XStage::Prepare);
                 let x_units = x.run_subject_units(&x_subject, parallel_pool);
                 x_lap.lap(XStage::Units);
+                // EXPERIMENT (LOSAT_X_TBXBOARD): every unit of the batch taken: the next batch
+                // may build its tables (tblastx/x_batch_pipe.rs `XSeedEnd::units_taken`).
+                if let (Some((_, batch)), Some(seed_end)) = (x_board_batch.as_ref(), x_seed_end) {
+                    if batch.drained() {
+                        seed_end.units_taken();
+                    }
+                }
                 x_units_stage.end();
                 x_lap.lap(XStage::UnitsRelease);
                 let x_hits = x_pair_par::XPairPar::merge_subject(x_units, &x_subject);
@@ -7142,9 +7151,20 @@ fn search_query_batch<S: TbxScore>(
 
     // EXPERIMENT (LOSAT_X_TBXBOARD): a thread of the subject loop without a subject helps with the
     // batch's units (tblastx/x_work_board.rs `XBoard::help`).
-    let x_board_help = x_board_batch
-        .as_ref()
-        .map(|(board, batch)| move || board.help(batch));
+    let x_board_help = x_board_batch.as_ref().map(|(board, batch)| {
+        move || {
+            board.help(batch);
+            // Every unit of the batch has been taken: the next batch may build its tables.
+            if let Some(seed_end) = x_seed_end {
+                seed_end.units_taken();
+            }
+        }
+    });
+    // EXPERIMENT (LOSAT_X_TBXBOARD): a batch started early waits here, after its tables, until the
+    // batch before has ended its seed stage (tblastx/x_batch_pipe.rs `XGateView`).
+    if let Some(seed_end) = x_seed_end {
+        seed_end.wait_gate(x_board);
+    }
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 && x_subject_next::on() {
         // EXPERIMENT (LOSAT_X_TBXNEXT): each thread of the pool takes the next subject when it is

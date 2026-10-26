@@ -134,7 +134,7 @@ pub(crate) struct XBatch {
 
 impl XBatch {
     /// Every subject has put its units on the board (or will put none) and none is left to take.
-    fn drained(&self) -> bool {
+    pub(crate) fn drained(&self) -> bool {
         self.closed.iter().enumerate().all(|(s, closed)| {
             closed.load(Ordering::Acquire)
                 && self.slots[s]
@@ -234,6 +234,12 @@ impl XBoard {
             .unwrap_or_else(|e| e.into_inner())
             .clone();
         batches.iter().any(|batch| batch.run_one(taker))
+    }
+
+    /// Takes and runs one item (groups first, then units by batch and subject order); false when
+    /// there was none. For a thread that waits outside the pool.
+    pub(crate) fn take_one(&self, taker: &mut XTaker) -> bool {
+        self.run_one(taker)
     }
 
     /// A subject's units: `run(i, taker)` for every `i < n`, on this thread and on the board's

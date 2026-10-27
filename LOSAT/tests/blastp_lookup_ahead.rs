@@ -226,6 +226,9 @@ fn blastp(
         .env("BATCH_SIZE", queries.batch_size)
         .env("LOSAT_TIMING", "1")
         .envs(PREVIOUS_DEFAULT.iter().copied())
+        // `LOSAT_X_BPQSLOTS=0`: the block loop of `LOSAT_X_BPQBLOCK`, one block at a time (the switch searches
+        // blastp-fast's blocks two at a time, of other sizes, with no table built ahead), unless the run names it.
+        .env("LOSAT_X_BPQSLOTS", "0")
         .envs(vars.iter().copied())
         .output()
         .expect("run LOSAT");

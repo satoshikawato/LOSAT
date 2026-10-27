@@ -6478,7 +6478,7 @@ fn search(
     if x_plan.is_none() {
         super::x_query_blocks::x_reach_block_search(&x_formats, false);
     }
-    if let Some((x_kinds, blocks)) = x_plan {
+    if let Some((x_kinds, blocks, x_slots)) = x_plan {
         use super::x_query_blocks::{XBlockReport, XBlockSink, XOffsetObserver};
         let reader_warnings = &batches.warnings;
         let ReportOutputs {
@@ -6563,6 +6563,9 @@ fn search(
                     return Ok(false);
                 }
                 super::x_query_blocks::x_reach_block_search(&x_formats, true);
+                if super::x_query_slots::x_bp_qslots().is_some() {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BPQSLOTS", x_slots > 1);
+                }
                 // EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks
                 // (`x_query_blocks::XBlockSubjects`), on the search's pool.
                 // Diagnostic (LOSAT_TIMING): the blocks' shared subject encoding for the common
@@ -6576,6 +6579,59 @@ fn search(
                     .iter_mut()
                     .map(|format| XBlockSink::new(&mut format.sink))
                     .collect();
+                // EXPERIMENT (LOSAT_X_BPQSLOTS): the blocks searched several at a time on the pool,
+                // each block's report and messages written in block order (`x_query_slots.rs`); one
+                // output, no hit records, no observer (the plan's slots).
+                #[cfg(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                ))]
+                if x_slots > 1 {
+                    let v1_titles = v1.is_some();
+                    let search_block = |index: usize, block_outputs: &mut ReportOutputs<'_>| {
+                        let block = &blocks[index];
+                        let block_queries = &searched_queries[block.clone()];
+                        let block_input = seq_range::QueryInput::whole(block_queries);
+                        run_resolved_in_pool(
+                            args.clone(),
+                            block_queries,
+                            subject_source,
+                            "",
+                            subject_label,
+                            block_outputs,
+                            pool,
+                            None,
+                            &BlastpRanges {
+                                input_records: &query_records[block.clone()],
+                                query_input: &block_input,
+                                subject_placements: &subjects.placements,
+                                x_ordinal_base: block.start,
+                            },
+                            &BlastpReports {
+                                reader_warnings: &reader_warnings[block.clone()],
+                                epilog: epilog && index + 1 == blocks.len(),
+                                v1_titles,
+                                x_prolog: index == 0,
+                                x_queries_before: block.start,
+                                x_xml2_carry: None,
+                            },
+                            x_lookup_ahead::XAheadBlock::none(),
+                        )
+                    };
+                    super::x_query_slots::x_search_in_slots(
+                        blocks.len(),
+                        x_slots,
+                        outfmts[0],
+                        pool,
+                        &mut sinks[0],
+                        &mut **diagnostics,
+                        &search_block,
+                    )?;
+                    for sink in &mut sinks {
+                        sink.flush()?;
+                    }
+                    return Ok(true);
+                }
                 // The HSPs of the blocks before: the first index of the block's HSPs in the list
                 // of all queries.
                 let mut x_hsps_before: HspIndex = 0;
@@ -6817,6 +6873,7 @@ fn x_query_block_plan(
 ) -> Option<(
     Vec<super::x_query_blocks::XBlockReport>,
     Vec<std::ops::Range<usize>>,
+    usize,
 )> {
     use super::x_query_blocks::{XBlockFormat, XBlockReport};
     let block_letters = super::x_query_blocks::x_bp_qblock()?;
@@ -6953,9 +7010,26 @@ fn x_query_block_plan(
         }
     }
     let query_batches = query_input.batches(batch_size);
+    // EXPERIMENT (LOSAT_X_BPQSLOTS): blastp-fast's blocks searched several at a time on a pool of
+    // more than one thread, with one output that is not outfmt 11 or 13 to 16 and no hit records or
+    // observer (`x_query_slots.rs`), in blocks of `x_slot_letters`.
+    let slots = super::x_query_slots::x_bp_qslots()
+        .filter(|_| {
+            args.num_threads > 1
+                && args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable
+                && !x_web
+                && args.archive.is_none()
+                && !kinds.contains(&XBlockReport::Xml2)
+        })
+        .unwrap_or(1);
+    let block_letters = if slots > 1 {
+        super::x_query_slots::x_slot_letters(block_letters, slots)
+    } else {
+        block_letters
+    };
     let blocks = super::x_query_blocks::x_query_blocks(&query_batches, &lengths, block_letters)?;
     (blocks.len() > 1 && x_block_search_refuses_nothing(args, queries, &query_batches, &lengths))
-        .then_some((kinds, blocks))
+        .then_some((kinds, blocks, slots))
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): whether the search of all queries passes the checks that refuse

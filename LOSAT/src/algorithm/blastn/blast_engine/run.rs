@@ -69,7 +69,8 @@ use super::super::blast_extend::DiagStruct;
 use super::super::coordination::{
     build_lookup_tables, chunk_query_masks, collect_lowercase_masks, configure_task,
     finalize_task_config, prepare_sequence_data, query_masks, reverse_mask_intervals,
-    subject_metadata_from_records, subject_trace_id, LookupTables, SequenceData, SubjectMetadata,
+    subject_metadata_from_records, subject_trace_id, LookupTables, QueryLetters, SequenceData,
+    SubjectMetadata,
 };
 use super::super::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
 use super::super::extension::{
@@ -4688,32 +4689,34 @@ fn diag_container_query_length(query_contexts: &[QueryContext]) -> usize {
 /// context is the BLASTNA code of the letters and the minus context that of their reverse
 /// complement. The searched block (`query_concat_length` bytes) is `[1..n + 1]` of it
 /// (LOSAT's memory: no second copy of the block, no IUPAC copy of either strand).
-fn build_query_blastna_buffer(
-    query_letters: &[&[u8]],
+fn build_query_blastna_buffer<L: QueryLetters + ?Sized>(
+    query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
 ) -> Vec<u8> {
-    debug_assert_eq!(2 * query_letters.len(), context_offsets.len());
+    debug_assert_eq!(2 * query_letters.count(), context_offsets.len());
 
     let mut with_sentinels = vec![NUCL_SENTINEL; query_concat_length + 2];
 
-    for (letters, offsets) in query_letters.iter().zip(context_offsets.chunks_exact(2)) {
-        let length = letters.len();
-        // A context that is empty or does not end inside the block stays sentinels.
-        // (Twin: `place` and the two encoder calls below are copied in x_query_prep_par.rs
-        // (LOSAT_X_QPREPPAR) and, with the strand switches, in
-        // `build_strand_query_blastna_buffer`; change them there too.)
-        let place = |offset: i32| -> Option<std::ops::Range<usize>> {
-            let start = offset.max(0) as usize;
-            let end = start.saturating_add(length);
-            (start < end && end <= query_concat_length).then(|| start + 1..end + 1)
-        };
-        if let Some(range) = place(offsets[0]) {
-            encode_iupac_to_blastna_into(letters, &mut with_sentinels[range]);
-        }
-        if let Some(range) = place(offsets[1]) {
-            encode_reverse_complement_blastna_into(letters, &mut with_sentinels[range]);
-        }
+    for (q, offsets) in context_offsets.chunks_exact(2).enumerate() {
+        query_letters.read(q, |letters| {
+            let length = letters.len();
+            // A context that is empty or does not end inside the block stays sentinels.
+            // (Twin: `place` and the two encoder calls below are copied in x_query_prep_par.rs
+            // (LOSAT_X_QPREPPAR) and, with the strand switches, in
+            // `build_strand_query_blastna_buffer`; change them there too.)
+            let place = |offset: i32| -> Option<std::ops::Range<usize>> {
+                let start = offset.max(0) as usize;
+                let end = start.saturating_add(length);
+                (start < end && end <= query_concat_length).then(|| start + 1..end + 1)
+            };
+            if let Some(range) = place(offsets[0]) {
+                encode_iupac_to_blastna_into(letters, &mut with_sentinels[range]);
+            }
+            if let Some(range) = place(offsets[1]) {
+                encode_reverse_complement_blastna_into(letters, &mut with_sentinels[range]);
+            }
+        });
     }
 
     with_sentinels
@@ -4730,33 +4733,35 @@ fn build_query_blastna_buffer(
 ///
 ///         qinfo->contexts[index].query_offset = prev_loc + shift;
 /// ```
-fn build_strand_query_blastna_buffer(
-    query_letters: &[&[u8]],
+fn build_strand_query_blastna_buffer<L: QueryLetters + ?Sized>(
+    query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
     strand: QueryStrand,
 ) -> Vec<u8> {
-    debug_assert_eq!(2 * query_letters.len(), context_offsets.len());
+    debug_assert_eq!(2 * query_letters.count(), context_offsets.len());
     let (plus_on, minus_on) = strand.searched();
 
     let mut with_sentinels = vec![NUCL_SENTINEL; query_concat_length + 2];
 
-    for (letters, offsets) in query_letters.iter().zip(context_offsets.chunks_exact(2)) {
-        let place = |offset: i32, length: usize| -> Option<std::ops::Range<usize>> {
-            let start = offset.max(0) as usize;
-            let end = start.saturating_add(length);
-            (start < end && end <= query_concat_length).then(|| start + 1..end + 1)
-        };
-        if plus_on {
-            if let Some(range) = place(offsets[0], letters.len()) {
-                encode_iupac_to_blastna_into(letters, &mut with_sentinels[range]);
+    for (q, offsets) in context_offsets.chunks_exact(2).enumerate() {
+        query_letters.read(q, |letters| {
+            let place = |offset: i32, length: usize| -> Option<std::ops::Range<usize>> {
+                let start = offset.max(0) as usize;
+                let end = start.saturating_add(length);
+                (start < end && end <= query_concat_length).then(|| start + 1..end + 1)
+            };
+            if plus_on {
+                if let Some(range) = place(offsets[0], letters.len()) {
+                    encode_iupac_to_blastna_into(letters, &mut with_sentinels[range]);
+                }
             }
-        }
-        if minus_on {
-            if let Some(range) = place(offsets[1], letters.len()) {
-                encode_reverse_complement_blastna_into(letters, &mut with_sentinels[range]);
+            if minus_on {
+                if let Some(range) = place(offsets[1], letters.len()) {
+                    encode_reverse_complement_blastna_into(letters, &mut with_sentinels[range]);
+                }
             }
-        }
+        });
     }
 
     with_sentinels
@@ -7178,6 +7183,10 @@ fn search_cli(
             hit_records: outputs.hits.is_some(),
         }
         .acts();
+    // EXPERIMENT (LOSAT_X_BNQSLOTS): the store where the slots may run too.
+    if x_slots_may_run && !x_opening.acts() && x_query_drop::on() && x_query_drop::slots_on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_BNQSLOTS", x_drop_rule);
+    }
     let x_pack = x_query_drop::packs(x_drop_rule, x_file_bytes, x_batch_letters);
     if x_drop_rule && x_query_drop::pack_on() {
         crate::utils::xreach::x_reach!("LOSAT_X_BNQPACK", x_pack);
@@ -8370,14 +8379,22 @@ fn run_in_pool(
         // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records read again (a chunk shared with the
         // window, or a copy); none for a batch the loop has passed, which the loop never takes
         // (cancelled).
-        let records = match queries.slot_records(job.searched.clone()) {
+        let mut records = match queries.slot_records(job.searched.clone()) {
             Ok(Some(records)) => records,
             Ok(None) => return Err(x_qbatch_par::Cancelled.into()),
             Err(error) => return Err(error),
         };
+        // EXPERIMENT (LOSAT_X_BNQSLOTS): a copy out of the LOSAT_X_BNQDROP store is the slot's
+        // alone and drops its letters after their encoding, as the loop's batch does.
+        let batch_queries = match &mut records {
+            x_query_stream::SlotRecords::Held(records, packs) => {
+                x_query_drop::BatchQueries::Held(records, std::mem::take(packs))
+            }
+            records => x_query_drop::BatchQueries::Shared(&**records),
+        };
         search_query_batch(
             &args,
-            x_query_drop::BatchQueries::Shared(&records),
+            batch_queries,
             source,
             None,
             pool,
@@ -8440,8 +8457,9 @@ fn run_in_pool(
             qbp_off,
         );
         // EXPERIMENT (LOSAT_X_BNQDROP): no slot searches the records that the loop takes out of
-        // their store (`search_cli`'s rule moved them there where it found that no slot may run).
-        if matches!(queries, x_query_stream::Queries::Taken(_)) {
+        // their store (`search_cli`'s rule moved them there where it found that no slot may run),
+        // unless the store lends the loop's batch to its slot (EXPERIMENT LOSAT_X_BNQSLOTS).
+        if matches!(queries, x_query_stream::Queries::Taken(_)) && !x_query_drop::slots_on() {
             qbp.x_refuse_taken();
         }
         // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
@@ -8502,8 +8520,11 @@ fn run_in_pool(
             // report of the batch's first query (`QueryWarnings`). Skipped records are read too.
             // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records, read now from the query file when
             // the switch acts (an error here is the file changed between the two readings).
+            // EXPERIMENT (LOSAT_X_BNQSLOTS): lent to the slot that may search the batch (any batch
+            // but the first while the slots may run).
+            let x_lend = input_start != 0 && qbp.may_speculate();
             let mut batch_records =
-                match queries.batch_in(input_start..input_end, start..end, parallel_pool) {
+                match queries.batch_in(input_start..input_end, start..end, parallel_pool, x_lend) {
                     Ok(records) => records,
                     Err(error) => {
                         qbp.finish();
@@ -8802,7 +8823,10 @@ fn run_in_pool(
                 input_end,
                 batch_size: batching.batch_size,
             };
-            let searched = match qbp.take(key) {
+            let x_precomputed = qbp.take(key);
+            // EXPERIMENT (LOSAT_X_BNQSLOTS): no slot searches the batch again.
+            queries.unlend();
+            let searched = match x_precomputed {
                 Some(precomputed) => precomputed,
                 None => {
                     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps its megablast table from batch
@@ -10105,6 +10129,9 @@ fn search_query_batch(
     // ```
     // The search reads the query records of its caller (`prepare_sequence_data`).
     let queries = query_records.records();
+    // EXPERIMENT (LOSAT_X_BNQSLOTS): the records' letters for the readers below, one record at a
+    // time (a slot's copy out of the query store makes them from its packed letters).
+    let letters = query_records.letters();
     let query_ids = queries
         .iter()
         .map(|record| String::from_utf8_lossy(record.shown_id()).into_owned())
@@ -10214,7 +10241,7 @@ fn search_query_batch(
             query_masks: Some(masks),
             ..
         } => masks.to_vec(),
-        BatchStage::Search { .. } => query_masks(args, queries, parallel_pool)
+        BatchStage::Search { .. } => query_masks(args, &letters, parallel_pool)
             .map_err(|error| window_masker_rejection(args, &error))?,
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
@@ -10244,10 +10271,8 @@ fn search_query_batch(
     //                  curr_context + 1 : curr_context - 1;
     // ```
     let query_lengths = Arc::new(
-        seq_data
-            .queries
-            .iter()
-            .map(|record| record.seq().len())
+        (0..letters.count())
+            .map(|index| letters.length(index))
             .collect::<Vec<usize>>(),
     );
 
@@ -10321,9 +10346,8 @@ fn search_query_batch(
     let (plus_on, minus_on) = strand.searched();
     let mut query_concat_offset: usize = 0;
     let context_room = |length: usize| if length == 0 { 0 } else { length + 1 };
-    for (q_idx, q_record) in seq_data.queries.iter().enumerate() {
-        let seq = q_record.seq();
-        let q_len = seq.len();
+    for q_idx in 0..seq_data.queries.len() {
+        let q_len = letters.length(q_idx);
         let plus_len = if plus_on { q_len } else { 0 };
         let minus_len = if minus_on { q_len } else { 0 };
         let plus_masks = if plus_on {
@@ -10412,7 +10436,6 @@ fn search_query_batch(
     // ```
     // The buffer is the one BLASTNA copy of the query contexts; the searched block is the
     // buffer without its first and last sentinel, and a context is a slice of it.
-    let query_letters: Vec<&[u8]> = seq_data.queries.iter().map(|r| r.seq()).collect();
     // EXPERIMENT (LOSAT_X_QPREPPAR): with the switch on and a search pool of two or more threads
     // the queries are encoded by the pool, each into its own part of the buffer; the buffer is
     // the same (`x_query_prep_par.rs`).
@@ -10423,14 +10446,14 @@ fn search_query_batch(
     // (`build_strand_query_blastna_buffer`); `both` is the code of the search without the option.
     let encoded_query_buffer = if strand == QueryStrand::Both {
         x_query_prep_par::query_buffer(
-            &query_letters,
+            &letters,
             &query_context_offsets,
             query_concat_length,
             parallel_pool,
         )
     } else {
         build_strand_query_blastna_buffer(
-            &query_letters,
+            &letters,
             &query_context_offsets,
             query_concat_length,
             strand,
@@ -10931,7 +10954,7 @@ fn search_query_batch(
     let split_prelim_lists = match stage {
         BatchStage::Search { query_offsets, .. } if any_valid_context => search_query_chunks(
             args,
-            &seq_data.queries,
+            &letters,
             &seq_data.query_masks,
             query_offsets,
             &query_eff_searchsp,
@@ -18269,7 +18292,7 @@ fn search_query_batch(
 #[allow(clippy::too_many_arguments)]
 fn search_query_chunks(
     args: &BlastnArgs,
-    queries: &[FastaRecord],
+    queries: &x_query_drop::Letters<'_>,
     query_masks: &[Vec<MaskedInterval>],
     query_offsets: &[usize],
     batch_eff_searchsp: &[i64],
@@ -18281,7 +18304,9 @@ fn search_query_chunks(
     first_batch: bool,
     x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
 ) -> Result<Option<PrelimHitLists>> {
-    let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
+    let lengths: Vec<usize> = (0..queries.count())
+        .map(|index| queries.length(index))
+        .collect();
     // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below it
     // (`calculate_num_chunks`); NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:
     // 145-171): NCBI stops with a CCoreException that names its build's files where a chunk
@@ -18305,8 +18330,8 @@ fn search_query_chunks(
     // (`query_split::chunk_would_be_split`). LOSAT searches each chunk once, as NCBI does
     // for every overlap that does not split a chunk again (approved exception 1 of
     // PD-LOSAT-NCBI-DEFECTS).
-    let mut merged: PrelimHitLists = Vec::with_capacity(queries.len());
-    merged.resize_with(queries.len(), || None);
+    let mut merged: PrelimHitLists = Vec::with_capacity(queries.count());
+    merged.resize_with(queries.count(), || None);
     for chunk in &chunks {
         // EXPERIMENT (LOSAT_X_QBATCHPAR): a cancelled slot's batch ends between query chunks.
         if x_qbatch_par::cancelled(parallel_pool) {
@@ -18321,7 +18346,7 @@ fn search_query_chunks(
         let parts: Vec<FastaRecord> = chunk
             .queries
             .iter()
-            .map(|part| queries[part.query].cut(part.from, part.to))
+            .map(|part| queries.cut(part.query, part.from, part.to))
             .collect();
         let restricted = chunk
             .queries
@@ -18716,7 +18741,7 @@ mod tests {
         let concat_len = at - 1;
         let (logical, with_sentinels) =
             query_buffers_from_context_copies(&queries, &offsets, concat_len);
-        let buffer = build_query_blastna_buffer(&queries, &offsets, concat_len);
+        let buffer = build_query_blastna_buffer(&queries[..], &offsets, concat_len);
         assert_eq!(buffer, with_sentinels);
         assert_eq!(&buffer[1..concat_len + 1], logical.as_slice());
         assert_eq!(
@@ -18785,13 +18810,16 @@ mod tests {
                 naive.push(NUCL_SENTINEL);
             }
             assert_eq!(naive.len(), concat_len + 2, "{strand:?}");
-            let buffer = build_strand_query_blastna_buffer(&queries, &offsets, concat_len, strand);
+            let buffer =
+                build_strand_query_blastna_buffer(&queries[..], &offsets, concat_len, strand);
             assert_eq!(buffer, naive, "{strand:?}");
         }
         // an empty query alone, and a single query, build a block of sentinels / its letters
-        let buffer = build_strand_query_blastna_buffer(&[b"AC"], &[0, 3], 2, QueryStrand::Plus);
+        let buffer =
+            build_strand_query_blastna_buffer(&[&b"AC"[..]][..], &[0, 3], 2, QueryStrand::Plus);
         assert_eq!(buffer, [NUCL_SENTINEL, 0, 1, NUCL_SENTINEL]);
-        let buffer = build_strand_query_blastna_buffer(&[b"AC"], &[0, 0], 2, QueryStrand::Minus);
+        let buffer =
+            build_strand_query_blastna_buffer(&[&b"AC"[..]][..], &[0, 0], 2, QueryStrand::Minus);
         assert_eq!(buffer, [NUCL_SENTINEL, 2, 3, NUCL_SENTINEL]);
     }
 

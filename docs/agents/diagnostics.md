@@ -21,7 +21,7 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   `_mm*_fnm*`, `vfmaq_*`, `vfmsq_*`), or the Wasm `relaxed-simd` feature (its `relaxed_madd`
   fuses or not depending on the engine). The Wasm builds enable `+simd128` only.
 - **One fused multiply-add**, `f64::mul_add` in `stats/spouge.rs::x_product_error`: the exact
-  rounding error of a product in the double-double emulation of the long-double line
+  rounding error of a product in the double-double emulation of `expl` in the long-double line
   `result *= expl(-z * z) / z` of NCBI's `boost_erf.c`. The other call is its test
   `x_dekker_product_error_matches_fused_multiply_add`. `mul_add` rounds once (IEEE 754
   fusedMultiplyAdd) on every target, so an instruction and a library routine give the same bits.
@@ -318,6 +318,7 @@ export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNQDROP=1
 export LOSAT_X_BNQPACK=1
+export LOSAT_X_BNQSLOTS=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BNTABPAR=1
@@ -348,6 +349,7 @@ export LOSAT_X_BPQBLOCKSA=1
 export LOSAT_X_BPQBLOCKWEB=1
 export LOSAT_X_BPQBLOCKXML=1
 export LOSAT_X_BPQBLOCKXML2=1
+export LOSAT_X_BPQSLOTS=1
 export LOSAT_X_BPREDODBSUBJ=1
 export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
@@ -2718,6 +2720,36 @@ Rebuilding less:
   In a `run_local` call with several outputs, hit records or an observer (`LOSAT_X_BPQBLOCKWEB`), an outfmt 13 to 16
   output does not take blocks (the run-level frame and carry were verified for one CLI-style output only): the
   format is recorded for `LOSAT_X_REACH` and the search of all queries runs (Owner-delegated 2026-10-22).
+- `LOSAT_X_BPQSLOTS=1` (BLASTP with the compressed lookup table: `-task blastp-fast`, or a word size above 4; speed; in the strict set from the pull request that added it,
+  2026-10-27, on unless it is `0`; acts only in the block search of `LOSAT_X_BPQBLOCK`) two query blocks searched at
+  a time on the search's pool, each block's report and messages written in block order
+  (`blastp/x_query_slots.rs`, exactness argument in its header). The block loop runs one block at a time on the
+  whole pool, and each block's stages end in joins with serial parts between them: in the human x yeast blastp-fast
+  search at 16 threads (Species4 x Species6 `-subject`, 254 blocks of about 18 ms) about 1.8 of the 16 threads
+  waited all the time, and most block ends drained the pool (line R `REPORT_R17.md` §3.1). With the switch two
+  drivers on the pool each take the next block and search it with the block loop's call; a thread that waits in
+  one block's join takes the other block's tasks. One form (two blocks: the block and the next one, whose whole
+  search runs beside it where `LOSAT_X_BPLKPAHEAD` builds only its table), with blocks of `2 x LOSAT_X_BPQBLOCK / 3`
+  letters (33,333 by default), so that the two tables in flight and the build of the next hold the letters of
+  the block loop's block and its table built ahead (the build's transient vectors are as large as a table:
+  78 appends of 4 bytes per query letter). No table is built ahead; each block keeps its table to its end and
+  gives its vectors to the spare that a later block's build takes (`LOSAT_X_BPLKPFLAT`). A driver takes a block
+  only while fewer than 4 blocks are searched or wait to be written, and the output is flushed after each
+  block, as the block loop flushes it. Where: a pool of more than one thread, one output that is not outfmt 11 (the archive carries state from
+  document to document) or 13 to 16 (`Xml2Carry`), no hit records and no observer, native and wasm32 with
+  `wasm-threads`; exact blastp's `AaLookupTable` keeps the block loop (its in-place builds share neighbour lists
+  that one build uses at a time). One thread runs the block loop unchanged. `LOSAT_TIMING`'s per-block lines of the two blocks come
+  interleaved. `LOSAT_X_STATS` prints `[X_STATS] BPQSLOTS searches=<n> blocks=<n>`. Reports identical; off =
+  `LOSAT_X_BPQSLOTS=0`. Evidence (workstation, dev 3a83c151 against the switch's pull request, 2026-10-27, v4-BPF
+  s7): 16 threads (node 1 CPUs 32-47, 3 alternating rounds, one output hash per case) Species4 x Species6 `-subject`
+  4.87 -> 4.56 s (x0.937; busy CPUs 13.3 -> 14.5), the first 3,000 Species4 proteins x Species6 `-subject` x0.945,
+  Species4 x Species6 `-db` 5.21 -> 4.87 s (x0.935), Species0 x Species3 `-db` 16.79 -> 15.16 s (x0.903); 8 threads
+  x0.969 / x0.983 / x0.966 / x0.941; one thread: instructions x1.0000. Instructions at 16 threads +1.8 % (the
+  smaller blocks scan the subjects more often). Max RSS (MiB, dev -> switch, NCBI 2.17.0): 16 threads 136 -> 156
+  (NCBI `-subject` 335), 110 -> 113 (166), 125 -> 141, 107 -> 165; 8 threads 131 -> 149, 99 -> 122, 121 -> 147,
+  97 -> 142; Species4 x Species6 `-db` at 2 / 4 threads 106 -> 134 / 117 -> 147 (NCBI 304 / 360). Three blocks of
+  50,000 letters were faster at 16 threads (x0.870 on the first case) but held 175 MiB on the 3,000 proteins, above
+  NCBI's 166; 16 one-thread blocks (x0.858) held 813 MiB.
 - `LOSAT_X_BPQBLOCKWEB=1` (BLASTP in `run_local`, the LOSAT Web build's search, speed and memory; in the strict set
   from the pull request that added it, 2026-10-22, on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search
   of `LOSAT_X_BPQBLOCK` also for a call with more than one output, the hit records or a format observer (ABI v2 of the
@@ -3471,6 +3503,38 @@ Scheduling (each value computed by one thread with the original function; order 
   batch, not packed): `instructions:u` x1.000. The 22.3 MB of packed letters replace 89.3 MB. Before the reader
   packed in place of its copy, packing after it with `PackedNucleotide` cost x1.020 (one thread) and x1.098 (`-db`,
   16 threads) of the time (plan v4 line A10 session 19).
+- `LOSAT_X_BNQSLOTS=1` (BLASTN, every task, `-subject`; in the strict set since 2026-10-27 (perf/bn-q-slots-packed,
+  evidence at the end of this entry): on unless it is `0`) the `LOSAT_X_BNQDROP` store also where `LOSAT_X_QBATCHPAR`
+  slots may run (`blastn/blast_engine/x_query_drop.rs`); with `=0` its rule refuses the store there and the records
+  read before the search keep all their letters to the end of the search, as before. Where slots may run,
+  `LOSAT_X_QSTREAM` refuses its second reading for a file shorter than the slots' window (`Off::Slots`), so the whole
+  query file was held (dc-megablast of 31,168 cDNAs at 32 threads: 86 MiB of a peak of 349). Memory only; no NCBI
+  counterpart (NCBI does not split `-subject` searches by queries). The store serves the slots: a slot that searches
+  a batch the loop has not taken copies its records out of the store with the packed letters of `LOSAT_X_BNQPACK`
+  (`Store::slot_batch`: shared with the store; the records of packed letters hold none), and its search makes a
+  record's letters for each reader that asks (`x_query_drop::Letters`, through `coordination::QueryLetters`:
+  WindowMasker, DUST, the lower-case masks, the encoding, a query chunk's cut), which drops them before its next
+  record, so no slot holds its batch's letters at once. (Making a slot's letters when it started held nine batches'
+  letters at once beside the packed store in dc-megablast of 15,600 cDNAs at 32 threads, and their freed space stayed
+  in the slots' arenas: peak `RssAnon` 748 -> 766 MiB, 740 -> 749 with `MALLOC_ARENA_MAX=1`.) The loop lends the
+  batch it takes to the slot that may still search it (`Store::lend`: any batch but the first while the slots may run, `Arc`-shared) until it has the
+  batch's result, the slot's or its own search once no slot runs (`Queries::unlend`, right after
+  `x_qbatch_par::Driver::take`). A lent batch the loop searches itself is held by the loop alone by then and drops
+  its letters after the encoding; a batch a slot searched keeps them until the loop is done with it, and the records
+  kept for a later writer lose theirs (no format of the rule reads them). The rule (class conditional, recorded where
+  `search_cli` decides): `LOSAT_X_QBATCHPAR`'s slots may run and the store's other conditions hold (the output
+  formats, no `-query_loc`, no hit records, the records read before the search). Letters are made on one thread: a
+  batch's take about 0.1 ms per million, while the pool's threads, waking for them while the slots hold the CPUs, took
+  0.17 s in all at 16 threads against 0.003 s on one (blastn of 5,000 cDNAs). Without the lending (a prototype) a slot
+  that started a batch after the loop took it out of the store found no records, was cancelled, and the plan queued
+  it again for ever while the loop waited for its result; the integration test runs with a deadline. Evidence (ws,
+  node 1, 2026-10-27, plan v4 line D sessions 19-21; the default against `=0` in one binary, order alternated, median
+  of the per-round ratios; `-subject` the first 3 Mb of D. melanogaster chromosome 2L; one sha per cell):
+  dc-megablast of 31,168 cDNAs at 32 threads peak `RssAnon` 341 -> 286 MiB (NCBI max RSS 313 MiB at one thread),
+  time x0.986 (0.960-0.997, 8 rounds); of 15,600 cDNAs at 32 threads 748 -> 729 MiB, x1.002 (0.966-1.028, 8; cycles
+  x1.001); at 16 threads 332 -> 304 MiB, x0.987; of 5,000 cDNAs at 16 threads 264 -> 260 MiB, x0.989; blastn of
+  4,000 / 5,000 cDNAs at 16 threads 217 -> 207 / 347 -> 338 MiB, x1.012 (cycles x0.999) / x1.004; of 31,168 cDNAs
+  at 16 / 32 threads 395 -> 396 / 522 -> 458 MiB, x0.993 / x0.999 (6 rounds each).
 - `LOSAT_X_GREEDYROWFUSE=1` (BLASTN megablast, the distances of the non-affine greedy alignment that `x_greedy_row` runs:
   every traceback, and the score-only calls the fused loop GREEDYFUSE declines; speed; in the strict set from the pull
   request that added it, 2026-10-24; `=0` runs `x_greedy_row_avx2`, the three passes) runs one distance in two passes per

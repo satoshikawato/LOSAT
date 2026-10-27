@@ -213,8 +213,10 @@ authoritative, current guidance for agent behavior in LOSAT.
 
 - A speed-up pull request's body names the structural cause the change removes (what allocates,
   copies, waits or rescans, and why), says whether the new form holds for every input, and lists the
-  inputs where it does not with their ratios. A body that only says "X is slow" or "X uses memory"
-  is not ready for review. Owner, 2026-10-27.
+  inputs where it does not with their ratios, and reports max RSS at one thread and at the measured
+  thread counts from one run (on glibc with a `MALLOC_ARENA_MAX=1` arm beside the default, since a
+  second arena alone moves max RSS by 10-20 MiB). A body that only says "X is slow" or "X uses
+  memory" is not ready for review. Owner, 2026-10-27.
 - No new conditional switch (a path that runs only under a rule) while these structural items are
   open: blastn's QBATCHPAR slots each holding a lookup table and a query-batch copy, one lookup table
   per parallel unit in blastx and tblastx, and tblastn's OID-order hand-back waits. A rule-limited

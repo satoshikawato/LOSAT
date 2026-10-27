@@ -16,6 +16,7 @@ exclude = [
     "**/*.pyc",
     "**/*.tmp",
     "**/*.orig",
+    "/matrix",
 ]
 
 [lib]

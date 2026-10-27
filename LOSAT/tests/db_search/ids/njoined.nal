@@ -1,0 +1,5 @@
+#
+# Alias file of line DBID, ID2b
+#
+TITLE njoined (two volumes, parsed Seq-ids)
+DBLIST njoined_a njoined_b

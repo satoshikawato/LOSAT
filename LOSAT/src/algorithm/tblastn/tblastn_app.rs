@@ -1286,11 +1286,17 @@ fn search(
         // `-db`: the reported sequences by rank, with their records and packed subjects; the
         // database's other sequences are dropped before the reports.
         let reported = match database {
-            Some(_) => Some(
-                super::database::reported_subjects(&titles, &mut results, search_letters)
-                    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): a read of a reported sequence that
-                    // failed: the run's error, as the check's error would be.
-                    .map_err(|error| x_read_failure(error).unwrap_or_else(|error| error))?,
+            Some(database) => Some(
+                super::database::reported_subjects(
+                    database,
+                    &titles,
+                    &mut results,
+                    search_letters,
+                    parsed_shown(&outputs.formats),
+                )
+                // EXPERIMENT (LOSAT_X_TBNDBSTREAM): a read of a reported sequence that
+                // failed: the run's error, as the check's error would be.
+                .map_err(|error| x_read_failure(error).unwrap_or_else(|error| error))?,
             ),
             None => None,
         };
@@ -1405,6 +1411,29 @@ fn search(
         return Err(error);
     }
     Ok(())
+}
+
+/// What the reports `formats` show of the reported database sequences, for LOSAT's refusals of
+/// those with parsed Seq-ids (`common::database::ParsedShown`): the tabular formats (6, 7),
+/// outfmt 0, and the formats that join the alignments of following hits whose Seq-align ids
+/// match (0, 5, 13 to 16).
+fn parsed_shown(
+    formats: &[crate::api::local_blast::FormatOutput<'_>],
+) -> crate::algorithm::common::database::ParsedShown {
+    let numbers: Vec<i32> = formats
+        .iter()
+        .map(|format| super::stage_e_report::format_number(&format.outfmt))
+        .collect();
+    let pairwise = numbers.contains(&0);
+    crate::algorithm::common::database::ParsedShown {
+        tabular: numbers.iter().any(|&number| number == 6 || number == 7),
+        pairwise,
+        joined: pairwise
+            || formats
+                .iter()
+                .any(|format| super::stage_e_report::is_structured_xml(&format.outfmt)),
+        sam: false,
+    }
 }
 
 #[cfg(test)]

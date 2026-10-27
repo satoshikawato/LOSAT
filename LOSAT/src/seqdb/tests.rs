@@ -578,9 +578,9 @@ fn databases_that_need_unread_data_are_rejected() {
         assert!(
             error.to_string().ends_with(&format!(
                 "{name}.phr: unsupported database: the database stores parsed Seq-ids \
-                 (makeblastdb -parse_seqids, or a database distributed by NCBI); LOSAT's blastp \
-                 and blastx read them, its other programs read databases built without \
-                 -parse_seqids only"
+                 (makeblastdb -parse_seqids, or a database distributed by NCBI); LOSAT's search \
+                 programs read them, its psiblast reads databases built without -parse_seqids \
+                 only"
             )),
             "{name}: {error}"
         );

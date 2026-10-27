@@ -246,12 +246,18 @@ pub(super) fn prepare(
             None => SubjectNames::of_record(record.local_id.as_bytes(), record.title(), false)
                 .map_err(|refusal| refusal.error(PROGRAM, "a subject title"))?,
             // The taxid is shown by XML2 alone (`taxa` is empty for the other formats).
-            Some(ordinal) => SubjectNames::of_database_sequence(
-                ordinal,
-                record.title(),
-                taxa.taxids.get(oid).copied().unwrap_or(0),
-                taxa.taxonomy.get(oid).cloned().unwrap_or_default(),
-            )
+            Some(ordinal) => match shown.parsed_subject(oid) {
+                Some(parsed) => SubjectNames::of_parsed(
+                    parsed,
+                    taxa.parsed_taxonomy.get(oid).map_or(&[], Vec::as_slice),
+                ),
+                None => SubjectNames::of_database_sequence(
+                    ordinal,
+                    record.title(),
+                    taxa.taxids.get(oid).copied().unwrap_or(0),
+                    taxa.taxonomy.get(oid).cloned().unwrap_or_default(),
+                ),
+            }
             .map_err(|refusal| refusal.error(PROGRAM, "a database title"))?,
         });
         // The whole record (`-subject_loc` searches part of it).

@@ -1640,6 +1640,54 @@ impl CompressedWordCount {
         true
     }
 
+    /// PROBE (v4-BPF s8, LOSAT_BPF_S8WF): `words` with the counts kept in `shared`, a table of
+    /// `(sorted letters << 28) | count` entries that the threads of a check share (a slot holding
+    /// another word's letters is counted again and overwritten).
+    fn x_words_shared(&mut self, word: &[u8], shared: &[std::sync::atomic::AtomicU64]) -> u64 {
+        use std::sync::atomic::Ordering;
+        let mut sorted = [0u8; 8];
+        for (to, &residue) in sorted.iter_mut().zip(word) {
+            let compressed = self.compress_table.get(usize::from(residue));
+            if compressed.is_none_or(|&c| usize::from(c) >= self.compressed_alphabet_size) {
+                return 0;
+            }
+            *to = residue;
+        }
+        let sorted = &mut sorted[..word.len()];
+        sorted.sort_unstable();
+        let key = sorted
+            .iter()
+            .fold(0u64, |key, &residue| key << 5 | u64::from(residue));
+        let slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 47) as usize & (shared.len() - 1);
+        let entry = shared[slot].load(Ordering::Relaxed);
+        if entry >> 28 == key {
+            return entry & ((1 << 28) - 1);
+        }
+        let words = self.count(word);
+        shared[slot].store(key << 28 | words, Ordering::Relaxed);
+        words
+    }
+
+    /// PROBE (v4-BPF s8): `fits_banks` with the shared counts.
+    pub(crate) fn x_fits_banks_shared(
+        &mut self,
+        queries: &mut dyn Iterator<Item = &[u8]>,
+        shared: &[std::sync::atomic::AtomicU64],
+    ) -> bool {
+        let limit = (COMPRESSED_HITS_PER_OVERFLOW_CELL as u64)
+            .saturating_mul(NCBI_OVERFLOW_CELL_CAPACITY as u64);
+        let mut words = 0u64;
+        for query in queries {
+            for word in query.windows(self.word_length) {
+                words = words.saturating_add(self.x_words_shared(word, shared));
+                if words > limit {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
     /// Whether no table whose words are some of the words of `queries`' offsets can fill NCBI's
     /// overflow banks: a query batch's table, or the table of one of its query chunks (whose
     /// parts are pieces of the batch's queries). `false` when their words are more than four

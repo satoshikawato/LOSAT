@@ -279,8 +279,8 @@ their variables mean
   one block (see its entry), and
   `BPQBLOCKFMT`, `BPQBLOCKSA`, `BPQBLOCKXML`, `BPQBLOCKXML2` and `BPQBLOCKWEB` act only with `BPQBLOCK`; `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
   `TBXNEXT` only in TBLASTX's parallel subject loop (2 or more threads, several subjects; native
-  builds and the threaded Wasm module); `TBXBOARD` only in that loop in a native build, for a batch on
-  the unit path with at most as many subjects as threads; `BPCLUT` acts on `blastp -task blastp-fast` only, and `BPLKPFLAT` only where the search's pool
+  builds and the threaded Wasm module); `TBXBOARD` in native builds with 2 or more threads (every batch: one
+  subject, or several in `TBXNEXT`'s loop); `BPCLUT` acts on `blastp -task blastp-fast` only, and `BPLKPFLAT` only where the search's pool
   builds the flat table of `BPCLUT` (`BPCLUT` on, 2 or more threads), so with `BPCLUT=0` it changes
   nothing.
 - White space around a value is ignored (`set LOSAT_X_BPSUBJRUN=0 && ...` in cmd.exe stores `0 `).
@@ -2562,16 +2562,18 @@ Rebuilding less:
   16 threads, a one-genome pair at 8) are equal in time and memory. The memory cost is the next batch's
   tables and HSPs while the batch before links (up to +38 MiB at 4 threads here).
 - `LOSAT_X_TBXBOARD=1` (TBLASTX, speed; in the strict set from the pull request that added it,
-  2026-10-27; `=0` turns it off; acts in a native build with two or more threads, for a query batch whose
-  subjects run in `LOSAT_X_TBXNEXT`'s loop on the unit path (`LOSAT_X_PAIRPAR`, not the serial chunk scan)
-  with 2 to `-num_threads` subjects; otherwise the batch runs as before) one work board per search
+  2026-10-27; `=0` turns it off; acts in a native build with two or more threads on every query batch: one
+  subject, or several in `LOSAT_X_TBXNEXT`'s loop (with `LOSAT_X_TBXNEXT=0` a batch of several subjects
+  runs as before); no size or count rule) one work board per search
   (`tblastx/x_work_board.rs`, exactness argument in its header) hands out the batch's pure work items:
   every linking call's groups (`x_link_slices.rs` `x_link_board`), the chunk sorts and merges of a chain's
   stable sorts of at least the parallel size (`x_link_sort.rs` `x_board_sort`), a subject's frame merges
   (`x_kmerge.rs`), and the subjects' units (`x_pair_par.rs` `run_units`), in that order: groups, sorts and
-  merges of any batch first, then units by batch and subject index. A subject's thread puts its units on
-  the board and takes items until its units are all taken, then blocks until the units others took have
-  run; a thread of the subject loop without a subject takes items until the batch's units are all taken;
+  merges of any batch first, then units by batch and subject index (a batch without the unit path has
+  only groups, merges and sorts). A subject's thread puts its units on the board, with up to threads - 1
+  helper jobs that take that subject's units, and takes items until its units are all taken, then blocks
+  until the units others took have run; a thread of the subject loop without a subject takes items until
+  the batch's units are all taken;
   a chain's thread does the same with its groups and sorts, with `rayon::spawn` helpers that take one
   item each. An item makes no pool call and waits for nothing, so no thread waits in the pool and no
   subject's chain runs nested in another's: before, the chain of a batch that was not the last one

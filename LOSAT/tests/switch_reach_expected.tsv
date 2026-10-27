@@ -154,7 +154,7 @@ LOSAT_X_TBNUNGAP	tblastn	conditional	required	required	matrix BLOSUM62 (the defa
 LOSAT_X_TBNUNITXLATE	tblastn	conditional	gap	required	a packed subject whose plan is made for its search alone (the search keeps no TBNSSIDE plans), first frame of 1 MiB or more (3,145,722+ bases); new gap: no CI subject is that long (unit tests on 15 and 30 Mb stores and tests/tblastn_unit_xlate.rs cover it)
 LOSAT_X_TBNXLATESIMD	tblastn	platform			AVX2 vector loop only on x86 AVX2; packed subjects (-db and -subject)
 LOSAT_X_TBXBAND	tblastx	conditional	required	gap	only batches the old guard rejected (query/subject chunk lengths near table sizes); memory rule x_band_fits; ref gap: needs a batch the old guard rejects with a subject chunk longer than the table (short query x multi-Mb subject)
-LOSAT_X_TBXBOARD	tblastx	conditional	required	required	native, 2+ threads, a batch in TBXNEXT's loop on the unit path with 2 to num_threads subjects; ref = 1 thread, one subject, more subjects than threads, the serial chunk scan
+LOSAT_X_TBXBOARD	tblastx	conditional	required	required	native, 2+ threads: every batch (one subject, or several in TBXNEXT's loop); no size or count rule; ref = 1 thread (no pool), TBXNEXT=0 with several subjects, LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS
 LOSAT_X_TBXEXTBATCH	tblastx	conditional	gap	required	x86-64 only; only units with query-group span >=256 Ki letters (query ~>0.8 Mb); window >= wordsize+16; new gap: needs a query-group span >= 256 Ki letters (query ~0.8 Mb), x86-64
 LOSAT_X_TBXHITBF	tblastx	conditional	required	required	only units of the PAIRPAR unit path (gated by size) with 1<=wordsize<window; not under LOSAT_TIMING/STATS
 LOSAT_X_TBXKMERGE	tblastx	conditional	required	required	only where PAIRPAR unit path runs (gated by query size)

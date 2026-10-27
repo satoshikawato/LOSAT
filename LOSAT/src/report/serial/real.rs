@@ -23,7 +23,7 @@
 //! no `f64` formatting of the Rust standard library is involved and every platform prints the
 //! same bytes.
 
-use super::x87::X87;
+use crate::utils::x87::X87;
 
 /// `DBL_DIG`: the digits every `WriteDouble` of the ASN.1 text, ASN.1 binary, JSON and XML
 /// object streams passes to the digit generator.

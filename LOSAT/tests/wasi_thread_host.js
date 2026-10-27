@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const os = require("node:os");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
-const { inspectArtifact, unsignedWasiImports, createSharedMemory } = require("./wasi_artifact");
+const { inspectArtifact, prepareArtifact, unsignedWasiImports, createSharedMemory } = require("./wasi_artifact");
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Keep the parallel command's memory operations valid across V8 isolates.
@@ -589,7 +589,35 @@ async function terminateWorkers(workers) {
 // Host-owned lifecycle records count attempts, ready confirmations, and real exit
 // events separately. Test-only failure injection never changes search behavior.
 async function createThreadHost(wasmPath, kind, argv = [], options = {}) {
-  return (await prepareThreadHost(wasmPath, kind)).create(argv, options);
+  // LOSAT_WASI_PRESPAWN: a command's standby workers start booting here, while the module is
+  // read, guarded and compiled, and get the module and the memory once they exist (`early`).
+  // Booting one is most of a thread's start (Node's worker bootstrap: 0.1-0.3 s for 15 workers at
+  // once), so they no longer start only after the compile.
+  const early = kind === "threaded-command" && !recycleWorkers(kind)
+    ? bootEarlyWorkers(prespawnCount(argv), options.fault) : [];
+  try {
+    return await (await prepareThreadHost(wasmPath, kind)).create(argv, early.length ? { ...options, early } : options);
+  } catch (err) {
+    await terminateWorkers(new Set(early.map(slot => slot.worker)));
+    throw err;
+  }
+}
+
+// LOSAT_WASI_PRESPAWN (createThreadHost): `count` standby workers created before the module is
+// compiled; each boots and waits for its `init` message from prespawnWorkers. Fewer when a worker
+// cannot be created (prespawnWorkers creates the rest as before).
+function bootEarlyWorkers(count, fault) {
+  const early = [];
+  for (let index = 0; index < count; index++) {
+    const control = new SharedArrayBuffer(4 * START_WORDS);
+    let worker;
+    try {
+      worker = new Worker(__filename, { workerData: { control, standby: index, early: true, fault: fault || null } });
+    } catch { break; }
+    worker.unref();
+    early.push({ worker, control });
+  }
+  return early;
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -601,12 +629,23 @@ async function createThreadHost(wasmPath, kind, argv = [], options = {}) {
 async function prepareThreadHost(wasmPath, kind) {
   const start = performance.now();
   const bytes = fs.readFileSync(wasmPath);
-  const identity = inspectArtifact(bytes, kind);
+  // One compile: the identity (imports, exports) is read from the guarded module, whose imports
+  // and exports are the input's (the guard rewrites only memory.fill and memory.copy), instead of
+  // compiling the input too (about 40 ms for the 9 MB command). An input that cannot be guarded
+  // or compiled is inspected first, so that an artifact of another kind is refused as before.
+  const inputSha256 = sha256(bytes);
   const inspected = performance.now();
-  const guarded = guardSharedMemoryCached(bytes, identity.sha256);
-  const guardedAt = performance.now();
-  const module = await WebAssembly.compile(guarded.bytes);
-  const timings = { validation_including_raw_compile_seconds: (inspected-start)/1000, guard_seconds: (guardedAt-inspected)/1000,
+  let guarded, module, guardedAt;
+  try {
+    guarded = guardSharedMemoryCached(bytes, inputSha256);
+    guardedAt = performance.now();
+    module = await WebAssembly.compile(guarded.bytes);
+  } catch (err) {
+    inspectArtifact(bytes, kind);
+    throw err;
+  }
+  const identity = prepareArtifact(bytes, kind, module, inputSha256).identity;
+  const timings = { read_and_hash_seconds: (inspected-start)/1000, guard_seconds: (guardedAt-inspected)/1000,
     guarded_compile_seconds: (performance.now()-guardedAt)/1000 };
   debug(`shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies`);
   return { identity, timings, create: (argv = [], options = {}) =>
@@ -771,11 +810,18 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
         event("standby_spawned", { standby: index });
         continue;
       }
-      const control = new SharedArrayBuffer(4 * START_WORDS);
+      // An early worker (createThreadHost) has booted meanwhile and gets what it instantiates now.
+      const early = options.early ? options.early[index] : undefined;
+      const control = early ? early.control : new SharedArrayBuffer(4 * START_WORDS);
       let worker;
       try {
-        worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
-          control, files, standby: index, fault: options.fault || null } });
+        if (early) {
+          worker = early.worker;
+          worker.postMessage({ module, wasmPath, args, memory: mainMemory, files });
+        } else {
+          worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
+            control, files, standby: index, fault: options.fault || null } });
+        }
       } catch (err) { event("standby_rejected", { standby: index, error: String(err) }); return; }
       worker.unref();
       const slot = { index, worker, control, tid: null };
@@ -832,7 +878,10 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
 module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir };
 
 if (!isMainThread) {
-  const { module: workerModule, wasmPath, args, memory, control, files, fault, standby, recycle } = workerData;
+  const { control, fault, standby, recycle, early } = workerData;
+  // An early worker (createThreadHost) boots before the module and the memory exist and gets
+  // them in one message (`init`) from prespawnWorkers.
+  let { module: workerModule, wasmPath, args, memory, files } = workerData;
   // A standby worker (LOSAT_WASI_PRESPAWN) learns its tid and startArg from its start order,
   // and so does a recycled worker (LOSAT_WASI_RECYCLE) for every thread after its first.
   let { startArg, tid } = workerData;
@@ -854,6 +903,10 @@ if (!isMainThread) {
       debug(`worker boot ${name}`);
       if (fault === "startup-timeout") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
       if (fault === "startup-error") throw new Error("injected worker startup error");
+      if (early) {
+        ({ module: workerModule, wasmPath, args, memory, files } =
+          await new Promise(resolve => parentPort.once("message", resolve)));
+      }
       const module = workerModule || await compileThreadedModule(wasmPath);
       const spawnThread = () => -1;
       const view = new Int32Array(control);

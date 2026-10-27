@@ -796,6 +796,74 @@ pub(crate) fn search_core(
             chunks
         };
         super::x_timing::batch(XBatch::ChunksPar, x_t);
+        // Dispatch point (LOSAT_X_BXCHUNKCROSS, in the strict set): where the loop below would
+        // search two or more chunks one after another, each with the subject flow, they run as one
+        // flow of tasks across the chunks; each chunk's setup is made by the loop's statements
+        // below, the sink sees the chunks and subjects in the loop's order (x_subject_flow.rs).
+        #[cfg(feature = "parallel")]
+        let chunks = match x_subject_flow::crosses_chunks(
+            pool,
+            diagnostics,
+            options,
+            subjects,
+            chunks.len(),
+        ) {
+            Some(x_k) => {
+                if x_raw_params.take().is_some() {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BXKAONCE", false);
+                }
+                let x_parts = x_bx_mem::cross_build_parts(pool);
+                let fixed_spaces = &spaces;
+                let x_chunks = &chunks;
+                let x_make = |c: usize| -> Result<Option<x_subject_flow::XChunkSetup>> {
+                    let x_t = super::x_timing::lap();
+                    let batch = &x_chunks[c].prepared;
+                    let mut params = score_block(batch);
+                    if !params.iter().any(|p| p.valid) {
+                        return Ok(None);
+                    }
+                    let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
+                    let last = batch.contexts.last().expect("BLASTX contexts");
+                    let length = last.offset + last.length;
+                    let table = Diagonals::new(length, options.window_size)?;
+                    let xdrop = subject_parameters(
+                        batch,
+                        &mut params,
+                        options,
+                        db_length,
+                        db_count,
+                        min_subject_length,
+                        Some(fixed_spaces),
+                    )?;
+                    super::x_timing::batch(XBatch::Lookup, x_t);
+                    Ok(Some(x_subject_flow::XChunkSetup {
+                        params,
+                        lookup,
+                        xdrop,
+                        table,
+                        length,
+                    }))
+                };
+                let x_t = super::x_timing::lap();
+                call += x_subject_flow::run_chunks(
+                    x_k,
+                    x_chunks,
+                    &x_make,
+                    subjects,
+                    options,
+                    pool.threads() - 1,
+                    x_bx_mem::diag_keep(options, subjects),
+                    db_length,
+                    x_containment,
+                    x_bx_mem::in_capped_batch(pool),
+                    is_split,
+                    sink,
+                )?;
+                super::x_timing::batch(XBatch::ScanPar, x_t);
+                Vec::new()
+            }
+            None => chunks,
+        };
         for chunk in chunks {
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-244
             // ```c++

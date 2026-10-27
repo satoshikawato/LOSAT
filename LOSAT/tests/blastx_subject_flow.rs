@@ -270,12 +270,16 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
         reference.iter().filter(|&&b| b == b'\n').count() > 20,
         "too few hits to test"
     );
-    // (threads, environment, flow loops): in order at 2 and 8 threads; side by side at 16 threads
-    // and with the switch off; with LOSAT_X_BXSUBJFLOW=0 the chunks run side by side (2 threads)
-    // with the waves.
+    // (threads, environment, flow loops): in order at 2 and 8 threads, as one flow across the
+    // three chunks (LOSAT_X_BXCHUNKCROSS), or one flow per chunk with that switch off; side by side
+    // at 16 threads and with LOSAT_X_BXCHUNKFLOW off; with LOSAT_X_BXSUBJFLOW=0 the chunks run
+    // side by side (2 threads) with the waves.
     for (threads, env, loops) in [
-        (2, &[][..], 3),
-        (8, &[][..], 3),
+        (2, &[][..], 1),
+        (8, &[][..], 1),
+        (3, &[("LOSAT_X_BXBUILDPAR", "0")][..], 1),
+        (2, &[("LOSAT_X_BXCHUNKCROSS", "0")][..], 3),
+        (8, &[("LOSAT_X_BXCHUNKCROSS", "0")][..], 3),
         (16, &[][..], 0),
         (2, &[("LOSAT_X_BXCHUNKFLOW", "0")][..], 0),
         (2, &[("LOSAT_X_BXSUBJFLOW", "0")][..], 0),
@@ -296,17 +300,21 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
             assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 162);
         }
     }
-    // The flow's shadow compares every task of the three chunks.
-    let (report, stderr) = blastx(&query, &args, 3, &[("LOSAT_X_BXSUBJFLOWSHADOW", "1")]);
-    assert!(report == reference);
-    assert!(
-        stderr.contains("[X_SHADOW] BXSUBJFLOW tasks_compared=162 (subject results identical)"),
-        "{stderr}"
-    );
+    // The flow's shadow compares every task of the three chunks, across the chunks and per chunk.
+    for env in [&[][..], &[("LOSAT_X_BXCHUNKCROSS", "0")][..]] {
+        let mut env = env.to_vec();
+        env.push(("LOSAT_X_BXSUBJFLOWSHADOW", "1"));
+        let (report, stderr) = blastx(&query, &args, 3, &env);
+        assert!(report == reference);
+        assert!(
+            stderr.contains("[X_SHADOW] BXSUBJFLOW tasks_compared=162 (subject results identical)"),
+            "{stderr}"
+        );
+    }
     // A `-subject` file takes the same rule.
     let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
     let (reference, _) = blastx(&query, &args, 1, &[]);
-    for (threads, loops) in [(4, 3), (16, 0)] {
+    for (threads, loops) in [(4, 1), (16, 0)] {
         let (report, stderr) = blastx(&query, &args, threads, &[("LOSAT_TIMING", "1")]);
         assert!(
             report == reference,

@@ -32,10 +32,10 @@
 //! two slots and corrupted predictions (`LOSAT_X_QBATCHPARMISS`), where the slots stop partway and
 //! the loop keeps its table from then on. The subject is LC738868.
 //!
-//! `LOSAT_X_MBCHAINKEEP` (in the strict set from 2026-10-27, on unless it is `0`) keeps the chains
-//! of the 3-byte tables (`LOSAT_X_MB24`) from batch to batch as well, while a later batch may build
-//! a table of 4^12 cells: the genomes' last three tables take the chains the one before gave back
-//! (`chains_kept=` of the keep line), with the same report as with the switch off.
+//! `LOSAT_X_MBCHAINKEEP` (in the strict set from 2026-10-27, on unless it is `0`) makes the keep
+//! the tables' chains (`next_pos`) workspace too, while a later batch or query chunk follows: the
+//! genomes' last three tables take the chains the one before gave back (`chains_kept=` of the keep
+//! line), with the same report as with the switch off.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -268,10 +268,10 @@ fn megablast_runs_the_prefault_round_on_fresh_tables_only() {
     assert_eq!(field(&stderr, ONCE, "prefault_rounds="), fresh, "{stderr}");
 }
 
-// The four genomes' tables of 4^12 cells (3-byte elements), one per batch: the last three take the
-// chains the one before gave back (the last frees its own), at 4 threads (the pool fill's exact
-// 3-byte stores) and at one (the serial fill's 4-byte stores), with the report of the search with
-// `LOSAT_X_MBCHAINKEEP=0`, which keeps none.
+// The four genomes' tables of 4^12 cells (3-byte elements, `LOSAT_X_MB24`), one per batch: the last
+// three take the chains the one before gave back (the last frees its own), at 4 threads (the pool
+// fill's exact 3-byte stores) and at one (the serial fill's 4-byte stores), with the report of the
+// search with `LOSAT_X_MBCHAINKEEP=0`, which keeps none.
 #[test]
 fn megablast_tables_take_the_kept_chains() {
     for threads in [4, 1] {

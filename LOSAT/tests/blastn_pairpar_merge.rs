@@ -1,6 +1,6 @@
-//! The merge of a partitioned seed stage putting the stage's hits in key order strip by strip on
-//! the pool (`LOSAT_X_PAIRPARMERGE`, `src/algorithm/blastn/blast_engine/x_pair_seed_part.rs`) on
-//! whole searches.
+//! The merge of a partitioned seed stage putting the stage's hits in key order strip by strip, on
+//! the pool in ranges of strips (`LOSAT_X_PAIRPARMERGE`,
+//! `src/algorithm/blastn/blast_engine/x_pair_seed_part.rs`), on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is `0`.
 //! It changes how the hits of a stage are put in the order of their keys, not the order, so the

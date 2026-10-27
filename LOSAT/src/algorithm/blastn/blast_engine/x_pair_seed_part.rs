@@ -151,9 +151,9 @@ fn home_on() -> bool {
 }
 
 /// No NCBI counterpart: reads LOSAT_X_PAIRPARMERGE once (a strict-set switch: on unless it is
-/// `0`): the merge of a partitioned stage on a pool puts the stage's hits in key order strip by
-/// strip, in ranges of strips on the pool (`hits_by_strips`), instead of with one sort of all of
-/// them. It does not change any value NCBI computes.
+/// `0`): the merge of a partitioned stage puts the stage's hits in key order strip by strip, on a
+/// pool in ranges of strips (`hits_by_strips`), instead of with one sort of all of them. It does
+/// not change any value NCBI computes.
 fn merge_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PAIRPARMERGE"))
@@ -1722,7 +1722,7 @@ mod tests {
     // the order of `merge`'s sort of all of them (the same states): random stages of 1 to 9
     // partitions whose keys ascend, 1 to 300 strips, strips without hits, an empty partition.
     #[test]
-    fn hits_by_strips_on_a_pool_is_the_sort_of_merge() {
+    fn hits_by_strips_is_the_sort_of_merge() {
         let mut rng = Lcg(0xA15_5EED);
         let mut runs: Vec<(u64, u32, u32)> = Vec::new();
         let pools: Vec<rayon::ThreadPool> = [2, 3, 8]

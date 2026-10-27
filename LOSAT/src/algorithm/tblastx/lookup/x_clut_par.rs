@@ -166,9 +166,24 @@ pub(super) fn x_try_build_flat_in_pool(
     let threads = pool.threads();
     // PROBE (v4-BPF s8): LOSAT_BPF_S8TURN=1 lets one build at a time run (blocks in flight).
     static TURN: Mutex<()> = Mutex::new(());
-    let turn = (!x_flat_args.x_ahead
-        && crate::algorithm::blastp::x_query_slots::x_s8_env("LOSAT_BPF_S8TURN") == Some(1))
-    .then(|| TURN.lock().unwrap_or_else(PoisonError::into_inner));
+    // LOSAT_BPF_S8TURN=2: the waiting driver runs the pool's jobs (rayon::yield_now) meanwhile.
+    let turn_mode = crate::algorithm::blastp::x_query_slots::x_s8_env("LOSAT_BPF_S8TURN");
+    let turn = (!x_flat_args.x_ahead && matches!(turn_mode, Some(1 | 2))).then(|| {
+        if turn_mode == Some(1) {
+            return TURN.lock().unwrap_or_else(PoisonError::into_inner);
+        }
+        loop {
+            match TURN.try_lock() {
+                Ok(guard) => return guard,
+                Err(std::sync::TryLockError::Poisoned(poisoned)) => return poisoned.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    if !matches!(rayon::yield_now(), Some(rayon::Yield::Executed)) {
+                        std::hint::spin_loop();
+                    }
+                }
+            }
+        }
+    });
     crate::algorithm::blastp::x_query_slots::x_s8_log("build0", query.len(), 0);
     let build = |passes, spare, x_ahead| {
         pool.install(|| {

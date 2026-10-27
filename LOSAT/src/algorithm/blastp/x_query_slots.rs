@@ -316,6 +316,21 @@ pub(crate) fn x_search_in_slots(
         failed: None,
     });
     let written = Condvar::new();
+    // PROBE (v4-BPF s8): every driver starts before any takes a block (the fix of fix/bp-slots-start).
+    let drivers = slots.min(blocks).min(pool.threads()).max(1);
+    let started = std::sync::atomic::AtomicUsize::new(0);
+    let wait_for_every_driver = || {
+        started.fetch_add(1, Ordering::AcqRel);
+        let mut idle = 0u32;
+        while started.load(Ordering::Acquire) < drivers {
+            idle = idle.saturating_add(1);
+            if idle < 128 {
+                std::hint::spin_loop();
+            } else {
+                std::thread::yield_now();
+            }
+        }
+    };
     let driver = || loop {
         let _stop = XPanicStop {
             stop: &stop,
@@ -376,8 +391,11 @@ pub(crate) fn x_search_in_slots(
     };
     pool.install(|| {
         rayon::scope(|scope| {
-            for _ in 0..slots.min(blocks) {
-                scope.spawn(|_| driver());
+            for _ in 0..drivers {
+                scope.spawn(|_| {
+                    wait_for_every_driver();
+                    driver()
+                });
             }
         })
     });

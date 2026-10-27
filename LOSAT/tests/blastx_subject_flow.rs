@@ -235,7 +235,10 @@ fn the_flow_takes_the_subject_loop() {
         &query,
         &args,
         2,
-        &[("LOSAT_TIMING", "1"), ("LOSAT_X_REACH", reach_text.as_str())],
+        &[
+            ("LOSAT_TIMING", "1"),
+            ("LOSAT_X_REACH", reach_text.as_str()),
+        ],
     );
     assert!(report == reference);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 1);

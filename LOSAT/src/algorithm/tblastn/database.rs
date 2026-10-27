@@ -45,7 +45,8 @@ pub(super) const PROGRAM: &str = "TBLASTN";
 pub(super) struct TblastnDatabase {
     db: SeqDb,
     name: String,
-    /// The taxonomy database of the run, opened by the XML2 and JSON formats only.
+    /// The taxonomy database of the run, opened by the XML2 and JSON formats and by the
+    /// batches' prefetch of outfmt 0, 5, 6 and 7 (`prefetch_messages`).
     taxdb: shared::TaxdbRun,
 }
 
@@ -143,6 +144,35 @@ impl TblastnDatabase {
             parsed_taxonomy,
             notes,
         })
+    }
+
+    /// Whether `taxdb.bti` is on the search path, asked once for the run
+    /// (`shared::TaxdbRun::found`): the batches' prefetch reads the taxonomy database only then
+    /// (`prefetch_messages`).
+    pub(super) fn taxdb_found(&self) -> bool {
+        self.taxdb.found(&self.db)
+    }
+
+    /// NCBI's messages about the taxonomy database when the query batch whose final hit lists
+    /// are `hitlists` (subjects named by rank, `reported_subjects`) prefetches the subjects it
+    /// reports (`shared::prefetch_messages`): the sequences with HSPs in them, the ones
+    /// `read_taxids` reads, with the definition lines of those with parsed Seq-ids. Empty, and
+    /// nothing read, without `taxdb.bti` on the search path. A taxonomy database that LOSAT
+    /// cannot read as NCBI does, and a header whose taxid does not decode, are refused.
+    pub(super) fn prefetch_messages(
+        &self,
+        reported: &ReportedSubjects,
+        hitlists: &[KappaResultHitList],
+    ) -> Result<Vec<u8>> {
+        let subjects = hitlists
+            .iter()
+            .flat_map(KappaResultHitList::lists)
+            .filter(|list| !list.hsps.hsps.is_empty())
+            .map(|list| {
+                let rank = list.oid as usize;
+                (reported.ordinals[rank], reported.parsed_subject(rank))
+            });
+        shared::prefetch_messages(&self.db, &self.taxdb, subjects, PROGRAM)
     }
 
     /// Every sequence of the database by ordinal id, packed
@@ -373,5 +403,111 @@ mod tests {
         );
         TblastnDatabase::open(&path("tests/seqdb/db/nucl_v4"), &settings)
             .expect("a database without parsed Seq-ids opens with SEQ_ID_PREFER_ACCESSION_OVER_GI");
+    }
+
+    /// The fixture database `name` of `tests/db_search`, with the taxonomy database variant
+    /// `taxdb` of `tests/seqdb/taxdb` (`None`: none) as `BLASTDB`, from the directory `cwd`.
+    fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> TblastnDatabase {
+        use crate::seqdb::alias::SearchPath;
+        let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+        let taxdb = taxdb.map(|variant| tests.join("seqdb/taxdb").join(variant));
+        let search =
+            SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
+        let path = tests.join("db_search").join(name);
+        TblastnDatabase {
+            db: SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap(),
+            name: name.to_string(),
+            taxdb: shared::TaxdbRun::default(),
+        }
+    }
+
+    /// The final hit list of one query whose lists name the sequences `lists` by ordinal id, each
+    /// with one HSP of the score given (0: no Seq-align, `KappaResultHitList::drop_zero_score_hsps`).
+    fn hitlist(lists: &[(i32, i32)]) -> KappaResultHitList {
+        use super::super::search_gapped::GappedHsp;
+        use super::super::stage_d_linking::{LinkedHsp, LinkedHspList};
+        use super::super::stage_d_results::KappaResultList;
+        let mut hitlist = KappaResultHitList::new(500).unwrap();
+        for &(oid, score) in lists {
+            let hsp = LinkedHsp {
+                context: 0,
+                hsp: GappedHsp {
+                    frame: 1,
+                    score,
+                    q_start: 0,
+                    q_end: 1,
+                    q_gapped_start: 0,
+                    s_start: 0,
+                    s_end: 1,
+                    s_gapped_start: 0,
+                },
+                num: 1,
+                evalue: 1e-9,
+                source_index: 0,
+            };
+            let list = KappaResultList {
+                oid,
+                hsps: LinkedHspList {
+                    hsps: vec![hsp],
+                    best_evalue: 1e-9,
+                },
+                payloads: Vec::new(),
+            };
+            assert!(hitlist.update(list).unwrap().is_none());
+        }
+        hitlist
+    }
+
+    // DBID item T: a batch's prefetch looks up the sequences that its reports show (an HSP with a
+    // Seq-align), once per volume and taxid over the batches of a run, and opens the taxonomy
+    // database at the run's first lookup; nothing without `taxdb.bti`. `x16_ntaxid_99990` (two
+    // sequences of taxid 99990) with `offset_last_past_end` (the last entry, 99990, is past the
+    // end of `taxdb.btd`), `x16_ntaxid` (taxid 9606) with `bad_magic`.
+    #[test]
+    fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
+        use super::super::x_subject_store::SubjectLetters;
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-tblastn-db-prefetch-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        // The reports of one batch of `queries` (the lists of each query), as the run makes them:
+        // the titles, the reported sequences by rank, then the batch's prefetch.
+        let text = |database: &TblastnDatabase, queries: &[&[(i32, i32)]]| -> String {
+            let stores = database.read_stores().unwrap();
+            let mut hitlists: Vec<KappaResultHitList> =
+                queries.iter().map(|&lists| hitlist(lists)).collect();
+            let mut titles = DatabaseTitles::new();
+            read_titles(database, &hitlists, 0, &mut titles).unwrap();
+            let reported = reported_subjects(
+                database,
+                &titles,
+                &mut hitlists,
+                SubjectLetters::Packed(&stores),
+                ParsedShown::default(),
+            )
+            .unwrap();
+            let messages = database.prefetch_messages(&reported, &hitlists);
+            String::from_utf8(messages.unwrap()).unwrap()
+        };
+        let database = open_with_taxdb("x16_ntaxid_99990", Some("offset_last_past_end"), &cwd);
+        assert!(database.taxdb_found());
+        // A sequence whose HSPs have no Seq-align is not fetched: the taxonomy database is not
+        // opened.
+        assert_eq!(text(&database, &[&[(0, 0)]]), "");
+        let offset = "Error: [tblastn] Error: Offset error at end of taxdb file.\n";
+        assert_eq!(text(&database, &[&[(0, 0)], &[(1, 50)]]), offset);
+        // The same volume and taxid in a later batch.
+        assert_eq!(text(&database, &[&[(0, 50), (1, 50)]]), "");
+        let database = open_with_taxdb("x16_ntaxid", Some("bad_magic"), &cwd);
+        assert_eq!(
+            text(&database, &[&[(1, 50), (0, 40)]]),
+            "Error: [tblastn] Error: Tax database file has wrong magic number.\n"
+        );
+        let database = open_with_taxdb("x16_ntaxid", None, &cwd);
+        assert!(!database.taxdb_found());
+        assert_eq!(text(&database, &[&[(0, 50), (1, 40)]]), "");
+        std::fs::remove_dir_all(&cwd).unwrap();
     }
 }

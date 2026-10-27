@@ -224,9 +224,8 @@ impl XBlock {
     }
 }
 
-/// the subjects of a `-db` search read in blocks
-/// (`subjects::Subjects::Stream`), with the block that the current pass or task has read, which
-/// the preliminary stage reads its subjects from.
+/// The subjects of a `-db` search read in blocks (`subjects::Subjects::Stream`), with the block
+/// that the current pass or task has read, which the preliminary stage reads its subjects from.
 #[derive(Clone, Copy)]
 pub(crate) struct XStream<'a> {
     pub(crate) db: &'a XStreamDb<'a>,
@@ -291,8 +290,8 @@ impl<'a> XStream<'a> {
     }
 }
 
-/// the blocks of one pass over the subjects in ascending order,
-/// read as the pass reaches them; the block before is dropped first.
+/// The blocks of one pass over the subjects in ascending order, read as the pass reaches them;
+/// the block before is dropped first.
 pub(crate) struct XPass<'a> {
     db: &'a XStreamDb<'a>,
     block: Option<XBlock>,
@@ -316,8 +315,8 @@ impl<'a> XPass<'a> {
     }
 }
 
-/// the lengths that the sink of one query batch reads of its
-/// subjects in its order, from windows of the index.
+/// The lengths that the sink of one query batch reads of its subjects in its order, from windows
+/// of the index.
 pub(crate) struct XCursor<'a> {
     db: &'a XStreamDb<'a>,
     first: usize,

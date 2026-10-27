@@ -130,6 +130,14 @@ impl BlastxDatabase {
                 first_too_long = Some((ordinal, length));
             }
         })?;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
+        // ```c
+        // /** Split subject sequences if longer than this */
+        // #define MAX_DBSEQ_LEN 5000000
+        // ```
+        // NCBI searches a longer subject in overlapping parts, which BLASTX does not port (the
+        // same limit stops `-subject` in `search::search_core`); the refusal belongs to the
+        // first batch with a valid context, as the reader's errors.
         if let Some((ordinal, length)) = first_too_long {
             return Err(too_long(ordinal as usize, length));
         }

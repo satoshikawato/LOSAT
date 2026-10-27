@@ -579,19 +579,22 @@ pub(crate) fn query_ungapped_karlin_blastna(
         return None;
     }
     let matrix = build_blastna_matrix(reward, penalty);
-    let mut probabilities = Vec::new();
+    // At most 16 residues x 4 bases: a fixed array in place of a vector grown for each query.
+    let mut probabilities = [(0i32, 0f64); 64];
+    let mut num_probabilities = 0usize;
     for (residue, &count) in counts.iter().enumerate() {
         if count == 0.0 {
             continue;
         }
         for base in 0..4 {
-            probabilities.push((matrix[residue * 16 + base], count / sum * 0.25));
+            probabilities[num_probabilities] = (matrix[residue * 16 + base], count / sum * 0.25);
+            num_probabilities += 1;
         }
     }
     let sfp = score_freq_profile_from_probabilities(
         penalty.min(reward),
         reward.max(penalty),
-        &probabilities,
+        &probabilities[..num_probabilities],
     );
     compute_karlin_params_ungapped(&sfp).ok()
 }

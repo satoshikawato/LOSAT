@@ -239,6 +239,12 @@ fn decode_words(bytes: &[u8], out: &mut [u32]) {
 /// Entries of an array that the check of `IndexFile::open` reads at once (1 MiB).
 const CHECK_CHUNK_ENTRIES: usize = 1 << 18;
 
+/// EXPERIMENT (LOSAT_X_BPDBKEEP): `CHECK_CHUNK_ENTRIES` with the switch (64 KiB): the check's
+/// buffers stay below glibc's first mmap threshold (128 KiB), so that freeing them does not raise
+/// it (`algorithm/blastp/blast_engine/database/x_db_keep.rs`). The size changes nothing but the
+/// number of reads.
+const X_KEEP_CHECK_CHUNK_ENTRIES: usize = 1 << 14;
+
 impl IndexFile {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:175-235
     // ```c++
@@ -410,7 +416,12 @@ impl IndexFile {
     /// in the file. The arrays are checked here, as `parse` checks them, with one pass that
     /// reads 1 MiB at a time; the errors are those of `parse`.
     pub fn open(file: DbFile, seqtype: SeqType) -> Result<Self, SeqDbError> {
-        Self::open_checked(file, seqtype, CHECK_CHUNK_ENTRIES)
+        let chunk_entries = if super::x_bp_db_keep() {
+            X_KEEP_CHECK_CHUNK_ENTRIES
+        } else {
+            CHECK_CHUNK_ENTRIES
+        };
+        Self::open_checked(file, seqtype, chunk_entries)
     }
 
     pub(super) fn open_checked(

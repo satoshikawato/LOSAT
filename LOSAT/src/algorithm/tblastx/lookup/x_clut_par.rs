@@ -198,7 +198,10 @@ pub(super) fn x_try_build_flat_in_pool(
                     max_appends: None,
                     threads,
                     chunk_sizes: &[],
-                    stripe_shift: None,
+                    // PROBE (v4-BPF s8): LOSAT_BPF_S8SHIFT sets the stripes' width (2^shift cells).
+                    stripe_shift: crate::algorithm::blastp::x_query_slots::x_s8_env(
+                        "LOSAT_BPF_S8SHIFT",
+                    ),
                     passes,
                     spare,
                     x_ahead,

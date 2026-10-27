@@ -151,23 +151,14 @@ fn home_on() -> bool {
 }
 
 /// No NCBI counterpart: reads LOSAT_X_PAIRPARMERGE once (a strict-set switch: on unless it is
-/// `0`): the merge of a partitioned stage on a pool puts the stage's hits in key order strip by
-/// strip, in ranges of strips on the pool (`hits_by_strips`), instead of with one sort of all of
-/// them. It does not change any value NCBI computes.
+/// `0`): the merge of a partitioned stage puts the stage's hits in key order strip by strip, on a
+/// pool in ranges of strips (`hits_by_strips`), instead of with one sort of all of them. It does
+/// not change any value NCBI computes.
 fn merge_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PAIRPARMERGE"))
 }
 
-/// No NCBI counterpart (scheduling only, LOSAT_X_PAIRPARMERGE): the fewest hits of a stage that
-/// `hits_by_strips` orders on the pool. A bound kept above the estimated crossover (starting the
-/// jobs of a scope takes tens of microseconds, the sort about 50 ns per hit) rather than a
-/// measured one; smaller stages keep the sort.
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-const MERGE_POOL_MIN_HITS: usize = 4096;
 /// No NCBI counterpart (scheduling only, LOSAT_X_PAIRPARMERGE): the ranges of strips per thread of
 /// the pool in `hits_by_strips` (more ranges than threads, so that a range with many hits does not
 /// hold the others back).
@@ -1237,16 +1228,27 @@ fn rebuild(scratch: &mut PartScratch, hash: &DiagHashTable, parts: usize) {
 /// of a partition ascend (it folds the strips in order, and a strip's seeds of the partition in
 /// their scan order, the counting sort of `produce` being stable; one hit per seed at most), and
 /// a key is (strip, position in the strip's scan order), so the hits of strip i are one run per
-/// partition, after those of the strips before i. Strip by strip, the runs are gathered and the
-/// few hits sorted (`hits_of_strips`); the strips are cut into ranges that the pool orders side
-/// by side, each range writing the slice of the output after the hits of the ranges before it.
-/// Returns `false`, having written nothing, where the switch is off, the stage is not on a pool
-/// of two threads or more, has one strip, or has fewer than `MERGE_POOL_MIN_HITS` hits (`merge`
-/// sorts them then).
-fn hits_by_strips(hits: &mut Vec<UngappedHit>, states: &[PartState], strips: usize) -> bool {
+/// partition, after those of the strips before i. Strip by strip, the runs are gathered (in
+/// `runs`) and the few hits sorted (`hits_of_strips`). On a pool of two threads or more, the
+/// strips of a stage of two strips or more are cut into ranges that the pool orders side by side,
+/// each range writing the slice of the output after the hits of the ranges before it; otherwise
+/// this thread goes through the strips. Every stage takes this path, whatever its number of hits:
+/// the stages of a search are either large (the blastn and blastn-short folds, tens to hundreds
+/// of thousands of hits, where the ranges on the pool take a third to a fifth of the sort's time)
+/// or small (the two-hit fold of dc-megablast and megablast's, at most a few thousand hits,
+/// where the pool's start costs tens of microseconds per stage, a ten-thousandth of the search).
+/// Returns `false`, having written nothing, where the switch is off (`merge` sorts the hits then).
+fn hits_by_strips(
+    hits: &mut Vec<UngappedHit>,
+    states: &[PartState],
+    strips: usize,
+    runs: &mut Vec<(u64, u32, u32)>,
+) -> bool {
     if !merge_on() {
         return false;
     }
+    // every stage takes the switch's path (once per stage)
+    crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARMERGE", true);
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1259,24 +1261,28 @@ fn hits_by_strips(hits: &mut Vec<UngappedHit>, states: &[PartState], strips: usi
         } else {
             1
         };
-        let total: usize = states.iter().map(|st| st.hits.len()).sum();
-        let own = threads >= 2 && strips >= 2 && total >= MERGE_POOL_MIN_HITS;
-        // (once per stage)
-        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARMERGE", own);
-        if own {
+        if threads >= 2 && strips >= 2 {
             hits_by_strips_on_pool(hits, states, strips, threads * MERGE_RANGES_PER_THREAD);
+            return true;
         }
-        own
     }
-    #[cfg(not(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    )))]
-    {
-        let _ = (hits, states, strips);
-        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARMERGE", false);
-        false
-    }
+    hits_by_strips_here(hits, states, strips, runs);
+    true
+}
+
+/// No NCBI counterpart (LOSAT_X_PAIRPARMERGE): `hits_by_strips` on this thread, the strips in
+/// order from each partition's first hit.
+fn hits_by_strips_here(
+    hits: &mut Vec<UngappedHit>,
+    states: &[PartState],
+    strips: usize,
+    runs: &mut Vec<(u64, u32, u32)>,
+) {
+    let mut cur = vec![0usize; states.len()];
+    hits.reserve(states.iter().map(|st| st.hits.len()).sum());
+    hits_of_strips(states, 0..strips, &mut cur, runs, |hit| hits.push(hit));
+    // every key is of one of the stage's strips
+    assert!(cur.iter().zip(states).all(|(&c, st)| c == st.hits.len()));
 }
 
 /// No NCBI counterpart (LOSAT_X_PAIRPARMERGE): `hits_by_strips` on the current pool with the
@@ -1353,10 +1359,6 @@ fn hits_by_strips_on_pool(
 /// No NCBI counterpart (LOSAT_X_PAIRPARMERGE): the hits of strips `strips` in key order, passed
 /// to `put`: for each strip, every partition's run of keys below the next strip's from `cur[p]`
 /// on (which moves past it) is gathered in `runs` and sorted (`hits_by_strips`).
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
 fn hits_of_strips(
     states: &[PartState],
     strips: std::ops::Range<usize>,
@@ -1420,8 +1422,8 @@ fn merge(
     apps: &mut Vec<(u64, u32, u32)>,
 ) {
     let parts = states.len();
-    // EXPERIMENT (LOSAT_X_PAIRPARMERGE): the same order strip by strip on the pool.
-    if !hits_by_strips(hits, states, strips) {
+    // EXPERIMENT (LOSAT_X_PAIRPARMERGE): the same order strip by strip (on the pool in ranges).
+    if !hits_by_strips(hits, states, strips, order) {
         order.clear();
         for (p, st) in states.iter().enumerate() {
             debug_assert_eq!(st.hits.len(), st.out.hit_keys.len());
@@ -1715,12 +1717,14 @@ mod tests {
     }
 
     // LOSAT_X_PAIRPARMERGE: `hits_by_strips_on_pool` on pools of 2, 3 and 8 threads, cut into 1,
-    // 2, 7, one per strip and more ranges than strips, puts the hits after those already in the
-    // list in the order of `merge`'s sort of all of them (the same states): random stages of 1 to
-    // 9 partitions whose keys ascend, 1 to 300 strips, strips without hits, an empty partition.
+    // 2, 7, one per strip and more ranges than strips, and `hits_by_strips_here` off a pool (its
+    // `runs` left over from the stage before), put the hits after those already in the list in
+    // the order of `merge`'s sort of all of them (the same states): random stages of 1 to 9
+    // partitions whose keys ascend, 1 to 300 strips, strips without hits, an empty partition.
     #[test]
-    fn hits_by_strips_on_a_pool_is_the_sort_of_merge() {
+    fn hits_by_strips_is_the_sort_of_merge() {
         let mut rng = Lcg(0xA15_5EED);
+        let mut runs: Vec<(u64, u32, u32)> = Vec::new();
         let pools: Vec<rayon::ThreadPool> = [2, 3, 8]
             .iter()
             .map(|&t| {
@@ -1788,6 +1792,13 @@ mod tests {
                     );
                 }
             }
+            let mut hits = before.clone();
+            hits_by_strips_here(&mut hits, &states, strips, &mut runs);
+            let got: Vec<usize> = hits.iter().map(|h| h.seed_q_off).collect();
+            assert_eq!(
+                got, want,
+                "round {round}: {parts} partitions, {strips} strips, this thread"
+            );
         }
     }
 

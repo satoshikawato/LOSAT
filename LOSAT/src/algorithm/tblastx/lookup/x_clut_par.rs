@@ -164,6 +164,12 @@ pub(super) fn x_try_build_flat_in_pool(
     x_flat_args: XFlatArgs<'_>,
 ) -> Option<XFlatBuild> {
     let threads = pool.threads();
+    // PROBE (v4-BPF s8): LOSAT_BPF_S8TURN=1 lets one build at a time run (blocks in flight).
+    static TURN: Mutex<()> = Mutex::new(());
+    let turn = (!x_flat_args.x_ahead
+        && crate::algorithm::blastp::x_query_slots::x_s8_env("LOSAT_BPF_S8TURN") == Some(1))
+    .then(|| TURN.lock().unwrap_or_else(PoisonError::into_inner));
+    crate::algorithm::blastp::x_query_slots::x_s8_log("build0", query.len(), 0);
     let build = |passes, spare, x_ahead| {
         pool.install(|| {
             x_try_build_flat_parallel_with(
@@ -200,6 +206,12 @@ pub(super) fn x_try_build_flat_in_pool(
     if matches!(built, Some(XFlatBuild::Table(_))) {
         X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
     }
+    let hits = match &built {
+        Some(XFlatBuild::Table(table)) => table.hits.len(),
+        _ => 0,
+    };
+    crate::algorithm::blastp::x_query_slots::x_s8_log("build1", query.len(), hits);
+    drop(turn);
     built
 }
 

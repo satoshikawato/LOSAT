@@ -32,7 +32,7 @@ mod seqalign;
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries searched in blocks of whole query batches.
 mod x_query_blocks;
 // EXPERIMENT (LOSAT_X_BPQSLOTS): blastp-fast's query blocks searched several at a time.
-mod x_query_slots;
+pub(crate) mod x_query_slots;
 // Redone HSP lists without spare room.
 mod x_redo_fit;
 // EXPERIMENT (LOSAT_X_BPREDOPAR): the composition-based redo with jobs

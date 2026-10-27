@@ -131,6 +131,33 @@ pub(crate) fn x_bp_qslots_print_summary() {
 )]
 pub(crate) const X_SLOTS: usize = 2;
 
+/// PROBE (v4-BPF s8): a numeric environment variable.
+pub(crate) fn x_s8_env(name: &str) -> Option<usize> {
+    std::env::var(name).ok()?.parse().ok()
+}
+
+/// PROBE (v4-BPF s8): with LOSAT_BPF_S8LOG=1, one stderr line per event: microseconds since the
+/// first event, the event, two numbers and the process's RssAnon (kB).
+pub(crate) fn x_s8_log(event: &str, a: usize, b: usize) {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    static START: OnceLock<std::time::Instant> = OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var("LOSAT_BPF_S8LOG").is_ok_and(|v| v == "1")) {
+        return;
+    }
+    let t = START.get_or_init(std::time::Instant::now).elapsed().as_micros();
+    let anon = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| {
+            status
+                .lines()
+                .find(|line| line.starts_with("RssAnon:"))
+                .and_then(|line| line.split_whitespace().nth(1)?.parse::<usize>().ok())
+        })
+        .unwrap_or(0);
+    eprintln!("S8\t{t}\t{event}\t{a}\t{b}\t{anon}");
+}
+
 // No NCBI counterpart: reads the LOSAT_X_BPQSLOTS switch once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BPQSLOTS): the number of blocks in flight (`X_SLOTS`), or `None` (off, or a
@@ -144,7 +171,7 @@ pub(crate) fn x_bp_qslots() -> Option<usize> {
         use std::sync::OnceLock;
         static ON: OnceLock<bool> = OnceLock::new();
         ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPQSLOTS"))
-            .then_some(X_SLOTS)
+            .then(|| x_s8_env("LOSAT_BPF_S8K").unwrap_or(X_SLOTS))
     }
     #[cfg(not(all(
         feature = "parallel",
@@ -158,6 +185,9 @@ pub(crate) fn x_bp_qslots() -> Option<usize> {
 /// EXPERIMENT (LOSAT_X_BPQSLOTS): the letters of a block (`x_query_blocks`'s `block_letters`) when
 /// `slots` blocks are in flight: `2 x block_letters / (slots + 1)`, at least 1.
 pub(crate) fn x_slot_letters(block_letters: usize, slots: usize) -> usize {
+    if let Some(letters) = x_s8_env("LOSAT_BPF_S8L") {
+        return letters;
+    }
     (block_letters.saturating_mul(2) / (slots + 1)).max(1)
 }
 
@@ -306,6 +336,7 @@ pub(crate) fn x_search_in_slots(
             state.taken += 1;
             state.taken - 1
         };
+        x_s8_log("take", index, 0);
         X_BLOCKS.fetch_add(1, Ordering::Relaxed);
         let mut report = Vec::new();
         let mut messages = Vec::new();
@@ -321,6 +352,7 @@ pub(crate) fn x_search_in_slots(
             };
             search_block(index, &mut outputs)
         };
+        x_s8_log("done", index, report.len());
         let error = result.err();
         if error.is_some() {
             stop.store(true, Ordering::Relaxed);
@@ -335,6 +367,7 @@ pub(crate) fn x_search_in_slots(
             },
         );
         state.write_ready();
+        x_s8_log("written", state.next, state.done.len());
         if state.failed.is_some() {
             stop.store(true, Ordering::Relaxed);
         }

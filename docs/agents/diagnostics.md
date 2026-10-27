@@ -320,6 +320,7 @@ export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNQDROP=1
 export LOSAT_X_BNQPACK=1
+export LOSAT_X_BNSHRINKFREE=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BNTABPAR=1
@@ -3322,6 +3323,21 @@ Scheduling (each value computed by one thread with the original function; order 
   traceback earlier and that traceback's medium buffers stay in the heap; with the threshold fixed
   (`MALLOC_MMAP_THRESHOLD_=131072`) the run reads 217.2 -> 217.0, and `LOSAT_X_BNLUTDROP=0` reads 217.5 as dev. Time:
   wall x0.997-1.001, cycles:u x0.991-1.000 and instructions:u x0.999-1.000 in every case.
+- `LOSAT_X_BNSHRINKFREE=1` (BLASTN, every task, `-subject` and `-db`; in the strict set since 2026-10-2x
+  (perf/bn-shrink-free, evidence at the end of this entry): on unless it is `0`) the largest buffers a query batch frees
+  are shrunk to one element before their free (`blastn/x_shrink_free.rs`): the CSR of a lookup table (`x_dc_csr::Csr`,
+  the discontiguous tables of `LOSAT_X_DCCSR` and the contiguous ones of `LOSAT_X_BNCSR`) and the batch's BLASTNA query
+  buffer; with `=0` they are freed as they are, as before. glibc maps a block of its mmap threshold or more and unmaps
+  it at its free, but the free of a mapped block also raises the threshold to the block's size (up to 32 MiB), and the
+  heap then serves every smaller allocation: dc-megablast of 31,168 cDNAs at one thread freed a CSR of 16 + 36 MiB and a
+  10 MiB query buffer after each of its 18 batches, its arena grew from 44.7 to 58.6 MiB with 13-20 MiB free in it,
+  and that stayed resident (peak `RssAnon` 90.8 MiB against 80.8 for the memory floor of plan v4 line MF). The shrink is
+  a `realloc`, which glibc does by `mremap` for a mapped block, without the free that moves the threshold; the
+  one-page block left is freed below any threshold. Memory only; NCBI allocates and frees a batch's tables with the
+  batch as LOSAT does (`blast_nalookup.c:1262,1376`), and only how the memory goes back changes. Keeping the buffers for
+  the next batch instead (no new mapping, no page faults) raised the peak by 10 MiB: `LOSAT_X_BNLUTDROP` frees a
+  batch's tables before its traceback, and a kept table stays resident through it. With `LOSAT_TIMING`
+  `[TIMING] x_bn_shrink_free: buffers=` gives the number of buffers shrunk. Evidence: (n1 and w9, to be filled in).
 - `LOSAT_X_BNQDROP=1` (BLASTN, every task, `-subject` and `-db`; in the strict set since 2026-10-25
   (perf/mb-query-letters, evidence at the end of this entry): on unless it is `0`) a query batch drops its records'
   letters once it has encoded them (`blastn/blast_engine/x_query_drop.rs`), where no report reads them; with `=0` the

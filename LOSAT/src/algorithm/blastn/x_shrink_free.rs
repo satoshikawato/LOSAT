@@ -35,6 +35,10 @@
 //! The shrink costs one `mremap` per buffer per batch. On a heap block (below the threshold, or
 //! another allocator) `realloc` shortens it in place or copies one element, and the `free` follows
 //! as before.
+//!
+//! Timing: with LOSAT_TIMING, `[TIMING] x_bn_shrink_free: buffers=` gives the number of buffers
+//! shrunk before their free.
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: LOSAT_X_BNSHRINKFREE (read once).
@@ -43,13 +47,26 @@ pub(crate) fn on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNSHRINKFREE"))
 }
 
+// No NCBI counterpart: the buffers shrunk before their free.
+static SHRUNK: AtomicU64 = AtomicU64::new(0);
+
 /// Frees `vector`, shrunk to one element first with the switch (module comment).
 pub(crate) fn free<T>(mut vector: Vec<T>) {
     if on() && vector.capacity() > 1 {
         vector.clear();
         vector.shrink_to(1);
+        SHRUNK.fetch_add(1, Ordering::Relaxed);
     }
     drop(vector);
+}
+
+/// No NCBI counterpart: with LOSAT_TIMING, the `[TIMING] x_bn_shrink_free` line `main` prints at
+/// exit (when a buffer was shrunk).
+pub(crate) fn print_summary() {
+    let shrunk = SHRUNK.load(Ordering::Relaxed);
+    if crate::utils::xtiming::on() && shrunk > 0 {
+        eprintln!("[TIMING] x_bn_shrink_free: buffers={shrunk}");
+    }
 }
 
 /// A batch's BLASTNA query buffer, freed by `free` when the batch drops it.

@@ -11,6 +11,12 @@
 //! megablast table, blastn and blastn-short the small or the direct table, dc-megablast the
 //! discontiguous tables), against a subject file (`-subject`) and a database (`-db`), at one and
 //! four threads. That those bytes equal NCBI's is the business of the fixture suites.
+//!
+//! The same holds for how a batch's largest buffers are freed (`LOSAT_X_BNSHRINKFREE`,
+//! `src/algorithm/blastn/x_shrink_free.rs`, also in the strict set): the CSR of a table and the
+//! batch's BLASTNA query buffer are shrunk to one element before their free. With `LOSAT_TIMING`
+//! the default run prints `[TIMING] x_bn_shrink_free: buffers=` with a count above 0, `=0` prints
+//! no such line, and the reports are equal.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -148,6 +154,39 @@ fn the_report_does_not_depend_on_when_the_tables_are_dropped() {
             let (report, stderr) = search(task, &query, subjects, 4, &[]);
             assert_eq!(report, default, "{what} threads 4");
             assert_eq!(stderr, "", "{what} threads 4");
+        }
+    }
+}
+
+/// The count of `[TIMING] x_bn_shrink_free: buffers=` in `stderr` (`None` without the line).
+fn shrunk_buffers(stderr: &str) -> Option<u64> {
+    stderr.lines().find_map(|line| {
+        line.strip_prefix("[TIMING] x_bn_shrink_free: buffers=")
+            .map(|count| count.trim().parse().expect("a count"))
+    })
+}
+
+// The default shrinks each batch's query buffer (and its CSR, where the table is built as one)
+// before the free and says so with LOSAT_TIMING; `LOSAT_X_BNSHRINKFREE=0` frees them as they are
+// and prints no line. The reports are equal.
+#[test]
+fn the_report_does_not_depend_on_how_the_buffers_are_freed() {
+    const SHRINK_OFF: (&str, &str) = ("LOSAT_X_BNSHRINKFREE", "0");
+    let dir = TestDir::new("shrink");
+    let (query, db) = inputs(&dir);
+    let subject = fasta("LC738868.fasta");
+    for task in TASKS {
+        for subjects in [("-subject", subject.as_path()), ("-db", db.as_path())] {
+            let what = format!("{task} {}", subjects.0);
+            let (default, stderr) = search(task, &query, subjects, 1, &[TIMING]);
+            assert!(!default.is_empty(), "{what}: no hits");
+            assert!(
+                shrunk_buffers(&stderr).is_some_and(|count| count > 0),
+                "{what}: no buffer shrunk before its free: {stderr}"
+            );
+            let (report, stderr) = search(task, &query, subjects, 1, &[TIMING, SHRINK_OFF]);
+            assert_eq!(report, default, "{what} {SHRINK_OFF:?}");
+            assert_eq!(shrunk_buffers(&stderr), None, "{what} {SHRINK_OFF:?}");
         }
     }
 }

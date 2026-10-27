@@ -2659,7 +2659,16 @@ Rebuilding less:
   `wasm-threads`; exact blastp's `AaLookupTable` keeps the block loop (its in-place builds share neighbour lists
   that one build uses at a time). One thread runs the block loop unchanged. `LOSAT_TIMING`'s per-block lines of the two blocks come
   interleaved. `LOSAT_X_STATS` prints `[X_STATS] BPQSLOTS searches=<n> blocks=<n>`. Reports identical; off =
-  `LOSAT_X_BPQSLOTS=0`. Evidence: v4-BPF s7 (2026-10-27).
+  `LOSAT_X_BPQSLOTS=0`. Evidence (workstation, dev 3a83c151 against the switch's pull request, 2026-10-27, v4-BPF
+  s7): 16 threads (node 1 CPUs 32-47, 3 alternating rounds, one output hash per case) Species4 x Species6 `-subject`
+  4.87 -> 4.56 s (x0.937; busy CPUs 13.3 -> 14.5), the first 3,000 Species4 proteins x Species6 `-subject` x0.945,
+  Species4 x Species6 `-db` 5.21 -> 4.87 s (x0.935), Species0 x Species3 `-db` 16.79 -> 15.16 s (x0.903); 8 threads
+  x0.969 / x0.983 / x0.966 / x0.941; one thread: instructions x1.0000. Instructions at 16 threads +1.8 % (the
+  smaller blocks scan the subjects more often). Max RSS (MiB, dev -> switch, NCBI 2.17.0): 16 threads 136 -> 156
+  (NCBI `-subject` 335), 110 -> 113 (166), 125 -> 141, 107 -> 165; 8 threads 131 -> 149, 99 -> 122, 121 -> 147,
+  97 -> 142; Species4 x Species6 `-db` at 2 / 4 threads 106 -> 134 / 117 -> 147 (NCBI 304 / 360). Three blocks of
+  50,000 letters were faster at 16 threads (x0.870 on the first case) but held 175 MiB on the 3,000 proteins, above
+  NCBI's 166; 16 one-thread blocks (x0.858) held 813 MiB.
 - `LOSAT_X_BPQBLOCKWEB=1` (BLASTP in `run_local`, the LOSAT Web build's search, speed and memory; in the strict set
   from the pull request that added it, 2026-10-22, on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search
   of `LOSAT_X_BPQBLOCK` also for a call with more than one output, the hit records or a format observer (ABI v2 of the

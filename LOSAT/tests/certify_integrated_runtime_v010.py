@@ -22,10 +22,7 @@ from typing import Iterable, Sequence
 
 EXPECTED_NATIVE_COUNTS = {"blastn": 14, "blastp": 9, "tblastx": 20}
 EXPECTED_WASM_COUNTS = {"blastn": 14, "blastp": 7, "tblastx": 20}
-EXPECTED_BLASTN_CLASSIFICATIONS = {
-    "EXACT_TEXT": 13,
-    "SOURCE_UNDETERMINED_ACCEPTED": 1,
-}
+EXPECTED_BLASTN_CLASSIFICATIONS = {"EXACT_TEXT": 14}
 EXPECTED_TBLASTX_CLASSIFICATIONS = {"EXACT_TEXT": 14, "HSP_SET_DIFF": 6}
 BLASTP_THREAD_PAIRS = {
     "pairwise_default_thread4": "pairwise_default_serial",

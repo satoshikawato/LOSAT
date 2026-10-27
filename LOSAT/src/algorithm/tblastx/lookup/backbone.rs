@@ -31,7 +31,7 @@ pub(crate) use x_lut_direct::XAaSpares;
 // The comparison of two tables, for the unit tests (x_lut_direct.rs).
 #[cfg(test)]
 pub(crate) use x_lut_direct::{x_assert_same_table_as, x_same_table};
-// LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
+// The BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
 // by searches of two threads or more).
 pub(crate) use x_lut_direct::{x_bx_pooled_for, x_give_back_pooled};
 // EXPERIMENT (PAIRLUT): the direct builder of the TBLASTX unit
@@ -246,7 +246,7 @@ struct XChainArena {
     remaining: usize,
     /// Blocks chains have left, by size class (`1 << class` ints).
     free: Vec<Vec<std::ptr::NonNull<i32>>>,
-    /// Slabs of `SLAB_INTS` kept by `x_reset` for the next build (`LOSAT_X_BXLUTPOOL`).
+    /// Slabs of `SLAB_INTS` kept by `x_reset` for the next build (the pooled build).
     spare: Vec<Box<[i32]>>,
     /// EXPERIMENT (LOSAT_X_BPDBKEEP): every allocation is made by `x_allocate_unthresholded`.
     x_unthresholded: bool,
@@ -273,7 +273,7 @@ impl XChainArena {
         }
     }
 
-    // No NCBI counterpart (buffer reuse, `LOSAT_X_BXLUTPOOL`): every block given up at once, the
+    // No NCBI counterpart (buffer reuse, the pooled build): every block given up at once, the
     // slabs kept.
     fn x_reset(&mut self) {
         for slab in self.slabs.drain(..) {
@@ -509,7 +509,7 @@ impl LookupBackboneChains {
         Self { cells, arena }
     }
 
-    // No NCBI counterpart (buffer reuse, LOSAT_X_BXLUTPOOL): as `new(backbone_size)`, on this
+    // No NCBI counterpart (buffer reuse, the pooled build): as `new(backbone_size)`, on this
     // backbone's vectors and slabs.
     fn x_reset(&mut self, backbone_size: usize) {
         self.cells.clear();
@@ -1631,7 +1631,7 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     // BLASTX: the table is filled in place from the per-cell counts, in the same append order as
     // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines (diagnostics
     // mode, or a backbone index wider than 16 bits) the reference builder below runs. With `pooled`
-    // (LOSAT_X_BXLUTPOOL, chosen by the caller for its search, LOSAT_X_BXPOOLN1) the build takes
+    // (the pooled build, chosen by the caller for its search, LOSAT_X_BXPOOLN1) the build takes
     // kept vectors; the caller gives them back (`x_give_back_pooled`) when it drops the table, or
     // the pool goes without them (a missed reuse only).
     let built = if pooled {

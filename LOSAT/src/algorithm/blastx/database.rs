@@ -4,10 +4,11 @@
 //!
 //! What differs from the search of a FASTA subject set (`-subject`):
 //!
-//! - the subjects are the stored bytes of the whole database, read once before the query
-//!   batches (`BlastxDatabase::read_stores`, `common::database::read_protein_stores`) and
-//!   searched by ordinal id through `subjects::Subjects::Database`; the set-level numbers
-//!   are the index's (total, count) and 10 for the shortest sequence (D1);
+//! - the subjects are the stored bytes of the database, checked once before the query batches
+//!   (`BlastxDatabase::x_check_stores`, `common::database::x_check_protein_stores`) and read in
+//!   blocks where they are searched (`x_db_stream.rs`, through `subjects::Subjects::Stream`),
+//!   by ordinal id; the set-level numbers are the index's (total, count) and 10 for the
+//!   shortest sequence (D1);
 //! - a database that cannot be read fails the first query batch with a valid context, after
 //!   the reports of the batches before it (NCBI does not search a batch without one);
 //! - after each batch's search, the titles of its reported sequences are read in NCBI's
@@ -28,7 +29,7 @@ use anyhow::Result;
 use super::input::FastaRecord;
 use super::runtime::BatchResults;
 use super::subjects::Subjects;
-use crate::algorithm::common::database::{self as shared, PreliminaryReadError, StoredProteins};
+use crate::algorithm::common::database::{self as shared, PreliminaryReadError};
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::blast_xml::HitTaxonomy;
 use crate::report::db_subject::ParsedSubject;
@@ -112,32 +113,11 @@ impl BlastxDatabase {
     // sequence): NCBI opens it, writes the outfmt 0 prolog, reads the first query batch and
     // fails in that batch's preliminary search, where its reader cannot map the sequence
     // file (BLASTP's `-db`, fixture `LOSAT/tests/seqdb/db/empty`).
-    /// Reads every sequence of the database (`read_protein_stores`). The error (a reader
-    /// error of NCBI's preliminary search, LOSAT's refusal of a sequence, or the empty
-    /// database's) belongs to the first query batch with a valid context, which the caller
-    /// fails with it.
-    pub(crate) fn read_stores(&self) -> Result<StoredProteins> {
-        if self.db.num_seqs() == 0 {
-            return Err(PreliminaryReadError("Database memory map file error").into());
-        }
-        let stores = shared::read_protein_stores(&self.db, PROGRAM)?;
-        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
-        // ```c
-        // /** Split subject sequences if longer than this */
-        // #define MAX_DBSEQ_LEN 5000000
-        // ```
-        // NCBI searches a longer subject in overlapping parts, which BLASTX does not port (the
-        // same limit stops `-subject` in `search::search_core`); the refusal belongs to the
-        // first batch with a valid context, as the reader's errors.
-        if let Some(ordinal) = (0..stores.len()).find(|&i| stores.length(i) > MAX_DBSEQ_LEN) {
-            return Err(too_long(ordinal, stores.length(ordinal)));
-        }
-        Ok(stores)
-    }
-
-    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): `read_stores` without the store
-    /// (`common::database::x_check_protein_stores`): the same reads and checks with the same
-    /// errors, the residues of the longest sequence (`StoredProteins::max_length`) when they pass.
+    /// Reads every sequence of the database once, in blocks (`x_check_protein_stores`), and keeps
+    /// nothing but the residues of the longest sequence. The error (a reader error of NCBI's
+    /// preliminary search, LOSAT's refusal of a sequence, or the empty database's) belongs to the
+    /// first query batch with a valid context, which the caller fails with it. The sequences are
+    /// read again where they are searched (`x_db_stream.rs`).
     pub(crate) fn x_check_stores(&self) -> Result<usize> {
         if self.db.num_seqs() == 0 {
             return Err(PreliminaryReadError("Database memory map file error").into());
@@ -156,7 +136,7 @@ impl BlastxDatabase {
         Ok(longest)
     }
 
-    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the opened database.
+    /// The opened database.
     pub(crate) fn x_seqdb(&self) -> &SeqDb {
         &self.db
     }
@@ -527,32 +507,6 @@ mod tests {
     }
 
     #[test]
-    fn the_stores_hold_the_bytes_the_reader_reads_in_ordinal_order() {
-        // LOSAT/tests/seqdb/expected/prot_mv.info.tsv: 10 sequences, 801 residues, in six
-        // volumes (the stores span them in ordinal order).
-        let database = open("prot_mv");
-        let stores = database.read_stores().unwrap();
-        assert_eq!((stores.len(), stores.total_length()), (10, 801));
-        let subjects = Subjects::Database(&stores);
-        let mut letters = 0;
-        for ordinal in 0..stores.len() {
-            let block = database.db.read_sequence(ordinal as u32).unwrap();
-            let stored = block.protein(0);
-            assert_eq!(&*subjects.encoded(ordinal), stored, "{ordinal}");
-            let with_sentinel = subjects.encoded_with_sentinel(ordinal);
-            assert_eq!(&with_sentinel[..stored.len()], stored, "{ordinal}");
-            assert_eq!(with_sentinel.last(), Some(&0), "{ordinal}");
-            assert_eq!(subjects.length(ordinal), stored.len());
-            letters += stored.len();
-        }
-        assert_eq!(letters, 801);
-        assert_eq!(
-            (subjects.total_length().unwrap(), subjects.shortest_length()),
-            (801, 10)
-        );
-    }
-
-    #[test]
     fn a_record_of_the_stored_letters_encodes_to_the_stored_bytes() {
         // Every residue byte 1..=27 (O = 26 included) reads back as itself through its
         // letter: the records of the reported sequences and `-subject` records alike.
@@ -570,14 +524,5 @@ mod tests {
         };
         let records = [record];
         assert_eq!(&*Subjects::Fasta(&records).encoded(0), &bytes[..]);
-    }
-
-    #[test]
-    fn an_empty_database_fails_as_ncbis_preliminary_search() {
-        let error = open("empty").read_stores().unwrap_err();
-        let error = error
-            .downcast::<PreliminaryReadError>()
-            .expect("NCBI's error of the preliminary search");
-        assert_eq!(error.0, "Database memory map file error");
     }
 }

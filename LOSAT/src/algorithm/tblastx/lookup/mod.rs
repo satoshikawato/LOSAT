@@ -231,7 +231,7 @@ pub(crate) use backbone::XAaSpares;
 // The comparison of two tables, for the unit tests (lookup/x_lut_direct.rs).
 #[cfg(test)]
 pub(crate) use backbone::{x_assert_same_table_as, x_same_table};
-// LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
+// The BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
 // by searches of two threads or more; x_lut_direct.rs).
 pub(crate) use backbone::{x_bx_pooled_for, x_give_back_pooled};
 

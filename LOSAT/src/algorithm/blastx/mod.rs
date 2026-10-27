@@ -342,7 +342,7 @@ mod x_seg_memo;
 // Diagnostic (LOSAT_TIMING): the stage times of a BLASTX run. No NCBI counterpart.
 mod x_timing;
 
-// EXPERIMENT (LOSAT_X_BXDBSTREAM): `-db` read in blocks where it is searched, instead of a copy of
+// `-db` read in blocks where it is searched, instead of a copy of
 // the whole database.
 pub(crate) mod x_db_stream;
 

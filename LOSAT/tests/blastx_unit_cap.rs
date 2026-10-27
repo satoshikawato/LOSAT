@@ -1,7 +1,8 @@
 //! BLASTX's memory at many threads on whole searches: the workers' diagonal tables kept one per
 //! thread (`LOSAT_X_BXDIAGKEEP`), the lookup tables' neighbour lists shared and their vectors kept
-//! between builds (`LOSAT_X_BXLUTPOOL`; not in a search on one thread, `LOSAT_X_BXPOOLN1`), at most
-//! K query batches or chunks searched at a time (`LOSAT_X_BXUNITCAP[=K]`), and the capped units'
+//! between builds (the pooled build, graduated 2026-10-27; not in a search on one thread,
+//! `LOSAT_X_BXPOOLN1`), at most K query batches or chunks searched at a time
+//! (`LOSAT_X_BXUNITCAP[=K]`), and the capped units'
 //! threads filled with few subjects too (tasks of fewer subjects, each query batch prepared outside
 //! the cap: `LOSAT_X_BXCAPFILL`), their lookup tables built on the threads the cap leaves them
 //! (`LOSAT_X_BXBUILDPAR`), and the fused loop's context table made once per lookup table
@@ -191,7 +192,6 @@ const ALL_OFF: &[(&str, &str)] = &[
     ("LOSAT_X_BXCAPFILL", "0"),
     ("LOSAT_X_BXCTXONCE", "0"),
     ("LOSAT_X_BXDIAGKEEP", "0"),
-    ("LOSAT_X_BXLUTPOOL", "0"),
     ("LOSAT_X_BXPOOLN1", "0"),
     ("LOSAT_X_BXUNITCAP", "0"),
 ];
@@ -211,7 +211,7 @@ fn several_query_batches_give_the_report_without_the_switches() {
     for env in [
         &[][..],
         &[("LOSAT_X_BXUNITCAP", "2")][..],
-        &[("LOSAT_X_BXUNITCAP", "3"), ("LOSAT_X_BXLUTPOOL", "0")][..],
+        &[("LOSAT_X_BXUNITCAP", "3")][..],
         &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXDIAGKEEP", "0")][..],
         &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXBUILDPAR", "0")][..],
         &[("LOSAT_X_BXUNITCAP", "3"), ("LOSAT_X_BXCTXONCE", "0")][..],
@@ -335,7 +335,7 @@ fn a_split_query_gives_the_report_without_the_switches() {
         cap_sides(&dir, &query, &args, &[("LOSAT_X_BXUNITCAP", "2")]),
         (true, false)
     );
-    // A database: the chunks' subject tasks read their subjects as blocks (LOSAT_X_BXDBSTREAM).
+    // A database: the chunks' subject tasks read their subjects as blocks.
     let db = database(&dir, &set);
     let args = ["-db", db.as_str(), "-outfmt", "6"];
     assert!(

@@ -185,7 +185,7 @@ fn search_task(
 ) -> Task {
     let mut kept = Vec::new();
     let (first, end) = (task * k, subjects.len().min((task + 1) * k));
-    // EXPERIMENT (LOSAT_X_BXDBSTREAM): the task's subjects, read at once when the subjects are read
+    // The task's subjects, read at once when the subjects are read
     // in blocks; an error stops the flow at the task's first subject.
     let x_block = match subjects.x_read_range(first, end) {
         Ok(block) => block,

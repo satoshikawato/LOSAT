@@ -91,8 +91,8 @@ thread_local! {
 }
 
 // No NCBI counterpart (buffer reuse and one memo for all threads; the table is the one
-// `x_build_direct` builds): LOSAT_X_BXLUTPOOL, in the strict set (on unless `=0` or
-// `LOSAT_X_DEFAULT=0`). NCBI builds a BLASTX table with calloc'd vectors and frees them with the
+// `x_build_direct` builds): the BLASTX lookup table build that was `LOSAT_X_BXLUTPOOL` (graduated
+// 2026-10-27, no variable). NCBI builds a BLASTX table with calloc'd vectors and frees them with the
 // search (blast_aalookup.c BlastAaLookupTableNew / BlastAaLookupFinalize, cited above). LOSAT builds
 // one per query batch or chunk searched side by side; a thread's glibc arena keeps what the thread
 // allocated after it is freed, so every building thread kept a table's worth (3-6 MiB with the
@@ -101,31 +101,26 @@ thread_local! {
 // table's vectors from the tables dropped before (`x_give_back_pooled`) and the build's counts and
 // exact backbone from the builds before (`XBuildTemps`), each cleared and zero-filled to the sizes
 // of the new table as calloc gives them; the pool holds as many sets as builds and tables were alive
-// at once. The values written are those of `x_build_direct`.
-/// Whether BLASTX builds its tables pooled (`LOSAT_X_BXLUTPOOL`).
-pub(crate) fn x_bx_lut_pool() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXLUTPOOL"))
-}
-
-// No NCBI counterpart: buffer reuse only (above).
+// at once. The values written are those of `x_build_direct`, which still builds the tables of a
+// search on one thread (`x_bx_pooled_for`) and, in diagnostics mode, is replaced by the reference
+// builder.
 /// Whether a BLASTX table is built pooled, so that its vectors go back to the pool when it is
-/// dropped: the switch is on and the in-place builder runs (diagnostics mode runs the reference
-/// builder, whose tables are freed as before).
+/// dropped: the in-place builder runs (diagnostics mode runs the reference builder, whose tables
+/// are freed as before).
 pub(crate) fn x_bx_pooled_builds() -> bool {
-    x_bx_lut_pool() && !diagnostics_enabled()
+    !diagnostics_enabled()
 }
 
 // No NCBI counterpart (buffer reuse only): LOSAT_X_BXPOOLN1, in the strict set (on unless `=0`).
 // The pool moves a table's vectors and its build's temporaries from the thread that drops them to
 // the thread that builds next, so that no thread's glibc arena keeps a table's worth after the
-// table is freed (`x_bx_lut_pool`). A search on one thread has no other thread: with the switch its
-// tables are built by `x_build_direct` (its own neighbour memo, `vec!` vectors) and freed with the
-// search's lookup (`blastx/seed.rs` `Lookup`), as NCBI builds and frees them and as `=0` of
-// LOSAT_X_BXLUTPOOL does. Kept, the pool held a table and its build's temporaries through each
-// query batch's end (the composition-based statistics and the traceback), which then took its
-// memory on top: a 660 kb genome (AP027131) against 543 proteins (AP027133) at one thread had a
-// peak `RssAnon` of 26.0 MiB, 22.6 without the pool. Searches of two threads or more build pooled as before.
+// table is freed (the pooled build). A search on one thread has no other thread: with the switch
+// its tables are built by `x_build_direct` (its own neighbour memo, `vec!` vectors) and freed with
+// the search's lookup (`blastx/seed.rs` `Lookup`), as NCBI builds and frees them. Kept, the pool
+// held a table and its build's temporaries through each query batch's end (the
+// composition-based statistics and the traceback), which then took its memory on top: a 660 kb
+// genome (AP027131) against 543 proteins (AP027133) at one thread had a peak `RssAnon` of
+// 26.0 MiB, 22.6 without the pool. Searches of two threads or more build pooled as before.
 /// Whether a BLASTX search of `threads` threads builds its tables pooled: the builds are pooled
 /// ([`x_bx_pooled_builds`]) and, with `LOSAT_X_BXPOOLN1`, the search has two threads or more.
 pub(crate) fn x_bx_pooled_for(threads: usize) -> bool {
@@ -249,7 +244,7 @@ fn x_zeroed<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Ve
 //             s_AddWordHits(lookup, matrix, query->sequence,
 //                           exact_backbone[i], query_bias, row_max);
 // ```
-/// [`x_build_direct`] with the shared neighbour lists and kept vectors (`LOSAT_X_BXLUTPOOL`); with
+/// [`x_build_direct`] with the shared neighbour lists and kept vectors (the pooled build); with
 /// `parts` above 1, its passes on that many tasks of the pool it runs on (`LOSAT_X_BXBUILDPAR`,
 /// [`x_partitioned_passes`]).
 pub(super) fn x_build_direct_pooled(
@@ -274,7 +269,7 @@ pub(super) fn x_build_direct_pooled(
     .map(|table| table.expect("pooled vectors grow to any table"))
 }
 
-// No NCBI counterpart: buffer reuse (`LOSAT_X_BXLUTPOOL`); NCBI frees the vectors.
+// No NCBI counterpart: buffer reuse (the pooled build); NCBI frees the vectors.
 /// Keeps `table`'s backbone, overflow and pv vectors for the next pooled build (the table is left
 /// empty).
 pub(crate) fn x_give_back_pooled(table: &mut BlastAaLookupTable) {
@@ -1955,7 +1950,7 @@ mod tests {
     //       lookup->thick_backbone =
     //             calloc(lookup->backbone_size, sizeof(AaLookupBackboneCell));
     // ```
-    // LOSAT_X_BXLUTPOOL: a table built on vectors another table and another build left (cleared
+    // The pooled build: a table built on vectors another table and another build left (cleared
     // and zero-filled as calloc gives them) and with the neighbour lists shared by all threads is
     // the reference table: after a smaller and a larger table, with two tables alive at once, and
     // after the shared lists change key.

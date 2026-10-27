@@ -362,15 +362,12 @@ export LOSAT_X_BXCHUNKFLOW=1
 export LOSAT_X_BXCROSS=1
 export LOSAT_X_BXCROSSDEFER=1
 export LOSAT_X_BXCTXONCE=1
-export LOSAT_X_BXDBSTREAM=256
 export LOSAT_X_BXDEFER=1
 export LOSAT_X_BXDIAG=1
 export LOSAT_X_BXDIAGKEEP=1
-export LOSAT_X_BXEVALEMPTY=1
 export LOSAT_X_BXFLOW=1
 export LOSAT_X_BXHITBF=1
 export LOSAT_X_BXKAONCE=1
-export LOSAT_X_BXLUTPOOL=1
 export LOSAT_X_BXPOOLN1=1
 export LOSAT_X_BXSCANBYTE=1
 export LOSAT_X_BXSUBJFLOW=1
@@ -451,8 +448,7 @@ export LOSAT_X_TBXUNGAPSENT=1
 export LOSAT_X_TBXUNITMASK=256
 ```
 
-Value switches: `LOSAT_X_BXDBSTREAM` (2 to
-1,048,576, built-in 256: KiB of a block of BLASTX `-db`), `LOSAT_X_TBXPREFETCH` (2 to
+Value switches: `LOSAT_X_TBXPREFETCH` (2 to
 4,194,304, built-in 1,536: KiB of a subject's largest unit table), `LOSAT_X_TBXEXTBATCH` (2 to
 4,194,304, built-in 256: Ki letters of a subject's largest unit query-group span), `LOSAT_X_TBXQSLICE`
 (2 to 1,073,741,824: letters of a query slice, on every group longer than that; `1` or unset: the
@@ -5871,9 +5867,10 @@ Scheduling (each value computed by one thread with the original function; order 
   128 KiB each for a batch of 10,002 bases: 4 MiB per batch at 32 threads, kept in that thread's glibc arena.
   Exactness: a subject's computation depends on the subject and the chunk alone, not on the table's history, while
   no diagonal offset passes 2^30 (`x_subject_flow.rs` module comment, the bound the flow already requires).
-- `LOSAT_X_BXLUTPOOL=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on unless
-  `=0` or `LOSAT_X_DEFAULT=0`; every word-size-3 table built in place, outside diagnostics mode; since
-  `LOSAT_X_BXPOOLN1`, 2026-10-26, only in searches of two threads or more): the lookup tables
+- BXLUTPOOL (graduated 2026-10-27, in the set from the pull request that added it, 2026-10-24; no variable; always
+  on; every word-size-3 table built in place, outside diagnostics mode; since `LOSAT_X_BXPOOLN1`, 2026-10-26, only in
+  searches of two threads or more; the unpooled build of a one-thread search, `x_build_direct`, stays) (BLASTX,
+  memory): the lookup tables
   are built with one set of neighbour lists shared by all threads (filled on first use as each thread's memo was,
   `tblastx/lookup/x_lut_direct.rs` `XSharedMemo`), and on vectors kept between builds: a table's backbone, overflow
   and pv vectors when the table is dropped (`blastx::seed::Lookup`'s drop), and the build's counts, layout and fill
@@ -5972,39 +5969,40 @@ Scheduling (each value computed by one thread with the original function; order 
   kept with it (`XKeptPresence`), instead of once per thread and batch. In the capped batch flow each batch's
   subjects run on several threads, and every thread made the table again: 7 % of cycles and 2.9 MiB of page faults
   at 32 threads (800 cDNAs x 8 yeast proteins). Exactness: the table is a function of the batch's contexts alone.
-- `LOSAT_X_BXDBSTREAM=1` or `=KiB` (BLASTX `-db`, memory; in the strict set from the pull request that added it:
-  on unless `=0`; a value switch, `KiB` from 2 to 1,048,576, otherwise 256): the search reads
+- BXDBSTREAM (graduated 2026-10-27, in the set from the pull request that added it, 2026-10-22; no variable
+  (it was a value switch, the block size in KiB, 2 to 1,048,576), no `LOSAT_X_BXDBSTREAMSHADOW` and no
+  `[X_SHADOW] BXDBSTREAM` line; always on, blocks of 256 KiB) (BLASTX `-db`, memory): the search reads
   the database's sequences where it searches them, a block at a time, instead of the copy of the whole database that
-  `BlastxDatabase::read_stores` makes before the first query batch (`blastx/x_db_stream.rs`, exactness argument in its
-  header). The database is checked once before the first batch with the reads and checks of the copy
+  `BlastxDatabase::read_stores` made before the first query batch (deleted; `blastx/x_db_stream.rs`, exactness
+  argument in its header). The database is checked once before the first batch with the reads and checks of the copy
   (`x_check_stores`: the same error fails the same batch with the same text) and nothing of it is kept but the length
   of its longest sequence. Each pass of the preliminary search over the database (a query chunk searched on one
-  thread, a query chunk searched side by side) reads blocks of `KiB` in ordinal order and drops each before the next; a task of
+  thread, a query chunk searched side by side) reads blocks of 256 KiB in ordinal order and drops each before the next; a task of
   `LOSAT_X_BXSUBJFLOW` reads its subjects with one read per volume, a wave of the pool reads its subjects before its
   fork. The sink reads the lengths of the subjects in its order from the index (16,384 per read) and, for `-ungapped`,
   their residues in blocks. The composition redo (speculated and serial), the traceback of `-comp_based_stats 0` and
   the reports' records read each subject they need with one read. Every read gives the stored bytes of the copy, so
-  every report is the same. Shadow: `LOSAT_X_BXDBSTREAMSHADOW=1` also makes the copy and compares every block, window of
-  lengths and read with it (and the check's error with the copy's), stopping at the first difference; at exit
-  `[X_SHADOW] BXDBSTREAM blocks= sequences= residues= lengths= reads= identical` (`tests/blastx_db_stream.rs`).
+  every report is the same. Before it graduated, a shadow mode (`LOSAT_X_BXDBSTREAMSHADOW=1`) made the copy too and
+  compared every block, window of lengths and read with it, and the check's error with the copy's; it went with the
+  copy (`tests/blastx_db_stream.rs` compares the reports across thread counts and schedules and the unit test of
+  `x_db_stream.rs` compares each read with `SeqDb::read_sequence`).
   Measured 2026-10-22 (workstation, every report identical): peak RssAnon of `uniref50.03` x 201 reads at 8
-  threads 49.3 MiB against 2,888.2 MiB with `=0` (NCBI: 61 MiB at 1 thread), untimed. Timed on node 1, warmed 3 s,
+  threads 49.3 MiB against 2,888.2 MiB with the copy (`=0`) (NCBI: 61 MiB at 1 thread), untimed. Timed on node 1, warmed 3 s,
   8 alternated pairs: against `=0` alone, Swiss-Prot x 201 reads x0.992 at 8 threads and x0.974 at 16,
   `uniref50.03` x 201 x0.996 and x0.992, but x1.0067 at 1 thread (7 of 8 pairs above 1: cycles:u +0.8 to +1.2 %
   at blocks of 16 KiB to 1 MiB, in the scan kernels, not in the new code). With `LOSAT_X_BXEVALEMPTY`, against the
   binary before both: Swiss-Prot x 201 x0.980 / x0.975 / x0.966 at 1 / 8 / 16 threads, `uniref50.03` x 201 x0.969 /
   x0.950 at 8 / 16, no pair above 1. Max RSS there: Swiss-Prot 15.6 / 31.3 / 38.4 MiB against 219.4 / 231.4 /
   239.9, `uniref50.03` 52.3 / 63.1 MiB against 2,825.7 / 2,835.7.
-- `LOSAT_X_BXEVALEMPTY=1` (BLASTX, speed; in the strict set from the pull request that added it, with
-  `LOSAT_X_BXDBSTREAM`: on unless `=0`): the gapped evaluation of a subject without
+- BXEVALEMPTY (graduated 2026-10-27, in the set from the pull request that added it, with BXDBSTREAM, 2026-10-22; no
+  variable, no `LOSAT_X_BXEVALEMPTYSHADOW` and no `[X_SHADOW] BXEVALEMPTY` line; always on) (BLASTX, speed): the gapped evaluation of a subject without
   preliminary HSPs (`statistics::evaluate_gapped`, which the sink calls for every subject, and the composition redo
   and the traceback call for theirs) returns at once the list that both of its ways give for no input
   (`link_uneven`'s first lines, and its loop: no HSP, best e-value 0), without the Karlin and Gumbel lookups and the
   per-context vectors it built first. Most subjects of a database have no HSP: on Swiss-Prot x 201 reads at one
-  thread the evaluation was 2.1 % of the run's user cycles (`perf record`, workstation). Shadow:
-  `LOSAT_X_BXEVALEMPTYSHADOW=1` also evaluates every empty input the full way; at exit, after at least one
-  comparison, `[X_SHADOW] BXEVALEMPTY lists_compared=N identical` (`tests/blastx_db_stream.rs`). At a difference the
-  same line, with the lists compared before it, comes just before the panic. Measured 2026-10-22 (workstation, with
+  thread the evaluation was 2.1 % of the run's user cycles (`perf record`, workstation). Before it graduated, a
+  shadow mode (`LOSAT_X_BXEVALEMPTYSHADOW=1`) also evaluated every empty input the full way and compared; it went
+  with the full evaluation of no input. Measured 2026-10-22 (workstation, with
   `LOSAT_X_BXDBSTREAM`, against the binary before both): Swiss-Prot x 201 reads `-db` at one thread, instructions:u
   x0.9877 and cycles:u x0.9835 (`perf stat`, 3 runs each; x0.9873 and x0.9878 against both switches `=0`), wall
   x0.980 (node 1, 8 alternated pairs, none above 1); `-subject` (201 reads x PemoMJNVA) instructions:u x0.9993.
@@ -6456,8 +6454,8 @@ Scheduling (each value computed by one thread with the original function; order 
   query saves only the ideal block.
 - `LOSAT_X_BXPOOLN1=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-26; `=0`
   turns it off): a search on one thread (`-num_threads 1`) builds its word-size-3 lookup tables without the pool of
-  `LOSAT_X_BXLUTPOOL`: `blastx::seed::Lookup::new` asks `x_bx_pooled_for(threads)` (`tblastx/lookup/x_lut_direct.rs`),
-  builds with `x_build_direct` (its own neighbour memo, `vec!` vectors), as NCBI and `LOSAT_X_BXLUTPOOL=0` do, and
+  the pooled build: `blastx::seed::Lookup::new` asks `x_bx_pooled_for(threads)` (`tblastx/lookup/x_lut_direct.rs`),
+  builds with `x_build_direct` (its own neighbour memo, `vec!` vectors), as NCBI does, and
   marks the table unpooled (`XKeptPresence::pooled`), so the table's vectors are freed when the lookup drops; only
   tables built pooled go back to the pool. Searches of two threads or more build pooled as before. Why: the pool moves
   vectors between threads (no thread's glibc arena keeps a table's worth); at one thread it held a table and its

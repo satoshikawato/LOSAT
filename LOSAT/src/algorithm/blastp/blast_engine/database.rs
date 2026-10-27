@@ -2456,7 +2456,7 @@ mod tests {
         // (`x_db_keep.rs`); the kernel sees the same sequences from the same diagonal offsets, and
         // the hit lists receive the same updates, as with a scratch and a buffer per task.
         // At 1, 2, 3 and 7 threads, blocks of 1 MiB and of 4 KiB (the 40,000 and 70,000-letter
-        // sequences in blocks of their own, so buffers grow and shrink), in rounds of 2 and of
+        // sequences in blocks of their own, so buffers grow and are refilled shorter), in rounds of 2 and of
         // `BLOCKS_PER_THREAD` blocks per thread, on one volume and on several.
         #[test]
         fn kept_scratches_and_buffers_give_the_search_without_them() {

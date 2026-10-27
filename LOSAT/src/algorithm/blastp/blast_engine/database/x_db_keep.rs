@@ -33,7 +33,8 @@
 //! them. A search that fails returns the first error in ordinal order, the error of the rounds of
 //! `search_blocks_of` (each round's merge stops at its first error, and the rounds before had
 //! none): the merge stops at the first block that failed, after every block before it, and no
-//! later block is taken. No floating-point operation changes order.
+//! block is taken after it (blocks already taken end unmerged). No floating-point operation
+//! changes order.
 //!
 //! Why the waits end: a worker waits only while block j - W, the oldest not merged, is taken and
 //! not ended, so another worker is searching it; that search waits for nothing a waiting worker
@@ -42,7 +43,9 @@
 //! wakes the others (`XStopOnPanic`); the scope then raises the panic.
 //!
 //! `LOSAT_X_BPDBKEEP` is a switch of the strict set: on unless it is `0`. It acts for every task of
-//! BLASTP with `-db`; the index check acts for every program that opens a database.
+//! BLASTP with `-db`; the chains of BLASTP's lookup builds (`tblastx/lookup/backbone.rs`) with
+//! `-subject` too; the index check and the header pieces of the title checks for every program that
+//! opens a database.
 
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 

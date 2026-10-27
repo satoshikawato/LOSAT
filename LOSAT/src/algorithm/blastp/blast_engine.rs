@@ -8606,6 +8606,8 @@ fn run_resolved_in_pool(
     // The kernel takes the subject from its caller: a record of the encoded FASTA set,
     // or a sequence of a database block (`BlastpSubjectRef`); `s_idx` is the subject's
     // index in the set, or its ordinal id in the database.
+    // The kernel runs no rayon work: with `-db` the window of `database/x_db_keep.rs` makes the
+    // workers wait for the one that runs it (header: why the waits end).
     let process_subject = |scratch: &mut BlastpSubjectScratch,
                            s_idx: usize,
                            subject: BlastpSubjectRef<'_>,

@@ -249,8 +249,10 @@ struct XChainArena {
     spare: Vec<Box<[i32]>>,
     /// EXPERIMENT (LOSAT_X_BPDBKEEP): every allocation is made by `x_allocate_unthresholded`.
     x_unthresholded: bool,
-    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the allocations of `x_allocate_unthresholded`.
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the regions of `x_allocate_unthresholded`.
     x_unthresholded_slabs: Vec<Vec<i32>>,
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the ints of the last region given out.
+    x_unthresholded_used: usize,
 }
 
 impl XChainArena {
@@ -266,6 +268,7 @@ impl XChainArena {
             spare: Vec::new(),
             x_unthresholded: false,
             x_unthresholded_slabs: Vec::new(),
+            x_unthresholded_used: 0,
         }
     }
 
@@ -278,6 +281,7 @@ impl XChainArena {
             }
         }
         self.x_unthresholded_slabs.clear();
+        self.x_unthresholded_used = 0;
         self.cursor = std::ptr::null_mut();
         self.remaining = 0;
         for list in &mut self.free {
@@ -304,19 +308,37 @@ impl XChainArena {
     }
 
     // No NCBI counterpart (LOSAT_X_BPDBKEEP): where the ints are allocated.
-    /// `allocate(ints)` with a capacity that glibc maps and unmaps without raising its mmap
-    /// threshold (`utils::x_mapped::x_unthresholded_capacity`; the zeroed pages are not touched).
+    /// `allocate(ints)` from a region that glibc maps and unmaps without raising its mmap threshold
+    /// (`utils::x_mapped::x_unthresholded_capacity`: zeroed by `calloc`, whose mapped pages are not
+    /// touched until written). The slabs and long chains are cut from the last region while it has
+    /// room, so that a build reserves the address space of one region per 32 MiB of chains, not
+    /// one per slab (tens of slabs for a block of 50,000 query letters).
     #[inline(never)]
     fn x_allocate_unthresholded(&mut self, ints: usize) -> *mut i32 {
-        let mut slab =
-            vec![
+        let room = self
+            .x_unthresholded_slabs
+            .last()
+            .map_or(0, |region| region.len() - self.x_unthresholded_used);
+        if room < ints {
+            self.x_unthresholded_slabs.push(vec![
                 0i32;
-                crate::utils::x_mapped::x_unthresholded_capacity(ints, std::mem::size_of::<i32>())
-            ];
-        slab.truncate(ints);
-        let start = slab.as_mut_ptr();
-        // Moving the vector into the list does not move the ints.
-        self.x_unthresholded_slabs.push(slab);
+                crate::utils::x_mapped::x_unthresholded_capacity(
+                    ints,
+                    std::mem::size_of::<i32>()
+                )
+            ]);
+            self.x_unthresholded_used = 0;
+        }
+        let used = self.x_unthresholded_used;
+        let region = self
+            .x_unthresholded_slabs
+            .last_mut()
+            .expect("a region with room for the ints");
+        debug_assert!(used + ints <= region.len());
+        // SAFETY: `used + ints <= region.len()`, and the region is never resized, so the ints
+        // stay inside it, where earlier cuts do not reach, until the arena drops it.
+        let start = unsafe { region.as_mut_ptr().add(used) };
+        self.x_unthresholded_used = used + ints;
         start
     }
 
@@ -2134,6 +2156,49 @@ mod tests {
     use crate::config::ScoringMatrix;
     use crate::stats::lookup_protein_params_ungapped;
     use crate::utils::matrix::{blosum62_score, ncbistdaa, BLASTAA_SIZE};
+
+    // No NCBI counterpart (LOSAT_X_BPDBKEEP): the unthresholded arena cuts its slabs and long chains
+    // from one region while it has room (one region per 32 MiB on 64-bit glibc, else one per
+    // allocation): the blocks it gives do not overlap and keep what was written to them.
+    #[test]
+    fn unthresholded_slabs_are_cut_from_one_region() {
+        let mut arena = XChainArena::new();
+        arena.x_unthresholded = true;
+        let sizes = [
+            XChainArena::SLAB_INTS,
+            1 << 15,
+            XChainArena::SLAB_INTS,
+            3,
+            1 << 17,
+        ];
+        let mut blocks = Vec::new();
+        for (i, &ints) in sizes.iter().enumerate() {
+            let start = arena.allocate(ints);
+            // SAFETY: the arena gave `ints` ints at `start`.
+            unsafe { std::slice::from_raw_parts_mut(start, ints) }.fill(i as i32 + 1);
+            blocks.push((start as usize, ints));
+        }
+        for (i, &(start, ints)) in blocks.iter().enumerate() {
+            // SAFETY: as above; the arena is alive.
+            let ints_read = unsafe { std::slice::from_raw_parts(start as *const i32, ints) };
+            assert!(ints_read.iter().all(|&v| v == i as i32 + 1), "block {i}");
+            for &(other, other_ints) in &blocks[i + 1..] {
+                let end = start + ints * 4;
+                assert!(
+                    end <= other || other + other_ints * 4 <= start,
+                    "blocks {i} overlap"
+                );
+            }
+        }
+        let regions = if crate::utils::x_mapped::X_MAPPED_ALLOCATOR {
+            1
+        } else {
+            sizes.len()
+        };
+        assert_eq!(arena.x_unthresholded_slabs.len(), regions);
+        arena.x_reset();
+        assert!(arena.x_unthresholded_slabs.is_empty());
+    }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:87-129
     // ```c

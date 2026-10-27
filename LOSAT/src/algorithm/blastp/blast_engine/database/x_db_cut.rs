@@ -13,7 +13,9 @@
 //! bytes, where the sequence bytes are the letters, one sentinel byte per sequence and one before
 //! the first (the size of a one-volume sequence file; `x_sequence_bytes`): about 4 blocks per
 //! thread, of at least 4 KiB. A database of at least 4 x threads MiB keeps blocks of 1 MiB; at one
-//! thread nothing changes. The rounds, the tasks and the merge are those of `search_blocks_of`; only
+//! thread nothing changes (EXPERIMENT LOSAT_X_BPDBKEEP: blocks of at most 96 KiB at every thread
+//! count, `x_db_keep.rs`, so a failed search at one thread also reads the blocks of `BLOCK_BYTES`
+//! again for its error). The rounds, the tasks and the merge are those of `search_blocks_of`; only
 //! its `block_bytes` differs.
 //!
 //! Why the reports do not change (the integer argument of `search_blocks`'s comment, which already

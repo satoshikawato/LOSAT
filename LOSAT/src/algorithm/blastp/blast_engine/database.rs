@@ -103,7 +103,8 @@ const BLOCKS_PER_THREAD: usize = 8;
 pub(super) struct BlastpDatabase {
     db: SeqDb,
     name: String,
-    /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16).
+    /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16,
+    /// and the batches' prefetch of outfmt 0, 5, 6 and 7).
     taxdb: shared::TaxdbRun,
 }
 
@@ -148,6 +149,13 @@ impl BlastpDatabase {
     /// The `-db` value as NCBI keeps it.
     pub(super) fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Whether `taxdb.bti` is on the search path, asked once for the run
+    /// (`shared::TaxdbRun::found`): the batches' prefetch reads the taxonomy database only then
+    /// (`ListedTitles::prefetch_messages`).
+    pub(super) fn taxdb_found(&self) -> bool {
+        self.taxdb.found(&self.db)
     }
 
     /// The number of sequences (`CSeqDB::GetNumSeqs`).
@@ -1053,18 +1061,38 @@ impl ListedTitles<'_> {
         )
     }
 
+    /// NCBI's messages about the taxonomy database when the query batch whose final hit lists
+    /// are `hit_lists` prefetches the subjects it reports (`shared::prefetch_messages`): the
+    /// subjects with rows in them, the ones `read_taxids` reads. Empty, and nothing read,
+    /// without `taxdb.bti` on the search path. A taxonomy database that LOSAT cannot read as
+    /// NCBI does, and a header whose taxid does not decode, are refused.
+    pub(super) fn prefetch_messages(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &[Option<BlastpHitList>],
+    ) -> Result<Vec<u8>> {
+        shared::prefetch_messages(
+            &database.db,
+            &database.taxdb,
+            Self::reported_ranks(hit_lists)
+                .map(|rank| (self.listed.ordinals[rank], self.parsed_subject(rank))),
+            PROGRAM,
+        )
+    }
+
     /// The ranks of the subjects with rows in `hit_lists` (the final hit lists).
     fn reported(hit_lists: &[Option<BlastpHitList>]) -> std::collections::BTreeSet<usize> {
-        hit_lists
-            .iter()
-            .flatten()
-            .flat_map(|hit_list| {
-                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                hit_list.hsplist_array[..count]
-                    .iter()
-                    .flat_map(|hsp_list| hsp_list.hsps.iter().map(|hsp| hsp.s_idx as usize))
-            })
-            .collect()
+        Self::reported_ranks(hit_lists).collect()
+    }
+
+    /// The rank of the subject of each row of `hit_lists`, in the order of the lists.
+    fn reported_ranks(hit_lists: &[Option<BlastpHitList>]) -> impl Iterator<Item = usize> + '_ {
+        hit_lists.iter().flatten().flat_map(|hit_list| {
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            hit_list.hsplist_array[..count]
+                .iter()
+                .flat_map(|hsp_list| hsp_list.hsps.iter().map(|hsp| hsp.s_idx as usize))
+        })
     }
 
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
@@ -1207,19 +1235,28 @@ impl ListedTitles<'_> {
 // `ListedSubjects::x_read_titles_lean`,
 // `ListedTitles::check_reported_titles`, `ListedTitles::tabular_subject_ids`, and for outfmt 0
 // `ListedTitles::check_shown_titles`). When every definition line of the database reads and none
-// of them is refused, none of these failures can happen in any batch.
+// of them is refused, none of these failures can happen in any batch. With `taxdb.bti` on the
+// search path, the prefetch of each batch (`ListedTitles::prefetch_messages`) also reads the
+// reported subjects' taxids and looks them up in the taxonomy database, which can refuse as
+// XML2's lookups can (DBID item T): `taxids` then also asks that every sequence's taxid decodes
+// and that no lookup can be refused (`shared::taxdb_may_refuse`), as `x_titles_taxids_allow_blocks`
+// asks for outfmt 15 and 16.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether every sequence of the database has one definition line
 /// that reads, holds no byte outside ' ' ..= '~' and gives a tabular subject id as NCBI writes
 /// it, or with `pairwise` (an outfmt 0 report, LOSAT_X_BPQBLOCKFMT, which writes no tabular id) a
-/// title that the outfmt 0 report writes as NCBI. Read in `pool` over the ordinal ids; a reader
-/// error is `false` (the search of all queries then reports it where NCBI does).
+/// title that the outfmt 0 report writes as NCBI, and with `taxids` (the batches' prefetch reads
+/// the taxonomy database) a taxid that decodes, where no lookup of the taxonomy database can be
+/// refused. Read in `pool` over the ordinal ids; a reader error is `false` (the search of all
+/// queries then reports it where NCBI does).
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): the definition lines are read in ranges of
 /// `HEADER_RANGE_SEQS` sequences (`SeqDb::visit_deflines`, the same results as
-/// `SeqDb::deflines`) instead of one sequence at a time.
+/// `SeqDb::deflines`; with `taxids`, `SeqDb::visit_deflines_taxids`, the titles and the taxids in
+/// one pass) instead of one sequence at a time.
 pub(super) fn x_titles_allow_blocks(
     database: &BlastpDatabase,
     pairwise: bool,
+    taxids: bool,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> bool {
     let db = &database.db;
@@ -1246,36 +1283,59 @@ pub(super) fn x_titles_allow_blocks(
     };
     if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
         let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
+        // A record whose taxid does not decode is an `Err` (`visit_deflines_taxids`).
         let allowed_range = |range: &BlockRange| -> bool {
-            db.visit_deflines(*range, |ordinal, deflines| {
-                allowed_deflines(ordinal, deflines)
-            })
+            if taxids {
+                db.visit_deflines_taxids(*range, |ordinal, deflines| {
+                    allowed_deflines(ordinal, deflines)
+                })
+            } else {
+                db.visit_deflines(*range, |ordinal, deflines| {
+                    allowed_deflines(ordinal, deflines)
+                })
+            }
         };
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
-        if pool.enabled() {
-            return pool.install(|| ranges.par_iter().all(allowed_range));
-        }
-        let _ = pool;
-        return ranges.iter().all(allowed_range);
+        let titles = if pool.enabled() {
+            pool.install(|| ranges.par_iter().all(allowed_range))
+        } else {
+            ranges.iter().all(allowed_range)
+        };
+        #[cfg(not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )))]
+        let titles = {
+            let _ = pool;
+            ranges.iter().all(allowed_range)
+        };
+        return titles && !(taxids && shared::taxdb_may_refuse(db));
     }
     let allowed = |ordinal: u32| -> bool { allowed_deflines(ordinal, db.deflines(ordinal)) };
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if pool.enabled() {
-        return pool.install(|| {
+    let titles = if pool.enabled() {
+        pool.install(|| {
             (0..db.num_seqs())
                 .into_par_iter()
                 .with_min_len(4096)
                 .all(allowed)
-        });
-    }
-    let _ = pool;
-    (0..db.num_seqs()).all(allowed)
+        })
+    } else {
+        (0..db.num_seqs()).all(allowed)
+    };
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    let titles = (0..db.num_seqs()).all(allowed);
+    // One sequence at a time (`LOSAT_X_DBIDXREAD=0`): the taxids after the titles.
+    titles && (!taxids || x_taxids_allow_blocks(database, pool))
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): the block search of outfmt 8, 9, 12 and 5.
@@ -2868,7 +2928,7 @@ mod tests {
         let allowed = |database: &BlastpDatabase| -> [bool; 2] {
             [1, 4].map(|threads| {
                 crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
-                    Ok(x_titles_allow_blocks(database, false, pool))
+                    Ok(x_titles_allow_blocks(database, false, false, pool))
                 })
                 .unwrap()
             })
@@ -2945,5 +3005,60 @@ mod tests {
         assert_eq!(read_allowed(&punctuation), [true, true]);
         drop((missing, bad, punctuation));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): where the batches' prefetch reads the taxonomy database
+    // (`taxids`, DBID item T), the block search of `-db` runs only when no lookup can be refused:
+    // the one pass over the headers gives the answer of the titles' check followed by
+    // `x_taxids_allow_blocks`. `sprot_tax` of `tests/fixtures/outfmt16/db` (two sequences, taxid
+    // 9606) with no taxonomy database, ones whose lookups cannot be refused (a wrong magic number
+    // is a message) and one whose name of 9606 can (`shared::taxdb_may_refuse`), at one thread
+    // and in a pool.
+    #[test]
+    fn blocks_with_the_prefetch_need_lookups_that_cannot_be_refused() {
+        use crate::seqdb::alias::SearchPath;
+        let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-db-qblock-prefetch-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let path = tests.join("fixtures/outfmt16/db/sprot_tax");
+        for (taxdb, refused) in [
+            (None, false),
+            (Some("good"), false),
+            (Some("bad_magic"), false),
+            (Some("high_bytes_utf8"), true),
+        ] {
+            let taxdb = taxdb.map(|name| tests.join("seqdb/taxdb").join(name));
+            let search =
+                SearchPath::new(&cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None)
+                    .unwrap();
+            let database = BlastpDatabase {
+                db: SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap(),
+                name: "sprot_tax".to_string(),
+                taxdb: shared::TaxdbRun::default(),
+            };
+            assert_eq!(database.taxdb_found(), taxdb.is_some());
+            for threads in [1, 4] {
+                crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    for pairwise in [false, true] {
+                        let titles = x_titles_allow_blocks(&database, pairwise, false, pool);
+                        assert!(titles, "{taxdb:?} threads {threads}");
+                        let two = titles && x_taxids_allow_blocks(&database, pool);
+                        assert_eq!(two, !refused, "{taxdb:?} threads {threads}");
+                        assert_eq!(
+                            x_titles_allow_blocks(&database, pairwise, true, pool),
+                            two,
+                            "{taxdb:?} threads {threads}"
+                        );
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            }
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
     }
 }

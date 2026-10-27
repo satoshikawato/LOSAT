@@ -20,6 +20,7 @@
 mod cutoffs;
 mod linking;
 mod linking_incr;
+pub(crate) use linking_incr::x_b23;
 mod params;
 
 // Re-export parameter types and functions

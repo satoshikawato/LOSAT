@@ -254,11 +254,20 @@ fn x_merge_pass<T: Copy>(
     }
 }
 
+// PROBE (v4-B s23): LOSAT_X_B23MAP=frame (sum_stats_linking/linking_incr.rs `x_b23`).
+fn xfcap<T>(n: usize) -> usize {
+    if crate::algorithm::tblastx::sum_stats_linking::x_b23("frame") {
+        crate::utils::x_mapped::x_mapped_capacity(n, std::mem::size_of::<T>())
+    } else {
+        n
+    }
+}
+
 /// The stable merge of `lists`, each sorted by `R::cmp`, ties to the lower list (item 2), each
 /// record expanded by `unit`, in a Vec of their total length.
 fn x_kway<R: XRecord>(lists: Vec<Vec<R>>, unit: &XExpand<'_, '_>) -> Vec<InitHSP> {
     let total = lists.iter().map(Vec::len).sum();
-    let mut merged = Vec::with_capacity(total);
+    let mut merged = Vec::with_capacity(xfcap::<InitHSP>(total));
     // The empty lists are left out; the others keep their order, so a tie still goes to the lower
     // unit.
     let mut lists: Vec<std::vec::IntoIter<R>> = lists
@@ -500,7 +509,7 @@ fn x_merge_one_frame<R: XRecord>(
         let mut hits = if init_hsps.is_empty() {
             Vec::new()
         } else {
-            let exact = Vec::with_capacity(init_hsps.len());
+            let exact = Vec::with_capacity(xfcap::<UngappedHit>(init_hsps.len()));
             let mut hits = convert_init_hsps_unsorted(init_hsps, inp.contexts, inp.s_frames, exact);
             x_sort_k1_runs(&mut hits);
             hits

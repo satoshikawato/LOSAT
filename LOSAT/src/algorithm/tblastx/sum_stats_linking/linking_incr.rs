@@ -305,6 +305,41 @@ const TRIM_SIZE: i32 = (OVERLAP_SIZE + 1) / 2;
 // NULL of a link (and the end of a list) as a list index.
 const NONE: u32 = u32::MAX;
 
+
+// PROBE (v4-B s23, never a PR): LOSAT_X_B23MAP=link,frame gives the link kernel's arrays (link) or the frame
+// merges' lists (frame) a capacity that glibc maps, so that their free returns them to the OS.
+pub(crate) fn x_b23(kind: &str) -> bool {
+    static V: OnceLock<String> = OnceLock::new();
+    V.get_or_init(|| std::env::var("LOSAT_X_B23MAP").unwrap_or_default())
+        .split(',')
+        .any(|k| k == kind)
+}
+fn xcap<T>(n: usize) -> usize {
+    if x_b23("link") {
+        crate::utils::x_mapped::x_mapped_capacity(n, std::mem::size_of::<T>())
+    } else {
+        n
+    }
+}
+fn xvec<T: Clone>(x: T, n: usize) -> Vec<T> {
+    if x_b23("link") {
+        let mut v = Vec::with_capacity(xcap::<T>(n));
+        v.resize(n, x);
+        v
+    } else {
+        vec![x; n]
+    }
+}
+fn xcollect<T>(it: impl Iterator<Item = T>, n: usize) -> Vec<T> {
+    if x_b23("link") {
+        let mut v = Vec::with_capacity(xcap::<T>(n));
+        v.extend(it);
+        v
+    } else {
+        it.collect()
+    }
+}
+
 // No NCBI counterpart: LOSAT_LINK_STATS only prints counters; it does not change any value NCBI computes.
 fn stats_enabled() -> bool {
     static FLAG: OnceLock<bool> = OnceLock::new();
@@ -341,7 +376,7 @@ impl<K: Copy + Ord + Default> MaxTree<K> {
         let cap = n.max(1).next_power_of_two();
         Self {
             cap,
-            nodes: vec![[K::default(); 2]; cap * 2],
+            nodes: xvec([K::default(); 2], cap * 2),
         }
     }
 
@@ -605,9 +640,9 @@ struct Children {
 impl Children {
     fn new(n: usize) -> Self {
         Self {
-            first: vec![NONE; n],
-            next: vec![NONE; n],
-            prev: vec![NONE; n],
+            first: xvec(NONE, n),
+            next: xvec(NONE, n),
+            prev: xvec(NONE, n),
         }
     }
 
@@ -1018,13 +1053,13 @@ fn link_group<'g, K: LinkKey>(
     // H->s_end_trim = hsp->subject.end - MIN(s_length, trim_size);
     // ```
     // The trimmed offsets, with the same expressions.
-    let mut score = Vec::with_capacity(n);
-    let mut qo = Vec::with_capacity(n);
-    let mut so = Vec::with_capacity(n);
-    let mut qe = Vec::with_capacity(n);
-    let mut se = Vec::with_capacity(n);
-    let mut sl = Vec::with_capacity(n);
-    let mut lk = Vec::with_capacity(n);
+    let mut score = Vec::with_capacity(xcap::<i32>(n));
+    let mut qo = Vec::with_capacity(xcap::<i32>(n));
+    let mut so = Vec::with_capacity(xcap::<i32>(n));
+    let mut qe = Vec::with_capacity(xcap::<i32>(n));
+    let mut se = Vec::with_capacity(xcap::<i32>(n));
+    let mut sl = Vec::with_capacity(xcap::<f64>(n));
+    let mut lk = Vec::with_capacity(xcap::<f64>(n));
     for hit in group_hits.iter() {
         let q_off = hit.q_aa_start as i32;
         let q_end = hit.q_aa_end as i32;
@@ -1059,32 +1094,26 @@ fn link_group<'g, K: LinkKey>(
     // The pass values of LinkHSPStruct (hsp_link.sum, num, xsum, link) per method, initialised to
     // the values of an HSP without a predecessor; `indeg` is linked_to.
     let mut sum: [Vec<i64>; 2] = [
-        (0..n)
-            .map(|i| i64::from(score[i]) - i64::from(c[0]))
-            .collect(),
-        (0..n)
-            .map(|i| i64::from(score[i]) - i64::from(c[1]))
-            .collect(),
+        xcollect((0..n).map(|i| i64::from(score[i]) - i64::from(c[0])), n),
+        xcollect((0..n).map(|i| i64::from(score[i]) - i64::from(c[1])), n),
     ];
-    let base_xsum: Vec<f64> = (0..n).map(|i| sl[i] - lk[i]).collect();
-    let mut xsum: [Vec<f64>; 2] = [base_xsum.clone(), base_xsum];
-    let mut num: [Vec<i16>; 2] = [vec![1; n], vec![1; n]];
-    let mut link: [Vec<u32>; 2] = [vec![NONE; n], vec![NONE; n]];
-    let mut indeg: Vec<i32> = vec![0; n];
-    let mut alive: Vec<bool> = vec![true; n];
-    let mut next_active: Vec<u32> = (0..n)
-        .map(|i| if i + 1 < n { (i + 1) as u32 } else { NONE })
-        .collect();
-    let mut prev_active: Vec<u32> = (0..n)
-        .map(|i| if i > 0 { (i - 1) as u32 } else { NONE })
-        .collect();
+    let base_xsum: Vec<f64> = xcollect((0..n).map(|i| sl[i] - lk[i]), n);
+    let mut xsum: [Vec<f64>; 2] = [xcollect(base_xsum.iter().copied(), n), base_xsum];
+    let mut num: [Vec<i16>; 2] = [xvec(1, n), xvec(1, n)];
+    let mut link: [Vec<u32>; 2] = [xvec(NONE, n), xvec(NONE, n)];
+    let mut indeg: Vec<i32> = xvec(0, n);
+    let mut alive: Vec<bool> = xvec(true, n);
+    let mut next_active: Vec<u32> =
+        xcollect((0..n).map(|i| if i + 1 < n { (i + 1) as u32 } else { NONE }), n);
+    let mut prev_active: Vec<u32> =
+        xcollect((0..n).map(|i| if i > 0 { (i - 1) as u32 } else { NONE }), n);
     let mut active_head: u32 = 0;
     let mut children = [Children::new(n), Children::new(n)];
     // Per pass: queued for a method, sum changed in this pass, leaf to write.
-    let mut queued: [Vec<bool>; 2] = [vec![false; n], vec![false; n]];
-    let mut sum_changed: [Vec<bool>; 2] = [vec![false; n], vec![false; n]];
+    let mut queued: [Vec<bool>; 2] = [xvec(false, n), xvec(false, n)];
+    let mut sum_changed: [Vec<bool>; 2] = [xvec(false, n), xvec(false, n)];
     let mut sum_changed_list: Vec<(u8, u32)> = Vec::new();
-    let mut leaf_dirty: Vec<bool> = vec![false; n];
+    let mut leaf_dirty: Vec<bool> = xvec(false, n);
     let mut leaf_list: Vec<u32> = Vec::new();
     let mut seeds: [Vec<u32>; 2] = [Vec::new(), Vec::new()];
     let mut addback_hsps: Vec<u32> = Vec::new();
@@ -1114,10 +1143,12 @@ fn link_group<'g, K: LinkKey>(
     let mut grid_index: FxHashMap<u64, (u32, u32)> = FxHashMap::default();
     let mut grid_items: Vec<u32> = Vec::new();
     if !ignore_small_gaps {
-        let mut cells: Vec<(u64, u32)> = (0..n)
-            .filter(|&i| score[i] > c[0])
-            .map(|i| (cell_of(qo[i], so[i]), i as u32))
-            .collect();
+        let mut cells: Vec<(u64, u32)> = xcollect(
+            (0..n)
+                .filter(|&i| score[i] > c[0])
+                .map(|i| (cell_of(qo[i], so[i]), i as u32)),
+            n,
+        );
         cells.sort_unstable();
         grid_items.reserve(cells.len());
         let mut start = 0usize;
@@ -1146,20 +1177,17 @@ fn link_group<'g, K: LinkKey>(
     // ```
     // The structures of the index-1 scan: the orders, ranks and Fenwick tree of the sweep (module
     // documentation, "Index 1"), over the HSPs with score > cutoff[1].
-    let elig1: Vec<u32> = (0..n)
-        .filter(|&i| score[i] > c[1])
-        .map(|i| i as u32)
-        .collect();
-    let mut qorder: Vec<u32> = elig1.clone();
+    let elig1: Vec<u32> = xcollect((0..n).filter(|&i| score[i] > c[1]).map(|i| i as u32), n);
+    let mut qorder: Vec<u32> = xcollect(elig1.iter().copied(), elig1.len());
     qorder.sort_unstable_by(|&a, &b| qe[b as usize].cmp(&qe[a as usize]).then_with(|| a.cmp(&b)));
-    let mut iorder: Vec<u32> = elig1.clone();
+    let mut iorder: Vec<u32> = xcollect(elig1.iter().copied(), elig1.len());
     iorder.sort_unstable_by(|&a, &b| qo[b as usize].cmp(&qo[a as usize]).then_with(|| a.cmp(&b)));
-    let mut so_vals: Vec<i32> = elig1.iter().map(|&i| so[i as usize]).collect();
+    let mut so_vals: Vec<i32> = xcollect(elig1.iter().map(|&i| so[i as usize]), elig1.len());
     so_vals.sort_unstable();
     so_vals.dedup();
     let msz = so_vals.len();
-    let mut rr: Vec<u32> = vec![0; n];
-    let mut kq: Vec<u32> = vec![0; n];
+    let mut rr: Vec<u32> = xvec(0, n);
+    let mut kq: Vec<u32> = xvec(0, n);
     for &i in elig1.iter() {
         let i = i as usize;
         let rank = so_vals.partition_point(|&v| v < so[i]);
@@ -1167,7 +1195,7 @@ fn link_group<'g, K: LinkKey>(
         let le = so_vals.partition_point(|&v| v <= se[i]);
         kq[i] = (msz - le) as u32;
     }
-    let mut fen: Vec<K> = vec![K::default(); msz + 1];
+    let mut fen: Vec<K> = xvec(K::default(), msz + 1);
 
     let mut tree = MaxTree::<K>::new(n);
 

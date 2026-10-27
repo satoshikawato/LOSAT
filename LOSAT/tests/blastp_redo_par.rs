@@ -15,7 +15,7 @@
 //! small windows (`LOSAT_X_BPREDOPARWINDOW=1`) that end inside queries and leave out the matches
 //! the test has ended before them, at two and eight threads, and in one search of all queries with
 //! the jobs largest first at four; and the windows that expand the compact lists as they reach
-//! them (`LOSAT_X_BPREDOWINEXPAND`, in the strict set) against `=0`. The
+//! them against the one-thread search. The
 //! `[TIMING] x_bpredopar:` lines show that the path ran and what it did, not only that the report
 //! is equal. `LOSAT_X_BPQBLOCK` is in the strict set, on by default with blocks of 50,000 query
 //! letters (two blocks of the fixture's 77,448): the tests that count one search of all queries
@@ -454,11 +454,11 @@ fn small_windows_in_one_search_of_all_queries_give_the_one_thread_report() {
     assert_eq!(on.freed_lists, reference.freed_lists, "lists freed");
 }
 
-/// `LOSAT_X_BPREDOWINEXPAND` (a switch of the strict set, so on in the searches above with the
-/// switch at more than one thread): the windows expand the compact preliminary lists as they
-/// reach them instead of every list before the redo
-/// (`src/algorithm/blastp/x_redo_par.rs`, `XExpandAhead`). `=0` expands every list first.
-const WIN_EXPAND_OFF: (&str, &str) = ("LOSAT_X_BPREDOWINEXPAND", "0");
+// The windows expand the compact preliminary lists as they reach them instead of every list
+// before the redo (`src/algorithm/blastp/x_redo_par.rs`, `XExpandAhead`; the variable
+// `LOSAT_X_BPREDOWINEXPAND` graduated on 2026-10-27). The one-thread loop expands each query's list
+// when it reaches it, so the reports and the lists freed of a windowed search are compared with
+// the one-thread search.
 
 /// The compact lists expanded in a run (`[TIMING] x_bppcompact: expanded_lists=`,
 /// summed).
@@ -470,11 +470,11 @@ fn expanded_lists(stderr: &str) -> usize {
         .sum()
 }
 
-/// The reports, the lists expanded and freed and the windows (with the matches the test ended in them) of the
-/// windows that expand the lists as they reach them equal those with every list expanded first,
-/// in small windows that end inside queries and in the default windows of the default blocks.
+/// The report, the lists expanded and freed of the windows that expand the lists as they reach
+/// them equal those of the one-thread search, in small windows that end inside queries and in the
+/// default windows of the default blocks.
 #[test]
-fn windows_that_expand_the_compact_lists_as_they_reach_them_give_the_full_expansions_report() {
+fn windows_that_expand_the_compact_lists_as_they_reach_them_give_the_one_thread_report() {
     let query = fixture("MeenMJNV.faa");
     let default_args = ["-evalue", "0.001", "-outfmt", "6"];
     // Small windows at 8 threads (windows of 8 jobs); the default windows at 2 (128 jobs: 5 and 3
@@ -488,42 +488,30 @@ fn windows_that_expand_the_compact_lists_as_they_reach_them_give_the_full_expans
         ),
         (vec![SWITCH], &default_args[..], false, 2),
     ] {
-        let with = |extra: (&'static str, &'static str)| -> Vec<(&str, &str)> {
-            vars.iter().copied().chain([extra]).collect()
-        };
         let what = format!("{vars:?} threads {threads}");
-        let off = blastp(&query, threads, &with(WIN_EXPAND_OFF), args);
+        let reference = blastp(&query, 1, &vars, args);
         let on = blastp(&query, threads, &vars, args);
-        let windows = |run: &Run| {
-            let counts = RedoPar::sum(&run.redo_par);
-            (
-                run.redo_par.len(),
-                counts.matches,
-                counts.windows,
-                counts.split,
-                counts.ended,
-                counts.skipped,
-                counts.wasted,
-            )
-        };
-        assert!(!off.redo_par.is_empty(), "{what}: the path ran");
+        assert!(!on.redo_par.is_empty(), "{what}: the path ran");
         if small {
-            let counts = RedoPar::sum(&off.redo_par);
+            let counts = RedoPar::sum(&on.redo_par);
             assert!(
                 counts.windows > 1 && counts.split > 0 && counts.skipped > 0,
                 "{what}: {counts:?}"
             );
         }
-        assert!(on.stdout == off.stdout, "{what}: the report differs");
-        assert_eq!(on.freed_lists, off.freed_lists, "{what}: lists freed");
-        assert_eq!(windows(&on), windows(&off), "{what}: windows");
+        assert!(on.stdout == reference.stdout, "{what}: the report differs");
+        assert_eq!(on.freed_lists, reference.freed_lists, "{what}: lists freed");
         // Each compact list is expanded once.
         assert_eq!(
             expanded_lists(&on.stderr),
-            expanded_lists(&off.stderr),
+            expanded_lists(&reference.stderr),
             "{what}: lists expanded"
         );
-        assert!(expanded_lists(&off.stderr) > 0, "{what}: {}", off.stderr);
+        assert!(
+            expanded_lists(&reference.stderr) > 0,
+            "{what}: {}",
+            reference.stderr
+        );
     }
 }
 

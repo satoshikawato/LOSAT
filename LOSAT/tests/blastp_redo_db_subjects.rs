@@ -1,17 +1,17 @@
-//! blastp `-db` searches with `LOSAT_X_BPREDODBSUBJ` (`src/algorithm/blastp/x_redo_subjects.rs`).
+//! blastp `-db` searches whose composition redo reads each match's subject from the database
+//! (`src/algorithm/blastp/x_redo_subjects.rs`; the variable `LOSAT_X_BPREDODBSUBJ` graduated on
+//! 2026-10-27).
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`): on unless its variable is `0`.
-//! With it on, the composition redo reads the subject of each
-//! match from the database when it redoes the match, instead of a copy of every subject of the
-//! preliminary hit lists made before the redo, and the reports read the subjects of the final hit
-//! lists again. These tests compare the reports with the switch off and on on every redo path (the
-//! one-thread loop, `LOSAT_X_BPREDOPAR`, the query-parallel and the match-parallel redo of
-//! `LOSAT_X_BPREDOPAR=0`) and for each set of residues the reports keep (tabular rows of the
-//! default fields and Seq-aligns: the subjects with an O and those of the HSPs whose query has one;
-//! outfmt 0 and other tabular fields (XML reads the same set): every final subject; the records of
-//! `LOSAT_X_BPLISTEDLEAN=0`: every listed subject; the recount of the HSPs with a pyrrolysine on
-//! proteins made for it). The switch has no rule (class `always`): every `-db` run takes its path
-//! with the switch on, so the equality of the two reports is the check.
+//! The composition redo reads the subject of each match from the database when it redoes the
+//! match, and the reports read the subjects of the final hit lists again. These tests compare the
+//! reports of every redo path (the one-thread loop, `LOSAT_X_BPREDOPAR`, the query-parallel and
+//! the match-parallel redo of `LOSAT_X_BPREDOPAR=0`) and of each set of residues the reports keep
+//! (tabular rows of the default fields and Seq-aligns: the subjects with an O and those of the
+//! HSPs whose query has one; outfmt 0 and other tabular fields (XML reads the same set): every
+//! final subject; the records of `LOSAT_X_BPLISTEDLEAN=0`: every listed subject; the recount of
+//! the HSPs with a pyrrolysine on proteins made for it) with the report of the one-thread search of
+//! the same query and format, which the frozen NCBI `-db` fixtures hold (`db.o_stored.*` for the
+//! stored O). There is no rule (class `always`): every `-db` run takes this path.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385
 //! ```c
@@ -148,7 +148,7 @@ fn blastp(query: &Path, db: &Path, threads: u32, vars: &[(&str, &str)], outfmt: 
 }
 
 #[test]
-fn reports_with_reads_per_match_are_the_copys_reports() {
+fn reports_with_reads_per_match_are_the_one_thread_reports() {
     let dir = work_dir("reports");
     let db = subject_database(&dir);
     let one = queries(&dir, 1);
@@ -156,8 +156,8 @@ fn reports_with_reads_per_match_are_the_copys_reports() {
     // Each redo path and each set of residues that the reports keep once. With
     // `LOSAT_WASI_THREADS_DEBUG=1` the `[losat-thread-stage]` lines name the paths: kappa-redo-par
     // takes precedence over kappa-match-redo and kappa-query-redo, which are printed before it. The
-    // switch lists and reads the subjects search by search, the same for a block of the block
-    // search (the default; every other `-db` test of blastp runs the switch in it) and for the one
+    // search lists and reads the subjects search by search, the same for a block of the block
+    // search (the default; every other `-db` test of blastp runs it in it) and for the one
     // search of all queries of `LOSAT_X_BPQBLOCK=0`, so no case needs more than two queries.
     for (query, outfmt, threads, vars) in [
         // `LOSAT_X_BPREDOPAR` (kappa-redo-par) over two queries of one batch, the default fields.
@@ -171,31 +171,17 @@ fn reports_with_reads_per_match_are_the_copys_reports() {
         // `LOSAT_X_BPREDOPAR`, the records of `LOSAT_X_BPLISTEDLEAN=0`.
         (&one, "6", 2, &[("LOSAT_X_BPLISTEDLEAN", "0")][..]),
     ] {
-        let with = |extra: (&'static str, &'static str)| {
-            vars.iter().copied().chain([extra]).collect::<Vec<_>>()
-        };
         let what = format!("{query:?} outfmt {outfmt} threads {threads} {vars:?}");
-        let off = blastp(
-            query,
-            &db,
-            threads,
-            &with(("LOSAT_X_BPREDODBSUBJ", "0")),
-            outfmt,
-        );
-        assert!(!off.stdout.is_empty(), "{what}: an empty report");
-        let on = blastp(
-            query,
-            &db,
-            threads,
-            &with(("LOSAT_X_BPREDODBSUBJ", "1")),
-            outfmt,
-        );
-        assert!(on.stdout == off.stdout, "{what}: report");
-        assert_eq!(on.stderr, off.stderr, "{what}: standard error");
+        let reference = blastp(query, &db, 1, &[], outfmt);
+        assert!(!reference.stdout.is_empty(), "{what}: an empty report");
+        let run = blastp(query, &db, threads, vars, outfmt);
+        assert!(run.stdout == reference.stdout, "{what}: report");
+        assert_eq!(run.stderr, reference.stderr, "{what}: standard error");
     }
 }
 
-/// The letters before position 27 of the proteins of `pyrrolysine_recounts_are_the_copys`.
+/// The letters before position 27 of the proteins of
+/// `pyrrolysine_recounts_do_not_depend_on_the_threads`.
 const PREFIX: &str = "MKTAYIAKQRQISFVKSHFSRQLEDN";
 /// The letters after position 27.
 const SUFFIX: &str = "GLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHSLAKWKRQTLGQHDFSAGEGLYTHMKALRPDEDRLSPLHSVYVDQWDWERVMGDGERQFSTLKSTVEAIWAGIKATEAAVSEEFGLAPFLPDQIHFVHSQELLSRYPDLDAKGRERAIAKDLGAVFLVGIGGKLSDGHRHDVRAPDYDDWSTPSELGHAGLNGDILVWNPVLEDAFELSSMGIRVDADTLKHQLALTGDEDRLELEWHQALLRGEMPQTIGGGIGQSRLTMLLLQLPHIGQVQAGVWPAACVRESVPALL";
@@ -204,9 +190,9 @@ const SUFFIX: &str = "GLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHSLAKWKRQTLGQHD
 // the search reads as X: a query O against a subject X is not identical in NCBI's reports. With the
 // tabular rows of the default fields the reports keep the residues of the subjects with an O and of
 // the subjects of the HSPs whose query has one; these tests compare those rows (and those of other
-// formats) with the switch off and on.
+// formats) at one thread and at the thread counts of the cases.
 #[test]
-fn pyrrolysine_recounts_are_the_copys() {
+fn pyrrolysine_recounts_do_not_depend_on_the_threads() {
     let dir = work_dir("pyrrolysine");
     let with_o_at_128 = format!("{}O{}", &SUFFIX[..100], &SUFFIX[101..]);
     let subjects = format!(
@@ -231,13 +217,7 @@ fn pyrrolysine_recounts_are_the_copys() {
         ("0", 1),
     ] {
         let what = format!("outfmt {outfmt} threads {threads}");
-        let off = blastp(
-            &query,
-            &db,
-            threads,
-            &[("LOSAT_X_BPREDODBSUBJ", "0")],
-            outfmt,
-        );
+        let off = blastp(&query, &db, 1, &[], outfmt);
         if outfmt == "6" {
             // The recount ran: qo's O against sx's X and qx's X against so's O are mismatches.
             for pair in ["qo\tsx\t", "qx\tso\t"] {
@@ -249,13 +229,7 @@ fn pyrrolysine_recounts_are_the_copys() {
                 assert!(!row.contains("\t100.000\t"), "{what}: {row}");
             }
         }
-        let on = blastp(
-            &query,
-            &db,
-            threads,
-            &[("LOSAT_X_BPREDODBSUBJ", "1")],
-            outfmt,
-        );
+        let on = blastp(&query, &db, threads, &[], outfmt);
         assert!(
             on.stdout == off.stdout,
             "{what}: report\n{}\n{}",

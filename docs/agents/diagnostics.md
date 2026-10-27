@@ -347,10 +347,8 @@ export LOSAT_X_BPQBLOCKSA=1
 export LOSAT_X_BPQBLOCKWEB=1
 export LOSAT_X_BPQBLOCKXML=1
 export LOSAT_X_BPQBLOCKXML2=1
-export LOSAT_X_BPREDODBSUBJ=1
 export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
-export LOSAT_X_BPREDOWINEXPAND=1
 export LOSAT_X_BPSEGWIN=4096
 export LOSAT_X_BPSUBJMETA=1
 export LOSAT_X_BPSUBJRUN=1
@@ -1574,13 +1572,14 @@ Rebuilding less:
   binaries, 1,993 passed); ci_fast all programs with the switch, with `=0` and with `LOSAT_X_DEFAULT=0` (223 cases, 0
   failures each); blastp `-db` fixtures at 1 and 4 threads under the shadow (52 rows, 0 differing, the exit line
   `identical` in every run that ends without an error).
-- `LOSAT_X_BPREDODBSUBJ=1` (BLASTP `-db`, memory; in the strict set from the pull request that added it
-  (perf/bp-redo-db-subjects, evidence at the end of this entry): on unless it is `0`;
-  acts for every task with `-db`) the composition redo reads the subject of each match from the database when
+- BPREDODBSUBJ (graduated 2026-10-27, in the set since 2026-10-22 (perf/bp-redo-db-subjects, evidence at the end of
+  this entry); no variable; always on; acts for every task with `-db`) (BLASTP `-db`, memory) the composition redo
+  reads the subject of each match from the database when
   it redoes the match, as NCBI does (blast_kappa.c:1381-1385), instead of a copy of every listed subject made before the
-  redo (`blastp/x_redo_subjects.rs`, `blastp/blast_engine/database/x_redo_db_subjects.rs`). Without it
-  `ListedSubjects::read` copies the residues of every subject of the preliminary hit lists, which the redo and the
-  reports read. With it `ListedSubjects::x_list` keeps their ordinal ids and lengths (from the index; the estimate of
+  redo (`blastp/x_redo_subjects.rs`, `blastp/blast_engine/database/x_redo_db_subjects.rs`). The previous path,
+  `ListedSubjects::read`, copied the residues of every subject of the preliminary hit lists, which the redo and the
+  reports read; it is gone (a `cfg(test)` form of `read` remains for the unit tests of the titles).
+  `ListedSubjects::x_list` keeps their ordinal ids and lengths (from the index; the estimate of
   `LOSAT_X_BPREDOLPT` reads the lengths), every redo path and the first Newton problems of the Newton lanes read a
   match's stored residues with `SeqDb::read_sequence` and drop them after the match (the Newton problems read ahead of
   the redo and the redo reads again: keeping the reads ahead for the redo raised the maximum resident set; the
@@ -1593,8 +1592,10 @@ Rebuilding less:
   one; otherwise those of every final subject; those of every listed subject when the reports make records
   (`LOSAT_X_BPLISTEDLEAN=0`, ABI v1's titles); the others keep their lengths. The redo reads the same
   stored residues and the reports the same letters and lengths, so reports do not change. A reader error of the redo's
-  reads is the error of the copy's read, reached in the redo and only for a subject that the redo reads; only a database
-  changed after its preliminary read can fail there. Evidence 2026-10-21 (perf/bp-redo-db-subjects, head 90bb60f8, workstation; the same binary on / off in one job):
+  reads is the error that the copy's read gave, reached in the redo and only for a subject that the redo reads; only a database
+  changed after its preliminary read can fail there. The reports are held by the frozen NCBI `-db` fixtures
+  (`db.o_stored.*` for stored O) and by `tests/blastp_redo_db_subjects.rs`, which compares the reports of every redo path and
+  residue set with the one-thread search. Evidence 2026-10-21 (perf/bp-redo-db-subjects, head 90bb60f8, workstation; the same binary on / off in one job):
   `blastp -db` UniRef50 q100 at 32 threads (node 1, untimed) peak RssAnon 235 / 289 MiB (max RSS 229 / 280 MiB; NCBI
   195 MiB), wall 541 / 543 s, the same output (= NCBI); Swiss-Prot q100 peak RssAnon 91.5 / 121.0 MiB at 8 threads and
   101.4 / 130.1 MiB at 16 (medians of 2 pairs; NCBI 125 and 136 MiB). Instructions (`perf stat` `:u`, 8 threads, on /
@@ -1714,10 +1715,9 @@ Rebuilding less:
   -8.6 % wall (four rounds at a matched clock, -3.8..-10.5 %), at 4 threads -1.3 %; with `-db` inside the rounds'
   spread (rounds at a matched clock -10.2 % blastp-fast, +1.3 % exact); max RSS within 3 MiB. It acts only with
   `LOSAT_X_BPREDOPAR`.
-- `LOSAT_X_BPREDOWINEXPAND=1` (BLASTP, memory; in the strict set from the pull request that added it
-  (perf/bp-redo-window-expand, evidence at the end of this entry): on unless it is `0`;
-  acts only where `LOSAT_X_BPREDOPAR` runs, with the compact lists of
-  BPPCOMPACT) the redo in windows expands the compact preliminary lists as its windows reach them instead of
+- BPREDOWINEXPAND (graduated 2026-10-27, in the set since 2026-10-22 (perf/bp-redo-window-expand, evidence at the
+  end of this entry); no variable; always on; acts only where `LOSAT_X_BPREDOPAR` runs, with the compact lists of
+  BPPCOMPACT) (BLASTP, memory) the redo in windows expands the compact preliminary lists as its windows reach them instead of
   the lists of all queries before the redo (`blastp/x_redo_par.rs`, `XExpandAhead`). Before each window the lists from
   the first one not expanded are expanded in query order, by the same `x_expand_hit_list`, until the queries expanded
   from the window's start hold more jobs than the window's budget (or every list is expanded); a query's jobs are its
@@ -1726,7 +1726,7 @@ Rebuilding less:
   lists (asserted after each window), and the windows, the replay, the matches ended and the lists released are those of the full
   expansion. The match counts that the early termination bound (`x_end_above`) and the choice of the path read are
   counted from the compact lists. Where the path does not run after all (fewer than two matches), every list is expanded before
-  the other paths, as without the switch. The expanded lists held at a time are those of the queries of about one
+  the other paths (the only expansion before the previous switch existed). The expanded lists held at a time are those of the queries of about one
   window, and each query's compact list is freed when it is expanded.
   Evidence 2026-10-20 (v4-D12 s3 probe, workstation): in `blastp -db` UniRef50 q100 at 32 threads the expansion of all
   91 lists of the first query batch (194,347 HSPs of 168 bytes) added 31 MiB to the main heap before the redo, which
@@ -2740,7 +2740,7 @@ Rebuilding less:
   made generic over the element (`blastp/x_prelim_compact.rs`, exactness argument in its header); the redo
   reads lists of full HSPs rebuilt from them: the one-thread redo rebuilds each query's list when it
   reaches it and drops it after its redo, a search with more than one thread rebuilds all lists before the
-  redo (or, with `LOSAT_X_BPREDOWINEXPAND`, window by window), query chunks hand on rebuilt lists; with `-db`
+  redo (or, where `LOSAT_X_BPREDOPAR` runs, window by window), query chunks hand on rebuilt lists; with `-db`
   the compact lists are listed and renamed to ranks (`ListedSubjects::read`). The unit test
   `hit_list_helpers_keep_the_same_lists_on_both_types` compares the hit-list helpers on both element types.
   With `LOSAT_TIMING=1` each search of a query

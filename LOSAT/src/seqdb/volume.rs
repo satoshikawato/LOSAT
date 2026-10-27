@@ -182,7 +182,7 @@ impl Volume {
         }
     }
 
-    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the number of residues of protein `oid` (volume-relative), read
+    /// The number of residues of protein `oid` (volume-relative), read
     /// from the index alone: `read_block(oid, oid + 1, _)`'s `protein(0).len()`.
     pub fn protein_length(&self, oid: u32) -> Result<u32, SeqDbError> {
         assert!(

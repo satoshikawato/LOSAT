@@ -58,6 +58,11 @@ def graduated() -> list[str]:
     return names_of("GRADUATED")
 
 
+def opt_in() -> list[str]:
+    """The opt-in switches (OPT_IN in xswitch.rs): off unless their variable is set, no row until they join the set."""
+    return names_of("OPT_IN")
+
+
 def read_expected(path: Path) -> list[dict[str, str]]:
     with open(path, newline="") as handle:
         return list(csv.DictReader((line for line in handle if not line.startswith("#")), delimiter="\t"))
@@ -118,7 +123,7 @@ def check(names: list[str], rows: list[dict[str, str]], reached, programs: set[s
             elif row[side] == "gap" and sides[side]:
                 notes.append(f"{name}: the {side} side was reached ({','.join(sorted(sides[side]))}); "
                              "the row can say required")
-    unknown = sorted(set(reached) - set(names))
+    unknown = sorted(set(reached) - set(names) - set(opt_in()))
     for name in unknown:
         failures.append(f"{name}: recorded but in neither STRICT_SET nor GRADUATED")
     return failures, notes

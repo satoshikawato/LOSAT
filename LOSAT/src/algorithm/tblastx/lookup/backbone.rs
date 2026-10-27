@@ -253,6 +253,18 @@ pub trait XCell: Copy + Default + Send + Sync + 'static {
     /// The cell's `num_used`.
     fn count(&self) -> usize;
 
+    /// The hits and the used cells (`count()` above 0) of `cells`.
+    fn x_hits_and_used(cells: &[Self]) -> (u64, u64) {
+        let (mut hits, mut used) = (0u64, 0u64);
+        for cell in cells {
+            if cell.count() > 0 {
+                hits += cell.count() as u64;
+                used += 1;
+            }
+        }
+        (hits, used)
+    }
+
     /// The cell's hits: its own entries, or the `count()` hits from its cursor in `overflow`.
     // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:60-99 (quoted at `x_scan_cells`,
     // blastp/x_seed_fused.rs)
@@ -276,6 +288,19 @@ impl XCell for BackboneCell {
     #[inline(always)]
     fn count(&self) -> usize {
         self.num_used as usize
+    }
+
+    // The loop `x_bp_table_ratio` had before LOSAT_X_BPLK16, for the instance of the table of
+    // 32-bit hits to keep its code.
+    fn x_hits_and_used(cells: &[Self]) -> (u64, u64) {
+        let (mut hits, mut used) = (0u64, 0u64);
+        for cell in cells {
+            if cell.num_used > 0 {
+                hits += cell.num_used as u64;
+                used += 1;
+            }
+        }
+        (hits, used)
     }
 
     #[inline(always)]

@@ -383,13 +383,7 @@ fn x_bp_table_ratio<K: XCell>(table: &BlastAaLookupTable<K>) -> (u64, bool) {
         if (a, b, c) == key {
             return (ratio, false);
         }
-        let (mut hits, mut used) = (0u64, 0u64);
-        for cell in &table.backbone {
-            if cell.count() > 0 {
-                hits += cell.count() as u64;
-                used += 1;
-            }
-        }
+        let (hits, used) = K::x_hits_and_used(&table.backbone);
         let ratio = (hits * 100).checked_div(used).unwrap_or(0);
         choice.set((key.0, key.1, key.2, ratio));
         (ratio, true)

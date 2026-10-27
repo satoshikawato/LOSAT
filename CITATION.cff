@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use LOSAT in your research, please cite it."
+title: "LOSAT"
+abstract: "Pure-Rust local BLAST with NCBI-verified fixtures, genetic-code exceptions, and command-WASI support."
+version: "0.2.0"
+# date-released: set when v0.2.0 is tagged (release stage 11).
+license: "MIT"
+url: "https://github.com/satoshikawato/LOSAT"
+repository-code: "https://github.com/satoshikawato/LOSAT"
+type: software
+authors:
+  - family-names: "Kawato"
+    given-names: "Satoshi"
+keywords:
+  - blast
+  - bioinformatics
+  - alignment
+  - wasm
+  - genomics

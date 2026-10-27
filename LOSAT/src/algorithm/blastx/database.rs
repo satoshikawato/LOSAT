@@ -57,7 +57,8 @@ pub(crate) struct BlastxDatabase {
     db: SeqDb,
     name: String,
     /// The taxonomy database of the run and the taxids its volumes have looked up (XML2 and
-    /// JSON only), kept across the query batches of the run.
+    /// JSON, and the batches' prefetch of outfmt 0, 5, 6 and 7), kept across the query batches
+    /// of the run.
     taxdb: shared::TaxdbRun,
     /// Whether the database has parsed Seq-ids (`shared::check_seqids`).
     parsed_seqids: bool,
@@ -91,12 +92,14 @@ impl BlastxDatabase {
     }
 
     /// Whether `taxdb.bti` resolves on NCBI's search path, so that the XML2 and JSON formats
-    /// write the scientific name of a taxid (`SeqDb::taxdb_found`).
+    /// write the scientific name of a taxid (`SeqDb::taxdb_found`) and the batches' prefetch
+    /// reads the taxonomy database (`ReportedSubjects::prefetch_messages`); asked once for the
+    /// run (`shared::TaxdbRun::found`).
     pub(crate) fn taxdb_found(&self) -> bool {
-        self.db.taxdb_found()
+        self.taxdb.found(&self.db)
     }
 
-    /// Whether a later query batch of an XML2 or JSON run could still refuse a taxonomy
+    /// Whether a later query batch of an XML, XML2 or JSON run could still refuse a taxonomy
     /// database name or record (`algorithm::common::database::taxdb_may_refuse`: every
     /// sequence's taxid looked up once, before the first byte).
     pub(crate) fn taxdb_may_refuse(&self) -> bool {
@@ -401,6 +404,27 @@ impl ReportedSubjects {
         Ok(reported)
     }
 
+    /// NCBI's messages about the taxonomy database when the query batch whose hit lists are
+    /// `batches` (renamed to ranks by `for_batch`) prefetches the subjects it reports
+    /// (`shared::prefetch_messages`): the sequences of the lists that the reports show
+    /// (`report::reported`), the ones whose titles `for_batch` reads, with the definition lines
+    /// of those with parsed Seq-ids. Empty, and nothing read, without `taxdb.bti` on the search
+    /// path. A taxonomy database that LOSAT cannot read as NCBI does is refused
+    /// (`shared::TaxonomyRefusal`); a header whose taxid does not decode is the reader's error.
+    pub(crate) fn prefetch_messages(
+        &self,
+        database: &BlastxDatabase,
+        batches: &[BatchResults],
+        gapped: bool,
+    ) -> Result<Vec<u8>> {
+        let subjects = batches
+            .iter()
+            .flat_map(|batch| batch.queries.iter().flatten())
+            .filter(|list| super::report::reported(list, gapped))
+            .map(|list| (self.ordinals[list.oid], self.parsed_subject(list.oid)));
+        shared::prefetch_messages(&database.db, &database.taxdb, subjects, PROGRAM)
+    }
+
     /// The records by rank.
     pub(crate) fn records(&self) -> &[FastaRecord] {
         &self.records
@@ -579,5 +603,126 @@ mod tests {
             .downcast::<PreliminaryReadError>()
             .expect("NCBI's error of the preliminary search");
         assert_eq!(error.0, "Database memory map file error");
+    }
+
+    /// The fixture database `name` of `tests/db_search`, with the taxonomy database variant
+    /// `taxdb` of `tests/seqdb/taxdb` (`None`: none) as `BLASTDB`, from the directory `cwd`.
+    fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> BlastxDatabase {
+        use crate::seqdb::alias::SearchPath;
+        let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+        let taxdb = taxdb.map(|variant| tests.join("seqdb/taxdb").join(variant));
+        let search =
+            SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
+        let path = tests.join("db_search").join(name);
+        BlastxDatabase {
+            db: SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap(),
+            name: name.to_string(),
+            taxdb: shared::TaxdbRun::default(),
+            parsed_seqids: false,
+        }
+    }
+
+    /// The results of a query batch of one query whose hit lists name the sequences `lists` by
+    /// ordinal id, each with one HSP of the score given (0: no Seq-align in a gapped search).
+    fn one_query(lists: &[(usize, i32)]) -> Vec<BatchResults> {
+        use super::super::preliminary::PreliminaryHsp;
+        use super::super::results::{Hsp, HspList};
+        let query = FastaRecord {
+            internal_id: "Query_1".into(),
+            title: String::new(),
+            sequence: b"ACGTACGTACGTACGTACGTACGTACGTAC".to_vec(),
+            lowercase_masks: Vec::new(),
+            warnings: Vec::new(),
+            source: None,
+        };
+        let hsp = |score: i32| Hsp {
+            hsp: PreliminaryHsp {
+                context: 0,
+                frame: 1,
+                score,
+                q_start: 0,
+                q_end: 3,
+                q_gapped_start: 0,
+                s_start: 0,
+                s_end: 1,
+                s_gapped_start: 0,
+            },
+            num: 1,
+            evalue: 1e-9,
+            bit_score: 50.0,
+            identity: 1,
+            positive: 1,
+            edit_script: Vec::new(),
+            composition_method: 0,
+        };
+        vec![BatchResults {
+            query_ordinal: 0,
+            queries: vec![lists
+                .iter()
+                .map(|&(oid, score)| HspList {
+                    query_index: 0,
+                    oid,
+                    hsps: vec![hsp(score)],
+                    best_evalue: 1e-9,
+                })
+                .collect()],
+            prepared: super::super::query_setup::prepare_queries(
+                &[query],
+                &super::super::stage_c_tests::options(),
+            )
+            .unwrap(),
+            parameters: Vec::new(),
+            search_skipped: false,
+        }]
+    }
+
+    // DBID item T: a batch's prefetch looks up the sequences that its reports show (an HSP with a
+    // Seq-align), once per volume and taxid over the batches of a run, and opens the taxonomy
+    // database at the run's first lookup; nothing without `taxdb.bti`. `x16_taxid_99990` (two
+    // sequences of taxid 99990) with `offset_last_past_end` (the last entry, 99990, is past the
+    // end of `taxdb.btd`), `x16_taxid` (taxid 9606) with `bad_magic`.
+    #[test]
+    fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-blastx-db-prefetch-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let text = |database: &BlastxDatabase, lists: &[(usize, i32)]| -> String {
+            let stores = database.read_stores().unwrap();
+            let mut batches = one_query(lists);
+            let reported = ReportedSubjects::for_batch(
+                database,
+                Subjects::Database(&stores),
+                &mut batches,
+                true,
+                false,
+                false,
+                false,
+                false,
+            )
+            .unwrap();
+            let messages = reported.prefetch_messages(database, &batches, true);
+            String::from_utf8(messages.unwrap()).unwrap()
+        };
+        let database = open_with_taxdb("x16_taxid_99990", Some("offset_last_past_end"), &cwd);
+        assert!(database.taxdb_found());
+        // A sequence whose HSPs have no Seq-align is not fetched: the taxonomy database is not
+        // opened.
+        assert_eq!(text(&database, &[(0, 0)]), "");
+        let offset = "Error: [blastx] Error: Offset error at end of taxdb file.\n";
+        assert_eq!(text(&database, &[(0, 0), (1, 50)]), offset);
+        // The same volume and taxid in a later batch.
+        assert_eq!(text(&database, &[(0, 50), (1, 50)]), "");
+        let database = open_with_taxdb("x16_taxid", Some("bad_magic"), &cwd);
+        assert_eq!(
+            text(&database, &[(1, 50), (0, 40)]),
+            "Error: [blastx] Error: Tax database file has wrong magic number.\n"
+        );
+        let database = open_with_taxdb("x16_taxid", None, &cwd);
+        assert!(!database.taxdb_found());
+        assert_eq!(text(&database, &[(0, 50), (1, 40)]), "");
+        std::fs::remove_dir_all(&cwd).unwrap();
     }
 }

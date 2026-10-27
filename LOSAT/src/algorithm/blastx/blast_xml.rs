@@ -41,10 +41,11 @@
 //!   13 to 16) and refuses the first query whose title the writer would refuse;
 //! - when some `-subject` title would be refused if its subject had a hit
 //!   (`subjects_may_be_refused`), or some query's message would be (a title that is refused only
-//!   in the message of a query NCBI did not search), or (15 and 16 with `-db`) the taxonomy
-//!   database is on the search path and the lookup of the taxid of some sequence of the database
-//!   would be refused (a scientific name NCBI's XML cannot write, a damaged record: checked once
-//!   before the first byte, `taxdb_may_refuse`), so that a later batch could refuse it,
+//!   in the message of a query NCBI did not search), or (with `-db`) the taxonomy database is
+//!   on the search path and the lookup of the taxid of some sequence of the database would be
+//!   refused (a scientific name NCBI's XML2 cannot write, a damaged record, which outfmt 5 reads
+//!   in each batch's prefetch, `ReportedSubjects::prefetch_messages`: checked once before the
+//!   first byte, `taxdb_may_refuse`), so that a later batch could refuse it,
 //!   the run holds the document in memory (`HeldOutput`; with outfmt 13 and 14 the side files'
 //!   bytes too, `HeldSideFiles`) and writes it at the epilog; a refusal found while the batches
 //!   are reported drops it, with nothing written (an empty master file, no side file).

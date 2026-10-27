@@ -329,6 +329,7 @@ export LOSAT_X_BPCLUT=1
 export LOSAT_X_BPCLUTSCANBF=1
 export LOSAT_X_BPCOMPOREUSE=1
 export LOSAT_X_BPDBCUT=1
+export LOSAT_X_BPDBKEEP=1
 export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
 export LOSAT_X_BPFFILL=1
@@ -1819,6 +1820,54 @@ Rebuilding less:
   (the zero fill), cycles x1.000 (0.961-1.060) where the A/A arm read x1.001 (0.939-1.034), x0.999-1.002 in the 4
   quietest rounds (load 8-16); WSSV 8 rounds instructions x0.999998, cycles x1.002 (0.986-1.008), A/A x0.999
   (0.985-1.010); minor faults 13.2k -> 5.2k (human x yeast).
+- `LOSAT_X_BPDBKEEP=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-db-thresh):
+  on unless it is `0`; the preliminary stage of every BLASTP task with `-db`, at any thread count; also the chains of
+  every BLASTP lookup build, `-subject` too, and the reads of the index check and the title checks wherever a program
+  opens a database) keeps glibc's dynamic mmap threshold at its first value (128 KiB) through the preliminary stage
+  of a query block. glibc maps an allocation of 128 KiB or more and raises the threshold to the size of each mapped
+  allocation that is freed (up to 32 MiB); after that, allocations below the threshold come from the thread arenas,
+  and the space they leave there stays resident. Without the switch every task of a round made a search scratch
+  (offset pairs 256 KiB, a diagonal table of up to 512 KiB) and read its block into a new buffer of up to 1 MiB, and
+  freed both; before the stage the index check read 1 MiB at a time, the title checks read 1 MiB pieces and made a
+  list of all ranges (397 KiB with UniRef50), and the lookup build freed its chains (448 KiB): each free raised the
+  threshold. With the switch:
+  (1) each worker of the pool keeps one scratch and one block buffer for the whole stage
+  (`blastp/blast_engine/database/x_db_keep.rs`), and the blocks are cut to at most 96 KiB (`X_KEEP_BLOCK_BYTES`, at
+  one thread too), so that a kept buffer stays in its worker's arena instead of a mapping of its own beside it;
+  (2) the workers take the blocks one at a time in ordinal order and put each block's results into a window of 8
+  blocks per worker; the worker that ends the oldest block not yet merged merges it and the later blocks already
+  ended, in ordinal order, and a worker takes block j only once the blocks before j - W are merged (W, the window).
+  No round ends, where every worker waited for the round's last block and its merge: with 96 KiB blocks the rounds
+  were 11 times as many (Swiss-Prot at 16 threads 2 -> 17, UniRef50 at 32 threads about 74 -> 794);
+  (3) the index check (`seqdb/index.rs`) and the header pieces of the title checks read 64 KiB at a time, and
+  BLASTP's title checks read each range from the index (`SeqDb::x_header_range`) instead of a list of all ranges;
+  (4) the chains of BLASTP's lookup build (`x_bp_build_direct`) take a capacity above 32 MiB
+  (`utils/x_mapped.rs` `x_unthresholded_capacity`), which glibc maps whatever the threshold and whose free does not
+  move it (the pages not written are not resident).
+  Reports do not change: each block is searched as a task of the rounds searches it, from the one-thread order's
+  diagonal offset of its first sequence, and the blocks' results go to the hit lists in ordinal order; a failed
+  search stops at the first error in ordinal order, and `x_db_cut.rs` returns the one-thread order's error. The
+  waits end: the oldest block's search waits for nothing a waiting worker holds and runs no rayon work, and a panic
+  stops the window (`x_db_keep.rs` header). Lib tests `kept_scratches_and_buffers_give_the_search_without_them`,
+  `the_window_waits_for_its_oldest_block_and_ends_on_a_panic` and
+  `a_damaged_database_gives_the_one_thread_error_with_the_cut` compare the sequences, offsets, hit lists and errors
+  with the rounds without the switch at 1-7 threads. Evidence 2026-10-27 (v4-D12 s18, workstation, node 1 with
+  membind 1 at 16 and 32 threads, node 0 at one thread, binary f465af2d on dev f5326a59, every report identical and
+  the same as NCBI's), switch / `=0`: peak RssAnon UniRef50 q100 `-evalue 0.001` `-db` at 32 threads **188.1 /
+  212.1 MiB**, wall 411 / 425 s; `-db uniref50.03` at 16 threads **59.0, 59.2 / 95.7, 93.0 MiB**, wall 161.3, 161.6 /
+  169.1, 169.4 s; WSSV x PajaWSV `-db` at one thread **12,452, 12,528 / 12,784, 12,780 KiB**; 3,000 human proteins x
+  `BlastDBSpecies6` at one thread 17,792, 17,824 / 19,076, 18,068 KiB; Swiss-Prot q100 at one thread 75,040 /
+  75,232 KiB. 16 threads, 16 rounds rotated with an A/A arm (`=0` again), CPUs warmed 3 s, load 16-47: Swiss-Prot
+  q100 wall x0.943 (16 of 16 below 1; A/A x1.000), cycles:u x1.003, instructions x1.0001, minor faults x0.83;
+  human x `BlastDBSpecies6` wall x0.979 (15 of 16; A/A x1.003), cycles:u x0.999. One thread `perf stat` `:u` (8 and
+  4 rounds): instructions x0.9999 / x1.0000, cycles x0.999 / x1.003 where the A/A arm read x1.001 / x1.005. Forms
+  measured on the way (v4-D12 s16-s18, same cases): kits with 1 MiB blocks, UniRef50 n32 234.9 against 210.6 MiB (a
+  kept 1 MiB buffer is a mapping beside the arena); the fixes before the stage without kits, 210.2 against 209.0 (the
+  first task's block free raises the threshold to 1 MiB); kits with 96 KiB blocks in rounds, 184.0-186.3 against
+  206.6-209.2 MiB but Swiss-Prot n16 cycles:u x1.002-1.004 and wall x1.000-1.004; rounds of the cut's bytes,
+  199.7 MiB and wall x0.949. The window holds about 3 MiB more than those rounds with UniRef50 at 32 threads (a
+  worker, not the main thread, merges). A threshold held by `GLIBC_TUNABLES` (mmap and trim at 128 KiB, a diagnostic)
+  gave 136 MiB with 144 times the minor faults.
 - `LOSAT_X_BPSEED=1` (BLASTP, speed; in the strict set since 2026-10-14; `=0` turns it off) the two-hit seed
   stage with an amino-acid lookup table
   (`blastp/x_seed_fused.rs`, exactness argument in its header): the subject scan and the diagonal test in one

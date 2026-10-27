@@ -126,9 +126,9 @@ impl Drop for Csr {
         let offsets = std::mem::take(&mut self.offsets);
         match self.x_keep.take() {
             Some((keep, length, dirty)) => keep.give_back_buffer(offsets, length, dirty),
-            None => crate::algorithm::blastn::x_shrink_free::free(offsets),
+            None => crate::algorithm::blastn::x_shrink_free::free_as(2, offsets),
         }
-        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.qs));
+        crate::algorithm::blastn::x_shrink_free::free_as(4, std::mem::take(&mut self.qs));
     }
 }
 

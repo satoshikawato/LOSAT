@@ -60,6 +60,24 @@ pub(crate) fn free<T>(mut vector: Vec<T>) {
     drop(vector);
 }
 
+/// PROBE (not for a pull request): `free` where bit `bit` of LOSAT_PROBE_SHRINKMASK is set
+/// (unset: every bit), else a plain drop. 1 BLASTNA buffer, 2 CSR offsets (not kept), 4 CSR qs,
+/// 8 chains' heads, 16 next_pos, 32 pv_array, 64 MB24 heads, 128 MB24 chain, 256 second template.
+pub(crate) fn free_as<T>(bit: u32, vector: Vec<T>) {
+    static MASK: OnceLock<u32> = OnceLock::new();
+    let mask = *MASK.get_or_init(|| {
+        std::env::var("LOSAT_PROBE_SHRINKMASK")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(u32::MAX)
+    });
+    if mask & bit != 0 {
+        free(vector);
+    } else {
+        drop(vector);
+    }
+}
+
 /// No NCBI counterpart: with LOSAT_TIMING, the `[TIMING] x_bn_shrink_free` line `main` prints at
 /// exit (when a buffer was shrunk).
 pub(crate) fn print_summary() {
@@ -82,7 +100,7 @@ impl std::ops::Deref for Blastna {
 
 impl Drop for Blastna {
     fn drop(&mut self) {
-        free(std::mem::take(&mut self.0));
+        free_as(1, std::mem::take(&mut self.0));
     }
 }
 

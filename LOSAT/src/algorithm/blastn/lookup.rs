@@ -895,8 +895,8 @@ pub struct DiscTemplates {
 // (`x_shrink_free`).
 impl Drop for DiscTemplates {
     fn drop(&mut self) {
-        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.hashtable2));
-        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.next_pos2));
+        crate::algorithm::blastn::x_shrink_free::free_as(256, std::mem::take(&mut self.hashtable2));
+        crate::algorithm::blastn::x_shrink_free::free_as(256, std::mem::take(&mut self.next_pos2));
     }
 }
 
@@ -962,9 +962,9 @@ impl Drop for MbLookupTable {
         if let Some(narrow) = self.x_narrow.as_mut() {
             narrow.x_shrink_free();
         }
-        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.hashtable));
-        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.next_pos));
-        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.pv_array));
+        crate::algorithm::blastn::x_shrink_free::free_as(8, std::mem::take(&mut self.hashtable));
+        crate::algorithm::blastn::x_shrink_free::free_as(16, std::mem::take(&mut self.next_pos));
+        crate::algorithm::blastn::x_shrink_free::free_as(32, std::mem::take(&mut self.pv_array));
     }
 }
 

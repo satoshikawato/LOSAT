@@ -1246,6 +1246,15 @@ fn x_try_build_flat_by_buckets(
         }
     }
     let total = targets.len();
+    if std::env::var_os("LOSAT_BPF_S7LOG").is_some() {
+        eprintln!(
+            "[bpf-s7-build] letters={} appends={total} targets_cap={} per_offset={} per_offset_cap={}",
+            query.len(),
+            targets.capacity(),
+            per_offset.len(),
+            per_offset.capacity()
+        );
+    }
 
     // Partition: the buckets' appends in order (a counting sort, stable), bucket b's at
     // `bucket_starts[b]..bucket_starts[b + 1]` of `hits`, the slots its cells' hits take.

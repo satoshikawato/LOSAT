@@ -6430,7 +6430,7 @@ mod tests {
     #[test]
     fn the_redo_lpt_scope_returns_the_par_iter_results_by_index() {
         let mut rng = XorShift(0x9e37_79b9_7f4a_7c15);
-        for threads in [2, 3, 7] {
+        for threads in [2, 3, 7, 17] {
             crate::utils::threading::with_search_pool(threads, "tblastn", |pool| {
                 for matches in [0_usize, 1, 2, 5, 40, 256] {
                     let hsps: Vec<usize> = (0..matches).map(|_| rng.below(50)).collect();
@@ -6489,7 +6489,7 @@ mod tests {
     #[cfg(feature = "parallel")]
     #[test]
     fn a_panicking_redo_match_propagates_and_the_pool_stays_usable() {
-        for threads in [2, 3, 7] {
+        for threads in [2, 3, 7, 17] {
             crate::utils::threading::with_search_pool(threads, "tblastn", |pool| {
                 let matches = 40_usize;
                 let order: Vec<usize> = (0..matches).collect();

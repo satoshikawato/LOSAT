@@ -164,7 +164,10 @@ fn check(query: &Path, target: [&str; 2], task: &str, threads: &[u32], own: bool
             String::from_utf8_lossy(&expected.2),
             "{what}: standard error"
         );
-        let took = own && n >= 2;
+        // The parts are read with `read_at` of `std::os::unix::fs::FileExt` and need the `parallel`
+        // feature: elsewhere (Windows, WebAssembly) the switch never acts and the sides stay
+        // `(false, true)` (module doc of `x_query_scan_par.rs`).
+        let took = own && n >= 2 && cfg!(all(unix, feature = "parallel"));
         assert_eq!(
             reach.sides(SWITCH),
             (took, !took),

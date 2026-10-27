@@ -33,19 +33,32 @@
 //!    subjects has ended its seed stage (`XSeedEnd`, at dispatch point 5 of `process_subject`,
 //!    where the seed release (`x_seed_release.rs`) has freed the batch's lookup and unit tables),
 //!    if the admission rule lets it. That search is a job of the loop's scope
-//!    (`rayon::in_place_scope`) and runs on the pool like any other.
+//!    (`rayon::in_place_scope`) and runs on the pool like any other. With `LOSAT_X_TBXBOARD`
+//!    (tblastx/x_work_board.rs) a batch whose units are on the board starts the next one earlier,
+//!    when every one of its units has been taken (`XSeedEnd::units_taken`, while the HSPs held are
+//!    below the limit): the next batch builds its tables while the last units run, then waits at a
+//!    gate before its subjects (`XGateView`) until the batch before has ended its seed stage and
+//!    the HSPs held leave room, or the batch before has returned, or the pipe stopped, taking the
+//!    board's items meanwhile.
 //! 3. The loop takes a started batch's result from its slot. Until the slot is filled the loop's
 //!    thread runs the pool's jobs (`rayon::yield_now`), and sleeps 50 us when there is none, so
 //!    no thread waits for a condition outside rayon's latches and no job waits at all (plan v4
-//!    §5: a waiting helper that a nested wait runs deadlocks).
+//!    §5: a waiting helper that a nested wait runs deadlocks). With the board the loop's thread
+//!    and a gate's thread take the board's items instead, then their own pool jobs and their
+//!    part of a broadcast (`rayon::yield_local`; a later batch's subject loop is a
+//!    `rayon::broadcast`, which ends only after every thread has run its part), so they never
+//!    run another thread's jobs, such as a batch's search, nested.
 //! 4. Admission: a subject holds its HSP list from its seed-stage end until it returns (its chain
 //!    links it, re-evaluates it and converts it). The next batch starts early only while the
 //!    subjects past their seed stage hold at most `HSP_LIMIT` HSPs (4 Mi: 352 MiB of 88-byte
 //!    records); otherwise
 //!    the loop starts it when it reaches it, as before. The genome 3 x 3 batches hold 1.2-1.4 M
 //!    HSPs; one 5 Mb by 5 Mb pair holds about 23 M, so a query file of such genomes keeps today's
-//!    peak. The tables of two batches are never held at once: the next batch builds its own after
-//!    the batch before has freed its tables.
+//!    peak. Without the board the tables of two batches are never held at once: the next batch
+//!    builds its own after the batch before has freed its tables. With the board the next batch's
+//!    tables are built while the batch before's last units run, so both batches' tables are held
+//!    for that time (one batch ahead at most: a batch starts the next only once its own units are
+//!    all taken).
 //! 5. A search that returns an error stops the early starts. The loop then meets that batch's
 //!    error where it met it before; batches started after it are discarded unread. So does the
 //!    loop's end (its own errors, as a database's titles that cannot be read): the scope then
@@ -59,7 +72,9 @@
 //!    (genome 3 x 3, 16 threads: the last batch's tail 1.43 s, against 0.91 s without the pipe).
 //!    A chain without a wait never runs other work. The other threads run the next batch's units
 //!    meanwhile. The subjects of the plan's last batch, and of a batch whose subjects hold more
-//!    HSPs than the limit (no batch starts early then), link on the pool as before.
+//!    HSPs than the limit (no batch starts early then), link on the pool as before. With the
+//!    board, such a chain puts its link groups and sorts on the board instead of running them on
+//!    its own thread (`x_link_slices.rs` `x_helped`), where no thread waits in the pool.
 //!
 //! # Why the output is the loop's
 //!
@@ -84,8 +99,8 @@
 //!
 //! Diagnostics: with `LOSAT_X_STATS`, `[X_STATS] TBXPIPE planned= taken= early= loop= waited=
 //! key_mismatch= max_held_hsps=` at the end of the search (early: started at the batch before's
-//! seed-stage end; loop: searched by the loop when it reached them; waited: taken after the loop
-//! waited for the slot).
+//! seed-stage end, or with the board when its units were all taken; loop: searched by the loop
+//! when it reached them; waited: taken after the loop waited for the slot).
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -510,9 +525,12 @@ impl<'s, R: Send> XPipe<'s, R> {
     // now, builds its tables and waits at its gate (`XGateView::open`) before its subjects.
     fn units_taken(&'s self, scope: &rayon::Scope<'s>, i: usize) {
         let next = i + 1;
+        // Batch i's own HSPs are not counted yet (they are at its seed-stage end): the start needs
+        // room left below the limit (item 4).
         if next >= self.plan.len()
             || self.stop.load(Ordering::SeqCst)
             || self.started[next].load(Ordering::SeqCst)
+            || self.held.now.load(Ordering::SeqCst) >= self.held.limit
         {
             return;
         }

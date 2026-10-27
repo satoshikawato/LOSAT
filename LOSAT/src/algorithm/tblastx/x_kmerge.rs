@@ -387,53 +387,146 @@ fn x_merge_frame(combined: &mut Vec<UngappedHit>, mut frame: Vec<UngappedHit>) {
 
 /// `combined_ungapped_hits` of one subject from its units' sorted lists (items 2-4); adds the init
 /// HSPs to the `[X_STATS] PAIRPAR` counter.
-fn x_merge<R: XRecord>(
+fn x_merge<R: XRecord + Send>(
     frame_chunks: &[Vec<SubjectChunk>],
     units: &[XUnit],
     lists: Vec<Vec<R>>,
     inp: &XSubject<'_>,
 ) -> Vec<UngappedHit> {
+    // The lists of each frame's units, in unit order (the units are listed frame by frame).
+    let mut per_frame: Vec<Vec<Vec<R>>> = (0..frame_chunks.len()).map(|_| Vec::new()).collect();
+    let mut lists = lists.into_iter();
+    let mut next_unit = 0usize;
+    for (f, frame_lists) in per_frame.iter_mut().enumerate() {
+        while next_unit < units.len() && units[next_unit].f == f {
+            frame_lists.push(lists.next().expect("one output per unit"));
+            next_unit += 1;
+        }
+    }
+    let first_unit: Vec<usize> = {
+        let mut starts = Vec::with_capacity(frame_chunks.len());
+        let mut u = 0usize;
+        for f in 0..frame_chunks.len() {
+            starts.push(u);
+            while u < units.len() && units[u].f == f {
+                u += 1;
+            }
+        }
+        starts
+    };
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the frames on the search's board (tblastx/x_work_board.rs).
+    // No NCBI counterpart: a frame's list depends on that frame's units only, and the frames are
+    // put together below in frame order as before, so the list is the same.
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    if frame_chunks.len() > 1 {
+        if let Some((board, _)) = crate::algorithm::tblastx::x_work_board::current() {
+            let inputs: Vec<std::sync::Mutex<Option<Vec<Vec<R>>>>> = per_frame
+                .into_iter()
+                .map(|frame_lists| std::sync::Mutex::new(Some(frame_lists)))
+                .collect();
+            let outputs: Vec<std::sync::OnceLock<Vec<UngappedHit>>> = (0..frame_chunks.len())
+                .map(|_| std::sync::OnceLock::new())
+                .collect();
+            let run = |f: usize, _: &mut crate::algorithm::tblastx::x_work_board::XTaker| {
+                let frame_lists = inputs[f]
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .take()
+                    .expect("a frame is merged once");
+                let frame = x_merge_one_frame(
+                    f,
+                    &frame_chunks[f],
+                    &units[first_unit[f]..first_unit[f] + frame_lists.len()],
+                    frame_lists,
+                    inp,
+                );
+                if outputs[f].set(frame).is_err() {
+                    unreachable!("a frame is merged once");
+                }
+            };
+            board.run_groups(
+                frame_chunks.len(),
+                &run,
+                frame_chunks.len().min(rayon::current_num_threads()) - 1,
+            );
+            let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
+            for frame in outputs {
+                x_merge_frame(
+                    &mut combined_ungapped_hits,
+                    frame.into_inner().expect("every frame ran"),
+                );
+            }
+            return combined_ungapped_hits;
+        }
+    }
+    let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
+    for (f, frame_lists) in per_frame.into_iter().enumerate() {
+        let n = frame_lists.len();
+        let frame = x_merge_one_frame(
+            f,
+            &frame_chunks[f],
+            &units[first_unit[f]..first_unit[f] + n],
+            frame_lists,
+            inp,
+        );
+        x_merge_frame(&mut combined_ungapped_hits, frame);
+    }
+    combined_ungapped_hits
+}
+
+/// The list of subject frame `f`: its chunks' k-way merges, converted, and the chunks put together
+/// (the body of `x_merge`'s frame loop; `units` and `lists` are the frame's, in unit order).
+fn x_merge_one_frame<R: XRecord>(
+    f: usize,
+    chunks: &[SubjectChunk],
+    units: &[XUnit],
+    lists: Vec<Vec<R>>,
+    inp: &XSubject<'_>,
+) -> Vec<UngappedHit> {
+    let unit = XExpand::new(f, inp);
     let mut lists = lists.into_iter();
     let mut next_unit = 0usize;
     let mut chunks_merged = 0u64;
-    let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
-    for (f, chunks) in frame_chunks.iter().enumerate() {
-        let unit = XExpand::new(f, inp);
-        let mut frame_ungapped_hits: Vec<UngappedHit> = Vec::new();
-        for (k, chunk) in chunks.iter().enumerate() {
-            let mut chunk_lists = Vec::new();
-            while next_unit < units.len() && units[next_unit].f == f && units[next_unit].k == k {
-                chunk_lists.push(lists.next().expect("one output per unit"));
-                next_unit += 1;
-            }
-            let init_hsps = x_kway(chunk_lists, &unit);
-            chunks_merged += 1;
-            INIT_HSPS.fetch_add(init_hsps.len() as u64, AtomicOrdering::Relaxed);
-            let mut hits = if init_hsps.is_empty() {
-                Vec::new()
-            } else {
-                let exact = Vec::with_capacity(init_hsps.len());
-                let mut hits =
-                    convert_init_hsps_unsorted(init_hsps, inp.contexts, inp.s_frames, exact);
-                x_sort_k1_runs(&mut hits);
-                hits
-            };
-            adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
-            if !hits.is_empty() && frame_ungapped_hits.is_empty() {
-                frame_ungapped_hits = hits;
-            } else if !hits.is_empty() {
-                merge_tblastx_subject_chunk_hits(
-                    &mut frame_ungapped_hits,
-                    hits,
-                    chunk.offset,
-                    chunk.overlap,
-                );
-            }
+    let mut frame_ungapped_hits: Vec<UngappedHit> = Vec::new();
+    for (k, chunk) in chunks.iter().enumerate() {
+        let mut chunk_lists = Vec::new();
+        while next_unit < units.len() && units[next_unit].f == f && units[next_unit].k == k {
+            chunk_lists.push(lists.next().expect("one output per unit"));
+            next_unit += 1;
         }
-        x_merge_frame(&mut combined_ungapped_hits, frame_ungapped_hits);
+        let init_hsps = x_kway(chunk_lists, &unit);
+        chunks_merged += 1;
+        INIT_HSPS.fetch_add(init_hsps.len() as u64, AtomicOrdering::Relaxed);
+        let mut hits = if init_hsps.is_empty() {
+            Vec::new()
+        } else {
+            let exact = Vec::with_capacity(init_hsps.len());
+            let mut hits = convert_init_hsps_unsorted(init_hsps, inp.contexts, inp.s_frames, exact);
+            x_sort_k1_runs(&mut hits);
+            hits
+        };
+        adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
+        if !hits.is_empty() && frame_ungapped_hits.is_empty() {
+            frame_ungapped_hits = hits;
+        } else if !hits.is_empty() {
+            merge_tblastx_subject_chunk_hits(
+                &mut frame_ungapped_hits,
+                hits,
+                chunk.offset,
+                chunk.overlap,
+            );
+        }
     }
     KM_CHUNKS.fetch_add(chunks_merged, AtomicOrdering::Relaxed);
-    combined_ungapped_hits
+    // The frame's own sort of `x_merge_frame` (a no-op when sorted), here so that it runs with the
+    // frame on the board.
+    if !frame_ungapped_hits.is_empty()
+        && !ungapped_hits_is_sorted_by_score_ncbi(&frame_ungapped_hits)
+    {
+        KM_FRAME_UNSORTED.fetch_add(1, AtomicOrdering::Relaxed);
+        sort_ungapped_hits_by_score_ncbi(&mut frame_ungapped_hits);
+    }
+    frame_ungapped_hits
 }
 
 /// `XPairPar::merge_subject` with the switch on (the units sorted their lists).

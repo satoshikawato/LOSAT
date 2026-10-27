@@ -276,7 +276,10 @@ fn pool_allowed(site: Site) -> bool {
     {
         match site {
             Site::First(allow_parallel) | Site::Final(allow_parallel) => allow_parallel,
-            Site::Dispatch => rayon::current_thread_index().is_some(),
+            // EXPERIMENT (LOSAT_X_TBXBOARD): a chain of the batch pipe sorts on its own thread.
+            Site::Dispatch => {
+                rayon::current_thread_index().is_some() && !super::x_link_slices::x_helped_now()
+            }
         }
     }
     #[cfg(any(
@@ -286,6 +289,98 @@ fn pool_allowed(site: Site) -> bool {
     {
         let _ = site;
         false
+    }
+}
+
+// EXPERIMENT (LOSAT_X_TBXBOARD): a stable sort of `indices` by `compare` on the search's board
+// (tblastx/x_work_board.rs): equal chunks sorted by the stable `sort_by`, then rounds of two-way
+// merges that take the left element unless the right one is smaller. No NCBI counterpart: a stable
+// sort's result is the one order in which equal elements keep their input order, so this gives
+// `sort_today`'s order (and `par_sort_by`'s), element for element, however the chunks are cut and
+// whichever thread sorts or merges them. No thread waits in the pool (the board's items wait for
+// nothing).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_board_sort<C>(
+    board: &crate::algorithm::tblastx::x_work_board::XBoard,
+    indices: &mut [usize],
+    records: &[UngappedHit],
+    compare: &C,
+) where
+    C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
+{
+    use crate::algorithm::tblastx::x_work_board::XTaker;
+    const CHUNK_MIN: usize = 8192;
+    let n = indices.len();
+    let chunks = (n / CHUNK_MIN).clamp(1, rayon::current_num_threads());
+    let bounds: Vec<usize> = (0..=chunks).map(|c| c * n / chunks).collect();
+    let less = |a: usize, b: usize| compare(&records[a], &records[b]) == Ordering::Less;
+    let mut other: Vec<usize> = vec![0; n];
+    // The runs of the current round as [start, end) of the data in `src`.
+    let mut runs: Vec<(usize, usize)> = bounds.windows(2).map(|w| (w[0], w[1])).collect();
+    {
+        let base = indices.as_mut_ptr() as usize;
+        let sort_chunk = |c: usize, _: &mut XTaker| {
+            let (a, b) = runs[c];
+            // SAFETY: the runs are disjoint ranges of `indices`; the board runs index `c` once,
+            // and `run_groups` returns after every index has run.
+            let chunk =
+                unsafe { std::slice::from_raw_parts_mut((base as *mut usize).add(a), b - a) };
+            chunk.sort_by(|&lhs, &rhs| compare(&records[lhs], &records[rhs]));
+        };
+        board.run_groups(runs.len(), &sort_chunk, runs.len() - 1);
+    }
+    let mut in_indices = true;
+    while runs.len() > 1 {
+        let (src, dst): (usize, usize) = if in_indices {
+            (indices.as_mut_ptr() as usize, other.as_mut_ptr() as usize)
+        } else {
+            (other.as_mut_ptr() as usize, indices.as_mut_ptr() as usize)
+        };
+        let pairs: Vec<((usize, usize), Option<(usize, usize)>)> = runs
+            .chunks(2)
+            .map(|pair| (pair[0], pair.get(1).copied()))
+            .collect();
+        let merge = |p: usize, _: &mut XTaker| {
+            let ((a0, a1), right) = pairs[p];
+            let end = right.map_or(a1, |(_, b1)| b1);
+            // SAFETY: pair `p` reads `src[a0..end]` and writes `dst[a0..end]`, ranges disjoint
+            // from every other pair's; `src` and `dst` are different buffers of length `n`; the
+            // board runs index `p` once, and `run_groups` returns after every index has run.
+            let src = unsafe { std::slice::from_raw_parts(src as *const usize, n) };
+            let dst =
+                unsafe { std::slice::from_raw_parts_mut((dst as *mut usize).add(a0), end - a0) };
+            match right {
+                None => dst.copy_from_slice(&src[a0..a1]),
+                Some((b0, b1)) => {
+                    let (mut i, mut j, mut k) = (a0, b0, 0);
+                    while i < a1 && j < b1 {
+                        if less(src[j], src[i]) {
+                            dst[k] = src[j];
+                            j += 1;
+                        } else {
+                            dst[k] = src[i];
+                            i += 1;
+                        }
+                        k += 1;
+                    }
+                    dst[k..k + (a1 - i)].copy_from_slice(&src[i..a1]);
+                    k += a1 - i;
+                    dst[k..].copy_from_slice(&src[j..b1]);
+                }
+            }
+        };
+        board.run_groups(pairs.len(), &merge, pairs.len().saturating_sub(1));
+        runs = pairs
+            .iter()
+            .map(|&((a0, a1), right)| (a0, right.map_or(a1, |(_, b1)| b1)))
+            .collect();
+        in_indices = !in_indices;
+    }
+    if !in_indices {
+        indices.copy_from_slice(&other);
     }
 }
 
@@ -323,6 +418,25 @@ fn sort_stable<C>(
 where
     C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
 {
+    // EXPERIMENT (LOSAT_X_TBXBOARD): a sort inside a board item stays on its thread.
+    if crate::algorithm::tblastx::x_work_board::in_item() {
+        sort_today(indices, records, compare);
+        return false;
+    }
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if (on_pool || super::x_link_slices::x_helped_now())
+        && indices.len() >= parallel_min
+        && rayon::current_num_threads() > 1
+    {
+        // EXPERIMENT (LOSAT_X_TBXBOARD): chunks and merges on the search's board.
+        if let Some((board, _)) = crate::algorithm::tblastx::x_work_board::current() {
+            x_board_sort(board, indices, records, &compare);
+            return true;
+        }
+    }
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -745,6 +859,41 @@ mod tests {
     // dispatch sort follows the calling thread, which is not a rayon worker off a pool (the
     // thread of a `-num_threads 1` search) and is one inside `ThreadPool::install`, where the
     // current pool has the threads it was built with.
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the board's chunk sorts and merges give today's order for every
+    // comparator, list arrangement and chunk count (lists below and above the chunk size), on pools
+    // of 2 and 8 threads.
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[test]
+    fn the_board_sort_is_todays() {
+        let mut rng = Rng(0x1319_8A2E_0370_7344);
+        for threads in [2usize, 8] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("test pool");
+            for (name, compare) in COMPARATORS {
+                for n in [0usize, 1, 7, 8191, 8192, 30_001, 70_000] {
+                    for span in [2u64, 50] {
+                        for hits in arrangements(&mut rng, n, span, compare) {
+                            let mut expected: Vec<usize> = (0..n).collect();
+                            sort_today(&mut expected, &hits, compare);
+                            let mut actual: Vec<usize> = (0..n).collect();
+                            pool.install(|| {
+                                let board =
+                                    crate::algorithm::tblastx::x_work_board::XBoard::default();
+                                x_board_sort(&board, &mut actual, &hits, &compare);
+                            });
+                            assert_eq!(
+                                actual, expected,
+                                "{name}, n {n}, span {span}, {threads} threads"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn the_pool_decision_follows_the_flag_or_the_calling_thread() {
         on_and_off_pools(|where_, in_pool| {

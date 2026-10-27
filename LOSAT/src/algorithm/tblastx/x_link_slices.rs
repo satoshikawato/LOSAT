@@ -162,7 +162,6 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 // No NCBI counterpart: counters for LOSAT_X_STATS; they do not change any value NCBI computes.
 static LINKINGS: AtomicU64 = AtomicU64::new(0);
-static HELPED_LINKINGS: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(all(
     feature = "parallel",
@@ -372,7 +371,6 @@ fn link_slices(
     {
         if let Some((board, _)) = crate::algorithm::tblastx::x_work_board::current() {
             x_link_board(board, groups, args, &scratch, kernel_times);
-            HELPED_LINKINGS.fetch_add(1, AtomicOrdering::Relaxed);
             return on_pool;
         }
     }

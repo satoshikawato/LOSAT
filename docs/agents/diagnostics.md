@@ -2583,7 +2583,8 @@ Rebuilding less:
   sort has one order (equal chunks sorted with `sort_by`, then two-way merges that take the left element
   on ties), and frames are put together in frame order as before, so every list is the same. With
   `LOSAT_X_TBXPIPE`, the next batch starts when every unit of the batch before has been taken (not at its
-  seed-stage end), builds its tables and waits at a gate before its subjects until the batch before has
+  seed-stage end) while the HSPs held by the batches past their seed stage are below TBXPIPE's limit,
+  builds its tables and waits at a gate before its subjects until the batch before has
   ended its seed stage and the held HSPs leave room, or it returned, taking board items meanwhile; the
   pipe loop waits for a batch by taking board items. A wait outside the pool also runs this thread's own
   pool jobs and its part of a `rayon::broadcast` (`rayon::yield_local`): a broadcast (a later batch's
@@ -2591,7 +2592,8 @@ Rebuilding less:
   (plan v4 line W).
   Memory: the groups of one linking call are linked at once (as the pool path already did), so the
   kernels' per-HSP arrays (about 203 bytes per HSP, `link_group`) of a self pair's four large groups are
-  live together instead of one at a time.
+  live together instead of one at a time; and the next batch's tables are built while the batch
+  before's last units run, so two batches' tables are held for that time.
 - `LOSAT_X_TBXRPTPAR=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads))
   the report stage after the last query batch (`write_tblastx_outputs`) runs its per-HSP work on the

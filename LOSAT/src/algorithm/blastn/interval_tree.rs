@@ -296,8 +296,10 @@ impl XPointSet {
     }
 
     fn grow(&mut self) {
+        // The size follows the table's length only; the allocation is kept between trees.
         let words = (self.bits.len() * 2).max(128);
-        self.bits = vec![0u64; words];
+        self.bits.clear();
+        self.bits.resize(words, 0);
         self.points = 0;
     }
 
@@ -400,7 +402,7 @@ impl XTreeIndex {
     ///     s_IntervalRootNodeInit(tree, q_start, q_end, &retval);
     /// ```
     /// The index follows `reset_with_bounds`: new ranges, empty index; the grid is sized
-    /// from the ranges.
+    /// from the ranges (on the first HSP, in the allocation kept from earlier ranges).
     fn set_bounds(&mut self, q_min: i32, q_max: i32, s_min: i32, s_max: i32) {
         let q_span = (q_max as i64 - q_min as i64).max(0) as usize;
         let s_span = (s_max as i64 - s_min as i64).max(0) as usize;
@@ -413,7 +415,7 @@ impl XTreeIndex {
         self.s_min = s_min;
         self.nq = (q_span >> shift) + 1;
         self.ns = (s_span >> shift) + 1;
-        self.head = Vec::new();
+        self.head.clear();
         self.used_cells.clear();
         self.clear();
     }
@@ -482,7 +484,7 @@ impl XTreeIndex {
             return;
         }
         if self.head.is_empty() {
-            self.head = vec![0u32; self.nq * self.ns];
+            self.head.resize(self.nq * self.ns, 0);
         }
         for q in q_a..=q_b {
             for s in s_a..=s_b {

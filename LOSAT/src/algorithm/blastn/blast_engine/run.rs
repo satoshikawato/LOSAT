@@ -4235,6 +4235,20 @@ struct SubjectScratch {
     // }
     // ```
     offset_pairs: Vec<OffsetPair>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:146-170
+    // ```c
+    // Blast_IntervalTreeInit(Int4 q_start, Int4 q_end,
+    //                        Int4 s_start, Int4 s_end)
+    // ...
+    //     tree->s_min = s_start;
+    //     tree->s_max = s_end;
+    // ...
+    //     s_IntervalRootNodeInit(tree, q_start, q_end, &retval);
+    // ```
+    // The interval tree of the subject's preliminary gapped stage and of its traceback, kept with
+    // this scratch and given each subject's ranges with `reset_with_bounds` (the same state as a
+    // new tree) instead of being made again for every subject. Reuse only.
+    x_tree: BlastIntervalTree,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
@@ -4315,6 +4329,8 @@ impl SubjectScratch {
                 };
                 offset_array_size
             ],
+            // No NCBI counterpart: every user sets the subject's ranges first (`reset_with_bounds`).
+            x_tree: BlastIntervalTree::new(0, 1, 0, 1),
         }
     }
 }
@@ -11763,7 +11779,9 @@ fn search_query_batch(
             //                               0, subject->length+1);
             // ```
             // query->length is the concatenated length for both strands (2*len + 1).
-            let mut interval_tree = BlastIntervalTree::new(
+            // The tree is the scratch's (`x_tree`), given this chunk's ranges.
+            let interval_tree = &mut subject_scratch.x_tree;
+            interval_tree.reset_with_bounds(
                 0,                                // q_min
                 (query_concat_length + 1) as i32, // q_max
                 0,                                // s_min
@@ -15437,7 +15455,7 @@ fn search_query_batch(
             } else {
                 let (calls, skipped) = x_prelim_list(
                     ungapped_hits,
-                    &mut interval_tree,
+                    interval_tree,
                     gap_scratch,
                     greedy_align_scratch,
                     Some(&mut subject_scratch.x_ahead_scratch),
@@ -15913,7 +15931,9 @@ fn search_query_batch(
         // tree = Blast_IntervalTreeInit(0, query_blk->length + 1,
         //                               0, subject_length + 1);
         // ```
-        let mut interval_tree = BlastIntervalTree::new(
+        // The tree is the scratch's (`x_tree`), given this subject's ranges.
+        let interval_tree = &mut subject_scratch.x_tree;
+        interval_tree.reset_with_bounds(
             0,
             (query_concat_length + 1) as i32,
             0,
@@ -17764,7 +17784,7 @@ fn search_query_batch(
             } else {
                 x_trace_list(
                     prelim_hits,
-                    &mut interval_tree,
+                    interval_tree,
                     gap_scratch,
                     &mut subject_scratch.greedy_align_scratch,
                     Some(&mut subject_scratch.x_ahead_scratch),
@@ -17773,7 +17793,7 @@ fn search_query_batch(
                     &mut traceback_alignment_lengths,
                 );
                 let (list, s1, s2, s3, s4) = x_post_purge(hits.drain(..).collect());
-                let (list, s5) = x_final_list(list, &mut interval_tree);
+                let (list, s5) = x_final_list(list, interval_tree);
                 (list, [s1, s2, s3, s4, s5])
             };
         prelim_hits.clear();

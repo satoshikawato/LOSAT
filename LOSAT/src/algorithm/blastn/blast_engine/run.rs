@@ -8440,8 +8440,9 @@ fn run_in_pool(
             qbp_off,
         );
         // EXPERIMENT (LOSAT_X_BNQDROP): no slot searches the records that the loop takes out of
-        // their store (`search_cli`'s rule moved them there where it found that no slot may run).
-        if matches!(queries, x_query_stream::Queries::Taken(_)) {
+        // their store (`search_cli`'s rule moved them there where it found that no slot may run),
+        // unless the store lends the loop's batch to its slot (EXPERIMENT LOSAT_X_BNQSLOTS).
+        if matches!(queries, x_query_stream::Queries::Taken(_)) && !x_query_drop::slots_on() {
             qbp.x_refuse_taken();
         }
         // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
@@ -8502,8 +8503,11 @@ fn run_in_pool(
             // report of the batch's first query (`QueryWarnings`). Skipped records are read too.
             // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records, read now from the query file when
             // the switch acts (an error here is the file changed between the two readings).
+            // EXPERIMENT (LOSAT_X_BNQSLOTS): lent to the slot that may search the batch (any batch
+            // but the first while the slots may run).
+            let x_lend = input_start != 0 && qbp.may_speculate();
             let mut batch_records =
-                match queries.batch_in(input_start..input_end, start..end, parallel_pool) {
+                match queries.batch_in(input_start..input_end, start..end, parallel_pool, x_lend) {
                     Ok(records) => records,
                     Err(error) => {
                         qbp.finish();
@@ -8802,7 +8806,10 @@ fn run_in_pool(
                 input_end,
                 batch_size: batching.batch_size,
             };
-            let searched = match qbp.take(key) {
+            let x_precomputed = qbp.take(key);
+            // EXPERIMENT (LOSAT_X_BNQSLOTS): no slot searches the batch again.
+            queries.unlend();
+            let searched = match x_precomputed {
                 Some(precomputed) => precomputed,
                 None => {
                     // EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps its megablast table from batch

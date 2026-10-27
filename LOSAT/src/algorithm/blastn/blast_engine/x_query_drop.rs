@@ -75,7 +75,7 @@
 //! making their letters again.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use crate::algorithm::blastn::hsp::BlastnOutputFormat;
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -95,6 +95,12 @@ pub(super) fn pack_on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNQPACK"))
 }
 
+/// No NCBI counterpart: LOSAT_X_BNQSLOTS (read once).
+pub(super) fn slots_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNQSLOTS"))
+}
+
 /// No NCBI counterpart: whether `search_cli` packs the letters of the records it reads before the
 /// search (LOSAT_X_BNQPACK): where they go into a `Store` (`Rule::acts`, LOSAT_X_BNQDROP on) and the
 /// query file holds at least two of the task's largest batches (`file_bytes` against
@@ -112,7 +118,8 @@ pub(super) struct Rule<'a> {
     pub formats: &'a [BlastnOutputFormat],
     /// `-query_loc` is given.
     pub query_range: bool,
-    /// A LOSAT_X_QBATCHPAR slot may search a batch ahead of the loop.
+    /// A LOSAT_X_QBATCHPAR slot may search a batch ahead of the loop (the store acts there too
+    /// with LOSAT_X_BNQSLOTS).
     pub slots_may_run: bool,
     /// The caller takes the hits' records (`ReportOutputs::hits`, which hold the query rows).
     pub hit_records: bool,
@@ -122,7 +129,7 @@ impl Rule<'_> {
     /// Whether the records read before the search are moved into a `Store` (the switch on).
     pub(super) fn acts(&self) -> bool {
         !self.query_range
-            && !self.slots_may_run
+            && (!self.slots_may_run || slots_on())
             && !self.hit_records
             && !self
                 .formats
@@ -135,7 +142,7 @@ impl Rule<'_> {
 /// order (`x_query_stream::Queries::Taken`).
 pub(super) struct Store {
     /// The records the loop has not taken, the packed letters of those packed (LOSAT_X_BNQPACK),
-    /// and how many records the loop has taken.
+    /// how many records the loop has taken, and the loop's batch lent to the slots.
     left: Mutex<Left>,
     /// Every record searched whole (no `-query_loc`).
     query_input: QueryInput,
@@ -144,8 +151,18 @@ pub(super) struct Store {
 struct Left {
     records: std::vec::IntoIter<FastaRecord>,
     /// The packed letters of the records not taken, with their positions among all records.
-    packed: std::collections::VecDeque<(usize, PackedLetters)>,
+    packed: std::collections::VecDeque<(usize, Arc<PackedLetters>)>,
     taken: usize,
+    /// LOSAT_X_BNQSLOTS: the records of the loop's batch that a slot may still search, with the
+    /// position of the first (`Store::lend`), until the loop has the batch's result.
+    lent: Option<(usize, Arc<Vec<FastaRecord>>)>,
+}
+
+/// The records of a batch for a LOSAT_X_QBATCHPAR slot (LOSAT_X_BNQSLOTS): the loop's batch lent
+/// by the store, or a copy of records the loop has not taken.
+pub(super) enum SlotBatch {
+    Lent(Arc<Vec<FastaRecord>>),
+    Copied(Vec<FastaRecord>),
 }
 
 impl Store {
@@ -174,8 +191,12 @@ impl Store {
             query_input,
             left: Mutex::new(Left {
                 records: records.into_iter(),
-                packed: packed.into(),
+                packed: packed
+                    .into_iter()
+                    .map(|(index, store)| (index, Arc::new(store)))
+                    .collect(),
                 taken: 0,
+                lent: None,
             }),
         }
     }
@@ -202,6 +223,7 @@ impl Store {
             records,
             packed,
             taken,
+            ..
         } = &mut *left;
         anyhow::ensure!(
             range.start == *taken && range.len() <= records.len(),
@@ -209,7 +231,7 @@ impl Store {
         );
         *taken = range.end;
         let mut batch: Vec<FastaRecord> = records.by_ref().take(range.len()).collect();
-        let mut stores: Vec<Option<PackedLetters>> = Vec::new();
+        let mut stores: Vec<Option<Arc<PackedLetters>>> = Vec::new();
         while packed.front().is_some_and(|(index, _)| *index < range.end) {
             let (index, store) = packed.pop_front().expect("a front");
             stores.resize_with(range.len(), || None);
@@ -220,19 +242,64 @@ impl Store {
         Ok(batch)
     }
 
-    /// A copy of the records `range` for a LOSAT_X_QBATCHPAR slot; `None` once the loop has taken
-    /// the first of them. No slot runs where the loop takes the records (`x_qbatch_par::Off::Taken`;
-    /// the rule acts where none may run), so a slot never waits on the loop's current batch.
-    pub(super) fn copy(&self, range: std::ops::Range<usize>) -> Option<Vec<FastaRecord>> {
+    /// LOSAT_X_BNQSLOTS: `take` for a batch that a LOSAT_X_QBATCHPAR slot may search: the store
+    /// keeps the records (shared) for that slot (`slot_batch`) until the loop has the batch's
+    /// result (`unlend`). Packed letters are made again on the loop's thread: the slots' threads
+    /// are busy, and a batch's letters take about 0.1 ms per million (a pool's threads waking for
+    /// them cost more where the CPUs are taken).
+    pub(super) fn lend(
+        &self,
+        range: std::ops::Range<usize>,
+    ) -> anyhow::Result<Arc<Vec<FastaRecord>>> {
+        let start = range.start;
+        let records = Arc::new(self.take(range, &SearchPool::x_serial())?);
+        let mut left = self.left.lock().unwrap_or_else(PoisonError::into_inner);
+        left.lent = Some((start, Arc::clone(&records)));
+        Ok(records)
+    }
+
+    /// LOSAT_X_BNQSLOTS: the loop has the result of its lent batch (a slot's, or the search it
+    /// makes itself with no slot running): no slot searches the batch again.
+    pub(super) fn unlend(&self) {
+        let lent = self
+            .left
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .lent
+            .take();
+        drop(lent);
+    }
+
+    /// The records `range` for a LOSAT_X_QBATCHPAR slot: the loop's lent batch when it is exactly
+    /// them, else a copy whose packed letters are made again on the slot's thread (as in `lend`);
+    /// `None` once the loop has taken the first of them otherwise (a batch the loop has passed, or
+    /// one it took without lending: the slot's search is cancelled). The loop lends every batch a
+    /// slot may search (`x_query_stream::Queries::batch_in`), so a queued batch whose records the
+    /// loop took is always served (a search that could never get its records would be queued
+    /// again for ever: `x_qbatch_par::settle` queues a cancelled batch that the plan wants).
+    pub(super) fn slot_batch(&self, range: std::ops::Range<usize>) -> Option<SlotBatch> {
         let left = self.left.lock().unwrap_or_else(PoisonError::into_inner);
-        let from = range.start.checked_sub(left.taken)?;
-        let mut records = left.records.as_slice()[from..from + range.len()].to_vec();
-        for (index, store) in &left.packed {
-            if range.contains(index) {
-                store.unpack_into(&mut records[index - range.start].sequence);
+        if let Some((start, records)) = &left.lent {
+            if *start == range.start && records.len() == range.len() {
+                return Some(SlotBatch::Lent(Arc::clone(records)));
             }
         }
-        Some(records)
+        let from = range.start.checked_sub(left.taken)?;
+        let mut records = left.records.as_slice()[from..from + range.len()].to_vec();
+        let first = left
+            .packed
+            .partition_point(|(index, _)| *index < range.start);
+        let mut stores: Vec<Option<Arc<PackedLetters>>> = Vec::new();
+        for (index, store) in left.packed.range(first..) {
+            if *index >= range.end {
+                break;
+            }
+            stores.resize_with(range.len(), || None);
+            stores[index - range.start] = Some(Arc::clone(store));
+        }
+        drop(left);
+        unpack(&mut records, stores, &SearchPool::x_serial());
+        Some(SlotBatch::Copied(records))
     }
 
     /// Writes the reader's messages of every record (none taken yet).
@@ -250,7 +317,11 @@ impl Store {
 
 /// No NCBI counterpart: the letters of a batch's packed records made again (LOSAT_X_BNQPACK), by the
 /// search pool where it has two threads or more (each record by one thread).
-fn unpack(batch: &mut [FastaRecord], stores: Vec<Option<PackedLetters>>, pool: &SearchPool<'_>) {
+fn unpack(
+    batch: &mut [FastaRecord],
+    stores: Vec<Option<Arc<PackedLetters>>>,
+    pool: &SearchPool<'_>,
+) {
     if stores.is_empty() {
         return;
     }

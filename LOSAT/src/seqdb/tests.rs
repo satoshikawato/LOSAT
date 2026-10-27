@@ -578,8 +578,9 @@ fn databases_that_need_unread_data_are_rejected() {
         assert!(
             error.to_string().ends_with(&format!(
                 "{name}.phr: unsupported database: the database stores parsed Seq-ids \
-                 (makeblastdb -parse_seqids, or a database distributed by NCBI); LOSAT reads \
-                 databases built without -parse_seqids only"
+                 (makeblastdb -parse_seqids, or a database distributed by NCBI); LOSAT's blastp \
+                 and blastx read them, its other programs read databases built without \
+                 -parse_seqids only"
             )),
             "{name}: {error}"
         );
@@ -1624,8 +1625,9 @@ fn check_search_path_row(
     let (ncbi, title, sequences, volumes, error, status) =
         (&row[0], &row[1], &row[2], &row[3], &row[4], &row[5]);
     // The tables hold the value of blastp's `-db`, which the program trims. A
-    // search program checks the ordinal ids right after it opens the database
-    // (`algorithm::common::database::refuse_parsed_seqids`).
+    // search program reads the first header of each volume right after it opens the
+    // database (`algorithm::common::database::refuse_parsed_seqids`, or `check_seqids`
+    // where it reads parsed Seq-ids too); the tables' databases have none.
     let name = db_argument_name(name);
     let opened = SeqDb::open_in(name, SeqType::Protein, search)
         .and_then(|db| db.check_ordinal_ids().map(|()| db));

@@ -275,25 +275,47 @@ impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
         // `-subject` record one.
         enc.member("description", 1);
         enc.begin_list(false);
-        enc.element();
-        enc.begin_sequence("HitDescr");
-        string_member(enc, "id", 0, hit.id);
-        // A taxid the taxonomy database does not know (`GetTaxInfo` throws) leaves the id alone
-        // (blastxml2_format.cpp:422-428).
-        if !matches!(hit.taxonomy, HitTaxonomy::NotFound(_)) {
-            // `-subject` ids are local: no accession (blastxml2_format.cpp:398-402).
-            if database {
-                string_member(enc, "accession", 1, hit.accession);
+        // The `HitDescr` of each definition line of a sequence with parsed Seq-ids
+        // (`report::db_subject::ParsedSubject::hit_descriptions`).
+        for description in hit.descriptions {
+            enc.element();
+            enc.begin_sequence("HitDescr");
+            string_member(enc, "id", 0, &description.id);
+            if !description.accession.is_empty() {
+                string_member(enc, "accession", 1, &description.accession);
             }
-            string_member(enc, "title", 2, hit.title);
-            if database && hit.taxid != 0 {
-                int_member(enc, "taxid", 3, hit.taxid);
-                if let HitTaxonomy::Named(sciname) = hit.taxonomy {
+            if let Some(title) = &description.title {
+                string_member(enc, "title", 2, title);
+            }
+            if description.taxid != 0 {
+                int_member(enc, "taxid", 3, description.taxid);
+                if let HitTaxonomy::Named(sciname) = &description.taxonomy {
                     string_member(enc, "sciname", 4, sciname);
                 }
             }
+            enc.end_sequence();
         }
-        enc.end_sequence();
+        if hit.descriptions.is_empty() {
+            enc.element();
+            enc.begin_sequence("HitDescr");
+            string_member(enc, "id", 0, hit.id);
+            // A taxid the taxonomy database does not know (`GetTaxInfo` throws) leaves the id alone
+            // (blastxml2_format.cpp:422-428).
+            if !matches!(hit.taxonomy, HitTaxonomy::NotFound(_)) {
+                // `-subject` ids are local: no accession (blastxml2_format.cpp:398-402).
+                if database {
+                    string_member(enc, "accession", 1, hit.accession);
+                }
+                string_member(enc, "title", 2, hit.title);
+                if database && hit.taxid != 0 {
+                    int_member(enc, "taxid", 3, hit.taxid);
+                    if let HitTaxonomy::Named(sciname) = hit.taxonomy {
+                        string_member(enc, "sciname", 4, sciname);
+                    }
+                }
+            }
+            enc.end_sequence();
+        }
         enc.end_list();
         enc.end_member();
         int_member(enc, "len", 2, hit.len);

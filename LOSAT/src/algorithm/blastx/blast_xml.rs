@@ -196,13 +196,16 @@ fn subject_names(
             true,
         )
         .map_err(|refusal| refuse(refusal, "a subject title")),
-        ShownSubjects::Database { reported, .. } => SubjectNames::of_database_sequence(
-            reported.ordinal(oid),
-            &reported.stored_titles()[oid],
-            // XML2 and JSON alone show the taxid (`ReportedSubjects` reads it for them only).
-            reported.taxid(oid),
-            reported.taxonomy(oid),
-        )
+        ShownSubjects::Database { reported, .. } => match reported.parsed_subject(oid) {
+            Some(parsed) => SubjectNames::of_parsed(parsed, reported.parsed_taxonomy(oid)),
+            None => SubjectNames::of_database_sequence(
+                reported.ordinal(oid),
+                &reported.stored_titles()[oid],
+                // XML2 and JSON alone show the taxid (`ReportedSubjects` reads it for them only).
+                reported.taxid(oid),
+                reported.taxonomy(oid),
+            ),
+        }
         .map_err(|refusal| refuse(refusal, "a database title")),
     }
 }
@@ -740,12 +743,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time.
-                    taxdb_printer.at_hit(
-                        list.oid,
-                        names.taxid,
-                        &names.taxonomy,
-                        &mut *diagnostics,
-                    )?;
+                    taxdb_printer.at_names(list.oid, names, &mut *diagnostics)?;
                     sink.hit(&hit, |hsps| {
                         for hsp in list
                             .hsps

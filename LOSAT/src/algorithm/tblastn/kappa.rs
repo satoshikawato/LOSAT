@@ -25,6 +25,8 @@ use crate::core::composition_adjustment::redo_alignment::{
 };
 use crate::utils::genetic_code::GeneticCode;
 
+mod x_reap_index;
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1738-1773,1896-1957
 // ```c
 // q_start = hsp->query.gapped_start - query_range->begin;
@@ -133,6 +135,29 @@ pub(super) fn reap_contained_postredo_hsps(hsps: &mut Vec<(usize, GappedHsp)>) -
     if hsps.len() < 2 {
         return (0..hsps.len()).collect();
     }
+    // No NCBI counterpart: LOSAT_X_TBNREAPIDX gives the same answers from an index by subject start
+    // for a list of `X_REAP_INDEX_FROM` HSPs or more (`kappa/x_reap_index.rs`).
+    let keep = if x_reap_index::x_indexed(hsps.len()) {
+        x_reap_index::x_reap_keep(hsps)
+    } else {
+        reap_keep(hsps)
+    };
+    let retained_indices = keep
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &selected)| selected.then_some(index))
+        .collect();
+    let mut index = 0;
+    hsps.retain(|_| {
+        let selected = keep[index];
+        index += 1;
+        selected
+    });
+    retained_indices
+}
+
+/// Whether each HSP of `hsps` is kept: NCBI's loop of `s_HitlistReapContained` (above).
+fn reap_keep(hsps: &[(usize, GappedHsp)]) -> Vec<bool> {
     let mut keep = vec![true; hsps.len()];
     for read in 1..hsps.len() {
         let (query_context, inner) = hsps[read];
@@ -158,18 +183,7 @@ pub(super) fn reap_contained_postredo_hsps(hsps: &mut Vec<(usize, GappedHsp)>) -
             }
         }
     }
-    let retained_indices = keep
-        .iter()
-        .enumerate()
-        .filter_map(|(index, &selected)| selected.then_some(index))
-        .collect();
-    let mut index = 0;
-    hsps.retain(|_| {
-        let selected = keep[index];
-        index += 1;
-        selected
-    });
-    retained_indices
+    keep
 }
 
 // NCBI c++/src/algo/blast/core/blast_kappa.c:305-358:

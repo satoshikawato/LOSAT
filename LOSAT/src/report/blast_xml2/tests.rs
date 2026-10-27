@@ -452,6 +452,7 @@ fn one_hsp_named(
                     len: 20,
                     taxid,
                     taxonomy,
+                    descriptions: &[],
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {
@@ -573,6 +574,7 @@ fn blastn_document(kind: Xml2Kind, minus: bool) -> String {
                     len: 20,
                     taxid: 0,
                     taxonomy: crate::report::blast_xml::records::UNNAMED,
+                    descriptions: &[],
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {

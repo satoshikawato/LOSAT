@@ -434,10 +434,10 @@ fn write_subject_alignments_part<W: Write>(
 /// that `GenerateDefline` makes of an empty one (for a protein, `unnamed protein product`)
 /// has an encoding that is never unknown. `protein` is the database's molecule type (BLASTP
 /// and BLASTN share this heading).
-fn write_database_subject_alignments<W: Write>(
+fn write_database_subject_alignments<'h, W: Write>(
     writer: &mut W,
     probe: Option<&mut FormatProbe<'_>>,
-    title: &[u8],
+    title: impl Into<DatabaseHeading<'h>>,
     protein: bool,
     hits: &[&PairwiseHit],
     hsp_indices: &[HspIndex],
@@ -458,10 +458,10 @@ fn write_database_subject_alignments<W: Write>(
 /// `write_database_subject_alignments` for the HSPs `part` of the subject's (the heading with
 /// the first), as `write_subject_alignments_part`.
 #[allow(clippy::too_many_arguments)]
-fn write_database_subject_alignments_part<W: Write>(
+fn write_database_subject_alignments_part<'h, W: Write>(
     writer: &mut W,
     mut probe: Option<&mut FormatProbe<'_>>,
-    title: &[u8],
+    title: impl Into<DatabaseHeading<'h>>,
     protein: bool,
     hits: &[&PairwiseHit],
     hsp_indices: &[HspIndex],
@@ -494,15 +494,53 @@ fn write_database_subject_alignments_part<W: Write>(
     Ok(())
 }
 
+/// The definition lines of a database sequence's alignment heading: the stored title of a
+/// sequence without parsed Seq-ids, or the definition lines of one with them
+/// (`ParsedSubject::heading`).
+#[derive(Clone, Copy)]
+pub enum DatabaseHeading<'a> {
+    Title(&'a [u8]),
+    Parsed(&'a crate::report::db_subject::ParsedSubject),
+}
+
+impl<'a> From<&'a [u8]> for DatabaseHeading<'a> {
+    fn from(title: &'a [u8]) -> Self {
+        DatabaseHeading::Title(title)
+    }
+}
+
+impl<'a> From<&'a Vec<u8>> for DatabaseHeading<'a> {
+    fn from(title: &'a Vec<u8>) -> Self {
+        DatabaseHeading::Title(title)
+    }
+}
+
+impl<'a> From<&'a Arc<[u8]>> for DatabaseHeading<'a> {
+    fn from(title: &'a Arc<[u8]>) -> Self {
+        DatabaseHeading::Title(title)
+    }
+}
+
 /// The heading of a database sequence's alignments (`write_database_subject_alignments`):
-/// `>` and the stored title wrapped as `s_WrapOutputLine` wraps it, then `Length=` when the
+/// `>` and the stored title wrapped as `s_WrapOutputLine` wraps it (a sequence with parsed
+/// Seq-ids: the line of each definition line, `ParsedSubject::heading`), then `Length=` when the
 /// length is known, and one blank line. BLASTX writes it with its own HSP blocks.
-fn write_database_subject_heading<W: Write>(
+fn write_database_subject_heading<'h, W: Write>(
     writer: &mut W,
-    title: &[u8],
+    title: impl Into<DatabaseHeading<'h>>,
     protein: bool,
     length: Option<usize>,
 ) -> io::Result<()> {
+    let title = match title.into() {
+        DatabaseHeading::Title(title) => title,
+        DatabaseHeading::Parsed(subject) => {
+            writer.write_all(&subject.heading(protein))?;
+            if let Some(length) = length {
+                writeln!(writer, "Length={length}")?;
+            }
+            return writeln!(writer);
+        }
+    };
     let generated;
     let heading: &[u8] = if title.is_empty() {
         generated = super::defline::generate_defline(title, protein, false)
@@ -1982,6 +2020,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
     queries: &[BlastpPairwiseQuery],
     query_titles: &[Arc<[u8]>],
     subject_titles: &[Arc<[u8]>],
+    parsed_subjects: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
@@ -2031,6 +2070,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
             query_titles,
             report,
             database,
+            parsed_subjects,
         },
         &hits_by_query,
         subject_titles,
@@ -2067,6 +2107,8 @@ struct BlastpSections<'a> {
     query_titles: &'a [Arc<[u8]>],
     report: &'a BlastpPairwiseReport,
     database: Option<&'a PairwiseDatabase>,
+    /// The subjects with parsed Seq-ids by subject (empty without them).
+    parsed_subjects: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
 }
 
 impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
@@ -2139,14 +2181,19 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         // The table follows `x_InitDeflineTable` (`write_blastn_description_table`): the
         // subject's highest bit score and that HSP's E-value, and the protein title of the
         // record read (by subject index), as TBLASTN's.
-        write_blastn_description_table(
+        write_description_table(
             writer,
             group.described(report.num_descriptions),
             group.subject_order.len() <= report.num_descriptions,
             &group.subject_hits,
-            &group.subject_titles,
             false,
-            true,
+            |s_idx| {
+                let title = group
+                    .subject_titles
+                    .get(&s_idx)
+                    .map_or(&[][..], Vec::as_slice);
+                database_description_label(title, parsed_subject(self.parsed_subjects, s_idx), true)
+            },
         )?;
         // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1520-1589
         // x_DisplayDeflines(aln_set, ...); ... display.DisplaySeqalign(m_Outfile);
@@ -2163,10 +2210,14 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
     ) -> io::Result<()> {
         let config = self.config;
         if self.database.is_some() {
+            let heading = match parsed_subject(self.parsed_subjects, s_idx) {
+                Some(subject) => DatabaseHeading::Parsed(subject),
+                None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
+            };
             return write_database_subject_alignments_part(
                 writer,
                 probe,
-                &group.subject_titles[&s_idx],
+                heading,
                 true,
                 &group.subject_hits[&s_idx],
                 &group.subject_hit_indices[&s_idx],
@@ -2478,6 +2529,34 @@ fn write_description_table<W: Write>(
         writeln!(writer)?;
     }
     writeln!(writer)
+}
+
+/// The subject of `s_idx` among `parsed` when it has parsed Seq-ids.
+fn parsed_subject(
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    s_idx: u32,
+) -> Option<&crate::report::db_subject::ParsedSubject> {
+    parsed.get(s_idx as usize).and_then(Option::as_deref)
+}
+
+/// The description-table label of a database sequence (before the cut to the line): the title
+/// that `GenerateDefline` makes of the stored title `title` (`Unknown` where NCBI's
+/// `HtmlDecode` throws), or for a sequence with parsed Seq-ids its id and title
+/// (`ParsedSubject::description`).
+pub fn database_description_label(
+    title: &[u8],
+    parsed: Option<&crate::report::db_subject::ParsedSubject>,
+    protein: bool,
+) -> Vec<u8> {
+    if let Some(subject) = parsed {
+        let (mut label, title) = subject.description(protein);
+        label.extend_from_slice(&title.text);
+        return label;
+    }
+    match super::defline::generate_defline(title, protein, true) {
+        Ok(defline) => defline.text,
+        Err(super::defline::UnknownEncoding) => b"Unknown".to_vec(),
+    }
 }
 
 // The description table of BLASTN, BLASTP, TBLASTN and TBLASTX: a subject's line is the
@@ -4712,7 +4791,11 @@ pub fn write_blastx_pairwise_report<W: Write>(
     subject_ids: &[Arc<str>],
     report: &BlastpPairwiseReport,
     options: &BlastxPairwiseOptions,
-    database: Option<(&PairwiseDatabase, &[Arc<[u8]>])>,
+    database: Option<(
+        &PairwiseDatabase,
+        &[Arc<[u8]>],
+        &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    )>,
 ) -> io::Result<()> {
     let mut writer = io::BufWriter::new(writer);
     let mut by_query: Vec<Vec<&PairwiseHit>> = vec![Vec::new(); queries.len()];
@@ -4776,9 +4859,12 @@ pub fn write_blastx_pairwise_report<W: Write>(
                 // A database sequence's heading is its stored title after `>` (as
                 // BLASTP's, BLASTN's and TBLASTN's `-db` reports).
                 match database {
-                    Some((_, titles)) => write_database_subject_heading(
+                    Some((_, titles, parsed)) => write_database_subject_heading(
                         &mut writer,
-                        &titles[*oid as usize],
+                        match parsed_subject(parsed, *oid) {
+                            Some(subject) => DatabaseHeading::Parsed(subject),
+                            None => DatabaseHeading::Title(&titles[*oid as usize]),
+                        },
                         true,
                         first.subject_length,
                     )?,

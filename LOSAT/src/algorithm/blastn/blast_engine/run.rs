@@ -249,6 +249,13 @@ mod x_qgroup_par;
 #[path = "x_query_stream.rs"]
 mod x_query_stream;
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279 (the batch reading that
+// LOSAT_X_QSTREAM's first reading precedes).
+// EXPERIMENT (LOSAT_X_QSCANPAR): that first reading cut into parts at record starts and read by
+// the search's threads (a child module, beside `x_query_stream`, which calls it).
+#[path = "x_query_scan_par.rs"]
+mod x_query_scan_par;
+
 /// EXPERIMENT (LOSAT_X_QPREPPAR): the summary line `main` prints at exit. No NCBI
 /// counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_query_prep_par_print_summary() {
@@ -6217,6 +6224,7 @@ fn post_process_hits_and_write(
                 (Some(ordinals), Some(database)) => SubjectNames::Database {
                     ordinals,
                     title: &database.definition,
+                    parsed: &[],
                 },
                 _ => SubjectNames::Records(report.subjects.records()),
             };
@@ -6242,6 +6250,7 @@ fn post_process_hits_and_write(
                 (Some(ordinals), Some(database)) => SubjectNames::Database {
                     ordinals,
                     title: &database.definition,
+                    parsed: &[],
                 },
                 _ => SubjectNames::Records(report.subjects.records()),
             };
@@ -6322,6 +6331,7 @@ fn post_process_hits_and_write(
                         SubjectNames::Database {
                             ordinals,
                             title: &database.definition,
+                            parsed: &[],
                         },
                         report.ranges.subjects.placements,
                         &super::super::sam::SubjectLengths {
@@ -6468,6 +6478,8 @@ fn post_process_hits_and_write(
                     taxids: &xml_taxids,
                     taxonomy: &xml_taxonomy,
                     length: &database_length,
+                    parsed: &[],
+                    parsed_taxonomy: &[],
                 },
                 _ => crate::report::blast_xml::XmlSubjects::Records {
                     records: subject_records,
@@ -7200,6 +7212,7 @@ fn search_cli(
             &mut query_source,
             query_config,
             query_range.as_ref(),
+            args.num_threads,
         )?;
         (Vec::new(), end, store)
     } else if x_pack {

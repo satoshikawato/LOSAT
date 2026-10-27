@@ -36,6 +36,7 @@ use crate::blastinput::ncbi_environment::ApplicationSettings;
 #[cfg(test)]
 use crate::cli::NativeError;
 use crate::report::blast_xml::HitTaxonomy;
+use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{BlockRange, SeqDb, SeqDbError, SeqType, SequenceBlock};
 use crate::stats::search_space::SearchSpace;
@@ -131,10 +132,19 @@ fn search_read_error(error: SeqDbError) -> anyhow::Error {
 impl BlastpDatabase {
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
-    pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
+    pub(super) fn open(
+        name: &str,
+        settings: &ApplicationSettings,
+        parsed_seqids: bool,
+    ) -> Result<Self> {
         let db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
-        // A database with parsed Seq-ids is refused (line DBID: ID2a opens it).
-        shared::refuse_parsed_seqids(&db, PROGRAM)?;
+        // A database with parsed Seq-ids (line DBID, ID2a): BLASTP reads it; psiblast, whose
+        // reports were not checked against NCBI's for one, refuses it as before.
+        if parsed_seqids {
+            shared::check_seqids(&db, settings, PROGRAM)?;
+        } else {
+            shared::refuse_parsed_seqids(&db, PROGRAM)?;
+        }
         Ok(Self {
             db,
             name: name.to_string(),
@@ -856,6 +866,7 @@ impl ListedSubjects {
         hit_lists: &[Option<BlastpHitList>],
     ) -> Result<ListedTitles<'_>> {
         let mut titles: Vec<Option<(Vec<u8>, bool)>> = vec![None; self.ordinals.len()];
+        let mut parsed = ParsedSubjects::default();
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
                 continue;
@@ -867,8 +878,8 @@ impl ListedSubjects {
                     continue;
                 }
                 let ordinal = self.ordinals[rank];
-                let stored = shared::read_title(&database.db, ordinal, query, PROGRAM)?;
-                titles[rank] = Some((stored.title, stored.replaced_bytes));
+                titles[rank] =
+                    Some(parsed.read(database, rank, ordinal, query, self.ordinals.len())?);
             }
         }
         let mut records = Vec::with_capacity(self.ordinals.len());
@@ -892,6 +903,7 @@ impl ListedSubjects {
             listed: self,
             shown: ListedShown::Records(records),
             replaced_title_bytes,
+            parsed: parsed.by_rank,
         })
     }
 }
@@ -979,6 +991,42 @@ pub(super) struct ListedTitles<'a> {
     /// Whether the stored title of a subject holds a byte outside ' ' ..= '~' (read as
     /// '#'), by rank (`check_reported_titles`).
     replaced_title_bytes: Vec<bool>,
+    /// The subjects with parsed Seq-ids, by rank (empty when no reported subject has them;
+    /// their entry of `shown` is the title of their first definition line).
+    pub(super) parsed: Vec<Option<Arc<ParsedSubject>>>,
+}
+
+/// The reported subjects with parsed Seq-ids of `ListedSubjects::read_titles`, by rank.
+#[derive(Default)]
+pub(super) struct ParsedSubjects {
+    pub(super) by_rank: Vec<Option<Arc<ParsedSubject>>>,
+}
+
+impl ParsedSubjects {
+    /// Reads the header of the subject `ordinal` of rank `rank` (of `ranks`), where the hit list
+    /// of query `query` reaches it (`shared::read_header`): its stored title and whether it held
+    /// a replaced byte, or for a sequence with parsed Seq-ids, kept here, the title of its first
+    /// definition line.
+    pub(super) fn read(
+        &mut self,
+        database: &BlastpDatabase,
+        rank: usize,
+        ordinal: u32,
+        query: usize,
+        ranks: usize,
+    ) -> Result<(Vec<u8>, bool)> {
+        match shared::read_header(&database.db, ordinal, query, PROGRAM)? {
+            shared::ReportedHeader::Stored(stored) => Ok((stored.title, stored.replaced_bytes)),
+            shared::ReportedHeader::Parsed(subject) => {
+                let title = subject.first_title().to_vec();
+                if self.by_rank.is_empty() {
+                    self.by_rank = vec![None; ranks];
+                }
+                self.by_rank[rank] = Some(subject);
+                Ok((title, false))
+            }
+        }
+    }
 }
 
 /// The titles (and letters) of the listed subjects as the reports read them, by rank.
@@ -1027,8 +1075,9 @@ impl ListedTitles<'_> {
 
     /// The Blast-def-line taxid of each reported subject by rank (0 for none and for a
     /// subject in no final hit list), which the XML2 and JSON formats write in the `Hit`
-    /// description, and what the taxonomy database says about it. They are read apart from the
-    /// titles, for those formats only.
+    /// description, and what the taxonomy database says about it (for a subject with parsed
+    /// Seq-ids, about the taxid of each definition line: `shared::read_reported_taxonomy`).
+    /// They are read apart from the titles, for those formats only.
     ///
     /// NCBI writes the scientific name of a taxid when it finds `taxdb.bti` on the search path
     /// (`data4xml2format.cpp x_InitCommon`, `blastxml2_format.cpp:380-386`; validity is not
@@ -1047,12 +1096,18 @@ impl ListedTitles<'_> {
         &self,
         database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
-    ) -> Result<(Vec<i32>, Vec<HitTaxonomy>, shared::TaxdbNotes)> {
-        shared::read_reported_taxids(
+    ) -> Result<(
+        Vec<i32>,
+        Vec<HitTaxonomy>,
+        Vec<Vec<HitTaxonomy>>,
+        shared::TaxdbNotes,
+    )> {
+        shared::read_reported_taxonomy(
             &database.db,
             &database.taxdb,
             &self.listed.ordinals,
             &Self::reported(hit_lists),
+            &self.parsed,
             PROGRAM,
         )
     }
@@ -1078,10 +1133,13 @@ impl ListedTitles<'_> {
     pub(super) fn tabular_subject_ids(
         &self,
         hit_lists: &[Option<BlastpHitList>],
-    ) -> Result<Vec<Arc<[u8]>>> {
+    ) -> Result<(Vec<Arc<[u8]>>, Vec<Option<[Arc<[u8]>; 2]>>)> {
         let reported = Self::reported(hit_lists);
         let ranks = self.listed.ordinals.len();
         let mut ids: Vec<Arc<[u8]>> = Vec::with_capacity(ranks);
+        // `sacc` and `saccver` of the subjects with parsed Seq-ids, by rank (empty without
+        // them; the others' are their `sseqid`).
+        let mut accessions: Vec<Option<[Arc<[u8]>; 2]>> = Vec::new();
         // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): one empty id for every subject without rows.
         let empty: Arc<[u8]> = Arc::from(&b""[..]);
         for rank in 0..ranks {
@@ -1093,10 +1151,70 @@ impl ListedTitles<'_> {
                 continue;
             }
             let ordinal = self.listed.ordinals[rank];
+            if let Some(subject) = self.parsed_subject(rank) {
+                let [id, accession, version] = subject.tabular_ids(true).map_err(|problem| {
+                    shared::parsed_refusal(ordinal, &format!("has {problem}"), PROGRAM)
+                })?;
+                ids.push(Arc::from(id));
+                if accessions.is_empty() {
+                    accessions = vec![None; ranks];
+                }
+                accessions[rank] = Some([Arc::from(accession), Arc::from(version)]);
+                continue;
+            }
             let id = shared::tabular_subject_id(self.title(rank), ordinal, true, PROGRAM)?;
             ids.push(Arc::from(id));
         }
-        Ok(ids)
+        Ok((ids, accessions))
+    }
+
+    /// The subject of rank `rank` when it has parsed Seq-ids.
+    pub(super) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
+        self.parsed.get(rank).and_then(Option::as_deref)
+    }
+
+    /// LOSAT's refusals of the subjects with parsed Seq-ids that the reports of the kinds asked
+    /// for do not write as NCBI, before any format is written: a subject that NCBI's formatters
+    /// cannot find by its Seq-align id where a format reads its Bioseq (`fetched`: outfmt 0, 5,
+    /// 6, 7, 13 to 16; `ParsedSubject::fetched`), two of them that follow each
+    /// other in a hit list with matching Seq-align ids where outfmt 0, 5 or 13 to 16 is written
+    /// (`joined`, `shared::refuse_joined_hits`). `hit_lists` are in the order of the reports.
+    pub(super) fn check_parsed_reports(
+        &self,
+        hit_lists: &[Option<BlastpHitList>],
+        fetched: bool,
+        joined: bool,
+    ) -> Result<()> {
+        if self.parsed.is_empty() {
+            return Ok(());
+        }
+        if fetched {
+            for rank in Self::reported(hit_lists) {
+                if let Some(subject) = self.parsed_subject(rank) {
+                    subject.fetched().map_err(|reason| {
+                        shared::parsed_refusal(self.listed.ordinals[rank], &reason, PROGRAM)
+                    })?;
+                }
+            }
+        }
+        if joined {
+            for (query, hit_list) in hit_lists.iter().enumerate() {
+                let Some(hit_list) = hit_list else {
+                    continue;
+                };
+                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                shared::refuse_joined_hits(
+                    query,
+                    hit_list.hsplist_array[..count].iter().map(|hsp_list| {
+                        let rank = hsp_list.oid as usize;
+                        self.parsed_subject(rank)
+                            .map(|subject| (self.listed.ordinals[rank], subject))
+                    }),
+                    PROGRAM,
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// The `stitle` text of every listed subject, by rank: the stored title (an empty
@@ -1118,14 +1236,21 @@ impl ListedTitles<'_> {
     /// subject set (`check_shown_subject_titles`).
     pub(super) fn check_shown_titles(
         &self,
+        database: &BlastpDatabase,
         shown: &std::collections::BTreeSet<usize>,
     ) -> Result<()> {
         for &rank in shown {
-            shared::check_shown_protein_title(
-                self.title(rank),
-                self.listed.ordinals[rank],
-                PROGRAM,
-            )?;
+            let ordinal = self.listed.ordinals[rank];
+            match self.parsed_subject(rank) {
+                Some(subject) => shared::check_shown_parsed_subject(
+                    subject,
+                    true,
+                    database.db.taxdb_found(),
+                    ordinal,
+                    PROGRAM,
+                )?,
+                None => shared::check_shown_protein_title(self.title(rank), ordinal, PROGRAM)?,
+            }
         }
         Ok(())
     }
@@ -1414,7 +1539,7 @@ mod tests {
     }
 
     fn open(name: &str) -> BlastpDatabase {
-        BlastpDatabase::open(&fixture(name), &ApplicationSettings::default())
+        BlastpDatabase::open(&fixture(name), &ApplicationSettings::default(), true)
             .unwrap_or_else(|error| panic!("{name}: {error:#}"))
     }
 
@@ -1588,9 +1713,42 @@ mod tests {
         std::fs::copy(fixture("prot_v4") + ".psq", dir.join("u.psq")).unwrap();
         std::fs::copy(fixture("prot_v4") + ".phr", dir.join("u.phr")).unwrap();
         let name = dir.join("u").to_str().unwrap().to_string();
-        let database = BlastpDatabase::open(&name, &ApplicationSettings::default()).unwrap();
+        let database = BlastpDatabase::open(&name, &ApplicationSettings::default(), true).unwrap();
         assert_eq!(database.pairwise_database().definition, name.as_bytes());
         drop(database);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // The first header of each volume is read when the database is opened (`shared::
+    // check_seqids`), as before line DBID ID2a: a header that LOSAT does not read is refused
+    // there, and only one with parsed Seq-ids is let through (review 1 of ID2a, M2).
+    #[cfg(unix)]
+    #[test]
+    fn the_first_header_of_each_volume_is_read_at_open() {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-db-badheader-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut header = std::fs::read(fixture("prot_v4") + ".phr").unwrap();
+        header[0] = 0x31;
+        std::fs::write(dir.join("b.phr"), header).unwrap();
+        std::fs::copy(fixture("prot_v4") + ".pin", dir.join("b.pin")).unwrap();
+        std::fs::copy(fixture("prot_v4") + ".psq", dir.join("b.psq")).unwrap();
+        let name = dir.join("b").to_str().unwrap().to_string();
+        let settings = ApplicationSettings::default();
+        for parsed_seqids in [true, false] {
+            let Err(error) = BlastpDatabase::open(&name, &settings, parsed_seqids) else {
+                panic!("a damaged first header opened ({parsed_seqids})")
+            };
+            assert!(
+                format!("{error:#}").ends_with(
+                    "b.phr: header record, byte 1: tag 0x31 where Blast-def-line-set (0x30) is expected; this database is not supported by LOSAT's BLASTP"
+                ),
+                "{error:#}"
+            );
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1606,7 +1764,7 @@ mod tests {
             (native.exit, native.message.clone())
         };
         let settings = ApplicationSettings::default();
-        let Err(error) = BlastpDatabase::open("", &settings) else {
+        let Err(error) = BlastpDatabase::open("", &settings, true) else {
             panic!("an empty name opened")
         };
         assert_eq!(
@@ -1616,7 +1774,7 @@ mod tests {
                 "BLAST Database error: Database name is required.\n".to_string()
             )
         );
-        let Err(error) = BlastpDatabase::open(&fixture("no_such_database"), &settings) else {
+        let Err(error) = BlastpDatabase::open(&fixture("no_such_database"), &settings, true) else {
             panic!("a missing database opened")
         };
         let (exit, message) = native(error);
@@ -1627,9 +1785,12 @@ mod tests {
             ),
             "{message}"
         );
-        // A database with parsed Seq-ids: LOSAT's refusal, not NCBI's error.
-        let Err(error) = BlastpDatabase::open(&fixture("prot_ids_v4"), &settings) else {
-            panic!("a database with parsed Seq-ids opened")
+        // A database with parsed Seq-ids opens for BLASTP; psiblast's is LOSAT's refusal, not
+        // NCBI's error.
+        BlastpDatabase::open(&fixture("prot_ids_v4"), &settings, true)
+            .expect("BLASTP opens a database with parsed Seq-ids");
+        let Err(error) = BlastpDatabase::open(&fixture("prot_ids_v4"), &settings, false) else {
+            panic!("a database with parsed Seq-ids opened for psiblast")
         };
         assert!(error.downcast_ref::<NativeError>().is_none());
         assert!(
@@ -2200,7 +2361,7 @@ mod tests {
         }
 
         fn open_path(name: &str) -> BlastpDatabase {
-            BlastpDatabase::open(name, &ApplicationSettings::default())
+            BlastpDatabase::open(name, &ApplicationSettings::default(), true)
                 .unwrap_or_else(|error| panic!("{name}: {error:#}"))
         }
 
@@ -2612,7 +2773,8 @@ mod tests {
         );
         assert_eq!(listed.encoded[3].aa_len, 300);
         // The tabular ids of the subjects with rows, the stored titles for `stitle`.
-        let ids = titles.tabular_subject_ids(&hit_lists).unwrap();
+        let (ids, accessions) = titles.tabular_subject_ids(&hit_lists).unwrap();
+        assert!(accessions.is_empty());
         assert_eq!(
             ids.iter().map(|id| id.as_ref()).collect::<Vec<_>>(),
             [&b"p01"[..], b"p03", b"p08", b"p10"]
@@ -2622,7 +2784,7 @@ mod tests {
             b"p01 first protein [Test organism]"
         );
         titles
-            .check_shown_titles(&[0usize, 1, 2, 3].into_iter().collect())
+            .check_shown_titles(&database, &[0usize, 1, 2, 3].into_iter().collect())
             .unwrap();
         titles.check_reported_titles(&hit_lists).unwrap();
     }
@@ -2677,7 +2839,7 @@ mod tests {
             lean.tabular_subject_ids(&hit_lists).unwrap(),
             records.tabular_subject_ids(&hit_lists).unwrap()
         );
-        lean.check_shown_titles(&[0usize, 1].into_iter().collect())
+        lean.check_shown_titles(&database, &[0usize, 1].into_iter().collect())
             .unwrap();
         lean.check_reported_titles(&hit_lists).unwrap();
         assert_eq!(lean.stitles(), records.stitles());
@@ -2710,7 +2872,7 @@ mod tests {
             }
         }
         let name = dir.join("prot_mv").to_str().unwrap().to_string();
-        let database = BlastpDatabase::open(&name, &ApplicationSettings::default()).unwrap();
+        let database = BlastpDatabase::open(&name, &ApplicationSettings::default(), true).unwrap();
         let list = |oid: u32, best_evalue: f64| BlastpHspList {
             oid,
             query_index: 0,
@@ -2817,7 +2979,7 @@ mod tests {
         header[at + 5] = 0xE9;
         std::fs::write(dir.join("b.phr"), header).unwrap();
         let name = dir.join("b").to_str().unwrap().to_string();
-        let database = BlastpDatabase::open(&name, &ApplicationSettings::default()).unwrap();
+        let database = BlastpDatabase::open(&name, &ApplicationSettings::default(), true).unwrap();
         let list = |oid: u32| BlastpHspList {
             oid,
             query_index: 0,
@@ -2934,8 +3096,12 @@ mod tests {
             (open("prot_v4"), true),
             (open("prot_mv"), true),
             (
-                BlastpDatabase::open(paja.to_str().unwrap(), &ApplicationSettings::default())
-                    .unwrap(),
+                BlastpDatabase::open(
+                    paja.to_str().unwrap(),
+                    &ApplicationSettings::default(),
+                    true,
+                )
+                .unwrap(),
                 true,
             ),
         ];
@@ -2943,6 +3109,7 @@ mod tests {
         if let Ok(missing) = BlastpDatabase::open(
             dir.join("nohdr").to_str().unwrap(),
             &ApplicationSettings::default(),
+            true,
         ) {
             databases.push((missing, false));
         }
@@ -3007,9 +3174,12 @@ mod tests {
                 std::fs::copy(&path, dir.join(&name)).unwrap();
             }
         }
-        let missing =
-            BlastpDatabase::open(dir.join("prot_mv").to_str().unwrap(), &Default::default())
-                .unwrap();
+        let missing = BlastpDatabase::open(
+            dir.join("prot_mv").to_str().unwrap(),
+            &Default::default(),
+            true,
+        )
+        .unwrap();
         assert_eq!(allowed(&missing), [false, false]);
         assert_eq!(read_allowed(&missing), [false, false]);
         // A stored title with a byte outside ' ' ..= '~' (LOSAT's refusal when it is reported).
@@ -3023,8 +3193,8 @@ mod tests {
             .expect("the title of p10");
         header[at + 5] = 0xE9;
         std::fs::write(dir.join("b.phr"), header).unwrap();
-        let bad =
-            BlastpDatabase::open(dir.join("b").to_str().unwrap(), &Default::default()).unwrap();
+        let bad = BlastpDatabase::open(dir.join("b").to_str().unwrap(), &Default::default(), true)
+            .unwrap();
         assert_eq!(allowed(&bad), [false, false]);
         assert_eq!(read_allowed(&bad), [false, false]);
         // A title of punctuation only (`, ,`): the tabular id NCBI writes cannot be made from it
@@ -3042,7 +3212,8 @@ mod tests {
         header[at..at + 16].copy_from_slice(b", , , , , , , , ");
         std::fs::write(dir.join("c.phr"), header).unwrap();
         let punctuation =
-            BlastpDatabase::open(dir.join("c").to_str().unwrap(), &Default::default()).unwrap();
+            BlastpDatabase::open(dir.join("c").to_str().unwrap(), &Default::default(), true)
+                .unwrap();
         assert_eq!(allowed(&punctuation), [false, false]);
         assert_eq!(read_allowed(&punctuation), [true, true]);
         drop((missing, bad, punctuation));

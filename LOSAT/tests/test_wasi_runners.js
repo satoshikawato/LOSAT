@@ -883,3 +883,80 @@ test("LOSAT_WASI_PRESPAWN is auto when unset and 0 boots no worker", () => {
     checkLifecycle(hostEvents(result.stderr), 3, standby, JSON.stringify(env));
   }
 });
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:114-127
+// ```c++
+// CMemoryFile* CSeqDBAtlas::GetMemoryFile(const string& fileName)
+// ...
+//     m_FileMemMap[fileName].reset(file);
+// ```
+// A command whose main thread opens `file` (path_open on the preopened "/") and whose one
+// thread reads up to 64 bytes of it with that descriptor (fd_read); the main thread waits,
+// writes what the thread read to standard output and exits with the thread's errno.
+function descriptorReader(file) {
+  const types = vector([
+    [0x60, 1, 0x7f, 0],                          // proc_exit(i32)
+    [0x60, 0, 0],                                // _start()
+    [0x60, 1, 0x7f, 1, 0x7f],                    // thread-spawn(i32) -> i32
+    [0x60, 2, 0x7f, 0x7f, 0],                    // wasi_thread_start(i32, i32)
+    [0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f],  // fd_write / fd_read(i32, i32, i32, i32) -> i32
+    // path_open(fd, dirflags, path, path_len, oflags, rights_base, rights_inheriting, fdflags, fd_out) -> i32
+    [0x60, 9, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7e, 0x7e, 0x7f, 0x7f, 1, 0x7f],
+  ]);
+  const imports = [
+    [...name("wasi_snapshot_preview1"), ...name("proc_exit"), 0, 0],
+    [...name("env"), ...name("memory"), 2, 3, 1, ...uleb(16384)],
+    [...name("wasi"), ...name("thread-spawn"), 0, 2],
+    [...name("wasi_snapshot_preview1"), ...name("fd_write"), 0, 4],
+    [...name("wasi_snapshot_preview1"), ...name("path_open"), 0, 5],
+    [...name("wasi_snapshot_preview1"), ...name("fd_read"), 0, 4],
+  ];
+  const load = (address) => [...i32(address), 0x28, 2, 0];                          // i32.load
+  const store = (address, value) => [...i32(address), ...value, 0x36, 2, 0];         // i32.store
+  const pathBytes = Buffer.from(file);
+  // 0: thread done, 4: its errno, 8: the descriptor, 16: read iovec, 24: bytes read,
+  // 32: write iovec, 40: bytes written, 64: the path, 256: the bytes.
+  const main = [...pathBytes].flatMap((value, i) => [...i32(64 + i), ...i32(value), 0x3a, 0, 0]);
+  main.push(
+    // if (path_open(3, 0, 64, len, 0, FD_READ, 0, 0, 8) != 0) proc_exit(100)
+    ...i32(3), ...i32(0), ...i32(64), ...i32(pathBytes.length), ...i32(0), 0x42, 2, 0x42, 0, ...i32(0), ...i32(8),
+    0x10, 3, 0x04, 0x40, ...i32(100), 0x10, 0, 0x0b,
+    // if (thread-spawn(0) < 1) proc_exit(90)
+    ...i32(0), 0x10, 1, ...i32(1), 0x48, 0x04, 0x40, ...i32(90), 0x10, 0, 0x0b,
+    // block { loop { if (done) break; memory.atomic.wait32(0, 0, -1) } }
+    0x02, 0x40, 0x03, 0x40, ...i32(0), 0xfe, 0x10, 2, 0, 0x0d, 1,
+    ...i32(0), ...i32(0), 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b,
+    ...store(32, i32(256)), ...store(36, load(24)),
+    ...i32(1), ...i32(32), ...i32(1), ...i32(40), 0x10, 2, 0x1a,               // fd_write(1, ...)
+    ...load(4), 0x10, 0,                                                         // proc_exit(errno)
+  );
+  const thread = [...store(16, i32(256)), ...store(20, i32(64)),
+    ...i32(4), ...load(8), ...i32(16), ...i32(1), ...i32(24), 0x10, 4, 0x36, 2, 0, // errno = fd_read(fd, ...)
+    ...i32(0), ...i32(1), 0xfe, 0x17, 2, 0,                                       // done (atomic store)
+    ...i32(0), ...i32(1), 0xfe, 0x00, 2, 0, 0x1a];                               // notify(0, 1)
+  return Buffer.from([
+    0, 97, 115, 109, 1, 0, 0, 0,
+    ...section(1, types),
+    ...section(2, vector(imports)),
+    ...section(3, vector([[1], [3]])),
+    ...section(7, vector([[...name("memory"), 2, 0], [...name("_start"), 0, 5],
+      [...name("wasi_thread_start"), 0, 6]])),
+    ...section(10, vector([body(main), body(thread)])),
+  ]);
+}
+
+test("a descriptor that the main thread opened reads on a thread worker (-num_threads 2)", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-descriptor-"));
+  try {
+    const file = path.join(directory, "data.txt");
+    fs.writeFileSync(file, "read on another thread\n");
+    const bytes = descriptorReader(path.relative("/", file));
+    for (const env of [{}, { LOSAT_WASI_PRESPAWN: "0" }]) {
+      const result = runThreaded(bytes, ["-num_threads", "2"], env);
+      assert.deepEqual(outcome(result), { status: 0, signal: null, stdout: "read on another thread\n", stderr: "" },
+        JSON.stringify(env));
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

@@ -103,6 +103,9 @@ pub struct XmlHit<'a> {
     /// What the taxonomy database said about the taxid (XML2's `HitDescr_sciname`); outfmt 5
     /// does not read it.
     pub taxonomy: &'a HitTaxonomy,
+    /// The `HitDescr` list of a database sequence with parsed Seq-ids (`SubjectNames::
+    /// descriptions`; empty for the others).
+    pub descriptions: &'a [crate::report::db_subject::HitDescription],
 }
 
 impl<'a> XmlHit<'a> {
@@ -115,6 +118,7 @@ impl<'a> XmlHit<'a> {
             len,
             taxid: names.taxid,
             taxonomy: &names.taxonomy,
+            descriptions: &names.descriptions,
         }
     }
 }

@@ -2401,7 +2401,10 @@ Rebuilding less:
   enumerates the set's neighbours, and stores what it counts. The count depends only on the set, so the check's
   outcome is the same. Before, each group counted every set it met: on the human proteome (Species4, 23,879 proteins)
   at 16 threads the 16 counters spent 10.3 G instructions in `count_neighbors` against 1.0 G at one thread (v4-BPF
-  s8 probe (a)). Reports identical; off = `LOSAT_X_BPWORDSHARE=0`. Evidence: EVIDENCE_PLACEHOLDER
+  s8 probe (a)). Reports identical; off = `LOSAT_X_BPWORDSHARE=0`. Evidence: workstation node 1, dev cbf649c7
+  against 57be2034, 3 rounds alternating: n16 wall bpff (human proteome x yeast `-subject`) x0.992, its first 3,000
+  proteins x0.955, `-db` 4_6 x0.994, 0_3 x0.995; n8 x0.991 / x0.968 / x0.993 / x0.996; one-thread instructions
+  x0.9989; max RSS under NCBI's (v4-BPF s8wsab).
 - `LOSAT_X_BPUNGAPSENT=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-23;
   `=0` turns it off) the two-hit ungapped extension of blastp's fused seed loop for word size 3
   (`blastp/x_ungapped_sent.rs`, exactness argument in its header): a closure of its own, with the extension

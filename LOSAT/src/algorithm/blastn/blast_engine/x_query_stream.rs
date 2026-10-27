@@ -1478,7 +1478,9 @@ mod tests {
         let second = queries.batch(3..6, 3..6).unwrap();
         match &second {
             BatchRecords::Read { input, .. } => assert!(Arc::ptr_eq(input, &middle)),
-            BatchRecords::Borrowed { .. } | BatchRecords::Taken(_) => panic!("records read again"),
+            BatchRecords::Borrowed { .. } | BatchRecords::Taken(_) | BatchRecords::Lent(_) => {
+                panic!("records read again")
+            }
         }
         drop(second);
         queries.done(6);
@@ -1578,7 +1580,9 @@ mod tests {
         let batch = queries.batch(0..3, 0..3).unwrap();
         let held = match &batch {
             BatchRecords::Read { input, .. } => Arc::clone(input),
-            BatchRecords::Borrowed { .. } | BatchRecords::Taken(_) => panic!("records read again"),
+            BatchRecords::Borrowed { .. } | BatchRecords::Taken(_) | BatchRecords::Lent(_) => {
+                panic!("records read again")
+            }
         };
         // The batch's handle, `current` and this one.
         assert_eq!(Arc::strong_count(&held), 3);

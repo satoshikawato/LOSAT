@@ -33,8 +33,8 @@
 //! the tabular formats 6 and 7, the Seq-aligns of 8, 9 and 12, and SAM without both `SQ` and `SR`;
 //! not outfmt 0, 5, 11, 13 to 16, nor SAM's `SQ SR`) and no caller takes the hits' records (their
 //! query rows), without `-query_loc` (its input records keep their letters), where no
-//! LOSAT_X_QBATCHPAR slot may run (a slot searches the records of a batch ahead of the loop), and
-//! for the records read before the search only (not a streamed search, and not `run_local`, whose
+//! LOSAT_X_QBATCHPAR slot may run (a slot searches the records of a batch ahead of the loop; with
+//! LOSAT_X_BNQSLOTS below, also where one may), and for the records read before the search only (not a streamed search, and not `run_local`, whose
 //! caller holds its records).
 //!
 //! Why the reports are the same. The records keep their local IDs, titles and messages; every
@@ -73,6 +73,26 @@
 //! No search value changes. With LOSAT_TIMING, `[TIMING] x_bn_q_pack: records= letters= bytes=
 //! unpack_s=` gives the records packed, their letters, the bytes held for them and the time spent
 //! making their letters again.
+//!
+//! EXPERIMENT (LOSAT_X_BNQSLOTS; in the strict set: on unless it is `0`): the store where
+//! LOSAT_X_QBATCHPAR slots may run too. There the rule above refused the store, and LOSAT_X_QSTREAM
+//! refuses its second reading where the file is shorter than the slots' window (`Off::Slots`), so
+//! the records and all their letters were read before the search and held to its end
+//! (dc-megablast of 31,168 cDNAs at 32 threads: 86 MiB of a peak of 349). With the switch the rule
+//! does not look at the slots (`Rule::acts`), and the store serves the slots: a slot that searches
+//! a batch the loop has not taken copies its records out of the store, its packed letters made
+//! again on its own thread (`Store::slot_batch`), and the loop lends the batch it takes to the slot
+//! that may still search it (`Store::lend`, any batch but the first while the slots may run), until
+//! it has the batch's result: the slot's, or its own search once no slot runs
+//! (`Queries::unlend`, called right after `x_qbatch_par::Driver::take`). A lent batch the loop
+//! searches itself is held by the loop alone by then and drops its letters as above; a batch a
+//! slot searched keeps its letters until the loop is done with it (one batch), and the records the
+//! loop keeps for a later writer lose their letters, which no format of the rule reads. Without the
+//! lending a slot that started the batch after the loop took it found no records and was
+//! cancelled, and `x_qbatch_par::settle` queued the batch again, for ever (the loop waited for its
+//! result). The letters are made on one thread: a batch's take about 0.1 ms per million letters,
+//! and the pool's threads, waking for them while the slots hold the CPUs, cost more (16 threads:
+//! 0.17 s in all against 0.003 s on one).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -426,5 +446,93 @@ pub(super) fn print_summary() {
             PACKED_BYTES.load(Ordering::Relaxed),
             UNPACK_NANOS.load(Ordering::Relaxed) as f64 / 1e9
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Nine records (three batches of three), every second one packed, as `search_cli` stores them.
+    fn store() -> (Vec<FastaRecord>, Store) {
+        let records: Vec<FastaRecord> = (0..9)
+            .map(|index| {
+                // Mostly ACGT (packed), a run of N and a lower-case stretch (kept beside the
+                // codes).
+                let mut letters: Vec<u8> = b"ACGTTGCAAGCTTCGAGATCCTAGGCATTACG"
+                    .iter()
+                    .cycle()
+                    .skip(index)
+                    .take(400 + 37 * index)
+                    .copied()
+                    .collect();
+                letters[100..104].copy_from_slice(b"NNNN");
+                letters[200..240].make_ascii_lowercase();
+                FastaRecord::new(format!("Query_{index}"), b"title", &letters)
+            })
+            .collect();
+        let mut held = records.clone();
+        let mut packed = Vec::new();
+        for (index, record) in held
+            .iter_mut()
+            .enumerate()
+            .filter(|(index, _)| index % 2 == 1)
+        {
+            if let Some(store) = PackedLetters::pack(&record.sequence) {
+                record.sequence = Vec::new();
+                packed.push((index, store));
+            }
+        }
+        assert!(!packed.is_empty(), "no record packed");
+        (records, Store::new(held, packed))
+    }
+
+    fn same(got: &[FastaRecord], want: &[FastaRecord]) {
+        assert_eq!(got, want);
+    }
+
+    // LOSAT_X_BNQSLOTS: a slot gets the records of a batch the loop has not taken (a copy, the
+    // letters made again), and the loop's lent batch itself until the loop has its result; the
+    // loop's batches are those `take` (the `=0` path) gives.
+    #[test]
+    fn the_loop_lends_its_batch_to_the_slot() {
+        let (records, lent) = store();
+        let (_, taken) = store();
+        let serial = SearchPool::x_serial();
+        // Ahead of the loop: copies.
+        for range in [0..3, 3..6, 6..9, 4..7] {
+            match lent.slot_batch(range.clone()) {
+                Some(SlotBatch::Copied(copy)) => same(&copy, &records[range]),
+                _ => panic!("no copy of {range:?}"),
+            }
+        }
+        for range in [0..3, 3..6, 6..9] {
+            let batch = lent.lend(range.clone()).expect("lend");
+            same(&batch, &taken.take(range.clone(), &serial).expect("take"));
+            same(&batch, &records[range.clone()]);
+            // The slot of the loop's batch gets the batch itself; a slot of another range that the
+            // loop has passed gets nothing.
+            match lent.slot_batch(range.clone()) {
+                Some(SlotBatch::Lent(shared)) => assert!(Arc::ptr_eq(&shared, &batch)),
+                _ => panic!("{range:?} not lent"),
+            }
+            assert!(lent.slot_batch(range.start..range.end - 1).is_none());
+            if range.end < 9 {
+                assert!(matches!(
+                    lent.slot_batch(range.end..range.end + 3),
+                    Some(SlotBatch::Copied(_))
+                ));
+            }
+            lent.unlend();
+            assert!(
+                lent.slot_batch(range.clone()).is_none(),
+                "{range:?} after unlend"
+            );
+            assert_eq!(
+                Arc::strong_count(&batch),
+                1,
+                "the store let go of {range:?}"
+            );
+        }
     }
 }

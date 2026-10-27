@@ -7178,6 +7178,10 @@ fn search_cli(
             hit_records: outputs.hits.is_some(),
         }
         .acts();
+    // EXPERIMENT (LOSAT_X_BNQSLOTS): the store where the slots may run too.
+    if x_slots_may_run && !x_opening.acts() && x_query_drop::on() && x_query_drop::slots_on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_BNQSLOTS", x_drop_rule);
+    }
     let x_pack = x_query_drop::packs(x_drop_rule, x_file_bytes, x_batch_letters);
     if x_drop_rule && x_query_drop::pack_on() {
         crate::utils::xreach::x_reach!("LOSAT_X_BNQPACK", x_pack);

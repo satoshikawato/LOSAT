@@ -318,6 +318,7 @@ export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNQDROP=1
 export LOSAT_X_BNQPACK=1
+export LOSAT_X_BNQSLOTS=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BNTABPAR=1
@@ -3444,6 +3445,27 @@ Scheduling (each value computed by one thread with the original function; order 
   batch, not packed): `instructions:u` x1.000. The 22.3 MB of packed letters replace 89.3 MB. Before the reader
   packed in place of its copy, packing after it with `PackedNucleotide` cost x1.020 (one thread) and x1.098 (`-db`,
   16 threads) of the time (plan v4 line A10 session 19).
+- `LOSAT_X_BNQSLOTS=1` (BLASTN, every task, `-subject`; in the strict set since 2026-10-2x (perf/bn-q-slots,
+  evidence at the end of this entry): on unless it is `0`) the `LOSAT_X_BNQDROP` store also where `LOSAT_X_QBATCHPAR`
+  slots may run (`blastn/blast_engine/x_query_drop.rs`); with `=0` its rule refuses the store there and the records
+  read before the search keep all their letters to the end of the search, as before. Where slots may run,
+  `LOSAT_X_QSTREAM` refuses its second reading for a file shorter than the slots' window (`Off::Slots`), so the whole
+  query file was held (dc-megablast of 31,168 cDNAs at 32 threads: 86 MiB of a peak of 349). Memory only; no NCBI
+  counterpart (NCBI does not split `-subject` searches by queries). The store serves the slots: a slot that searches
+  a batch the loop has not taken copies its records out of the store (`Store::slot_batch`; the packed letters of
+  `LOSAT_X_BNQPACK` made again on the slot's own thread), and the loop lends the batch it takes to the slot that may
+  still search it (`Store::lend`: any batch but the first while the slots may run, `Arc`-shared) until it has the
+  batch's result, the slot's or its own search once no slot runs (`Queries::unlend`, right after
+  `x_qbatch_par::Driver::take`). A lent batch the loop searches itself is held by the loop alone by then and drops
+  its letters after the encoding; a batch a slot searched keeps them until the loop is done with it, and the records
+  kept for a later writer lose theirs (no format of the rule reads them). The rule (class conditional, recorded where
+  `search_cli` decides): `LOSAT_X_QBATCHPAR`'s slots may run and the store's other conditions hold (the output
+  formats, no `-query_loc`, no hit records, the records read before the search). Letters are made on one thread: a
+  batch's take about 0.1 ms per million, while the pool's threads, waking for them while the slots hold the CPUs, took
+  0.17 s in all at 16 threads against 0.003 s on one (blastn of 5,000 cDNAs). Without the lending (a prototype) a slot
+  that started a batch after the loop took it out of the store found no records, was cancelled, and the plan queued
+  it again for ever while the loop waited for its result; the integration test runs with a deadline. Evidence: (w8,
+  to be filled in).
 - `LOSAT_X_GREEDYROWFUSE=1` (BLASTN megablast, the distances of the non-affine greedy alignment that `x_greedy_row` runs:
   every traceback, and the score-only calls the fused loop GREEDYFUSE declines; speed; in the strict set from the pull
   request that added it, 2026-10-24; `=0` runs `x_greedy_row_avx2`, the three passes) runs one distance in two passes per

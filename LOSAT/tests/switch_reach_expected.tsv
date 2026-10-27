@@ -81,6 +81,7 @@ LOSAT_X_BXUNITCAP	blastx	conditional	gap	required	more threads than K (8) with s
 LOSAT_X_CTXO1	blastn	always			Constant-time context of a hit's query offset
 LOSAT_X_DBIDXREAD	blastn,blastp,blastx,tblastn,tblastx	conditional	required	required	-db searches only (not -subject)
 LOSAT_X_DCCSR	blastn	conditional	required	required	dc-megablast one-template table as CSR when positions x 4 >= cells; ref = two templates or a small query
+LOSAT_X_DCSEEDLEAN	blastn	conditional	required	gap	-task dc-megablast (or megablast with template options): the CSR of a one-template table built on a pool of 2+ threads (DCCSR, DISCLUTPAR) and the partitioned stages of PAIRPARDISC (PAIRPARFOLD: 2+ threads, one unmasked subject, query block >8000 letters); ref gap: cannot happen: every such build and stage takes the switch's path while it is on
 LOSAT_X_DCTWOSLOTS	blastn	conditional	gap	gap	-task dc-megablast where the QBATCHPAR slot model takes slots itself (no LOSAT_X_QBATCHPARSLOTS); new where it takes 3+ slots and the two-slot rule holds (12-33 threads, even batch units, and narrow slots with idle threads / one round / a last round at most half full within 5), ref where it takes 2 or the rule declines; new gap and ref gap: needs a query file NCBI splits (> 10 MB) with 2+ batches at 12+ threads (new) or 2+ (ref), as QBATCHPAR
 LOSAT_X_DEKKER	blastn,blastp,blastx,tblastn,tblastx	platform			wasm32 only
 LOSAT_X_DIAGLV	blastn	conditional	required	required	only the diagonal hash (query block >8000 letters, about >4000 bases); not diagonal array, not scan_range

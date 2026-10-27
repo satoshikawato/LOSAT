@@ -385,6 +385,7 @@ export LOSAT_X_BXUNITCAP=8
 export LOSAT_X_CTXO1=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
+export LOSAT_X_DCSEEDLEAN=1
 export LOSAT_X_DCTWOSLOTS=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
@@ -3839,6 +3840,56 @@ Scheduling (each value computed by one thread with the original function; order 
   both arms) x1.003. `=0` is dev's (x0.998); instructions of megablast and blastn at one thread move by at most
   0.04 %. Peak RSS with `MALLOC_ARENA_MAX=1`: 374 against 386 MiB (`-subject`, 16 threads) and 113 against
   115 MiB (`-db`); with the default arenas both arms vary between about 130 and 144 MiB on `-db`.
+- `LOSAT_X_DCSEEDLEAN=1` (BLASTN `-task dc-megablast`, and megablast given template options, at two threads or more;
+  in the strict set from the pull request that added it, 2026-10-28: `LOSAT_X_DCSEEDLEAN=0` turns it off) changes
+  three LOSAT-only parts of dc-megablast's seed stage; each gives the same table, seeds and hits in the same order:
+  - the CSR of a one-template table built on a pool (`LOSAT_X_DCCSR` above; `x_disc_lookup_par::csr_on_pool_steps`):
+    two sets of the owners' buckets, chunk k's in set k % 2. Step k of each pass (count, then place) reads chunk k into
+    its set with the lean reader (`Fill::read`'s word loop with the template a const parameter, so a word's index is
+    computed without the dispatch per word of `compute_discontiguous_index`, and a range read through one slice), then
+    does the owner's work on chunk k - 1 from the other set; one spin barrier ends the step. `csr_on_pool` waits twice
+    per chunk (after the reading and after the owners' work), so each chunk costs the slowest reading plus the slowest
+    owner's work; a step costs the slowest thread's reading and owner's work together (about as many barriers per pass:
+    chunks of half the size, one barrier each). Chunks are 2^18 positions (`STEP_POSITIONS`, half of
+    `CHUNK_POSITIONS`, so the two sets keep room for about as many entries as one set did); the place pass prefetches the
+    `offsets` element of the entry 16 ahead, as the count pass does. A cell gets its words in the same order (chunks
+    in order, readers' spans in stream order, a bucket in reading order), so the counts, sums and runs are
+    `csr_on_pool`'s.
+  - the partitioned stage of `LOSAT_X_PAIRPARDISC` (`LOSAT_X_PAIRPARFOLD`) in `LOSAT_X_PAIRPARHOME`'s home loop: a
+    strip's scan pushes each seed into its partition's list (`x_pair_seed_part::PartSink`; the partition of the seed's
+    diagonal bucket from a table of the 512 buckets made at the stage's start), numbered in scan order, instead of into
+    one list that a stable counting sort then cuts by partition (two more passes over the strip's seeds and a copy of
+    each 16-byte seed and its 4-byte position). A partition gets the same seeds in the same order with the same
+    positions, so its folds and the merge's key order are the same.
+  - the folds of that stage (home loop or not) do not record the buckets their inserts change (`insert_t` without
+    `TRACK`), and the merge writes back every bucket of each partition: a bucket no fold changed has the stage's chain,
+    cells below the stage's occupancy, so writing it back changes nothing. That is one copy of the table's cells per
+    stage, where `rebuild` copies the table into each partition at the stage's start; the stages of dc-megablast begin
+    with a nearly empty table (at most 256 cells in the 27 stages of the 31,168 cDNAs below).
+  The scan into lists and the untracked folds are dc-megablast's only: the partitioned stages of `-task blastn` and
+  `blastn-short` (`LOSAT_X_PAIRPAR`, `LOSAT_X_PAIRPARNA`) keep the cut and the tracked folds. `x_reach!` at each pool
+  build and each partitioned stage, always the switch's side while it is on. Tests: `csr_on_a_pool_lists_the_chains`
+  (`csr_on_pool` and `csr_on_pool_steps` on pools of 2, 3 and 5 threads, chunks of 1, 97, 5,000 and `CHUNK_POSITIONS`
+  positions, against the chains of the serial loop), `seed_stage_part_equals_the_reference_fold` (the stage with and
+  without the lists and untracked folds, in every pairing with the home loop for each level setting, one scratch
+  passing its strip buffers from one form to the other, against the reference fold's hits and table cell for cell),
+  the dc-megablast stage test of `x_pair_seed_disc.rs` (both forms in both `LOSAT_X_FOLDLEAN` instances against the
+  reference fold) and `LOSAT/tests/blastn_dc_seed_lean.rs` (the reports at 2 and 4 threads, and at 4 with
+  `LOSAT_X_PAIRPARHOME=0`, against `=0` at 2 and 4: Sakai against MG1655, a CSR table built on the pool, and 9,800
+  letters of LC738874 against LC738868, a table of chains; with the sides of `LOSAT_X_REACH`, of `LOSAT_X_DCCSR`,
+  `LOSAT_X_DISCLUTPAR` and `LOSAT_X_PAIRPARFOLD` too).
+  Probe (v4-A15 s15-s18, 2026-10-26/28, exp/a15-csrpool; workstation 2x Xeon Gold 6338, node 1 booked through its FIFO,
+  16 / 8 physical cores with the siblings idle, `numactl --membind 1`, the arms in rotated order, 16 rounds at 16
+  threads; dc-megablast of 31,168 D. melanogaster cDNAs against 3 Mb of chromosome 2L, `-subject`, every output NCBI's
+  5c357f81): dev's form 1.441 s, 147.07 G instructions, 58.39 G cycles, max RSS 237 MiB; the lean reader, the scan into
+  lists and the untracked folds x0.957 (cycles x0.946, 133.04 G instructions, 221 MiB); with the steps as well (this
+  switch) x0.951 (median x0.952, no round slower, cycles x0.939, 137.12 G instructions, 220 MiB), at 8 threads x0.946.
+  Of the parts (s16, the same window): the untracked folds -2.7 G instructions and -0.5 G cycles; the scan into lists
+  -4 G instructions and -15 MiB (the strip buffers' copies) but about the same cycles (its stores go to buffers other
+  cores read in their folds); the steps against the lean reader alone -0.45 G cycles of the build (the waits of two
+  barriers per chunk, each waiting for the slowest thread, not the overlap of reading and owner's work: s15's form
+  taking one entry after each word read gained no more). Chunks of 2^19 positions took 55.42 against 54.75 G cycles (screening on node 0). One thread
+  takes none of these paths (no pool, no partitioned stage): 117.68 G instructions as dev's.
 - `LOSAT_X_BNCSR=1` (BLASTN `-task blastn` and every task with word size 9, 10 or 11 that builds the contiguous
   two-stage table of `build_mb_lookup`, `-subject` and `-db`, any thread count, speed; in the strict set from the pull
   request that added it, 2026-10-25 (perf/bn-csr, evidence at the end of this entry): on unless it is `0`) lays out the

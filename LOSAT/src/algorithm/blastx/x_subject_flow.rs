@@ -65,15 +65,18 @@ fn shadow() -> bool {
 }
 
 /// No NCBI counterpart: whether the subject loop runs as a flow, and with how many subjects per
-/// task. Not with diagnostics (they keep every subject's seeds), without a pool, with one task
-/// only, or when a diagonal offset could pass 2^30 (module comment).
+/// task (fewer inside the capped batch flow, `x_bx_mem::flow_subjects_per_task`). Not with
+/// diagnostics (they keep every subject's seeds), without a pool, with one task only, or when a
+/// diagonal offset could pass 2^30 (module comment).
 pub(super) fn chosen(
     pool: &crate::utils::threading::SearchPool<'_>,
     diagnostics: bool,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
 ) -> Option<usize> {
-    let k = subjects_per_task()?;
+    // Dispatch point (LOSAT_X_BXCAPFILL, in the strict set): inside the capped batch flow, tasks of
+    // fewer subjects (x_bx_mem::flow_subjects_per_task).
+    let k = super::x_bx_mem::flow_subjects_per_task(pool, subjects.len(), subjects_per_task()?);
     let own = fits(k, pool, diagnostics, options, subjects);
     crate::utils::xreach::x_reach!("LOSAT_X_BXSUBJFLOW", own);
     own.then_some(k)

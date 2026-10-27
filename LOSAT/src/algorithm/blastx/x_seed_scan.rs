@@ -161,6 +161,9 @@ pub(crate) fn x_bxscan_byte() -> XScanByte {
 /// can sit at the address of the one dropped before it, with the same backbone vector.
 pub struct XKeptPresence {
     presence: OnceLock<Option<(Arc<[u8]>, bool)>>,
+    /// EXPERIMENT (LOSAT_X_BXCTXONCE): the context table of the query batch the table was built
+    /// from (`x_seed_diag.rs` `x_with_context_table`), made by the first thread that needs it.
+    pub(super) contexts: OnceLock<crate::algorithm::blastp::x_seed_fused::XContextTable>,
     pub(crate) build: u64,
 }
 
@@ -174,6 +177,7 @@ impl XKeptPresence {
     pub fn new() -> Self {
         Self {
             presence: OnceLock::new(),
+            contexts: OnceLock::new(),
             build: X_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
     }

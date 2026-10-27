@@ -45,7 +45,7 @@
 //! its DUST, and SAM's SEQ of the query with `SQ SR` do). Dropping memory changes no value that the
 //! search computes. No floating-point operation is involved.
 //!
-//! Memory: the peak of a megablast batch is the scan (with LOSAT_X_BNLUTDROP), where the letters
+//! Memory: the peak of a megablast batch is the scan (with BNLUTDROP, graduated), where the letters
 //! of a 5.5 Mb query (E. coli Sakai x MG1655) were 5.2 MiB beside the 10.5 MiB of the BLASTNA
 //! buffer and the 106 MiB of the lookup table (plan v4 line MF, `REPORT.md` §2.3): its peak
 //! `RssAnon` falls by 4.4-6.4 MiB at one and 16 threads, `-subject` and `-db`. Megablast of 31,168

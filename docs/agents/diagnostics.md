@@ -314,7 +314,6 @@ export LOSAT_X_BNDCONE=1
 export LOSAT_X_BNEIGHTSLOTS=1
 export LOSAT_X_BNFEWSUBJ=1
 export LOSAT_X_BNHLGROW=1
-export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNQDROP=1
 export LOSAT_X_BNQPACK=1
@@ -322,7 +321,6 @@ export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BNTABPAR=1
 export LOSAT_X_BNTBRANGE=1
-export LOSAT_X_BNUNGAPCOUNT=1
 export LOSAT_X_BPCLUT=1
 export LOSAT_X_BPCLUTSCANBF=1
 export LOSAT_X_BPDBCUT=1
@@ -375,7 +373,6 @@ export LOSAT_X_BXSCANBYTE=1
 export LOSAT_X_BXSUBJFLOW=1
 export LOSAT_X_BXUNGAPSENT=1
 export LOSAT_X_BXUNITCAP=8
-export LOSAT_X_CTXO1=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
 export LOSAT_X_DCTWOSLOTS=1
@@ -1004,8 +1001,8 @@ Same values, faster computation:
 - CTXFAST (graduated 2026-10-22; no variable, no `LOSAT_X_CTXSHADOW`; always on) blastn
   query-offset-to-context lookup by binary search over the runs of the contexts instead of a
   per-base table. The per-base table (`direct_map`) stays for overlapping runs.
-- `LOSAT_X_CTXO1=1` (blastn, speed; in the strict set from the pull request that added it, 2026-10-19;
-  `=0` returns to the binary search over the runs) the
+- CTXO1 (graduated 2026-10-27, in the set from 2026-10-19; no variable; always on, and the binary search
+  over the runs still answers where the layout does not allow the form) (blastn, speed) the
   context of a lookup hit's query offset in constant time (`blastn/blast_engine/x_ctx_o1.rs`, argument
   in its header): where every context has the same length `L`, `offset / (L + 1)` by a multiplication
   (NCBI's `BSearchContextInfo` shortcut), else one `u32` per block of `2^k` offsets (the context at the
@@ -1025,8 +1022,8 @@ Same values, faster computation:
   31,168 cDNAs against the same subject x0.822 at one thread, x0.939 at 16; blastn of the same x0.949
   / x0.960; max RSS unchanged. `=0` x1.000-1.005 of the binary before (1.6 % more instructions on
   blastn-short: the binary search moved out of line behind the check for this form).
-- `LOSAT_X_BNUNGAPCOUNT=1` (blastn, speed; in the strict set from the pull request that added it,
-  2026-10-22; `=0` runs the ported loops) the exact ungapped extension
+- BNUNGAPCOUNT (graduated 2026-10-27, in the set from 2026-10-22; no variable; always on; the ported loops
+  stay as the unit test's reference) (blastn, speed) the exact ungapped extension
   (`s_NuclUngappedExtendExact`: blastn-short and other word sizes below 11, and the exact pass after the
   approximate one reaches the reduced cutoff) with the step count of each direction worked out first:
   `min(q_off, s_off)` to the left, `min(q_avail, s_avail)` to the right, the C loop conditions on
@@ -3305,11 +3302,11 @@ Scheduling (each value computed by one thread with the original function; order 
   again): instructions x0.99998, cycles x0.9993 (0.986-1.012) where the A/A arm read x0.9970 (0.984-1.010), minor
   faults 94.1k -> 40.6k, system time 0.15 -> 0.07 s; 16 threads (node 1, CPUs warmed 3 s before each run), 20 pairs in
   alternating order: wall x0.961 (median; geometric mean x0.962; 20 of 20 pairs below 1), minor faults 115k -> 60k.
-- `LOSAT_X_BNLUTDROP=1` (BLASTN, every task, `-subject` and `-db`; in the strict set since 2026-10-24
-  (perf/mb-lut-drop, evidence at the end of this entry): on unless it is `0`) a query batch drops its lookup tables
+- BNLUTDROP (graduated 2026-10-27, in the set since 2026-10-24 (perf/mb-lut-drop, evidence at the end of this
+  entry); no variable; always on) (BLASTN, every task, `-subject` and `-db`) a query batch drops its lookup tables
   when its preliminary stage ends, before its traceback (`blastn/blast_engine/x_lut_drop.rs`), where NCBI's traceback
-  stage drops its table (`m_LookupTable.Reset(NULL)`, `traceback_stage.cpp:208-211`); with `=0` the tables live until
-  the batch returns, as before. The traceback reads the HSPs that the preliminary stage kept and does not scan, and the
+  stage drops its table (`m_LookupTable.Reset(NULL)`, `traceback_stage.cpp:208-211`); before it graduated the tables
+  lived until the batch returned. The traceback reads the HSPs that the preliminary stage kept and does not scan, and the
   tables are passed to `process_subject` by the preliminary stage's calls only (`None` in the traceback's), so the
   compiler shows that no traceback reads them; the values taken from them before the scan (the offset array size, the
   shape of the subject search) are plain numbers. A `LOSAT_X_MBLUTKEEP` table goes back to the batch loop's keep when
@@ -3670,7 +3667,7 @@ Scheduling (each value computed by one thread with the original function; order 
   (and 16,384 for the reading-order table of 4^8 cells) at 9; word sizes 12 and above build 4^11-cell tables only
   below that size and keep their chains, and so do megablast's 4^12-cell tables. Such a table takes nothing from the
   batch loop's keep (`LOSAT_X_MBLUTKEEP`): its `offsets` is allocated per build and freed with the table (before the
-  traceback with `LOSAT_X_BNLUTDROP`), and a build laid out as CSR frees the table the keep holds. With a search pool
+  traceback, BNLUTDROP), and a build laid out as CSR frees the table the keep holds. With a search pool
   of two threads or more (where PAIRPAR's fill would run) the table is built on the pool
   (`x_mb_lookup_once::csr`): the readers of `LOSAT_X_MBLUTONCE` put each chunk's words into the owners' sub-ranges of
   its arena, once to count and once to place (so the build holds one chunk's words, the fill's arena, not the whole

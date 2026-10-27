@@ -77,7 +77,7 @@
 //! are then empty: the CSR replaces them (`offsets` has two elements more than `hashtable`, `qs`
 //! one element per word where `next_pos` has one per query position), so the table takes no more
 //! memory. The batch loop's keep (LOSAT_X_MBLUTKEEP) holds no CSR: `offsets` is allocated by each
-//! build and freed with the table (LOSAT_X_BNLUTDROP frees it before the traceback), and a build
+//! build and freed with the table (BNLUTDROP, graduated, frees it before the traceback), and a build
 //! laid out as CSR frees the table the keep holds, so the loop never holds a kept table beside it.
 //! Every reader of the chains of a contiguous table goes through `MbLookupTable::x_csr`: the strip
 //! scan of PAIRPAR (`x_pair_seed.rs`, `scan_strip_csr`), the reference scan of `search_query_batch`

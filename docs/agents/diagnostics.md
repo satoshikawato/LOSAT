@@ -3348,8 +3348,19 @@ Scheduling (each value computed by one thread with the original function; order 
   switch leaves alone, at 8-32 threads) 0.97-1.02; megablast of 1,775 cDNAs (the loop by default) 1.00 at one thread and
   1.02-1.03 at 8 and 16 threads, within the rounds' spread (0.97-1.09) with the same page faults, TLB shootdowns, user
   and system time as dev. Max RSS: the same (the 31,168 cDNAs in the loop 236 MiB against 249). Evidence of
-  perf/bn-keep-cells (CSR `offsets` and discontiguous chain heads): to be filled in (n1 on a node-0 core against dev,
-  and a window at 16 and 32 threads).
+  perf/bn-keep-cells (CSR `offsets` and discontiguous chain heads; workstation, 2026-10-27, against dev c780af86, plan
+  v4 line D sessions 20-22; the cDNAs against the first 3 Mb of chromosome 2L `-subject`, one sha per cell): one thread
+  on a node-0 core, 6 rounds in rotated order, median of the per-round ratios: dc-megablast of the 31,168 cDNAs peak
+  `RssAnon` 91.0 -> 79.4 MiB (the floor 80.8), time x0.997 (0.958-1.026), minor faults 192 K -> 183 K; blastn of them
+  62.1 -> 60.2 MiB, x1.003 (0.977-1.028), system time 0.41 -> 0.55 s and minor faults 146 K -> 231 K: glibc's threshold
+  now stops at 7.7 MB (a batch's CSR positions, freed once), its trim threshold at twice that, and the batches' scratch
+  freed at the top of the heap (the CSR positions, hit vectors, interval trees, sort buffers) goes back to the system
+  17 times and faults in again (`brk` 52 -> 188 calls); blastn of 5,000 cDNAs 54.5 -> 57.9 MiB (dev's own builds
+  52-60), x0.985; megablast of the 31,168 cDNAs and of E. coli Sakai against MG1655 unchanged (130.6 and 100.0 MiB,
+  x1.002 and x1.001). At 16 and 32 threads (node 1, 6 rounds): with `-subject` QBATCHPAR's slots run and the keep does
+  not act (dc-megablast, blastn and megablast of the 31,168 cDNAs, blastn of 5,000: x1.001-1.023, cycles x1.001-1.002,
+  the same peaks); with `-db` the loop keeps (dc-megablast of the 31,168 cDNAs at 16 threads `RssAnon` 138 -> 131 MiB,
+  x0.993; blastn of 5,000 88 -> 87, x0.994).
 - `LOSAT_X_BNHLGROW=1` (BLASTN, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
   added it (perf/bn-hl-grow): on unless it is `0`) a hit list's array (`blastn/hsp.rs` `HitList`, the preliminary
   stage's lists per query and the final ones) is no longer reserved to NCBI's array size when a list comes

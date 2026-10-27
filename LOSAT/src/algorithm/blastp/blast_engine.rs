@@ -31,7 +31,10 @@ use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
 };
 use crate::algorithm::tblastx::lookup::compressed::BlastCompressedAaLookupTable;
 use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
-use crate::algorithm::tblastx::lookup::{x_bp_build_ncbi_lookup, BlastAaLookupTable, QueryContext};
+use crate::algorithm::tblastx::lookup::{
+    x_bp_build_ncbi_lookup, x_bp_build_ncbi_lookup_as, BackboneCell16, BlastAaLookupTable,
+    QueryContext, XBpLookup,
+};
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::{FormatObserver, FormatProbe, HspIndex, OutputSink, ReportOutputs};
@@ -1890,6 +1893,10 @@ fn blastp_offset_array_size(longest_chain: i32) -> i32 {
 
 enum BlastpRuntimeLookup {
     Aa(BlastAaLookupTable),
+    // EXPERIMENT (LOSAT_X_BPLK16): the exact table of a block whose lookup query is at most 65,535
+    // letters, with 16-bit hits and 8-byte cells (lookup/backbone.rs `BackboneCell16`); the same
+    // hits in the same order. Only for a search with a window (the fused two-hit loop reads it).
+    Aa16(BlastAaLookupTable<BackboneCell16>),
     Compressed(BlastCompressedAaLookupTable),
     // EXPERIMENT (LOSAT_X_BPCLUT): the compressed table built flat (lookup/x_clut_direct.rs); the
     // same cells, PV array and parameters.
@@ -1919,6 +1926,7 @@ impl BlastpRuntimeLookup {
     fn word_length(&self) -> i32 {
         match self {
             Self::Aa(lookup) => lookup.word_length,
+            Self::Aa16(lookup) => lookup.word_length,
             Self::Compressed(lookup) => lookup.word_length,
             Self::CompressedFlat(lookup) => lookup.word_length,
         }
@@ -1938,6 +1946,7 @@ impl BlastpRuntimeLookup {
     fn longest_chain(&self) -> i32 {
         match self {
             Self::Aa(lookup) => lookup.longest_chain,
+            Self::Aa16(lookup) => lookup.longest_chain,
             Self::Compressed(lookup) => lookup.longest_chain,
             Self::CompressedFlat(lookup) => lookup.longest_chain,
         }
@@ -2057,6 +2066,12 @@ fn blastp_for_each_offset_pair<F>(
                 );
                 blastp_visit_scanned_offset_pairs(offset_pairs, hits, &mut visit);
             }
+        }
+        // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits is built only for a search with a
+        // window, which scans with the fused two-hit loop; this offset-pair scan (a search without a
+        // window) never gets one.
+        BlastpRuntimeLookup::Aa16(_) => {
+            unreachable!("a table of 16-bit hits is built only for a search with a window")
         }
         BlastpRuntimeLookup::Compressed(lookup) => {
             while scan_range[1] <= scan_range[2] {
@@ -7742,6 +7757,37 @@ fn blastp_query_frames_marked(
         .collect()
 }
 
+// No NCBI counterpart: reads the LOSAT_X_BPLK16 switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPLK16): strict set (on unless `0`). Exact blastp's block tables hold 16-bit hits in 8-byte cells where the lookup query is at most 65,535
+/// letters (`BlastAaLookupTable<BackboneCell16>`, lookup/backbone.rs), halving the overflow array
+/// and the cells; the hits are the same in the same order.
+fn x_bplk16() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPLK16"))
+}
+
+// No NCBI counterpart: chooses LOSAT's table (LOSAT_X_BPLK16); it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPLK16): whether a table of `args`' search may have 16-bit hits: a search
+/// with a window (the fused two-hit loop scans it; the offset-pair scan of a search without one
+/// reads the 32-bit table) that is not a query chunk of a split batch (`x_chunk`).
+fn x_bplk16_for(args: &ResolvedBlastpArgs, x_chunk: bool) -> bool {
+    args.window_size != 0 && !x_chunk
+}
+
+// No NCBI counterpart: LOSAT_X_BPLK16's table in the runtime lookup; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLK16): the runtime lookup of a table built with the switch on, counted for
+/// `LOSAT_X_REACH` (taken: the table has 16-bit hits).
+fn x_bp_runtime_lookup(built: XBpLookup) -> BlastpRuntimeLookup {
+    crate::utils::xreach::x_reach!("LOSAT_X_BPLK16", matches!(built, XBpLookup::Narrow(_)));
+    match built {
+        XBpLookup::Wide(table) => BlastpRuntimeLookup::Aa(table),
+        XBpLookup::Narrow(table) => BlastpRuntimeLookup::Aa16(table),
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:245
 // ```c
 //     lookup->threshold = (Int4)opt->threshold;
@@ -7755,7 +7801,18 @@ fn blastp_query_frames_marked(
 fn blastp_aa_lookup(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
+    x_chunk: bool,
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
+    // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits where the switch is on.
+    if x_bplk16() {
+        let (built, contexts) = x_bp_build_ncbi_lookup_as(
+            query_frames,
+            crate::core::blast_util::ncbi_int4_from_double(args.threshold),
+            false,
+            x_bplk16_for(args, x_chunk),
+        );
+        return (x_bp_runtime_lookup(built), contexts);
+    }
     let (lookup, contexts) = x_bp_build_ncbi_lookup(
         query_frames,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
@@ -7777,6 +7834,22 @@ fn blastp_aa_lookup_ahead(
     query_frames: &[Vec<QueryFrame>],
     spares: &crate::algorithm::tblastx::lookup::XAaSpares,
 ) -> Option<(BlastpRuntimeLookup, Vec<QueryContext>)> {
+    // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits where the switch is on (a block of the
+    // block loop is never a query chunk).
+    if x_bplk16() {
+        let threshold = crate::core::blast_util::ncbi_int4_from_double(args.threshold);
+        if x_bplk16_for(args, false) {
+            let (built, contexts) = spares.x_build_ahead16(query_frames, threshold, false)?;
+            return Some((x_bp_runtime_lookup(built), contexts));
+        }
+        let (lookup, contexts) = spares.x_build_ahead(
+            query_frames,
+            threshold,
+            &lookup_protein_params_ungapped(args.scoring.matrix),
+            false,
+        )?;
+        return Some((x_bp_runtime_lookup(XBpLookup::Wide(lookup)), contexts));
+    }
     let (lookup, contexts) = spares.x_build_ahead(
         query_frames,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
@@ -7797,7 +7870,23 @@ fn blastp_aa_lookup_on_block_spare(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
     spare: &crate::algorithm::tblastx::lookup::XAaSpares,
+    x_chunk: bool,
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
+    // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits where the switch is on.
+    if x_bplk16() {
+        let threshold = crate::core::blast_util::ncbi_int4_from_double(args.threshold);
+        if x_bplk16_for(args, x_chunk) {
+            let (built, contexts) = spare.x_build_on_block_spare16(query_frames, threshold, false);
+            return (x_bp_runtime_lookup(built), contexts);
+        }
+        let (lookup, contexts) = spare.x_build_on_block_spare(
+            query_frames,
+            threshold,
+            &lookup_protein_params_ungapped(args.scoring.matrix),
+            false,
+        );
+        return (x_bp_runtime_lookup(XBpLookup::Wide(lookup)), contexts);
+    }
     let (lookup, contexts) = spare.x_build_on_block_spare(
         query_frames,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
@@ -7914,7 +8003,7 @@ fn x_lookup_after_prelim(
             BlastpRuntimeLookup::CompressedFlat(_) => {
                 super::x_query_blocks::x_bp_lookup_spare(pool).is_some()
             }
-            BlastpRuntimeLookup::Aa(_) => {
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {
                 super::x_query_blocks::x_bp_aa_spares(pool).is_some()
                     || super::x_query_blocks::x_bp_aa_block_spare(pool).is_some()
             }
@@ -8180,8 +8269,13 @@ fn run_resolved_in_pool(
         BlastpLookupTableType::AaLookupTable => match x_prebuilt.take() {
             Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(prebuilt),
             None => match super::x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool) {
-                Some(spare) => blastp_aa_lookup_on_block_spare(&args, &query_frames, spare),
-                None => blastp_aa_lookup(&args, &query_frames),
+                Some(spare) => blastp_aa_lookup_on_block_spare(
+                    &args,
+                    &query_frames,
+                    spare,
+                    chunk_prelim.is_some(),
+                ),
+                None => blastp_aa_lookup(&args, &query_frames, chunk_prelim.is_some()),
             },
         },
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
@@ -8216,7 +8310,7 @@ fn run_resolved_in_pool(
     // on the reference compressed table never (the standard table always has the branch-free scan).
     if args.window_size != 0 && super::x_seed_fused_clut::x_bp_clut_scan_bf() {
         match &lookup {
-            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
             BlastpRuntimeLookup::Compressed(_) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPCLUTSCANBF", false)
             }
@@ -8231,7 +8325,7 @@ fn run_resolved_in_pool(
     // the loop records its side per subject (`x_seed_fused_clut.rs`).
     if args.window_size != 0 && super::x_seed_fused_clut::x_bp_fseed() {
         match &lookup {
-            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
             BlastpRuntimeLookup::Compressed(_) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
             }
@@ -8250,7 +8344,7 @@ fn run_resolved_in_pool(
         && super::x_seed_fused_clut::x_bp_fstage()
     {
         match &lookup {
-            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
             BlastpRuntimeLookup::Compressed(_) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPFSTAGE", false)
             }
@@ -8269,7 +8363,7 @@ fn run_resolved_in_pool(
         && super::x_seed_fused_clut::x_bp_flean()
     {
         match &lookup {
-            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
             BlastpRuntimeLookup::Compressed(_) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPFLEAN", false)
             }
@@ -8930,13 +9024,35 @@ fn run_resolved_in_pool(
                     crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", sent_subject.is_some());
                     sent_subject.map(|sent_subject| (sent_query, sent_subject, aa_lookup))
                 }
+                (Some(_), BlastpRuntimeLookup::Aa16(_)) => None,
                 (Some(_), _) => {
                     crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", false);
                     None
                 }
                 (None, _) => None,
             };
-            if let Some((sent_query, sent_subject, aa_lookup)) = x_sent {
+            // EXPERIMENT (LOSAT_X_BPLK16): the same choice for the table of 16-bit hits.
+            let x_sent16 = match (&x_ungap_sent, &lookup) {
+                (Some(sent_query), BlastpRuntimeLookup::Aa16(aa_lookup)) => {
+                    let sent_subject = super::x_ungapped_sent::XSentSubject::new(subject.aa_seq);
+                    crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", sent_subject.is_some());
+                    sent_subject.map(|sent_subject| (sent_query, sent_subject, aa_lookup))
+                }
+                _ => None,
+            };
+            if let Some((sent_query, sent_subject, aa_lookup)) = x_sent16 {
+                super::x_seed_fused::x_scan_two_hit(
+                    aa_lookup,
+                    subject_sequence,
+                    subject.aa_len,
+                    &mut scratch.diag_array,
+                    diag_mask,
+                    subject_diag_offset,
+                    window,
+                    word_size,
+                    x_candidate_sent!(sent_query, sent_subject),
+                );
+            } else if let Some((sent_query, sent_subject, aa_lookup)) = x_sent {
                 super::x_seed_fused::x_scan_two_hit(
                     aa_lookup,
                     subject_sequence,
@@ -8951,6 +9067,18 @@ fn run_resolved_in_pool(
             } else {
                 match &lookup {
                     BlastpRuntimeLookup::Aa(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate,
+                    ),
+                    // EXPERIMENT (LOSAT_X_BPLK16): the same loop on the table of 16-bit hits.
+                    BlastpRuntimeLookup::Aa16(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
                         aa_lookup,
                         subject_sequence,
                         subject.aa_len,
@@ -12257,6 +12385,15 @@ fn run_resolved_in_pool(
                 .or_else(|| super::x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool))
             {
                 spares.give(table);
+            }
+        }
+        // EXPERIMENT (LOSAT_X_BPLK16): the vectors of a table of 16-bit hits, for the next block's
+        // build of that width.
+        Some(BlastpRuntimeLookup::Aa16(table)) => {
+            if let Some(spares) = super::x_query_blocks::x_bp_aa_spares(blastp_parallel_pool)
+                .or_else(|| super::x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool))
+            {
+                spares.give16(table);
             }
         }
         Some(BlastpRuntimeLookup::Compressed(_)) | None => {}

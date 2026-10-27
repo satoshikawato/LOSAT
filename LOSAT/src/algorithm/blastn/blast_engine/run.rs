@@ -8374,14 +8374,20 @@ fn run_in_pool(
         // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records read again (a chunk shared with the
         // window, or a copy); none for a batch the loop has passed, which the loop never takes
         // (cancelled).
-        let records = match queries.slot_records(job.searched.clone()) {
+        let mut records = match queries.slot_records(job.searched.clone()) {
             Ok(Some(records)) => records,
             Ok(None) => return Err(x_qbatch_par::Cancelled.into()),
             Err(error) => return Err(error),
         };
+        // EXPERIMENT (LOSAT_X_BNQSLOTS): a copy out of the LOSAT_X_BNQDROP store is the slot's
+        // alone and drops its letters after their encoding, as the loop's batch does.
+        let batch_queries = match &mut records {
+            x_query_stream::SlotRecords::Held(records) => x_query_drop::BatchQueries::Held(records),
+            records => x_query_drop::BatchQueries::Shared(&**records),
+        };
         search_query_batch(
             &args,
-            x_query_drop::BatchQueries::Shared(&records),
+            batch_queries,
             source,
             None,
             pool,

@@ -223,6 +223,12 @@ impl<'a> XStreamDb<'a> {
         Ok(lengths)
     }
 
+    /// EXPERIMENT (LOSAT_X_BXTASKRES): `read_lengths`, for the bounds of the subject flow's tasks
+    /// (`x_subject_flow::XTasks`).
+    pub(crate) fn x_lengths_from(&self, oid: usize) -> Result<Vec<u32>> {
+        self.read_lengths(oid)
+    }
+
     /// The residues of `oid` (`SeqDb::read_sequence`), for the stages after the preliminary
     /// search.
     fn read_one(&self, oid: usize) -> Result<Vec<u8>> {

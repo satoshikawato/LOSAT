@@ -188,6 +188,25 @@ impl<'a> Subjects<'a> {
         }
     }
 
+    /// EXPERIMENT (LOSAT_X_BXTASKRES): the lengths of the subjects from `oid` on, at least one and
+    /// at most `X_LENGTHS` of them (with `-db` read in blocks, to the end of `oid`'s volume, from
+    /// the index: `XStreamDb::x_lengths_from`); an error of the index read is the reader's.
+    pub(crate) fn x_lengths_from(&self, oid: usize) -> Result<Vec<u32>> {
+        const X_LENGTHS: usize = 16_384;
+        let end = self.len().min(oid.saturating_add(X_LENGTHS));
+        match self {
+            Subjects::Fasta(records) => Ok(records[oid..end]
+                .iter()
+                .map(|record| u32::try_from(record.sequence.len()).unwrap_or(u32::MAX))
+                .collect()),
+            Subjects::Database(stores) => Ok((oid..end)
+                .map(|i| u32::try_from(stores.length(i)).unwrap_or(u32::MAX))
+                .collect()),
+            Subjects::Stream(stream) => stream.db.x_lengths_from(oid),
+            Subjects::Unreadable => unreachable!("no subject is read from an unreadable database"),
+        }
+    }
+
     /// The NCBIstdaa residues of subject `oid` for the stages after the preliminary search (the
     /// composition redo, the traceback, the reports' records): `encoded`, or with
     /// `LOSAT_X_BXDBSTREAM` a read of the database whose error is the reader's error.

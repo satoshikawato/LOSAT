@@ -57,6 +57,78 @@ pub(super) fn subjects_per_task() -> Option<usize> {
     })
 }
 
+/// EXPERIMENT (LOSAT_X_BXTASKRES, in the strict set: on unless `=0`): whether the flow's tasks are
+/// cut by residues as well as by subjects (`XTasks`).
+fn task_residues() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXTASKRES"))
+}
+
+/// No NCBI counterpart: the subjects of each task of a flow (scheduling only). `Grid`: task `t` is
+/// the subjects `t * k..(t + 1) * k`. `Cut` (`LOSAT_X_BXTASKRES`): the first subject of each task,
+/// then the number of subjects; a task ends after `k` subjects or before the subject that would take
+/// its residues past `k` times the mean subject length, so a run of long subjects (the isoforms of
+/// one long protein, stored next to each other) is spread over several tasks instead of making one
+/// task many times the others, which the ordered flow then waits for at its end.
+pub(super) enum XTasks {
+    Grid { k: usize, subjects: usize },
+    Cut(Vec<u32>),
+}
+
+impl XTasks {
+    /// The tasks of `k` subjects (at most) of `subjects`. `Grid` without the switch, and where the
+    /// lengths cannot be read (an index read error: the task that reads the subject then meets the
+    /// error where it did before) or the subjects do not fit `u32`.
+    pub(super) fn new(k: usize, subjects: Subjects<'_>) -> Self {
+        let n = subjects.len();
+        let grid = XTasks::Grid { k, subjects: n };
+        if !task_residues() || n == 0 || u32::try_from(n).is_err() {
+            return grid;
+        }
+        let total = match subjects.total_length() {
+            Ok(total) if total > 0 => total as u128,
+            _ => return grid,
+        };
+        // `k` times the mean length, rounded up.
+        let budget = (k as u128 * total).div_ceil(n as u128) as u64;
+        let mut starts = vec![0u32];
+        let (mut count, mut residues, mut oid) = (0usize, 0u64, 0usize);
+        while oid < n {
+            let Ok(lengths) = subjects.x_lengths_from(oid) else {
+                return grid;
+            };
+            for length in lengths {
+                let length = u64::from(length);
+                if count == k || (count > 0 && residues + length > budget) {
+                    starts.push(oid as u32);
+                    (count, residues) = (0, 0);
+                }
+                count += 1;
+                residues += length;
+                oid += 1;
+            }
+        }
+        starts.push(n as u32);
+        XTasks::Cut(starts)
+    }
+
+    /// The number of tasks.
+    pub(super) fn count(&self) -> usize {
+        match self {
+            XTasks::Grid { k, subjects } => subjects.div_ceil(*k),
+            XTasks::Cut(starts) => starts.len() - 1,
+        }
+    }
+
+    /// The subjects of task `task`.
+    pub(super) fn range(&self, task: usize) -> std::ops::Range<usize> {
+        match self {
+            XTasks::Grid { k, subjects } => task * k..(*subjects).min((task + 1) * k),
+            XTasks::Cut(starts) => starts[task] as usize..starts[task + 1] as usize,
+        }
+    }
+}
+
 /// No NCBI counterpart: reads the shadow switch; it does not change any value NCBI computes.
 /// `LOSAT_X_BXSUBJFLOWSHADOW`: the owner searches every task again on its own table and compares.
 fn shadow() -> bool {
@@ -188,11 +260,10 @@ mod tests {
     }
 }
 
-/// No NCBI counterpart: the subjects of task `task`, searched on `diagonals`; see `Task`.
+/// No NCBI counterpart: the subjects `range` of one task, searched on `diagonals`; see `Task`.
 #[allow(clippy::too_many_arguments)]
 fn search_task(
-    task: usize,
-    k: usize,
+    range: std::ops::Range<usize>,
     subjects: Subjects<'_>,
     batch: &PreparedQueryBatch,
     params: &[ContextParameters],
@@ -204,7 +275,7 @@ fn search_task(
     x_containment: bool,
 ) -> Task {
     let mut kept = Vec::new();
-    let (first, end) = (task * k, subjects.len().min((task + 1) * k));
+    let (first, end) = (range.start, range.end);
     // EXPERIMENT (LOSAT_X_BXDBSTREAM): the task's subjects, read at once when the subjects are read
     // in blocks; an error stops the flow at the task's first subject.
     let x_block = match subjects.x_read_range(first, end) {
@@ -309,20 +380,21 @@ pub(super) fn run(
     capped: bool,
     sink: &mut impl PreliminarySink,
 ) -> Result<usize> {
-    let tasks = subjects.len().div_ceil(k);
+    let bounds = XTasks::new(k, subjects);
+    let tasks = bounds.count();
     // The fused loop's choice for the lookup table, worked out here once for every helper (a
     // helper's thread may have searched another table's tasks in between).
     let x_ratio =
         crate::algorithm::blastx::seed::x_seed_diag::x_shared_table_ratio(lookup, options);
     let compute = |task: usize, scratch: &mut super::x_bx_mem::XScratch<'_>| {
         crate::algorithm::blastx::seed::x_seed_diag::x_take_table_ratio(lookup, x_ratio);
+        let range = bounds.range(task);
         let table = match scratch.get() {
             Ok(table) => table,
-            Err(error) => return (Vec::new(), Some((task * k, error))),
+            Err(error) => return (Vec::new(), Some((range.start, error))),
         };
         search_task(
-            task,
-            k,
+            range,
             subjects,
             batch,
             params,
@@ -362,11 +434,10 @@ pub(super) fn run(
                     &compute(task, &mut own),
                 );
             }
-            let end = error
-                .as_ref()
-                .map_or(subjects.len().min((task + 1) * k), |(oid, _)| *oid);
+            let range = bounds.range(task);
+            let end = error.as_ref().map_or(range.end, |(oid, _)| *oid);
             let mut kept = kept.into_iter().peekable();
-            for oid in task * k..end {
+            for oid in range.start..end {
                 let computed = match kept.next_if(|(kept_oid, _)| *kept_oid == oid) {
                     Some((_, computed)) => computed,
                     None => SubjectComputation::empty(),
@@ -640,7 +711,8 @@ pub(super) fn run_chunks(
     is_split: bool,
     sink: &mut impl PreliminarySink,
 ) -> Result<usize> {
-    let tasks = subjects.len().div_ceil(k);
+    let bounds = XTasks::new(k, subjects);
+    let tasks = bounds.count();
     let total = chunks.len() * tasks;
     let setups = XSetups {
         slots: (0..chunks.len())
@@ -675,13 +747,13 @@ pub(super) fn run_chunks(
             setups.start(c + 1, 1);
         }
         crate::algorithm::blastx::seed::x_seed_diag::x_take_table_ratio(&ready.lookup, ready.ratio);
+        let range = bounds.range(task);
         let table = match scratch.get(ready.length, window) {
             Ok(table) => table,
-            Err(error) => return (Vec::new(), Some((task * k, error))),
+            Err(error) => return (Vec::new(), Some((range.start, error))),
         };
         search_task(
-            task,
-            k,
+            range,
             subjects,
             &chunks[c].prepared,
             &ready.params,
@@ -752,11 +824,10 @@ pub(super) fn run_chunks(
                         &compute(index, &mut own),
                     );
                 }
-                let end = error
-                    .as_ref()
-                    .map_or(subjects.len().min((task + 1) * k), |(oid, _)| *oid);
+                let range = bounds.range(task);
+                let end = error.as_ref().map_or(range.end, |(oid, _)| *oid);
                 let mut kept = kept.into_iter().peekable();
-                for oid in task * k..end {
+                for oid in range.start..end {
                     let computed = match kept.next_if(|(kept_oid, _)| *kept_oid == oid) {
                         Some((_, computed)) => computed,
                         None => SubjectComputation::empty(),

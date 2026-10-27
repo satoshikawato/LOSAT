@@ -696,6 +696,118 @@ fn x_stripe_build(
     }
 }
 
+/// PROBE (v4-BPF s9, LOSAT_BPF_S9B=1): a thread's scratch for `x_stripe_build_s9`: the stripe's
+/// appends gathered, the cells' counts (then cursors), the cells of more than 5 offsets, a cell's
+/// offsets.
+type XS9Scratch = (Vec<u32>, Vec<u32>, Vec<u32>, Vec<i32>);
+
+/// PROBE (v4-BPF s9, LOSAT_BPF_S9B=1): `x_stripe_build` in the serial bucket fill's form
+/// (`x_try_build_flat_by_buckets`): the stripe's parts of the chunks are read once, in chunk order,
+/// into one run of `(query_offset << shift) | cell` (the query has fewer than 2^(32 - shift)
+/// letters) while the cells are counted; the layout; the fill from that run. The overflow cells are
+/// counted only with `need_cells` (a table's appends pass the capacity; an append takes at most one
+/// cell).
+#[allow(clippy::too_many_arguments)]
+fn x_stripe_build_s9(
+    part: XStripe<'_>,
+    shift: usize,
+    backbone_size: usize,
+    ranges: usize,
+    chunks: &[XChunk],
+    appends: &[XChunkAppends],
+    need_cells: bool,
+    scratch: &mut XS9Scratch,
+) -> XStripeCounts {
+    let XStripe {
+        stripe,
+        base,
+        starts,
+        hits,
+        pv,
+    } = part;
+    let (run, slots, overflowed, appended) = scratch;
+    let first = stripe << shift;
+    let cell_count = (backbone_size - first).min(1 << shift);
+    slots.clear();
+    slots.resize(cell_count, 0);
+    run.clear();
+    run.reserve(hits.len());
+    let mut cells = vec![0usize; ranges];
+    for (chunk, chunk_appends) in chunks.iter().zip(appends) {
+        let part = &chunk_appends.packed[chunk_appends.stripe_starts[stripe] as usize
+            ..chunk_appends.stripe_starts[stripe + 1] as usize];
+        let chunk_base = chunk.base as u32;
+        if need_cells {
+            let mut taken = 0usize;
+            run.extend(part.iter().map(|&packed| {
+                let cell = packed >> 16;
+                let count = &mut slots[cell as usize];
+                taken += usize::from(x_takes_overflow_cell(*count));
+                *count += 1;
+                ((chunk_base + (packed & 0xffff)) << shift) | cell
+            }));
+            cells[chunk.range] += taken;
+        } else {
+            run.extend(part.iter().map(|&packed| {
+                let cell = packed >> 16;
+                slots[cell as usize] += 1;
+                ((chunk_base + (packed & 0xffff)) << shift) | cell
+            }));
+        }
+    }
+
+    // Layout, as `x_stripe_build`'s; the cells of more than 5 offsets noted.
+    let mut nonempty = 0usize;
+    let mut longest = 0u32;
+    let mut slot = 0u32;
+    overflowed.clear();
+    for (cell, (start, cursor)) in starts.iter_mut().zip(slots.iter_mut()).enumerate() {
+        let count = *cursor;
+        *start = base + slot;
+        if count > 0 {
+            nonempty += 1;
+            longest = longest.max(count);
+            if !pv.is_empty() {
+                pv[cell >> PV_ARRAY_BTS] |= 1u32 << ((first + cell) & PV_ARRAY_MASK);
+            }
+            if count > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
+                overflowed.push(cell as u32);
+            }
+        }
+        *cursor = slot;
+        slot += count;
+    }
+
+    // Fill from the run.
+    let mask = (1u32 << shift) - 1;
+    let out = hits.as_mut_ptr();
+    for &packed in run.iter() {
+        let at = &mut slots[(packed & mask) as usize];
+        // SAFETY: a cell's cursor starts at its first slot and moves on once per append to the
+        // cell, which the counts counted, so it stays below the stripe's hits (their sum).
+        unsafe { out.add(*at as usize).write((packed >> shift) as i32) };
+        *at += 1;
+    }
+    // A cursor ends at the cell's end.
+    for &cell in overflowed.iter() {
+        let cell = cell as usize;
+        let begin = (starts[cell] - base) as usize;
+        let end = slots[cell] as usize;
+        let n = (end - begin) as u32;
+        let slice = &mut hits[begin..end];
+        appended.clear();
+        appended.extend_from_slice(slice);
+        for (k, &query_offset) in appended.iter().enumerate() {
+            slice[x_emission_position(k as u32, n) as usize] = query_offset;
+        }
+    }
+    XStripeCounts {
+        nonempty,
+        longest,
+        cells,
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (the passes) and
 // :1197-1235 (`finalize`, the statements of `x_try_build_flat_with_capacity`'s layout)
 // ```c
@@ -755,7 +867,11 @@ fn x_try_build_flat_parallel_with(
         cuts.chunk_sizes
     };
     let chunks = x_chunks(word_size, &ranges, locations, sizes);
-    let shift = cuts.stripe_shift.unwrap_or_else(|| {
+    // PROBE (v4-BPF s9): LOSAT_BPF_S9B=1 builds the stripes as the serial bucket fill builds its
+    // buckets (`x_stripe_build_s9`), stripes of 2^10 cells unless LOSAT_BPF_S8SHIFT says otherwise.
+    let s9_on = crate::algorithm::blastp::x_query_slots::x_s8_env("LOSAT_BPF_S9B") == Some(1)
+        && matches!(cuts.passes, XPasses::OneLatch(_));
+    let shift = cuts.stripe_shift.or(s9_on.then_some(10)).unwrap_or_else(|| {
         let stripes = (X_PARTS_PER_THREAD * threads).min(X_MAX_PARTS / chunks.len().max(1));
         x_stripe_shift(backbone_size, stripes, largest_pv_shift)
     });
@@ -764,6 +880,7 @@ fn x_try_build_flat_parallel_with(
         "stripe shift {shift} outside {largest_pv_shift}..={X_MAX_STRIPE_SHIFT}"
     );
     let stripes = backbone_size.div_ceil(1 << shift);
+    let s9 = s9_on && (query.len() as u64) < (1u64 << (32 - shift));
 
     // The chunks' appends, sorted by stripe.
     let appended = AtomicUsize::new(0);
@@ -894,6 +1011,46 @@ fn x_try_build_flat_parallel_with(
             .into_par_iter()
             .map(|part| x_stripe_build(part, shift, backbone_size, ranges.len(), &chunks, &appends))
             .collect(),
+        XPasses::OneLatch(_) if s9 => {
+            // An append takes at most one overflow cell: where no table's appends pass the
+            // capacity, no table's test can refuse it.
+            let mut range_appends = vec![0usize; ranges.len()];
+            for (chunk, chunk_appends) in chunks.iter().zip(&appends) {
+                range_appends[chunk.range] += chunk_appends.packed.len();
+            }
+            let need_cells = ranges
+                .iter()
+                .zip(&range_appends)
+                .any(|((_, is_table), &n)| *is_table && n > cuts.overflow_cell_capacity);
+            let parts: Vec<Mutex<Option<XStripe<'_>>>> = parts
+                .into_iter()
+                .map(|part| Mutex::new(Some(part)))
+                .collect();
+            x_one_latch_pass(
+                threads,
+                parts.len(),
+                0,
+                XS9Scratch::default,
+                |scratch, stripe| {
+                    let part = parts[stripe]
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .take()
+                        .expect("each stripe taken once");
+                    x_stripe_build_s9(
+                        part,
+                        shift,
+                        backbone_size,
+                        ranges.len(),
+                        &chunks,
+                        &appends,
+                        need_cells,
+                        scratch,
+                    )
+                },
+                |_| {},
+            )
+        }
         XPasses::OneLatch(_) => {
             // Each stripe's part, taken by the task that takes its index.
             let parts: Vec<Mutex<Option<XStripe<'_>>>> = parts

@@ -21,7 +21,7 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   `_mm*_fnm*`, `vfmaq_*`, `vfmsq_*`), or the Wasm `relaxed-simd` feature (its `relaxed_madd`
   fuses or not depending on the engine). The Wasm builds enable `+simd128` only.
 - **One fused multiply-add**, `f64::mul_add` in `stats/spouge.rs::x_product_error`: the exact
-  rounding error of a product in the double-double emulation of the long-double line
+  rounding error of a product in the double-double emulation of `expl` in the long-double line
   `result *= expl(-z * z) / z` of NCBI's `boost_erf.c`. The other call is its test
   `x_dekker_product_error_matches_fused_multiply_add`. `mul_add` rounds once (IEEE 754
   fusedMultiplyAdd) on every target, so an instruction and a library routine give the same bits.

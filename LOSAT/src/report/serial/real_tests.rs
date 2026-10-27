@@ -28,7 +28,7 @@ use super::real::{
     double_to_string_ecvt, double_to_string_posix, long_double_pow10_table, write_asn_text_double,
     write_json_double, write_xml_double, JsonDoubleError, DBL_DIG,
 };
-use super::x87::X87;
+use crate::utils::x87::X87;
 use std::cmp::Ordering;
 
 // -------------------------------------------------------------------------------------------

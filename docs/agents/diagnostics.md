@@ -5812,15 +5812,16 @@ Scheduling (each value computed by one thread with the original function; order 
   The one-chunk subject flow (`x_subject_flow::run`) keeps 4 per thread. Measured 2026-10-27 on the workstation
   (node 1, the first n physical cores with their HT siblings idle, `--membind=1`, cores warmed 3 s per case,
   rounds in rotated arm order, medians of the per-round ratios; every output the same bytes as dev's and, for the
-  50 kb slice, as the progress board's d26), dev dfe8a461 against this change (8e3f2e0e, the gate's binary): fly
-  2L 800,001-850,000 (five chunks) x the 30,802 fly proteins `-db -evalue 1e-5` at 16 threads 0.689 -> 0.571 s
-  (x0.829, 8 of 8 rounds), system time 1.56 -> 0.08 s, max RSS 16 -> 24 MiB (NCBI `-db` 91-96 MiB); 32 threads
-  0.561 -> 0.400 s (x0.712); 8 threads x0.885; 4 / 2 / 1 threads x0.951 / x0.993 / x0.997; S(16) (one thread /
-  16 threads) 11.43 -> 13.74. 2L slices of 20 kb (two chunks) and 150 kb (15 chunks) at 16 threads x0.881 and
-  x0.804 (system time of the 150 kb slice 4.96 -> 0.13 s). The cross-chunk flow with 4 tasks per thread ahead (a
-  prototype) gave only x0.973 at 16 threads (system time 1.59 s); 32 or 64 per thread gave the same times as 16.
-  800 cDNAs x the yeast proteins at 16 threads `-subject` x1.002 (0.996-1.010), `-db` x0.997, `-db` at 32 threads
-  x0.998, max RSS +4-5 MiB (71 -> 76, 89 -> 93; NCBI 143-154 MiB).
+  50 kb slice, as the progress board's d26), dev dfe8a461 against this change (d7eb5b30, the gate's binary): fly
+  2L 800,001-850,000 (five chunks) x the 30,802 fly proteins `-db -evalue 1e-5` at 16 threads 0.684 -> 0.570 s
+  (x0.833, 8 of 8 rounds), system time 1.58 -> 0.08 s, max RSS 16 -> 25 MiB (NCBI `-db` 91-96 MiB); 32 threads
+  0.555 -> 0.401 s (x0.723); 8 threads x0.882; 4 / 2 / 1 threads x0.947 / x1.003 (rounds 0.997-1.010) / x1.000;
+  S(16) (one thread / 16 threads) 11.43 -> 13.71. 2L slices of 20 kb (two chunks) and 150 kb (15 chunks) at 16
+  threads x0.894 and x0.799 (system time of the 150 kb slice 4.93 -> 0.13 s). The cross-chunk flow with 4 tasks
+  per thread ahead (a prototype) gave only x0.973 at 16 threads (system time 1.59 s); 32 or 64 per thread gave the
+  same times as 16. 800 cDNAs x the yeast proteins at 16 threads `-subject` x1.000 (0.999-1.001), `-db` x1.000
+  (1.000-1.003), `-db` at 32 threads x0.997 (0.995-1.006); max RSS at 16 threads +7 MiB (70 -> 79, 65 -> 72), at
+  32 threads 90 -> 91 (NCBI 143-154 MiB; the v4-MF floor of the 800-cDNA `-db` row at 16 threads is about 85).
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

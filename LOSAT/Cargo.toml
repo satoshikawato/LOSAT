@@ -2,6 +2,7 @@
 name = "LOSAT"
 version = "0.2.0"
 edition = "2021"
+rust-version = "1.92"
 autotests = false
 description = "Pure-Rust local BLAST with NCBI-verified fixtures, genetic-code exceptions, and command-WASI support"
 license = "MIT"

@@ -495,6 +495,53 @@ mod tests {
         with_search_pool(4, "test", |_| Ok(())).unwrap();
         assert_eq!(rayon::current_thread_index(), None);
     }
+
+    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:171-180
+    // (*thread)->Run(); (*thread)->Join(&result);
+    #[test]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    fn a_spawned_pool_runs_on_its_new_thread_and_ends_with_its_scope() {
+        let caller = std::thread::current().id();
+        for n in [1, 2, 4] {
+            let seen = std::sync::Mutex::new(None);
+            std::thread::scope(|scope| {
+                let zero = std::thread::Builder::new().name("x-spawned-zero".to_string());
+                let handle = x_spawn_search_pool(scope, zero, n, "test", |search| {
+                    let me = std::thread::current();
+                    let workers = search.install(|| {
+                        search
+                            .pool
+                            .map(|pool| pool.broadcast(|_| std::thread::current().id()))
+                            .unwrap_or_default()
+                    });
+                    *seen.lock().unwrap() = Some((
+                        search.threads(),
+                        search.enabled(),
+                        me.name().map(str::to_string),
+                        me.id(),
+                        workers,
+                        rayon::current_thread_index(),
+                    ));
+                })
+                .unwrap();
+                handle.join().unwrap();
+            });
+            let (threads, enabled, name, zero, workers, index) =
+                seen.into_inner().unwrap().unwrap();
+            assert_eq!(name.as_deref(), Some("x-spawned-zero"));
+            assert_ne!(zero, caller);
+            if n == 1 {
+                assert_eq!((threads, enabled, index), (1, false, None));
+            } else {
+                // The new thread is slot zero of a pool of `n` threads, none of them the caller.
+                assert_eq!((threads, enabled, index), (n, true, Some(0)));
+                assert_eq!(workers.len(), n);
+                assert_eq!(workers.iter().filter(|id| **id == zero).count(), 1);
+                assert!(!workers.contains(&caller));
+            }
+            assert_eq!(rayon::current_thread_index(), None);
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1664

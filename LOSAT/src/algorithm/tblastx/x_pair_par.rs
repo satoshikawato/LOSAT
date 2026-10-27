@@ -2338,7 +2338,7 @@ impl XPairPar {
     // above `X_MAPPED_BYTES`, rule 3: at one thread nothing is retained, mapping only costs).
     // EXPERIMENT (LOSAT_X_TBXKMERGE, x_kmerge.rs item 1): with `sort` each unit's list is sorted
     // in the unit's own task, after its scan, by the comparator of the chunk's init sort.
-    fn run_units<T: Send + x_kmerge::XUnitSort>(
+    fn run_units<T: Send + Sync + x_kmerge::XUnitSort>(
         &self,
         units: &[XUnit],
         inp: &XSubject<'_>,
@@ -2359,6 +2359,29 @@ impl XPairPar {
         ))]
         if pool.enabled() {
             let unmap = seed_unmap_active();
+            // EXPERIMENT (LOSAT_X_TBXBOARD): the units on the search's board, by batch and subject
+            // order (tblastx/x_work_board.rs); the same unit function on each unit, so the same
+            // lists in unit order.
+            if let Some((board, batch)) = crate::algorithm::tblastx::x_work_board::current() {
+                let results: Vec<OnceLock<T>> = (0..units.len()).map(|_| OnceLock::new()).collect();
+                let item =
+                    |i: usize, taker: &mut crate::algorithm::tblastx::x_work_board::XTaker| {
+                        let scratch = taker
+                            .scratch
+                            .get_or_insert_with(|| Box::new(XScratch::new(unmap)))
+                            .downcast_mut::<XScratch>()
+                            .expect("a board taker's scratch is the unit path's");
+                        let list = run(&units[i], scratch);
+                        if results[i].set(list).is_err() {
+                            unreachable!("a unit is taken once");
+                        }
+                    };
+                board.run_units(batch, inp.s_idx, units.len(), &item);
+                return results
+                    .into_iter()
+                    .map(|cell| cell.into_inner().expect("every unit ran"))
+                    .collect();
+            }
             return pool.install(|| {
                 units
                     .par_iter()

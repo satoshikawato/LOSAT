@@ -2139,6 +2139,10 @@ fn write_tblastx_outputs(
                     // `-query_loc`) writes no epilog (tblastx_app.cpp:209, `PrintEpilog`).
                     epilog: run.epilog,
                     prolog,
+                    parsed_subjects: match &run.database {
+                        Some(database) => database.reported.parsed.clone(),
+                        None => Vec::new(),
+                    },
                 };
                 crate::report::pairwise::write_tblastx_pairwise_report(
                     pairwise,
@@ -2183,6 +2187,7 @@ fn write_tblastx_outputs(
                             crate::algorithm::tblastx::seqalign::SeqalignSubjects::Database {
                                 ordinals: &database.reported.ordinals,
                                 title: &database.pairwise.definition,
+                                parsed: &database.reported.parsed,
                             }
                         }
                         None => crate::algorithm::tblastx::seqalign::SeqalignSubjects::Records {
@@ -2212,6 +2217,7 @@ fn write_tblastx_outputs(
                         crate::algorithm::tblastx::seqalign::SeqalignSubjects::Database {
                             ordinals: &database.reported.ordinals,
                             title: &database.pairwise.definition,
+                            parsed: &database.reported.parsed,
                         }
                     }
                     None => crate::algorithm::tblastx::seqalign::SeqalignSubjects::Records {
@@ -3234,10 +3240,25 @@ impl BatchReports<'_> {
                 pairwise,
                 stores,
             } => {
+                let formats: Vec<report::TblastxOutputFormat> = outputs
+                    .formats
+                    .iter()
+                    .map(|format| report::output_format(format.outfmt))
+                    .collect();
+                let pairwise_shown = formats.contains(&report::TblastxOutputFormat::Pairwise);
+                let shown = crate::algorithm::common::database::ParsedShown {
+                    tabular: formats.iter().any(|format| format.is_tabular()),
+                    pairwise: pairwise_shown,
+                    joined: pairwise_shown
+                        || formats.iter().any(|format| format.is_structured_xml()),
+                    sam: false,
+                };
                 reported_subjects = super::super::database::reported_subjects(
+                    database,
                     &self.titles.borrow(),
                     &mut hits,
                     stores,
+                    shown,
                 )?;
                 (
                     reported_subjects.records.as_slice(),
@@ -3264,7 +3285,7 @@ impl BatchReports<'_> {
                     )
                 }) =>
             {
-                database.read_taxids(&shown.reported.ordinals)?
+                database.read_taxids(shown.reported)?
             }
             _ => Default::default(),
         };

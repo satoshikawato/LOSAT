@@ -83,6 +83,27 @@ impl ShownSubjects<'_> {
             Self::Database { reported, .. } => Some(reported.ordinals[rank]),
         }
     }
+
+    /// The reported database sequences with parsed Seq-ids by rank (empty without them).
+    fn parsed_subjects(&self) -> &[Option<Arc<crate::report::db_subject::ParsedSubject>>] {
+        match self {
+            Self::Fasta { .. } => &[],
+            Self::Database { reported, .. } => &reported.parsed,
+        }
+    }
+}
+
+impl<'a> ShownSubjects<'a> {
+    /// The reported database sequence of rank `rank` when it has parsed Seq-ids.
+    pub(super) fn parsed_subject(
+        &self,
+        rank: usize,
+    ) -> Option<&'a crate::report::db_subject::ParsedSubject> {
+        match *self {
+            Self::Fasta { .. } => None,
+            Self::Database { reported, .. } => reported.parsed_subject(rank),
+        }
+    }
 }
 
 // NCBI c++/src/algo/blast/format/blast_format.cpp:759-835,1411-1458:
@@ -1225,6 +1246,7 @@ fn write_pairwise(
         query_validity,
         query_batch_skipped,
         &subject_titles,
+        shown.parsed_subjects(),
         &report,
         shown.pairwise_database(),
         probe,

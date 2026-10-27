@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the protein databases with parsed Seq-ids of the `db.id.*` rows (line DBID, ID2a).
+"""Build the databases with parsed Seq-ids of the `db.id.*` rows (line DBID: proteins ID2a, nucleotides ID2b).
 
 NCBI BLAST+ 2.17.0 makeblastdb is the comparison oracle only: it writes the databases from the
 records below, and every file it writes is kept (NCBI's formatters find a reported sequence
@@ -34,6 +34,18 @@ description id longer than 65 bytes, `punct` a title that NCBI's `x_CleanAndComp
 the end of, `disp` a `lcl|777` before `gi|777` (NCBI's formatters find no sequence by the
 Seq-align id `gi|777`). The queries hit their own record alone with `-evalue 1e-20` (NCBI's
 outfmt 0 of a report that shows `punct` does not end).
+
+Nucleotides (ID2b; every record holds the sequence of `LOSAT/tests/seqid/fasta/nucl_ids.fa`, which the
+queries `qnucl.fa` and `qprot.fa` there hit): `nucl_v4.*` and `nucl_v5.*` from `nucl.fna` (the Seq-id forms
+of `nucl_ids.fa`, with the GenBank, EMBL and DDBJ accessions each under prefixes of its own partner, so
+that NCBI's process-wide Seq-id registry does not print one partner's type for another's (an approved
+difference of line DBID, DECISIONS 5 Q2); titles that NCBI makes from the Seq-ids (`tpg` and RefSeq ids
+without a title), a GI in the second definition line only, titles longer than 60 bytes, `lcl|Subject_`
+beside an accession, a `gnl|ti|` integer tag) with the taxids of `taxmap_nucl.txt`; version 5 without the
+GI-only record `gi|1111`. `nrefuse_v5.*` from `nrefuse.fna` (`lcl|777` before `gi|777`: NCBI's formatters
+find no sequence by the Seq-align id `gi|777`). `njoined_a.*` and `njoined_b.*` (version 4) from
+`njoined_a.fna` and `njoined_b.fna`, read through the alias `njoined.nal`: `gb|AF000040.1|` and
+`gb|AF000040|` follow each other in the hits, and NCBI's XML and outfmt 0 take them for one sequence.
 """
 import argparse
 import subprocess
@@ -84,6 +96,28 @@ def main() -> int:
          "-parse_seqids", "-blastdb_version", "5", "-title", "refuse_v5 (parsed Seq-ids)",
          "-taxid_map", str(HERE / "taxmap_refuse.txt"), "-out", str(args.out / "refuse_v5")],
         check=True, stdout=subprocess.DEVNULL)
+    nucl = records(HERE / "nucl.fna")
+    work.mkdir(exist_ok=True)
+    for version, kept in ((4, nucl), (5, [r for r in nucl if not r.startswith(">gi|1111 ")])):
+        fasta = work / f"nucl_v{version}.fna"
+        fasta.write_text("".join(kept))
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(fasta), "-dbtype", "nucl", "-parse_seqids",
+             "-blastdb_version", str(version), "-title", f"nucl_v{version} (parsed Seq-ids)",
+             "-taxid_map", str(HERE / "taxmap_nucl.txt"), "-out", str(args.out / f"nucl_v{version}")],
+            check=True, stdout=subprocess.DEVNULL)
+        fasta.unlink()
+    work.rmdir()
+    for name, version, title in (("nrefuse_v5", 5, "nrefuse_v5 (parsed Seq-ids)"),
+                                 ("njoined_a", 4, "njoined_a"), ("njoined_b", 4, "njoined_b")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / (name.split("_v")[0] + ".fna")),
+             "-dbtype", "nucl", "-parse_seqids", "-blastdb_version", str(version), "-title", title,
+             "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+    (args.out / "njoined.nal").write_text(
+        "#\n# Alias file of line DBID, ID2b\n#\nTITLE njoined (two volumes, parsed Seq-ids)\n"
+        "DBLIST njoined_a njoined_b\n")
     return 0
 
 

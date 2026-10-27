@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastn</program>
+      <version>BLASTN 2.17.0+</version>
+      <reference>Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), &quot;A greedy algorithm for aligning DNA sequences&quot;, J Comput Biol 2000; 7(1-2):203-14.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/ids/nucl_v5</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <expect>10</expect>
+          <sc-match>1</sc-match>
+          <sc-mismatch>-2</sc-mismatch>
+          <gap-open>0</gap-open>
+          <gap-extend>0</gap-extend>
+          <filter>L;m;</filter>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>qn1 query nucleotide one</query-title>
+              <query-len>480</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>tpe|BN000025.1|</id>
+                      <accession>BN000025</accession>
+                      <title>third party embl nucleotide</title>
+                    </HitDescr>
+                  </description>
+                  <len>488</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>608.668</bit-score>
+                      <score>329</score>
+                      <evalue>3.12745e-177</evalue>
+                      <identity>394</identity>
+                      <query-from>31</query-from>
+                      <query-to>453</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>46</hit-from>
+                      <hit-to>466</hit-to>
+                      <hit-strand>Plus</hit-strand>
+                      <align-len>425</align-len>
+                      <gaps>6</gaps>
+                      <qseq>ATGTGGATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATGAGCTGGAAAGTCCTTATGAAGTATGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGGATTTGCTGGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGTTGCATATGGCAGAAATGGGTCTGTGGATGCATAAGTATCCCAAGTGTATGTGTGTAA--TGGTGAGATTCACAGATCAATCTCTCCGGCATTGGAAAATTAACCATGACGCTAACTTTGAGAAACTTAAGATCTTCCACTACATGGTGGGTCATGGGAGAACAGCATCTGAGGGCAAC</qseq>
+                      <hseq>ATGTGGATGGAACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGCAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATAAGCTGGAAAGTCCTTATGAAGTTTGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGCATTTGCTG----CCTAAGGATATGGCAAACCCAGGATTGTCGAAGACGGATACGTTGCATAGGTCAGCAATGGGTCTGTGGAGGCATAAGCATCTCAAGGGTATGTGTGTAACGTGGTGAGAATCACAGATCAATCTCTCCGGCATTGCAAACCTAACCATGACGCTAACTGCGAGAAATTTAAGATCTTCCACAACATGGTGGGTCATGGGAGAACAGCATCTGAGGGCAAC</hseq>
+                      <midline>|||||||||||||||||||||||| |||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||| |||||||||||||||||||||||||||||||||||| ||||||||    |||||||| ||||||| |||||||| || |||||||||||||||||||| | ||| |||||||||||||| ||||||| ||| |||| ||||||||||||  |||||||| ||||||||||||||||||||||||| |||  |||||||||||||||||  |||||| |||||||||||||| ||||||||||||||||||||||||||||||||||||||</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|ti|123</id>
+                      <accession>123</accession>
+                      <title>trace id nucleotide</title>
+                    </HitDescr>
+                  </description>
+                  <len>488</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>608.668</bit-score>
+                      <score>329</score>
+                      <evalue>3.12745e-177</evalue>
+                      <identity>394</identity>
+                      <query-from>31</query-from>
+                      <query-to>453</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>46</hit-from>
+                      <hit-to>466</hit-to>
+                      <hit-strand>Plus</hit-strand>
+                      <align-len>425</align-len>
+                      <gaps>6</gaps>
+                      <qseq>ATGTGGATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATGAGCTGGAAAGTCCTTATGAAGTATGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGGATTTGCTGGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGTTGCATATGGCAGAAATGGGTCTGTGGATGCATAAGTATCCCAAGTGTATGTGTGTAA--TGGTGAGATTCACAGATCAATCTCTCCGGCATTGGAAAATTAACCATGACGCTAACTTTGAGAAACTTAAGATCTTCCACTACATGGTGGGTCATGGGAGAACAGCATCTGAGGGCAAC</qseq>
+                      <hseq>ATGTGGATGGAACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGCAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATAAGCTGGAAAGTCCTTATGAAGTTTGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGCATTTGCTG----CCTAAGGATATGGCAAACCCAGGATTGTCGAAGACGGATACGTTGCATAGGTCAGCAATGGGTCTGTGGAGGCATAAGCATCTCAAGGGTATGTGTGTAACGTGGTGAGAATCACAGATCAATCTCTCCGGCATTGCAAACCTAACCATGACGCTAACTGCGAGAAATTTAAGATCTTCCACAACATGGTGGGTCATGGGAGAACAGCATCTGAGGGCAAC</hseq>
+                      <midline>|||||||||||||||||||||||| |||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||| |||||||||||||||||||||||||||||||||||| ||||||||    |||||||| ||||||| |||||||| || |||||||||||||||||||| | ||| |||||||||||||| ||||||| ||| |||| ||||||||||||  |||||||| ||||||||||||||||||||||||| |||  |||||||||||||||||  |||||| |||||||||||||| ||||||||||||||||||||||||||||||||||||||</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>3</num>
+                  <description>
+                    <HitDescr>
+                      <id>ref|NR_000023.1|</id>
+                      <accession>NR_000023</accession>
+                      <title></title>
+                    </HitDescr>
+                  </description>
+                  <len>488</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>608.668</bit-score>
+                      <score>329</score>
+                      <evalue>3.12745e-177</evalue>
+                      <identity>394</identity>
+                      <query-from>31</query-from>
+                      <query-to>453</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>46</hit-from>
+                      <hit-to>466</hit-to>
+                      <hit-strand>Plus</hit-strand>
+                      <align-len>425</align-len>
+                      <gaps>6</gaps>
+                      <qseq>ATGTGGATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATGAGCTGGAAAGTCCTTATGAAGTATGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGGATTTGCTGGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGTTGCATATGGCAGAAATGGGTCTGTGGATGCATAAGTATCCCAAGTGTATGTGTGTAA--TGGTGAGATTCACAGATCAATCTCTCCGGCATTGGAAAATTAACCATGACGCTAACTTTGAGAAACTTAAGATCTTCCACTACATGGTGGGTCATGGGAGAACAGCATCTGAGGGCAAC</qseq>
+                      <hseq>ATGTGGATGGAACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGCAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATAAGCTGGAAAGTCCTTATGAAGTTTGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGCATTTGCTG----CCTAAGGATATGGCAAACCCAGGATTGTCGAAGACGGATACGTTGCATAGGTCAGCAATGGGTCTGTGGAGGCATAAGCATCTCAAGGGTATGTGTGTAACGTGGTGAGAATCACAGATCAATCTCTCCGGCATTGCAAACCTAACCATGACGCTAACTGCGAGAAATTTAAGATCTTCCACAACATGGTGGGTCATGGGAGAACAGCATCTGAGGGCAAC</hseq>
+                      <midline>|||||||||||||||||||||||| |||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||| |||||||||||||||||||||||||||||||||||| ||||||||    |||||||| ||||||| |||||||| || |||||||||||||||||||| | ||| |||||||||||||| ||||||| ||| |||| ||||||||||||  |||||||| ||||||||||||||||||||||||| |||  |||||||||||||||||  |||||| |||||||||||||| ||||||||||||||||||||||||||||||||||||||</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>4</num>
+                  <description>
+                    <HitDescr>
+                      <id>gb|AF000022.1|</id>
+                      <accession>AF000022</accession>
+                      <title>subject id beside an accession</title>
+                    </HitDescr>
+                  </description>
+                  <len>488</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>608.668</bit-score>
+                      <score>329</score>
+                      <evalue>3.12745e-177</evalue>
+                      <identity>394</identity>
+                      <query-from>31</query-from>
+                      <query-to>453</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>46</hit-from>
+                      <hit-to>466</hit-to>
+                      <hit-strand>Plus</hit-strand>
+                      <align-len>425</align-len>
+                      <gaps>6</gaps>
+                      <qseq>ATGTGGATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATGAGCTGGAAAGTCCTTATGAAGTATGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGGATTTGCTGGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGTTGCATATGGCAGAAATGGGTCTGTGGATGCATAAGTATCCCAAGTGTATGTGTGTAA--TGGTGAGATTCACAGATCAATCTCTCCGGCATTGGAAAATTAACCATGACGCTAACTTTGAGAAACTTAAGATCTTCCACTACATGGTGGGTCATGGGAGAACAGCATCTGAGGGCAAC</qseq>
+                      <hseq>ATGTGGATGGAACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGCAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATAAGCTGGAAAGTCCTTATGAAGTTTGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGCATTTGCTG----CCTAAGGATATGGCAAACCCAGGATTGTCGAAGACGGATACGTTGCATAGGTCAGCAATGGGTCTGTGGAGGCATAAGCATCTCAAGGGTATGTGTGTAACGTGGTGAGAATCACAGATCAATCTCTCCGGCATTGCAAACCTAACCATGACGCTAACTGCGAGAAATTTAAGATCTTCCACAACATGGTGGGTCATGGGAGAACAGCATCTGAGGGCAAC</hseq>
+                      <midline>|||||||||||||||||||||||| |||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||| |||||||||||||||||||||||||||||||||||| ||||||||    |||||||| ||||||| |||||||| || |||||||||||||||||||| | ||| |||||||||||||| ||||||| ||| |||| ||||||||||||  |||||||| ||||||||||||||||||||||||| |||  |||||||||||||||||  |||||| |||||||||||||| ||||||||||||||||||||||||||||||||||||||</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>5</num>
+                  <description>
+                    <HitDescr>
+                      <id>gb|AF000021.1|</id>
+                    </HitDescr>
+                  </description>
+                  <len>488</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>608.668</bit-score>
+                      <score>329</score>
+                      <evalue>3.12745e-177</evalue>
+                      <identity>394</identity>
+                      <query-from>31</query-from>
+                      <query-to>453</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>46</hit-from>
+                      <hit-to>466</hit-to>
+                      <hit-strand>Plus</hit-strand>
+                      <align-len>425</align-len>
+                      <gaps>6</gaps>
+                      <qseq>ATGTGGATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATGAGCTGGAAAGTCCTTATGAAGTATGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGGATTTGCTGGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGTTGCATATGGCAGAAATGGGTCTGTGGATGCATAAGTATCCCAAGTGTATGTGTGTAA--TGGTGAGATTCACAGATCAATCTCTCCGGCATTGGAAAATTAACCATGACGCTAACTTTGAGAAACTTAAGATCTTCCACTACATGGTGGGTCATGGGAGAACAGCATCTGAGGGCAAC</qseq>
+                      <hseq>ATGTGGATGGAACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGCAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATAAGCTGGAAAGTCCTTATGAAGTTTGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGCATTTGCTG----CCTAAGGATATGGCAAACCCAGGATTGTCGAAGACGGATACGTTGCATAGGTCAGCAATGGGTCTGTGGAGGCATAAGCATCTCAAGGGTATGTGTGTAACGTGGTGAGAATCACAGATCAATCTCTCCGGCATTGCAAACCTAACCATGACGCTAACTGCGAGAAATTTAAGATCTTCCACAACATGGTGGGTCATGGGAGAACAGCATCTGAGGGCAAC</hseq>
+                      <midline>|||||||||||||||||||||||| |||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||| |||||||||||||||||||||||||||||||||||| ||||||||    |||||||| ||||||| |||||||| || |||||||||||||||||||| | ||| |||||||||||||| ||||||| ||| |||| ||||||||||||  |||||||| ||||||||||||||||||||||||| |||  |||||||||||||||||  |||||| |||||||||||||| ||||||||||||||||||||||||||||||||||||||</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>24</db-num>
+                  <db-len>11712</db-len>
+                  <hsp-len>15</hsp-len>
+                  <eff-space>5278680</eff-space>
+                  <kappa>0.46</kappa>
+                  <lambda>1.28</lambda>
+                  <entropy>0.85</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastn</program>
+      <version>BLASTN 2.17.0+</version>
+      <reference>Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), &quot;A greedy algorithm for aligning DNA sequences&quot;, J Comput Biol 2000; 7(1-2):203-14.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/ids/nucl_v5</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <expect>10</expect>
+          <sc-match>1</sc-match>
+          <sc-mismatch>-2</sc-mismatch>
+          <gap-open>0</gap-open>
+          <gap-extend>0</gap-extend>
+          <filter>L;m;</filter>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_2</query-id>
+              <query-title>qn2 unrelated nucleotide (no hits expected)</query-title>
+              <query-len>90</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>24</db-num>
+                  <db-len>11712</db-len>
+                  <hsp-len>13</hsp-len>
+                  <eff-space>877800</eff-space>
+                  <kappa>0.46</kappa>
+                  <lambda>1.28</lambda>
+                  <entropy>0.85</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

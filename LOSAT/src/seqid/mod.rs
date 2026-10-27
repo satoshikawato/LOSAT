@@ -14,9 +14,9 @@
 //!   every definition line.
 //!
 //! A format chooses and prints a database sequence's ids only through these functions; it
-//! keeps only its own joins and escaping. The search programs refuse a database with parsed
-//! Seq-ids when they open it (`algorithm::common::database::refuse_parsed_seqids`); the
-//! programs that read one take their ids from `seqdb::SeqDb::defline_set`.
+//! keeps only its own joins and escaping. The search programs take the ids of a database with
+//! parsed Seq-ids from `seqdb::SeqDb::defline_set`; psiblast refuses such a database when it
+//! opens it (`algorithm::common::database::refuse_parsed_seqids`).
 
 pub mod ber;
 pub mod defline_set;

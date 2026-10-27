@@ -136,7 +136,7 @@ impl BlastpDatabase {
         if parsed_seqids {
             shared::check_seqids(&db, settings, PROGRAM)?;
         } else {
-            shared::refuse_parsed_seqids(&db, PROGRAM)?;
+            shared::refuse_parsed_seqids(&db, "PSIBLAST")?;
         }
         Ok(Self {
             db,
@@ -1650,14 +1650,14 @@ mod tests {
         std::fs::copy(fixture("prot_v4") + ".psq", dir.join("b.psq")).unwrap();
         let name = dir.join("b").to_str().unwrap().to_string();
         let settings = ApplicationSettings::default();
-        for parsed_seqids in [true, false] {
+        for (parsed_seqids, program) in [(true, "BLASTP"), (false, "PSIBLAST")] {
             let Err(error) = BlastpDatabase::open(&name, &settings, parsed_seqids) else {
                 panic!("a damaged first header opened ({parsed_seqids})")
             };
             assert!(
-                format!("{error:#}").ends_with(
-                    "b.phr: header record, byte 1: tag 0x31 where Blast-def-line-set (0x30) is expected; this database is not supported by LOSAT's BLASTP"
-                ),
+                format!("{error:#}").ends_with(&format!(
+                    "b.phr: header record, byte 1: tag 0x31 where Blast-def-line-set (0x30) is expected; this database is not supported by LOSAT's {program}"
+                )),
                 "{error:#}"
             );
         }
@@ -1706,7 +1706,7 @@ mod tests {
         };
         assert!(error.downcast_ref::<NativeError>().is_none());
         assert!(
-            format!("{error:#}").ends_with("this database is not supported by LOSAT's BLASTP"),
+            format!("{error:#}").ends_with("this database is not supported by LOSAT's PSIBLAST"),
             "{error:#}"
         );
     }

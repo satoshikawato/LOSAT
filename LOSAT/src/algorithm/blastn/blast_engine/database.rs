@@ -38,10 +38,11 @@ use rayon::prelude::*;
 
 use crate::algorithm::blastn::coordination::SubjectMetadata;
 use crate::algorithm::blastn::hsp::BlastnHitList;
-use crate::algorithm::common::database::{self as shared, StoredTitle};
+use crate::algorithm::common::database::{self as shared, ParsedShown, ReportedHeader};
 pub(super) use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
+use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{BlockRange, NucleotideAmbiguity, SeqDb, SeqDbError, SeqType, SequenceBlock};
 use crate::utils::threading::SearchPool;
@@ -235,8 +236,9 @@ impl BlastnDatabase {
     /// engine cannot hold in a `usize` (a 32-bit target) is LOSAT's refusal.
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
         let db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
-        // A database with parsed Seq-ids is refused (line DBID: ID2b opens it).
-        shared::refuse_parsed_seqids(&db, PROGRAM)?;
+        // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
+        // NCBI's choice of its Seq-ids.
+        shared::check_seqids(&db, settings, PROGRAM)?;
         let total = db.total_length();
         let db_len_total = usize::try_from(total)
             .ok()
@@ -259,16 +261,20 @@ impl BlastnDatabase {
     }
 
     /// The Blast-def-line taxid of each reported sequence by rank (`ordinals`: the ordinal id of
-    /// each rank, `ReportedSubjects::ordinals`) and what the taxonomy database says about it,
-    /// for the XML2 and JSON formats (`algorithm::common::database::read_reported_taxids`);
-    /// the sequences of `hit_lists` with HSPs are the reported ones.
+    /// each rank, `ReportedSubjects::ordinals`; `parsed`: the sequences with parsed Seq-ids,
+    /// `ReportedSubjects::parsed`) and what the taxonomy database says about it, for the XML2
+    /// and JSON formats (`algorithm::common::database::read_reported_taxonomy`); the sequences
+    /// of `hit_lists` with HSPs are the reported ones.
+    #[allow(clippy::type_complexity)]
     pub(super) fn read_taxids(
         &self,
         ordinals: &[u32],
+        parsed: &[Option<Arc<ParsedSubject>>],
         hit_lists: &[Option<BlastnHitList>],
     ) -> Result<(
         Vec<i32>,
         Vec<crate::report::blast_xml::HitTaxonomy>,
+        Vec<Vec<crate::report::blast_xml::HitTaxonomy>>,
         shared::TaxdbNotes,
     )> {
         let reported: std::collections::BTreeSet<usize> = hit_lists
@@ -278,7 +284,7 @@ impl BlastnDatabase {
             .filter_map(|hsp_list| hsp_list.hsps.first())
             .map(|hsp| hsp.s_idx as usize)
             .collect();
-        shared::read_reported_taxids(&self.db, &self.taxdb, ordinals, &reported, PROGRAM)
+        shared::read_reported_taxonomy(&self.db, &self.taxdb, ordinals, &reported, parsed, PROGRAM)
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).
@@ -871,9 +877,10 @@ pub(super) fn x_tb_range_print_summary() {
     );
 }
 
-/// The stored titles of the database sequences that the final hit lists of the query
-/// batches searched so far name, by ordinal id (`read_titles`).
-pub(super) type DatabaseTitles = BTreeMap<u32, StoredTitle>;
+/// The headers of the database sequences that the final hit lists of the query batches searched
+/// so far name, by ordinal id (`read_titles`): the stored title, or the definition lines of a
+/// sequence with parsed Seq-ids.
+pub(super) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
 // ```c++
@@ -917,8 +924,9 @@ pub(super) type DatabaseTitles = BTreeMap<u32, StoredTitle>;
 // before; a batch without hits reads no header. A title read in an earlier batch is not
 // read again: the header file stays open, and the title is the same.
 /// Reads the definition lines of the sequences that the final hit lists `hit_lists` of a
-/// query batch name, in NCBI's order, into `titles`. A reader error of NCBI's own is a
-/// `HeaderReadError` (it fails the batch); LOSAT's refusals are errors of their own.
+/// query batch name, in NCBI's order, into `titles` (`common::database::read_header`). A reader
+/// error of NCBI's own is a `HeaderReadError` (it fails the batch); LOSAT's refusals are errors
+/// of their own.
 pub(super) fn read_titles(
     database: &BlastnDatabase,
     hit_lists: &[Option<BlastnHitList>],
@@ -933,7 +941,7 @@ pub(super) fn read_titles(
             if titles.contains_key(&hsp_list.oid) {
                 continue;
             }
-            let title = shared::read_title(&database.db, hsp_list.oid, query, PROGRAM)?;
+            let title = shared::read_header(&database.db, hsp_list.oid, query, PROGRAM)?;
             titles.insert(hsp_list.oid, title);
         }
     }
@@ -944,9 +952,13 @@ pub(super) fn read_titles(
 pub(super) struct ReportedSubjects {
     /// The ordinal id of each rank, ascending.
     pub(super) ordinals: Vec<u32>,
-    /// The record of each rank: the id `gnl|BL_ORD_ID|n`, the stored title, and the
-    /// stored letters (empty when the reports do not show them).
+    /// The record of each rank: the id `gnl|BL_ORD_ID|n`, the stored title (a sequence with
+    /// parsed Seq-ids: the title of its first definition line), and the stored letters (empty
+    /// when the reports do not show them).
     pub(super) records: Vec<FastaRecord>,
+    /// The sequences with parsed Seq-ids by rank (empty when none is reported): their ids and
+    /// titles come from their definition lines (`report::db_subject`).
+    pub(super) parsed: Vec<Option<Arc<ParsedSubject>>>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1406-1414
@@ -979,12 +991,16 @@ pub(super) struct ReportedSubjects {
 /// by the ordinal id gives the same order), and their records are made for the reports
 /// from `titles`, with their stored letters when `letters` (outfmt 0 and the hit records
 /// read them; the tabular formats do not). A reported sequence whose stored title LOSAT
-/// does not report as NCBI does is LOSAT's refusal.
+/// does not report as NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the
+/// reports `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
+/// `shown.joined` `refuse_joined_hits`; `first_query`: the index of the query of `hit_lists[0]`).
 pub(super) fn reported_subjects(
     database: &BlastnDatabase,
     titles: &DatabaseTitles,
     hit_lists: &mut [Option<BlastnHitList>],
     letters: bool,
+    shown: ParsedShown,
+    first_query: usize,
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = hit_lists
         .iter()
@@ -1012,11 +1028,30 @@ pub(super) fn reported_subjects(
         }
     }
     let mut records = Vec::with_capacity(ordinals.len());
-    for &ordinal in &ordinals {
-        let stored = titles
+    let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
+    // Whether `taxdb.bti` is on the search path, looked up at the first sequence with parsed
+    // Seq-ids that outfmt 0 shows.
+    let mut taxdb_found: Option<bool> = None;
+    for (rank, &ordinal) in ordinals.iter().enumerate() {
+        let header = titles
             .get(&ordinal)
             .with_context(|| format!("database sequence {ordinal} has no title read"))?;
-        shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+        let title = match header {
+            ReportedHeader::Stored(stored) => {
+                shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                stored.title.clone()
+            }
+            ReportedHeader::Parsed(subject) => {
+                let taxdb =
+                    shown.pairwise && *taxdb_found.get_or_insert_with(|| database.db.taxdb_found());
+                shared::check_reported_parsed(subject, shown, false, taxdb, ordinal, PROGRAM)?;
+                if parsed.is_empty() {
+                    parsed = vec![None; ordinals.len()];
+                }
+                parsed[rank] = Some(Arc::clone(subject));
+                subject.first_title().to_vec()
+            }
+        };
         let sequence = if letters {
             let block = x_read_sequence(&database.db, ordinal).map_err(database_error)?;
             let length = block.nucleotide_len(0).map_err(database_error)?;
@@ -1033,28 +1068,45 @@ pub(super) fn reported_subjects(
         };
         records.push(FastaRecord {
             local_id: format!("gnl|BL_ORD_ID|{ordinal}"),
-            title: stored.title.clone(),
+            title,
             sequence,
             warnings: Vec::new(),
             source: Default::default(),
         });
     }
-    Ok(ReportedSubjects { ordinals, records })
+    if shown.joined && !parsed.is_empty() {
+        for (query, hit_list) in hit_lists.iter().enumerate() {
+            let Some(hit_list) = hit_list else {
+                continue;
+            };
+            shared::refuse_joined_hits(
+                first_query + query,
+                hit_list
+                    .hsplist_array
+                    .iter()
+                    .filter(|hsp_list| !hsp_list.hsps.is_empty())
+                    .map(|hsp_list| {
+                        let rank = hsp_list.oid as usize;
+                        Some((ordinals[rank], parsed[rank].as_deref()?))
+                    }),
+                PROGRAM,
+            )?;
+        }
+    }
+    Ok(ReportedSubjects {
+        ordinals,
+        records,
+        parsed,
+    })
 }
 
 impl ReportedSubjects {
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
-    /// reported sequence, by rank (`algorithm::common::database::tabular_subject_id`). A
+    /// reported sequence, by rank (`algorithm::common::database::tabular_subject_ids`). A
     /// sequence whose id LOSAT cannot write as NCBI is an error before any format is
     /// written.
     pub(super) fn tabular_subject_ids(&self) -> Result<Vec<Arc<[u8]>>> {
-        self.records
-            .iter()
-            .zip(&self.ordinals)
-            .map(|(record, &ordinal)| {
-                shared::tabular_subject_id(&record.title, ordinal, false, PROGRAM).map(Arc::from)
-            })
-            .collect()
+        shared::tabular_subject_ids(&self.records, &self.ordinals, &self.parsed, false, PROGRAM)
     }
 }
 
@@ -1082,6 +1134,9 @@ impl ReportedSubjects {
 /// without the switch). EXPERIMENT (LOSAT_X_DBIDXREAD): both are read in ranges of
 /// `HEADER_RANGE_SEQS` sequences (`SeqDb::visit_deflines`, `SeqDb::visit_ambiguity`, the same
 /// results as `read_title` and `SeqDb::check_ambiguity`) instead of one sequence at a time.
+/// A database with parsed Seq-ids gives `Off::Titles` at its first definition line (`read_title`
+/// reads ordinal ids alone), so its reports come after the whole search, as BLASTP's do without
+/// its block search (line DBID, DECISIONS 9 (6)), except SAM (`Ready::sam_despite`).
 pub(super) fn x_streaming_refusal(
     database: &BlastnDatabase,
     pool: &crate::utils::threading::SearchPool<'_>,
@@ -1171,6 +1226,35 @@ mod tests {
     fn open(name: &str) -> BlastnDatabase {
         BlastnDatabase::open(&fixture(name), &ApplicationSettings::default())
             .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+    }
+
+    // DECISIONS 3 Q8 of line DBID: NCBI's choice of the Seq-ids of a database with parsed
+    // Seq-ids depends on SEQ_ID_PREFER_ACCESSION_OVER_GI and SEQ_ID_AVOID_GI.
+    #[test]
+    fn a_seq_id_variable_refuses_a_database_with_parsed_seqids_only() {
+        let path = |name: &str| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(name)
+                .to_str()
+                .expect("fixture path is UTF-8")
+                .to_string()
+        };
+        let settings = ApplicationSettings {
+            seq_id_rank_variable: Some("SEQ_ID_PREFER_ACCESSION_OVER_GI"),
+            ..ApplicationSettings::default()
+        };
+        let parsed = path("tests/db_search/ids/nucl_v5");
+        BlastnDatabase::open(&parsed, &ApplicationSettings::default())
+            .expect("a database with parsed Seq-ids opens");
+        let Err(error) = BlastnDatabase::open(&parsed, &settings) else {
+            panic!("a database with parsed Seq-ids opened with SEQ_ID_PREFER_ACCESSION_OVER_GI")
+        };
+        assert_eq!(
+            format!("{error:#}"),
+            "the environment variable SEQ_ID_PREFER_ACCESSION_OVER_GI, which changes the Seq-ids that NCBI BLAST+ chooses for a database with parsed Seq-ids, is not supported by LOSAT's BLASTN"
+        );
+        BlastnDatabase::open(&path("tests/seqdb/db/nucl_v4"), &settings)
+            .expect("a database without parsed Seq-ids opens with SEQ_ID_PREFER_ACCESSION_OVER_GI");
     }
 
     /// LOSAT/tests/seqdb/expected/nucl_mv.entries.tsv (blastdbcmd): the lengths, letters and
@@ -1565,7 +1649,7 @@ mod tests {
         read_titles(&database, &batch, &mut titles).unwrap();
         assert_eq!(titles.keys().copied().collect::<Vec<_>>(), [middle]);
         assert_eq!(
-            titles[&middle].title,
+            titles[&middle].stored().title,
             entries()[middle as usize].2.as_bytes()
         );
         // The next batch: query 0 names `middle` again (not read again), query 1 names the
@@ -1616,7 +1700,15 @@ mod tests {
         read_titles(&database, &hit_lists, &mut titles).unwrap();
         // A list left without HSPs (its HSPs had score 0) is not reported.
         hit_lists[2].as_mut().unwrap().hsplist_array[1].hsps.clear();
-        let reported = reported_subjects(&database, &titles, &mut hit_lists, true).unwrap();
+        let reported = reported_subjects(
+            &database,
+            &titles,
+            &mut hit_lists,
+            true,
+            ParsedShown::default(),
+            0,
+        )
+        .unwrap();
         assert_eq!(reported.ordinals, [5, 9]);
         let ranks = |hit_list: &Option<BlastnHitList>| -> Vec<(u32, Vec<u32>)> {
             hit_list
@@ -1651,7 +1743,15 @@ mod tests {
         );
         // Without the letters (the tabular formats only): the records are empty.
         let mut hit_lists = vec![hit_list(vec![(9, 1e-9)], 1)];
-        let reported = reported_subjects(&database, &titles, &mut hit_lists, false).unwrap();
+        let reported = reported_subjects(
+            &database,
+            &titles,
+            &mut hit_lists,
+            false,
+            ParsedShown::default(),
+            0,
+        )
+        .unwrap();
         assert!(reported.records[0].seq().is_empty());
     }
 
@@ -1677,13 +1777,28 @@ mod tests {
         let mut titles = DatabaseTitles::new();
         let mut clean = vec![hit_list(vec![(0, 1e-9)], 1)];
         read_titles(&database, &clean, &mut titles).unwrap();
-        reported_subjects(&database, &titles, &mut clean, false).unwrap();
+        reported_subjects(
+            &database,
+            &titles,
+            &mut clean,
+            false,
+            ParsedShown::default(),
+            0,
+        )
+        .unwrap();
         let mut bad = vec![hit_list(vec![(1, 1e-9)], 1)];
         read_titles(&database, &bad, &mut titles).unwrap();
-        assert_eq!(titles[&1].title, b"n02 l#ngth 41");
-        let error = reported_subjects(&database, &titles, &mut bad, false)
-            .err()
-            .expect("the bad byte");
+        assert_eq!(titles[&1].stored().title, b"n02 l#ngth 41");
+        let error = reported_subjects(
+            &database,
+            &titles,
+            &mut bad,
+            false,
+            ParsedShown::default(),
+            0,
+        )
+        .err()
+        .expect("the bad byte");
         assert!(
             format!("{error:#}").starts_with(
                 "database sequence 1 has a stored title with a byte outside ' ' to '~'"

@@ -5407,6 +5407,10 @@ struct BlastnReportInputs<'a> {
     /// The opened database of a database search, which the XML2 and JSON formats read the taxids
     /// of the reported sequences from; `None` for a subject set.
     database_reader: Option<&'a database::BlastnDatabase>,
+    /// The reported sequences with parsed Seq-ids of a database search, by rank
+    /// (`database::ReportedSubjects::parsed`; empty without them): their ids and titles come from
+    /// their definition lines.
+    database_parsed: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
     /// Whether the hit lists were finished after each query batch's traceback (a database
     /// search, `run_in_pool`), not by `post_process_hits_and_write`.
     finished_hit_lists: bool,
@@ -5531,6 +5535,7 @@ fn blastn_pairwise_report(
         unsearched,
         epilog: report.epilog,
         prolog: report.prolog,
+        parsed_subjects: report.database_parsed.to_vec(),
     };
     Ok((queries, pairwise_report))
 }
@@ -6224,7 +6229,7 @@ fn post_process_hits_and_write(
                 (Some(ordinals), Some(database)) => SubjectNames::Database {
                     ordinals,
                     title: &database.definition,
-                    parsed: &[],
+                    parsed: report.database_parsed,
                 },
                 _ => SubjectNames::Records(report.subjects.records()),
             };
@@ -6250,7 +6255,7 @@ fn post_process_hits_and_write(
                 (Some(ordinals), Some(database)) => SubjectNames::Database {
                     ordinals,
                     title: &database.definition,
-                    parsed: &[],
+                    parsed: report.database_parsed,
                 },
                 _ => SubjectNames::Records(report.subjects.records()),
             };
@@ -6331,7 +6336,7 @@ fn post_process_hits_and_write(
                         SubjectNames::Database {
                             ordinals,
                             title: &database.definition,
-                            parsed: &[],
+                            parsed: report.database_parsed,
                         },
                         report.ranges.subjects.placements,
                         &super::super::sam::SubjectLengths {
@@ -6432,15 +6437,16 @@ fn post_process_hits_and_write(
             };
             // The taxids of the reported sequences and the taxonomy database's names, read for
             // the XML2 and JSON formats only.
-            let (xml_taxids, xml_taxonomy, xml_taxdb_notes): (
+            let (xml_taxids, xml_taxonomy, xml_parsed_taxonomy, xml_taxdb_notes): (
                 Vec<i32>,
                 Vec<crate::report::blast_xml::HitTaxonomy>,
+                Vec<Vec<crate::report::blast_xml::HitTaxonomy>>,
                 crate::algorithm::common::database::TaxdbNotes,
             ) = match (xml2_kind, report.database_ordinals, report.database_reader) {
                 (Some(_), Some(ordinals), Some(database)) if is_database => {
-                    database.read_taxids(ordinals, &hit_lists)?
+                    database.read_taxids(ordinals, report.database_parsed, &hit_lists)?
                 }
-                _ => (Vec::new(), Vec::new(), Default::default()),
+                _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
             };
             // The masked regions of the queries in record coordinates and the queries of the
             // batches that were not searched, which only XML2 shows (outfmt 5 shows neither).
@@ -6478,8 +6484,8 @@ fn post_process_hits_and_write(
                     taxids: &xml_taxids,
                     taxonomy: &xml_taxonomy,
                     length: &database_length,
-                    parsed: &[],
-                    parsed_taxonomy: &[],
+                    parsed: report.database_parsed,
+                    parsed_taxonomy: &xml_parsed_taxonomy,
                 },
                 _ => crate::report::blast_xml::XmlSubjects::Records {
                     records: subject_records,
@@ -9656,11 +9662,25 @@ fn write_reports_untimed(
                 || output_formats
                     .iter()
                     .any(|format| format.is_structured_xml());
+            let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
+            let shown = crate::algorithm::common::database::ParsedShown {
+                tabular: output_formats.iter().any(|format| format.is_tabular()),
+                pairwise,
+                joined: pairwise
+                    || output_formats
+                        .iter()
+                        .any(|format| format.is_structured_xml()),
+                sam: output_formats
+                    .iter()
+                    .any(|format| matches!(format, BlastnOutputFormat::Sam(_))),
+            };
             Some(database::reported_subjects(
                 database,
                 subjects.titles,
                 &mut hit_lists,
                 letters,
+                shown,
+                written.queries,
             )?)
         }
     };
@@ -9742,6 +9762,9 @@ fn write_reports_untimed(
             SubjectSource::Database(database) => Some(database),
             SubjectSource::Prepared(_) => None,
         },
+        database_parsed: reported
+            .as_ref()
+            .map_or(&[][..], |reported| reported.parsed.as_slice()),
         finished_hit_lists: reported.is_some(),
         epilog,
         prolog: outputs

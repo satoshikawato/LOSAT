@@ -104,7 +104,7 @@ pub(super) fn query_records_of<'a>(
     hitlist: &'a KappaResultHitList,
     subject_records: &'a [FastaRecord],
     subject_letters: SubjectLetters<'_>,
-    shown: &ShownSubjects<'_>,
+    shown: &ShownSubjects<'a>,
     ranges: &ReportRanges<'_>,
     subjects: &mut Vec<SubjectRecord<'a>>,
     hsps: &mut Vec<HspRecord<'a>>,
@@ -118,9 +118,10 @@ pub(super) fn query_records_of<'a>(
         let oid = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
         let subject = subjects.len() as u32;
         subjects.push(SubjectRecord {
-            id: match shown.ordinal(oid) {
-                Some(ordinal) => SeqId::BlOrdId(ordinal),
-                None => SeqId::Local(&subject_records[oid].local_id),
+            id: match (shown.parsed_subject(oid), shown.ordinal(oid)) {
+                (Some(parsed), _) => SeqId::Db(parsed.alignment_id()),
+                (None, Some(ordinal)) => SeqId::BlOrdId(ordinal),
+                (None, None) => SeqId::Local(&subject_records[oid].local_id),
             },
             searched_length: i32::try_from(subject_letters.length(oid))?,
             // A database's sequences have no subject remap (`RunRecord::remaps_subjects`).

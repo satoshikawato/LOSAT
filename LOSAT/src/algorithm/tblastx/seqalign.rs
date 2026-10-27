@@ -62,7 +62,8 @@ use crate::report::serial::{write_query_to, SerialFormat};
 
 /// The subjects of a TBLASTX search as the Seq-aligns name them: the records of `-subject`
 /// (`Subject_N`) with their `-subject_loc` placements, or a database's reported sequences by
-/// rank (`ordinals`) with the database's title.
+/// rank (`ordinals`) with the database's title, named by their Seq-align ids where they have
+/// parsed Seq-ids (`parsed`, by rank; empty without them).
 pub(crate) enum SeqalignSubjects<'a> {
     Records {
         records: &'a [FastaRecord],
@@ -71,6 +72,7 @@ pub(crate) enum SeqalignSubjects<'a> {
     Database {
         ordinals: &'a [u32],
         title: &'a [u8],
+        parsed: &'a [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     },
 }
 
@@ -103,8 +105,13 @@ pub(crate) fn query_records_of<'a>(
                     searched_length: i32::try_from(subject_letters.length(s_idx))?,
                     offset: i32::try_from(placements.offset(s_idx))?,
                 },
-                SeqalignSubjects::Database { ordinals, .. } => SubjectRecord {
-                    id: SeqId::BlOrdId(ordinals[s_idx]),
+                SeqalignSubjects::Database {
+                    ordinals, parsed, ..
+                } => SubjectRecord {
+                    id: match parsed.get(s_idx).and_then(Option::as_deref) {
+                        Some(subject) => SeqId::Db(subject.alignment_id()),
+                        None => SeqId::BlOrdId(ordinals[s_idx]),
+                    },
                     searched_length: i32::try_from(subject_letters.length(s_idx))?,
                     offset: 0,
                 },

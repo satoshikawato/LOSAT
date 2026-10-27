@@ -816,7 +816,9 @@ pub(super) fn run_chunks(
     // (`x_announce_until`), and only the next chunk's setup is made ahead, so at most two chunks'
     // setups are alive at a time.
     let at_chunk = std::sync::atomic::AtomicUsize::new(0);
-    let compute = |index: usize, scratch: &mut XCrossScratch| -> Task {
+    let x_probe = std::env::var_os("LOSAT_X_S17STAMP").is_some();
+    let x_tasks = std::sync::Mutex::new(Vec::<(usize, usize, u64, u64, usize, usize)>::new());
+    let compute_inner = |index: usize, scratch: &mut XCrossScratch| -> Task {
         let (c, task) = (index / tasks, index % tasks);
         // A chunk without a valid context (or whose setup failed) has no task to search; the loop
         // does not take its values.
@@ -848,6 +850,18 @@ pub(super) fn run_chunks(
             x_containment,
         )
     };
+    let compute = |index: usize, scratch: &mut XCrossScratch| -> Task {
+        if !x_probe {
+            return compute_inner(index, scratch);
+        }
+        let t0 = crate::utils::xtiming::x_since_us();
+        let value = compute_inner(index, scratch);
+        let t1 = crate::utils::xtiming::x_since_us();
+        let hsps: usize = value.0.iter().map(|(_, c)| c.purged.len()).sum();
+        x_lock(&x_tasks).push((index, rayon::current_thread_index().unwrap_or(999), t0, t1, value.0.len(), hsps));
+        value
+    };
+    crate::utils::xtiming::x_stamp("flow_start");
     // Sixteen tasks per thread ahead of this thread (`run` keeps four): a task much slower than
     // the others (a subject with many hits) holds this thread at its place in the order while the
     // helpers search the rest of the window, and with four per thread they ran out of tasks and
@@ -937,5 +951,10 @@ pub(super) fn run_chunks(
         Ok(())
     });
     super::super::x_timing::subject_flow(x_t, total as u64, ahead.counts());
+    if x_probe {
+        for (index, thread, t0, t1, kept, hsps) in x_lock(&x_tasks).iter() {
+            eprintln!("XTASK {index} {thread} {t0} {t1} {kept} {hsps}");
+        }
+    }
     result.map(|()| call)
 }

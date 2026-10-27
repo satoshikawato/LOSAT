@@ -4,8 +4,8 @@
 //!
 //! What differs from the search of a FASTA subject set (`-subject`):
 //!
-//! - the subjects are the database's sequences, read once, in ordinal order, as packed
-//!   subjects (`TblastnDatabase::read_stores`): the preliminary stage translates the stored
+//! - the subjects are the database's sequences, each read where it is searched, as packed
+//!   subjects (`TblastnDatabase::x_stream`, `x_db_stream.rs`): the preliminary stage translates the stored
 //!   2-bit data (makeblastdb's bases for the ambiguous ones, NCBI's preliminary input) and
 //!   the traceback and the reports read the stored ambiguity codes; the search's subject
 //!   index is the ordinal id;
@@ -145,16 +145,10 @@ impl TblastnDatabase {
         })
     }
 
-    /// Every sequence of the database by ordinal id, packed
-    /// (`algorithm::common::database::read_nucleotide_stores`).
-    pub(super) fn read_stores(&self) -> Result<Vec<PackedNucleotide>> {
-        shared::read_nucleotide_stores(&self.db, PROGRAM)
-    }
-
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the database read where it is searched by `threads`
-    /// threads, after the checks of `read_stores` (`x_db_stream.rs`).
+    /// The database read where it is searched by `threads` threads, after the checks of
+    /// `common::database::x_check_nucleotide_stores` (`x_db_stream.rs`).
     pub(super) fn x_stream(&self, threads: usize) -> Result<super::x_db_stream::XDbStream<'_>> {
-        super::x_db_stream::XDbStream::new(&self.db, threads, || self.read_stores())
+        super::x_db_stream::XDbStream::new(&self.db, threads)
     }
 }
 
@@ -240,7 +234,7 @@ impl ReportedSubjects {
 /// kept for the reports. A reported sequence whose stored title LOSAT does not report as
 /// NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the reports `shown` do
 /// not write as NCBI (`common::database::check_reported_parsed`, and with `shown.joined`
-/// `refuse_joined_hits`). EXPERIMENT (LOSAT_X_TBNDBSTREAM): the packed subjects are read
+/// `refuse_joined_hits`). The packed subjects are read
 /// from the database (`SubjectLetters::Stream`, one read each) instead of cloned from the copy.
 pub(super) fn reported_subjects(
     database: &TblastnDatabase,

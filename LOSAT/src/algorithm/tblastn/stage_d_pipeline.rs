@@ -1273,7 +1273,7 @@ fn run_local_search_with_pool(
             observer.as_deref_mut(),
         );
     }
-    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): with a `-db` stream, the subjects of the lists, each read
+    // With a `-db` stream, the subjects of the lists, each read
     // when first aligned, held until their last match is done (LOSAT_X_TBNSTAGEDROP; with it off
     // until the redo ends).
     let x_stage = super::x_db_stream::XStageSubjects::new(
@@ -1389,8 +1389,8 @@ fn run_local_search_with_pool(
                      workspace: &mut BlastCompositionWorkspace|
      -> Result<Option<(CompoHeapRecord, KappaResultList)>> {
         // The subject's letters, or (EXPERIMENT, LOSAT_X_TBNSTORE) its packed form: the redo and
-        // the translations below read windows of it, as NCBI's do. EXPERIMENT (LOSAT_X_TBNDBSTREAM):
-        // a `-db` sequence is read once for the redo (`x_stage`); EXPERIMENT (LOSAT_X_TBNSTAGEDROP):
+        // the translations below read windows of it, as NCBI's do. A
+        // `-db` sequence is read once for the redo (`x_stage`); EXPERIMENT (LOSAT_X_TBNSTAGEDROP):
         // the stage lets it go after its last match (`_done`, declared before `held`).
         let _done = x_stage.x_match(oid);
         let held = x_stage.held(oid)?;
@@ -2939,7 +2939,7 @@ fn finish_local_mode0_no_sum_stats(
                 .collect::<Vec<_>>()
         })
         .collect();
-    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): with a `-db` stream, the subjects of the lists, each read
+    // With a `-db` stream, the subjects of the lists, each read
     // when first aligned, held until their last list is done (LOSAT_X_TBNSTAGEDROP; with it off
     // until the traceback ends).
     let x_stage = super::x_db_stream::XStageSubjects::new(
@@ -2951,7 +2951,7 @@ fn finish_local_mode0_no_sum_stats(
         // `-db` sequence; with EXPERIMENT LOSAT_X_TBNSTORE every `-subject` record), whose windows
         // the translations make when they read them (`TargetTranslation`). The whole subject's
         // letters are made only for a list retried after a fence, whose frames NCBI translates
-        // whole (one window for all of them). EXPERIMENT (LOSAT_X_TBNDBSTREAM): a `-db` sequence is
+        // whole (one window for all of them). A `-db` sequence is
         // read once for the traceback (`x_stage`); EXPERIMENT (LOSAT_X_TBNSTAGEDROP): the stage
         // lets it go after its last list (`_done`, declared before `held`).
         let _done = x_stage.x_match(oid);

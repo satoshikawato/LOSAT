@@ -3,8 +3,9 @@
 //! as the command line reports them, the `Database:` lines of the pairwise report, and the
 //! rules for the stored titles of the reported sequences. BLASTP (stage DB-3), BLASTN
 //! (stage DB-4) and TBLASTN (stage DB-5) use them with their own name in LOSAT's refusals;
-//! TBLASTN also reads a nucleotide database whole into packed subjects
-//! (`read_nucleotide_stores`).
+//! TBLASTX reads a nucleotide database whole into packed subjects
+//! (`read_nucleotide_stores`), and TBLASTN each sequence where it searches it
+//! (`x_read_nucleotide_store`).
 //!
 //! The reader (`crate::seqdb`) knows nothing of the command line; this module maps its
 //! errors to NCBI's application errors (`crate::cli::NativeError`) and to LOSAT's
@@ -229,11 +230,11 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
     Ok(stores)
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the checks of `read_nucleotide_stores` without the copy. The
+/// The checks of `read_nucleotide_stores` without the copy (TBLASTN's `-db` search, which reads
+/// its subjects where it searches them, `x_read_nucleotide_store`). The
 /// database is read in the same blocks, and every sequence's length and ambiguity runs are read
-/// with the same errors in the same order; only the lengths are kept, by ordinal id. A search
-/// that reads its subjects where it searches them (`x_read_nucleotide_store`) fails the query
-/// batch that the copy would fail, with the same text. A block of one sequence (one longer than
+/// with the same errors in the same order; only the lengths are kept, by ordinal id. The search
+/// fails the query batch that the copy would fail, with the same text. A block of one sequence (one longer than
 /// a block, or the last of its volume) is checked without its 2-bit data
 /// (`SeqDb::x_nucleotide_check`): a human chromosome is not read here only to be dropped.
 pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<usize>> {
@@ -270,7 +271,7 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec
     Ok(lengths)
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): sequence `ordinal` of `db` as `read_nucleotide_stores` packs
+/// Sequence `ordinal` of `db` as `read_nucleotide_stores` packs
 /// it (`PackedNucleotide::from_stored` of the stored 2-bit data, length and ambiguity runs), read
 /// with one read of the sequence file. The errors are those of `read_nucleotide_stores` for the
 /// same sequence. With `mapped`, the bytes are read into a buffer that glibc maps from 1 MiB on,
@@ -301,24 +302,8 @@ pub(crate) fn x_read_nucleotide_store(
     ))
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): sequence `i` of `block` (ordinal id `ordinal`), a block of
-/// `SeqDb::read_block`, as `read_nucleotide_stores` packs it, with its errors.
-pub(crate) fn x_nucleotide_store_in(
-    block: &crate::seqdb::SequenceBlock,
-    i: usize,
-    ordinal: u32,
-    program: &str,
-) -> Result<PackedNucleotide> {
-    let (length, runs) = stored_parts(block, i, ordinal, program)?;
-    Ok(PackedNucleotide::from_stored(
-        block.nucleotide_packed(i),
-        length,
-        &runs,
-    ))
-}
-
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the length of sequence `i` of `block` (ordinal id
-/// `ordinal`), with the errors of `x_nucleotide_store_in`, without the store.
+/// The length of sequence `i` of `block` (ordinal id
+/// `ordinal`), with the errors of the sequence's store (`x_read_nucleotide_store`), without the store.
 pub(crate) fn x_nucleotide_length_in(
     block: &crate::seqdb::SequenceBlock,
     i: usize,

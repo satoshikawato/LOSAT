@@ -18,7 +18,7 @@ pub(crate) mod x_scan_byte;
 mod x_subject_translate;
 // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects held packed, their letters made when read.
 mod x_subject_store;
-// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `-db` sequences read where they are searched.
+// `-db` sequences read where they are searched.
 mod x_db_stream;
 // NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234:
 // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);

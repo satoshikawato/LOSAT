@@ -576,7 +576,7 @@ fn x_preliminary_protein_hsps_by_unit(
     let total_query_length = x_frames.total_query_length;
     let query_sequence = &x_frames.query_sequence;
     let init_context_offsets = &x_frames.init_context_offsets;
-    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): a database sequence whose plan has no residues
+    // A database sequence whose plan has no residues
     // (LOSAT_X_TBNUNITXLATE, `x_lean_subject`) is read before its plan (`read_shared`) and
     // searched as the packed subject of the copy is: its units translate the store they read.
     let x_store;

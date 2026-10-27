@@ -382,7 +382,7 @@ pub(super) struct XSubjectPlan {
 //     }
 // ```
 // NCBI frees a subject's translation after the subject; a dropped plan gives its frames to the
-// next plan of the thread instead (LOSAT_X_TBNFRAMEREUSE).
+// next plan of the thread instead.
 impl Drop for XSubjectPlan {
     fn drop(&mut self) {
         for frame in self.frames.drain(..) {
@@ -501,7 +501,7 @@ impl XSubjectSide {
     /// (40.6 Mb) and 309 MiB less on 57,775 zebrafish cDNAs (122 Mb), with five query batches,
     /// and took 0.980-0.994 of the time at 4, 8 and 16 threads (workstation, 2026-10-19:
     /// translating a packed subject again, `LOSAT_X_TBNXLATESIMD`, costs less than holding its
-    /// plan; with `LOSAT_X_TBNFRAMEREUSE` 0.998 at one thread).
+    /// plan; with the frame reuse 0.998 at one thread).
     pub(super) fn kept_within_threads(
         subject_lengths: impl IntoIterator<Item = usize>,
         threads: usize,
@@ -633,7 +633,7 @@ impl XSubjectSide {
 
 // No NCBI counterpart: the rule of LOSAT_X_TBNUNITXLATE in `x_scan_plan` (its packed arm) for a
 // subject that is not read yet; it computes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): whether `x_scan_plan` makes the plan of a packed subject of
+/// Whether `x_scan_plan` makes the plan of a packed subject of
 /// `length` bases without residues (LOSAT_X_TBNUNITXLATE): the search keeps no plan of it
 /// (`XSubjectSide::slot`) and `x_units_translate`.
 pub(super) fn x_lean_subject(
@@ -695,8 +695,8 @@ fn x_pair_cap_on() -> bool {
 /// `None` when the subject is too short to be searched.
 pub(super) fn x_scan_plan(
     queries: &[&[u8]],
-    // EXPERIMENT (LOSAT_X_TBNSTORE): the subject's letters, or its packed store; (EXPERIMENT,
-    // LOSAT_X_TBNDBSTREAM) or a `-db` sequence, read here when its plan is made.
+    // EXPERIMENT (LOSAT_X_TBNSTORE): the subject's letters, or its packed store; or a `-db`
+    // sequence, read here when its plan is made.
     subject: super::x_subject_store::XPrelimSubject<'_>,
     db_gencode: u8,
     seg: Option<&SegParams>,
@@ -775,7 +775,7 @@ pub(super) fn x_scan_plan(
         use super::x_subject_store::XPrelimSubject;
         use crate::sequence::packed_subject::SubjectNt;
         match subject {
-            // EXPERIMENT (LOSAT_X_TBNDBSTREAM): the plan is made from the sequence's bytes, read
+            // The plan is made from the sequence's bytes, read
             // for it (a database sequence has no lower-case letters).
             XPrelimSubject::Stream(stream, oid) => stream.plan_with(oid, |packed, length| {
                 super::x_subject_translate::x_packed_bytes_plan(packed, length, db_gencode)

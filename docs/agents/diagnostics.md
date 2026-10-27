@@ -416,9 +416,7 @@ export LOSAT_X_SEEDCOMPACT=1
 export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_SUMPMEMO=1
 export LOSAT_X_TBNBATCHRULE=1
-export LOSAT_X_TBNDBSTREAM=1
 export LOSAT_X_TBNFLOWHELP=1
-export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNKEEPFEW=1
 export LOSAT_X_TBNLINKSETS=1
 export LOSAT_X_TBNOWNPOOLS=1
@@ -4828,14 +4826,15 @@ Scheduling (each value computed by one thread with the original function; order 
   waited 1.17-1.20 s with `=0` and 0.06 s with the switch, during which it ran 2-3 parts of chromosomes (0.99-1.09
   s). Where the flow does not run (one thread, one subject such as an E. coli genome) the code is not reached:
   instructions the same.
-- `LOSAT_X_TBNFRAMEREUSE=1` tblastn (speed; in the strict set from the pull request that added it,
-  2026-10-19, with `TBNKEEPFEW`; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_frame_buffer`,
-  `x_reuse_frame`): a subject plan that is dropped gives its six frames to the next plan its thread
+- TBNFRAMEREUSE (graduated 2026-10-27, in the set since 2026-10-22 (#340), added 2026-10-19 with `TBNKEEPFEW`; no
+  variable; always on; `tblastn/x_subject_translate.rs` `x_frame_buffer`, `x_reuse_frame`) tblastn (speed): a subject plan that is dropped gives its six frames to the next plan its thread
   translates from a packed subject, which writes every residue of them without clearing them first.
   A thread keeps at most six frames of at most 256 KiB (1.5 MiB). Before, every plan allocated and
   zero-filled six new frames: with `TBNKEEPFEW` a search of many subjects makes a plan per subject
   and query batch, and the allocations and zero fills were the 0.2-0.4 % that `TBNKEEPFEW` alone
-  lost at one thread and side by side. The residues do not change (`TBNXLATESHADOW` compared the
+  lost at one thread and side by side. The unit test `x_frames_of_a_dropped_plan_make_the_next_plan` checks that
+  the next plan is made from the dropped plan's frames and is the reference plan. The residues do not change
+  (`TBNXLATESHADOW` compared the
   plans with the reference translation: 266,092 plans of 5,000 fly cDNAs and of the zebrafish
   cDNAs at 8 threads, identical). With `TBNKEEPFEW`, against the default before (both `=0`), one
   query batch (no plan kept either way) of 27 fly proteins against the zebrafish cDNAs (`-db`)
@@ -5014,7 +5013,7 @@ Scheduling (each value computed by one thread with the original function; order 
   instructions x1.0000; at 1 thread 16 proteins x E. coli and fly proteins x fly genome 81.420 G / 127.235 G
   instructions in all three arms (base, default, `=0`). Max RSS within 3 % of the base everywhere.
 - `LOSAT_X_TBNKEEPFEW=1` tblastn (memory; in the strict set from the pull request that added it,
-  2026-10-19, with `TBNFRAMEREUSE`; `=0` turns it off; `tblastn/search_seed.rs`
+  2026-10-19, with `TBNFRAMEREUSE` (graduated 2026-10-27); `=0` turns it off; `tblastn/search_seed.rs`
   `XSubjectSide::kept_within_threads`, `tblastn/stage_d_pipeline.rs` `x_searched_side_by_side`): a
   search of four or more query batches that searches its batches one after another
   keeps the subjects' six-frame translations (the plans) only when they hold no more than its
@@ -5025,7 +5024,7 @@ Scheduling (each value computed by one thread with the original function; order 
   of their own (`TBNOWNPOOLS`) keeps them as before: batches searched at the same time share them,
   and the batches after the first ones read them (5,000 fly cDNAs, 7 batches at 4 threads:
   4 side by side, then 3 one after another, took 1.004 of the time without them, 8 pairs). The
-  layout of the batches does not change. Measured with `TBNFRAMEREUSE`, the default against
+  layout of the batches does not change. Measured with `TBNFRAMEREUSE` (then a switch), the default against
   `TBNKEEPFEW=0 TBNFRAMEREUSE=0` (the default before, same binary; workstation, 2026-10-20, node 1,
   physical cores, booked cores warmed 3 s, arm order reversed every round, medians of 4-8 pairs;
   the fly proteins of `dmel_b4.faa`, five batches, `-evalue 1e-5 -max_target_seqs 5`): 57,775
@@ -5957,10 +5956,11 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_BXDBSTREAM`, against the binary before both): Swiss-Prot x 201 reads `-db` at one thread, instructions:u
   x0.9877 and cycles:u x0.9835 (`perf stat`, 3 runs each; x0.9873 and x0.9878 against both switches `=0`), wall
   x0.980 (node 1, 8 alternated pairs, none above 1); `-subject` (201 reads x PemoMJNVA) instructions:u x0.9993.
-- `LOSAT_X_TBNDBSTREAM=1` (TBLASTN `-db`, memory; in the strict set from the pull request that added it: on unless
-  `=0`): the search reads each database sequence where it searches it instead of the copy of
-  the whole database that `TblastnDatabase::read_stores` makes before the first query batch
-  (`tblastn/x_db_stream.rs`, exactness argument in its header). The database is checked once before the first batch
+- TBNDBSTREAM (graduated 2026-10-27, in the set since 2026-10-24 (#443); no variable, no `LOSAT_X_TBNDBSTREAMSHADOW`
+  and no `[X_SHADOW] TBNDBSTREAM` line; always on; every `-db` search) (TBLASTN `-db`, memory): the search reads each
+  database sequence where it searches it instead of the copy of
+  the whole database that `TblastnDatabase::read_stores` made before the first query batch (`read_stores` is deleted;
+  `common::database::read_nucleotide_stores` stays for TBLASTX; `tblastn/x_db_stream.rs`, exactness argument in its header). The database is checked once before the first batch
   with the blocks and checks of the copy (`common::database::x_check_nucleotide_stores`: the same error fails the
   same batch with the same text; a block of one sequence, a long one, is checked from its last 2-bit byte and its
   ambiguity data, `SeqDb::x_nucleotide_check`) and only the lengths of its sequences are kept. The preliminary search reads a
@@ -5976,10 +5976,10 @@ Scheduling (each value computed by one thread with the original function; order 
   stream is open, the frames of 1 MiB or more of a dropped subject plan go to `X_BYTES` (idle bound
   `LOSAT_X_POOLIDLE`), and the next frames and long reads take them with their pages resident. A read that fails
   after the check fails its query batch with the check's error, after the reports of the batches before. Every
-  read packs the stored bytes as the copy does, so every report is the same. Shadow:
-  `LOSAT_X_TBNDBSTREAMSHADOW=1` also makes the copy and compares the check's lengths and error and every read with
-  it, stopping at the first difference; at exit `[X_SHADOW] TBNDBSTREAM sequences= reads= bases= identical`
-  (`tests/tblastn_db_stream.rs`). Measured 2026-10-24 (workstation, every report identical, against dev 4c9ba700):
+  read packs the stored bytes as the copy did, so every report is the same (the frozen NCBI `-db` fixtures hold the
+  reports; `tests/tblastn_db_stream.rs` compares the reports across thread counts and query batches and the errors of a
+  database that cannot be read). The shadow mode that compared the check's lengths and error and every read with the
+  copy is gone with the copy. Measured 2026-10-24 (workstation, every report identical, against dev 4c9ba700):
   peak RssAnon (untimed, 2 runs) of 30 C. elegans proteins x the C. elegans genome (100 Mb in 7 sequences) 32 /
   87-89 / 139-140 MiB at 1 / 8 / 16 threads against 46 / 109-110 / 153-158 (NCBI 75 / 210 / 212), of 118 fly
   proteins x zebrafish cDNAs (57,776 sequences, `-max_target_seqs 5`) 22-23 / 55-56 / 86-87 against 52 / 81-82 / 112

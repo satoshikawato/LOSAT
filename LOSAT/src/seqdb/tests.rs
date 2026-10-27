@@ -1271,7 +1271,7 @@ fn ambiguity_data_that_do_not_fit_the_sequence() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `SeqDb::x_nucleotide_check` of a block of one sequence and
+/// `SeqDb::x_nucleotide_check` of a block of one sequence and
 /// `read_block` of the same block give the same length and ambiguity runs, or the same errors.
 /// Returns whether they failed.
 fn check_as_read_block(db: &SeqDb, range: BlockRange, what: &str) -> bool {

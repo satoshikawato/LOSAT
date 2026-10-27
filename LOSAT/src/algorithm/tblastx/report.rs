@@ -869,7 +869,8 @@ pub(crate) fn xml_query_masks(
 /// The scan of a frame's ranges (graduated 2026-10-27, the switch was `LOSAT_X_TBXMASKSEEK`)
 /// starts at the first range whose end, or the end of a range before it, reaches `low`, and stops
 /// at the first range that starts after `high`; the ranges it leaves out are the ones a scan of
-/// all the ranges skips (the reference of the unit test `mask_seek_lowercases_the_letters_of_the_full_scan`).
+/// all the ranges skips (that scan is the reference of the unit test
+/// `mask_seek_lowercases_the_letters_of_the_full_scan`).
 fn lowercase_query_row(row: &mut [u8], frame: i8, low: i32, high: i32, masks: &[FrameMasks]) {
     let columns = row.len() as i32;
     let column = |nt: i32| -> i32 {
@@ -896,7 +897,7 @@ fn lowercase_query_row(row: &mut [u8], frame: i8, low: i32, high: i32, masks: &[
             if from > high {
                 break;
             }
-            if to < low || from > high {
+            if to < low {
                 continue;
             }
             let (first, last) = if frame > 0 {
@@ -970,7 +971,8 @@ pub(crate) fn set_row_positives(hits: &mut [PairwiseHit], matrix: ScoringMatrix)
 // lowercase letters of a row do not depend on the order of the ranges, so a frame's ranges are
 // sorted by start, and the running maximum of their ends lets the row's scan start at the first
 // range that can reach it (`LOSAT_X_TBXMASKSEEK`, graduated 2026-10-27). Before, every row
-// scanned all ranges of its frame: in TBLASTX of two ~650 kb genomes that scan was most of the row's time.
+// scanned all ranges of its frame: in TBLASTX of two ~650 kb genomes that scan was most of the
+// row's time.
 /// The shown SEG masks of one frame of a query, sorted by start.
 struct FrameMasks {
     frame: i8,
@@ -1847,8 +1849,8 @@ mod tests {
         assert_eq!(display_base(b'*'), 0);
     }
 
-    // The display table (graduated `LOSAT_X_DISPTABLE`) holds the scan's answers: each byte's code on both
-    // strands, each codon of 4-bit codes of each genetic code, and so each residue of a row.
+    // The display table (graduated `LOSAT_X_DISPTABLE`) holds the scan's answers: each byte's code
+    // on both strands, each codon of 4-bit codes of each genetic code, and so each residue of a row.
     #[test]
     fn display_table_gives_the_residues_of_the_scan() {
         let reversed = |mask: u8| {

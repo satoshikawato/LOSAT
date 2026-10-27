@@ -308,7 +308,7 @@ impl Volume {
         end: u32,
         first_ordinal: u32,
     ) -> Result<SequenceBlock, SeqDbError> {
-        self.read_block_in(first, end, first_ordinal, false)
+        self.read_block_in(first, end, first_ordinal, BlockBuffer::New)
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_block` with the bytes in a buffer of
@@ -319,7 +319,19 @@ impl Volume {
         end: u32,
         first_ordinal: u32,
     ) -> Result<SequenceBlock, SeqDbError> {
-        self.read_block_in(first, end, first_ordinal, true)
+        self.read_block_in(first, end, first_ordinal, BlockBuffer::Mapped)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_block` with the bytes in `buf`
+    /// (`File::x_read_range_into`; `SequenceBlock::x_into_data` gives the buffer back).
+    pub fn x_read_block_into(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+        buf: Vec<u8>,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        self.read_block_in(first, end, first_ordinal, BlockBuffer::Given(buf))
     }
 
     fn read_block_in(
@@ -327,7 +339,7 @@ impl Volume {
         first: u32,
         end: u32,
         first_ordinal: u32,
-        mapped: bool,
+        buffer: BlockBuffer,
     ) -> Result<SequenceBlock, SeqDbError> {
         self.check_range(first, end)?;
         let seqtype = self.index.seqtype;
@@ -346,10 +358,10 @@ impl Volume {
         let data_start = u64::from(seq_offsets[0]) - self.lead();
         let data_end = u64::from(seq_offsets[seq_offsets.len() - 1]);
         let file = self.seq_file()?;
-        let data = if mapped {
-            file.x_read_range_mapped(data_start, data_end)?
-        } else {
-            file.read_range(data_start, data_end)?
+        let data = match buffer {
+            BlockBuffer::New => file.read_range(data_start, data_end)?,
+            BlockBuffer::Mapped => file.x_read_range_mapped(data_start, data_end)?,
+            BlockBuffer::Given(buf) => file.x_read_range_into(data_start, data_end, buf)?,
         };
         let block = SequenceBlock {
             seqtype,
@@ -757,6 +769,33 @@ impl Volume {
         )
     }
 
+    /// `visit_defline_taxids` with the decoder of `defline_set` (`header::decode_full`), which
+    /// reads the definition lines of any Seq-ids, parsed ones too: the taxid of every definition
+    /// line, 0 for none (item T: the check of NCBI's taxonomy cache,
+    /// `algorithm::common::database::TaxdbRun::cache_collision`).
+    pub(super) fn visit_defline_set_taxids(
+        &self,
+        first: u32,
+        end: u32,
+        piece_bytes: u64,
+        visit: &mut dyn FnMut(u32, Result<Vec<i32>, SeqDbError>) -> bool,
+    ) -> bool {
+        let taxids = |set: crate::seqid::DeflineSet| -> Vec<i32> {
+            set.deflines
+                .iter()
+                .map(|defline| defline.taxid.unwrap_or(0))
+                .collect()
+        };
+        self.visit_headers(
+            first,
+            end,
+            piece_bytes,
+            &|oid| self.defline_set(oid).map(taxids),
+            &|record, path| decode_full(record, path).map(taxids),
+            visit,
+        )
+    }
+
     /// The shared walk of `visit_deflines` and `visit_defline_taxids`: `single(oid)` is the
     /// one-sequence read that gives the result for a sequence that is not read in a piece,
     /// `decode(record, path)` decodes a record read in a piece.
@@ -871,6 +910,16 @@ pub(super) fn held_block_end(offsets: &[u32], first: u32, max_bytes: u64, lead: 
         |end: u32| u64::from(offsets[end as usize]) - u64::from(offsets[first as usize]) + lead;
     let fitting = super::partition_point_u32(first + 1..n + 1, |end| block_bytes(end) <= max_bytes);
     first + (fitting.max(1) as u32)
+}
+
+/// Where `Volume::read_block_in` puts the bytes of a block.
+enum BlockBuffer {
+    /// A new buffer (`read_block`).
+    New,
+    /// EXPERIMENT (LOSAT_X_BNMAPPED): `File::x_read_range_mapped`'s buffer.
+    Mapped,
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the caller's buffer.
+    Given(Vec<u8>),
 }
 
 /// A contiguous range of sequences of one volume, held in memory.
@@ -1074,6 +1123,12 @@ impl SequenceBlock {
     /// counterpart: only where the bytes go.
     pub fn x_recycle(mut self) {
         crate::utils::x_mapped::X_BYTES.give(&mut self.data);
+    }
+
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the block's buffer, for the next `x_read_block_into`. No
+    /// NCBI counterpart: only where the bytes are kept.
+    pub fn x_into_data(self) -> Vec<u8> {
+        self.data
     }
 
     /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the bytes of a block of one nucleotide cut to its 2-bit

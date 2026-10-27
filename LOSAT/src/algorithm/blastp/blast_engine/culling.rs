@@ -60,12 +60,9 @@ fn cull_key<H: HitListHsp>(hsp: &H) -> (i32, CullKey) {
 /// order of its score-sorted HSP list (the order in which the collector receives them), because
 /// the result depends on the order of the writes.
 ///
-/// There are two forests, because the preliminary lists have two representations
-/// (EXPERIMENT LOSAT_X_BPPCOMPACT, `x_prelim_compact.rs`): the compact lists (the default),
-/// the full ones (`LOSAT_X_BPPCOMPACT=0`), or both (the shadow mode). Each forest receives what the
-/// subject result holds of its kind and gives the same culled lists as the other.
+/// The preliminary lists are the compact lists (`x_prelim_compact.rs`), so the forest holds
+/// `XPrelimHsp`s.
 pub(super) struct PrelimCulling {
-    full: CullingForest<BlastpHsp>,
     compact: CullingForest<XPrelimHsp>,
     prelim_hitlist_size: usize,
 }
@@ -90,7 +87,6 @@ impl PrelimCulling {
     pub(super) fn new(prelim_hitlist_size: usize, culling_limit: i32) -> Self {
         let culling_max = CullingForest::<BlastpHsp>::prelim_max(culling_limit);
         Self {
-            full: CullingForest::new(culling_max),
             compact: CullingForest::new(culling_max),
             prelim_hitlist_size,
         }
@@ -120,16 +116,13 @@ impl PrelimCulling {
     /// the parts of the chunk are its queries). An HSP that is not saved is freed. The subject
     /// result is emptied, as the collector empties it.
     pub(super) fn add(&mut self, subject_result: &mut BlastpSubjectResult) {
-        for (query, list) in subject_result.query_hsp_lists.drain(..) {
-            save_list(&mut self.full, query, list);
-        }
         for (query, list) in subject_result.x_compact_hsp_lists.drain(..) {
             save_list(&mut self.compact, query, list);
         }
     }
 
-    /// `s_BlastHSPCullingFinal` for both forests: the hit list of each query with a tree goes
-    /// into `lists` (full HSPs) or `compact_lists`. It has one HSP list for each subject in the
+    /// `s_BlastHSPCullingFinal`: the hit list of each query with a tree goes into
+    /// `compact_lists`. It has one HSP list for each subject in the
     /// order of its first HSP in the rip of the tree, each sorted by score, and as many lists as
     /// the tree keeps: the hit list is made with `prelim_hitlist_size` as its maximum but is not
     /// cut to it, and it is not heapified.
@@ -138,12 +131,7 @@ impl PrelimCulling {
     /// and the lists; the first chunk's hit list is moved as it is, with more lists than
     /// `hsplist_max`. The stream close (`sort_by_evalue`) sorts and purges the first
     /// `hsplist_count` lists.
-    pub(super) fn finish(
-        self,
-        lists: &mut [Option<BlastpHitList>],
-        compact_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-    ) {
-        finish_forest(self.full, self.prelim_hitlist_size, lists);
+    pub(super) fn finish(self, compact_lists: &mut [Option<BlastpHitList<XPrelimHsp>>]) {
         finish_forest(self.compact, self.prelim_hitlist_size, compact_lists);
     }
 }
@@ -348,25 +336,13 @@ mod tests {
         full
     }
 
-    /// The subject result of `oid` with the HSPs of one query in both representations.
+    /// The subject result of `oid` with the HSPs of one query.
     fn subject(
         oid: usize,
         query: usize,
         hsps: &[(BlastpPreliminaryHsp, f64)],
     ) -> BlastpSubjectResult {
         let mut result = BlastpSubjectResult::new(oid);
-        result.query_hsp_lists.push((
-            query,
-            BlastpHspList {
-                oid: oid as u32,
-                query_index: query as u32,
-                hsps: hsps
-                    .iter()
-                    .map(|(h, e)| full_hsp(h, oid as u32, *e))
-                    .collect(),
-                best_evalue: 0.0,
-            },
-        ));
         result.x_compact_hsp_lists.push((
             query,
             BlastpHspList {
@@ -388,37 +364,14 @@ mod tests {
         result
     }
 
-    fn finished(
-        culling: PrelimCulling,
-        queries: usize,
-    ) -> (
-        Vec<Option<BlastpHitList>>,
-        Vec<Option<BlastpHitList<XPrelimHsp>>>,
-    ) {
-        let mut lists: Vec<Option<BlastpHitList>> = (0..queries).map(|_| None).collect();
+    fn finished(culling: PrelimCulling, queries: usize) -> Vec<Option<BlastpHitList<XPrelimHsp>>> {
         let mut compact: Vec<Option<BlastpHitList<XPrelimHsp>>> =
             (0..queries).map(|_| None).collect();
-        culling.finish(&mut lists, &mut compact);
-        (lists, compact)
+        culling.finish(&mut compact);
+        compact
     }
 
-    fn scores(lists: &[Option<BlastpHitList>], query: usize) -> Vec<(u32, Vec<i32>)> {
-        lists[query]
-            .as_ref()
-            .map(|hit_list| {
-                hit_list
-                    .hsplist_array
-                    .iter()
-                    .map(|l| (l.oid, l.hsps.iter().map(|h| h.raw_score).collect()))
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    fn compact_scores(
-        lists: &[Option<BlastpHitList<XPrelimHsp>>],
-        query: usize,
-    ) -> Vec<(u32, Vec<i32>)> {
+    fn scores(lists: &[Option<BlastpHitList<XPrelimHsp>>], query: usize) -> Vec<(u32, Vec<i32>)> {
         lists[query]
             .as_ref()
             .map(|hit_list| {
@@ -458,9 +411,9 @@ mod tests {
     // NCBI hspfilter_culling.c:516-581 and blast_hits.c:3125-3133: the hit list is made with
     // `prelim_hitlist_size` and holds more lists than that, in the order of the first HSP of
     // each subject in the rip, with the best e-value, worst e-value and low score set, and not
-    // heapified; and the compact forest gives the same lists as the full one.
+    // heapified.
     #[test]
-    fn the_hit_list_is_not_cut_and_keeps_the_rip_order_in_both_forests() {
+    fn the_hit_list_is_not_cut_and_keeps_the_rip_order() {
         let mut culling = PrelimCulling::new(2, 5);
         for oid in 0..4usize {
             let a = prelim(
@@ -475,12 +428,11 @@ mod tests {
             let c = prelim(1, 500, 10, 30, 1, 30);
             let mut first = subject(oid, 0, &[(a, 1e-5), (b, 1e-2)]);
             let second = subject(oid, 1, &[(c, 1e-3)]);
-            first.query_hsp_lists.extend(second.query_hsp_lists);
             first.x_compact_hsp_lists.extend(second.x_compact_hsp_lists);
             culling.add(&mut first);
-            assert!(first.query_hsp_lists.is_empty() && first.x_compact_hsp_lists.is_empty());
+            assert!(first.x_compact_hsp_lists.is_empty());
         }
-        let (lists, compact) = finished(culling, 2);
+        let lists = finished(culling, 2);
         let q0 = lists[0].as_ref().unwrap();
         assert_eq!(q0.hsplist_max, 2);
         assert_eq!(q0.hsplist_count, 4);
@@ -496,12 +448,7 @@ mod tests {
             (0, vec![40, 20]),
         ];
         assert_eq!(scores(&lists, 0), expected);
-        assert_eq!(compact_scores(&compact, 0), expected);
         assert_eq!(lists[1].as_ref().unwrap().hsplist_count, 4);
-        assert_eq!(compact[1].as_ref().unwrap().hsplist_count, 4);
-        let q0c = compact[0].as_ref().unwrap();
-        assert_eq!(q0c.low_score, q0.low_score);
-        assert_eq!(q0c.worst_evalue.to_bits(), q0.worst_evalue.to_bits());
     }
 
     // NCBI hspfilter_culling.c:100-112: the lower OID wins a tie, and the subjects must come in
@@ -512,9 +459,8 @@ mod tests {
         let h = prelim(0, 1000, 100, 200, 5, 80);
         culling.add(&mut subject(0, 0, &[(h, 1e-10)]));
         culling.add(&mut subject(1, 0, &[(h, 1e-10)]));
-        let (lists, compact) = finished(culling, 1);
+        let lists = finished(culling, 1);
         assert_eq!(scores(&lists, 0), vec![(0, vec![80])]);
-        assert_eq!(compact_scores(&compact, 0), vec![(0, vec![80])]);
     }
 
     // NCBI hspfilter_culling.c:602-644: the tree of a query is made with the length of its HSPs,
@@ -526,7 +472,7 @@ mod tests {
         culling.add(&mut subject(0, 0, &[(prelim(0, 400, 10, 90, 0, 50), 1e-3)]));
         culling.add(&mut subject(1, 1, &[(prelim(1, 300, 10, 90, 0, 90), 1e-9)]));
         culling.add(&mut subject(2, 0, &[(prelim(0, 400, 10, 90, 0, 60), 1e-5)]));
-        let (lists, _) = finished(culling, 2);
+        let lists = finished(culling, 2);
         // Limit 1: score 60 dominates score 50 in query 0.
         assert_eq!(scores(&lists, 0), vec![(2, vec![60])]);
         assert_eq!(scores(&lists, 1), vec![(1, vec![90])]);

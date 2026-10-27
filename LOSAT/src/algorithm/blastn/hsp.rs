@@ -147,6 +147,25 @@ impl BlastnOutputFormat {
         }
     }
 
+    /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
+    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7 and 17,
+    /// `database::prefetches_subjects`): as the call's first report, the taxonomy database's
+    /// messages of that prefetch go with the query warnings.
+    pub(crate) fn prefetches_subjects(self) -> bool {
+        crate::algorithm::common::database::prefetches_subjects(match self {
+            BlastnOutputFormat::Pairwise => Some(0),
+            BlastnOutputFormat::Xml => Some(5),
+            BlastnOutputFormat::Tabular => Some(6),
+            BlastnOutputFormat::TabularWithComments => Some(7),
+            BlastnOutputFormat::Sam(_) => Some(17),
+            // The Seq-annots and the archive fetch nothing; XML2 and JSON write the messages
+            // at each `Hit` (`TaxdbPrinter`).
+            BlastnOutputFormat::Seqalign(_)
+            | BlastnOutputFormat::Archive
+            | BlastnOutputFormat::Xml2(_) => None,
+        })
+    }
+
     /// Whether the format is one of the tabular formats (outfmt 6 and 7), which read the
     /// tabular subject IDs.
     pub(crate) fn is_tabular(self) -> bool {

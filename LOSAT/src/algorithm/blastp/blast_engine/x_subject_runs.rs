@@ -29,7 +29,7 @@
 //! order afterwards as without the switch (`merge_blastp_subject_results_in_order`).
 //!
 //! Why the reports do not change. A subject's result depends on the diagonal table only through
-//! the test of each word hit (`aa_ungapped.c`, below; the fused loops of `LOSAT_X_BPSEED` make
+//! the test of each word hit (`aa_ungapped.c`, below; the fused loops make
 //! the same decisions). For an entry with flag 0, a cleared entry (last_hit 0 at an offset of at
 //! least `window`, or `-window` after `s_BlastDiagClear` at the offset `window`) gives
 //! `diff >= window` for every subject offset (`diff >= 0` for one hit, where `window` is 0), so the

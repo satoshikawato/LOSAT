@@ -2316,6 +2316,9 @@ pub struct BlastnPairwiseReport {
     /// Whether the report starts with NCBI's prolog (`PrintProlog`); false when the caller
     /// wrote it before the search, as NCBI does.
     pub prolog: bool,
+    /// The database sequences with parsed Seq-ids by subject index (empty without them): their
+    /// descriptions and headings come from their definition lines (`db_subject::ParsedSubject`).
+    pub parsed_subjects: Vec<Option<Arc<crate::report::db_subject::ParsedSubject>>>,
 }
 
 // The description table of a report: BLASTN's, BLASTP's, TBLASTN's and TBLASTX's
@@ -2567,6 +2570,7 @@ fn write_blastn_description_table<W: Write>(
     last_row_counted: bool,
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
     subject_titles: &std::collections::HashMap<u32, Vec<u8>>,
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     show_sum_n: bool,
     protein: bool,
 ) -> io::Result<()> {
@@ -2590,10 +2594,7 @@ fn write_blastn_description_table<W: Write>(
             //         sdl->defline = "Unknown";
             // ```
             let title = subject_titles.get(&s_idx).map_or(&[][..], Vec::as_slice);
-            match super::defline::generate_defline(title, protein, true) {
-                Ok(defline) => defline.text,
-                Err(super::defline::UnknownEncoding) => b"Unknown".to_vec(),
-            }
+            database_description_label(title, parsed_subject(parsed, s_idx), protein)
         },
     )
 }
@@ -2963,6 +2964,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             group.subject_order.len() <= report.num_descriptions,
             &group.subject_hits,
             &group.subject_titles,
+            &report.parsed_subjects,
             false,
             false,
         )?;
@@ -2979,12 +2981,17 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
     ) -> io::Result<()> {
         let config = self.config;
         // A database sequence's heading is its stored title after `>` (a `BL_ORD_ID`
-        // id is not shown), as BLASTP's (`write_database_subject_alignments`).
+        // id is not shown), as BLASTP's (`write_database_subject_alignments`), or the lines
+        // of the definition lines of one with parsed Seq-ids.
         if self.report.database.is_some() {
+            let heading = match parsed_subject(&self.report.parsed_subjects, s_idx) {
+                Some(subject) => DatabaseHeading::Parsed(subject),
+                None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
+            };
             return write_database_subject_alignments_part(
                 writer,
                 probe,
-                &group.subject_titles[&s_idx],
+                heading,
                 false,
                 &group.subject_hits[&s_idx],
                 &group.subject_hit_indices[&s_idx],
@@ -3074,6 +3081,9 @@ pub struct TblastxPairwiseReport {
     /// Whether the report starts with NCBI's prolog (`PrintProlog`); false when the caller
     /// wrote it before the search, as NCBI does.
     pub prolog: bool,
+    /// The database sequences with parsed Seq-ids by subject index (empty without them), as
+    /// BLASTN's (`BlastnPairwiseReport::parsed_subjects`).
+    pub parsed_subjects: Vec<Option<Arc<crate::report::db_subject::ParsedSubject>>>,
 }
 
 /// The start of the TBLASTX report, which NCBI writes before it searches: the program and
@@ -3599,6 +3609,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             group.subject_order.len() <= report.num_descriptions,
             &group.subject_hits,
             &group.subject_titles,
+            &report.parsed_subjects,
             true,
             false,
         )?;
@@ -3626,12 +3637,17 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             writeln!(writer)
         };
         // A database sequence's heading is its stored title after `>` (as BLASTP's,
-        // BLASTN's and TBLASTN's `-db` reports).
+        // BLASTN's and TBLASTN's `-db` reports), or the lines of the definition lines of one
+        // with parsed Seq-ids.
         if self.database.is_some() {
+            let heading = match parsed_subject(&self.report.parsed_subjects, s_idx) {
+                Some(subject) => DatabaseHeading::Parsed(subject),
+                None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
+            };
             return write_database_subject_alignments_part(
                 writer,
                 probe,
-                &group.subject_titles[&s_idx],
+                heading,
                 false,
                 &group.subject_hits[&s_idx],
                 &group.subject_hit_indices[&s_idx],
@@ -4243,6 +4259,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     query_validity: &[bool],
     query_batch_skipped: &[bool],
     subject_titles: &[Arc<[u8]>],
+    parsed_subjects: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -4373,6 +4390,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             subject_order.len() <= report.num_descriptions,
             &subject_hits,
             &subject_titles,
+            parsed_subjects,
             false,
             false,
         )?;
@@ -4389,12 +4407,17 @@ pub fn write_tblastn_pairwise_report<W: Write>(
                 writeln!(writer)
             };
             // A database sequence's heading is its stored title after `>` (as BLASTP's
-            // and BLASTN's `-db` reports).
+            // and BLASTN's `-db` reports), or the lines of the definition lines of one with
+            // parsed Seq-ids.
             if database.is_some() {
+                let heading = match parsed_subject(parsed_subjects, s_idx) {
+                    Some(subject) => DatabaseHeading::Parsed(subject),
+                    None => DatabaseHeading::Title(&subject_titles[&s_idx]),
+                };
                 write_database_subject_alignments(
                     &mut writer,
                     probe.as_deref_mut(),
-                    &subject_titles[&s_idx],
+                    heading,
                     false,
                     &subject_hits[&s_idx],
                     &subject_hit_indices[&s_idx],
@@ -5446,7 +5469,7 @@ mod tblastx_tests {
                 .into_iter()
                 .collect();
         let mut out = Vec::new();
-        write_blastn_description_table(&mut out, &[0, 1], true, &hits, &titles, true, false)
+        write_blastn_description_table(&mut out, &[0, 1], true, &hits, &titles, &[], true, false)
             .unwrap();
         let text = String::from_utf8(out).unwrap();
         let lines: Vec<&str> = text.lines().collect();
@@ -5617,7 +5640,8 @@ mod tblastx_tests {
         let titles: std::collections::HashMap<u32, Vec<u8>> =
             [(0, b"id \x81 x".to_vec())].into_iter().collect();
         let mut out = Vec::new();
-        write_blastn_description_table(&mut out, &[0], true, &hits, &titles, false, false).unwrap();
+        write_blastn_description_table(&mut out, &[0], true, &hits, &titles, &[], false, false)
+            .unwrap();
         let row = out.split(|&byte| byte == b'\n').nth(3).unwrap().to_vec();
         assert!(row.starts_with(&[&b"Unknown"[..], &[b' '; 61], b"  120"].concat()));
         let mut out = Vec::new();

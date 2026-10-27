@@ -112,8 +112,9 @@ impl ParsedSubject {
     }
 
     /// `Err` for a subject whose sequence NCBI's formatters cannot find by its Seq-align id
-    /// (see `new`): the formats that read the subject's Bioseq (outfmt 0, 5, 6, 7 and 13 to 16)
-    /// refuse it; the Seq-annots and the archive (8, 9, 11, 12) write the Seq-align id alone.
+    /// (see `new`): the formats that read the subject's Bioseq (outfmt 0, 5, 6, 7, 13 to 16 and
+    /// SAM, 17) refuse it; the Seq-annots and the archive (8, 9, 11, 12) write the Seq-align id
+    /// alone.
     pub fn fetched(&self) -> Result<(), String> {
         if !self.unfetchable {
             return Ok(());
@@ -127,6 +128,67 @@ impl ParsedSubject {
     /// The Seq-align id (outfmt 8, 9, 11, 12; `DeflineSet::alignment_id`).
     pub fn alignment_id(&self) -> &ParsedSeqId {
         &self.alignment_id
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:131-141
+    // ```c++
+    // void CSAM_CIGAR_Formatter::AdjustSeqIdType(CConstRef<CSeq_id>& id)
+    // {
+    //     ...
+    //     CSeq_id_Handle forced_id = sequence::GetId(*id, *scope, force_type);
+    //     if (forced_id) {
+    //         id.Reset(forced_id.GetSeqId());
+    //     }
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:2743-2757 (`GetAccVer`, which
+    // `GetId(eGetId_ForceAcc)` calls: the id itself where it is an accession with a version,
+    // else `x_GetAccVer` of the Bioseq's ids)
+    // ```c++
+    //     if ( !(flags & CScope::fForceLoad) ) {
+    //         if ( idh.IsAccVer() ) {
+    //             return idh;
+    //         }
+    //     }
+    //     ...
+    //             CSeq_id_Handle ret = CScope::x_GetAccVer(info->GetIds());
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope.cpp:425-445
+    // ```c++
+    //     ITERATE ( TIds, iter, ids ) {
+    //         if ( iter->IsGi() ) {
+    //             // optimization to avoid calling GetSeqId() (it may be expensive)
+    //             continue;
+    //         }
+    //         if ( auto seq_id = iter->GetSeqId() ) { // need to hold CConstRef<>
+    //             if ( auto text_id = seq_id->GetTextseq_Id() ) {
+    //                 // found some text id, it can be returned
+    //                 ret = *iter;
+    //                 if ( text_id->IsSetAccession() && text_id->IsSetVersion() ) {
+    //                     // found acc.ver, stop searching
+    //                     break;
+    //                 }
+    // ```
+    /// The Seq-id that NCBI's SAM formatter (outfmt 17) names the subject by
+    /// (`AdjustSeqIdType` with `eGetId_ForceAcc`): the Seq-align id where it is an accession
+    /// with a version, else the first such id of the subject Bioseq (its gis passed over), else
+    /// its last Textseq-id, else the Seq-align id.
+    pub fn sam_id(&self) -> &ParsedSeqId {
+        let acc_ver =
+            |id: &crate::seqid::model::TextseqId| id.accession.is_some() && id.version.is_some();
+        if self.alignment_id.textseq().is_some_and(acc_ver) {
+            return &self.alignment_id;
+        }
+        let mut found = None;
+        for id in &self.target().ids {
+            if let Some(text) = id.textseq() {
+                found = Some(id);
+                if acc_ver(text) {
+                    break;
+                }
+            }
+        }
+        found.unwrap_or(&self.alignment_id)
     }
 
     /// The definition lines.
@@ -239,7 +301,9 @@ impl ParsedSubject {
         let defline = self
             .bioseq_title(protein, false)
             .map_err(|UnknownEncoding| "a title in no encoding that NCBI BLAST+ recognises")?;
-        if defline.reads_past_end {
+        // A nucleotide title stops at the end of the string (approved exception 2 of
+        // PD-LOSAT-NCBI-DEFECTS for BLASTN, TBLASTN and TBLASTX).
+        if protein && defline.reads_past_end {
             return Err("a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes)");
         }
         let end = defline
@@ -592,6 +656,96 @@ mod tests {
 
     fn text(bytes: &[u8]) -> &str {
         std::str::from_utf8(bytes).unwrap()
+    }
+
+    // Approved exception 2 of PD-LOSAT-NCBI-DEFECTS: BLASTN, TBLASTN and TBLASTX stop an outfmt 0
+    // title made only of punctuation at the end of the string (NCBI's `x_CleanAndCompress` reads
+    // past it and crashes); a nucleotide subject with parsed Seq-ids gets the title of the same
+    // stored title without them, and so does the tabular title word. A protein subject is refused.
+    #[test]
+    fn a_nucleotide_title_of_punctuation_stops_at_its_end() {
+        use crate::algorithm::common::database::check_shown_parsed_subject;
+        let subject = |id: ParsedSeqId| {
+            let defline = BlastDefline {
+                title: Some(b", ,".to_vec()),
+                ids: vec![id],
+                ..BlastDefline::default()
+            };
+            ParsedSubject::new(
+                DeflineSet {
+                    deflines: vec![defline],
+                },
+                true,
+            )
+            .unwrap()
+        };
+        let stored = crate::report::defline::generate_defline(b", ,", false, true).unwrap();
+        assert!(stored.reads_past_end);
+        let accession = subject(ParsedSeqId::Genbank(crate::seqid::model::TextseqId {
+            name: None,
+            accession: Some(b"AF000050".to_vec()),
+            release: None,
+            version: Some(1),
+        }));
+        let (start, title) = accession.description(false);
+        assert_eq!(text(&start), "AF000050.1 ");
+        assert_eq!(title.text, stored.text);
+        check_shown_parsed_subject(&accession, false, false, 0, "BLASTN")
+            .expect("a nucleotide title of punctuation is shown");
+        assert!(check_shown_parsed_subject(&accession, true, false, 0, "BLASTP").is_err());
+        let local = subject(ParsedSeqId::Local(ObjectId::Str(b"Subject_51".to_vec())));
+        assert!(local.tabular_ids(true).is_err());
+        let [id, _, _] = local.tabular_ids(false).unwrap();
+        let word = stored.text.split(|&byte| byte == b' ').next().unwrap();
+        assert_eq!(id, word);
+    }
+
+    // NCBI BLAST+ 2.17.0 `blastn -db tests/db_search/ids/nucl_v5 -outfmt 17` names the subjects
+    // so (`LOSAT/tests/fixtures/db_search/db.id.blastn.17.v5.out`, ordinal order): the Seq-align
+    // id `gi|654321` and `gi|2020` (a GI in the second definition line) give the accession of
+    // the Bioseq's definition line, `AB000009` has no version, and `lcl|Subject_31` no Textseq-id.
+    #[test]
+    fn sam_names_the_subject_by_an_accession_of_its_bioseq() {
+        let base =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/ids/nucl_v5");
+        let db = SeqDb::open(base.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+        let names: Vec<String> = (0..db.num_seqs())
+            .map(|ordinal| {
+                let subject = ParsedSubject::new(db.defline_set(ordinal).unwrap(), true).unwrap();
+                let mut name = Vec::new();
+                crate::report::seqid::SeqId::Db(subject.sam_id()).sam_name(&mut name);
+                String::from_utf8(name).unwrap()
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "NM_000001.1",
+                "AF000002.3",
+                "AJ000003.1",
+                "AB000004.1",
+                "NC_000005.11",
+                "mynuc6",
+                "mydb:nuc7",
+                "NM_000008.2",
+                "AB000009",
+                "mynuc_10",
+                "BK000012.1",
+                "AF000013.1",
+                "US1234567_14",
+                "AF000015.1",
+                "Subject_30",
+                "Subject_31",
+                "BK000018.1",
+                "NC_000019.1",
+                "AF000020.1",
+                "AF000021.1",
+                "AF000022.1",
+                "NR_000023.1",
+                "ti:123",
+                "BN000025.1",
+            ]
+        );
     }
 
     fn description(first: &str) -> String {

@@ -2,8 +2,7 @@
 //! on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`) since 2026-10-17: on unless
-//! `LOSAT_X_BPDIAG=0`. It acts in the fused seed loop of
-//! `LOSAT_X_BPSEED` (also in the set). With it on, the hits of one lookup cell are tested in
+//! `LOSAT_X_BPDIAG=0`. It acts in the fused seed loop (every two-hit blastp search). With it on, the hits of one lookup cell are tested in
 //! batches of eight in AVX2 registers where the CPU has AVX2; without AVX2 the per-hit loop runs,
 //! and `LOSAT_X_BPDIAG_SIMD=0` forces the scalar batch. `LOSAT_X_BPDEFER` (in the set too since
 //! 2026-10-17; `tests/blastp_diag_defer.rs`) calls the candidates of the AVX2 batches after a
@@ -11,10 +10,11 @@
 //! batches the masked last batch, so the default's line names `avx2-defer-masked` where the CPU
 //! has AVX2 (tables with few hits per used cell keep the deferred calls under
 //! `LOSAT_X_BPMASKEDMIN`); the AVX2 batch with the calls per batch (`avx2`) runs with
-//! `LOSAT_X_BPDEFER=0`. These tests compare the reports with the reference loop
-//! (`LOSAT_X_BPSEED=0 LOSAT_X_BPDIAG=0`) and the per-hit fused loop, on a generated pair (long
+//! `LOSAT_X_BPDEFER=0`. These tests compare the reports of the batched loops with
+//! the per-hit fused loop (`LOSAT_X_BPDIAG=0`), on a generated pair (long
 //! lookup cells from repeats, related proteins for two-hit extensions) at one and four threads and
-//! on the fixture pair at four, and check from the
+//! on the fixture pair at four (that the reports equal NCBI's is the business of the frozen
+//! fixtures), and check from the
 //! `[TIMING] x_bpdiag: mode=<m> cells=<n> batched_hits=<h> candidates=<k>` lines which path ran and
 //! that cells were tested in batches, not only that the report is equal. Each search states the
 //! default it runs with: no variable (the default) or the switches it sets to `0`.
@@ -209,8 +209,8 @@ fn generated_pair(test: &str) -> (PathBuf, PathBuf) {
     )
 }
 
-/// The reference loop: the loop without the fused seed stage and without its line.
-const REFERENCE: &[(&str, &str)] = &[("LOSAT_X_BPSEED", "0"), ("LOSAT_X_BPDIAG", "0")];
+/// The per-hit fused loop: the loop without the batches and without their line.
+const PER_HIT: &[(&str, &str)] = &[("LOSAT_X_BPDIAG", "0")];
 
 /// The variables of one search.
 type Vars = &'static [(&'static str, &'static str)];
@@ -219,12 +219,11 @@ type Vars = &'static [(&'static str, &'static str)];
 fn batched_cells_give_the_reports_of_the_per_hit_loop() {
     let (query, subject) = generated_pair("per_hit_loop");
     // The generated pair (0.01 CPU s a search) at one and four threads with every run below. The
-    // fixture pair (7-12 CPU s a search) at four threads with the reference, the per-hit loop, the
-    // default and the scalar batch: the same pair's run of `LOSAT_X_BPDEFER=0` (`BATCHES`) and its
-    // pairwise reports (outfmt 0) of the reference and the default are made by
+    // fixture pair (7-12 CPU s a search) at four threads with the per-hit loop, the default and
+    // the scalar batch: the same pair's run of `LOSAT_X_BPDEFER=0` (`BATCHES`) and its pairwise
+    // reports (outfmt 0) of the per-hit loop and the default are made by
     // `deferred_and_masked_calls_give_the_reports_and_counts_of_the_batches` in
-    // `tests/blastp_diag_defer.rs`, and with `LOSAT_X_BPSEED=0` the switch has no fused loop to act
-    // in on any pair.
+    // `tests/blastp_diag_defer.rs`.
     let pairs = [
         (query, subject, &[1, 4][..], true),
         (
@@ -234,8 +233,6 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
             false,
         ),
     ];
-    // The fused per-hit loop: the switch off in the default.
-    let per_hit: &[(&str, &str)] = &[("LOSAT_X_BPDIAG", "0")];
     // The batches, with the `LOSAT_X_BPDIAG_SIMD` value each runs with and whether
     // `LOSAT_X_BPDEFER` is on: the default (the CPU's path, the AVX2 batch with the deferred calls
     // and the masked last batch, or the per-hit loop without AVX2), its scalar batch, and its AVX2
@@ -250,18 +247,11 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
         let every_run = *every_run;
         for &threads in *thread_counts {
             let (reference, reference_counts, _) =
-                blastp(query, subject, threads, REFERENCE, &["-outfmt", "6"]);
+                blastp(query, subject, threads, PER_HIT, &["-outfmt", "6"]);
             assert!(!reference.is_empty(), "the pair has a report");
-            assert!(reference_counts.is_empty(), "no line with the switch off");
-            let (fused, fused_counts, _) =
-                blastp(query, subject, threads, per_hit, &["-outfmt", "6"]);
             assert!(
-                fused == reference,
-                "{per_hit:?} threads {threads}: the fused loop differs"
-            );
-            assert!(
-                fused_counts.is_empty(),
-                "{per_hit:?}: no line with the switch off"
+                reference_counts.is_empty(),
+                "{PER_HIT:?}: no line with the switch off"
             );
             // The fixture pair without the run of `LOSAT_X_BPDEFER=0`.
             for &(vars, simd, defer) in batched.iter().filter(|run| every_run || run.2) {
@@ -270,25 +260,6 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
                 assert!(rows == reference, "{what}: rows differ");
                 check_counts(&counts, simd, defer, &what);
             }
-            if !every_run {
-                continue;
-            }
-            // The switch on without the fused loop: the reference loop, nothing tested in batches.
-            let (rows, counts, _) = blastp(
-                query,
-                subject,
-                threads,
-                &[("LOSAT_X_BPSEED", "0")],
-                &["-outfmt", "6"],
-            );
-            assert!(
-                rows == reference,
-                "LOSAT_X_BPSEED=0 threads {threads}: rows differ"
-            );
-            assert!(
-                counts.len() == 1 && counts[0].cells == 0 && counts[0].hits == 0,
-                "LOSAT_X_BPSEED=0 threads {threads}: {counts:?}"
-            );
         }
     }
 }

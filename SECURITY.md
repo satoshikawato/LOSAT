@@ -2,20 +2,21 @@
 
 ## Supported Versions
 
-LOSAT has not published a stable release yet. Until v0.1.0 is released, security
-fixes are handled on the active development branch and in the v0.1.0 release
-candidate branch when one exists.
+LOSAT v0.1.0 is published. Security fixes go to the latest patch release of the
+latest minor version (`v0.2.x` once v0.2.0 is released); until then, `v0.1.0` is
+supported on a best-effort basis. Older releases are not supported.
 
 | Version | Supported |
 | --- | --- |
-| `v0.1.0` release candidates | Yes |
-| Unreleased development snapshots | Best effort |
-| Older snapshots | No |
+| Latest patch of the latest minor release (`v0.2.x` once released) | Yes |
+| `v0.1.0` until v0.2.0 is released | Best effort |
+| `dev` branch snapshots | Best effort |
+| Older releases and snapshots | No |
 
 ## Reporting A Vulnerability
 
-If the repository has GitHub private vulnerability reporting enabled, use that
-channel first.
+If the repository has GitHub private vulnerability reporting enabled (Security
+tab, "Report a vulnerability"), use that channel first.
 
 If private reporting is not available, open a GitHub issue with a high-level
 summary and avoid posting exploit details, sensitive inputs, or private data.

@@ -6,7 +6,7 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:804-883 (the walks) and
 //! 1089-1155 (`s_BlastAaExtendTwoHit`), which the seed loops reach through
-//! `extend_two_hit_blosum62` (and LOSAT_X_BPUNGAP's `x_ungapped_fast::two_hit`).
+//! `extend_two_hit_blosum62` (and `x_ungapped_fast::two_hit`).
 //!
 //! Why the result is the reference's. The extension is `x_ungapped_sent::two_hit_in::<1>`, whose
 //! statements are blastp's; what differs is where the sentinels are.
@@ -292,7 +292,7 @@ mod tests {
         buffer
     }
 
-    /// The path gives NCBI's extension (`extend_two_hit`, the reference without LOSAT_X_BPUNGAP)
+    /// The path gives NCBI's extension (`extend_two_hit`, the reference)
     /// on the reference's sequences (the buffers without their first byte) for every offset of a
     /// word, the ends of both sequences and the frame borders included, subjects of 0 to 3
     /// letters, inner sentinels, codes up to 31, and X-drops on and off the path (above 127: the

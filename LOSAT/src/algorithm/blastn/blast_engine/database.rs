@@ -38,10 +38,11 @@ use rayon::prelude::*;
 
 use crate::algorithm::blastn::coordination::SubjectMetadata;
 use crate::algorithm::blastn::hsp::BlastnHitList;
-use crate::algorithm::common::database::{self as shared, StoredTitle};
+use crate::algorithm::common::database::{self as shared, ParsedShown, ReportedHeader};
 pub(super) use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
+use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{BlockRange, NucleotideAmbiguity, SeqDb, SeqDbError, SeqType, SequenceBlock};
 use crate::utils::threading::SearchPool;
@@ -159,7 +160,8 @@ pub(super) struct BlastnDatabase {
     db: SeqDb,
     name: String,
     metadata: SubjectMetadata,
-    /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16).
+    /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16,
+    /// and the batches' prefetch of outfmt 0, 5, 6, 7 and 17).
     taxdb: shared::TaxdbRun,
 }
 
@@ -235,8 +237,9 @@ impl BlastnDatabase {
     /// engine cannot hold in a `usize` (a 32-bit target) is LOSAT's refusal.
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
         let db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
-        // A database with parsed Seq-ids is refused (line DBID: ID2b opens it).
-        shared::refuse_parsed_seqids(&db, PROGRAM)?;
+        // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
+        // NCBI's choice of its Seq-ids.
+        shared::check_seqids(&db, settings, PROGRAM)?;
         let total = db.total_length();
         let db_len_total = usize::try_from(total)
             .ok()
@@ -259,16 +262,20 @@ impl BlastnDatabase {
     }
 
     /// The Blast-def-line taxid of each reported sequence by rank (`ordinals`: the ordinal id of
-    /// each rank, `ReportedSubjects::ordinals`) and what the taxonomy database says about it,
-    /// for the XML2 and JSON formats (`algorithm::common::database::read_reported_taxids`);
-    /// the sequences of `hit_lists` with HSPs are the reported ones.
+    /// each rank, `ReportedSubjects::ordinals`; `parsed`: the sequences with parsed Seq-ids,
+    /// `ReportedSubjects::parsed`) and what the taxonomy database says about it, for the XML2
+    /// and JSON formats (`algorithm::common::database::read_reported_taxonomy`); the sequences
+    /// of `hit_lists` with HSPs are the reported ones.
+    #[allow(clippy::type_complexity)]
     pub(super) fn read_taxids(
         &self,
         ordinals: &[u32],
+        parsed: &[Option<Arc<ParsedSubject>>],
         hit_lists: &[Option<BlastnHitList>],
     ) -> Result<(
         Vec<i32>,
         Vec<crate::report::blast_xml::HitTaxonomy>,
+        Vec<Vec<crate::report::blast_xml::HitTaxonomy>>,
         shared::TaxdbNotes,
     )> {
         let reported: std::collections::BTreeSet<usize> = hit_lists
@@ -278,7 +285,44 @@ impl BlastnDatabase {
             .filter_map(|hsp_list| hsp_list.hsps.first())
             .map(|hsp| hsp.s_idx as usize)
             .collect();
-        shared::read_reported_taxids(&self.db, &self.taxdb, ordinals, &reported, PROGRAM)
+        shared::read_reported_taxonomy(&self.db, &self.taxdb, ordinals, &reported, parsed, PROGRAM)
+    }
+
+    /// Whether `taxdb.bti` is on the search path, asked once for the run
+    /// (`shared::TaxdbRun::found`): the batches' prefetch reads the taxonomy database only then
+    /// (`prefetch_messages`).
+    pub(super) fn taxdb_found(&self) -> bool {
+        self.taxdb.found(&self.db)
+    }
+
+    /// NCBI's messages about the taxonomy database when the query batch whose final hit lists
+    /// are `hit_lists` (after their HSPs of score 0 were dropped, still naming the sequences by
+    /// ordinal id) prefetches the subjects it reports (`shared::prefetch_messages`): the
+    /// sequences with HSPs in them, the ones `read_taxids` reads, with the definition lines of
+    /// those with parsed Seq-ids from `titles` (`read_titles`). Empty, and nothing read, without
+    /// `taxdb.bti` on the search path. A taxonomy database that LOSAT cannot read as NCBI does,
+    /// and a header whose taxid does not decode, are refused.
+    pub(super) fn prefetch_messages(
+        &self,
+        titles: &DatabaseTitles,
+        hit_lists: &[Option<BlastnHitList>],
+    ) -> Result<Vec<u8>> {
+        let subjects = hit_lists
+            .iter()
+            .flatten()
+            .flat_map(|hit_list| {
+                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                &hit_list.hsplist_array[..count]
+            })
+            .filter(|hsp_list| !hsp_list.hsps.is_empty())
+            .map(|hsp_list| {
+                let parsed = match titles.get(&hsp_list.oid) {
+                    Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+                    _ => None,
+                };
+                (hsp_list.oid, parsed)
+            });
+        shared::prefetch_messages(&self.db, &self.taxdb, subjects, PROGRAM)
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).
@@ -871,9 +915,10 @@ pub(super) fn x_tb_range_print_summary() {
     );
 }
 
-/// The stored titles of the database sequences that the final hit lists of the query
-/// batches searched so far name, by ordinal id (`read_titles`).
-pub(super) type DatabaseTitles = BTreeMap<u32, StoredTitle>;
+/// The headers of the database sequences that the final hit lists of the query batches searched
+/// so far name, by ordinal id (`read_titles`): the stored title, or the definition lines of a
+/// sequence with parsed Seq-ids.
+pub(super) type DatabaseTitles = BTreeMap<u32, ReportedHeader>;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
 // ```c++
@@ -917,8 +962,9 @@ pub(super) type DatabaseTitles = BTreeMap<u32, StoredTitle>;
 // before; a batch without hits reads no header. A title read in an earlier batch is not
 // read again: the header file stays open, and the title is the same.
 /// Reads the definition lines of the sequences that the final hit lists `hit_lists` of a
-/// query batch name, in NCBI's order, into `titles`. A reader error of NCBI's own is a
-/// `HeaderReadError` (it fails the batch); LOSAT's refusals are errors of their own.
+/// query batch name, in NCBI's order, into `titles` (`common::database::read_header`). A reader
+/// error of NCBI's own is a `HeaderReadError` (it fails the batch); LOSAT's refusals are errors
+/// of their own.
 pub(super) fn read_titles(
     database: &BlastnDatabase,
     hit_lists: &[Option<BlastnHitList>],
@@ -933,7 +979,7 @@ pub(super) fn read_titles(
             if titles.contains_key(&hsp_list.oid) {
                 continue;
             }
-            let title = shared::read_title(&database.db, hsp_list.oid, query, PROGRAM)?;
+            let title = shared::read_header(&database.db, hsp_list.oid, query, PROGRAM)?;
             titles.insert(hsp_list.oid, title);
         }
     }
@@ -944,9 +990,13 @@ pub(super) fn read_titles(
 pub(super) struct ReportedSubjects {
     /// The ordinal id of each rank, ascending.
     pub(super) ordinals: Vec<u32>,
-    /// The record of each rank: the id `gnl|BL_ORD_ID|n`, the stored title, and the
-    /// stored letters (empty when the reports do not show them).
+    /// The record of each rank: the id `gnl|BL_ORD_ID|n`, the stored title (a sequence with
+    /// parsed Seq-ids: the title of its first definition line), and the stored letters (empty
+    /// when the reports do not show them).
     pub(super) records: Vec<FastaRecord>,
+    /// The sequences with parsed Seq-ids by rank (empty when none is reported): their ids and
+    /// titles come from their definition lines (`report::db_subject`).
+    pub(super) parsed: Vec<Option<Arc<ParsedSubject>>>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1406-1414
@@ -979,12 +1029,16 @@ pub(super) struct ReportedSubjects {
 /// by the ordinal id gives the same order), and their records are made for the reports
 /// from `titles`, with their stored letters when `letters` (outfmt 0 and the hit records
 /// read them; the tabular formats do not). A reported sequence whose stored title LOSAT
-/// does not report as NCBI does is LOSAT's refusal.
+/// does not report as NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the
+/// reports `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
+/// `shown.joined` `refuse_joined_hits`; `first_query`: the index of the query of `hit_lists[0]`).
 pub(super) fn reported_subjects(
     database: &BlastnDatabase,
     titles: &DatabaseTitles,
     hit_lists: &mut [Option<BlastnHitList>],
     letters: bool,
+    shown: ParsedShown,
+    first_query: usize,
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = hit_lists
         .iter()
@@ -1012,11 +1066,30 @@ pub(super) fn reported_subjects(
         }
     }
     let mut records = Vec::with_capacity(ordinals.len());
-    for &ordinal in &ordinals {
-        let stored = titles
+    let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
+    // Whether `taxdb.bti` is on the search path, looked up at the first sequence with parsed
+    // Seq-ids that outfmt 0 shows.
+    let mut taxdb_found: Option<bool> = None;
+    for (rank, &ordinal) in ordinals.iter().enumerate() {
+        let header = titles
             .get(&ordinal)
             .with_context(|| format!("database sequence {ordinal} has no title read"))?;
-        shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+        let title = match header {
+            ReportedHeader::Stored(stored) => {
+                shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                stored.title.clone()
+            }
+            ReportedHeader::Parsed(subject) => {
+                let taxdb =
+                    shown.pairwise && *taxdb_found.get_or_insert_with(|| database.db.taxdb_found());
+                shared::check_reported_parsed(subject, shown, false, taxdb, ordinal, PROGRAM)?;
+                if parsed.is_empty() {
+                    parsed = vec![None; ordinals.len()];
+                }
+                parsed[rank] = Some(Arc::clone(subject));
+                subject.first_title().to_vec()
+            }
+        };
         let sequence = if letters {
             let block = x_read_sequence(&database.db, ordinal).map_err(database_error)?;
             let length = block.nucleotide_len(0).map_err(database_error)?;
@@ -1033,28 +1106,45 @@ pub(super) fn reported_subjects(
         };
         records.push(FastaRecord {
             local_id: format!("gnl|BL_ORD_ID|{ordinal}"),
-            title: stored.title.clone(),
+            title,
             sequence,
             warnings: Vec::new(),
             source: Default::default(),
         });
     }
-    Ok(ReportedSubjects { ordinals, records })
+    if shown.joined && !parsed.is_empty() {
+        for (query, hit_list) in hit_lists.iter().enumerate() {
+            let Some(hit_list) = hit_list else {
+                continue;
+            };
+            shared::refuse_joined_hits(
+                first_query + query,
+                hit_list
+                    .hsplist_array
+                    .iter()
+                    .filter(|hsp_list| !hsp_list.hsps.is_empty())
+                    .map(|hsp_list| {
+                        let rank = hsp_list.oid as usize;
+                        Some((ordinals[rank], parsed[rank].as_deref()?))
+                    }),
+                PROGRAM,
+            )?;
+        }
+    }
+    Ok(ReportedSubjects {
+        ordinals,
+        records,
+        parsed,
+    })
 }
 
 impl ReportedSubjects {
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
-    /// reported sequence, by rank (`algorithm::common::database::tabular_subject_id`). A
+    /// reported sequence, by rank (`algorithm::common::database::tabular_subject_ids`). A
     /// sequence whose id LOSAT cannot write as NCBI is an error before any format is
     /// written.
     pub(super) fn tabular_subject_ids(&self) -> Result<Vec<Arc<[u8]>>> {
-        self.records
-            .iter()
-            .zip(&self.ordinals)
-            .map(|(record, &ordinal)| {
-                shared::tabular_subject_id(&record.title, ordinal, false, PROGRAM).map(Arc::from)
-            })
-            .collect()
+        shared::tabular_subject_ids(&self.records, &self.ordinals, &self.parsed, false, PROGRAM)
     }
 }
 
@@ -1075,15 +1165,28 @@ impl ReportedSubjects {
 /// - `Off::Ambiguity`: a sequence whose ambiguity data the traceback cannot decode
 ///   (`traceback_listed` and `reported_subjects` read them with
 ///   `SequenceBlock::nucleotide_blastna`, first for the batch whose lists name the sequence; the
-///   preliminary stage reads the 2-bit letters only).
+///   preliminary stage reads the 2-bit letters only);
+/// - `Off::Taxonomy`, with `taxids` (the batches' prefetch reads the taxonomy database: outfmt 0,
+///   6, 7 and 17 with `taxdb.bti` on the search path, `BlastnDatabase::prefetch_messages`, DBID
+///   item T): a lookup of the taxonomy database that could be refused
+///   (`shared::taxdb_may_refuse` without the scientific names, which only XML2 and JSON write
+///   and XML is never streamed). The prefetch's refusal of NCBI's taxonomy cache
+///   (`shared::TaxdbRun::cache_collision`) comes at the run's first prefetch, in the first batch
+///   before its reports. A definition line whose taxid does not decode is `Off::Titles` then:
+///   the titles' pass decodes the taxids too (`SeqDb::visit_deflines_taxids`; one sequence at a
+///   time, `SeqDb::defline_taxids`), as blastp's block search does.
 /// Every ordinal id is read in `pool` (the titles, then the ambiguity data of the sequences that
 /// have any; `SeqDb::check_ambiguity` reads only those bytes); a reader error is a refusal too
 /// (the reports then stay after the loop, and the batch that meets the error fails where it does
 /// without the switch). EXPERIMENT (LOSAT_X_DBIDXREAD): both are read in ranges of
 /// `HEADER_RANGE_SEQS` sequences (`SeqDb::visit_deflines`, `SeqDb::visit_ambiguity`, the same
 /// results as `read_title` and `SeqDb::check_ambiguity`) instead of one sequence at a time.
+/// A database with parsed Seq-ids gives `Off::Titles` at its first definition line (`read_title`
+/// reads ordinal ids alone), so its reports come after the whole search, as BLASTP's do without
+/// its block search (line DBID, DECISIONS 9 (6)), except SAM (`Ready::sam_despite`).
 pub(super) fn x_streaming_refusal(
     database: &BlastnDatabase,
+    taxids: bool,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Option<super::x_rpt_stream::Off> {
     let db = &database.db;
@@ -1109,10 +1212,17 @@ pub(super) fn x_streaming_refusal(
             let _ = pool;
             ranges.iter().all(allowed)
         };
+        // With `taxids` a record whose taxid does not decode is an `Err`
+        // (`visit_deflines_taxids`).
         let titles = |range: &BlockRange| -> bool {
-            db.visit_deflines(*range, |ordinal, deflines| {
+            let visit = |ordinal: u32, deflines| {
                 title_allowed(ordinal, shared::stored_title(deflines, ordinal, 0, PROGRAM))
-            })
+            };
+            if taxids {
+                db.visit_deflines_taxids(*range, visit)
+            } else {
+                db.visit_deflines(*range, visit)
+            }
         };
         if !all(&titles) {
             return Some(super::x_rpt_stream::Off::Titles);
@@ -1122,10 +1232,12 @@ pub(super) fn x_streaming_refusal(
         if !all(&ambiguity) {
             return Some(super::x_rpt_stream::Off::Ambiguity);
         }
-        return None;
+        return x_taxonomy_refusal(database, taxids);
     }
+    // One sequence at a time (`LOSAT_X_DBIDXREAD=0`): the taxid after the title.
     let title = |ordinal: u32| -> bool {
         title_allowed(ordinal, shared::read_title(db, ordinal, 0, PROGRAM))
+            && (!taxids || db.defline_taxids(ordinal).is_ok())
     };
     let ambiguity = |ordinal: u32| -> bool { db.check_ambiguity(ordinal).is_ok() };
     let all = |allowed: &(dyn Fn(u32) -> bool + Sync)| -> bool {
@@ -1150,7 +1262,15 @@ pub(super) fn x_streaming_refusal(
     if !all(&ambiguity) {
         return Some(super::x_rpt_stream::Off::Ambiguity);
     }
-    None
+    x_taxonomy_refusal(database, taxids)
+}
+
+/// EXPERIMENT (LOSAT_X_RPTSTREAM): `Off::Taxonomy` of `x_streaming_refusal`, asked with `taxids`
+/// only (`shared::taxdb_may_refuse` without the names, `false` without `taxdb.bti` on the search
+/// path).
+fn x_taxonomy_refusal(database: &BlastnDatabase, taxids: bool) -> Option<super::x_rpt_stream::Off> {
+    (taxids && shared::taxdb_may_refuse(&database.db, false))
+        .then_some(super::x_rpt_stream::Off::Taxonomy)
 }
 
 #[cfg(test)]
@@ -1171,6 +1291,35 @@ mod tests {
     fn open(name: &str) -> BlastnDatabase {
         BlastnDatabase::open(&fixture(name), &ApplicationSettings::default())
             .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+    }
+
+    // DECISIONS 3 Q8 of line DBID: NCBI's choice of the Seq-ids of a database with parsed
+    // Seq-ids depends on SEQ_ID_PREFER_ACCESSION_OVER_GI and SEQ_ID_AVOID_GI.
+    #[test]
+    fn a_seq_id_variable_refuses_a_database_with_parsed_seqids_only() {
+        let path = |name: &str| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(name)
+                .to_str()
+                .expect("fixture path is UTF-8")
+                .to_string()
+        };
+        let settings = ApplicationSettings {
+            seq_id_rank_variable: Some("SEQ_ID_PREFER_ACCESSION_OVER_GI"),
+            ..ApplicationSettings::default()
+        };
+        let parsed = path("tests/db_search/ids/nucl_v5");
+        BlastnDatabase::open(&parsed, &ApplicationSettings::default())
+            .expect("a database with parsed Seq-ids opens");
+        let Err(error) = BlastnDatabase::open(&parsed, &settings) else {
+            panic!("a database with parsed Seq-ids opened with SEQ_ID_PREFER_ACCESSION_OVER_GI")
+        };
+        assert_eq!(
+            format!("{error:#}"),
+            "the environment variable SEQ_ID_PREFER_ACCESSION_OVER_GI, which changes the Seq-ids that NCBI BLAST+ chooses for a database with parsed Seq-ids, is not supported by LOSAT's BLASTN"
+        );
+        BlastnDatabase::open(&path("tests/seqdb/db/nucl_v4"), &settings)
+            .expect("a database without parsed Seq-ids opens with SEQ_ID_PREFER_ACCESSION_OVER_GI");
     }
 
     /// LOSAT/tests/seqdb/expected/nucl_mv.entries.tsv (blastdbcmd): the lengths, letters and
@@ -1565,7 +1714,7 @@ mod tests {
         read_titles(&database, &batch, &mut titles).unwrap();
         assert_eq!(titles.keys().copied().collect::<Vec<_>>(), [middle]);
         assert_eq!(
-            titles[&middle].title,
+            titles[&middle].stored().title,
             entries()[middle as usize].2.as_bytes()
         );
         // The next batch: query 0 names `middle` again (not read again), query 1 names the
@@ -1616,7 +1765,15 @@ mod tests {
         read_titles(&database, &hit_lists, &mut titles).unwrap();
         // A list left without HSPs (its HSPs had score 0) is not reported.
         hit_lists[2].as_mut().unwrap().hsplist_array[1].hsps.clear();
-        let reported = reported_subjects(&database, &titles, &mut hit_lists, true).unwrap();
+        let reported = reported_subjects(
+            &database,
+            &titles,
+            &mut hit_lists,
+            true,
+            ParsedShown::default(),
+            0,
+        )
+        .unwrap();
         assert_eq!(reported.ordinals, [5, 9]);
         let ranks = |hit_list: &Option<BlastnHitList>| -> Vec<(u32, Vec<u32>)> {
             hit_list
@@ -1651,7 +1808,15 @@ mod tests {
         );
         // Without the letters (the tabular formats only): the records are empty.
         let mut hit_lists = vec![hit_list(vec![(9, 1e-9)], 1)];
-        let reported = reported_subjects(&database, &titles, &mut hit_lists, false).unwrap();
+        let reported = reported_subjects(
+            &database,
+            &titles,
+            &mut hit_lists,
+            false,
+            ParsedShown::default(),
+            0,
+        )
+        .unwrap();
         assert!(reported.records[0].seq().is_empty());
     }
 
@@ -1677,13 +1842,28 @@ mod tests {
         let mut titles = DatabaseTitles::new();
         let mut clean = vec![hit_list(vec![(0, 1e-9)], 1)];
         read_titles(&database, &clean, &mut titles).unwrap();
-        reported_subjects(&database, &titles, &mut clean, false).unwrap();
+        reported_subjects(
+            &database,
+            &titles,
+            &mut clean,
+            false,
+            ParsedShown::default(),
+            0,
+        )
+        .unwrap();
         let mut bad = vec![hit_list(vec![(1, 1e-9)], 1)];
         read_titles(&database, &bad, &mut titles).unwrap();
-        assert_eq!(titles[&1].title, b"n02 l#ngth 41");
-        let error = reported_subjects(&database, &titles, &mut bad, false)
-            .err()
-            .expect("the bad byte");
+        assert_eq!(titles[&1].stored().title, b"n02 l#ngth 41");
+        let error = reported_subjects(
+            &database,
+            &titles,
+            &mut bad,
+            false,
+            ParsedShown::default(),
+            0,
+        )
+        .err()
+        .expect("the bad byte");
         assert!(
             format!("{error:#}").starts_with(
                 "database sequence 1 has a stored title with a byte outside ' ' to '~'"
@@ -1706,7 +1886,7 @@ mod tests {
         let refusal = |database: &BlastnDatabase| -> [Option<Off>; 2] {
             [1, 4].map(|threads| {
                 crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
-                    Ok(x_streaming_refusal(database, pool))
+                    Ok(x_streaming_refusal(database, false, pool))
                 })
                 .unwrap()
             })
@@ -1800,5 +1980,101 @@ mod tests {
         open("nucl_v4").db.check_ambiguity(0).unwrap();
         drop((missing, bad));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The fixture database `name` of `tests/db_search`, with the taxonomy database variant
+    /// `taxdb` of `tests/seqdb/taxdb` (`None`: none) as `BLASTDB`, from the directory `cwd`.
+    fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> BlastnDatabase {
+        use crate::seqdb::alias::SearchPath;
+        let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+        let taxdb = taxdb.map(|variant| tests.join("seqdb/taxdb").join(variant));
+        let search =
+            SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
+        let path = tests.join("db_search").join(name);
+        let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+        BlastnDatabase {
+            metadata: SubjectMetadata {
+                db_len_total: db.total_length() as usize,
+                db_num_seqs: db.num_seqs() as usize,
+            },
+            db,
+            name: name.to_string(),
+            taxdb: shared::TaxdbRun::default(),
+        }
+    }
+
+    // DBID item T: a batch's prefetch looks up the sequences with HSPs in its final hit lists
+    // (within the hit list size), once per volume and taxid over the batches of a run, and opens
+    // the taxonomy database at the run's first lookup; nothing without `taxdb.bti`.
+    // `x16_ntaxid_99990` (two sequences of taxid 99990) with `offset_last_past_end` (the last
+    // entry, 99990, is past the end of `taxdb.btd`), `x16_ntaxid` (taxid 9606) with `bad_magic`.
+    #[test]
+    fn the_prefetch_looks_up_the_sequences_with_hsps_once_per_run() {
+        let cwd = temp_dir("prefetch");
+        let text = |database: &BlastnDatabase, hit_lists: &[Option<BlastnHitList>]| -> String {
+            let titles = DatabaseTitles::new();
+            String::from_utf8(database.prefetch_messages(&titles, hit_lists).unwrap()).unwrap()
+        };
+        let database = open_with_taxdb("x16_ntaxid_99990", Some("offset_last_past_end"), &cwd);
+        assert!(database.taxdb_found());
+        // Sequence 0 without HSPs (its HSPs of score 0 were dropped), sequence 1 past the hit
+        // list size: nothing is fetched, the taxonomy database is not opened.
+        let mut none = hit_list(vec![(0, 1e-9), (1, 1e-8)], 1);
+        none.as_mut().unwrap().hsplist_array[0].hsps.clear();
+        assert_eq!(text(&database, &[None, none]), "");
+        let offset = "Error: [blastn] Error: Offset error at end of taxdb file.\n";
+        assert_eq!(text(&database, &[hit_list(vec![(1, 1e-9)], 1)]), offset);
+        // The same volume and taxid in a later batch.
+        assert_eq!(
+            text(&database, &[hit_list(vec![(0, 1e-9), (1, 1e-8)], 2)]),
+            ""
+        );
+        let database = open_with_taxdb("x16_ntaxid", Some("bad_magic"), &cwd);
+        assert_eq!(
+            text(&database, &[hit_list(vec![(0, 1e-9), (1, 1e-8)], 2)]),
+            "Error: [blastn] Error: Tax database file has wrong magic number.\n"
+        );
+        let database = open_with_taxdb("x16_ntaxid", None, &cwd);
+        assert!(!database.taxdb_found());
+        assert_eq!(
+            text(&database, &[hit_list(vec![(0, 1e-9), (1, 1e-8)], 2)]),
+            ""
+        );
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    // EXPERIMENT (LOSAT_X_RPTSTREAM), DBID item T: where the batches' prefetch reads the taxonomy
+    // database (`taxids`), each batch's reports are written when the loop takes it only when no
+    // lookup can be refused (`Off::Taxonomy`). `x16_ntaxid` (taxid 9606) with no taxonomy
+    // database, ones whose lookups cannot be refused (a wrong magic number is a message; a
+    // scientific name of 9606 that XML2 cannot write is not asked for by the prefetch) and one
+    // whose record of 9606 is (an empty `taxdb.btd`, `shared::taxdb_may_refuse`), at one thread
+    // and in a pool.
+    #[test]
+    fn streaming_with_the_prefetch_needs_lookups_that_cannot_be_refused() {
+        use super::super::x_rpt_stream::Off;
+        let cwd = temp_dir("streamtaxdb");
+        for (taxdb, refused) in [
+            (None, None),
+            (Some("good"), None),
+            (Some("bad_magic"), None),
+            (Some("high_bytes_utf8"), None),
+            (Some("btd_empty"), Some(Off::Taxonomy)),
+        ] {
+            let database = open_with_taxdb("x16_ntaxid", taxdb, &cwd);
+            for threads in [1, 4] {
+                crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
+                    assert_eq!(x_streaming_refusal(&database, false, pool), None);
+                    assert_eq!(
+                        x_streaming_refusal(&database, true, pool),
+                        refused,
+                        "{taxdb:?} threads {threads}"
+                    );
+                    Ok(())
+                })
+                .unwrap();
+            }
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
     }
 }

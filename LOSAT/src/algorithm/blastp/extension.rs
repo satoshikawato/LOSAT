@@ -268,14 +268,10 @@ pub(crate) fn extend_one_hit_blosum62(
             word_size,
         )
     };
-    // LOSAT_X_BPUNGAP (x_ungapped_fast.rs): the same result, the X-drop walks with a byte score
-    // table and no bounds checks.
-    if x_ungapped_fast::on() {
-        x_ungapped_fast::one_hit(query, subject, q_off, s_off, dropoff, word_size)
-            .unwrap_or_else(reference)
-    } else {
-        reference()
-    }
+    // x_ungapped_fast.rs: the same result, the X-drop walks with a byte score table and no bounds
+    // checks; the reference runs where the fast walks do not cover the call.
+    x_ungapped_fast::one_hit(query, subject, q_off, s_off, dropoff, word_size)
+        .unwrap_or_else(reference)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1020-1083
@@ -459,22 +455,18 @@ pub(crate) fn extend_two_hit_blosum62(
             word_size,
         )
     };
-    // LOSAT_X_BPUNGAP (x_ungapped_fast.rs): the same result, the X-drop walks with a byte score
-    // table and no bounds checks.
-    if x_ungapped_fast::on() {
-        x_ungapped_fast::two_hit(
-            query,
-            subject,
-            s_left_off,
-            s_right_off,
-            q_right_off,
-            dropoff,
-            word_size,
-        )
-        .unwrap_or_else(reference)
-    } else {
-        reference()
-    }
+    // x_ungapped_fast.rs: the same result, the X-drop walks with a byte score table and no bounds
+    // checks; the reference runs where the fast walks do not cover the call.
+    x_ungapped_fast::two_hit(
+        query,
+        subject,
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        dropoff,
+        word_size,
+    )
+    .unwrap_or_else(reference)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1155

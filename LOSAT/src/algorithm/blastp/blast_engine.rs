@@ -31,7 +31,10 @@ use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
 };
 use crate::algorithm::tblastx::lookup::compressed::BlastCompressedAaLookupTable;
 use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
-use crate::algorithm::tblastx::lookup::{x_bp_build_ncbi_lookup, BlastAaLookupTable, QueryContext};
+use crate::algorithm::tblastx::lookup::{
+    x_bp_build_ncbi_lookup, x_bp_build_ncbi_lookup_as, BackboneCell16, BlastAaLookupTable,
+    QueryContext, XBpLookup,
+};
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::{FormatObserver, FormatProbe, HspIndex, OutputSink, ReportOutputs};
@@ -105,8 +108,7 @@ use super::kappa::{
     BlastpKappaSubjectRangeCache, BlastpTraceHspTarget,
 };
 use super::x_prelim_compact::{
-    x_bp_prelim_compact, x_expand_hit_list, x_expanded_lists, x_finish_compact_lists,
-    x_shadow_compare, XPrelimCompact, XPrelimHsp,
+    x_expand_hit_list, x_expanded_lists, x_finish_compact_lists, XPrelimHsp,
 };
 use crate::core::blast_hits::reap_by_query_coverage;
 // No NCBI counterpart: matches per Newton lanes prefetch in the BLASTP redo loops; it does not
@@ -171,9 +173,7 @@ impl InitHSP {
 // ```
 struct BlastpSubjectResult {
     subject_index: usize,
-    query_hsp_lists: Vec<(usize, BlastpHspList)>,
-    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the same lists with the compact element
-    // (`x_prelim_compact.rs`).
+    // The lists with the compact element (`x_prelim_compact.rs`).
     x_compact_hsp_lists: Vec<(usize, BlastpHspList<XPrelimHsp>)>,
 }
 
@@ -186,7 +186,6 @@ impl BlastpSubjectResult {
     fn new(subject_index: usize) -> Self {
         Self {
             subject_index,
-            query_hsp_lists: Vec::new(),
             x_compact_hsp_lists: Vec::new(),
         }
     }
@@ -200,7 +199,6 @@ impl BlastpSubjectResult {
     // ```
     fn reset(&mut self, subject_index: usize) {
         self.subject_index = subject_index;
-        self.query_hsp_lists.clear();
         self.x_compact_hsp_lists.clear();
     }
 }
@@ -516,7 +514,7 @@ fn print_blastp_timing(timing: &BlastpTiming, total_start: Option<Instant>) {
             total_start.elapsed().as_secs_f64()
         );
     }
-    // EXPERIMENT (LOSAT_X_BPREDOFIT): the redone lists kept with fitted room (`x_redo_fit.rs`).
+    // The redone lists kept with fitted room (`x_redo_fit.rs`).
     super::x_redo_fit::x_bp_redo_fit_print_timing();
 }
 
@@ -1081,7 +1079,7 @@ fn blastp_subject_diag_offsets(subjects: &[EncodedProtein], window: i32) -> Vec<
 // for (b = 0; b < numMatches; ++b) {
 // ```
 // The matches of query `q_idx` (`hsplist_count` of its preliminary hit list), from the compact
-// list while it is not expanded yet (EXPERIMENT LOSAT_X_BPPCOMPACT, `x_prelim_compact.rs`).
+// list while it is not expanded yet (`x_prelim_compact.rs`).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1110,7 +1108,6 @@ trait PrelimSink {
 
 /// The default writer: `hspfilter_collector.c`, a heap of `prelim_hitlist_size` lists per query.
 struct PrelimCollector<'a> {
-    preliminary_hit_lists: &'a mut [Option<BlastpHitList>],
     x_compact_hit_lists: &'a mut [Option<BlastpHitList<XPrelimHsp>>],
     prelim_hitlist_size: usize,
 }
@@ -1119,7 +1116,6 @@ impl PrelimSink for PrelimCollector<'_> {
     #[inline(always)]
     fn add(&mut self, subject_result: &mut BlastpSubjectResult) {
         update_blastp_preliminary_hit_lists(
-            self.preliminary_hit_lists,
             self.x_compact_hit_lists,
             subject_result,
             self.prelim_hitlist_size,
@@ -1142,7 +1138,6 @@ impl PrelimSink for culling::PrelimCulling {
 // Blast_HitListUpdate(results->hitlist_array[0], hsp_list);
 // ```
 fn update_blastp_preliminary_hit_lists(
-    preliminary_hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     subject_result: &mut BlastpSubjectResult,
     prelim_hitlist_size: usize,
@@ -1152,12 +1147,6 @@ fn update_blastp_preliminary_hit_lists(
     // ```c
     // Blast_HitListUpdate(results->hitlist_array[0], hsp_list);
     // ```
-    for (q_idx, provisional_hsp_list) in subject_result.query_hsp_lists.drain(..) {
-        let provisional_hit_list = preliminary_hit_lists[q_idx]
-            .get_or_insert_with(|| BlastpHitList::new(prelim_hitlist_size));
-        provisional_hit_list.update(provisional_hsp_list);
-    }
-    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the same update of the compact lists.
     for (q_idx, provisional_hsp_list) in subject_result.x_compact_hsp_lists.drain(..) {
         x_compact_hit_lists[q_idx]
             .get_or_insert_with(|| BlastpHitList::new(prelim_hitlist_size))
@@ -1182,7 +1171,6 @@ fn update_blastp_preliminary_hit_lists(
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 fn merge_blastp_subject_results_in_order(
-    preliminary_hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     subject_results: Vec<Option<BlastpSubjectResult>>,
     prelim_hitlist_size: usize,
@@ -1193,7 +1181,6 @@ fn merge_blastp_subject_results_in_order(
         };
         debug_assert_eq!(subject_result.subject_index, subject_index);
         update_blastp_preliminary_hit_lists(
-            preliminary_hit_lists,
             x_compact_hit_lists,
             &mut subject_result,
             prelim_hitlist_size,
@@ -1437,47 +1424,8 @@ fn blastp_preliminary_cutoff_subject_length(subjects: &[EncodedProtein]) -> i32 
 // Blast_HSPListGetEvalues(program_number, query_info, subject_length,
 //                         hsp_list, TRUE, FALSE, sbp, 0.0, 1.0);
 // ```
-fn build_preliminary_hsp_list_for_hitlist(
-    preliminary_hits: &[BlastpPreliminaryHsp],
-    oid: u32,
-    query_index: u32,
-    query_length: usize,
-    subject_length: usize,
-    karlin_params: &KarlinParams,
-    gumbel_params: &BlastGumbelBlk,
-) -> BlastpHspList {
-    let hsps: Vec<BlastpHsp> = preliminary_hits
-        .iter()
-        .map(|hit| {
-            blastp_hsp_from_preliminary(
-                hit,
-                blast_spouge_stoe(
-                    hit.raw_score,
-                    karlin_params,
-                    gumbel_params,
-                    query_length as i32,
-                    subject_length as i32,
-                ),
-            )
-        })
-        .collect();
-    let mut hsp_list = BlastpHspList {
-        oid,
-        query_index,
-        hsps,
-        best_evalue: f64::MAX,
-    };
-    super::hsp::update_best_evalue(&mut hsp_list);
-    hsp_list
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-242
-// ```c
-// Blast_HSPListGetEvalues(program_number, query_info, subject_length,
-//                         hsp_list, TRUE, FALSE, sbp, 0.0, 1.0);
-// ```
-// EXPERIMENT (LOSAT_X_BPPCOMPACT): `build_preliminary_hsp_list_for_hitlist` with the compact
-// element: the same E-values (`x_prelim_compact.rs`).
+// The preliminary HSP list of a subject for a query with the compact element, with the E-values
+// `Blast_HSPListGetEvalues` gives (`x_prelim_compact.rs`).
 #[allow(clippy::too_many_arguments)]
 fn x_build_compact_preliminary_hsp_list(
     preliminary_hits: &[BlastpPreliminaryHsp],
@@ -1945,6 +1893,10 @@ fn blastp_offset_array_size(longest_chain: i32) -> i32 {
 
 enum BlastpRuntimeLookup {
     Aa(BlastAaLookupTable),
+    // EXPERIMENT (LOSAT_X_BPLK16): the exact table of a block whose lookup query is at most 65,535
+    // letters, with 16-bit hits and 8-byte cells (lookup/backbone.rs `BackboneCell16`); the same
+    // hits in the same order. Only for a search with a window (the fused two-hit loop reads it).
+    Aa16(BlastAaLookupTable<BackboneCell16>),
     Compressed(BlastCompressedAaLookupTable),
     // EXPERIMENT (LOSAT_X_BPCLUT): the compressed table built flat (lookup/x_clut_direct.rs); the
     // same cells, PV array and parameters.
@@ -1974,6 +1926,7 @@ impl BlastpRuntimeLookup {
     fn word_length(&self) -> i32 {
         match self {
             Self::Aa(lookup) => lookup.word_length,
+            Self::Aa16(lookup) => lookup.word_length,
             Self::Compressed(lookup) => lookup.word_length,
             Self::CompressedFlat(lookup) => lookup.word_length,
         }
@@ -1993,6 +1946,7 @@ impl BlastpRuntimeLookup {
     fn longest_chain(&self) -> i32 {
         match self {
             Self::Aa(lookup) => lookup.longest_chain,
+            Self::Aa16(lookup) => lookup.longest_chain,
             Self::Compressed(lookup) => lookup.longest_chain,
             Self::CompressedFlat(lookup) => lookup.longest_chain,
         }
@@ -2002,7 +1956,20 @@ impl BlastpRuntimeLookup {
 #[derive(Clone, Copy)]
 enum BlastpOffsetPairScanMode {
     OneHit,
+    // The two-hit search scans with the fused loop; the offset-pair two-hit scan stays as the unit tests' reference.
+    #[cfg(test)]
     TwoHit,
+}
+
+impl BlastpOffsetPairScanMode {
+    /// aa_ungapped.c clamps the scan end for the two-hit search only.
+    fn clamps_scan_end(self) -> bool {
+        match self {
+            Self::OneHit => false,
+            #[cfg(test)]
+            Self::TwoHit => true,
+        }
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:86-93
@@ -2068,7 +2035,7 @@ fn blastp_for_each_offset_pair<F>(
     // if (scan_range[2] < scan_range[1])
     //     scan_range[2] = scan_range[1];
     // ```
-    if matches!(scan_mode, BlastpOffsetPairScanMode::TwoHit) && scan_range[2] < scan_range[1] {
+    if scan_mode.clamps_scan_end() && scan_range[2] < scan_range[1] {
         scan_range[2] = scan_range[1];
     }
 
@@ -2099,6 +2066,12 @@ fn blastp_for_each_offset_pair<F>(
                 );
                 blastp_visit_scanned_offset_pairs(offset_pairs, hits, &mut visit);
             }
+        }
+        // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits is built only for a search with a
+        // window, which scans with the fused two-hit loop; this offset-pair scan (a search without a
+        // window) never gets one.
+        BlastpRuntimeLookup::Aa16(_) => {
+            unreachable!("a table of 16-bit hits is built only for a search with a window")
         }
         BlastpRuntimeLookup::Compressed(lookup) => {
             while scan_range[1] <= scan_range[2] {
@@ -2430,6 +2403,20 @@ impl BlastpReport {
     /// (`ReportFormat::writes_query_warnings`): not for the Seq-annot formats.
     fn writes_query_warnings(self) -> bool {
         matches!(self, BlastpReport::Text(_))
+    }
+
+    /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
+    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6 and 7,
+    /// `database::prefetches_subjects`): as the call's first report, the taxonomy database's
+    /// messages of that prefetch go with the query warnings.
+    fn prefetches_subjects(self) -> bool {
+        crate::algorithm::common::database::prefetches_subjects(match self {
+            BlastpReport::Text(outfmt) => Some(outfmt as i32),
+            BlastpReport::Xml => Some(5),
+            // The Seq-annots and the archive fetch nothing; XML2 and JSON write the messages
+            // at each `Hit` (`TaxdbPrinter`).
+            BlastpReport::Seqalign(_) | BlastpReport::Archive | BlastpReport::Xml2(_) => None,
+        })
     }
 
     /// Whether the report is tabular (outfmt 6 and 7), which reads the tabular subject IDs.
@@ -6303,6 +6290,10 @@ fn search(
             if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
                 crate::utils::xreach::x_reach!("LOSAT_X_DBIDXREAD", false);
             }
+            // LOSAT_X_BPDBKEEP acts on the preliminary stage of `-db` (`database/x_db_keep.rs`).
+            if crate::seqdb::x_bp_db_keep() {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPDBKEEP", false);
+            }
             BlastpSubjectSource::Fasta(&subjects.records)
         }
     };
@@ -6480,7 +6471,8 @@ fn search(
     // all queries below. With `-db` the blocks are searched only when no definition line of the
     // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, or
     // `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and 5, `x_titles_taxids_allow_blocks` for 15
-    // and 16 (the titles and the taxids in one pass), read
+    // and 16 (the titles and the taxids in one pass), for outfmt 0, 5, 6 and 7 with `taxdb.bti` on
+    // the search path also the taxids that each batch's prefetch reads and looks up, read
     // in the block search's pool before the first block), and with outfmt 0 and `-subject` only
     // when no subject's title is refused where the report shows it
     // (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when the names of the database, the
@@ -6501,7 +6493,7 @@ fn search(
     if x_plan.is_none() {
         super::x_query_blocks::x_reach_block_search(&x_formats, false);
     }
-    if let Some((x_kinds, blocks)) = x_plan {
+    if let Some((x_kinds, blocks, x_slots)) = x_plan {
         use super::x_query_blocks::{XBlockReport, XBlockSink, XOffsetObserver};
         let reader_warnings = &batches.warnings;
         let ReportOutputs {
@@ -6531,7 +6523,9 @@ fn search(
                 // been written and the search of all queries below runs: the lookup tables' words
                 // (`x_block_words_fit`), then with `-db` the definition lines
                 // (`database::x_titles_allow_blocks`; for outfmt 8, 9, 12 and 5
-                // `database::x_titles_read_allow_blocks`), with outfmt 0 and `-subject` the
+                // `database::x_titles_read_allow_blocks`; for outfmt 0, 5, 6 and 7 with `taxdb.bti`
+                // found also the taxids and lookups of the batches' prefetch), with outfmt 0 and
+                // `-subject` the
                 // subjects' titles (`x_block_shown_titles_allowed`), and with outfmt 5 the
                 // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the database
                 // name and queries' names (`x_block_xml_run_allowed`); with several outputs, the
@@ -6540,7 +6534,28 @@ fn search(
                     super::x_query_blocks::x_reach_block_search(&x_formats, false);
                     return Ok(false);
                 }
+                // BLASTP's outfmt 0, 5, 6 and 7 prefetch the subjects of each batch, which with
+                // `taxdb.bti` on the search path reads their taxids and looks them up in the
+                // taxonomy database (`ListedTitles::prefetch_messages`); a refusal there would come
+                // in a later block, so their checks then also read every sequence's taxid and ask
+                // whether any lookup can be refused (`shared::taxdb_may_refuse`, without the
+                // scientific names, which the prefetch does not ask for). The refusal of NCBI's
+                // taxonomy cache (`shared::TaxdbRun::cache_collision`) comes at the run's first
+                // prefetch, in block 0 before any row.
+                let x_prefetch_taxids = |x_kind: XBlockReport| {
+                    args.app == BlastpApp::Blastp
+                        && matches!(
+                            x_kind,
+                            XBlockReport::Tabular | XBlockReport::Pairwise | XBlockReport::Xml
+                        )
+                        && database.is_some_and(|database| database.taxdb_found())
+                };
                 let titles_allowed = |x_kind: XBlockReport| match (database, x_kind) {
+                    // Outfmt 5 whose batches read the taxids: the check of outfmt 15 and 16.
+                    // The prefetch asks for no scientific name.
+                    (Some(database), XBlockReport::Xml) if x_prefetch_taxids(x_kind) => {
+                        database::x_titles_taxids_allow_blocks(database, false, pool)
+                    }
                     // Outfmt 8, 9, 12 and 5 write no tabular id: only the definition lines' reading
                     // and bytes can fail (`x_titles_read_allow_blocks`).
                     (Some(database), XBlockReport::Seqalign | XBlockReport::Xml) => {
@@ -6550,11 +6565,14 @@ fn search(
                     // database's name of it, in the same pass over the headers
                     // (`x_titles_taxids_allow_blocks`).
                     (Some(database), XBlockReport::Xml2) => {
-                        database::x_titles_taxids_allow_blocks(database, pool)
+                        database::x_titles_taxids_allow_blocks(database, true, pool)
                     }
-                    (Some(database), _) => {
-                        database::x_titles_allow_blocks(database, x_pairwise, pool)
-                    }
+                    (Some(database), _) => database::x_titles_allow_blocks(
+                        database,
+                        x_pairwise,
+                        x_prefetch_taxids(x_kind),
+                        pool,
+                    ),
                     (None, XBlockReport::Pairwise) => {
                         x_block_shown_titles_allowed(&subjects.records, v1.is_some(), pool)
                     }
@@ -6586,6 +6604,9 @@ fn search(
                     return Ok(false);
                 }
                 super::x_query_blocks::x_reach_block_search(&x_formats, true);
+                if super::x_query_slots::x_bp_qslots().is_some() {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BPQSLOTS", x_slots > 1);
+                }
                 // EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks
                 // (`x_query_blocks::XBlockSubjects`), on the search's pool.
                 // Diagnostic (LOSAT_TIMING): the blocks' shared subject encoding for the common
@@ -6599,6 +6620,59 @@ fn search(
                     .iter_mut()
                     .map(|format| XBlockSink::new(&mut format.sink))
                     .collect();
+                // EXPERIMENT (LOSAT_X_BPQSLOTS): the blocks searched several at a time on the pool,
+                // each block's report and messages written in block order (`x_query_slots.rs`); one
+                // output, no hit records, no observer (the plan's slots).
+                #[cfg(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                ))]
+                if x_slots > 1 {
+                    let v1_titles = v1.is_some();
+                    let search_block = |index: usize, block_outputs: &mut ReportOutputs<'_>| {
+                        let block = &blocks[index];
+                        let block_queries = &searched_queries[block.clone()];
+                        let block_input = seq_range::QueryInput::whole(block_queries);
+                        run_resolved_in_pool(
+                            args.clone(),
+                            block_queries,
+                            subject_source,
+                            "",
+                            subject_label,
+                            block_outputs,
+                            pool,
+                            None,
+                            &BlastpRanges {
+                                input_records: &query_records[block.clone()],
+                                query_input: &block_input,
+                                subject_placements: &subjects.placements,
+                                x_ordinal_base: block.start,
+                            },
+                            &BlastpReports {
+                                reader_warnings: &reader_warnings[block.clone()],
+                                epilog: epilog && index + 1 == blocks.len(),
+                                v1_titles,
+                                x_prolog: index == 0,
+                                x_queries_before: block.start,
+                                x_xml2_carry: None,
+                            },
+                            x_lookup_ahead::XAheadBlock::none(),
+                        )
+                    };
+                    super::x_query_slots::x_search_in_slots(
+                        blocks.len(),
+                        x_slots,
+                        outfmts[0],
+                        pool,
+                        &mut sinks[0],
+                        &mut **diagnostics,
+                        &search_block,
+                    )?;
+                    for sink in &mut sinks {
+                        sink.flush()?;
+                    }
+                    return Ok(true);
+                }
                 // The HSPs of the blocks before: the first index of the block's HSPs in the list
                 // of all queries.
                 let mut x_hsps_before: HspIndex = 0;
@@ -6840,6 +6914,7 @@ fn x_query_block_plan(
 ) -> Option<(
     Vec<super::x_query_blocks::XBlockReport>,
     Vec<std::ops::Range<usize>>,
+    usize,
 )> {
     use super::x_query_blocks::{XBlockFormat, XBlockReport};
     let block_letters = super::x_query_blocks::x_bp_qblock()?;
@@ -6976,9 +7051,40 @@ fn x_query_block_plan(
         }
     }
     let query_batches = query_input.batches(batch_size);
+    // EXPERIMENT (LOSAT_X_BPQSLOTS): blastp-fast's blocks searched several at a time on a pool of
+    // more than one thread, with one output that is not outfmt 11 or 13 to 16 and no hit records or
+    // observer (`x_query_slots.rs`), in blocks of `x_slot_letters`. Not where the batches' prefetch
+    // can write a text (`-db`, a first format of outfmt 0, 5, 6 or 7 and a taxonomy database whose
+    // lookups write the texts of opening or the offset error, `BlastpDatabase::prefetch_may_write`):
+    // the text goes with the block whose prefetch makes the run's first lookup, which in flight is
+    // the block that gets there first, not block 0 (DBID item T, review 1). NCBI's own taxonomy
+    // database writes no text, so the usual run keeps the slots.
+    let prefetch_writes = args.app == BlastpApp::Blastp
+        && matches!(
+            kinds.first(),
+            Some(XBlockReport::Tabular | XBlockReport::Pairwise | XBlockReport::Xml)
+        )
+        && subject_source
+            .database()
+            .is_some_and(|database| database.prefetch_may_write());
+    let slots = super::x_query_slots::x_bp_qslots()
+        .filter(|_| {
+            args.num_threads > 1
+                && args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable
+                && !x_web
+                && args.archive.is_none()
+                && !kinds.contains(&XBlockReport::Xml2)
+                && !prefetch_writes
+        })
+        .unwrap_or(1);
+    let block_letters = if slots > 1 {
+        super::x_query_slots::x_slot_letters(block_letters, slots)
+    } else {
+        block_letters
+    };
     let blocks = super::x_query_blocks::x_query_blocks(&query_batches, &lengths, block_letters)?;
     (blocks.len() > 1 && x_block_search_refuses_nothing(args, queries, &query_batches, &lengths))
-        .then_some((kinds, blocks))
+        .then_some((kinds, blocks, slots))
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): whether the search of all queries passes the checks that refuse
@@ -7494,7 +7600,6 @@ fn search_split_query_batches(
     query_input: &seq_range::QueryInput,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-    x_split_queries: &mut [bool],
     x_prolog: bool,
 ) -> Result<()> {
     use crate::algorithm::common::protein_query_split::{
@@ -7592,18 +7697,9 @@ fn search_split_query_batches(
             );
         }
         for (local, list) in merged.into_iter().enumerate() {
-            // EXPERIMENT (LOSAT_X_BPPCOMPACT): the chunks' list replaces the compact one too; the
-            // shadow mode compares the two lists it replaces.
+            // The chunks' list replaces the compact one too.
             let q_idx = range.start + local;
-            if x_bp_prelim_compact() == XPrelimCompact::Shadow {
-                x_shadow_compare(
-                    q_idx,
-                    preliminary_hit_lists[q_idx].as_ref(),
-                    x_compact_hit_lists[q_idx].take(),
-                );
-            }
             x_compact_hit_lists[q_idx] = None;
-            x_split_queries[q_idx] = true;
             preliminary_hit_lists[q_idx] = list;
         }
     }
@@ -7661,25 +7757,65 @@ fn blastp_query_frames_marked(
         .collect()
 }
 
+// No NCBI counterpart: reads the LOSAT_X_BPLK16 switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPLK16): strict set (on unless `0`). Exact blastp's block tables hold 16-bit hits in 8-byte cells where the lookup query is at most 65,535
+/// letters (`BlastAaLookupTable<BackboneCell16>`, lookup/backbone.rs), halving the overflow array
+/// and the cells; the hits are the same in the same order.
+fn x_bplk16() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPLK16"))
+}
+
+// No NCBI counterpart: chooses LOSAT's table (LOSAT_X_BPLK16); it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPLK16): whether a table of `args`' search may have 16-bit hits: a search
+/// with a window (the fused two-hit loop scans it; the offset-pair scan of a search without one
+/// reads the 32-bit table) that is not a query chunk of a split batch (`x_chunk`).
+fn x_bplk16_for(args: &ResolvedBlastpArgs, x_chunk: bool) -> bool {
+    args.window_size != 0 && !x_chunk
+}
+
+// No NCBI counterpart: LOSAT_X_BPLK16's table in the runtime lookup; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLK16): the runtime lookup of a table built with the switch on, counted for
+/// `LOSAT_X_REACH` (taken: the table has 16-bit hits).
+fn x_bp_runtime_lookup(built: XBpLookup) -> BlastpRuntimeLookup {
+    crate::utils::xreach::x_reach!("LOSAT_X_BPLK16", matches!(built, XBpLookup::Narrow(_)));
+    match built {
+        XBpLookup::Wide(table) => BlastpRuntimeLookup::Aa(table),
+        XBpLookup::Narrow(table) => BlastpRuntimeLookup::Aa16(table),
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:245
 // ```c
 //     lookup->threshold = (Int4)opt->threshold;
 // ```
 /// The lookup table of exact blastp (`AaLookupTable`) and the query contexts of `query_frames`, as
 /// the lookup region of `run_resolved_in_pool` builds them. The threshold takes the x86-64
-/// conversion: `INT_MIN` for a threshold beyond `Int4` (every word). EXPERIMENT (LOSAT_X_BPLUT):
-/// the same table filled in place, without the reference builder's chains
-/// (lookup/x_lut_direct.rs). The build of the next block's table ahead of that block
-/// (LOSAT_X_BPLKPAHEAD, `x_lookup_ahead.rs`) makes the same call with the same arguments
-/// (`blastp_aa_lookup_ahead`).
+/// conversion: `INT_MIN` for a threshold beyond `Int4` (every word). The table is filled in place,
+/// without the reference builder's chains (lookup/x_lut_direct.rs). The build of the next block's table ahead of that block
+/// (LOSAT_X_BPLKPAHEAD, `x_lookup_ahead.rs`, `blastp_aa_lookup_ahead`) takes the same threshold and
+/// query frames and gives the same table; the Karlin parameters it is passed are not used.
 fn blastp_aa_lookup(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
+    x_chunk: bool,
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
+    // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits where the switch is on.
+    if x_bplk16() {
+        let (built, contexts) = x_bp_build_ncbi_lookup_as(
+            query_frames,
+            crate::core::blast_util::ncbi_int4_from_double(args.threshold),
+            false,
+            x_bplk16_for(args, x_chunk),
+        );
+        return (x_bp_runtime_lookup(built), contexts);
+    }
     let (lookup, contexts) = x_bp_build_ncbi_lookup(
         query_frames,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
-        &lookup_protein_params_ungapped(args.scoring.matrix),
         false,
     );
     (BlastpRuntimeLookup::Aa(lookup), contexts)
@@ -7698,6 +7834,22 @@ fn blastp_aa_lookup_ahead(
     query_frames: &[Vec<QueryFrame>],
     spares: &crate::algorithm::tblastx::lookup::XAaSpares,
 ) -> Option<(BlastpRuntimeLookup, Vec<QueryContext>)> {
+    // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits where the switch is on (a block of the
+    // block loop is never a query chunk).
+    if x_bplk16() {
+        let threshold = crate::core::blast_util::ncbi_int4_from_double(args.threshold);
+        if x_bplk16_for(args, false) {
+            let (built, contexts) = spares.x_build_ahead16(query_frames, threshold, false)?;
+            return Some((x_bp_runtime_lookup(built), contexts));
+        }
+        let (lookup, contexts) = spares.x_build_ahead(
+            query_frames,
+            threshold,
+            &lookup_protein_params_ungapped(args.scoring.matrix),
+            false,
+        )?;
+        return Some((x_bp_runtime_lookup(XBpLookup::Wide(lookup)), contexts));
+    }
     let (lookup, contexts) = spares.x_build_ahead(
         query_frames,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
@@ -7718,7 +7870,23 @@ fn blastp_aa_lookup_on_block_spare(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
     spare: &crate::algorithm::tblastx::lookup::XAaSpares,
+    x_chunk: bool,
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
+    // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits where the switch is on.
+    if x_bplk16() {
+        let threshold = crate::core::blast_util::ncbi_int4_from_double(args.threshold);
+        if x_bplk16_for(args, x_chunk) {
+            let (built, contexts) = spare.x_build_on_block_spare16(query_frames, threshold, false);
+            return (x_bp_runtime_lookup(built), contexts);
+        }
+        let (lookup, contexts) = spare.x_build_on_block_spare(
+            query_frames,
+            threshold,
+            &lookup_protein_params_ungapped(args.scoring.matrix),
+            false,
+        );
+        return (x_bp_runtime_lookup(XBpLookup::Wide(lookup)), contexts);
+    }
     let (lookup, contexts) = spare.x_build_on_block_spare(
         query_frames,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
@@ -7835,7 +8003,7 @@ fn x_lookup_after_prelim(
             BlastpRuntimeLookup::CompressedFlat(_) => {
                 super::x_query_blocks::x_bp_lookup_spare(pool).is_some()
             }
-            BlastpRuntimeLookup::Aa(_) => {
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {
                 super::x_query_blocks::x_bp_aa_spares(pool).is_some()
                     || super::x_query_blocks::x_bp_aa_block_spare(pool).is_some()
             }
@@ -8101,8 +8269,13 @@ fn run_resolved_in_pool(
         BlastpLookupTableType::AaLookupTable => match x_prebuilt.take() {
             Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(prebuilt),
             None => match super::x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool) {
-                Some(spare) => blastp_aa_lookup_on_block_spare(&args, &query_frames, spare),
-                None => blastp_aa_lookup(&args, &query_frames),
+                Some(spare) => blastp_aa_lookup_on_block_spare(
+                    &args,
+                    &query_frames,
+                    spare,
+                    chunk_prelim.is_some(),
+                ),
+                None => blastp_aa_lookup(&args, &query_frames, chunk_prelim.is_some()),
             },
         },
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
@@ -8134,13 +8307,10 @@ fn run_resolved_in_pool(
     x_ahead.lookup_ready(&lookup);
     // EXPERIMENT (LOSAT_X_BPCLUTSCANBF): whether the fused loop lists this block's cells without a
     // branch on the presence bit: on the flat compressed table when enough of its cells are used,
-    // on the reference compressed table never (the standard table has LOSAT_X_BPSCANBF's scan).
-    if args.window_size != 0
-        && super::x_seed_fused::x_bp_seed()
-        && super::x_seed_fused_clut::x_bp_clut_scan_bf()
-    {
+    // on the reference compressed table never (the standard table always has the branch-free scan).
+    if args.window_size != 0 && super::x_seed_fused_clut::x_bp_clut_scan_bf() {
         match &lookup {
-            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
             BlastpRuntimeLookup::Compressed(_) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPCLUTSCANBF", false)
             }
@@ -8153,12 +8323,9 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPFSEED): the reference compressed table, a flat table without the
     // branch-free list and every table on wasm32 keep their loops; on a flat table with the list
     // the loop records its side per subject (`x_seed_fused_clut.rs`).
-    if args.window_size != 0
-        && super::x_seed_fused::x_bp_seed()
-        && super::x_seed_fused_clut::x_bp_fseed()
-    {
+    if args.window_size != 0 && super::x_seed_fused_clut::x_bp_fseed() {
         match &lookup {
-            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
             BlastpRuntimeLookup::Compressed(_) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
             }
@@ -8173,12 +8340,11 @@ fn run_resolved_in_pool(
     // without that loop keep theirs, and a subject with it records its side
     // (`x_seed_fused_clut.rs`).
     if args.window_size != 0
-        && super::x_seed_fused::x_bp_seed()
         && super::x_seed_fused_clut::x_bp_fseed()
         && super::x_seed_fused_clut::x_bp_fstage()
     {
         match &lookup {
-            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
             BlastpRuntimeLookup::Compressed(_) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPFSTAGE", false)
             }
@@ -8192,13 +8358,12 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPFLEAN): it acts only where LOSAT_X_BPFSTAGE's loop runs, and records
     // its sides where that switch records its own.
     if args.window_size != 0
-        && super::x_seed_fused::x_bp_seed()
         && super::x_seed_fused_clut::x_bp_fseed()
         && super::x_seed_fused_clut::x_bp_fstage()
         && super::x_seed_fused_clut::x_bp_flean()
     {
         match &lookup {
-            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
             BlastpRuntimeLookup::Compressed(_) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPFLEAN", false)
             }
@@ -8211,14 +8376,14 @@ fn run_resolved_in_pool(
     }
     let context_lookup_bounds = blastp_context_lookup_bounds(&contexts);
     let concatenated_query = build_blastp_concatenated_query(&contexts);
-    // EXPERIMENT (LOSAT_X_BPSEED): the context of every query offset, for the candidates of the
-    // fused seed loop (the binary search below gives the same index).
+    // The context of every query offset, for the candidates of the fused seed loop (the binary
+    // search gives the same index).
     // No NCBI counterpart: a table of BSearchContextInfo's results; it does not change any value
     // NCBI computes.
-    let x_context_table = super::x_seed_fused::x_bp_seed().then(|| {
+    let x_context_table = {
         let frame_bases: Vec<i32> = contexts.iter().map(|ctx| ctx.frame_base).collect();
         super::x_seed_fused::XContextTable::new(&frame_bases, concatenated_query.len())
-    });
+    };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
     // ```c
     //     int status = m_PrelimSearch->CheckInternalData();
@@ -8535,8 +8700,7 @@ fn run_resolved_in_pool(
     // params->prelim_evalue = cbs_stretch*evalue;
     // ```
     let prelim_evalue = blastp_prelim_evalue(args.evalue, args.comp_based_stats.mode);
-    // EXPERIMENT (LOSAT_X_BPPFREE): `x_prelim_free.rs`.
-    let x_prelim_free = super::x_prelim_free::x_bp_prelim_free();
+    // `x_prelim_free.rs`.
     let mut x_prelim_freed = 0usize;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3074-3077
     // ```c
@@ -8554,17 +8718,13 @@ fn run_resolved_in_pool(
     let mut preliminary_hit_lists: Vec<Option<BlastpHitList>> = std::iter::repeat_with(|| None)
         .take(query_ids.len())
         .collect();
-    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the preliminary hit lists with the compact element
-    // (`x_prelim_compact.rs`); all None with the switch off.
-    let x_prelim_compact = x_bp_prelim_compact();
+    // The preliminary hit lists with the compact element (`x_prelim_compact.rs`), the lists the
+    // subject scan keeps until the redo.
     let x_expanded_at_start = x_expanded_lists();
     let mut x_compact_hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>> =
         std::iter::repeat_with(|| None)
             .take(query_ids.len())
             .collect();
-    // EXPERIMENT (LOSAT_X_BPPCOMPACT=shadow): queries whose lists the query chunks replaced
-    // (compared before the replacement, in `search_split_query_batches`).
-    let mut x_split_queries = vec![false; query_ids.len()];
 
     let window = args.window_size as i32;
     let word_size = lookup.word_length();
@@ -8602,6 +8762,8 @@ fn run_resolved_in_pool(
     // The kernel takes the subject from its caller: a record of the encoded FASTA set,
     // or a sequence of a database block (`BlastpSubjectRef`); `s_idx` is the subject's
     // index in the set, or its ordinal id in the database.
+    // The kernel runs no rayon work: with `-db` the window of `database/x_db_keep.rs` makes the
+    // workers wait for the one that runs it (header: why the waits end).
     let process_subject = |scratch: &mut BlastpSubjectScratch,
                            s_idx: usize,
                            subject: BlastpSubjectRef<'_>,
@@ -8667,7 +8829,7 @@ fn run_resolved_in_pool(
         let subject_diag_offset = scratch.diag_offset;
 
         let scan_ungapped_start = blastp_timing_start(timing_enabled);
-        // EXPERIMENT (LOSAT_X_BPSEED): the subject scan and the two-hit test in one loop.
+        // The subject scan and the two-hit test in one loop (a search with a window).
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:502-512
         // ```c
         // while (scan_range[1] <= scan_range[2]) {
@@ -8677,13 +8839,12 @@ fn run_resolved_in_pool(
         //     ...
         //     for (i = 0; i < hits; ++i) {
         // ```
-        // Dispatch point: with the switch, the two-hit test reads the lookup cells in place
+        // Dispatch point: the two-hit test reads the lookup cells in place
         // (`x_seed_fused::x_scan_two_hit`, and `x_seed_fused_compressed::x_scan_two_hit_compressed`
         // for the compressed table of blastp-fast) and this closure takes the hits that need the
         // context check and the extension, with the same body as the reference closure below.
         // EXPERIMENT (LOSAT_X_BPDIAG): inside it the hits of a cell are tested in batches.
-        let x_fused = args.window_size != 0 && super::x_seed_fused::x_bp_seed();
-        if x_fused {
+        if args.window_size != 0 {
             let x_candidate = |query_offset: i32,
                                subject_offset: i32,
                                last_hit: i32,
@@ -8700,16 +8861,13 @@ fn run_resolved_in_pool(
                 //     continue;
                 // }
                 // ```
-                let ctx_idx = x_context_table
-                    .as_ref()
-                    .and_then(|table| table.get(query_offset))
-                    .unwrap_or_else(|| {
-                        blastp_context_idx_for_query_offset_with_bounds(
-                            &contexts,
-                            context_lookup_bounds,
-                            query_offset,
-                        )
-                    });
+                let ctx_idx = x_context_table.get(query_offset).unwrap_or_else(|| {
+                    blastp_context_idx_for_query_offset_with_bounds(
+                        &contexts,
+                        context_lookup_bounds,
+                        query_offset,
+                    )
+                });
                 let ctx = &contexts[ctx_idx];
                 if query_offset - diff < ctx.frame_base {
                     diag_entry.set_last_hit(subject_offset + subject_diag_offset);
@@ -8800,16 +8958,13 @@ fn run_resolved_in_pool(
                      diag_entry: &mut DiagStruct| {
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:551-570
                         // (as in the closure above)
-                        let ctx_idx = x_context_table
-                            .as_ref()
-                            .and_then(|table| table.get(query_offset))
-                            .unwrap_or_else(|| {
-                                blastp_context_idx_for_query_offset_with_bounds(
-                                    &contexts,
-                                    context_lookup_bounds,
-                                    query_offset,
-                                )
-                            });
+                        let ctx_idx = x_context_table.get(query_offset).unwrap_or_else(|| {
+                            blastp_context_idx_for_query_offset_with_bounds(
+                                &contexts,
+                                context_lookup_bounds,
+                                query_offset,
+                            )
+                        });
                         let ctx = &contexts[ctx_idx];
                         if query_offset - diff < ctx.frame_base {
                             diag_entry.set_last_hit(subject_offset + subject_diag_offset);
@@ -8869,13 +9024,35 @@ fn run_resolved_in_pool(
                     crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", sent_subject.is_some());
                     sent_subject.map(|sent_subject| (sent_query, sent_subject, aa_lookup))
                 }
+                (Some(_), BlastpRuntimeLookup::Aa16(_)) => None,
                 (Some(_), _) => {
                     crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", false);
                     None
                 }
                 (None, _) => None,
             };
-            if let Some((sent_query, sent_subject, aa_lookup)) = x_sent {
+            // EXPERIMENT (LOSAT_X_BPLK16): the same choice for the table of 16-bit hits.
+            let x_sent16 = match (&x_ungap_sent, &lookup) {
+                (Some(sent_query), BlastpRuntimeLookup::Aa16(aa_lookup)) => {
+                    let sent_subject = super::x_ungapped_sent::XSentSubject::new(subject.aa_seq);
+                    crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", sent_subject.is_some());
+                    sent_subject.map(|sent_subject| (sent_query, sent_subject, aa_lookup))
+                }
+                _ => None,
+            };
+            if let Some((sent_query, sent_subject, aa_lookup)) = x_sent16 {
+                super::x_seed_fused::x_scan_two_hit(
+                    aa_lookup,
+                    subject_sequence,
+                    subject.aa_len,
+                    &mut scratch.diag_array,
+                    diag_mask,
+                    subject_diag_offset,
+                    window,
+                    word_size,
+                    x_candidate_sent!(sent_query, sent_subject),
+                );
+            } else if let Some((sent_query, sent_subject, aa_lookup)) = x_sent {
                 super::x_seed_fused::x_scan_two_hit(
                     aa_lookup,
                     subject_sequence,
@@ -8890,6 +9067,18 @@ fn run_resolved_in_pool(
             } else {
                 match &lookup {
                     BlastpRuntimeLookup::Aa(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate,
+                    ),
+                    // EXPERIMENT (LOSAT_X_BPLK16): the same loop on the table of 16-bit hits.
+                    BlastpRuntimeLookup::Aa16(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
                         aa_lookup,
                         subject_sequence,
                         subject.aa_len,
@@ -8930,240 +9119,90 @@ fn run_resolved_in_pool(
                     }
                 }
             }
-        }
-        if !x_fused {
+        } else {
+            // One-hit search (`-window_size 0`): the buffer of offset pairs, as NCBI's
+            // `s_BlastAaWordFinder_OneHit`.
             blastp_for_each_offset_pair(
                 &lookup,
                 subject_sequence,
                 subject.aa_len,
                 &mut scratch.offset_pairs,
-                if args.window_size == 0 {
-                    BlastpOffsetPairScanMode::OneHit
-                } else {
-                    BlastpOffsetPairScanMode::TwoHit
-                },
+                BlastpOffsetPairScanMode::OneHit,
                 |pair| {
                     let query_offset = i32::try_from(pair.q_off)
                         .expect("NCBI BLAST query offset must fit in Int4");
                     let subject_offset = i32::try_from(pair.s_off)
                         .expect("NCBI BLAST subject offset must fit in Int4");
-                    if args.window_size == 0 {
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:776-779
-                        // ```c
-                        // diag_coord = (subject_offset - query_offset) & diag_mask;
-                        // diff = subject_offset -
-                        //     (diag_array[diag_coord].last_hit - diag_offset);
-                        // ```
-                        let diag_coord =
-                            blastp_diag_coord(subject_offset - query_offset, diag_mask);
-                        let diag_entry = &mut scratch.diag_array[diag_coord];
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:713-775
-                        // ```c
-                        // diff = subject_offset -
-                        //     (diag_array[diag_coord].last_hit - diag_offset);
-                        // if (diff >= 0) {
-                        //     score = s_BlastAaExtendOneHit(...);
-                        //     if (score >= cutoffs->cutoff_score) {
-                        //         BlastSaveInitHsp(...);
-                        //     }
-                        //     diag_array[diag_coord].last_hit =
-                        //         s_last_off - (wordsize - 1) + diag_offset;
-                        // }
-                        // ```
-                        let diff = subject_offset - (diag_entry.last_hit() - subject_diag_offset);
-                        if diff < 0 {
-                            return;
-                        }
-
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:787-793
-                        // ```c
-                        // Int4 curr_context = BSearchContextInfo(query_offset,
-                        //                                        query_info);
-                        // BlastUngappedCutoffs *cutoffs =
-                        //     word_params->cutoffs + curr_context;
-                        // ```
-                        let ctx_idx = blastp_context_idx_for_query_offset_with_bounds(
-                            &contexts,
-                            context_lookup_bounds,
-                            query_offset,
-                        );
-                        let x_drop = x_dropoff_per_context[ctx_idx];
-                        let cutoff = word_cutoff_scores[ctx_idx];
-
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
-                        // ```c
-                        // if (use_pssm)
-                        //     sum += matrix[q_off + i][s[s_off + i]];
-                        // else
-                        //     sum += matrix[q[q_off + i]][s[s_off + i]];
-                        // ```
-                        let Some(ungapped_hit) = extend_one_hit_blosum62(
-                            &concatenated_query,
-                            subject_raw,
-                            usize::try_from(query_offset)
-                                .expect("NCBI BLAST one-hit query offset must be non-negative"),
-                            usize::try_from(subject_offset)
-                                .expect("NCBI BLAST one-hit subject offset must be non-negative"),
-                            x_drop,
-                            args.word_size,
-                        ) else {
-                            return;
-                        };
-
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:790-800
-                        // ```c
-                        // if (score >= cutoffs->cutoff_score) {
-                        //     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-                        //                      query_offset, subject_offset, hsp_len,
-                        //                      score);
-                        // }
-                        // diag_array[diag_coord].last_hit =
-                        //     s_last_off - (wordsize - 1) + diag_offset;
-                        // ```
-                        if ungapped_hit.ungapped_data.score >= cutoff {
-                            blastp_save_init_hsp(
-                                &mut init_hsps,
-                                ungapped_hit.ungapped_data.q_start,
-                                ungapped_hit.ungapped_data.s_start,
-                                query_offset,
-                                subject_offset,
-                                ungapped_hit.ungapped_data.length,
-                                ungapped_hit.ungapped_data.score,
-                            );
-                        }
-                        diag_entry.set_last_hit(
-                            ungapped_hit.s_last_off - (word_size - 1) + subject_diag_offset,
-                        );
-                        return;
-                    }
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:516-518
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:776-779
                     // ```c
-                    // diag_coord = (query_offset - subject_offset) & diag_mask;
+                    // diag_coord = (subject_offset - query_offset) & diag_mask;
+                    // diff = subject_offset -
+                    //     (diag_array[diag_coord].last_hit - diag_offset);
                     // ```
-                    let diag_coord = blastp_diag_coord(query_offset - subject_offset, diag_mask);
+                    let diag_coord = blastp_diag_coord(subject_offset - query_offset, diag_mask);
                     let diag_entry = &mut scratch.diag_array[diag_coord];
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:488-574
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:713-775
                     // ```c
-                    // if (diag_array[diag_coord].flag) {
-                    //     ...
-                    // } else {
-                    //     last_hit = diag_array[diag_coord].last_hit - diag_offset;
-                    //     diff = subject_offset - last_hit;
-                    //     if (diff >= window) { ... }
-                    //     if (diff < wordsize) continue;
-                    //     ...
-                    //     score = s_BlastAaExtendTwoHit(...);
-                    //     if (right_extend) {
-                    //         diag_array[diag_coord].flag = 1;
-                    //         diag_array[diag_coord].last_hit =
-                    //             s_last_off - (wordsize - 1) + diag_offset;
-                    //     } else {
-                    //         diag_array[diag_coord].last_hit =
-                    //             subject_offset + diag_offset;
+                    // diff = subject_offset -
+                    //     (diag_array[diag_coord].last_hit - diag_offset);
+                    // if (diff >= 0) {
+                    //     score = s_BlastAaExtendOneHit(...);
+                    //     if (score >= cutoffs->cutoff_score) {
+                    //         BlastSaveInitHsp(...);
                     //     }
+                    //     diag_array[diag_coord].last_hit =
+                    //         s_last_off - (wordsize - 1) + diag_offset;
                     // }
                     // ```
-                    if diag_entry.flag() != 0 {
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:509-521
-                        // ```c
-                        // if ((Int4) (subject_offset + diag_offset) <
-                        //     diag_array[diag_coord].last_hit) {
-                        //     continue;
-                        // }
-                        // else {
-                        //     diag_array[diag_coord].last_hit =
-                        //         subject_offset + diag_offset;
-                        //     diag_array[diag_coord].flag = 0;
-                        // }
-                        // ```
-                        let subject_plus_offset = subject_offset + subject_diag_offset;
-                        if subject_plus_offset < diag_entry.last_hit() {
-                            return;
-                        }
-                        diag_entry.set_last_hit(subject_plus_offset);
-                        diag_entry.set_flag(0);
+                    let diff = subject_offset - (diag_entry.last_hit() - subject_diag_offset);
+                    if diff < 0 {
                         return;
                     }
 
-                    let last_hit = diag_entry.last_hit() - subject_diag_offset;
-                    let diff = subject_offset - last_hit;
-                    if diff >= window {
-                        diag_entry.set_last_hit(subject_offset + subject_diag_offset);
-                        return;
-                    }
-                    if diff < word_size {
-                        return;
-                    }
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:551-560
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:787-793
                     // ```c
-                    // curr_context = BSearchContextInfo(query_offset, query_info);
-                    // ...
-                    // if (query_offset - diff <
-                    //     query_info->contexts[curr_context].query_offset) {
+                    // Int4 curr_context = BSearchContextInfo(query_offset,
+                    //                                        query_info);
+                    // BlastUngappedCutoffs *cutoffs =
+                    //     word_params->cutoffs + curr_context;
                     // ```
                     let ctx_idx = blastp_context_idx_for_query_offset_with_bounds(
                         &contexts,
                         context_lookup_bounds,
                         query_offset,
                     );
-                    let ctx = &contexts[ctx_idx];
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:562-570
-                    // ```c
-                    // if (query_offset - diff <
-                    //     query_info->contexts[curr_context].query_offset) {
-                    //     diag_array[diag_coord].last_hit =
-                    //         subject_offset + diag_offset;
-                    //     continue;
-                    // }
-                    // ```
-                    if query_offset - diff < ctx.frame_base {
-                        diag_entry.set_last_hit(subject_offset + subject_diag_offset);
-                        return;
-                    }
-
                     let x_drop = x_dropoff_per_context[ctx_idx];
                     let cutoff = word_cutoff_scores[ctx_idx];
 
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
                     // ```c
                     // if (use_pssm)
-                    //     score += matrix[q_right_off + i][s[s_right_off + i]];
+                    //     sum += matrix[q_off + i][s[s_off + i]];
                     // else
-                    //     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
+                    //     sum += matrix[q[q_off + i]][s[s_off + i]];
                     // ```
-                    let Some(ungapped_hit) = extend_two_hit_blosum62(
+                    let Some(ungapped_hit) = extend_one_hit_blosum62(
                         &concatenated_query,
                         subject_raw,
-                        usize::try_from(last_hit + word_size)
-                            .expect("NCBI BLAST two-hit seed boundary must be non-negative"),
-                        usize::try_from(subject_offset)
-                            .expect("NCBI BLAST two-hit subject offset must be non-negative"),
                         usize::try_from(query_offset)
-                            .expect("NCBI BLAST two-hit query offset must be non-negative"),
+                            .expect("NCBI BLAST one-hit query offset must be non-negative"),
+                        usize::try_from(subject_offset)
+                            .expect("NCBI BLAST one-hit subject offset must be non-negative"),
                         x_drop,
                         args.word_size,
                     ) else {
                         return;
                     };
 
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-588
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:790-800
                     // ```c
-                    // if (score >= cutoffs->cutoff_score)
+                    // if (score >= cutoffs->cutoff_score) {
                     //     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
                     //                      query_offset, subject_offset, hsp_len,
                     //                      score);
-                    // if (right_extend) {
-                    //     diag_array[diag_coord].flag = 1;
-                    //     diag_array[diag_coord].last_hit =
-                    //         s_last_off - (wordsize - 1) + diag_offset;
                     // }
-                    // else {
-                    //     diag_array[diag_coord].last_hit =
-                    //         subject_offset + diag_offset;
-                    // }
+                    // diag_array[diag_coord].last_hit =
+                    //     s_last_off - (wordsize - 1) + diag_offset;
                     // ```
                     if ungapped_hit.ungapped_data.score >= cutoff {
                         blastp_save_init_hsp(
@@ -9176,14 +9215,9 @@ fn run_resolved_in_pool(
                             ungapped_hit.ungapped_data.score,
                         );
                     }
-                    if ungapped_hit.right_extend {
-                        diag_entry.set_flag(1);
-                        diag_entry.set_last_hit(
-                            ungapped_hit.s_last_off - (word_size - 1) + subject_diag_offset,
-                        );
-                    } else {
-                        diag_entry.set_last_hit(subject_offset + subject_diag_offset);
-                    }
+                    diag_entry.set_last_hit(
+                        ungapped_hit.s_last_off - (word_size - 1) + subject_diag_offset,
+                    );
                 },
             );
         }
@@ -9684,33 +9718,10 @@ fn run_resolved_in_pool(
                 continue;
             }
             let ctx = &contexts[q_idx as usize];
-            // EXPERIMENT (LOSAT_X_BPPCOMPACT): the compact list, with the same E-values and the
-            // same reap (`x_prelim_compact.rs`); the shadow mode builds both lists.
-            if x_prelim_compact.compact() {
-                let mut compact_hsp_list = x_build_compact_preliminary_hsp_list(
-                    preliminary_hits.as_slice(),
-                    s_idx as u32,
-                    q_idx as u32,
-                    ctx.aa_len,
-                    subject.aa_len,
-                    &gapped_params,
-                    &gapped_gumbel,
-                );
-                reap_hsplist_by_evalue(&mut compact_hsp_list, prelim_evalue);
-                if !compact_hsp_list.hsps.is_empty() {
-                    if x_prelim_free {
-                        compact_hsp_list.hsps.shrink_to_fit();
-                    }
-                    subject_result
-                        .x_compact_hsp_lists
-                        .push((q_idx, compact_hsp_list));
-                }
-                if !x_prelim_compact.full() {
-                    preliminary_hits.clear();
-                    continue;
-                }
-            }
-            let mut provisional_hsp_list = build_preliminary_hsp_list_for_hitlist(
+            // The compact list, with the E-values of `Blast_HSPListGetEvalues` and the reap by the
+            // preliminary E-value (`x_prelim_compact.rs`); a list that keeps HSPs gives back the
+            // room of the reaped ones (`x_prelim_free.rs`).
+            let mut compact_hsp_list = x_build_compact_preliminary_hsp_list(
                 preliminary_hits.as_slice(),
                 s_idx as u32,
                 q_idx as u32,
@@ -9736,19 +9747,13 @@ fn run_resolved_in_pool(
             //     hsp_array[index] = Blast_HSPFree(hsp_array[index]);
             // }
             // ```
-            reap_hsplist_by_evalue(&mut provisional_hsp_list, prelim_evalue);
-            if provisional_hsp_list.hsps.is_empty() {
-                preliminary_hits.clear();
-                continue;
+            reap_hsplist_by_evalue(&mut compact_hsp_list, prelim_evalue);
+            if !compact_hsp_list.hsps.is_empty() {
+                compact_hsp_list.hsps.shrink_to_fit();
+                subject_result
+                    .x_compact_hsp_lists
+                    .push((q_idx, compact_hsp_list));
             }
-            // EXPERIMENT (LOSAT_X_BPPFREE): the reaped list gives back the room of the HSPs it no
-            // longer holds; the same HSPs in the same order (`x_prelim_free.rs`).
-            if x_prelim_free {
-                provisional_hsp_list.hsps.shrink_to_fit();
-            }
-            subject_result
-                .query_hsp_lists
-                .push((q_idx, provisional_hsp_list));
             preliminary_hits.clear();
         }
         scratch.restricted_align_array = restricted_align_array;
@@ -9819,7 +9824,6 @@ fn run_resolved_in_pool(
                 &new_scratch,
                 &process_subject,
                 &mut PrelimCollector {
-                    preliminary_hit_lists: &mut preliminary_hit_lists,
                     x_compact_hit_lists: &mut x_compact_hit_lists,
                     prelim_hitlist_size,
                 },
@@ -9926,7 +9930,6 @@ fn run_resolved_in_pool(
             match culling.as_mut() {
                 Some(culling) => merge_blastp_subject_results_culled(culling, subject_results),
                 None => merge_blastp_subject_results_in_order(
-                    &mut preliminary_hit_lists,
                     &mut x_compact_hit_lists,
                     subject_results,
                     prelim_hitlist_size,
@@ -9975,7 +9978,6 @@ fn run_resolved_in_pool(
             );
             let merge_sort_start = blastp_timing_start(timing_enabled);
             update_blastp_preliminary_hit_lists(
-                &mut preliminary_hit_lists,
                 &mut x_compact_hit_lists,
                 &mut subject_result,
                 prelim_hitlist_size,
@@ -9994,7 +9996,7 @@ fn run_resolved_in_pool(
     // trees (hspfilter_culling.c:516-581; `culling.rs`), where the collector's lists were
     // updated as the subjects came. A query chunk's lists leave below as the collector's do.
     if let Some(culling) = culling.take() {
-        culling.finish(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
+        culling.finish(&mut x_compact_hit_lists);
     }
     // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:268-271
     // ```c++
@@ -10006,14 +10008,9 @@ fn run_resolved_in_pool(
     // A query chunk's preliminary stage ends here, before its stream is closed: its hit
     // lists merge into the batch's (`search_split_query_batches`).
     if let Some(chunk_lists) = chunk_prelim {
-        // EXPERIMENT (LOSAT_X_BPPCOMPACT): a chunk's lists leave as the off path's lists, so the
-        // chunk merge (`query_split.rs`) is unchanged; the shadow mode compares them here.
-        x_finish_compact_lists(
-            x_prelim_compact,
-            &mut preliminary_hit_lists,
-            &mut x_compact_hit_lists,
-            &[],
-        );
+        // A chunk's lists leave as `BlastpHitList`s of full HSPs, so the chunk merge
+        // (`query_split.rs`) reads what it reads from a search without chunks.
+        x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
         *chunk_lists = preliminary_hit_lists;
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Search, t_search);
         return Ok(());
@@ -10031,7 +10028,6 @@ fn run_resolved_in_pool(
         ranges.query_input,
         &mut preliminary_hit_lists,
         &mut x_compact_hit_lists,
-        &mut x_split_queries,
         reports.x_prolog,
     )?;
 
@@ -10070,7 +10066,7 @@ fn run_resolved_in_pool(
             hit_list.sort_by_evalue();
         }
     }
-    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the same sort of the compact lists.
+    // The same sort of the compact lists.
     for hit_list in x_compact_hit_lists.iter_mut().flatten() {
         hit_list.sort_by_evalue();
     }
@@ -10081,10 +10077,9 @@ fn run_resolved_in_pool(
             merge_sort_start,
         );
     }
-    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the redo reads the off path's lists. With more than one
-    // thread its parallel paths read the lists of all queries, so all are expanded here (but for
-    // LOSAT_X_BPREDOWINEXPAND below); the one-thread loop below expands each query's list when it
-    // reaches it. The shadow mode compares every list here and redoes the off path's lists.
+    // The redo reads lists of full HSPs. With more than one thread its parallel paths read the
+    // lists of all queries, so all are expanded here (but for LOSAT_X_BPREDOWINEXPAND below); the
+    // one-thread loop below expands each query's list when it reaches it.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -10103,7 +10098,6 @@ fn run_resolved_in_pool(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     let x_win_expand = x_compact_expand_all
-        && x_prelim_compact == XPrelimCompact::On
         && super::x_redo_par::x_bp_redo_par()
         && super::x_redo_par::x_bp_redo_win_expand();
     #[cfg(any(
@@ -10111,13 +10105,8 @@ fn run_resolved_in_pool(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_win_expand = false;
-    if x_prelim_compact == XPrelimCompact::Shadow || (x_compact_expand_all && !x_win_expand) {
-        x_finish_compact_lists(
-            x_prelim_compact,
-            &mut preliminary_hit_lists,
-            &mut x_compact_hit_lists,
-            &x_split_queries,
-        );
+    if x_compact_expand_all && !x_win_expand {
+        x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3329-3334
@@ -10455,12 +10444,7 @@ fn run_resolved_in_pool(
     let x_redo_par_run = false;
     // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the other paths read the expanded lists of all queries.
     if x_win_expand && !x_redo_par_run {
-        x_finish_compact_lists(
-            x_prelim_compact,
-            &mut preliminary_hit_lists,
-            &mut x_compact_hit_lists,
-            &x_split_queries,
-        );
+        x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
 
     // Graduated 2026-10-22 (was `LOSAT_X_SEGSHARE`): the query-parallel redo and the windows of
@@ -10499,11 +10483,8 @@ fn run_resolved_in_pool(
                 &mut preliminary_hit_lists,
                 x_win_expand.then_some(&mut x_compact_hit_lists[..]),
                 &mut redone_matches,
-                x_prelim_free || x_prelim_compact == XPrelimCompact::On,
             )?;
-            if x_prelim_free {
-                x_prelim_freed += released;
-            }
+            x_prelim_freed += released;
         }
     } else if use_parallel_kappa_match_redo {
         #[cfg(all(
@@ -11018,8 +10999,7 @@ fn run_resolved_in_pool(
             let ctx = &contexts[q_idx];
             let query_raw = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
             let query_nomask = query_nomask_sequence(ctx);
-            // EXPERIMENT (LOSAT_X_BPPCOMPACT): this query's list as the off path holds it
-            // (`x_prelim_compact.rs`).
+            // This query's list of full HSPs (`x_prelim_compact.rs`).
             if let Some(compact) = x_compact_hit_lists[q_idx].take() {
                 preliminary_hit_lists[q_idx] = Some(x_expand_hit_list(compact));
             }
@@ -11162,23 +11142,15 @@ fn run_resolved_in_pool(
                     redone_match.insert(hsp_list, best_evalue, best_score, s_idx);
                 }
             }
-            // EXPERIMENT (LOSAT_X_BPPFREE): nothing reads this query's preliminary list after its
-            // redo; it is freed here as NCBI frees each list it has redone (`x_prelim_free.rs`).
-            if x_prelim_free {
-                preliminary_hit_lists[q_idx] = None;
-                x_prelim_freed += 1;
-            } else if x_prelim_compact == XPrelimCompact::On {
-                // EXPERIMENT (LOSAT_X_BPPCOMPACT): the expanded list is a copy made for this
-                // query's redo; nothing reads it afterwards.
-                preliminary_hit_lists[q_idx] = None;
-            }
+            // Nothing reads this query's preliminary list after its redo; it is freed here as NCBI
+            // frees each list it has redone (`x_prelim_free.rs`).
+            preliminary_hit_lists[q_idx] = None;
+            x_prelim_freed += 1;
         }
     }
 
-    if x_prelim_free && timing_enabled {
+    if timing_enabled {
         eprintln!("[TIMING] x_bppfree: freed_lists={x_prelim_freed}");
-    }
-    if x_prelim_compact == XPrelimCompact::On && timing_enabled {
         eprintln!(
             "[TIMING] x_bppcompact: expanded_lists={}",
             x_expanded_lists() - x_expanded_at_start
@@ -11576,7 +11548,7 @@ fn run_resolved_in_pool(
     let result_warnings = format_plans
         .first()
         .is_none_or(|(outfmt, _, _)| outfmt.writes_query_warnings());
-    let query_warning_lines: Vec<Vec<u8>> = query_records
+    let mut query_warning_lines: Vec<Vec<u8>> = query_records
         .iter()
         .enumerate()
         .map(|(q_idx, record)| {
@@ -11626,6 +11598,42 @@ fn run_resolved_in_pool(
                 )
             }),
         )?;
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
+    // ```c++
+    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+    //                 		                            fmt_args->GetFormattedOutputChoice());
+    //                 ITERATE(CSearchResultSet, result, *results) {
+    //                     formatter.PrintOneResultSet(**result, query_batch);
+    //                 }
+    // ```
+    // Before the reports of a batch NCBI fetches every subject that the batch reports, and with
+    // `taxdb.bti` on the search path the taxonomy database writes its messages there
+    // (`database::prefetch_messages`: the texts of opening it at the run's first lookup, a
+    // volume's lookup of a taxid once per run): after the reader's messages of the batch and
+    // before the warnings of its first query. They go with the warnings, where the first format
+    // is outfmt 0, 5, 6 or 7 (`BlastpReport::prefetches_subjects`). They are read here, after
+    // the subjects' refusals and before any format is written, so a taxonomy database that LOSAT
+    // cannot read is refused before any byte; without `taxdb.bti` nothing is read. psiblast's
+    // batches prefetch too (psiblast_app.cpp:256-263, 369-370); its reports stay as they were.
+    if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
+        if args.app == BlastpApp::Blastp
+            && format_plans
+                .first()
+                .is_some_and(|(outfmt, _, _)| outfmt.prefetches_subjects())
+            && database.taxdb_found()
+        {
+            for batch in &query_batches {
+                let messages =
+                    titles.prefetch_messages(database, &hit_lists[batch.searched.clone()])?;
+                if messages.is_empty() {
+                    continue;
+                }
+                let first = batch.searched.start;
+                let reader = reports.reader_warnings.get(first).map_or(0, Vec::len);
+                query_warning_lines[first].splice(reader..reader, messages);
+            }
+        }
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPSUBJMETA): the block
@@ -12379,6 +12387,15 @@ fn run_resolved_in_pool(
                 spares.give(table);
             }
         }
+        // EXPERIMENT (LOSAT_X_BPLK16): the vectors of a table of 16-bit hits, for the next block's
+        // build of that width.
+        Some(BlastpRuntimeLookup::Aa16(table)) => {
+            if let Some(spares) = super::x_query_blocks::x_bp_aa_spares(blastp_parallel_pool)
+                .or_else(|| super::x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool))
+            {
+                spares.give16(table);
+            }
+        }
         Some(BlastpRuntimeLookup::Compressed(_)) | None => {}
     }
 
@@ -12511,7 +12528,7 @@ mod tests {
     use crate::stats::KarlinParams;
     use crate::utils::matrix::ncbistdaa;
 
-    fn make_test_blastp_hsp_list(oid: u32, raw_score: i32) -> BlastpHspList {
+    fn make_test_blastp_hsp_list(oid: u32, raw_score: i32) -> BlastpHspList<XPrelimHsp> {
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
         // ```c
         // typedef struct BlastHSP {
@@ -12521,37 +12538,27 @@ mod tests {
         //    BlastSeg subject;
         // } BlastHSP;
         // ```
-        let hit = Hit {
-            identity: 100.0,
-            length: 10,
-            mismatch: 0,
-            gapopen: 0,
-            q_start: 1,
-            q_end: 10,
-            s_start: 1,
-            s_end: 10,
-            e_value: 1.0,
-            bit_score: 0.0,
-            num_ident: 10,
-            query_frame: 0,
-            query_length: 10,
-            q_idx: 0,
-            s_idx: oid,
-            raw_score,
-            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
-            // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
-            sort_query_offset: 0,
-            sort_query_end: 0,
-            sort_subject_offset: 0,
-            sort_subject_end: 0,
-            has_sort_offsets: false,
-            gap_info: None,
-            num_positives: 10,
-        };
         BlastpHspList {
             oid,
             query_index: 0,
-            hsps: vec![BlastpHsp::from_hit(hit)],
+            hsps: vec![XPrelimHsp {
+                hsp: BlastpPreliminaryHsp {
+                    query_start: 0,
+                    query_end: 10,
+                    subject_start: 0,
+                    subject_end: 10,
+                    gapped_query_start: 1,
+                    gapped_subject_start: 1,
+                    raw_score,
+                    query_context: 0,
+                    query_frame: 0,
+                    subject_frame: 0,
+                    query_length: 10,
+                    q_idx: 0,
+                    s_idx: oid,
+                },
+                e_value: 1.0,
+            }],
             best_evalue: f64::MAX,
         }
     }
@@ -12564,7 +12571,7 @@ mod tests {
         // ```
         let mut result = BlastpSubjectResult::new(oid);
         result
-            .query_hsp_lists
+            .x_compact_hsp_lists
             .push((0, make_test_blastp_hsp_list(oid as u32, raw_score)));
         result
     }
@@ -12582,21 +12589,16 @@ mod tests {
         //     status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
         // }
         // ```
-        let mut preliminary_hit_lists = vec![None];
+        let mut hit_lists = vec![None];
         let subject_results = vec![
             Some(make_test_subject_result(0, 50)),
             Some(make_test_subject_result(1, 60)),
             Some(make_test_subject_result(2, 70)),
         ];
 
-        merge_blastp_subject_results_in_order(
-            &mut preliminary_hit_lists,
-            &mut [None],
-            subject_results,
-            10,
-        );
+        merge_blastp_subject_results_in_order(&mut hit_lists, subject_results, 10);
 
-        let hit_list = preliminary_hit_lists[0]
+        let hit_list = hit_lists[0]
             .as_ref()
             .expect("query hit list should be created");
         let oids: Vec<u32> = hit_list.hsplist_array.iter().map(|list| list.oid).collect();
@@ -12770,7 +12772,7 @@ mod tests {
         }
     }
 
-    // EXPERIMENT (LOSAT_X_BPSEED): the table of contexts gives the binary search's index at every
+    // The table of contexts gives the binary search's index at every
     // offset of the concatenated query, for query sets of one length, of mixed lengths, with
     // empty queries (equal frame bases), and with blocks of 1 to 16 offsets and the size `new`
     // chooses (a set long enough for blocks of more than one offset).

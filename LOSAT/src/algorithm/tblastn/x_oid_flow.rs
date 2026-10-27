@@ -48,14 +48,16 @@
 //! waits for a unit taken by another thread runs other jobs of the pool meanwhile; were a thread's
 //! loop still queued then, it would start there, on top of the chunk being searched, and could wait
 //! for the window while that chunk is the one the owner waits for. Once every loop runs,
-//! only units are left for a waiting thread to take.
+//! only units and the linking of a subject's query contexts (`stage_d_linking/x_link_ctx.rs`) are
+//! left for a waiting thread to take.
 //!
 //! `LOSAT_X_TBNFLOWHELP` (on unless `=0`): a thread that waits for the flow
 //! after the start (the owner for the next chunk in order, a thread of the pool for the window)
 //! runs the pool's jobs meanwhile instead of sleeping on the flow's condition (no NCBI
 //! counterpart: NCBI's threads do not wait for one another). Those jobs are units of the subjects
-//! being searched, which do not wait for the flow; a unit's result goes back to its subject by
-//! unit number, so the reports are the same. With `=0` the owner sleeps while a long subject's
+//! being searched and the linking of their query contexts, which do not wait for the flow; a
+//! unit's result goes back to its subject by unit number and a context's linked values by input
+//! position, so the reports are the same. With `=0` the owner sleeps while a long subject's
 //! units wait in the pool, when it took a short subject first and every chunk it could take is
 //! taken.
 
@@ -165,8 +167,8 @@ impl<T: Send> XOidFlow<T> {
     /// returns, so that its caller looks at the flow again. When there is none it returns at once
     /// if the flow changed meanwhile, and otherwise waits for a change for at most `help` times
     /// 2^`idle` (up to 16 times `help`), after which it looks for a job again. Every loop of the
-    /// flow runs by then (`start_together`), so the job is a unit of a subject being searched and
-    /// never a loop.
+    /// flow runs by then (`start_together`), so the job is a unit of a subject being searched or
+    /// the linking of one of its query contexts, and never a loop.
     fn wait<'s>(
         &'s self,
         state: MutexGuard<'s, XFlowState<T>>,

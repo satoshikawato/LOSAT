@@ -55,6 +55,13 @@ use super::{
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod x_db_cut;
+// EXPERIMENT (LOSAT_X_BPDBKEEP): one search scratch and one block buffer per worker for the whole
+// preliminary stage.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+mod x_db_keep;
 mod x_listed_lean;
 mod x_redo_db_subjects;
 #[cfg(test)]
@@ -103,7 +110,8 @@ const BLOCKS_PER_THREAD: usize = 8;
 pub(super) struct BlastpDatabase {
     db: SeqDb,
     name: String,
-    /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16).
+    /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16,
+    /// and the batches' prefetch of outfmt 0, 5, 6 and 7).
     taxdb: shared::TaxdbRun,
 }
 
@@ -136,7 +144,7 @@ impl BlastpDatabase {
         if parsed_seqids {
             shared::check_seqids(&db, settings, PROGRAM)?;
         } else {
-            shared::refuse_parsed_seqids(&db, PROGRAM)?;
+            shared::refuse_parsed_seqids(&db, "PSIBLAST")?;
         }
         Ok(Self {
             db,
@@ -148,6 +156,21 @@ impl BlastpDatabase {
     /// The `-db` value as NCBI keeps it.
     pub(super) fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Whether `taxdb.bti` is on the search path, asked once for the run
+    /// (`shared::TaxdbRun::found`): the batches' prefetch reads the taxonomy database only then
+    /// (`ListedTitles::prefetch_messages`).
+    pub(super) fn taxdb_found(&self) -> bool {
+        self.taxdb.found(&self.db)
+    }
+
+    /// Whether a batch's prefetch can write a text (`shared::TaxdbRun::prefetch_may_write`): the
+    /// texts of opening the taxonomy database or its offset error, which go with the batch whose
+    /// prefetch makes the run's first lookup (or the volume's first lookup of the taxid). `false`
+    /// without `taxdb.bti` and for a taxonomy database that writes no text, NCBI's own among them.
+    pub(super) fn prefetch_may_write(&self) -> bool {
+        self.taxdb.prefetch_may_write(&self.db)
     }
 
     /// The number of sequences (`CSeqDB::GetNumSeqs`).
@@ -454,7 +477,7 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
 // ```
 /// The preliminary stage of a database search: every sequence, in the order of its
 /// ordinal id, through the per-subject kernel `process_subject`, with its HSP lists put
-/// into `preliminary_hit_lists` in that order (NCBI's loop with one thread).
+/// into `x_compact_hit_lists` in that order (NCBI's loop with one thread).
 ///
 /// One thread: the blocks in order, one scratch (one diagonal table) for the whole
 /// database, the hit lists updated after every subject, as the one-thread loop of the
@@ -474,8 +497,7 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
 /// `ListedSubjects` holds the sequences of the listed subjects). A block that cannot be
 /// read or searched does not stop the other blocks of its round; the round's first
 /// error in ordinal order is returned, the error of the one-thread order (the blocks
-/// are cut alike). EXPERIMENT (LOSAT_X_BPPCOMPACT): the compact lists
-/// (`x_compact_hit_lists`) are updated with the hit lists, in the same order.
+/// are cut alike). The hit lists hold the compact element (`x_prelim_compact.rs`).
 /// EXPERIMENT (LOSAT_X_BPDBCUT): with more than one thread the blocks are cut by the
 /// database size and the thread count, and a failed search returns the one-thread order's
 /// error (`database/x_db_cut.rs`, exactness argument in its header).
@@ -491,7 +513,7 @@ pub(super) fn search_blocks<S, K, P>(
 where
     S: Fn() -> BlastpSubjectScratch + Sync,
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
-    P: PrelimSink,
+    P: PrelimSink + Send,
 {
     #[cfg(all(
         feature = "parallel",
@@ -537,6 +559,53 @@ where
 /// blocks per thread.
 #[allow(clippy::too_many_arguments)]
 fn search_blocks_of<S, K, P>(
+    database: &BlastpDatabase,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    window: i32,
+    block_bytes: u64,
+    blocks_per_thread: usize,
+    new_scratch: &S,
+    process_subject: &K,
+    sink: &mut P,
+) -> Result<()>
+where
+    S: Fn() -> BlastpSubjectScratch + Sync,
+    K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
+    P: PrelimSink + Send,
+{
+    // EXPERIMENT (LOSAT_X_BPDBKEEP): `database/x_db_keep.rs`.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if x_db_keep::x_bp_db_keep() {
+        return x_db_keep::x_search_blocks_kept(
+            database,
+            pool,
+            window,
+            block_bytes,
+            blocks_per_thread,
+            new_scratch,
+            process_subject,
+            sink,
+        );
+    }
+    search_blocks_made(
+        database,
+        pool,
+        window,
+        block_bytes,
+        blocks_per_thread,
+        new_scratch,
+        process_subject,
+        sink,
+    )
+}
+
+/// `search_blocks_of` without LOSAT_X_BPDBKEEP: each task makes its scratch and reads its block
+/// into a new buffer.
+#[allow(clippy::too_many_arguments)]
+fn search_blocks_made<S, K, P>(
     database: &BlastpDatabase,
     pool: &crate::utils::threading::SearchPool<'_>,
     window: i32,
@@ -603,11 +672,7 @@ where
                                     block_subject(&block, i),
                                     &mut subject_result,
                                 );
-                                // (EXPERIMENT LOSAT_X_BPPCOMPACT: the HSP lists may all
-                                // be compact ones.)
-                                if !subject_result.query_hsp_lists.is_empty()
-                                    || !subject_result.x_compact_hsp_lists.is_empty()
-                                {
+                                if !subject_result.x_compact_hsp_lists.is_empty() {
                                     with_hits.push(std::mem::replace(
                                         &mut subject_result,
                                         BlastpSubjectResult::new(0),
@@ -727,7 +792,7 @@ impl ListedSubjects {
     // (`adjust_scores.rs`, composition_adjustment.c:681-703). The preliminary stage uses
     // scores only, which are the same for O and X (`prepare_search_block`).
     /// Reads the sequences of the ordinal ids in `hit_lists` and `x_compact_hit_lists`
-    /// (EXPERIMENT LOSAT_X_BPPCOMPACT: the lists not expanded yet, `x_prelim_compact.rs`) and
+    /// (the lists not expanded yet, `x_prelim_compact.rs`) and
     /// renames the subjects of both to their ranks.
     pub(super) fn read(
         database: &BlastpDatabase,
@@ -1058,18 +1123,38 @@ impl ListedTitles<'_> {
         )
     }
 
+    /// NCBI's messages about the taxonomy database when the query batch whose final hit lists
+    /// are `hit_lists` prefetches the subjects it reports (`shared::prefetch_messages`): the
+    /// subjects with rows in them, the ones `read_taxids` reads. Empty, and nothing read,
+    /// without `taxdb.bti` on the search path. A taxonomy database that LOSAT cannot read as
+    /// NCBI does, and a header whose taxid does not decode, are refused.
+    pub(super) fn prefetch_messages(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &[Option<BlastpHitList>],
+    ) -> Result<Vec<u8>> {
+        shared::prefetch_messages(
+            &database.db,
+            &database.taxdb,
+            Self::reported_ranks(hit_lists)
+                .map(|rank| (self.listed.ordinals[rank], self.parsed_subject(rank))),
+            PROGRAM,
+        )
+    }
+
     /// The ranks of the subjects with rows in `hit_lists` (the final hit lists).
     fn reported(hit_lists: &[Option<BlastpHitList>]) -> std::collections::BTreeSet<usize> {
-        hit_lists
-            .iter()
-            .flatten()
-            .flat_map(|hit_list| {
-                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                hit_list.hsplist_array[..count]
-                    .iter()
-                    .flat_map(|hsp_list| hsp_list.hsps.iter().map(|hsp| hsp.s_idx as usize))
-            })
-            .collect()
+        Self::reported_ranks(hit_lists).collect()
+    }
+
+    /// The rank of the subject of each row of `hit_lists`, in the order of the lists.
+    fn reported_ranks(hit_lists: &[Option<BlastpHitList>]) -> impl Iterator<Item = usize> + '_ {
+        hit_lists.iter().flatten().flat_map(|hit_list| {
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            hit_list.hsplist_array[..count]
+                .iter()
+                .flat_map(|hsp_list| hsp_list.hsps.iter().map(|hsp| hsp.s_idx as usize))
+        })
     }
 
     /// The subject id of the tabular formats (`sseqid`, `sacc`, `saccver`) of every
@@ -1212,19 +1297,55 @@ impl ListedTitles<'_> {
 // `ListedSubjects::x_read_titles_lean`,
 // `ListedTitles::check_reported_titles`, `ListedTitles::tabular_subject_ids`, and for outfmt 0
 // `ListedTitles::check_shown_titles`). When every definition line of the database reads and none
-// of them is refused, none of these failures can happen in any batch.
+// of them is refused, none of these failures can happen in any batch. With `taxdb.bti` on the
+// search path, the prefetch of each batch (`ListedTitles::prefetch_messages`) also reads the
+// reported subjects' taxids and looks them up in the taxonomy database, which can refuse as
+// XML2's lookups can (DBID item T): `taxids` then also asks that every sequence's taxid decodes
+// and that no lookup can be refused (`shared::taxdb_may_refuse` without the names, which the
+// prefetch does not ask for), as `x_titles_taxids_allow_blocks` asks for outfmt 15 and 16.
+// The prefetch's refusal of NCBI's taxonomy cache (`shared::TaxdbRun::cache_collision`) comes at
+// the run's first prefetch, in block 0 before its rows.
+
+// No NCBI counterpart: the order of LOSAT's own checks; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPDBKEEP): whether `check` holds for every range of
+/// `db.header_ranges(HEADER_RANGE_SEQS)`, read in `pool` as the title checks read them, with each
+/// range made from its index (`SeqDb::x_header_range`): no list of the ranges is allocated, whose
+/// free (1.5 MiB for UniRef50) would raise glibc's mmap threshold before the search.
+fn x_all_header_ranges(
+    db: &crate::seqdb::SeqDb,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    check: impl Fn(&BlockRange) -> bool + Sync,
+) -> bool {
+    let seqs = crate::seqdb::HEADER_RANGE_SEQS;
+    let count = db.x_header_range_count(seqs);
+    let check_index = |index: usize| check(&db.x_header_range(seqs, index));
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pool.enabled() {
+        return pool.install(|| (0..count).into_par_iter().all(check_index));
+    }
+    let _ = pool;
+    (0..count).all(check_index)
+}
+
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether every sequence of the database has one definition line
 /// that reads, holds no byte outside ' ' ..= '~' and gives a tabular subject id as NCBI writes
 /// it, or with `pairwise` (an outfmt 0 report, LOSAT_X_BPQBLOCKFMT, which writes no tabular id) a
-/// title that the outfmt 0 report writes as NCBI. Read in `pool` over the ordinal ids; a reader
-/// error is `false` (the search of all queries then reports it where NCBI does).
+/// title that the outfmt 0 report writes as NCBI, and with `taxids` (the batches' prefetch reads
+/// the taxonomy database) a taxid that decodes, where no lookup of the taxonomy database can be
+/// refused. Read in `pool` over the ordinal ids; a reader error is `false` (the search of all
+/// queries then reports it where NCBI does).
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): the definition lines are read in ranges of
 /// `HEADER_RANGE_SEQS` sequences (`SeqDb::visit_deflines`, the same results as
-/// `SeqDb::deflines`) instead of one sequence at a time.
+/// `SeqDb::deflines`; with `taxids`, `SeqDb::visit_deflines_taxids`, the titles and the taxids in
+/// one pass) instead of one sequence at a time.
 pub(super) fn x_titles_allow_blocks(
     database: &BlastpDatabase,
     pairwise: bool,
+    taxids: bool,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> bool {
     let db = &database.db;
@@ -1250,37 +1371,64 @@ pub(super) fn x_titles_allow_blocks(
         }
     };
     if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
-        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
+        // A record whose taxid does not decode is an `Err` (`visit_deflines_taxids`).
         let allowed_range = |range: &BlockRange| -> bool {
-            db.visit_deflines(*range, |ordinal, deflines| {
-                allowed_deflines(ordinal, deflines)
-            })
+            if taxids {
+                db.visit_deflines_taxids(*range, |ordinal, deflines| {
+                    allowed_deflines(ordinal, deflines)
+                })
+            } else {
+                db.visit_deflines(*range, |ordinal, deflines| {
+                    allowed_deflines(ordinal, deflines)
+                })
+            }
         };
+        if crate::seqdb::x_bp_db_keep() {
+            return x_all_header_ranges(db, pool, allowed_range)
+                && !(taxids && shared::taxdb_may_refuse(db, false));
+        }
+        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
-        if pool.enabled() {
-            return pool.install(|| ranges.par_iter().all(allowed_range));
-        }
-        let _ = pool;
-        return ranges.iter().all(allowed_range);
+        let titles = if pool.enabled() {
+            pool.install(|| ranges.par_iter().all(allowed_range))
+        } else {
+            ranges.iter().all(allowed_range)
+        };
+        #[cfg(not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )))]
+        let titles = {
+            let _ = pool;
+            ranges.iter().all(allowed_range)
+        };
+        return titles && !(taxids && shared::taxdb_may_refuse(db, false));
     }
     let allowed = |ordinal: u32| -> bool { allowed_deflines(ordinal, db.deflines(ordinal)) };
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if pool.enabled() {
-        return pool.install(|| {
+    let titles = if pool.enabled() {
+        pool.install(|| {
             (0..db.num_seqs())
                 .into_par_iter()
                 .with_min_len(4096)
                 .all(allowed)
-        });
-    }
-    let _ = pool;
-    (0..db.num_seqs()).all(allowed)
+        })
+    } else {
+        (0..db.num_seqs()).all(allowed)
+    };
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    let titles = (0..db.num_seqs()).all(allowed);
+    // One sequence at a time (`LOSAT_X_DBIDXREAD=0`): the taxids after the titles.
+    titles && (!taxids || x_taxids_allow_blocks(database, false, pool))
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): the block search of outfmt 8, 9, 12 and 5.
@@ -1311,10 +1459,13 @@ pub(super) fn x_titles_read_allow_blocks(
         }
     };
     if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
-        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
         let readable_range = |range: &BlockRange| -> bool {
             db.visit_deflines(*range, |_ordinal, deflines| readable(deflines))
         };
+        if crate::seqdb::x_bp_db_keep() {
+            return x_all_header_ranges(db, pool, readable_range);
+        }
+        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1363,18 +1514,21 @@ pub(super) fn x_titles_read_allow_blocks(
 /// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): `x_titles_read_allow_blocks` and `x_taxids_allow_blocks`
 /// in one pass over the headers: whether every sequence of the database has one definition line
 /// that reads and holds no byte outside ' ' ..= '~', its taxid reads, and no lookup of the
-/// taxonomy database can be refused (`shared::taxdb_may_refuse`). Read in `pool`; a failure is
-/// `false`. It writes nothing and changes no state of the run. With `LOSAT_X_DBIDXREAD=0` the two
-/// checks run one after the other, one sequence at a time.
+/// taxonomy database can be refused (`shared::taxdb_may_refuse`; with `names`, the outfmt 15 and
+/// 16 that write the scientific names, also no name that their writer refuses; without, outfmt
+/// 5's prefetch). Read in `pool`; a failure is `false`. It writes nothing and changes no state of
+/// the run. With `LOSAT_X_DBIDXREAD=0` the two checks run one after the other, one sequence at a
+/// time.
 pub(super) fn x_titles_taxids_allow_blocks(
     database: &BlastpDatabase,
+    names: bool,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> bool {
     let db = &database.db;
     if crate::seqdb::x_dbidxread() == crate::seqdb::XDbIdxRead::Off {
-        return x_titles_read_allow_blocks(database, pool) && x_taxids_allow_blocks(database, pool);
+        return x_titles_read_allow_blocks(database, pool)
+            && x_taxids_allow_blocks(database, names, pool);
     }
-    let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
     let readable_range = |range: &BlockRange| -> bool {
         db.visit_deflines_taxids(*range, |_ordinal, deflines| match deflines {
             // The taxid `read_reported_taxids` takes of a sequence: its first definition
@@ -1383,6 +1537,11 @@ pub(super) fn x_titles_taxids_allow_blocks(
             Err(_) => false,
         })
     };
+    if crate::seqdb::x_bp_db_keep() {
+        return x_all_header_ranges(db, pool, readable_range)
+            && !shared::taxdb_may_refuse(db, names);
+    }
+    let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1400,15 +1559,16 @@ pub(super) fn x_titles_taxids_allow_blocks(
         let _ = pool;
         ranges.iter().all(readable_range)
     };
-    readable && !shared::taxdb_may_refuse(db)
+    readable && !shared::taxdb_may_refuse(db, names)
 }
 
 /// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): whether every sequence's taxid reads and no lookup of the
-/// taxonomy database can be refused (`shared::taxdb_may_refuse`, which is `false` where
-/// `taxdb.bti` is not found). One sequence at a time (`LOSAT_X_DBIDXREAD=0`); see
+/// taxonomy database can be refused (`shared::taxdb_may_refuse` with `names`, which is `false`
+/// where `taxdb.bti` is not found). One sequence at a time (`LOSAT_X_DBIDXREAD=0`); see
 /// `x_titles_taxids_allow_blocks`.
 fn x_taxids_allow_blocks(
     database: &BlastpDatabase,
+    names: bool,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> bool {
     let db = &database.db;
@@ -1431,7 +1591,7 @@ fn x_taxids_allow_blocks(
         let _ = pool;
         (0..count).all(reads)
     };
-    all_read && !shared::taxdb_may_refuse(db)
+    all_read && !shared::taxdb_may_refuse(db, names)
 }
 
 #[cfg(test)]
@@ -1650,14 +1810,14 @@ mod tests {
         std::fs::copy(fixture("prot_v4") + ".psq", dir.join("b.psq")).unwrap();
         let name = dir.join("b").to_str().unwrap().to_string();
         let settings = ApplicationSettings::default();
-        for parsed_seqids in [true, false] {
+        for (parsed_seqids, program) in [(true, "BLASTP"), (false, "PSIBLAST")] {
             let Err(error) = BlastpDatabase::open(&name, &settings, parsed_seqids) else {
                 panic!("a damaged first header opened ({parsed_seqids})")
             };
             assert!(
-                format!("{error:#}").ends_with(
-                    "b.phr: header record, byte 1: tag 0x31 where Blast-def-line-set (0x30) is expected; this database is not supported by LOSAT's BLASTP"
-                ),
+                format!("{error:#}").ends_with(&format!(
+                    "b.phr: header record, byte 1: tag 0x31 where Blast-def-line-set (0x30) is expected; this database is not supported by LOSAT's {program}"
+                )),
                 "{error:#}"
             );
         }
@@ -1706,7 +1866,7 @@ mod tests {
         };
         assert!(error.downcast_ref::<NativeError>().is_none());
         assert!(
-            format!("{error:#}").ends_with("this database is not supported by LOSAT's BLASTP"),
+            format!("{error:#}").ends_with("this database is not supported by LOSAT's PSIBLAST"),
             "{error:#}"
         );
     }
@@ -1866,16 +2026,38 @@ mod tests {
                 .push((s_idx, scratch.diag_offset, subject.aa_seq.to_vec()));
             scratch.finish_subject(subject.aa_len, window);
             if s_idx % 3 == 0 {
-                result.query_hsp_lists.push((
+                result.x_compact_hsp_lists.push((
                     0,
                     BlastpHspList {
                         oid: s_idx as u32,
                         query_index: 0,
-                        hsps: vec![test_hsp(s_idx as u32, 50 + (s_idx as i32 % 2))],
+                        hsps: vec![test_prelim_hsp(s_idx as u32, 50 + (s_idx as i32 % 2))],
                         best_evalue: 1e-5,
                     },
                 ));
             }
+        }
+    }
+
+    fn test_prelim_hsp(s_idx: u32, raw_score: i32) -> XPrelimHsp {
+        use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
+        XPrelimHsp {
+            hsp: BlastpPreliminaryHsp {
+                query_start: 0,
+                query_end: 10,
+                subject_start: 0,
+                subject_end: 10,
+                gapped_query_start: 1,
+                gapped_subject_start: 1,
+                raw_score,
+                query_context: 0,
+                query_frame: 0,
+                subject_frame: 0,
+                query_length: 20,
+                q_idx: 0,
+                s_idx,
+            },
+            e_value: 1e-5,
         }
     }
 
@@ -1914,7 +2096,7 @@ mod tests {
         window: i32,
     ) -> (Vec<(usize, i32, Vec<u8>)>, Vec<u32>) {
         let seen = std::sync::Mutex::new(Vec::new());
-        let mut hit_lists: Vec<Option<BlastpHitList>> = vec![None];
+        let mut hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>> = vec![None];
         crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
             search_blocks_of(
                 database,
@@ -1925,8 +2107,7 @@ mod tests {
                 &|| BlastpSubjectScratch::new(16, 64, window, 21),
                 &recording_kernel(window, &seen),
                 &mut crate::algorithm::blastp::blast_engine::PrelimCollector {
-                    preliminary_hit_lists: &mut hit_lists,
-                    x_compact_hit_lists: &mut [],
+                    x_compact_hit_lists: &mut hit_lists,
                     prelim_hitlist_size: 500,
                 },
             )
@@ -2049,28 +2230,92 @@ mod tests {
             blocks_per_thread: usize,
             block_bytes: Option<u64>,
         ) -> Result<(Seen, Vec<u32>)> {
+            let driver = match block_bytes {
+                None => Driver::Cut,
+                Some(block_bytes) => Driver::Of(block_bytes),
+            };
+            search_with(database, threads, blocks_per_thread, driver)
+        }
+
+        /// The drivers of the preliminary stage that the tests call.
+        #[derive(Clone, Copy, Debug)]
+        enum Driver {
+            /// `x_search_blocks_cut`.
+            Cut,
+            /// `search_blocks_of` with blocks of this many bytes.
+            Of(u64),
+            /// `x_db_keep::x_search_blocks_kept` with blocks of this many bytes.
+            Kept(u64),
+            /// `search_blocks_made` (without LOSAT_X_BPDBKEEP) with blocks of this many bytes.
+            Made(u64),
+            /// `Kept` with the kernel's hook.
+            KeptWith(u64, XHook),
+        }
+
+        /// What the kernel does before it records a sequence (`Driver::KeptWith`).
+        #[derive(Clone, Copy, Debug)]
+        enum XHook {
+            /// Sleeps 50 ms at this ordinal id.
+            SleepAt(usize),
+            /// Panics at this ordinal id.
+            PanicAt(usize),
+        }
+
+        /// `kernel` after the hook `hook`.
+        fn hooked_kernel<'a>(
+            kernel: impl Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult)
+                + Sync
+                + 'a,
+            hook: Option<XHook>,
+        ) -> impl Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult)
+               + Sync
+               + 'a {
+            move |scratch, s_idx, subject, result| {
+                match hook {
+                    Some(XHook::SleepAt(ordinal)) if ordinal == s_idx => {
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    Some(XHook::PanicAt(ordinal)) if ordinal == s_idx => {
+                        panic!("the kernel's hook at {ordinal}");
+                    }
+                    _ => {}
+                }
+                kernel(scratch, s_idx, subject, result);
+            }
+        }
+
+        /// `search` with the driver `driver`.
+        fn search_with(
+            database: &BlastpDatabase,
+            threads: usize,
+            blocks_per_thread: usize,
+            driver: Driver,
+        ) -> Result<(Seen, Vec<u32>)> {
             let window = 40;
             let seen = std::sync::Mutex::new(Vec::new());
-            let mut hit_lists: Vec<Option<BlastpHitList>> = vec![None];
-            let mut compact: Vec<Option<BlastpHitList<XPrelimHsp>>> = vec![None];
+            let mut hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>> = vec![None];
             crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                 let new_scratch = || BlastpSubjectScratch::new(16, 64, window, 21);
-                let kernel = recording_kernel(window, &seen);
-                match block_bytes {
-                    None => x_search_blocks_cut(
+                let hook = match driver {
+                    Driver::KeptWith(_, hook) => Some(hook),
+                    _ => None,
+                };
+                let kernel = hooked_kernel(recording_kernel(window, &seen), hook);
+                let mut sink = crate::algorithm::blastp::blast_engine::PrelimCollector {
+                    x_compact_hit_lists: &mut hit_lists,
+                    prelim_hitlist_size: 500,
+                };
+                match driver {
+                    Driver::Cut => x_search_blocks_cut(
                         database,
                         pool,
                         window,
                         blocks_per_thread,
                         &new_scratch,
                         &kernel,
-                        &mut crate::algorithm::blastp::blast_engine::PrelimCollector {
-                            preliminary_hit_lists: &mut hit_lists,
-                            x_compact_hit_lists: &mut compact,
-                            prelim_hitlist_size: 500,
-                        },
+                        &mut sink,
                     ),
-                    Some(block_bytes) => search_blocks_of(
+                    Driver::Of(block_bytes) => search_blocks_of(
                         database,
                         pool,
                         window,
@@ -2078,11 +2323,29 @@ mod tests {
                         blocks_per_thread,
                         &new_scratch,
                         &kernel,
-                        &mut crate::algorithm::blastp::blast_engine::PrelimCollector {
-                            preliminary_hit_lists: &mut hit_lists,
-                            x_compact_hit_lists: &mut compact,
-                            prelim_hitlist_size: 500,
-                        },
+                        &mut sink,
+                    ),
+                    Driver::Kept(block_bytes) | Driver::KeptWith(block_bytes, _) => {
+                        super::super::x_db_keep::x_search_blocks_kept(
+                            database,
+                            pool,
+                            window,
+                            block_bytes,
+                            blocks_per_thread,
+                            &new_scratch,
+                            &kernel,
+                            &mut sink,
+                        )
+                    }
+                    Driver::Made(block_bytes) => search_blocks_made(
+                        database,
+                        pool,
+                        window,
+                        block_bytes,
+                        blocks_per_thread,
+                        &new_scratch,
+                        &kernel,
+                        &mut sink,
                     ),
                 }
             })?;
@@ -2179,6 +2442,15 @@ mod tests {
             (dir, name)
         }
 
+        /// EXPERIMENT (LOSAT_X_BPDBKEEP): `cut` with the switch's largest block.
+        fn x_keep_cut(cut: u64) -> u64 {
+            if crate::seqdb::x_bp_db_keep() {
+                cut.min(super::super::x_db_keep::X_KEEP_BLOCK_BYTES)
+            } else {
+                cut
+            }
+        }
+
         fn open_path(name: &str) -> BlastpDatabase {
             BlastpDatabase::open(name, &ApplicationSettings::default(), true)
                 .unwrap_or_else(|error| panic!("{name}: {error:#}"))
@@ -2204,8 +2476,8 @@ mod tests {
             // Each further volume has its own leading sentinel byte.
             assert_eq!(x_sequence_bytes(&volumes) + 5, psq_bytes(&mv));
             assert_eq!(x_sequence_bytes(&volumes), x_sequence_bytes(&single));
-            assert_eq!(cut_of(&single, 1), BLOCK_BYTES);
-            assert_eq!(cut_of(&volumes, 1), BLOCK_BYTES);
+            assert_eq!(cut_of(&single, 1), x_keep_cut(BLOCK_BYTES));
+            assert_eq!(cut_of(&volumes, 1), x_keep_cut(BLOCK_BYTES));
             for threads in [2, 3, 4, 8] {
                 assert_eq!(cut_of(&single, threads), x_cut_block_bytes(812, threads));
                 assert_eq!(cut_of(&single, threads), 4096);
@@ -2242,7 +2514,7 @@ mod tests {
             for threads in [1usize, 2, 3, 7] {
                 let cut = cut_of(&single, threads);
                 if threads == 1 {
-                    assert_eq!(cut, BLOCK_BYTES);
+                    assert_eq!(cut, x_keep_cut(BLOCK_BYTES));
                 } else {
                     assert_eq!(
                         cut,
@@ -2269,6 +2541,93 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(single_dir);
             let _ = std::fs::remove_dir_all(multi_dir);
+        }
+
+        // No NCBI counterpart: LOSAT_X_BPDBKEEP keeps a scratch and a block buffer per worker
+        // (`x_db_keep.rs`); the kernel sees the same sequences from the same diagonal offsets, and
+        // the hit lists receive the same updates, as with a scratch and a buffer per task.
+        // At 1, 2, 3 and 7 threads, blocks of 1 MiB and of 4 KiB (the 40,000 and 70,000-letter
+        // sequences in blocks of their own, so buffers grow and are refilled shorter), in rounds of 2 and of
+        // `BLOCKS_PER_THREAD` blocks per thread, on one volume and on several.
+        #[test]
+        fn kept_scratches_and_buffers_give_the_search_without_them() {
+            let (single_dir, single_name) = generated_database("keep1", "3GB");
+            let (multi_dir, multi_name) = generated_database("keepn", "100000");
+            let single = open_path(&single_name);
+            let multi = open_path(&multi_name);
+            let (reference, reference_listed) =
+                search_with(&single, 1, 2, Driver::Made(BLOCK_BYTES)).unwrap();
+            assert_eq!(reference.len(), generated_lengths().len());
+            for threads in [1usize, 2, 3, 7] {
+                for block_bytes in [BLOCK_BYTES, 4096] {
+                    for blocks_per_thread in [2, BLOCKS_PER_THREAD] {
+                        for (what, db) in [("one volume", &single), ("volumes", &multi)] {
+                            let context = format!(
+                                "{what}, {threads} threads, {block_bytes}-byte blocks, {blocks_per_thread} blocks per thread"
+                            );
+                            let made = search_with(
+                                db,
+                                threads,
+                                blocks_per_thread,
+                                Driver::Made(block_bytes),
+                            )
+                            .unwrap();
+                            let kept = search_with(
+                                db,
+                                threads,
+                                blocks_per_thread,
+                                Driver::Kept(block_bytes),
+                            )
+                            .unwrap();
+                            assert!(made.0 == reference, "{context}");
+                            assert_eq!(made.1, reference_listed, "{context}");
+                            assert!(kept.0 == made.0, "{context}");
+                            assert_eq!(kept.1, made.1, "{context}");
+                        }
+                    }
+                }
+            }
+            let _ = std::fs::remove_dir_all(single_dir);
+            let _ = std::fs::remove_dir_all(multi_dir);
+        }
+
+        // No NCBI counterpart: the window of LOSAT_X_BPDBKEEP (`x_db_keep.rs`) with a slow block,
+        // the oldest one (the later blocks fill the window and their takers wait for its merge) or
+        // a later one: the kernel sees the same sequences from the same diagonal offsets and the
+        // hit lists receive the same updates as with a scratch and a buffer per task. A panic of
+        // the kernel in either block ends the search with the panic (the waiting workers stop).
+        // At 2, 3 and 7 threads, blocks of 4 KiB, windows of 2 blocks per thread.
+        #[test]
+        fn the_window_waits_for_its_oldest_block_and_ends_on_a_panic() {
+            let (dir, name) = generated_database("keepw", "3GB");
+            let database = open_path(&name);
+            let block_bytes = 4096;
+            assert!(x_count_blocks(&database.db, block_bytes) > 40);
+            for threads in [2usize, 3, 7] {
+                let made = search_with(&database, threads, 2, Driver::Made(block_bytes)).unwrap();
+                for ordinal in [0usize, 150] {
+                    let context = format!("{threads} threads, ordinal {ordinal}");
+                    let slow = search_with(
+                        &database,
+                        threads,
+                        2,
+                        Driver::KeptWith(block_bytes, XHook::SleepAt(ordinal)),
+                    )
+                    .unwrap();
+                    assert!(slow.0 == made.0, "{context}");
+                    assert_eq!(slow.1, made.1, "{context}");
+                    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        search_with(
+                            &database,
+                            threads,
+                            2,
+                            Driver::KeptWith(block_bytes, XHook::PanicAt(ordinal)),
+                        )
+                    }));
+                    assert!(panicked.is_err(), "{context}");
+                }
+            }
+            let _ = std::fs::remove_dir_all(dir);
         }
 
         fn error_text(result: Result<(Seen, Vec<u32>)>) -> String {
@@ -2314,6 +2673,24 @@ mod tests {
                     // Without the one-thread order's error, the cut's own error differs.
                     let own = error_text(search(&database, threads, 2, Some(cut)));
                     assert_ne!(own, expected, "{threads} threads");
+                    // EXPERIMENT (LOSAT_X_BPDBKEEP): the kept buffers give the same errors.
+                    for block_bytes in [BLOCK_BYTES, cut] {
+                        assert_eq!(
+                            error_text(search_with(
+                                &database,
+                                threads,
+                                2,
+                                Driver::Kept(block_bytes)
+                            )),
+                            error_text(search_with(
+                                &database,
+                                threads,
+                                2,
+                                Driver::Made(block_bytes)
+                            )),
+                            "{threads} threads, {block_bytes}-byte blocks"
+                        );
+                    }
                     if gap {
                         assert!(own.contains("holds a gap character"), "{own}");
                     }
@@ -2732,8 +3109,8 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the compact preliminary lists (`x_prelim_compact.rs`) are
-    // listed and renamed to ranks with the off path's lists, before they are expanded.
+    // The compact preliminary lists (`x_prelim_compact.rs`) are listed and renamed to ranks with
+    // the lists of full HSPs, before they are expanded.
     #[test]
     fn compact_lists_are_listed_and_renamed_with_the_others() {
         use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
@@ -2830,14 +3207,16 @@ mod tests {
         for (database, readable) in &databases {
             for threads in [1, 4] {
                 crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
-                    let two = x_titles_read_allow_blocks(database, pool)
-                        && x_taxids_allow_blocks(database, pool);
-                    assert_eq!(two, *readable);
-                    assert_eq!(
-                        x_titles_taxids_allow_blocks(database, pool),
-                        two,
-                        "threads {threads}"
-                    );
+                    for names in [true, false] {
+                        let two = x_titles_read_allow_blocks(database, pool)
+                            && x_taxids_allow_blocks(database, names, pool);
+                        assert_eq!(two, *readable);
+                        assert_eq!(
+                            x_titles_taxids_allow_blocks(database, names, pool),
+                            two,
+                            "threads {threads}"
+                        );
+                    }
                     Ok(())
                 })
                 .unwrap();
@@ -2855,7 +3234,7 @@ mod tests {
         let allowed = |database: &BlastpDatabase| -> [bool; 2] {
             [1, 4].map(|threads| {
                 crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
-                    Ok(x_titles_allow_blocks(database, false, pool))
+                    Ok(x_titles_allow_blocks(database, false, false, pool))
                 })
                 .unwrap()
             })
@@ -2932,5 +3311,64 @@ mod tests {
         assert_eq!(read_allowed(&punctuation), [true, true]);
         drop((missing, bad, punctuation));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): where the batches' prefetch reads the taxonomy database
+    // (`taxids`, DBID item T), the block search of `-db` runs only when no lookup can be refused:
+    // the one pass over the headers gives the answer of the titles' check followed by
+    // `x_taxids_allow_blocks`. `sprot_tax` of `tests/fixtures/outfmt16/db` (two sequences, taxid
+    // 9606) with no taxonomy database, ones whose lookups cannot be refused (a wrong magic number
+    // is a message; a scientific name of 9606 that XML2 cannot write is not asked for by the
+    // prefetch) and one whose record of 9606 is (an empty `taxdb.btd`, `shared::taxdb_may_refuse`),
+    // at one thread and in a pool. The slots (LOSAT_X_BPQSLOTS) are declined where a lookup can
+    // write a text (`prefetch_may_write`).
+    #[test]
+    fn blocks_with_the_prefetch_need_lookups_that_cannot_be_refused() {
+        use crate::seqdb::alias::SearchPath;
+        let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-db-qblock-prefetch-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let path = tests.join("fixtures/outfmt16/db/sprot_tax");
+        for (taxdb, refused, writes) in [
+            (None, false, false),
+            (Some("good"), false, false),
+            (Some("bad_magic"), false, true),
+            (Some("high_bytes_utf8"), false, false),
+            (Some("btd_empty"), true, true),
+        ] {
+            let taxdb = taxdb.map(|name| tests.join("seqdb/taxdb").join(name));
+            let search =
+                SearchPath::new(&cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None)
+                    .unwrap();
+            let database = BlastpDatabase {
+                db: SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap(),
+                name: "sprot_tax".to_string(),
+                taxdb: shared::TaxdbRun::default(),
+            };
+            assert_eq!(database.taxdb_found(), taxdb.is_some());
+            assert_eq!(database.prefetch_may_write(), writes, "{taxdb:?}");
+            for threads in [1, 4] {
+                crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    for pairwise in [false, true] {
+                        let titles = x_titles_allow_blocks(&database, pairwise, false, pool);
+                        assert!(titles, "{taxdb:?} threads {threads}");
+                        let two = titles && x_taxids_allow_blocks(&database, false, pool);
+                        assert_eq!(two, !refused, "{taxdb:?} threads {threads}");
+                        assert_eq!(
+                            x_titles_allow_blocks(&database, pairwise, true, pool),
+                            two,
+                            "{taxdb:?} threads {threads}"
+                        );
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            }
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
     }
 }

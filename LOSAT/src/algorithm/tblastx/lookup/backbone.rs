@@ -28,11 +28,15 @@ pub(crate) use x_lut_direct::x_tbxlut_reach_stub;
 // EXPERIMENT (LOSAT_X_BPLKPAHEAD): the spares of exact blastp's table built ahead of its block
 // (x_lut_direct.rs); no NCBI counterpart for the re-export itself.
 pub(crate) use x_lut_direct::XAaSpares;
+// EXPERIMENT (LOSAT_X_BPLK16): the table of a blastp block, `u16` hits or `Int4` hits
+// (x_lut_direct.rs); no NCBI counterpart for the re-export itself.
+pub(crate) use x_lut_direct::XBpLookup;
 // The comparison of two tables, for the unit tests (x_lut_direct.rs).
 #[cfg(test)]
 pub(crate) use x_lut_direct::{x_assert_same_table_as, x_same_table};
-// LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build.
-pub(crate) use x_lut_direct::{x_bx_pooled_builds, x_give_back_pooled};
+// LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
+// by searches of two threads or more).
+pub(crate) use x_lut_direct::{x_bx_pooled_for, x_give_back_pooled};
 // EXPERIMENT (PAIRLUT): the direct builder of the TBLASTX unit
 // path's group tables (x_pair_lut.rs, a child module of x_lut_direct.rs), used by
 // tblastx/x_pair_par.rs.
@@ -106,6 +110,283 @@ impl Default for BackboneCell {
     }
 }
 
+// No NCBI counterpart (LOSAT_X_BPLK16): NCBI's AaLookupBackboneCell holds Int4 offsets and counts.
+// A blastp block's lookup query is at most about 50,000 letters (LOSAT_X_BPQBLOCK), so a query
+// offset and a cell's hit count fit 16 bits and the cell takes 8 bytes instead of 16. The trait
+// `XCell` is what the table's builder (x_lut_direct.rs) and the scan of the fused loop
+// (blastp/x_seed_fused.rs) need of a cell; `BackboneCell` implements it with exactly the reads the
+// code had before, so the tables of every other program stay what they were.
+/// EXPERIMENT (LOSAT_X_BPLK16): a hit (a query offset) stored in a lookup cell or in the overflow
+/// array: `i32` as NCBI's `Int4`, or `u16`.
+pub trait XHit: Copy + Default + Send + Sync + 'static {
+    /// The query offset.
+    fn q(self) -> i32;
+
+    /// `dst` set to the query offsets `src` (`dst.len() == src.len()`); a `u16` hit panics on an
+    /// offset above 65,535.
+    fn x_store(dst: &mut [Self], src: &[i32]);
+
+    /// The hit at `p` read with one volatile load (not taken out of a vector register by the
+    /// compiler, `x_cell_avx2_defer_masked`).
+    ///
+    /// # Safety
+    /// `p` must point to a hit.
+    unsafe fn x_read_volatile(p: *const Self) -> i32;
+
+    /// Eight hits from `p` as eight `i32` lanes: one `vmovdqu` for `i32`, one `vpmovzxwd ymm, m128`
+    /// for `u16`.
+    ///
+    /// # Safety
+    /// The CPU must have AVX2 and `p` must point to eight hits.
+    #[cfg(target_arch = "x86_64")]
+    unsafe fn x_load8(p: *const Self) -> std::arch::x86_64::__m256i;
+
+    /// The lanes of `x_load8` for the hits at `p` where `in_rest` is set (all ones per lane); the
+    /// other lanes are not used by the caller. `i32`: `vpmaskmovd`, which reads nothing past the
+    /// hits. `u16`: the same 16-byte widening load as `x_load8`, so the 16 bytes at `p` must lie
+    /// inside the allocation (`XCell::PAD_HITS`, `XCell::PAD_CELLS`).
+    ///
+    /// # Safety
+    /// The CPU must have AVX2, `in_rest` must be set exactly for the first `n < 8` lanes and `p`
+    /// must point to `n` hits, with (for `u16`) 16 readable bytes from `p` on.
+    #[cfg(target_arch = "x86_64")]
+    unsafe fn x_load_tail(
+        p: *const Self,
+        in_rest: std::arch::x86_64::__m256i,
+    ) -> std::arch::x86_64::__m256i;
+}
+
+impl XHit for i32 {
+    #[inline(always)]
+    fn q(self) -> i32 {
+        self
+    }
+
+    #[inline(always)]
+    fn x_store(dst: &mut [Self], src: &[i32]) {
+        dst.copy_from_slice(src);
+    }
+
+    #[inline(always)]
+    unsafe fn x_read_volatile(p: *const Self) -> i32 {
+        // SAFETY: (caller) `p` points to a hit.
+        unsafe { std::ptr::read_volatile(p) }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    unsafe fn x_load8(p: *const Self) -> std::arch::x86_64::__m256i {
+        // SAFETY: (caller) the CPU has AVX2 and `p` points to eight hits.
+        unsafe { std::arch::x86_64::_mm256_loadu_si256(p.cast()) }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    unsafe fn x_load_tail(
+        p: *const Self,
+        in_rest: std::arch::x86_64::__m256i,
+    ) -> std::arch::x86_64::__m256i {
+        // SAFETY: (caller) the CPU has AVX2; the masked load reads only the lanes in `in_rest`.
+        unsafe { std::arch::x86_64::_mm256_maskload_epi32(p, in_rest) }
+    }
+}
+
+impl XHit for u16 {
+    #[inline(always)]
+    fn q(self) -> i32 {
+        i32::from(self)
+    }
+
+    fn x_store(dst: &mut [Self], src: &[i32]) {
+        for (d, &s) in dst.iter_mut().zip(src) {
+            *d = u16::try_from(s).expect("a query offset of a u16 lookup table fits 16 bits");
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn x_read_volatile(p: *const Self) -> i32 {
+        // SAFETY: (caller) `p` points to a hit.
+        i32::from(unsafe { std::ptr::read_volatile(p) })
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    unsafe fn x_load8(p: *const Self) -> std::arch::x86_64::__m256i {
+        use std::arch::x86_64::*;
+        // SAFETY: (caller) the CPU has AVX2 and `p` points to eight hits (16 bytes).
+        unsafe { _mm256_cvtepu16_epi32(_mm_loadu_si128(p.cast())) }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    unsafe fn x_load_tail(
+        p: *const Self,
+        _in_rest: std::arch::x86_64::__m256i,
+    ) -> std::arch::x86_64::__m256i {
+        use std::arch::x86_64::*;
+        // SAFETY: (caller) the CPU has AVX2 and the 16 bytes at `p` are inside the allocation;
+        // the lanes past the hits are blended away by the caller.
+        unsafe { _mm256_cvtepu16_epi32(_mm_loadu_si128(p.cast())) }
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BPLK16): a cell of the lookup table's backbone: `BackboneCell` (`Int4`
+/// hits, as NCBI's AaLookupBackboneCell) or `BackboneCell16`. A cell with more than
+/// `AA_HITS_PER_CELL` hits keeps the cursor of its hits in the table's overflow array in its
+/// entries.
+pub trait XCell: Copy + Default + Send + Sync + 'static {
+    /// The cell's hits.
+    type Hit: XHit;
+
+    /// Zero cells kept after the table's last cell (the AVX2 tail of the scan reads 16 bytes from
+    /// a hit list's start, which for a cell's own entries runs into the cells after it).
+    const PAD_CELLS: usize;
+
+    /// Zero hits kept after the overflow array's last hit (the same read, at the end of the
+    /// overflow array).
+    const PAD_HITS: usize;
+
+    /// The cell's `num_used`.
+    fn count(&self) -> usize;
+
+    /// The hits and the used cells (`count()` above 0) of `cells`.
+    fn x_hits_and_used(cells: &[Self]) -> (u64, u64) {
+        let (mut hits, mut used) = (0u64, 0u64);
+        for cell in cells {
+            if cell.count() > 0 {
+                hits += cell.count() as u64;
+                used += 1;
+            }
+        }
+        (hits, used)
+    }
+
+    /// The cell's hits: its own entries, or the `count()` hits from its cursor in `overflow`.
+    // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:60-99 (quoted at `x_scan_cells`,
+    // blastp/x_seed_fused.rs)
+    fn hits<'a>(&'a self, overflow: &'a [Self::Hit]) -> &'a [Self::Hit];
+
+    /// Sets `num_used`.
+    fn set_count(&mut self, count: usize);
+
+    /// Sets the cursor of a cell with more than `AA_HITS_PER_CELL` hits.
+    fn set_cursor(&mut self, cursor: usize);
+
+    /// The cell's own entries (a cell with at most `AA_HITS_PER_CELL` hits is written here).
+    fn entries_mut(&mut self) -> &mut [Self::Hit];
+}
+
+impl XCell for BackboneCell {
+    type Hit = i32;
+    const PAD_CELLS: usize = 0;
+    const PAD_HITS: usize = 0;
+
+    #[inline(always)]
+    fn count(&self) -> usize {
+        self.num_used as usize
+    }
+
+    // The loop `x_bp_table_ratio` had before LOSAT_X_BPLK16, for the instance of the table of
+    // 32-bit hits to keep its code.
+    fn x_hits_and_used(cells: &[Self]) -> (u64, u64) {
+        let (mut hits, mut used) = (0u64, 0u64);
+        for cell in cells {
+            if cell.num_used > 0 {
+                hits += cell.num_used as u64;
+                used += 1;
+            }
+        }
+        (hits, used)
+    }
+
+    #[inline(always)]
+    fn hits<'a>(&'a self, overflow: &'a [i32]) -> &'a [i32] {
+        let numhits = self.num_used as usize;
+        if numhits <= AA_HITS_PER_CELL {
+            &self.entries[..numhits]
+        } else {
+            let cursor = self.entries[0] as usize;
+            &overflow[cursor..cursor + numhits]
+        }
+    }
+
+    #[inline(always)]
+    fn set_count(&mut self, count: usize) {
+        self.num_used = count as i32;
+    }
+
+    #[inline(always)]
+    fn set_cursor(&mut self, cursor: usize) {
+        self.entries[0] = cursor as i32;
+    }
+
+    #[inline(always)]
+    fn entries_mut(&mut self) -> &mut [i32] {
+        &mut self.entries
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BPLK16): the cell of the lookup table of a blastp block whose lookup
+/// query is at most 65,535 letters (`LOSAT_X_BPLK16`): `BackboneCell` with 16-bit hits and count,
+/// 8 bytes. A cell with more than `AA_HITS_PER_CELL` hits keeps its cursor in the overflow array as
+/// a `u32` in `entries[0]` (low half) and `entries[1]` (high half).
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct BackboneCell16 {
+    pub num_used: u16,
+    pub entries: [u16; AA_HITS_PER_CELL],
+}
+
+const _: () = assert!(std::mem::size_of::<BackboneCell16>() == 8);
+
+impl XCell for BackboneCell16 {
+    type Hit = u16;
+    // A 16-byte load at a cell's entries (2 bytes into the cell) ends 10 bytes past the cell's
+    // end at most.
+    const PAD_CELLS: usize = 2;
+    // A 16-byte load at the start of an overflow hit list of at least one hit ends 7 hits past
+    // its end at most.
+    const PAD_HITS: usize = 8;
+
+    #[inline(always)]
+    fn count(&self) -> usize {
+        usize::from(self.num_used)
+    }
+
+    #[inline(always)]
+    fn hits<'a>(&'a self, overflow: &'a [u16]) -> &'a [u16] {
+        let numhits = usize::from(self.num_used);
+        if numhits <= AA_HITS_PER_CELL {
+            &self.entries[..numhits]
+        } else {
+            let cursor = usize::from(self.entries[0]) | usize::from(self.entries[1]) << 16;
+            &overflow[cursor..cursor + numhits]
+        }
+    }
+
+    #[inline(always)]
+    fn set_count(&mut self, count: usize) {
+        self.num_used = u16::try_from(count).expect("a cell of a u16 lookup table counts 16 bits");
+    }
+
+    #[inline(always)]
+    fn set_cursor(&mut self, cursor: usize) {
+        let cursor =
+            u32::try_from(cursor).expect("the overflow cursor of a u16 table fits 32 bits");
+        self.entries[0] = cursor as u16;
+        self.entries[1] = (cursor >> 16) as u16;
+    }
+
+    #[inline(always)]
+    fn entries_mut(&mut self) -> &mut [u16] {
+        &mut self.entries
+    }
+}
+
 // NCBI c++/src/algo/blast/core/blast_aalookup.c:562-603:
 // row = info->matrix[query_word[current_pos]];
 // score + row[i] controls neighboring word inclusion.
@@ -119,9 +400,15 @@ fn lookup_matrix_score(matrix: ScoringMatrix, query: usize, subject: usize) -> i
 }
 
 /// NCBI-style lookup table with flat backbone
-pub struct BlastAaLookupTable {
-    pub backbone: Vec<BackboneCell>,
-    pub overflow: Vec<i32>,
+///
+/// EXPERIMENT (LOSAT_X_BPLK16): generic over its cell, `BackboneCell` (the default: every table of
+/// every program) or `BackboneCell16` (blastp's block tables with `u16` hits). A `BackboneCell16`
+/// table has `XCell::PAD_CELLS` zero cells after its `backbone_size` cells and `XCell::PAD_HITS`
+/// zero hits after its overflow (the AVX2 tail of the fused loop reads 16 bytes from a hit list's
+/// start); the padding is in no count, `longest_chain` or presence bit.
+pub struct BlastAaLookupTable<C: XCell = BackboneCell> {
+    pub backbone: Vec<C>,
+    pub overflow: Vec<C::Hit>,
     // Presence vector: PV_ARRAY_TYPE = Uint4
     // Reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:41-44
     pub pv: Vec<u32>,
@@ -154,7 +441,7 @@ pub struct BlastAaLookupTable {
     pub row_max: Vec<i32>,
 }
 
-impl BlastAaLookupTable {
+impl<C: XCell> BlastAaLookupTable<C> {
     #[inline]
     pub fn get_context_idx(&self, concat_off: i32) -> usize {
         let bases = &self.frame_bases;
@@ -170,7 +457,9 @@ impl BlastAaLookupTable {
         }
         lo.saturating_sub(1)
     }
+}
 
+impl BlastAaLookupTable {
     #[inline(always)]
     pub fn get_hits(&self, index: usize) -> &[i32] {
         let cell = unsafe { self.backbone.get_unchecked(index) };
@@ -247,6 +536,12 @@ struct XChainArena {
     free: Vec<Vec<std::ptr::NonNull<i32>>>,
     /// Slabs of `SLAB_INTS` kept by `x_reset` for the next build (`LOSAT_X_BXLUTPOOL`).
     spare: Vec<Box<[i32]>>,
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): every allocation is made by `x_allocate_unthresholded`.
+    x_unthresholded: bool,
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the regions of `x_allocate_unthresholded`.
+    x_unthresholded_slabs: Vec<Vec<i32>>,
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the ints of the last region given out.
+    x_unthresholded_used: usize,
 }
 
 impl XChainArena {
@@ -260,6 +555,9 @@ impl XChainArena {
             remaining: 0,
             free: Vec::new(),
             spare: Vec::new(),
+            x_unthresholded: false,
+            x_unthresholded_slabs: Vec::new(),
+            x_unthresholded_used: 0,
         }
     }
 
@@ -271,6 +569,8 @@ impl XChainArena {
                 self.spare.push(slab);
             }
         }
+        self.x_unthresholded_slabs.clear();
+        self.x_unthresholded_used = 0;
         self.cursor = std::ptr::null_mut();
         self.remaining = 0;
         for list in &mut self.free {
@@ -286,10 +586,49 @@ impl XChainArena {
                 return start;
             }
         }
+        if self.x_unthresholded {
+            return self.x_allocate_unthresholded(ints);
+        }
         let mut slab = vec![0i32; ints].into_boxed_slice();
         let start = slab.as_mut_ptr();
         // Moving the box into the list does not move the ints.
         self.slabs.push(slab);
+        start
+    }
+
+    // No NCBI counterpart (LOSAT_X_BPDBKEEP): where the ints are allocated.
+    /// `allocate(ints)` from a region that glibc maps and unmaps without raising its mmap threshold
+    /// (`utils::x_mapped::x_unthresholded_capacity`: zeroed by `calloc`, whose mapped pages are not
+    /// touched until written). The slabs and long chains are cut from the last region while it has
+    /// room, so that a build reserves the address space of one region per 32 MiB of chains, not
+    /// one per slab (3,000 human proteins x `BlastDBSpecies6` at one thread, blocks of 50,000 query
+    /// letters: VmPeak 129 -> 97 MB, RssAnon the same).
+    #[inline(never)]
+    fn x_allocate_unthresholded(&mut self, ints: usize) -> *mut i32 {
+        let room = self
+            .x_unthresholded_slabs
+            .last()
+            .map_or(0, |region| region.len() - self.x_unthresholded_used);
+        if room < ints {
+            self.x_unthresholded_slabs.push(vec![
+                0i32;
+                crate::utils::x_mapped::x_unthresholded_capacity(
+                    ints,
+                    std::mem::size_of::<i32>()
+                )
+            ]);
+            self.x_unthresholded_used = 0;
+        }
+        let used = self.x_unthresholded_used;
+        let region = self
+            .x_unthresholded_slabs
+            .last_mut()
+            .expect("a region with room for the ints");
+        debug_assert!(used + ints <= region.len());
+        // SAFETY: `used + ints <= region.len()`, and the region is never resized, so the ints
+        // stay inside it, where earlier cuts do not reach, until the arena drops it.
+        let start = unsafe { region.as_mut_ptr().add(used) };
+        self.x_unthresholded_used = used + ints;
         start
     }
 
@@ -441,6 +780,21 @@ impl LookupBackboneChains {
                 .collect(),
             arena: XChainArena::new(),
         }
+    }
+
+    // No NCBI counterpart (LOSAT_X_BPDBKEEP): where the cells and the chains are allocated.
+    /// `new(backbone_size)` whose cells and slabs glibc maps and unmaps without raising its mmap
+    /// threshold (`utils::x_mapped::x_unthresholded_capacity`): a build's one-off 446 KiB of
+    /// cells (BLASTP's 28,540) and 256 KiB slabs would raise it to their size when they are freed.
+    fn x_new_unthresholded(backbone_size: usize) -> Self {
+        let mut cells = Vec::with_capacity(crate::utils::x_mapped::x_unthresholded_capacity(
+            backbone_size,
+            std::mem::size_of::<Option<LookupChain>>(),
+        ));
+        cells.resize_with(backbone_size, || None);
+        let mut arena = XChainArena::new();
+        arena.x_unthresholded = true;
+        Self { cells, arena }
     }
 
     // No NCBI counterpart (buffer reuse, LOSAT_X_BXLUTPOOL): as `new(backbone_size)`, on this
@@ -1444,23 +1798,27 @@ pub fn build_ncbi_lookup(
 //         }
 //     }
 // ```
-/// EXPERIMENT (LOSAT_X_BPLUT): [`build_ncbi_lookup`] for
-/// BLASTP; with the switch the table is filled in place from the per-cell counts, in the same
-/// append order as the loop above and BlastAaLookupFinalize (x_lut_direct.rs), so the chains of
-/// the reference builder are never held.
+/// [`build_ncbi_lookup`] for BLASTP: the table is filled in place from the per-cell counts, in
+/// the same append order as the loop above and BlastAaLookupFinalize (x_lut_direct.rs), so the
+/// chains of the reference builder are never held.
 pub(crate) fn x_bp_build_ncbi_lookup(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
-    karlin_params: &crate::stats::KarlinParams,
     check_ideal: bool,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    x_lut_direct::x_bp_build_lookup(
-        x_lut_direct::x_bplut_on(),
-        queries,
-        threshold,
-        karlin_params,
-        check_ideal,
-    )
+    x_lut_direct::x_bp_build_lookup(queries, threshold, check_ideal)
+}
+
+/// EXPERIMENT (LOSAT_X_BPLK16): [`x_bp_build_ncbi_lookup`] with the width of the table's hits
+/// chosen by the build (`narrow`: a table of `u16` hits where the lookup query is at most 65,535
+/// letters and the in-place builder applies; x_lut_direct.rs `x_bp_build_lookup_as`).
+pub(crate) fn x_bp_build_ncbi_lookup_as(
+    queries: &[Vec<QueryFrame>],
+    threshold: i32,
+    check_ideal: bool,
+    narrow: bool,
+) -> (x_lut_direct::XBpLookup, Vec<QueryContext>) {
+    x_lut_direct::x_bp_build_lookup_as(queries, threshold, check_ideal, narrow)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:356-360
@@ -1542,11 +1900,15 @@ pub(crate) fn build_ncbi_lookup_for_profile(
 //
 //     sfree(exact_backbone);
 // ```
+/// BLASTX's lookup table of a prepared query; `parts` above 1: a pooled build's passes on that many tasks of the pool it runs on
+/// (`LOSAT_X_BXBUILDPAR`, `x_lut_direct.rs` `x_partitioned_passes`); the table is the same.
 pub(crate) fn build_ncbi_lookup_from_prepared(
     concat_query: Vec<u8>,
     lookup_locations: Vec<(i32, i32)>,
     contexts: Vec<QueryContext>,
     threshold: i32,
+    pooled: bool,
+    parts: usize,
 ) -> BlastAaLookupTable {
     let frame_bases = contexts.iter().map(|c| c.frame_base).collect();
     let prepared = PreparedLookupQuery {
@@ -1568,9 +1930,12 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     // ```
     // BLASTX: the table is filled in place from the per-cell counts, in the same append order as
     // this loop and BlastAaLookupFinalize (x_lut_direct.rs); where that declines (diagnostics
-    // mode, or a backbone index wider than 16 bits) the reference builder below runs.
-    let built = if x_lut_direct::x_bx_lut_pool() {
-        x_lut_direct::x_build_direct_pooled(prepared, threshold, ScoringMatrix::Blosum62, 3)
+    // mode, or a backbone index wider than 16 bits) the reference builder below runs. With `pooled`
+    // (LOSAT_X_BXLUTPOOL, chosen by the caller for its search, LOSAT_X_BXPOOLN1) the build takes
+    // kept vectors; the caller gives them back (`x_give_back_pooled`) when it drops the table, or
+    // the pool goes without them (a missed reuse only).
+    let built = if pooled {
+        x_lut_direct::x_build_direct_pooled(prepared, threshold, ScoringMatrix::Blosum62, 3, parts)
     } else {
         x_lut_direct::x_build_direct(prepared, threshold, ScoringMatrix::Blosum62, 3)
     };
@@ -2092,6 +2457,49 @@ mod tests {
     use crate::config::ScoringMatrix;
     use crate::stats::lookup_protein_params_ungapped;
     use crate::utils::matrix::{blosum62_score, ncbistdaa, BLASTAA_SIZE};
+
+    // No NCBI counterpart (LOSAT_X_BPDBKEEP): the unthresholded arena cuts its slabs and long chains
+    // from one region while it has room (one region per 32 MiB on 64-bit glibc, else one per
+    // allocation): the blocks it gives do not overlap and keep what was written to them.
+    #[test]
+    fn unthresholded_slabs_are_cut_from_one_region() {
+        let mut arena = XChainArena::new();
+        arena.x_unthresholded = true;
+        let sizes = [
+            XChainArena::SLAB_INTS,
+            1 << 15,
+            XChainArena::SLAB_INTS,
+            3,
+            1 << 17,
+        ];
+        let mut blocks = Vec::new();
+        for (i, &ints) in sizes.iter().enumerate() {
+            let start = arena.allocate(ints);
+            // SAFETY: the arena gave `ints` ints at `start`.
+            unsafe { std::slice::from_raw_parts_mut(start, ints) }.fill(i as i32 + 1);
+            blocks.push((start as usize, ints));
+        }
+        for (i, &(start, ints)) in blocks.iter().enumerate() {
+            // SAFETY: as above; the arena is alive.
+            let ints_read = unsafe { std::slice::from_raw_parts(start as *const i32, ints) };
+            assert!(ints_read.iter().all(|&v| v == i as i32 + 1), "block {i}");
+            for &(other, other_ints) in &blocks[i + 1..] {
+                let end = start + ints * 4;
+                assert!(
+                    end <= other || other + other_ints * 4 <= start,
+                    "blocks {i} overlap"
+                );
+            }
+        }
+        let regions = if crate::utils::x_mapped::X_MAPPED_ALLOCATOR {
+            1
+        } else {
+            sizes.len()
+        };
+        assert_eq!(arena.x_unthresholded_slabs.len(), regions);
+        arena.x_reset();
+        assert!(arena.x_unthresholded_slabs.is_empty());
+    }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:87-129
     // ```c

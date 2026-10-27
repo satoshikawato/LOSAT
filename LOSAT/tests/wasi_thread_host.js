@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const os = require("node:os");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
-const { inspectArtifact, unsignedWasiImports, createSharedMemory } = require("./wasi_artifact");
+const { inspectArtifact, prepareArtifact, unsignedWasiImports, createSharedMemory } = require("./wasi_artifact");
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Keep the parallel command's memory operations valid across V8 isolates.
@@ -88,6 +88,19 @@ function prespawnCount(argv) {
     throw new Error(`LOSAT_WASI_PRESPAWN must be auto or an integer from 0 to ${PRESPAWN_MAX}`);
   }
   return count;
+}
+
+// LOSAT_WASI_PRESPAWN=auto only: when a spawn finds no standby worker left, the workers of the
+// next set of threads boot together, as many as the -num_threads that argv requests. That is
+// the most one set asks for: a pool whose threads are all new (LOSAT/src/utils/threading.rs
+// x_spawn_search_pool), as blastn's query-batch slots start after the search's pool, k pools
+// of m threads with k x m = -num_threads. One new worker per spawn instead, each spawn waits
+// for its own worker's boot (16 one after another, about 40 ms each, for the slots of a
+// 16-thread search on the workstation). Unused workers are terminated at close, as the first
+// set's. 0 (a new worker per spawn, as before) for a number of workers and without standby.
+function refillCount(argv) {
+  if ((process.env.LOSAT_WASI_PRESPAWN ?? "auto") !== "auto" || !prespawnCount(argv)) return 0;
+  return requestedThreads(argv);
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
@@ -589,7 +602,35 @@ async function terminateWorkers(workers) {
 // Host-owned lifecycle records count attempts, ready confirmations, and real exit
 // events separately. Test-only failure injection never changes search behavior.
 async function createThreadHost(wasmPath, kind, argv = [], options = {}) {
-  return (await prepareThreadHost(wasmPath, kind)).create(argv, options);
+  // LOSAT_WASI_PRESPAWN: a command's standby workers start booting here, while the module is
+  // read, guarded and compiled, and get the module and the memory once they exist (`early`).
+  // Booting one is most of a thread's start (Node's worker bootstrap: 0.1-0.3 s for 15 workers at
+  // once), so they no longer start only after the compile.
+  const early = kind === "threaded-command" && !recycleWorkers(kind)
+    ? bootEarlyWorkers(prespawnCount(argv), options.fault) : [];
+  try {
+    return await (await prepareThreadHost(wasmPath, kind)).create(argv, early.length ? { ...options, early } : options);
+  } catch (err) {
+    await terminateWorkers(new Set(early.map(slot => slot.worker)));
+    throw err;
+  }
+}
+
+// LOSAT_WASI_PRESPAWN (createThreadHost): `count` standby workers created before the module is
+// compiled; each boots and waits for its `init` message from prespawnWorkers. Fewer when a worker
+// cannot be created (prespawnWorkers creates the rest as before).
+function bootEarlyWorkers(count, fault) {
+  const early = [];
+  for (let index = 0; index < count; index++) {
+    const control = new SharedArrayBuffer(4 * START_WORDS);
+    let worker;
+    try {
+      worker = new Worker(__filename, { workerData: { control, standby: index, early: true, fault: fault || null } });
+    } catch { break; }
+    worker.unref();
+    early.push({ worker, control });
+  }
+  return early;
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -601,12 +642,23 @@ async function createThreadHost(wasmPath, kind, argv = [], options = {}) {
 async function prepareThreadHost(wasmPath, kind) {
   const start = performance.now();
   const bytes = fs.readFileSync(wasmPath);
-  const identity = inspectArtifact(bytes, kind);
+  // One compile: the identity (imports, exports) is read from the guarded module, whose imports
+  // and exports are the input's (the guard rewrites only memory.fill and memory.copy), instead of
+  // compiling the input too (about 40 ms for the 9 MB command). An input that cannot be guarded
+  // or compiled is inspected first, so that an artifact of another kind is refused as before.
+  const inputSha256 = sha256(bytes);
   const inspected = performance.now();
-  const guarded = guardSharedMemoryCached(bytes, identity.sha256);
-  const guardedAt = performance.now();
-  const module = await WebAssembly.compile(guarded.bytes);
-  const timings = { validation_including_raw_compile_seconds: (inspected-start)/1000, guard_seconds: (guardedAt-inspected)/1000,
+  let guarded, module, guardedAt;
+  try {
+    guarded = guardSharedMemoryCached(bytes, inputSha256);
+    guardedAt = performance.now();
+    module = await WebAssembly.compile(guarded.bytes);
+  } catch (err) {
+    inspectArtifact(bytes, kind);
+    throw err;
+  }
+  const identity = prepareArtifact(bytes, kind, module, inputSha256).identity;
+  const timings = { read_and_hash_seconds: (inspected-start)/1000, guard_seconds: (guardedAt-inspected)/1000,
     guarded_compile_seconds: (performance.now()-guardedAt)/1000 };
   debug(`shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies`);
   return { identity, timings, create: (argv = [], options = {}) =>
@@ -615,7 +667,7 @@ async function prepareThreadHost(wasmPath, kind) {
 
 async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) {
   const args = [wasmPath, ...argv];
-  const prespawn = prespawnCount(argv), recycle = recycleWorkers(kind);
+  const prespawn = prespawnCount(argv), recycle = recycleWorkers(kind), refill = recycle ? 0 : refillCount(argv);
   // The table of the files that every thread reads (sharedFileImports), in a command that
   // requests 2 or more threads.
   const files = kind === "threaded-command" && requestedThreads(argv) >= 2 ? sharedFileTable() : null;
@@ -623,7 +675,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   // LOSAT_WASI_RECYCLE: the workers that run one guest thread after another, the guest threads
   // they run now (tids), and how each of those threads' exit promise is resolved.
   const recycled = [], running = new Set(), returned = new Map();
-  let nextTid = 1, attempt = 0, nextSlot = 0, mainMemory, closing = false, failure = null;
+  let nextTid = 1, attempt = 0, nextSlot = 0, nextStandby = 0, mainMemory, closing = false, failure = null;
   const event = (type, fields = {}) => {
     const record = { event: type, at_ms: performance.now(), ...fields }; events.push(record);
     if (DEBUG) fs.writeSync(2, `[losat-wasi-event] ${JSON.stringify(record)}\n`);
@@ -727,6 +779,8 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   const spawnThread = (startArg) => {
     attempt++; const tid = nextTid++; event("spawn_attempt", { tid, attempt });
     if (options.rejectSpawn && options.rejectSpawn(attempt)) { event("spawn_rejected", { tid }); return -1; }
+    // refillCount: the next set boots together; this spawn takes the first of it.
+    if (!standby.length && refill) { event("standby_refill", { tid, count: refill }); prespawnWorkers(refill); }
     if (standby.length) return startStandby(standby.shift(), tid, startArg);
     if (recycle) {
       const waiting = claimRecycled();
@@ -760,10 +814,12 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   // ```
   // LOSAT_WASI_PRESPAWN: boot the workers together, before the guest asks for them. Each
   // instantiates the module with the shared memory and waits for its start order; spawnThread
-  // hands them out in order and creates new workers when none is left. A standby worker never
-  // keeps the process alive (unref until taken), and close() terminates the unused ones.
+  // hands them out in order and, when none is left, boots the next set (refillCount) or creates
+  // a new worker per spawn. A standby worker never keeps the process alive (unref until taken),
+  // and close() terminates the unused ones.
   const prespawnWorkers = (count) => {
-    for (let index = 0; index < count; index++) {
+    for (let n = 0; n < count; n++) {
+      const index = nextStandby++;
       if (recycle) {
         // A recycled worker that waits from the start; spawnThread takes it like the others.
         try { recycledWorker({ standby: index }).worker.unref(); }
@@ -771,11 +827,18 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
         event("standby_spawned", { standby: index });
         continue;
       }
-      const control = new SharedArrayBuffer(4 * START_WORDS);
+      // An early worker (createThreadHost) has booted meanwhile and gets what it instantiates now.
+      const early = options.early ? options.early[index] : undefined;
+      const control = early ? early.control : new SharedArrayBuffer(4 * START_WORDS);
       let worker;
       try {
-        worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
-          control, files, standby: index, fault: options.fault || null } });
+        if (early) {
+          worker = early.worker;
+          worker.postMessage({ module, wasmPath, args, memory: mainMemory, files });
+        } else {
+          worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
+            control, files, standby: index, fault: options.fault || null } });
+        }
       } catch (err) { event("standby_rejected", { standby: index, error: String(err) }); return; }
       worker.unref();
       const slot = { index, worker, control, tid: null };
@@ -832,7 +895,10 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
 module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir };
 
 if (!isMainThread) {
-  const { module: workerModule, wasmPath, args, memory, control, files, fault, standby, recycle } = workerData;
+  const { control, fault, standby, recycle, early } = workerData;
+  // An early worker (createThreadHost) boots before the module and the memory exist and gets
+  // them in one message (`init`) from prespawnWorkers.
+  let { module: workerModule, wasmPath, args, memory, files } = workerData;
   // A standby worker (LOSAT_WASI_PRESPAWN) learns its tid and startArg from its start order,
   // and so does a recycled worker (LOSAT_WASI_RECYCLE) for every thread after its first.
   let { startArg, tid } = workerData;
@@ -854,6 +920,10 @@ if (!isMainThread) {
       debug(`worker boot ${name}`);
       if (fault === "startup-timeout") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
       if (fault === "startup-error") throw new Error("injected worker startup error");
+      if (early) {
+        ({ module: workerModule, wasmPath, args, memory, files } =
+          await new Promise(resolve => parentPort.once("message", resolve)));
+      }
       const module = workerModule || await compileThreadedModule(wasmPath);
       const spawnThread = () => -1;
       const view = new Int32Array(control);

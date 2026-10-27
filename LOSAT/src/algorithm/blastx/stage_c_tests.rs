@@ -392,6 +392,8 @@ fn active_ncbi_lookup_overflow_u16_boundary_preserves_all_offsets() {
             vec![(0, len as i32 - 1)],
             vec![c],
             0,
+            false,
+            1,
         );
         let hits = lookup.get_hits(0);
         assert_eq!(hits.len(), len - 2);

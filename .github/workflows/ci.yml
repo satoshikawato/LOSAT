@@ -20,12 +20,12 @@ jobs:
     name: rust lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.92.0
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: LOSAT -> target
       # NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
@@ -89,18 +89,18 @@ jobs:
       CARGO_PROFILE_TEST_OPT_LEVEL: '3'
       CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.92.0
       # cache-on-failure: a red push run still saves the dependencies it built (the crate's
       # tests run after them), so that pull request shards do not build them cold until the
       # next green push run.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: LOSAT -> target
           cache-on-failure: true
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-nextest@0.9.148
       - name: cargo nextest run --all-features
@@ -137,7 +137,7 @@ jobs:
     name: fast output regressions
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - name: Select programs from the changed paths
@@ -151,11 +151,11 @@ jobs:
             python3 LOSAT/tests/ci_fast_regressions.py --select-only --programs all | tee select.txt
           fi
           echo "programs=$(sed -n 's/^selected programs: \([^ ]*\).*/\1/p' select.txt)" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         if: steps.select.outputs.programs != 'none'
         with:
           toolchain: 1.92.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         if: steps.select.outputs.programs != 'none'
         with:
           workspaces: LOSAT -> target
@@ -190,7 +190,7 @@ jobs:
         run: |
           python3 LOSAT/tests/switch_reach_check.py --dir .tmp/switch-reach \
             --programs "${{ steps.select.outputs.programs }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always() && steps.select.outputs.programs != 'none'
         with:
           name: fast-regressions

@@ -53,8 +53,10 @@
 //! only the residues of the word (the exact backbone index identifies them), the matrix, the
 //! threshold, the word length and the alphabet, so a list memoised under the same key is the
 //! list the recursion would produce again. The exact backbone is built by the reference
-//! function, and every other field of the table is computed by the reference expressions.
-//! In diagnostics mode the reference builder runs (its prints read the chains).
+//! function (a partitioned build, LOSAT_X_BXBUILDPAR, takes the same cells and offsets from a
+//! counting sort of that function's loop, `x_counted_sources`), and every other field of the table
+//! is computed by the reference expressions. In diagnostics mode the reference builder runs (its
+//! prints read the chains).
 
 use super::*;
 use std::cell::RefCell;
@@ -114,6 +116,31 @@ pub(crate) fn x_bx_pooled_builds() -> bool {
     x_bx_lut_pool() && !diagnostics_enabled()
 }
 
+// No NCBI counterpart (buffer reuse only): LOSAT_X_BXPOOLN1, in the strict set (on unless `=0`).
+// The pool moves a table's vectors and its build's temporaries from the thread that drops them to
+// the thread that builds next, so that no thread's glibc arena keeps a table's worth after the
+// table is freed (`x_bx_lut_pool`). A search on one thread has no other thread: with the switch its
+// tables are built by `x_build_direct` (its own neighbour memo, `vec!` vectors) and freed with the
+// search's lookup (`blastx/seed.rs` `Lookup`), as NCBI builds and frees them and as `=0` of
+// LOSAT_X_BXLUTPOOL does. Kept, the pool held a table and its build's temporaries through each
+// query batch's end (the composition-based statistics and the traceback), which then took its
+// memory on top: a 660 kb genome (AP027131) against 543 proteins (AP027133) at one thread had a
+// peak `RssAnon` of 26.0 MiB, 22.6 without the pool. Searches of two threads or more build pooled as before.
+/// Whether a BLASTX search of `threads` threads builds its tables pooled: the builds are pooled
+/// ([`x_bx_pooled_builds`]) and, with `LOSAT_X_BXPOOLN1`, the search has two threads or more.
+pub(crate) fn x_bx_pooled_for(threads: usize) -> bool {
+    static N1: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !x_bx_pooled_builds() {
+        return false;
+    }
+    if !*N1.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXPOOLN1")) {
+        return true;
+    }
+    let own = threads <= 1;
+    crate::utils::xreach::x_reach!("LOSAT_X_BXPOOLN1", own);
+    !own
+}
+
 /// No NCBI counterpart (memoised neighbour lists shared by threads, `XNeighborMemo` otherwise).
 struct XSharedMemo {
     key: (ScoringMatrix, i32, usize, usize),
@@ -171,13 +198,18 @@ impl XLists<'_> {
     }
 }
 
-/// No NCBI counterpart: a build's temporary vectors, kept between pooled builds.
+/// No NCBI counterpart: a build's temporary vectors, kept between pooled builds (`cells`, `starts`
+/// and `offsets`: the present source cells of a partitioned build, `x_counted_sources`, which keeps
+/// its cursors in `base`; the build's `counts` holds its ranges' counts, `x_partitioned_passes`).
 #[derive(Default)]
 struct XBuildTemps {
     counts: Vec<u32>,
     base: Vec<u32>,
     fill: Vec<u32>,
     chains: Option<LookupBackboneChains>,
+    cells: Vec<u32>,
+    starts: Vec<u32>,
+    offsets: Vec<i32>,
 }
 
 // SAFETY: the exact backbone's block pointers point into slabs it owns (boxes, which do not move
@@ -217,15 +249,18 @@ fn x_zeroed<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Ve
 //             s_AddWordHits(lookup, matrix, query->sequence,
 //                           exact_backbone[i], query_bias, row_max);
 // ```
-/// [`x_build_direct`] with the shared neighbour lists and kept vectors (`LOSAT_X_BXLUTPOOL`).
+/// [`x_build_direct`] with the shared neighbour lists and kept vectors (`LOSAT_X_BXLUTPOOL`); with
+/// `parts` above 1, its passes on that many tasks of the pool it runs on (`LOSAT_X_BXBUILDPAR`,
+/// [`x_partitioned_passes`]).
 pub(super) fn x_build_direct_pooled(
     prepared: PreparedLookupQuery,
     threshold: i32,
     matrix: ScoringMatrix,
     word_length: usize,
+    parts: usize,
 ) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
     let mut unused = None;
-    x_build_direct_in(
+    x_build_direct_in::<BackboneCell>(
         prepared,
         threshold,
         matrix,
@@ -233,6 +268,8 @@ pub(super) fn x_build_direct_pooled(
         &mut unused,
         None,
         true,
+        parts,
+        false,
     )
     .map(|table| table.expect("pooled vectors grow to any table"))
 }
@@ -246,6 +283,7 @@ pub(crate) fn x_give_back_pooled(table: &mut BlastAaLookupTable) {
         overflow: std::mem::take(&mut table.overflow),
         pv: std::mem::take(&mut table.pv),
         grow: false,
+        ..XAaVectors::default()
     };
     if !vectors.is_empty() {
         x_pool_lock(&X_BX_TABLES).push(vectors);
@@ -275,9 +313,75 @@ pub(crate) struct XAaVectors {
     backbone: Vec<BackboneCell>,
     overflow: Vec<i32>,
     pv: Vec<u32>,
+    /// EXPERIMENT (LOSAT_X_BPLK16): the backbone and overflow vectors of a table of `u16` hits;
+    /// the pair of the other width is empty (`x_take_zeroed` and `XAaSpares::x_make_room` drop
+    /// the pair a build or a room does not use, so that a spare keeps one width).
+    backbone16: Vec<BackboneCell16>,
+    overflow16: Vec<u16>,
     /// EXPERIMENT (LOSAT_X_BPLKREUSE): a vector short of the table's size grows in place
     /// (`x_take_zeroed`) instead of refusing the build.
     grow: bool,
+}
+
+// No NCBI counterpart: buffer reuse and the width of the table's hits (LOSAT_X_BPLK16); it
+// changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLK16): a cell width the in-place builder ([`x_build_direct_in`]) builds
+/// tables of, and the vectors of [`XAaVectors`] it builds on.
+trait XVec: XCell {
+    /// The width's backbone and overflow vectors of `vectors`.
+    fn vectors(vectors: &mut XAaVectors) -> (&mut Vec<Self>, &mut Vec<Self::Hit>);
+
+    /// Drops the other width's backbone and overflow vectors.
+    fn drop_other(vectors: &mut XAaVectors);
+
+    /// The table of a partitioned build (LOSAT_X_BXBUILDPAR: `Int4` hits only, BLASTX's pooled
+    /// build) as this width's table. The narrow width builds no partitioned table.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    fn partitioned(table: BlastAaLookupTable) -> BlastAaLookupTable<Self>;
+}
+
+impl XVec for BackboneCell {
+    #[inline(always)]
+    fn vectors(vectors: &mut XAaVectors) -> (&mut Vec<Self>, &mut Vec<i32>) {
+        (&mut vectors.backbone, &mut vectors.overflow)
+    }
+
+    #[inline(always)]
+    fn drop_other(vectors: &mut XAaVectors) {
+        vectors.backbone16 = Vec::new();
+        vectors.overflow16 = Vec::new();
+    }
+
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[inline(always)]
+    fn partitioned(table: BlastAaLookupTable) -> BlastAaLookupTable {
+        table
+    }
+}
+
+impl XVec for BackboneCell16 {
+    fn vectors(vectors: &mut XAaVectors) -> (&mut Vec<Self>, &mut Vec<u16>) {
+        (&mut vectors.backbone16, &mut vectors.overflow16)
+    }
+
+    fn drop_other(vectors: &mut XAaVectors) {
+        vectors.backbone = Vec::new();
+        vectors.overflow = Vec::new();
+    }
+
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    fn partitioned(_table: BlastAaLookupTable) -> BlastAaLookupTable<Self> {
+        unreachable!("a partitioned build (pooled, parts above 1) makes tables of Int4 hits only")
+    }
 }
 
 impl XAaVectors {
@@ -290,37 +394,53 @@ impl XAaVectors {
     /// moves a mapped allocation with `mremap`, so the freed table never raises its dynamic mmap
     /// threshold, which a free of a mapped allocation does (the next table then lands in the main
     /// heap, whose free space stays resident below the allocations made after it).
-    fn x_take_zeroed(
+    ///
+    /// EXPERIMENT (LOSAT_X_BPLK16): of the width `C`; the sizes are those of the table without the
+    /// zero padding of its width (`XCell::PAD_CELLS`, `XCell::PAD_HITS`: none for `Int4` hits),
+    /// which the vectors are given as well. The vectors of the other width are dropped.
+    fn x_take_zeroed<C: XVec>(
         &mut self,
         backbone_size: usize,
         pv_size: usize,
         overflow_size: usize,
-    ) -> Option<(Vec<BackboneCell>, Vec<u32>, Vec<i32>)> {
-        if !self.grow
-            && (self.backbone.capacity() < backbone_size
-                || self.pv.capacity() < pv_size
-                || self.overflow.capacity() < overflow_size)
+    ) -> Option<(Vec<C>, Vec<u32>, Vec<C::Hit>)> {
+        let backbone_size = backbone_size + C::PAD_CELLS;
+        let overflow_size = overflow_size + C::PAD_HITS;
+        let grow = self.grow;
+        let pv_capacity = self.pv.capacity();
+        let (own_backbone, own_overflow) = C::vectors(self);
+        if !grow
+            && (own_backbone.capacity() < backbone_size
+                || pv_capacity < pv_size
+                || own_overflow.capacity() < overflow_size)
         {
             return None;
         }
-        let mut backbone = std::mem::take(&mut self.backbone);
+        let (mut backbone, mut overflow) =
+            (std::mem::take(own_backbone), std::mem::take(own_overflow));
+        // The other width's vectors are freed before this width's grow.
+        C::drop_other(self);
+        // Grown and filled in the order of before LOSAT_X_BPLK16: backbone, pv, overflow.
         backbone.clear();
         backbone.reserve_exact(backbone_size);
-        backbone.resize(backbone_size, BackboneCell::default());
+        backbone.resize(backbone_size, C::default());
         let mut pv = std::mem::take(&mut self.pv);
         pv.clear();
         pv.reserve_exact(pv_size);
         pv.resize(pv_size, 0);
-        let mut overflow = std::mem::take(&mut self.overflow);
         overflow.clear();
         overflow.reserve_exact(overflow_size);
-        overflow.resize(overflow_size, 0);
+        overflow.resize(overflow_size, C::Hit::default());
         Some((backbone, pv, overflow))
     }
 
     // No NCBI counterpart: buffer reuse only.
     fn is_empty(&self) -> bool {
-        self.backbone.capacity() == 0 && self.overflow.capacity() == 0 && self.pv.capacity() == 0
+        self.backbone.capacity() == 0
+            && self.overflow.capacity() == 0
+            && self.backbone16.capacity() == 0
+            && self.overflow16.capacity() == 0
+            && self.pv.capacity() == 0
     }
 }
 
@@ -355,11 +475,10 @@ fn x_locked<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 impl XAaSpares {
     // No NCBI counterpart: where the build ahead applies; it reads switches and changes no value
     // NCBI computes.
-    /// Whether exact blastp's table is built by [`x_build_direct`] (`LOSAT_X_BPLUT` on,
-    /// outside diagnostics mode, whose reference builder prints its phases), the build
-    /// [`Self::x_build_ahead`] makes.
+    /// Whether exact blastp's table is built by [`x_build_direct`] (outside diagnostics mode,
+    /// whose reference builder prints its phases), the build [`Self::x_build_ahead`] makes.
     pub(crate) fn x_applies() -> bool {
-        x_bplut_on() && !diagnostics_enabled()
+        !diagnostics_enabled()
     }
 
     // No NCBI counterpart: buffer reuse only (`XAaSpares`).
@@ -372,6 +491,20 @@ impl XAaSpares {
             overflow: table.overflow,
             pv: table.pv,
             grow: false,
+            ..XAaVectors::default()
+        };
+    }
+
+    // No NCBI counterpart: buffer reuse only (`XAaSpares`).
+    /// EXPERIMENT (LOSAT_X_BPLK16): [`Self::give`] for a table of `u16` hits (its padding stays in
+    /// the vectors; the next build of that width clears and fills them to its own sizes).
+    pub(crate) fn give16(&self, table: BlastAaLookupTable<BackboneCell16>) {
+        *x_locked(&self.block) = XAaVectors {
+            backbone16: table.backbone,
+            overflow16: table.overflow,
+            pv: table.pv,
+            grow: false,
+            ..XAaVectors::default()
         };
     }
 
@@ -401,10 +534,38 @@ impl XAaSpares {
         let prepared = x_bp_prepared_query(queries, check_ideal);
         // build_lookup_from_prepared returns the prepared contexts unchanged.
         let contexts = prepared.contexts.clone();
+        match self.x_on_block_spare::<BackboneCell>(prepared, threshold) {
+            Ok(table) => (table, contexts),
+            Err(prepared) => build_lookup_from_prepared(
+                prepared,
+                threshold,
+                ScoringMatrix::Blosum62,
+                LOOKUP_WORD_LENGTH,
+            ),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
+    // `build_ncbi_lookup_from_prepared`)
+    // ```c
+    //     for (i = 0; i < lookup->backbone_size; i++) {
+    //         if (exact_backbone[i] != NULL) {
+    //             s_AddWordHits(lookup, matrix, query->sequence,
+    //                           exact_backbone[i], query_bias, row_max);
+    // ```
+    /// The in-place build of [`Self::x_build_on_block_spare`] with the cells of width `C`: the
+    /// table built on the vectors the block before gave back (`give`, `give16`), each grown in
+    /// place where it is short, or `Err(prepared)` where the in-place builder declines (the vectors
+    /// stay kept).
+    fn x_on_block_spare<C: XVec>(
+        &self,
+        prepared: PreparedLookupQuery,
+        threshold: i32,
+    ) -> std::result::Result<BlastAaLookupTable<C>, PreparedLookupQuery> {
         let mut room = std::mem::take(&mut *x_locked(&self.block));
         room.grow = true;
         let built = X_MEMO.with(|memo| {
-            x_build_direct_in(
+            x_build_direct_in::<C>(
                 prepared,
                 threshold,
                 ScoringMatrix::Blosum62,
@@ -412,24 +573,61 @@ impl XAaSpares {
                 &mut memo.borrow_mut(),
                 Some(&mut room),
                 false,
+                1,
+                crate::seqdb::x_bp_db_keep(),
             )
         });
         match built {
-            Ok(table) => (
-                table.expect("grown vectors have the room for any table"),
-                contexts,
-            ),
+            Ok(table) => Ok(table.expect("grown vectors have the room for any table")),
             Err(prepared) => {
                 room.grow = false;
                 *x_locked(&self.block) = room;
-                build_lookup_from_prepared(
-                    prepared,
-                    threshold,
-                    ScoringMatrix::Blosum62,
-                    LOOKUP_WORD_LENGTH,
-                )
+                Err(prepared)
             }
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
+    // `build_ncbi_lookup_from_prepared`)
+    // ```c
+    //     for (i = 0; i < lookup->backbone_size; i++) {
+    //         if (exact_backbone[i] != NULL) {
+    //             s_AddWordHits(lookup, matrix, query->sequence,
+    //                           exact_backbone[i], query_bias, row_max);
+    // ```
+    /// EXPERIMENT (LOSAT_X_BPLK16): [`Self::x_build_on_block_spare`] with the width of the table's
+    /// hits chosen by the build (`x_bplk16_width`): `u16` where the lookup query is at most 65,535
+    /// letters and the in-place builder applies, else `Int4` as before.
+    pub(crate) fn x_build_on_block_spare16(
+        &self,
+        queries: &[Vec<QueryFrame>],
+        threshold: i32,
+        check_ideal: bool,
+    ) -> (XBpLookup, Vec<QueryContext>) {
+        let prepared = x_bp_prepared_query(queries, check_ideal);
+        // build_lookup_from_prepared returns the prepared contexts unchanged.
+        let contexts = prepared.contexts.clone();
+        let prepared = if x_bplk16_fits(&prepared) {
+            match self.x_on_block_spare::<BackboneCell16>(prepared, threshold) {
+                Ok(table) => {
+                    x_bplk16_shadow(queries, threshold, check_ideal, &table);
+                    return (XBpLookup::Narrow(table), contexts);
+                }
+                Err(prepared) => prepared,
+            }
+        } else {
+            match self.x_on_block_spare::<BackboneCell>(prepared, threshold) {
+                Ok(table) => return (XBpLookup::Wide(table), contexts),
+                Err(prepared) => prepared,
+            }
+        };
+        let (table, contexts) = build_lookup_from_prepared(
+            prepared,
+            threshold,
+            ScoringMatrix::Blosum62,
+            LOOKUP_WORD_LENGTH,
+        );
+        (XBpLookup::Wide(table), contexts)
     }
 
     // No NCBI counterpart: buffer reuse, and the thread that allocates the next table's vectors
@@ -449,13 +647,52 @@ impl XAaSpares {
         overflow: usize,
         overflow_grown: usize,
     ) -> usize {
+        self.x_make_room_of(backbone_size, pv_size, overflow, overflow_grown, false)
+    }
+
+    // No NCBI counterpart: buffer reuse only (`XAaSpares`).
+    /// EXPERIMENT (LOSAT_X_BPLK16): [`Self::x_make_room`] for the vectors of a table of `u16` hits
+    /// (`backbone_size` and `overflow` count their padding, as the vectors of the table built
+    /// before have it); the vectors of the other width are dropped. A block whose table turns out
+    /// to have the other width builds on its own vectors.
+    pub(crate) fn x_make_room16(
+        &self,
+        backbone_size: usize,
+        pv_size: usize,
+        overflow: usize,
+        overflow_grown: usize,
+    ) -> usize {
+        self.x_make_room_of(backbone_size, pv_size, overflow, overflow_grown, true)
+    }
+
+    /// [`Self::x_make_room`] for the vectors of the width `narrow` names.
+    fn x_make_room_of(
+        &self,
+        backbone_size: usize,
+        pv_size: usize,
+        overflow: usize,
+        overflow_grown: usize,
+        narrow: bool,
+    ) -> usize {
         let mut kept = std::mem::take(&mut *x_locked(&self.ahead));
         let given_back = std::mem::take(&mut *x_locked(&self.block));
         if kept.is_empty() {
             kept = given_back;
         }
         let mut allocated = 0;
-        if kept.backbone.capacity() < backbone_size {
+        if narrow {
+            BackboneCell16::drop_other(&mut kept);
+        } else {
+            BackboneCell::drop_other(&mut kept);
+        }
+        // The allocations in the order of the vectors' use before LOSAT_X_BPLK16: backbone, pv,
+        // overflow.
+        if narrow {
+            if kept.backbone16.capacity() < backbone_size {
+                kept.backbone16 = Vec::with_capacity(backbone_size);
+                allocated += 1;
+            }
+        } else if kept.backbone.capacity() < backbone_size {
             kept.backbone = Vec::with_capacity(backbone_size);
             allocated += 1;
         }
@@ -463,7 +700,12 @@ impl XAaSpares {
             kept.pv = Vec::with_capacity(pv_size);
             allocated += 1;
         }
-        if kept.overflow.capacity() < overflow {
+        if narrow {
+            if kept.overflow16.capacity() < overflow {
+                kept.overflow16 = Vec::with_capacity(overflow_grown.max(overflow));
+                allocated += 1;
+            }
+        } else if kept.overflow.capacity() < overflow {
             kept.overflow = Vec::with_capacity(overflow_grown.max(overflow));
             allocated += 1;
         }
@@ -505,7 +747,7 @@ impl XAaSpares {
     //             s_AddWordHits(lookup, matrix, query->sequence,
     //                           exact_backbone[i], query_bias, row_max);
     // ```
-    /// `x_bp_build_lookup(true, queries, threshold, karlin_params, check_ideal)` (where
+    /// `x_bp_build_lookup(queries, threshold, check_ideal)` (where
     /// [`Self::x_applies`]), the table built on the vectors `x_make_room` kept and with the
     /// neighbour lists kept here (both taken while it builds and given back after, the vectors only
     /// where no table was made). `None` where no table was made: the vectors lack the room, or the
@@ -523,7 +765,7 @@ impl XAaSpares {
         let contexts = prepared.contexts.clone();
         let mut room = std::mem::take(&mut *x_locked(&self.ahead));
         let mut memo = x_locked(&self.memo).take();
-        let built = x_build_direct_in(
+        let built = x_build_direct_in::<BackboneCell>(
             prepared,
             threshold,
             ScoringMatrix::Blosum62,
@@ -531,6 +773,8 @@ impl XAaSpares {
             &mut memo,
             Some(&mut room),
             false,
+            1,
+            crate::seqdb::x_bp_db_keep(),
         );
         *x_locked(&self.memo) = memo;
         *x_locked(&self.ahead) = room;
@@ -539,6 +783,185 @@ impl XAaSpares {
             Ok(None) | Err(_) => None,
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
+    // `build_ncbi_lookup_from_prepared`)
+    // ```c
+    //     for (i = 0; i < lookup->backbone_size; i++) {
+    //         if (exact_backbone[i] != NULL) {
+    //             s_AddWordHits(lookup, matrix, query->sequence,
+    //                           exact_backbone[i], query_bias, row_max);
+    // ```
+    /// EXPERIMENT (LOSAT_X_BPLK16): [`Self::x_build_ahead`] with the width of the table's hits
+    /// chosen by the build (`x_bplk16_fits`): `u16` where the lookup query is at most 65,535
+    /// letters, else `Int4` as before; `None` where no table was made (the kept vectors of the
+    /// width lack the room, or the in-place builder declines).
+    pub(crate) fn x_build_ahead16(
+        &self,
+        queries: &[Vec<QueryFrame>],
+        threshold: i32,
+        check_ideal: bool,
+    ) -> Option<(XBpLookup, Vec<QueryContext>)> {
+        let prepared = x_bp_prepared_query(queries, check_ideal);
+        // build_lookup_from_prepared returns the prepared contexts unchanged.
+        let contexts = prepared.contexts.clone();
+        let narrow = x_bplk16_fits(&prepared);
+        let mut room = std::mem::take(&mut *x_locked(&self.ahead));
+        let mut memo = x_locked(&self.memo).take();
+        let built = if narrow {
+            x_build_direct_in::<BackboneCell16>(
+                prepared,
+                threshold,
+                ScoringMatrix::Blosum62,
+                LOOKUP_WORD_LENGTH,
+                &mut memo,
+                Some(&mut room),
+                false,
+                1,
+                crate::seqdb::x_bp_db_keep(),
+            )
+            .map(|table| table.map(XBpLookup::Narrow))
+        } else {
+            x_build_direct_in::<BackboneCell>(
+                prepared,
+                threshold,
+                ScoringMatrix::Blosum62,
+                LOOKUP_WORD_LENGTH,
+                &mut memo,
+                Some(&mut room),
+                false,
+                1,
+                crate::seqdb::x_bp_db_keep(),
+            )
+            .map(|table| table.map(XBpLookup::Wide))
+        };
+        *x_locked(&self.memo) = memo;
+        *x_locked(&self.ahead) = room;
+        match built {
+            Ok(Some(table)) => {
+                if let XBpLookup::Narrow(narrow) = &table {
+                    x_bplk16_shadow(queries, threshold, check_ideal, narrow);
+                }
+                Some((table, contexts))
+            }
+            Ok(None) | Err(_) => None,
+        }
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BPLK16): the table of a blastp block: `Int4` hits (every table before the
+/// switch, and the blocks whose lookup query is above 65,535 letters) or `u16` hits.
+pub(crate) enum XBpLookup {
+    Wide(BlastAaLookupTable),
+    Narrow(BlastAaLookupTable<BackboneCell16>),
+}
+
+// No NCBI counterpart: chooses the width of a table's hits (LOSAT_X_BPLK16); it changes no value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLK16): whether the table built from `prepared` takes `u16` hits: every
+/// query offset (below the lookup query's length, the concatenation of the contexts with their
+/// sentinels) and every cell's hit count (at most one hit per offset) fits 16 bits.
+fn x_bplk16_fits(prepared: &PreparedLookupQuery) -> bool {
+    // The expression of x_build_direct_in (BLAST_SequenceBlk length).
+    let query_length = prepared
+        .contexts
+        .last()
+        .map(|ctx| ctx.frame_base + ctx.aa_len as i32)
+        .unwrap_or(0);
+    (0..=i32::from(u16::MAX)).contains(&query_length)
+}
+
+// No NCBI counterpart: a diagnostic of LOSAT_X_BPLK16; it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLK16SHADOW): with the variable set, the table of `u16` hits just built for
+/// `queries` is compared with the table of `Int4` hits of the reference builder
+/// (`build_lookup_from_prepared`) cell by cell ([`x_assert_narrow_same_as_wide`]); a difference
+/// panics with the cell's index.
+fn x_bplk16_shadow(
+    queries: &[Vec<QueryFrame>],
+    threshold: i32,
+    check_ideal: bool,
+    narrow: &BlastAaLookupTable<BackboneCell16>,
+) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var_os("LOSAT_X_BPLK16SHADOW").is_some()) {
+        return;
+    }
+    let (wide, _) = build_lookup_from_prepared(
+        x_bp_prepared_query(queries, check_ideal),
+        threshold,
+        ScoringMatrix::Blosum62,
+        LOOKUP_WORD_LENGTH,
+    );
+    x_assert_narrow_same_as_wide("LOSAT_X_BPLK16SHADOW:", narrow, &wide);
+}
+
+// No NCBI counterpart: the check of LOSAT_X_BPLK16SHADOW and of the unit tests; it changes no value
+// NCBI computes.
+/// Asserts that a table of `u16` hits holds what the table of `Int4` hits of the same query holds:
+/// for every cell the same `num_used` and the same hit list (in order), the same pv and
+/// `longest_chain` and scalars, and the padding (`XCell::PAD_CELLS` zero cells, `XCell::PAD_HITS`
+/// zero hits) after the cells and the overflow. The first difference panics with a message that
+/// starts with `prefix` and names the cell.
+pub(crate) fn x_assert_narrow_same_as_wide(
+    prefix: &str,
+    narrow: &BlastAaLookupTable<BackboneCell16>,
+    wide: &BlastAaLookupTable,
+) {
+    assert_eq!(
+        narrow.backbone.len(),
+        wide.backbone.len() + BackboneCell16::PAD_CELLS,
+        "{prefix} backbone size differs"
+    );
+    assert_eq!(
+        narrow.overflow.len(),
+        wide.overflow.len() + BackboneCell16::PAD_HITS,
+        "{prefix} overflow size differs"
+    );
+    for (idx, (a, b)) in narrow.backbone.iter().zip(&wide.backbone).enumerate() {
+        let (a_hits, b_hits) = (a.hits(&narrow.overflow), b.hits(&wide.overflow));
+        assert!(
+            a.count() == b.count()
+                && a_hits.len() == b_hits.len()
+                && a_hits.iter().zip(b_hits).all(|(a, b)| a.q() == b.q()),
+            "{prefix} backbone cell {idx} differs ({} {:?} vs {} {:?})",
+            a.count(),
+            a_hits,
+            b.count(),
+            b_hits
+        );
+    }
+    for (idx, cell) in narrow.backbone[wide.backbone.len()..].iter().enumerate() {
+        assert!(
+            cell.num_used == 0 && cell.entries == [0; AA_HITS_PER_CELL],
+            "{prefix} padding cell {idx} is not zero"
+        );
+    }
+    for (idx, (a, b)) in narrow.overflow.iter().zip(&wide.overflow).enumerate() {
+        assert!(
+            a.q() == b.q(),
+            "{prefix} overflow entry {idx} differs ({a} vs {b})"
+        );
+    }
+    assert!(
+        narrow.overflow[wide.overflow.len()..]
+            .iter()
+            .all(|&h| h == 0),
+        "{prefix} overflow padding is not zero"
+    );
+    assert!(narrow.pv == wide.pv, "{prefix} pv differs");
+    assert!(
+        narrow.frame_bases == wide.frame_bases
+            && narrow.num_contexts == wide.num_contexts
+            && narrow.query_length == wide.query_length
+            && narrow.word_length == wide.word_length
+            && narrow.alphabet_size == wide.alphabet_size
+            && narrow.charsize == wide.charsize
+            && narrow.mask == wide.mask
+            && narrow.longest_chain == wide.longest_chain
+            && narrow.threshold == wide.threshold
+            && narrow.row_max == wide.row_max,
+        "{prefix} table fields differ"
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-563,580-582,600-604
@@ -746,7 +1169,7 @@ pub(super) fn x_build_direct(
     word_length: usize,
 ) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
     X_MEMO.with(|memo| {
-        x_build_direct_in(
+        x_build_direct_in::<BackboneCell>(
             prepared,
             threshold,
             matrix,
@@ -754,6 +1177,33 @@ pub(super) fn x_build_direct(
             &mut memo.borrow_mut(),
             None,
             false,
+            1,
+            false,
+        )
+        .map(|table| table.expect("fresh vectors have the room for any table"))
+    })
+}
+
+/// EXPERIMENT (LOSAT_X_BPDBKEEP): [`x_build_direct`] for BLASTP, whose chains glibc maps and
+/// unmaps without raising its mmap threshold where the switch is on
+/// (`LookupBackboneChains::x_new_unthresholded`).
+fn x_bp_build_direct(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
+    X_MEMO.with(|memo| {
+        x_build_direct_in::<BackboneCell>(
+            prepared,
+            threshold,
+            matrix,
+            word_length,
+            &mut memo.borrow_mut(),
+            None,
+            false,
+            1,
+            crate::seqdb::x_bp_db_keep(),
         )
         .map(|table| table.expect("fresh vectors have the room for any table"))
     })
@@ -762,8 +1212,16 @@ pub(super) fn x_build_direct(
 /// [`x_build_direct`] with the neighbour lists of `memo` (the calling thread's, or those an
 /// `XAaSpares` keeps), and, with `room` (LOSAT_X_BPLKPAHEAD), the table's backbone, overflow and pv
 /// vectors taken from `room` instead of allocated: `Ok(None)` (nothing taken) where one of them
-/// lacks the capacity.
-fn x_build_direct_in(
+/// lacks the capacity. A pooled build with `parts` above 1 runs its passes on that many tasks of
+/// the pool it runs on ([`x_partitioned_passes`]).
+///
+/// EXPERIMENT (LOSAT_X_BPLK16): the table has the cells of width `C`: `BackboneCell` (the table of
+/// every program before the switch) or `BackboneCell16`, whose caller has checked that the lookup
+/// query is at most 65,535 letters (`x_bplk16_fits`) and passes no `pooled` or `parts` above 1. A
+/// table of `u16` hits has `XCell::PAD_CELLS` zero cells after its `backbone_size` cells and
+/// `XCell::PAD_HITS` zero hits after its overflow; neither is in any count.
+#[allow(clippy::too_many_arguments)]
+fn x_build_direct_in<C: XVec>(
     prepared: PreparedLookupQuery,
     threshold: i32,
     matrix: ScoringMatrix,
@@ -771,7 +1229,9 @@ fn x_build_direct_in(
     memo: &mut Option<XNeighborMemo>,
     room: Option<&mut XAaVectors>,
     pooled: bool,
-) -> std::result::Result<Option<BlastAaLookupTable>, PreparedLookupQuery> {
+    parts: usize,
+    x_unthresholded: bool,
+) -> std::result::Result<Option<BlastAaLookupTable<C>>, PreparedLookupQuery> {
     let alphabet_size = LOOKUP_ALPHABET_SIZE;
     let charsize = ilog2(alphabet_size) + 1;
     if diagnostics_enabled() || word_length * charsize > 16 || word_length > 32 {
@@ -800,17 +1260,72 @@ fn x_build_direct_in(
                 .unwrap_or(i32::MIN)
         })
         .collect();
-    // The reference exact backbone (blast_aalookup.c:448-456).
     let mut temps = if pooled {
         x_pool_lock(&X_BX_TEMPS).pop().unwrap_or_default()
     } else {
         XBuildTemps::default()
     };
+    let key = (matrix, threshold, word_length, alphabet_size);
+    // Dispatch point (LOSAT_X_BXBUILDPAR, in the strict set): a pooled build (the shared lists)
+    // with parts asked for runs its passes by source ranges on the pool, on the exact backbone's
+    // cells and offsets as a counting sort gives them.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pooled && parts > 1 && room.is_none() {
+        x_counted_sources(
+            &concat_query,
+            &lookup_locations,
+            word_length,
+            charsize,
+            backbone_size,
+            &mut temps,
+        );
+        let shared = x_shared_memo(key, backbone_size);
+        let (backbone, pv, overflow, longest_chain) = x_partitioned_passes(
+            parts,
+            backbone_size,
+            &shared.lists,
+            &|first: usize| {
+                x_target_list(
+                    &concat_query[first..],
+                    alphabet_size,
+                    word_length,
+                    charsize,
+                    &row_max,
+                    threshold,
+                    matrix,
+                )
+            },
+            &mut temps,
+        );
+        x_pool_lock(&X_BX_TEMPS).push(temps);
+        return Ok(Some(C::partitioned(BlastAaLookupTable {
+            backbone,
+            overflow,
+            pv,
+            frame_bases,
+            num_contexts: contexts.len(),
+            query_length,
+            word_length: word_length as i32,
+            alphabet_size: alphabet_size as i32,
+            charsize: charsize as i32,
+            mask: mask as i32,
+            longest_chain,
+            threshold,
+            row_max,
+        })));
+    }
+    // The reference exact backbone (blast_aalookup.c:448-456).
     let mut exact_backbone = match temps.chains.take() {
         Some(mut chains) => {
             chains.x_reset(backbone_size);
             chains
         }
+        // EXPERIMENT (LOSAT_X_BPDBKEEP): the chains' memory freed without raising glibc's mmap
+        // threshold.
+        None if x_unthresholded => LookupBackboneChains::x_new_unthresholded(backbone_size),
         None => LookupBackboneChains::new(backbone_size),
     };
     let mut skipped_invalid_residue = 0usize;
@@ -824,7 +1339,6 @@ fn x_build_direct_in(
         &mut skipped_invalid_residue,
     );
 
-    let key = (matrix, threshold, word_length, alphabet_size);
     let shared = pooled.then(|| x_shared_memo(key, backbone_size));
     if shared.is_none()
         && memo
@@ -884,21 +1398,24 @@ fn x_build_direct_in(
             longest_chain = count as i32;
         }
     }
-    let (mut backbone, mut pv, mut overflow) = match room {
+    let (mut backbone, mut pv, mut overflow): (Vec<C>, Vec<u32>, Vec<C::Hit>) = match room {
         None if pooled => {
-            let kept = x_pool_lock(&X_BX_TABLES).pop().unwrap_or_default();
+            let mut kept = x_pool_lock(&X_BX_TABLES).pop().unwrap_or_default();
+            let (kept_backbone, kept_overflow) = C::vectors(&mut kept);
+            let (kept_backbone, kept_overflow) =
+                (std::mem::take(kept_backbone), std::mem::take(kept_overflow));
             (
-                x_zeroed(kept.backbone, backbone_size, false),
+                x_zeroed(kept_backbone, backbone_size + C::PAD_CELLS, false),
                 x_zeroed(kept.pv, pv_size, false),
-                x_zeroed(kept.overflow, overflow_size, true),
+                x_zeroed(kept_overflow, overflow_size + C::PAD_HITS, true),
             )
         }
         None => (
-            vec![BackboneCell::default(); backbone_size],
+            vec![C::default(); backbone_size + C::PAD_CELLS],
             vec![0u32; pv_size],
-            vec![0i32; overflow_size],
+            vec![C::Hit::default(); overflow_size + C::PAD_HITS],
         ),
-        Some(room) => match room.x_take_zeroed(backbone_size, pv_size, overflow_size) {
+        Some(room) => match room.x_take_zeroed::<C>(backbone_size, pv_size, overflow_size) {
             Some(vectors) => vectors,
             None => return Ok(None),
         },
@@ -914,9 +1431,9 @@ fn x_build_direct_in(
             continue;
         }
         pv_set(&mut pv, idx);
-        backbone[idx].num_used = count as i32;
+        backbone[idx].set_count(count as usize);
         if count as usize > AA_HITS_PER_CELL {
-            backbone[idx].entries[0] = overflow_cursor as i32;
+            backbone[idx].set_cursor(overflow_cursor);
             base[idx] = overflow_cursor as u32;
             overflow_cursor += count as usize;
         }
@@ -939,22 +1456,24 @@ fn x_build_direct_in(
             let w = w as usize;
             let at = fill[w] as usize;
             if counts[w] as usize <= AA_HITS_PER_CELL {
-                backbone[w].entries[at..at + offsets.len()].copy_from_slice(offsets);
+                C::Hit::x_store(
+                    &mut backbone[w].entries_mut()[at..at + offsets.len()],
+                    offsets,
+                );
             } else {
                 let start = base[w] as usize + at;
-                overflow[start..start + offsets.len()].copy_from_slice(offsets);
+                C::Hit::x_store(&mut overflow[start..start + offsets.len()], offsets);
             }
             fill[w] += offsets.len() as u32;
         }
     }
 
     if pooled {
-        x_pool_lock(&X_BX_TEMPS).push(XBuildTemps {
-            counts,
-            base,
-            fill,
-            chains: Some(exact_backbone),
-        });
+        temps.counts = counts;
+        temps.base = base;
+        temps.fill = fill;
+        temps.chains = Some(exact_backbone);
+        x_pool_lock(&X_BX_TEMPS).push(temps);
     }
     Ok(Some(BlastAaLookupTable {
         backbone,
@@ -971,6 +1490,524 @@ fn x_build_direct_in(
         threshold,
         row_max,
     }))
+}
+
+// No NCBI counterpart: spins of `x_claimed`'s caller before it yields while it waits for parts.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+const X_CLAIM_SPINS: u32 = 1 << 12;
+
+// No NCBI counterpart (scheduling only): `f` on each of `parts` on tasks of the pool the caller runs
+// on. The caller and the helpers it spawns claim the parts in turn; once every part is claimed, the
+// caller waits for the parts others still run without taking other work of the pool (a part is
+// short, and a job taken while waiting, such as another batch's search, could hold the caller far
+// longer than the part; the scope's own wait at its end, for a helper that claimed nothing, can
+// still run one). A part that panics still counts as ended, and the scope raises its panic.
+/// EXPERIMENT (LOSAT_X_BXBUILDPAR): `f(part)` for each part, its results in part order.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_claimed<T: Send, R: Send>(parts: Vec<T>, f: &(dyn Fn(T) -> R + Sync)) -> Vec<R> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Ended<'a>(&'a AtomicUsize);
+    impl Drop for Ended<'_> {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Release);
+        }
+    }
+    let n = parts.len();
+    let slots: Vec<std::sync::Mutex<Option<T>>> = parts
+        .into_iter()
+        .map(|part| std::sync::Mutex::new(Some(part)))
+        .collect();
+    let results: Vec<std::sync::Mutex<Option<R>>> =
+        (0..n).map(|_| std::sync::Mutex::new(None)).collect();
+    let (next, ended) = (AtomicUsize::new(0), AtomicUsize::new(0));
+    let work = || loop {
+        let i = next.fetch_add(1, Ordering::Relaxed);
+        if i >= n {
+            return;
+        }
+        let _ended = Ended(&ended);
+        let part = x_pool_lock(&slots[i])
+            .take()
+            .expect("each part claimed once");
+        let result = f(part);
+        *x_pool_lock(&results[i]) = Some(result);
+    };
+    rayon::in_place_scope(|scope| {
+        for _ in 1..n.min(rayon::current_num_threads()) {
+            scope.spawn(|_| work());
+        }
+        work();
+        let mut spins = 0u32;
+        while ended.load(Ordering::Acquire) < n {
+            // A part is short; past a bound the helper running it was likely preempted (more
+            // threads than CPUs), so give the CPU away instead of spinning through its timeslice.
+            if spins < X_CLAIM_SPINS {
+                spins += 1;
+                std::hint::spin_loop();
+            } else {
+                std::thread::yield_now();
+            }
+        }
+    });
+    results
+        .into_iter()
+        .map(|result| {
+            result
+                .into_inner()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .expect("each part ended")
+        })
+        .collect()
+}
+
+// No NCBI counterpart: `vector` with `n` entries for a build that writes every entry itself: the
+// entries kept are not cleared (new ones are zero), and one short of room is replaced as by
+// `x_zeroed`.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_sized<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
+    if vector.capacity() < n {
+        vector = Vec::with_capacity(if slack { n + n / 4 } else { n });
+    }
+    vector.truncate(n);
+    vector.resize(n, T::default());
+    vector
+}
+
+/// No NCBI counterpart: the most source ranges of a partitioned build (each holds a count per
+/// backbone cell, 112 KiB for words of three letters, kept with the build's temporaries: about
+/// threads x 112 KiB for the K builds at a time, up to 8 parts each).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+const X_MOST_PARTS: usize = 8;
+
+/// No NCBI counterpart: the weight of a source whose neighbour list is not made yet, per offset
+/// (the ranges are cut by offsets times list length).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+const X_UNLISTED_LENGTH: usize = 24;
+
+/// No NCBI counterpart: the bit of a range's position that says the position is in the overflow
+/// (a cell of more than AA_HITS_PER_CELL entries), not in the cell's own entries.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+const X_IN_OVERFLOW: u32 = 1 << 31;
+
+/// No NCBI counterpart: where the source ranges of a partitioned build write their appends (the
+/// table's backbone and overflow, written by the ranges side by side at disjoint positions).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+struct XDisjointOut {
+    backbone: *mut BackboneCell,
+    overflow: *mut i32,
+    #[cfg(debug_assertions)]
+    lens: (usize, usize),
+}
+
+// SAFETY: the tasks of the fill write through the pointers only, each at positions no other task
+// writes (`XDisjointOut::put`), while nothing else reads or writes the vectors.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+unsafe impl Sync for XDisjointOut {}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+impl XDisjointOut {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:74-76 (an append at the
+    // chain's end, cited in the module comment); the copy of BlastAaLookupFinalize (blast_aalookup.c
+    // 746-747, cited at `x_build_direct`) to the cell's entries or the overflow.
+    /// Writes `src` at `at` of cell `w`: the cell's entries from `at`, or with `X_IN_OVERFLOW` set
+    /// the overflow from `at`'s other bits. Copies of one to four offsets are made element by element
+    /// (no call of the C library's memmove for the short lists of most cells and sources).
+    ///
+    /// # Safety
+    /// `w` is a cell of the backbone, the positions `at..at + src.len()` lie in the cell's entries or
+    /// in the overflow, and no other thread reads or writes them while this runs.
+    #[inline(always)]
+    unsafe fn put(&self, w: usize, at: u32, src: &[i32]) {
+        let dst = if at & X_IN_OVERFLOW == 0 {
+            #[cfg(debug_assertions)]
+            debug_assert!(w < self.lens.0 && at as usize + src.len() <= AA_HITS_PER_CELL);
+            // SAFETY: (caller) `w` is a cell of the backbone; no reference to the cell is made.
+            unsafe { std::ptr::addr_of_mut!((*self.backbone.add(w)).entries) }
+                .cast::<i32>()
+                .wrapping_add(at as usize)
+        } else {
+            let at = (at & !X_IN_OVERFLOW) as usize;
+            #[cfg(debug_assertions)]
+            debug_assert!(at + src.len() <= self.lens.1);
+            self.overflow.wrapping_add(at)
+        };
+        // SAFETY: (caller) `dst..dst + src.len()` lies in the cell's entries or in the overflow and
+        // is written by this call alone.
+        unsafe {
+            match src {
+                [s0] => dst.write(*s0),
+                [s0, s1] => {
+                    dst.write(*s0);
+                    dst.add(1).write(*s1);
+                }
+                [s0, s1, s2] => {
+                    dst.write(*s0);
+                    dst.add(1).write(*s1);
+                    dst.add(2).write(*s2);
+                }
+                [s0, s1, s2, s3] => {
+                    dst.write(*s0);
+                    dst.add(1).write(*s1);
+                    dst.add(2).write(*s2);
+                    dst.add(3).write(*s3);
+                }
+                src => std::ptr::copy_nonoverlapping(src.as_ptr(), dst, src.len()),
+            }
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:79-132 (the loop of
+// `blast_lookup_index_query_exact_matches`, backbone.rs, which carries it)
+// ```c
+// for (loc = locations; loc; loc = loc->next) {
+//     Int4 from = loc->ssr->left;
+//     Int4 to = loc->ssr->right;
+//     if (word_length > to - from + 1)
+//         continue;
+//     seq = query->sequence + from;
+//     word_target = seq + lut_word_length;
+//     for (offset = from; offset <= to; offset++, seq++) {
+//         if (seq >= word_target) {
+//             BlastLookupAddWordHit(backbone, lut_word_length, charsize,
+//                                   seq - lut_word_length, offset - lut_word_length);
+//         }
+//         if (*seq & invalid_mask)
+//             word_target = seq + lut_word_length + 1;
+//     }
+//     if (seq >= word_target) {
+//         BlastLookupAddWordHit(backbone, lut_word_length, charsize,
+//                               seq - lut_word_length, offset - lut_word_length);
+//     }
+// }
+// ```
+// The same loop with the same tests; where it calls BlastLookupAddWordHit, `visit` gets the
+// word's backbone index (blast_lookup.c:46 ComputeTableIndex, the shifts of
+// `blast_lookup_add_word_hit`) and the query offset the call appends.
+/// EXPERIMENT (LOSAT_X_BXBUILDPAR): `visit(index, offset)` for each word the exact backbone's
+/// build adds, in the order it adds them.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_for_each_exact_word(
+    query: &[u8],
+    locations: &[(i32, i32)],
+    word_length: usize,
+    charsize: usize,
+    mut visit: impl FnMut(usize, usize),
+) {
+    let invalid_mask: u8 = 0xffu8 << (charsize as u32);
+    for &(from, to) in locations {
+        if word_length as i32 > to - from + 1 {
+            continue;
+        }
+        let from = usize::try_from(from).expect("NCBI BLAST query offset must fit usize");
+        let to = usize::try_from(to).expect("NCBI BLAST query offset must fit usize");
+        let mut word_target = from + word_length;
+        for seq in from..=to {
+            if seq >= word_target {
+                let start = seq - word_length;
+                visit(
+                    x_word_index(&query[start..], word_length, charsize) as usize,
+                    start,
+                );
+            }
+            if query[seq] & invalid_mask != 0 {
+                word_target = seq + word_length + 1;
+            }
+        }
+        if to + 1 >= word_target {
+            let start = to + 1 - word_length;
+            visit(
+                x_word_index(&query[start..], word_length, charsize) as usize,
+                start,
+            );
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-456 (cited at
+// `x_build_direct`): the exact backbone, a chain per backbone cell holding the query offsets of the
+// cell's words in the order BlastLookupIndexQueryExactMatches adds them. No NCBI counterpart for the
+// form: a stable counting sort of the words of `x_for_each_exact_word` by cell (count, then each
+// cell's start in ascending cell order, then each word's offset at its cell's cursor in the loop's
+// order) gives every cell its chain's offsets in chain order, the cells that have a chain in
+// ascending order, with no chain allocated.
+/// EXPERIMENT (LOSAT_X_BXBUILDPAR): the exact backbone of a partitioned build as plain slices:
+/// `temps.cells` the cells that have a chain, ascending, and cell i's offsets (chain order)
+/// `temps.offsets[temps.starts[i]..temps.starts[i + 1]]`.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_counted_sources(
+    query: &[u8],
+    locations: &[(i32, i32)],
+    word_length: usize,
+    charsize: usize,
+    backbone_size: usize,
+    temps: &mut XBuildTemps,
+) {
+    let mut at = x_zeroed(std::mem::take(&mut temps.base), backbone_size, false);
+    let mut words = 0usize;
+    x_for_each_exact_word(query, locations, word_length, charsize, |idx, _| {
+        at[idx] += 1;
+        words += 1;
+    });
+    let (cells, starts, offsets) = (&mut temps.cells, &mut temps.starts, &mut temps.offsets);
+    cells.clear();
+    starts.clear();
+    let mut running = 0u32;
+    for (idx, slot) in at.iter_mut().enumerate() {
+        if *slot != 0 {
+            cells.push(idx as u32);
+            starts.push(running);
+            running += std::mem::replace(slot, running);
+        }
+    }
+    starts.push(running);
+    offsets.clear();
+    offsets.resize(words, 0);
+    x_for_each_exact_word(query, locations, word_length, charsize, |idx, offset| {
+        offsets[at[idx] as usize] =
+            i32::try_from(offset).expect("NCBI BLAST query offset must fit Int4");
+        at[idx] += 1;
+    });
+    temps.base = at;
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 and 283-358 (cited
+// at `x_build_direct`): the appends of s_AddWordHits for s ascending, then BlastAaLookupFinalize's
+// layout. No NCBI counterpart for the parts (scheduling only): NCBI builds a table on one thread.
+// Here the passes of `x_build_direct_in` run on tasks of the pool. The present source cells, in
+// ascending order, are cut into P contiguous ranges (of about equal appends).
+// (a) Each range counts its own appends per target cell: c_p[w], the offsets its sources append to
+//     w (making the neighbour lists not made yet; each is a function of its word alone, module
+//     comment).
+// (b) Each stripe of target cells (a multiple of 32 cells, so that no pv word is shared) sums them:
+//     count[w] = sum over p of c_p[w], the reference's count, from which it sets num_used and the
+//     pv bit of each of its cells, and its cells' overflow size and longest count.
+// (c) Each stripe, after the overflow of the stripes before it (their sizes summed in stripe order:
+//     BlastAaLookupFinalize assigns the overflow cursors in ascending cell order), gives its
+//     overflow cells their cursors and turns c_p[w] into the position of range p's first append to
+//     w: the cell's start (0 in its own entries, or its cursor in the overflow) plus the sum of
+//     c_q[w] over q < p.
+// (d) Each range makes its appends, s ascending and w in T(s) in list order, at its position for w,
+//     advanced by the offsets written.
+// Every append to a cell from a range before p comes before range p's appends to it, and within a
+// range the appends are made in the reference's order, so each cell holds the reference's entries
+// in the reference's order; the ranges write disjoint positions, every position of a non-empty cell
+// once. Each source is walked once in (a) and once in (d). The backbone and the overflow are not
+// zero-filled first: (b) writes every cell whole (its unused entries zero, as after the C `calloc`)
+// and (d) every overflow position.
+/// EXPERIMENT (LOSAT_X_BXBUILDPAR): the count pass, the layout and the fill pass of a pooled build
+/// (`x_build_direct_in`) on `parts` tasks of the pool it runs on (at most `X_MOST_PARTS`): the
+/// table's backbone, pv and overflow vectors (taken from the pool) and its `longest_chain`.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[allow(clippy::type_complexity)]
+fn x_partitioned_passes(
+    parts: usize,
+    backbone_size: usize,
+    lists: &[std::sync::OnceLock<Box<[u16]>>],
+    target_list: &(dyn Fn(usize) -> Box<[u16]> + Sync),
+    temps: &mut XBuildTemps,
+) -> (Vec<BackboneCell>, Vec<u32>, Vec<i32>, i32) {
+    use crate::algorithm::tblastx::lookup::PV_ARRAY_MASK;
+    let parts = parts.clamp(1, X_MOST_PARTS);
+    // The present source cells (`x_counted_sources`) and the appends' weights.
+    let (cells, starts, offsets) = (
+        std::mem::take(&mut temps.cells),
+        std::mem::take(&mut temps.starts),
+        std::mem::take(&mut temps.offsets),
+    );
+    let weight = |idx: usize, k: usize| {
+        (k * lists[idx]
+            .get()
+            .map_or(X_UNLISTED_LENGTH, |list| list.len())) as u64
+    };
+    let total: u64 = (0..cells.len())
+        .map(|i| weight(cells[i] as usize, (starts[i + 1] - starts[i]) as usize))
+        .sum();
+    let source = |i: usize| &offsets[starts[i] as usize..starts[i + 1] as usize];
+    // The ranges' bounds: range p ends at the first source whose weights so far reach
+    // total * (p + 1) / P.
+    let mut bounds = [cells.len(); X_MOST_PARTS + 1];
+    bounds[0] = 0;
+    let (mut cut, mut so_far) = (1usize, 0u64);
+    for (i, &cell) in cells.iter().enumerate() {
+        if cut == parts {
+            break;
+        }
+        so_far += weight(cell as usize, source(i).len());
+        while cut < parts && so_far * parts as u64 >= total * cut as u64 {
+            bounds[cut] = i + 1;
+            cut += 1;
+        }
+    }
+    let ranges = || bounds[..=parts].windows(2).map(|bound| bound[0]..bound[1]);
+    // (a) The ranges' counts per target cell.
+    let mut per_range = x_sized(
+        std::mem::take(&mut temps.counts),
+        parts * backbone_size,
+        false,
+    );
+    x_claimed(
+        per_range.chunks_mut(backbone_size).zip(ranges()).collect(),
+        &|(counts, range): (&mut [u32], std::ops::Range<usize>)| {
+            counts.fill(0);
+            for i in range {
+                let k = source(i).len() as u32;
+                // blast_aalookup.c:490: w = query + offset_list[2];
+                let list =
+                    lists[cells[i] as usize].get_or_init(|| target_list(source(i)[0] as usize));
+                for &w in list.iter() {
+                    counts[w as usize] += k;
+                }
+            }
+        },
+    );
+    let list = |i: usize| -> &[u16] { lists[cells[i] as usize].get().expect("made in (a)") };
+    // (b) The stripes' counts, num_used, pv bits, overflow sizes and longest counts.
+    let stripe = backbone_size.div_ceil(parts).next_multiple_of(32);
+    let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
+    let kept = x_pool_lock(&X_BX_TABLES).pop().unwrap_or_default();
+    let mut backbone = x_sized(kept.backbone, backbone_size, false);
+    let mut pv = x_zeroed(kept.pv, pv_size, false);
+    let mut columns: Vec<Vec<&mut [u32]>> = (0..backbone_size.div_ceil(stripe))
+        .map(|_| Vec::with_capacity(parts))
+        .collect();
+    for counts in per_range.chunks_mut(backbone_size) {
+        for (column, part) in columns.iter_mut().zip(counts.chunks_mut(stripe)) {
+            column.push(part);
+        }
+    }
+    let laid: Vec<_> = x_claimed(
+        columns
+            .into_iter()
+            .zip(backbone.chunks_mut(stripe))
+            .zip(pv.chunks_mut(stripe >> PV_ARRAY_BTS))
+            .collect(),
+        &|((column, backbone), pv): ((Vec<&mut [u32]>, &mut [BackboneCell]), &mut [u32])| {
+            let (mut overflow_size, mut longest_chain) = (0usize, 0i32);
+            for (local, cell) in backbone.iter_mut().enumerate() {
+                let count: u32 = column.iter().map(|counts| counts[local]).sum();
+                *cell = BackboneCell {
+                    num_used: count as i32,
+                    entries: [0; AA_HITS_PER_CELL],
+                };
+                if count == 0 {
+                    continue;
+                }
+                // pv_set at the stripe's first cell + local, a multiple of 32.
+                pv[local >> PV_ARRAY_BTS] |= 1u32 << (local & PV_ARRAY_MASK);
+                if count as usize > AA_HITS_PER_CELL {
+                    overflow_size += count as usize;
+                }
+                longest_chain = longest_chain.max(count as i32);
+            }
+            (overflow_size, longest_chain, column, backbone)
+        },
+    );
+    let overflow_size: usize = laid.iter().map(|part| part.0).sum();
+    let longest_chain = laid.iter().map(|part| part.1).max().unwrap_or(0);
+    assert!(
+        overflow_size < X_IN_OVERFLOW as usize,
+        "BLASTX lookup overflow cursor must fit in Int4"
+    );
+    // (c) The overflow cursors and each range's first position per cell.
+    let mut cursor = 0usize;
+    let mut placed = Vec::with_capacity(laid.len());
+    for (size, _, column, backbone) in laid {
+        placed.push((cursor, column, backbone));
+        cursor += size;
+    }
+    x_claimed(placed, &|(mut cursor, mut column, backbone): (
+        usize,
+        Vec<&mut [u32]>,
+        &mut [BackboneCell],
+    )| {
+        for (local, cell) in backbone.iter_mut().enumerate() {
+            let count = cell.num_used as usize;
+            if count == 0 {
+                continue;
+            }
+            let mut at = if count > AA_HITS_PER_CELL {
+                cell.entries[0] = cursor as i32;
+                cursor += count;
+                (cursor - count) as u32 | X_IN_OVERFLOW
+            } else {
+                0
+            };
+            for counts in column.iter_mut() {
+                let n = counts[local];
+                counts[local] = at;
+                at += n;
+            }
+        }
+    });
+    // (d) The appends.
+    let mut overflow = x_sized(kept.overflow, overflow_size, true);
+    let out = XDisjointOut {
+        backbone: backbone.as_mut_ptr(),
+        overflow: overflow.as_mut_ptr(),
+        #[cfg(debug_assertions)]
+        lens: (backbone.len(), overflow.len()),
+    };
+    x_claimed(
+        per_range.chunks_mut(backbone_size).zip(ranges()).collect(),
+        &|(at, range): (&mut [u32], std::ops::Range<usize>)| {
+            for i in range {
+                let offsets = source(i);
+                for &w in list(i) {
+                    let w = w as usize;
+                    // SAFETY: by (c), range p's appends to cell w take the positions from at[w]
+                    // (its first, set in (c)) for c_p[w] offsets, inside the cell's count, after the
+                    // ranges before p and before the ranges after p; an overflow cell's count lies
+                    // in the overflow from its cursor and the cursors give the cells disjoint parts.
+                    // So no two tasks write a position, and the backbone and the overflow are read
+                    // or written by nothing else until the tasks end.
+                    unsafe { out.put(w, at[w], offsets) };
+                    at[w] += offsets.len() as u32;
+                }
+            }
+        },
+    );
+    temps.counts = per_range;
+    temps.cells = cells;
+    temps.starts = starts;
+    temps.offsets = offsets;
+    (backbone, pv, overflow, longest_chain)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469
@@ -991,39 +2028,77 @@ fn x_build_direct_in(
 //         }
 //     }
 // ```
-/// EXPERIMENT (LOSAT_X_BPLUT): `true` = BLASTP's table built in place by [`x_build_direct`],
-/// `false` = off (`build_ncbi_lookup`).
-// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
-// `LOSAT_X_BPLUT` is a strict-set switch.
-pub(super) fn x_bplut_on() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPLUT"))
-}
-
 // No NCBI counterpart: the BLASTP choice between the reference builder and the in-place builder
 // (`build_ncbi_lookup_from_prepared` in backbone.rs carries the NCBI code); it changes no value
 // NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLUT): `build_ncbi_lookup` for BLASTP. With `direct` false it calls it;
-/// with `direct` true it prepares the query as `build_ncbi_lookup_for_profile(.., Blosum62,
-/// LOOKUP_WORD_LENGTH)` does and builds the table with [`x_build_direct`] (the same table without
-/// the chains, so without the chains' memory while it is built), falling back to the reference
-/// builder where that declines.
+/// `build_ncbi_lookup` for BLASTP: prepares the query as `build_ncbi_lookup_for_profile(..,
+/// Blosum62, LOOKUP_WORD_LENGTH)` does and builds the table with [`x_build_direct`] (the same
+/// table without the chains, so without the chains' memory while it is built), falling back to
+/// the reference builder where that declines.
 pub(super) fn x_bp_build_lookup(
-    direct: bool,
     queries: &[Vec<QueryFrame>],
     threshold: i32,
-    karlin_params: &KarlinParams,
     check_ideal: bool,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    x_build_ncbi_lookup_with(
-        direct,
-        queries,
-        threshold,
-        karlin_params,
-        check_ideal,
-        |_| {},
-    )
+    x_build_direct_or_reference(queries, threshold, check_ideal, |_| {}, x_bp_build_direct)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
+// `x_build_direct_or_reference`)
+// ```c
+//     for (i = 0; i < lookup->backbone_size; i++) {
+//         if (exact_backbone[i] != NULL) {
+//             s_AddWordHits(lookup, matrix, query->sequence,
+//                           exact_backbone[i], query_bias, row_max);
+// ```
+/// EXPERIMENT (LOSAT_X_BPLK16): [`x_bp_build_lookup`] with the width of the table's hits chosen by
+/// the build: with `narrow`, `u16` hits where the lookup query is at most 65,535 letters
+/// ([`x_bplk16_fits`]) and the in-place builder applies; otherwise `Int4` hits, the table
+/// [`x_bp_build_lookup`] builds.
+pub(super) fn x_bp_build_lookup_as(
+    queries: &[Vec<QueryFrame>],
+    threshold: i32,
+    check_ideal: bool,
+    narrow: bool,
+) -> (XBpLookup, Vec<QueryContext>) {
+    let matrix = ScoringMatrix::Blosum62;
+    let prepared = x_bp_prepared_query(queries, check_ideal);
+    // build_lookup_from_prepared returns the prepared contexts unchanged.
+    let contexts = prepared.contexts.clone();
+    let prepared = if narrow && x_bplk16_fits(&prepared) {
+        let built = X_MEMO.with(|memo| {
+            x_build_direct_in::<BackboneCell16>(
+                prepared,
+                threshold,
+                matrix,
+                LOOKUP_WORD_LENGTH,
+                &mut memo.borrow_mut(),
+                None,
+                false,
+                1,
+                crate::seqdb::x_bp_db_keep(),
+            )
+            .map(|table| table.expect("fresh vectors have the room for any table"))
+        });
+        match built {
+            Ok(table) => {
+                x_bplk16_shadow(queries, threshold, check_ideal, &table);
+                return (XBpLookup::Narrow(table), contexts);
+            }
+            Err(prepared) => prepared,
+        }
+    } else {
+        prepared
+    };
+    // As x_build_direct_or_reference with BLASTP's direct builder.
+    match x_bp_build_direct(prepared, threshold, matrix, LOOKUP_WORD_LENGTH) {
+        Ok(table) => (XBpLookup::Wide(table), contexts),
+        Err(prepared) => {
+            let (table, contexts) =
+                build_lookup_from_prepared(prepared, threshold, matrix, LOOKUP_WORD_LENGTH);
+            (XBpLookup::Wide(table), contexts)
+        }
+    }
 }
 
 /// EXPERIMENT (LOSAT_X_TBXLUT): `true` = TBLASTX's full table built in place by [`x_build_direct`],
@@ -1061,11 +2136,12 @@ pub(super) fn x_tbx_build_lookup(
         karlin_params,
         check_ideal,
         |direct| crate::utils::xreach::x_reach!("LOSAT_X_TBXLUT", direct),
+        x_build_direct,
     )
 }
 
 /// The query of `queries` prepared as `build_ncbi_lookup_for_profile(.., Blosum62,
-/// LOOKUP_WORD_LENGTH)` prepares it ([`x_build_ncbi_lookup_with`] with the switch on, and
+/// LOOKUP_WORD_LENGTH)` prepares it ([`x_build_direct_or_reference`] and
 /// [`XAaSpares::x_build_ahead`]).
 fn x_bp_prepared_query(queries: &[Vec<QueryFrame>], check_ideal: bool) -> PreparedLookupQuery {
     let matrix = ScoringMatrix::Blosum62;
@@ -1082,11 +2158,18 @@ fn x_bp_prepared_query(queries: &[Vec<QueryFrame>], check_ideal: bool) -> Prepar
     )
 }
 
-/// The body of [`x_bp_build_lookup`] and [`x_tbx_build_lookup`]: with `direct` false it calls
-/// `build_ncbi_lookup`; with `direct` true it prepares the query as
-/// `build_ncbi_lookup_for_profile(.., Blosum62, LOOKUP_WORD_LENGTH)` does and builds the table with
-/// [`x_build_direct`], falling back to the reference builder where that declines. `reach` is called
-/// with `direct` true with whether the direct builder built the table (`LOSAT_X_REACH`).
+/// The direct builder of [`x_build_direct_or_reference`]: [`x_build_direct`] or BLASTP's
+/// [`x_bp_build_direct`].
+type XBuildDirect = fn(
+    PreparedLookupQuery,
+    i32,
+    ScoringMatrix,
+    usize,
+) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery>;
+
+/// The body of [`x_tbx_build_lookup`]: with `direct` false it calls `build_ncbi_lookup`; with
+/// `direct` true it is [`x_build_direct_or_reference`] with `build_direct`. `reach` is called with
+/// `direct` true with whether the direct builder built the table (`LOSAT_X_REACH`).
 fn x_build_ncbi_lookup_with(
     direct: bool,
     queries: &[Vec<QueryFrame>],
@@ -1094,15 +2177,31 @@ fn x_build_ncbi_lookup_with(
     karlin_params: &KarlinParams,
     check_ideal: bool,
     reach: fn(bool),
+    build_direct: XBuildDirect,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
     if !direct {
         return build_ncbi_lookup(queries, threshold, karlin_params, check_ideal);
     }
+    x_build_direct_or_reference(queries, threshold, check_ideal, reach, build_direct)
+}
+
+/// The table of [`x_bp_build_lookup`] and of [`x_build_ncbi_lookup_with`] with `direct` true: the
+/// query is prepared as `build_ncbi_lookup_for_profile(.., Blosum62, LOOKUP_WORD_LENGTH)` prepares
+/// it and the table is built with `build_direct` ([`x_build_direct`], or [`x_bp_build_direct`] for
+/// BLASTP), falling back to the reference builder where that declines. `reach` is called with
+/// whether the direct builder built the table.
+fn x_build_direct_or_reference(
+    queries: &[Vec<QueryFrame>],
+    threshold: i32,
+    check_ideal: bool,
+    reach: fn(bool),
+    build_direct: XBuildDirect,
+) -> (BlastAaLookupTable, Vec<QueryContext>) {
     let matrix = ScoringMatrix::Blosum62;
     let prepared = x_bp_prepared_query(queries, check_ideal);
     // build_lookup_from_prepared returns the prepared contexts unchanged.
     let contexts = prepared.contexts.clone();
-    match x_build_direct(prepared, threshold, matrix, LOOKUP_WORD_LENGTH) {
+    match build_direct(prepared, threshold, matrix, LOOKUP_WORD_LENGTH) {
         Ok(table) => {
             reach(true);
             (table, contexts)
@@ -1319,21 +2418,26 @@ mod tests {
         let mut low_complexity = vec![1u8; 400];
         low_complexity.extend(residues(&mut seed, 60));
         let small = vec![vec![frame(residues(&mut seed, 300), vec![], 1)]];
+        let mut invalid = residues(&mut seed, 700);
+        for at in [0, 5, 6, 300, 699] {
+            invalid[at] = 0x40;
+        }
         let large = vec![
             vec![
-                frame(residues(&mut seed, 2_500), vec![(100, 140)], 1),
+                frame(residues(&mut seed, 2_500), vec![(100, 140), (143, 200)], 1),
                 frame(low_complexity, vec![(350, 399)], -1),
             ],
             vec![frame(residues(&mut seed, 1_800), vec![], 2)],
+            vec![frame(invalid, vec![], 3)],
         ];
         let pooled = |queries: &[Vec<QueryFrame>], threshold: i32, matrix: ScoringMatrix| {
             let reference =
                 build_lookup_from_prepared(prepared(queries, matrix), threshold, matrix, 3).0;
-            let table = match x_build_direct_pooled(prepared(queries, matrix), threshold, matrix, 3)
-            {
-                Ok(table) => table,
-                Err(_) => panic!("in-place builder declined"),
-            };
+            let table =
+                match x_build_direct_pooled(prepared(queries, matrix), threshold, matrix, 3, 1) {
+                    Ok(table) => table,
+                    Err(_) => panic!("in-place builder declined"),
+                };
             x_assert_same_table(&table, &reference);
             table
         };
@@ -1356,6 +2460,73 @@ mod tests {
         }
     }
 
+    // No NCBI counterpart (scheduling only): LOSAT_X_BXBUILDPAR's passes by source ranges give the
+    // reference table, with 2 to 8 ranges (the most; more asked for are clamped), with overflow
+    // cells (the low-complexity frame), a location shorter than a word (between the first frame's
+    // masks) and residues outside the alphabet's bits (the third query: the exact backbone skips
+    // their words), a query of fewer source cells than ranges and an all-masked one, thresholds
+    // with and without neighbours and other matrices, on vectors other builds left.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn partitioned_tables_equal_the_reference() {
+        let mut seed = 31u64;
+        let mut low_complexity = vec![1u8; 400];
+        low_complexity.extend(residues(&mut seed, 60));
+        let small = vec![vec![frame(residues(&mut seed, 300), vec![], 1)]];
+        let mut invalid = residues(&mut seed, 700);
+        for at in [0, 5, 6, 300, 699] {
+            invalid[at] = 0x40;
+        }
+        let large = vec![
+            vec![
+                frame(residues(&mut seed, 2_500), vec![(100, 140), (143, 200)], 1),
+                frame(low_complexity, vec![(350, 399)], -1),
+            ],
+            vec![frame(residues(&mut seed, 1_800), vec![], 2)],
+            vec![frame(invalid, vec![], 3)],
+        ];
+        // Fewer source cells than parts, and none at all.
+        let tiny = vec![vec![frame(residues(&mut seed, 6), vec![], 1)]];
+        let masked = vec![vec![frame(residues(&mut seed, 50), vec![(0, 49)], 1)]];
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            for (queries, threshold, matrix) in [
+                (&large, 11, ScoringMatrix::Blosum62),
+                (&small, 12, ScoringMatrix::Blosum62),
+                (&large, 13, ScoringMatrix::Blosum45),
+                (&large, 0, ScoringMatrix::Blosum62),
+                (&small, 12, ScoringMatrix::Pam30),
+                (&tiny, 11, ScoringMatrix::Blosum62),
+                (&masked, 11, ScoringMatrix::Blosum62),
+            ] {
+                let reference =
+                    build_lookup_from_prepared(prepared(queries, matrix), threshold, matrix, 3).0;
+                let edge = std::ptr::eq(queries, &tiny) || std::ptr::eq(queries, &masked);
+                assert!(edge || threshold == 0 || !reference.overflow.is_empty());
+                for parts in [2, 3, 4, 7, 8, 1_000] {
+                    let mut table = match x_build_direct_pooled(
+                        prepared(queries, matrix),
+                        threshold,
+                        matrix,
+                        3,
+                        parts,
+                    ) {
+                        Ok(table) => table,
+                        Err(_) => panic!("in-place builder declined"),
+                    };
+                    x_assert_same_table(&table, &reference);
+                    x_give_back_pooled(&mut table);
+                }
+            }
+        });
+    }
+
     #[test]
     fn in_place_table_of_an_all_masked_query_is_empty() {
         let mut seed = 11u64;
@@ -1374,17 +2545,12 @@ mod tests {
         assert_eq!(table.longest_chain, 0);
     }
 
-    /// BLASTP's builder (in place with `direct`) against `build_ncbi_lookup`: every table field and
-    /// every context field. Returns the overflow length.
-    fn same_bp(
-        direct: bool,
-        queries: &[Vec<QueryFrame>],
-        threshold: i32,
-        check_ideal: bool,
-    ) -> usize {
+    /// BLASTP's builder against `build_ncbi_lookup`: every table field and every context field.
+    /// Returns the overflow length.
+    fn same_bp(queries: &[Vec<QueryFrame>], threshold: i32, check_ideal: bool) -> usize {
         let params = blosum62_ideal_karlin_params();
         let (reference, ref_contexts) = build_ncbi_lookup(queries, threshold, &params, check_ideal);
-        let (got, contexts) = x_bp_build_lookup(direct, queries, threshold, &params, check_ideal);
+        let (got, contexts) = x_bp_build_lookup(queries, threshold, check_ideal);
         x_assert_same_table(&got, &reference);
         assert_eq!(contexts.len(), ref_contexts.len());
         for (a, b) in contexts.iter().zip(&ref_contexts) {
@@ -1442,7 +2608,7 @@ mod tests {
         let mut overflow_seen = false;
         for check_ideal in [false, true] {
             for threshold in [0, 11, 12, 13, 21] {
-                overflow_seen |= same_bp(true, &queries, threshold, check_ideal) > 0;
+                overflow_seen |= same_bp(&queries, threshold, check_ideal) > 0;
             }
         }
         assert!(overflow_seen, "the fixture must reach the overflow array");
@@ -1450,9 +2616,7 @@ mod tests {
         let short: Vec<Vec<QueryFrame>> = (0..3)
             .map(|_| bp_query(residues(&mut seed, 15), vec![], false))
             .collect();
-        same_bp(true, &short, i32::MIN, false);
-        // With the switch off the builder is the reference itself.
-        same_bp(false, &queries, 11, false);
+        same_bp(&short, i32::MIN, false);
     }
 
     /// The query offsets of every cell of `table`, as the scan reads them.
@@ -1510,7 +2674,11 @@ mod tests {
                 (&short, 1),
                 (&short, i32::MIN),
             ] {
-                let (table, _) = x_bp_build_lookup(direct, set, threshold, &params, false);
+                let (table, _) = if direct {
+                    x_bp_build_lookup(set, threshold, false)
+                } else {
+                    build_ncbi_lookup(set, threshold, &params, false)
+                };
                 for hits in cell_lists(&table) {
                     let mut sorted = hits.to_vec();
                     sorted.sort_unstable();
@@ -1539,11 +2707,11 @@ mod tests {
         ]
     }
 
-    /// `x_bp_build_lookup(true, ..)`'s table and contexts are those of `got`: every table field,
+    /// `x_bp_build_lookup(..)`'s table and contexts are those of `got`: every table field,
     /// and every context field (the Karlin blocks by their bits).
     fn assert_same_bp(got: &(BlastAaLookupTable, Vec<QueryContext>), queries: &[Vec<QueryFrame>]) {
         let params = blosum62_ideal_karlin_params();
-        let (want, want_contexts) = x_bp_build_lookup(true, queries, 11, &params, false);
+        let (want, want_contexts) = x_bp_build_lookup(queries, 11, false);
         x_assert_same_table_as("ahead:", &got.0, &want);
         assert!(x_same_table(&got.0, &want));
         assert_eq!(got.1.len(), want_contexts.len());
@@ -1569,15 +2737,15 @@ mod tests {
     //                  calloc(overflow_cells_needed, sizeof(Int4));
     // ```
     /// LOSAT_X_BPLKPAHEAD: the table built ahead on vectors kept by `XAaSpares` (a table given back
-    /// with other values, then moved to the build by `x_make_room`) is `x_bp_build_lookup(true,
-    /// ..)`'s; `x_make_room` allocates only the vectors short of their room, and keeps the calling
+    /// with other values, then moved to the build by `x_make_room`) is `x_bp_build_lookup(..)`'s;
+    /// `x_make_room` allocates only the vectors short of their room, and keeps the calling
     /// thread's neighbour lists for the builds, which give them back.
     #[test]
     fn aa_spares_build_the_bplut_table_on_kept_vectors() {
         let mut seed = 41u64;
         let queries = bp_queries(&mut seed);
         let params = blosum62_ideal_karlin_params();
-        let (first, _) = x_bp_build_lookup(true, &queries, 11, &params, false);
+        let (first, _) = x_bp_build_lookup(&queries, 11, false);
         let (backbone, pv, overflow) = (first.backbone.len(), first.pv.len(), first.overflow.len());
         assert!(overflow > 0, "the fixture must reach the overflow array");
         assert!(X_MEMO.with(|memo| memo.borrow().is_some()));
@@ -1629,7 +2797,7 @@ mod tests {
         assert!(x_locked(&spares.block).is_empty());
         // Its own vectors are kept (those given back meanwhile are dropped); only a vector short of
         // its room is replaced.
-        let (other_table, _) = x_bp_build_lookup(true, &queries, 11, &params, false);
+        let (other_table, _) = x_bp_build_lookup(&queries, 11, false);
         spares.give(other_table);
         assert_eq!(spares.x_make_room(backbone, pv, overflow, overflow), 0);
         assert_eq!(addresses(&x_locked(&spares.ahead)), given);
@@ -1727,7 +2895,7 @@ mod tests {
         let mut seed = 43u64;
         let queries = bp_queries(&mut seed);
         let params = blosum62_ideal_karlin_params();
-        let (table, _) = x_bp_build_lookup(true, &queries, 11, &params, false);
+        let (table, _) = x_bp_build_lookup(&queries, 11, false);
         let (backbone, pv, overflow) = (table.backbone.len(), table.pv.len(), table.overflow.len());
         for (b, p, o) in [
             (backbone, pv, overflow - 1),
@@ -1762,7 +2930,7 @@ mod tests {
         let mut seed = 47u64;
         let queries = bp_queries(&mut seed);
         let params = blosum62_ideal_karlin_params();
-        let build = || x_bp_build_lookup(true, &queries, 11, &params, false).0;
+        let build = || x_bp_build_lookup(&queries, 11, false).0;
         let want = build();
         assert!(x_same_table(&build(), &want));
         let cell = want
@@ -1791,5 +2959,135 @@ mod tests {
                 .unwrap_or_default();
             assert!(message.starts_with(&format!("PREFIX: {what}")), "{message}");
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:283-358 (quoted at
+    // `x_build_direct`)
+    // LOSAT_X_BPLK16: the table of 16-bit hits holds, cell by cell, the hits of the table of
+    // 32-bit hits of the same block in the same order (the comparison of LOSAT_X_BPLK16SHADOW,
+    // against the reference builder), for short queries, a low-complexity query whose cells are far
+    // above AA_HITS_PER_CELL (the overflow array, with its cursor split over two entries), several
+    // thresholds, and the block that is just at the 65,535 letters of the choice (16-bit) and one
+    // letter above it (32-bit).
+    #[test]
+    fn table_of_u16_hits_equals_the_table_of_i32_hits() {
+        let mut seed = 16u64;
+        let mut low_complexity = vec![1u8; 300];
+        low_complexity.extend(residues(&mut seed, 40));
+        let queries = vec![
+            vec![
+                frame(residues(&mut seed, 700), vec![(10, 30), (400, 401)], 1),
+                frame(residues(&mut seed, 2), vec![], 2),
+                frame(low_complexity, vec![(250, 299)], -1),
+                frame(Vec::new(), vec![], -3),
+            ],
+            vec![frame(residues(&mut seed, 1200), vec![], 1)],
+        ];
+        let mut overflow_seen = false;
+        for threshold in [0, 11, 13, 1000] {
+            let (built, contexts) = x_bp_build_lookup_as(&queries, threshold, false, true);
+            let XBpLookup::Narrow(narrow) = built else {
+                panic!("a small block takes 16-bit hits (threshold {threshold})");
+            };
+            let (wide, wide_contexts) = x_bp_build_lookup(&queries, threshold, false);
+            assert_eq!(contexts.len(), wide_contexts.len());
+            x_assert_narrow_same_as_wide(&format!("threshold {threshold}:"), &narrow, &wide);
+            overflow_seen |= !wide.overflow.is_empty();
+            assert!(wide.longest_chain as usize > AA_HITS_PER_CELL);
+        }
+        assert!(overflow_seen, "the fixture must reach the overflow array");
+        // Not asked for: the table of 32-bit hits.
+        assert!(matches!(
+            x_bp_build_lookup_as(&queries, 11, false, false).0,
+            XBpLookup::Wide(_)
+        ));
+        // The choice at 65,535 letters: the lookup query's length is the last context's frame_base
+        // plus its aa_len.
+        let base = x_bp_prepared_query(&[vec![frame(residues(&mut seed, 50), vec![], 1)]], false)
+            .contexts[0]
+            .frame_base as usize;
+        for (length, narrow) in [(65_535 - base, true), (65_536 - base, false)] {
+            let block = vec![vec![frame(residues(&mut seed, length), vec![], 1)]];
+            assert_eq!(
+                x_bplk16_fits(&x_bp_prepared_query(&block, false)),
+                narrow,
+                "{length} letters"
+            );
+            match x_bp_build_lookup_as(&block, 11, false, true).0 {
+                XBpLookup::Narrow(table) => {
+                    assert!(narrow, "{length} letters took 16-bit hits");
+                    assert_eq!(table.query_length, 65_535);
+                    let reference = build_lookup_from_prepared(
+                        x_bp_prepared_query(&block, false),
+                        11,
+                        ScoringMatrix::Blosum62,
+                        LOOKUP_WORD_LENGTH,
+                    )
+                    .0;
+                    x_assert_narrow_same_as_wide("65,535 letters:", &table, &reference);
+                }
+                XBpLookup::Wide(table) => {
+                    assert!(!narrow, "{length} letters took 32-bit hits");
+                    assert_eq!(table.query_length, 65_536);
+                }
+            }
+        }
+    }
+
+    // LOSAT_X_BPLK16: the vectors of a table of 16-bit hits given back (`give16`) serve the next
+    // block's build on the same spares (`x_build_on_block_spare16`, grown in place where short),
+    // and the vectors made ready for a build ahead (`x_make_room` with the narrow width, the
+    // padding counted in the sizes the table before reports) serve `x_build_ahead16`; a spare of the
+    // other width is not reused (the room is made for the width asked for) and the tables are the
+    // tables of 32-bit hits.
+    #[test]
+    fn spares_serve_the_builds_of_both_widths() {
+        let mut seed = 160u64;
+        let mut low_complexity = vec![1u8; 200];
+        low_complexity.extend(residues(&mut seed, 30));
+        let blocks: Vec<Vec<Vec<QueryFrame>>> = vec![
+            vec![vec![frame(residues(&mut seed, 900), vec![], 1)]],
+            vec![
+                vec![frame(low_complexity, vec![], 1)],
+                vec![frame(residues(&mut seed, 1500), vec![(7, 70)], 1)],
+            ],
+            vec![vec![frame(residues(&mut seed, 300), vec![], 1)]],
+        ];
+        let params = blosum62_ideal_karlin_params();
+        let spares = XAaSpares::default();
+        let narrow_of = |built: XBpLookup| match built {
+            XBpLookup::Narrow(table) => table,
+            XBpLookup::Wide(_) => panic!("a small block takes 16-bit hits"),
+        };
+        // The builds on the block spare, each on the vectors the block before gave back.
+        for block in &blocks {
+            let table = narrow_of(spares.x_build_on_block_spare16(block, 11, false).0);
+            let wide = x_bp_build_lookup(block, 11, false).0;
+            x_assert_narrow_same_as_wide("on the block spare:", &table, &wide);
+            spares.give16(table);
+        }
+        // The build ahead on the room made for the next table, from the table before it.
+        let first = narrow_of(spares.x_build_on_block_spare16(&blocks[0], 11, false).0);
+        spares.x_make_room16(first.backbone.len(), first.pv.len(), 1 << 16, 1 << 17);
+        spares.give16(first);
+        for block in &blocks {
+            let (built, _) = spares
+                .x_build_ahead16(block, 11, false)
+                .expect("the room made holds the table");
+            let table = narrow_of(built);
+            let wide = x_bp_build_lookup(block, 11, false).0;
+            x_assert_narrow_same_as_wide("built ahead:", &table, &wide);
+            spares.x_make_room16(table.backbone.len(), table.pv.len(), 1 << 16, 1 << 17);
+        }
+        // A table of 32-bit hits built ahead takes room of its own width, not the 16-bit vectors.
+        assert!(spares
+            .x_build_ahead(&blocks[0], 11, &params, false)
+            .is_none());
+        let wide = x_bp_build_lookup(&blocks[0], 11, false).0;
+        spares.x_make_room(wide.backbone.len(), wide.pv.len(), 1 << 16, 1 << 17);
+        let (table, _) = spares
+            .x_build_ahead(&blocks[0], 11, &params, false)
+            .expect("the room made holds the table");
+        x_assert_same_table(&table, &wide);
     }
 }

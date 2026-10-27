@@ -21,8 +21,8 @@ use super::search_gapped::{
 };
 use super::stage_d_kappa_params::{local_extension_final_xdrop, local_kappa_redo_params};
 use super::stage_d_linking::{
-    compare_preliminary_lists_for_kappa, link_preliminary_hsps, reap_by_evalue, LinkedHsp,
-    LinkedHspList,
+    compare_preliminary_lists_for_kappa, link_preliminary_hsps, link_preliminary_hsps_on,
+    reap_by_evalue, LinkedHsp, LinkedHspList,
 };
 use super::stage_d_results::{
     merge_query_chunk, KappaHspPayload, KappaResultHitList, KappaResultList, PrelimCulling,
@@ -1614,8 +1614,7 @@ fn run_local_search_with_pool(
                     .map(|(_, _, list)| !compo_early_termination(list.best_evalue, &heaps))
                     .collect();
                 let lpt = x_tbn_redo_lpt() && {
-                    let acts = pool.threads() <= X_REDO_LPT_MAX_THREADS
-                        && wanted.iter().filter(|&&wanted| wanted).count() > 1;
+                    let acts = wanted.iter().filter(|&&wanted| wanted).count() > 1;
                     crate::utils::xreach::x_reach!("LOSAT_X_TBNREDOLPT", acts);
                     acts
                 };
@@ -1914,26 +1913,14 @@ unsafe impl Send for XRedoWorker {}
 // NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNREDOLPT): a switch of the strict set (`utils/xswitch.rs`), on unless
 /// it is `0`. It acts only where the redo runs on the search pool (two or more threads, two or
-/// more matches), with at most `X_REDO_LPT_MAX_THREADS` threads, on a chunk with two or more
-/// matches to redo.
+/// more matches), at any thread count, on a chunk with two or more matches to redo. (A limit of
+/// 16 threads, set while the reap of `kappa.rs` was quadratic, came off with `LOSAT_X_TBNREAPIDX`:
+/// `docs/agents/diagnostics.md`.)
 #[cfg(feature = "parallel")]
 fn x_tbn_redo_lpt() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNREDOLPT"))
 }
-
-// No NCBI counterpart: chooses how the threads share a chunk's matches; it changes no value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_TBNREDOLPT): the most threads with which a chunk's matches run largest
-/// first (`x_redo_lpt`); a larger pool keeps the `par_iter`. Measured on the workstation (2026-10-25,
-/// the first query batch of 35 human proteins against the human genome): the chunk's time is its
-/// longest match's at 16 and 32 threads (work / threads below it). At 16 threads the `par_iter`
-/// gave one thread a run of adjacent heavy matches (redo 226 s, largest first 112 s); at 32 its
-/// runs are short and it started the longest match within 1-8 s, so starting it first saved
-/// little, while running the 32 heaviest matches at once raised the redo's work by 5 % (each
-/// scans lists of tens of thousands of HSPs): x1.035 of the run time.
-#[cfg(feature = "parallel")]
-const X_REDO_LPT_MAX_THREADS: usize = 16;
 
 // No NCBI counterpart: the order in which the threads take a chunk's matches; it changes no value
 // NCBI computes.
@@ -2624,21 +2611,24 @@ fn run_preliminary_subjects_into(
         // ```
         // Dispatch point: the call that runs the preliminary stage for one subject
         // (s_BlastSearchEngineCore). preliminary_protein_hsps_for_search runs the unit-wise stage.
+        let x_pool = x_unit_pool(subject);
         let preliminary = super::search_gapped::preliminary_protein_hsps_for_search(
             inputs.queries,
             subject,
             inputs.genetic_code,
             inputs.search,
-            x_unit_pool(subject),
+            x_pool,
             &x_query_side,
             x_subject_side.map(|side| (side, x_oid)),
         )?;
         // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
         // BLAST_LinkHsps(..., hsp_list_out, ...);
         // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
-        // Even an allocated empty subject list enters link/E-value.
+        // Even an allocated empty subject list enters link/E-value. The query contexts of a
+        // subject whose units ran on the pool are linked there side by side (LOSAT_X_TBNLINKCTX).
         let mut linked = if let Some(link) = inputs.link {
-            link_preliminary_hsps(
+            link_preliminary_hsps_on(
+                x_pool,
                 &preliminary,
                 inputs.query_lengths,
                 inputs.lengths,
@@ -6443,7 +6433,7 @@ mod tests {
     #[test]
     fn the_redo_lpt_scope_returns_the_par_iter_results_by_index() {
         let mut rng = XorShift(0x9e37_79b9_7f4a_7c15);
-        for threads in [2, 3, 7] {
+        for threads in [2, 3, 7, 17] {
             crate::utils::threading::with_search_pool(threads, "tblastn", |pool| {
                 for matches in [0_usize, 1, 2, 5, 40, 256] {
                     let hsps: Vec<usize> = (0..matches).map(|_| rng.below(50)).collect();
@@ -6502,7 +6492,7 @@ mod tests {
     #[cfg(feature = "parallel")]
     #[test]
     fn a_panicking_redo_match_propagates_and_the_pool_stays_usable() {
-        for threads in [2, 3, 7] {
+        for threads in [2, 3, 7, 17] {
             crate::utils::threading::with_search_pool(threads, "tblastn", |pool| {
                 let matches = 40_usize;
                 let order: Vec<usize> = (0..matches).collect();

@@ -1405,6 +1405,22 @@ impl TblastxOutputFormat {
     pub(crate) fn writes_query_warnings(self) -> bool {
         self.reads_displayed_counts()
     }
+
+    /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
+    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6 and 7,
+    /// `database::prefetches_subjects`): as the call's first report, the taxonomy database's
+    /// messages of that prefetch go with the query warnings.
+    pub(crate) fn prefetches_subjects(self) -> bool {
+        crate::algorithm::common::database::prefetches_subjects(match self {
+            Self::Pairwise => Some(0),
+            Self::Xml => Some(5),
+            Self::Tabular => Some(6),
+            Self::TabularWithComments => Some(7),
+            // The Seq-annots and the archive fetch nothing; XML2 and JSON write the messages
+            // at each `Hit` (`TaxdbPrinter`).
+            Self::Seqalign(_) | Self::Archive | Self::Xml2(_) => None,
+        })
+    }
 }
 
 /// The format of a validated `-outfmt` value (`tblastx_outfmt`).
@@ -2191,6 +2207,27 @@ mod tests {
             let format = output_format(outfmt);
             assert_eq!(format.reads_displayed_counts(), counts, "{outfmt}");
             assert_eq!(format.writes_query_warnings(), counts, "{outfmt}");
+        }
+        // DBID item T: the formats whose batches' prefetch writes the taxonomy database's
+        // messages (not the Seq-annots, the archive, XML2 and JSON).
+        for (outfmt, prefetches) in [
+            ("0", true),
+            ("5", true),
+            ("6", true),
+            ("7 qseqid", true),
+            ("8", false),
+            ("9", false),
+            ("11", false),
+            ("12", false),
+            ("13", false),
+            ("15", false),
+            ("16", false),
+        ] {
+            assert_eq!(
+                output_format(outfmt).prefetches_subjects(),
+                prefetches,
+                "{outfmt}"
+            );
         }
     }
 

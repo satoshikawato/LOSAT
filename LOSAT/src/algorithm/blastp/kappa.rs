@@ -23,7 +23,7 @@ use crate::core::composition_adjustment::adjust_scores::{
 use crate::core::composition_adjustment::redo_alignment::{
     blast_compo_alignment_new, blast_redo_one_match_with_workspace_queries_and_matrix,
     build_query_word_hashes, preliminary_test_near_identical, test_near_identical,
-    windows_from_protein_aligns, x_compo_reuse, x_whole_subject_composition, BlastCompoAlignment,
+    windows_from_protein_aligns, x_whole_subject_composition, BlastCompoAlignment,
     BlastCompoAlignmentContext, BlastCompoMatchingSequence, BlastCompoQueryInfo,
     BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks, BlastRedoRangeResult,
     EMatrixAdjustRule, XSubjectComposition,
@@ -287,7 +287,7 @@ pub(crate) struct BlastpKappaQueryWorkspace {
 struct CachedSubjectRangeData {
     subject: BlastCompoSequenceData,
     subject_maybe_biased: bool,
-    // EXPERIMENT (LOSAT_X_BPCOMPOREUSE): `read_aa_composition(subject.data())`, read when the
+    // `read_aa_composition(subject.data())`, read when the
     // entry was made.
     x_composition: Option<std::sync::Arc<XSubjectComposition>>,
 }
@@ -953,15 +953,9 @@ fn hsplist_from_distinct_alignments(
     template_hit: &BlastpPreliminaryHsp,
     oid: u32,
     query_index: u32,
-    x_redo_fit: bool,
 ) -> BlastpHspList {
-    // EXPERIMENT (LOSAT_X_BPREDOFIT): room for exactly the alignments of the list
-    // (`x_redo_fit.rs`); without the switch the vector grows by `push`, as before.
-    let capacity = if x_redo_fit {
-        super::x_redo_fit::x_alignment_count(alignments.as_deref())
-    } else {
-        0
-    };
+    // Room for exactly the alignments of the list (`x_redo_fit.rs`).
+    let capacity = super::x_redo_fit::x_alignment_count(alignments.as_deref());
     let mut hsp_list = BlastpHspList {
         oid,
         query_index,
@@ -1183,7 +1177,7 @@ fn build_subject_range_data(
                 subject.buffer[subject.data_offset + pos] = ncbistdaa::X;
             }
         }
-        // EXPERIMENT (LOSAT_X_BPCOMPOREUSE): the composition of the masked bytes, read once here
+        // The composition of the masked bytes, read once here
         // and kept with them.
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:934-936
         // ```c
@@ -1191,8 +1185,9 @@ fn build_subject_range_data(
         //     }
         //     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
         // ```
-        let x_composition = x_compo_reuse()
-            .then(|| std::sync::Arc::new(XSubjectComposition(read_aa_composition(subject.data()))));
+        let x_composition = Some(std::sync::Arc::new(XSubjectComposition(
+            read_aa_composition(subject.data()),
+        )));
         if let Some(cache) = subject_range_cache.as_mut() {
             cache.insert(
                 matching_seq,
@@ -1986,7 +1981,6 @@ pub(crate) fn postprocess_preliminary_hits(
                 &preliminary_hits[0],
                 matching_seq.index as u32,
                 preliminary_hits[0].q_idx,
-                super::x_redo_fit::x_bp_redo_fit(),
             )
         })
         .unwrap_or_else(|| BlastpHspList {
@@ -2092,11 +2086,9 @@ pub(crate) fn postprocess_preliminary_hits(
         }
     }
 
-    // EXPERIMENT (LOSAT_X_BPREDOFIT): the kept list gives back the room of the HSPs removed
-    // above; the same HSPs in the same order (`x_redo_fit.rs`).
-    if super::x_redo_fit::x_bp_redo_fit() {
-        super::x_redo_fit::x_fit_redone_hsps(&mut hsp_list.hsps);
-    }
+    // The kept list gives back the room of the HSPs removed above; the same HSPs in the same
+    // order (`x_redo_fit.rs`).
+    super::x_redo_fit::x_fit_redone_hsps(&mut hsp_list.hsps);
     Ok(BlastpPostprocessResult {
         hsp_list: Some(hsp_list),
         best_score,
@@ -2437,7 +2429,7 @@ mod tests {
             ])),
         ));
 
-        let hits = hsplist_from_distinct_alignments(alignments, &template_hit, 0, 0, false).hsps;
+        let hits = hsplist_from_distinct_alignments(alignments, &template_hit, 0, 0).hsps;
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].raw_score, 80);
         assert_eq!(hits[1].raw_score, 70);
@@ -2454,9 +2446,9 @@ mod tests {
         assert_eq!(hits[0].s_idx, 9);
     }
 
-    // EXPERIMENT (LOSAT_X_BPREDOFIT): the list built with fitted room is the list built by `push`.
+    // The list is built with room for its alignments only.
     #[test]
-    fn x_redo_fit_builds_the_same_list_with_room_for_its_alignments_only() {
+    fn x_redo_fit_builds_the_list_with_room_for_its_alignments_only() {
         let template_hit = BlastpPreliminaryHsp {
             query_start: 0,
             query_end: 20,
@@ -2498,14 +2490,9 @@ mod tests {
                 super::super::x_redo_fit::x_alignment_count(alignments(count).as_deref()),
                 count
             );
-            let pushed =
-                hsplist_from_distinct_alignments(alignments(count), &template_hit, 9, 0, false);
-            let fitted =
-                hsplist_from_distinct_alignments(alignments(count), &template_hit, 9, 0, true);
-            assert_eq!(format!("{:?}", fitted.hsps), format!("{:?}", pushed.hsps));
+            let fitted = hsplist_from_distinct_alignments(alignments(count), &template_hit, 9, 0);
             assert_eq!(fitted.hsps.len(), count);
             assert_eq!(fitted.hsps.capacity(), count);
-            assert!(pushed.hsps.capacity() >= 4);
         }
     }
 
@@ -2806,7 +2793,7 @@ mod tests {
         assert!(range.subject.data().contains(&ncbistdaa::X));
     }
 
-    // EXPERIMENT (LOSAT_X_BPCOMPOREUSE): the masked range carries the composition of its bytes,
+    // The masked range carries the composition of its bytes,
     // on the miss that masks it and on the cache hit that returns it.
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:934-936
     // ```c
@@ -2816,9 +2803,6 @@ mod tests {
     // ```
     #[test]
     fn x_masked_subject_range_carries_the_composition_of_its_bytes() {
-        if !x_compo_reuse() {
-            return;
-        }
         let mut matching_residues = vec![1u8; 80];
         for (i, residue) in matching_residues.iter_mut().enumerate().skip(40) {
             *residue = 1 + (i % 19) as u8;

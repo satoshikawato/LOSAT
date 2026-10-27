@@ -1256,7 +1256,7 @@ fn search(
             ))
             .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings)
         });
-        let query_warning_lines: Vec<Vec<u8>> = queries
+        let mut query_warning_lines: Vec<Vec<u8>> = queries
             .iter()
             .zip(&query_validity)
             .enumerate()
@@ -1286,16 +1286,67 @@ fn search(
         // `-db`: the reported sequences by rank, with their records and packed subjects; the
         // database's other sequences are dropped before the reports.
         let reported = match database {
-            Some(_) => Some(
-                super::database::reported_subjects(&titles, &mut results, search_letters)
-                    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): a read of a reported sequence that
-                    // failed: the run's error, as the check's error would be.
-                    .map_err(|error| x_read_failure(error).unwrap_or_else(|error| error))?,
+            Some(database) => Some(
+                super::database::reported_subjects(
+                    database,
+                    &titles,
+                    &mut results,
+                    search_letters,
+                    parsed_shown(&outputs.formats),
+                )
+                // EXPERIMENT (LOSAT_X_TBNDBSTREAM): a read of a reported sequence that
+                // failed: the run's error, as the check's error would be.
+                .map_err(|error| x_read_failure(error).unwrap_or_else(|error| error))?,
             ),
             None => None,
         };
         drop(database_stores);
         super::x_db_stream::x_print_shadow_summary();
+        // The query batches that were read and searched, by their searched queries (the batches
+        // before a database failure or a reader stop): each is reported.
+        let batch_spans: Vec<std::ops::Range<usize>> = query_input
+            .batches(batch_size)
+            .into_iter()
+            .map(|batch| batch.searched)
+            .filter(|searched| !searched.is_empty() && searched.end <= queries.len())
+            .collect();
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:298-302
+        // ```c++
+        //                     BlastFormatter_PreFetchSequenceData(*results, scope,
+        //                     		                            fmt_args->GetFormattedOutputChoice());
+        //                     ITERATE(CSearchResultSet, result, *results) {
+        //                         formatter.PrintOneResultSet(**result, query);
+        //                     }
+        // ```
+        // Before the reports of a batch NCBI fetches every subject that the batch reports, and
+        // with `taxdb.bti` on the search path the taxonomy database writes its messages there
+        // (`TblastnDatabase::prefetch_messages`: the texts of opening it at the run's first
+        // lookup, a volume's lookup of a taxid once per run): after the reader's messages of the
+        // batch and before the warnings of its first query. They go with the warnings, where the
+        // first format is outfmt 0, 5, 6 or 7 (`database::prefetches_subjects`); XML2 and JSON
+        // write theirs at each `Hit` (`TaxdbPrinter`). They are read here, after the refusals of
+        // the reported subjects and before any format is written, so a refusal (a taxonomy
+        // database or a taxid that LOSAT cannot read as NCBI does) comes before any byte, as
+        // those refusals do; without `taxdb.bti` nothing is read. A failed batch is not reported
+        // and prefetches nothing (`failed`, a header file or the sequence file that NCBI cannot
+        // read during the batch's search).
+        if let (Some(reported), Some(database)) = (&reported, database) {
+            if outputs.formats.first().is_some_and(|format| {
+                crate::algorithm::common::database::prefetches_subjects(Some(
+                    super::stage_e_report::format_number(format.outfmt),
+                ))
+            }) && database.taxdb_found()
+            {
+                for span in &batch_spans {
+                    let messages = database.prefetch_messages(reported, &results[span.clone()])?;
+                    if messages.is_empty() {
+                        continue;
+                    }
+                    let reader = batches.warnings[span.start].len();
+                    query_warning_lines[span.start].splice(reader..reader, messages);
+                }
+            }
+        }
         // `-db`, XML2 and JSON: the taxid of each reported sequence, and what the taxonomy
         // database says about it (the refusals of both come before any byte).
         let xml_taxa = match (&reported, database) {
@@ -1330,19 +1381,13 @@ fn search(
             ),
         };
         // The BLAST archive (outfmt 11): one document per query batch that was read and searched
-        // (the batches before a database failure or a reader stop).
-        let archive_spans: Vec<std::ops::Range<usize>> = query_input
-            .batches(batch_size)
-            .into_iter()
-            .map(|batch| batch.searched)
-            .filter(|searched| !searched.is_empty() && searched.end <= queries.len())
-            .collect();
+        // (`batch_spans`).
         let archive_render = args
             .archive
             .as_ref()
             .map(|handle| super::archive::ArchiveRender {
                 handle,
-                spans: &archive_spans,
+                spans: &batch_spans,
             });
         // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); it is
         // written after all batches are searched. No NCBI counterpart.
@@ -1405,6 +1450,29 @@ fn search(
         return Err(error);
     }
     Ok(())
+}
+
+/// What the reports `formats` show of the reported database sequences, for LOSAT's refusals of
+/// those with parsed Seq-ids (`common::database::ParsedShown`): the tabular formats (6, 7),
+/// outfmt 0, and the formats that join the alignments of following hits whose Seq-align ids
+/// match (0, 5, 13 to 16).
+fn parsed_shown(
+    formats: &[crate::api::local_blast::FormatOutput<'_>],
+) -> crate::algorithm::common::database::ParsedShown {
+    let numbers: Vec<i32> = formats
+        .iter()
+        .map(|format| super::stage_e_report::format_number(&format.outfmt))
+        .collect();
+    let pairwise = numbers.contains(&0);
+    crate::algorithm::common::database::ParsedShown {
+        tabular: numbers.iter().any(|&number| number == 6 || number == 7),
+        pairwise,
+        joined: pairwise
+            || formats
+                .iter()
+                .any(|format| super::stage_e_report::is_structured_xml(&format.outfmt)),
+        sam: false,
+    }
 }
 
 #[cfg(test)]

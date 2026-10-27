@@ -140,6 +140,9 @@ fn blastp_against(
         .args(["-num_threads", &threads.to_string()])
         .args(extra)
         .env("LOSAT_TIMING", "1")
+        // `LOSAT_X_BPQSLOTS=0`: the block loop of `LOSAT_X_BPQBLOCK`, one block at a time (the switch searches
+        // blastp-fast's blocks two at a time, of other sizes, with no table built ahead), unless the run names it.
+        .env("LOSAT_X_BPQSLOTS", "0")
         .envs(vars.iter().copied())
         .output()
         .expect("run LOSAT");
@@ -331,52 +334,34 @@ fn database_blocks_write_the_rows_of_the_search_of_all_queries() {
     std::fs::remove_dir_all(query.parent().unwrap()).unwrap();
 }
 
-// The exact blastp switches together with `-db`, in blocks and in the search of all queries: the
-// rows of the search with the exact blastp switches and the block search off (`EXACT_OFF`). The
-// default runs them all; the runs at the default's block size are in `TWO_BLOCKS` here (the
-// default size needs all 101 queries: `the_default_searches_in_blocks_of_50000_letters`).
-// `LOSAT_X_BPPCOMPACT=shadow` compares every compact preliminary list of the database search with
-// the off path's list (it panics on a difference). One case per path: the runs at four threads, and
-// at one thread the default in blocks of one letter and the shadow in blocks (whose `-db` subject
-// loop at one thread is sequential, `database.rs` `search_blocks`). The experiments' thread gates
-// are left to their own tests; the default in blocks at one thread with `-db`:
+// The exact blastp search with `-db`, in blocks and in the search of all queries: the rows of the
+// search with `LOSAT_X_BPGAP` and the block search off (`EXACT_OFF`) against the default's. The
+// runs at the default's block size are in `TWO_BLOCKS` here (the default size needs all 101
+// queries: `the_default_searches_in_blocks_of_50000_letters`). One case per path: the runs at four
+// threads, and at one thread the default in blocks of one letter (whose `-db` subject loop at one
+// thread is sequential, `database.rs` `search_blocks`). The experiments' thread gates are left to
+// their own tests; the default in blocks at one thread with `-db`:
 // `database_blocks_write_the_rows_...` above.
 #[test]
 fn database_search_with_the_exact_blastp_experiments() {
-    const EXACT_OFF: [(&str, &str); 9] = [
-        BATCH,
-        ("LOSAT_X_BPSEED", "0"),
-        ("LOSAT_X_BPUNGAP", "0"),
-        ("LOSAT_X_BPGAP", "0"),
-        ("LOSAT_X_BPLUT", "0"),
-        ("LOSAT_X_BPPFREE", "0"),
-        ("LOSAT_X_BPPCOMPACT", "0"),
-        ("LOSAT_X_BPREDOFIT", "0"),
-        SWITCH_OFF,
-    ];
+    const EXACT_OFF: [(&str, &str); 3] = [BATCH, ("LOSAT_X_BPGAP", "0"), SWITCH_OFF];
     let db = subject_database("exact");
     let subject = [OsStr::new("-db"), db.as_os_str()];
     let query = queries("exact");
-    let shadow = ("LOSAT_X_BPPCOMPACT", "shadow");
     let two_blocks = ("LOSAT_X_BPQBLOCK", TWO_BLOCKS);
-    /// A run's variables and its searches (`None`: a shadow run, whose searches are not counted).
-    type Run<'a> = (Vec<(&'a str, &'a str)>, Option<usize>);
+    /// A run's variables and its searches.
+    type Run<'a> = (Vec<(&'a str, &'a str)>, usize);
     let cases: [(u32, Vec<Run>); 2] = [
         (
             4,
             vec![
-                (vec![BATCH, two_blocks], Some(blocks(TWO_BLOCKS))),
-                (vec![BATCH, SWITCH_OFF], Some(1)),
-                (vec![BATCH, two_blocks, shadow], None),
-                (vec![BATCH, SWITCH_OFF, shadow], None),
+                (vec![BATCH, two_blocks], blocks(TWO_BLOCKS)),
+                (vec![BATCH, SWITCH_OFF], 1),
             ],
         ),
         (
             1,
-            vec![
-                (vec![BATCH, ("LOSAT_X_BPQBLOCK", "1")], Some(blocks("1"))),
-                (vec![BATCH, two_blocks, shadow], None),
-            ],
+            vec![(vec![BATCH, ("LOSAT_X_BPQBLOCK", "1")], blocks("1"))],
         ),
     ];
     for (threads, runs) in &cases {
@@ -393,12 +378,10 @@ fn database_search_with_the_exact_blastp_experiments() {
                 rows == reference,
                 "-db threads {threads} {vars:?}: rows differ"
             );
-            if let Some(expected) = expected {
-                assert_eq!(
-                    searches, *expected,
-                    "-db threads {threads} {vars:?}: searches"
-                );
-            }
+            assert_eq!(
+                searches, *expected,
+                "-db threads {threads} {vars:?}: searches"
+            );
         }
     }
     std::fs::remove_dir_all(db.parent().unwrap()).unwrap();

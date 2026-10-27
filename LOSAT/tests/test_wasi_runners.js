@@ -622,6 +622,24 @@ test("LOSAT_WASI_PRESPAWN=auto reads -num_threads, and unused standby workers ar
   }
 });
 
+// A spawn that finds no standby worker left boots the next set of -num_threads workers together
+// with `auto`, and takes its first; a number of workers still boots one new worker per spawn after them.
+test("LOSAT_WASI_PRESPAWN=auto boots the next set together when its standby workers run out", () => {
+  const argv = ["-num_threads", "3"];
+  for (const [spawns, prespawn, standby, refills] of [[5, "auto", 5, [3]], [4, "auto", 5, [3]], [6, "auto", 8, [3, 6]],
+    [5, "2", 2, []]]) {
+    const label = `${spawns} spawns PRESPAWN=${prespawn}`;
+    const reference = runThreaded(spawner(spawns), argv, { LOSAT_WASI_PRESPAWN: "0" });
+    const result = runThreaded(spawner(spawns), argv, { LOSAT_WASI_PRESPAWN: prespawn, LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(result.status, reference.status, `${label}\n${result.stderr}`);
+    assert.equal(result.stdout, reference.stdout, label);
+    const events = hostEvents(result.stderr);
+    checkLifecycle(events, spawns, standby, label);
+    assert.deepEqual(events.filter((e) => e.event === "standby_refill").map((e) => [e.tid, e.count]),
+      refills.map((tid) => [tid, 3]), label);
+  }
+});
+
 test("invalid LOSAT_WASI_PRESPAWN values fail before the command starts", () => {
   for (const value of ["", "-1", "255", "two", "1.5"]) {
     const result = runThreaded(spawner(1), [], { LOSAT_WASI_PRESPAWN: value });

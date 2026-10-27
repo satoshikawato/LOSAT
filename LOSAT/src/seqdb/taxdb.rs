@@ -5,9 +5,12 @@
 //! c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp): the `sciname` of the
 //! XML2 and JSON reports (`-outfmt 13` to `16`), the tabular fields `sscinames`,
 //! `scomnames`, `sblastnames`, `sskingdoms` (and their singular forms) and the
-//! organism report (`-outfmt 18`). This module is the reader only; the
-//! report code decides when a name is looked up and what it writes when the
-//! lookup finds nothing.
+//! organism report (`-outfmt 18`). The lookups also write NCBI's messages on
+//! standard error when a query batch of outfmt 0, 5, 6, 7 or 17 prefetches the
+//! subjects it reports (`CSeqDBVol::x_GetTaxonomy`; the texts of opening and
+//! [`MSG_OFFSET_ERROR`], `algorithm::common::database::prefetch_messages`).
+//! This module is the reader only; the report code decides when a name is
+//! looked up and what it writes when the lookup finds nothing.
 //!
 //! ## Files
 //!
@@ -425,6 +428,29 @@ impl TaxDb {
     /// missing.
     pub fn entry_count(&self) -> u64 {
         self.files.as_ref().map_or(0, |files| files.count as u64)
+    }
+
+    /// The taxid whose lookup writes [`MSG_OFFSET_ERROR`] ([`Self::names`]): the last entry's,
+    /// when its offset is past the end of `taxdb.btd` and the search for its taxid ends on it (in
+    /// an index that is not sorted the search may end elsewhere). `None` when no lookup writes the
+    /// message, and for a database NCBI treats as missing. No other lookup writes a text (those of
+    /// opening are [`Self::open_messages`]), and this one writes it at every lookup of the taxid.
+    /// Err: a read error, or the lookup of that taxid refused.
+    pub fn offset_error_taxid(&self) -> Result<Option<i32>, SeqDbError> {
+        let Some(files) = &self.files else {
+            return Ok(None);
+        };
+        let (taxid, offset) = Self::entry(files, files.count - 1)?;
+        // `names`: `end_data < begin_data` with `end_data` the file size as `Uint4`.
+        if offset <= files.data.len() as u32 {
+            return Ok(None);
+        }
+        let mut messages = Vec::new();
+        self.names(taxid, &mut messages)?;
+        Ok(messages
+            .iter()
+            .any(|message| message == MSG_OFFSET_ERROR)
+            .then_some(taxid))
     }
 
     /// Whether [`Self::names`] could refuse some taxid, or give a scientific name for which
@@ -1005,6 +1031,66 @@ mod tests {
         index[at..at + 4].copy_from_slice(&be(data.len() as u32));
         let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
         assert_eq!(names_of(&db, 2), (None, vec![]));
+    }
+
+    #[test]
+    fn the_taxid_of_the_offset_error_is_the_last_entry_s_where_its_lookup_writes_it() {
+        // Every variant: the taxid for which `blastdbcmd -tax_info` of NCBI BLAST+ 2.17.0 wrote
+        // the message (`expected.tsv`), none where it wrote it for no taxid.
+        let text = std::fs::read_to_string(fixture_dir().join("expected.tsv")).unwrap();
+        let mut variants: Vec<String> = std::fs::read_dir(fixture_dir())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.is_dir())
+            .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        variants.sort();
+        let mut with_message = 0;
+        for variant in &variants {
+            let Ok(db) = open_fixture(variant) else {
+                continue;
+            };
+            let ncbi: Vec<i32> = text
+                .lines()
+                .map(|line| line.splitn(4, '\t').collect::<Vec<&str>>())
+                .filter(|cols| {
+                    cols[0] == variant.as_str()
+                        && cols.get(3).is_some_and(|m| m.contains(MSG_OFFSET_ERROR))
+                })
+                .map(|cols| cols[1].parse().unwrap())
+                .collect();
+            assert!(ncbi.len() <= 1, "{variant}");
+            assert_eq!(
+                db.offset_error_taxid().unwrap(),
+                ncbi.first().copied(),
+                "{variant}"
+            );
+            with_message += ncbi.len();
+        }
+        // offset_last_past_end, btd_truncated and btd_empty.
+        assert_eq!(with_message, 3);
+        // The last entry (50) begins past the end, but the search for 50 ends on entry 2 (90 >
+        // 50, then 20 < 50): no lookup writes the message.
+        let rows: [(i32, &[u8]); 5] = [
+            (10, b"a\tb\tc\td"),
+            (20, b"a\tb\tc\td"),
+            (90, b"a\tb\tc\td"),
+            (30, b"a\tb\tc\td"),
+            (50, b"a\tb\tc\td"),
+        ];
+        let (mut index, data) = build(&rows);
+        let at = 24 + 8 * 4 + 4;
+        index[at..at + 4].copy_from_slice(&be(data.len() as u32 + 10));
+        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        assert_eq!(names_of(&db, 50), (None, vec![]));
+        assert_eq!(db.offset_error_taxid().unwrap(), None);
+        // Sorted, the same entry writes it.
+        let rows: [(i32, &[u8]); 3] = [(10, b"a\tb\tc\td"), (20, b"a\tb\tc\td"), (50, b"x")];
+        let (mut index, data) = build(&rows);
+        let at = 24 + 8 * 2 + 4;
+        index[at..at + 4].copy_from_slice(&be(data.len() as u32 + 1));
+        let db = TaxDb::open(&path_of(&write_db(&index, &data))).unwrap();
+        assert_eq!(db.offset_error_taxid().unwrap(), Some(50));
     }
 
     #[test]

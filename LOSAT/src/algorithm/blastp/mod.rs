@@ -15,8 +15,7 @@ pub(crate) mod encoding;
 // status = s_BlastAaWordFinder_TwoHit(subject, query, ..., matrix, ...);
 // The same protein two-hit extension primitive is used by BLASTP and TBLASTN.
 pub(crate) mod extension;
-// EXPERIMENT (LOSAT_X_BPUNGAP): the ungapped X-drop walks of aa_ungapped.c:804-883 with a byte
-// score table, same results.
+// The ungapped X-drop walks of aa_ungapped.c:804-883 with a byte score table, same results.
 pub(crate) mod x_ungapped_fast;
 // EXPERIMENT (LOSAT_X_BPUNGAPSENT): blastp's two-hit extension for word size 3 inlined into the
 // fused loop's candidate closure, walks stopped by the sentinels, same results.
@@ -32,7 +31,9 @@ mod query_split;
 mod seqalign;
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries searched in blocks of whole query batches.
 mod x_query_blocks;
-// EXPERIMENT (LOSAT_X_BPREDOFIT): redone HSP lists without spare room.
+// EXPERIMENT (LOSAT_X_BPQSLOTS): blastp-fast's query blocks searched several at a time.
+mod x_query_slots;
+// Redone HSP lists without spare room.
 mod x_redo_fit;
 // EXPERIMENT (LOSAT_X_BPREDOPAR): the composition-based redo with jobs
 // of up to four matches on the pool, replayed in stream order. Built where the parallel redo paths
@@ -53,16 +54,15 @@ mod x_redo_subjects;
 // static void s_ComputeNumIdentities(...);
 // ```
 mod kappa;
-// EXPERIMENT (LOSAT_X_BPSEED): the subject scan and the two-hit test in one loop.
+// The subject scan and the two-hit test in one loop.
 pub(crate) mod x_seed_fused;
-// EXPERIMENT (LOSAT_X_BPSEED): the same loop for the compressed lookup table of blastp-fast.
+// The same loop for the compressed lookup table of blastp-fast.
 mod x_seed_fused_compressed;
-// EXPERIMENT (LOSAT_X_BPSEED with LOSAT_X_BPCLUT): the same loop on the flat compressed table.
+// With LOSAT_X_BPCLUT: the same loop on the flat compressed table.
 mod x_seed_fused_clut;
-// EXPERIMENT (LOSAT_X_BPPFREE): preliminary hit lists without spare room, each freed after its
-// query's redo.
+// Preliminary hit lists without spare room, each freed after its query's redo.
 mod x_prelim_free;
-// EXPERIMENT (LOSAT_X_BPPCOMPACT): preliminary hit lists with a 64-byte element until the redo.
+// Preliminary hit lists with a 64-byte element until the redo.
 mod x_prelim_compact;
 
 /// EXPERIMENT (LOSAT_X_BPHITBF): the `[X_STATS] BPHITBF` line at exit.
@@ -77,10 +77,14 @@ pub fn x_bp_lkp_ahead_print_summary() {
     blast_engine::x_lookup_ahead::x_bp_lkp_ahead_print_summary();
 }
 
+/// EXPERIMENT (LOSAT_X_BPQSLOTS): the `[X_STATS] BPQSLOTS` line at exit.
+// No NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_bp_qslots_print_summary() {
+    x_query_slots::x_bp_qslots_print_summary();
+}
+
 pub use args::BlastpArgs;
 pub use blast_engine::run;
 // EXPERIMENT (LOSAT_X_BPGAP): the summary line `main` prints at exit.
 // No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub use gapalign::x_restricted_gap_print_summary;
-// EXPERIMENT (LOSAT_X_BPPCOMPACT=shadow): the summary line `main` prints at exit.
-pub use x_prelim_compact::x_bp_prelim_compact_print_summary;

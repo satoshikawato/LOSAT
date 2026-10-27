@@ -1,0 +1,120 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 205
+        },
+        {
+          id str "blast_score",
+          value int 205
+        },
+        {
+          id str "e_value",
+          value real { 71168593459011, 10, -34 }
+        },
+        {
+          id str "bit_score",
+          value real { 835741453431014, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 49
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 66
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 821666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 7,
+        ids {
+          local str "Query_1",
+          local str "Subject_1"
+        },
+        starts {
+          16,
+          15,
+          28,
+          -1,
+          29,
+          27,
+          43,
+          -1,
+          44,
+          41,
+          50,
+          -1,
+          54,
+          47
+        },
+        lens {
+          12,
+          1,
+          14,
+          1,
+          6,
+          4,
+          60
+        },
+        strands {
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}

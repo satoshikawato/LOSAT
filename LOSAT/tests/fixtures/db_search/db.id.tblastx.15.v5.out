@@ -1,0 +1,886 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/ids/nucl_v5"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "qn1 query nucleotide one",
+          "query_len": 480,
+          "query_masking": [
+            {
+              "from": 373,
+              "to": 415
+            },
+            {
+              "from": 437,
+              "to": 476
+            }
+          ],
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "tpe|BN000025.1|",
+                  "accession": "BN000025",
+                  "title": "third party embl nucleotide"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|ti|123",
+                  "accession": "123",
+                  "title": "trace id nucleotide"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "ref|NR_000023.1|",
+                  "accession": "NR_000023",
+                  "title": ""
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "gb|AF000022.1|",
+                  "accession": "AF000022",
+                  "title": "subject id beside an accession"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "gb|AF000021.1|",
+                  "accession": "AF000021",
+                  "title": "a long nucleotide title that goes past the sixty byte wrap of the alignment heading line of outfmt zero",
+                  "taxid": 9606
+                },
+                {
+                  "id": "emb|AJ000021.1|",
+                  "accession": "AJ000021",
+                  "title": "another long title for the second definition line of this record, also past sixty bytes",
+                  "taxid": 562
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 6,
+              "description": [
+                {
+                  "id": "ref|XM_000020.1|",
+                  "accession": "XM_000020",
+                  "title": "first definition line without a gi"
+                },
+                {
+                  "id": "gi|2020|gb|AF000020.1|",
+                  "accession": "AF000020",
+                  "title": "second definition line with a gi"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 7,
+              "description": [
+                {
+                  "id": "ref|NC_000019.1|",
+                  "accession": "NC_000019",
+                  "title": "",
+                  "taxid": 9606
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 8,
+              "description": [
+                {
+                  "id": "tpg|BK000018.1|",
+                  "accession": "BK000018",
+                  "title": ""
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 9,
+              "description": [
+                {
+                  "id": "Subject_31",
+                  "accession": "Subject_31",
+                  "title": "nucleotide subject title"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 10,
+              "description": [
+                {
+                  "id": "Subject_30",
+                  "accession": "Subject_30",
+                  "title": ""
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 11,
+              "description": [
+                {
+                  "id": "gi|1515|gb|AF000015.1|",
+                  "accession": "AF000015",
+                  "title": ""
+                },
+                {
+                  "id": "gi|1516|ref|XM_000016.1|",
+                  "accession": "XM_000016",
+                  "title": "second defline"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 12,
+              "description": [
+                {
+                  "id": "pat|US|1234567|14",
+                  "accession": "US1234567_14",
+                  "title": "patent nucleotide"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 13,
+              "description": [
+                {
+                  "id": "gb|AF000013.1|LOCUS13",
+                  "accession": "AF000013",
+                  "title": "gb with a locus name"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 14,
+              "description": [
+                {
+                  "id": "tpg|BK000012.1|",
+                  "accession": "BK000012",
+                  "title": "third-party nucleotide"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 15,
+              "description": [
+                {
+                  "id": "mynuc_10",
+                  "accession": "mynuc_10",
+                  "title": "bare non-accession word"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 16,
+              "description": [
+                {
+                  "id": "dbj|AB000009|",
+                  "accession": "AB000009",
+                  "title": "bare ddbj accession without version"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 17,
+              "description": [
+                {
+                  "id": "ref|NM_000008.2|",
+                  "accession": "NM_000008",
+                  "title": "bare refseq accession"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 18,
+              "description": [
+                {
+                  "id": "gnl|mydb|nuc7",
+                  "accession": "nuc7",
+                  "title": "general id nucleotide"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 19,
+              "description": [
+                {
+                  "id": "mynuc6",
+                  "accession": "mynuc6",
+                  "title": "local id nucleotide"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 20,
+              "description": [
+                {
+                  "id": "ref|NC_000005.11|",
+                  "accession": "NC_000005",
+                  "title": "chromosome-like"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 21,
+              "description": [
+                {
+                  "id": "dbj|AB000004.1|",
+                  "accession": "AB000004",
+                  "title": "dbj nucleotide"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 22,
+              "description": [
+                {
+                  "id": "emb|AJ000003.1|",
+                  "accession": "AJ000003",
+                  "title": "emb nucleotide"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 23,
+              "description": [
+                {
+                  "id": "gi|654321|gb|AF000002.3|",
+                  "accession": "AF000002",
+                  "title": "gi plus gb nucleotide",
+                  "taxid": 7227
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 24,
+              "description": [
+                {
+                  "id": "ref|NM_000001.1|",
+                  "accession": "NM_000001",
+                  "title": "alpha mRNA [Homo sapiens]",
+                  "taxid": 9606
+                },
+                {
+                  "id": "gb|AF000001.1|",
+                  "accession": "AF000001",
+                  "title": "alpha cDNA",
+                  "taxid": 10090
+                },
+                {
+                  "id": "emb|X00001.2|",
+                  "accession": "X00001",
+                  "title": "alpha clone",
+                  "taxid": 9606
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57819e-74,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 24,
+            "db_len": 11712,
+            "hsp_len": 24,
+            "eff_space": 452608,
+            "kappa": 0.133956144488482,
+            "lambda": 0.317605957635731,
+            "entropy": 0.401214524497119
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/ids/nucl_v5"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "qn2 unrelated nucleotide (no hits expected)",
+          "query_len": 90,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 24,
+            "db_len": 11712,
+            "hsp_len": 18,
+            "eff_space": 41664,
+            "kappa": 0.133956144488482,
+            "lambda": 0.317605957635731,
+            "entropy": 0.401214524497119
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+]
+}

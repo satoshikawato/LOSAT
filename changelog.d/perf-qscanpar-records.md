@@ -1,0 +1,1 @@
+- blastn: where LOSAT_X_QSTREAM does not act (`-task megablast`, and the threaded WebAssembly command, whose WASI has no second handle on a file), the records read before the search are read in parts on the search's threads, as LOSAT_X_QSCANPAR reads the lengths (in the WebAssembly command each thread opens the query file again; the output is unchanged).

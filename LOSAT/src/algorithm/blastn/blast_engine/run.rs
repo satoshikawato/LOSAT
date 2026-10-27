@@ -7211,6 +7211,18 @@ fn search_cli(
     }
     let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders)
         .with_defline(args.archive.is_some());
+    // EXPERIMENT (LOSAT_X_QSCANPAR): where LOSAT_X_QSTREAM does not act, a handle for the reading of
+    // every record in parts and the position the reader starts from (`IsIStreamEmpty` below leaves
+    // the reader there); none for standard input or the BLAST archive.
+    let x_scan_handle = if !x_opening.acts()
+        && x_query_scan_par::on()
+        && !query_config.keep_defline
+        && args.query.as_os_str() != "-"
+    {
+        x_query_scan_par::second_handle(&args.query, &query_file)
+    } else {
+        None
+    };
     let mut query_source = FastaInputSource::from_argument(&args.query, query_file, query_config);
     if !shared_standard_input && query_source.stream_is_empty() {
         outputs
@@ -7238,16 +7250,34 @@ fn search_cli(
     let t_read_fasta = crate::utils::xtiming::clock();
     // EXPERIMENT (LOSAT_X_QSTREAM): with the switch acting this reading keeps only each record's
     // length and how the reading ends; the batches read their records again (`x_query_stream`).
+    // EXPERIMENT (LOSAT_X_QSCANPAR): without it every record is read here, in parts on the search's
+    // threads where they can be taken (`x_query_scan_par::records`), else by `query_source`.
     let mut x_packed = Vec::new();
+    let x_parts = x_scan_handle.as_ref().and_then(|(again, start)| {
+        let input = x_query_scan_par::Input {
+            file: again,
+            path: &args.query,
+        };
+        x_query_scan_par::records(input, *start, query_config, args.num_threads, x_pack)
+    });
+    drop(x_scan_handle);
     let (records, end, x_store) = if x_opening.acts() {
         let (store, end) = x_query_stream::Store::read(
             x_opening,
+            &args.query,
             &mut query_source,
             query_config,
             query_range.as_ref(),
             args.num_threads,
         )?;
         (Vec::new(), end, store)
+    } else if let Some(parts) = x_parts {
+        x_packed = parts.packed;
+        (
+            parts.records,
+            QueryEnd::Input,
+            x_query_stream::Store::off(x_opening),
+        )
     } else if x_pack {
         let (QueryRecords { records, end }, packed) =
             crate::blastinput::fasta_reader::x_read_queries_packed(&mut query_source);

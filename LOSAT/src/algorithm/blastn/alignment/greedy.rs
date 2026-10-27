@@ -391,6 +391,10 @@ struct GreedyNonAffineMem {
     max_score: Vec<i32>,
     traceback_pool: Vec<i32>,
     traceback_used: usize,
+    /// The row descriptors of `last_seq2_off` (`blast_greedy_align`): NCBI allocates its row
+    /// pointers once with the scratch, `gamp->last_seq2_off = (Int4**) malloc((max_d + 2) *
+    /// sizeof(Int4*))` (blast_gapalign.c:211), so they are kept here between calls.
+    rows: Vec<NonAffineGreedyRow>,
 }
 
 impl GreedyNonAffineMem {
@@ -400,6 +404,7 @@ impl GreedyNonAffineMem {
             max_score: Vec::new(),
             traceback_pool: Vec::new(),
             traceback_used: 0,
+            rows: Vec::new(),
         }
     }
 
@@ -3225,7 +3230,50 @@ mod x_greedy_fused;
 
 /// Non-affine greedy alignment with optional traceback.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:379-751 (BLAST_GreedyAlign)
+/// The row descriptors come from `non_affine_mem` (`GreedyNonAffineMem::rows`), as NCBI's row
+/// pointers come from its `SGreedyAlignMem`, instead of a new vector per call.
 fn blast_greedy_align(
+    seq1: &[u8],
+    len1: i32,
+    seq2: &[u8],
+    len2: i32,
+    reverse: bool,
+    xdrop_threshold: i32,
+    match_cost: i32,
+    mismatch_cost: i32,
+    seq1_align_len: &mut i32,
+    seq2_align_len: &mut i32,
+    max_dist: i32,
+    non_affine_mem: &mut GreedyNonAffineMem,
+    edit_block: Option<&mut GapPrelimEditBlock>,
+    fence_hit: &mut bool,
+    seed: &mut GreedySeed,
+) -> i32 {
+    let mut rows = std::mem::take(&mut non_affine_mem.rows);
+    let score = blast_greedy_align_rows(
+        seq1,
+        len1,
+        seq2,
+        len2,
+        reverse,
+        xdrop_threshold,
+        match_cost,
+        mismatch_cost,
+        seq1_align_len,
+        seq2_align_len,
+        max_dist,
+        non_affine_mem,
+        edit_block,
+        fence_hit,
+        seed,
+        &mut rows,
+    );
+    non_affine_mem.rows = rows;
+    score
+}
+
+/// `blast_greedy_align` with its row descriptors in `last_seq2_off` (emptied first).
+fn blast_greedy_align_rows(
     seq1: &[u8],
     len1: i32,
     seq2: &[u8],
@@ -3241,6 +3289,7 @@ fn blast_greedy_align(
     mut edit_block: Option<&mut GapPrelimEditBlock>,
     fence_hit: &mut bool,
     seed: &mut GreedySeed,
+    last_seq2_off: &mut Vec<NonAffineGreedyRow>,
 ) -> i32 {
     let mut seq1_index: i32;
     let mut seq2_index: i32;
@@ -3298,7 +3347,8 @@ fn blast_greedy_align(
     // Only the two base rows exist initially. Reserve the descriptor capacity
     // once, then retain each traceback row when NCBI allocates it. Unused
     // distance slots have no cells to read, persist, or destroy.
-    let mut last_seq2_off = Vec::with_capacity(rows);
+    last_seq2_off.clear();
+    last_seq2_off.reserve(rows);
     last_seq2_off.push(NonAffineGreedyRow::from_base(0, base_row_len, 0));
     last_seq2_off.push(NonAffineGreedyRow::from_base(0, base_row_len, 1));
 

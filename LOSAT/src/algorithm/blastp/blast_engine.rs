@@ -2390,6 +2390,20 @@ impl BlastpReport {
         matches!(self, BlastpReport::Text(_))
     }
 
+    /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
+    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6 and 7,
+    /// `database::prefetches_subjects`): as the call's first report, the taxonomy database's
+    /// messages of that prefetch go with the query warnings.
+    fn prefetches_subjects(self) -> bool {
+        crate::algorithm::common::database::prefetches_subjects(match self {
+            BlastpReport::Text(outfmt) => Some(outfmt as i32),
+            BlastpReport::Xml => Some(5),
+            // The Seq-annots and the archive fetch nothing; XML2 and JSON write the messages
+            // at each `Hit` (`TaxdbPrinter`).
+            BlastpReport::Seqalign(_) | BlastpReport::Archive | BlastpReport::Xml2(_) => None,
+        })
+    }
+
     /// Whether the report is tabular (outfmt 6 and 7), which reads the tabular subject IDs.
     fn is_tabular(self) -> bool {
         matches!(
@@ -6442,7 +6456,8 @@ fn search(
     // all queries below. With `-db` the blocks are searched only when no definition line of the
     // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, or
     // `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and 5, `x_titles_taxids_allow_blocks` for 15
-    // and 16 (the titles and the taxids in one pass), read
+    // and 16 (the titles and the taxids in one pass), for outfmt 0, 5, 6 and 7 with `taxdb.bti` on
+    // the search path also the taxids that each batch's prefetch reads and looks up, read
     // in the block search's pool before the first block), and with outfmt 0 and `-subject` only
     // when no subject's title is refused where the report shows it
     // (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when the names of the database, the
@@ -6493,7 +6508,9 @@ fn search(
                 // been written and the search of all queries below runs: the lookup tables' words
                 // (`x_block_words_fit`), then with `-db` the definition lines
                 // (`database::x_titles_allow_blocks`; for outfmt 8, 9, 12 and 5
-                // `database::x_titles_read_allow_blocks`), with outfmt 0 and `-subject` the
+                // `database::x_titles_read_allow_blocks`; for outfmt 0, 5, 6 and 7 with `taxdb.bti`
+                // found also the taxids and lookups of the batches' prefetch), with outfmt 0 and
+                // `-subject` the
                 // subjects' titles (`x_block_shown_titles_allowed`), and with outfmt 5 the
                 // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the database
                 // name and queries' names (`x_block_xml_run_allowed`); with several outputs, the
@@ -6502,7 +6519,28 @@ fn search(
                     super::x_query_blocks::x_reach_block_search(&x_formats, false);
                     return Ok(false);
                 }
+                // BLASTP's outfmt 0, 5, 6 and 7 prefetch the subjects of each batch, which with
+                // `taxdb.bti` on the search path reads their taxids and looks them up in the
+                // taxonomy database (`ListedTitles::prefetch_messages`); a refusal there would come
+                // in a later block, so their checks then also read every sequence's taxid and ask
+                // whether any lookup can be refused (`shared::taxdb_may_refuse`, without the
+                // scientific names, which the prefetch does not ask for). The refusal of NCBI's
+                // taxonomy cache (`shared::TaxdbRun::cache_collision`) comes at the run's first
+                // prefetch, in block 0 before any row.
+                let x_prefetch_taxids = |x_kind: XBlockReport| {
+                    args.app == BlastpApp::Blastp
+                        && matches!(
+                            x_kind,
+                            XBlockReport::Tabular | XBlockReport::Pairwise | XBlockReport::Xml
+                        )
+                        && database.is_some_and(|database| database.taxdb_found())
+                };
                 let titles_allowed = |x_kind: XBlockReport| match (database, x_kind) {
+                    // Outfmt 5 whose batches read the taxids: the check of outfmt 15 and 16.
+                    // The prefetch asks for no scientific name.
+                    (Some(database), XBlockReport::Xml) if x_prefetch_taxids(x_kind) => {
+                        database::x_titles_taxids_allow_blocks(database, false, pool)
+                    }
                     // Outfmt 8, 9, 12 and 5 write no tabular id: only the definition lines' reading
                     // and bytes can fail (`x_titles_read_allow_blocks`).
                     (Some(database), XBlockReport::Seqalign | XBlockReport::Xml) => {
@@ -6512,11 +6550,14 @@ fn search(
                     // database's name of it, in the same pass over the headers
                     // (`x_titles_taxids_allow_blocks`).
                     (Some(database), XBlockReport::Xml2) => {
-                        database::x_titles_taxids_allow_blocks(database, pool)
+                        database::x_titles_taxids_allow_blocks(database, true, pool)
                     }
-                    (Some(database), _) => {
-                        database::x_titles_allow_blocks(database, x_pairwise, pool)
-                    }
+                    (Some(database), _) => database::x_titles_allow_blocks(
+                        database,
+                        x_pairwise,
+                        x_prefetch_taxids(x_kind),
+                        pool,
+                    ),
                     (None, XBlockReport::Pairwise) => {
                         x_block_shown_titles_allowed(&subjects.records, v1.is_some(), pool)
                     }
@@ -6997,7 +7038,20 @@ fn x_query_block_plan(
     let query_batches = query_input.batches(batch_size);
     // EXPERIMENT (LOSAT_X_BPQSLOTS): blastp-fast's blocks searched several at a time on a pool of
     // more than one thread, with one output that is not outfmt 11 or 13 to 16 and no hit records or
-    // observer (`x_query_slots.rs`), in blocks of `x_slot_letters`.
+    // observer (`x_query_slots.rs`), in blocks of `x_slot_letters`. Not where the batches' prefetch
+    // can write a text (`-db`, a first format of outfmt 0, 5, 6 or 7 and a taxonomy database whose
+    // lookups write the texts of opening or the offset error, `BlastpDatabase::prefetch_may_write`):
+    // the text goes with the block whose prefetch makes the run's first lookup, which in flight is
+    // the block that gets there first, not block 0 (DBID item T, review 1). NCBI's own taxonomy
+    // database writes no text, so the usual run keeps the slots.
+    let prefetch_writes = args.app == BlastpApp::Blastp
+        && matches!(
+            kinds.first(),
+            Some(XBlockReport::Tabular | XBlockReport::Pairwise | XBlockReport::Xml)
+        )
+        && subject_source
+            .database()
+            .is_some_and(|database| database.prefetch_may_write());
     let slots = super::x_query_slots::x_bp_qslots()
         .filter(|_| {
             args.num_threads > 1
@@ -7005,6 +7059,7 @@ fn x_query_block_plan(
                 && !x_web
                 && args.archive.is_none()
                 && !kinds.contains(&XBlockReport::Xml2)
+                && !prefetch_writes
         })
         .unwrap_or(1);
     let block_letters = if slots > 1 {
@@ -11365,7 +11420,7 @@ fn run_resolved_in_pool(
     let result_warnings = format_plans
         .first()
         .is_none_or(|(outfmt, _, _)| outfmt.writes_query_warnings());
-    let query_warning_lines: Vec<Vec<u8>> = query_records
+    let mut query_warning_lines: Vec<Vec<u8>> = query_records
         .iter()
         .enumerate()
         .map(|(q_idx, record)| {
@@ -11415,6 +11470,42 @@ fn run_resolved_in_pool(
                 )
             }),
         )?;
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
+    // ```c++
+    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+    //                 		                            fmt_args->GetFormattedOutputChoice());
+    //                 ITERATE(CSearchResultSet, result, *results) {
+    //                     formatter.PrintOneResultSet(**result, query_batch);
+    //                 }
+    // ```
+    // Before the reports of a batch NCBI fetches every subject that the batch reports, and with
+    // `taxdb.bti` on the search path the taxonomy database writes its messages there
+    // (`database::prefetch_messages`: the texts of opening it at the run's first lookup, a
+    // volume's lookup of a taxid once per run): after the reader's messages of the batch and
+    // before the warnings of its first query. They go with the warnings, where the first format
+    // is outfmt 0, 5, 6 or 7 (`BlastpReport::prefetches_subjects`). They are read here, after
+    // the subjects' refusals and before any format is written, so a taxonomy database that LOSAT
+    // cannot read is refused before any byte; without `taxdb.bti` nothing is read. psiblast's
+    // batches prefetch too (psiblast_app.cpp:256-263, 369-370); its reports stay as they were.
+    if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
+        if args.app == BlastpApp::Blastp
+            && format_plans
+                .first()
+                .is_some_and(|(outfmt, _, _)| outfmt.prefetches_subjects())
+            && database.taxdb_found()
+        {
+            for batch in &query_batches {
+                let messages =
+                    titles.prefetch_messages(database, &hit_lists[batch.searched.clone()])?;
+                if messages.is_empty() {
+                    continue;
+                }
+                let first = batch.searched.start;
+                let reader = reports.reader_warnings.get(first).map_or(0, Vec::len);
+                query_warning_lines[first].splice(reader..reader, messages);
+            }
+        }
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPSUBJMETA): the block

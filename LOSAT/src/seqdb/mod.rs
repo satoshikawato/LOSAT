@@ -1327,6 +1327,27 @@ impl SeqDb {
         )
     }
 
+    /// [`SeqDb::visit_defline_taxids`] for a database of any Seq-ids: the taxid of every
+    /// definition line of each sequence of `range` (0 for none), decoded as [`SeqDb::defline_set`]
+    /// decodes the definition lines (parsed Seq-ids too), read as `visit_deflines` reads them.
+    pub fn visit_defline_set_taxids(
+        &self,
+        range: BlockRange,
+        mut visit: impl FnMut(u32, Result<Vec<i32>, SeqDbError>) -> bool,
+    ) -> bool {
+        let Some(vol) = self.volumes.get(range.volume) else {
+            return range.is_empty().then_some(true).unwrap_or_else(|| {
+                visit(range.first_ordinal, Err(volume_range_error(range, self)))
+            });
+        };
+        vol.visit_defline_set_taxids(
+            range.first,
+            range.end,
+            header_piece_bytes(),
+            &mut |oid, taxids| visit(range.first_ordinal + (oid - range.first), taxids),
+        )
+    }
+
     /// EXPERIMENT (LOSAT_X_DBIDXREAD): calls `visit(ordinal, self.check_ambiguity(ordinal))`
     /// for the sequences of `range` in order until `visit` returns false; returns whether every
     /// call returned true. The offsets of the range are read at once

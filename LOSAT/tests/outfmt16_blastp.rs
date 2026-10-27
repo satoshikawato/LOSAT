@@ -535,19 +535,22 @@ fn a_query_of_an_unsearched_batch_lists_no_masks() {
     assert_eq!(out.matches("<query-masking>").count(), 1, "{out}");
 }
 
-/// The taxonomy database is read for outfmt 15 and 16 only (DECISIONS 30): a `taxdb.bti` of the
-/// search path that cannot be read (here a damaged one) changes no byte of outfmt 0, 5, 6, 7 or 8
-/// and adds no line to standard error, while 15 and 16 refuse it. The database has taxids, so the
-/// lookup would run if any other format asked for it.
+/// The taxonomy database is read by the formats that prefetch the reported subjects (0, 5, 6 and 7,
+/// since DBID item T: the volume's lookup of each fetched subject's taxid) and by 15 and 16, and by
+/// no other: a `taxdb.bti` of the search path whose record of the database's taxid (9606) NCBI
+/// reads from unmapped memory (`btd_empty`, NCBI BLAST+ crashes) changes no byte of outfmt 8 and
+/// adds no line to standard error, while the other formats refuse it (rc 1, DBID DECISIONS 13 (3))
+/// at 1 and 4 threads. BLASTP writes nothing to standard output then.
 #[test]
-fn the_taxdb_is_not_opened_outside_outfmt_15_and_16() {
+fn the_taxdb_is_read_by_the_prefetching_formats_only() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
     let (db, query) = (
         "tests/db_search/x16_taxid",
         "tests/db_search/x16_taxid_q.faa",
     );
     let damaged = "tests/seqdb/taxdb/btd_empty";
-    for format in ["0", "5", "6", "7", "8"] {
+    let refusal = "unsupported database: the taxonomy record of taxid 9606";
+    for format in ["8", "0", "5", "6", "7"] {
         for threads in ["1", "4"] {
             let args = [
                 "blastp",
@@ -564,10 +567,17 @@ fn the_taxdb_is_not_opened_outside_outfmt_15_and_16() {
             let with = run_in(engine, &args, &[("BLASTDB", damaged)]);
             let case = format!("outfmt {format} threads {threads}");
             assert_eq!(without.status.code(), Some(0), "{case}");
-            assert_eq!(with.status.code(), Some(0), "{case}");
-            assert!(with.stderr.is_empty(), "{case}: {:?}", with.stderr);
-            assert!(!with.stdout.is_empty(), "{case}");
-            assert!(with.stdout == without.stdout, "{case}: stdout");
+            assert!(!without.stdout.is_empty(), "{case}");
+            if ["8"].contains(&format) {
+                assert_eq!(with.status.code(), Some(0), "{case}");
+                assert!(with.stderr.is_empty(), "{case}: {:?}", with.stderr);
+                assert!(with.stdout == without.stdout, "{case}: stdout");
+                continue;
+            }
+            assert_eq!(with.status.code(), Some(1), "{case}");
+            let stderr = String::from_utf8_lossy(&with.stderr);
+            assert!(stderr.contains(refusal), "{case}: {stderr}");
+            assert!(with.stdout.is_empty(), "{case}");
         }
     }
     for format in ["15", "16"] {

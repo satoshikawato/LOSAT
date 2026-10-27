@@ -9044,6 +9044,48 @@ fn run_in_pool(
                 for hit_list in batch_hit_lists.iter_mut().flatten() {
                     drop_hsps_of_score_zero(hit_list);
                 }
+                // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:304-312
+                // ```c++
+                //             if (isArchiveFormat) {
+                //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+                //                 m_Bah.ResetMessages();
+                //             } else {
+                //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+                //                 			                        fmt_args->GetFormattedOutputChoice());
+                //                 ITERATE(CSearchResultSet, result, *results) {
+                //                     formatter.PrintOneResultSet(**result, query_batch);
+                //                 }
+                // ```
+                // Before the reports of a batch NCBI fetches every subject that the batch reports
+                // (those with Seq-aligns: the HSPs of score 0 are dropped), and with `taxdb.bti`
+                // on the search path the taxonomy database writes its messages there
+                // (`BlastnDatabase::prefetch_messages`: the texts of opening it at the run's first
+                // lookup, a volume's lookup of a taxid once per run): after the reader's messages
+                // of the batch and before the warnings of its first query, which are added below.
+                // They go with the warnings, where the first format is outfmt 0, 5, 6, 7 or 17
+                // (`BlastnOutputFormat::prefetches_subjects`), so every writer of the batch's
+                // reports writes them there (the reports after the loop, LOSAT_X_RPTSTREAM's
+                // batch writes, the error paths that write the reports of the batches before).
+                // Without `taxdb.bti` nothing is read. A refusal (a taxonomy database or a taxid
+                // that LOSAT cannot read as NCBI does) is written as the titles' refusals above;
+                // LOSAT_X_RPTSTREAM acts only where none can come (`x_rpt_stream::check`).
+                if output_formats
+                    .first()
+                    .is_some_and(|format| format.prefetches_subjects())
+                    && database.taxdb_found()
+                {
+                    match database.prefetch_messages(&titles, &batch_hit_lists) {
+                        Ok(messages) => warnings[start].extend(messages),
+                        Err(error) => {
+                            qbp.finish();
+                            let written = if stream.acting() { start } else { 0 };
+                            for query_warnings in &warnings[written..=start] {
+                                outputs.diagnostics.write_all(query_warnings)?;
+                            }
+                            return Err(error);
+                        }
+                    }
+                }
             }
             // The batch numbers its queries from 0.
             let first = start as u32;

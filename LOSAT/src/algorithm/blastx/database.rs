@@ -101,9 +101,16 @@ impl BlastxDatabase {
 
     /// Whether a later query batch of an XML, XML2 or JSON run could still refuse a taxonomy
     /// database name or record (`algorithm::common::database::taxdb_may_refuse`: every
-    /// sequence's taxid looked up once, before the first byte).
-    pub(crate) fn taxdb_may_refuse(&self) -> bool {
-        shared::taxdb_may_refuse(&self.db)
+    /// sequence's taxid looked up once, before the first byte). `names`: the run writes the
+    /// scientific names (XML2 and JSON); outfmt 5's prefetch asks for none.
+    pub(crate) fn taxdb_may_refuse(&self, names: bool) -> bool {
+        shared::taxdb_may_refuse(&self.db, names)
+    }
+
+    /// Whether the batches' prefetch of the run is refused for NCBI's taxonomy cache
+    /// (`shared::TaxdbRun::prefetch_refused`), which an outfmt 5 run holds its document for.
+    pub(crate) fn prefetch_refused(&self) -> bool {
+        self.taxdb.prefetch_refused(&self.db)
     }
 
     /// What the `Database:` lines of outfmt 0 show (title, date, real totals).

@@ -1338,8 +1338,7 @@ fn search(
             }) && database.taxdb_found()
             {
                 for span in &batch_spans {
-                    let messages =
-                        database.prefetch_messages(reported, &results[span.clone()])?;
+                    let messages = database.prefetch_messages(reported, &results[span.clone()])?;
                     if messages.is_empty() {
                         continue;
                     }

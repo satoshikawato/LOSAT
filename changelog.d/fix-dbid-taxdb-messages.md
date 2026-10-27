@@ -3,3 +3,7 @@
   were written only in 13 to 16): the texts of opening it (for example `Tax database file has wrong magic
   number.`) and of a volume's lookup of a taxid (`Offset error at end of taxdb file.`), after the reader's
   warnings of each query batch and before its first query's own warnings. Without `taxdb.bti` nothing changes.
+- A `-db` search in those formats whose taxonomy database has the offset error of a taxid, in a database
+  volume that also holds another taxid of the same slot of NCBI's 256-slot taxonomy cache of a volume, is
+  refused at its first query batch, before any report (NCBI repeats the message in an order of fetches LOSAT
+  does not reproduce).

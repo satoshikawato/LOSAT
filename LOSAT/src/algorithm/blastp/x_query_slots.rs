@@ -20,9 +20,17 @@
 //!   writes the outfmt 0 prolog, the last the epilog, outfmt 7's count and outfmt 5's iteration numbers
 //!   start at the block's first query: `BlastpReports`), the search's arguments, the subjects encoded
 //!   once for all blocks and, with `-db`, the database (read only), and writes only its outputs and
-//!   messages. It reads nothing that another block's search writes: the lookup table, the diagonal
-//!   table, the hit lists and the reports are the block's own, and the spare vectors of the flat tables
-//!   (`XFlatSpare`) are moved under their locks, their values never read (`x_clut_par.rs`). The flat
+//!   messages. Of what another block's search writes it reads only the run's taxonomy state, and only
+//!   where that changes no byte: the lookup table, the diagonal table, the hit lists and the reports
+//!   are the block's own, and the spare vectors of the flat tables (`XFlatSpare`) are moved under
+//!   their locks, their values never read (`x_clut_par.rs`). With `-db` the prefetch of each batch of
+//!   outfmt 0, 5, 6 and 7 (DBID item T, `ListedTitles::prefetch_messages`) reads and writes the run's
+//!   `TaxdbRun` (the taxonomy database opened at the run's first lookup, the volumes' lookups), so
+//!   the texts it writes go with whichever block looks up first. The slots are therefore declined
+//!   where a lookup can write a text (`BlastpDatabase::prefetch_may_write`: the texts of opening, the
+//!   offset error); with any other taxonomy database every prefetch text is empty, whichever block
+//!   comes first. A refusal of a lookup (a record NCBI reads from unmapped memory, a header whose
+//!   taxid does not decode) already declines the block search (`x_titles_allow_blocks`). The flat
 //!   table does not depend on the threads that build it (`x_clut_par.rs`), nor any value of the search
 //!   on the thread count (the block loop gives the same bytes at every thread count);
 //! - the run-level state that outlives a block's report is declined: outfmt 13 to 16 (`Xml2Carry`),

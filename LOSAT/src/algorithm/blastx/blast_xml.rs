@@ -45,7 +45,9 @@
 //!   on the search path and the lookup of the taxid of some sequence of the database would be
 //!   refused (a scientific name NCBI's XML2 cannot write, a damaged record, which outfmt 5 reads
 //!   in each batch's prefetch, `ReportedSubjects::prefetch_messages`: checked once before the
-//!   first byte, `taxdb_may_refuse`), so that a later batch could refuse it,
+//!   first byte, `taxdb_may_refuse`, with the names for XML2 and JSON only), or outfmt 5's
+//!   prefetch is refused for NCBI's taxonomy cache (`BlastxDatabase::prefetch_refused`, at the
+//!   first batch, after the prolog), so that a later batch could refuse it,
 //!   the run holds the document in memory (`HeldOutput`; with outfmt 13 and 14 the side files'
 //!   bytes too, `HeldSideFiles`) and writes it at the epilog; a refusal found while the batches
 //!   are reported drops it, with nothing written (an empty master file, no side file).

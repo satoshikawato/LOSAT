@@ -1169,8 +1169,10 @@ impl ReportedSubjects {
 /// - `Off::Taxonomy`, with `taxids` (the batches' prefetch reads the taxonomy database: outfmt 0,
 ///   6, 7 and 17 with `taxdb.bti` on the search path, `BlastnDatabase::prefetch_messages`, DBID
 ///   item T): a lookup of the taxonomy database that could be refused
-///   (`shared::taxdb_may_refuse`, which also answers for the names that only XML2 and JSON
-///   write: a superset). A definition line whose taxid does not decode is `Off::Titles` then:
+///   (`shared::taxdb_may_refuse` without the scientific names, which only XML2 and JSON write
+///   and XML is never streamed). The prefetch's refusal of NCBI's taxonomy cache
+///   (`shared::TaxdbRun::cache_collision`) comes at the run's first prefetch, in the first batch
+///   before its reports. A definition line whose taxid does not decode is `Off::Titles` then:
 ///   the titles' pass decodes the taxids too (`SeqDb::visit_deflines_taxids`; one sequence at a
 ///   time, `SeqDb::defline_taxids`), as blastp's block search does.
 /// Every ordinal id is read in `pool` (the titles, then the ambiguity data of the sequences that
@@ -1264,9 +1266,11 @@ pub(super) fn x_streaming_refusal(
 }
 
 /// EXPERIMENT (LOSAT_X_RPTSTREAM): `Off::Taxonomy` of `x_streaming_refusal`, asked with `taxids`
-/// only (`shared::taxdb_may_refuse`, `false` without `taxdb.bti` on the search path).
+/// only (`shared::taxdb_may_refuse` without the names, `false` without `taxdb.bti` on the search
+/// path).
 fn x_taxonomy_refusal(database: &BlastnDatabase, taxids: bool) -> Option<super::x_rpt_stream::Off> {
-    (taxids && shared::taxdb_may_refuse(&database.db)).then_some(super::x_rpt_stream::Off::Taxonomy)
+    (taxids && shared::taxdb_may_refuse(&database.db, false))
+        .then_some(super::x_rpt_stream::Off::Taxonomy)
 }
 
 #[cfg(test)]
@@ -2042,8 +2046,10 @@ mod tests {
     // EXPERIMENT (LOSAT_X_RPTSTREAM), DBID item T: where the batches' prefetch reads the taxonomy
     // database (`taxids`), each batch's reports are written when the loop takes it only when no
     // lookup can be refused (`Off::Taxonomy`). `x16_ntaxid` (taxid 9606) with no taxonomy
-    // database, ones whose lookups cannot be refused (a wrong magic number is a message) and one
-    // whose name of 9606 can (`shared::taxdb_may_refuse`), at one thread and in a pool.
+    // database, ones whose lookups cannot be refused (a wrong magic number is a message; a
+    // scientific name of 9606 that XML2 cannot write is not asked for by the prefetch) and one
+    // whose record of 9606 is (an empty `taxdb.btd`, `shared::taxdb_may_refuse`), at one thread
+    // and in a pool.
     #[test]
     fn streaming_with_the_prefetch_needs_lookups_that_cannot_be_refused() {
         use super::super::x_rpt_stream::Off;
@@ -2052,7 +2058,8 @@ mod tests {
             (None, None),
             (Some("good"), None),
             (Some("bad_magic"), None),
-            (Some("high_bytes_utf8"), Some(Off::Taxonomy)),
+            (Some("high_bytes_utf8"), None),
+            (Some("btd_empty"), Some(Off::Taxonomy)),
         ] {
             let database = open_with_taxdb("x16_ntaxid", taxdb, &cwd);
             for threads in [1, 4] {

@@ -421,6 +421,7 @@ export LOSAT_X_TBNDBSTREAM=1
 export LOSAT_X_TBNFLOWHELP=1
 export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNKEEPFEW=1
+export LOSAT_X_TBNLINKCTX=1
 export LOSAT_X_TBNLINKSETS=1
 export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNPAIRCAP=1
@@ -5147,6 +5148,21 @@ Scheduling (each value computed by one thread with the original function; order 
   tblastn switches of 2026-10-17 against `=0` in rotating rounds, 3-8 rounds, one hash per case):
   zebrafish 0.58 (23.2 -> 13.5 s), human 0.82 at one thread and 0.84 at 8 threads, fly 0.81, MG1655
   0.98.
+- `LOSAT_X_TBNLINKCTX=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-27;
+  `=0` turns it off; `tblastn/stage_d_linking/x_link_ctx.rs` `x_link_by_context`): a subject's HSPs are linked one
+  query context at a time, and a subject whose units ran on the pool (one longer than a chunk's budget) links its
+  contexts there side by side, those with the most HSPs first. Before, the whole list was linked in one pass on the
+  thread that merged the subject's units: with many queries the long subjects ended in a serial link while the
+  other threads waited (the B11e / B10-E probes, 35 human proteins x the human genome `-db`: chr1 936 k HSPs over
+  35 contexts, link 1.38-1.47 s, of it 1.03 s the head loop, 0.23 s sorts; the six longest chromosomes ended the
+  preliminary stage in links of 0.8-1.5 s with 2-6 threads busy, at 16 and at 32 threads). The chains of NCBI's
+  pass never leave a context (a head's candidates are HSPs of its context, `link_hsps.c` 1048-1060 and 1407-1491),
+  so each context's HSPs linked alone, in the sum-score order restricted to the context, give the same chains,
+  numbers and e-values; the values go back to the list's order before the final stable sort by score (unit test
+  `contexts_linked_apart_give_the_list_of_one_pass`: random lists of 1 to 3,000 HSPs over 1 to 35 contexts, on one
+  thread and on a pool of 4, against the one pass, every field and the e-value bits). A list of one context is one
+  call as before (single-query searches and the post-redo linking of one match do not change). Always: every
+  linked list of two or more contexts takes this path. MEASURED_PENDING.
 - `LOSAT_X_TBNLINKSETS=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-26;
   `=0` turns it off; `tblastn/stage_d_linking/x_link_window.rs` `XLinkWindow::candidates`): the linking candidates
   of a head whose query-offset window holds more HSPs than its subject lookup (TBNLINKWIN, graduated) take a set of

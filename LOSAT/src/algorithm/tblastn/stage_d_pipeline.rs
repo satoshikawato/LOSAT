@@ -21,8 +21,8 @@ use super::search_gapped::{
 };
 use super::stage_d_kappa_params::{local_extension_final_xdrop, local_kappa_redo_params};
 use super::stage_d_linking::{
-    compare_preliminary_lists_for_kappa, link_preliminary_hsps, reap_by_evalue, LinkedHsp,
-    LinkedHspList,
+    compare_preliminary_lists_for_kappa, link_preliminary_hsps, link_preliminary_hsps_on,
+    reap_by_evalue, LinkedHsp, LinkedHspList,
 };
 use super::stage_d_results::{
     merge_query_chunk, KappaHspPayload, KappaResultHitList, KappaResultList, PrelimCulling,
@@ -2611,21 +2611,24 @@ fn run_preliminary_subjects_into(
         // ```
         // Dispatch point: the call that runs the preliminary stage for one subject
         // (s_BlastSearchEngineCore). preliminary_protein_hsps_for_search runs the unit-wise stage.
+        let x_pool = x_unit_pool(subject);
         let preliminary = super::search_gapped::preliminary_protein_hsps_for_search(
             inputs.queries,
             subject,
             inputs.genetic_code,
             inputs.search,
-            x_unit_pool(subject),
+            x_pool,
             &x_query_side,
             x_subject_side.map(|side| (side, x_oid)),
         )?;
         // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
         // BLAST_LinkHsps(..., hsp_list_out, ...);
         // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
-        // Even an allocated empty subject list enters link/E-value.
+        // Even an allocated empty subject list enters link/E-value. The query contexts of a
+        // subject whose units ran on the pool are linked there side by side (LOSAT_X_TBNLINKCTX).
         let mut linked = if let Some(link) = inputs.link {
-            link_preliminary_hsps(
+            link_preliminary_hsps_on(
+                x_pool,
                 &preliminary,
                 inputs.query_lengths,
                 inputs.lengths,

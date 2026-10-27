@@ -4168,21 +4168,21 @@ Scheduling (each value computed by one thread with the original function; order 
   (`blastn/blast_engine/x_pair_seed_part.rs`) puts the stage's hits in the order of their keys. Without the switch the
   owner sorts the (key, partition, index) of every hit of the stage on its thread while the other participants wait
   (`sort_unstable`; the AB input below: 76,600 hits per stage, 91 stages, 0.30-0.40 s of a 4.7-9.8 s run at 8-32
-  threads, the only serial part of the stage, which otherwise scales in cycles). With the switch (`hits_by_strips`), a
-  stage on a pool of two threads or more with `MERGE_POOL_MIN_HITS` (4,096) hits or more is ordered strip by strip: a
-  partition's keys ascend (it folds the strips in order and a strip's seeds of the partition in their scan order, the
+  threads, the only serial part of the stage, which otherwise scales in cycles). With the switch (`hits_by_strips`), every
+  stage is ordered strip by strip: a partition's keys ascend (it folds the strips in order and a strip's seeds of the partition in their scan order, the
   counting sort of the strip being stable; one hit per seed at most) and a key is (strip, position in the strip's scan
   order), so the hits of strip i are one run per partition after those of the strips before i; each strip's runs are
   gathered and its few hits sorted (`hits_of_strips`). The strips are cut into `MERGE_RANGES_PER_THREAD` (2) ranges per
   thread of the pool, which the pool orders side by side (`rayon::scope`); a range starts each partition's cursor at its
   first key of the range (binary search) and writes its hits into its own slice of the list's spare capacity, after the
-  hits of the ranges before it. The order is the sort's (keys are unique), so the hits, and everything made from them,
-  are the same. A stage of fewer hits (the bound is kept above the estimated crossover: starting a scope's jobs takes
-  tens of microseconds, the sort about 50 ns per hit), of one strip, or without a pool keeps the sort (`x_reach!` per
-  stage: the switch's side for a stage it orders; no stage of the ci_fast blastn fixtures has 4,096 hits, so the reach
-  table marks the new side a gap, which the tests below cover). Tests: `hits_by_strips_on_a_pool_is_the_sort_of_merge` (random stages of 1 to 9 partitions and 1 to
-  300 strips, strips without hits, an empty partition, hits already in the list; pools of 2, 3 and 8 threads, 1 to
-  4 x strips ranges) and `LOSAT/tests/blastn_pairpar_merge.rs` (the reports at 2 and 4 threads, and at 4 with
+  hits of the ranges before it. A stage of one strip, or off a pool, is ordered on the owner's thread, the strips in turn
+  (`hits_by_strips_here`). The order is the sort's (keys are unique), so the hits, and everything made from them, are the
+  same. Until 2026-10-2x (perf/pairpar-merge-one-form) a stage of fewer than 4,096 hits kept the sort, a bound set above
+  an estimated crossover and never measured; it is gone because the stages' hit counts fall on either side of any such
+  bound (per-stage counts below) and the pool's form costs the small stages tens of microseconds each (`x_reach!` per
+  stage, always the switch's side while it is on). Tests: `hits_by_strips_on_a_pool_is_the_sort_of_merge` (random stages
+  of 1 to 9 partitions and 1 to 300 strips, strips without hits, an empty partition, hits already in the list; pools of
+  2, 3 and 8 threads, 1 to 4 x strips ranges, and the owner's thread with its `runs` left from the stage before) and `LOSAT/tests/blastn_pairpar_merge.rs` (the reports at 2 and 4 threads, and at 4 with
   `LOSAT_X_PAIRPARHOME=0`, against `=0`, the
   one-hit fold of `-task blastn` with 17,506 hits in its stage and with 412, the Na fold of `-task blastn-short`, the
   two-hit fold of `-task dc-megablast`, with the sides of `LOSAT_X_REACH`).

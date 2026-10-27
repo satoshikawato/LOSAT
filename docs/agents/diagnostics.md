@@ -4752,7 +4752,7 @@ Scheduling (each value computed by one thread with the original function; order 
   and in the first record, a batch of queries without letters, a batch of skipped records, LOSAT's
   refusals; standard input and `/dev/stdin`; `-db`; the switch off unless set; `kept=0` with
   `LOSAT_X_RPTSTREAM` acting, with and without slots).
-- `LOSAT_X_QSCANPAR=1` (BLASTN: blastn, blastn-short and dc-megablast, where `LOSAT_X_QSTREAM` acts (not megablast),
+- `LOSAT_X_QSCANPAR=1` (BLASTN: blastn, blastn-short and dc-megablast where `LOSAT_X_QSTREAM` acts, and every task where it does not,
   `-subject` and `-db`, speed; in the strict set since 2026-10-26 (perf/bn-query-scan-par, evidence at the end of
   this entry): on unless it is `0`) the first reading of `LOSAT_X_QSTREAM` (each record's length and how the reading
   ends) is read in parts on `-num_threads` threads (the calling thread and scoped helpers: the search pool does not
@@ -4774,7 +4774,16 @@ Scheduling (each value computed by one thread with the original function; order 
   at most that many letters), every byte of each part read (an I/O error or a file that ends early would look like
   the end of its input to a reader), and every part read to its end without an `eEOF`, a reader error or LOSAT's
   rejection of a Seq-id line. Where one of these fails the first reading runs on one thread as before and finds that
-  error with its messages. Evidence (workstation, node 1, 16 threads on
+  error with its messages. Since perf/qscanpar-records (2026-10-28) the same parts also read the records where
+  `LOSAT_X_QSTREAM` does not act (`-task megablast`, and the threaded WebAssembly command, where WASI gives no second
+  handle), which are then all read before the search (`records`: each part's reader keeps its records, with
+  `LOSAT_X_BNQPACK` their packed letters); a part is taken there only where each record has the local ID of its place
+  in the part (the counter moves one per record) and, after the first part, no record has a reader message (their line
+  numbers count from the part's start); the records then get the IDs of their places among all records, and every
+  record is one of one reading. On WASI (no read at an offset in stable std) each thread opens the path again and seeks
+  it, only where it is a regular file of the same length and modification time; the rule's build condition is
+  therefore `unix` or WASI with the `parallel` feature (not Windows or the serial WebAssembly command), and the mark is
+  also where the records are read before the search. Evidence (workstation, node 1, 16 threads on
   CPUs 32-47 with their siblings idle and `--membind=1`, probe 6179df06 on dev ce281c9a, the switch against
   `LOSAT_X_QSCANPAR=0` in the same binary, rounds alternating, outputs identical and NCBI's where the case has NCBI
   bytes): the busy threads of dc-megablast of 31,168 D. melanogaster cDNAs (96 MB) against 3 Mb of chromosome 2L

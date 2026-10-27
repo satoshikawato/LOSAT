@@ -2252,6 +2252,13 @@ pub(crate) fn x_pool_builds(pool: &SearchPool<'_>) -> bool {
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     )) && pool.enabled()
         && pool.threads() > 1
+        && !x_bpf_s7_serial()
+}
+
+/// PROBE (LOSAT_BPF_S7SER=1, exp/bpf-blocks): every flat table built by the serial builder.
+fn x_bpf_s7_serial() -> bool {
+    static SERIAL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SERIAL.get_or_init(|| std::env::var_os("LOSAT_BPF_S7SER").is_some())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354

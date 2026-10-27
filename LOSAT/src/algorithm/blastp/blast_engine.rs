@@ -6599,6 +6599,72 @@ fn search(
                     .iter_mut()
                     .map(|format| XBlockSink::new(&mut format.sink))
                     .collect();
+                // PROBE (LOSAT_BPF_S7, exp/bpf-blocks): k blocks in flight, each on its own slot of
+                // m threads (m = 1: `SearchPool::x_serial`), rows written in block order. One
+                // output, no hit records, no observer, no outfmt 13 to 16 carry.
+                #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+                if let Some((x_slots, x_slot_threads)) = x_bpf_s7_slots(args.num_threads) {
+                    if sinks.len() == 1
+                        && !x_want_records
+                        && observer.is_none()
+                        && !x_kinds.contains(&XBlockReport::Xml2)
+                    {
+                        let v1_titles = v1.is_some();
+                        let outfmt = outfmts[0];
+                        let x_search_block = |index: usize,
+                                              slot_pool: &crate::utils::threading::SearchPool<
+                            '_,
+                        >,
+                                              block_outputs: &mut ReportOutputs<'_>|
+                         -> Result<()> {
+                            let block = &blocks[index];
+                            let block_queries = &searched_queries[block.clone()];
+                            let block_input = seq_range::QueryInput::whole(block_queries);
+                            let mut block_args = args.clone();
+                            block_args.num_threads = slot_pool.threads();
+                            run_resolved_in_pool(
+                                block_args,
+                                block_queries,
+                                subject_source,
+                                "",
+                                subject_label,
+                                block_outputs,
+                                slot_pool,
+                                None,
+                                &BlastpRanges {
+                                    input_records: &query_records[block.clone()],
+                                    query_input: &block_input,
+                                    subject_placements: &subjects.placements,
+                                    x_ordinal_base: block.start,
+                                },
+                                &BlastpReports {
+                                    reader_warnings: &reader_warnings[block.clone()],
+                                    epilog: epilog && index + 1 == blocks.len(),
+                                    v1_titles,
+                                    x_prolog: index == 0,
+                                    x_queries_before: block.start,
+                                    x_xml2_carry: None,
+                                },
+                                x_lookup_ahead::XAheadBlock::none(),
+                            )
+                        };
+                        x_bpf_s7_run(
+                            blocks.len(),
+                            outfmt,
+                            x_slots,
+                            x_slot_threads,
+                            pool,
+                            &x_subjects,
+                            &mut sinks[0],
+                            &mut **diagnostics,
+                            &x_search_block,
+                        )?;
+                        for sink in &mut sinks {
+                            sink.flush()?;
+                        }
+                        return Ok(true);
+                    }
+                }
                 // The HSPs of the blocks before: the first index of the block's HSPs in the list
                 // of all queries.
                 let mut x_hsps_before: HspIndex = 0;
@@ -6769,6 +6835,164 @@ fn search(
 //        continue;
 //    }
 // ```
+/// PROBE (LOSAT_BPF_S7=k, exp/bpf-blocks): `(k, n / k)` slots for the block search of `n`
+/// threads, when `k` divides `n` and `1 < k <= n`.
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+fn x_bpf_s7_slots(threads: usize) -> Option<(usize, usize)> {
+    static SLOTS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let k = *SLOTS.get_or_init(|| {
+        std::env::var("LOSAT_BPF_S7")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    });
+    (k > 1 && k <= threads && threads % k == 0).then(|| (k, threads / k))
+}
+
+/// PROBE (LOSAT_BPF_S7): what the slots have searched, written in block order.
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+struct XS7Out<'s> {
+    next: usize,
+    ready: std::collections::BTreeMap<usize, (Vec<u8>, Vec<u8>)>,
+    sink: &'s mut (dyn Write + Send),
+    diagnostics: &'s mut (dyn Write + Send),
+    error: Option<(usize, anyhow::Error)>,
+    max_ready: usize,
+}
+
+/// PROBE (LOSAT_BPF_S7): the blocks `0..blocks` searched by `slots` slots of `slot_threads` threads
+/// (`search_block(index, slot_pool, outputs)`), each block's rows and messages written in block
+/// order; the first failed block's error after the blocks before it.
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[allow(clippy::too_many_arguments)]
+fn x_bpf_s7_run(
+    blocks: usize,
+    outfmt: &str,
+    slots: usize,
+    slot_threads: usize,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    ext: &(dyn std::any::Any + Send + Sync),
+    sink: &mut (dyn Write + Send),
+    diagnostics: &mut (dyn Write + Send),
+    search_block: &(dyn Fn(usize, &crate::utils::threading::SearchPool<'_>, &mut ReportOutputs<'_>) -> Result<()>
+          + Sync),
+) -> Result<()> {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let next = AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    let out = std::sync::Mutex::new(XS7Out {
+        next: 0,
+        ready: std::collections::BTreeMap::new(),
+        sink,
+        diagnostics,
+        error: None,
+        max_ready: 0,
+    });
+    let slot = |slot_pool: &crate::utils::threading::SearchPool<'_>| loop {
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        let index = next.fetch_add(1, Ordering::Relaxed);
+        if index >= blocks {
+            break;
+        }
+        let mut rows = Vec::new();
+        let mut messages = Vec::new();
+        let result = {
+            let mut outputs = ReportOutputs {
+                formats: vec![crate::api::local_blast::FormatOutput {
+                    outfmt,
+                    sink: OutputSink::Writer(&mut rows),
+                }],
+                diagnostics: &mut messages,
+                hits: None,
+                observer: None,
+            };
+            search_block(index, slot_pool, &mut outputs)
+        };
+        let mut out = out.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        match result {
+            Ok(()) => {
+                out.ready.insert(index, (rows, messages));
+            }
+            Err(error) => {
+                stop.store(true, Ordering::Relaxed);
+                if out.error.as_ref().map_or(true, |&(at, _)| index < at) {
+                    out.error = Some((index, error));
+                }
+            }
+        }
+        let ready = out.ready.len();
+        out.max_ready = out.max_ready.max(ready);
+        loop {
+            let at = out.next;
+            let Some((rows, messages)) = out.ready.remove(&at) else {
+                break;
+            };
+            let written = out
+                .diagnostics
+                .write_all(&messages)
+                .and_then(|()| out.sink.write_all(&rows));
+            if let Err(error) = written {
+                stop.store(true, Ordering::Relaxed);
+                if out.error.as_ref().map_or(true, |&(e, _)| at < e) {
+                    out.error = Some((at, error.into()));
+                }
+                break;
+            }
+            out.next += 1;
+        }
+    };
+    if slot_threads == 1 {
+        pool.install(|| {
+            rayon::scope(|scope| {
+                for _ in 0..slots {
+                    scope.spawn(|_| {
+                        let serial = crate::utils::threading::SearchPool::x_serial();
+                        slot(&serial.x_with_ext(ext));
+                    });
+                }
+            })
+        });
+    } else {
+        std::thread::scope(|scope| -> Result<()> {
+            let handles: Vec<_> = (0..slots)
+                .map(|_| {
+                    scope.spawn(|| {
+                        crate::utils::threading::with_search_pool(
+                            slot_threads,
+                            "blastp",
+                            |slot_pool| {
+                                slot(&slot_pool.x_with_ext(ext));
+                                Ok(())
+                            },
+                        )
+                    })
+                })
+                .collect();
+            for handle in handles {
+                handle.join().expect("a slot thread does not panic")?;
+            }
+            Ok(())
+        })?;
+    }
+    let out = out
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if std::env::var_os("LOSAT_BPF_S7LOG").is_some() {
+        eprintln!(
+            "[bpf-s7] slots={slots} slot_threads={slot_threads} blocks={blocks} written={} max_ready={}",
+            out.next, out.max_ready
+        );
+    }
+    if let Some((index, error)) = out.error {
+        if index >= out.next {
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): the encoding of `run_resolved_in_pool`
 /// (`prepare_blastp_subjects_preserving_order`), made once for all blocks.
 fn x_bp_encode_block_subjects(

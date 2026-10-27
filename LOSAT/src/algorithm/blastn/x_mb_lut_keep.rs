@@ -131,6 +131,40 @@ impl Keep {
         (table, true, dirty.max(cells))
     }
 
+    /// EXPERIMENT (LOSAT_X_BNSHRINKFREE): the kept table as the buffer of a CSR's `offsets`
+    /// (`x_dc_csr::x_offsets_buffer`; the build writes every element it uses): the table, its
+    /// length and the number of its first elements that earlier builds wrote, when it has room for
+    /// `len` elements (a discontiguous table's heads are the first cells of a CSR's `offsets`,
+    /// one shorter); else an empty vector, after the kept one is freed (as `take`). The CSR gives
+    /// its `offsets` back when it is dropped (`give_back_buffer`), so a loop whose batches
+    /// alternate between CSR and chains keeps one table for both.
+    pub(super) fn take_buffer(&self, len: usize) -> (Vec<u32>, usize, usize) {
+        let kept = self.kept.lock().unwrap_or_else(|e| e.into_inner()).take();
+        match kept {
+            Some(Kept { table, dirty }) if table.capacity() >= len => {
+                let length = table.len();
+                (table, length, dirty)
+            }
+            kept => {
+                drop(kept);
+                (Vec::new(), 0, 0)
+            }
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNSHRINKFREE): takes back a CSR's `offsets` (`take_buffer`'s table of
+    /// `length` elements, or a vector of its own when `length` is 0), with every element the
+    /// build wrote counted as written.
+    pub(super) fn give_back_buffer(&self, mut table: Vec<u32>, length: usize, dirty: usize) {
+        let used = table.len();
+        if length > used {
+            // SAFETY: the elements past `used` are those of the kept table of `length` elements
+            // (initialized, unchanged: the build wrote its first `used` only, in its capacity).
+            unsafe { table.set_len(length) };
+        }
+        self.give_back(table, dirty.max(used));
+    }
+
     /// Frees the kept table, if any: a build laid out as CSR (LOSAT_X_BNCSR, `x_bn_csr.rs`) takes
     /// nothing from the keep, and the loop should not hold a table beside it; the next build
     /// with chains allocates a fresh table, which the keep takes back as before.

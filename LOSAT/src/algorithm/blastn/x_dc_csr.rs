@@ -113,18 +113,37 @@ pub fn print_summary() {
 pub struct Csr {
     offsets: Vec<u32>,
     qs: Vec<u32>,
+    /// EXPERIMENT (LOSAT_X_BNSHRINKFREE): the batch loop's keep that takes `offsets` back when the
+    /// CSR is dropped, with `Keep::take_buffer`'s length and written elements (`x_kept`).
+    x_keep: Option<(std::sync::Arc<super::x_mb_lut_keep::Keep>, usize, usize)>,
 }
 
-// EXPERIMENT (LOSAT_X_BNSHRINKFREE): the two vectors are shrunk before they are freed, so that
-// glibc's mmap threshold stays put (`x_shrink_free`).
+// EXPERIMENT (LOSAT_X_BNSHRINKFREE): `offsets` goes back to the batch loop's keep when it came
+// from it (or was built for it), and the vectors that are freed are shrunk first, so that glibc's
+// mmap threshold stays put (`x_shrink_free`).
 impl Drop for Csr {
     fn drop(&mut self) {
-        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.offsets));
+        let offsets = std::mem::take(&mut self.offsets);
+        match self.x_keep.take() {
+            Some((keep, length, dirty)) => keep.give_back_buffer(offsets, length, dirty),
+            None => crate::algorithm::blastn::x_shrink_free::free(offsets),
+        }
         crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.qs));
     }
 }
 
 impl Csr {
+    /// EXPERIMENT (LOSAT_X_BNSHRINKFREE): the CSR whose `offsets` goes back to `keep` when it is
+    /// dropped (`take` = `Keep::take_buffer`'s length and written elements).
+    pub(super) fn x_kept(
+        mut self,
+        keep: &std::sync::Arc<super::x_mb_lut_keep::Keep>,
+        take: (usize, usize),
+    ) -> Self {
+        self.x_keep = Some((std::sync::Arc::clone(keep), take.0, take.1));
+        self
+    }
+
     /// The 1-based query offsets of the cell's chain, in its order.
     #[inline(always)]
     pub fn run(&self, cell: usize) -> &[u32] {
@@ -334,7 +353,20 @@ pub(super) unsafe fn assemble(
         offsets.set_len(cells + 1);
         qs.set_len(words);
     }
-    Csr { offsets, qs }
+    Csr {
+        offsets,
+        qs,
+        x_keep: None,
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BNSHRINKFREE): `buffer` emptied, with room for `len` elements (the buffer
+/// of a build's `offsets`: the batch loop's kept table, `x_mb_lut_keep::Keep::take_buffer`, or an
+/// empty vector). A build writes every element it uses before it reads one.
+pub(super) fn x_offsets_buffer(mut buffer: Vec<u32>, len: usize) -> Vec<u32> {
+    buffer.clear();
+    buffer.reserve_exact(len);
+    buffer
 }
 
 /// No NCBI counterpart (counters only): a CSR build of the search.
@@ -353,11 +385,13 @@ pub(super) fn build(
     pv_array: &mut [PvArrayType],
     pv_array_bts: usize,
     helper_array: &mut [u32],
+    x_offsets: Vec<u32>,
 ) -> Csr {
     // Once per table: the bounds the unchecked writes below rely on.
     assert!(!words.two_templates && cells % 2048 == 0 && pv_array_bts >= 5);
     assert_eq!(helper_array.len(), cells >> 11);
-    let mut offsets: Vec<u32> = Vec::with_capacity(cells + 1);
+    // EXPERIMENT (LOSAT_X_BNSHRINKFREE): `x_offsets` is the batch loop's kept table or an empty vector.
+    let mut offsets = x_offsets_buffer(x_offsets, cells + 1);
     let ob = offsets.as_mut_ptr();
     // SAFETY: `cells + 1` elements of the capacity, written here before anything reads them.
     unsafe { std::ptr::write_bytes(ob, 0, cells + 1) };
@@ -603,7 +637,14 @@ pub(super) fn x_assert_runs_are_the_chains(
     if on_pool {
         let mut pv2 = vec![0 as PvArrayType; pv.len()];
         let mut helper2 = vec![0u32; helper.len()];
-        let serial = build(words, cells, &mut pv2, pv_array_bts, &mut helper2);
+        let serial = build(
+            words,
+            cells,
+            &mut pv2,
+            pv_array_bts,
+            &mut helper2,
+            Vec::new(),
+        );
         if serial.offsets != csr.offsets || serial.qs != csr.qs || pv2 != pv || helper2 != helper {
             diffs.push("pool build != serial build".to_string());
         }
@@ -747,7 +788,7 @@ mod tests {
                     chains(&w, cells, pv_len, pv_array_bts);
                 let mut pv = vec![0 as PvArrayType; pv_len];
                 let mut helper = vec![0u32; cells >> 11];
-                let csr = build(&w, cells, &mut pv, pv_array_bts, &mut helper);
+                let csr = build(&w, cells, &mut pv, pv_array_bts, &mut helper, Vec::new());
                 let longest = disc_longest_chain(&fill_helper, &[], false);
                 x_assert_runs_are_the_chains(
                     &w,

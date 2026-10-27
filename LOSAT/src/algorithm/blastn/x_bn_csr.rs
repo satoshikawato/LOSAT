@@ -224,13 +224,27 @@ pub(super) fn build(
     pv_array: &mut [PvArrayType],
     pv_array_bts: usize,
     helper_array: &mut [u32],
+    x_offsets: Vec<u32>,
 ) -> (Csr, bool) {
     let (csr, on_pool) = match super::x_mb_lookup_par::pool_threads() {
-        Some(parts) => {
-            super::x_mb_lookup_once::csr(parts, words, cells, pv_array, pv_array_bts, helper_array)
-        }
+        Some(parts) => super::x_mb_lookup_once::csr(
+            parts,
+            words,
+            cells,
+            pv_array,
+            pv_array_bts,
+            helper_array,
+            x_offsets,
+        ),
         None => (
-            serial(words, cells, pv_array, pv_array_bts, helper_array),
+            serial(
+                words,
+                cells,
+                pv_array,
+                pv_array_bts,
+                helper_array,
+                x_offsets,
+            ),
             false,
         ),
     };
@@ -259,12 +273,14 @@ pub(super) fn serial(
     pv_array: &mut [PvArrayType],
     pv_array_bts: usize,
     helper_array: &mut [u32],
+    x_offsets: Vec<u32>,
 ) -> Csr {
     // Once per table: the bounds the unchecked writes below rely on.
     assert!(cells % 2048 == 0 && pv_array_bts >= 5);
     assert_eq!(helper_array.len(), cells >> 11);
     let ascending = words.ascending_cells;
-    let mut offsets: Vec<u32> = Vec::with_capacity(cells + 2);
+    // EXPERIMENT (LOSAT_X_BNSHRINKFREE): `x_offsets` is the batch loop's kept table or an empty vector.
+    let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 2);
     let ob = offsets.as_mut_ptr();
     // SAFETY: `cells + 2` elements of the capacity, written here before anything reads them.
     unsafe { std::ptr::write_bytes(ob, 0, cells + 2) };
@@ -570,7 +586,7 @@ pub(super) mod tests {
                         chains(&case, &words, cells, pv_len, bts);
                     let mut pv = vec![0 as PvArrayType; pv_len];
                     let mut helper = vec![0u32; cells >> 11];
-                    let csr = serial(&words, cells, &mut pv, bts, &mut helper);
+                    let csr = serial(&words, cells, &mut pv, bts, &mut helper, Vec::new());
                     x_assert_runs_are_the_chains(
                         &csr,
                         &pv,

@@ -1311,6 +1311,7 @@ pub(super) fn csr(
     pv_array: &mut [PvArrayType],
     pv_array_bts: usize,
     helper_array: &mut [u32],
+    x_offsets: Vec<u32>,
 ) -> (super::x_dc_csr::Csr, bool) {
     #[cfg(all(
         feature = "parallel",
@@ -1328,11 +1329,19 @@ pub(super) fn csr(
             pv_array_bts,
             helper_array,
             chunk_positions(parts),
+            x_offsets,
         );
         return (csr, true);
     }
     let _ = parts;
-    let csr = super::x_bn_csr::serial(words, cells, pv_array, pv_array_bts, helper_array);
+    let csr = super::x_bn_csr::serial(
+        words,
+        cells,
+        pv_array,
+        pv_array_bts,
+        helper_array,
+        x_offsets,
+    );
     (csr, false)
 }
 
@@ -1350,6 +1359,7 @@ fn csr_on_pool(
     pv_array_bts: usize,
     helper_array: &mut [u32],
     chunk: usize,
+    x_offsets: Vec<u32>,
 ) -> super::x_dc_csr::Csr {
     use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier};
     let chunk = chunk.max(1);
@@ -1418,7 +1428,8 @@ fn csr_on_pool(
     // `qs` gets one element per word (`total` positions bound them).
     let ascending = words.ascending_cells;
     let shift = super::x_bn_csr::count_shift(ascending);
-    let mut offsets: Vec<u32> = Vec::with_capacity(cells + 2);
+    // EXPERIMENT (LOSAT_X_BNSHRINKFREE): `x_offsets` is the batch loop's kept table or an empty vector.
+    let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 2);
     let mut qs: Vec<u32> = Vec::with_capacity(total);
     let ob = Shared {
         ptr: offsets.as_mut_ptr(),
@@ -2475,10 +2486,19 @@ mod tests {
                     let what = format!("threads {threads} round {round} lut {lut} chunk {chunk}");
                     let mut pv = vec![0 as PvArrayType; pv_len];
                     let mut helper = vec![0u32; cells >> 11];
-                    let csr = csr_on_pool(threads, &words, cells, &mut pv, bts, &mut helper, chunk);
+                    let csr = csr_on_pool(
+                        threads,
+                        &words,
+                        cells,
+                        &mut pv,
+                        bts,
+                        &mut helper,
+                        chunk,
+                        Vec::new(),
+                    );
                     let mut pv1 = vec![0 as PvArrayType; pv_len];
                     let mut helper1 = vec![0u32; cells >> 11];
-                    let one = serial(&words, cells, &mut pv1, bts, &mut helper1);
+                    let one = serial(&words, cells, &mut pv1, bts, &mut helper1, Vec::new());
                     assert_eq!(csr.words(), one.words(), "{what}");
                     for cell in 0..cells {
                         assert_eq!(csr.run(cell), one.run(cell), "{what} cell {cell}");
@@ -2503,7 +2523,15 @@ mod tests {
                 let (pv_len, bts) = pv_params(&case, 11);
                 let mut pv = vec![0 as PvArrayType; pv_len];
                 let mut helper = vec![0u32; (1 << 22) >> 11];
-                let (_, on_pool) = csr(threads, &words, 1 << 22, &mut pv, bts, &mut helper);
+                let (_, on_pool) = csr(
+                    threads,
+                    &words,
+                    1 << 22,
+                    &mut pv,
+                    bts,
+                    &mut helper,
+                    Vec::new(),
+                );
                 assert!(on_pool, "threads {threads}");
                 Ok(())
             })
@@ -2515,7 +2543,7 @@ mod tests {
         let (pv_len, bts) = pv_params(&case, 11);
         let mut pv = vec![0 as PvArrayType; pv_len];
         let mut helper = vec![0u32; (1 << 22) >> 11];
-        let (_, on_pool) = csr(4, &words, 1 << 22, &mut pv, bts, &mut helper);
+        let (_, on_pool) = csr(4, &words, 1 << 22, &mut pv, bts, &mut helper, Vec::new());
         assert!(!on_pool, "off a pool");
     }
 }

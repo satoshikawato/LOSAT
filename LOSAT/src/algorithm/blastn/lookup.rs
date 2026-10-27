@@ -2011,9 +2011,15 @@ fn build_mb_lookup(
     } else {
         table_size
     };
+    // EXPERIMENT (LOSAT_X_BNSHRINKFREE): a build laid out as CSR takes the buffer of its
+    // `offsets` from the keep (`x_csr_keep`), which gets it back when the CSR is dropped, instead
+    // of freeing the kept table.
+    let x_csr_keep = x_keep.filter(|_| x_csr_layout && super::x_shrink_free::on());
     let x_keep = match x_keep {
         Some(keep) if x_csr_layout => {
-            keep.release();
+            if x_csr_keep.is_none() {
+                keep.release();
+            }
             None
         }
         x_keep => x_keep,
@@ -2107,14 +2113,20 @@ fn build_mb_lookup(
     };
     let mut x_filled = x_mb_lookup_par::FillStats::default();
     if x_csr_layout {
+        let (x_offsets, x_length, x_dirty) =
+            x_csr_keep.map_or((Vec::new(), 0, 0), |keep| keep.take_buffer(table_size + 2));
         let (csr, on_pool) = x_bn_csr::build(
             &x_words,
             table_size,
             &mut pv_array,
             pv_array_bts,
             &mut helper_array,
+            x_offsets,
         );
-        x_csr = Some(csr);
+        x_csr = Some(match x_csr_keep {
+            Some(keep) => csr.x_kept(keep, (x_length, x_dirty)),
+            None => csr,
+        });
         x_csr_on_pool = on_pool;
     } else if let Some(x_parts) = x_on_pool {
         x_filled = x_mb_lookup_par::fill(
@@ -2699,6 +2711,33 @@ pub fn build_disc_mb_lookup(
     query_masks: &[Vec<MaskedInterval>],
     approx_table_entries: usize,
 ) -> TwoStageLookup {
+    build_disc_mb_lookup_kept(
+        queries_blastna,
+        query_offsets,
+        word_size,
+        template_length,
+        word_type,
+        query_masks,
+        approx_table_entries,
+        None,
+    )
+}
+
+/// `build_disc_mb_lookup` with the batch loop's keep (EXPERIMENT LOSAT_X_BNSHRINKFREE, with
+/// LOSAT_X_MBLUTKEEP's `Keep`): a one-template table takes its CSR's `offsets` or its chains' head
+/// table from the kept table, which gets it back when the table is dropped.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_disc_mb_lookup_kept(
+    queries_blastna: &[&[u8]],
+    query_offsets: &[i32],
+    word_size: usize,
+    template_length: usize,
+    word_type: DiscWordType,
+    query_masks: &[Vec<MaskedInterval>],
+    approx_table_entries: usize,
+    x_keep: Option<&std::sync::Arc<x_mb_lut_keep::Keep>>,
+) -> TwoStageLookup {
+    let x_keep = x_keep.filter(|_| super::x_shrink_free::on());
     // No NCBI counterpart: the start of the `[TIMING] disc_lookup_build` interval and its split
     // (only with LOSAT_TIMING; LOSAT_X_DISCLUTPAR's module).
     let mut x_clock = x_disc_lookup_par::BuildClock::start();
@@ -2740,6 +2779,8 @@ pub fn build_disc_mb_lookup(
         let mut helper_array = vec![0u32; hashsize / K_COMPRESSION_FACTOR];
         let mut pv_array = vec![0u32; pv_size];
         x_clock.fill();
+        let (x_offsets, x_length, x_dirty) =
+            x_keep.map_or((Vec::new(), 0, 0), |keep| keep.take_buffer(hashsize + 1));
         let (csr, on_pool) = match x_disc_lookup_par::parts() {
             Some(parts) => x_disc_lookup_par::csr(
                 parts,
@@ -2748,6 +2789,7 @@ pub fn build_disc_mb_lookup(
                 &mut pv_array,
                 pv_array_bts,
                 &mut helper_array,
+                x_offsets,
             ),
             None => (
                 x_dc_csr::build(
@@ -2756,9 +2798,14 @@ pub fn build_disc_mb_lookup(
                     &mut pv_array,
                     pv_array_bts,
                     &mut helper_array,
+                    x_offsets,
                 ),
                 false,
             ),
+        };
+        let csr = match x_keep {
+            Some(keep) => csr.x_kept(keep, (x_length, x_dirty)),
+            None => csr,
         };
         x_clock.chain();
         let longest_chain = disc_longest_chain(&helper_array, &[], false);
@@ -2788,7 +2835,17 @@ pub fn build_disc_mb_lookup(
             }),
         };
     }
-    let mut hashtable = vec![0u32; hashsize];
+    // EXPERIMENT (LOSAT_X_BNSHRINKFREE): a one-template table's heads from the batch loop's keep
+    // (its first `hashsize` cells, every one 0; `Keep::take`), given back when the table drops.
+    let x_keep = x_keep.filter(|_| !two_templates);
+    let (mut hashtable, x_dirty) = match x_keep {
+        Some(keep) => {
+            let (mut table, _, dirty) = keep.take(hashsize, x_disc_lookup_par::parts().is_some());
+            table.truncate(hashsize);
+            (table, dirty)
+        }
+        None => (vec![0u32; hashsize], hashsize),
+    };
     let mut next_pos = vec![0u32; query_length + 1];
     let mut helper_array = vec![0u32; hashsize / K_COMPRESSION_FACTOR];
     let (mut hashtable2, mut next_pos2, mut helper_array2) = if two_templates {
@@ -2849,7 +2906,7 @@ pub fn build_disc_mb_lookup(
             pv_array,
             pv_array_bts,
             longest_chain: total_longest_chain,
-            x_keep: None,
+            x_keep: x_keep.map(|keep| (std::sync::Arc::clone(keep), x_dirty)),
             x_csr: None,
             x_narrow: None,
         },

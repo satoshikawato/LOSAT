@@ -4921,7 +4921,7 @@ Scheduling (each value computed by one thread with the original function; order 
   `tests/tblastn_redo_lpt.rs`). NCBI runs the same matches in one `omp for schedule(static)` (`blast_kappa.c`
   3448-3451), whose fixed shares have the same problem. Conditional: two or more threads and two or more matches,
   on each chunk with two or more matches to redo (`x_reach!`); one thread (also each query batch searched side by
-  side with others, on one thread) keeps the loop on the calling thread. Until 2026-10-2x a pool of more than 16
+  side with others, on one thread) keeps the loop on the calling thread. Until 2026-10-27 a pool of more than 16
   threads kept the `par_iter` too (the last part of this entry). Measured 2026-10-25 on the workstation (2x Xeon
   Gold 6338, cores warmed 3 s before each run, pairs alternating in order, `perf stat` walls; the first commit of
   the pull request that added it against its base 313fd4e7; every output of a case the same bytes in both arms),
@@ -4939,15 +4939,26 @@ Scheduling (each value computed by one thread with the original function; order 
   the fly genome x0.987 / x0.994, one protein against the zebrafish genome x1.002 / x1.001. Instructions equal
   those of the base in every case and arm (x1.0000), `=0` included, and at one thread (the same path). Max RSS
   within 2 % of the base (HsG_b4 2,813 -> 2,775 MiB).
-  The limit came off in a later pull request (2026-10-2x, `perf/tbn-redo-lpt-all`). While the redo still ran loops
+  The limit came off in a later pull request (2026-10-27, `perf/tbn-redo-lpt-all`). While the redo still ran loops
   quadratic in a match's HSPs, the heaviest matches set its time at 32 threads in either order: with
   `REDOCONTAINIDX` (the 35 proteins at 32 threads 173.6 s) the switch allowed up to 64 threads still ran x0.991
   (3 pairs). After `TBNREAPIDX` (35.8 s) the B11e probe of v4-B10 session 14 (one line per match and per
   thread, node 1, one run each) found the 32-thread tail in the `par_iter` again: its redo took 14.49 s against
   5.13 s of work per thread (299.5 thread-s idle), one thread redoing six chromosome matches of query context 0 one
   after another, while largest first took 8.05 s, the longest match (context 31 x chromosome 1, 66,169 HSPs), and
-  the run 35.86 -> 29.63 s (x0.826) for 1.7 % more user time (763 -> 776 s). Measured for that pull request:
-  MEASURED_ALL_PENDING
+  the run 35.86 -> 29.63 s (x0.826) for 1.7 % more user time (763 -> 776 s). Measured for that pull request on the
+  workstation (as above; base 3a83c151, its commit 718c2b1f; node 1 whole, 3 pairs unless said; every output of a
+  case the same bytes in every arm, the 35 proteins' 52de36f0 as on dev): the 35 proteins at 24 threads (CPUs
+  32-55) 53.3 -> 33.2 s (x0.622, 3/3; user 697 -> 705 s), at 32 threads 36.1 -> 29.7 s (x0.823, 3/3; user 773 ->
+  780 s; `=0` 36.2 s, one run), at 16 threads 41.6 -> 41.7 s (one pair, the same path, instructions x1.0000), and
+  at 64 threads (the 32 cores with their siblings) 29.1 -> 29.9 s (x1.029; pairs x1.031, x0.995, x1.029): with
+  every logical CPU busy, the heaviest matches started together share cores with one another. Max RSS 2,707 ->
+  3,007 MiB at 24 threads (x1.110), 3,258 -> 3,449 MiB at 32 (x1.070), the same at 16 and 64: the heaviest
+  matches are in flight together. Matches with few HSPs at 32 threads (8 pairs): 16 proteins x E. coli x1.003,
+  fly proteins x 5,000 16S x1.028 (no hits, 0.09 s), the same around fly 2L (`-subject`) x0.996, against the fly
+  genome x0.984, one protein against the zebrafish genome x1.010; instructions x1.0000 (x0.9999). At one thread
+  (node 0, one core) 16 proteins x E. coli 81.411 G and fly proteins x the fly genome 127.161 G instructions in
+  both arms.
 - `LOSAT_X_REDOCONTAINIDX=1` blastp, blastx and tblastn (speed; in the strict set from the pull request that added
   it, 2026-10-25; `=0` turns it off; `core/composition_adjustment/x_align_index.rs` `x_contains`, `x_add_distinct`,
   `x_finish`, used by `redo_alignment.rs` `blast_redo_one_match_with_workspace_queries_and_matrix_observed`): the

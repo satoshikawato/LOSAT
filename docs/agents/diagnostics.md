@@ -426,6 +426,7 @@ export LOSAT_X_TBNDBSTREAM=1
 export LOSAT_X_TBNFLOWHELP=1
 export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNKEEPFEW=1
+export LOSAT_X_TBNLINKCTX=1
 export LOSAT_X_TBNLINKSETS=1
 export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNPAIRCAP=1
@@ -5240,6 +5241,35 @@ Scheduling (each value computed by one thread with the original function; order 
   tblastn switches of 2026-10-17 against `=0` in rotating rounds, 3-8 rounds, one hash per case):
   zebrafish 0.58 (23.2 -> 13.5 s), human 0.82 at one thread and 0.84 at 8 threads, fly 0.81, MG1655
   0.98.
+- `LOSAT_X_TBNLINKCTX=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-27;
+  `=0` turns it off; `tblastn/stage_d_linking/x_link_ctx.rs` `x_link_by_context`): a subject's HSPs are linked one
+  query context at a time, and a subject whose units ran on the pool (the single subject of a search, or one longer
+  than a chunk's budget) links its contexts there side by side, those with the most HSPs first. Before, the whole list was linked in one pass on the
+  thread that merged the subject's units: with many queries the long subjects ended in a serial link while the
+  other threads waited (the B11e / B10-E probes, 35 human proteins x the human genome `-db`: chr1 936 k HSPs over
+  35 contexts, link 1.38-1.47 s, of it 1.03 s the head loop, 0.23 s sorts; the six longest chromosomes ended the
+  preliminary stage in links of 0.8-1.5 s with 2-6 threads busy, at 16 and at 32 threads). The chains of NCBI's
+  pass never leave a context (a head's candidates are HSPs of its context, `link_hsps.c` 1048-1060 and 1407-1491),
+  so each context's HSPs linked alone, in the sum-score order restricted to the context, give the same chains,
+  numbers and e-values; the values go back to the list's order before the final stable sort by score (unit test
+  `contexts_linked_apart_give_the_list_of_one_pass`: random lists of 1 to 3,000 HSPs over 1 to 35 contexts, on one
+  thread and on a pool of 4, against the one pass, every field and the e-value bits). A list of one context is one
+  call as before (single-query searches and the post-redo linking of one match do not change). Always: every
+  linked list of two or more contexts takes this path. Measured 2026-10-27 on the workstation (2x Xeon Gold 6338,
+  node 1 whole, cores warmed 3 s before each run, pairs alternating in order, `perf stat` walls; the first commit of
+  the pull request that added it, 1a4ef2a6, against its base c780af86; every output of a case the same bytes in
+  every arm; ratio = median of the per-pair ratios; `-evalue 1e-5 -max_target_seqs 5`): 35 human proteins x the
+  human genome (`-db hsap_dna`) at 32 threads 29.78 -> 28.49 s (x0.963, 3 of 3 pairs; `=0` 29.86 s), at 16 threads
+  41.35 -> 40.20 s (x0.972, 2 of 2; the probe model put -1.17 s and -1.15 s, the runs -1.29 s and -1.15 s); 794
+  proteins x E. coli MG1655 at 32 threads x0.989 (8 of 8), 27 fly proteins x the fly genome x0.974 (6 of 8). The same
+  where a list has one context or the subjects are short: one human protein x the human genome at 16 threads x0.998
+  (5 of 8 faster), one zebrafish protein x the zebrafish genome at 32 threads x1.009 (2 of 8; per pair 0.98-1.08,
+  instructions x1.0001), the 35 proteins x human cDNA (`-db hsap_cdna`, short subjects, each linked on its own
+  thread) at 16 threads x1.001 (instructions x1.0019, the grouping by context). One thread (node 0, one core):
+  794 x MG1655 9.58 -> 9.53 s, 27 fly proteins x the fly genome 15.46 -> 15.34 s, instructions x0.9994 and x0.9996.
+  Max RSS (`time` %M): 35 x human genome x0.994 at 32 threads and x0.991 at 16, x human cDNA 143 -> 121 MiB (x0.85,
+  3 of 3), other cases x0.98-1.01 at 32 threads; at one thread the fly case reads 49.0 or 54.6 MiB in either arm
+  (the A/B's pair 49.0 -> 54.6 MiB, a later run of 3 pairs on the same core 54.6 -> 49.0 MiB in each pair).
 - `LOSAT_X_TBNLINKSETS=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-26;
   `=0` turns it off; `tblastn/stage_d_linking/x_link_window.rs` `XLinkWindow::candidates`): the linking candidates
   of a head whose query-offset window holds more HSPs than its subject lookup (TBNLINKWIN, graduated) take a set of

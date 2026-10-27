@@ -174,6 +174,15 @@
 //! a page, as glibc's mapped blocks do, 512 and 2,048 for a page-aligned one: 33 KiB at P = 16, 526
 //! KiB at 255), freed at the end of the fill, and their OR (one row), freed after the round; in
 //! every fill, P counters of the zeros written.
+//!
+//! EXPERIMENT (LOSAT_X_MB24): a table of 3-byte elements (`Tables::x_h24`, `x_mb_narrow.rs`) runs
+//! its own instances of phases B and C, of the marking and of the prefault round (`H24`): phase B
+//! reads and writes each head as exactly its 3 bytes (the next cell may be another owner's) and
+//! phase C each link (the next offset may be another reader's, or linked already); the marks are
+//! the pages of the words that hold a cell's first and last byte, and a page's toucher is the
+//! owner of the cell of its middle word's first byte (the round's jobs write different words, so a
+//! word with bytes of two owners' cells is still written by one job). The plan, the phases and the
+//! order of the updates are the same, so the tables are the same.
 
 use super::x_disc_lookup_par::{
     middle, page_offset, pages_of, touch, PageBits, SharedBits, TouchLog, HASHTABLE,
@@ -544,10 +553,12 @@ impl Fill<'_, '_, '_> {
     /// so that the k-mer and `valid_bases >= lut_word_length` at the positions from `s0` on are the
     /// loop's. With `MARK` (the first chunk, when the prefault round runs) it also marks in its own
     /// bits (`Faults::marks`), after clearing them, the page of `hashtable` of each word's cell; the
-    /// other chunks run the loop without the marking code.
+    /// other chunks run the loop without the marking code. `H24` (LOSAT_X_MB24, with `MARK`): the
+    /// cells are 3-byte elements, and the pages marked those of the words that hold the first and
+    /// the last byte of the cell's element.
     ///
     /// SAFETY: no other job of the phase uses reader `a`'s region, row or marks.
-    unsafe fn read<const MARK: bool>(&self, a: usize, s0: usize, s1: usize) {
+    unsafe fn read<const MARK: bool, const H24: bool>(&self, a: usize, s0: usize, s1: usize) {
         let words = self.words;
         let lut_word_length = words.lut_word_length;
         let (marks, cells) = (self.faults.marks, self.faults.offset);
@@ -594,7 +605,14 @@ impl Fill<'_, '_, '_> {
                 };
                 n += 1;
                 counts[self.owner[cell >> self.block_shift] as usize] += 1;
-                if MARK {
+                if MARK && H24 {
+                    // SAFETY: reader `a`'s bits; the pages are `hashtable`'s (the element's bytes
+                    // lie in its words).
+                    unsafe {
+                        marks.mark(a, (cells + (3 * cell >> 2)) >> PAGE_ELEMS_SHIFT);
+                        marks.mark(a, (cells + ((3 * cell + 2) >> 2)) >> PAGE_ELEMS_SHIFT);
+                    }
+                } else if MARK {
                     // SAFETY: reader `a`'s bits; the page is one of `hashtable`'s (`cell` < its
                     // length).
                     unsafe { marks.mark(a, (cells + cell) >> PAGE_ELEMS_SHIFT) };
@@ -631,11 +649,14 @@ impl Fill<'_, '_, '_> {
     /// a block of owner `j`, so that phase B finds the page mapped. A marked page holds the cell of a
     /// word of the first chunk, which phase B writes; no phase B has run, so the element holds the 0
     /// it was allocated with, and each page has one toucher: the round writes 0 over 0 and changes
-    /// no value (no NCBI counterpart; scheduling only).
+    /// no value (no NCBI counterpart; scheduling only). `H24` (LOSAT_X_MB24): `hashtable` holds
+    /// 3-byte cells in its words, and the middle word goes to the owner of the cell of its first
+    /// byte (the jobs of the round write different words, so a word that holds bytes of two
+    /// owners' cells is still written by one job only).
     ///
     /// SAFETY: no other job of the phase uses slot `j` of `Faults::touched`; the round runs before
     /// the first phase B, on a table allocated zeroed; `marked` holds pages of `hashtable` only.
-    unsafe fn prefault(&self, j: usize, marked: &[u64]) {
+    unsafe fn prefault<const H24: bool>(&self, j: usize, marked: &[u64]) {
         let (offset, len) = (self.faults.offset, self.tables.hashtable.len);
         // SAFETY: slot `j` is this job's.
         let (touches, log) = unsafe { self.faults.touched.at(j) };
@@ -645,7 +666,12 @@ impl Fill<'_, '_, '_> {
                 let page = (w << 6) + bits.trailing_zeros() as usize;
                 bits &= bits - 1;
                 let m = middle(offset, len, page);
-                if self.owner[m >> self.block_shift] as usize == j {
+                let cell = if H24 {
+                    (4 * m / 3).min((self.owner.len() << self.block_shift) - 1)
+                } else {
+                    m
+                };
+                if self.owner[cell >> self.block_shift] as usize == j {
                     // SAFETY: as above: element `m` of a page of this job, before the first phase B.
                     unsafe { touch(self.tables.hashtable, m, HASHTABLE, log) };
                     *touches += 1;
@@ -656,11 +682,11 @@ impl Fill<'_, '_, '_> {
 
     /// Phase B, owner `o`: the updates of the words of its cells, reader by reader, each sub-range
     /// in reading order (both reversed for `ascending_cells`), counting into its own copies; each
-    /// entry keeps the cell's head before the update.
+    /// entry keeps the cell's head before the update. `H24` (LOSAT_X_MB24): on 3-byte cells.
     ///
     /// SAFETY: no other job of the phase uses the sub-ranges `(*, o)`, the cells of `o`'s blocks or
     /// `o`'s copies.
-    unsafe fn update(&self, o: usize) {
+    unsafe fn update<const H24: bool>(&self, o: usize) {
         // SAFETY: slot `o` is this job's.
         let x = unsafe { self.copies.at(o) }.private();
         let ascending = self.words.ascending_cells;
@@ -684,25 +710,50 @@ impl Fill<'_, '_, '_> {
             // SAFETY: the cells of the entries lie in `o`'s blocks; `x` is `o`'s.
             unsafe {
                 if ascending {
-                    update_backward(self.tables, x, entries);
+                    update_backward::<H24>(self.tables, x, entries);
                 } else {
-                    update_forward(self.tables, x, entries);
+                    update_forward::<H24>(self.tables, x, entries);
                 }
             }
         }
     }
 
-    /// Phase C, reader `a`: `next_pos[index]` of the words it read, from their kept heads.
+    /// Phase C, reader `a`: `next_pos[index]` of the words it read, from their kept heads. `H24`
+    /// (LOSAT_X_MB24): as 3-byte elements, each written as exactly its 3 bytes (the next element may
+    /// be another reader's, or written already).
     ///
     /// SAFETY: no other job of the phase uses reader `a`'s region; the indices are the words' own.
-    unsafe fn link(&self, a: usize) {
+    unsafe fn link<const H24: bool>(&self, a: usize) {
         // SAFETY: reader `a` wrote its row in phase A.
         let n = unsafe { self.arena.row(a).add(self.parts).read() } as usize;
         // SAFETY: the first `n` entries of the sorted region were written in phase A.
         let entries = unsafe { std::slice::from_raw_parts(self.arena.sorted(a), n) };
         for e in entries {
             // SAFETY: each index is written once, by the reader of its word.
-            unsafe { self.tables.next_pos.set(e.index as usize, e.value) };
+            unsafe {
+                if H24 {
+                    let next_pos = self.tables.next_pos;
+                    debug_assert!(3 * e.index as usize + 3 <= 4 * next_pos.len);
+                    super::x_mb_narrow::store_exact(next_pos.ptr, e.index as usize, e.value);
+                } else {
+                    self.tables.next_pos.set(e.index as usize, e.value)
+                }
+            };
+        }
+    }
+
+    /// `link` for a table of 3-byte cells (`h24`, LOSAT_X_MB24) or not.
+    ///
+    /// SAFETY: as `link`'s.
+    #[inline(always)]
+    unsafe fn link_any(&self, h24: bool, a: usize) {
+        // SAFETY: the caller's.
+        unsafe {
+            if h24 {
+                self.link::<true>(a)
+            } else {
+                self.link::<false>(a)
+            }
         }
     }
 
@@ -739,15 +790,21 @@ impl Fill<'_, '_, '_> {
 /// ```
 /// The update of one word, as in the loop of `build_mb_lookup`, with the counter and the presence
 /// bit in the owner's private copies; `next_pos[index]` is written in phase C from the head kept in
-/// the entry.
+/// the entry. `H24` (LOSAT_X_MB24): on a 3-byte cell, read and written as exactly its 3 bytes (the
+/// next cell may be another owner's).
 ///
 /// SAFETY: the cell lies in a block of the calling owner, and `x` is its copies.
 #[inline(always)]
-unsafe fn update_one(t: SharedTables, x: &mut Private<'_>, e: &mut Entry) {
+unsafe fn update_one<const H24: bool>(t: SharedTables, x: &mut Private<'_>, e: &mut Entry) {
     let cell = e.value as usize;
     // SAFETY: the caller's guarantee (the cell < the table size: a masked k-mer).
     unsafe {
-        let head = t.hashtable.get(cell);
+        let head = if H24 {
+            debug_assert!(3 * cell + 3 <= 4 * t.hashtable.len);
+            super::x_mb_narrow::load_exact(t.hashtable.ptr, cell)
+        } else {
+            t.hashtable.get(cell)
+        };
         if head == 0 {
             let w = cell >> t.pv_array_bts;
             if w < t.pv_array.len {
@@ -757,7 +814,11 @@ unsafe fn update_one(t: SharedTables, x: &mut Private<'_>, e: &mut Entry) {
             let c = x.counters.slot(cell >> K_COMPRESSION_FACTOR_SHIFT);
             *c = c.saturating_add(1);
         }
-        t.hashtable.set(cell, e.index);
+        if H24 {
+            super::x_mb_narrow::store_exact(t.hashtable.ptr, cell, e.index);
+        } else {
+            t.hashtable.set(cell, e.index);
+        }
         e.value = head;
     }
 }
@@ -766,14 +827,18 @@ unsafe fn update_one(t: SharedTables, x: &mut Private<'_>, e: &mut Entry) {
 ///
 /// SAFETY: as `update_one`, for every entry.
 #[inline]
-unsafe fn update_forward(t: SharedTables, x: &mut Private<'_>, entries: &mut [Entry]) {
+unsafe fn update_forward<const H24: bool>(
+    t: SharedTables,
+    x: &mut Private<'_>,
+    entries: &mut [Entry],
+) {
     for j in 0..entries.len() {
         #[cfg(target_arch = "x86_64")]
         if let Some(ahead) = entries.get(j + X_AHEAD) {
-            prefetch(t.hashtable, ahead.value as usize);
+            prefetch::<H24>(t.hashtable, ahead.value as usize);
         }
         // SAFETY: the caller's guarantee.
-        unsafe { update_one(t, x, &mut entries[j]) };
+        unsafe { update_one::<H24>(t, x, &mut entries[j]) };
     }
 }
 
@@ -781,26 +846,34 @@ unsafe fn update_forward(t: SharedTables, x: &mut Private<'_>, entries: &mut [En
 ///
 /// SAFETY: as `update_one`, for every entry.
 #[inline]
-unsafe fn update_backward(t: SharedTables, x: &mut Private<'_>, entries: &mut [Entry]) {
+unsafe fn update_backward<const H24: bool>(
+    t: SharedTables,
+    x: &mut Private<'_>,
+    entries: &mut [Entry],
+) {
     for j in (0..entries.len()).rev() {
         #[cfg(target_arch = "x86_64")]
         if j >= X_AHEAD {
-            prefetch(t.hashtable, entries[j - X_AHEAD].value as usize);
+            prefetch::<H24>(t.hashtable, entries[j - X_AHEAD].value as usize);
         }
         // SAFETY: the caller's guarantee.
-        unsafe { update_one(t, x, &mut entries[j]) };
+        unsafe { update_one::<H24>(t, x, &mut entries[j]) };
     }
 }
 
-/// A prefetch of cell `cell` of `hashtable` (x86_64).
+/// A prefetch of cell `cell` of `hashtable` (x86_64); `H24`: of its 3-byte element.
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-fn prefetch(hashtable: Shared<u32>, cell: usize) {
-    debug_assert!(cell < hashtable.len);
+fn prefetch<const H24: bool>(hashtable: Shared<u32>, cell: usize) {
+    debug_assert!(H24 || cell < hashtable.len);
     // SAFETY: a cell index < the table size; a prefetch does not fault.
     unsafe {
         core::arch::x86_64::_mm_prefetch(
-            hashtable.ptr.add(cell) as *const i8,
+            if H24 {
+                super::x_mb_narrow::at(hashtable.ptr, cell)
+            } else {
+                hashtable.ptr.add(cell) as *const i8
+            },
             core::arch::x86_64::_MM_HINT_T0,
         );
     }
@@ -960,7 +1033,8 @@ pub(super) fn fill(
 /// positions per 1,024 cells (4 KiB), counted on the table's size, not on the pages it spans, so
 /// that the allocation's offset in its first page (16 bytes for glibc's mapped blocks, 0 for a
 /// page-aligned one) does not move the boundary: 131,072 positions for 4^12 cells, the first chunk
-/// of 4 workers (`chunk_positions`).
+/// of 4 workers (`chunk_positions`). With LOSAT_X_MB24 `cells` is the words of the 3-byte cells
+/// (1,024 to a page): 98,304 positions for 4^12 cells.
 fn prefault_gate(first: usize, cells: usize) -> bool {
     first > 0
         && first >= PREFAULT_MIN_WORDS_PER_PAGE.saturating_mul((cells >> PAGE_ELEMS_SHIFT).max(1))
@@ -976,12 +1050,20 @@ fn fill_chunked(
     chunk: usize,
     prefault: bool,
 ) -> OnceStats {
-    let table_size = tables.hashtable.len();
+    // LOSAT_X_MB24: a table of 3-byte cells (`x_mb_narrow.rs`) has `kmer_mask + 1` cells in fewer
+    // words; its phases run their own instances (`H24`).
+    let h24 = tables.x_h24;
+    let table_size = if h24 {
+        words.kmer_mask as usize + 1
+    } else {
+        tables.hashtable.len()
+    };
     let (block_shift, owner) = plan(table_size, tables.pv_array_bts, parts);
     debug_assert!(
         block_shift >= K_COMPRESSION_FACTOR_SHIFT && block_shift >= tables.pv_array_bts,
         "a block must own whole counters and presence-vector words"
     );
+    debug_assert!(!(h24 && words.ascending_cells));
     let parts = parts.clamp(1, 255);
     let chunk = chunk.max(1);
     let (segments, total) = segments(words);
@@ -1025,11 +1107,12 @@ fn fill_chunked(
     };
     // The prefault round runs in the first chunk (of the processing order) only, and only when
     // that chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per 4 KiB of `hashtable`
-    // (`prefault_gate`); without it the readers' marks have no rows.
+    // (`prefault_gate`); without it the readers' marks have no rows. (The words of `hashtable`:
+    // its cells, or with LOSAT_X_MB24 the words that hold them.)
     let offset = page_offset(shared.hashtable.ptr);
-    let pages = pages_of(offset, table_size);
+    let pages = pages_of(offset, shared.hashtable.len);
     let (first_start, first_end) = bounds(0);
-    let round_on = prefault && prefault_gate(first_end - first_start, table_size);
+    let round_on = prefault && prefault_gate(first_end - first_start, shared.hashtable.len);
     if prefault {
         crate::utils::xreach::x_reach!("LOSAT_X_MBLUTPREFAULT", round_on);
     }
@@ -1081,13 +1164,14 @@ fn fill_chunked(
         run_phase(&mut clock, 0, parts, in_pool, |a| {
             if k > 0 {
                 // C of the chunk before.
-                unsafe { fill.link(a) };
+                unsafe { fill.link_any(h24, a) };
             }
             let (s0, s1) = span(current, a);
-            if mark {
-                unsafe { fill.read::<true>(a, s0, s1) };
-            } else {
-                unsafe { fill.read::<false>(a, s0, s1) };
+            match (mark, h24) {
+                (true, true) => unsafe { fill.read::<true, true>(a, s0, s1) },
+                (true, false) => unsafe { fill.read::<true, false>(a, s0, s1) },
+                // (the words are read alike; only the marks depend on the cells' width)
+                (false, _) => unsafe { fill.read::<false, false>(a, s0, s1) },
             }
         });
         if mark {
@@ -1102,24 +1186,39 @@ fn fill_chunked(
                 })
                 .collect();
             run_phase(&mut clock, PREFAULT_PHASE, parts, in_pool, |j| unsafe {
-                fill.prefault(j, &marked)
+                if h24 {
+                    fill.prefault::<true>(j, &marked)
+                } else {
+                    fill.prefault::<false>(j, &marked)
+                }
             });
             stats.prefault_rounds += 1;
         }
-        run_phase(&mut clock, 1, parts, in_pool, |o| unsafe { fill.update(o) });
+        run_phase(&mut clock, 1, parts, in_pool, |o| unsafe {
+            if h24 {
+                fill.update::<true>(o)
+            } else {
+                fill.update::<false>(o)
+            }
+        });
         // Tests: the pages of `hashtable` the first chunk wrote (every written cell holds a 1-based
-        // query offset, other than 0), which the round must have touched.
+        // query offset, other than 0), which the round must have touched; for 3-byte cells
+        // (LOSAT_X_MB24) the pages of the words of their first and last bytes (a cell's last byte
+        // may be 0 on a page of its own).
         #[cfg(test)]
         if k == 0 {
             let t = fill.tables.hashtable;
             // SAFETY: between two phases; the table outlives the fill.
-            stats.first_pages = super::x_disc_lookup_par::nonzero_pages(unsafe {
-                std::slice::from_raw_parts(t.ptr, t.len)
-            });
+            let v = unsafe { std::slice::from_raw_parts(t.ptr, t.len) };
+            stats.first_pages = if h24 {
+                super::x_mb_narrow::written_pages(v, table_size)
+            } else {
+                super::x_disc_lookup_par::nonzero_pages(v)
+            };
         }
     }
     run_phase(&mut clock, 2, parts, in_pool, |i| unsafe {
-        fill.link(i);
+        fill.link_any(h24, i);
         fill.flush(i);
     });
     stats.chunks = chunks;
@@ -1366,7 +1465,7 @@ fn csr_on_pool(
             let mut got = 0u64;
             for c in 0..chunks {
                 let (s0, s1) = span(c, o);
-                fill.read::<false>(o, s0, s1);
+                fill.read::<false, false>(o, s0, s1);
                 bar.wait();
                 for a in 0..parts {
                     let es = fill.subrange(a, o);
@@ -1398,7 +1497,7 @@ fn csr_on_pool(
             }
             for c in 0..chunks {
                 let (s0, s1) = span(c, o);
-                fill.read::<false>(o, s0, s1);
+                fill.read::<false, false>(o, s0, s1);
                 bar.wait();
                 for a in 0..parts {
                     for e in fill.subrange(a, o) {
@@ -1561,6 +1660,7 @@ mod tests {
                     pv_array: &mut pv_array,
                     pv_array_bts: bts,
                     helper_array: &mut helper_array,
+                    x_h24: false,
                 },
             );
             helper_array
@@ -1622,6 +1722,7 @@ mod tests {
                     pv_array: &mut b.pv_array,
                     pv_array_bts: bts,
                     helper_array: &mut b.helper_array,
+                    x_h24: false,
                 },
                 in_pool,
                 false,
@@ -1629,6 +1730,53 @@ mod tests {
                 prefault,
             );
             (b, stats)
+        }
+
+        /// LOSAT_X_MB24: the read-once fill from zero start values into 3-byte elements of `cells`
+        /// cells (newest first), with LOSAT_X_MBLUTPREFAULT given (`prefault`) and checked on the
+        /// words of the heads (`check_prefault`); the tables widened, and the pages touched.
+        fn once_h24(
+            &self,
+            reference: &Built,
+            bts: usize,
+            parts: usize,
+            in_pool: bool,
+            chunk: usize,
+            prefault: bool,
+        ) -> (Built, OnceStats, usize) {
+            use super::super::x_mb_narrow::{widen, words_for};
+            assert!(!self.ascending);
+            let cells = reference.hashtable.len();
+            let refs = self.refs();
+            let words = self.words(&refs);
+            let mut hashtable = vec![0u32; words_for(cells)];
+            let mut next_pos = vec![0u32; words_for(self.next_len())];
+            let mut b = Built {
+                hashtable: Vec::new(),
+                next_pos: Vec::new(),
+                pv_array: vec![0 as PvArrayType; reference.pv_array.len()],
+                helper_array: vec![0u32; reference.helper_array.len()],
+            };
+            let stats = fill_chunked(
+                parts,
+                &words,
+                Tables {
+                    hashtable: &mut hashtable,
+                    next_pos: &mut next_pos,
+                    pv_array: &mut b.pv_array,
+                    pv_array_bts: bts,
+                    helper_array: &mut b.helper_array,
+                    x_h24: true,
+                },
+                in_pool,
+                false,
+                chunk,
+                prefault,
+            );
+            let pages = check_prefault(&hashtable, &stats, self.first_chunk(chunk), prefault);
+            b.hashtable = widen(&hashtable, cells);
+            b.next_pos = widen(&next_pos, self.next_len());
+            (b, stats, pages)
         }
 
         /// The read-once fill from zero start values.
@@ -2093,6 +2241,72 @@ mod tests {
         assert!(skipped > 0);
     }
 
+    // LOSAT_X_MB24: the read-once fill into 3-byte elements, newest first: random cases (`lut_word_length`
+    // 4 to 12) off the pool with 1..8 parts and chunks of 7, 1000 positions and the default, then
+    // long repeats and random letters at 11 and 12 on pools of 2, 5 and 16 threads (with
+    // LOSAT_X_MBLUTPREFAULT and without; first chunks on both sides of the gate): every element of
+    // the four arrays and the longest chain equal the loop's, and the round touches exactly the
+    // pages of the words that the first chunk wrote (`check_prefault` on the words of the heads).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn once_fill_of_3_byte_cells_builds_the_loops_tables() {
+        let mut rng = Lcg(0x0003_B17E);
+        for case in 0..24 {
+            let c = Case::random(&mut rng, false);
+            let (reference, bts, chain) = c.reference(1_000_000);
+            for parts in 1..=8usize {
+                for chunk in [7usize, 1000, CHUNK_POSITIONS] {
+                    let (b, stats, _) = c.once_h24(&reference, bts, parts, false, chunk, true);
+                    let what = format!("case {case} parts {parts} chunk {chunk}");
+                    assert_built(&reference, chain, &b, &what);
+                    assert_eq!(stats.subranges, stats.subranges_in_order, "{what}");
+                }
+            }
+        }
+        let random = |rng: &mut Lcg, len: usize| (0..len).map(|_| rng.below(4) as u8).collect();
+        let mut cases = Vec::new();
+        for lut in [11usize, 12] {
+            cases.push(Case::one(random(&mut rng, 150_000), lut + 4, lut, false));
+            cases.push(Case::one(
+                repeat_case(&mut rng, 40_000),
+                lut + 4,
+                lut,
+                false,
+            ));
+        }
+        let (mut most, mut skipped) = (0usize, 0usize);
+        for (i, c) in cases.iter().enumerate() {
+            let (reference, bts, chain) = c.reference(1_000_000);
+            for threads in [2usize, 5, 16] {
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build()
+                    .unwrap();
+                for chunk in [4_096usize, 70_000, CHUNK_POSITIONS] {
+                    for prefault in [true, false] {
+                        let what = format!("case {i} pool {threads} chunk {chunk} {prefault}");
+                        let (b, stats, pages) = pool.install(|| {
+                            c.once_h24(&reference, bts, threads, true, chunk, prefault)
+                        });
+                        assert_built(&reference, chain, &b, &what);
+                        if prefault {
+                            most = most.max(pages);
+                            skipped += usize::from(stats.prefault_rounds == 0);
+                        }
+                        if threads >= 5 && c.positions() >= 40_000 {
+                            assert!(stats.owners_with_values >= 2, "{what}: {stats:?}");
+                        }
+                    }
+                }
+            }
+        }
+        assert!(most > 4_000, "{most}");
+        assert!(skipped > 0);
+    }
+
     // LOSAT_X_MBLUTPREFAULT with `hashtable` at element offsets 0, 4 (glibc's mapped blocks) and
     // 1,023 (a first page of one element) in its first page, at `lut_word_length` 11 and 12, on a
     // pool of 5 threads, with a first chunk just at the gate (8 positions per 1,024 cells) and one
@@ -2142,6 +2356,7 @@ mod tests {
                                 pv_array: &mut b.pv_array,
                                 pv_array_bts: bts,
                                 helper_array: &mut b.helper_array,
+                                x_h24: false,
                             },
                             true,
                             false,

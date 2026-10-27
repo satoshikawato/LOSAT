@@ -117,6 +117,7 @@
 //! two-hit extension is the sentinel walks, in an instance of its own (`x_word_finder_fused_sent`,
 //! never inlined; the other statements unchanged), so the loop without it keeps its code.
 
+use super::x_seed_scan::XKeptPresence;
 use super::x_ungap_sent::XSent;
 use super::*;
 use crate::algorithm::blastp::x_seed_fused::{
@@ -156,13 +157,31 @@ thread_local! {
 // }
 // ```
 /// EXPERIMENT (LOSAT_X_BXDIAG): runs `f` with blastp's context table (`XContextTable`: a coarse
-/// table and a short walk over the frame bases) for `batch`, made once per query batch and
-/// thread. It gives the index the reference's binary search gives, the last context whose offset
-/// is at most the query offset (`XContextTable::get`). The table is reused only while the batch's
-/// frame bases and span are the ones it was made for (compared on every call), so a new batch
-/// gets a new table even if its contexts lie at the same address.
-fn x_with_context_table<R>(batch: &PreparedQueryBatch, f: impl FnOnce(&XContextTable) -> R) -> R {
+/// table and a short walk over the frame bases) for `batch`, the query batch whose lookup table
+/// `kept` goes with. It gives the index the reference's binary search gives, the last context
+/// whose offset is at most the query offset (`XContextTable::get`). The table is made once per
+/// lookup table and kept with it (LOSAT_X_BXCTXONCE), or with that switch `=0` once per query batch
+/// and thread, reused only while the batch's frame bases and span are the ones it was made for
+/// (compared on every call), so a new batch gets a new table even if its contexts lie at the same
+/// address.
+fn x_with_context_table<R>(
+    batch: &PreparedQueryBatch,
+    kept: &XKeptPresence,
+    f: impl FnOnce(&XContextTable) -> R,
+) -> R {
     let span = batch.contexts.last().map_or(0, |c| c.offset + c.length);
+    // Dispatch point (LOSAT_X_BXCTXONCE, in the strict set): the table kept with the lookup table,
+    // made by the first thread that scans with it. A lookup table is built from one query batch
+    // (`Lookup::new`) and scanned only with that batch, and its companion is made with it, so the
+    // frame bases and the span are those of `batch` on every call; a thread that takes tasks of
+    // several tables in turn (LOSAT_X_BXUNITCAP, the subject flow) then makes none again.
+    if x_ctx_once() {
+        let table = kept.contexts.get_or_init(|| {
+            let bases: Vec<i32> = batch.contexts.iter().map(|c| c.offset as i32).collect();
+            XContextTable::new(&bases, span)
+        });
+        return f(table);
+    }
     X_CONTEXTS.with(|cell| {
         let mut cell = cell.borrow_mut();
         let fits = cell.as_ref().is_some_and(|(bases, s, _)| {
@@ -239,6 +258,16 @@ fn x_bx_cross() -> bool {
 fn x_bx_cross_defer() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCROSSDEFER"))
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BXCTXONCE switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BXCTXONCE): whether a query batch's context table is made once per lookup
+/// table and kept with it ([`x_with_context_table`]); a switch of the strict set, on unless it is
+/// `0`.
+fn x_ctx_once() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCTXONCE"))
 }
 
 // No NCBI counterpart: chooses LOSAT's code path once; it does not change any value NCBI computes.
@@ -521,7 +550,7 @@ pub(crate) fn x_word_finder_diag(
             crate::utils::xreach::x_reach!("LOSAT_X_BXDEFER", table_mode == mode);
         }
         let (hits, counts) = x_word_finder_fused_or_sent(
-            table_mode, batch, parameters, options, subject, table, diagonals, sent,
+            table_mode, batch, parameters, options, subject, table, kept, diagonals, sent,
         )?;
         x_add_counts(counts);
         return Ok(Some(hits));
@@ -547,6 +576,7 @@ pub(crate) fn x_word_finder_diag(
         options,
         subject,
         table,
+        kept,
         diagonals,
         sent,
     )?;
@@ -614,14 +644,17 @@ fn x_word_finder_fused_or_sent(
     options: &ResolvedOptions,
     subject: &[u8],
     table: &BlastAaLookupTable,
+    kept: &XKeptPresence,
     diagonals: &mut Diagonals,
     sent: Option<XSent<'_>>,
 ) -> Result<(Vec<InitHsp>, [u64; 4])> {
     match sent {
         Some(sent) => x_word_finder_fused_sent(
-            mode, batch, parameters, options, subject, table, diagonals, sent,
+            mode, batch, parameters, options, subject, table, kept, diagonals, sent,
         ),
-        None => x_word_finder_fused(mode, batch, parameters, options, subject, table, diagonals),
+        None => x_word_finder_fused(
+            mode, batch, parameters, options, subject, table, kept, diagonals,
+        ),
     }
 }
 
@@ -655,6 +688,7 @@ fn x_word_finder_fused(
     options: &ResolvedOptions,
     subject: &[u8],
     table: &BlastAaLookupTable,
+    kept: &XKeptPresence,
     diagonals: &mut Diagonals,
 ) -> Result<(Vec<InitHsp>, [u64; 4])> {
     let query = &batch.sequence_start[1..];
@@ -666,7 +700,7 @@ fn x_word_finder_fused(
     // two-hit window.
     let length = subject.len().saturating_sub(1);
     let mut hits = Vec::new();
-    let counts = x_with_context_table(batch, |contexts| {
+    let counts = x_with_context_table(batch, kept, |contexts| {
         x_scan_two_hit_with(
             mode,
             true,
@@ -798,6 +832,7 @@ fn x_word_finder_fused_sent(
     options: &ResolvedOptions,
     subject: &[u8],
     table: &BlastAaLookupTable,
+    kept: &XKeptPresence,
     diagonals: &mut Diagonals,
     sent: XSent<'_>,
 ) -> Result<(Vec<InitHsp>, [u64; 4])> {
@@ -806,7 +841,7 @@ fn x_word_finder_fused_sent(
     let mask = diagonals.entries.len() as i32 - 1;
     let length = subject.len().saturating_sub(1);
     let mut hits = Vec::new();
-    let counts = x_with_context_table(batch, |contexts| {
+    let counts = x_with_context_table(batch, kept, |contexts| {
         // The candidate closure with the extension `two_hit::<$shadow>`.
         macro_rules! scan {
             ($shadow:literal) => {
@@ -1005,7 +1040,7 @@ mod tests {
         mode: XCellTest,
         start: impl Fn(&mut Diagonals),
     ) -> (usize, [u64; 4]) {
-        let Lookup::Standard(table, _) = lookup else {
+        let Lookup::Standard(table, kept) = lookup else {
             panic!("the standard lookup table")
         };
         let length = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
@@ -1032,9 +1067,10 @@ mod tests {
                 |_| {},
             )
             .unwrap();
-            let (actual, c) =
-                x_word_finder_fused(mode, batch, params, options, subject, table, &mut fused)
-                    .unwrap();
+            let (actual, c) = x_word_finder_fused(
+                mode, batch, params, options, subject, table, kept, &mut fused,
+            )
+            .unwrap();
             let run = format!("{mode:?} subject {i}");
             assert_eq!(actual, expected, "{run}");
             assert_eq!(fused.offset, reference.offset, "{run}");
@@ -1043,7 +1079,7 @@ mod tests {
             for (table_sent, shadow) in sent.iter_mut().zip([false, true]) {
                 let x = XSent::for_test(&batch.sequence_start, &lead, shadow);
                 let (got, c2) = x_word_finder_fused_sent(
-                    mode, batch, params, options, subject, table, table_sent, x,
+                    mode, batch, params, options, subject, table, kept, table_sent, x,
                 )
                 .unwrap();
                 assert_eq!(got, expected, "{run} sent shadow={shadow}");
@@ -1145,10 +1181,13 @@ mod tests {
                 query.extend_from_slice(&letters[i * 50_000..i * 50_000 + n]);
                 query.push(b'\n');
             }
-            let (batch, ..) = search(&query, 40, 500);
+            let (batch, _, _, lookup) = search(&query, 40, 500);
+            let Lookup::Standard(_, kept) = &lookup else {
+                panic!("a standard table");
+            };
             let span = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
             assert!(batch.contexts.len() >= 24);
-            x_with_context_table(&batch, |table| {
+            x_with_context_table(&batch, kept, |table| {
                 for q in 0..span as i32 {
                     let expected = batch
                         .contexts

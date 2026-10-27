@@ -163,6 +163,9 @@ pub(crate) fn x_bxscan_byte() -> XScanByte {
 /// dropped (LOSAT_X_BXPOOLN1 builds a one-thread search's tables without the pool).
 pub struct XKeptPresence {
     presence: OnceLock<Option<(Arc<[u8]>, bool)>>,
+    /// EXPERIMENT (LOSAT_X_BXCTXONCE): the context table of the query batch the table was built
+    /// from (`x_seed_diag.rs` `x_with_context_table`), made by the first thread that needs it.
+    pub(super) contexts: OnceLock<crate::algorithm::blastp::x_seed_fused::XContextTable>,
     pub(crate) build: u64,
     pub(crate) pooled: bool,
 }
@@ -183,6 +186,7 @@ impl XKeptPresence {
     pub(crate) fn x_built(pooled: bool) -> Self {
         Self {
             presence: OnceLock::new(),
+            contexts: OnceLock::new(),
             build: X_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             pooled,
         }

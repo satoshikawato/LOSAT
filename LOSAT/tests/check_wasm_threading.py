@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Real native/WASI threading gates with raw NCBI 2.17.0 oracle output."""
 import argparse
+import csv
 import hashlib
 import json
 import os
@@ -153,6 +154,33 @@ def main():
                 assert data == reference, f"raw output differs: {label}/{kind}-n{n}"
                 validate_thread_evidence(log, n, "native" if kind == "native-serial" else kind)
         print(label, "raw parity + thread contract PASS", flush=True)
+    # NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:114-127
+    # ```c++
+    # CMemoryFile* CSeqDBAtlas::GetMemoryFile(const string& fileName)
+    # {
+    #     std::lock_guard<std::mutex> guard(m_FileMemMapMutex);
+    #     ...
+    #     m_FileMemMap[fileName].reset(file);
+    # ```
+    # A database file is opened once for the process and read by every thread. -db at every
+    # thread count, against the frozen NCBI bytes of one outfmt 6 row per program
+    # (LOSAT/tests/db_search_manifest.tsv; the Node host's threads read a descriptor that
+    # another thread opened).
+    with (TESTS / "db_search_manifest.tsv").open() as handle:
+        manifest = {row["row_id"]: row for row in csv.DictReader(
+            (line for line in handle if not line.startswith("#")), delimiter="\t")}
+    for row_id in ["db.blastn.mega.6", "db.d1.6", "db.blastx.default.6", "db.tblastn.default.6", "db.tblastx.default.6"]:
+        row = manifest[row_id]
+        assert row["kind"] == "ncbi" and not row["extra_args"], row_id
+        reference = (TESTS / "fixtures/db_search" / f"{row_id}.out").read_bytes()
+        common = ["-db", ROOT / "LOSAT" / row["db"], "-query", ROOT / "LOSAT" / row["query"],
+                  "-outfmt", row["outfmt"], "-out", "{out}"]
+        for kind, prefix in prefixes.items():
+            for n in ([1] if kind in ["serial", "native-serial"] else [1, 2, 4, 8, 16]):
+                data, log = execute(f"db/{row_id}/{kind}-n{n}", [*prefix, row["program"], *common, "-num_threads", str(n)], {"LOSAT_WASI_THREADS_DEBUG": "1"})
+                assert data == reference, f"raw output differs: {row_id}/{kind}-n{n}"
+                validate_thread_evidence(log, n, "native" if kind == "native-serial" else kind)
+        print(row_id, "-db raw parity + thread contract PASS", flush=True)
     for program, query in [("blastn", "nuc1"), ("tblastx", "nuc1"), ("blastp", "aa1")]:
         common = [program, "-query", inputs[query], "-subject", inputs[query], "-outfmt", "6", "-out", "{out}"]
         for kind, prefix in prefixes.items():

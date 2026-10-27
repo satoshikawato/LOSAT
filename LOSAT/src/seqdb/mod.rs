@@ -156,6 +156,14 @@ impl std::fmt::Display for SeqDbError {
     }
 }
 
+impl SeqDbError {
+    /// Whether this is the error of the ordinal-id decoders for a record with a Seq-id other
+    /// than `gnl|BL_ORD_ID|n` (a database built with `-parse_seqids`; `SeqDb::read_header`).
+    pub fn is_parsed_seqids(&self) -> bool {
+        matches!(self, SeqDbError::Unsupported { message, .. } if message == header::PARSED_SEQIDS)
+    }
+}
+
 impl std::error::Error for SeqDbError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -719,6 +727,35 @@ impl SeqDb {
         Ok(())
     }
 
+    /// `check_ordinal_ids` of a program that reads parsed Seq-ids too: `Ok(true)` when the first
+    /// header of some volume holds parsed Seq-ids, any other error as `check_ordinal_ids` gives
+    /// it.
+    pub fn has_parsed_seqids(&self) -> Result<bool, SeqDbError> {
+        let mut parsed = false;
+        for (at, volume) in self.volumes.iter().enumerate() {
+            if volume.num_oids() > 0 {
+                match self.deflines(self.volume_starts[at]) {
+                    Ok(_) | Err(SeqDbError::NotFound(_) | SeqDbError::Open { .. }) => {}
+                    Err(error) if error.is_parsed_seqids() => parsed = true,
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        Ok(parsed)
+    }
+
+    /// Whether the database is of format version 5 (its volumes' index files name an LMDB
+    /// file; `open` refuses a mix of versions).
+    pub fn is_version5(&self) -> bool {
+        self.volumes.first().is_some_and(|volume| {
+            volume
+                .index()
+                .lmdb_file
+                .as_ref()
+                .is_some_and(|name| !name.is_empty())
+        })
+    }
+
     /// Sequence type of the database.
     pub fn seqtype(&self) -> SeqType {
         self.seqtype
@@ -1030,6 +1067,18 @@ impl SeqDb {
     //                         }
     //                     }
     // ```
+    /// The header of `ordinal` as a report reads it: the ordinal-id definition lines
+    /// (`deflines`), or every member and Seq-id (`defline_set`) of a record with parsed
+    /// Seq-ids. A record without parsed Seq-ids is read as before, with the same errors.
+    pub fn read_header(&self, ordinal: u32) -> Result<SequenceHeader, SeqDbError> {
+        match self.deflines(ordinal) {
+            Err(error) if error.is_parsed_seqids() => {
+                self.defline_set(ordinal).map(SequenceHeader::Parsed)
+            }
+            read => read.map(SequenceHeader::Ordinal),
+        }
+    }
+
     /// The definition lines of `ordinal` with every member and every Seq-id
     /// (`seqid::ber::decode_full_set`), as NCBI's `GetHdr` gives them: the
     /// tag of a `general` id `BL_ORD_ID` is its database ordinal id (the
@@ -1252,6 +1301,15 @@ fn partition_point_u32(range: std::ops::Range<u32>, fits: impl Fn(u32) -> bool) 
         }
     }
     (lo - range.start) as usize
+}
+
+/// The header of one sequence (`SeqDb::read_header`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SequenceHeader {
+    /// A record whose only Seq-ids are `gnl|BL_ORD_ID|n` (`SeqDb::deflines`).
+    Ordinal(Vec<OrdinalDefline>),
+    /// A record with parsed Seq-ids (`SeqDb::defline_set`).
+    Parsed(DeflineSet),
 }
 
 /// A definition line with its database-wide `BL_ORD_ID`.

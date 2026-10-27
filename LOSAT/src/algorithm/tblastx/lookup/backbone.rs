@@ -1543,12 +1543,15 @@ pub(crate) fn build_ncbi_lookup_for_profile(
 //
 //     sfree(exact_backbone);
 // ```
+/// BLASTX's lookup table of a prepared query; `parts` above 1: a pooled build's passes on that many tasks of the pool it runs on
+/// (`LOSAT_X_BXBUILDPAR`, `x_lut_direct.rs` `x_partitioned_passes`); the table is the same.
 pub(crate) fn build_ncbi_lookup_from_prepared(
     concat_query: Vec<u8>,
     lookup_locations: Vec<(i32, i32)>,
     contexts: Vec<QueryContext>,
     threshold: i32,
     pooled: bool,
+    parts: usize,
 ) -> BlastAaLookupTable {
     let frame_bases = contexts.iter().map(|c| c.frame_base).collect();
     let prepared = PreparedLookupQuery {
@@ -1575,7 +1578,7 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     // kept vectors; the caller gives them back (`x_give_back_pooled`) when it drops the table, or
     // the pool goes without them (a missed reuse only).
     let built = if pooled {
-        x_lut_direct::x_build_direct_pooled(prepared, threshold, ScoringMatrix::Blosum62, 3)
+        x_lut_direct::x_build_direct_pooled(prepared, threshold, ScoringMatrix::Blosum62, 3, parts)
     } else {
         x_lut_direct::x_build_direct(prepared, threshold, ScoringMatrix::Blosum62, 3)
     };

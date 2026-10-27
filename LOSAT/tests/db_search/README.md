@@ -339,3 +339,18 @@ nothing hits, `-taxid 9606`; only `.phr .pin .psq` kept). `mixtax_blastx_{good,b
   and the `qwarn2` order puts the query without hits first. With `-evalue 1e-20` each query hits its own subject only. They search the
   existing databases `x16_ntaxid` (taxid 9606) and `x16_ntaxid_99990`: rows `db.sa.x16_xtaxid.*` (`BLASTDB=DIR` and `BATCH_SIZE=N`
   tokens as in the BLASTP, BLASTN and TBLASTN rows, the other tokens are options; the messages on standard error name `tblastx`).
+
+## Databases with parsed Seq-ids (line DBID, ID2a)
+
+`ids/`: rows `db.id.*`. `ids/make_ids.py` (its docstring has the usage and the records) writes
+`ids/prot_v5` (version 5) and `ids/prot_v4` (version 4) with `makeblastdb -parse_seqids` from the records of
+`LOSAT/tests/seqid/fasta` and `ids/gen.faa` (titles that NCBI makes from the Seq-ids), with every file
+makeblastdb writes: NCBI's formatters find a reported sequence again through the ISAM or LMDB files, so the
+frozen outputs need them (LOSAT reads the index, sequence and header files). Queries: `ids/ids_q.faa` (three
+proteins: one hits every sequence, one hits a few weakly, one has no hit), `ids/ids_q.fna` (the same
+back-translated, for BLASTX) and `ids/ids_qw.faa` (thirty W, which hits the records of
+`LOSAT/tests/seqid/db/variants` that no NCBI formatter finds again). `ids/refuse_v5` (version 5, from
+`ids/refuse.faa` and `ids/taxmap_refuse.txt`) holds one record per case of the rows `db.id.*.taxdb_nf.*` and
+of LOSAT's refusals, each hit by its own query `ids/refuse_<case>.faa` (`.fna` for BLASTX) alone with
+`-evalue 1e-20`: NCBI's outfmt 0 does not end on the records `long` and `punct`, so no other query may
+report them.

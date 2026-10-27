@@ -539,6 +539,7 @@ pub(super) mod tests {
                 pv_array: &mut pv,
                 pv_array_bts,
                 helper_array: &mut helper,
+                x_h24: false,
             },
         );
         (hashtable, next_pos, pv, helper)

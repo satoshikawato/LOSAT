@@ -67,15 +67,20 @@ function debug(message) {
 // accepts, so at most 254 workers. Booting ahead changes when a worker boots, not which
 // workers the guest gets or what they run.
 const PRESPAWN_MAX = 254;
+// The -num_threads that argv requests (its last value), or 0 when none or not a number.
+function requestedThreads(argv) {
+  let value;
+  for (let i = 0; i < argv.length; i++) {
+    const option = /^--?num_threads(?:=(.*))?$/s.exec(String(argv[i]));
+    if (option) value = option[1] !== undefined ? option[1] : argv[++i];
+  }
+  return /^\d+$/.test(String(value)) ? Number(value) : 0;
+}
+
 function prespawnCount(argv) {
   const raw = process.env.LOSAT_WASI_PRESPAWN ?? "auto";
   if (raw === "auto") {
-    let value;
-    for (let i = 0; i < argv.length; i++) {
-      const option = /^--?num_threads(?:=(.*))?$/s.exec(String(argv[i]));
-      if (option) value = option[1] !== undefined ? option[1] : argv[++i];
-    }
-    const requested = /^\d+$/.test(String(value)) ? Number(value) : 0;
+    const requested = requestedThreads(argv);
     return requested >= 2 && requested - 1 <= PRESPAWN_MAX ? requested - 1 : 0;
   }
   const count = /^\d+$/.test(raw) ? Number(raw) : NaN;
@@ -380,32 +385,194 @@ function blockingStdioWrite(fdWrite) {
   };
 }
 
-function createImports(wasi, memory, spawnThread, extra) {
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:114-127
+// ```c++
+// CMemoryFile* CSeqDBAtlas::GetMemoryFile(const string& fileName)
+// {
+//     std::lock_guard<std::mutex> guard(m_FileMemMapMutex);
+//     auto it = m_FileMemMap.find(fileName);
+//     ...
+//     CAtlasMappedFile* file(new CAtlasMappedFile(fileName));
+//     m_FileMemMap[fileName].reset(file);
+// ```
+// NCBI opens a database file once for the process, and every thread reads it there. LOSAT does
+// the same with one descriptor (LOSAT/src/seqdb/file.rs: a seek and a read under a lock), so a
+// descriptor must name the same open file on every thread, as in the native process's table.
+// Node's WASI keeps its table in the instance (uvwasi), and each thread worker has its own, so a
+// descriptor that one thread opened was EBADF on the others (-db with 2 or more threads,
+// 2026-10-26). In a command that may run more than one thread, the host therefore opens itself
+// (Node's fs, whose descriptors belong to the process) each regular file that path_open opens
+// from the preopened "/" for reading only (no open or descriptor flags, no write right), enters
+// it in a table that every thread shares (the OS descriptor, the file position and the rights)
+// and gives the guest SHARED_FD_BASE + its slot; each thread then reads, seeks, stats and closes
+// such a descriptor itself, through the table. Every other open (for writing, a directory, a
+// FIFO, one that fails, with uvwasi's errno) stays with the calling thread's uvwasi as before.
+// (One I/O worker that ran the file functions of every thread was tried first: each call waited
+// until that worker was scheduled on the 16 busy CPUs, and BLASTN at 16 threads took 22.6 s
+// instead of 9.3 s on ws, 2026-10-27.)
+const SHARED_FD_BASE = 0x40000000, SHARED_FDS = 1024;
+const WASI_EBADF = 8, WASI_EINVAL = 28, WASI_EIO = 29, WASI_ENOTSUP = 58, WASI_ENOTCAPABLE = 76;
+const WASI_ERRNO = { EACCES: 2, EBADF: WASI_EBADF, EINVAL: WASI_EINVAL, EIO: WASI_EIO, EISDIR: 31, ENOENT: 44, EOVERFLOW: 61 };
+const RIGHT_FD_WRITE = 1n << 6n, LOOKUP_SYMLINK_FOLLOW = 1, FILETYPE_REGULAR_FILE = 4, PREOPEN_ROOT_FD = 3;
+// The table: per slot the OS descriptor (-1 free, -2 being entered), the position, the rights.
+const sharedFileViews = table => ({ os: new Int32Array(table, 0, SHARED_FDS),
+  position: new BigInt64Array(table, 4 * SHARED_FDS, SHARED_FDS),
+  rights: new BigUint64Array(table, 12 * SHARED_FDS, 2 * SHARED_FDS) });
+function sharedFileTable() {
+  const table = new SharedArrayBuffer(28 * SHARED_FDS);
+  sharedFileViews(table).os.fill(-1);
+  return table;
+}
+
+// The file functions of one thread with the shared table in front of its own uvwasi functions
+// (`local`, which take the guest's signed i32 values themselves).
+function sharedFileImports(table, memory, local) {
+  const { os, position, rights } = sharedFileViews(table);
+  const slotOf = fd => (fd >>> 0) - SHARED_FD_BASE;
+  const shared = fd => slotOf(fd) >= 0 && slotOf(fd) < SHARED_FDS;
+  // The guest's memory as this isolate sees it; memory.grow(0) updates the view when the guest
+  // grew the memory on another thread (see the start of a thread below).
+  const buffer = end => {
+    if (end > memory.buffer.byteLength) memory.grow(0);
+    return memory.buffer;
+  };
+  const view = (pointer, length) => new DataView(buffer(pointer + length), pointer, length);
+  const read = (descriptor, iovs, count, at) => {
+    let total = 0n;
+    const vectors = view(iovs, 8 * count);
+    for (let i = 0; i < count; i++) {
+      const pointer = vectors.getUint32(8 * i, true), length = vectors.getUint32(8 * i + 4, true);
+      if (length === 0) continue;
+      const got = fs.readSync(descriptor, new Uint8Array(buffer(pointer + length), pointer, length), 0, length, at + total);
+      total += BigInt(got);
+      if (got < length) break;
+    }
+    return total;
+  };
+  const imports = {};
+  // Any function given a shared descriptor where that is not one of the files: no right to it.
+  for (const [name, call] of Object.entries(local)) {
+    if (!/^(fd|path|sock)_/.test(name)) continue;
+    const fds = { path_symlink: [2], path_rename: [0, 3], path_link: [0, 4], fd_renumber: [0, 1] }[name] || [0];
+    imports[name] = (...args) => (fds.some(i => shared(args[i])) ? WASI_ENOTCAPABLE : call(...args));
+  }
+  const own = (name, op) => {
+    const call = imports[name];
+    imports[name] = (fd, ...args) => {
+      if (!shared(fd)) return call(fd, ...args);
+      const slot = slotOf(fd), descriptor = Atomics.load(os, slot);
+      if (descriptor < 0) return WASI_EBADF;
+      try {
+        return op(slot, descriptor, ...args.map(arg => (typeof arg === "number" ? arg >>> 0 : arg))) ?? 0;
+      } catch (err) {
+        return WASI_ERRNO[err && err.code] ?? WASI_EIO;
+      }
+    };
+  };
+  own("fd_read", (slot, descriptor, iovs, count, nread) => {
+    const got = read(descriptor, iovs, count, Atomics.load(position, slot));
+    Atomics.add(position, slot, got);
+    view(nread, 4).setUint32(0, Number(got), true);
+  });
+  own("fd_pread", (slot, descriptor, iovs, count, offset, nread) => {
+    view(nread, 4).setUint32(0, Number(read(descriptor, iovs, count, BigInt.asUintN(64, offset))), true);
+  });
+  own("fd_seek", (slot, descriptor, offset, whence, result) => {
+    const from = [0n, Atomics.load(position, slot), fs.fstatSync(descriptor, { bigint: true }).size][whence];
+    if (from === undefined || from + offset < 0n) return WASI_EINVAL;
+    Atomics.store(position, slot, from + offset);
+    view(result, 8).setBigUint64(0, from + offset, true);
+  });
+  own("fd_tell", (slot, descriptor, result) => { view(result, 8).setBigUint64(0, Atomics.load(position, slot), true); });
+  own("fd_close", (slot) => {
+    const descriptor = Atomics.exchange(os, slot, -1);
+    if (descriptor < 0) return WASI_EBADF;
+    fs.closeSync(descriptor);
+  });
+  own("fd_filestat_get", (slot, descriptor, result) => {
+    const stat = fs.fstatSync(descriptor, { bigint: true }), out = view(result, 64);
+    for (const [at, value] of [[0, stat.dev], [8, stat.ino], [16, 0n], [24, stat.nlink], [32, stat.size],
+      [40, stat.atimeNs], [48, stat.mtimeNs], [56, stat.ctimeNs]]) out.setBigUint64(at, value, true);
+    out.setUint8(16, FILETYPE_REGULAR_FILE);
+  });
+  own("fd_fdstat_get", (slot, descriptor, result) => {
+    const out = view(result, 24);
+    out.setBigUint64(0, 0n, true);
+    out.setUint8(0, FILETYPE_REGULAR_FILE);
+    out.setBigUint64(8, rights[2 * slot], true);
+    out.setBigUint64(16, rights[2 * slot + 1], true);
+  });
+  own("fd_fdstat_set_rights", (slot, descriptor, base, inheriting) => {
+    [base, inheriting] = [BigInt.asUintN(64, base), BigInt.asUintN(64, inheriting)];
+    if ((base & ~rights[2 * slot]) || (inheriting & ~rights[2 * slot + 1])) return WASI_ENOTCAPABLE;
+    [rights[2 * slot], rights[2 * slot + 1]] = [base, inheriting];
+  });
+  own("fd_fdstat_set_flags", (slot, descriptor, flags) => (flags === 0 ? 0 : WASI_ENOTSUP));
+  own("fd_advise", () => 0);
+  own("fd_sync", (slot, descriptor) => { fs.fsyncSync(descriptor); });
+  own("fd_datasync", (slot, descriptor) => { fs.fdatasyncSync(descriptor); });
+  own("fd_prestat_get", () => WASI_EBADF);
+  own("fd_prestat_dir_name", () => WASI_EBADF);
+  const pathOpen = imports.path_open;
+  imports.path_open = (...args) => {
+    const [dirfd, dirflags, path, pathLength, oflags] = args.slice(0, 5).map(arg => arg >>> 0);
+    const [base, inheriting, fdflags, opened] = [BigInt.asUintN(64, args[5]), BigInt.asUintN(64, args[6]), args[7] >>> 0, args[8] >>> 0];
+    if (dirfd !== PREOPEN_ROOT_FD || oflags !== 0 || fdflags !== 0 || (base & RIGHT_FD_WRITE)) return pathOpen(...args);
+    let descriptor = -1;
+    try {
+      const host = "/" + Buffer.from(buffer(path + pathLength), path, pathLength).toString();
+      const follow = (dirflags & LOOKUP_SYMLINK_FOLLOW) !== 0;
+      // Not opened unless it is a regular file now (opening a FIFO waits for its writer).
+      const stat = (follow ? fs.statSync : fs.lstatSync)(host, { throwIfNoEntry: false });
+      if (!stat || !stat.isFile()) return pathOpen(...args);
+      descriptor = fs.openSync(host, fs.constants.O_RDONLY | (follow ? 0 : fs.constants.O_NOFOLLOW));
+      if (!fs.fstatSync(descriptor).isFile()) throw new Error("not a regular file");
+    } catch {
+      if (descriptor >= 0) fs.closeSync(descriptor);
+      return pathOpen(...args);
+    }
+    for (let slot = 0; slot < SHARED_FDS; slot++) {
+      if (Atomics.load(os, slot) !== -1 || Atomics.compareExchange(os, slot, -1, -2) !== -1) continue;
+      Atomics.store(position, slot, 0n);
+      [rights[2 * slot], rights[2 * slot + 1]] = [base, inheriting];
+      Atomics.store(os, slot, descriptor);
+      view(opened, 4).setUint32(0, SHARED_FD_BASE + slot, true);
+      return 0;
+    }
+    // A full table: the thread's own uvwasi opens it, as before.
+    fs.closeSync(descriptor);
+    return pathOpen(...args);
+  };
+  return imports;
+}
+
+function createImports(wasi, memory, spawnThread, extra, files) {
   const wasiImport = unsignedWasiImports(wasi.wasiImport);
+  const local = { ...wasiImport, fd_write: blockingStdioWrite(wasiImport.fd_write) };
   return {
     ...extra,
     env: { memory },
     wasi: { "thread-spawn": spawnThread },
-    wasi_snapshot_preview1: { ...wasiImport, fd_write: blockingStdioWrite(wasiImport.fd_write) },
+    wasi_snapshot_preview1: files ? { ...local, ...sharedFileImports(files, memory, local) } : local,
   };
 }
 
-async function instantiateWithMemory(module, memory, args, spawnThread, provided, wasi = createWasi(args)) {
+async function instantiateWithMemory(module, memory, args, spawnThread, provided, wasi = createWasi(args), files = null) {
   const instance = await WebAssembly.instantiate(
     module,
-    createImports(wasi, memory, spawnThread, hostImports(module, provided)),
+    createImports(wasi, memory, spawnThread, hostImports(module, provided), files),
   );
   return { instance, wasi };
 }
 
-async function instantiateMain(module, args, spawnThread, limits, provided) {
+async function instantiateMain(module, args, spawnThread, limits, provided, files) {
   const initial = parsePositiveIntEnv("LOSAT_WASM_MEMORY_INITIAL_PAGES", limits.initial);
   // A maximum given in the environment is used as it is, without stepping down.
   const requested = parsePositiveIntEnv("LOSAT_WASM_MEMORY_MAXIMUM_PAGES", limits.maximum);
   const { memory, maximum } = createSharedMemory(initial, requested,
     process.env.LOSAT_WASM_MEMORY_MAXIMUM_PAGES === undefined);
   debug(`shared memory: initial ${initial} pages, maximum ${maximum} pages (module declares ${limits.maximum})`);
-  return { ...await instantiateWithMemory(module, memory, args, spawnThread, provided), memory };
+  return { ...await instantiateWithMemory(module, memory, args, spawnThread, provided, undefined, files), memory };
 }
 
 async function terminateWorkers(workers) {
@@ -449,6 +616,9 @@ async function prepareThreadHost(wasmPath, kind) {
 async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) {
   const args = [wasmPath, ...argv];
   const prespawn = prespawnCount(argv), recycle = recycleWorkers(kind);
+  // The table of the files that every thread reads (sharedFileImports), in a command that
+  // requests 2 or more threads.
+  const files = kind === "threaded-command" && requestedThreads(argv) >= 2 ? sharedFileTable() : null;
   const workers = new Set(), exits = new Map(), events = [], standby = [];
   // LOSAT_WASI_RECYCLE: the workers that run one guest thread after another, the guest threads
   // they run now (tids), and how each of those threads' exit promise is resolved.
@@ -503,7 +673,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   const recycledWorker = (data) => {
     const control = new SharedArrayBuffer(4 * START_WORDS);
     const worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
-      control, fault: options.fault || null, recycle: true, ...data } });
+      control, files, fault: options.fault || null, recycle: true, ...data } });
     const slot = { index: nextSlot++, worker, control, state: new Int32Array(control), tid: data.tid ?? null };
     if (data.tid === undefined) Atomics.store(slot.state, SLOT_STATE, SLOT_PREPARING);
     worker.on("message", message => {
@@ -572,7 +742,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     let worker;
     try {
       worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
-        startArg, tid, control, fault: options.fault || null } });
+        startArg, tid, control, files, fault: options.fault || null } });
     } catch (err) { event("spawn_rejected", { tid, error: String(err) }); return -1; }
     workers.add(worker); event("spawned", { tid });
     exits.set(worker, new Promise(resolve => {
@@ -605,7 +775,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
       let worker;
       try {
         worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
-          control, standby: index, fault: options.fault || null } });
+          control, files, standby: index, fault: options.fault || null } });
       } catch (err) { event("standby_rejected", { standby: index, error: String(err) }); return; }
       worker.unref();
       const slot = { index, worker, control, tid: null };
@@ -625,7 +795,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
       standby.push(slot); event("standby_spawned", { standby: index });
     }
   };
-  const instantiated = await instantiateMain(module, args, spawnThread, identity.memory, options.imports);
+  const instantiated = await instantiateMain(module, args, spawnThread, identity.memory, options.imports, files);
   mainMemory = instantiated.memory;
   const { instance, wasi } = instantiated;
   if (kind === "threaded-reactor") wasi.initialize(instance);
@@ -653,6 +823,8 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
       for (const slot of standby) event("standby_unused", { standby: slot.index });
       await Promise.all([terminateWorkers(workers), terminateWorkers(new Set(standby.splice(0).map(slot => slot.worker))),
         terminateWorkers(new Set(recycled.splice(0).map(slot => slot.worker)))]);
+      // The shared files that the guest left open.
+      if (files) for (const descriptor of sharedFileViews(files).os) if (descriptor >= 0) fs.closeSync(descriptor);
       exits.clear();
     },
   };
@@ -660,7 +832,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
 module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir };
 
 if (!isMainThread) {
-  const { module: workerModule, wasmPath, args, memory, control, fault, standby, recycle } = workerData;
+  const { module: workerModule, wasmPath, args, memory, control, files, fault, standby, recycle } = workerData;
   // A standby worker (LOSAT_WASI_PRESPAWN) learns its tid and startArg from its start order,
   // and so does a recycled worker (LOSAT_WASI_RECYCLE) for every thread after its first.
   let { startArg, tid } = workerData;
@@ -692,7 +864,7 @@ if (!isMainThread) {
         // recycled worker keeps its one WASI context (bound once to the same shared memory): a
         // new context per thread would hold one more open preopen descriptor for each thread.
         const created = wasi === null;
-        const instantiated = await instantiateWithMemory(module, memory, args, spawnThread, undefined, wasi ?? undefined);
+        const instantiated = await instantiateWithMemory(module, memory, args, spawnThread, undefined, wasi ?? undefined, files);
         const { instance } = instantiated;
         wasi = instantiated.wasi;
         if (created) initializeWasiThreadInstance(wasi, instance);

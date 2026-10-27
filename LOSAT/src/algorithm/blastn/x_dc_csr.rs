@@ -115,6 +115,15 @@ pub struct Csr {
     qs: Vec<u32>,
 }
 
+// EXPERIMENT (LOSAT_X_BNSHRINKFREE): the two vectors are shrunk before they are freed, so that
+// glibc's mmap threshold stays put (`x_shrink_free`).
+impl Drop for Csr {
+    fn drop(&mut self) {
+        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.offsets));
+        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.qs));
+    }
+}
+
 impl Csr {
     /// The 1-based query offsets of the cell's chain, in its order.
     #[inline(always)]

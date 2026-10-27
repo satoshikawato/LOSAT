@@ -10398,21 +10398,23 @@ fn search_query_batch(
     let t_encode = crate::utils::xtiming::clock();
     // `-strand plus` or `minus` builds the buffer serially from the contexts that are searched
     // (`build_strand_query_blastna_buffer`); `both` is the code of the search without the option.
-    let encoded_query_buffer = if strand == QueryStrand::Both {
-        x_query_prep_par::query_buffer(
-            &query_letters,
-            &query_context_offsets,
-            query_concat_length,
-            parallel_pool,
-        )
-    } else {
-        build_strand_query_blastna_buffer(
-            &query_letters,
-            &query_context_offsets,
-            query_concat_length,
-            strand,
-        )
-    };
+    // EXPERIMENT (LOSAT_X_BNSHRINKFREE): shrunk before it is freed when the batch ends.
+    let encoded_query_buffer =
+        crate::algorithm::blastn::x_shrink_free::Blastna(if strand == QueryStrand::Both {
+            x_query_prep_par::query_buffer(
+                &query_letters,
+                &query_context_offsets,
+                query_concat_length,
+                parallel_pool,
+            )
+        } else {
+            build_strand_query_blastna_buffer(
+                &query_letters,
+                &query_context_offsets,
+                query_concat_length,
+                strand,
+            )
+        });
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
     let encoded_query_concat_blastna_with_sentinels: &[u8] = &encoded_query_buffer;
     let encoded_query_concat_blastna: &[u8] = &encoded_query_buffer[1..query_concat_length + 1];

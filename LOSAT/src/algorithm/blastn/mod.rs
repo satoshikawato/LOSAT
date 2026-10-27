@@ -36,6 +36,8 @@ pub(crate) mod x_query_dust_par;
 // NCBI c++/src/algo/blast/core/na_ungapped.c:149-242 (`s_NuclUngappedExtendExact`). EXPERIMENT
 // (LOSAT_X_BNUNGAPCOUNT): the same loops with their step counts worked out first.
 pub(crate) mod x_ungap_count;
+// EXPERIMENT (LOSAT_X_BNSHRINKFREE): a query batch's largest buffers shrunk before they are freed.
+pub(crate) mod x_shrink_free;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-166
 // ```c
 // typedef struct BlastHSP {

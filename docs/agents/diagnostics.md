@@ -1822,8 +1822,8 @@ Rebuilding less:
   (0.985-1.010); minor faults 13.2k -> 5.2k (human x yeast).
 - `LOSAT_X_BPLK16=1` (BLASTP, memory; **opt-in** during the prototype (perf/bp-lk16, v4-D12 s19, `DECISIONS` 59): off unless
   the variable is set to anything but `0`; not in the strict set, so it is not in the `export` block above, and its row
-  of `switch_reach_expected.tsv` and its default come with the pull request after the measurement; it is in `OPT_IN`
-  of `xswitch.rs`, so `LOSAT_X_REACH` records its sides): exact blastp's block tables (`-task blastp`, the table built
+  of `switch_reach_expected.tsv`, its `LOSAT_X_REACH` sides and its default come with the pull request after the
+  measurement): exact blastp's block tables (`-task blastp`, the table built
   in place) hold 16-bit hits in 8-byte cells where the block's lookup query is at most 65,535 letters
   (`BlastAaLookupTable<BackboneCell16>`, `lookup/backbone.rs`: `num_used: u16` and `entries: [u16; 3]`; a cell with more
   than three hits keeps its cursor in the overflow array as a `u32` over `entries[0]` (low) and `entries[1]` (high)).

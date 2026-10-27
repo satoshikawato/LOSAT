@@ -416,19 +416,21 @@ impl XAaVectors {
         {
             return None;
         }
-        let mut backbone = std::mem::take(own_backbone);
+        let (mut backbone, mut overflow) =
+            (std::mem::take(own_backbone), std::mem::take(own_overflow));
+        // The other width's vectors are freed before this width's grow.
+        C::drop_other(self);
+        // Grown and filled in the order of before LOSAT_X_BPLK16: backbone, pv, overflow.
         backbone.clear();
         backbone.reserve_exact(backbone_size);
         backbone.resize(backbone_size, C::default());
-        let mut overflow = std::mem::take(own_overflow);
-        overflow.clear();
-        overflow.reserve_exact(overflow_size);
-        overflow.resize(overflow_size, C::Hit::default());
-        C::drop_other(self);
         let mut pv = std::mem::take(&mut self.pv);
         pv.clear();
         pv.reserve_exact(pv_size);
         pv.resize(pv_size, 0);
+        overflow.clear();
+        overflow.reserve_exact(overflow_size);
+        overflow.resize(overflow_size, C::Hit::default());
         Some((backbone, pv, overflow))
     }
 

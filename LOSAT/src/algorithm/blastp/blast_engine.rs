@@ -7636,7 +7636,10 @@ fn blastp_query_frames_marked(
 /// and the cells; the hits are the same in the same order.
 fn x_bplk16() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::opt_in("LOSAT_X_BPLK16"))
+    *ON.get_or_init(|| {
+        std::env::var_os("LOSAT_X_BPLK16")
+            .is_some_and(|value| value.to_str().map(str::trim) != Some("0"))
+    })
 }
 
 // No NCBI counterpart: chooses LOSAT's table (LOSAT_X_BPLK16); it does not change any value NCBI
@@ -7650,10 +7653,9 @@ fn x_bplk16_for(args: &ResolvedBlastpArgs, x_chunk: bool) -> bool {
 
 // No NCBI counterpart: LOSAT_X_BPLK16's table in the runtime lookup; it does not change any value
 // NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLK16): the runtime lookup of a table built with the switch on, counted for
-/// `LOSAT_X_REACH` (taken: the table has 16-bit hits).
+/// EXPERIMENT (LOSAT_X_BPLK16): the runtime lookup of a table built with the switch on (an opt-in
+/// switch records no `LOSAT_X_REACH` side; it does from the pull request that adds it to the set).
 fn x_bp_runtime_lookup(built: XBpLookup) -> BlastpRuntimeLookup {
-    crate::utils::xreach::x_reach!("LOSAT_X_BPLK16", matches!(built, XBpLookup::Narrow(_)));
     match built {
         XBpLookup::Wide(table) => BlastpRuntimeLookup::Aa(table),
         XBpLookup::Narrow(table) => BlastpRuntimeLookup::Aa16(table),

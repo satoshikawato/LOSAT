@@ -371,20 +371,6 @@ pub(crate) const GRADUATED: &[&str] = &[
     "LOSAT_X_TBNSSIDE",
 ];
 
-/// No NCBI counterpart: the opt-in switches that record the side they took (`x_reach!`,
-/// `utils/xreach.rs`), sorted by name. An opt-in switch is off unless its variable is set (to
-/// anything but `0`), is not in `STRICT_SET` and has no row in `switch_reach_expected.tsv`; it
-/// joins the set (and leaves this list) in the pull request that makes it the default.
-pub(crate) const OPT_IN: &[&str] = &["LOSAT_X_BPLK16"];
-
-/// No NCBI counterpart: whether the opt-in switch `name` (of `OPT_IN`) is on: its variable is set
-/// to anything but `0` (white space around the value is ignored). Reads the environment on every
-/// call; callers keep the result where it matters.
-pub(crate) fn opt_in(name: &str) -> bool {
-    debug_assert!(OPT_IN.contains(&name), "{name} is not an opt-in switch");
-    std::env::var_os(name).is_some_and(|value| !matches!(value.to_str().map(str::trim), Some("0")))
-}
-
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that
 /// is not UTF-8 is "any other value".
 fn state(value: Option<&OsStr>) -> bool {
@@ -462,15 +448,6 @@ mod tests {
     fn the_strict_set_names_are_distinct_and_sorted() {
         assert!(STRICT_SET.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(STRICT_SET.iter().all(|name| name.starts_with("LOSAT_X_")));
-    }
-
-    #[test]
-    fn the_opt_in_names_are_distinct_sorted_and_outside_the_set() {
-        assert!(OPT_IN.windows(2).all(|pair| pair[0] < pair[1]));
-        assert!(OPT_IN.iter().all(|name| name.starts_with("LOSAT_X_")));
-        assert!(OPT_IN
-            .iter()
-            .all(|name| !STRICT_SET.contains(name) && !GRADUATED.contains(name)));
     }
 
     #[test]

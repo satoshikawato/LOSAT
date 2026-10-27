@@ -61,6 +61,18 @@ pub(crate) fn x_mapped_capacity(elements: usize, size: usize) -> usize {
     }
 }
 
+/// No NCBI counterpart (LOSAT_X_BPDBKEEP): the capacity, in elements of `size` bytes, of a buffer
+/// of `elements` that glibc maps whatever its size and whose free leaves the mmap threshold as it
+/// is (above glibc's ceiling; `elements` elsewhere). Its pages beyond those touched are not
+/// resident.
+pub(crate) fn x_unthresholded_capacity(elements: usize, size: usize) -> usize {
+    if X_MAPPED_ALLOCATOR {
+        elements.max(X_MAPPED_BYTES.div_ceil(size.max(1)))
+    } else {
+        elements
+    }
+}
+
 /// No NCBI counterpart: `Vec::reserve(additional)` (the same doubling), with the capacity of
 /// `x_mapped_capacity` once the buffer reaches `X_MAPPED_FROM` bytes.
 pub(crate) fn x_reserve_mapped<T>(v: &mut Vec<T>, additional: usize) {

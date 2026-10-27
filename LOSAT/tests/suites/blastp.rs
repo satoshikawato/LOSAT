@@ -37,6 +37,8 @@ mod blastp_prelim_free;
 mod blastp_query_blocks;
 #[path = "../blastp_query_blocks_fmt.rs"]
 mod blastp_query_blocks_fmt;
+#[path = "../blastp_query_slots.rs"]
+mod blastp_query_slots;
 #[path = "../blastp_redo_db_subjects.rs"]
 mod blastp_redo_db_subjects;
 #[path = "../blastp_redo_fit.rs"]

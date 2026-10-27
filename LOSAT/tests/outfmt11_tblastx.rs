@@ -338,17 +338,16 @@ fn cases() -> Vec<Case> {
 /// on `batches_sub`) or the switch acts on every run (class `always`); the `=0` run then takes a
 /// path other than the default one. The seed stage's switches (`PAIRPARGATE`, `SEEDCOMPACT`,
 /// `TBXHITBF`, `TBXKMERGE`, `TBXSCANBF`), the pool's (`TBXNEXT`, `TBXQFRAMES`, `TBXRPTPAR`,
-/// `TBXPIPE`: the next batch starts while the batch before links) and the always-on ones
-/// (`SUMPMEMO`) change what the search does, not what the
-/// archive reads: the first query's block, search space and masks and the final hits.
+/// `TBXPIPE`: the next batch starts while the batch before links) change what the search does,
+/// not what the archive reads: the first query's block, search space and masks and the final hits.
 /// `DISPTABLE` is not here: it acts only where a format reads displayed counts, which outfmt 11
 /// never builds, so its `=0` run is the default run. `lenbatch_sub` x `TBXPIPE` is not here for
 /// the same reason (4 threads take the reference side on that case). `TBXEXTBATCH`, `TBXLUT`,
 /// `TBXPREFETCH`, `TBXQSLICE`, `TBXUNITMASK` and `SEEDUNMAP` are not needed: they change only
 /// the seed scan of the PAIRPAR units (value switches reach their new side with a small value on
 /// a 200 kb pair), and the archive reads the final hits and the batch set-up's query statistics,
-/// which are made before the seed stage. The review sweep (26 switches, `ERFABSORB`, `TBXFRAMES`
-/// and `TBXUNGAP` since graduated, against 26 archive
+/// which are made before the seed stage. The review sweep (26 switches, `ERFABSORB`, `SUMPMEMO`,
+/// `TBXFRAMES` and `TBXUNGAP` since graduated, against 26 archive
 /// cases, `S/of8/logs/RESULTS_impl_b3.md`) covers every switch.
 const STRICT_SET_RUNS: &[(&str, &str)] = &[
     ("batches_sub", "LOSAT_X_PAIRPARGATE"),
@@ -362,7 +361,6 @@ const STRICT_SET_RUNS: &[(&str, &str)] = &[
     ("batches_sub", "LOSAT_X_TBXSCANBF"),
     ("segbatch_sub", "LOSAT_X_TBXQFRAMES"),
     ("stop1batch_sub", "LOSAT_X_TBXPIPE"),
-    ("batches_sub", "LOSAT_X_SUMPMEMO"),
 ];
 
 fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {

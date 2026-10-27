@@ -32,6 +32,8 @@ mod query_split;
 mod seqalign;
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries searched in blocks of whole query batches.
 mod x_query_blocks;
+// EXPERIMENT (LOSAT_X_BPQSLOTS): blastp-fast's query blocks searched several at a time.
+mod x_query_slots;
 // EXPERIMENT (LOSAT_X_BPREDOFIT): redone HSP lists without spare room.
 mod x_redo_fit;
 // EXPERIMENT (LOSAT_X_BPREDOPAR): the composition-based redo with jobs
@@ -75,6 +77,12 @@ pub fn x_bp_hit_bf_print_summary() {
 // No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_bp_lkp_ahead_print_summary() {
     blast_engine::x_lookup_ahead::x_bp_lkp_ahead_print_summary();
+}
+
+/// EXPERIMENT (LOSAT_X_BPQSLOTS): the `[X_STATS] BPQSLOTS` line at exit.
+// No NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_bp_qslots_print_summary() {
+    x_query_slots::x_bp_qslots_print_summary();
 }
 
 pub use args::BlastpArgs;

@@ -353,6 +353,7 @@ export LOSAT_X_BPQBLOCKSA=1
 export LOSAT_X_BPQBLOCKWEB=1
 export LOSAT_X_BPQBLOCKXML=1
 export LOSAT_X_BPQBLOCKXML2=1
+export LOSAT_X_BPQSLOTS=1
 export LOSAT_X_BPREDODBSUBJ=1
 export LOSAT_X_BPREDOFIT=1
 export LOSAT_X_BPREDOLPT=1
@@ -2635,6 +2636,26 @@ Rebuilding less:
   In a `run_local` call with several outputs, hit records or an observer (`LOSAT_X_BPQBLOCKWEB`), an outfmt 13 to 16
   output does not take blocks (the run-level frame and carry were verified for one CLI-style output only): the
   format is recorded for `LOSAT_X_REACH` and the search of all queries runs (Owner-delegated 2026-10-22).
+- `LOSAT_X_BPQSLOTS=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added it,
+  2026-10-27, on unless it is `0`; acts only in the block search of `LOSAT_X_BPQBLOCK`) two query blocks searched at
+  a time on the search's pool, each block's report and messages written in block order
+  (`blastp/x_query_slots.rs`, exactness argument in its header). The block loop runs one block at a time on the
+  whole pool, and each block's stages end in joins with serial parts between them: in the human x yeast blastp-fast
+  search at 16 threads (Species4 x Species6 `-subject`, 254 blocks of about 18 ms) about 1.8 of the 16 threads
+  waited all the time, and most block ends drained the pool (line R `REPORT_R17.md` §3.1). With the switch two
+  drivers on the pool each take the next block and search it with the block loop's call; a thread that waits in
+  one block's join takes the other block's tasks. One form (two blocks: the block and the next one, whose whole
+  search runs beside it where `LOSAT_X_BPLKPAHEAD` builds only its table), with blocks of `2 x LOSAT_X_BPQBLOCK / 3`
+  letters (33,333 by default), so that the two tables in flight and the build of the next hold the letters of
+  the block loop's block and its table built ahead (the build's transient vectors are as large as a table:
+  78 appends of 4 bytes per query letter). No table is built ahead; each table is dropped before its block's
+  redo (`LOSAT_X_BPLKDROP`). A driver takes a block only while fewer than 8 blocks are searched or wait to be
+  written. Where: a pool of more than one thread, one output that is not outfmt 11 (the archive carries state from
+  document to document) or 13 to 16 (`Xml2Carry`), no hit records and no observer, native and wasm32 with
+  `wasm-threads`; exact blastp keeps the block loop (its in-place builds share neighbour lists that one build uses
+  at a time). One thread runs the block loop unchanged. `LOSAT_TIMING`'s per-block lines of the two blocks come
+  interleaved. `LOSAT_X_STATS` prints `[X_STATS] BPQSLOTS searches=<n> blocks=<n>`. Reports identical; off =
+  `LOSAT_X_BPQSLOTS=0`. Evidence: v4-BPF s7 (2026-10-27).
 - `LOSAT_X_BPQBLOCKWEB=1` (BLASTP in `run_local`, the LOSAT Web build's search, speed and memory; in the strict set
   from the pull request that added it, 2026-10-22, on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search
   of `LOSAT_X_BPQBLOCK` also for a call with more than one output, the hit records or a format observer (ABI v2 of the

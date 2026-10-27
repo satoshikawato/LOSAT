@@ -94,11 +94,22 @@
 //! them); `-verbose` and the debug output (`x_debug_output`, the list LOSAT_X_QBATCHPAR uses); and
 //! the refusals above. The command line (`-out` file or standard output) and ABI v1 are streamed.
 //!
+//! The taxonomy database (DBID item T): NCBI prefetches the subjects that each batch reports
+//! before the batch's reports in outfmt 0, 5, 6, 7 and 17, and with `taxdb.bti` on the search path
+//! the taxonomy database writes its messages there; the batch loop adds them to the warnings of
+//! the batch's first query (`run_in_pool`), so both paths write them before that query's report.
+//! Their lookups can be refused (a taxonomy database or a taxid that LOSAT cannot read as NCBI
+//! does), in the batch that first reports the sequence: with `taxdb.bti` found and a format that
+//! prefetches, the stream also needs every sequence's taxid to decode and no lookup that could
+//! be refused (`database::x_streaming_refusal` with `taxids`, `Off::Taxonomy`).
+//!
 //! Outfmt 17 (SAM) streams also where a stored title or ambiguity data of the database could be
 //! refused in a later batch (`Off::Titles`, `Off::Ambiguity`; `Ready::sam_despite`): the document
 //! is written only by `SamDocument::finish`, which no refusal of LOSAT's follows, and a SAM report
 //! call writes nothing to standard error (`writes_query_warnings`), so a refusal in a later batch
-//! still finds nothing written, as in the one call after the loop.
+//! still finds nothing written, as in the one call after the loop. Not with `taxdb.bti` on the
+//! search path: each batch's report call then writes the taxonomy database's messages of its
+//! prefetch (DBID item T, above).
 //! `finish_sam` at NCBI's five error sites writes the document of the batches before as in the off
 //! path. Memory: the records of the batches before are rendered text, and each batch's lists are
 //! dropped, as for any streamed search.
@@ -177,6 +188,9 @@ pub(super) enum Off {
     /// A database sequence whose ambiguity data the traceback cannot decode (outfmt 17 streams
     /// all the same).
     Ambiguity,
+    /// A lookup of the taxonomy database that could be refused, where the batches' prefetch
+    /// reads it (outfmt 0, 6, 7 and 17 with `taxdb.bti` on the search path).
+    Taxonomy,
 }
 
 impl Off {
@@ -192,6 +206,7 @@ impl Off {
             Off::SubjectIds => "subject_ids",
             Off::Titles => "titles",
             Off::Ambiguity => "ambiguity",
+            Off::Taxonomy => "taxonomy",
         }
     }
 }
@@ -544,30 +559,45 @@ fn check(
                 sam_despite: None,
             })
         }
-        SubjectSource::Database(db) => match database::x_streaming_refusal(db, pool) {
-            // Outfmt 17 writes no byte before its end (`SamDocument::finish`, which no refusal of
-            // LOSAT's follows) and nothing to standard error with its report calls (a SAM format
-            // writes no query warnings, `writes_query_warnings`), so a
-            // refusal in a later batch (a stored title, ambiguity data) still finds nothing
-            // written, as in the one call after the loop: the stream acts.
-            Some(off @ (Off::Titles | Off::Ambiguity))
-                if output_formats
-                    .iter()
-                    .any(|format| format.sam_spec().is_some()) =>
-            {
-                Ok(Ready {
+        SubjectSource::Database(db) => {
+            // With `taxdb.bti` on the search path the batches' prefetch of outfmt 0, 6, 7 and 17
+            // reads the taxonomy database (`BlastnDatabase::prefetch_messages`), which can
+            // refuse; and each batch's report call writes its messages to standard error
+            // (DBID item T). One format is streamed (`Off::Outputs`), the first.
+            let prefetch = output_formats
+                .first()
+                .is_some_and(|format| format.prefetches_subjects())
+                && db.taxdb_found();
+            match database::x_streaming_refusal(db, prefetch, pool) {
+                // Outfmt 17 writes no byte before its end (`SamDocument::finish`, which no
+                // refusal of LOSAT's follows) and nothing to standard error with its report calls
+                // (a SAM format writes no query warnings, `writes_query_warnings`), so a
+                // refusal in a later batch (a stored title, ambiguity data) still finds nothing
+                // written, as in the one call after the loop: the stream acts. Not where the
+                // prefetch reads the taxonomy database: its messages are written with each
+                // batch's report call, which a title's refusal in a later batch's report call
+                // (`database::reported_subjects`) would follow, where the one call after the
+                // loop writes nothing before it.
+                Some(off @ (Off::Titles | Off::Ambiguity))
+                    if !prefetch
+                        && output_formats
+                            .iter()
+                            .any(|format| format.sam_spec().is_some()) =>
+                {
+                    Ok(Ready {
+                        cache: None,
+                        one_batch: false,
+                        sam_despite: Some(off),
+                    })
+                }
+                Some(off) => Err(off),
+                None => Ok(Ready {
                     cache: None,
                     one_batch: false,
-                    sam_despite: Some(off),
-                })
+                    sam_despite: None,
+                }),
             }
-            Some(off) => Err(off),
-            None => Ok(Ready {
-                cache: None,
-                one_batch: false,
-                sam_despite: None,
-            }),
-        },
+        }
     }
 }
 

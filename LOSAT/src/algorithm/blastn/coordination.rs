@@ -15,7 +15,7 @@ use super::constants::{
 };
 use super::disc_lookup::DiscWordType;
 use super::lookup::{
-    build_db_word_counts, build_disc_mb_lookup, build_na_lookup, build_pv_direct_lookup,
+    build_db_word_counts, build_disc_mb_lookup_kept, build_na_lookup, build_pv_direct_lookup,
     build_two_stage_lookup_kept, x_mb_lut_keep, NaLookupTable, PvDirectLookup, TwoStageLookup,
 };
 use crate::blastinput::fasta_reader::{FastaRecord, InputRecord};
@@ -1171,7 +1171,7 @@ pub fn build_lookup_tables<R: InputRecord>(
     //                                      counts);
     // ```
     let two_stage_lookup: Option<TwoStageLookup> = if config.mb_template_length > 0 {
-        Some(build_disc_mb_lookup(
+        Some(build_disc_mb_lookup_kept(
             queries_blastna,
             query_offsets,
             config.effective_word_size,
@@ -1179,6 +1179,7 @@ pub fn build_lookup_tables<R: InputRecord>(
             config.mb_template_type,
             query_masks,
             approx_table_entries,
+            x_keep,
         ))
     } else if config.use_two_stage {
         Some(build_two_stage_lookup_kept(

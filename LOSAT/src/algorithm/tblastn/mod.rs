@@ -92,4 +92,5 @@ pub use x_scan_bf::print_summary as x_scan_bf_print_summary;
 pub use x_scan_byte::print_summary as x_scan_byte_print_summary;
 // The summary line of the linking lookup that `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
+pub use stage_d_linking::x_link_ctx_print_summary;
 pub use stage_d_linking::x_link_window_print_summary;

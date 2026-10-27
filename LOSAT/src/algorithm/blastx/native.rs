@@ -28,7 +28,9 @@ use super::{
     runtime::BatchResults,
     subjects::{Subjects, UnreadableSubjects},
 };
-use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
+use crate::algorithm::common::database::{
+    prefetches_subjects, HeaderReadError, PreliminaryReadError, TaxonomyRefusal,
+};
 use crate::report::blast_xml2::{FsSideFiles, NoSideFiles, RunSideFiles, Xml2Kind};
 use anyhow::{bail, Result};
 use std::{
@@ -549,15 +551,20 @@ fn run_inner(
         let query_file = File::open(&args.query).map_err(|_| inaccessible("query", &args.query))?;
         let messages_may_be_refused =
             super::blast_xml::prescan_queries(query_file, args.lcase_masking)?;
-        // The XML2 and JSON documents of a `-db` search with a taxonomy database on the search
-        // path: a later batch can still refuse the scientific name of a taxid, or the damaged
-        // database (`read_reported_taxids`, which needs the batch's hits). The taxids of every
-        // sequence are looked up here, once, and the output is held only when one of them would
-        // be refused (DECISIONS 32); the usual run, in which none is, writes batch by batch.
-        let taxdb_may_refuse = choice.number != 5
-            && database
-                .as_ref()
-                .is_some_and(|database| database.taxdb_found() && database.taxdb_may_refuse());
+        // The documents of a `-db` search with a taxonomy database on the search path: a later
+        // batch can still refuse the scientific name of a taxid (XML2 and JSON), or the damaged
+        // database (`read_reported_taxids`, which needs the batch's hits; outfmt 5 looks the
+        // batch's subjects up in its prefetch, `ReportedSubjects::prefetch_messages`, DBID item
+        // T). The taxids of every sequence are looked up here, once, and the output is held only
+        // when one of them would be refused (DECISIONS 32; outfmt 5 asks no scientific name); the
+        // usual run, in which none is, writes batch by batch. Outfmt 5's prefetch is also refused
+        // at the run's first prefetch where NCBI's taxonomy cache would repeat the offset error
+        // (`BlastxDatabase::prefetch_refused`), after the prolog: the run holds then too.
+        let prefetch = prefetches_subjects(Some(choice.number));
+        let taxdb_may_refuse = database.as_ref().is_some_and(|database| {
+            database.taxdb_found()
+                && (database.taxdb_may_refuse(!prefetch) || prefetch && database.prefetch_refused())
+        });
         // A database with parsed Seq-ids: a later batch can still refuse one of its subjects
         // (`ReportedSubjects::for_batch`), which only the batch's hits show.
         let parsed_may_be_refused = database
@@ -888,7 +895,7 @@ fn run_inner(
                             matches!(options.outfmt, 0 | 5 | 13..=16),
                         );
                         super::x_timing::run(XRun::Titles, x_t);
-                        reported
+                        let reported = reported
                             .map_err(|error| match error.downcast::<HeaderReadError>() {
                                 Ok(header) => header.error,
                                 // EXPERIMENT (LOSAT_X_BXDBSTREAM): a failed read of a record's residues.
@@ -912,7 +919,44 @@ fn run_inner(
                                         held.discard();
                                     }
                                 }
-                            })?
+                            })?;
+                        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
+                        // ```c++
+                        //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+                        //                 		                            fmt_args->GetFormattedOutputChoice());
+                        //             	ITERATE(CSearchResultSet, result, *results) {
+                        //                	    formatter.PrintOneResultSet(**result, query_batch);
+                        //             	}
+                        // ```
+                        // Before the reports of a batch NCBI fetches every subject that the batch
+                        // reports, and with `taxdb.bti` on the search path the taxonomy database
+                        // writes its messages there (`ReportedSubjects::prefetch_messages`: the
+                        // texts of opening it at the run's first lookup, a volume's lookup of a
+                        // taxid once per run): after the reader's messages of the reader batch,
+                        // which every batch loop writes before it calls this, and before the
+                        // warnings of its first query (`report::render_queries`). Outfmt 0, 5, 6
+                        // and 7 (`database::prefetches_subjects`); XML2 and JSON write theirs at
+                        // each `Hit` (`TaxdbPrinter`). Without `taxdb.bti` nothing is read. A
+                        // refusal comes after the reports of the batches before, as the refusals
+                        // of the batch's titles above (line DBID, DECISIONS 9 (9)); a refusal of
+                        // the taxonomy database (`TaxonomyRefusal`) drops what an outfmt 5 run
+                        // holds, and the run holds where one could come (`taxdb_may_refuse`
+                        // above), as XML2's does.
+                        if prefetches_subjects(Some(i32::from(options.outfmt)))
+                            && database.taxdb_found()
+                        {
+                            let messages = reported
+                                .prefetch_messages(database, results, options.gapped)
+                                .inspect_err(|error| {
+                                    if error.is::<TaxonomyRefusal>() {
+                                        if let Some(held) = &held {
+                                            held.discard();
+                                        }
+                                    }
+                                })?;
+                            diagnostics.write_all(&messages)?;
+                        }
+                        reported
                     }
                 };
                 report::render_queries(

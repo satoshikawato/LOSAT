@@ -15,6 +15,8 @@ mod tblastn_culling;
 mod tblastn_db_search;
 #[path = "../tblastn_db_stream.rs"]
 mod tblastn_db_stream;
+#[path = "../tblastn_link_ctx.rs"]
+mod tblastn_link_ctx;
 #[path = "../tblastn_link_window.rs"]
 mod tblastn_link_window;
 #[path = "../tblastn_oid_chunk.rs"]

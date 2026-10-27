@@ -363,3 +363,26 @@ formatters do not find again) and the two volumes `ids/njoined_a` and `ids/njoin
 `ids/njoined.nal` (`gb|AF000040|` and `gb|AF000040.1|`, whose hits NCBI's XML and outfmt 0 join). Queries:
 `LOSAT/tests/seqid/fasta/qnucl.fa` (BLASTN, TBLASTX) and `qprot.fa` (TBLASTN); the second query of each has
 no hit. TBLASTN and TBLASTX run with `-max_hsps 1` to keep the frozen files small.
+
+## The taxonomy database's prefetch messages (line DBID, item T, review 1)
+
+Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTDB=tests/seqdb/taxdb/offset_last_past_end`
+(the last entry, taxid 99990, begins past the end of `taxdb.btd`):
+
+- `tm_fast_q289.faa`: 289 copies of `qp1` of `x16_taxid_q.faa`, the first with its first letter replaced by `O` (a warning
+  of its own). With `-task blastp-fast` against `x16_taxid_99990` at two or more threads LOSAT_X_BPQSLOTS would search it
+  as two query blocks in flight; the offset error must come before that warning, at any thread count.
+- `tm_2vol.pal` (`DBLIST tm_2vol_a tm_2vol_b`): two volumes that are copies of `x16_taxid_99990` (`.phr .pin .psq`); NCBI
+  writes the offset error once per volume.
+- `tm_cache.faa` (`st1`, `st2`, `st3`: the same protein), `tm_cache_q.faa` (its query), and the databases built from them
+  with every file makeblastdb writes (version 5):
+
+      makeblastdb -in tm_cache.faa -dbtype prot -out tm_cache150 -title "tm cache 150" \
+          -parse_seqids -taxid_map tm_cache150.map
+      makeblastdb -in tm_cache.faa -dbtype prot -out tm_cache151 -title "tm cache 151" \
+          -parse_seqids -taxid_map tm_cache151.map
+
+  (run in this directory). `tm_cache150` holds the taxids 99990, 150, 99990: 150 takes the slot of 99990 (`99990 & 255`) in
+  NCBI's 256-slot taxonomy cache of a volume (`CSeqDBVol::m_TaxCache`), so NCBI writes the offset error again after a fetch
+  of 150, as often as its order of fetches makes it (twice for the row's query, once for the same query with a version 4
+  database or an absolute `BLASTDB`); LOSAT refuses the run. `tm_cache151` (151 instead of 150) is the control: once.

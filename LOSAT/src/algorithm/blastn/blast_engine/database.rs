@@ -160,7 +160,8 @@ pub(super) struct BlastnDatabase {
     db: SeqDb,
     name: String,
     metadata: SubjectMetadata,
-    /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16).
+    /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16,
+    /// and the batches' prefetch of outfmt 0, 5, 6, 7 and 17).
     taxdb: shared::TaxdbRun,
 }
 
@@ -285,6 +286,43 @@ impl BlastnDatabase {
             .map(|hsp| hsp.s_idx as usize)
             .collect();
         shared::read_reported_taxonomy(&self.db, &self.taxdb, ordinals, &reported, parsed, PROGRAM)
+    }
+
+    /// Whether `taxdb.bti` is on the search path, asked once for the run
+    /// (`shared::TaxdbRun::found`): the batches' prefetch reads the taxonomy database only then
+    /// (`prefetch_messages`).
+    pub(super) fn taxdb_found(&self) -> bool {
+        self.taxdb.found(&self.db)
+    }
+
+    /// NCBI's messages about the taxonomy database when the query batch whose final hit lists
+    /// are `hit_lists` (after their HSPs of score 0 were dropped, still naming the sequences by
+    /// ordinal id) prefetches the subjects it reports (`shared::prefetch_messages`): the
+    /// sequences with HSPs in them, the ones `read_taxids` reads, with the definition lines of
+    /// those with parsed Seq-ids from `titles` (`read_titles`). Empty, and nothing read, without
+    /// `taxdb.bti` on the search path. A taxonomy database that LOSAT cannot read as NCBI does,
+    /// and a header whose taxid does not decode, are refused.
+    pub(super) fn prefetch_messages(
+        &self,
+        titles: &DatabaseTitles,
+        hit_lists: &[Option<BlastnHitList>],
+    ) -> Result<Vec<u8>> {
+        let subjects = hit_lists
+            .iter()
+            .flatten()
+            .flat_map(|hit_list| {
+                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                &hit_list.hsplist_array[..count]
+            })
+            .filter(|hsp_list| !hsp_list.hsps.is_empty())
+            .map(|hsp_list| {
+                let parsed = match titles.get(&hsp_list.oid) {
+                    Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+                    _ => None,
+                };
+                (hsp_list.oid, parsed)
+            });
+        shared::prefetch_messages(&self.db, &self.taxdb, subjects, PROGRAM)
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).
@@ -1127,7 +1165,16 @@ impl ReportedSubjects {
 /// - `Off::Ambiguity`: a sequence whose ambiguity data the traceback cannot decode
 ///   (`traceback_listed` and `reported_subjects` read them with
 ///   `SequenceBlock::nucleotide_blastna`, first for the batch whose lists name the sequence; the
-///   preliminary stage reads the 2-bit letters only).
+///   preliminary stage reads the 2-bit letters only);
+/// - `Off::Taxonomy`, with `taxids` (the batches' prefetch reads the taxonomy database: outfmt 0,
+///   6, 7 and 17 with `taxdb.bti` on the search path, `BlastnDatabase::prefetch_messages`, DBID
+///   item T): a lookup of the taxonomy database that could be refused
+///   (`shared::taxdb_may_refuse` without the scientific names, which only XML2 and JSON write
+///   and XML is never streamed). The prefetch's refusal of NCBI's taxonomy cache
+///   (`shared::TaxdbRun::cache_collision`) comes at the run's first prefetch, in the first batch
+///   before its reports. A definition line whose taxid does not decode is `Off::Titles` then:
+///   the titles' pass decodes the taxids too (`SeqDb::visit_deflines_taxids`; one sequence at a
+///   time, `SeqDb::defline_taxids`), as blastp's block search does.
 /// Every ordinal id is read in `pool` (the titles, then the ambiguity data of the sequences that
 /// have any; `SeqDb::check_ambiguity` reads only those bytes); a reader error is a refusal too
 /// (the reports then stay after the loop, and the batch that meets the error fails where it does
@@ -1139,6 +1186,7 @@ impl ReportedSubjects {
 /// its block search (line DBID, DECISIONS 9 (6)), except SAM (`Ready::sam_despite`).
 pub(super) fn x_streaming_refusal(
     database: &BlastnDatabase,
+    taxids: bool,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Option<super::x_rpt_stream::Off> {
     let db = &database.db;
@@ -1164,10 +1212,17 @@ pub(super) fn x_streaming_refusal(
             let _ = pool;
             ranges.iter().all(allowed)
         };
+        // With `taxids` a record whose taxid does not decode is an `Err`
+        // (`visit_deflines_taxids`).
         let titles = |range: &BlockRange| -> bool {
-            db.visit_deflines(*range, |ordinal, deflines| {
+            let visit = |ordinal: u32, deflines| {
                 title_allowed(ordinal, shared::stored_title(deflines, ordinal, 0, PROGRAM))
-            })
+            };
+            if taxids {
+                db.visit_deflines_taxids(*range, visit)
+            } else {
+                db.visit_deflines(*range, visit)
+            }
         };
         if !all(&titles) {
             return Some(super::x_rpt_stream::Off::Titles);
@@ -1177,10 +1232,12 @@ pub(super) fn x_streaming_refusal(
         if !all(&ambiguity) {
             return Some(super::x_rpt_stream::Off::Ambiguity);
         }
-        return None;
+        return x_taxonomy_refusal(database, taxids);
     }
+    // One sequence at a time (`LOSAT_X_DBIDXREAD=0`): the taxid after the title.
     let title = |ordinal: u32| -> bool {
         title_allowed(ordinal, shared::read_title(db, ordinal, 0, PROGRAM))
+            && (!taxids || db.defline_taxids(ordinal).is_ok())
     };
     let ambiguity = |ordinal: u32| -> bool { db.check_ambiguity(ordinal).is_ok() };
     let all = |allowed: &(dyn Fn(u32) -> bool + Sync)| -> bool {
@@ -1205,7 +1262,15 @@ pub(super) fn x_streaming_refusal(
     if !all(&ambiguity) {
         return Some(super::x_rpt_stream::Off::Ambiguity);
     }
-    None
+    x_taxonomy_refusal(database, taxids)
+}
+
+/// EXPERIMENT (LOSAT_X_RPTSTREAM): `Off::Taxonomy` of `x_streaming_refusal`, asked with `taxids`
+/// only (`shared::taxdb_may_refuse` without the names, `false` without `taxdb.bti` on the search
+/// path).
+fn x_taxonomy_refusal(database: &BlastnDatabase, taxids: bool) -> Option<super::x_rpt_stream::Off> {
+    (taxids && shared::taxdb_may_refuse(&database.db, false))
+        .then_some(super::x_rpt_stream::Off::Taxonomy)
 }
 
 #[cfg(test)]
@@ -1821,7 +1886,7 @@ mod tests {
         let refusal = |database: &BlastnDatabase| -> [Option<Off>; 2] {
             [1, 4].map(|threads| {
                 crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
-                    Ok(x_streaming_refusal(database, pool))
+                    Ok(x_streaming_refusal(database, false, pool))
                 })
                 .unwrap()
             })
@@ -1915,5 +1980,101 @@ mod tests {
         open("nucl_v4").db.check_ambiguity(0).unwrap();
         drop((missing, bad));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The fixture database `name` of `tests/db_search`, with the taxonomy database variant
+    /// `taxdb` of `tests/seqdb/taxdb` (`None`: none) as `BLASTDB`, from the directory `cwd`.
+    fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> BlastnDatabase {
+        use crate::seqdb::alias::SearchPath;
+        let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+        let taxdb = taxdb.map(|variant| tests.join("seqdb/taxdb").join(variant));
+        let search =
+            SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
+        let path = tests.join("db_search").join(name);
+        let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+        BlastnDatabase {
+            metadata: SubjectMetadata {
+                db_len_total: db.total_length() as usize,
+                db_num_seqs: db.num_seqs() as usize,
+            },
+            db,
+            name: name.to_string(),
+            taxdb: shared::TaxdbRun::default(),
+        }
+    }
+
+    // DBID item T: a batch's prefetch looks up the sequences with HSPs in its final hit lists
+    // (within the hit list size), once per volume and taxid over the batches of a run, and opens
+    // the taxonomy database at the run's first lookup; nothing without `taxdb.bti`.
+    // `x16_ntaxid_99990` (two sequences of taxid 99990) with `offset_last_past_end` (the last
+    // entry, 99990, is past the end of `taxdb.btd`), `x16_ntaxid` (taxid 9606) with `bad_magic`.
+    #[test]
+    fn the_prefetch_looks_up_the_sequences_with_hsps_once_per_run() {
+        let cwd = temp_dir("prefetch");
+        let text = |database: &BlastnDatabase, hit_lists: &[Option<BlastnHitList>]| -> String {
+            let titles = DatabaseTitles::new();
+            String::from_utf8(database.prefetch_messages(&titles, hit_lists).unwrap()).unwrap()
+        };
+        let database = open_with_taxdb("x16_ntaxid_99990", Some("offset_last_past_end"), &cwd);
+        assert!(database.taxdb_found());
+        // Sequence 0 without HSPs (its HSPs of score 0 were dropped), sequence 1 past the hit
+        // list size: nothing is fetched, the taxonomy database is not opened.
+        let mut none = hit_list(vec![(0, 1e-9), (1, 1e-8)], 1);
+        none.as_mut().unwrap().hsplist_array[0].hsps.clear();
+        assert_eq!(text(&database, &[None, none]), "");
+        let offset = "Error: [blastn] Error: Offset error at end of taxdb file.\n";
+        assert_eq!(text(&database, &[hit_list(vec![(1, 1e-9)], 1)]), offset);
+        // The same volume and taxid in a later batch.
+        assert_eq!(
+            text(&database, &[hit_list(vec![(0, 1e-9), (1, 1e-8)], 2)]),
+            ""
+        );
+        let database = open_with_taxdb("x16_ntaxid", Some("bad_magic"), &cwd);
+        assert_eq!(
+            text(&database, &[hit_list(vec![(0, 1e-9), (1, 1e-8)], 2)]),
+            "Error: [blastn] Error: Tax database file has wrong magic number.\n"
+        );
+        let database = open_with_taxdb("x16_ntaxid", None, &cwd);
+        assert!(!database.taxdb_found());
+        assert_eq!(
+            text(&database, &[hit_list(vec![(0, 1e-9), (1, 1e-8)], 2)]),
+            ""
+        );
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    // EXPERIMENT (LOSAT_X_RPTSTREAM), DBID item T: where the batches' prefetch reads the taxonomy
+    // database (`taxids`), each batch's reports are written when the loop takes it only when no
+    // lookup can be refused (`Off::Taxonomy`). `x16_ntaxid` (taxid 9606) with no taxonomy
+    // database, ones whose lookups cannot be refused (a wrong magic number is a message; a
+    // scientific name of 9606 that XML2 cannot write is not asked for by the prefetch) and one
+    // whose record of 9606 is (an empty `taxdb.btd`, `shared::taxdb_may_refuse`), at one thread
+    // and in a pool.
+    #[test]
+    fn streaming_with_the_prefetch_needs_lookups_that_cannot_be_refused() {
+        use super::super::x_rpt_stream::Off;
+        let cwd = temp_dir("streamtaxdb");
+        for (taxdb, refused) in [
+            (None, None),
+            (Some("good"), None),
+            (Some("bad_magic"), None),
+            (Some("high_bytes_utf8"), None),
+            (Some("btd_empty"), Some(Off::Taxonomy)),
+        ] {
+            let database = open_with_taxdb("x16_ntaxid", taxdb, &cwd);
+            for threads in [1, 4] {
+                crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
+                    assert_eq!(x_streaming_refusal(&database, false, pool), None);
+                    assert_eq!(
+                        x_streaming_refusal(&database, true, pool),
+                        refused,
+                        "{taxdb:?} threads {threads}"
+                    );
+                    Ok(())
+                })
+                .unwrap();
+            }
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
     }
 }

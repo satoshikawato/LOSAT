@@ -130,6 +130,26 @@ pub(super) fn chunks_in_order(
     own
 }
 
+/// EXPERIMENT (LOSAT_X_BXCHUNKCROSS, in the strict set: on unless `=0`): `Some(k)` where the chunk
+/// loop of `search::search_core` would search `chunks` (two or more) one after another, each with
+/// the subject flow in tasks of `k` (`chosen`): they then run as one flow (`run_chunks`). No
+/// condition of its own.
+pub(super) fn crosses_chunks(
+    pool: &crate::utils::threading::SearchPool<'_>,
+    diagnostics: bool,
+    options: &ResolvedOptions,
+    subjects: Subjects<'_>,
+    chunks: usize,
+) -> Option<usize> {
+    static ON: OnceLock<bool> = OnceLock::new();
+    if chunks < 2 || !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCHUNKCROSS")) {
+        return None;
+    }
+    let k = chosen(pool, diagnostics, options, subjects);
+    crate::utils::xreach::x_reach!("LOSAT_X_BXCHUNKCROSS", k.is_some());
+    k
+}
+
 /// No NCBI counterpart: whether `-window_size` plus twice the longest subject is at most 2^28,
 /// so that no diagonal offset of any table history passes 2^30 (module comment).
 pub(super) fn offsets_stay_below_2_30(window_size: i32, longest: usize) -> bool {
@@ -369,5 +389,399 @@ pub(super) fn run(
         Ok(())
     });
     super::super::x_timing::subject_flow(x_t, tasks as u64, ahead.counts());
+    result.map(|()| call)
+}
+
+/// No NCBI counterpart: tasks per thread that the flow across chunks searches ahead of the loop's
+/// thread (`run_chunks`; scheduling only).
+const X_CROSS_AHEAD: usize = 16;
+
+/// No NCBI counterpart: what the subject loop of one query chunk needs, made by the statements of
+/// `search::search_core` before that loop (`LOSAT_X_BXCHUNKCROSS`): the chunk's Karlin blocks with
+/// its subject parameters, its lookup table, its X-drop, and a diagonal table of its length for
+/// the loop's thread.
+pub(super) struct XChunkSetup {
+    pub(super) params: Vec<ContextParameters>,
+    pub(super) lookup: Lookup,
+    pub(super) xdrop: i32,
+    pub(super) table: Diagonals,
+    pub(super) length: usize,
+}
+
+// No NCBI counterpart: a chunk's setup in the flow across chunks, with the fused loop's choice for
+// its lookup table (worked out once, as `run` does) and the length of its diagonal tables.
+struct XChunkReady {
+    params: Vec<ContextParameters>,
+    lookup: Lookup,
+    xdrop: i32,
+    ratio: Option<u64>,
+    length: usize,
+    table: std::sync::Mutex<Option<Diagonals>>,
+}
+
+// No NCBI counterpart: the state of one chunk's setup in the flow across chunks. `Failed` keeps the
+// error until the loop's thread reaches the chunk and returns it; `Ended`: the loop has ended the
+// chunk and dropped its setup.
+enum XSetupState {
+    Empty,
+    Building,
+    Ready(std::sync::Arc<XChunkReady>),
+    Skipped,
+    Failed(Option<anyhow::Error>),
+    Ended,
+}
+
+// No NCBI counterpart: what a thread finds for a chunk.
+enum XGot {
+    Ready(std::sync::Arc<XChunkReady>),
+    Skipped,
+    Failed,
+}
+
+// No NCBI counterpart: a mutex lock that ignores poisoning (no lock is held while a setup is made).
+fn x_lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+// No NCBI counterpart: the setups of the chunks of one flow across chunks, each made once by the
+// first thread that needs it (`get`) or that starts it ahead (`start`).
+struct XSetups<'s> {
+    slots: Vec<std::sync::Mutex<XSetupState>>,
+    make: &'s (dyn Fn(usize, usize) -> Result<Option<XChunkSetup>> + Sync),
+    options: &'s ResolvedOptions,
+}
+
+// No NCBI counterpart: puts a chunk's setup back to `Empty` if making it unwinds, so that the next
+// thread that needs it makes it again (and meets the same panic) instead of waiting forever.
+struct XUnbuilt<'a>(&'a std::sync::Mutex<XSetupState>, bool);
+
+impl Drop for XUnbuilt<'_> {
+    fn drop(&mut self) {
+        if self.1 {
+            *x_lock(self.0) = XSetupState::Empty;
+        }
+    }
+}
+
+impl XSetups<'_> {
+    // No NCBI counterpart: makes chunk `c`'s setup on this thread (its slot is `Building`), its
+    // lookup table in `parts`.
+    fn make(&self, c: usize, parts: usize) {
+        let slot = &self.slots[c];
+        let mut unbuilt = XUnbuilt(slot, true);
+        let state = match (self.make)(c, parts) {
+            Ok(Some(setup)) => {
+                let ratio = crate::algorithm::blastx::seed::x_seed_diag::x_shared_table_ratio(
+                    &setup.lookup,
+                    self.options,
+                );
+                XSetupState::Ready(std::sync::Arc::new(XChunkReady {
+                    params: setup.params,
+                    lookup: setup.lookup,
+                    xdrop: setup.xdrop,
+                    ratio,
+                    length: setup.length,
+                    table: std::sync::Mutex::new(Some(setup.table)),
+                }))
+            }
+            Ok(None) => XSetupState::Skipped,
+            Err(error) => XSetupState::Failed(Some(error)),
+        };
+        unbuilt.1 = false;
+        *x_lock(slot) = state;
+    }
+
+    // No NCBI counterpart: starts chunk `c`'s setup on this thread if nobody has (a helper ahead of
+    // the chunk), its lookup table in `parts`; returns at once if it is being made or made.
+    fn start(&self, c: usize, parts: usize) {
+        {
+            let mut state = x_lock(&self.slots[c]);
+            if !matches!(*state, XSetupState::Empty) {
+                return;
+            }
+            *state = XSetupState::Building;
+        }
+        self.make(c, parts);
+    }
+
+    // No NCBI counterpart: chunk `c`'s setup: made here if nobody has started it, else the one
+    // another thread makes (waited for: a setup takes a few milliseconds).
+    fn get(&self, c: usize) -> XGot {
+        let mut idle = 0u32;
+        loop {
+            let mine = {
+                let mut state = x_lock(&self.slots[c]);
+                match &*state {
+                    XSetupState::Ready(ready) => return XGot::Ready(std::sync::Arc::clone(ready)),
+                    XSetupState::Skipped => return XGot::Skipped,
+                    XSetupState::Failed(_) | XSetupState::Ended => return XGot::Failed,
+                    XSetupState::Building => false,
+                    XSetupState::Empty => {
+                        *state = XSetupState::Building;
+                        true
+                    }
+                }
+            };
+            if mine {
+                self.make(c, 1);
+                continue;
+            }
+            idle = idle.saturating_add(1);
+            if idle < 128 {
+                std::hint::spin_loop();
+            } else {
+                std::thread::yield_now();
+            }
+        }
+    }
+
+    // No NCBI counterpart: the error of chunk `c`'s setup, once.
+    fn error(&self, c: usize) -> Option<anyhow::Error> {
+        match &mut *x_lock(&self.slots[c]) {
+            XSetupState::Failed(error) => error.take(),
+            _ => None,
+        }
+    }
+
+    // No NCBI counterpart: the loop has ended chunk `c`: its setup is dropped (once the helpers
+    // holding it let go).
+    fn end(&self, c: usize) {
+        *x_lock(&self.slots[c]) = XSetupState::Ended;
+    }
+}
+
+// No NCBI counterpart (buffer reuse): a thread's diagonal table in the flow across chunks, made again
+// when a task's chunk has another length (the last chunk of a split query is shorter): the table
+// its thread keeps (`LOSAT_X_BXDIAGKEEP`, `x_bx_mem::XDiagSlot`) or one of its own.
+enum XCrossScratch {
+    Slot(usize, Option<super::x_bx_mem::XDiagSlot>),
+    Owned(usize, Option<Diagonals>),
+}
+
+impl XCrossScratch {
+    // No NCBI counterpart: whether the table serves a chunk of `length` letters (`Diagonals::x_fits`).
+    fn fits(&self, length: usize, window: i32) -> bool {
+        match self {
+            Self::Slot(have, slot) => *have == length && slot.is_some(),
+            Self::Owned(_, table) => table
+                .as_ref()
+                .is_some_and(|table| table.x_fits(length, window)),
+        }
+    }
+
+    // No NCBI counterpart: buffer reuse only (a new table is `Diagonals::new`, the NCBI port).
+    fn get(&mut self, length: usize, window: i32) -> Result<&mut Diagonals> {
+        let fits = self.fits(length, window);
+        match self {
+            Self::Slot(have, slot) => {
+                if !fits {
+                    // The slot left gives its table back to this thread first.
+                    *slot = None;
+                    *slot = Some(super::x_bx_mem::XDiagSlot::new(length, window));
+                    *have = length;
+                }
+                slot.as_mut().expect("set above").get()
+            }
+            Self::Owned(have, table) => {
+                if !fits {
+                    *table = Some(Diagonals::new(length, window)?);
+                    *have = length;
+                }
+                Ok(table.as_mut().expect("set above"))
+            }
+        }
+    }
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-271
+/// ```c
+///         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
+/// ...
+///                     retval =
+///                         CPrelimSearchRunner(*chunk_data, opts_memento.get())();
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
+/// ```c
+///     /* iterate over all subject sequences */
+///     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+///            != BLAST_SEQSRC_EOF) {
+/// ```
+/// EXPERIMENT (LOSAT_X_BXCHUNKCROSS, in the strict set): the chunk loop of a split query whose chunks
+/// `search::search_core` searches one after another, each with the subject flow
+/// (`LOSAT_X_BXCHUNKFLOW`), as one flow of tasks across the chunks. Task `c * tasks + t` is task `t`
+/// (`k` subjects) of chunk `c`; the helpers search up to a window ahead of this thread across a
+/// chunk's end, so they do not wait while this thread hands the last tasks of a chunk to the sink
+/// and the next chunk is set up; the tasks offered are those of this thread's chunk and the next.
+/// A chunk's setup (`make(c, parts)`: `search_core`'s statements before the chunk's subject loop, a
+/// function of the chunk alone) is made once, by the first thread that needs it or ahead by a
+/// helper near the end of this thread's chunk, on one thread (so at most two chunks' setups are
+/// alive at a time), and the first chunk's on the pool before the helpers start (its lookup table
+/// in `first_parts`, `LOSAT_X_BXBUILDPAR`). This thread makes the sink calls of the loop in
+/// its order: per chunk `chunk_start`, the subjects as `run` hands them, `chunk_end`; a chunk
+/// without a valid context gets `chunk_start` only; a setup that failed returns its error after
+/// that chunk's `chunk_start`. A task's value depends on its chunk and subjects alone (module
+/// comment), so only which thread computes what, and when, changes. Returns the number of subjects
+/// handed to the sink.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_chunks(
+    k: usize,
+    chunks: &[crate::algorithm::blastx::split::QueryChunk],
+    make: &(dyn Fn(usize, usize) -> Result<Option<XChunkSetup>> + Sync),
+    first_parts: usize,
+    subjects: Subjects<'_>,
+    options: &ResolvedOptions,
+    helpers: usize,
+    keep: bool,
+    db_length: i64,
+    x_containment: bool,
+    capped: bool,
+    is_split: bool,
+    sink: &mut impl PreliminarySink,
+) -> Result<usize> {
+    let tasks = subjects.len().div_ceil(k);
+    let total = chunks.len() * tasks;
+    let setups = XSetups {
+        slots: (0..chunks.len())
+            .map(|_| std::sync::Mutex::new(XSetupState::Empty))
+            .collect(),
+        make,
+        options,
+    };
+    // The first chunk's setup while the pool is idle, before the helpers start: the parts of its
+    // lookup table's build (`first_parts`) go to the other threads. A setup made later is made on
+    // one thread: inside a helper, a build in parts could, waiting at its end for a part another
+    // thread took, run a helper's loop that is not started yet and wait there for this very setup.
+    setups.start(0, first_parts);
+    // A helper this many tasks before the end of the loop's chunk makes the next chunk's setup.
+    let lead = 2 * (helpers + 1);
+    let window = options.window_size;
+    // The chunk the loop's thread is at: the tasks offered are those of this chunk and the next
+    // (`x_announce_until`), and only the next chunk's setup is made ahead, so at most two chunks'
+    // setups are alive at a time.
+    let at_chunk = std::sync::atomic::AtomicUsize::new(0);
+    let compute = |index: usize, scratch: &mut XCrossScratch| -> Task {
+        let (c, task) = (index / tasks, index % tasks);
+        // A chunk without a valid context (or whose setup failed) has no task to search; the loop
+        // does not take its values.
+        let XGot::Ready(ready) = setups.get(c) else {
+            return (Vec::new(), None);
+        };
+        if task + lead >= tasks
+            && c + 1 < chunks.len()
+            && c == at_chunk.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            setups.start(c + 1, 1);
+        }
+        crate::algorithm::blastx::seed::x_seed_diag::x_take_table_ratio(&ready.lookup, ready.ratio);
+        let table = match scratch.get(ready.length, window) {
+            Ok(table) => table,
+            Err(error) => return (Vec::new(), Some((task * k, error))),
+        };
+        search_task(
+            task,
+            k,
+            subjects,
+            &chunks[c].prepared,
+            &ready.params,
+            options,
+            &ready.lookup,
+            table,
+            ready.xdrop,
+            db_length,
+            x_containment,
+        )
+    };
+    // Sixteen tasks per thread ahead of this thread (`run` keeps four): a task much slower than
+    // the others (a subject with many hits) holds this thread at its place in the order while the
+    // helpers search the rest of the window, and with four per thread they ran out of tasks and
+    // spun (16 threads, fly 2L 50 kb x the fly proteins: 1.6 s of `sched_yield` in 0.69 s); with
+    // sixteen they seldom do (0.08 s), and the tasks held at once stay few next to the lookup
+    // tables (only subjects with hits are kept). Inside the capped batch flow the helpers leave
+    // once every task is claimed.
+    let ahead = if capped {
+        crate::utils::xahead::Ahead::x_new_leaving(X_CROSS_AHEAD * (helpers + 1))
+    } else {
+        crate::utils::xahead::Ahead::new(X_CROSS_AHEAD * (helpers + 1))
+    };
+    let scratches: Vec<_> = (0..helpers)
+        .map(|_| {
+            if keep {
+                XCrossScratch::Slot(0, None)
+            } else {
+                XCrossScratch::Owned(0, None)
+            }
+        })
+        .collect();
+    let x_t = super::super::x_timing::lap();
+    let mut call = 0usize;
+    let mut own = XCrossScratch::Owned(0, None);
+    let result = crate::utils::xahead::with_helpers(Some(&ahead), scratches, &compute, || {
+        for (c, chunk) in chunks.iter().enumerate() {
+            at_chunk.store(c, std::sync::atomic::Ordering::Relaxed);
+            sink.chunk_start(chunk)?;
+            let ready = match setups.get(c) {
+                XGot::Ready(ready) => ready,
+                // No valid context: the serial loop goes on to the next chunk.
+                XGot::Skipped => continue,
+                XGot::Failed => {
+                    return Err(setups
+                        .error(c)
+                        .expect("a failed setup keeps its error until the loop reaches it"))
+                }
+            };
+            if !own.fits(ready.length, window) {
+                if let Some(table) = x_lock(&ready.table).take() {
+                    own = XCrossScratch::Owned(ready.length, Some(table));
+                }
+            }
+            let batch = &chunk.prepared;
+            let params = &ready.params;
+            for task in 0..tasks {
+                let index = c * tasks + task;
+                ahead.x_announce_until(index, ((c + 2) * tasks).min(total), total, |_| true);
+                let (kept, error) = match ahead.take(index, &mut own, &compute) {
+                    Some(value) => value,
+                    None => compute(index, &mut own),
+                };
+                if shadow() {
+                    x_shadow_check(
+                        &kept,
+                        error.as_ref().map(|(oid, _)| *oid),
+                        &compute(index, &mut own),
+                    );
+                }
+                let end = error
+                    .as_ref()
+                    .map_or(subjects.len().min((task + 1) * k), |(oid, _)| *oid);
+                let mut kept = kept.into_iter().peekable();
+                for oid in task * k..end {
+                    let computed = match kept.next_if(|(kept_oid, _)| *kept_oid == oid) {
+                        Some((_, computed)) => computed,
+                        None => SubjectComputation::empty(),
+                    };
+                    sink.subject_start(oid, batch, params, computed.prepared_link)?;
+                    for (h, contained) in &computed.containment {
+                        sink.containment(h, *contained);
+                    }
+                    let SubjectComputation { raw, purged, .. } = computed;
+                    if options.gapped && !raw.is_empty() {
+                        sink.preliminary_purge(oid, &raw, &purged)?;
+                    }
+                    sink.subject(oid, &purged, batch, params)?;
+                    call += 1;
+                }
+                if let Some((_, error)) = error {
+                    return Err(error);
+                }
+            }
+            drop(ready);
+            setups.end(c);
+            sink.chunk_end(chunk, is_split)?;
+        }
+        Ok(())
+    });
+    super::super::x_timing::subject_flow(x_t, total as u64, ahead.counts());
     result.map(|()| call)
 }

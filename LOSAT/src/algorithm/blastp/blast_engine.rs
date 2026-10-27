@@ -31,7 +31,10 @@ use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
 };
 use crate::algorithm::tblastx::lookup::compressed::BlastCompressedAaLookupTable;
 use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
-use crate::algorithm::tblastx::lookup::{x_bp_build_ncbi_lookup, BlastAaLookupTable, QueryContext};
+use crate::algorithm::tblastx::lookup::{
+    x_bp_build_ncbi_lookup, x_bp_build_ncbi_lookup_as, BackboneCell16, BlastAaLookupTable,
+    QueryContext, XBpLookup,
+};
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::{FormatObserver, FormatProbe, HspIndex, OutputSink, ReportOutputs};
@@ -1890,6 +1893,10 @@ fn blastp_offset_array_size(longest_chain: i32) -> i32 {
 
 enum BlastpRuntimeLookup {
     Aa(BlastAaLookupTable),
+    // EXPERIMENT (LOSAT_X_BPLK16): the exact table of a block whose lookup query is at most 65,535
+    // letters, with 16-bit hits and 8-byte cells (lookup/backbone.rs `BackboneCell16`); the same
+    // hits in the same order. Only for a search with a window (the fused two-hit loop reads it).
+    Aa16(BlastAaLookupTable<BackboneCell16>),
     Compressed(BlastCompressedAaLookupTable),
     // EXPERIMENT (LOSAT_X_BPCLUT): the compressed table built flat (lookup/x_clut_direct.rs); the
     // same cells, PV array and parameters.
@@ -1919,6 +1926,7 @@ impl BlastpRuntimeLookup {
     fn word_length(&self) -> i32 {
         match self {
             Self::Aa(lookup) => lookup.word_length,
+            Self::Aa16(lookup) => lookup.word_length,
             Self::Compressed(lookup) => lookup.word_length,
             Self::CompressedFlat(lookup) => lookup.word_length,
         }
@@ -1938,6 +1946,7 @@ impl BlastpRuntimeLookup {
     fn longest_chain(&self) -> i32 {
         match self {
             Self::Aa(lookup) => lookup.longest_chain,
+            Self::Aa16(lookup) => lookup.longest_chain,
             Self::Compressed(lookup) => lookup.longest_chain,
             Self::CompressedFlat(lookup) => lookup.longest_chain,
         }
@@ -2057,6 +2066,12 @@ fn blastp_for_each_offset_pair<F>(
                 );
                 blastp_visit_scanned_offset_pairs(offset_pairs, hits, &mut visit);
             }
+        }
+        // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits is built only for a search with a
+        // window, which scans with the fused two-hit loop; this offset-pair scan (a search without a
+        // window) never gets one.
+        BlastpRuntimeLookup::Aa16(_) => {
+            unreachable!("a table of 16-bit hits is built only for a search with a window")
         }
         BlastpRuntimeLookup::Compressed(lookup) => {
             while scan_range[1] <= scan_range[2] {
@@ -2388,6 +2403,20 @@ impl BlastpReport {
     /// (`ReportFormat::writes_query_warnings`): not for the Seq-annot formats.
     fn writes_query_warnings(self) -> bool {
         matches!(self, BlastpReport::Text(_))
+    }
+
+    /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
+    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6 and 7,
+    /// `database::prefetches_subjects`): as the call's first report, the taxonomy database's
+    /// messages of that prefetch go with the query warnings.
+    fn prefetches_subjects(self) -> bool {
+        crate::algorithm::common::database::prefetches_subjects(match self {
+            BlastpReport::Text(outfmt) => Some(outfmt as i32),
+            BlastpReport::Xml => Some(5),
+            // The Seq-annots and the archive fetch nothing; XML2 and JSON write the messages
+            // at each `Hit` (`TaxdbPrinter`).
+            BlastpReport::Seqalign(_) | BlastpReport::Archive | BlastpReport::Xml2(_) => None,
+        })
     }
 
     /// Whether the report is tabular (outfmt 6 and 7), which reads the tabular subject IDs.
@@ -6442,7 +6471,8 @@ fn search(
     // all queries below. With `-db` the blocks are searched only when no definition line of the
     // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, or
     // `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and 5, `x_titles_taxids_allow_blocks` for 15
-    // and 16 (the titles and the taxids in one pass), read
+    // and 16 (the titles and the taxids in one pass), for outfmt 0, 5, 6 and 7 with `taxdb.bti` on
+    // the search path also the taxids that each batch's prefetch reads and looks up, read
     // in the block search's pool before the first block), and with outfmt 0 and `-subject` only
     // when no subject's title is refused where the report shows it
     // (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when the names of the database, the
@@ -6493,7 +6523,9 @@ fn search(
                 // been written and the search of all queries below runs: the lookup tables' words
                 // (`x_block_words_fit`), then with `-db` the definition lines
                 // (`database::x_titles_allow_blocks`; for outfmt 8, 9, 12 and 5
-                // `database::x_titles_read_allow_blocks`), with outfmt 0 and `-subject` the
+                // `database::x_titles_read_allow_blocks`; for outfmt 0, 5, 6 and 7 with `taxdb.bti`
+                // found also the taxids and lookups of the batches' prefetch), with outfmt 0 and
+                // `-subject` the
                 // subjects' titles (`x_block_shown_titles_allowed`), and with outfmt 5 the
                 // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the database
                 // name and queries' names (`x_block_xml_run_allowed`); with several outputs, the
@@ -6502,7 +6534,28 @@ fn search(
                     super::x_query_blocks::x_reach_block_search(&x_formats, false);
                     return Ok(false);
                 }
+                // BLASTP's outfmt 0, 5, 6 and 7 prefetch the subjects of each batch, which with
+                // `taxdb.bti` on the search path reads their taxids and looks them up in the
+                // taxonomy database (`ListedTitles::prefetch_messages`); a refusal there would come
+                // in a later block, so their checks then also read every sequence's taxid and ask
+                // whether any lookup can be refused (`shared::taxdb_may_refuse`, without the
+                // scientific names, which the prefetch does not ask for). The refusal of NCBI's
+                // taxonomy cache (`shared::TaxdbRun::cache_collision`) comes at the run's first
+                // prefetch, in block 0 before any row.
+                let x_prefetch_taxids = |x_kind: XBlockReport| {
+                    args.app == BlastpApp::Blastp
+                        && matches!(
+                            x_kind,
+                            XBlockReport::Tabular | XBlockReport::Pairwise | XBlockReport::Xml
+                        )
+                        && database.is_some_and(|database| database.taxdb_found())
+                };
                 let titles_allowed = |x_kind: XBlockReport| match (database, x_kind) {
+                    // Outfmt 5 whose batches read the taxids: the check of outfmt 15 and 16.
+                    // The prefetch asks for no scientific name.
+                    (Some(database), XBlockReport::Xml) if x_prefetch_taxids(x_kind) => {
+                        database::x_titles_taxids_allow_blocks(database, false, pool)
+                    }
                     // Outfmt 8, 9, 12 and 5 write no tabular id: only the definition lines' reading
                     // and bytes can fail (`x_titles_read_allow_blocks`).
                     (Some(database), XBlockReport::Seqalign | XBlockReport::Xml) => {
@@ -6512,11 +6565,14 @@ fn search(
                     // database's name of it, in the same pass over the headers
                     // (`x_titles_taxids_allow_blocks`).
                     (Some(database), XBlockReport::Xml2) => {
-                        database::x_titles_taxids_allow_blocks(database, pool)
+                        database::x_titles_taxids_allow_blocks(database, true, pool)
                     }
-                    (Some(database), _) => {
-                        database::x_titles_allow_blocks(database, x_pairwise, pool)
-                    }
+                    (Some(database), _) => database::x_titles_allow_blocks(
+                        database,
+                        x_pairwise,
+                        x_prefetch_taxids(x_kind),
+                        pool,
+                    ),
                     (None, XBlockReport::Pairwise) => {
                         x_block_shown_titles_allowed(&subjects.records, v1.is_some(), pool)
                     }
@@ -6997,7 +7053,20 @@ fn x_query_block_plan(
     let query_batches = query_input.batches(batch_size);
     // EXPERIMENT (LOSAT_X_BPQSLOTS): blastp-fast's blocks searched several at a time on a pool of
     // more than one thread, with one output that is not outfmt 11 or 13 to 16 and no hit records or
-    // observer (`x_query_slots.rs`), in blocks of `x_slot_letters`.
+    // observer (`x_query_slots.rs`), in blocks of `x_slot_letters`. Not where the batches' prefetch
+    // can write a text (`-db`, a first format of outfmt 0, 5, 6 or 7 and a taxonomy database whose
+    // lookups write the texts of opening or the offset error, `BlastpDatabase::prefetch_may_write`):
+    // the text goes with the block whose prefetch makes the run's first lookup, which in flight is
+    // the block that gets there first, not block 0 (DBID item T, review 1). NCBI's own taxonomy
+    // database writes no text, so the usual run keeps the slots.
+    let prefetch_writes = args.app == BlastpApp::Blastp
+        && matches!(
+            kinds.first(),
+            Some(XBlockReport::Tabular | XBlockReport::Pairwise | XBlockReport::Xml)
+        )
+        && subject_source
+            .database()
+            .is_some_and(|database| database.prefetch_may_write());
     let slots = super::x_query_slots::x_bp_qslots()
         .filter(|_| {
             args.num_threads > 1
@@ -7005,6 +7074,7 @@ fn x_query_block_plan(
                 && !x_web
                 && args.archive.is_none()
                 && !kinds.contains(&XBlockReport::Xml2)
+                && !prefetch_writes
         })
         .unwrap_or(1);
     let block_letters = if slots > 1 {
@@ -7687,6 +7757,37 @@ fn blastp_query_frames_marked(
         .collect()
 }
 
+// No NCBI counterpart: reads the LOSAT_X_BPLK16 switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPLK16): strict set (on unless `0`). Exact blastp's block tables hold 16-bit hits in 8-byte cells where the lookup query is at most 65,535
+/// letters (`BlastAaLookupTable<BackboneCell16>`, lookup/backbone.rs), halving the overflow array
+/// and the cells; the hits are the same in the same order.
+fn x_bplk16() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPLK16"))
+}
+
+// No NCBI counterpart: chooses LOSAT's table (LOSAT_X_BPLK16); it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPLK16): whether a table of `args`' search may have 16-bit hits: a search
+/// with a window (the fused two-hit loop scans it; the offset-pair scan of a search without one
+/// reads the 32-bit table) that is not a query chunk of a split batch (`x_chunk`).
+fn x_bplk16_for(args: &ResolvedBlastpArgs, x_chunk: bool) -> bool {
+    args.window_size != 0 && !x_chunk
+}
+
+// No NCBI counterpart: LOSAT_X_BPLK16's table in the runtime lookup; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLK16): the runtime lookup of a table built with the switch on, counted for
+/// `LOSAT_X_REACH` (taken: the table has 16-bit hits).
+fn x_bp_runtime_lookup(built: XBpLookup) -> BlastpRuntimeLookup {
+    crate::utils::xreach::x_reach!("LOSAT_X_BPLK16", matches!(built, XBpLookup::Narrow(_)));
+    match built {
+        XBpLookup::Wide(table) => BlastpRuntimeLookup::Aa(table),
+        XBpLookup::Narrow(table) => BlastpRuntimeLookup::Aa16(table),
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:245
 // ```c
 //     lookup->threshold = (Int4)opt->threshold;
@@ -7700,7 +7801,18 @@ fn blastp_query_frames_marked(
 fn blastp_aa_lookup(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
+    x_chunk: bool,
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
+    // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits where the switch is on.
+    if x_bplk16() {
+        let (built, contexts) = x_bp_build_ncbi_lookup_as(
+            query_frames,
+            crate::core::blast_util::ncbi_int4_from_double(args.threshold),
+            false,
+            x_bplk16_for(args, x_chunk),
+        );
+        return (x_bp_runtime_lookup(built), contexts);
+    }
     let (lookup, contexts) = x_bp_build_ncbi_lookup(
         query_frames,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
@@ -7722,6 +7834,22 @@ fn blastp_aa_lookup_ahead(
     query_frames: &[Vec<QueryFrame>],
     spares: &crate::algorithm::tblastx::lookup::XAaSpares,
 ) -> Option<(BlastpRuntimeLookup, Vec<QueryContext>)> {
+    // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits where the switch is on (a block of the
+    // block loop is never a query chunk).
+    if x_bplk16() {
+        let threshold = crate::core::blast_util::ncbi_int4_from_double(args.threshold);
+        if x_bplk16_for(args, false) {
+            let (built, contexts) = spares.x_build_ahead16(query_frames, threshold, false)?;
+            return Some((x_bp_runtime_lookup(built), contexts));
+        }
+        let (lookup, contexts) = spares.x_build_ahead(
+            query_frames,
+            threshold,
+            &lookup_protein_params_ungapped(args.scoring.matrix),
+            false,
+        )?;
+        return Some((x_bp_runtime_lookup(XBpLookup::Wide(lookup)), contexts));
+    }
     let (lookup, contexts) = spares.x_build_ahead(
         query_frames,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
@@ -7742,7 +7870,23 @@ fn blastp_aa_lookup_on_block_spare(
     args: &ResolvedBlastpArgs,
     query_frames: &[Vec<QueryFrame>],
     spare: &crate::algorithm::tblastx::lookup::XAaSpares,
+    x_chunk: bool,
 ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
+    // EXPERIMENT (LOSAT_X_BPLK16): the table of 16-bit hits where the switch is on.
+    if x_bplk16() {
+        let threshold = crate::core::blast_util::ncbi_int4_from_double(args.threshold);
+        if x_bplk16_for(args, x_chunk) {
+            let (built, contexts) = spare.x_build_on_block_spare16(query_frames, threshold, false);
+            return (x_bp_runtime_lookup(built), contexts);
+        }
+        let (lookup, contexts) = spare.x_build_on_block_spare(
+            query_frames,
+            threshold,
+            &lookup_protein_params_ungapped(args.scoring.matrix),
+            false,
+        );
+        return (x_bp_runtime_lookup(XBpLookup::Wide(lookup)), contexts);
+    }
     let (lookup, contexts) = spare.x_build_on_block_spare(
         query_frames,
         crate::core::blast_util::ncbi_int4_from_double(args.threshold),
@@ -7859,7 +8003,7 @@ fn x_lookup_after_prelim(
             BlastpRuntimeLookup::CompressedFlat(_) => {
                 super::x_query_blocks::x_bp_lookup_spare(pool).is_some()
             }
-            BlastpRuntimeLookup::Aa(_) => {
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {
                 super::x_query_blocks::x_bp_aa_spares(pool).is_some()
                     || super::x_query_blocks::x_bp_aa_block_spare(pool).is_some()
             }
@@ -8125,8 +8269,13 @@ fn run_resolved_in_pool(
         BlastpLookupTableType::AaLookupTable => match x_prebuilt.take() {
             Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(prebuilt),
             None => match super::x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool) {
-                Some(spare) => blastp_aa_lookup_on_block_spare(&args, &query_frames, spare),
-                None => blastp_aa_lookup(&args, &query_frames),
+                Some(spare) => blastp_aa_lookup_on_block_spare(
+                    &args,
+                    &query_frames,
+                    spare,
+                    chunk_prelim.is_some(),
+                ),
+                None => blastp_aa_lookup(&args, &query_frames, chunk_prelim.is_some()),
             },
         },
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
@@ -8161,7 +8310,7 @@ fn run_resolved_in_pool(
     // on the reference compressed table never (the standard table always has the branch-free scan).
     if args.window_size != 0 && super::x_seed_fused_clut::x_bp_clut_scan_bf() {
         match &lookup {
-            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
             BlastpRuntimeLookup::Compressed(_) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPCLUTSCANBF", false)
             }
@@ -8176,7 +8325,7 @@ fn run_resolved_in_pool(
     // the loop records its side per subject (`x_seed_fused_clut.rs`).
     if args.window_size != 0 && super::x_seed_fused_clut::x_bp_fseed() {
         match &lookup {
-            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
             BlastpRuntimeLookup::Compressed(_) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPFSEED", false)
             }
@@ -8195,7 +8344,7 @@ fn run_resolved_in_pool(
         && super::x_seed_fused_clut::x_bp_fstage()
     {
         match &lookup {
-            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
             BlastpRuntimeLookup::Compressed(_) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPFSTAGE", false)
             }
@@ -8214,7 +8363,7 @@ fn run_resolved_in_pool(
         && super::x_seed_fused_clut::x_bp_flean()
     {
         match &lookup {
-            BlastpRuntimeLookup::Aa(_) => {}
+            BlastpRuntimeLookup::Aa(_) | BlastpRuntimeLookup::Aa16(_) => {}
             BlastpRuntimeLookup::Compressed(_) => {
                 crate::utils::xreach::x_reach!("LOSAT_X_BPFLEAN", false)
             }
@@ -8875,13 +9024,35 @@ fn run_resolved_in_pool(
                     crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", sent_subject.is_some());
                     sent_subject.map(|sent_subject| (sent_query, sent_subject, aa_lookup))
                 }
+                (Some(_), BlastpRuntimeLookup::Aa16(_)) => None,
                 (Some(_), _) => {
                     crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", false);
                     None
                 }
                 (None, _) => None,
             };
-            if let Some((sent_query, sent_subject, aa_lookup)) = x_sent {
+            // EXPERIMENT (LOSAT_X_BPLK16): the same choice for the table of 16-bit hits.
+            let x_sent16 = match (&x_ungap_sent, &lookup) {
+                (Some(sent_query), BlastpRuntimeLookup::Aa16(aa_lookup)) => {
+                    let sent_subject = super::x_ungapped_sent::XSentSubject::new(subject.aa_seq);
+                    crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", sent_subject.is_some());
+                    sent_subject.map(|sent_subject| (sent_query, sent_subject, aa_lookup))
+                }
+                _ => None,
+            };
+            if let Some((sent_query, sent_subject, aa_lookup)) = x_sent16 {
+                super::x_seed_fused::x_scan_two_hit(
+                    aa_lookup,
+                    subject_sequence,
+                    subject.aa_len,
+                    &mut scratch.diag_array,
+                    diag_mask,
+                    subject_diag_offset,
+                    window,
+                    word_size,
+                    x_candidate_sent!(sent_query, sent_subject),
+                );
+            } else if let Some((sent_query, sent_subject, aa_lookup)) = x_sent {
                 super::x_seed_fused::x_scan_two_hit(
                     aa_lookup,
                     subject_sequence,
@@ -8896,6 +9067,18 @@ fn run_resolved_in_pool(
             } else {
                 match &lookup {
                     BlastpRuntimeLookup::Aa(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
+                        aa_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate,
+                    ),
+                    // EXPERIMENT (LOSAT_X_BPLK16): the same loop on the table of 16-bit hits.
+                    BlastpRuntimeLookup::Aa16(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
                         aa_lookup,
                         subject_sequence,
                         subject.aa_len,
@@ -11365,7 +11548,7 @@ fn run_resolved_in_pool(
     let result_warnings = format_plans
         .first()
         .is_none_or(|(outfmt, _, _)| outfmt.writes_query_warnings());
-    let query_warning_lines: Vec<Vec<u8>> = query_records
+    let mut query_warning_lines: Vec<Vec<u8>> = query_records
         .iter()
         .enumerate()
         .map(|(q_idx, record)| {
@@ -11415,6 +11598,42 @@ fn run_resolved_in_pool(
                 )
             }),
         )?;
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
+    // ```c++
+    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+    //                 		                            fmt_args->GetFormattedOutputChoice());
+    //                 ITERATE(CSearchResultSet, result, *results) {
+    //                     formatter.PrintOneResultSet(**result, query_batch);
+    //                 }
+    // ```
+    // Before the reports of a batch NCBI fetches every subject that the batch reports, and with
+    // `taxdb.bti` on the search path the taxonomy database writes its messages there
+    // (`database::prefetch_messages`: the texts of opening it at the run's first lookup, a
+    // volume's lookup of a taxid once per run): after the reader's messages of the batch and
+    // before the warnings of its first query. They go with the warnings, where the first format
+    // is outfmt 0, 5, 6 or 7 (`BlastpReport::prefetches_subjects`). They are read here, after
+    // the subjects' refusals and before any format is written, so a taxonomy database that LOSAT
+    // cannot read is refused before any byte; without `taxdb.bti` nothing is read. psiblast's
+    // batches prefetch too (psiblast_app.cpp:256-263, 369-370); its reports stay as they were.
+    if let (Some(titles), Some(database)) = (listed_titles.as_ref(), database) {
+        if args.app == BlastpApp::Blastp
+            && format_plans
+                .first()
+                .is_some_and(|(outfmt, _, _)| outfmt.prefetches_subjects())
+            && database.taxdb_found()
+        {
+            for batch in &query_batches {
+                let messages =
+                    titles.prefetch_messages(database, &hit_lists[batch.searched.clone()])?;
+                if messages.is_empty() {
+                    continue;
+                }
+                let first = batch.searched.start;
+                let reader = reports.reader_warnings.get(first).map_or(0, Vec::len);
+                query_warning_lines[first].splice(reader..reader, messages);
+            }
+        }
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPSUBJMETA): the block
@@ -12166,6 +12385,15 @@ fn run_resolved_in_pool(
                 .or_else(|| super::x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool))
             {
                 spares.give(table);
+            }
+        }
+        // EXPERIMENT (LOSAT_X_BPLK16): the vectors of a table of 16-bit hits, for the next block's
+        // build of that width.
+        Some(BlastpRuntimeLookup::Aa16(table)) => {
+            if let Some(spares) = super::x_query_blocks::x_bp_aa_spares(blastp_parallel_pool)
+                .or_else(|| super::x_query_blocks::x_bp_aa_block_spare(blastp_parallel_pool))
+            {
+                spares.give16(table);
             }
         }
         Some(BlastpRuntimeLookup::Compressed(_)) | None => {}

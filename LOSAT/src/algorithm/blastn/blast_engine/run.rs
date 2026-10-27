@@ -490,7 +490,7 @@ const DIAGHASH_CHAIN_LENGTH: usize = 256;
 // ```
 struct SubjectSplitState {
     full_right: i32,
-    hard_ranges: Vec<(i32, i32)>,
+    hard_ranges: [(i32, i32); 1],
     soft_ranges: Vec<(i32, i32)>,
     hm_index: usize,
     sm_index: usize,
@@ -614,7 +614,8 @@ impl SubjectSplitState {
         let full_right = subject_len as i32;
         Self {
             full_right,
-            hard_ranges: vec![(0, full_right)],
+            // One range, as NCBI's `&(backup->full_range)`: an array, not a vector per subject.
+            hard_ranges: [(0, full_right)],
             soft_ranges,
             hm_index: 0,
             sm_index: 0,
@@ -3535,36 +3536,27 @@ fn purge_prelim_hits_with_common_endpoints(mut hsps: Vec<PrelimHit>) -> Vec<Prel
     // duplicates are deleted, not trimmed. The full traceback stage still uses
     // the later purge=FALSE/TRUE passes over final HSPs with edit scripts.
     qsort_prelim_hits_by(&mut hsps, query_offset_compare_prelim_hits);
-    let mut kept: Vec<PrelimHit> = Vec::with_capacity(hsps.len());
-    for hsp in hsps {
-        let same_common_start = kept.last().is_some_and(|prev| {
-            prev.context_idx == hsp.context_idx
-                && prev.prelim_qs == hsp.prelim_qs
-                && prev.prelim_ss == hsp.prelim_ss
-        });
-        if !same_common_start {
-            kept.push(hsp);
-        }
-    }
+    // In place: `dedup_by` drops an HSP that matches the last one kept, as the copy into a
+    // second vector did.
+    hsps.dedup_by(|hsp, prev| {
+        prev.context_idx == hsp.context_idx
+            && prev.prelim_qs == hsp.prelim_qs
+            && prev.prelim_ss == hsp.prelim_ss
+    });
+    let mut kept = hsps;
 
     if kept.len() <= 1 {
         return kept;
     }
 
     qsort_prelim_hits_by(&mut kept, query_end_compare_prelim_hits);
-    let mut out: Vec<PrelimHit> = Vec::with_capacity(kept.len());
-    for hsp in kept {
-        let same_common_end = out.last().is_some_and(|prev| {
-            prev.context_idx == hsp.context_idx
-                && prev.prelim_qe == hsp.prelim_qe
-                && prev.prelim_se == hsp.prelim_se
-        });
-        if !same_common_end {
-            out.push(hsp);
-        }
-    }
+    kept.dedup_by(|hsp, prev| {
+        prev.context_idx == hsp.context_idx
+            && prev.prelim_qe == hsp.prelim_qe
+            && prev.prelim_se == hsp.prelim_se
+    });
 
-    out
+    kept
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits_priv.h:66-72
@@ -4165,6 +4157,15 @@ struct SubjectScratch {
     // that holds its working memory. A helper never uses the caller's scratch. Reuse only.
     // No NCBI counterpart: scratch memory of the look-ahead helpers.
     x_ahead_scratch: Vec<(GapAlignScratch, GreedyAlignScratch)>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-513
+    // ```c
+    //             BLAST_GappedAlignmentWithTraceback(program_number,
+    //                 query, adjusted_subject, gap_align, score_params,
+    // ```
+    // No NCBI counterpart: the scratch of the speculative traceback batches, one pair per thread
+    // of the pool, kept with the rest of this scratch so that each subject's traceback reuses it
+    // instead of making it again. Reuse only, as `x_ahead_scratch`.
+    x_spec_scratch: Vec<(GapAlignScratch, GreedyAlignScratch)>,
     cutoff_scores: Vec<i32>,
     x_dropoff_scores: Vec<i32>,
     reduced_cutoff_scores: Vec<i32>,
@@ -4236,6 +4237,20 @@ struct SubjectScratch {
     // }
     // ```
     offset_pairs: Vec<OffsetPair>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:146-170
+    // ```c
+    // Blast_IntervalTreeInit(Int4 q_start, Int4 q_end,
+    //                        Int4 s_start, Int4 s_end)
+    // ...
+    //     tree->s_min = s_start;
+    //     tree->s_max = s_end;
+    // ...
+    //     s_IntervalRootNodeInit(tree, q_start, q_end, &retval);
+    // ```
+    // The interval tree of the subject's preliminary gapped stage and of its traceback, kept with
+    // this scratch and given each subject's ranges with `reset_with_bounds` (the same state as a
+    // new tree) instead of being made again for every subject. Reuse only.
+    x_tree: BlastIntervalTree,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
@@ -4271,6 +4286,7 @@ impl SubjectScratch {
             // No NCBI counterpart: the helper scratch list starts empty and is filled when helpers are used;
             // it does not change any value NCBI computes.
             x_ahead_scratch: Vec::new(),
+            x_spec_scratch: Vec::new(),
             cutoff_scores: Vec::with_capacity(query_count),
             x_dropoff_scores: Vec::with_capacity(query_count),
             reduced_cutoff_scores: Vec::with_capacity(query_count),
@@ -4316,6 +4332,8 @@ impl SubjectScratch {
                 };
                 offset_array_size
             ],
+            // No NCBI counterpart: every user sets the subject's ranges first (`reset_with_bounds`).
+            x_tree: BlastIntervalTree::new(0, 1, 0, 1),
         }
     }
 }
@@ -9026,6 +9044,48 @@ fn run_in_pool(
                 for hit_list in batch_hit_lists.iter_mut().flatten() {
                     drop_hsps_of_score_zero(hit_list);
                 }
+                // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:304-312
+                // ```c++
+                //             if (isArchiveFormat) {
+                //                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
+                //                 m_Bah.ResetMessages();
+                //             } else {
+                //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+                //                 			                        fmt_args->GetFormattedOutputChoice());
+                //                 ITERATE(CSearchResultSet, result, *results) {
+                //                     formatter.PrintOneResultSet(**result, query_batch);
+                //                 }
+                // ```
+                // Before the reports of a batch NCBI fetches every subject that the batch reports
+                // (those with Seq-aligns: the HSPs of score 0 are dropped), and with `taxdb.bti`
+                // on the search path the taxonomy database writes its messages there
+                // (`BlastnDatabase::prefetch_messages`: the texts of opening it at the run's first
+                // lookup, a volume's lookup of a taxid once per run): after the reader's messages
+                // of the batch and before the warnings of its first query, which are added below.
+                // They go with the warnings, where the first format is outfmt 0, 5, 6, 7 or 17
+                // (`BlastnOutputFormat::prefetches_subjects`), so every writer of the batch's
+                // reports writes them there (the reports after the loop, LOSAT_X_RPTSTREAM's
+                // batch writes, the error paths that write the reports of the batches before).
+                // Without `taxdb.bti` nothing is read. A refusal (a taxonomy database or a taxid
+                // that LOSAT cannot read as NCBI does) is written as the titles' refusals above;
+                // LOSAT_X_RPTSTREAM acts only where none can come (`x_rpt_stream::check`).
+                if output_formats
+                    .first()
+                    .is_some_and(|format| format.prefetches_subjects())
+                    && database.taxdb_found()
+                {
+                    match database.prefetch_messages(&titles, &batch_hit_lists) {
+                        Ok(messages) => warnings[start].extend(messages),
+                        Err(error) => {
+                            qbp.finish();
+                            let written = if stream.acting() { start } else { 0 };
+                            for query_warnings in &warnings[written..=start] {
+                                outputs.diagnostics.write_all(query_warnings)?;
+                            }
+                            return Err(error);
+                        }
+                    }
+                }
             }
             // The batch numbers its queries from 0.
             let first = start as u32;
@@ -11400,6 +11460,103 @@ fn search_query_batch(
     // ```
     // The initial hits that the word finder saved in every subject chunk of the batch; they
     // size the next batch.
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:336-377
+    // ```c
+    // if (!gapped_calculation || sbp->matrix_only_scoring) {
+    //     ...
+    // } else {
+    //     new_cutoff = gap_trigger;
+    // }
+    // new_cutoff = MIN(new_cutoff,
+    //                  hit_params->cutoffs[context].cutoff_score_max);
+    // curr_cutoffs->cutoff_score = new_cutoff;
+    // ```
+    // NCBI updates these per subject (`BlastInitialWordParametersUpdate`); LOSAT's values do not
+    // depend on the subject, so they are computed once for the batch instead of in every subject
+    // (`process_subject`): the cutoff scores, the hit-saving cutoff scores, the X-dropoffs and the
+    // reduced cutoff scores of each context.
+    let x_batch_cutoffs = {
+        let mut cutoff_scores: Vec<i32> = Vec::with_capacity(query_contexts.len());
+        let mut hit_saving_cutoff_scores: Vec<i32> = Vec::with_capacity(query_contexts.len());
+        // NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-211;
+        // c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181;
+        // c++/src/algo/blast/core/blast_engine.c:1434-1445
+        // db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
+        // if (dbscan_mode) { ... m_iTotalLength += (Int8) (*iter)->length; }
+        // if (db_length == 0) { BLAST_OneSubjectUpdateParameters(...); }
+        // The CLI subject set has a nonzero total length. Its context search
+        // space is retained across subjects, just as for output statistics.
+        for context_idx in 0..query_contexts.len() {
+            // An invalid context has an infinite cutoff and, unset, a zero X-drop and
+            // reduced cutoff (blast_parameters.c:324-332 above).
+            if !context_valid_ref[context_idx] {
+                cutoff_scores.push(i32::MAX);
+                hit_saving_cutoff_scores.push(i32::MAX);
+                continue;
+            }
+            // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:925-946
+            // searchsp = query_info->contexts[context].eff_searchsp;
+            // BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
+            // params->cutoffs[context].cutoff_score_max = new_cutoff;
+            let hit_saving_cutoff = cutoff_score_max_from_evalue(
+                evalue_threshold,
+                query_eff_searchsp[context_idx],
+                &search_karlin_ref[context_idx].gapped,
+            );
+            // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-374
+            // gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
+            // new_cutoff = gap_trigger;
+            // new_cutoff *= (Int4)sbp->scale_factor;
+            // new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
+            let gap_trigger = gap_trigger_raw_score(
+                GAP_TRIGGER_BIT_SCORE_NUCL,
+                &search_karlin_ref[context_idx].ungapped,
+            );
+            let cutoff = cutoff_score_for_ungapped_extension(gap_trigger, hit_saving_cutoff, 1.0);
+            cutoff_scores.push(cutoff);
+            hit_saving_cutoff_scores.push(hit_saving_cutoff);
+        }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:380-383
+        // ```c
+        // if (curr_cutoffs->x_dropoff_init == 0)
+        //    curr_cutoffs->x_dropoff = new_cutoff;
+        // else
+        //    curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
+        // ```
+        let mut x_dropoff_scores: Vec<i32> = Vec::with_capacity(cutoff_scores.len());
+        for ((cutoff, &x_dropoff_init), &valid) in cutoff_scores
+            .iter()
+            .zip(x_dropoff_init_ref)
+            .zip(context_valid_ref)
+        {
+            let x_dropoff = if !valid {
+                0
+            } else if x_dropoff_init == 0 {
+                *cutoff
+            } else {
+                x_dropoff_init
+            };
+            x_dropoff_scores.push(x_dropoff);
+        }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:408-412
+        // ```c
+        // curr_cutoffs->reduced_nucl_cutoff_score = (Int4)(0.8 * new_cutoff);
+        // ```
+        let mut reduced_cutoff_scores: Vec<i32> = Vec::with_capacity(cutoff_scores.len());
+        for (cutoff, &valid) in cutoff_scores.iter().zip(context_valid_ref) {
+            reduced_cutoff_scores.push(if valid {
+                (0.8 * (*cutoff as f64)) as i32
+            } else {
+                0
+            });
+        }
+        (
+            cutoff_scores,
+            hit_saving_cutoff_scores,
+            x_dropoff_scores,
+            reduced_cutoff_scores,
+        )
+    };
     let good_init_extends = std::sync::atomic::AtomicU64::new(0);
     let process_subject = |s_idx: usize,
                            subject: BlastnSubjectRef<'_>,
@@ -11539,10 +11696,12 @@ fn search_query_batch(
             _ => Vec::new(),
         };
         let subject_masked = !subject_masks.is_empty();
+        // Unmasked, every chunk carries its range inline (`SeqRanges::Inline`) and no one reads
+        // the soft ranges, so none are made (NCBI points them at `full_range`).
         let soft_ranges = if subject_masked {
             build_subject_seq_ranges_from_masks(subject_masks.as_slice(), s_len_full)
         } else {
-            vec![(0i32, s_len_full as i32)]
+            Vec::new()
         };
 
         if s_len_full < effective_word_size {
@@ -11607,80 +11766,14 @@ fn search_query_batch(
         // ```
         // NCBI uses UNGAPPED params (kbp_std) for gap_trigger calculation
         // and GAPPED params (kbp_gap) for cutoff_score_max calculation
-        let mut cutoff_scores: Vec<i32> = Vec::with_capacity(query_contexts.len());
-        let mut hit_saving_cutoff_scores: Vec<i32> = Vec::with_capacity(query_contexts.len());
-        // NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-211;
-        // c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181;
-        // c++/src/algo/blast/core/blast_engine.c:1434-1445
-        // db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
-        // if (dbscan_mode) { ... m_iTotalLength += (Int8) (*iter)->length; }
-        // if (db_length == 0) { BLAST_OneSubjectUpdateParameters(...); }
-        // The CLI subject set has a nonzero total length. Its context search
-        // space is retained across subjects, just as for output statistics.
-        for context_idx in 0..query_contexts.len() {
-            // An invalid context has an infinite cutoff and, unset, a zero X-drop and
-            // reduced cutoff (blast_parameters.c:324-332 above).
-            if !context_valid_ref[context_idx] {
-                cutoff_scores.push(i32::MAX);
-                hit_saving_cutoff_scores.push(i32::MAX);
-                continue;
-            }
-            // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:925-946
-            // searchsp = query_info->contexts[context].eff_searchsp;
-            // BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
-            // params->cutoffs[context].cutoff_score_max = new_cutoff;
-            let hit_saving_cutoff = cutoff_score_max_from_evalue(
-                evalue_threshold,
-                query_eff_searchsp[context_idx],
-                &search_karlin_ref[context_idx].gapped,
-            );
-            // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-374
-            // gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
-            // new_cutoff = gap_trigger;
-            // new_cutoff *= (Int4)sbp->scale_factor;
-            // new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
-            let gap_trigger = gap_trigger_raw_score(
-                GAP_TRIGGER_BIT_SCORE_NUCL,
-                &search_karlin_ref[context_idx].ungapped,
-            );
-            let cutoff = cutoff_score_for_ungapped_extension(gap_trigger, hit_saving_cutoff, 1.0);
-            cutoff_scores.push(cutoff);
-            hit_saving_cutoff_scores.push(hit_saving_cutoff);
-        }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:380-383
-        // ```c
-        // if (curr_cutoffs->x_dropoff_init == 0)
-        //    curr_cutoffs->x_dropoff = new_cutoff;
-        // else
-        //    curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
-        // ```
-        let mut x_dropoff_scores: Vec<i32> = Vec::with_capacity(cutoff_scores.len());
-        for ((cutoff, &x_dropoff_init), &valid) in cutoff_scores
-            .iter()
-            .zip(x_dropoff_init_ref)
-            .zip(context_valid_ref)
-        {
-            let x_dropoff = if !valid {
-                0
-            } else if x_dropoff_init == 0 {
-                *cutoff
-            } else {
-                x_dropoff_init
-            };
-            x_dropoff_scores.push(x_dropoff);
-        }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:408-412
-        // ```c
-        // curr_cutoffs->reduced_nucl_cutoff_score = (Int4)(0.8 * new_cutoff);
-        // ```
-        let mut reduced_cutoff_scores: Vec<i32> = Vec::with_capacity(cutoff_scores.len());
-        for (cutoff, &valid) in cutoff_scores.iter().zip(context_valid_ref) {
-            reduced_cutoff_scores.push(if valid {
-                (0.8 * (*cutoff as f64)) as i32
-            } else {
-                0
-            });
-        }
+        // The values depend on the context only (the gapped calculation's branch above: gap_trigger
+        // capped by cutoff_score_max), so the batch computes them once (`x_batch_cutoffs`).
+        let (cutoff_scores, hit_saving_cutoff_scores, x_dropoff_scores, reduced_cutoff_scores) = (
+            &x_batch_cutoffs.0,
+            &x_batch_cutoffs.1,
+            &x_batch_cutoffs.2,
+            &x_batch_cutoffs.3,
+        );
 
         // BLASTN debug: Log cutoff scores for this query-subject pair
         if blastn_debug {
@@ -11786,7 +11879,9 @@ fn search_query_batch(
             //                               0, subject->length+1);
             // ```
             // query->length is the concatenated length for both strands (2*len + 1).
-            let mut interval_tree = BlastIntervalTree::new(
+            // The tree is the scratch's (`x_tree`), given this chunk's ranges.
+            let interval_tree = &mut subject_scratch.x_tree;
+            interval_tree.reset_with_bounds(
                 0,                                // q_min
                 (query_concat_length + 1) as i32, // q_max
                 0,                                // s_min
@@ -15460,7 +15555,7 @@ fn search_query_batch(
             } else {
                 let (calls, skipped) = x_prelim_list(
                     ungapped_hits,
-                    &mut interval_tree,
+                    interval_tree,
                     gap_scratch,
                     greedy_align_scratch,
                     Some(&mut subject_scratch.x_ahead_scratch),
@@ -15936,7 +16031,9 @@ fn search_query_batch(
         // tree = Blast_IntervalTreeInit(0, query_blk->length + 1,
         //                               0, subject_length + 1);
         // ```
-        let mut interval_tree = BlastIntervalTree::new(
+        // The tree is the scratch's (`x_tree`), given this subject's ranges.
+        let interval_tree = &mut subject_scratch.x_tree;
+        interval_tree.reset_with_bounds(
             0,
             (query_concat_length + 1) as i32,
             0,
@@ -15955,10 +16052,18 @@ fn search_query_batch(
                             x_helper_scratch: Option<
             &mut Vec<(GapAlignScratch, GreedyAlignScratch)>,
         >,
+                            x_spec_scratch: Option<
+            &mut Vec<(GapAlignScratch, GreedyAlignScratch)>,
+        >,
                             hits: &mut Vec<BlastnHsp>,
                             traceback_edit_script_lengths: &mut Vec<u32>,
                             traceback_alignment_lengths: &mut Vec<u32>| {
             let speculative_traceback = speculative_traceback && x_helper_scratch.is_some();
+            #[cfg(not(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            )))]
+            let _ = &x_spec_scratch;
             if x_greedy_spec {
                 crate::utils::xreach::x_reach!("LOSAT_X_GREEDYSPEC", speculative_traceback);
             }
@@ -16104,26 +16209,36 @@ fn search_query_batch(
                     feature = "parallel",
                     any(not(target_arch = "wasm32"), feature = "wasm-threads")
                 ))]
+                let mut x_no_spec = Vec::new();
+                #[cfg(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                ))]
+                let x_spec_scratch = x_spec_scratch.unwrap_or(&mut x_no_spec);
+                #[cfg(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                ))]
                 let mut speculative_scratch: Vec<_> = if speculative_traceback {
                     // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-513
                     // BLAST_GappedAlignmentWithTraceback(...);
                     // Each independent scratch slot retains its intermediate results.
-                    (0..num_threads)
-                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507
-                        // ```c
-                        //         } else if (kGreedyTraceback) {
-                        //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
-                        //                 query_length, adjusted_s_length, gap_align,
-                        // ```
-                        // Each slot of the batch also has the scratch of the greedy aligner, so that
-                        // the greedy traceback call can run on a slot instead of on the ordered loop. Scratch only.
-                        .map(|_| {
-                            (
-                                GapAlignScratch::new(),
-                                GreedyAlignScratch::new(),
-                                Vec::new(),
-                            )
-                        })
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507
+                    // ```c
+                    //         } else if (kGreedyTraceback) {
+                    //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
+                    //                 query_length, adjusted_s_length, gap_align,
+                    // ```
+                    // Each slot of the batch also has the scratch of the greedy aligner, so that
+                    // the greedy traceback call can run on a slot instead of on the ordered loop.
+                    // Scratch only, made once per subject scratch (`x_spec_scratch`).
+                    while x_spec_scratch.len() < num_threads {
+                        x_spec_scratch.push((GapAlignScratch::new(), GreedyAlignScratch::new()));
+                    }
+                    x_spec_scratch
+                        .iter_mut()
+                        .take(num_threads)
+                        .map(|(gap, greedy)| (gap, greedy, Vec::new()))
                         .collect()
                 } else {
                     Vec::new()
@@ -17761,6 +17876,7 @@ fn search_query_batch(
                             gap,
                             greedy,
                             None,
+                            None,
                             &mut hits,
                             &mut edit_lengths,
                             &mut alignment_lengths,
@@ -17787,16 +17903,17 @@ fn search_query_batch(
             } else {
                 x_trace_list(
                     prelim_hits,
-                    &mut interval_tree,
+                    interval_tree,
                     gap_scratch,
                     &mut subject_scratch.greedy_align_scratch,
                     Some(&mut subject_scratch.x_ahead_scratch),
+                    Some(&mut subject_scratch.x_spec_scratch),
                     hits,
                     &mut traceback_edit_script_lengths,
                     &mut traceback_alignment_lengths,
                 );
                 let (list, s1, s2, s3, s4) = x_post_purge(hits.drain(..).collect());
-                let (list, s5) = x_final_list(list, &mut interval_tree);
+                let (list, s5) = x_final_list(list, interval_tree);
                 (list, [s1, s2, s3, s4, s5])
             };
         prelim_hits.clear();

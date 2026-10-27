@@ -272,6 +272,22 @@ pub(crate) fn build_parts(pool: &crate::utils::threading::SearchPool<'_>, capped
     parts
 }
 
+/// No NCBI counterpart (scheduling only, `LOSAT_X_BXBUILDPAR`): the parts of the first chunk's lookup
+/// table in the flow across chunks (`LOSAT_X_BXCHUNKCROSS`, `x_subject_flow::run_chunks`), built
+/// before the helpers start: one per thread (at most `X_MOST_PARTS` = 8, `x_lut_direct.rs`). Outside
+/// the capped batch flow the other threads of the pool are idle then; inside it they may be
+/// searching other batches, so the caller builds the parts they do not claim, and the scope's wait
+/// at the end may run another batch's work first (time only: nothing there waits for this
+/// setup). The later chunks' tables are built on one thread.
+pub(crate) fn cross_build_parts(pool: &crate::utils::threading::SearchPool<'_>) -> usize {
+    if !build_par_on() {
+        return 1;
+    }
+    let parts = pool.threads();
+    crate::utils::xreach::x_reach!("LOSAT_X_BXBUILDPAR", parts > 1);
+    parts
+}
+
 // No NCBI counterpart: the counts of one run's capped batch flow (scheduling only): the batches it
 // is searching now and the chunks the waves of its split batches hold. The native run attaches one
 // to its pool (`XCapRun::attach`); a search on a pool without one counts in `X_PROCESS_RUN`.

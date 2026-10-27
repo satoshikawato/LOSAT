@@ -769,6 +769,33 @@ impl Volume {
         )
     }
 
+    /// `visit_defline_taxids` with the decoder of `defline_set` (`header::decode_full`), which
+    /// reads the definition lines of any Seq-ids, parsed ones too: the taxid of every definition
+    /// line, 0 for none (item T: the check of NCBI's taxonomy cache,
+    /// `algorithm::common::database::TaxdbRun::cache_collision`).
+    pub(super) fn visit_defline_set_taxids(
+        &self,
+        first: u32,
+        end: u32,
+        piece_bytes: u64,
+        visit: &mut dyn FnMut(u32, Result<Vec<i32>, SeqDbError>) -> bool,
+    ) -> bool {
+        let taxids = |set: crate::seqid::DeflineSet| -> Vec<i32> {
+            set.deflines
+                .iter()
+                .map(|defline| defline.taxid.unwrap_or(0))
+                .collect()
+        };
+        self.visit_headers(
+            first,
+            end,
+            piece_bytes,
+            &|oid| self.defline_set(oid).map(taxids),
+            &|record, path| decode_full(record, path).map(taxids),
+            visit,
+        )
+    }
+
     /// The shared walk of `visit_deflines` and `visit_defline_taxids`: `single(oid)` is the
     /// one-sequence read that gives the result for a sequence that is not read in a piece,
     /// `decode(record, path)` decodes a record read in a piece.

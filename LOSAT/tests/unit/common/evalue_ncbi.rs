@@ -1,12 +1,11 @@
-//! Unit tests for common/evalue.rs with NCBI BLAST reference data
+//! Unit tests for common/evalue.rs: effective search space and e-value properties
 //!
 //! **Testing Strategy:**
 //!
 //! These tests use a multi-layered approach to verify NCBI BLAST compatibility:
 //!
-//! 1. **Effective Search Space Verification**: The most critical check to catch
-//!    length adjustment bugs. We compare LOSAT's effective search space calculation
-//!    with NCBI BLAST's reported values (when available).
+//! 1. **Effective Search Space Variation**: length adjustment changes the effective
+//!    search space as the inputs change.
 //!
 //! 2. **Parameter Set Testing**: Test multiple scoring parameter combinations,
 //!    not just default values, to catch parameter-dependent bugs.
@@ -18,124 +17,8 @@
 //!    correctness. End-to-end NCBI BLAST compatibility is verified in integration
 //!    tests (tests/run_comparison.sh).
 
-use super::super::helpers::ncbi_reference::{
-    compare_bit_score_with_ncbi, compare_evalue_with_ncbi, get_ncbi_blastn_evalue_cases,
-    get_ncbi_tblastx_evalue_cases, verify_effective_search_space,
-};
-use LOSAT::algorithm::common::evalue::{
-    calculate_evalue_alignment_length, calculate_evalue_database_search,
-};
+use LOSAT::algorithm::common::evalue::calculate_evalue_database_search;
 use LOSAT::stats::search_space::SearchSpace;
-
-#[test]
-#[ignore] // Ignore until reference data is populated
-fn test_evalue_against_ncbi_blastn_with_effective_space() {
-    // This test verifies both e-value calculation AND effective search space
-    // to catch length adjustment bugs
-
-    let test_cases = get_ncbi_blastn_evalue_cases();
-
-    for case in test_cases {
-        // Calculate e-value using LOSAT
-        let (bit_score, e_value) = calculate_evalue_database_search(
-            case.score,
-            case.q_len,
-            case.db_len,
-            case.db_num_seqs,
-            &case.params,
-        );
-
-        // **Critical**: Verify effective search space calculation
-        // This catches the most common bug: incorrect length adjustment
-        let search_space = SearchSpace::for_database_search(
-            case.q_len,
-            case.db_len,
-            case.db_num_seqs,
-            &case.params,
-            true, // use_length_adjustment
-        );
-
-        // Verify effective search space with small tolerance (0.1%)
-        // LOSAT's implementation is a direct port of NCBI BLAST's code,
-        // so we expect very close agreement (within floating-point precision)
-        // Larger differences (>1%) indicate a bug that needs to be fixed
-        if let Err(msg) = verify_effective_search_space(
-            search_space.effective_space,
-            search_space.length_adjustment,
-            case.expected_effective_space,
-            case.expected_length_adjustment,
-            0.001, // 0.1% tolerance (very strict, since implementation should match exactly)
-        ) {
-            panic!(
-                "Effective search space mismatch for {}: {}",
-                case.test_name, msg
-            );
-        }
-
-        // Compare bit scores
-        if case.expected_bit_score > 0.0 {
-            assert!(
-                compare_bit_score_with_ncbi(bit_score, case.expected_bit_score, 0.01),
-                "Bit score mismatch for {}: {} vs {}",
-                case.test_name,
-                bit_score,
-                case.expected_bit_score
-            );
-        }
-
-        // Compare e-values
-        if case.expected_evalue > 0.0 {
-            assert!(
-                compare_evalue_with_ncbi(e_value, case.expected_evalue, case.tolerance),
-                "E-value mismatch for {}: {} vs {} (tolerance: {})",
-                case.test_name,
-                e_value,
-                case.expected_evalue,
-                case.tolerance
-            );
-        }
-    }
-}
-
-#[test]
-#[ignore] // Ignore until reference data is populated
-fn test_evalue_against_ncbi_tblastx_with_effective_space() {
-    // This test verifies TBLASTX e-value calculations
-    // **Important**: Reference data should be from NCBI BLAST runs with
-    // -comp_based_stats 0 to avoid composition-based corrections
-
-    let test_cases = get_ncbi_tblastx_evalue_cases();
-
-    for case in test_cases {
-        let (bit_score, e_value) = calculate_evalue_alignment_length(
-            case.score,
-            case.aln_len, // Used as alignment length
-            &case.params,
-        );
-
-        // Compare with NCBI BLAST expected values
-        if case.expected_bit_score > 0.0 {
-            assert!(
-                compare_bit_score_with_ncbi(bit_score, case.expected_bit_score, 0.01),
-                "Bit score mismatch for {}: {} vs {}",
-                case.test_name,
-                bit_score,
-                case.expected_bit_score
-            );
-        }
-
-        if case.expected_evalue > 0.0 {
-            assert!(
-                compare_evalue_with_ncbi(e_value, case.expected_evalue, case.tolerance),
-                "E-value mismatch for {}: {} vs {} (tolerance: {})",
-                case.test_name,
-                e_value,
-                case.expected_evalue,
-                case.tolerance
-            );
-        }
-    }
-}
 
 #[test]
 fn test_effective_search_space_variation() {

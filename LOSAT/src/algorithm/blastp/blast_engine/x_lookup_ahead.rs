@@ -25,7 +25,7 @@
 //! and the same pool (the flat table and the Karlin blocks do not depend on the threads that
 //! compute them, `tblastx/lookup/x_clut_par.rs` and `x_query_blocks.rs`); for exact blastp the call
 //! of `blastp_aa_lookup` (`blastp_aa_lookup_ahead`: the same threshold, matrix, word length and
-//! `check_ideal`), the in-place builder of `LOSAT_X_BPLUT` on the block search's spare vectors
+//! `check_ideal`), the in-place builder on the block search's spare vectors
 //! (`tblastx/lookup/x_lut_direct.rs` `XAaSpares`: cleared and zero-filled to the table's sizes, as
 //! the C `calloc` gives them) with neighbour lists memoised under the same key (each list is a
 //! function of the word, the matrix, the threshold, the word length and the alphabet; a list
@@ -43,11 +43,9 @@
 //! are the same; `blast_engine/database.rs` only reads the subjects), on a pool of more than one
 //! thread: for blastp-fast (`CompressedAaLookupTable`) where `LOSAT_X_BPLKPFLAT` acts on the flat
 //! table of `LOSAT_X_BPCLUT` (on, `x_query_blocks::x_bp_lookup_spare`); for exact blastp
-//! (`AaLookupTable`) where its table is built in place (`LOSAT_X_BPLUT` on,
-//! `x_query_blocks::x_bp_aa_spares`), not with `LOSAT_X_BPLUT=0` (the reference builder) nor with
-//! `LOSAT_DIAGNOSTICS` (whose reference builder prints its phases,
-//! which would come earlier). Not at one thread, for the search of all queries, or for the query
-//! chunks of a split batch (each builds its own table inside its block's search). The last block
+//! (`AaLookupTable`) where its table is built in place (`x_query_blocks::x_bp_aa_spares`), not
+//! with `LOSAT_DIAGNOSTICS` (whose reference builder prints its phases, which would come earlier).
+//! Not at one thread, for the search of all queries, or for the query chunks of a split batch (each builds its own table inside its block's search). The last block
 //! starts no build.
 //!
 //! Errors and refusals: the task keeps nothing but a table. A build that fails or refuses (its
@@ -1095,8 +1093,8 @@ mod tests {
                 let (first_lookup, _) = own_build(&args, &first, &first_frames, batch_size, &pool);
                 assert!(
                     x_make_room(&pool, &first_lookup, &Cell::new(0)),
-                    "{task}: no spares in the pool (LOSAT_X_BPCLUT, LOSAT_X_BPLKPFLAT or \
-                     LOSAT_X_BPLUT is set to 0)"
+                    "{task}: no spares in the pool (LOSAT_X_BPCLUT or LOSAT_X_BPLKPFLAT is set \
+                     to 0)"
                 );
                 let (_, built) = x_run_with_build_ahead(
                     || x_build_ahead(&args, &next, batch_size, &pool),

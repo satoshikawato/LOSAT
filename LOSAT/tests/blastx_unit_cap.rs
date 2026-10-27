@@ -1,11 +1,12 @@
 //! BLASTX's memory at many threads on whole searches: the workers' diagonal tables kept one per
 //! thread (`LOSAT_X_BXDIAGKEEP`), the lookup tables' neighbour lists shared and their vectors kept
-//! between builds (`LOSAT_X_BXLUTPOOL`), at most K query batches or chunks searched at a time
-//! (`LOSAT_X_BXUNITCAP[=K]`), and the capped units' threads filled with few subjects too (tasks of
-//! fewer subjects, each query batch prepared outside the cap: `LOSAT_X_BXCAPFILL`), their lookup
-//! tables built on the threads the cap leaves them (`LOSAT_X_BXBUILDPAR`), and the fused loop's
-//! context table made once per lookup table (`LOSAT_X_BXCTXONCE`; `src/algorithm/blastx/x_bx_mem.rs`,
-//! `src/algorithm/tblastx/lookup/x_lut_direct.rs`, `src/algorithm/blastx/x_seed_diag.rs`).
+//! between builds (`LOSAT_X_BXLUTPOOL`; not in a search on one thread, `LOSAT_X_BXPOOLN1`), at most
+//! K query batches or chunks searched at a time (`LOSAT_X_BXUNITCAP[=K]`), and the capped units'
+//! threads filled with few subjects too (tasks of fewer subjects, each query batch prepared outside
+//! the cap: `LOSAT_X_BXCAPFILL`), their lookup tables built on the threads the cap leaves them
+//! (`LOSAT_X_BXBUILDPAR`), and the fused loop's context table made once per lookup table
+//! (`LOSAT_X_BXCTXONCE`; `src/algorithm/blastx/x_bx_mem.rs`, `src/algorithm/tblastx/lookup/x_lut_direct.rs`,
+//! `src/algorithm/blastx/x_seed_diag.rs`).
 //!
 //! They are in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). They change which
 //! thread computes what, and the vectors the tables are built on, not what is computed, so the
@@ -13,8 +14,9 @@
 //! the same search with all of them `=0`, for several query batches (the batch flow,
 //! `LOSAT_X_BXFLOW`) and for one query split into chunks (the chunk waves, `LOSAT_X_BXPAR`), with
 //! the cap acting (`LOSAT_X_BXUNITCAP=2` at 4 threads; its built-in K = 8 needs 9 threads or more),
-//! not acting, and with each part off. `LOSAT_X_REACH` shows that the cap acted, and that it does
-//! not act where K units would leave threads without a task (too few subjects). That a pooled
+//! not acting, and with each part off. `LOSAT_X_REACH` shows that the cap acted, and that with
+//! `LOSAT_X_BXCAPFILL=0` it does not act where K units would leave threads without a task (too few
+//! subjects). That a pooled
 //! table equals the reference table is a unit test of `x_lut_direct.rs`; that the bytes equal
 //! NCBI's is the business of the BLASTX fixtures and the campaign's comparison runs.
 //!
@@ -190,6 +192,7 @@ const ALL_OFF: &[(&str, &str)] = &[
     ("LOSAT_X_BXCTXONCE", "0"),
     ("LOSAT_X_BXDIAGKEEP", "0"),
     ("LOSAT_X_BXLUTPOOL", "0"),
+    ("LOSAT_X_BXPOOLN1", "0"),
     ("LOSAT_X_BXUNITCAP", "0"),
 ];
 
@@ -385,5 +388,36 @@ fn several_queries_give_the_report_without_ka_once() {
         sides(&dir, &query, &args, 1, &[], "LOSAT_X_BXKAONCE"),
         (true, false)
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `LOSAT_X_BXPOOLN1` (a search on one thread builds and frees its lookup tables without the pool,
+/// `tblastx/lookup/x_lut_direct.rs`): at one thread the report equals that without it, for several
+/// query batches (one table each) and for a split query (a table per chunk); `LOSAT_X_REACH` shows
+/// that it acts at one thread and not at four (where both build pooled).
+#[test]
+fn queries_give_the_report_without_pool_n1() {
+    let dir = temp_dir("pool-n1");
+    let off = [("LOSAT_X_BXPOOLN1", "0")];
+    for (pieces, length) in [(4, 4_000), (1, 45_000)] {
+        let (query, set) = inputs(&dir, pieces, length, 595);
+        let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+        let reference = blastx(&query, &args, 1, &off);
+        assert!(
+            reference.iter().filter(|&&b| b == b'\n').count() > 20,
+            "too few hits to test"
+        );
+        assert!(
+            blastx(&query, &args, 1, &[]) == reference,
+            "{pieces} x {length} letters: report differs"
+        );
+        for threads in [1, 4] {
+            assert_eq!(
+                sides(&dir, &query, &args, threads, &[], "LOSAT_X_BXPOOLN1"),
+                (threads == 1, threads > 1),
+                "{pieces} x {length} letters, {threads} threads: sides"
+            );
+        }
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

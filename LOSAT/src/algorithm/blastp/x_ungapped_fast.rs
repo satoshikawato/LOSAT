@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BPUNGAP): the BLOSUM62 protein ungapped extension (`s_BlastAaExtendOneHit`,
+//! The BLOSUM62 protein ungapped extension (`s_BlastAaExtendOneHit`,
 //! `s_BlastAaExtendTwoHit` and the `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks they share)
 //! with a tighter inner loop.
 //!
@@ -62,12 +62,6 @@ const MAX_WORD_SIZE: usize = 11;
 
 pub(crate) type Table = [i8; TABLE_LEN];
 
-struct State {
-    /// LOSAT_X_BPUNGAP (and the table fits a byte).
-    on: bool,
-    table: Box<Table>,
-}
-
 /// The table of the walks, `None` if a score does not fit a byte (`x_ungapped_sent.rs` scores
 /// with it too).
 // NCBI reference: aa_ungapped.c:804-883 `matrix[q[i]][s[i]]`; the scores are those of the
@@ -89,32 +83,11 @@ pub(crate) fn build_table() -> Option<Box<Table>> {
     Some(t)
 }
 
-fn state() -> &'static State {
-    static STATE: OnceLock<State> = OnceLock::new();
-    STATE.get_or_init(|| {
-        // `LOSAT_X_BPUNGAP` is a strict-set switch.
-        let requested = crate::utils::xswitch::on("LOSAT_X_BPUNGAP");
-        // The table is built in every mode (the tests use it, and tblastn's LOSAT_X_TBNUNGAP reads
-        // it whatever this switch says, after its own `build_table` check); a score that does not
-        // fit a byte keeps the switch off.
-        match build_table() {
-            Some(table) => State {
-                on: requested,
-                table,
-            },
-            None => State {
-                on: false,
-                table: Box::new([0i8; TABLE_LEN]),
-            },
-        }
-    })
-}
-
-/// Whether `LOSAT_X_BPUNGAP` is on (and the table fits a byte).
-// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
-#[inline]
-pub(crate) fn on() -> bool {
-    state().on
+/// The table of the walks, built once; `None` if a score does not fit a byte (the walks then hand
+/// every call to the reference).
+fn table() -> Option<&'static Table> {
+    static TABLE: OnceLock<Option<Box<Table>>> = OnceLock::new();
+    TABLE.get_or_init(build_table).as_deref()
 }
 
 /// What one walk returns: best score, length, step at which the loop left, and the OR of every
@@ -269,7 +242,7 @@ pub(crate) fn two_hit(
     if !supported(query, subject, dropoff, word_size) {
         return None;
     }
-    let tab: &Table = &state().table;
+    let tab = table()?;
     let mut q_right_off = q_right_off as i32;
     let s_left_off = s_left_off as i32;
     let mut s_right_off = s_right_off as i32;
@@ -354,7 +327,7 @@ pub(crate) fn one_hit(
     if !supported(query, subject, dropoff, word_size) {
         return None;
     }
-    let tab: &Table = &state().table;
+    let tab = table()?;
     let q_off = q_off as i32;
     let s_off = s_off as i32;
     let word_size = word_size as i32;

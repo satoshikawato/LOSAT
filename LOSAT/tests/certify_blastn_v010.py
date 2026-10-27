@@ -313,12 +313,16 @@ def certify_suite(
         missing = [str(path) for path in (ncbi_path, losat_path) if not path.is_file()]
         if missing:
             raise CertificationError(f"{case_id}: missing paired output: {missing}")
-        if case_id in exceptions:
+        bytes_equal = ncbi_path.read_bytes() == losat_path.read_bytes()
+        if case_id in exceptions and not bytes_equal:
+            # A declared source exception is consulted only when the bytes
+            # differ; byte-equal output is exact whether or not the case is
+            # declared (the exception went stale once LOSAT matched NCBI).
             results.append(
                 certify_source_exception(exceptions[case_id], ncbi_path, losat_path)
             )
             continue
-        if ncbi_path.read_bytes() != losat_path.read_bytes():
+        if not bytes_equal:
             raise CertificationError(
                 f"{case_id}: source-defined output is not byte-exact"
             )

@@ -105,6 +105,20 @@ class IntegratedRuntimeCertificationTests(unittest.TestCase):
         with self.assertRaises(integrated.CertificationFailure):
             integrated.validate_output_dir(Path("/var/tmp/not-accepted"))
 
+    def test_blastn_expects_fourteen_exact_text(self) -> None:
+        self.assertEqual(integrated.EXPECTED_BLASTN_CLASSIFICATIONS, {"EXACT_TEXT": 14})
+        integrated.assert_counter(
+            Counter({"EXACT_TEXT": 14}),
+            integrated.EXPECTED_BLASTN_CLASSIFICATIONS,
+            "BLASTN",
+        )
+        with self.assertRaises(integrated.CertificationFailure):
+            integrated.assert_counter(
+                Counter({"EXACT_TEXT": 13, "SOURCE_UNDETERMINED_ACCEPTED": 1}),
+                integrated.EXPECTED_BLASTN_CLASSIFICATIONS,
+                "BLASTN",
+            )
+
     def test_classification_counters_are_exact_not_minimums(self) -> None:
         integrated.assert_counter(
             Counter({"EXACT_TEXT": 14, "HSP_SET_DIFF": 6}),

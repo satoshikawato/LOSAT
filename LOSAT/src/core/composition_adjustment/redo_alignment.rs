@@ -482,7 +482,7 @@ pub struct BlastRedoRangeResult {
     pub query: BlastCompoSequenceData,
     pub subject: BlastCompoSequenceData,
     pub subject_maybe_biased: bool,
-    /// EXPERIMENT (LOSAT_X_BPCOMPOREUSE): `read_aa_composition(subject.data())`, computed once
+    /// `read_aa_composition(subject.data())`, computed once
     /// when blastp's SEG pass masked these subject bytes (and its cache keeps them); `None` where
     /// nothing computed it. Shared, so that a cache hit copies a pointer.
     pub x_subject_composition: Option<std::sync::Arc<XSubjectComposition>>,
@@ -519,22 +519,8 @@ impl Eq for XSubjectComposition {}
 //     }
 //     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
 // ```
-// No NCBI counterpart: the switch, read once per process. Off reads every subject composition,
-// on keeps the composition of the bytes blastp's SEG cache holds and reuses it.
-pub(crate) fn x_compo_reuse() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPCOMPOREUSE"))
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:934-936
-// ```c
-//         right = length;
-//     }
-//     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
-// ```
 // The composition of a whole, untranslated subject range: the stored one when the range carries
-// it (EXPERIMENT LOSAT_X_BPCOMPOREUSE: it was read from the same bytes by the same function),
+// it (it was read from the same bytes by the same function),
 // otherwise read here.
 pub(crate) fn x_whole_subject_composition(
     range: &BlastRedoRangeResult,

@@ -102,6 +102,35 @@ available; a host validates the argv first.
 | `losat_web2_run(argv_ptr, argv_len, query_handle, subject_handle)` | argv, handles registered for the argv's program | emits the program's supported format streams (0, 6, 7), stream 1 (§8) and stream 3; returns after the run ends. It searches once for each distinct hit list size of the formats (§7): one search, or two when `-num_descriptions` / `-num_alignments` give format 0 another size than formats 6 and 7. The registered records enter the engine's `run_local` as the reader's records, so a run reads them as the CLI reads the same file: the subjects' warnings first, then the query batches with their warnings; a first batch that fails (for example a batch of queries without residues only, NCBI's `BLAST engine error: Warning: Sequence contains no data ...`) fails the run after the CLI would have written the outfmt 0 prolog to its file, and the host discards what it received (§5). Subject titles are written by the report layer ported in E2h (`NStr::HtmlDecode`, `GuessEncoding`, `x_CleanAndCompress`), so a title that NCBI decodes no longer fails a run (BLASTN, TBLASTX and TBLASTN outfmt 0/6 byte-identical to NCBI 2.17.0, SFc 2026-10-10); a run fails as the CLI does only for the CLI's explicit rejections that happen after the search starts (`docs/evidence/losat_web_e2h/AUTHORITY.md` §J: RP-20 in the tabular formats, BLASTP's punctuation-only subject titles in outfmt 0) and for NCBI's own errors (for example `The average subject length is too short` when every subject is without residues) |
 | `losat_web2_last_error_ptr()` / `losat_web2_last_error_len()` | — | last error message |
 
+## After a trap
+
+The release profile sets `panic = "abort"` (`LOSAT/Cargo.toml:141-145`). The adapter has
+a copy of it (`web/adapter/Cargo.toml:27-32`, checked by
+`web/adapter/tools/check_build_identity.py`), and the adapter builds the shipped
+reactors. So a Rust panic inside any export of this ABI or of ABI v1
+([`abi_v1.md`](abi_v1.md)) does not unwind and does not return `-1`. It ends as a Wasm
+trap, and the host sees an exception (in JavaScript, a `WebAssembly.RuntimeError`). The
+same holds for an allocation failure and for a pointer outside the memory (§6).
+
+After a trap:
+
+- Do not call the instance again, not even `losat_web2_dealloc` or
+  `losat_web2_last_error_ptr`. Its linear memory is in an unknown state.
+- Every handle (`register`, `scan_begin`), the stored records and the last error are
+  lost. There is no error message to read for the call that trapped. The chunks of
+  streams that the host received before the trap belong to a run that did not finish:
+  the host discards them (§5).
+- The host discards the instance and instantiates the module again, calls
+  `_initialize` (§2), and registers its inputs again. The new handles differ from the
+  old ones.
+- In the threaded module the main instance and the worker instances share one memory
+  that the host created (§3). The host discards the instance, the shared memory and the
+  workers together, and creates new ones. The old shared memory is not reused: its
+  contents are in an unknown state.
+
+A failure that is reported (`-1` and a message) is not a trap. The instance stays usable
+after it.
+
 ## 5. Output streams
 
 `emit` may be called many times per stream. Chunks of one stream arrive in order. The

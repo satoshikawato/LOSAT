@@ -1,7 +1,6 @@
-//! EXPERIMENT (LOSAT_X_BPSEED): the blastp two-hit seed stage with the subject scan and the
-//! diagonal test in one loop.
+//! The blastp two-hit seed stage with the subject scan and the diagonal test in one loop.
 //!
-//! The reference path copies every word hit of the subject into the offset-pair buffer
+//! NCBI copies every word hit of the subject into the offset-pair buffer
 //! (`s_blast_aa_scan_subject_one_range`, NCBI's `s_BlastAaScanSubject`) and then reads the buffer
 //! back for the two-hit test (NCBI's `s_BlastAaWordFinder_TwoHit`). Here the test reads the hit
 //! list of the lookup cell in place, in the same order (subject offset ascending, the cell's list
@@ -16,7 +15,9 @@
 //! The buffer's capacity (`array_size`) only cuts the reference's scan into rounds; it changes
 //! neither the order nor the set of hits.
 //!
-//! `LOSAT_X_BPSEED` is a switch of the strict set (`utils/xswitch.rs`): on unless it is `0`.
+//! The loop is the two-hit seed stage of every blastp search with a window (`-window_size` other
+//! than 0); the one-hit search (`-window_size 0`) keeps the buffer of offset pairs
+//! (`blastp_for_each_offset_pair`).
 //!
 //! EXPERIMENT (LOSAT_X_BPDIAG): with the fused loop on, the hits of one subject offset (one lookup
 //! cell) are tested in batches of eight instead of one after the other: for every hit of a batch
@@ -39,7 +40,7 @@
 //!   write) and the i32 arithmetic of `x_test_hit`, which wraps (see there).
 //!
 //! `LOSAT_X_BPDIAG` is a switch of the strict set: on unless it is `0`.
-//! It needs `LOSAT_X_BPSEED`. Without AVX2
+//! Without AVX2
 //! (another architecture, or an x86-64 CPU without it) the switch keeps the per-hit loop: the
 //! scalar batch was slower than the per-hit loop on both machines it was timed on (2026-10-14,
 //! human block 1 x Species4, one thread, scan_ungapped: workstation 12.56 s against 11.59 s,
@@ -107,7 +108,7 @@
 //! table).
 //! `LOSAT_X_BPMASKED` is a switch of the strict set: on unless it is `0`; off, blastp's fused loop
 //! takes LOSAT_X_BPDEFER's deferred calls ([`XDiagMode::Avx2Defer`]). It acts only where those
-//! run (`LOSAT_X_BPDEFER` with the AVX2 batch, [`x_diag_mode`]; not with LOSAT_X_BPSEED=0,
+//! run (`LOSAT_X_BPDEFER` with the AVX2 batch, [`x_diag_mode`]; not with
 //! LOSAT_X_BPDIAG=0 or LOSAT_X_BPDIAG_SIMD=0, not in the per-hit loop of a CPU without AVX2), and
 //! never in blastp-fast's loops on the compressed table, which have no AVX2 batches.
 //!
@@ -185,8 +186,7 @@
 //! to a list whose length advances by the presence bit, without a branch on it, and the listed
 //! cells then go to the cell test in position order. The cells, their order and their hit lists
 //! are the presence-test loop's, so every outcome above is unchanged. blastp's own loop
-//! (`x_scan_two_hit`) takes the same cells under its own switch, LOSAT_X_BPSCANBF (a switch of the
-//! strict set; [`x_bp_scan_bf`]); blastp-fast's loop on the flat compressed table lists its cells
+//! (`x_scan_two_hit`) takes the same cells ([`x_scan_two_hit_bf`]); blastp-fast's loop on the flat compressed table lists its cells
 //! the same way under LOSAT_X_BPCLUTSCANBF (`x_seed_fused_clut.rs`).
 //!
 //! EXPERIMENT (LOSAT_X_BPHITBF): the per-hit loop (`x_cell_per_hit`: the fused loop without
@@ -266,27 +266,9 @@ use crate::algorithm::tblastx::lookup::{
 use crate::utils::matrix::BLASTAA_SIZE;
 use std::mem::MaybeUninit;
 
-// No NCBI counterpart: reads the LOSAT_X_BPSEED switch once; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BPSEED): a strict-set switch, on unless it is `0`.
-pub(crate) fn x_bp_seed() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPSEED"))
-}
-
-// No NCBI counterpart: how many hits ahead the fused loop reads the diagonal entries
-// (LOSAT_X_BPSEED_PREFETCH, default 16; 0 = no prefetch). Tuning only.
-pub(super) fn x_prefetch_distance() -> usize {
-    use std::sync::OnceLock;
-    static D: OnceLock<usize> = OnceLock::new();
-    *D.get_or_init(|| {
-        std::env::var("LOSAT_X_BPSEED_PREFETCH")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(16)
-    })
-}
+// No NCBI counterpart: how many hits ahead the fused loop reads the diagonal entries (0 = no
+// prefetch).
+pub(super) const X_PREFETCH_DISTANCE: usize = 16;
 
 // No NCBI counterpart: a cache hint for one diagonal entry; it reads nothing and changes no value.
 #[inline(always)]
@@ -439,16 +421,6 @@ fn x_bp_table_mode(mode: XDiagMode, table: &BlastAaLookupTable) -> XDiagMode {
     #[cfg(not(target_arch = "x86_64"))]
     let _ = table;
     mode
-}
-
-// No NCBI counterpart: reads the LOSAT_X_BPSCANBF switch once; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BPSCANBF): blastp's fused loop finds the cells with [`x_scan_cells_bf`]
-/// (module header). A strict-set switch, on unless it is `0`.
-pub(crate) fn x_bp_scan_bf() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPSCANBF"))
 }
 
 // No NCBI counterpart: reads the LOSAT_X_BPHITBF switch once; it does not change any value NCBI
@@ -848,7 +820,7 @@ struct XDiagTest {
     diag_offset: i32,
     window: i32,
     word_size: i32,
-    /// LOSAT_X_BPSEED_PREFETCH (the per-hit loop only).
+    /// [`X_PREFETCH_DISTANCE`] (the per-hit loop only).
     prefetch: usize,
 }
 
@@ -987,7 +959,7 @@ pub(crate) fn x_scan_two_hit<F>(
         diag_offset,
         window,
         word_size,
-        prefetch: x_prefetch_distance(),
+        prefetch: X_PREFETCH_DISTANCE,
     };
     let table = &mut XDiagTable::new(diag_array, diag_mask);
     // EXPERIMENT (LOSAT_X_BPHITBF): the per-hit loop with the branch-free two-hit test, where it
@@ -1000,7 +972,6 @@ pub(crate) fn x_scan_two_hit<F>(
         word_size,
     ) {
         x_scan_two_hit_hitbf(
-            x_bp_scan_bf(),
             lookup,
             subject,
             subject_length,
@@ -1013,36 +984,23 @@ pub(crate) fn x_scan_two_hit<F>(
     }
     // EXPERIMENT (LOSAT_X_BPMASKEDMIN): the masked batch only on tables with enough hits per cell.
     let mode = x_bp_table_mode(x_diag_mode(), lookup);
-    // EXPERIMENT (LOSAT_X_BPSCANBF): the same cells found without a branch on the presence bit.
-    let counts = if x_bp_scan_bf() {
-        x_scan_two_hit_bf(
-            mode,
-            lookup,
-            subject,
-            subject_length,
-            table,
-            test,
-            &mut candidate,
-        )
-    } else {
-        x_scan_two_hit_in(
-            mode,
-            lookup,
-            subject,
-            subject_length,
-            table,
-            test,
-            &mut candidate,
-        )
-    };
+    // The cells are found without a branch on the presence bit ([`x_scan_cells_bf`]).
+    let counts = x_scan_two_hit_bf(
+        mode,
+        lookup,
+        subject,
+        subject_length,
+        table,
+        test,
+        &mut candidate,
+    );
     counts.add_to_totals();
 }
 
-/// EXPERIMENT (LOSAT_X_BPSCANBF): [`x_scan_two_hit_in`] with the cells found by [`x_scan_cells_bf`].
-/// Out of line, and with a closure of its own type, so that the default instance in
-/// [`x_scan_two_hit`] and the cell tests it calls are compiled as without the switch: with the
-/// same closure type the cell test had two callers, and the default instance ran 2-6 % more
-/// instructions.
+/// [`x_scan_two_hit_in_with`] with the cells found by [`x_scan_cells_bf`]. Out of line, and with
+/// a closure of its own type, so that its cell tests keep a single caller (when the closure type
+/// was shared with another loop, the cell test had two callers and that instance ran 2-6 % more
+/// instructions).
 #[inline(never)]
 fn x_scan_two_hit_bf<F>(
     mode: XDiagMode,
@@ -1082,13 +1040,12 @@ fn x_hit_bf_for(
 }
 
 /// EXPERIMENT (LOSAT_X_BPHITBF): the per-hit loop of [`x_scan_two_hit`] with the branch-free
-/// two-hit test ([`x_cell_per_hit_bf`]), the cells found by [`x_scan_cells_bf`] when
-/// `branch_free` (LOSAT_X_BPSCANBF). Out of line, and with a closure of its own type, so that the
-/// loops without the test keep their code (see [`x_scan_two_hit_bf`]).
+/// two-hit test ([`x_cell_per_hit_bf`]), the cells found by [`x_scan_cells_bf`]. Out of line, and
+/// with a closure of its own type, so that the loops without the test keep their code (see
+/// [`x_scan_two_hit_bf`]).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 fn x_scan_two_hit_hitbf<F>(
-    branch_free: bool,
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     subject_length: usize,
@@ -1102,15 +1059,9 @@ fn x_scan_two_hit_hitbf<F>(
     let mut own = |query_offset, subject_offset, last_hit, diff, entry: &mut DiagStruct| {
         candidate(query_offset, subject_offset, last_hit, diff, entry)
     };
-    if branch_free {
-        x_scan_cells_with::<true, _>(lookup, subject, subject_length, |s, hits| {
-            x_cell_per_hit_bf(hits, s, table, test, bf, &mut own)
-        })
-    } else {
-        x_scan_cells_with::<false, _>(lookup, subject, subject_length, |s, hits| {
-            x_cell_per_hit_bf(hits, s, table, test, bf, &mut own)
-        })
-    }
+    x_scan_cells_with::<true, _>(lookup, subject, subject_length, |s, hits| {
+        x_cell_per_hit_bf(hits, s, table, test, bf, &mut own)
+    })
 }
 
 /// EXPERIMENT (LOSAT_X_BXDIAG): [`x_scan_two_hit`] with the cell test `mode` (blastx's choice,
@@ -1143,7 +1094,7 @@ where
         diag_offset,
         window,
         word_size,
-        prefetch: x_prefetch_distance(),
+        prefetch: X_PREFETCH_DISTANCE,
     };
     let table = &mut XDiagTable::new(diag_array, diag_mask);
     let mode = match mode {
@@ -1194,32 +1145,8 @@ where
     [counts.cells, counts.hits, counts.candidates, 0]
 }
 
-/// [`x_scan_two_hit`] with the cell test of `mode`; returns the counts of LOSAT_X_BPDIAG (zero
-/// for [`XDiagMode::PerHit`]).
-fn x_scan_two_hit_in<F>(
-    mode: XDiagMode,
-    lookup: &BlastAaLookupTable,
-    subject: &[u8],
-    subject_length: usize,
-    table: &mut XDiagTable<'_>,
-    test: XDiagTest,
-    candidate: &mut F,
-) -> XDiagCounts
-where
-    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
-{
-    x_scan_two_hit_in_with::<false, F>(
-        mode,
-        lookup,
-        subject,
-        subject_length,
-        table,
-        test,
-        candidate,
-    )
-}
-
-/// [`x_scan_two_hit_in`], with the cells found by [`x_scan_cells_bf`] when `BRANCH_FREE`
+/// [`x_scan_two_hit`] with the cell test of `mode`; returns the counts of LOSAT_X_BPDIAG (zero for
+/// [`XDiagMode::PerHit`]). The cells are found by [`x_scan_cells_bf`] when `BRANCH_FREE`
 /// (LOSAT_X_BXSCANBF, graduated 2026-10-26 for blastx).
 fn x_scan_two_hit_in_with<const BRANCH_FREE: bool, F>(
     mode: XDiagMode,
@@ -2009,7 +1936,7 @@ where
 
 /// EXPERIMENT (LOSAT_X_BPDIAG): the cell's hits in batches of [`X_DIAG_LANES`], each by
 /// [`x_test_batch_scalar`]; returns the number of candidates. The batches read no entry ahead
-/// (LOSAT_X_BPSEED_PREFETCH is the per-hit loop's): prefetching the batch 8 or 16 hits ahead was
+/// ([`X_PREFETCH_DISTANCE`] is the per-hit loop's): prefetching the batch 8 or 16 hits ahead was
 /// not faster than none on 2026-10-14 (local, human block 1 x Species4 and the OrthoFinder
 /// sample job, one thread).
 #[inline(always)]
@@ -3145,7 +3072,7 @@ where
     candidates
 }
 
-/// EXPERIMENT (LOSAT_X_BPSEED): the context of an offset of the concatenated query without the
+/// The context of an offset of the concatenated query without the
 /// binary search over the contexts: a coarse table gives the context at the start of the offset's
 /// block, and a walk over the (small, contiguous) frame bases moves on to the last context starting
 /// at or before the offset. The result is the largest context index whose `frame_base` is at most
@@ -4010,7 +3937,7 @@ mod tests {
                 candidate,
             )
         } else {
-            x_scan_two_hit_in(
+            x_scan_two_hit_in_with::<false, F>(
                 mode,
                 lookup,
                 subject,

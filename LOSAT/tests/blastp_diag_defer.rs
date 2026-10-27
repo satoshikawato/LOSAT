@@ -8,13 +8,13 @@
 //!
 //! Both switches are in the strict set (`src/utils/xswitch.rs`), `LOSAT_X_BPDEFER` since
 //! 2026-10-17 and `LOSAT_X_BPMASKED` since 2026-10-24: on unless `=0`. `LOSAT_X_BPDEFER` acts only
-//! where `LOSAT_X_BPDIAG`'s AVX2 batch runs (the fused seed loop of `LOSAT_X_BPSEED`, both in the
-//! set, a CPU with AVX2, not `LOSAT_X_BPDIAG_SIMD=0`), and `LOSAT_X_BPMASKED` only where
+//! where `LOSAT_X_BPDIAG`'s AVX2 batch runs (the fused seed loop, a CPU with AVX2, not
+//! `LOSAT_X_BPDIAG_SIMD=0`), and `LOSAT_X_BPMASKED` only where
 //! `LOSAT_X_BPDEFER`'s deferred calls run. Each search states the default it runs with: the
-//! reference loop (`LOSAT_X_BPSEED=0 LOSAT_X_BPDIAG=0`), the default (no variable: the masked batch
+//! per-hit fused loop (`LOSAT_X_BPDIAG=0`), the default (no variable: the masked batch
 //! where the CPU has AVX2), the default with `LOSAT_X_BPMASKED=0` (the deferred calls), and the
 //! default with `LOSAT_X_BPDEFER=0` (the AVX2 batch with the calls per batch). The tests
-//! compare the reports with the reference and with the batches on a generated pair (long lookup
+//! compare the reports with the per-hit loop and with the batches on a generated pair (long lookup
 //! cells from repeats, related proteins for two-hit extensions) at one and four threads and on the
 //! fixture pair at four, check from the
 //! `[TIMING] x_bpdiag: mode=<m> cells=<n> batched_hits=<h> candidates=<k>` lines that the masked
@@ -176,8 +176,8 @@ fn generated_pair(test: &str) -> (PathBuf, PathBuf) {
     )
 }
 
-/// The reference loop: the loop without the fused seed stage and without its line.
-const REFERENCE: &[(&str, &str)] = &[("LOSAT_X_BPSEED", "0"), ("LOSAT_X_BPDIAG", "0")];
+/// The reference: the per-hit fused loop, without the batches and without their line.
+const REFERENCE: &[(&str, &str)] = &[("LOSAT_X_BPDIAG", "0")];
 /// The default: the strict set, with the deferred calls and the masked batch.
 const DEFAULT: &[(&str, &str)] = &[];
 /// The default without the masked batch: the deferred calls of `LOSAT_X_BPDEFER`.
@@ -235,7 +235,7 @@ fn deferred_and_masked_calls_give_the_reports_and_counts_of_the_batches() {
     // fixture pair (7-12 CPU s a search) at four threads with the pairwise report (outfmt 0), which
     // shows the alignments too and, with 124 subjects (under the 250 alignments shown), every HSP
     // of the rows. `tests/blastp_diag_batch.rs` relies on this test for the fixture pair's run of
-    // `BATCHES` and its pairwise reports of the reference and the default.
+    // `BATCHES` and its pairwise reports of the per-hit loop and the default.
     let pairs = [
         (query, subject, &[1, 4][..], "6"),
         (
@@ -312,11 +312,9 @@ fn the_switch_acts_only_on_the_avx2_batches() {
     let (query, subject) = generated_pair("only_avx2");
     let (reference, _, _) = blastp(&query, &subject, 1, REFERENCE, &["-outfmt", "6"]);
     assert!(!reference.is_empty(), "the pair has a report");
-    // Without LOSAT_X_BPDIAG: the per-hit fused loop, no line.
-    let vars: &[(&str, &str)] = &[("LOSAT_X_BPDIAG", "0")];
-    let (rows, counts, _) = blastp(&query, &subject, 1, vars, &["-outfmt", "6"]);
-    assert!(rows == reference, "without BPDIAG {vars:?}: rows differ");
-    assert!(counts.is_empty(), "without BPDIAG {vars:?}: {counts:?}");
+    // Without LOSAT_X_BPDIAG (the reference): the per-hit fused loop, no line.
+    let (_, counts, _) = blastp(&query, &subject, 1, REFERENCE, &["-outfmt", "6"]);
+    assert!(counts.is_empty(), "without BPDIAG: {counts:?}");
     // With the scalar batch (LOSAT_X_BPDIAG_SIMD=0): the scalar batch, its calls per batch.
     let vars: &[(&str, &str)] = &[("LOSAT_X_BPDIAG_SIMD", "0")];
     let (rows, counts, _) = blastp(&query, &subject, 1, vars, &["-outfmt", "6"]);
@@ -326,7 +324,7 @@ fn the_switch_acts_only_on_the_avx2_batches() {
 
 /// `LOSAT_X_BPMASKEDMIN`'s rule on whole searches: a short query (about one hit per used lookup
 /// cell) keeps the deferred calls by default and takes the masked batch with
-/// `LOSAT_X_BPMASKEDMIN=0`, with the reference's report and the batches' counts either way.
+/// `LOSAT_X_BPMASKEDMIN=0`, with the per-hit loop's report and the batches' counts either way.
 #[test]
 fn the_rule_gives_tables_with_few_hits_per_cell_the_deferred_calls() {
     let (query, subject) = generated_pair("rule");

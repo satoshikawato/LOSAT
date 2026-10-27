@@ -1,8 +1,8 @@
 # Product Decision: Bounded native-NCBI platform variance
 
 - Decision ID: `PD-NCBI-PLATFORM-VARIANCE`
-- Version: 1.3
-- Date: 2026-09-02 (1.1: 2026-10-12, 1.2 and 1.3: 2026-10-14, see Amendments)
+- Version: 1.4
+- Date: 2026-09-02 (1.1: 2026-10-12, 1.2 and 1.3: 2026-10-14, 1.4: 2026-10-27, see Amendments)
 - Status: Accepted
 
 ## Scope
@@ -133,6 +133,45 @@ LOSAT parity axis. The TBLASTX d06 case remains
 ceiling remains exactly six. Native-NCBI platform variance creates no seventh
 deviation and no new LOSAT parity exception.
 
+## C `qsort` on the oracle hosts (since 1.4)
+
+This section records facts; it changes neither gate.
+
+The Linux oracle runs NCBI BLAST+ 2.17.0 on Ubuntu 24.04 (glibc 2.39): the
+capture machine of the frozen outputs and the GitHub `ubuntu-24.04` runners
+(the measurement workstation runs Ubuntu 22.04, glibc 2.35). Every glibc
+release, these two included, implements `qsort` as a merge sort, which keeps
+comparator-equal elements in their incoming order; it falls back to an
+in-place sort only when its temporary array cannot be allocated (above a
+quarter of physical memory), which no oracle case approaches. An introsort
+`qsort` was committed to the glibc development branch in October 2023 and
+reverted in January 2024, before glibc 2.39 was released (2024-01-31), because
+it made the sort unstable; no glibc release contains it
+(<https://lwn.net/Articles/960309/>). The glibc version of a Linux oracle host
+therefore does not change the order of comparator-equal elements.
+
+TBLASTX sum-statistics linking sorts the HSPs with `s_RevCompareHSPsTbx`
+(`link_hsps.c:331-370`, called at `link_hsps.c:483-486`). It returns 0 for two
+HSPs with the same query strand (`context / 3`), the same subject frame sign,
+and the same query and subject start and end offsets, for example HSPs of
+different frames of one strand at the same frame-relative coordinates. The
+NCBI source does not order such HSPs; their order is that of the platform
+`qsort`. This tie class is source-underdetermined, as the BLASTN
+common-endpoint class of `PD-BLASTN-HSP-CANONICALIZATION` is, and the order can
+change which HSPs are linked. LOSAT sorts with the same comparator and a stable
+sort that keeps the incoming order (`PD-PURE-RUST-RUNTIME-AUTHORITY`;
+`LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs`
+`sort_hsps_by_ncbi_link_order`, `LOSAT/src/algorithm/tblastx/ungapped_hit_sort.rs`
+`sort_ungapped_hits_by_index_replay`), on every platform.
+
+The `qsort` of the macOS and Windows C libraries is not a merge sort and does
+not keep comparator-equal elements in order, so the official NCBI binaries
+there may order this class differently from Linux. That difference belongs to
+Gate B, whose platform-local TBLASTX row order is normative fingerprint data
+(above). Gate A is unchanged: the known frozen mismatches list
+(`LOSAT/tests/frozen_mismatch_allowlist.json`) has no entry, so no case of this
+class is listed.
+
 ## Evidence authority
 
 The immutable authority is
@@ -217,6 +256,13 @@ are not edited or auto-learned in place.
   approved output. The v0.1.0 manifest is not edited. Gate A labels drop
   "PR 5": `CANONICAL_RAW_BYTES` and `all_exact_canonical_raw_bytes`. The Sakai
   and TBLASTX d06 ratchets, Gate B and the authority are unchanged.
+- 1.4 (2026-10-27): records the C `qsort` facts of the oracle hosts ("C
+  `qsort` on the oracle hosts" above): glibc's `qsort` has been a stable merge
+  sort in every release (the introsort change of 2023-10 was reverted before
+  2.39), the TBLASTX linking tie class of `s_RevCompareHSPsTbx` is
+  source-underdetermined and LOSAT sorts it stably, and the macOS and Windows
+  `qsort` is not a merge sort. Gate A, Gate B, the allowlist (empty) and the
+  authority are unchanged.
 
 ## Non-goals
 

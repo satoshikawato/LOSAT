@@ -285,7 +285,6 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastn::lookup::x_disc_lookup_par::print_summary();
     LOSAT::algorithm::blastn::lookup::x_dc_csr::print_summary();
     LOSAT::algorithm::blastn::lookup::x_mb_lookup_print_summary();
-    LOSAT::algorithm::blastp::x_bp_prelim_compact_print_summary();
     LOSAT::algorithm::blastx::seed::x_seed_scan::print_shadow_stats();
     LOSAT::utils::x_logclone::print_shadow_stats();
     // Diagnostic (LOSAT_TIMING): the common line, last (utils/xtiming.rs).

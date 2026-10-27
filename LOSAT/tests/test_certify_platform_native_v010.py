@@ -18,6 +18,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tarfile
@@ -2193,7 +2194,8 @@ class PlatformCertificationTests(unittest.TestCase):
         self.assertIn("preflight-path", workflow)
         self.assertIn("extract-verified-archive", workflow)
         self.assertNotIn("tar -xzf", workflow)
-        self.assertIn("actions/upload-artifact@v4", workflow)
+        # Actions are pinned to a commit with the release tag as a comment.
+        self.assertRegex(workflow, r"actions/upload-artifact@[0-9a-f]{40} # v4\.")
         self.assertIn("if: ${{ always() }}", workflow)
         self.assertIn("cross-platform-aggregation:", workflow)
         self.assertIn("needs: [platform-certification]", workflow)
@@ -2204,7 +2206,9 @@ class PlatformCertificationTests(unittest.TestCase):
             .count('print("CROSS_PLATFORM_NATIVE_CERTIFIED")'),
             1,
         )
-        self.assertEqual(workflow.count("actions/download-artifact@v4"), 6)
+        self.assertEqual(
+            len(re.findall(r"actions/download-artifact@[0-9a-f]{40} # v4\.", workflow)), 6
+        )
 
     def test_resume_import_revalidates_verified_output_hash(self) -> None:
         payload = b"canonical output\n"

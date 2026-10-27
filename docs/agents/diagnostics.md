@@ -5784,6 +5784,41 @@ Scheduling (each value computed by one thread with the original function; order 
   x1.004 with the same instructions; with one chunk per batch (the 10 transcripts of BX-t10 against Swiss-Prot at 8
   and 16 threads, 1,000 short reads against Swiss-Prot at 16) x0.996-1.000; the `-subject` case above x0.988-1.002
   (kept on the waves).
+- `LOSAT_X_BXCHUNKCROSS=1` (BLASTX, speed at 2+ threads; in the strict set from the pull request that added it: on
+  unless `=0` or `LOSAT_X_DEFAULT=0`; no condition of its own: it acts where the serial chunk loop of
+  `search::search_core` would search two or more chunks of a split query one after another, each with the subject
+  flow, which by default is `LOSAT_X_BXCHUNKFLOW`'s in-order case): the chunks run as one flow of tasks across the
+  chunks (`x_subject_flow::run_chunks`). Task `c x tasks + t` is task `t` (64 subjects) of chunk `c`; the helpers
+  search up to 16 tasks per thread ahead of the loop's thread across a chunk's end, so they no longer stop at each
+  chunk's end while that thread hands the chunk's last tasks to the sink and sets up the next chunk (before: one
+  `utils::xahead` loop per chunk with 4 tasks per thread ahead, then the next chunk's Karlin blocks and lookup table
+  on that thread alone). A chunk's setup (the loop's statements before its subject loop: `score_block`, the lookup
+  table, the loop thread's diagonal table, `subject_parameters`; a function of the chunk alone) is made once, by the
+  first thread that needs it or ahead by a helper within 2 x threads tasks of the chunk before, so at most two
+  chunks' lookup tables are alive at a time; the first chunk's is made on the idle pool before the helpers start,
+  its lookup table in one part per thread (at most 8, the partitioned build of `LOSAT_X_BXBUILDPAR`, which a later
+  chunk's builder runs mostly alone). Exactness: a task's value depends on its chunk and subjects alone (the module
+  comment's argument for the diagonal tables holds across chunks), the loop's thread makes the sink calls in the
+  serial loop's order (per chunk `chunk_start`, its subjects, `chunk_end`; a chunk without a valid context gets
+  `chunk_start` only), and a setup that fails returns its error after that chunk's `chunk_start`, where the loop met
+  it. `LOSAT_X_BXSUBJFLOWSHADOW` compares every task of every chunk (`tests/blastx_subject_flow.rs`: 30,000 letters
+  x 3,422 subjects at 2 / 3 / 8 threads, with `LOSAT_X_BXBUILDPAR=0`, and the switch `=0`, all equal to one
+  thread). Why 16 tasks per thread: in the ordered flow a task much slower than the others (a subject with many
+  hits) holds the loop's thread at its place while the helpers search the rest of the window; with 4 per thread
+  they ran out of tasks and spun in `sched_yield` (fly 2L 50 kb at 16 threads: 1.6 s of system time in a 0.69 s
+  run); with 16 they seldom do (0.08 s), and the tasks held at once stay few (only subjects with hits are kept).
+  The one-chunk subject flow (`x_subject_flow::run`) keeps 4 per thread. Measured 2026-10-27 on the workstation
+  (node 1, the first n physical cores with their HT siblings idle, `--membind=1`, cores warmed 3 s per case,
+  rounds in rotated arm order, medians of the per-round ratios; every output the same bytes as dev's and, for the
+  50 kb slice, as the progress board's d26), dev dfe8a461 against this change (8e3f2e0e, the gate's binary): fly
+  2L 800,001-850,000 (five chunks) x the 30,802 fly proteins `-db -evalue 1e-5` at 16 threads 0.689 -> 0.571 s
+  (x0.829, 8 of 8 rounds), system time 1.56 -> 0.08 s, max RSS 16 -> 24 MiB (NCBI `-db` 91-96 MiB); 32 threads
+  0.561 -> 0.400 s (x0.712); 8 threads x0.885; 4 / 2 / 1 threads x0.951 / x0.993 / x0.997; S(16) (one thread /
+  16 threads) 11.43 -> 13.74. 2L slices of 20 kb (two chunks) and 150 kb (15 chunks) at 16 threads x0.881 and
+  x0.804 (system time of the 150 kb slice 4.96 -> 0.13 s). The cross-chunk flow with 4 tasks per thread ahead (a
+  prototype) gave only x0.973 at 16 threads (system time 1.59 s); 32 or 64 per thread gave the same times as 16.
+  800 cDNAs x the yeast proteins at 16 threads `-subject` x1.002 (0.996-1.010), `-db` x0.997, `-db` at 32 threads
+  x0.998, max RSS +4-5 MiB (71 -> 76, 89 -> 93; NCBI 143-154 MiB).
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

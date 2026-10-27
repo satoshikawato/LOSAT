@@ -1148,9 +1148,16 @@ mod tests {
 pub(crate) struct TaxdbRun {
     lazy: std::sync::Mutex<Option<std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>>>,
     volume_lookups: std::sync::Mutex<std::collections::HashSet<(usize, i32)>>,
+    found: std::sync::OnceLock<bool>,
 }
 
 impl TaxdbRun {
+    /// [`SeqDb::taxdb_found`] of the run's database, asked once: the search path is not
+    /// looked through again for each batch.
+    pub(crate) fn found(&self, db: &SeqDb) -> bool {
+        *self.found.get_or_init(|| db.taxdb_found())
+    }
+
     /// The run's taxonomy database, a handle that opens it at its first name asked for.
     fn taxdb(
         &self,
@@ -1369,6 +1376,116 @@ pub(crate) fn read_reported_taxonomy(
         parsed_taxonomy[rank] = answers;
     }
     Ok((taxids, taxonomy, parsed_taxonomy, notes))
+}
+
+/// NCBI's messages about the taxonomy database when a query batch prefetches the subjects it
+/// reports, for the formats that read the subject Bioseqs but show no taxonomy (outfmt 0, 5, 6,
+/// 7 and 17): the texts of opening it and of the lookup that a volume makes the first time it
+/// fetches a subject with a taxid (`CSeqDBVol::x_GetTaxonomy`, once per volume and positive
+/// taxid in the run, `TaxdbRun`), on standard error. `subjects` are the batch's reported
+/// sequences (ordinal id, and the definition lines of one with parsed Seq-ids, whose volume
+/// lookups are `ParsedSubject::volume_taxids`; the others have one definition line, whose
+/// taxid is read here), in any order: the only text of a lookup is the same offset error, so
+/// the order of the subjects does not change the bytes. The caller writes the text after the
+/// reader's messages of the batch and before the warnings of its first query, where NCBI's
+/// prefetch comes. Empty, and nothing read, without `taxdb.bti` on the search path. A
+/// taxonomy database that LOSAT cannot read as NCBI does is refused as in
+/// [`read_reported_taxonomy`].
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-772
+/// ```c++
+/// s_IsPrefetchFormat(blast::CFormattingArgs::EOutputFormat format_type)
+/// {
+/// 	if ((format_type == CFormattingArgs::eAsnText) ||
+/// 	    (format_type == CFormattingArgs::eAsnBinary) ||
+/// 	    (format_type == CFormattingArgs::eArchiveFormat)||
+/// 	    (format_type == CFormattingArgs::eJsonSeqalign)) {
+/// 		return false;
+/// 	}
+/// 	return true;
+/// }
+/// ...
+///        s_ExtractSeqidsAndRanges(results, ids, ranges);
+///        _TRACE("Prefetching " << ids.size() << " sequence lengths");
+///        LoadSequencesToScope(ids, ranges, scope);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
+/// ```c++
+///                 BlastFormatter_PreFetchSequenceData(*results, scope,
+///                 		                            fmt_args->GetFormattedOutputChoice());
+///                 ITERATE(CSearchResultSet, result, *results) {
+///                     formatter.PrintOneResultSet(**result, query_batch);
+///                 }
+/// ```
+pub(crate) fn prefetch_messages<'s>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    subjects: impl IntoIterator<Item = (u32, Option<&'s crate::report::db_subject::ParsedSubject>)>,
+    program: &str,
+) -> Result<Vec<u8>> {
+    if !run.found(db) {
+        return Ok(Vec::new());
+    }
+    let Some(search_path) = db.search_path() else {
+        return Ok(Vec::new());
+    };
+    let taxdb = run.taxdb(search_path);
+    let lower = program.to_ascii_lowercase();
+    let mut text = String::new();
+    let mut fetched: std::collections::HashSet<u32> = Default::default();
+    for (ordinal, parsed) in subjects {
+        if !fetched.insert(ordinal) {
+            continue;
+        }
+        // `x_GetTaxonomy` asks for a positive taxid only (seqdbvol.cpp:1136); one definition
+        // line per sequence without parsed Seq-ids (`stored_title`).
+        let volume_taxids: Vec<i32> = match parsed {
+            Some(subject) => subject.volume_taxids(),
+            None => db
+                .defline_taxids(ordinal)
+                .map_err(|error| database_error(error, program))?
+                .first()
+                .copied()
+                .filter(|&taxid| taxid > 0)
+                .into_iter()
+                .collect(),
+        };
+        if volume_taxids.is_empty() {
+            continue;
+        }
+        let volume = db
+            .volume_index(ordinal)
+            .map_err(|error| database_error(error, program))?;
+        for taxid in volume_taxids {
+            let first = run
+                .volume_lookups
+                .lock()
+                .expect("the volume lookups")
+                .insert((volume, taxid));
+            if !first {
+                continue;
+            }
+            // The texts of opening come with the run's first lookup (`LazyTaxDb::names`).
+            let mut messages = Vec::new();
+            taxdb
+                .names(taxid, &mut messages)
+                .map_err(|error| taxdb_error(error, program))?;
+            for line in messages {
+                text.push_str(&crate::seqdb::taxdb::err_post_line(&lower, &line));
+                text.push('\n');
+            }
+        }
+    }
+    Ok(text.into_bytes())
+}
+
+/// Whether the first format of a call is one whose batches prefetch their reported subjects
+/// and that shows no taxonomy of them (`prefetch_messages`): outfmt 0, 5, 6, 7 and 17. The
+/// query warnings, which the batch's messages go with, are written with the first format; the
+/// XML2 and JSON formats write theirs at each `Hit` (`TaxdbPrinter`), and the Seq-annots and the
+/// archive prefetch nothing.
+pub(crate) fn prefetches_subjects(outfmt: Option<i32>) -> bool {
+    matches!(outfmt, Some(0 | 5 | 6 | 7 | 17))
 }
 
 /// How many taxonomy database entries cost as much to check as one database sequence: the
@@ -1801,6 +1918,45 @@ mod taxdb_prepass_tests {
             );
             assert_eq!(answer, Some(false));
         }
+    }
+
+    /// `prefetch_messages`: the open texts at the run's first lookup, a volume's lookup once per
+    /// taxid over the batches of a run, nothing without a taxonomy database or a taxid.
+    #[test]
+    fn the_prefetch_writes_each_text_once_per_run() {
+        let text = |db: &SeqDb, run: &TaxdbRun, ordinals: &[u32]| -> String {
+            let subjects = ordinals.iter().map(|&ordinal| (ordinal, None));
+            String::from_utf8(prefetch_messages(db, run, subjects, "BLASTP").unwrap()).unwrap()
+        };
+        let db = database("sprot_mixtax", Some(&variant("bad_magic")));
+        let run = TaxdbRun::default();
+        assert_eq!(
+            text(&db, &run, &[0, 1, 2, 0]),
+            "Error: [blastp] Error: Tax database file has wrong magic number.\n"
+        );
+        assert_eq!(text(&db, &run, &[2, 1]), "");
+        // No taxonomy database on the search path, or one that writes nothing.
+        for taxdb in [None, Some(variant("good"))] {
+            let db = database("sprot_mixtax", taxdb.as_deref());
+            assert_eq!(text(&db, &TaxdbRun::default(), &[0, 1, 2]), "");
+        }
+        // A database without taxids does not open the taxonomy database.
+        let db = database("sprot", Some(&variant("bad_magic")));
+        assert_eq!(text(&db, &TaxdbRun::default(), &[0, 1]), "");
+        // The last entry's offset error (taxid 99990 of x16_taxid_99990), once per volume.
+        let cwd = std::env::temp_dir().join(format!("losat_prefetch_cwd_{}", std::process::id()));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let taxdb = variant("offset_last_past_end");
+        let search = SearchPath::new(&cwd, Some(taxdb.as_os_str()), None).unwrap();
+        let path = root().join("db_search/x16_taxid_99990");
+        let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap();
+        let run = TaxdbRun::default();
+        let all: Vec<u32> = (0..db.num_seqs()).collect();
+        assert_eq!(
+            text(&db, &run, &all),
+            "Error: [blastp] Error: Offset error at end of taxdb file.\n"
+        );
+        assert_eq!(text(&db, &run, &all), "");
     }
 
     #[test]

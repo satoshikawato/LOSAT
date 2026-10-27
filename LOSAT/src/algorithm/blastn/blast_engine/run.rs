@@ -8407,6 +8407,20 @@ fn run_in_pool(
         batching,
         parallel_pool,
     );
+    // The lookup word of a batch of `letters` letters whose longest record has `max_len`: the
+    // width `finalize_task_config` gives `2 * letters` table entries (LOSAT_X_QBATCHPAR's plan, and
+    // LOSAT_X_MBCHAINKEEP's look ahead below).
+    let lut_width = |letters: u64, max_len: usize| {
+        let mut config = configure_task(&args);
+        let discontig_template = config.mb_template_length > 0;
+        finalize_task_config(
+            &mut config,
+            2 * letters as usize,
+            max_len.max(1),
+            discontig_template,
+        );
+        config.lut_word_length
+    };
     std::thread::scope(|scope| {
         let mut qbp = x_qbatch_par::Driver::new(
             &qbp_shared,
@@ -8420,17 +8434,7 @@ fn run_in_pool(
                 x_query_file_bytes(&args.query),
                 x_subject_letters(source),
             ),
-            Box::new(|letters: u64, max_len: usize| {
-                let mut config = configure_task(&args);
-                let discontig_template = config.mb_template_length > 0;
-                finalize_task_config(
-                    &mut config,
-                    2 * letters as usize,
-                    max_len.max(1),
-                    discontig_template,
-                );
-                config.lut_word_length
-            }),
+            Box::new(lut_width),
             qbp_off,
         );
         // EXPERIMENT (LOSAT_X_BNQDROP): no slot searches the records that the loop takes out of
@@ -8441,6 +8445,11 @@ fn run_in_pool(
         // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
         // (`lookup::x_mb_lut_keep`), freed when the loop ends.
         let x_lut_keep = x_mb_lut_keep::Keep::for_loop();
+        // EXPERIMENT (LOSAT_X_MBCHAINKEEP): the letters of the records from `x_rest_at` on.
+        let (mut x_rest_at, mut x_rest_letters) = (0usize, 0u64);
+        if x_lut_keep.is_some() && x_mb_lut_keep::chains_on() {
+            x_rest_letters = query_input.input_lengths.iter().map(|&n| n as u64).sum();
+        }
         let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(lengths.len());
         let mut batch_spans: Vec<std::ops::Range<usize>> = Vec::new();
         let mut unsearched = Vec::with_capacity(lengths.len());
@@ -8804,6 +8813,22 @@ fn run_in_pool(
                     let x_keep = x_lut_keep.as_ref().filter(|_| !qbp.may_speculate());
                     if x_lut_keep.is_some() && x_keep.is_none() {
                         crate::utils::xreach::x_reach!("LOSAT_X_MBLUTKEEP", false);
+                    }
+                    // EXPERIMENT (LOSAT_X_MBCHAINKEEP): whether this batch or a later one, and
+                    // whether a later one, may build a table of 4^12 cells, from the letters of
+                    // the records left (`lookup::x_mb_lut_keep`, "The chains").
+                    if let Some(keep) = x_keep.filter(|_| x_mb_lut_keep::chains_on()) {
+                        let lengths = &query_input.input_lengths;
+                        while x_rest_at < input_start {
+                            x_rest_letters -= lengths[x_rest_at] as u64;
+                            x_rest_at += 1;
+                        }
+                        let batch: u64 = lengths[input_start..input_end]
+                            .iter()
+                            .map(|&n| n as u64)
+                            .sum();
+                        let wide = |letters: u64| lut_width(letters, 1) == 12;
+                        keep.x_chains_ahead(wide(x_rest_letters), wide(x_rest_letters - batch));
                     }
                     search_query_batch(
                         &args,

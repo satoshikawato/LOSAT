@@ -152,7 +152,9 @@ fn ascending_offsets(words: &Words<'_>) -> bool {
 pub(super) struct Narrow {
     /// The heads, one per cell (the batch loop's kept table or a fresh one; it may be longer).
     heads: Vec<u32>,
-    /// The links, one per element of NCBI's `next_pos`.
+    /// The links, one per element of NCBI's `next_pos` (LOSAT_X_MBCHAINKEEP: the batch loop's kept
+    /// chains, which may be longer, and whose elements at offsets that are no word of this table
+    /// hold what earlier fills wrote: no walk reads them).
     chain: Vec<u32>,
 }
 
@@ -164,6 +166,11 @@ impl Narrow {
     /// The head table, for the batch loop's keep (`MbLookupTable`'s `Drop`).
     pub(super) fn take_heads(&mut self) -> Vec<u32> {
         std::mem::take(&mut self.heads)
+    }
+
+    /// The chains, for the batch loop's keep (LOSAT_X_MBCHAINKEEP, `MbLookupTable`'s `Drop`).
+    pub(super) fn chains_mut(&mut self) -> &mut Vec<u32> {
+        &mut self.chain
     }
 
     /// `for_each_hit` (blast_nascan.c:1406-1418 above): the chain of `cell`, newest first.

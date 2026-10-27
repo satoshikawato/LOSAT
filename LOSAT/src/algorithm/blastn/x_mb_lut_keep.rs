@@ -62,17 +62,54 @@
 //! batch's (the same table, a full batch's `next_pos` and the rest), so the search's peak is the
 //! full batch's as before.
 //!
-//! Timing: with LOSAT_TIMING, `[TIMING] x_mb_lut_keep: kept= fresh= zero=` gives the loop's
-//! builds on the kept table, its builds on a fresh one, and the time spent zeroing (also inside
-//! `x_mb_lookup_split`'s `alloc=`).
+//! The chains (EXPERIMENT LOSAT_X_MBCHAINKEEP; in the strict set from the pull request that added
+//! it, 2026-10-27: on unless it is `0`). A table of 3-byte elements (LOSAT_X_MB24, `x_mb_narrow.rs`:
+//! the megablast table of 4^12 cells) has its chains (NCBI's `next_pos`, 3 bytes a query position)
+//! beside the heads; they are freed with the table, after the preliminary stage
+//! (LOSAT_X_BNLUTDROP). Megablast of 31,168 D. melanogaster cDNAs against a database of 3 Mb
+//! builds 18 such tables, with chains of up to 28.6 MiB: once glibc's dynamic mmap threshold has
+//! risen past them (a freed mapped block raises it), each batch's chains come from the heap of the
+//! main arena, other blocks fill the hole they leave, and the next batch's chains grow the heap
+//! again, which glibc keeps (peak `RssAnon` 159.8 MiB at one thread and about 171 at 16, against
+//! 131 and 145 with the threshold fixed at 1 MiB, the floor of that retention). With the switch the
+//! keep takes a table's chains back as well when a later batch of the loop may build a table of
+//! 4^12 cells (`x_chains_ahead`, which the loop calls before each batch), and the next table of
+//! 3-byte elements takes them without zeroing them, extended (with zeros) when it needs more. A
+//! search holds one block of chains from the first such table to the last: no hole, no regrowth.
+//! When no later batch may build such a table (megablast of one genome, the last of the large
+//! batches) the chains are freed with the table as before, so that no traceback holds them; when
+//! neither this batch nor a later one may, the kept chains are freed before the batch. The loop
+//! answers from the letters of the records left (`2 *` their letters bounds the table entries of
+//! any batch of them, and the table's width grows with its entries), so it may keep chains that
+//! no table takes; they go when the loop ends.
+//!
+//! Why the chains are NCBI's although they are not zeroed. A chain is read from a head (0 or the
+//! 1-based offset of a word of this build) and then only at the offsets of the words it visits
+//! (`next_pos[q_off]`), and the fill writes the element of every word's offset (the link to the
+//! cell's previous head, `x_mb_narrow.rs`) before any reader runs, so every element a reader reads
+//! holds the value of NCBI's `calloc`ed array; the others are never read, and may hold anything.
+//! The fills write an element whole: on a pool as its exact 3 bytes (`store_exact`), serially as
+//! one 4-byte store whose fourth byte, the first byte of the next element, comes before that
+//! element's own store whenever that element is a word (the words come in increasing order of
+//! offset). The heads are zeroed by the keep as before. No floating-point operation is involved.
+//!
+//! Timing: with LOSAT_TIMING, `[TIMING] x_mb_lut_keep: kept= fresh= zero= chains_kept=` gives the
+//! loop's builds on the kept table, its builds on a fresh one, the time spent zeroing (also inside
+//! `x_mb_lookup_split`'s `alloc=`) and the builds on kept chains.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// No NCBI counterpart: LOSAT_X_MBLUTKEEP (read once).
 fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBLUTKEEP"))
+}
+
+/// No NCBI counterpart: LOSAT_X_MBCHAINKEEP (read once; module documentation, "The chains").
+pub(crate) fn chains_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBCHAINKEEP"))
 }
 
 /// No NCBI counterpart (scheduling only): the elements one job of the pool's zeroing writes at
@@ -82,6 +119,7 @@ const ZERO_CHUNK: usize = 1 << 16;
 static KEPT: AtomicU64 = AtomicU64::new(0);
 static FRESH: AtomicU64 = AtomicU64::new(0);
 static ZERO_NANOS: AtomicU64 = AtomicU64::new(0);
+static CHAINS_KEPT: AtomicU64 = AtomicU64::new(0);
 
 /// The kept table: as long as the largest table built so far; its first `dirty` elements may
 /// hold values of earlier fills (the longest start that builds wrote since it was last zeroed),
@@ -95,6 +133,12 @@ struct Kept {
 #[derive(Default)]
 pub(crate) struct Keep {
     kept: Mutex<Option<Kept>>,
+    /// LOSAT_X_MBCHAINKEEP: the words of the chains of a table of 3-byte elements that a dropped
+    /// table gave back, their elements as the fills left them.
+    chains: Mutex<Option<Vec<u32>>>,
+    /// LOSAT_X_MBCHAINKEEP: whether a later batch of the loop may build a table of 4^12 cells
+    /// (`x_chains_ahead`): a dropped table's chains then go back to the keep.
+    chains_later: AtomicBool,
 }
 
 impl Keep {
@@ -154,6 +198,53 @@ impl Keep {
             drop(old);
         }
     }
+
+    /// LOSAT_X_MBCHAINKEEP (module documentation, "The chains"): what the loop knows before a
+    /// batch: whether this batch or a later one (`ahead`), and whether a later one (`later`), may
+    /// build a table of 4^12 cells. Without `ahead` the kept chains are freed now.
+    pub(crate) fn x_chains_ahead(&self, ahead: bool, later: bool) {
+        self.chains_later
+            .store(later && chains_on(), Ordering::Relaxed);
+        if !ahead {
+            let old = self.chains.lock().unwrap_or_else(|e| e.into_inner()).take();
+            drop(old);
+        }
+    }
+
+    /// LOSAT_X_MBCHAINKEEP: the words for the chains of a table of 3-byte elements, `words` of
+    /// them or more: the kept ones, extended to `words` with zeros when shorter (their other
+    /// elements as earlier fills left them), else `vec![0; words]` as before.
+    pub(super) fn chains(&self, words: usize) -> Vec<u32> {
+        let kept = self.chains.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let Some(mut chains) = kept else {
+            return vec![0u32; words];
+        };
+        if chains.len() < words {
+            chains.reserve_exact(words - chains.len());
+            chains.resize(words, 0);
+        }
+        CHAINS_KEPT.fetch_add(1, Ordering::Relaxed);
+        chains
+    }
+
+    /// LOSAT_X_MBCHAINKEEP: takes the chains of a dropped table of 3-byte elements when a later
+    /// batch may build a table of 4^12 cells (`x_chains_ahead`); otherwise leaves them to be
+    /// freed with the table, as before.
+    pub(super) fn give_back_chains(&self, chains: &mut Vec<u32>) {
+        if !chains_on() {
+            return;
+        }
+        let later = self.chains_later.load(Ordering::Relaxed);
+        crate::utils::xreach::x_reach!("LOSAT_X_MBCHAINKEEP", later);
+        if later {
+            let old = self
+                .chains
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .replace(std::mem::take(chains));
+            drop(old);
+        }
+    }
 }
 
 /// Writes 0 to every element, with the pool's threads when `on_pool`.
@@ -180,10 +271,11 @@ pub(super) fn print_summary() {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
     if super::x_mb_lookup_par::timing_on() && load(&KEPT) + load(&FRESH) > 0 {
         eprintln!(
-            "[TIMING] x_mb_lut_keep: kept={} fresh={} zero={:.4}s",
+            "[TIMING] x_mb_lut_keep: kept={} fresh={} zero={:.4}s chains_kept={}",
             load(&KEPT),
             load(&FRESH),
-            load(&ZERO_NANOS) as f64 * 1e-9
+            load(&ZERO_NANOS) as f64 * 1e-9,
+            load(&CHAINS_KEPT)
         );
     }
 }

@@ -10,6 +10,7 @@ readme = "../README.md"
 keywords = ["blast", "bioinformatics", "alignment", "wasm", "genomics"]
 categories = ["science::bioinformatics", "command-line-utilities"]
 exclude = [
+    "/matrix",
     ".tmp/",
     "tests/",
     "losat_out/",

@@ -1,0 +1,1 @@
+- Remove the stray 6 MB `LOSAT/matrix` ELF binary from the repository and exclude it from the package and from git (preventive; it was never part of a release).

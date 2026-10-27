@@ -41,3 +41,6 @@ tests/*_implementation.md
 tests/*_results.log
 tests/baseline_results.log
 tests/extract_timing.sh
+
+# Stray build output once committed by mistake
+/matrix

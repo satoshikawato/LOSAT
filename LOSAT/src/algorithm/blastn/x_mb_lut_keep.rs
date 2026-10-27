@@ -119,7 +119,11 @@ impl Keep {
                 crate::utils::xreach::x_reach!("LOSAT_X_MBLUTKEEP", false);
             }
             FRESH.fetch_add(1, Ordering::Relaxed);
-            return (vec![0u32; cells], false, cells);
+            // EXPERIMENT (LOSAT_X_BNSHRINKFREE): room for the `offsets` of a later CSR build (two
+            // elements more, `x_bn_csr`), which takes the table from the keep (`take_buffer`).
+            let mut table = vec![0u32; cells + 2];
+            table.truncate(cells);
+            return (table, false, cells);
         };
         let start = super::x_mb_lookup_par::timing_on().then(std::time::Instant::now);
         zero(&mut table[..dirty.min(cells)], on_pool);

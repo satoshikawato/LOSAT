@@ -266,6 +266,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastx::sum_stats_linking::x_link_slices_print_summary();
     LOSAT::algorithm::tblastn::x_subject_translate_print_summary();
     LOSAT::algorithm::tblastn::x_subject_store_print_summary();
+    LOSAT::algorithm::tblastn::x_collect_ctx_print_summary();
     LOSAT::algorithm::tblastn::x_scan_bf_print_summary();
     LOSAT::algorithm::tblastn::x_scan_byte_print_summary();
     LOSAT::algorithm::tblastn::x_link_window_print_summary();

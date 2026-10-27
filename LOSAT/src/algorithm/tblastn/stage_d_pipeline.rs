@@ -2429,6 +2429,10 @@ trait PreliminarySink {
 struct PreliminaryCollector {
     hitlists: Vec<Option<KappaResultHitList>>,
     prelim_size: usize,
+    /// `LOSAT_X_TBNCOLLECTCTX`: the HSPs of each context of the list being added, and their
+    /// counts (kept from one subject to the next).
+    x_lists: Vec<Vec<LinkedHsp>>,
+    x_counts: Vec<usize>,
 }
 
 impl PreliminaryCollector {
@@ -2436,12 +2440,116 @@ impl PreliminaryCollector {
         Self {
             hitlists: (0..inputs.queries.len()).map(|_| None).collect(),
             prelim_size: inputs.prelim_size,
+            x_lists: Vec::new(),
+            x_counts: Vec::new(),
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:115-151
+    // ```c
+    //       for (index = 0; index < hsp_list->hspcnt; index++) {
+    //          Int4 query_index;
+    //          hsp = hsp_list->hsp_array[index];
+    //          query_index = Blast_GetQueryIndexFromContext(hsp->context, program);
+    //          ...
+    //          Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
+    //       ...
+    //       for (index = 0; index < results->num_queries; index++) {
+    //          if (hsp_list_array[index]) {
+    //             ...
+    //             Blast_HitListUpdate(results->hitlist_array[index],
+    //                                 hsp_list_array[index]);
+    // ```
+    // `LOSAT_X_TBNCOLLECTCTX` (strict set; `=0` filters the whole list once per query context, as
+    // before): one pass over the list puts each HSP in the list of its context, in list order, as
+    // NCBI's collector does; the contexts then update their hit lists in context order with the
+    // same lists and best e-values as the filters made. Exact capacity per context.
+    fn x_add_by_context(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()> {
+        let contexts = self.hitlists.len();
+        self.x_counts.clear();
+        self.x_counts.resize(contexts, 0);
+        for hsp in &linked.hsps {
+            if let Some(count) = self.x_counts.get_mut(hsp.context) {
+                *count += 1;
+            }
+        }
+        self.x_lists.resize_with(contexts, Vec::new);
+        for (list, &count) in self.x_lists.iter_mut().zip(&self.x_counts) {
+            if count > 0 {
+                *list = Vec::with_capacity(count);
+            }
+        }
+        for hsp in &linked.hsps {
+            if let Some(list) = self.x_lists.get_mut(hsp.context) {
+                list.push(*hsp);
+            }
+        }
+        x_collect_ctx_count(linked.hsps.len());
+        for context in 0..contexts {
+            if self.x_counts[context] == 0 {
+                continue;
+            }
+            let hsps = std::mem::take(&mut self.x_lists[context]);
+            let best_evalue = hsps.iter().map(|h| h.evalue).reduce(f64::min).unwrap();
+            // NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
+            // Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
+            // Each context owns an independently capped preliminary list.
+            let collector =
+                self.hitlists[context].get_or_insert(KappaResultHitList::new(self.prelim_size)?);
+            collector.update(KappaResultList {
+                oid: i32::try_from(oid)?,
+                hsps: LinkedHspList { hsps, best_evalue },
+                payloads: Vec::new(),
+            })?;
+        }
+        Ok(())
+    }
+}
+
+// No NCBI counterpart: reads the LOSAT_X_TBNCOLLECTCTX variable once; it does not change any value
+// NCBI computes.
+/// `LOSAT_X_TBNCOLLECTCTX`: a switch of the strict set (`utils/xswitch.rs`), on unless it is `0`.
+fn x_collect_ctx_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNCOLLECTCTX"))
+}
+
+// No NCBI counterpart: LOSAT_X_STATS counters; they do not change any value NCBI computes.
+/// Lists the collector split by context in one pass, and their HSPs.
+static X_COLLECT_CTX_STATS: [AtomicUsize; 2] = [const { AtomicUsize::new(0) }; 2];
+
+fn x_collect_ctx_count(hsps: usize) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("LOSAT_X_STATS").is_some()) {
+        X_COLLECT_CTX_STATS[0].fetch_add(1, Ordering::Relaxed);
+        X_COLLECT_CTX_STATS[1].fetch_add(hsps, Ordering::Relaxed);
+    }
+}
+
+/// The `[X_STATS] TBNCOLLECTCTX` line (printed by `main` at exit) with `LOSAT_X_STATS`, when the
+/// collector split a list in one pass.
+pub fn x_collect_ctx_print_summary() {
+    let [lists, hsps] = X_COLLECT_CTX_STATS
+        .each_ref()
+        .map(|v| v.load(Ordering::Relaxed));
+    if lists > 0 {
+        eprintln!("[X_STATS] TBNCOLLECTCTX lists={lists} hsps={hsps}");
     }
 }
 
 impl PreliminarySink for PreliminaryCollector {
     fn add(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()> {
+        if x_collect_ctx_on() {
+            self.x_add_by_context(oid, linked)
+        } else {
+            self.add_filtered(oid, linked)
+        }
+    }
+}
+
+impl PreliminaryCollector {
+    /// The list of subject `oid`, filtered once per query context (`LOSAT_X_TBNCOLLECTCTX=0`).
+    fn add_filtered(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()> {
         for context in 0..self.hitlists.len() {
             let hsps: Vec<_> = linked
                 .hsps
@@ -3094,6 +3202,122 @@ fn finish_local_mode0_no_sum_stats(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // No NCBI counterpart (LOSAT_X_TBNCOLLECTCTX): the collector's one pass by context gives the
+    // hit lists of one filter per context (`=0`): per context, the lists in order with their oid,
+    // HSPs (context, HSP, number, e-value bits, input position), best e-value bits and payload
+    // count, and the hit list's worst e-value, low score and heap state; on 40 subjects whose lists
+    // hold 0 to 399 HSPs over 1, 2 and 9 contexts and one beyond the query set (dropped by both),
+    // with equal e-values, and hit lists of 1, 3 and 50 lists (the heap path runs).
+    #[test]
+    fn the_collector_split_in_one_pass_gives_the_hit_lists_of_the_filters() {
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut next = move || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            state.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        };
+        let mut compared = 0;
+        for contexts in [1usize, 2, 9] {
+            for prelim_size in [1usize, 3, 50] {
+                let collector = || PreliminaryCollector {
+                    hitlists: (0..contexts).map(|_| None).collect(),
+                    prelim_size,
+                    x_lists: Vec::new(),
+                    x_counts: Vec::new(),
+                };
+                let (mut filters, mut one_pass) = (collector(), collector());
+                for oid in 0..40 {
+                    let count = if next() % 5 == 0 {
+                        0
+                    } else {
+                        (next() % 400) as usize
+                    };
+                    let hsps: Vec<LinkedHsp> = (0..count)
+                        .map(|index| {
+                            let at = (next() % 50_000) as i32;
+                            LinkedHsp {
+                                context: (next() % (contexts as u64 + 1)) as usize,
+                                hsp: GappedHsp {
+                                    frame: [1, 2, 3, -1, -2, -3][(next() % 6) as usize],
+                                    score: 20 + (next() % 60) as i32,
+                                    q_start: 0,
+                                    q_end: 30,
+                                    q_gapped_start: 10,
+                                    s_start: at,
+                                    s_end: at + 30,
+                                    s_gapped_start: at + 10,
+                                },
+                                num: 1 + (next() % 3) as i32,
+                                evalue: (next() % 200) as f64 * 1e-7,
+                                source_index: index,
+                            }
+                        })
+                        .collect();
+                    let best_evalue = hsps.iter().map(|h| h.evalue).fold(f64::MAX, f64::min);
+                    let linked = LinkedHspList { hsps, best_evalue };
+                    filters.add_filtered(oid, &linked).unwrap();
+                    one_pass.x_add_by_context(oid, &linked).unwrap();
+                }
+                for context in 0..contexts {
+                    let label =
+                        format!("{contexts} contexts, hit list {prelim_size}, context {context}");
+                    let (Some(a), Some(e)) =
+                        (&one_pass.hitlists[context], &filters.hitlists[context])
+                    else {
+                        assert!(
+                            one_pass.hitlists[context].is_none()
+                                && filters.hitlists[context].is_none(),
+                            "{label}"
+                        );
+                        continue;
+                    };
+                    assert_eq!(
+                        (
+                            a.worst_evalue().to_bits(),
+                            a.low_score(),
+                            a.heapified(),
+                            a.lists().len()
+                        ),
+                        (
+                            e.worst_evalue().to_bits(),
+                            e.low_score(),
+                            e.heapified(),
+                            e.lists().len()
+                        ),
+                        "{label}"
+                    );
+                    for (a, e) in a.lists().iter().zip(e.lists()) {
+                        assert_eq!(
+                            (
+                                a.oid,
+                                a.hsps.best_evalue.to_bits(),
+                                a.hsps.hsps.len(),
+                                a.payloads.len()
+                            ),
+                            (
+                                e.oid,
+                                e.hsps.best_evalue.to_bits(),
+                                e.hsps.hsps.len(),
+                                e.payloads.len()
+                            ),
+                            "{label}"
+                        );
+                        for (a, e) in a.hsps.hsps.iter().zip(&e.hsps.hsps) {
+                            assert_eq!(
+                                (a.context, a.hsp, a.num, a.evalue.to_bits(), a.source_index),
+                                (e.context, e.hsp, e.num, e.evalue.to_bits(), e.source_index),
+                                "{label}"
+                            );
+                        }
+                        compared += 1;
+                    }
+                }
+            }
+        }
+        assert!(compared > 100, "lists compared: {compared}");
+    }
 
     // The search reads the subjects as slices of the records' residues (`tblastn_app.rs`).
     fn subject_slices(subjects: &[Vec<u8>]) -> Vec<&[u8]> {

@@ -81,6 +81,9 @@ pub use x_subject_translate::print_summary as x_subject_translate_print_summary;
 // EXPERIMENT (LOSAT_X_TBNSTORE): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use x_subject_store::print_summary as x_subject_store_print_summary;
+// EXPERIMENT (LOSAT_X_TBNCOLLECTCTX): the summary line `main` prints at exit. No NCBI counterpart:
+// it prints counters and changes no value NCBI computes.
+pub use stage_d_pipeline::x_collect_ctx_print_summary;
 // The summary line of the branch-free scan that `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use x_scan_bf::print_summary as x_scan_bf_print_summary;

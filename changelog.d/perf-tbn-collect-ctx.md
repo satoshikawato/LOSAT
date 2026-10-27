@@ -1,0 +1,1 @@
+- `tblastn` with many queries: the preliminary hit lists take a subject's HSPs in one pass over its list instead of one pass per query, as NCBI does. Reports do not change; `LOSAT_X_TBNCOLLECTCTX=0` restores the passes per query. 35 human proteins against the human genome (`tblastn -db`): MEASURED_PENDING ([`docs/agents/diagnostics.md`](docs/agents/diagnostics.md)).

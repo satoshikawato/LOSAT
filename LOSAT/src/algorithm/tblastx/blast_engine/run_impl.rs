@@ -4004,19 +4004,27 @@ fn search_query_batch<S: TbxScore>(
     // ```
     // NCBI keeps its lookup table and diagonal table through the subject loop; when LOSAT
     // frees its copies is not a value NCBI computes (x_seed_release.rs).
-    // EXPERIMENT (LOSAT_X_TBXBOARD): this batch's units go on the search's board when its subjects
-    // run their units on the pool, one thread each (TBXNEXT), and there are no more subjects than
-    // threads (tblastx/x_work_board.rs).
+    // EXPERIMENT (LOSAT_X_TBXBOARD): every batch of a search with a board (2+ threads) uses it: its
+    // units (the unit path), link groups, frame merges and chain sorts go on the search's board
+    // (tblastx/x_work_board.rs). Several subjects run in TBXNEXT's loop (the other subject loop
+    // waits in the pool); one subject runs on this thread and its units bring their own helpers.
     let x_board_batch = x_board
         .filter(|_| {
-            x_pair_par_batch.is_some()
-                && use_parallel
+            use_parallel
                 && !use_serial_scan_chunks
-                && x_subject_next::on()
-                && subjects.count() > 1
-                && subjects.count() <= num_threads
+                && (subjects.count() == 1 || x_subject_next::on())
         })
         .map(|board| (board, board.batch(subjects.count())));
+    // A batch without the unit path puts no units on the board: its subjects' slots are closed
+    // now, so the subject loop's threads without a subject return at once (`XBoard::help`).
+    if let Some((_, batch)) = x_board_batch
+        .as_ref()
+        .filter(|_| x_pair_par_batch.is_none())
+    {
+        for s in 0..subjects.count() {
+            batch.close_without_units(s);
+        }
+    }
     if crate::algorithm::tblastx::x_work_board::on() {
         crate::utils::xreach::x_reach!("LOSAT_X_TBXBOARD", x_board_batch.is_some());
     }

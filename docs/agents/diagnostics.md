@@ -279,7 +279,8 @@ their variables mean
   one block (see its entry), and
   `BPQBLOCKFMT`, `BPQBLOCKSA`, `BPQBLOCKXML`, `BPQBLOCKXML2` and `BPQBLOCKWEB` act only with `BPQBLOCK`; `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
   `TBXNEXT` only in TBLASTX's parallel subject loop (2 or more threads, several subjects; native
-  builds and the threaded Wasm module); `BPCLUT` acts on `blastp -task blastp-fast` only, and `BPLKPFLAT` only where the search's pool
+  builds and the threaded Wasm module); `TBXBOARD` only in that loop in a native build, for a batch on
+  the unit path with at most as many subjects as threads; `BPCLUT` acts on `blastp -task blastp-fast` only, and `BPLKPFLAT` only where the search's pool
   builds the flat table of `BPCLUT` (`BPCLUT` on, 2 or more threads), so with `BPCLUT=0` it changes
   nothing.
 - White space around a value is ignored (`set LOSAT_X_BPSUBJRUN=0 && ...` in cmd.exe stores `0 `).
@@ -2560,6 +2561,37 @@ Rebuilding less:
   AP027133+AP027078) 3.84 / 4.17 s at 16 (294 / 330 MiB). One-batch inputs (MelaMJNV x 9 MJNV genomes at
   16 threads, a one-genome pair at 8) are equal in time and memory. The memory cost is the next batch's
   tables and HSPs while the batch before links (up to +38 MiB at 4 threads here).
+- `LOSAT_X_TBXBOARD=1` (TBLASTX, speed; in the strict set from the pull request that added it,
+  2026-10-27; `=0` turns it off; acts in a native build with two or more threads, for a query batch whose
+  subjects run in `LOSAT_X_TBXNEXT`'s loop on the unit path (`LOSAT_X_PAIRPAR`, not the serial chunk scan)
+  with 2 to `-num_threads` subjects; otherwise the batch runs as before) one work board per search
+  (`tblastx/x_work_board.rs`, exactness argument in its header) hands out the batch's pure work items:
+  every linking call's groups (`x_link_slices.rs` `x_link_board`), the chunk sorts and merges of a chain's
+  stable sorts of at least the parallel size (`x_link_sort.rs` `x_board_sort`), a subject's frame merges
+  (`x_kmerge.rs`), and the subjects' units (`x_pair_par.rs` `run_units`), in that order: groups, sorts and
+  merges of any batch first, then units by batch and subject index. A subject's thread puts its units on
+  the board and takes items until its units are all taken, then blocks until the units others took have
+  run; a thread of the subject loop without a subject takes items until the batch's units are all taken;
+  a chain's thread does the same with its groups and sorts, with `rayon::spawn` helpers that take one
+  item each. An item makes no pool call and waits for nothing, so no thread waits in the pool and no
+  subject's chain runs nested in another's: before, the chain of a batch that was not the last one
+  (`LOSAT_X_TBXPIPE`'s pipe chains, which link without the pool) linked its groups one after the other on
+  one thread, and on AP027131+AP027132+AP027133 x AP027133+AP027078+AP027131 at 16 threads the search
+  ended with batch 0's self pair (AP027131 x AP027131: groups of 165,637, 161,243, 131,690 and 122,349
+  HSPs) linking on one thread after every unit had run. Its units run the same function on the same unit
+  and are kept by unit index, groups are disjoint slices whose kernels read their group only, a stable
+  sort has one order (equal chunks sorted with `sort_by`, then two-way merges that take the left element
+  on ties), and frames are put together in frame order as before, so every list is the same. With
+  `LOSAT_X_TBXPIPE`, the next batch starts when every unit of the batch before has been taken (not at its
+  seed-stage end), builds its tables and waits at a gate before its subjects until the batch before has
+  ended its seed stage and the held HSPs leave room, or it returned, taking board items meanwhile; the
+  pipe loop waits for a batch by taking board items. A wait outside the pool also runs this thread's own
+  pool jobs and its part of a `rayon::broadcast` (`rayon::yield_local`): a broadcast (a later batch's
+  subject loop) ends only after every thread ran its part. wasm32 (LOSAT Web) keeps the previous loop
+  (plan v4 line W).
+  Memory: the groups of one linking call are linked at once (as the pool path already did), so the
+  kernels' per-HSP arrays (about 203 bytes per HSP, `link_group`) of a self pair's four large groups are
+  live together instead of one at a time.
 - `LOSAT_X_TBXRPTPAR=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads))
   the report stage after the last query batch (`write_tblastx_outputs`) runs its per-HSP work on the

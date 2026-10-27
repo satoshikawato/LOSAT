@@ -100,7 +100,7 @@ LOSAT_X_MB24	blastn	conditional	required	required	contiguous megablast table of 
 LOSAT_X_MBBATCH	blastn	platform			wasm/aarch64 where MBDELAY does not run
 LOSAT_X_MBDELAY	blastn	platform			x86 native (prefetch instruction); MBBATCH runs elsewhere
 LOSAT_X_MBFILL	blastn	conditional	required	gap	one-thread build (1 thread, or no pool of 2+ threads) of the contiguous megablast or the two-stage blastn table, x86_64 and wasm32 only; not with database word counts (limit_lookup, not a CLI option); ref gap: needs a target other than x86_64 and wasm32 (platform-checks arm64), or limit_lookup set by a library caller
-LOSAT_X_MBLUTKEEP	blastn	conditional	required	required	only batch loop with several query batches, contiguous table, while no QBATCHPAR slot can run
+LOSAT_X_MBLUTKEEP	blastn	conditional	required	required	only batch loop with several query batches, contiguous or one-template discontiguous table (hashtable, chain heads or CSR offsets), while no QBATCHPAR slot can run
 LOSAT_X_MBLUTONCE	blastn	conditional	required	required	only where PAIRPAR fills contiguous megablast table on pool of 2+ threads; not -limit_lookup; wins mainly for large query sets
 LOSAT_X_MBLUTPREFAULT	blastn	conditional	required	required	only with read-once pool fill (2+ threads); first chunk >=8 positions per 1,024 cells; Linux evidence
 LOSAT_X_NEWTONLANES	blastp,tblastn	conditional	required	gap	blastp: not single-query match-parallel redo; tblastn: only >=32 coming problems; reuse only if inputs bit-equal; ref gap: blastp: only the match-parallel redo (BPREDOPAR=0); tblastn: -comp_based_stats 0

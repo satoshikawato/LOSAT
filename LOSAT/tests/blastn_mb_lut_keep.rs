@@ -299,6 +299,36 @@ fn shorter_tables_are_the_start_of_the_kept_table() {
     check_counts("megablast", &query, &[BATCH], 4, 1);
 }
 
+// dc-megablast (discontiguous tables of 4^11 cells) and blastn (megablast tables of 4^11 cells) of
+// four records in batches of one: LC738868 and LC738869 joined into one record, LC738870, LC738873
+// and LC738871 joined, LC738875. A joined record has at least a quarter as many positions as
+// cells and its table is laid out as CSR (`LOSAT_X_DCCSR`, `LOSAT_X_BNCSR`), a genome alone has
+// fewer and gets chains. The first build (CSR) allocates its `offsets`, which the keep takes back
+// when the batch drops the table; every build after it is on that table: the chain heads or
+// hashtable (`kept=`) and the second CSR's `offsets` (`csr=`). The report equals the one with the
+// switch off.
+#[test]
+fn csr_and_chain_builds_share_the_kept_table() {
+    let seqs: Vec<String> = [
+        "LC738868", "LC738869", "LC738870", "LC738873", "LC738871", "LC738875",
+    ]
+    .iter()
+    .map(|name| letters(&format!("{name}.fasta")))
+    .collect();
+    let (first, second) = (seqs[0].clone() + &seqs[1], seqs[3].clone() + &seqs[4]);
+    let records = [
+        ("LC738868_LC738869".to_string(), first.as_str()),
+        ("LC738870".to_string(), seqs[2].as_str()),
+        ("LC738873_LC738871".to_string(), second.as_str()),
+        ("LC738875".to_string(), seqs[5].as_str()),
+    ];
+    let query = query_file("csr_chains", &records);
+    for task in ["dc-megablast", "blastn"] {
+        let stderr = check_counts(task, &query, &[BATCH], 2, 1);
+        assert_eq!(field(&stderr, KEEP, "csr="), 1, "{task}:\n{stderr}");
+    }
+}
+
 // LC738868 against itself split into query chunks of 100,000 letters (`CHUNK_SIZE`): the batch
 // builds no table, each of its three chunks builds one, the last two on the kept table.
 #[test]

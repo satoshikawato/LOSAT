@@ -53,7 +53,8 @@
 //! encoding; its peak, in the first batches, falls by 4.4 MiB.
 //!
 //! Timing: with LOSAT_TIMING, `[TIMING] x_bn_q_drop: batches= records= letters=` gives the number
-//! of batches and records whose letters were dropped, and their letters.
+//! of batches and records whose letters were dropped, and their letters (with LOSAT_X_BNQSLOTS a
+//! slot's copy counts as a batch of its own).
 //!
 //! EXPERIMENT (LOSAT_X_BNQPACK; in the strict set since 2026-10-25: on unless it is `0`): the letters
 //! of the records that wait in the store packed from the reading on. Dropping a batch's letters after
@@ -81,7 +82,9 @@
 //! (dc-megablast of 31,168 cDNAs at 32 threads: 86 MiB of a peak of 349). With the switch the rule
 //! does not look at the slots (`Rule::acts`), and the store serves the slots: a slot that searches
 //! a batch the loop has not taken copies its records out of the store, its packed letters made
-//! again on its own thread (`Store::slot_batch`), and the loop lends the batch it takes to the slot
+//! again on its own thread (`Store::slot_batch`); the copy is the slot's alone and its search drops
+//! the letters after their encoding, as the loop's (`x_query_stream::SlotRecords::Held`; a slot
+//! writes no report). The loop lends the batch it takes to the slot
 //! that may still search it (`Store::lend`, any batch but the first while the slots may run), until
 //! it has the batch's result: the slot's, or its own search once no slot runs
 //! (`Queries::unlend`, called right after `x_qbatch_par::Driver::take`). A lent batch the loop

@@ -729,6 +729,10 @@ pub(super) enum SlotRecords<'a> {
     Borrowed(&'a [FastaRecord]),
     Shared(Arc<Vec<FastaRecord>>),
     Owned(Vec<FastaRecord>),
+    /// EXPERIMENT (LOSAT_X_BNQSLOTS): a copy out of a LOSAT_X_BNQDROP `Store`, the slot's alone:
+    /// its search drops the letters after their encoding, as the loop's batch does (the store's
+    /// rule holds, and a slot writes no report).
+    Held(Vec<FastaRecord>),
 }
 
 impl std::ops::Deref for SlotRecords<'_> {
@@ -739,6 +743,7 @@ impl std::ops::Deref for SlotRecords<'_> {
             SlotRecords::Borrowed(records) => records,
             SlotRecords::Shared(records) => records,
             SlotRecords::Owned(records) => records,
+            SlotRecords::Held(records) => records,
         }
     }
 }
@@ -993,7 +998,7 @@ impl<'a> Queries<'a> {
             Queries::Taken(store) => {
                 return Ok(store.slot_batch(searched).map(|batch| match batch {
                     super::x_query_drop::SlotBatch::Lent(records) => SlotRecords::Shared(records),
-                    super::x_query_drop::SlotBatch::Copied(records) => SlotRecords::Owned(records),
+                    super::x_query_drop::SlotBatch::Copied(records) => SlotRecords::Held(records),
                 }));
             }
             Queries::Streamed(store) => store,

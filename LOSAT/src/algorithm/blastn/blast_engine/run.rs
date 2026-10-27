@@ -9240,7 +9240,7 @@ fn x_qbatch_par_off_of(
     threads: usize,
 ) -> Option<x_qbatch_par::Off> {
     use x_qbatch_par::Off;
-    if !cfg!(all(feature = "parallel", not(target_arch = "wasm32"))) {
+    if !cfg!(feature = "parallel") {
         return Some(Off::Build);
     }
     if threads < 2 {

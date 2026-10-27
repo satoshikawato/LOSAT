@@ -280,6 +280,107 @@ where
     result.0
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-180
+// ```c++
+//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+//         (*thread)->Run();
+//     }
+//     ...
+//         (*thread)->Join(&result);
+// ```
+// No NCBI counterpart for where the threads are started: scheduling only, it changes no value
+// NCBI computes.
+/// `with_search_pool` on a new thread: the calling thread spawns, in `scope`, every thread of a
+/// pool of `requested` threads and does not join them (`scope` does). Slot zero is the new thread
+/// (`zero` sets its name and stack), which runs `work` with the pool and then drops the pool, so
+/// that its other threads end. For a thread that cannot start threads itself: the WASI hosts of wasm32 start a thread
+/// only for the main thread (a thread worker's `thread-spawn` fails), so a thread that a search on
+/// the main thread starts gets its pool from there. Without a pool (one thread, a count that
+/// `validate_threads` refuses, or a pool that cannot be built) `work` runs alone on the new thread
+/// (`SearchPool::x_serial`). Fails only when the new thread cannot be spawned; the pool's other
+/// threads then end.
+#[cfg(feature = "parallel")]
+pub fn x_spawn_search_pool<'scope, 'env, F>(
+    scope: &'scope std::thread::Scope<'scope, 'env>,
+    zero: std::thread::Builder,
+    requested: usize,
+    program: &str,
+    work: F,
+) -> std::io::Result<std::thread::ScopedJoinHandle<'scope, ()>>
+where
+    F: FnOnce(&SearchPool<'_>) + Send + 'scope,
+{
+    // Set by slot zero before it runs the worker loop, whose start hook (slot zero only) calls it.
+    let hook = std::sync::Arc::new(std::sync::OnceLock::<CallerCallback>::new());
+    let start = std::sync::Arc::clone(&hook);
+    let mut caller = None;
+    let pool = if requested > 1 && validate_threads(requested).is_ok() {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(requested)
+            .start_handler(move |index| {
+                if index == 0 {
+                    if let Some(callback) = start.get() {
+                        // SAFETY: slot zero sets the callback before it runs this worker loop, on
+                        // its own thread, and its body outlives the loop.
+                        unsafe { callback.call() };
+                    }
+                }
+            })
+            .spawn_handler(|thread| {
+                if thread.index() == 0 {
+                    caller = Some(thread);
+                } else {
+                    std::thread::Builder::new().spawn_scoped(scope, || thread.run())?;
+                }
+                Ok(())
+            })
+            .build()
+            .ok()
+    } else {
+        None
+    };
+    if let Some(pool) = &pool {
+        report_pool(program, requested, pool.current_num_threads());
+    }
+    zero.spawn_scoped(scope, move || {
+        let (Some(pool), Some(caller)) = (pool, caller) else {
+            work(&SearchPool::x_serial());
+            return;
+        };
+        let pool_slot = std::cell::RefCell::new(Some(pool));
+        let result_slot = std::cell::RefCell::new(None);
+        let mut work = Some(work);
+        let mut body = || {
+            let pool = pool_slot
+                .borrow_mut()
+                .take()
+                .expect("constructed search pool");
+            // Catch before Rayon's start_handler catch boundary, which otherwise aborts. Drop the
+            // pool even after a panic to release its threads.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let search = SearchPool {
+                    requested: &requested,
+                    pool: Some(&pool),
+                    x_ext: None,
+                };
+                search.install(|| work.take().expect("one search per pool")(&search));
+            }));
+            *result_slot.borrow_mut() = Some(result);
+            drop(pool);
+        };
+        // SAFETY: only slot zero, this thread, invokes the callback, synchronously in
+        // `caller.run()` below; body lives until then.
+        let callback = unsafe { CallerCallback::new(&mut body) };
+        if hook.set(callback).is_err() {
+            unreachable!("one slot zero per pool");
+        }
+        caller.run();
+        if let Some(Err(panic)) = result_slot.into_inner() {
+            std::panic::resume_unwind(panic);
+        }
+    })
+}
+
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:172-180
 // (*thread)->Run(); (*thread)->Join(&result);
 // Erase only the scoped caller callback's lifetime for Rayon's 'static startup

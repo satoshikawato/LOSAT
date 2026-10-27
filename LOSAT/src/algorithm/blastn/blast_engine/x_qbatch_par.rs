@@ -69,7 +69,7 @@
 //! searches its batch. The loop searches a batch on the whole pool only when no slot is running
 //! and none can start (the first batch, and every batch once the search does not speculate).
 //!
-//! Off (the loop as before): switch off; a build without `parallel`, or wasm32; one thread;
+//! Off (the loop as before): switch off; a build without `parallel`; one thread;
 //! a BLAST database (`-db`); `-verbose`, `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`,
 //! `LOSAT_DEBUG_COORDS[_START]`, the blastn trace or `LOSAT_WASI_THREADS_DEBUG`; subjects of n or
 //! more work units (5 Mb subject chunks; today's subject-parallel batch already uses the pool);
@@ -198,7 +198,7 @@
 //! ```
 
 #![cfg_attr(
-    not(all(feature = "parallel", not(target_arch = "wasm32"))),
+    not(feature = "parallel"),
     allow(dead_code, unused_imports, unused_variables)
 )]
 
@@ -284,7 +284,7 @@ impl Switches {
 pub(super) enum Off {
     /// The switch is off (`LOSAT_X_QBATCHPAR=0`).
     NotSet,
-    /// A build without the `parallel` feature, or wasm32.
+    /// A build without the `parallel` feature.
     Build,
     /// One thread.
     Threads,
@@ -1620,7 +1620,7 @@ where
         )
     }
 
-    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
+    #[cfg(not(feature = "parallel"))]
     fn start_slots(&mut self, _k: usize, _m: usize) -> Result<(), Off> {
         Err(Off::Build)
     }
@@ -1844,7 +1844,7 @@ where
 
 /// The batches of one slot, each searched with `pool`, until the loop ends or a batch panics
 /// (its thread-local state is then not trusted further; the panic is kept for the loop).
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(feature = "parallel")]
 fn slot_loop<T, F>(
     shared: &Shared<T>,
     search: &F,
@@ -1986,7 +1986,7 @@ fn set_panic_sink(sink: Option<Arc<PanicSink>>) {
 /// the loop takes the batch); elsewhere it calls the hook it replaced. Not with `panic =
 /// "abort"` (the release profile): a panic cannot be kept there, and the process ends with the
 /// default hook's message.
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(feature = "parallel")]
 fn install_panic_hook() {
     if cfg!(panic = "abort") {
         return;
@@ -4099,4 +4099,103 @@ mod tests {
             );
         }
     }
+}
+
+// No NCBI counterpart (scheduling only): where the threads of the slots are started; it changes no
+// value NCBI computes.
+/// wasm32: the slots' threads and the threads of their pools, all started by the loop's thread.
+/// The WASI hosts start a thread only for the main thread (a thread worker's `thread-spawn`
+/// fails: `LOSAT/tests/wasi_thread_host.js`, `web/app/src/infra/engine-worker/thread-host.ts`),
+/// and the loop runs there, as the first thread of the search's pool, so a slot's own thread
+/// cannot build its pool (`slot_main`'s `with_search_pool` would leave it on one thread).
+/// `x_spawn_search_pool` builds each slot's pool here instead, with the slot's thread as the
+/// pool's first thread, so the slots run as on the other targets: `k` threads named
+/// `losat-qbp-<slot>`, `k x m` threads in all.
+#[cfg(all(feature = "parallel", target_arch = "wasm32"))]
+impl<'scope, 'env, T, F> Driver<'scope, 'env, T, F>
+where
+    T: SlotResult + Send + 'env,
+    F: Fn(&Job, &SearchPool<'_>) -> T + Sync + 'env,
+{
+    fn start_slots(&mut self, k: usize, m: usize) -> Result<(), Off> {
+        install_panic_hook();
+        let sinks: Vec<Arc<PanicSink>> = (0..k).map(|_| Arc::default()).collect();
+        let cancels: Vec<Cancel> = (0..k).map(|_| Cancel::default()).collect();
+        if self.shared.sinks.set(sinks).is_err() || self.shared.cancels.set(cancels).is_err() {
+            return Err(Off::Spawn);
+        }
+        self.shared.lock().running = vec![None; k];
+        for slot in 0..k {
+            let (shared, search) = (self.shared, self.search);
+            self.shared.lock().alive += 1;
+            let thread = std::thread::Builder::new()
+                .name(format!("losat-qbp-{slot}"))
+                .stack_size(SLOT_STACK_BYTES);
+            let spawned = crate::utils::threading::x_spawn_search_pool(
+                self.scope,
+                thread,
+                m,
+                "blastn",
+                move |pool| slot_in_pool(shared, search, slot, pool),
+            );
+            match spawned {
+                Ok(handle) => {
+                    self.slots.push(handle);
+                    UNJOINED.with(|unjoined| unjoined.set(unjoined.get() + 1));
+                }
+                Err(_) => {
+                    self.shared.lock().alive -= 1;
+                    return Err(Off::Spawn);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// wasm32: `slot_main` on a slot's thread that runs in `pool`, the pool `start_slots` built for
+/// it (or one thread).
+#[cfg(all(feature = "parallel", target_arch = "wasm32"))]
+fn slot_in_pool<T, F>(shared: &Shared<T>, search: &F, slot: usize, pool: &SearchPool<'_>)
+where
+    T: SlotResult + Send,
+    F: Fn(&Job, &SearchPool<'_>) -> T + Sync,
+{
+    let sink = Arc::clone(
+        &shared
+            .sinks
+            .get()
+            .expect("slot sinks are set before the slots")[slot],
+    );
+    let cancel = &shared
+        .cancels
+        .get()
+        .expect("slot flags are set before the slots")[slot];
+    set_panic_sink(Some(Arc::clone(&sink)));
+    // When the slot's thread ends (also by a panic outside a batch, not expected), the loop must
+    // not wait for it.
+    struct Ended<'a, T>(&'a Shared<T>, usize);
+    impl<T> Drop for Ended<'_, T> {
+        fn drop(&mut self) {
+            let mut state = self.0.lock();
+            state.alive -= 1;
+            if let Some(running) = state.running.get_mut(self.1) {
+                *running = None;
+            }
+            drop(state);
+            self.0.wake.notify_all();
+        }
+    }
+    let _ended = Ended(shared, slot);
+    if pool.enabled() {
+        rayon::broadcast(|_| set_panic_sink(Some(Arc::clone(&sink))));
+    }
+    slot_loop(
+        shared,
+        search,
+        slot,
+        &pool.x_with_ext(cancel),
+        &sink,
+        cancel,
+    );
 }

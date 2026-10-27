@@ -6846,7 +6846,18 @@ fn x_bpf_s7_slots(threads: usize) -> Option<(usize, usize)> {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0)
     });
+    if x_bpf_s7_share() {
+        return (k > 1 && k <= threads).then_some((k, threads));
+    }
     (k > 1 && k <= threads && threads % k == 0).then(|| (k, threads / k))
+}
+
+/// PROBE (LOSAT_BPF_S7SHARE=1): the slots share the search's pool (each block's search on all its
+/// threads; a thread waiting in one block's join takes another block's tasks).
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+fn x_bpf_s7_share() -> bool {
+    static SHARE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SHARE.get_or_init(|| std::env::var_os("LOSAT_BPF_S7SHARE").is_some())
 }
 
 /// PROBE (LOSAT_BPF_S7): what the slots have searched, written in block order.
@@ -6943,7 +6954,15 @@ fn x_bpf_s7_run(
             out.next += 1;
         }
     };
-    if slot_threads == 1 {
+    if x_bpf_s7_share() {
+        pool.install(|| {
+            rayon::scope(|scope| {
+                for _ in 0..slots {
+                    scope.spawn(|_| slot(pool));
+                }
+            })
+        });
+    } else if slot_threads == 1 {
         pool.install(|| {
             rayon::scope(|scope| {
                 for _ in 0..slots {
@@ -6981,8 +7000,8 @@ fn x_bpf_s7_run(
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if std::env::var_os("LOSAT_BPF_S7LOG").is_some() {
         eprintln!(
-            "[bpf-s7] slots={slots} slot_threads={slot_threads} blocks={blocks} written={} max_ready={}",
-            out.next, out.max_ready
+            "[bpf-s7] slots={slots} slot_threads={slot_threads} share={} blocks={blocks} written={} max_ready={}",
+            x_bpf_s7_share(), out.next, out.max_ready
         );
     }
     if let Some((index, error)) = out.error {

@@ -5792,12 +5792,14 @@ Scheduling (each value computed by one thread with the original function; order 
   search up to 16 tasks per thread ahead of the loop's thread across a chunk's end, so they no longer stop at each
   chunk's end while that thread hands the chunk's last tasks to the sink and sets up the next chunk (before: one
   `utils::xahead` loop per chunk with 4 tasks per thread ahead, then the next chunk's Karlin blocks and lookup table
-  on that thread alone). A chunk's setup (the loop's statements before its subject loop: `score_block`, the lookup
-  table, the loop thread's diagonal table, `subject_parameters`; a function of the chunk alone) is made once, by the
-  first thread that needs it or ahead by a helper within 2 x threads tasks of the chunk before, so at most two
-  chunks' lookup tables are alive at a time; the first chunk's is made on the idle pool before the helpers start,
-  its lookup table in one part per thread (at most 8, the partitioned build of `LOSAT_X_BXBUILDPAR`, which a later
-  chunk's builder runs mostly alone). Exactness: a task's value depends on its chunk and subjects alone (the module
+  on that thread alone). The tasks offered are those of the loop thread's chunk and the next one. A chunk's setup
+  (the loop's statements before its subject loop: `score_block`, the lookup table, the loop thread's diagonal
+  table, `subject_parameters`; a function of the chunk alone) is made once, on one thread, by the first thread
+  that needs it or ahead by a helper within 2 x threads tasks of the end of the loop thread's chunk, so at most two
+  chunks' setups are alive at a time. The first chunk's is made before the helpers start, its lookup table in one
+  part per thread (at most 8) on the idle pool (the partitioned build of `LOSAT_X_BXBUILDPAR`); a later one is not
+  built in parts, because a helper waiting at the end of such a build for a part another thread took could run a
+  helper loop not yet started and wait there for the setup it is building. Exactness: a task's value depends on its chunk and subjects alone (the module
   comment's argument for the diagonal tables holds across chunks), the loop's thread makes the sink calls in the
   serial loop's order (per chunk `chunk_start`, its subjects, `chunk_end`; a chunk without a valid context gets
   `chunk_start` only), and a setup that fails returns its error after that chunk's `chunk_start`, where the loop met

@@ -280,6 +280,10 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
         (3, &[("LOSAT_X_BXBUILDPAR", "0")][..], 1),
         (2, &[("LOSAT_X_BXCHUNKCROSS", "0")][..], 3),
         (8, &[("LOSAT_X_BXCHUNKCROSS", "0")][..], 3),
+        // The helpers' own diagonal tables; the batch inside the capped batch flow (K = 2 below
+        // the thread count), whose helpers leave once every task is claimed.
+        (2, &[("LOSAT_X_BXDIAGKEEP", "0")][..], 1),
+        (4, &[("LOSAT_X_BXUNITCAP", "2")][..], 1),
         (16, &[][..], 0),
         (2, &[("LOSAT_X_BXCHUNKFLOW", "0")][..], 0),
         (2, &[("LOSAT_X_BXSUBJFLOW", "0")][..], 0),
@@ -309,6 +313,42 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
         assert!(
             stderr.contains("[X_SHADOW] BXSUBJFLOW tasks_compared=162 (subject results identical)"),
             "{stderr}"
+        );
+    }
+    // Chunks without a valid context (all N): the loop gives them `chunk_start` only, in the flow
+    // across chunks as in the serial loop. 10,000 letters, 25,000 N, 10,000 letters.
+    let letters: String = std::fs::read_to_string(&query)
+        .unwrap()
+        .lines()
+        .skip(1)
+        .collect();
+    let gapped = dir.join("gapped.fna");
+    std::fs::write(
+        &gapped,
+        format!(
+            ">gapped\n{}{}{}\n",
+            &letters[..10_000],
+            "N".repeat(25_000),
+            &letters[10_000..20_000]
+        ),
+    )
+    .unwrap();
+    let (reference, _) = blastx(&gapped, &args, 1, &[]);
+    for (threads, env, loops) in [
+        (2, &[][..], 1),
+        (8, &[][..], 1),
+        (2, &[("LOSAT_X_BXCHUNKCROSS", "0")][..], 5),
+    ] {
+        let mut env = env.to_vec();
+        env.push(("LOSAT_TIMING", "1"));
+        let (report, stderr) = blastx(&gapped, &args, threads, &env);
+        assert!(
+            report == reference,
+            "N stretch, threads {threads} {env:?}: report differs"
+        );
+        assert!(
+            timing(&stderr, "blastx_subject_flow", "loops") <= loops,
+            "N stretch, threads {threads} {env:?}"
         );
     }
     // A `-subject` file takes the same rule.

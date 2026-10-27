@@ -272,11 +272,10 @@ pub(crate) fn build_parts(pool: &crate::utils::threading::SearchPool<'_>, capped
     parts
 }
 
-/// No NCBI counterpart (scheduling only, `LOSAT_X_BXBUILDPAR`): the parts of a chunk's lookup table
-/// in the flow across chunks (`LOSAT_X_BXCHUNKCROSS`, `x_subject_flow::run_chunks`): one per thread
-/// of the pool (at most `X_MOST_PARTS` = 8, `x_lut_direct.rs`). The first chunk's table is built
-/// while the other threads are idle and they take its parts; a later chunk's is built by one helper
-/// while the others search, and that helper claims the parts no other thread takes.
+/// No NCBI counterpart (scheduling only, `LOSAT_X_BXBUILDPAR`): the parts of the first chunk's lookup
+/// table in the flow across chunks (`LOSAT_X_BXCHUNKCROSS`, `x_subject_flow::run_chunks`), built
+/// before the helpers start, while the other threads of the pool are idle: one per thread (at most
+/// `X_MOST_PARTS` = 8, `x_lut_direct.rs`). The later chunks' tables are built on one thread.
 pub(crate) fn cross_build_parts(pool: &crate::utils::threading::SearchPool<'_>) -> usize {
     if !build_par_on() {
         return 1;

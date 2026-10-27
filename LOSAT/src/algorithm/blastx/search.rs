@@ -815,40 +815,40 @@ pub(crate) fn search_core(
                 let x_parts = x_bx_mem::cross_build_parts(pool);
                 let fixed_spaces = &spaces;
                 let x_chunks = &chunks;
-                let x_make = |c: usize| -> Result<Option<x_subject_flow::XChunkSetup>> {
-                    let x_t = super::x_timing::lap();
-                    let batch = &x_chunks[c].prepared;
-                    let mut params = score_block(batch);
-                    if !params.iter().any(|p| p.valid) {
-                        return Ok(None);
-                    }
-                    let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
-                    let last = batch.contexts.last().expect("BLASTX contexts");
-                    let length = last.offset + last.length;
-                    let table = Diagonals::new(length, options.window_size)?;
-                    let xdrop = subject_parameters(
-                        batch,
-                        &mut params,
-                        options,
-                        db_length,
-                        db_count,
-                        min_subject_length,
-                        Some(fixed_spaces),
-                    )?;
-                    super::x_timing::batch(XBatch::Lookup, x_t);
-                    Ok(Some(x_subject_flow::XChunkSetup {
-                        params,
-                        lookup,
-                        xdrop,
-                        table,
-                        length,
-                    }))
-                };
+                let x_make =
+                    |c: usize, x_parts: usize| -> Result<Option<x_subject_flow::XChunkSetup>> {
+                        let batch = &x_chunks[c].prepared;
+                        let mut params = score_block(batch);
+                        if !params.iter().any(|p| p.valid) {
+                            return Ok(None);
+                        }
+                        let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
+                        let last = batch.contexts.last().expect("BLASTX contexts");
+                        let length = last.offset + last.length;
+                        let table = Diagonals::new(length, options.window_size)?;
+                        let xdrop = subject_parameters(
+                            batch,
+                            &mut params,
+                            options,
+                            db_length,
+                            db_count,
+                            min_subject_length,
+                            Some(fixed_spaces),
+                        )?;
+                        Ok(Some(x_subject_flow::XChunkSetup {
+                            params,
+                            lookup,
+                            xdrop,
+                            table,
+                            length,
+                        }))
+                    };
                 let x_t = super::x_timing::lap();
                 call += x_subject_flow::run_chunks(
                     x_k,
                     x_chunks,
                     &x_make,
+                    x_parts,
                     subjects,
                     options,
                     pool.threads() - 1,

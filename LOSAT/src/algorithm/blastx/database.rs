@@ -31,6 +31,7 @@ use super::subjects::Subjects;
 use crate::algorithm::common::database::{self as shared, PreliminaryReadError, StoredProteins};
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::report::blast_xml::HitTaxonomy;
+use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{SeqDb, SeqType};
 
@@ -58,6 +59,8 @@ pub(crate) struct BlastxDatabase {
     /// The taxonomy database of the run and the taxids its volumes have looked up (XML2 and
     /// JSON only), kept across the query batches of the run.
     taxdb: shared::TaxdbRun,
+    /// Whether the database has parsed Seq-ids (`shared::check_seqids`).
+    parsed_seqids: bool,
 }
 
 impl BlastxDatabase {
@@ -65,11 +68,21 @@ impl BlastxDatabase {
     /// with the command line's errors.
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
         let db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
+        // A database with parsed Seq-ids is read (line DBID, ID2a), unless a variable changes
+        // NCBI's choice of its Seq-ids.
+        let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
         Ok(Self {
             db,
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
+            parsed_seqids,
         })
+    }
+
+    /// Whether the database has parsed Seq-ids: a batch can then refuse one of its subjects
+    /// (`ReportedSubjects::for_batch`).
+    pub(crate) fn parsed_seqids(&self) -> bool {
+        self.parsed_seqids
     }
 
     /// The `-db` value as NCBI keeps it.
@@ -174,7 +187,17 @@ pub(crate) struct ReportedSubjects {
     /// otherwise, which reads as no taxid).
     taxids: Vec<i32>,
     taxonomy: Vec<HitTaxonomy>,
+    /// What the taxonomy database says of each definition line's taxid of a sequence with
+    /// parsed Seq-ids, by rank (`shared::read_reported_taxonomy`; empty as `taxonomy`).
+    parsed_taxonomy: Vec<Vec<HitTaxonomy>>,
     taxdb_notes: shared::TaxdbNotes,
+    /// The sequences with parsed Seq-ids by rank (empty when the batch reports none): their
+    /// ids and titles come from their definition lines (`report::db_subject`), and `titles`
+    /// holds the title of their first definition line.
+    parsed: Vec<Option<Arc<ParsedSubject>>>,
+    /// `sacc` and `saccver` of the sequences with parsed Seq-ids by rank, with `tabular`
+    /// (empty without them; the others' are their `sseqid`).
+    tabular_accessions: Vec<Option<[String; 2]>>,
 }
 
 impl ReportedSubjects {
@@ -192,7 +215,12 @@ impl ReportedSubjects {
     /// query by query in hit-list order; NCBI's reader error stops the run at this batch
     /// (`HeaderReadError`), and a title LOSAT does not show as NCBI is its refusal
     /// (`check_reported_title`; with `tabular`, `tabular_subject_id`; with `pairwise`,
-    /// `check_shown_protein_title`).
+    /// `check_shown_protein_title`). A sequence with parsed Seq-ids is read with every Seq-id
+    /// (`shared::read_header`), with LOSAT's refusals of `ParsedSubject::fetched`, of
+    /// `shared::check_shown_parsed_subject` (with `pairwise`), of `shared::refuse_joined_hits`
+    /// (with `joined`: outfmt 0, 5 and 13 to 16) and of `ParsedSubject::tabular_ids` (with
+    /// `tabular`).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
         subjects: Subjects<'_>,
@@ -201,10 +229,12 @@ impl ReportedSubjects {
         tabular: bool,
         pairwise: bool,
         taxids: bool,
+        joined: bool,
     ) -> Result<Self> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
         // up before it filters the HSPs); only the reported ones have their titles read.
         let mut listed: BTreeMap<usize, Option<Arc<[u8]>>> = BTreeMap::new();
+        let mut parsed: BTreeMap<usize, Arc<ParsedSubject>> = BTreeMap::new();
         for batch in batches.iter() {
             for (qidx, lists) in batch.queries.iter().enumerate() {
                 for list in lists {
@@ -219,26 +249,86 @@ impl ReportedSubjects {
                         continue;
                     }
                     let ordinal = u32::try_from(list.oid)?;
-                    let stored = shared::read_title(
+                    match shared::read_header(
                         &database.db,
                         ordinal,
                         batch.query_ordinal + qidx,
                         PROGRAM,
-                    )?;
-                    shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
-                    listed.insert(list.oid, Some(Arc::from(stored.title)));
+                    )? {
+                        shared::ReportedHeader::Stored(stored) => {
+                            shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                            listed.insert(list.oid, Some(Arc::from(stored.title)));
+                        }
+                        shared::ReportedHeader::Parsed(subject) => {
+                            listed.insert(list.oid, Some(Arc::from(subject.first_title())));
+                            parsed.insert(list.oid, subject);
+                        }
+                    }
                 }
             }
         }
+        if joined && !parsed.is_empty() {
+            for batch in batches.iter() {
+                for (qidx, lists) in batch.queries.iter().enumerate() {
+                    shared::refuse_joined_hits(
+                        batch.query_ordinal + qidx,
+                        lists
+                            .iter()
+                            .filter(|list| super::report::reported(list, gapped))
+                            .map(|list| {
+                                let ordinal = u32::try_from(list.oid).ok()?;
+                                Some((ordinal, parsed.get(&list.oid)?.as_ref()))
+                            }),
+                        PROGRAM,
+                    )?;
+                }
+            }
+        }
+        let taxdb_found = database.db.taxdb_found();
         let mut reported = ReportedSubjects::default();
         for (&oid, title) in &listed {
             let ordinal = u32::try_from(oid)?;
             let shown = title.is_some();
             let title = title.clone().unwrap_or_else(|| Arc::from(&b""[..]));
-            if pairwise && shown {
+            if pairwise && shown && !parsed.contains_key(&oid) {
                 shared::check_shown_protein_title(&title, ordinal, PROGRAM)?;
             }
-            if tabular {
+            if let Some(subject) = parsed.get(&oid) {
+                // The formats that read the subject's Bioseq; the Seq-annots and the archive
+                // write its Seq-align id alone.
+                if tabular || pairwise || joined || taxids {
+                    subject
+                        .fetched()
+                        .map_err(|reason| shared::parsed_refusal(ordinal, &reason, PROGRAM))?;
+                }
+                if pairwise {
+                    shared::check_shown_parsed_subject(
+                        subject,
+                        true,
+                        taxdb_found,
+                        ordinal,
+                        PROGRAM,
+                    )?;
+                }
+                if tabular {
+                    let [id, accession, version] =
+                        subject.tabular_ids(true).map_err(|problem| {
+                            shared::parsed_refusal(ordinal, &format!("has {problem}"), PROGRAM)
+                        })?;
+                    // The ids of a stored definition line are VisibleStrings: ASCII.
+                    let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
+                    reported.tabular_ids.push(text(id));
+                    if reported.tabular_accessions.is_empty() {
+                        reported.tabular_accessions = vec![None; listed.len()];
+                    }
+                    reported.tabular_accessions[reported.ordinals.len()] =
+                        Some([text(accession), text(version)]);
+                }
+                if reported.parsed.is_empty() {
+                    reported.parsed = vec![None; listed.len()];
+                }
+                reported.parsed[reported.ordinals.len()] = Some(Arc::clone(subject));
+            } else if tabular {
                 // An unreported subject's id is never written.
                 let id = if shown {
                     shared::tabular_subject_id(&title, ordinal, true, PROGRAM)?
@@ -283,23 +373,30 @@ impl ReportedSubjects {
             // The taxid of each reported sequence, read apart from the titles for the XML2 and
             // JSON formats only (`algorithm::common::database::read_reported_taxids`); the
             // sequences with a title are the reported ones.
+            // A sequence with parsed Seq-ids has the taxid of each definition line
+            // (`shared::read_reported_taxonomy`).
             let shown: std::collections::BTreeSet<usize> = listed
-                .values()
+                .iter()
                 .enumerate()
-                .filter(|(_, title)| title.is_some())
+                .filter(|(_, (_, title))| title.is_some())
                 .map(|(rank, _)| rank)
                 .collect();
             // A scientific name NCBI cannot write, or a taxonomy database LOSAT cannot read as NCBI
             // does, is LOSAT's refusal of the XML2 document (a run that holds its output drops it).
-            (reported.taxids, reported.taxonomy, reported.taxdb_notes) =
-                shared::read_reported_taxids(
-                    &database.db,
-                    &database.taxdb,
-                    &reported.ordinals,
-                    &shown,
-                    PROGRAM,
-                )
-                .map_err(super::blast_xml::XmlRefusal::of_taxonomy)?;
+            (
+                reported.taxids,
+                reported.taxonomy,
+                reported.parsed_taxonomy,
+                reported.taxdb_notes,
+            ) = shared::read_reported_taxonomy(
+                &database.db,
+                &database.taxdb,
+                &reported.ordinals,
+                &shown,
+                &reported.parsed,
+                PROGRAM,
+            )
+            .map_err(super::blast_xml::XmlRefusal::of_taxonomy)?;
         }
         Ok(reported)
     }
@@ -325,6 +422,12 @@ impl ReportedSubjects {
         self.taxonomy.get(rank).cloned().unwrap_or_default()
     }
 
+    /// What the taxonomy database says of the taxid of each definition line of the sequence of
+    /// rank `rank` with parsed Seq-ids (empty where nothing was asked).
+    pub(crate) fn parsed_taxonomy(&self, rank: usize) -> &[HitTaxonomy] {
+        self.parsed_taxonomy.get(rank).map_or(&[], Vec::as_slice)
+    }
+
     /// NCBI's messages about the taxonomy database that come before the `Hit`s' own, for the
     /// batch.
     pub(crate) fn taxdb_notes(&self) -> &shared::TaxdbNotes {
@@ -334,6 +437,26 @@ impl ReportedSubjects {
     /// The tabular subject id of rank `rank` (only with `tabular` in `for_batch`).
     pub(crate) fn tabular_id(&self, rank: usize) -> &str {
         &self.tabular_ids[rank]
+    }
+
+    /// The tabular `sseqid`, `sacc` and `saccver` of rank `rank` (only with `tabular` in
+    /// `for_batch`): the same id for a sequence without parsed Seq-ids.
+    pub(crate) fn tabular_ids(&self, rank: usize) -> [&str; 3] {
+        let id = self.tabular_id(rank);
+        match self.tabular_accessions.get(rank).and_then(Option::as_ref) {
+            Some([accession, version]) => [id, accession, version],
+            None => [id, id, id],
+        }
+    }
+
+    /// The sequences with parsed Seq-ids by rank (empty when the batch reports none).
+    pub(crate) fn parsed(&self) -> &[Option<Arc<ParsedSubject>>] {
+        &self.parsed
+    }
+
+    /// The sequence of rank `rank` when it has parsed Seq-ids.
+    pub(crate) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
+        self.parsed.get(rank).and_then(Option::as_deref)
     }
 
     /// The stored title of rank `rank` (`stitle`).
@@ -351,11 +474,13 @@ impl ReportedSubjects {
     pub(crate) fn descriptions(&self) -> Vec<Arc<str>> {
         self.titles
             .iter()
-            .map(|title| {
-                let label = match crate::report::defline::generate_defline(title, true, true) {
-                    Ok(defline) => defline.text,
-                    Err(crate::report::defline::UnknownEncoding) => b"Unknown".to_vec(),
-                };
+            .enumerate()
+            .map(|(rank, title)| {
+                let label = crate::report::pairwise::database_description_label(
+                    title,
+                    self.parsed_subject(rank),
+                    true,
+                );
                 Arc::from(String::from_utf8_lossy(&label).as_ref())
             })
             .collect()
@@ -378,6 +503,27 @@ mod tests {
     fn open(name: &str) -> BlastxDatabase {
         BlastxDatabase::open(&fixture(name), &ApplicationSettings::default())
             .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+    }
+
+    // DECISIONS 3 Q8 of line DBID: NCBI's choice of the Seq-ids of a database with parsed
+    // Seq-ids depends on SEQ_ID_PREFER_ACCESSION_OVER_GI and SEQ_ID_AVOID_GI.
+    #[test]
+    fn a_seq_id_variable_refuses_a_database_with_parsed_seqids_only() {
+        assert!(open("prot_ids_v4").parsed_seqids());
+        assert!(!open("prot_v4").parsed_seqids());
+        let settings = ApplicationSettings {
+            seq_id_rank_variable: Some("SEQ_ID_AVOID_GI"),
+            ..ApplicationSettings::default()
+        };
+        let Err(error) = BlastxDatabase::open(&fixture("prot_ids_v4"), &settings) else {
+            panic!("a database with parsed Seq-ids opened with SEQ_ID_AVOID_GI")
+        };
+        assert_eq!(
+            format!("{error:#}"),
+            "the environment variable SEQ_ID_AVOID_GI, which changes the Seq-ids that NCBI BLAST+ chooses for a database with parsed Seq-ids, is not supported by LOSAT's BLASTX"
+        );
+        BlastxDatabase::open(&fixture("prot_v4"), &settings)
+            .expect("a database without parsed Seq-ids opens with SEQ_ID_AVOID_GI");
     }
 
     #[test]

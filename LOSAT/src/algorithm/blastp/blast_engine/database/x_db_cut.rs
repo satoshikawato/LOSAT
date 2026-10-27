@@ -67,7 +67,7 @@ use crate::utils::threading::SearchPool;
 
 use super::{
     read_search_block, search_blocks_of, BlastpDatabase, BlastpHitList, BlastpSubjectRef,
-    BlastpSubjectResult, BlastpSubjectScratch, XPrelimHsp, BLOCK_BYTES,
+    BlastpSubjectResult, BlastpSubjectScratch, PrelimSink, XPrelimHsp, BLOCK_BYTES,
 };
 
 // No NCBI counterpart: reads the LOSAT_X_BPDBCUT switch once; it does not change any value NCBI
@@ -189,19 +189,19 @@ pub(super) fn x_one_thread_error(db: &SeqDb, error: anyhow::Error) -> anyhow::Er
 /// table, and the round's results are merged in ordinal order (module header). No floating-point
 /// operation changes order.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn x_search_blocks_cut<S, K>(
+pub(super) fn x_search_blocks_cut<S, K, P>(
     database: &BlastpDatabase,
     pool: &SearchPool<'_>,
     window: i32,
     blocks_per_thread: usize,
     new_scratch: &S,
     process_subject: &K,
-    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-    prelim_hitlist_size: usize,
+    sink: &mut P,
 ) -> Result<()>
 where
     S: Fn() -> BlastpSubjectScratch + Sync,
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
+    P: PrelimSink,
 {
     let db = &database.db;
     let block_bytes = x_db_cut_block_bytes(database, pool);
@@ -214,8 +214,7 @@ where
         blocks_per_thread,
         new_scratch,
         process_subject,
-        x_compact_hit_lists,
-        prelim_hitlist_size,
+        sink,
     )
     .map_err(|error| {
         if block_bytes == BLOCK_BYTES {

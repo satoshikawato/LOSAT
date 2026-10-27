@@ -744,6 +744,8 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
+    // No NCBI counterpart (memory placement only): see `x_frame_align`.
+    crate::utils::x_frame::x_frame_align();
     sc.ops.clear();
     if len1 == 0 || len2 == 0 {
         return Some(XdropResult {
@@ -918,7 +920,11 @@ unsafe fn align16<const TB: bool, const NIB: bool>(
 
         let row_off = sc.trace.len();
         if TB {
-            sc.trace.reserve(bend - first + num_extra + 96);
+            crate::utils::xdrop_simd::x_trace_reserve(
+                &mut sc.trace,
+                &mut sc.rows,
+                bend - first + num_extra + 96,
+            );
         }
         let tr = sc.trace.as_mut_ptr().add(row_off);
 
@@ -1315,6 +1321,11 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
+    // No NCBI counterpart (memory placement only): see `x_frame_align`. Only the score-only kernel:
+    // in the traceback kernel the realigned frame's register cost outweighed its spills (dc-megablast).
+    if !TB {
+        crate::utils::x_frame::x_frame_align();
+    }
     sc.ops.clear();
     if len1 == 0 || len2 == 0 {
         return Some(XdropResult {
@@ -1489,7 +1500,11 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
 
         let row_off = sc.trace.len();
         if TB {
-            sc.trace.reserve(bend - first + num_extra + 96);
+            crate::utils::xdrop_simd::x_trace_reserve(
+                &mut sc.trace,
+                &mut sc.rows,
+                bend - first + num_extra + 96,
+            );
         }
         let tr = sc.trace.as_mut_ptr().add(row_off);
 

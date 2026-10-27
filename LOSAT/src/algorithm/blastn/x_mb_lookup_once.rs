@@ -174,6 +174,15 @@
 //! a page, as glibc's mapped blocks do, 512 and 2,048 for a page-aligned one: 33 KiB at P = 16, 526
 //! KiB at 255), freed at the end of the fill, and their OR (one row), freed after the round; in
 //! every fill, P counters of the zeros written.
+//!
+//! EXPERIMENT (LOSAT_X_MB24): a table of 3-byte elements (`Tables::x_h24`, `x_mb_narrow.rs`) runs
+//! its own instances of phases B and C, of the marking and of the prefault round (`H24`): phase B
+//! reads and writes each head as exactly its 3 bytes (the next cell may be another owner's) and
+//! phase C each link (the next offset may be another reader's, or linked already); the marks are
+//! the pages of the words that hold a cell's first and last byte, and a page's toucher is the
+//! owner of the cell of its middle word's first byte (the round's jobs write different words, so a
+//! word with bytes of two owners' cells is still written by one job). The plan, the phases and the
+//! order of the updates are the same, so the tables are the same.
 
 use super::x_disc_lookup_par::{
     middle, page_offset, pages_of, touch, PageBits, SharedBits, TouchLog, HASHTABLE,
@@ -544,10 +553,12 @@ impl Fill<'_, '_, '_> {
     /// so that the k-mer and `valid_bases >= lut_word_length` at the positions from `s0` on are the
     /// loop's. With `MARK` (the first chunk, when the prefault round runs) it also marks in its own
     /// bits (`Faults::marks`), after clearing them, the page of `hashtable` of each word's cell; the
-    /// other chunks run the loop without the marking code.
+    /// other chunks run the loop without the marking code. `H24` (LOSAT_X_MB24, with `MARK`): the
+    /// cells are 3-byte elements, and the pages marked those of the words that hold the first and
+    /// the last byte of the cell's element.
     ///
     /// SAFETY: no other job of the phase uses reader `a`'s region, row or marks.
-    unsafe fn read<const MARK: bool>(&self, a: usize, s0: usize, s1: usize) {
+    unsafe fn read<const MARK: bool, const H24: bool>(&self, a: usize, s0: usize, s1: usize) {
         let words = self.words;
         let lut_word_length = words.lut_word_length;
         let (marks, cells) = (self.faults.marks, self.faults.offset);
@@ -594,7 +605,14 @@ impl Fill<'_, '_, '_> {
                 };
                 n += 1;
                 counts[self.owner[cell >> self.block_shift] as usize] += 1;
-                if MARK {
+                if MARK && H24 {
+                    // SAFETY: reader `a`'s bits; the pages are `hashtable`'s (the element's bytes
+                    // lie in its words).
+                    unsafe {
+                        marks.mark(a, (cells + (3 * cell >> 2)) >> PAGE_ELEMS_SHIFT);
+                        marks.mark(a, (cells + ((3 * cell + 2) >> 2)) >> PAGE_ELEMS_SHIFT);
+                    }
+                } else if MARK {
                     // SAFETY: reader `a`'s bits; the page is one of `hashtable`'s (`cell` < its
                     // length).
                     unsafe { marks.mark(a, (cells + cell) >> PAGE_ELEMS_SHIFT) };
@@ -631,11 +649,14 @@ impl Fill<'_, '_, '_> {
     /// a block of owner `j`, so that phase B finds the page mapped. A marked page holds the cell of a
     /// word of the first chunk, which phase B writes; no phase B has run, so the element holds the 0
     /// it was allocated with, and each page has one toucher: the round writes 0 over 0 and changes
-    /// no value (no NCBI counterpart; scheduling only).
+    /// no value (no NCBI counterpart; scheduling only). `H24` (LOSAT_X_MB24): `hashtable` holds
+    /// 3-byte cells in its words, and the middle word goes to the owner of the cell of its first
+    /// byte (the jobs of the round write different words, so a word that holds bytes of two
+    /// owners' cells is still written by one job only).
     ///
     /// SAFETY: no other job of the phase uses slot `j` of `Faults::touched`; the round runs before
     /// the first phase B, on a table allocated zeroed; `marked` holds pages of `hashtable` only.
-    unsafe fn prefault(&self, j: usize, marked: &[u64]) {
+    unsafe fn prefault<const H24: bool>(&self, j: usize, marked: &[u64]) {
         let (offset, len) = (self.faults.offset, self.tables.hashtable.len);
         // SAFETY: slot `j` is this job's.
         let (touches, log) = unsafe { self.faults.touched.at(j) };
@@ -645,7 +666,12 @@ impl Fill<'_, '_, '_> {
                 let page = (w << 6) + bits.trailing_zeros() as usize;
                 bits &= bits - 1;
                 let m = middle(offset, len, page);
-                if self.owner[m >> self.block_shift] as usize == j {
+                let cell = if H24 {
+                    (4 * m / 3).min((self.owner.len() << self.block_shift) - 1)
+                } else {
+                    m
+                };
+                if self.owner[cell >> self.block_shift] as usize == j {
                     // SAFETY: as above: element `m` of a page of this job, before the first phase B.
                     unsafe { touch(self.tables.hashtable, m, HASHTABLE, log) };
                     *touches += 1;
@@ -656,11 +682,11 @@ impl Fill<'_, '_, '_> {
 
     /// Phase B, owner `o`: the updates of the words of its cells, reader by reader, each sub-range
     /// in reading order (both reversed for `ascending_cells`), counting into its own copies; each
-    /// entry keeps the cell's head before the update.
+    /// entry keeps the cell's head before the update. `H24` (LOSAT_X_MB24): on 3-byte cells.
     ///
     /// SAFETY: no other job of the phase uses the sub-ranges `(*, o)`, the cells of `o`'s blocks or
     /// `o`'s copies.
-    unsafe fn update(&self, o: usize) {
+    unsafe fn update<const H24: bool>(&self, o: usize) {
         // SAFETY: slot `o` is this job's.
         let x = unsafe { self.copies.at(o) }.private();
         let ascending = self.words.ascending_cells;
@@ -684,25 +710,50 @@ impl Fill<'_, '_, '_> {
             // SAFETY: the cells of the entries lie in `o`'s blocks; `x` is `o`'s.
             unsafe {
                 if ascending {
-                    update_backward(self.tables, x, entries);
+                    update_backward::<H24>(self.tables, x, entries);
                 } else {
-                    update_forward(self.tables, x, entries);
+                    update_forward::<H24>(self.tables, x, entries);
                 }
             }
         }
     }
 
-    /// Phase C, reader `a`: `next_pos[index]` of the words it read, from their kept heads.
+    /// Phase C, reader `a`: `next_pos[index]` of the words it read, from their kept heads. `H24`
+    /// (LOSAT_X_MB24): as 3-byte elements, each written as exactly its 3 bytes (the next element may
+    /// be another reader's, or written already).
     ///
     /// SAFETY: no other job of the phase uses reader `a`'s region; the indices are the words' own.
-    unsafe fn link(&self, a: usize) {
+    unsafe fn link<const H24: bool>(&self, a: usize) {
         // SAFETY: reader `a` wrote its row in phase A.
         let n = unsafe { self.arena.row(a).add(self.parts).read() } as usize;
         // SAFETY: the first `n` entries of the sorted region were written in phase A.
         let entries = unsafe { std::slice::from_raw_parts(self.arena.sorted(a), n) };
         for e in entries {
             // SAFETY: each index is written once, by the reader of its word.
-            unsafe { self.tables.next_pos.set(e.index as usize, e.value) };
+            unsafe {
+                if H24 {
+                    let next_pos = self.tables.next_pos;
+                    debug_assert!(3 * e.index as usize + 3 <= 4 * next_pos.len);
+                    super::x_mb_narrow::store_exact(next_pos.ptr, e.index as usize, e.value);
+                } else {
+                    self.tables.next_pos.set(e.index as usize, e.value)
+                }
+            };
+        }
+    }
+
+    /// `link` for a table of 3-byte cells (`h24`, LOSAT_X_MB24) or not.
+    ///
+    /// SAFETY: as `link`'s.
+    #[inline(always)]
+    unsafe fn link_any(&self, h24: bool, a: usize) {
+        // SAFETY: the caller's.
+        unsafe {
+            if h24 {
+                self.link::<true>(a)
+            } else {
+                self.link::<false>(a)
+            }
         }
     }
 
@@ -739,15 +790,21 @@ impl Fill<'_, '_, '_> {
 /// ```
 /// The update of one word, as in the loop of `build_mb_lookup`, with the counter and the presence
 /// bit in the owner's private copies; `next_pos[index]` is written in phase C from the head kept in
-/// the entry.
+/// the entry. `H24` (LOSAT_X_MB24): on a 3-byte cell, read and written as exactly its 3 bytes (the
+/// next cell may be another owner's).
 ///
 /// SAFETY: the cell lies in a block of the calling owner, and `x` is its copies.
 #[inline(always)]
-unsafe fn update_one(t: SharedTables, x: &mut Private<'_>, e: &mut Entry) {
+unsafe fn update_one<const H24: bool>(t: SharedTables, x: &mut Private<'_>, e: &mut Entry) {
     let cell = e.value as usize;
     // SAFETY: the caller's guarantee (the cell < the table size: a masked k-mer).
     unsafe {
-        let head = t.hashtable.get(cell);
+        let head = if H24 {
+            debug_assert!(3 * cell + 3 <= 4 * t.hashtable.len);
+            super::x_mb_narrow::load_exact(t.hashtable.ptr, cell)
+        } else {
+            t.hashtable.get(cell)
+        };
         if head == 0 {
             let w = cell >> t.pv_array_bts;
             if w < t.pv_array.len {
@@ -757,7 +814,11 @@ unsafe fn update_one(t: SharedTables, x: &mut Private<'_>, e: &mut Entry) {
             let c = x.counters.slot(cell >> K_COMPRESSION_FACTOR_SHIFT);
             *c = c.saturating_add(1);
         }
-        t.hashtable.set(cell, e.index);
+        if H24 {
+            super::x_mb_narrow::store_exact(t.hashtable.ptr, cell, e.index);
+        } else {
+            t.hashtable.set(cell, e.index);
+        }
         e.value = head;
     }
 }
@@ -766,14 +827,18 @@ unsafe fn update_one(t: SharedTables, x: &mut Private<'_>, e: &mut Entry) {
 ///
 /// SAFETY: as `update_one`, for every entry.
 #[inline]
-unsafe fn update_forward(t: SharedTables, x: &mut Private<'_>, entries: &mut [Entry]) {
+unsafe fn update_forward<const H24: bool>(
+    t: SharedTables,
+    x: &mut Private<'_>,
+    entries: &mut [Entry],
+) {
     for j in 0..entries.len() {
         #[cfg(target_arch = "x86_64")]
         if let Some(ahead) = entries.get(j + X_AHEAD) {
-            prefetch(t.hashtable, ahead.value as usize);
+            prefetch::<H24>(t.hashtable, ahead.value as usize);
         }
         // SAFETY: the caller's guarantee.
-        unsafe { update_one(t, x, &mut entries[j]) };
+        unsafe { update_one::<H24>(t, x, &mut entries[j]) };
     }
 }
 
@@ -781,26 +846,34 @@ unsafe fn update_forward(t: SharedTables, x: &mut Private<'_>, entries: &mut [En
 ///
 /// SAFETY: as `update_one`, for every entry.
 #[inline]
-unsafe fn update_backward(t: SharedTables, x: &mut Private<'_>, entries: &mut [Entry]) {
+unsafe fn update_backward<const H24: bool>(
+    t: SharedTables,
+    x: &mut Private<'_>,
+    entries: &mut [Entry],
+) {
     for j in (0..entries.len()).rev() {
         #[cfg(target_arch = "x86_64")]
         if j >= X_AHEAD {
-            prefetch(t.hashtable, entries[j - X_AHEAD].value as usize);
+            prefetch::<H24>(t.hashtable, entries[j - X_AHEAD].value as usize);
         }
         // SAFETY: the caller's guarantee.
-        unsafe { update_one(t, x, &mut entries[j]) };
+        unsafe { update_one::<H24>(t, x, &mut entries[j]) };
     }
 }
 
-/// A prefetch of cell `cell` of `hashtable` (x86_64).
+/// A prefetch of cell `cell` of `hashtable` (x86_64); `H24`: of its 3-byte element.
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-fn prefetch(hashtable: Shared<u32>, cell: usize) {
-    debug_assert!(cell < hashtable.len);
+fn prefetch<const H24: bool>(hashtable: Shared<u32>, cell: usize) {
+    debug_assert!(H24 || cell < hashtable.len);
     // SAFETY: a cell index < the table size; a prefetch does not fault.
     unsafe {
         core::arch::x86_64::_mm_prefetch(
-            hashtable.ptr.add(cell) as *const i8,
+            if H24 {
+                super::x_mb_narrow::at(hashtable.ptr, cell)
+            } else {
+                hashtable.ptr.add(cell) as *const i8
+            },
             core::arch::x86_64::_MM_HINT_T0,
         );
     }
@@ -960,7 +1033,8 @@ pub(super) fn fill(
 /// positions per 1,024 cells (4 KiB), counted on the table's size, not on the pages it spans, so
 /// that the allocation's offset in its first page (16 bytes for glibc's mapped blocks, 0 for a
 /// page-aligned one) does not move the boundary: 131,072 positions for 4^12 cells, the first chunk
-/// of 4 workers (`chunk_positions`).
+/// of 4 workers (`chunk_positions`). With LOSAT_X_MB24 `cells` is the words of the 3-byte cells
+/// (1,024 to a page): 98,304 positions for 4^12 cells.
 fn prefault_gate(first: usize, cells: usize) -> bool {
     first > 0
         && first >= PREFAULT_MIN_WORDS_PER_PAGE.saturating_mul((cells >> PAGE_ELEMS_SHIFT).max(1))
@@ -976,12 +1050,20 @@ fn fill_chunked(
     chunk: usize,
     prefault: bool,
 ) -> OnceStats {
-    let table_size = tables.hashtable.len();
+    // LOSAT_X_MB24: a table of 3-byte cells (`x_mb_narrow.rs`) has `kmer_mask + 1` cells in fewer
+    // words; its phases run their own instances (`H24`).
+    let h24 = tables.x_h24;
+    let table_size = if h24 {
+        words.kmer_mask as usize + 1
+    } else {
+        tables.hashtable.len()
+    };
     let (block_shift, owner) = plan(table_size, tables.pv_array_bts, parts);
     debug_assert!(
         block_shift >= K_COMPRESSION_FACTOR_SHIFT && block_shift >= tables.pv_array_bts,
         "a block must own whole counters and presence-vector words"
     );
+    debug_assert!(!(h24 && words.ascending_cells));
     let parts = parts.clamp(1, 255);
     let chunk = chunk.max(1);
     let (segments, total) = segments(words);
@@ -1025,11 +1107,12 @@ fn fill_chunked(
     };
     // The prefault round runs in the first chunk (of the processing order) only, and only when
     // that chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per 4 KiB of `hashtable`
-    // (`prefault_gate`); without it the readers' marks have no rows.
+    // (`prefault_gate`); without it the readers' marks have no rows. (The words of `hashtable`:
+    // its cells, or with LOSAT_X_MB24 the words that hold them.)
     let offset = page_offset(shared.hashtable.ptr);
-    let pages = pages_of(offset, table_size);
+    let pages = pages_of(offset, shared.hashtable.len);
     let (first_start, first_end) = bounds(0);
-    let round_on = prefault && prefault_gate(first_end - first_start, table_size);
+    let round_on = prefault && prefault_gate(first_end - first_start, shared.hashtable.len);
     if prefault {
         crate::utils::xreach::x_reach!("LOSAT_X_MBLUTPREFAULT", round_on);
     }
@@ -1081,13 +1164,14 @@ fn fill_chunked(
         run_phase(&mut clock, 0, parts, in_pool, |a| {
             if k > 0 {
                 // C of the chunk before.
-                unsafe { fill.link(a) };
+                unsafe { fill.link_any(h24, a) };
             }
             let (s0, s1) = span(current, a);
-            if mark {
-                unsafe { fill.read::<true>(a, s0, s1) };
-            } else {
-                unsafe { fill.read::<false>(a, s0, s1) };
+            match (mark, h24) {
+                (true, true) => unsafe { fill.read::<true, true>(a, s0, s1) },
+                (true, false) => unsafe { fill.read::<true, false>(a, s0, s1) },
+                // (the words are read alike; only the marks depend on the cells' width)
+                (false, _) => unsafe { fill.read::<false, false>(a, s0, s1) },
             }
         });
         if mark {
@@ -1102,24 +1186,39 @@ fn fill_chunked(
                 })
                 .collect();
             run_phase(&mut clock, PREFAULT_PHASE, parts, in_pool, |j| unsafe {
-                fill.prefault(j, &marked)
+                if h24 {
+                    fill.prefault::<true>(j, &marked)
+                } else {
+                    fill.prefault::<false>(j, &marked)
+                }
             });
             stats.prefault_rounds += 1;
         }
-        run_phase(&mut clock, 1, parts, in_pool, |o| unsafe { fill.update(o) });
+        run_phase(&mut clock, 1, parts, in_pool, |o| unsafe {
+            if h24 {
+                fill.update::<true>(o)
+            } else {
+                fill.update::<false>(o)
+            }
+        });
         // Tests: the pages of `hashtable` the first chunk wrote (every written cell holds a 1-based
-        // query offset, other than 0), which the round must have touched.
+        // query offset, other than 0), which the round must have touched; for 3-byte cells
+        // (LOSAT_X_MB24) the pages of the words of their first and last bytes (a cell's last byte
+        // may be 0 on a page of its own).
         #[cfg(test)]
         if k == 0 {
             let t = fill.tables.hashtable;
             // SAFETY: between two phases; the table outlives the fill.
-            stats.first_pages = super::x_disc_lookup_par::nonzero_pages(unsafe {
-                std::slice::from_raw_parts(t.ptr, t.len)
-            });
+            let v = unsafe { std::slice::from_raw_parts(t.ptr, t.len) };
+            stats.first_pages = if h24 {
+                super::x_mb_narrow::written_pages(v, table_size)
+            } else {
+                super::x_disc_lookup_par::nonzero_pages(v)
+            };
         }
     }
     run_phase(&mut clock, 2, parts, in_pool, |i| unsafe {
-        fill.link(i);
+        fill.link_any(h24, i);
         fill.flush(i);
     });
     stats.chunks = chunks;
@@ -1144,6 +1243,296 @@ fn fill_chunked(
         PREFAULT_TOUCHES.fetch_add(stats.touches as u64, Ordering::Relaxed);
     }
     stats
+}
+
+impl Fill<'_, '_, '_> {
+    /// Sub-range `(a, o)` of the arena: the words reader `a` read in its span (`Fill::read`) whose
+    /// cells lie in owner `o`'s blocks, in reading order (LOSAT_X_BNCSR's pool build, `csr`).
+    ///
+    /// SAFETY: reader `a` wrote its row and region in a phase that has ended, and no job writes
+    /// them until the slice is dropped.
+    #[inline(always)]
+    unsafe fn subrange(&self, a: usize, o: usize) -> &[Entry] {
+        let row = self.arena.row(a);
+        // SAFETY: the caller's; a row has `parts + 1` values and `o < parts`.
+        unsafe {
+            let (lo, hi) = (row.add(o).read() as usize, row.add(o + 1).read() as usize);
+            std::slice::from_raw_parts(self.arena.sorted(a).add(lo), hi - lo)
+        }
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BNCSR, `x_bn_csr.rs`): the CSR of a contiguous table built from its words
+/// on the search pool of `parts` threads instead of the chains (`fill`), with the presence bits and
+/// helper counters into `pv_array` and `helper_array` (zeroed, of the fill's lengths); returns it
+/// and whether the pool built it (otherwise `x_bn_csr::serial` did, on this thread: no pool of
+/// `parts` threads around it, or a build without threads).
+///
+/// The words are read by this module's readers (`Fill::read::<false>`, which touches no table,
+/// copy or prefault state; chunks of `chunk_positions(parts)` positions, each cut into the
+/// readers' spans in stream order) into the arena, once to count and once to place. Owner `o`
+/// holds a contiguous run of the cell blocks (block `b` goes to owner `b * parts / blocks`, so the
+/// owners' cells follow each other in cell order, as in LOSAT_X_DCCSR's `x_disc_lookup_par::csr`)
+/// and makes every write to its cells' counts and cursors (`x_bn_csr.rs`: the count of `cell` is
+/// `offsets[cell + count_shift]`):
+/// - it zeroes its cells' counts; per chunk, after the readers, for `a` in `0..parts`, for each
+///   entry of sub-range `(a, o)` in order: the cell's count + 1 (the count of the entry 16 ahead
+///   prefetched), adding up its entries;
+/// - after the last chunk, its base is the number of entries of the owners before it, and it runs
+///   the sum pass (`x_dc_csr::sum_cells`) over its cells' counts from that base, with the
+///   presence-vector words and counters of its blocks (a block owns whole ones);
+/// - per chunk, after the readers, for `a` in `0..parts`, for each entry of sub-range `(a, o)` in
+///   order, the place of `x_bn_csr::serial`: `qs[--offsets[cell]] = index` (newest first) or
+///   `qs[offsets[cell + 1]++] = index` (`ascending_cells`).
+///
+/// A cell gets its words in the loop's order (chunks in order, the readers' spans in stream order,
+/// a sub-range in reading order), so the counts, sums and runs are those of `x_bn_csr::serial`.
+/// With `ascending_cells` the cursor of an owner's first cell, `offsets[c0 + 1]`, is the running
+/// sum of the cell before it, which the owner before writes in its sum pass; every thread runs its
+/// sum pass before it reads the first chunk of the place pass and waits at the barrier after that
+/// reading, so no cursor is used before its sum is written, and the owners' cursors
+/// (`offsets[c0 + 1 .. c1 + 1]`) are disjoint. The whole build is one `rayon::broadcast` (one job on
+/// each of the pool's `parts` threads) whose threads pass an `x_dc_csr::SpinBarrier` after each
+/// chunk's reading and after each chunk's owner work (one `rayon::scope` per phase and chunk, as
+/// `fill` runs them, started its last job about 0.15 ms late each time on the workstation for the
+/// discontiguous tables; v4-R R16). The barrier waits for every thread of the pool, so it needs
+/// them free while the table is built: `build_mb_lookup` runs on the search thread before its
+/// batch is scanned (`build_lookup_tables`, called by `search_query_batch`, which a
+/// LOSAT_X_QBATCHPAR slot runs on a pool of its own), with nothing else queued on its pool, and
+/// the broadcast's jobs wait for nothing but each other.
+///
+/// Memory: the arena of `fill` (16 bytes a position of one chunk, `Shape`), not one list of the
+/// whole query's words (8 bytes a word: 15 MiB more than the chains' fill at 8 threads for the
+/// first form, v4-A15 s10).
+pub(super) fn csr(
+    parts: usize,
+    words: &Words<'_>,
+    cells: usize,
+    pv_array: &mut [PvArrayType],
+    pv_array_bts: usize,
+    helper_array: &mut [u32],
+) -> (super::x_dc_csr::Csr, bool) {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if (2..=255).contains(&parts)
+        && rayon::current_thread_index().is_some()
+        && rayon::current_num_threads() == parts
+    {
+        let csr = csr_on_pool(
+            parts,
+            words,
+            cells,
+            pv_array,
+            pv_array_bts,
+            helper_array,
+            chunk_positions(parts),
+        );
+        return (csr, true);
+    }
+    let _ = parts;
+    let csr = super::x_bn_csr::serial(words, cells, pv_array, pv_array_bts, helper_array);
+    (csr, false)
+}
+
+/// `csr` on the calling worker's pool of `parts` threads (see there), in chunks of `chunk`
+/// positions (`chunk_positions`; the tests take others).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn csr_on_pool(
+    parts: usize,
+    words: &Words<'_>,
+    cells: usize,
+    pv_array: &mut [PvArrayType],
+    pv_array_bts: usize,
+    helper_array: &mut [u32],
+    chunk: usize,
+) -> super::x_dc_csr::Csr {
+    use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier};
+    let chunk = chunk.max(1);
+    let (block_shift, mut owner) = plan(cells, pv_array_bts, parts);
+    debug_assert!(
+        block_shift >= K_COMPRESSION_FACTOR_SHIFT && block_shift >= pv_array_bts,
+        "a block must own whole counters and presence-vector words"
+    );
+    let blocks = owner.len();
+    for (b, o) in owner.iter_mut().enumerate() {
+        *o = (b * parts / blocks) as u8;
+    }
+    // Owner `o`'s cells `own[o].0 .. own[o].1` (empty when it has no block).
+    let mut own = vec![(0usize, 0usize); parts];
+    for (b, &o) in owner.iter().enumerate().rev() {
+        let r = (b << block_shift)..((b + 1) << block_shift).min(cells);
+        let e = &mut own[o as usize];
+        *e = (r.start, if e.1 == 0 { r.end } else { e.1 });
+    }
+    // Once per table: the owners' cells cover the table (every count is written), and the
+    // positions, which bound the words, fit the `u32` offsets.
+    assert_eq!(own.iter().map(|&(c0, c1)| c1 - c0).sum::<usize>(), cells);
+    assert!(cells % 2048 == 0 && pv_array_bts >= 5 && helper_array.len() == cells >> 11);
+    let (segments, total) = segments(words);
+    assert!(
+        total <= u32::MAX as usize,
+        "BNCSR: more positions than u32 offsets"
+    );
+    // The reading-only `Fill`: `read::<false>` and `subrange` use only the words, the segments,
+    // the owners and the arena.
+    let shape = Shape::new(chunk.min(total), parts);
+    let mut arena: Vec<Line> = Vec::with_capacity(lines_capacity(shape.lines()));
+    let copies = Slots(Vec::new());
+    let touched = Slots(Vec::new());
+    let mut marks = PageBits::new(0, parts);
+    #[cfg(test)]
+    let checks = Checks::default();
+    let fill = Fill {
+        words,
+        segments: &segments,
+        owner: &owner,
+        block_shift,
+        parts,
+        tables: SharedTables {
+            hashtable: Shared::new(&mut []),
+            next_pos: Shared::new(&mut []),
+            pv_array: Shared::new(&mut []),
+            pv_array_bts,
+            helper_array: Shared::new(&mut []),
+        },
+        arena: SharedArena {
+            base: arena.spare_capacity_mut().as_mut_ptr() as *mut Line,
+            shape,
+        },
+        copies: &copies,
+        faults: Faults {
+            offset: 0,
+            marks: marks.shared(),
+            touched: &touched,
+        },
+        #[cfg(test)]
+        checks: &checks,
+    };
+    // `offsets` is written by its owners (their counts zeroed, then counted, summed and placed)
+    // and by this thread (the elements before the first count, and `offsets[cells]` newest first);
+    // `qs` gets one element per word (`total` positions bound them).
+    let ascending = words.ascending_cells;
+    let shift = super::x_bn_csr::count_shift(ascending);
+    let mut offsets: Vec<u32> = Vec::with_capacity(cells + 2);
+    let mut qs: Vec<u32> = Vec::with_capacity(total);
+    let ob = Shared {
+        ptr: offsets.as_mut_ptr(),
+        len: cells + 2,
+    };
+    // SAFETY: the first `shift` elements of the capacity, which no owner writes.
+    unsafe { std::ptr::write_bytes(ob.ptr, 0, shift) };
+    let qb = Shared {
+        ptr: qs.as_mut_ptr(),
+        len: total,
+    };
+    let pv = Shared::new(pv_array);
+    let helper = Shared::new(helper_array);
+    let mut own_words = vec![0u64; parts];
+    let own_w = Shared::new(&mut own_words);
+    let chunks = total.div_ceil(chunk);
+    let span = |c: usize, a: usize| {
+        let start = c * chunk;
+        let end = total.min(start + chunk);
+        (
+            start + (end - start) * a / parts,
+            start + (end - start) * (a + 1) / parts,
+        )
+    };
+    let bar = SpinBarrier::new(parts);
+    let (fill, own, bar) = (&fill, &own, &bar);
+    rayon::broadcast(|ctx| {
+        let o = ctx.index();
+        let _poison = Poison(bar);
+        let (ob, qb, pv, helper, own_w) = (ob, qb, pv, helper, own_w);
+        let (c0, c1) = own[o];
+        let cnt = ob.ptr.wrapping_add(shift);
+        // SAFETY (all of the job's accesses): reader `o` uses only its own region and row of the
+        // arena and owner `o` only the sub-ranges `(*, o)`, between barriers that separate the
+        // readers from the owners; owner `o` alone writes its cells' counts and cursors
+        // (`cnt[c0 .. c1]`, i.e. `offsets[c0 + shift .. c1 + shift]`, then `offsets[c0 + 1 .. c1 +
+        // 1]` or `offsets[c0 .. c1]`), the presence-vector words and counters of its blocks, its
+        // entry of the owners' words (read by the later owners after a barrier) and `qs` at its
+        // places, which lie in `base .. base + its words` (disjoint from the other owners'); every
+        // element read was written before by the same thread or before a barrier (the function's
+        // documentation for the cursor of `c0`).
+        unsafe {
+            std::ptr::write_bytes(cnt.add(c0), 0, c1 - c0);
+            let mut got = 0u64;
+            for c in 0..chunks {
+                let (s0, s1) = span(c, o);
+                fill.read::<false, false>(o, s0, s1);
+                bar.wait();
+                for a in 0..parts {
+                    let es = fill.subrange(a, o);
+                    got += es.len() as u64;
+                    for j in 0..es.len() {
+                        if let Some(ahead) = es.get(j + 16) {
+                            prefetch(cnt.wrapping_add(ahead.value as usize));
+                        }
+                        *cnt.add(es[j].value as usize) += 1;
+                    }
+                }
+                if c + 1 == chunks {
+                    own_w.set(o, got);
+                }
+                bar.wait();
+            }
+            let base: u64 = (0..o).map(|p| own_w.get(p)).sum();
+            if c0 < c1 {
+                sum_cells(
+                    pv.ptr,
+                    pv.len,
+                    helper.ptr,
+                    cnt,
+                    base as u32,
+                    c0,
+                    c1,
+                    pv_array_bts,
+                );
+            }
+            for c in 0..chunks {
+                let (s0, s1) = span(c, o);
+                fill.read::<false, false>(o, s0, s1);
+                bar.wait();
+                for a in 0..parts {
+                    for e in fill.subrange(a, o) {
+                        let cell = e.value as usize;
+                        if ascending {
+                            let cursor = ob.ptr.add(cell + 1);
+                            qb.set(*cursor as usize, e.index);
+                            *cursor += 1;
+                        } else {
+                            let p = ob.get(cell) - 1;
+                            ob.set(cell, p);
+                            qb.set(p as usize, e.index);
+                        }
+                    }
+                }
+                if c + 1 < chunks {
+                    bar.wait();
+                }
+            }
+        }
+    });
+    let n_words: u64 = own_words.iter().sum();
+    assert!(
+        n_words <= total as u64 && n_words <= u32::MAX as u64,
+        "BNCSR: more words than positions"
+    );
+    // SAFETY: no job is running. Every element of `offsets[..cells + 1]` was written (the elements
+    // before the counts here, the owners' counts covering the rest; newest first `offsets[cells]`,
+    // no cell's end, now), and the runs partition `0 .. n_words`, each place written once.
+    unsafe {
+        if !ascending {
+            ob.set(cells, n_words as u32);
+        }
+        assemble(offsets, qs, cells, n_words as usize)
+    }
 }
 
 #[cfg(test)]
@@ -1230,11 +1619,21 @@ mod tests {
                 self.ascending,
             );
             let mb = &r.mb_lookup;
-            let helper = self.helper_of(mb.hashtable.len(), mb.pv_array.len(), mb.pv_array_bts);
+            // (a table laid out as CSR, LOSAT_X_BNCSR, gives its chains back as the fill's arrays)
+            let next_pos_len = self
+                .queries
+                .iter()
+                .zip(&self.offsets)
+                .map(|(seq, &off)| off.max(0) as usize + seq.len())
+                .max()
+                .unwrap_or(0)
+                + 1;
+            let (hashtable, next_pos) = r.x_chain_arrays(next_pos_len);
+            let helper = self.helper_of(hashtable.len(), mb.pv_array.len(), mb.pv_array_bts);
             (
                 Built {
-                    hashtable: mb.hashtable.clone(),
-                    next_pos: mb.next_pos.clone(),
+                    hashtable,
+                    next_pos,
                     pv_array: mb.pv_array.clone(),
                     helper_array: helper,
                 },
@@ -1261,6 +1660,7 @@ mod tests {
                     pv_array: &mut pv_array,
                     pv_array_bts: bts,
                     helper_array: &mut helper_array,
+                    x_h24: false,
                 },
             );
             helper_array
@@ -1322,6 +1722,7 @@ mod tests {
                     pv_array: &mut b.pv_array,
                     pv_array_bts: bts,
                     helper_array: &mut b.helper_array,
+                    x_h24: false,
                 },
                 in_pool,
                 false,
@@ -1329,6 +1730,53 @@ mod tests {
                 prefault,
             );
             (b, stats)
+        }
+
+        /// LOSAT_X_MB24: the read-once fill from zero start values into 3-byte elements of `cells`
+        /// cells (newest first), with LOSAT_X_MBLUTPREFAULT given (`prefault`) and checked on the
+        /// words of the heads (`check_prefault`); the tables widened, and the pages touched.
+        fn once_h24(
+            &self,
+            reference: &Built,
+            bts: usize,
+            parts: usize,
+            in_pool: bool,
+            chunk: usize,
+            prefault: bool,
+        ) -> (Built, OnceStats, usize) {
+            use super::super::x_mb_narrow::{widen, words_for};
+            assert!(!self.ascending);
+            let cells = reference.hashtable.len();
+            let refs = self.refs();
+            let words = self.words(&refs);
+            let mut hashtable = vec![0u32; words_for(cells)];
+            let mut next_pos = vec![0u32; words_for(self.next_len())];
+            let mut b = Built {
+                hashtable: Vec::new(),
+                next_pos: Vec::new(),
+                pv_array: vec![0 as PvArrayType; reference.pv_array.len()],
+                helper_array: vec![0u32; reference.helper_array.len()],
+            };
+            let stats = fill_chunked(
+                parts,
+                &words,
+                Tables {
+                    hashtable: &mut hashtable,
+                    next_pos: &mut next_pos,
+                    pv_array: &mut b.pv_array,
+                    pv_array_bts: bts,
+                    helper_array: &mut b.helper_array,
+                    x_h24: true,
+                },
+                in_pool,
+                false,
+                chunk,
+                prefault,
+            );
+            let pages = check_prefault(&hashtable, &stats, self.first_chunk(chunk), prefault);
+            b.hashtable = widen(&hashtable, cells);
+            b.next_pos = widen(&next_pos, self.next_len());
+            (b, stats, pages)
         }
 
         /// The read-once fill from zero start values.
@@ -1793,6 +2241,72 @@ mod tests {
         assert!(skipped > 0);
     }
 
+    // LOSAT_X_MB24: the read-once fill into 3-byte elements, newest first: random cases (`lut_word_length`
+    // 4 to 12) off the pool with 1..8 parts and chunks of 7, 1000 positions and the default, then
+    // long repeats and random letters at 11 and 12 on pools of 2, 5 and 16 threads (with
+    // LOSAT_X_MBLUTPREFAULT and without; first chunks on both sides of the gate): every element of
+    // the four arrays and the longest chain equal the loop's, and the round touches exactly the
+    // pages of the words that the first chunk wrote (`check_prefault` on the words of the heads).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn once_fill_of_3_byte_cells_builds_the_loops_tables() {
+        let mut rng = Lcg(0x0003_B17E);
+        for case in 0..24 {
+            let c = Case::random(&mut rng, false);
+            let (reference, bts, chain) = c.reference(1_000_000);
+            for parts in 1..=8usize {
+                for chunk in [7usize, 1000, CHUNK_POSITIONS] {
+                    let (b, stats, _) = c.once_h24(&reference, bts, parts, false, chunk, true);
+                    let what = format!("case {case} parts {parts} chunk {chunk}");
+                    assert_built(&reference, chain, &b, &what);
+                    assert_eq!(stats.subranges, stats.subranges_in_order, "{what}");
+                }
+            }
+        }
+        let random = |rng: &mut Lcg, len: usize| (0..len).map(|_| rng.below(4) as u8).collect();
+        let mut cases = Vec::new();
+        for lut in [11usize, 12] {
+            cases.push(Case::one(random(&mut rng, 150_000), lut + 4, lut, false));
+            cases.push(Case::one(
+                repeat_case(&mut rng, 40_000),
+                lut + 4,
+                lut,
+                false,
+            ));
+        }
+        let (mut most, mut skipped) = (0usize, 0usize);
+        for (i, c) in cases.iter().enumerate() {
+            let (reference, bts, chain) = c.reference(1_000_000);
+            for threads in [2usize, 5, 16] {
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build()
+                    .unwrap();
+                for chunk in [4_096usize, 70_000, CHUNK_POSITIONS] {
+                    for prefault in [true, false] {
+                        let what = format!("case {i} pool {threads} chunk {chunk} {prefault}");
+                        let (b, stats, pages) = pool.install(|| {
+                            c.once_h24(&reference, bts, threads, true, chunk, prefault)
+                        });
+                        assert_built(&reference, chain, &b, &what);
+                        if prefault {
+                            most = most.max(pages);
+                            skipped += usize::from(stats.prefault_rounds == 0);
+                        }
+                        if threads >= 5 && c.positions() >= 40_000 {
+                            assert!(stats.owners_with_values >= 2, "{what}: {stats:?}");
+                        }
+                    }
+                }
+            }
+        }
+        assert!(most > 4_000, "{most}");
+        assert!(skipped > 0);
+    }
+
     // LOSAT_X_MBLUTPREFAULT with `hashtable` at element offsets 0, 4 (glibc's mapped blocks) and
     // 1,023 (a first page of one element) in its first page, at `lut_word_length` 11 and 12, on a
     // pool of 5 threads, with a first chunk just at the gate (8 positions per 1,024 cells) and one
@@ -1842,6 +2356,7 @@ mod tests {
                                 pv_array: &mut b.pv_array,
                                 pv_array_bts: bts,
                                 helper_array: &mut b.helper_array,
+                                x_h24: false,
                             },
                             true,
                             false,
@@ -1924,5 +2439,83 @@ mod tests {
             let bytes = Shape::new(chunk_positions(parts), parts).lines() * 64;
             assert!(bytes <= parts * (1 << 19) + 64 * 1024, "P {parts}: {bytes}");
         }
+    }
+
+    // EXPERIMENT (LOSAT_X_BNCSR): the CSR built on a pool, in chunks of any size and with owners
+    // without cells (more threads than blocks), is the serial build's (`x_bn_csr::serial`: every
+    // run, the presence vector and the counters) and lists the loop's chains, newest first and in
+    // reading order; `csr` builds on the pool there and on this thread off it.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn csr_on_a_pool_is_the_serial_build() {
+        use super::super::x_bn_csr::tests::{chains, pv_params, random_case};
+        use super::super::x_bn_csr::{serial, x_assert_runs_are_the_chains};
+        let mut rng = Lcg(0xB4C5_0003);
+        for threads in [2usize, 3, 8, 40] {
+            crate::utils::threading::with_search_pool(threads, "blastn", |_pool| {
+                let rounds = if threads == 40 { 2 } else { 8 };
+                for round in 0..rounds {
+                    // lut 8 has 32 blocks of 2,048 cells: 40 threads leave owners without cells
+                    let lut = if threads == 40 {
+                        8
+                    } else {
+                        [8usize, 9, 10, 11][round % 4]
+                    };
+                    // both orders for every lut and every chunk size
+                    let ascending = (round + round / 4) % 2 == 1;
+                    let case = random_case(&mut rng, 2 + round, 2_000 + 900 * round);
+                    let refs = case.refs();
+                    let words = case.words(&refs, lut + rng.below(4) as usize, lut, ascending);
+                    let cells = 1usize << (2 * lut);
+                    let (pv_len, bts) = pv_params(&case, lut);
+                    let chunk = [1usize, 97, 5000, chunk_positions(threads)][(round / 2) % 4];
+                    let what = format!("threads {threads} round {round} lut {lut} chunk {chunk}");
+                    let mut pv = vec![0 as PvArrayType; pv_len];
+                    let mut helper = vec![0u32; cells >> 11];
+                    let csr = csr_on_pool(threads, &words, cells, &mut pv, bts, &mut helper, chunk);
+                    let mut pv1 = vec![0 as PvArrayType; pv_len];
+                    let mut helper1 = vec![0u32; cells >> 11];
+                    let one = serial(&words, cells, &mut pv1, bts, &mut helper1);
+                    assert_eq!(csr.words(), one.words(), "{what}");
+                    for cell in 0..cells {
+                        assert_eq!(csr.run(cell), one.run(cell), "{what} cell {cell}");
+                    }
+                    assert!(pv == pv1 && helper == helper1, "{what}");
+                    let (hashtable, next_pos, fill_pv, fill_helper) =
+                        chains(&case, &words, cells, pv_len, bts);
+                    x_assert_runs_are_the_chains(
+                        &csr,
+                        &pv,
+                        &helper,
+                        &hashtable,
+                        &next_pos,
+                        &fill_pv,
+                        &fill_helper,
+                        &what,
+                    );
+                }
+                let case = random_case(&mut rng, 2, 3_000);
+                let refs = case.refs();
+                let words = case.words(&refs, 12, 11, false);
+                let (pv_len, bts) = pv_params(&case, 11);
+                let mut pv = vec![0 as PvArrayType; pv_len];
+                let mut helper = vec![0u32; (1 << 22) >> 11];
+                let (_, on_pool) = csr(threads, &words, 1 << 22, &mut pv, bts, &mut helper);
+                assert!(on_pool, "threads {threads}");
+                Ok(())
+            })
+            .unwrap();
+        }
+        let case = random_case(&mut rng, 2, 3_000);
+        let refs = case.refs();
+        let words = case.words(&refs, 12, 11, false);
+        let (pv_len, bts) = pv_params(&case, 11);
+        let mut pv = vec![0 as PvArrayType; pv_len];
+        let mut helper = vec![0u32; (1 << 22) >> 11];
+        let (_, on_pool) = csr(4, &words, 1 << 22, &mut pv, bts, &mut helper);
+        assert!(!on_pool, "off a pool");
     }
 }

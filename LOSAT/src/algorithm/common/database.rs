@@ -133,6 +133,14 @@ pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error 
     }
 }
 
+/// LOSAT's refusal of a database with parsed Seq-ids (`SeqDb::check_ordinal_ids`), which
+/// `program` does not search yet: each search program calls it right after it opens its
+/// database (`open_database`), so the refusal comes where the reader gave it before.
+pub(crate) fn refuse_parsed_seqids(db: &SeqDb, program: &str) -> Result<()> {
+    db.check_ordinal_ids()
+        .map_err(|error| database_error(error, program))
+}
+
 /// LOSAT's refusal of a database that `program` does not search as NCBI does.
 pub(crate) fn refusal(reason: &str, program: &str) -> anyhow::Error {
     anyhow::anyhow!("{reason}; this database is not supported by LOSAT's {program}")
@@ -445,16 +453,7 @@ pub(crate) fn stored_title(
     query: usize,
     program: &str,
 ) -> Result<StoredTitle> {
-    let mut deflines = deflines.map_err(|error| {
-        if error.ncbi_message().is_some() {
-            anyhow::Error::new(HeaderReadError {
-                query,
-                error: database_error(error, program),
-            })
-        } else {
-            database_error(error, program)
-        }
-    })?;
+    let mut deflines = deflines.map_err(|error| header_read_error(error, query, program))?;
     // makeblastdb without -parse_seqids writes one definition line per sequence; NCBI
     // shows the others of a sequence as ` >id title` after the first.
     if deflines.len() != 1 {
@@ -468,6 +467,188 @@ pub(crate) fn stored_title(
         title: defline.title,
         replaced_bytes: defline.replaced_title_bytes > 0,
     })
+}
+
+/// A reader error of the header of a reported sequence where the hit list of query `query`
+/// reaches it: NCBI's own is a `HeaderReadError` that names the query; LOSAT's refusals are
+/// errors of their own.
+fn header_read_error(error: SeqDbError, query: usize, program: &str) -> anyhow::Error {
+    if error.ncbi_message().is_some() {
+        anyhow::Error::new(HeaderReadError {
+            query,
+            error: database_error(error, program),
+        })
+    } else {
+        database_error(error, program)
+    }
+}
+
+/// The header of a reported database sequence (`read_header`).
+#[derive(Debug, Clone)]
+pub(crate) enum ReportedHeader {
+    /// A sequence of a database without parsed Seq-ids: its one title (`read_title`).
+    Stored(StoredTitle),
+    /// A sequence with parsed Seq-ids (`report::db_subject`).
+    Parsed(std::sync::Arc<crate::report::db_subject::ParsedSubject>),
+}
+
+/// `read_title` of a program that also reads databases with parsed Seq-ids: the header of the
+/// sequence `ordinal`, read as `read_title` reads it, or with every Seq-id where the record has
+/// parsed ones (`SeqDb::read_header`). A parsed subject that LOSAT does not write as NCBI
+/// (`ParsedSubject::new`) is LOSAT's refusal.
+pub(crate) fn read_header(
+    db: &SeqDb,
+    ordinal: u32,
+    query: usize,
+    program: &str,
+) -> Result<ReportedHeader> {
+    match db.read_header(ordinal) {
+        Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
+            crate::report::db_subject::ParsedSubject::new(set, db.is_version5())
+                .map(|subject| ReportedHeader::Parsed(std::sync::Arc::new(subject)))
+                .map_err(|reason| parsed_refusal(ordinal, &reason, program))
+        }
+        Ok(crate::seqdb::SequenceHeader::Ordinal(deflines)) => {
+            stored_title(Ok(deflines), ordinal, query, program).map(ReportedHeader::Stored)
+        }
+        Err(error) => Err(header_read_error(error, query, program)),
+    }
+}
+
+/// LOSAT's refusal of a reported database sequence with parsed Seq-ids (`parsed_refusal`,
+/// `refuse_joined_hits`, `refuse_parsed_taxonomy`). BLASTX finds one only when it reports a
+/// batch, after the start of its document: a run that holds its XML, XML2 or JSON document
+/// drops it on this error (`ReportedSubjects::for_batch`).
+#[derive(Debug)]
+pub(crate) struct ParsedRefusal(String);
+
+impl std::fmt::Display for ParsedRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ParsedRefusal {}
+
+/// LOSAT's refusal of the database sequence `ordinal` with parsed Seq-ids for `reason` (what the
+/// sequence has, `ParsedSubject`).
+pub(crate) fn parsed_refusal(ordinal: u32, reason: &str, program: &str) -> anyhow::Error {
+    anyhow::Error::new(ParsedRefusal(format!(
+        "database sequence {ordinal} {reason}; this is not supported by LOSAT's {program}"
+    )))
+}
+
+/// `refuse_parsed_seqids` of a program that searches databases with parsed Seq-ids too: the
+/// first header of each volume is read right after the database is opened, as before, and only
+/// a header with parsed Seq-ids is let through (`SeqDb::has_parsed_seqids`). Returns whether the
+/// database has parsed Seq-ids; such a database is LOSAT's refusal where a variable changes
+/// NCBI's choice of its Seq-ids (`ApplicationSettings::seq_id_rank_variable`).
+pub(crate) fn check_seqids(
+    db: &SeqDb,
+    settings: &ApplicationSettings,
+    program: &str,
+) -> Result<bool> {
+    let parsed = db
+        .has_parsed_seqids()
+        .map_err(|error| database_error(error, program))?;
+    if let (true, Some(name)) = (parsed, settings.seq_id_rank_variable) {
+        bail!(
+            "the environment variable {name}, which changes the Seq-ids that NCBI BLAST+ chooses for a database with parsed Seq-ids, is not supported by LOSAT's {program}"
+        );
+    }
+    Ok(parsed)
+}
+
+/// LOSAT's refusal of two parsed subjects that follow each other in the hit list of query
+/// `query` and whose Seq-align ids match (`report::db_subject::joined_in_reports`): NCBI's XML,
+/// XML2, JSON and outfmt 0 reports show their alignments as one hit, which LOSAT does not.
+/// `subjects` gives the ordinal id and the parsed subject of each HSP list of the hit list, in
+/// its order (`None` for a sequence without parsed Seq-ids).
+pub(crate) fn refuse_joined_hits<'a>(
+    query: usize,
+    subjects: impl IntoIterator<Item = Option<(u32, &'a crate::report::db_subject::ParsedSubject)>>,
+    program: &str,
+) -> Result<()> {
+    let mut previous: Option<(u32, &crate::report::db_subject::ParsedSubject)> = None;
+    for subject in subjects {
+        if let (Some((before, a)), Some((ordinal, b))) = (previous, subject) {
+            if crate::report::db_subject::joined_in_reports(a, b) {
+                return Err(anyhow::Error::new(ParsedRefusal(format!(
+                    "database sequences {before} and {ordinal} follow each other in the hits of query {} and have Seq-align ids that NCBI BLAST+ takes for one sequence (its XML and outfmt 0 reports show their alignments as one hit); this is not supported by LOSAT's {program}",
+                    query + 1
+                ))));
+            }
+        }
+        previous = subject;
+    }
+    Ok(())
+}
+
+/// LOSAT's refusal of a parsed subject whose outfmt 0 title NCBI makes from the source
+/// (`ParsedSubject::title_from_taxonomy`): with `taxdb.bti` on the search path NCBI names the
+/// organism of the taxids in it, which LOSAT does not do.
+pub(crate) fn refuse_parsed_taxonomy(ordinal: u32, program: &str) -> anyhow::Error {
+    anyhow::Error::new(ParsedRefusal(format!(
+        "database sequence {ordinal} has an empty title that NCBI BLAST+'s outfmt 0 makes from its taxids and the taxonomy database (taxdb.bti is on the search path); this is not supported by LOSAT's {program}"
+    )))
+}
+
+/// LOSAT's refusals of the outfmt 0 description and alignment heading of the subject with
+/// parsed Seq-ids `subject` (the database sequence `ordinal`; `protein` for a protein database)
+/// that it does not write as NCBI: a title of punctuation that NCBI's `x_CleanAndCompress`
+/// reads past the end of (NCBI BLAST+ 2.17.0 crashes or does not end), a description id longer
+/// than NCBI's cut of the line leaves room for (NCBI then pads the line without end), a
+/// generated heading title whose end NCBI rewrites from the taxids
+/// (`ParsedSubject::title_suffix_adjusted`), and a title that NCBI makes from the sequence's
+/// taxids and the taxonomy database (`taxdb_found`, `ParsedSubject::title_from_taxonomy`).
+pub(crate) fn check_shown_parsed_subject(
+    subject: &crate::report::db_subject::ParsedSubject,
+    protein: bool,
+    taxdb_found: bool,
+    ordinal: u32,
+    program: &str,
+) -> Result<()> {
+    let (start, title) = subject.description(protein);
+    let generated = subject.heading_generates_title();
+    let heading_reads_past_end = generated
+        && subject
+            .bioseq_title(protein, false)
+            .is_ok_and(|defline| defline.reads_past_end);
+    if title.reads_past_end || heading_reads_past_end {
+        return Err(parsed_refusal(
+            ordinal,
+            "has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0)",
+            program,
+        ));
+    }
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:913-916
+    // ```c++
+    //         line_component = (line_component.empty() ? "" : "  ") + sdl->defline;
+    //         string actual_line_component;
+    //         if(line_component.size()+line_length > m_LineLen){
+    //             actual_line_component = line_component.substr(0, m_LineLen -
+    //                                                           line_length - 3);
+    // ```
+    // The unsigned length wraps for an id longer than 65 bytes: NCBI 2.17.0 then pads the
+    // line with spaces without end (probe of the ID2a review, `tests/db_search/ids/refuse.faa`).
+    if start.len() > 65 {
+        return Err(parsed_refusal(
+            ordinal,
+            "has an outfmt 0 description id longer than 65 bytes (NCBI BLAST+ 2.17.0 pads the description line without end)",
+            program,
+        ));
+    }
+    if generated && subject.title_suffix_adjusted(protein) {
+        return Err(parsed_refusal(
+            ordinal,
+            "has a definition line without a title and a title ending in ']' that NCBI BLAST+'s outfmt 0 heading rewrites from the taxids (x_AdjustProteinTitleSuffix)",
+            program,
+        ));
+    }
+    if taxdb_found && subject.title_from_taxonomy() {
+        return Err(refuse_parsed_taxonomy(ordinal, program));
+    }
+    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1865-1886
@@ -939,20 +1120,58 @@ pub(crate) fn read_reported_taxids(
     Vec<crate::report::blast_xml::HitTaxonomy>,
     TaxdbNotes,
 )> {
+    let (taxids, taxonomy, _, notes) =
+        read_reported_taxonomy(db, run, ordinals, reported, &[], program)?;
+    Ok((taxids, taxonomy, notes))
+}
+
+/// [`read_reported_taxids`] of a database whose reported sequences can have parsed Seq-ids
+/// (`parsed[rank]`, empty where none has): the third vector holds, by rank, what the taxonomy
+/// database said about the taxid of each definition line of such a sequence (empty where nothing
+/// was asked), as NCBI's `HitDescr` loop asks it (`SubjectNames::of_parsed`): `Unnamed` for a
+/// definition line without a taxid, and no answer after the first `NotFound` (NCBI's loop ends
+/// there). The volume's lookups are those of `ParsedSubject::volume_taxids`.
+pub(crate) fn read_reported_taxonomy(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    ordinals: &[u32],
+    reported: &std::collections::BTreeSet<usize>,
+    parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+    program: &str,
+) -> Result<(
+    Vec<i32>,
+    Vec<crate::report::blast_xml::HitTaxonomy>,
+    Vec<Vec<crate::report::blast_xml::HitTaxonomy>>,
+    TaxdbNotes,
+)> {
     use crate::report::blast_xml::HitTaxonomy;
+    let parsed_subject = |rank: usize| parsed.get(rank).and_then(Option::as_deref);
+    let defline_taxids = |subject: &crate::report::db_subject::ParsedSubject| -> Vec<i32> {
+        subject
+            .deflines()
+            .iter()
+            .map(|defline| defline.taxid.unwrap_or(0))
+            .collect()
+    };
     let mut taxids = vec![0; ordinals.len()];
+    let mut any_taxid = false;
     for &rank in reported {
+        if let Some(subject) = parsed_subject(rank) {
+            any_taxid |= defline_taxids(subject).iter().any(|&taxid| taxid != 0);
+            continue;
+        }
         let defline_taxids = db
             .defline_taxids(ordinals[rank])
             .map_err(|error| database_error(error, program))?;
         // One definition line per reported sequence (`stored_title`).
         taxids[rank] = defline_taxids.first().copied().unwrap_or(0);
+        any_taxid |= taxids[rank] != 0;
     }
-    if taxids.iter().all(|&taxid| taxid == 0) || !db.taxdb_found() {
-        return Ok((taxids, Vec::new(), TaxdbNotes::default()));
+    if !any_taxid || !db.taxdb_found() {
+        return Ok((taxids, Vec::new(), Vec::new(), TaxdbNotes::default()));
     }
     let Some(search_path) = db.search_path() else {
-        return Ok((taxids, Vec::new(), TaxdbNotes::default()));
+        return Ok((taxids, Vec::new(), Vec::new(), TaxdbNotes::default()));
     };
     let taxdb = run.taxdb(search_path);
     let mut notes = TaxdbNotes {
@@ -962,33 +1181,8 @@ pub(crate) fn read_reported_taxids(
     // NCBI opens the database at its first lookup; the texts are written at the first `Hit`.
     notes.open = taxdb.open().map_err(|error| taxdb_error(error, program))?;
     let mut asked: std::collections::BTreeMap<i32, HitTaxonomy> = Default::default();
-    let mut taxonomy = vec![HitTaxonomy::Unnamed; taxids.len()];
-    notes.volumes = vec![0; taxids.len()];
-    for &rank in reported {
-        let taxid = taxids[rank];
-        if taxid == 0 {
-            continue;
-        }
-        // The volume's lookup when it fetches the sequence (once per volume and taxid;
-        // `x_GetTaxonomy` asks for a positive taxid only, seqdbvol.cpp:1136).
-        let volume = db
-            .volume_index(ordinals[rank])
-            .map_err(|error| database_error(error, program))?;
-        notes.volumes[rank] = volume;
-        let first = taxid > 0
-            && run
-                .volume_lookups
-                .lock()
-                .expect("the volume lookups")
-                .insert((volume, taxid));
-        if first {
-            let mut messages = Vec::new();
-            taxdb
-                .names(taxid, &mut messages)
-                .map_err(|error| taxdb_error(error, program))?;
-            notes.lookups.insert((volume, taxid), messages);
-        }
-        // The lookup of the `Hit` (`CSeqDB::GetTaxInfo`).
+    // The lookup of a `Hit` description (`CSeqDB::GetTaxInfo`).
+    let mut hit_lookup = |taxid: i32| -> Result<HitTaxonomy> {
         if !asked.contains_key(&taxid) {
             let mut messages = Vec::new();
             let found = taxdb
@@ -1011,9 +1205,62 @@ pub(crate) fn read_reported_taxids(
             };
             asked.insert(taxid, answer);
         }
-        taxonomy[rank] = asked[&taxid].clone();
+        Ok(asked[&taxid].clone())
+    };
+    let mut taxonomy = vec![HitTaxonomy::Unnamed; taxids.len()];
+    let mut parsed_taxonomy = vec![Vec::new(); if parsed.is_empty() { 0 } else { taxids.len() }];
+    notes.volumes = vec![0; taxids.len()];
+    for &rank in reported {
+        let subject = parsed_subject(rank);
+        // The volume's lookups when it fetches the sequence (once per volume and taxid;
+        // `x_GetTaxonomy` asks for a positive taxid only, seqdbvol.cpp:1136).
+        let volume_taxids = match subject {
+            Some(subject) if defline_taxids(subject).iter().all(|&taxid| taxid == 0) => continue,
+            Some(subject) => subject.volume_taxids(),
+            None if taxids[rank] == 0 => continue,
+            None => Some(taxids[rank])
+                .filter(|&taxid| taxid > 0)
+                .into_iter()
+                .collect(),
+        };
+        let volume = db
+            .volume_index(ordinals[rank])
+            .map_err(|error| database_error(error, program))?;
+        notes.volumes[rank] = volume;
+        for taxid in volume_taxids {
+            let first = run
+                .volume_lookups
+                .lock()
+                .expect("the volume lookups")
+                .insert((volume, taxid));
+            if first {
+                let mut messages = Vec::new();
+                taxdb
+                    .names(taxid, &mut messages)
+                    .map_err(|error| taxdb_error(error, program))?;
+                notes.lookups.insert((volume, taxid), messages);
+            }
+        }
+        let Some(subject) = subject else {
+            taxonomy[rank] = hit_lookup(taxids[rank])?;
+            continue;
+        };
+        let mut answers = Vec::new();
+        for taxid in defline_taxids(subject) {
+            let answer = if taxid == 0 {
+                HitTaxonomy::Unnamed
+            } else {
+                hit_lookup(taxid)?
+            };
+            let stop = matches!(answer, HitTaxonomy::NotFound(_));
+            answers.push(answer);
+            if stop {
+                break;
+            }
+        }
+        parsed_taxonomy[rank] = answers;
     }
-    Ok((taxids, taxonomy, notes))
+    Ok((taxids, taxonomy, parsed_taxonomy, notes))
 }
 
 /// How many taxonomy database entries cost as much to check as one database sequence: the
@@ -1178,6 +1425,44 @@ impl TaxdbPrinter<'_> {
         taxonomy: &crate::report::blast_xml::HitTaxonomy,
         sink: &mut dyn std::io::Write,
     ) -> std::io::Result<()> {
+        self.write(rank, taxid != 0, &[taxid], std::iter::once(taxonomy), sink)
+    }
+
+    /// `at_hit` of the `Hit` of subject `rank` named `names`: a subject with parsed Seq-ids
+    /// has the volume's lookup of each of its taxids (`SubjectNames::volume_taxids`) and the
+    /// lookup of each `HitDescr`.
+    pub(crate) fn at_names(
+        &mut self,
+        rank: usize,
+        names: &crate::report::blast_xml::subjects::SubjectNames,
+        sink: &mut dyn std::io::Write,
+    ) -> std::io::Result<()> {
+        use crate::report::blast_xml::HitTaxonomy;
+        if names.descriptions.is_empty() {
+            return self.at_hit(rank, names.taxid, &names.taxonomy, sink);
+        }
+        let asks = !names.volume_taxids.is_empty()
+            || names.descriptions.iter().any(|description| {
+                description.taxid != 0 || matches!(description.taxonomy, HitTaxonomy::NotFound(_))
+            });
+        let lookups = names
+            .descriptions
+            .iter()
+            .map(|description| &description.taxonomy);
+        self.write(rank, asks, &names.volume_taxids, lookups, sink)
+    }
+
+    /// The messages of a `Hit` that asks the taxonomy database (`asks`): opening and the
+    /// volume's lookup of each of `volume_taxids`, where they first apply, then the messages of
+    /// the `Hit`'s own lookups (`lookups`, in order).
+    fn write<'t>(
+        &mut self,
+        rank: usize,
+        asks: bool,
+        volume_taxids: &[i32],
+        lookups: impl Iterator<Item = &'t crate::report::blast_xml::HitTaxonomy>,
+        sink: &mut dyn std::io::Write,
+    ) -> std::io::Result<()> {
         use crate::seqdb::taxdb::err_post_line;
         let mut text = String::new();
         let program = &self.notes.program;
@@ -1185,20 +1470,24 @@ impl TaxdbPrinter<'_> {
             text.push_str(&err_post_line(program, line));
             text.push('\n');
         };
-        if taxid != 0 {
+        if asks {
             if !std::mem::replace(&mut self.opened, true) {
                 self.notes.open.iter().for_each(|line| push(line));
             }
             if let Some(volume) = self.notes.volumes.get(rank).copied() {
-                if let Some(lines) = self.notes.lookups.get(&(volume, taxid)) {
-                    if self.written.insert((volume, taxid)) {
-                        lines.iter().for_each(|line| push(line));
+                for &taxid in volume_taxids {
+                    if let Some(lines) = self.notes.lookups.get(&(volume, taxid)) {
+                        if self.written.insert((volume, taxid)) {
+                            lines.iter().for_each(|line| push(line));
+                        }
                     }
                 }
             }
         }
-        if let crate::report::blast_xml::HitTaxonomy::NotFound(messages) = taxonomy {
-            messages.iter().for_each(|line| push(line));
+        for taxonomy in lookups {
+            if let crate::report::blast_xml::HitTaxonomy::NotFound(messages) = taxonomy {
+                messages.iter().for_each(|line| push(line));
+            }
         }
         if text.is_empty() {
             return Ok(());

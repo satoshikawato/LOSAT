@@ -348,6 +348,10 @@ fn plan_strips(
 /// lookup width and step (unmasked subject), from `job.start` to `job.end`; every lookup
 /// chain hit as in `on_word` (the chain order); every pair through `seed_of_pair`.
 fn scan_strip(x: &Inputs<'_>, job: &StripJob, out: &mut Vec<Seed>) {
+    // EXPERIMENT (LOSAT_X_BNCSR): a contiguous table laid out as CSR has no chains.
+    if let Some(csr) = x.two_stage.x_mb_csr() {
+        return scan_strip_csr(x, csr, job, out);
+    }
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
     let packed = x.search_seq_packed;
@@ -377,6 +381,50 @@ fn scan_strip(x: &Inputs<'_>, job: &StripJob, out: &mut Vec<Seed>) {
         end,
         &mut on_kmer,
     );
+}
+
+/// EXPERIMENT (LOSAT_X_BNCSR): `scan_strip` over a contiguous table laid out as CSR
+/// (`lookup::x_bn_csr`): the words with hits (the presence test of `for_each_hit` first), in
+/// order, each `RING` words late through `x_dc_csr::Ring` (whose prefetches bring in the cell's
+/// offsets and the ends of its run), then the cell's run, which holds the chain's offsets in the
+/// chain's order; so the same pairs reach `seed_of_pair` in the same order.
+#[inline(never)]
+fn scan_strip_csr(
+    x: &Inputs<'_>,
+    csr: &crate::algorithm::blastn::lookup::x_dc_csr::Csr,
+    job: &StripJob,
+    out: &mut Vec<Seed>,
+) {
+    use crate::algorithm::blastn::lookup::x_dc_csr::Ring;
+    let two_stage = x.two_stage;
+    let s_range = job.s_range;
+    let mut emit = |(kmer_start, index): (usize, u64)| {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
+        // ```c
+        // offset_pairs[i].qs_offsets.q_off   = q_off - 1;
+        // offset_pairs[i++].qs_offsets.s_off = s_off;
+        // ```
+        for &q_off_1 in csr.run(index as usize) {
+            seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
+        }
+    };
+    let mut ring: Ring<'_, (usize, u64)> = Ring::new(csr);
+    let mut on_kmer = |kmer_start: usize, current_lut_kmer: u64| {
+        if two_stage.has_hits(current_lut_kmer) {
+            ring.push((kmer_start, current_lut_kmer), |w| w.1 as usize, &mut emit);
+        }
+    };
+    scan_kernel(
+        x.search_seq_packed,
+        x.s_len,
+        two_stage.lut_word_length(),
+        x.scan_step,
+        x.subject_masked,
+        job.start,
+        job.end,
+        &mut on_kmer,
+    );
+    ring.flush(&mut emit);
 }
 
 /// The scan kernel `scan_subject_kmers_with_ranges` picks for this lookup width and step,

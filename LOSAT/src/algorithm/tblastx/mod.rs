@@ -4,6 +4,9 @@
 //! which translates both query and subject sequences in all six reading frames
 //! and performs protein-protein alignment.
 
+// NCBI c++/src/app/blast/tblastx_app.cpp:198 (`WriteArchive`): TBLASTX's BLAST archive (outfmt 11),
+// one Blast4-archive per query batch.
+mod archive;
 pub mod args;
 pub mod blast_aascan;
 pub mod blast_engine;
@@ -25,6 +28,8 @@ pub(crate) mod report;
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
 mod scan;
 pub(crate) mod seqalign;
+// The scores of the search's matrix (`-matrix`).
+pub(crate) mod scoring;
 pub mod stage_dump;
 pub(crate) mod subjects;
 pub mod sum_stats_linking;

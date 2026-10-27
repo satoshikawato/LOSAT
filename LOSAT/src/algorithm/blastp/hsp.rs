@@ -180,6 +180,9 @@ pub(crate) trait HitListHsp {
     /// `(q_start, q_end, s_start, s_end)` as `BlastpHsp` stores them: 1-based starts, ends
     /// inclusive (NCBI's 0-based offset + 1, and its exclusive end).
     fn offsets(&self) -> (usize, usize, usize, usize);
+    /// The length of the query (or query part, or searched range) the HSP was found in:
+    /// `contexts[hsp->context].query_length`.
+    fn query_length(&self) -> usize;
 }
 
 impl HitListHsp for BlastpHsp {
@@ -194,6 +197,10 @@ impl HitListHsp for BlastpHsp {
     #[inline]
     fn offsets(&self) -> (usize, usize, usize, usize) {
         (self.q_start, self.q_end, self.s_start, self.s_end)
+    }
+    #[inline]
+    fn query_length(&self) -> usize {
+        self.query_length
     }
 }
 
@@ -583,7 +590,7 @@ pub(crate) fn sort_hsplist_by_score(list: &mut BlastpHspList) {
 //     ...
 // }
 // ```
-fn sort_hsplist_by_evalue<H: HitListHsp>(list: &mut BlastpHspList<H>) {
+pub(crate) fn sort_hsplist_by_evalue<H: HitListHsp>(list: &mut BlastpHspList<H>) {
     if list.hsps.len() > 1 {
         let mut index = 0usize;
         while index < list.hsps.len() - 1 {
@@ -639,8 +646,8 @@ fn sort_hsplist_by_evalue<H: HitListHsp>(list: &mut BlastpHspList<H>) {
 // afterwards (blast_kappa.c:108-114), so two HSPs whose scaled scores round to the same score
 // and whose E-values are both below 1.0e-180 (s_EvalueComp, blast_hits.c:1390-1395) are put in
 // ScoreCompareHSPs order here, the smaller subject offset first. An HSP of score 0 (kept by a
-// very large -evalue) is in no report, and a subject with only such HSPs has none (the hit
-// list was already cut to -max_target_seqs).
+// very large -evalue) is in no report, and a subject with only such HSPs has none (blastp's hit
+// list was already cut to -max_target_seqs; psiblast's is cut afterwards, `psiblast_hits_found`).
 pub(crate) fn hit_list_to_seqalign_order(hit_list: &mut BlastpHitList) {
     let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
     let mut kept: Vec<_> = hit_list

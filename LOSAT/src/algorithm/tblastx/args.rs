@@ -83,11 +83,26 @@ pub struct TblastxArgs {
     #[arg(long, default_value_t = 10.0, value_parser = tblastx_real)]
     pub evalue: f64,
     // NCBI blast_args.cpp:578-583: a double of at least 0; the lookup table takes its
-    // (Int4) value and the report prints the double.
-    #[arg(long, default_value_t = 13.0, value_parser = tblastx_threshold)]
-    pub threshold: f64,
-    #[arg(long, default_value_t = 3, value_parser = protein_word_size)]
-    pub word_size: i32,
+    // (Int4) value and the report prints the double. Omitted, the matrix's suggestion
+    // (`word_threshold`).
+    #[arg(long, value_parser = tblastx_threshold, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion]")]
+    pub threshold: Option<f64>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:624-629 (tblastx_args.cpp:81
+    // adds it)
+    // ```c
+    // CMatrixNameArg::SetArgumentDescriptions(CArgDescriptions& arg_desc)
+    // {
+    //     arg_desc.SetCurrentGroup("General search options");
+    //     arg_desc.AddOptionalKey(kArgMatrixName, "matrix_name",
+    //                            "Scoring matrix name (normally BLOSUM62)",
+    //                            CArgDescriptions::eString);
+    // ```
+    #[arg(long, help = "Scoring matrix name [default: BLOSUM62]")]
+    pub matrix: Option<String>,
+    // Option, not a value with a default: whether it was given is what a BLAST archive (outfmt 11)
+    // records (`WordSize`, NCBI blast_args.cpp:290-292); the search uses `word_size()` (default 3).
+    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3]")]
+    pub word_size: Option<i32>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
 
@@ -187,11 +202,11 @@ pub struct TblastxArgs {
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
 
-    /// Two-hit window size for triggering ungapped extension (default: 40).
-    /// Smaller values are more strict, larger values are more sensitive.
+    /// Two-hit window size for triggering ungapped extension (default: 40, or the matrix's
+    /// suggestion; `window`). Smaller values are more strict, larger values are more sensitive.
     /// 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX.
-    #[arg(long, default_value_t = 40, value_parser = nonnegative_ncbi_integer)]
-    pub window_size: i32,
+    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    pub window_size: Option<i32>,
 
     /// Output format: 0 (pairwise), 6 or 7 (tabular), without custom fields.
     // Read when NCBI reads it (`blastinput/app.rs` `parse_formatting_string`).
@@ -209,8 +224,10 @@ pub struct TblastxArgs {
     // ```
     /// If the query range of a hit is enveloped by that of at least this many
     /// higher-scoring hits, delete the hit (default: 0, no culling).
-    #[arg(long, default_value_t = 0, value_parser = nonnegative_ncbi_integer)]
-    pub culling_limit: i32,
+    // Option, not a value with a default: whether it was given (also 0) is what a BLAST archive
+    // (outfmt 11) records (`Culling`); the search uses `culling_limit()`.
+    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    pub culling_limit: Option<i32>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // ```c++
     //     // query location
@@ -241,9 +258,122 @@ pub struct TblastxArgs {
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
+    /// The run's BLAST archive (outfmt 11), made by `run` and `run_local` before the search
+    /// reads the arguments (`archive::handle_for`).
+    #[arg(skip)]
+    pub archive: Option<crate::report::archive::ArchiveHandle>,
+}
+
+/// What NCBI's score block makes of the `-matrix` name of an ungapped search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TblastxMatrix {
+    /// A matrix of NCBI's tables.
+    Table(crate::config::ScoringMatrix),
+    /// A name that NCBI's matrices and tables do not know: NCBI's search stops with "Unknown
+    /// error code -1" (`check_matrix`).
+    Unknown,
+    /// A name that NCBI's matrix loader reads as IDENTITY but its tables do not know: NCBI
+    /// 2.17.0 aborts (`free(): invalid size`), LOSAT refuses the name.
+    Aborts,
 }
 
 impl TblastxArgs {
+    /// The `-matrix` name as typed, BLOSUM62 when omitted (the pairwise report prints it so).
+    pub fn matrix_name(&self) -> &str {
+        self.matrix.as_deref().unwrap_or("BLOSUM62")
+    }
+
+    /// The matrix of `-matrix`.
+    ///
+    /// NCBI reference: c++/src/util/tables/raw_scoremat.c:157-161 (the matrix that the score
+    /// block loads, `BlastScoreBlkProteinMatrixLoad`, for the upper-cased name; blast_setup.c:385)
+    /// ```c
+    ///     case 'I': case 'i':
+    ///         if ( !s_NCBISM_StartsWith(name, "identity") ) {
+    ///             return NULL;
+    ///         }
+    ///         return &NCBISM_Identity;
+    /// ```
+    /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3103-3105, 3136 (the tables of
+    /// the length adjustment, found by `strcasecmp`; a name without a table leaves the
+    /// arrays unset, and `sfree` of them aborts)
+    /// ```c
+    ///    num_values = Blast_GetMatrixValues(matrixName, &gapOpen_arr,
+    ///      &gapExtend_arr, NULL, NULL, NULL,  &alpha_arr, &beta_arr,
+    ///      &pref_flags);
+    /// ...
+    ///    sfree(gapOpen_arr);
+    /// ```
+    /// The other names that the loader knows (`blosum` or `pam` and the exact digits) are the
+    /// tables' names ignoring the case. A name that the loader does not know is looked for as
+    /// a file (`BlastFindMatrixPath`, blast_stat.c:1631-1660); LOSAT reads no matrix file, and
+    /// NCBI 2.17.0 aborts for a file that it finds (`SURVEY_scoring.md` §1.3).
+    pub fn scoring_matrix(&self) -> TblastxMatrix {
+        let name = self.matrix_name();
+        if let Ok(matrix) = name.parse::<crate::config::ScoringMatrix>() {
+            return TblastxMatrix::Table(matrix);
+        }
+        let identity = name
+            .get(..8)
+            .is_some_and(|start| start.eq_ignore_ascii_case("identity"));
+        if identity {
+            TblastxMatrix::Aborts
+        } else {
+            TblastxMatrix::Unknown
+        }
+    }
+
+    /// The word threshold: `-threshold`, or the matrix's suggestion for a translated subject.
+    ///
+    /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:586-623 (TBLASTX's default
+    /// threshold is always the suggestion's)
+    /// ```c
+    ///     if (args[kArgWordScoreThreshold]) {
+    ///         opt.SetWordThreshold(args[kArgWordScoreThreshold].AsDouble());
+    ///     } else if (s_IsDefaultWordThreshold(opt.GetProgram(),
+    ///                                         opt.GetWordThreshold())) {
+    ///         double threshold = -1;
+    ///         BLAST_GetSuggestedThreshold(opt.GetProgramType(),
+    ///                                     opt.GetMatrixName(),
+    ///                                     &threshold);
+    /// ```
+    pub fn word_threshold(&self) -> f64 {
+        self.threshold.unwrap_or_else(|| {
+            crate::stats::protein_options::suggested_threshold(
+                crate::stats::protein_options::SuggestionProgram::TranslatedSubject,
+                self.matrix_name(),
+            )
+        })
+    }
+
+    /// The two-hit window: `-window_size`, or the matrix's suggestion.
+    ///
+    /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:485-497
+    /// ```c
+    ///     if (args[kArgWindowSize]) {
+    ///         opt.SetWindowSize(args[kArgWindowSize].AsInteger());
+    ///     } else {
+    ///         int window = -1;
+    ///         BLAST_GetSuggestedWindowSize(opt.GetProgramType(),
+    ///                                      opt.GetMatrixName(),
+    ///                                      &window);
+    /// ```
+    pub fn window(&self) -> i32 {
+        self.window_size.unwrap_or_else(|| {
+            crate::stats::protein_options::suggested_window_size(self.matrix_name())
+        })
+    }
+
+    /// The word size the search uses: the argument, else TBLASTX's default (3).
+    pub fn word_size(&self) -> i32 {
+        self.word_size.unwrap_or(3)
+    }
+
+    /// The culling limit the search uses: the argument, else 0 (no culling).
+    pub fn culling_limit(&self) -> i32 {
+        self.culling_limit.unwrap_or(0)
+    }
+
     /// The -seg value as NCBI's filtering handler reads it (`check_options` reports its
     /// errors first).
     pub fn seg_spec(&self) -> anyhow::Result<SegSpec> {

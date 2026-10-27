@@ -136,7 +136,10 @@ pub(super) fn query_records<'a>(
             id: match names {
                 SeqalignSubjects::Records => SeqId::Local(&subject.internal_id),
                 SeqalignSubjects::Database { reported, .. } => {
-                    SeqId::BlOrdId(reported.ordinal(list.oid))
+                    match reported.parsed_subject(list.oid) {
+                        Some(subject) => SeqId::Db(subject.alignment_id()),
+                        None => SeqId::BlOrdId(reported.ordinal(list.oid)),
+                    }
                 }
             },
             searched_length: i32::try_from(subject.sequence.len())?,

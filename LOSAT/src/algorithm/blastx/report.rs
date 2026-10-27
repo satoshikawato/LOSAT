@@ -1031,7 +1031,8 @@ fn field_name(field: &str) -> &str {
 /// (`ShownSubjects`).
 struct ShownSubject<'a> {
     record: &'a FastaRecord,
-    id: &'a str,
+    /// `sseqid`, `sacc` and `saccver` (`ShownSubjects::subject_ids`).
+    ids: [&'a str; 3],
     title: &'a str,
 }
 
@@ -1044,7 +1045,9 @@ fn field_value(
 ) -> String {
     match field {
         "qseqid" | "qacc" | "qaccver" => id_field(query, field),
-        "sseqid" | "sacc" | "saccver" => subject.id.to_owned(),
+        "sseqid" => subject.ids[0].to_owned(),
+        "sacc" => subject.ids[1].to_owned(),
+        "saccver" => subject.ids[2].to_owned(),
         "qlen" => query.sequence.len().to_string(),
         "slen" => subject.record.sequence.len().to_string(),
         "qstart" => a.qstart.to_string(),
@@ -1123,12 +1126,14 @@ pub(crate) enum ShownSubjects<'a> {
 }
 
 impl ShownSubjects<'_> {
-    /// The tabular subject id of subject `oid` (`sseqid`, `sacc`, `saccver`): the first
-    /// word of a record's title, or a database sequence's id made from its stored title.
-    fn subject_id<'s>(&'s self, subject: &'s FastaRecord, oid: usize) -> &'s str {
+    /// The tabular subject ids of subject `oid` (`sseqid`, `sacc`, `saccver`): the first
+    /// word of a record's title, or a database sequence's id made from its stored title, the
+    /// same for the three; a database sequence with parsed Seq-ids has its own three
+    /// (`ParsedSubject::tabular_ids`).
+    fn subject_ids<'s>(&'s self, subject: &'s FastaRecord, oid: usize) -> [&'s str; 3] {
         match self {
-            ShownSubjects::Fasta { .. } => local_id(subject),
-            ShownSubjects::Database { reported, .. } => reported.tabular_id(oid),
+            ShownSubjects::Fasta { .. } => [local_id(subject); 3],
+            ShownSubjects::Database { reported, .. } => reported.tabular_ids(oid),
         }
     }
 
@@ -1440,7 +1445,7 @@ pub fn render_queries(
                     let subject = &subjects[list.oid];
                     let shown_subject = ShownSubject {
                         record: subject,
-                        id: shown.subject_id(subject, list.oid),
+                        ids: shown.subject_ids(subject, list.oid),
                         title: shown.stitle(list.oid),
                     };
                     for hsp in &list.hsps {
@@ -1644,7 +1649,7 @@ fn write_pairwise(
         ShownSubjects::Fasta { .. } => None,
         ShownSubjects::Database {
             pairwise, reported, ..
-        } => Some((*pairwise, reported.stored_titles())),
+        } => Some((*pairwise, reported.stored_titles(), reported.parsed())),
     };
     let config = PairwiseConfig {
         program: "blastx".into(),

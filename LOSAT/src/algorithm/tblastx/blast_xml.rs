@@ -42,7 +42,7 @@
 
 use std::io::Write;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use super::blast_engine::{TblastxHsp, TblastxQueryStats, TblastxReportRun};
 use super::ncbi_cutoffs::try_compute_eff_lengths_tblastx;
@@ -62,11 +62,35 @@ use crate::utils::genetic_code::GeneticCode;
 
 const PROGRAM: &str = "TBLASTX";
 
-/// `BLOSUM62`, `-gapopen 11 -gapextend 1`: TBLASTX has no options for them, and NCBI's XML prints
-/// its option defaults (blastxml_format.cpp:602-607; DECISIONS 19, Q7).
-const MATRIX: &str = "BLOSUM62";
+/// `-gapopen 11 -gapextend 1`: TBLASTX has no options for them, and NCBI's XML prints its option
+/// defaults (blastxml_format.cpp:602-607; DECISIONS 19, Q7), or the best costs of `-matrix`
+/// (`gap_costs`).
 const GAP_OPEN: i32 = 11;
 const GAP_EXTEND: i32 = 1;
+
+/// The gap costs of the XML's parameters: with `-matrix`, the matrix's best costs.
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:257-273
+/// ```c
+///     int gap_open=0, gap_extend=0;
+///     if (args.Exist(kArgMatrixName) && args[kArgMatrixName])
+///          BLAST_GetProteinGapExistenceExtendParams
+///              (args[kArgMatrixName].AsString().c_str(), &gap_open, &gap_extend);
+///
+///     if (args.Exist(kArgGapOpen) && args[kArgGapOpen]) {
+///         opt.SetGapOpeningCost(args[kArgGapOpen].AsInteger());
+///     }
+///     else if (args.Exist(kArgMatrixName) && args[kArgMatrixName]) {
+///         opt.SetGapOpeningCost(gap_open);
+///     }
+/// ```
+fn gap_costs(matrix: Option<&str>) -> (i32, i32) {
+    match matrix {
+        Some(name) => crate::stats::protein_options::protein_gap_existence_extend_params(name)
+            .unwrap_or((0, 0)),
+        None => (GAP_OPEN, GAP_EXTEND),
+    }
+}
 
 /// The messages of a query's result (the warnings the other formats write to standard error,
 /// `report::query_warning`): the Karlin-Altschul message of a batch NCBI did not search (a
@@ -169,7 +193,26 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         None => ("", 0, 0),
     };
     names::check_database_name(PROGRAM, db_name)?;
-    let positives = FormattingMatrix::new(MATRIX).context("no formatting matrix for BLOSUM62")?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2206-2208 (XML2
+    // and JSON) and :2242-2243 (BLAST XML)
+    // ```c++
+    //     if ((m_FormatType == CFormattingArgs::eXml2) || (m_FormatType == CFormattingArgs::eJson) ||
+    //         (m_FormatType == CFormattingArgs::eXml2_S) || (m_FormatType == CFormattingArgs::eJson_S)) {
+    //         if(!m_AccumulatedResults.empty()) {
+    // ...
+    //     if (m_FormatType == CFormattingArgs::eXml) {
+    //         m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl;
+    // ```
+    // The batch loop refused a name that the formatting table does not know when a batch has
+    // letters (`run_batch_loop`); a run without queries makes no report data, and the document
+    // is its header and end.
+    let matrix = args.matrix_name();
+    let positives = FormattingMatrix::new(matrix);
+    anyhow::ensure!(
+        positives.is_some() || hits.is_empty(),
+        "no formatting matrix for {matrix}"
+    );
+    let (gap_open, gap_extend) = gap_costs(args.matrix.as_deref());
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:414-417
     // ```c
     //     if (SBlastFilterOptionsMaskAtHash(filtering_options)) {
@@ -189,15 +232,15 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         version: "TBLASTX 2.17.0+",
         reference: REFERENCE_GAPPED_BLAST,
         db_name: db_name.as_bytes(),
-        matrix: Some(MATRIX),
+        matrix: Some(matrix),
         expect: args.evalue,
-        gap_open: GAP_OPEN,
-        gap_extend: GAP_EXTEND,
+        gap_open,
+        gap_extend,
         reward_penalty: None,
         filter: &filter,
         db_num,
         db_len,
-        positives: Some(&positives),
+        positives: positives.as_ref(),
         mask_char: b'X',
     };
     let queries = run.queries;
@@ -240,6 +283,8 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
             taxids: &taxa.taxids,
             taxonomy: &taxa.taxonomy,
             length: &subject_length,
+            parsed: &[],
+            parsed_taxonomy: &[],
         },
         None => XmlSubjects::Records {
             records: run.subjects,
@@ -302,14 +347,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 }
                 let subject = cache.get(s_idx as usize, PROGRAM)?;
                 let subject_record_length = subjects.length(s_idx as usize);
-                let hit = XmlHit {
-                    id: &subject.id,
-                    title: &subject.title,
-                    accession: &subject.accession,
-                    len: subject_record_length,
-                    taxid: subject.taxid,
-                    taxonomy: &subject.taxonomy,
-                };
+                let hit = XmlHit::of(subject, subject_record_length);
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time
                 // (nothing for the other formats).
@@ -435,6 +473,7 @@ mod tests {
                 karlin: Some(karlin.clone()),
                 eff_searchsp: lengths.eff_searchsp,
                 aa_len: 130,
+                context0_search_space: 0,
                 seg_masks: Vec::new(),
             };
             let xml = query_stats(&stats, &numbers);

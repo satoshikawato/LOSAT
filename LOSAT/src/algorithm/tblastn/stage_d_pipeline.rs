@@ -25,7 +25,7 @@ use super::stage_d_linking::{
     LinkedHspList,
 };
 use super::stage_d_results::{
-    merge_query_chunk, KappaHspPayload, KappaResultHitList, KappaResultList,
+    merge_query_chunk, KappaHspPayload, KappaResultHitList, KappaResultList, PrelimCulling,
 };
 use super::stage_d_stats::{
     local_parameters_for_call, LocalParameterCall, LocalParameterOptions, LocalSubjectParameters,
@@ -80,6 +80,11 @@ pub(super) struct LocalStageDProfile<'a> {
     /// The Seq-aligns are requested (outfmt 8, 12; `ReportNeeds::seqalign`): the HSPs of a
     /// composition-adjusted match get NCBI's engine positives (`postredo_engine_positives`).
     pub engine_positives: bool,
+    /// The `-culling_limit` value (0: no culling). A positive value makes the preliminary
+    /// stage keep the HSPs of each query in NCBI's culling writer (`culling.rs`)
+    /// instead of the plain hit-list collector; the pipe after the traceback is run by the
+    /// finish of the search (`tblastn_app.rs`).
+    pub culling_limit: i32,
 }
 
 /// The numbers of a database (`-db`) as NCBI's search reads them from its sequence source:
@@ -571,9 +576,9 @@ fn x_own_pool_threads(threads: usize, pools: usize, index: usize) -> usize {
 }
 
 /// Graduated 2026-10-22 (was `LOSAT_X_TBNSSIDE`, `LOSAT_X_TBNBATCH`): the query batches
-/// `ranges` of `search` (`args.rs`) searched ahead, each with its range, in the order of
-/// `ranges`; `None` when `ranges` is empty; the caller's loop then searches its batches (args.rs
-/// passes none when the database's sequences could not be read).
+/// `ranges` of `search` (`tblastn_app.rs`) searched ahead, each with its range, in the order
+/// of `ranges`; `None` when `ranges` is empty; the caller's loop then searches its batches
+/// (tblastn_app.rs passes none when the database's sequences could not be read).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289
 /// ```c++
@@ -996,7 +1001,8 @@ fn run_local_search_with_pool(
         "TBLASTN Stage D requires a protein query"
     );
     // A database search has no subjects in hand when its sequences could not be read: its
-    // batches are set up and reported, and `args::search` fails the first with a valid context.
+    // batches are set up and reported, and `tblastn_app::search` fails the first with a valid
+    // context.
     ensure!(
         subjects.count() > 0 || profile.subject_set.database.is_some(),
         "TBLASTN Stage D requires a local subject"
@@ -1192,6 +1198,7 @@ fn run_local_search_with_pool(
                 gumbel: gumbel.as_ref(),
                 prelim_evalue: parameters.prelim_evalue,
                 prelim_size,
+                culling_limit: profile.culling_limit,
             },
             subjects,
             pool,
@@ -1267,7 +1274,8 @@ fn run_local_search_with_pool(
         );
     }
     // EXPERIMENT (LOSAT_X_TBNDBSTREAM): with a `-db` stream, the subjects of the lists, each read
-    // when first aligned, held until the redo ends.
+    // when first aligned, held until their last match is done (LOSAT_X_TBNSTAGEDROP; with it off
+    // until the redo ends).
     let x_stage = super::x_db_stream::XStageSubjects::new(
         subjects,
         preliminary_lists.iter().map(|(_, oid, _)| *oid),
@@ -1382,8 +1390,11 @@ fn run_local_search_with_pool(
      -> Result<Option<(CompoHeapRecord, KappaResultList)>> {
         // The subject's letters, or (EXPERIMENT, LOSAT_X_TBNSTORE) its packed form: the redo and
         // the translations below read windows of it, as NCBI's do. EXPERIMENT (LOSAT_X_TBNDBSTREAM):
-        // a `-db` sequence is read once for the redo (`x_stage`).
-        let subject = x_stage.nt(oid)?;
+        // a `-db` sequence is read once for the redo (`x_stage`); EXPERIMENT (LOSAT_X_TBNSTAGEDROP):
+        // the stage lets it go after its last match (`_done`, declared before `held`).
+        let _done = x_stage.x_match(oid);
+        let held = x_stage.held(oid)?;
+        let subject = held.nt();
         let incoming: Vec<_> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
         // The matrix that the match's adjustments leave, for the engine positives
         // (`postredo_engine_positives`).
@@ -1649,6 +1660,10 @@ fn run_local_search_with_pool(
                 };
                 for ((context, oid, list), result) in batch.iter().zip(computed) {
                     if compo_early_termination(list.best_evalue, &heaps) {
+                        // A redone match was done in redo_item (LOSAT_X_TBNSTAGEDROP).
+                        if result.is_none() {
+                            x_stage.done(*oid);
+                        }
                         continue;
                     }
                     if let Some(ref mut trace) = observer {
@@ -1686,6 +1701,7 @@ fn run_local_search_with_pool(
             //     redoneMatches, numQueries)) { Blast_HSPListFree(localMatch); continue; }
             // query_index = localMatch->query_index;
             if compo_early_termination(list.best_evalue, &heaps) {
+                x_stage.done(oid);
                 continue;
             }
             if let Some(ref mut trace) = observer {
@@ -2171,6 +2187,7 @@ fn split_preliminary_hitlists(
                 gumbel: inputs.gumbel,
                 prelim_evalue: setup.parameters.prelim_evalue,
                 prelim_size,
+                culling_limit: inputs.profile.culling_limit,
             },
             subjects,
             pool,
@@ -2405,6 +2422,68 @@ struct PreliminaryInputs<'a> {
     gumbel: Option<&'a BlastGumbelBlk>,
     prelim_evalue: f64,
     prelim_size: usize,
+    /// `-culling_limit` (0: none).
+    culling_limit: i32,
+}
+
+// Where the HSP lists of the subjects go as the owner of the search takes them in OID order:
+// the hit-list collector of the preliminary stage (`PreliminaryCollector`), or, with
+// `-culling_limit`, NCBI's culling writer (`PrelimCulling`). `run_preliminary_subjects` picks
+// one once per call, before the subject loop. The search takes the sink as a trait object, so
+// it has one instance (one indirect call per subject), as before the culling writer.
+trait PreliminarySink {
+    /// The list of subject `oid`: the linked HSPs of all queries and frames, in list order.
+    fn add(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()>;
+}
+
+// NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
+// Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
+// Each context owns an independently capped preliminary list.
+struct PreliminaryCollector {
+    hitlists: Vec<Option<KappaResultHitList>>,
+    prelim_size: usize,
+}
+
+impl PreliminaryCollector {
+    fn new(inputs: &PreliminaryInputs<'_>) -> Self {
+        Self {
+            hitlists: (0..inputs.queries.len()).map(|_| None).collect(),
+            prelim_size: inputs.prelim_size,
+        }
+    }
+}
+
+impl PreliminarySink for PreliminaryCollector {
+    fn add(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()> {
+        for context in 0..self.hitlists.len() {
+            let hsps: Vec<_> = linked
+                .hsps
+                .iter()
+                .copied()
+                .filter(|h| h.context == context)
+                .collect();
+            if !hsps.is_empty() {
+                let best_evalue = hsps.iter().map(|h| h.evalue).reduce(f64::min).unwrap();
+                // NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
+                // Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
+                // Each context owns an independently capped preliminary list.
+                let collector = self.hitlists[context]
+                    .get_or_insert(KappaResultHitList::new(self.prelim_size)?);
+                collector.update(KappaResultList {
+                    oid: i32::try_from(oid)?,
+                    hsps: LinkedHspList { hsps, best_evalue },
+                    payloads: Vec::new(),
+                })?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl PreliminarySink for PrelimCulling {
+    fn add(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()> {
+        PrelimCulling::add(self, oid, &linked.hsps)
+    }
 }
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475,1553-1555:
@@ -2415,10 +2494,31 @@ fn run_preliminary_subjects(
     inputs: &PreliminaryInputs<'_>,
     subjects: SubjectLetters<'_>,
     pool: Option<&SearchPool<'_>>,
-    mut observer: Option<&mut StageDBoundaryTrace>,
+    observer: Option<&mut StageDBoundaryTrace>,
 ) -> Result<Vec<Option<KappaResultHitList>>> {
-    let mut preliminary_hitlists: Vec<Option<KappaResultHitList>> =
-        (0..inputs.queries.len()).map(|_| None).collect();
+    // `-culling_limit` selects NCBI's culling writer in place of the collector, once per call.
+    if inputs.culling_limit > 0 {
+        let mut sink = PrelimCulling::new(
+            inputs.query_lengths,
+            inputs.prelim_size,
+            inputs.culling_limit,
+        );
+        run_preliminary_subjects_into(inputs, subjects, pool, observer, &mut sink)?;
+        sink.finish()
+    } else {
+        let mut sink = PreliminaryCollector::new(inputs);
+        run_preliminary_subjects_into(inputs, subjects, pool, observer, &mut sink)?;
+        Ok(sink.hitlists)
+    }
+}
+
+fn run_preliminary_subjects_into(
+    inputs: &PreliminaryInputs<'_>,
+    subjects: SubjectLetters<'_>,
+    pool: Option<&SearchPool<'_>>,
+    mut observer: Option<&mut StageDBoundaryTrace>,
+    sink: &mut (dyn PreliminarySink + Send),
+) -> Result<()> {
     // NCBI c++/src/algo/blast/core/blast_engine.c:1469-1475,872-905:
     //      status =
     //          s_BlastSearchEngineCore(program_number, query, query_info,
@@ -2696,27 +2796,7 @@ fn run_preliminary_subjects(
             // NCBI c++/src/algo/blast/core/blast_hspstream.c:289-319:
             // Query-indexed lists are consumed in
             // reverse-sorted order by BlastHSPStreamRead.
-            for context in 0..inputs.queries.len() {
-                let hsps: Vec<_> = linked
-                    .hsps
-                    .iter()
-                    .copied()
-                    .filter(|h| h.context == context)
-                    .collect();
-                if !hsps.is_empty() {
-                    let best_evalue = hsps.iter().map(|h| h.evalue).reduce(f64::min).unwrap();
-                    // NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
-                    // Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
-                    // Each context owns an independently capped preliminary list.
-                    let collector = preliminary_hitlists[context]
-                        .get_or_insert(KappaResultHitList::new(inputs.prelim_size)?);
-                    collector.update(KappaResultList {
-                        oid: i32::try_from(oid)?,
-                        hsps: LinkedHspList { hsps, best_evalue },
-                        payloads: Vec::new(),
-                    })?;
-                }
-            }
+            sink.add(oid, &linked)?;
         }
         Ok(())
     };
@@ -2770,7 +2850,7 @@ fn run_preliminary_subjects(
             subjects.count(), workers, peak.load(Ordering::SeqCst), x_flow_fields
         );
     }
-    Ok(preliminary_hitlists)
+    Ok(())
 }
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
@@ -2873,7 +2953,8 @@ fn finish_local_mode0_no_sum_stats(
         })
         .collect();
     // EXPERIMENT (LOSAT_X_TBNDBSTREAM): with a `-db` stream, the subjects of the lists, each read
-    // when first aligned, held until the traceback ends.
+    // when first aligned, held until their last list is done (LOSAT_X_TBNSTAGEDROP; with it off
+    // until the traceback ends).
     let x_stage = super::x_db_stream::XStageSubjects::new(
         subjects,
         preliminary_lists.iter().map(|(_, oid, _)| *oid),
@@ -2884,8 +2965,11 @@ fn finish_local_mode0_no_sum_stats(
         // the translations make when they read them (`TargetTranslation`). The whole subject's
         // letters are made only for a list retried after a fence, whose frames NCBI translates
         // whole (one window for all of them). EXPERIMENT (LOSAT_X_TBNDBSTREAM): a `-db` sequence is
-        // read once for the traceback (`x_stage`).
-        let subject = x_stage.nt(oid)?;
+        // read once for the traceback (`x_stage`); EXPERIMENT (LOSAT_X_TBNSTAGEDROP): the stage
+        // lets it go after its last list (`_done`, declared before `held`).
+        let _done = x_stage.x_match(oid);
+        let held = x_stage.held(oid)?;
+        let subject = held.nt();
         let input: Vec<_> = preliminary.hsps.iter().map(|linked| linked.hsp).collect();
         // NCBI c++/src/algo/blast/core/blast_traceback.c:503-536:
         // traceback uses the selected scoring matrix and gap costs.
@@ -3024,7 +3108,7 @@ fn finish_local_mode0_no_sum_stats(
 mod tests {
     use super::*;
 
-    // The search reads the subjects as slices of the records' residues (`args.rs`).
+    // The search reads the subjects as slices of the records' residues (`tblastn_app.rs`).
     fn subject_slices(subjects: &[Vec<u8>]) -> Vec<&[u8]> {
         subjects.iter().map(Vec::as_slice).collect()
     }
@@ -3073,6 +3157,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
             true,
             true,
@@ -3122,6 +3207,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
             true,
             true,
@@ -3411,6 +3497,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
             true,
             true,
@@ -3498,6 +3585,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
             true,
             true,
@@ -3654,6 +3742,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
         )
         .unwrap();
@@ -3746,6 +3835,7 @@ mod tests {
                     query_offsets: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
+                    culling_limit: 0,
                 },
             )
             .unwrap();
@@ -3929,6 +4019,7 @@ mod tests {
                     query_offsets: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
+                    culling_limit: 0,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -4155,6 +4246,7 @@ mod tests {
                     query_offsets: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
+                    culling_limit: 0,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -4364,6 +4456,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
             false,
             false,
@@ -4511,6 +4604,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
             false,
             false,
@@ -4679,6 +4773,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             };
             let mut boundary = StageDBoundaryTrace::default();
             let result = run_local_search(
@@ -4875,6 +4970,7 @@ mod tests {
                     query_offsets: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
+                    culling_limit: 0,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -5034,6 +5130,7 @@ mod tests {
                         query_offsets: &[],
                         subject_set: Default::default(),
                         engine_positives: false,
+                        culling_limit: 0,
                     },
                     true,
                     true,
@@ -5344,6 +5441,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
         )
         .unwrap();
@@ -5533,6 +5631,7 @@ mod tests {
                     query_offsets: &[],
                     subject_set: Default::default(),
                     engine_positives: false,
+                    culling_limit: 0,
                 },
             )
             .unwrap();
@@ -5647,6 +5746,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
         )
         .unwrap();
@@ -5743,6 +5843,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
         )
         .unwrap();
@@ -5856,6 +5957,7 @@ mod tests {
                 query_offsets: &[],
                 subject_set: Default::default(),
                 engine_positives: false,
+                culling_limit: 0,
             },
         )
         .unwrap();
@@ -6045,6 +6147,7 @@ mod tests {
             query_offsets: &[],
             subject_set: Default::default(),
             engine_positives: false,
+            culling_limit: 0,
         };
         for ranges in [
             vec![0..1],
@@ -6131,6 +6234,7 @@ mod tests {
             query_offsets: &[],
             subject_set: Default::default(),
             engine_positives: false,
+            culling_limit: 0,
         };
         let ranges = vec![0..1, 1..2, 2..3, 3..4];
         let searched = x_search_batches(

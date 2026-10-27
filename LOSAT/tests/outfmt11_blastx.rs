@@ -5,8 +5,8 @@
 //! batch, `EffectiveSearchSpace` per batch, an unsearched batch repeating the last value, a batch
 //! above the default size not split, a batch whose last query crosses the limit), a reader error
 //! in the second batch (the archive of the first batch, then an error archive, rc 1),
-//! `ARCHIVE_FORMAT` (`bin...` in any case: ASN.1 binary; any other value that is not empty: nothing
-//! is written, rc 0), `-outfmt "11 qseqid"` (the specification is ignored), the errors NCBI turns
+//! `ARCHIVE_FORMAT` (`bin...` in any case: ASN.1 binary; `xml`: NCBI's XML archive; any other value
+//! that is not empty: nothing is written, rc 0), `-outfmt "11 qseqid"` (the specification is ignored), the errors NCBI turns
 //! into an error archive (a `-subject` or `-query` file that does not exist, with `-subject` and
 //! with `-db`; an option error inside `Run`: `-ungapped` with composition-based statistics; a
 //! subject file with no letters), a query file with no letters (rc 3), an empty query file
@@ -82,6 +82,7 @@ struct Case {
 
 const BATCH: (&str, &str) = ("BATCH_SIZE", "200");
 const BIN_FORMAT: (&str, &str) = ("ARCHIVE_FORMAT", "bin");
+const XML_FORMAT: (&str, &str) = ("ARCHIVE_FORMAT", "xml");
 
 fn case(
     name: &str,
@@ -105,6 +106,7 @@ fn case(
 
 fn cases() -> Vec<Case> {
     let mut cases = vec![
+        case("default_sub_xml", &[XML_FORMAT], "arch_bx_q.fna", &[], 0),
         case("batches_sub", &[BATCH], "arch_bx_batches.fna", &[], 0),
         case(
             "batches_sub_bin",
@@ -442,6 +444,85 @@ pub(crate) fn first_difference(got: &[u8], want: &[u8]) -> String {
     )
 }
 
+/// A `real { M, 10, E }` token: its mantissa and exponent digits.
+type Real<'a> = (&'a [u8], &'a [u8]);
+
+/// The `real { M, 10, E }` tokens of an ASN.1 text archive (`CObjectOStreamAsn::WriteDouble`, 15
+/// digits): the bytes outside the tokens in order, and for each token its mantissa and exponent.
+fn split_reals(bytes: &[u8]) -> (Vec<u8>, Vec<Real<'_>>) {
+    const HEAD: &[u8] = b"real { ";
+    const MIDDLE: &[u8] = b", 10, ";
+    let digits = |from: usize| {
+        let sign = usize::from(bytes.get(from) == Some(&b'-'));
+        let run = bytes[from + sign..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+        (run > 0).then_some(from + sign + run)
+    };
+    let token = |at: usize| -> Option<(usize, &[u8], &[u8])> {
+        let m_from = at + HEAD.len();
+        let m_to = digits(m_from)?;
+        bytes[m_to..].starts_with(MIDDLE).then_some(())?;
+        let e_from = m_to + MIDDLE.len();
+        let e_to = digits(e_from)?;
+        bytes[e_to..].starts_with(b" }").then_some(())?;
+        Some((e_to + 2, &bytes[m_from..m_to], &bytes[e_from..e_to]))
+    };
+    let (mut rest, mut reals) = (Vec::new(), Vec::new());
+    let mut at = 0;
+    while at < bytes.len() {
+        match bytes[at..].starts_with(HEAD).then(|| token(at)).flatten() {
+            Some((end, mantissa, exponent)) => {
+                rest.extend_from_slice(b"real {}");
+                reals.push((mantissa, exponent));
+                at = end;
+            }
+            None => {
+                rest.push(bytes[at]);
+                at += 1;
+            }
+        }
+    }
+    (rest, reals)
+}
+
+/// Whether `got` is the archive `want`. Always: the same bytes. With `libm_last_digit` (the call
+/// sites pass `cfg!(target_os = "macos")`): also an archive that differs only in `real { M, 10, E }`
+/// tokens whose exponent and digit count are equal and whose mantissas differ by exactly 1. Apple's
+/// libm `exp` and `log` differ from glibc's by 1 ULP in some E values, which moves the last of the
+/// 15 digits (`PD-LOSAT-PLATFORM-LIBM`); NCBI built on macOS has the same property.
+pub(crate) fn archives_match_allowing_libm_last_digit(
+    got: &[u8],
+    want: &[u8],
+    libm_last_digit: bool,
+) -> bool {
+    if got == want {
+        return true;
+    }
+    if !libm_last_digit {
+        return false;
+    }
+    let ((got_rest, got_reals), (want_rest, want_reals)) = (split_reals(got), split_reals(want));
+    got_rest == want_rest
+        && got_reals.len() == want_reals.len()
+        && got_reals
+            .iter()
+            .zip(&want_reals)
+            .all(|((got_m, got_e), (want_m, want_e))| {
+                if (got_m, got_e) == (want_m, want_e) {
+                    return true;
+                }
+                let value = |m: &[u8]| std::str::from_utf8(m).ok()?.parse::<i128>().ok();
+                got_e == want_e
+                    && got_m.len() == want_m.len()
+                    && matches!(
+                        (value(got_m), value(want_m)),
+                        (Some(a), Some(b)) if a.abs_diff(b) == 1
+                    )
+            })
+}
+
 fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
     let mut env: Vec<(&str, &str)> = case.env.to_vec();
     env.extend_from_slice(extra_env);
@@ -461,7 +542,7 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
     assert_eq!(output.status.code(), Some(case.rc), "{label}: exit status");
     let want = frozen(&case.name, "out");
     assert!(
-        output.stdout == want,
+        archives_match_allowing_libm_last_digit(&output.stdout, &want, cfg!(target_os = "macos")),
         "{label}: stdout differs ({} bytes, NCBI wrote {}): {}",
         output.stdout.len(),
         want.len(),
@@ -487,6 +568,42 @@ fn a_difference_is_described_by_its_first_offset_and_the_bytes_around_it() {
         "{message}"
     );
     assert!(first_difference(b"abc", b"abcd").starts_with("1 bytes differ, first at offset 3"));
+}
+
+/// The macOS rule accepts a mantissa that is 1 away in a `real {}` token (and the tokens alone),
+/// and nothing else; on every other OS the comparison is exact.
+#[test]
+fn the_libm_rule_accepts_only_a_last_digit_of_a_real() {
+    let archive = |m: &str, e: &str, tail: &str| {
+        format!("evalue real {{ {m}, 10, {e} }},\nscore 7{tail}").into_bytes()
+    };
+    let want = archive("693693758698357", "-80", "");
+    let same = |got: &[u8], rule: bool| archives_match_allowing_libm_last_digit(got, &want, rule);
+    assert!(same(&want, false) && same(&want, true));
+    for m in ["693693758698358", "693693758698356"] {
+        let got = archive(m, "-80", "");
+        assert!(!same(&got, false), "{m}");
+        assert!(same(&got, true), "{m}");
+    }
+    for got in [
+        archive("693693758698359", "-80", ""),
+        archive("693693758698355", "-80", ""),
+        archive("693693758698358", "-79", ""),
+        archive("69369375869836", "-80", ""),
+        archive("693693758698357", "-80", " "),
+        b"evalue real { 693693758698358, 10, -80 },\nscore 8".to_vec(),
+        b"evalue real { 693693758698358, 10, -80 },\nscore".to_vec(),
+        b"evalue 693693758698358,\nscore 7".to_vec(),
+    ] {
+        assert!(!same(&got, true), "{}", String::from_utf8_lossy(&got));
+    }
+    // Every token is judged on its own; a second, different token fails the whole archive.
+    let two =
+        |a: &str, b: &str| format!("real {{ {a}, 10, -3 }} real {{ {b}, 10, -4 }}").into_bytes();
+    let want_two = two("100000000000001", "200000000000002");
+    let accepts = |got: &[u8]| archives_match_allowing_libm_last_digit(got, &want_two, true);
+    assert!(accepts(&two("100000000000002", "200000000000001")));
+    assert!(!accepts(&two("100000000000002", "200000000000004")));
 }
 
 #[test]
@@ -554,30 +671,9 @@ fn the_out_file_receives_the_archive() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `ARCHIVE_FORMAT=xml` is NCBI's XML archive, which LOSAT does not write yet: it stops
-/// before the first byte and says so.
-#[test]
-fn xml_archives_are_refused_before_the_first_byte() {
-    let query = input("arch_bx_q.fna");
-    let subject = input("arch_bx_s.faa");
-    for value in ["xml", "XML", "Xml"] {
-        let output = run(
-            &[("ARCHIVE_FORMAT", value)],
-            &["-query", &query, "-subject", &subject, "-outfmt", "11"],
-            "1",
-        );
-        assert_ne!(output.status.code(), Some(0), "{value}");
-        assert!(output.stdout.is_empty(), "{value}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("ARCHIVE_FORMAT=xml with -outfmt 11 is not supported by LOSAT"),
-            "{value}: {stderr}"
-        );
-    }
-}
-
-/// A title with a byte outside `0x20..=0x7E` (0x80 and above, and 0x7F) is written as `#` by
-/// NCBI, with a diagnostic per byte: LOSAT refuses it (query, `-subject` and a `-db` name)
+/// In the text and binary archives a title with a byte outside `0x20..=0x7E` (0x80 and above,
+/// and 0x7F) is written as `#` by NCBI, with a diagnostic per byte (in XML NCBI writes the byte,
+/// and so does LOSAT): LOSAT refuses it (query, `-subject` and a `-db` name)
 /// before the first byte.
 #[test]
 fn non_ascii_titles_and_database_names_are_refused() {
@@ -835,6 +931,41 @@ fn a_batch_size_that_is_not_an_integer_is_refused() {
                 String::from_utf8_lossy(&output.stderr).contains("BATCH_SIZE"),
                 "{value:?} {format}"
             );
+        }
+    }
+}
+
+/// NCBI's `PrintErrorArchive` converts the trimmed `-outfmt` text to an integer and writes
+/// nothing when that throws (`11 qseqid`); `11` with white space around it converts. NCBI 2.17.0
+/// with a missing `-query`: rc 1 and no bytes for `11 qseqid` and ` 11 qseqid`, the error
+/// archive of `noquery_sub` for ` 11 `.
+#[test]
+fn an_outfmt_spec_gets_no_error_archive() {
+    for threads in ["1", "4"] {
+        for (outfmt, written) in [("11 qseqid", false), (" 11 qseqid", false), (" 11 ", true)] {
+            let output = run(
+                &[],
+                &[
+                    "-query",
+                    &input("no_such_query.fna"),
+                    "-subject",
+                    &input("arch_bx_s.faa"),
+                    "-outfmt",
+                    outfmt,
+                ],
+                threads,
+            );
+            assert_eq!(output.status.code(), Some(1), "{outfmt:?}");
+            if written {
+                assert_eq!(output.stdout, frozen("noquery_sub", "out"), "{outfmt:?}");
+            } else {
+                assert!(
+                    output.stdout.is_empty(),
+                    "{outfmt:?}: {} bytes",
+                    output.stdout.len()
+                );
+            }
+            assert_eq!(output.stderr, frozen("noquery_sub", "err"), "{outfmt:?}");
         }
     }
 }

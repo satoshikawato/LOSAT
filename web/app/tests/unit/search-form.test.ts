@@ -103,13 +103,23 @@ describe('formParameters', () => {
 
   it('works for TBLASTX with its sections in the order of the page: the genetic codes, then the algorithm parameters', () => {
     const tblastx = programById('tblastx');
-    const values: FormValues = { '-db_gencode': '11', '-query_gencode': '4', '-seg': 'yes', '-culling_limit': '2', '-evalue': '1' };
+    const values: FormValues = {
+      '-db_gencode': '11',
+      '-query_gencode': '4',
+      '-seg': 'yes',
+      '-soft_masking': 'true',
+      '-matrix': 'PAM30',
+      '-culling_limit': '2',
+      '-evalue': '1',
+    };
     expect(formParameters(tblastx, values, undefined)).toEqual([
       ['-query_gencode', '4'],
       ['-db_gencode', '11'],
       ['-evalue', '1'],
       ['-culling_limit', '2'],
+      ['-matrix', 'PAM30'],
       ['-seg', 'yes'],
+      ['-soft_masking', 'true'],
     ]);
   });
 
@@ -122,6 +132,26 @@ describe('formParameters', () => {
     ]);
     expect(formParameters(tblastx, values, undefined, 'subject')).toEqual([['-db_gencode', '11']]);
     expect(formParameters(blastn, { '-task': 'blastn', '-evalue': '1' }, options, 'program')).toEqual([['-task', 'blastn']]);
+  });
+
+  it('has "Number of descriptions" and "Number of alignments" in Other Parameters of the four programs, writing -num_descriptions N and -num_alignments N', () => {
+    for (const id of ['blastn', 'blastp', 'tblastn', 'tblastx'] as const) {
+      const program = programById(id);
+      const other = program.sections.find((section) => section.title === 'Other Parameters');
+      const fields = other?.fields.filter((field) => field.flag === '-num_descriptions' || field.flag === '-num_alignments');
+      expect(fields?.map((field) => [field.flag, field.label]), id).toEqual([
+        ['-num_descriptions', 'Number of descriptions'],
+        ['-num_alignments', 'Number of alignments'],
+      ]);
+      expect(other?.placement, id).toBe('algorithm');
+      expect(
+        formParameters(program, { '-num_descriptions': '7', '-num_alignments': '3' }, undefined, 'algorithm'),
+        id,
+      ).toEqual([
+        ['-num_descriptions', '7'],
+        ['-num_alignments', '3'],
+      ]);
+    }
   });
 
   it('omits a TBLASTX value equal to the engine default', () => {

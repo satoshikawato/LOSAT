@@ -57,6 +57,58 @@ pub enum BlastpCompositionMode {
 //     opt.SetUnifiedP(1);
 // }
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:44-56
+// ```c++
+// CPsiBlastAppArgs::CPsiBlastAppArgs()
+// {
+//     bool const kQueryIsProtein = true;
+//     bool const kFilterByDefault = false;
+//     static const string kProgram("psiblast");
+//     CRef<IBlastCmdLineArgs> arg;
+//     arg.Reset(new CProgramDescriptionArgs(kProgram,
+//                                           "Position-Specific Iterated BLAST"));
+//     m_Args.push_back(arg);
+//     m_ClientId = kProgram + " " + CBlastVersion().Print();
+//
+//     static const char kDefaultTask[] = "psiblast";
+//     SetTask(kDefaultTask);
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:418-421
+// ```c++
+//         // Allow the fasta reader to complain on invalid sequence input
+//         SetDiagPostLevel(eDiag_Warning);
+//         SetDiagPostPrefix("psiblast");
+//         SetDiagHandler(&m_bah, false);
+// ```
+/// The NCBI application whose search the blastp engine runs: blastp, or the first round of
+/// psiblast (`algorithm/psiblast`), whose program is `ePSIBlast` (`eBlastTypePsiBlast` in the
+/// core) with the same search as blastp until a PSSM exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BlastpApp {
+    #[default]
+    Blastp,
+    Psiblast,
+}
+
+impl BlastpApp {
+    /// The program's name in NCBI's messages (`Warning: [psiblast] ...`) and reports
+    /// (`# PSIBLAST 2.17.0+` in upper case).
+    pub fn ncbi_name(self) -> &'static str {
+        match self {
+            BlastpApp::Blastp => "blastp",
+            BlastpApp::Psiblast => "psiblast",
+        }
+    }
+
+    /// The name in LOSAT's rejections ("... is not supported by LOSAT's PSIBLAST").
+    pub fn name(self) -> &'static str {
+        match self {
+            BlastpApp::Blastp => "BLASTP",
+            BlastpApp::Psiblast => "PSIBLAST",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlastpCompBasedStats {
     pub mode: BlastpCompositionMode,
@@ -255,7 +307,7 @@ pub struct BlastpArgs {
         long,
         value_name = "NAME",
         conflicts_with_all = ["subject", "subject_loc"],
-        help = "BLAST database name (a protein database without parsed Seq-ids)"
+        help = "BLAST database name (a protein database, with or without parsed Seq-ids)"
     )]
     pub db: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
@@ -308,6 +360,19 @@ pub struct BlastpArgs {
     // NCBI blast_args.cpp:196-201,313-315: no filter when omitted or 0.
     #[arg(long = "qcov_hsp_perc", value_parser = blastp_query_coverage, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
+    // ```c
+    // CHspFilteringArgs::ExtractAlgorithmOptions(const CArgs& args,
+    //                                            CBlastOptions& opts)
+    // {
+    //     if (args[kArgCullingLimit]) {
+    //         opts.SetCullingLimit(args[kArgCullingLimit].AsInteger());
+    //     }
+    // ```
+    /// If the query range of a hit is enveloped by that of at least this many
+    /// higher-scoring hits, delete the hit (default: 0, no culling).
+    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    pub culling_limit: Option<i32>,
     #[arg(long)]
     pub ungapped: bool,
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
@@ -389,6 +454,20 @@ pub struct BlastpArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// The application whose search this is: psiblast's command line sets it
+    /// (`algorithm/psiblast`).
+    #[arg(skip)]
+    pub app: BlastpApp,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1117-1119
+    // ```c++
+    //     if (args[kArgPSIInclusionEThreshold]) {
+    //         opt.SetInclusionThreshold(args[kArgPSIInclusionEThreshold].AsDouble());
+    //     }
+    // ```
+    /// psiblast's `-inclusion_ethresh`; `None` keeps the options' default
+    /// (`PSI_INCLUSION_ETHRESH`, which blastp's options have too).
+    #[arg(skip)]
+    pub inclusion_ethresh: Option<f64>,
 }
 
 // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:381-402
@@ -541,6 +620,8 @@ pub struct ResolvedBlastpArgs {
     pub max_hsps_per_subject: usize,
     /// The -qcov_hsp_perc value, or 0 (no filter).
     pub query_cov_hsp_perc: f64,
+    /// The -culling_limit value (0: no culling, as NCBI's `SetCullingLimit(0)`).
+    pub culling_limit: i32,
     pub ungapped: bool,
     pub window_size: usize,
     /// The matrix as the command line names it (NCBI keeps the spelling); `scoring.matrix`
@@ -560,9 +641,86 @@ pub struct ResolvedBlastpArgs {
     pub outfmt: String,
     /// The run's BLAST archive (outfmt 11), shared by the blocks and batches of the run.
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// The application whose search this is (`BlastpArgs::app`).
+    pub app: BlastpApp,
+    /// The inclusion threshold (`psi_options->inclusion_ethresh`): psiblast's
+    /// `-inclusion_ethresh`, or `PSI_INCLUSION_ETHRESH`.
+    pub inclusion_ethresh: f64,
+    /// `traceback_hitlist_size`, computed once (psiblast's reads `ADAPTIVE_CBS`).
+    traceback_hitlist: usize,
+}
+
+impl ResolvedBlastpArgs {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:213-224
+    // ```c++
+    //     // When dealing with PSI-BLAST iterations, we need to keep a larger
+    //     // alignment for the PSSM engine as to replicate blastpgp's behavior
+    //     int hitlist_size_backup = m_OptsMemento->m_HitSaveOpts->hitlist_size;
+    //     if (m_OptsMemento->m_ProgramType == eBlastTypePsiBlast ) {
+    //         SBlastHitsParameters* bhp = NULL;
+    //         SBlastHitsParametersNew(m_OptsMemento->m_HitSaveOpts,
+    //                                 m_OptsMemento->m_ExtnOpts,
+    //                                 m_OptsMemento->m_ScoringOpts,
+    //                                 &bhp);
+    //         m_OptsMemento->m_HitSaveOpts->hitlist_size = bhp->prelim_hitlist_size;
+    //         SBlastHitsParametersFree(bhp);
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:92-93
+    // ```c
+    //        (*retval)->prelim_hitlist_size = GetPrelimHitlistSize(hit_options->hitlist_size,
+    //     		   ext_options->compositionBasedStats, scoring_options->gapped_calculation);
+    // ```
+    /// The hit list size of the traceback (`hitParams->options->hitlist_size`: the heaps and the
+    /// hit lists of the composition-based redo): the hit list size, or psiblast's preliminary hit
+    /// list size. psiblast's formatter then keeps the first `max_target_seqs` subjects
+    /// (`PruneSeqalign` with `m_HitlistSize`, blast_format.cpp:813). The preliminary size is
+    /// positive (`validate_requested_blastp_support`).
+    pub fn traceback_hitlist_size(&self) -> usize {
+        self.traceback_hitlist
+    }
+
+    fn compute_traceback_hitlist_size(&self) -> usize {
+        match self.app {
+            BlastpApp::Blastp => self.max_target_seqs,
+            BlastpApp::Psiblast => crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+                self.max_target_seqs,
+                self.comp_based_stats.is_enabled(),
+                true,
+            )
+            .max(1) as usize,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:465-468
+    // ```c++
+    //             CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(
+    //                                          m_CmdLineArgs->GetInputStream(),
+    //                                          iconfig));
+    //             input.Reset(new CBlastInput(&*fasta, 1));
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:215-216
+    // ```c++
+    //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
+    //         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
+    // ```
+    /// The query batch size: blastp's (`BATCH_SIZE` or 10000 letters), or psiblast's 1, which
+    /// reads no variable (a batch of one query, and of the queries without letters before it).
+    pub fn query_batch_size(&self) -> Result<u32> {
+        match self.app {
+            BlastpApp::Blastp => crate::blastinput::app::query_batch_size("BLASTP", 10000),
+            BlastpApp::Psiblast => Ok(1),
+        }
+    }
 }
 
 impl BlastpArgs {
+    /// `-culling_limit`, 0 (no culling) when it is not given. The BLAST archive records
+    /// whether it was given (`culling_limit`).
+    pub fn culling_limit_value(&self) -> i32 {
+        self.culling_limit.unwrap_or(0)
+    }
+
     /// The options as `check_options` resolves them, without NCBI's warnings.
     pub fn resolve(&self) -> Result<ResolvedBlastpArgs> {
         self.check_options(&mut std::io::sink())
@@ -665,7 +823,7 @@ impl BlastpArgs {
         //             const string& seg_opts = args[kArgSegFiltering].AsString();
         // ```
         if let Some(seg) = &self.seg {
-            options.seg = crate::blastinput::app::parse_seg_option(seg, "BLASTP")?;
+            options.seg = crate::blastinput::app::parse_seg_option(seg, self.app.name())?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
         // ```c++
@@ -744,7 +902,7 @@ impl BlastpArgs {
         let query_range = crate::blastinput::seq_range::parse_optional_range(
             self.query_loc.as_deref(),
             crate::blastinput::seq_range::RangeRole::Query,
-            "BLASTP",
+            self.app.name(),
         )?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886 and
         // 2960-2977 (the formatting handler: other programs' formats, the hit list size
@@ -762,7 +920,7 @@ impl BlastpArgs {
         // The hit list size and the counts of the pairwise report
         // (`blastinput::report_counts`), with the handler's warnings.
         let (counts, warnings) = crate::blastinput::report_counts::run_report_counts(
-            "blastp",
+            self.app.ncbi_name(),
             &[choice.number],
             self.max_target_seqs,
             self.num_descriptions,
@@ -781,9 +939,10 @@ impl BlastpArgs {
         //                                    ungapped.get());
         //     }
         // ```
+        // The unified P-values are blastp's only (`program == eBlastp`, blast_args.cpp:880-883).
         let (mode, unified_p) = crate::blastinput::app::parse_comp_based_stats(
             &self.comp_based_stats,
-            true,
+            self.app == BlastpApp::Blastp,
             self.ungapped,
         )?;
         // NCBI's `Validate` (`BLAST_ValidateOptions`), shared with TBLASTN.
@@ -798,12 +957,13 @@ impl BlastpArgs {
                 == BlastpLookupTableType::CompressedAaLookupTable,
             hitlist_size: counts.hitlist_size,
             evalue: options.evalue,
+            psiblast: self.app == BlastpApp::Psiblast,
         })?;
         let matrix = options
             .matrix_name
             .parse::<ScoringMatrix>()
             .unwrap_or(ScoringMatrix::Blosum62);
-        Ok(ResolvedBlastpArgs {
+        let mut resolved = ResolvedBlastpArgs {
             query: self.query.clone(),
             subject: self.subject.clone().unwrap_or_default(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
@@ -847,6 +1007,7 @@ impl BlastpArgs {
             // NCBI blast_args.cpp:313-315: if (args[kArgQueryCovHspPerc])
             // opt.SetQueryCovHspPerc(args[kArgQueryCovHspPerc].AsDouble());
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
+            culling_limit: self.culling_limit_value(),
             ungapped: self.ungapped,
             window_size: usize::try_from(options.window_size).unwrap_or(0),
             matrix_name: options.matrix_name,
@@ -879,7 +1040,14 @@ impl BlastpArgs {
             query_range,
             outfmt: self.outfmt.clone(),
             archive: self.archive.clone(),
-        })
+            app: self.app,
+            inclusion_ethresh: self
+                .inclusion_ethresh
+                .unwrap_or(super::blast_engine::PSI_INCLUSION_ETHRESH),
+            traceback_hitlist: 0,
+        };
+        resolved.traceback_hitlist = resolved.compute_traceback_hitlist_size();
+        Ok(resolved)
     }
 }
 

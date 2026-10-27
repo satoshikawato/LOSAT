@@ -1,0 +1,19 @@
+0	0	0	other { accession "XP_900001", version 1 }
+0	1	0	gi 9002
+0	1	1	embl { accession "CAA90002", version 1 }
+0	2	0	swissprot { name "NAME3_HUMAN", accession "P90003", release "reviewed", version 1 }
+1	0	0	other { accession "XP_910001", version 1 }
+1	1	0	other { accession "XP_910002", version 1 }
+1	2	0	other { accession "XP_910003", version 1 }
+1	3	0	other { accession "XP_910004", version 1 }
+1	4	0	other { accession "XP_910005", version 1 }
+1	5	0	other { accession "XP_910006", version 1 }
+1	6	0	other { accession "XP_910007", version 1 }
+1	7	0	other { accession "XP_910008", version 1 }
+1	8	0	other { accession "XP_910009", version 1 }
+1	9	0	other { accession "XP_910010", version 1 }
+1	10	0	other { accession "XP_910011", version 1 }
+1	11	0	other { accession "XP_910012", version 1 }
+2	0	0	other { accession "XP_920001", version 1 }
+2	1	0	embl { accession "CAA92002", version 1 }
+2	2	0	ddbj { accession "BAA92003", version 1 }

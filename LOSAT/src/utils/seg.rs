@@ -600,7 +600,7 @@ pub struct SegMasker {
     /// Whether a recursion on the left part of a trimmed segment keeps only the head of
     /// its result, as NCBI's `s_SegSeq` does (true, the default; see `mask_sequence`).
     ncbi_left_segments: bool,
-    /// EXPERIMENT (LOSAT_X_SEGTRIMMEMO): whether the fast path takes a segment's trim from the
+    /// LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): whether the fast path takes a segment's trim from the
     /// thread's memo (`x_seg_trim_memo.rs`); set by the maskers that repeat segments.
     x_trim_memo: bool,
 }
@@ -637,7 +637,7 @@ impl SegMasker {
         self
     }
 
-    /// EXPERIMENT (LOSAT_X_SEGTRIMMEMO): the masker that takes the trim of a segment it (or
+    /// LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): the masker that takes the trim of a segment it (or
     /// another such masker on this thread) trimmed before from the thread's memo. For maskers
     /// that see the same segments again (TBLASTN's redo windows, BLASTX's query and its chunks);
     /// the result is the same either way.
@@ -1611,27 +1611,26 @@ impl SegMasker {
                     //          temp_seq = s_OpenWin(seq, leftend, rightend-leftend+1);
                     //          status = s_Trim(temp_seq, &leftend, &rightend, sparamsp);
                     // ```
-                    // EXPERIMENT (LOSAT_X_SEGTRIMMEMO): the trim's offsets within the segment are a
-                    // function of its letters and `maxtrim` (x_seg_trim_memo.rs); for a masker that
-                    // asks for it, a segment this thread trimmed before takes the stored offsets.
-                    (leftend, rightend) = if masker.x_trim_memo
-                        && crate::utils::x_seg_trim_memo::x_segtrimmemo_on()
-                        && leftend <= rightend
-                        && rightend < seq.len()
-                    {
-                        let base = leftend;
-                        let (lend, rend) = crate::utils::x_seg_trim_memo::x_trimmed(
-                            &seq[leftend..=rightend],
-                            masker.maxtrim,
-                            || {
-                                let (l, r) = masker.x_trim_segment(seq, leftend, rightend, index);
-                                (l - base, r - base)
-                            },
-                        );
-                        (base + lend, base + rend)
-                    } else {
-                        masker.x_trim_segment(seq, leftend, rightend, index)
-                    };
+                    // LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26, always on): the trim's offsets
+                    // within the segment are a function of its letters and `maxtrim`
+                    // (x_seg_trim_memo.rs); for a masker that asks for it, a segment this thread
+                    // trimmed before takes the stored offsets.
+                    (leftend, rightend) =
+                        if masker.x_trim_memo && leftend <= rightend && rightend < seq.len() {
+                            let base = leftend;
+                            let (lend, rend) = crate::utils::x_seg_trim_memo::x_trimmed(
+                                &seq[leftend..=rightend],
+                                masker.maxtrim,
+                                || {
+                                    let (l, r) =
+                                        masker.x_trim_segment(seq, leftend, rightend, index);
+                                    (l - base, r - base)
+                                },
+                            );
+                            (base + lend, base + rend)
+                        } else {
+                            masker.x_trim_segment(seq, leftend, rightend, index)
+                        };
 
                     if i + masker.upset - 1 < leftend {
                         let lend = loi - masker.downset;
@@ -1847,7 +1846,7 @@ mod tests {
     //                     status = s_DoSegSequenceData(seqData, eBlastTypeTblastn,
     //                                                  subject_maybe_biased);
     // ```
-    // EXPERIMENT (LOSAT_X_SEGTRIMMEMO): TBLASTN's redo masks overlapping windows of one subject;
+    // LOSAT_X_SEGTRIMMEMO (graduated 2026-10-26): TBLASTN's redo masks overlapping windows of one subject;
     // the windows below overlap so that their segments repeat and the trim memo answers. Every
     // window's intervals must equal the reference SEG's.
     #[test]
@@ -1893,12 +1892,10 @@ mod tests {
             masked += reference.len();
         }
         assert!(masked > 300, "only {masked} intervals");
-        if crate::utils::x_seg_trim_memo::x_segtrimmemo_on() {
-            assert!(
-                crate::utils::x_seg_trim_memo::x_hits() > hits_before + 100,
-                "the windows should repeat segments"
-            );
-        }
+        assert!(
+            crate::utils::x_seg_trim_memo::x_hits() > hits_before + 100,
+            "the windows should repeat segments"
+        );
     }
 
     #[test]

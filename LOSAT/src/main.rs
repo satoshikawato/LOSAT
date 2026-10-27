@@ -7,7 +7,7 @@ use anyhow::Result;
 //     arg.Reset(new CProgramDescriptionArgs(kProgram,
 //                                   "Translated Query-Protein Subject BLAST"));
 // ```
-use LOSAT::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
+use LOSAT::algorithm::{blastn, blastp, blastx, psiblast, tblastn, tblastx};
 use LOSAT::cli::{Cli, Commands};
 
 fn main() -> Result<()> {
@@ -219,6 +219,24 @@ fn main() -> Result<()> {
             let status = LOSAT::writedb::makeblastdb::run(&args);
             if status != 0 {
                 std::process::exit(status);
+            }
+        }
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:583-585
+        // ```c++
+        // int main(int argc, const char* argv[] /*, const char* envp[]*/)
+        // {
+        //     return CPsiBlastApp().AppMain(argc, argv);
+        // ```
+        Commands::Psiblast(args) => {
+            // psiblast is an NCBI application as blastp: its application layer reads its
+            // environment and registry files (`psiblast.ini`, then `.ncbirc`) before its own
+            // code runs; LOSAT rejects the settings that change the output.
+            let settings =
+                LOSAT::blastinput::ncbi_environment::check_ncbi_application_settings("psiblast")
+                    .map_err(anyhow::Error::msg)?;
+            if let Err(error) = psiblast::run(args, settings) {
+                LOSAT::cli::exit_on_native_error(&error);
+                return Err(error);
             }
         }
         Commands::Tblastn(args) => {

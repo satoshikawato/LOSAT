@@ -18,7 +18,9 @@
 //! pages, 16,385 where the table starts inside a page) at 8 threads (chunks of 262,144 positions),
 //! counted by `prefault_rounds=` / `prefault_touches=` of `[TIMING] x_mb_lookup_once`; not at 2
 //! threads (65,536 positions), nor with `LOSAT_X_MBLUTPREFAULT=0`; the report is the same either
-//! way.
+//! way. With `LOSAT_X_MB24` (the strict set, since 2026-10-26) the table's cells have 3 bytes: 12,289
+//! pages (12,290 where it starts inside a page), at least 98,304 positions; `LOSAT_X_MB24=0` gives
+//! the 4-byte table.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -27,6 +29,7 @@ const SWITCH: (&str, &str) = ("LOSAT_X_MBLUTONCE", "1");
 const OFF: (&str, &str) = ("LOSAT_X_MBLUTONCE", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 const PREFAULT_OFF: (&str, &str) = ("LOSAT_X_MBLUTPREFAULT", "0");
+const MB24_OFF: (&str, &str) = ("LOSAT_X_MB24", "0");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -165,8 +168,16 @@ fn megablast_prefaults_the_table_where_the_first_chunk_is_dense() {
     assert_eq!(field(&stderr, ONCE, "prefault_rounds="), fills, "{stderr}");
     let touches = field(&stderr, ONCE, "prefault_touches=");
     assert!(
+        touches > 12_000 && touches <= 12_290,
+        "nearly every page of the 4^12 table of 3-byte cells: {stderr}"
+    );
+    let (report, stderr) = blastn(task, query, query, 8, &[MB24_OFF, TIMING]);
+    assert!(report == reference, "the report differs with 4-byte cells");
+    assert_eq!(field(&stderr, ONCE, "prefault_rounds="), fills, "{stderr}");
+    let touches = field(&stderr, ONCE, "prefault_touches=");
+    assert!(
         touches > 16_000 && touches <= 16_385,
-        "nearly every page of the 4^12 table: {stderr}"
+        "nearly every page of the 4^12 table of 4-byte cells: {stderr}"
     );
     let (report, stderr) = blastn(task, query, query, 8, &[PREFAULT_OFF, TIMING]);
     assert!(report == reference, "the report differs without the round");

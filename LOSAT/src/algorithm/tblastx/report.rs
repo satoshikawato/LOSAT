@@ -17,6 +17,7 @@ use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::protein_display_score;
 
 use super::blast_engine::{TblastxHsp, TblastxQueryStats};
+use super::scoring::{Blosum62Score, TbxScore};
 
 /// The version that NCBI's TBLASTX reports print.
 ///
@@ -284,13 +285,14 @@ fn displayed_residues<'r>(
 // which 60 ms under this pass (v4-W s8).
 /// `row_counts` of the displayed rows of `hsp` (`displayed_rows`), without making them. The
 /// HSPs are ungapped: both rows have the HSP's length.
-fn displayed_counts(
+fn displayed_counts<S: TbxScore>(
     hsp: &TblastxHsp,
     query: &[u8],
     subject: &[u8],
     subject_first: usize,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
+    sc: S,
 ) -> (usize, usize) {
     let hit = &hsp.hit;
     debug_assert_eq!(
@@ -300,7 +302,7 @@ fn displayed_counts(
     );
     let (query_row, subject_row) =
         displayed_residues(hsp, query, subject, subject_first, query_code, db_code);
-    pair_counts(query_row.zip(subject_row))
+    pair_counts(sc, query_row.zip(subject_row))
 }
 
 /// `displayed_rows` into two buffers (cleared first), which the BLAST XML reuses from HSP to HSP.
@@ -326,11 +328,13 @@ fn displayed_rows_into(
 /// The letters of the subjects that the displayed rows read, by subject index.
 #[derive(Clone, Copy)]
 pub(crate) enum SubjectLetters<'a> {
-    /// The records of `-subject`: their letters.
+    /// The records of `-subject` (`run_local`'s, or the command line's with LOSAT_X_TBXSTORE=0):
+    /// their letters.
     Records(&'a [FastaRecord]),
     /// The reported sequences of a `-db` search by rank (`ordinals`, the ordinal id of each
-    /// rank, into `stores`): a row reads the letters of its HSP's codons only, made from the
-    /// stored codes (`codon_window`).
+    /// rank, into `stores`), or (LOSAT_X_TBXSTORE) the packed records of `-subject` (ordinals
+    /// `0..n`): a row reads the letters of its HSP's codons only, made from the stored codes
+    /// (`codon_window`).
     Stored {
         stores: &'a [PackedNucleotide],
         ordinals: &'a [u32],
@@ -367,16 +371,17 @@ impl<'a> SubjectLetters<'a> {
 
     /// The engine counts of `hsp` (`hsp_engine_counts`) against its subject; `window` is the
     /// buffer of a stored subject's letters.
-    fn engine_counts(
+    fn engine_counts<S: TbxScore>(
         &self,
         hsp: &TblastxHsp,
         query: &[u8],
         query_code: &GeneticCode,
         db_code: &GeneticCode,
         window: &mut Vec<u8>,
+        sc: S,
     ) -> (usize, usize) {
         let (subject, subject_first) = self.letters(hsp, window);
-        hsp_engine_counts(hsp, query, subject, subject_first, query_code, db_code)
+        hsp_engine_counts(hsp, query, subject, subject_first, query_code, db_code, sc)
     }
 
     /// The displayed rows of `hsp` (`displayed_rows`) against its subject; `window` is the
@@ -400,16 +405,17 @@ impl<'a> SubjectLetters<'a> {
     /// The counts of the displayed rows of `hsp` (`displayed_counts`) against its subject;
     /// `window` is the buffer of a stored subject's letters.
     #[cfg_attr(target_arch = "wasm32", inline(never))]
-    fn counts(
+    fn counts<S: TbxScore>(
         &self,
         hsp: &TblastxHsp,
         query: &[u8],
         query_code: &GeneticCode,
         db_code: &GeneticCode,
         window: &mut Vec<u8>,
+        sc: S,
     ) -> (usize, usize) {
         let (subject, subject_first) = self.letters(hsp, window);
-        displayed_counts(hsp, query, subject, subject_first, query_code, db_code)
+        displayed_counts(hsp, query, subject, subject_first, query_code, db_code, sc)
     }
 }
 
@@ -461,8 +467,11 @@ fn codon_window(length: usize, frame: i8, from: usize, to: usize) -> (usize, usi
 }
 
 /// The identities and the positives (identities included) of two displayed rows.
-fn row_counts(query_row: &[u8], subject_row: &[u8]) -> (usize, usize) {
-    pair_counts(query_row.iter().copied().zip(subject_row.iter().copied()))
+fn row_counts<S: TbxScore>(sc: S, query_row: &[u8], subject_row: &[u8]) -> (usize, usize) {
+    pair_counts(
+        sc,
+        query_row.iter().copied().zip(subject_row.iter().copied()),
+    )
 }
 
 // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2131-2150
@@ -492,15 +501,16 @@ fn row_counts(query_row: &[u8], subject_row: &[u8]) -> (usize, usize) {
 //                     }
 // ```
 /// The identities and the positives (identities included) of the letter pairs of two
-/// displayed rows, in row order (`row_counts`, `displayed_counts`).
-fn pair_counts(pairs: impl Iterator<Item = (u8, u8)>) -> (usize, usize) {
+/// displayed rows, in row order (`row_counts`, `displayed_counts`), by the display matrix of
+/// the search's matrix (BLOSUM62's instance reads the constant matrix).
+fn pair_counts<S: TbxScore>(sc: S, pairs: impl Iterator<Item = (u8, u8)>) -> (usize, usize) {
     let mut identities = 0;
     let mut positives = 0;
     for (q, s) in pairs {
         if q == s {
             identities += 1;
             positives += 1;
-        } else if protein_display_score(ScoringMatrix::Blosum62, q, s) > 0 {
+        } else if protein_display_score(sc.matrix(), q, s) > 0 {
             positives += 1;
         }
     }
@@ -519,12 +529,13 @@ fn pair_counts(pairs: impl Iterator<Item = (u8, u8)>) -> (usize, usize) {
 ///     case eMismatches:
 ///         x_PrintMismatches(); break;
 /// ```
-pub(crate) fn set_displayed_identities(
+pub(crate) fn set_displayed_identities<S: TbxScore>(
     hits: &mut [TblastxHsp],
     queries: &[FastaRecord],
     subjects: SubjectLetters<'_>,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
+    sc: S,
 ) {
     let mut window = Vec::new();
     for hsp in hits {
@@ -534,6 +545,7 @@ pub(crate) fn set_displayed_identities(
             query_code,
             db_code,
             &mut window,
+            sc,
         );
         let hit = &mut hsp.hit;
         hit.num_ident = identities;
@@ -599,13 +611,14 @@ pub(crate) fn set_displayed_identities(
 ///    if(NULL != matrix)
 /// 	   *num_pos_ptr = num_pos + num_ident;
 /// ```
-fn hsp_engine_counts(
+fn hsp_engine_counts<S: TbxScore>(
     hsp: &TblastxHsp,
     query: &[u8],
     subject: &[u8],
     subject_first: usize,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
+    sc: S,
 ) -> (usize, usize) {
     use super::translation::frame_residue;
     let hit = &hsp.hit;
@@ -624,7 +637,7 @@ fn hsp_engine_counts(
         );
         if q == s {
             identities += 1;
-        } else if crate::utils::matrix::blosum62_score(q, s) > 0 {
+        } else if sc.score(q, s) > 0 {
             positives += 1;
         }
     }
@@ -636,12 +649,13 @@ fn hsp_engine_counts(
 /// count; read before it) and its `num_positives`, which the search does not count
 /// (`hsp_engine_counts`: the same letters give the same identities, checked in debug builds).
 /// Made only when a Seq-align format is requested.
-pub(crate) fn engine_counts(
+pub(crate) fn engine_counts<S: TbxScore>(
     hits: &[TblastxHsp],
     queries: &[FastaRecord],
     subjects: SubjectLetters<'_>,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
+    sc: S,
 ) -> Vec<(u32, u32)> {
     let mut window = Vec::new();
     hits.iter()
@@ -652,6 +666,7 @@ pub(crate) fn engine_counts(
                 query_code,
                 db_code,
                 &mut window,
+                sc,
             );
             debug_assert_eq!(identities, hsp.hit.num_ident, "engine identities");
             (hsp.hit.num_ident as u32, positives as u32)
@@ -706,7 +721,10 @@ pub(crate) fn engine_counts(
 /// ```
 /// The minus-frame conversion is NCBI's: it starts one codon after the masked run, so the
 /// last residue of a run is not lowercased (and a run of one residue is empty).
-fn query_dna_masks(stats: &TblastxQueryStats, query_length: usize) -> Vec<(i8, Vec<(i32, i32)>)> {
+pub(super) fn query_dna_masks(
+    stats: &TblastxQueryStats,
+    query_length: usize,
+) -> Vec<(i8, Vec<(i32, i32)>)> {
     let protein_length = |context: usize| {
         if query_length == 0 || query_length <= context % 3 {
             0
@@ -947,6 +965,26 @@ pub(crate) fn pairwise_hits(
     hits.iter().map(|hsp| rows.hit(hsp, &mut window)).collect()
 }
 
+/// The positives of the outfmt 0 rows `hits` by `matrix`, a matrix other than BLOSUM62, counted
+/// again from the rows (`row_counts`) after `PairwiseRows::hit` counted BLOSUM62's: the query
+/// row's masked letters are lower case there, and the letters of the rows are upper case. One
+/// `hit` for every matrix keeps the helpers that it calls once (`SubjectLetters::rows`,
+/// `lowercase_query_row`) in its body.
+pub(crate) fn set_row_positives(hits: &mut [PairwiseHit], matrix: ScoringMatrix) {
+    for hit in hits {
+        let query_row = hit
+            .query_seq
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes()
+            .to_ascii_uppercase();
+        let subject_row = hit.subject_seq.as_deref().unwrap_or_default().as_bytes();
+        let (_, positives) = row_counts(matrix, &query_row, subject_row);
+        hit.hit.num_positives = positives;
+        hit.positives = Some(positives);
+    }
+}
+
 // No NCBI counterpart: the masks of `shown_query_masks` arranged for `lowercase_query_row`. The
 // lowercase letters of a row do not depend on the order of the ranges, so a frame's ranges are
 // sorted by start, and the running maximum of their ends lets the row's scan start at the first
@@ -1050,7 +1088,7 @@ impl<'a> PairwiseRows<'a> {
         let subject = &subjects[hsp.hit.s_idx as usize];
         let (mut query_row, subject_row) =
             subject_letters.rows(hsp, query.seq(), query_code, db_code, window);
-        let (identities, positives) = row_counts(&query_row, &subject_row);
+        let (identities, positives) = row_counts(Blosum62Score, &query_row, &subject_row);
         let (q_idx, s_idx) = (hsp.hit.q_idx as usize, hsp.hit.s_idx as usize);
         let mut hit = hsp.hit.clone();
         shift_hit(&mut hit, query_placements, subject_placements);
@@ -1323,7 +1361,7 @@ pub(crate) fn write_tabular_row<W: Write>(
     )
 }
 
-/// The TBLASTX output formats (`-outfmt` 0, 5, 6, 7, 8, 9, 12, 15 and 16, `tblastx_outfmt`).
+/// The TBLASTX output formats (`-outfmt` 0, 5, 6, 7, 8, 9, 11, 12, 15 and 16, `tblastx_outfmt`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TblastxOutputFormat {
     Pairwise,
@@ -1336,6 +1374,8 @@ pub(crate) enum TblastxOutputFormat {
     /// The XML2 and JSON documents (outfmt 16, 15, 14 and 13), written from the same records as
     /// outfmt 5 (`tblastx/blast_xml.rs`); 14 and 13 as side files with this output as the master.
     Xml2(crate::report::blast_xml2::Xml2Kind),
+    /// The BLAST archive (outfmt 11, `tblastx/archive.rs`): one document per query batch.
+    Archive,
 }
 
 impl TblastxOutputFormat {
@@ -1348,7 +1388,10 @@ impl TblastxOutputFormat {
     /// (`set_displayed_identities`): not the structured formats, which read the engine's counts
     /// (outfmt 8, 9, 12) or count the rows again themselves (outfmt 5, 15, 16).
     pub(crate) fn reads_displayed_counts(self) -> bool {
-        !matches!(self, Self::Seqalign(_) | Self::Xml | Self::Xml2(_))
+        !matches!(
+            self,
+            Self::Seqalign(_) | Self::Xml | Self::Xml2(_) | Self::Archive
+        )
     }
 
     /// Whether the format is BLAST XML (5) or one of its XML2 / JSON siblings (15, 16), which
@@ -1380,6 +1423,7 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
         Ok(9) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::AsnBinary),
         Ok(12) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::Json),
         Ok(5) => TblastxOutputFormat::Xml,
+        Ok(11) => TblastxOutputFormat::Archive,
         Ok(16) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Single16),
         Ok(15) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Single15),
         Ok(14) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Files14),
@@ -1691,8 +1735,8 @@ pub(crate) fn final_hit_order(
 /// ```
 /// The culling writer replaces the preliminary hit list (the collector): each subject's
 /// HSPs (after the `-evalue` reap, in score order) go into the trees, subject by subject
-/// in OID order, with the merit `culling_max` (+3 above 1, an `Int4` that NCBI's binary
-/// wraps). The trees' HSPs then reach the hit list of the traceback in OID order, where
+/// in OID order, with the merit `culling_max` (+3 above 1; in `i64`, where NCBI's `Int4`
+/// overflows near `INT4_MAX`, NCBI parity DECISIONS 17). The trees' HSPs then reach the hit list of the traceback in OID order, where
 /// the `-max_target_seqs` cut is made (`Blast_HitListUpdate`), and the pipe culls the kept
 /// lists again, sorted by e-value, with the merit `culling_limit`. The rest is
 /// `final_hit_order`'s: the lists sorted by e-value (their HSPs in score order) and each
@@ -1707,6 +1751,7 @@ pub(crate) fn culled_hit_order(
 ) -> Vec<TblastxHsp> {
     use super::hsp_culling::{tblastx_context_lengths, CullingWriter};
     use crate::algorithm::blastn::hsp::{HitList, HitListEntry};
+    use crate::core::hspfilter_culling::CullingForest;
     type Subjects = std::collections::BTreeMap<u32, Vec<TblastxHsp>>;
     let mut lists: std::collections::BTreeMap<u32, Subjects> = std::collections::BTreeMap::new();
     for hsp in hits {
@@ -1717,11 +1762,7 @@ pub(crate) fn culled_hit_order(
             .or_default()
             .push(hsp);
     }
-    let prelim_max = if culling_limit > 1 {
-        culling_limit.wrapping_add(3)
-    } else {
-        culling_limit
-    };
+    let prelim_max = CullingForest::<TblastxHsp>::prelim_max(culling_limit);
     let mut ordered = Vec::new();
     for (q_idx, subjects) in lists {
         let context_lengths = tblastx_context_lengths(query_lengths[q_idx as usize]);
@@ -1752,7 +1793,7 @@ pub(crate) fn culled_hit_order(
         pipe_lists.hsplist_count = kept.len();
         pipe_lists.hsplist_array = kept;
         pipe_lists.sort_by_evalue();
-        let mut pipe = CullingWriter::new(culling_limit, context_lengths);
+        let mut pipe = CullingWriter::new(i64::from(culling_limit), context_lengths);
         for list in pipe_lists.hsplist_array {
             pipe.run(list.hsps, list.oid);
         }
@@ -1910,7 +1951,7 @@ mod tests {
     // display matrix).
     #[test]
     fn row_counts_use_the_displayed_letters() {
-        assert_eq!(row_counts(b"XAB*J", b"XADKI"), (2, 3));
+        assert_eq!(row_counts(Blosum62Score, b"XAB*J", b"XADKI"), (2, 3));
     }
 
     // The identities pass counts without the rows: the counts of a residue-by-residue loop
@@ -1968,15 +2009,24 @@ mod tests {
                                 expected.1 += 1;
                             }
                         }
-                        let counts =
-                            subjects.counts(&hsp, &query, &query_code, &db_code, &mut window);
+                        let counts = subjects.counts(
+                            &hsp,
+                            &query,
+                            &query_code,
+                            &db_code,
+                            &mut window,
+                            Blosum62Score,
+                        );
                         assert_eq!(
                             counts, expected,
                             "frames {query_frame} {subject_frame} at {subject_offset}"
                         );
                         let (query_row, subject_row) =
                             subjects.rows(&hsp, &query, &query_code, &db_code, &mut window);
-                        assert_eq!(row_counts(&query_row, &subject_row), expected);
+                        assert_eq!(
+                            row_counts(Blosum62Score, &query_row, &subject_row),
+                            expected
+                        );
                         mismatched += usize::from(expected.0 < 10);
                         positive += usize::from(expected.1 > expected.0);
                     }

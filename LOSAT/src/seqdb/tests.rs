@@ -238,12 +238,42 @@ fn check_deflines_and_single_reads(db: &SeqDb, entries: &[Entry], name: &str) {
             format!("gnl|BL_ORD_ID|{}", entry.ordinal).into_bytes(),
             "{what}: NCBI id"
         );
+        // The full decoder reads the same definition line, with the BL_ORD_ID tag of the
+        // database (the volume start added) and the taxid that `defline_taxids` reads.
+        let set = db.defline_set(entry.ordinal).expect("defline set");
+        let taxids = db.defline_taxids(entry.ordinal).expect("taxids");
+        assert_eq!(set.deflines.len(), 1, "{what}: full decoder");
+        let full = &set.deflines[0];
+        assert_eq!(
+            full.ids,
+            [crate::seqid::ParsedSeqId::General(
+                crate::seqid::model::Dbtag {
+                    db: b"BL_ORD_ID".to_vec(),
+                    tag: crate::seqid::model::ObjectId::Id(deflines[0].bl_ord_id as i32),
+                }
+            )],
+            "{what}: full decoder id"
+        );
+        assert_eq!(
+            full.title.as_deref(),
+            Some(&deflines[0].title[..]),
+            "{what}"
+        );
+        assert_eq!(
+            full.replaced_title_bytes, deflines[0].replaced_title_bytes,
+            "{what}"
+        );
+        assert_eq!(full.taxid.unwrap_or(0), taxids[0], "{what}: taxid");
         let block = db.read_sequence(entry.ordinal).expect("read sequence");
         assert_eq!(block.len(), 1);
         check_sequence(&block, 0, &entry.seq, &what);
     }
     assert!(matches!(
         db.deflines(db.num_seqs()),
+        Err(SeqDbError::Range(_))
+    ));
+    assert!(matches!(
+        db.defline_set(db.num_seqs()),
         Err(SeqDbError::Range(_))
     ));
     assert!(matches!(
@@ -535,13 +565,29 @@ fn open_error(name: &str, seqtype: SeqType) -> SeqDbError {
 
 #[test]
 fn databases_that_need_unread_data_are_rejected() {
+    // A database with parsed Seq-ids opens; the check of the search programs
+    // that read ordinal ids only refuses it, as the reader's open did before.
     for name in ["prot_ids_v4", "prot_ids_v5"] {
-        let error = open_error(name, SeqType::Protein);
+        let db =
+            SeqDb::open(&db_name(name), SeqType::Protein).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let error = db.check_ordinal_ids().expect_err("parsed Seq-ids");
         assert!(
             matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("parsed Seq-ids")),
             "{name}: {error}"
         );
+        assert!(
+            error.to_string().ends_with(&format!(
+                "{name}.phr: unsupported database: the database stores parsed Seq-ids \
+                 (makeblastdb -parse_seqids, or a database distributed by NCBI); LOSAT's blastp \
+                 and blastx read them, its other programs read databases built without \
+                 -parse_seqids only"
+            )),
+            "{name}: {error}"
+        );
+        assert_eq!(db.defline_set(0).unwrap().deflines.len(), 1, "{name}");
     }
+    let db = SeqDb::open(&db_name("prot_v4"), SeqType::Protein).unwrap();
+    db.check_ordinal_ids().unwrap();
     for (name, key) in [("alias_gilist", "GILIST")] {
         let error = open_error(name, SeqType::Protein);
         assert!(
@@ -1578,9 +1624,13 @@ fn check_search_path_row(
 ) {
     let (ncbi, title, sequences, volumes, error, status) =
         (&row[0], &row[1], &row[2], &row[3], &row[4], &row[5]);
-    // The tables hold the value of blastp's `-db`, which the program trims.
+    // The tables hold the value of blastp's `-db`, which the program trims. A
+    // search program reads the first header of each volume right after it opens the
+    // database (`algorithm::common::database::refuse_parsed_seqids`, or `check_seqids`
+    // where it reads parsed Seq-ids too); the tables' databases have none.
     let name = db_argument_name(name);
-    let opened = SeqDb::open_in(name, SeqType::Protein, search);
+    let opened = SeqDb::open_in(name, SeqType::Protein, search)
+        .and_then(|db| db.check_ordinal_ids().map(|()| db));
 
     // A volume without its sequence file: NCBI's search fails when it reads
     // the first sequence, with the search stage's own text and exit status.

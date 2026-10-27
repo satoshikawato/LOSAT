@@ -135,9 +135,11 @@ use super::{
     blastp_aa_lookup_ahead, blastp_compressed_lookup, blastp_query_frames, BlastpRuntimeLookup,
 };
 use crate::algorithm::blastp::args::{BlastpLookupTableType, ResolvedBlastpArgs};
-use crate::algorithm::blastp::x_query_blocks::{x_bp_aa_spares, x_bp_lookup_spares, XLookupFor};
+use crate::algorithm::blastp::x_query_blocks::{
+    x_bp_aa_block_spare, x_bp_aa_spares, x_bp_lkreuse, x_bp_lookup_spares, XLookupFor,
+};
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_on;
-use crate::algorithm::tblastx::lookup::QueryContext;
+use crate::algorithm::tblastx::lookup::{QueryContext, XAaSpares};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range;
@@ -201,6 +203,9 @@ impl XAheadLookup {
 pub(super) struct XAheadBlock<'a> {
     prebuilt: Option<XAheadLookup>,
     start_next: Option<&'a dyn Fn(&BlastpRuntimeLookup)>,
+    /// EXPERIMENT (LOSAT_X_BPLKDROP): whether a later block's build may take the vectors of this
+    /// block's table from the block search's spares (`x_table_taken_later`).
+    table_taken_later: bool,
 }
 
 impl XAheadBlock<'_> {
@@ -210,6 +215,7 @@ impl XAheadBlock<'_> {
         Self {
             prebuilt: None,
             start_next: None,
+            table_taken_later: true,
         }
     }
 
@@ -236,6 +242,17 @@ impl XAheadBlock<'_> {
         if let Some(start_next) = self.start_next {
             start_next(lookup);
         }
+    }
+
+    // No NCBI counterpart: memory only (LOSAT_X_BPLKDROP); it changes no value NCBI computes.
+    /// Whether a later block's build may take the vectors of this block's lookup table, which the
+    /// search gives to the block search's spares at its end (`x_query_blocks::x_bp_lookup_spare`,
+    /// `x_bp_aa_spares`): the next block's own build where the switch does not act, the build
+    /// ahead of the block after the next where it does (`x_make_room`, called when the next block's
+    /// table is ready). True for `none()` (a search that is not a block of the block loop; outside
+    /// the block search there are no spares).
+    pub(super) fn x_table_taken_later(&self) -> bool {
+        self.table_taken_later
     }
 }
 
@@ -463,6 +480,17 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
         if x_bp_lkp_ahead() {
             crate::utils::xreach::x_reach!("LOSAT_X_BPLKPAHEAD", acts);
         }
+        // EXPERIMENT (LOSAT_X_BPLKREUSE): where exact blastp's tables are not built ahead, each
+        // block's build takes the vectors of the block before (`x_bp_aa_block_spare`).
+        if x_bp_lkreuse()
+            && matches!(args.lookup_table_type, BlastpLookupTableType::AaLookupTable)
+            && XAaSpares::x_applies()
+        {
+            crate::utils::xreach::x_reach!(
+                "LOSAT_X_BPLKREUSE",
+                x_bp_aa_block_spare(pool).is_some()
+            );
+        }
         Self {
             args,
             pool,
@@ -485,10 +513,12 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
     /// (the next block's records) and where the switch acts,
     /// the next block's build is spawned in a `rayon::in_place_scope` around the search when the
     /// block's table is ready, and its outcome kept for the next call. A kept panic of the build for
-    /// this block is resumed here, before its search (module header).
+    /// this block is resumed here, before its search (module header). `later_blocks` is the number
+    /// of blocks after this one (`XAheadBlock::x_table_taken_later`).
     pub(super) fn run_block<R>(
         &mut self,
         next: Option<&[FastaRecord]>,
+        later_blocks: usize,
         run: impl FnOnce(XAheadBlock<'_>) -> anyhow::Result<R>,
     ) -> anyhow::Result<R> {
         let prebuilt = x_take_built(self.next.take());
@@ -496,6 +526,7 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
             return run(XAheadBlock {
                 prebuilt,
                 start_next: None,
+                table_taken_later: later_blocks >= 1,
             });
         }
         X_BLOCKS.fetch_add(1, Ordering::Relaxed);
@@ -530,6 +561,7 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
                     run(XAheadBlock {
                         prebuilt,
                         start_next: Some(&start_next),
+                        table_taken_later: later_blocks >= 2,
                     })
                 },
             );
@@ -540,6 +572,7 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
         run(XAheadBlock {
             prebuilt,
             start_next: None,
+            table_taken_later: later_blocks >= 2,
         })
     }
 }
@@ -547,7 +580,7 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::algorithm::blastp::args::BlastpArgs;
+    use crate::algorithm::blastp::args::{BlastpApp, BlastpArgs};
     use crate::algorithm::blastp::x_query_blocks::XBlockSubjects;
     use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
         x_assert_same_flat_tables_as, XFlatCompressedLookup,
@@ -960,6 +993,7 @@ mod tests {
             num_alignments: None,
             max_hsps_per_subject: None,
             qcov_hsp_perc: None,
+            culling_limit: None,
             ungapped: false,
             window_size: None,
             matrix: None,
@@ -973,6 +1007,8 @@ mod tests {
             subject_loc: None,
             outfmt: "6".to_string(),
             archive: None,
+            app: BlastpApp::Blastp,
+            inclusion_ethresh: None,
         }
         .resolve()
         .expect("resolved arguments")
@@ -1133,11 +1169,13 @@ mod tests {
         let mut block = XAheadBlock {
             prebuilt: Some(values(x_key(&records))),
             start_next: None,
+            table_taken_later: true,
         };
         assert!(block.take_prebuilt(&records[..1]).is_none());
         let mut block = XAheadBlock {
             prebuilt: Some(values(x_key(&records))),
             start_next: None,
+            table_taken_later: true,
         };
         assert!(block.take_prebuilt(&records).is_some());
         assert!(block.take_prebuilt(&records).is_none());

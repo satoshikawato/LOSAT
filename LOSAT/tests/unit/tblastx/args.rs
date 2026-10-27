@@ -22,8 +22,14 @@ fn test_default_values() {
     let args = parse_args(&["-query", "query.fasta", "-subject", "subject.fasta"]);
 
     assert_eq!(args.evalue, 10.0);
-    assert_eq!(args.threshold, 13.0);
-    assert_eq!(args.word_size, 3);
+    assert_eq!(args.threshold, None);
+    assert_eq!(args.word_threshold(), 13.0);
+    assert_eq!(args.matrix, None);
+    assert_eq!(args.matrix_name(), "BLOSUM62");
+    assert_eq!(args.window(), 40);
+    assert_eq!(args.word_size, None);
+    assert_eq!(args.word_size(), 3);
+    assert_eq!(args.culling_limit, None);
     assert_eq!(args.num_threads, 1);
     assert_eq!(args.query_gencode, 1);
     assert_eq!(args.db_gencode, 1);
@@ -57,7 +63,46 @@ fn test_custom_threshold() {
         "-threshold",
         "20",
     ]);
-    assert_eq!(args.threshold, 20.0);
+    assert_eq!(args.threshold, Some(20.0));
+    assert_eq!(args.word_threshold(), 20.0);
+}
+
+// NCBI c++/src/algo/blast/core/blast_options.c:1174-1235 (BLAST_GetSuggestedThreshold and
+// BLAST_GetSuggestedWindowSize) and c++/src/algo/blast/blastinput/blast_args.cpp:586-623
+// (TBLASTX takes the suggestion, plus 2, unless -threshold is given): PAM30 reads 18 and 15;
+// the name is kept as typed.
+#[test]
+fn test_matrix_suggests_threshold_and_window() {
+    use LOSAT::algorithm::tblastx::args::TblastxMatrix;
+    use LOSAT::config::ScoringMatrix;
+    let args = parse_args(&[
+        "-query",
+        "query.fasta",
+        "-subject",
+        "subject.fasta",
+        "-matrix",
+        "pam30",
+    ]);
+    assert_eq!(args.matrix.as_deref(), Some("pam30"));
+    assert_eq!(args.matrix_name(), "pam30");
+    assert!(matches!(
+        args.scoring_matrix(),
+        TblastxMatrix::Table(ScoringMatrix::Pam30)
+    ));
+    assert_eq!((args.word_threshold(), args.window()), (18.0, 15));
+    let args = parse_args(&[
+        "-query",
+        "query.fasta",
+        "-subject",
+        "subject.fasta",
+        "-matrix",
+        "PAM30",
+        "-threshold",
+        "13",
+        "-window_size",
+        "40",
+    ]);
+    assert_eq!((args.word_threshold(), args.window()), (13.0, 40));
 }
 
 #[test]
@@ -70,7 +115,7 @@ fn test_custom_word_size() {
         "-word_size",
         "3",
     ]);
-    assert_eq!(args.word_size, 3);
+    assert_eq!(args.word_size, Some(3));
 }
 
 #[test]

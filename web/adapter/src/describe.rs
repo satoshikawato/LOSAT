@@ -10,16 +10,11 @@ use LOSAT::cli::Cli;
 use crate::json;
 use crate::run::Program;
 
-/// Options that the adapter sets itself or refuses (`run::parse`): a Web search writes the
-/// output formats 0, 6 and 7 from one search, for which NCBI derives different hit list
-/// sizes from `-num_descriptions` and `-num_alignments`.
-const ADAPTER_OWNED: [&str; 5] = [
-    "out",
-    "outfmt",
-    "num_threads",
-    "num_descriptions",
-    "num_alignments",
-];
+/// Options that the adapter or the host sets itself or refuses (`run::parse`): the output
+/// file and format (a run writes every format of the program) and the thread count.
+/// `-num_descriptions` and `-num_alignments` are described: a run searches once for each
+/// distinct hit list size of its formats (`run::search_groups`).
+const ADAPTER_OWNED: [&str; 3] = ["out", "outfmt", "num_threads"];
 
 /// Genetic codes are small integers; every accepted one is below this bound.
 const GENETIC_CODE_PROBE: u32 = 64;
@@ -125,16 +120,24 @@ mod tests {
     fn options_the_adapter_owns_or_refuses_are_not_described() {
         for program in ["blastp", "tblastn", "blastn", "tblastx"] {
             let described = describe(program).unwrap();
-            for flag in [
-                "num_descriptions",
-                "num_alignments",
-                "outfmt",
-                "num_threads",
-            ] {
+            for flag in ["outfmt", "out", "num_threads"] {
                 assert!(
                     !described.contains(&format!("\"-{flag}\"")),
                     "{program} lists -{flag}"
                 );
+            }
+            // The hit list options are described with the CLI's help text, which carries
+            // the defaults (they are `Option`s: "given or not" is NCBI's).
+            for (flag, default) in [
+                ("num_descriptions", "[default: 500]"),
+                ("num_alignments", "[default: 250]"),
+            ] {
+                let entry = described
+                    .split("{\"flag\":")
+                    .find(|entry| entry.starts_with(&format!("\"-{flag}\"")))
+                    .unwrap_or_else(|| panic!("{program} does not list -{flag}"));
+                assert!(entry.contains(default), "{program} -{flag}: {entry}");
+                assert!(entry.contains("\"takes_value\":true"), "{program} -{flag}");
             }
             assert!(described.contains("\"-max_target_seqs\""), "{program}");
         }

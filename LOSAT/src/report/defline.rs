@@ -151,14 +151,211 @@ pub fn generate_defline(
     protein: bool,
     leave_prefix_suffix: bool,
 ) -> Result<Defline, UnknownEncoding> {
-    let (mut decoded, _) =
-        html_decode(&title_before_decoding(title, protein, leave_prefix_suffix))?;
+    generate_bioseq_defline(title, protein, leave_prefix_suffix, &BioseqIds::default())
+}
+
+/// What `CDeflineGenerator::x_SetFlags` takes from the Seq-ids of a Bioseq (none for a record
+/// read from FASTA, whose id is local): the Bioseq of a database sequence with parsed Seq-ids
+/// has the ids of one definition line (`report::db_subject`).
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:745-824
+/// ```c++
+///     FOR_EACH_SEQID_ON_BIOSEQ_HANDLE (sid_itr, bsh) {
+///         CSeq_id_Handle sid = *sid_itr;
+///         switch (sid.Which()) {
+///             case NCBI_SEQID(Tpg):
+///             case NCBI_SEQID(Tpe):
+///             case NCBI_SEQID(Tpd):
+///                 m_ThirdParty = true;
+///                 // fall through
+///             case NCBI_SEQID(Other):
+///             case NCBI_SEQID(Genbank):
+///             case NCBI_SEQID(Embl):
+///             case NCBI_SEQID(Ddbj):
+///             {
+///                 ...
+///                     } else if (type == NCBI_ACCN(refseq_chromosome)) {
+///                         m_IsNC = true;
+///                     } else if (type == NCBI_ACCN(refseq_mrna)) {
+///                         m_IsNM = true;
+///                     } else if (type == NCBI_ACCN(refseq_mrna_predicted)) {
+///                         m_IsNM = true;
+///                     } else if (type == NCBI_ACCN(refseq_ncrna)) {
+///                         m_IsNR = true;
+///                     ...
+///             case NCBI_SEQID(Pdb):
+///             {
+///                 m_IsPDB = true;
+///                 CConstRef<CSeq_id> id = sid.GetSeqId();
+///                 const CPDB_seq_id& pdb_id = id->GetPdb ();
+///                 if (pdb_id.IsSetChain_id()) {
+///                     m_PDBChainID = pdb_id.GetChain_id();
+///                 } else if (pdb_id.IsSetChain()) {
+///                     m_PDBChain = pdb_id.GetChain();
+///                 }
+///                 break;
+///             }
+///             case NCBI_SEQID(Patent):
+///             {
+///                 m_IsPatent = true;
+///                 CConstRef<CSeq_id> id = sid.GetSeqId();
+///                 const CPatent_seq_id& pat_id = id->GetPatent();
+///                 if (pat_id.IsSetSeqid()) {
+///                     m_PatentSequence = pat_id.GetSeqid();
+///                 }
+///                 if (pat_id.IsSetCit()) {
+///                     const CId_pat& cit = pat_id.GetCit();
+///                     m_PatentCountry = cit.GetCountry();
+///                     m_PatentNumber = cit.GetSomeNumber();
+///                 }
+///                 break;
+///             }
+/// ```
+/// The other flags of `x_SetFlags` come from descriptors that the Bioseq of a database
+/// sequence does not have (MolInfo, user objects, GenBank and EMBL blocks), or change no title
+/// that a search writes. The source that a database Bioseq has for each definition line with a
+/// positive taxid is not modelled: the titles that depend on it are LOSAT's refusals
+/// (`ParsedSubject::title_from_taxonomy`, `ParsedSubject::title_suffix_adjusted`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BioseqIds {
+    /// `m_ThirdParty`: a `tpg`, `tpe` or `tpd` id (the prefix `TPA: `).
+    pub third_party: bool,
+    /// `m_IsNC`, `m_IsNM` or `m_IsNR`: an accession of a RefSeq chromosome, mRNA or ncRNA,
+    /// whose empty title NCBI makes from the source and features (a protein's is then not
+    /// `unnamed protein product`).
+    pub refseq_source_title: bool,
+    /// `m_IsPDB`, `m_PDBChainID` and `m_PDBChain`: whether a `pdb` id was seen and its chain.
+    pub pdb: Option<(Vec<u8>, i32)>,
+    /// `m_IsPatent`, `m_PatentSequence`, `m_PatentCountry` and `m_PatentNumber`.
+    pub patent: Option<(i32, Vec<u8>, Vec<u8>)>,
+}
+
+/// `GenerateDefline` of a Bioseq with the title `title` and the Seq-ids `ids` (`BioseqIds`):
+/// `generate_defline` with the parts of the title that come from the Seq-ids, the generated
+/// title of a `pdb` or `patent` record without a title and the prefix `TPA: ` of a third-party
+/// record (alignment heading only, as the other prefixes).
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4076-4092
+/// ```c++
+///     string mag;
+///     if (! (flags & fLeavePrefixSuffix)) {
+///         // calculate prefix
+///         x_SetPrefix(prefix, bsh);
+///         ...
+///     }
+///
+///     // produce final result
+///     string penult = mag + prefix + decoded + suffix;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2815-2840
+/// ```c++
+///     } else if (m_ThirdParty) {
+///         if (m_TPAExp) {
+///             prefix = "TPA_exp: ";
+///         ...
+///         if (prefix.empty()) {
+///             prefix = "TPA: ";
+///         }
+/// ```
+pub fn generate_bioseq_defline(
+    title: &[u8],
+    protein: bool,
+    leave_prefix_suffix: bool,
+    ids: &BioseqIds,
+) -> Result<Defline, UnknownEncoding> {
+    let (mut decoded, _) = html_decode(&title_before_decoding_of(
+        title,
+        protein,
+        leave_prefix_suffix,
+        ids,
+    ))?;
     trim_end_of(&mut decoded, b",;~ ");
+    if !leave_prefix_suffix && ids.third_party {
+        decoded.splice(0..0, b"TPA: ".iter().copied());
+    }
     let (text, reads_past_end) = clean_and_compress(&decoded, protein);
     Ok(Defline {
         text,
         reads_past_end,
     })
+}
+
+/// Whether `generate_bioseq_defline` makes the title of `title` and `ids` from the source of
+/// the Bioseq (`x_SetBioSrc`, `x_SetTitleFromBioSrc`, ...: a title that is empty once trimmed,
+/// of a record that is neither a `pdb` record with a chain nor a `patent` one). A database
+/// sequence's Bioseq has a source for each definition line with a taxid other than 0, with the
+/// names of the taxonomy database when NCBI finds one (seqdbvol.cpp:1055-1160): the title is
+/// then the organism's (`unnamed protein product [Homo sapiens]`).
+pub fn bioseq_title_from_source(title: &[u8], ids: &BioseqIds) -> bool {
+    let mut main_title = title.to_vec();
+    trim_end_of(&mut main_title, b".,;~ ");
+    main_title.is_empty() && pdb_or_patent_title(ids).is_empty()
+}
+
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:1815-1858
+// ```c++
+// void CDeflineGenerator::x_SetTitleFromPatent (void)
+//
+// {
+//     string seqno = NStr::IntToString(m_PatentSequence);
+//     CTextJoiner<6, CTempString> joiner;
+//     joiner.Add("Sequence ").Add(seqno).Add(" from Patent ")
+//         .Add(m_PatentCountry).Add(" ").Add(m_PatentNumber);
+//     joiner.Join(&m_MainTitle);
+// }
+//
+// void CDeflineGenerator::x_SetTitleFromPDB (void)
+//
+// {
+//     if (! m_PDBChainID.empty()) {
+//       string chain(m_PDBChainID);
+//       CTextJoiner<4, CTempString> joiner;
+//       if (m_UsePDBCompoundForDefline) {
+//           joiner.Add("Chain ").Add(chain).Add(", ").Add(m_PDBCompound);
+//       } else {
+//           std::size_t found = m_Comment.find_first_not_of("0123456789");
+//           if (found != std::string::npos && found < m_Comment.length() && m_Comment[found] == ' ') {
+//               joiner.Add("Chain ").Add(chain).Add(", ").Add(m_Comment.substr (found));
+//           } else {
+//               joiner.Add("Chain ").Add(chain).Add(", ").Add(m_Comment);
+//           }
+//       }
+//       joiner.Join(&m_MainTitle);
+//     } else if (isprint ((unsigned char) m_PDBChain)) {
+//         string chain(1, (char) m_PDBChain);
+//         ...
+//             joiner.Add("Chain ").Add(chain).Add(", ").Add(m_Comment);
+//         ...
+//     } else {
+//         m_MainTitle = m_PDBCompound;
+//     }
+// }
+// ```
+// The Bioseq of a database sequence has no PDB block and no comment: `m_PDBCompound` and
+// `m_Comment` are empty.
+/// The title that `x_SetTitleFromPDB` or `x_SetTitleFromPatent` makes for an empty one (empty
+/// for a `pdb` record without a chain, and for a record of neither kind).
+fn pdb_or_patent_title(ids: &BioseqIds) -> Vec<u8> {
+    if let Some((chain_id, chain)) = &ids.pdb {
+        let mut title = b"Chain ".to_vec();
+        if !chain_id.is_empty() {
+            title.extend_from_slice(chain_id);
+        } else if (0x20..0x7f).contains(chain) {
+            title.push(*chain as u8);
+        } else {
+            return Vec::new();
+        }
+        title.extend_from_slice(b", ");
+        return title;
+    }
+    if let Some((sequence, country, number)) = &ids.patent {
+        let mut title = format!("Sequence {sequence} from Patent ").into_bytes();
+        title.extend_from_slice(country);
+        title.push(b' ');
+        title.extend_from_slice(number);
+        return title;
+    }
+    Vec::new()
 }
 
 /// The subject ID of the tabular formats (`sseqid`, `sacc`, `saccver`) for a subject with
@@ -426,9 +623,50 @@ pub fn check_shown_subject_title(
 /// module), for the alignment heading (`leave_prefix_suffix` false) or the description
 /// table.
 fn title_before_decoding(title: &[u8], protein: bool, leave_prefix_suffix: bool) -> Vec<u8> {
+    title_before_decoding_of(title, protein, leave_prefix_suffix, &BioseqIds::default())
+}
+
+/// `title_before_decoding` of a Bioseq with the Seq-ids `ids`: an empty title of a `pdb` or
+/// `patent` record is generated from the id, and a RefSeq chromosome, mRNA or ncRNA protein
+/// keeps an empty one (`generate_bioseq_defline`).
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3994-4022
+/// ```c++
+///     if (m_MainTitle.empty()) {
+///
+///         // PDB and patent records do not normally need source data
+///         if (m_IsPDB) {
+///             x_SetTitleFromPDB ();
+///         } else if (m_IsPatent) {
+///             x_SetTitleFromPatent ();
+///         }
+///
+///         if (m_MainTitle.empty()) {
+///             ...
+///             // several record types have specific methods
+///             if (m_IsNC) {
+///                 x_SetTitleFromNC ();
+///             } else if (m_IsNM  &&  !m_LocalAnnotsOnly) {
+///                 x_SetTitleFromNM (bsh);
+///             } else if (m_IsNR) {
+///                 x_SetTitleFromNR (bsh);
+///             } else if (m_IsAA && m_Idx) {
+///                 x_SetTitleFromProteinIdx (bsh);
+///             } else if (m_IsAA) {
+///                 x_SetTitleFromProtein (bsh);
+/// ```
+fn title_before_decoding_of(
+    title: &[u8],
+    protein: bool,
+    leave_prefix_suffix: bool,
+    ids: &BioseqIds,
+) -> Vec<u8> {
     let mut main_title = title.to_vec();
     trim_end_of(&mut main_title, b".,;~ ");
-    if main_title.is_empty() && protein {
+    if main_title.is_empty() {
+        main_title = pdb_or_patent_title(ids);
+    }
+    if main_title.is_empty() && protein && !ids.refseq_source_title {
         main_title = UNNAMED_PROTEIN_PRODUCT.to_vec();
     }
     if !leave_prefix_suffix {

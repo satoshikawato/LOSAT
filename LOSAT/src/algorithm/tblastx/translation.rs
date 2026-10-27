@@ -213,7 +213,7 @@ const X_FRAME_WINDOW: usize = 3 << 16;
 //                     subject_blk->length, frame, retval->translations[context], gen_code_string);
 //               }
 // ```
-// EXPERIMENT (LOSAT_X_TBXFRAMES): `generate_frames` of a subject whose letters are read in
+// `x_generate_frames_in_windows` is `generate_frames` of a subject whose letters are read in
 // windows, without the subject's letters or their reverse complement in memory at once: the
 // six frames are filled in one pass over the letters, each codon start q (0 <= q <= len - 3)
 // giving the residue of forward frame q % 3 at index q / 3 (the codon letters q..q+3) and of

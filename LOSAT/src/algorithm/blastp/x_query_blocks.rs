@@ -758,7 +758,8 @@ impl Write for XBlockSink<'_> {
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks (attached to the search's
 /// pool, `SearchPool::x_with_ext`), with the records they encode; and the vectors of the last
 /// block's flat lookup table, for the next block's build (LOSAT_X_BPLKPFLAT, `x_bp_lookup_spare`),
-/// and those of exact blastp's tables built ahead (LOSAT_X_BPLKPAHEAD, `x_bp_aa_spares`).
+/// and those of exact blastp's tables built ahead (LOSAT_X_BPLKPAHEAD, `x_bp_aa_spares`) or by the
+/// next block (LOSAT_X_BPLKREUSE, `x_bp_aa_block_spare`).
 pub(crate) struct XBlockSubjects {
     /// The address and count of the records encoded.
     records: (usize, usize),
@@ -771,7 +772,8 @@ pub(crate) struct XBlockSubjects {
     /// block (`blast_engine/x_lookup_ahead.rs`, `x_bp_lookup_spares`).
     x_lookup_ahead: XFlatSpare,
     /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the vectors and neighbour lists of exact blastp's tables
-    /// built ahead of their blocks (`x_bp_aa_spares`).
+    /// built ahead of their blocks (`x_bp_aa_spares`); EXPERIMENT (LOSAT_X_BPLKREUSE): or the
+    /// vectors of the last block's table, for the next block's own build (`x_bp_aa_block_spare`).
     x_aa_spares: XAaSpares,
 }
 
@@ -894,6 +896,29 @@ pub(crate) fn x_bp_lookup_spares<'p>(
 pub(crate) fn x_bp_aa_spares<'p>(pool: &SearchPool<'p>) -> Option<&'p XAaSpares> {
     use super::blast_engine::x_lookup_ahead::x_bp_lkp_ahead;
     if !x_bp_lkp_ahead() || !XAaSpares::x_applies() || !x_pool_builds(pool) {
+        return None;
+    }
+    pool.x_ext::<XBlockSubjects>()
+        .map(|subjects| &subjects.x_aa_spares)
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BPLKREUSE switch once; it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLKREUSE): a strict-set switch, on unless it is `0`.
+pub(crate) fn x_bp_lkreuse() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPLKREUSE"))
+}
+
+// No NCBI counterpart: where LOSAT_X_BPLKREUSE acts, and buffer reuse between exact blastp's
+// tables (`XAaSpares`); it reads switches and changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLKREUSE): the block search's spares of exact blastp's tables where the
+/// blocks build their own tables (no build ahead, `x_bp_aa_spares` is `None`: one thread, or
+/// `LOSAT_X_BPLKPAHEAD=0`) and the table is built in place (`XAaSpares::x_applies`): each block's
+/// search gives its table's vectors back here and the next block's build takes them
+/// (`XAaSpares::x_build_on_block_spare`), so the block search allocates and frees one table, not
+/// one per block.
+pub(crate) fn x_bp_aa_block_spare<'p>(pool: &SearchPool<'p>) -> Option<&'p XAaSpares> {
+    if !x_bp_lkreuse() || !XAaSpares::x_applies() || x_bp_aa_spares(pool).is_some() {
         return None;
     }
     pool.x_ext::<XBlockSubjects>()

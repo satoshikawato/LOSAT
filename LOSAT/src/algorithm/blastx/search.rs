@@ -2,9 +2,11 @@
 use super::{
     args::ResolvedOptions,
     input::FastaRecord,
-    parameters::{effective_lengths, score_block, subject_parameters, ContextParameters},
+    parameters::{
+        effective_lengths, ka_once_on, score_block, subject_parameters, ContextParameters,
+    },
     preliminary::{gapped, purge_endpoints, sort_by_score, ungapped, PreliminaryHsp},
-    query_setup::{batch_ranges, prepare_queries, PreparedQueryBatch, BATCH_SIZE},
+    query_setup::{batch_ranges, PreparedQueryBatch, BATCH_SIZE},
     reader_batch::{prepare_reader_batch, UnitPrep},
     seed::{word_finder, Diagonals, InitHsp, Lookup},
     split::{adjust_chunk_hsps, merge_chunk_hsps, split_queries, QueryChunk},
@@ -584,9 +586,10 @@ pub(crate) fn search_core(
                 prepared, params, ..
             }) => (prepared, params),
             None => {
-                let full = prepare_queries(queries, options)?;
-                let params = score_block(&full);
-                (full, params)
+                let UnitPrep {
+                    prepared, params, ..
+                } = super::reader_batch::prepare_lone_unit(queries, options)?;
+                (prepared, params)
             }
         };
         super::x_timing::batch(XBatch::QuerySetup, x_t);
@@ -630,6 +633,10 @@ pub(crate) fn search_core(
             return Err(super::subjects::UnreadableSubjects.into());
         }
         let x_t = super::x_timing::lap();
+        // Dispatch point (LOSAT_X_BXKAONCE, in the strict set), taking the blocks: `score_block`'s
+        // raw blocks, before the lengths, kept for the one chunk of a batch that is not split (the
+        // chunk loop below). No NCBI counterpart.
+        let mut x_raw_params = ka_once_on().then(|| full_params.clone());
         effective_lengths(&full, &mut full_params, options, db_length, db_count, None)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2781-2787
         // ```c++
@@ -719,9 +726,12 @@ pub(crate) fn search_core(
             // (fewer inside the capped batch flow, x_bx_mem::chunk_wave), each chunk's subjects as
             // tasks on the pool (x_bx_mem.rs).
             let x_cap = x_bx_mem::chunk_unit_cap(pool, options, subjects);
+            // Dispatch point (LOSAT_X_BXBUILDPAR, in the strict set): a capped wave's chunks build
+            // their tables on the threads the cap leaves each (x_bx_mem.rs).
+            let x_parts = x_bx_mem::build_parts(pool, x_cap.is_some());
             let mut x_next = 0;
             while x_next < chunks.len() {
-                let x_wave = x_cap.map(x_bx_mem::chunk_wave);
+                let x_wave = x_cap.map(|(k, _)| x_bx_mem::chunk_wave(pool, k));
                 let wave = x_wave
                     .as_ref()
                     .map_or(pool.threads().max(2), x_bx_mem::XChunkWave::size);
@@ -741,7 +751,8 @@ pub(crate) fn search_core(
                                 db_count,
                                 min_subject_length,
                                 x_containment,
-                                x_cap.is_some(),
+                                x_cap.map(|(_, per_task)| per_task),
+                                x_parts,
                             )
                         })
                         .collect()
@@ -799,7 +810,34 @@ pub(crate) fn search_core(
             // ```
             sink.chunk_start(&chunk)?;
             let batch = &chunk.prepared;
-            let mut params = score_block(batch);
+            // Dispatch point (LOSAT_X_BXKAONCE, in the strict set): the one chunk of a batch that
+            // is not split is a clone of `full` (`split_queries`) whose contexts' `is_valid` are
+            // the raw blocks' `valid` (set above); `score_block` on it would compute the same
+            // compositions and so the same Karlin blocks, and `effective_lengths` writes only
+            // `length_adjustment` and `search_space`, never `valid` or `ungapped`, so the raw
+            // blocks kept above are its result. The chunks of a split batch have sequences of
+            // their own and keep `score_block`.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:243-246
+            // ```c++
+            //                 CRef<SInternalData> chunk_data =
+            //                     SplitQuery_CreateChunkData(chunk_qf, m_Options,
+            //                                                m_InternalData,
+            //                                                GetNumberOfThreads());
+            // ```
+            // NCBI computes the query's score block once in setup, and a chunk's own only for a
+            // split query (the loop this is in runs only `if (query_splitter->IsQuerySplit())`).
+            let mut params = match x_raw_params.take() {
+                Some(raw) if !is_split => {
+                    crate::utils::xreach::x_reach!("LOSAT_X_BXKAONCE", true);
+                    raw
+                }
+                other => {
+                    if other.is_some() {
+                        crate::utils::xreach::x_reach!("LOSAT_X_BXKAONCE", false);
+                    }
+                    score_block(batch)
+                }
+            };
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:277-288
             // ```c++
             //             } catch (const CBlastException& e) {
@@ -842,7 +880,13 @@ pub(crate) fn search_core(
             // ```
             let x_t = super::x_timing::lap();
             let fixed_spaces = &spaces;
-            let lookup = Lookup::new(batch, &params, options)?;
+            // Dispatch point (LOSAT_X_BXBUILDPAR, in the strict set): a batch of the capped batch
+            // flow builds its table on the threads the cap leaves it (x_bx_mem.rs).
+            #[cfg(feature = "parallel")]
+            let x_parts = x_bx_mem::build_parts(pool, false);
+            #[cfg(not(feature = "parallel"))]
+            let x_parts = 1;
+            let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
             let last = batch.contexts.last().expect("BLASTX contexts");
             let mut diagonals = Diagonals::new(last.offset + last.length, options.window_size)?;
             let xdrop = subject_parameters(
@@ -940,6 +984,7 @@ pub(crate) fn search_core(
                     xdrop,
                     db_length,
                     x_containment,
+                    x_bx_mem::in_capped_batch(pool),
                     sink,
                 )?;
                 super::x_timing::batch(XBatch::ScanPar, x_t);
@@ -1275,7 +1320,9 @@ pub(crate) fn search_core(
 // sink: the chunk's scoring parameters, lookup table, diagonal table, subject parameters and the
 // subject loop. The code is the same; it returns the results instead of writing them to the sink.
 /// Everything the chunk loop computes before it talks to the sink, for one chunk; `None` when no
-/// context of the chunk has valid Karlin parameters (the loop then skips the chunk).
+/// context of the chunk has valid Karlin parameters (the loop then skips the chunk). `x_par`: the
+/// chunk's subjects as tasks of that many subjects on the pool (`LOSAT_X_BXUNITCAP`'s waves);
+/// `x_parts`: the parts of its lookup table's build (`LOSAT_X_BXBUILDPAR`).
 #[cfg(feature = "parallel")]
 #[allow(clippy::type_complexity)]
 fn x_compute_chunk(
@@ -1287,16 +1334,17 @@ fn x_compute_chunk(
     db_count: i64,
     min_subject_length: usize,
     x_containment: bool,
-    x_par: bool,
+    x_par: Option<usize>,
+    x_parts: usize,
 ) -> Result<Option<(Vec<ContextParameters>, Vec<(usize, SubjectComputation)>)>> {
     let batch = &chunk.prepared;
     let mut params = score_block(batch);
     if !params.iter().any(|p| p.valid) {
         return Ok(None);
     }
-    let lookup = Lookup::new(batch, &params, options)?;
+    let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
     let last = batch.contexts.last().expect("BLASTX contexts");
-    if x_par {
+    if let Some(per_task) = x_par {
         let xdrop = subject_parameters(
             batch,
             &mut params,
@@ -1307,6 +1355,7 @@ fn x_compute_chunk(
             Some(fixed_spaces),
         )?;
         let results = x_bx_mem::chunk_subjects_on_pool(
+            per_task,
             subjects,
             batch,
             &params,

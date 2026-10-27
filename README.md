@@ -37,6 +37,7 @@ On certified pairwise profiles and fixtures, LOSAT is checked against declared N
 | **`blastp`** | `blastp` (default), `blastp-fast` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Protein vs. protein alignment |
 | **`tblastx`** | `tblastx` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
 | **`tblastn`** | `tblastn` (default) | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
+| **`psiblast`** | the first round (`-num_iterations 1`, the default) | `0`, `6`, `7` | Position-Specific Iterated BLAST: the first round, blastp's search with psiblast's report (see [section 7](#7-psi-blast-psiblast-first-round)) |
 
 > **Not supported**: `-task blastp-short` and `-task tblastn-fast` are rejected at the command line with an error message.
 >
@@ -63,7 +64,7 @@ The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blas
 | `8` | Seqalign (Text ASN.1) | all five | all five programs |
 | `9` | Seqalign (Binary ASN.1) | all five | all five programs |
 | `10` | Comma-separated values | all five | not yet |
-| `11` | BLAST archive (ASN.1) | all five | `blastn`, `blastp`, `blastx` and `tblastn` (with `-subject` and `-db`; `ARCHIVE_FORMAT` text and `bin`, as NCBI reads it; `xml` is refused for now); `tblastx`: not yet |
+| `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | all five | every program (with `-subject` and `-db`; `ARCHIVE_FORMAT` unset: ASN.1 text, `bin...`: ASN.1 binary, `xml`: XML (`Blast4-archive`), any case, as NCBI reads it) |
 | `12` | Seqalign (JSON) | all five | all five programs |
 | `13` | Multiple-file BLAST JSON | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |
 | `14` | Multiple-file BLAST XML2 | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |
@@ -130,6 +131,8 @@ The compiled binary will be located at `target/release/losat`.
 | WASI serial (`wasm32-wasip1`) | **Certified** against NCBI BLAST+ 2.17.0 on the certification set |
 | WASI threads (`wasm32-wasip1-threads`) | **Supported**: tested in CI, not certified |
 | [Web GUI](#web-gui-preview) (browser) | **Preview**: no NCBI certification is claimed |
+
+On macOS, an E value printed with full precision (`-outfmt 11`, `-outfmt 8`) can differ from other platforms by 1 in its last (15th) digit because of Apple's libm, as in NCBI BLAST+ built on macOS; see [PD-LOSAT-PLATFORM-LIBM](docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md).
 
 ---
 
@@ -229,7 +232,17 @@ losat blastx \
   -num_threads 8
 ```
 
-`blastp -db`, `blastn -db` (megablast, blastn, dc-megablast), `tblastn -db`, `blastx -db` and `tblastx -db` search a protein or nucleotide database written by `losat makedb` or by `makeblastdb` without `-parse_seqids` (format versions 4 and 5, several volumes, alias files), found as NCBI finds it (the current directory, `BLASTDB`, `.ncbirc`). The output is that of NCBI BLAST+ 2.17.0 `blastp -db`, `blastn -db`, `tblastn -db`, `blastx -db` or `tblastx -db` run with `-num_threads 1`, for outfmt 0, 6 and 7, and it is the same at every `-num_threads`. A database search differs from `-subject` on the same sequences as it does in NCBI BLAST+ (the statistics see the database and the `Database:` lines differ; the random bases that stand for ambiguous letters in a nucleotide database are the ones `-subject` draws, but a database stores a hyphen as `N` where `-subject` drops it). `-dbsize` is accepted with `-db` and `-subject`; `-searchsp`, databases with parsed Seq-ids (NCBI's distributed databases), id and taxonomy filters and several databases in one `-db` are rejected. See [PD-LOSAT-DATABASE-SEARCH](docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md) for what is rejected.
+`blastp -db`, `blastn -db` (megablast, blastn, dc-megablast), `tblastn -db`, `blastx -db` and `tblastx -db` search a protein or nucleotide database written by `losat makedb` or by `makeblastdb` without `-parse_seqids` (format versions 4 and 5, several volumes, alias files); `blastp -db` and `blastx -db` also search a database built with `-parse_seqids` (NCBI's distributed protein databases such as swissprot and pdbaa), with NCBI's subject ids and titles in every format they write, found as NCBI finds it (the current directory, `BLASTDB`, `.ncbirc`). The output is that of NCBI BLAST+ 2.17.0 `blastp -db`, `blastn -db`, `tblastn -db`, `blastx -db` or `tblastx -db` run with `-num_threads 1`, for outfmt 0, 6 and 7, and it is the same at every `-num_threads`. A database search differs from `-subject` on the same sequences as it does in NCBI BLAST+ (the statistics see the database and the `Database:` lines differ; the random bases that stand for ambiguous letters in a nucleotide database are the ones `-subject` draws, but a database stores a hyphen as `N` where `-subject` drops it). `-dbsize` is accepted with `-db` and `-subject`; `-searchsp`, databases with parsed Seq-ids in `blastn`, `tblastn`, `tblastx` and `psiblast`, id and taxonomy filters and several databases in one `-db` are rejected. See [PD-LOSAT-DATABASE-SEARCH](docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md) for what is rejected.
+
+### 7. PSI-BLAST (psiblast), first round
+```bash
+losat psiblast \
+  -query protein.faa \
+  -db proteins_db \
+  -outfmt 6
+```
+
+`losat psiblast` runs the first round of NCBI BLAST+ 2.17.0 `psiblast` (`-num_iterations 1`, the default), with `-subject` or `-db`: the search of each query with blastp's options, one query at a time, and psiblast's report (the `PSIBLAST` header and references, `Results from round 1`, `# Iteration: 1`). It takes blastp's options without `-task` and `-ungapped` (`-soft_masking` included), and `-inclusion_ethresh` and `-pseudocount`. More rounds, the PSSM files (`-out_pssm`, `-out_ascii_pssm`, `-save_*`, `-in_pssm`), `-in_msa`, `-phi_pattern`, `-gap_trigger` and `-sum_stats` are rejected for now, as are the output formats other than `0`, `6` and `7`.
 
 ---
 
@@ -239,10 +252,10 @@ losat blastx \
 |:---|:---|:---|:---|
 | `-query <file>` | File path | *(Required)* | Input query sequence file (FASTA) |
 | `-subject <file>` | File path | *(Required unless `-db`)* | Input subject sequence file (FASTA) |
-| `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX; section 6) |
+| `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX, PSIBLAST; section 6) |
 | `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp` or `blastp-fast` (for `blastp`); `blastx` (for `blastx`); `tblastn` (for `tblastn`). `blastp-short` and `tblastn-fast` are not supported |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
-| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `11`=BLAST archive (`blastn`, `blastp`, `blastx` and `tblastn` so far), `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out` (every program), `15`=BLAST JSON and `16`=BLAST XML2 (every program), `17`=SAM (BLASTN only); custom tabular fields in BLASTP and BLASTX only |
+| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `11`=BLAST archive (every program), `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out` (every program), `15`=BLAST JSON and `16`=BLAST XML2 (every program), `17`=SAM (BLASTN only); custom tabular fields in BLASTP and BLASTX only |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |
 | `-max_target_seqs <int>`| Integer | `500` | Maximum number of aligned target sequences to keep |
 | `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |
@@ -349,7 +362,7 @@ The `LOSAT_X_*` environment variables, `LOSAT_TIMING`, `LOSAT_X_STATS`, `LOSAT_X
 ## Scope & Differences from NCBI BLAST+
 
 - **Intended Use Case**: LOSAT is engineered for local pairwise sequence comparisons (`-query` vs `-subject`).
-- **Database searches**: LOSAT searches `-subject` FASTA files and BLAST databases (`-db`, section 6) written by `makeblastdb` without `-parse_seqids` or by `losat makedb`; `-db` gives NCBI BLAST+ 2.17.0 `-db -num_threads 1` output at every thread count. NCBI's distributed databases (nr, nt, core_nt and other databases built with parsed Seq-ids), taxonomy and id filters, and several databases in one `-db` are not supported; use NCBI BLAST+ for those.
+- **Database searches**: LOSAT searches `-subject` FASTA files and BLAST databases (`-db`, section 6) written by `makeblastdb` (`blastp` and `blastx` also with `-parse_seqids`) or by `losat makedb`; `-db` gives NCBI BLAST+ 2.17.0 `-db -num_threads 1` output at every thread count. Databases built with parsed Seq-ids in `blastn`, `tblastn` and `tblastx` (NCBI's distributed nucleotide databases such as nt and core_nt), taxonomy and id filters, and several databases in one `-db` are not supported; use NCBI BLAST+ for those.
 - **TBLASTX Subject Genetic Code**: In NCBI BLAST+, local `-subject` searches inadvertently default to genetic code 1 (Standard) regardless of command-line flags. LOSAT correctly translates the subject according to `-db_gencode`. See [PD-TBLASTX-LOCAL-SUBJECT-GENCODE](docs/product_decisions/PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md).
 - **Fail-Fast Configuration**: Unsupported flags and tasks fail fast with clear error messages rather than silently falling back to uncertified defaults.
 

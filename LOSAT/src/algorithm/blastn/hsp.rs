@@ -376,6 +376,19 @@ pub struct HitList<L> {
 /// The hit list of a query's final HSP lists.
 pub type BlastnHitList = HitList<BlastnHspList>;
 
+/// No NCBI counterpart: reads LOSAT_X_BNHLGROW once. It is a strict-set switch: on unless it is
+/// `0`. With it a hit list's array is not reserved to NCBI's array size (`kStartValue` = 100
+/// lists, then doubled) when a list comes; it grows as lists come (`HitList::x_room_for_one`),
+/// up to that size. NCBI's array holds pointers (800 bytes for 100), LOSAT's holds the lists
+/// (40 bytes each, preliminary and final), so a search of many short queries with few subjects
+/// each kept about 4 KB per query. It changes no value NCBI computes: the array's capacity is
+/// read by nothing but `push`.
+#[inline(always)]
+fn x_bnhlgrow() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNHLGROW"))
+}
+
 pub type BlastnHspCompare = fn(&BlastnHsp, &BlastnHsp) -> Ordering;
 
 impl BlastnHsp {
@@ -958,11 +971,27 @@ impl<L: HitListEntry> HitList<L> {
             let next = self.hsplist_current.saturating_mul(2);
             self.hsplist_current = next.min(self.hsplist_max);
         }
-        if self.hsplist_array.capacity() < self.hsplist_current {
+        // EXPERIMENT (LOSAT_X_BNHLGROW): the array is not reserved to `hsplist_current` here;
+        // `x_room_for_one` grows it as the lists come.
+        if self.hsplist_array.capacity() < self.hsplist_current && !x_bnhlgrow() {
             self.hsplist_array
                 .reserve(self.hsplist_current - self.hsplist_array.capacity());
         }
         true
+    }
+
+    /// No NCBI counterpart (LOSAT_X_BNHLGROW): room for one more list in a full array below
+    /// `hsplist_current`, NCBI's array size: doubled from 4, never past that size. Without the
+    /// switch `grow_hsplist_array` has reserved `hsplist_current` lists, so no such array is full.
+    /// An array filled by its owner without `update` (its `hsplist_current` stays 0) is left to
+    /// `push`, as before.
+    #[inline]
+    fn x_room_for_one(&mut self) {
+        let len = self.hsplist_array.len();
+        if len == self.hsplist_array.capacity() && len < self.hsplist_current {
+            let room = (2 * len).max(4).min(self.hsplist_current);
+            self.hsplist_array.reserve_exact(room - len);
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3196-3209
@@ -1048,6 +1077,7 @@ impl<L: HitListEntry> HitList<L> {
             if self.hsplist_current == self.hsplist_count && !self.grow_hsplist_array() {
                 return;
             }
+            self.x_room_for_one();
             self.hsplist_array.push(hsp_list);
             self.hsplist_count += 1;
             self.worst_evalue = self
@@ -1600,6 +1630,35 @@ mod tests {
         assert!(hit_list.heapified);
         hit_list.sort_by_evalue();
         assert_eq!(list_oids(&hit_list), vec![9, 8, 7]);
+    }
+
+    // LOSAT_X_BNHLGROW (on unless `0`): the array doubles from 4 as lists come and never holds
+    // more room than NCBI's array (`hsplist_current`: 100, 200, then `hsplist_max`); without the
+    // switch it is reserved to that size when a list comes.
+    #[test]
+    fn hit_list_array_grows_as_lists_come_within_ncbi_array_size() {
+        let grows = x_bnhlgrow();
+        let mut hit_list = BlastnHitList::new(250);
+        let mut rooms = Vec::new();
+        for oid in 0..600 {
+            hit_list.update(make_list(oid, &[(1e-10, 100 + (oid % 13) as i32)]));
+            let room = hit_list.hsplist_array.capacity();
+            assert!(room >= hit_list.hsplist_count, "list {oid}");
+            if grows {
+                assert!(room <= hit_list.hsplist_current, "list {oid}: {room}");
+            }
+            rooms.push(room);
+        }
+        assert!(hit_list.heapified);
+        assert_eq!(hit_list.hsplist_count, 250);
+        if grows {
+            assert_eq!(
+                [rooms[0], rooms[3], rooms[4], rooms[64], rooms[99], rooms[100], rooms[200]],
+                [4, 4, 8, 100, 100, 200, 250]
+            );
+        } else {
+            assert_eq!([rooms[0], rooms[100]], [100, 200]);
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1392-1395

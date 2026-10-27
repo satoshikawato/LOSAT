@@ -1,6 +1,8 @@
 //! Native serial caller, tested through the internal probe before public dispatch.
 #[cfg(feature = "parallel")]
-use super::reader_batch::{attach, prepare_reader_batch, prepare_unit, ReaderBatchShape, UnitPrep};
+use super::reader_batch::{
+    attach, prepare_lone_unit, prepare_reader_batch, prepare_unit, ReaderBatchShape, UnitPrep,
+};
 use super::{
     archive,
     args::{BlastxArgs, SemanticOptionsError},
@@ -289,7 +291,9 @@ fn run_inner(
     }
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
     // before anything is read or written.
-    let archive = archive::handle_for(args, format == Some(app::ReportFormat::ArchiveFormat))?;
+    // The error archives follow the `-outfmt` text (`writes_error_archive`).
+    let archive = archive::handle_for(args, format == Some(app::ReportFormat::ArchiveFormat))?
+        .map(|handle| handle.with_outfmt_text(&args.outfmt));
     archive_slot.clone_from(&archive);
     // Preserve explicit product refusals; defer supported semantic failures
     // until subject and standard query/output streams have been extracted.
@@ -527,8 +531,8 @@ fn run_inner(
     // LOSAT's other refusals of BLAST XML (a title with a byte NCBI's XML stream cannot write)
     // come before the first byte, though the query file is read batch by batch: the query
     // titles are checked by a read of the file before the search, and a run in which a
-    // `-subject` title (or the message of a query) could still be refused later holds the
-    // document in memory until its epilog (`blast_xml::HeldOutput`; outfmt 13 and 14: the side files
+    // `-subject` title, the message of a query or a subject of a database with parsed Seq-ids
+    // could still be refused later holds the document in memory until its epilog (`blast_xml::HeldOutput`; outfmt 13 and 14: the side files
     // too). Only with outfmt 5 and 13 to 16; the other formats read the file once.
     if let Some(held) = &held {
         // A query that is not a regular file (a pipe, `<(...)`, `/dev/stdin` from a pipe, a
@@ -554,8 +558,14 @@ fn run_inner(
             && database
                 .as_ref()
                 .is_some_and(|database| database.taxdb_found() && database.taxdb_may_refuse());
+        // A database with parsed Seq-ids: a later batch can still refuse one of its subjects
+        // (`ReportedSubjects::for_batch`), which only the batch's hits show.
+        let parsed_may_be_refused = database
+            .as_ref()
+            .is_some_and(|database| database.parsed_seqids());
         if messages_may_be_refused
             || taxdb_may_refuse
+            || parsed_may_be_refused
             || super::blast_xml::subjects_may_be_refused(&subjects)
         {
             held.hold();
@@ -818,6 +828,7 @@ fn run_inner(
                                 false,
                                 false,
                                 false,
+                                false,
                             )
                             .map_err(|error| match error.downcast::<HeaderReadError>() {
                                 Ok(header) => header.error,
@@ -874,6 +885,7 @@ fn run_inner(
                             matches!(options.outfmt, 6 | 7),
                             options.outfmt == 0,
                             matches!(options.outfmt, 13..=16),
+                            matches!(options.outfmt, 0 | 5 | 13..=16),
                         );
                         super::x_timing::run(XRun::Titles, x_t);
                         reported
@@ -890,8 +902,12 @@ fn run_inner(
                                 }
                             })
                             .inspect_err(|error| {
-                                // A refusal of the XML2 document drops what the run holds.
-                                if error.is::<super::blast_xml::XmlRefusal>() {
+                                // A refusal of the XML2 document, or of a subject with parsed
+                                // Seq-ids, drops what the run holds.
+                                if error.is::<super::blast_xml::XmlRefusal>()
+                                    || error
+                                        .is::<crate::algorithm::common::database::ParsedRefusal>()
+                                {
                                     if let Some(held) = &held {
                                         held.discard();
                                     }
@@ -1040,7 +1056,7 @@ fn run_inner(
                 // A reader batch becomes its units; a batch of several is prepared first (phase
                 // 1, `reader_batch.rs`): by the waves at once, on the pool, by the flow as tasks.
                 let x_split = |queries: &[super::input::FastaRecord]| {
-                    let units = XUnit::split(queries, &options);
+                    let units = XUnit::split(queries, &options, false);
                     XUnit::prepare_now(&units, &|batch, ranges| {
                         prepare_reader_batch(batch, ranges, &options, search_subjects, pool)
                     });
@@ -1076,6 +1092,8 @@ fn run_inner(
                         Some(k) => (super::search::x_bx_mem::flow_bound(k), 1, k),
                         None => (x_wave, pool.threads(), usize::MAX),
                     };
+                    let x_ahead =
+                        x_cap.is_some() && super::search::x_bx_mem::prepares_batches_ahead();
                     return x_flow(
                         x_bound,
                         x_lookahead,
@@ -1084,18 +1102,24 @@ fn run_inner(
                         args.lcase_masking,
                         batch_size,
                         archive.is_some(),
-                        &|queries: &[super::input::FastaRecord]| XUnit::split(queries, &options),
+                        // Dispatch point (LOSAT_X_BXCAPFILL, in the strict set): in the capped
+                        // flow a reader batch of one unit is prepared by a task of its own before
+                        // its search, outside the K searched at a time (blastx/x_bx_mem.rs).
+                        &|queries: &[super::input::FastaRecord]| {
+                            XUnit::split(queries, &options, x_ahead)
+                        },
                         &|queries: &[super::input::FastaRecord],
-                          layout: &std::sync::Arc<ReaderBatchShape>| {
-                            prepare_unit(queries, layout, &options, search_subjects)
+                          layout: Option<&std::sync::Arc<ReaderBatchShape>>| match layout {
+                            Some(layout) => prepare_unit(queries, layout, &options, search_subjects),
+                            None => prepare_lone_unit(queries, &options),
                         },
                         &|unit: &XUnit, alone: bool| {
                             let queries = unit.queries();
                             let large = x_cap.is_some() || alone || x_large(queries);
                             crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", !large);
                             if large {
-                                let _x_live =
-                                    x_cap.map(|_| super::search::x_bx_mem::XCappedBatch::enter());
+                                let _x_live = x_cap
+                                    .map(|_| super::search::x_bx_mem::XCappedBatch::enter(pool));
                                 super::runtime::x_search_unit_in_pool(
                                     queries,
                                     search_subjects,
@@ -1380,7 +1404,14 @@ fn run_inner(
             match crate::utils::threading::x_with_search_pool_local(
                 options.num_threads as usize,
                 "BLASTX",
-                |pool| Ok(x_run_batches(Some(pool))),
+                |pool| {
+                    // The run's counts of LOSAT_X_BXUNITCAP (scheduling only), on its pool.
+                    #[cfg(feature = "parallel")]
+                    let x_caps = super::search::x_bx_mem::XCapRun::default();
+                    #[cfg(feature = "parallel")]
+                    let pool = &x_caps.attach(pool);
+                    Ok(x_run_batches(Some(pool)))
+                },
             ) {
                 Ok(batches) => batches,
                 Err(error) => Err(engine(error)),
@@ -1631,17 +1662,20 @@ struct XUnit {
     batch: std::sync::Arc<Vec<FastaRecord>>,
     range: std::ops::Range<usize>,
     last: bool,
-    /// Phase 1 of the unit's reader batch when the batch has several units, and the unit's place
-    /// in it. `None`: the unit is the whole reader batch.
+    /// Phase 1 of the unit's reader batch when the batch has several units (or, in the capped batch
+    /// flow, `LOSAT_X_BXCAPFILL`, is the unit itself), and the unit's place in it. `None`: the unit
+    /// is the whole reader batch and prepares itself when it is searched.
     prep: Option<(std::sync::Arc<XReaderPrep>, usize)>,
 }
 
-/// Phase 1 of a reader batch of several units (`reader_batch.rs`): the units' preparations, and
-/// (the flow) the searches that wait for them.
+/// Phase 1 of a reader batch of several units (`reader_batch.rs`), or of one unit prepared ahead
+/// (`LOSAT_X_BXCAPFILL`): the units' preparations, and (the flow) the searches that wait for them.
 #[cfg(feature = "parallel")]
 struct XReaderPrep {
-    /// The batch's values that follow from its records; each unit is prepared with them.
-    layout: std::sync::Arc<ReaderBatchShape>,
+    /// The batch's values that follow from its records; each unit is prepared with them. `None`:
+    /// a reader batch of one unit prepared ahead of its search (`LOSAT_X_BXCAPFILL`), which has no
+    /// shape (`reader_batch::prepare_lone_unit`).
+    layout: Option<std::sync::Arc<ReaderBatchShape>>,
     /// The units' preparations, from the end of phase 1 until each unit's search takes its own.
     /// All `None` if phase 1 failed: each unit then prepares itself when it is searched, and the
     /// one whose queries fail raises the error there (a reader batch with a search error writes
@@ -1668,9 +1702,9 @@ impl XReaderPrep {
             .collect();
         if self.failed.load(Ordering::Acquire) {
             slots.iter_mut().for_each(|slot| **slot = None);
-        } else {
+        } else if let Some(layout) = &self.layout {
             let shape = std::sync::Arc::new(ReaderBatchShape::reduce(
-                &self.layout,
+                layout,
                 slots
                     .iter()
                     .map(|slot| slot.as_ref().expect("a prepared unit")),
@@ -1690,14 +1724,26 @@ impl XReaderPrep {
 impl XUnit {
     /// The units of a reader batch, in order (the last one marked); a copy of the batch is
     /// shared by them. A batch of several units gets its phase 1 (`prepare_now`, or the flow's
-    /// tasks), which its units' searches take.
-    fn split(queries: &[FastaRecord], options: &super::args::ResolvedOptions) -> Vec<XUnit> {
+    /// tasks), which its units' searches take; with `ahead` (the capped batch flow,
+    /// `LOSAT_X_BXCAPFILL`) a batch of one unit of at most two search units' letters gets one too
+    /// (the flow's task, without a shape). A longer batch (one long query) prepares itself when it
+    /// is searched, as before: preparations held ahead are bounded by letters, not only by the
+    /// flow's count of unwritten batches.
+    fn split(
+        queries: &[FastaRecord],
+        options: &super::args::ResolvedOptions,
+        ahead: bool,
+    ) -> Vec<XUnit> {
         let batch = std::sync::Arc::new(queries.to_vec());
         let ranges = super::query_setup::batch_ranges(&batch, BATCH_SIZE);
         let count = ranges.len();
-        let prep = (count > 1).then(|| {
+        let ahead = ahead
+            && count == 1
+            && batch.iter().map(|q| q.sequence.len()).sum::<usize>() <= 2 * BATCH_SIZE;
+        let prep = (count > 1 || ahead).then(|| {
             std::sync::Arc::new(XReaderPrep {
-                layout: std::sync::Arc::new(ReaderBatchShape::layout(&batch, options)),
+                layout: (count > 1)
+                    .then(|| std::sync::Arc::new(ReaderBatchShape::layout(&batch, options))),
                 slots: (0..count).map(|_| std::sync::Mutex::new(None)).collect(),
                 remaining: std::sync::atomic::AtomicUsize::new(count),
                 failed: std::sync::atomic::AtomicBool::new(false),
@@ -1735,11 +1781,12 @@ impl XUnit {
         prep.gate.lock().expect("the reader batch's gate").0 = true;
     }
 
-    /// The flow's task of phase 1 for this unit: prepares it by `prepare`; the last task of the
-    /// reader batch ends phase 1 and returns the searches that waited for it.
+    /// The flow's task of phase 1 for this unit: prepares it by `prepare` (with the batch's layout,
+    /// or none for a batch of one unit prepared ahead); the last task of the reader batch ends
+    /// phase 1 and returns the searches that waited for it.
     fn prepare_task(
         &self,
-        prepare: &(dyn Fn(&[FastaRecord], &std::sync::Arc<ReaderBatchShape>) -> Result<UnitPrep>
+        prepare: &(dyn Fn(&[FastaRecord], Option<&std::sync::Arc<ReaderBatchShape>>) -> Result<UnitPrep>
               + Sync),
     ) -> Vec<(usize, XUnit, bool)> {
         use std::sync::atomic::Ordering;
@@ -1747,9 +1794,11 @@ impl XUnit {
             return Vec::new();
         };
         // A panic is a failure of phase 1: the unit prepares itself again when it is searched,
-        // and its search raises the panic where the unit is written.
+        // and its search raises the panic where the unit is written. (With `panic = "abort"`, the
+        // release profile, the process ends at the first panic instead, which may be before the
+        // batches ahead of this one are written.)
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            prepare(self.queries(), &prep.layout)
+            prepare(self.queries(), prep.layout.as_ref())
         })) {
             Ok(Ok(unit)) => {
                 *prep.slots[*position].lock().expect("a unit's preparation") = Some(unit)
@@ -1842,9 +1891,9 @@ type XSearched = std::thread::Result<Result<Vec<BatchResults>>>;
 // batches follow it and while fewer than `max_live` are spawned and not yet searched (by the
 // reading thread or by a search that ends); the batches still held when the input ends are
 // searched alone. At most `bound` batches are read and not yet written. `split` makes a reader
-// batch its units (the flow's batches); a reader batch of several units is prepared by `prepare`
-// (phase 1, one task per unit) before any of its units is searched. Returns what the reader
-// returns.
+// batch its units (the flow's batches); a reader batch of several units (in the capped flow with
+// `LOSAT_X_BXCAPFILL`, every reader batch) is prepared by `prepare` (phase 1, one task per unit)
+// before any of its units is searched. Returns what the reader returns.
 // No NCBI counterpart: scheduling of the batch searches only (NCBI's -mt_mode 1 runs batches as
 // nodes and prints them in order, blastx_app.cpp:345-357, cited in `run`); every value written
 // is computed by the same calls as without the switch, in the same order of writing.
@@ -1859,7 +1908,7 @@ fn x_flow(
     batch_size: usize,
     keep_defline: bool,
     split: &dyn Fn(&[FastaRecord]) -> Vec<XUnit>,
-    prepare: &(dyn Fn(&[FastaRecord], &std::sync::Arc<ReaderBatchShape>) -> Result<UnitPrep>
+    prepare: &(dyn Fn(&[FastaRecord], Option<&std::sync::Arc<ReaderBatchShape>>) -> Result<UnitPrep>
           + Sync),
     search: &(dyn Fn(&XUnit, bool) -> Result<Vec<BatchResults>> + Sync),
     write_unit: &mut dyn FnMut(
@@ -2094,7 +2143,8 @@ fn x_flow(
                 }
                 // The reader batch enters the flow as its units (at most 10002 letters each),
                 // each as a batch of a run without `BATCH_SIZE` does; the bound counts units. A
-                // reader batch of several units is prepared first (phase 1) by one task per unit,
+                // reader batch of several units (in the capped flow with LOSAT_X_BXCAPFILL, every
+                // reader batch) is prepared first (phase 1) by one task per unit,
                 // beside the searches of the batches before it, while this thread reads on: the
                 // last task ends phase 1 and starts the searches that were due before it ended
                 // (no thread waits for phase 1).
@@ -2218,7 +2268,7 @@ mod reader_batch_tests {
             .map(record)
             .to_vec();
         let options = super::super::stage_c_tests::options();
-        let units = XUnit::split(&batch, &options);
+        let units = XUnit::split(&batch, &options, false);
         let ranges: Vec<_> = units.iter().map(|unit| unit.range.clone()).collect();
         // 4000 + 4000 + 4000 reaches 10002 at the third record; 100 + 10002 at the fifth;
         // 5 + 20000 at the seventh; the rest is the last unit.
@@ -2230,7 +2280,7 @@ mod reader_batch_tests {
         assert_eq!(units[1].queries().len(), 2);
         // A reader batch of at most 10002 letters (the default, or a smaller `BATCH_SIZE`) is
         // one unit.
-        let small = XUnit::split(&batch[..3], &options);
+        let small = XUnit::split(&batch[..3], &options, false);
         assert_eq!(small.len(), 1);
         assert!(small[0].last);
     }

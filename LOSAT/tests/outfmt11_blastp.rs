@@ -4,8 +4,8 @@
 //! and the `db.sa.arch.bp.*` rows of `db_search_manifest.tsv`): `BATCH_SIZE` (one archive per
 //! query batch, `EffectiveSearchSpace` per batch, an unsearched batch repeating the last value), a
 //! reader error in the second batch (the archive of the first batch, then an error archive, rc 1),
-//! `ARCHIVE_FORMAT` (`bin...` in any case: ASN.1 binary; any value except `xml` that is not empty:
-//! nothing is written, rc 0), `-outfmt "11 qseqid"` (the specification is ignored), the errors
+//! `ARCHIVE_FORMAT` (`bin...` in any case: ASN.1 binary; `xml`: NCBI's XML archive; any other value
+//! that is not empty: nothing is written, rc 0), `-outfmt "11 qseqid"` (the specification is ignored), the errors
 //! NCBI turns into an error archive (a `-subject` or `-query` file that does not exist, with
 //! `-subject` and with `-db`; `-query_loc` and `-subject_loc` past the end; an option error inside
 //! `Run`: `-ungapped` with composition-based statistics), a query that has no letters at all, a run
@@ -83,6 +83,7 @@ struct Case {
 
 const BATCH: (&str, &str) = ("BATCH_SIZE", "150");
 const BIN_FORMAT: (&str, &str) = ("ARCHIVE_FORMAT", "bin");
+const XML_FORMAT: (&str, &str) = ("ARCHIVE_FORMAT", "xml");
 
 const fn case(
     name: &'static str,
@@ -103,6 +104,7 @@ const fn case(
 }
 
 const CASES: &[Case] = &[
+    case("default_sub_xml", &[XML_FORMAT], "arch_bp_q.faa", &[], 0),
     case("batches_sub", &[BATCH], "arch_bp_batches.faa", &[], 0),
     case(
         "batches_sub_bin",
@@ -330,30 +332,9 @@ fn the_out_file_receives_the_archive() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `ARCHIVE_FORMAT=xml` is NCBI's XML archive, which LOSAT does not write yet: it stops
-/// before the first byte and says so.
-#[test]
-fn xml_archives_are_refused_before_the_first_byte() {
-    let query = input("arch_bp_q.faa");
-    let subject = input("arch_bp_s.faa");
-    for value in ["xml", "XML", "Xml"] {
-        let output = run(
-            &[("ARCHIVE_FORMAT", value)],
-            &["-query", &query, "-subject", &subject, "-outfmt", "11"],
-            "1",
-        );
-        assert_ne!(output.status.code(), Some(0), "{value}");
-        assert!(output.stdout.is_empty(), "{value}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("ARCHIVE_FORMAT=xml with -outfmt 11 is not supported by LOSAT"),
-            "{value}: {stderr}"
-        );
-    }
-}
-
-/// A title with a byte outside `0x20..=0x7E` (0x80 and above, and 0x7F) is written as `#` by
-/// NCBI, with a diagnostic per byte: LOSAT refuses it (query, `-subject` and a `-db` name)
+/// In the text and binary archives a title with a byte outside `0x20..=0x7E` (0x80 and above,
+/// and 0x7F) is written as `#` by NCBI, with a diagnostic per byte (in XML NCBI writes the byte,
+/// and so does LOSAT): LOSAT refuses it (query, `-subject` and a `-db` name)
 /// before the first byte.
 #[test]
 fn non_ascii_titles_and_database_names_are_refused() {
@@ -554,5 +535,40 @@ fn messages_left_at_the_end_make_an_error_archive() {
             frozen("empty_pipe_mts1", "err"),
             "threads {threads}"
         );
+    }
+}
+
+/// NCBI's `PrintErrorArchive` converts the trimmed `-outfmt` text to an integer and writes
+/// nothing when that throws (`11 qseqid`); `11` with white space around it converts. NCBI 2.17.0
+/// with a missing `-query`: rc 1 and no bytes for `11 qseqid` and ` 11 qseqid`, the error
+/// archive of `noquery_sub` for ` 11 `.
+#[test]
+fn an_outfmt_spec_gets_no_error_archive() {
+    for threads in ["1", "4"] {
+        for (outfmt, written) in [("11 qseqid", false), (" 11 qseqid", false), (" 11 ", true)] {
+            let output = run(
+                &[],
+                &[
+                    "-query",
+                    &input("no_such_query.faa"),
+                    "-subject",
+                    &input("arch_bp_s.faa"),
+                    "-outfmt",
+                    outfmt,
+                ],
+                threads,
+            );
+            assert_eq!(output.status.code(), Some(1), "{outfmt:?}");
+            if written {
+                assert_eq!(output.stdout, frozen("noquery_sub", "out"), "{outfmt:?}");
+            } else {
+                assert!(
+                    output.stdout.is_empty(),
+                    "{outfmt:?}: {} bytes",
+                    output.stdout.len()
+                );
+            }
+            assert_eq!(output.stderr, frozen("noquery_sub", "err"), "{outfmt:?}");
+        }
     }
 }

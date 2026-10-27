@@ -354,6 +354,7 @@ fn scan<R: Read>(
     archive: bool,
 ) -> Result<(Vec<usize>, QueryEnd)> {
     let mut lengths = Vec::new();
+    let encoding = crate::report::archive::ArchiveEncoding::from_env();
     loop {
         if source.end() {
             return Ok((lengths, QueryEnd::Input));
@@ -365,7 +366,8 @@ fn scan<R: Read>(
         }) {
             Ok(record) => {
                 if archive {
-                    crate::report::archive::check_titles(
+                    crate::report::archive::check_titles_for(
+                        encoding,
                         std::slice::from_ref(&record),
                         "query",
                         "BLASTN",
@@ -443,12 +445,14 @@ impl Store {
     /// The first reading, on `source` (the reader `search_cli` made of the file, after its
     /// `IsIStreamEmpty`), where `read_queries` reads without the switch: each record's length is
     /// kept and the record dropped. Returns how the reading ended. `config` is the source's
-    /// configuration and `range` `-query_loc`.
+    /// configuration, `range` `-query_loc` and `threads` the search's threads (EXPERIMENT
+    /// LOSAT_X_QSCANPAR: the reading in parts on them, `x_query_scan_par.rs`).
     pub(super) fn read(
         opening: Opening,
         source: &mut FastaInputSource<File>,
         config: ReaderConfig,
         range: Option<&SequenceRange>,
+        threads: usize,
     ) -> Result<(Store, QueryEnd)> {
         let (again, start) = opening
             .again
@@ -456,7 +460,18 @@ impl Store {
         let started = Instant::now();
         // The BLAST archive (outfmt 11) refuses a query title it cannot write before the
         // first byte: this reading sees every record.
-        let (input_lengths, end) = scan(source, config.keep_defline)?;
+        // EXPERIMENT (LOSAT_X_QSCANPAR): the lengths read in parts on the search's threads, from the
+        // second handle at the position the source starts from; where the parts are not taken, the
+        // source reads them (its position is where it was: the parts read at offsets).
+        let parts = if super::x_query_scan_par::on() && !config.keep_defline {
+            super::x_query_scan_par::lengths(&again, start, config, threads)
+        } else {
+            None
+        };
+        let (input_lengths, end) = match parts {
+            Some(lengths) => (lengths, QueryEnd::Input),
+            None => scan(source, config.keep_defline)?,
+        };
         let scan = started.elapsed();
         let (query_input, lengths) = query_input_of(input_lengths, range);
         let reopen = |handle: &File| -> Result<File> {
@@ -841,10 +856,26 @@ impl<'a> Queries<'a> {
 
     /// The records of the loop's batch of input records `input` and searched queries `searched`.
     /// The loop takes its batches in order, each starting where the one before ended.
+    #[cfg(test)]
     pub(super) fn batch(
         &self,
         input: Range<usize>,
         searched: Range<usize>,
+    ) -> Result<BatchRecords<'a>> {
+        self.batch_in(
+            input,
+            searched,
+            &crate::utils::threading::SearchPool::x_serial(),
+        )
+    }
+
+    /// `batch`, the packed letters of a batch taken out of a LOSAT_X_BNQDROP `Store` made again by
+    /// `pool` (EXPERIMENT LOSAT_X_BNQPACK).
+    pub(super) fn batch_in(
+        &self,
+        input: Range<usize>,
+        searched: Range<usize>,
+        pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Result<BatchRecords<'a>> {
         match *self {
             Queries::Records {
@@ -856,7 +887,7 @@ impl<'a> Queries<'a> {
             }),
             Queries::Taken(store) => {
                 debug_assert_eq!(input, searched, "no -query_loc");
-                Ok(BatchRecords::Taken(store.take(input)?))
+                Ok(BatchRecords::Taken(store.take(input, pool)?))
             }
             Queries::Streamed(store) => {
                 let acting = store.acting();
@@ -1171,14 +1202,15 @@ mod tests {
     }
 
     /// The store of `path` as `search_cli` makes it (`IsIStreamEmpty`, then the first reading)
-    /// with the switch on, and how the first reading ended.
+    /// with the switch on, and how the first reading ended (one thread: the reading in parts of
+    /// LOSAT_X_QSCANPAR has its own tests).
     fn store(path: &Path, range: Option<&SequenceRange>) -> (Store, QueryEnd) {
         let file = File::open(path).expect("open the test file");
         let opening = Opening::with_mode(true, path, &file, false, true, NO_RULE);
         assert!(opening.acts());
         let mut source = FastaInputSource::from_file(file, config());
         assert!(!source.stream_is_empty());
-        Store::read(opening, &mut source, config(), range).expect("the first reading")
+        Store::read(opening, &mut source, config(), range, 1).expect("the first reading")
     }
 
     /// The records as `search_cli` reads them without the switch.

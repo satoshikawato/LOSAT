@@ -1,17 +1,22 @@
 //! BLASTX's memory at many threads on whole searches: the workers' diagonal tables kept one per
 //! thread (`LOSAT_X_BXDIAGKEEP`), the lookup tables' neighbour lists shared and their vectors kept
-//! between builds (`LOSAT_X_BXLUTPOOL`), and at most K query batches or chunks searched at a time
-//! (`LOSAT_X_BXUNITCAP[=K]`; `src/algorithm/blastx/x_bx_mem.rs`,
-//! `src/algorithm/tblastx/lookup/x_lut_direct.rs`).
+//! between builds (`LOSAT_X_BXLUTPOOL`; not in a search on one thread, `LOSAT_X_BXPOOLN1`), at most
+//! K query batches or chunks searched at a time (`LOSAT_X_BXUNITCAP[=K]`), and the capped units'
+//! threads filled with few subjects too (tasks of fewer subjects, each query batch prepared outside
+//! the cap: `LOSAT_X_BXCAPFILL`), their lookup tables built on the threads the cap leaves them
+//! (`LOSAT_X_BXBUILDPAR`), and the fused loop's context table made once per lookup table
+//! (`LOSAT_X_BXCTXONCE`; `src/algorithm/blastx/x_bx_mem.rs`, `src/algorithm/tblastx/lookup/x_lut_direct.rs`,
+//! `src/algorithm/blastx/x_seed_diag.rs`).
 //!
-//! The three are in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). They change which
+//! They are in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). They change which
 //! thread computes what, and the vectors the tables are built on, not what is computed, so the
 //! property under test is that the report does not depend on them: standard output equals that of
-//! the same search with all three `=0`, for several query batches (the batch flow,
+//! the same search with all of them `=0`, for several query batches (the batch flow,
 //! `LOSAT_X_BXFLOW`) and for one query split into chunks (the chunk waves, `LOSAT_X_BXPAR`), with
 //! the cap acting (`LOSAT_X_BXUNITCAP=2` at 4 threads; its built-in K = 8 needs 9 threads or more),
-//! not acting, and with each part off. `LOSAT_X_REACH` shows that the cap acted, and that it does
-//! not act where K units would leave threads without a task (too few subjects). That a pooled
+//! not acting, and with each part off. `LOSAT_X_REACH` shows that the cap acted, and that with
+//! `LOSAT_X_BXCAPFILL=0` it does not act where K units would leave threads without a task (too few
+//! subjects). That a pooled
 //! table equals the reference table is a unit test of `x_lut_direct.rs`; that the bytes equal
 //! NCBI's is the business of the BLASTX fixtures and the campaign's comparison runs.
 //!
@@ -68,11 +73,22 @@ fn genome() -> String {
 /// `pieces` queries of `length` letters of AP027131 from position 100,000, 20,000 letters apart
 /// (closer where that would pass the end), and the first `proteins` proteins of AP027131, as files.
 fn inputs(dir: &Path, pieces: usize, length: usize, proteins: usize) -> (PathBuf, PathBuf) {
+    inputs_from(dir, 100_000, pieces, length, proteins)
+}
+
+/// `inputs` with the pieces from position `from` (the first proteins lie at the genome's start).
+fn inputs_from(
+    dir: &Path,
+    from: usize,
+    pieces: usize,
+    length: usize,
+    proteins: usize,
+) -> (PathBuf, PathBuf) {
     let genome = genome();
-    let step = ((genome.len() - 100_000 - length) / pieces).min(20_000);
+    let step = ((genome.len() - from - length) / pieces).min(20_000);
     let mut text = String::new();
     for piece in 0..pieces {
-        let start = 100_000 + piece * step;
+        let start = from + piece * step;
         text.push_str(&format!(
             ">piece{piece} AP027131 {start}-{}\n{}\n",
             start + length,
@@ -138,18 +154,30 @@ fn blastx(query: &Path, args: &[&str], threads: u32, env: &[(&str, &str)]) -> Ve
 
 /// The sides of `LOSAT_X_BXUNITCAP` one search reached (`LOSAT_X_REACH`): (own path, reference).
 fn cap_sides(dir: &Path, query: &Path, args: &[&str], env: &[(&str, &str)]) -> (bool, bool) {
-    let reach = dir.join(format!("reach-{}", env.len()));
+    sides(dir, query, args, 4, env, "LOSAT_X_BXUNITCAP")
+}
+
+/// The sides of `switch` one search at `threads` threads reached: (own path, reference).
+fn sides(
+    dir: &Path,
+    query: &Path,
+    args: &[&str],
+    threads: u32,
+    env: &[(&str, &str)],
+    switch: &str,
+) -> (bool, bool) {
+    let reach = dir.join(format!("reach-{}-{threads}", env.len()));
     let _ = std::fs::remove_dir_all(&reach);
     let mut env = env.to_vec();
     let reach_text = reach.to_str().unwrap().to_string();
     env.push(("LOSAT_X_REACH", &reach_text));
-    blastx(query, args, 4, &env);
+    blastx(query, args, threads, &env);
     let mut sides = (false, false);
     for file in std::fs::read_dir(&reach).unwrap() {
         let text = std::fs::read_to_string(file.unwrap().path()).unwrap();
         for line in text.lines() {
             let fields: Vec<&str> = line.split('\t').collect();
-            if fields[0] == "LOSAT_X_BXUNITCAP" {
+            if fields[0] == switch {
                 sides.0 |= fields[1] == "1";
                 sides.1 |= fields[2] == "1";
             }
@@ -159,8 +187,12 @@ fn cap_sides(dir: &Path, query: &Path, args: &[&str], env: &[(&str, &str)]) -> (
 }
 
 const ALL_OFF: &[(&str, &str)] = &[
+    ("LOSAT_X_BXBUILDPAR", "0"),
+    ("LOSAT_X_BXCAPFILL", "0"),
+    ("LOSAT_X_BXCTXONCE", "0"),
     ("LOSAT_X_BXDIAGKEEP", "0"),
     ("LOSAT_X_BXLUTPOOL", "0"),
+    ("LOSAT_X_BXPOOLN1", "0"),
     ("LOSAT_X_BXUNITCAP", "0"),
 ];
 
@@ -181,15 +213,29 @@ fn several_query_batches_give_the_report_without_the_switches() {
         &[("LOSAT_X_BXUNITCAP", "2")][..],
         &[("LOSAT_X_BXUNITCAP", "3"), ("LOSAT_X_BXLUTPOOL", "0")][..],
         &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXDIAGKEEP", "0")][..],
+        &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXBUILDPAR", "0")][..],
+        &[("LOSAT_X_BXUNITCAP", "3"), ("LOSAT_X_BXCTXONCE", "0")][..],
     ] {
         assert!(
             blastx(&query, &args, 4, env) == reference,
             "{env:?}: report differs"
         );
     }
-    // The cap acts with K below the thread count and only with the workers' tables kept.
+    // The cap acts with K below the thread count and only with the workers' tables kept; then
+    // the capped batches build their tables on two tasks each.
     assert_eq!(
         cap_sides(&dir, &query, &args, &[("LOSAT_X_BXUNITCAP", "2")]),
+        (true, false)
+    );
+    assert_eq!(
+        sides(
+            &dir,
+            &query,
+            &args,
+            4,
+            &[("LOSAT_X_BXUNITCAP", "2")],
+            "LOSAT_X_BXBUILDPAR"
+        ),
         (true, false)
     );
     assert_eq!(cap_sides(&dir, &query, &args, &[]), (false, true));
@@ -202,13 +248,54 @@ fn several_query_batches_give_the_report_without_the_switches() {
         ),
         (false, true)
     );
-    // 40 proteins: the subject flow does not run (64 subjects or fewer), so a capped batch would
-    // search on one thread; the cap does not act.
-    let (query, few) = inputs(&dir, 8, 4_000, 40);
+    // 40 proteins: without LOSAT_X_BXCAPFILL the subject flow does not run (64 subjects or
+    // fewer), so a capped batch would search on one thread, and the cap does not act. With it the
+    // capped batches' subjects run as tasks of 5 (f = 4 tasks for each of the 2 threads a batch is
+    // left), each batch prepared ahead, and the cap acts; the report is the same. With it the cap
+    // acts for one protein too (one task: the cap holds wherever there are more threads than K),
+    // with the same report; without it the old rule leaves one protein uncapped. The pieces start
+    // at the genome's start, where the 40 proteins lie.
+    let (query, few) = inputs_from(&dir, 0, 8, 4_000, 40);
     let args = ["-subject", few.to_str().unwrap(), "-outfmt", "6"];
+    let cap2 = [("LOSAT_X_BXUNITCAP", "2")];
     assert_eq!(
-        cap_sides(&dir, &query, &args, &[("LOSAT_X_BXUNITCAP", "2")]),
+        cap_sides(&dir, &query, &args, &[cap2[0], ("LOSAT_X_BXCAPFILL", "0")]),
         (false, true)
+    );
+    assert_eq!(cap_sides(&dir, &query, &args, &cap2), (true, false));
+    assert_eq!(
+        sides(&dir, &query, &args, 4, &cap2, "LOSAT_X_BXCAPFILL"),
+        (true, false)
+    );
+    let reference = blastx(&query, &args, 4, ALL_OFF);
+    assert!(
+        reference.iter().filter(|&&b| b == b'\n').count() > 5,
+        "40 proteins: too few hits to test"
+    );
+    for env in [
+        &cap2[..],
+        &[cap2[0], ("LOSAT_X_BXCAPFILL", "2")][..],
+        &[("LOSAT_X_BXUNITCAP", "3"), ("LOSAT_X_BXCAPFILL", "8")][..],
+    ] {
+        assert!(
+            blastx(&query, &args, 4, env) == reference,
+            "40 proteins {env:?}: report differs"
+        );
+    }
+    let (query, one) = inputs(&dir, 8, 4_000, 1);
+    let args = ["-subject", one.to_str().unwrap(), "-outfmt", "6"];
+    assert_eq!(cap_sides(&dir, &query, &args, &cap2), (true, false));
+    assert_eq!(
+        sides(&dir, &query, &args, 4, &cap2, "LOSAT_X_BXCAPFILL"),
+        (true, false)
+    );
+    assert_eq!(
+        cap_sides(&dir, &query, &args, &[cap2[0], ("LOSAT_X_BXCAPFILL", "0")]),
+        (false, true)
+    );
+    assert!(
+        blastx(&query, &args, 4, &cap2) == blastx(&query, &args, 4, ALL_OFF),
+        "1 protein: report differs"
     );
     // Forty queries: sixteen batches, more than the capped flow reads ahead of the writing with
     // K = 2 (`flow_bound`), so the reader waits and batches are spawned by searches that end.
@@ -234,7 +321,11 @@ fn a_split_query_gives_the_report_without_the_switches() {
         reference.iter().filter(|&&b| b == b'\n').count() > 20,
         "too few hits to test"
     );
-    for env in [&[][..], &[("LOSAT_X_BXUNITCAP", "2")][..]] {
+    for env in [
+        &[][..],
+        &[("LOSAT_X_BXUNITCAP", "2")][..],
+        &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXBUILDPAR", "0")][..],
+    ] {
         assert!(
             blastx(&query, &args, 4, env) == reference,
             "{env:?}: report differs"
@@ -252,20 +343,81 @@ fn a_split_query_gives_the_report_without_the_switches() {
             == blastx(&query, &args, 4, ALL_OFF),
         "-db: report differs"
     );
-    // 20 proteins make two tasks of 16 per chunk: two chunks at a time give four threads a task,
-    // and the cap acts on the chunk waves (not on the batch flow, whose batch has no subject flow
-    // with 64 subjects or fewer); 10 proteins make one task, and it acts nowhere.
+    // Without LOSAT_X_BXCAPFILL, 20 proteins make two tasks of 16 per chunk: two chunks at a time
+    // give four threads a task, and the cap acts on the chunk waves (not on the batch flow, whose
+    // batch has no subject flow with 64 subjects or fewer); 10 proteins make one task, and it acts
+    // nowhere. With it, 10 proteins make five tasks of 2 per chunk (and the batch flow's subject
+    // flow tasks of 2): the cap acts on both, and the report is the same.
+    let cap2 = [("LOSAT_X_BXUNITCAP", "2")];
+    let fill0 = [cap2[0], ("LOSAT_X_BXCAPFILL", "0")];
     let (query, twenty) = inputs(&dir, 1, 45_000, 20);
     let args = ["-subject", twenty.to_str().unwrap(), "-outfmt", "6"];
-    assert_eq!(
-        cap_sides(&dir, &query, &args, &[("LOSAT_X_BXUNITCAP", "2")]),
-        (true, true)
-    );
+    assert_eq!(cap_sides(&dir, &query, &args, &fill0), (true, true));
     let (query, ten) = inputs(&dir, 1, 45_000, 10);
     let args = ["-subject", ten.to_str().unwrap(), "-outfmt", "6"];
-    assert_eq!(
-        cap_sides(&dir, &query, &args, &[("LOSAT_X_BXUNITCAP", "2")]),
-        (false, true)
+    assert_eq!(cap_sides(&dir, &query, &args, &fill0), (false, true));
+    assert_eq!(cap_sides(&dir, &query, &args, &cap2), (true, false));
+    assert!(
+        blastx(&query, &args, 4, &cap2) == blastx(&query, &args, 4, ALL_OFF),
+        "10 proteins: report differs"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `LOSAT_X_BXKAONCE` (a query batch's Karlin blocks computed once, `blastx/search.rs`): the report
+/// equals that without it. The reuse runs in the serial chunk loop for a batch that is not split,
+/// so the search is run at one thread (the loop) and at four (the batch flow).
+#[test]
+fn several_queries_give_the_report_without_ka_once() {
+    let dir = temp_dir("ka-once");
+    let (query, set) = inputs(&dir, 4, 4_000, 595);
+    let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+    let off = [("LOSAT_X_BXKAONCE", "0")];
+    for threads in [1, 4] {
+        let reference = blastx(&query, &args, threads, &off);
+        assert!(
+            reference.iter().filter(|&&b| b == b'\n').count() > 20,
+            "too few hits to test"
+        );
+        assert!(
+            blastx(&query, &args, threads, &[]) == reference,
+            "{threads} threads: report differs"
+        );
+    }
+    assert_eq!(
+        sides(&dir, &query, &args, 1, &[], "LOSAT_X_BXKAONCE"),
+        (true, false)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `LOSAT_X_BXPOOLN1` (a search on one thread builds and frees its lookup tables without the pool,
+/// `tblastx/lookup/x_lut_direct.rs`): at one thread the report equals that without it, for several
+/// query batches (one table each) and for a split query (a table per chunk); `LOSAT_X_REACH` shows
+/// that it acts at one thread and not at four (where both build pooled).
+#[test]
+fn queries_give_the_report_without_pool_n1() {
+    let dir = temp_dir("pool-n1");
+    let off = [("LOSAT_X_BXPOOLN1", "0")];
+    for (pieces, length) in [(4, 4_000), (1, 45_000)] {
+        let (query, set) = inputs(&dir, pieces, length, 595);
+        let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+        let reference = blastx(&query, &args, 1, &off);
+        assert!(
+            reference.iter().filter(|&&b| b == b'\n').count() > 20,
+            "too few hits to test"
+        );
+        assert!(
+            blastx(&query, &args, 1, &[]) == reference,
+            "{pieces} x {length} letters: report differs"
+        );
+        for threads in [1, 4] {
+            assert_eq!(
+                sides(&dir, &query, &args, threads, &[], "LOSAT_X_BXPOOLN1"),
+                (threads == 1, threads > 1),
+                "{pieces} x {length} letters, {threads} threads: sides"
+            );
+        }
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

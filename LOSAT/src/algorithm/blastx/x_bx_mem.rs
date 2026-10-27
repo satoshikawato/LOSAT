@@ -40,15 +40,48 @@
 //!   `flow_bound` of those, so a slow batch at the head of the output does not stop the others), a
 //!   search that ends starts the next batch itself, and the subject flow's helpers inside a capped
 //!   batch leave once every task of the chunk is claimed (`in_capped_batch`) instead of waiting for
-//!   the batch's thread to finish.
+//!   the batch's thread to finish. These counts are the run's: the native run attaches them to its
+//!   pool (`XCapRun`), so searches side by side in one process (lib tests, an embedding host) do
+//!   not see each other's batches; a search on a pool without them counts process-wide.
+//! - `LOSAT_X_BXCAPFILL[=f]` (built-in f = 4; acts only where `LOSAT_X_BXUNITCAP` caps): the capped
+//!   units keep the threads busy with few subjects too. A capped unit's subjects run as tasks of
+//!   `capped_subjects_per_task` subjects: f tasks for each of the `ceil(threads / K)` threads a unit
+//!   is left, at least one subject and at most the size without the cap (64 for the batch flow's
+//!   subject flow, 16 for the chunk waves; a set keeps that size from 64 x f x ceil(threads / K)
+//!   subjects, 512 at 16 threads), and the cap holds wherever there are more threads than K
+//!   (`unit_cap`; without the fill it also needs K units with a task for every thread). And the
+//!   capped batch flow prepares each query batch of at most two search units' letters
+//!   (translation, filtering, Karlin blocks: `reader_batch::prepare_lone_unit`, which
+//!   `search::search_core` runs when a batch prepares itself) as a task of its own when the reader
+//!   delivers it, as it prepares the units of a reader batch of several (`native.rs`
+//!   `XUnit::split`), so that the lookup table's build and the subject search are what the cap
+//!   holds to K at a time (a batch spawned before its preparation ends holds one of the K places
+//!   while it waits). Without it, a unit of 64 subjects or fewer had no subject flow, so the cap
+//!   left the batch flow alone and every thread searched its own batch with its own table; forced
+//!   on, the cap ran the preparation (about half of the work at one thread) on K threads. Measured
+//!   (ws node 0, untimed, 800 cDNAs x 50 yeast proteins `-subject`, 16 threads): one batch per
+//!   thread 0.17 s and 128 MiB; the cap with tasks of 4 subjects but the preparation inside it
+//!   x1.59 and 68 MiB; this switch x0.98 and 71 MiB (NCBI `-subject`, one thread: 6.0 s, 80 MiB);
+//!   200 proteins x0.74. With `LOSAT_TIMING` the preparation ahead is not in the batch's
+//!   `QuerySetup` clock.
+//! - `LOSAT_X_BXBUILDPAR` (acts where `LOSAT_X_BXUNITCAP` caps): the lookup table of a capped unit
+//!   is built on `ceil(threads / K)` tasks of the pool (the threads a unit is left), its passes by
+//!   ranges of source cells (`tblastx/lookup/x_lut_direct.rs` `x_partitioned_passes`, which gives
+//!   the argument that the table is the one-thread build's), instead of on the unit's thread
+//!   alone: with K units at a time the builds were the part of the unit no other thread could
+//!   take (2.7 ms of a 3.6 ms batch at 32 threads, 800 cDNAs x 8 yeast proteins). Build alone (ws,
+//!   a 10,002-base batch's six frames): 7.8 ms on one thread, 1.8 ms in 4 parts on 4 threads.
 //!
 //! Exactness. A subject's computation depends on the subject and the query chunk alone, not on the
 //! diagonal table it runs on, while no diagonal offset passes 2^30 (`x_subject_flow.rs`, module
 //! comment); both switches act only where `x_subject_flow::offsets_stay_below_2_30` holds. The batch
 //! flow writes each batch's reports in the reader's order, and a capped batch is searched by the
 //! same function as the batches the flow searches with the pool inside; the chunk waves hand the
-//! sink every chunk and subject in the order of the serial chunk loop, as before. Only which thread
-//! computes what, and when, changes.
+//! sink every chunk and subject in the order of the serial chunk loop, as before. A batch prepared
+//! ahead (`LOSAT_X_BXCAPFILL`) is prepared by the statements its search runs when it prepares
+//! itself, from the same records and options, and its search takes that preparation instead (a
+//! preparation that fails is dropped, and the search prepares again and meets the error where it
+//! met it before). Only which thread computes what, and when, changes.
 
 use super::{compute_subject, SubjectComputation};
 use crate::algorithm::blastx::{
@@ -96,111 +129,242 @@ const UNIT_CAP: usize = 8;
 /// `LOSAT_X_BXUNITCAP`; 543 subjects make 34 tasks, enough for the threads a chunk is left.
 const UNIT_CAP_SUBJECTS_PER_TASK: usize = 16;
 
+/// No NCBI counterpart: K of `LOSAT_X_BXUNITCAP[=K]`; `None` when the switch is off.
+fn cap_k() -> Option<usize> {
+    static K: OnceLock<Option<usize>> = OnceLock::new();
+    *K.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BXUNITCAP", 2..=4_096, UNIT_CAP))
+}
+
+/// No NCBI counterpart: the built-in f of `LOSAT_X_BXCAPFILL` (tasks per thread of the capped units).
+const CAP_FILL: usize = 4;
+
+/// No NCBI counterpart: f of `LOSAT_X_BXCAPFILL[=f]`; `None` when the switch is off.
+fn cap_fill() -> Option<usize> {
+    static F: OnceLock<Option<usize>> = OnceLock::new();
+    *F.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BXCAPFILL", 2..=64, CAP_FILL))
+}
+
+/// No NCBI counterpart (scheduling only, `LOSAT_X_BXCAPFILL`): subjects per task of a unit searched
+/// under the cap K with `threads` threads: `most` (the size without the cap) when the switch is
+/// off; otherwise few enough that the unit has f tasks for each of the `ceil(threads / K)` threads
+/// it is left, at least one subject and at most `most`.
+fn capped_subjects_per_task(threads: usize, k: usize, subjects: usize, most: usize) -> usize {
+    cap_fill().map_or(most, |f| {
+        filled_subjects_per_task(f, threads, k, subjects, most)
+    })
+}
+
+/// No NCBI counterpart: `capped_subjects_per_task` with f tasks per thread.
+fn filled_subjects_per_task(
+    f: usize,
+    threads: usize,
+    k: usize,
+    subjects: usize,
+    most: usize,
+) -> usize {
+    subjects
+        .div_ceil(f.saturating_mul(threads.div_ceil(k.max(1))).max(1))
+        .clamp(1, most.max(1))
+}
+
 /// No NCBI counterpart: `Some(K)` where `LOSAT_X_BXUNITCAP[=K]` caps the units searched at a time,
-/// each unit with `tasks` tasks for the pool: the switch is on, there are more than K threads, K
-/// units have a task for every thread (else threads would wait that one unit per thread keeps busy),
-/// and the workers keep their diagonal tables (else each of the K units would make a table per
-/// thread).
+/// each unit with `tasks(K)` tasks for the pool: the switch is on, there are more than K threads, K
+/// units have a task for every thread (else threads would wait that one unit per thread keeps busy;
+/// with `LOSAT_X_BXCAPFILL` this condition is dropped), and the workers keep their diagonal tables
+/// (else each of the K units would make a table per thread). `LOSAT_X_BXCAPFILL` acts exactly where
+/// the cap does.
 fn unit_cap(
     threads: usize,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
-    tasks: usize,
+    tasks: impl FnOnce(usize) -> usize,
 ) -> Option<usize> {
-    static K: OnceLock<Option<usize>> = OnceLock::new();
-    let k = (*K
-        .get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BXUNITCAP", 2..=4_096, UNIT_CAP)))?;
-    let own = threads > k && k.saturating_mul(tasks) >= threads && keeps_tables(options, subjects);
+    let k = cap_k()?;
+    // With LOSAT_X_BXCAPFILL the cap holds wherever there are more threads than K: K units of few
+    // subjects leave threads without a subject task, but those threads take the parts of the K
+    // units' lookup-table builds (LOSAT_X_BXBUILDPAR) and the query batches prepared ahead, and a
+    // unit per thread would make a lookup table per thread.
+    let filled = cap_fill().is_some();
+    let own = threads > k
+        && (filled || k.saturating_mul(tasks(k)) >= threads)
+        && keeps_tables(options, subjects);
     crate::utils::xreach::x_reach!("LOSAT_X_BXUNITCAP", own);
+    if cap_fill().is_some() {
+        crate::utils::xreach::x_reach!("LOSAT_X_BXCAPFILL", own);
+    }
     own.then_some(k)
 }
 
 /// No NCBI counterpart: `LOSAT_X_BXUNITCAP`'s K for the batch flow (`native.rs`), where each capped
-/// batch's subjects would run as the subject flow (`x_subject_flow::fits`) in tasks of its `k`.
+/// batch's subjects would run as the subject flow (`x_subject_flow::fits`) in tasks of its `k`
+/// (`LOSAT_X_BXCAPFILL`: of `capped_subjects_per_task`).
 pub(crate) fn flow_unit_cap(
     pool: &crate::utils::threading::SearchPool<'_>,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
 ) -> Option<usize> {
-    let tasks = super::x_subject_flow::subjects_per_task()
-        .filter(|&k| super::x_subject_flow::fits(k, pool, false, options, subjects))
-        .map_or(0, |k| subjects.len().div_ceil(k));
-    unit_cap(pool.threads(), options, subjects, tasks)
+    let threads = pool.threads();
+    let cap = unit_cap(threads, options, subjects, |cap| {
+        super::x_subject_flow::subjects_per_task()
+            .map(|most| capped_subjects_per_task(threads, cap, subjects.len(), most))
+            .filter(|&k| super::x_subject_flow::fits(k, pool, false, options, subjects))
+            .map_or(0, |k| subjects.len().div_ceil(k))
+    });
+    cap
+}
+
+/// No NCBI counterpart: subjects per task of the subject flow in a chunk of a batch searched with
+/// the pool inside: `most`, or inside the capped batch flow (`in_capped_batch`) the size of
+/// `flow_unit_cap`'s tasks.
+pub(crate) fn flow_subjects_per_task(
+    pool: &crate::utils::threading::SearchPool<'_>,
+    subjects: usize,
+    most: usize,
+) -> usize {
+    match cap_k() {
+        Some(k) if in_capped_batch(pool) => {
+            capped_subjects_per_task(pool.threads(), k, subjects, most)
+        }
+        _ => most,
+    }
 }
 
 /// No NCBI counterpart: `LOSAT_X_BXUNITCAP`'s K for the chunk waves of a split query
-/// (`search::search_core`), each chunk's subjects in tasks of `UNIT_CAP_SUBJECTS_PER_TASK`.
+/// (`search::search_core`) and the subjects per task of each chunk on the pool:
+/// `UNIT_CAP_SUBJECTS_PER_TASK` (`LOSAT_X_BXCAPFILL`: at most that, `capped_subjects_per_task`).
 pub(crate) fn chunk_unit_cap(
     pool: &crate::utils::threading::SearchPool<'_>,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
-) -> Option<usize> {
-    let tasks = subjects.len().div_ceil(UNIT_CAP_SUBJECTS_PER_TASK);
-    unit_cap(pool.threads(), options, subjects, tasks)
+) -> Option<(usize, usize)> {
+    let threads = pool.threads();
+    let per_task =
+        |k| capped_subjects_per_task(threads, k, subjects.len(), UNIT_CAP_SUBJECTS_PER_TASK);
+    let k = unit_cap(threads, options, subjects, |k| {
+        subjects.len().div_ceil(per_task(k))
+    })?;
+    Some((k, per_task(k)))
 }
 
-// No NCBI counterpart: the batches the capped batch flow is searching now (scheduling only).
-static X_CAPPED_BATCHES: AtomicUsize = AtomicUsize::new(0);
+/// No NCBI counterpart: whether the capped batch flow prepares each query batch as a task of its
+/// own outside the cap (`LOSAT_X_BXCAPFILL`, module comment).
+pub(crate) fn prepares_batches_ahead() -> bool {
+    cap_fill().is_some()
+}
+
+/// No NCBI counterpart: whether `LOSAT_X_BXBUILDPAR` is on.
+fn build_par_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXBUILDPAR"))
+}
+
+/// No NCBI counterpart (scheduling only, `LOSAT_X_BXBUILDPAR`): the parts of the lookup table of
+/// a unit of `pool`'s search: `ceil(threads / K)` (the threads a unit is left) for a unit the cap K
+/// holds (`capped`: a chunk of the capped chunk waves, or any chunk inside the capped batch flow),
+/// else 1 (the build on one thread).
+pub(crate) fn build_parts(pool: &crate::utils::threading::SearchPool<'_>, capped: bool) -> usize {
+    if !build_par_on() {
+        return 1;
+    }
+    let k = cap_k().filter(|_| capped || in_capped_batch(pool));
+    let parts = k.map_or(1, |k| pool.threads().div_ceil(k));
+    crate::utils::xreach::x_reach!("LOSAT_X_BXBUILDPAR", parts > 1);
+    parts
+}
+
+// No NCBI counterpart: the counts of one run's capped batch flow (scheduling only): the batches it
+// is searching now and the chunks the waves of its split batches hold. The native run attaches one
+// to its pool (`XCapRun::attach`); a search on a pool without one counts in `X_PROCESS_RUN`.
+#[derive(Default)]
+pub(crate) struct XCapRun {
+    batches: AtomicUsize,
+    wave_chunks: AtomicUsize,
+}
+
+// No NCBI counterpart: the counts of the searches whose pool carries no `XCapRun`.
+static X_PROCESS_RUN: XCapRun = XCapRun {
+    batches: AtomicUsize::new(0),
+    wave_chunks: AtomicUsize::new(0),
+};
+
+impl XCapRun {
+    /// No NCBI counterpart: `pool` with `self` attached, so that the run's batches count here and
+    /// not with another search in the process (lib tests in parallel, an embedding host).
+    pub(crate) fn attach<'b>(
+        &'b self,
+        pool: &'b crate::utils::threading::SearchPool<'_>,
+    ) -> crate::utils::threading::SearchPool<'b> {
+        pool.x_with_ext(self)
+    }
+
+    /// No NCBI counterpart: the counts of the run searched on `pool`.
+    fn of<'a>(pool: &crate::utils::threading::SearchPool<'a>) -> &'a XCapRun {
+        pool.x_ext::<XCapRun>().unwrap_or(&X_PROCESS_RUN)
+    }
+}
 
 /// No NCBI counterpart: counts one batch of the capped batch flow while it is searched.
-pub(crate) struct XCappedBatch(());
+pub(crate) struct XCappedBatch<'a>(&'a XCapRun);
 
-impl XCappedBatch {
-    pub(crate) fn enter() -> Self {
-        X_CAPPED_BATCHES.fetch_add(1, Ordering::Relaxed);
-        Self(())
+impl<'a> XCappedBatch<'a> {
+    pub(crate) fn enter(pool: &crate::utils::threading::SearchPool<'a>) -> Self {
+        let run = XCapRun::of(pool);
+        run.batches.fetch_add(1, Ordering::Relaxed);
+        Self(run)
     }
 }
 
-impl Drop for XCappedBatch {
+impl Drop for XCappedBatch<'_> {
     fn drop(&mut self) {
-        X_CAPPED_BATCHES.fetch_sub(1, Ordering::Relaxed);
+        self.0.batches.fetch_sub(1, Ordering::Relaxed);
     }
 }
-
-// No NCBI counterpart: the chunks the waves of split queries hold now (scheduling only).
-static X_WAVE_CHUNKS: AtomicUsize = AtomicUsize::new(0);
 
 /// No NCBI counterpart: the chunks of one wave of a split query, held until the wave ends.
-pub(crate) struct XChunkWave(usize);
+pub(crate) struct XChunkWave<'a>(usize, &'a XCapRun);
 
-impl XChunkWave {
+impl XChunkWave<'_> {
     pub(crate) fn size(&self) -> usize {
         self.0
     }
 }
 
-impl Drop for XChunkWave {
+impl Drop for XChunkWave<'_> {
     fn drop(&mut self) {
-        X_WAVE_CHUNKS.fetch_sub(self.0, Ordering::Relaxed);
+        self.1.wave_chunks.fetch_sub(self.0, Ordering::Relaxed);
     }
 }
 
 /// No NCBI counterpart: the next wave of a split query under the cap K: K + 1 chunks less the capped
 /// batches searched now (the batch itself among them) and the chunks other waves hold, at least
 /// one, at most K. Waves that start at once take their chunks one after another, and a wave keeps
-/// its chunks until it ends, so a batch that starts later does not take K as well.
-pub(crate) fn chunk_wave(k: usize) -> XChunkWave {
-    let batches = X_CAPPED_BATCHES.load(Ordering::Relaxed);
-    let mut held = X_WAVE_CHUNKS.load(Ordering::Relaxed);
+/// its chunks until it ends, so a batch that starts later does not take K as well. The counts are
+/// those of the run searched on `pool`.
+pub(crate) fn chunk_wave<'a>(
+    pool: &crate::utils::threading::SearchPool<'a>,
+    k: usize,
+) -> XChunkWave<'a> {
+    let run = XCapRun::of(pool);
+    let batches = run.batches.load(Ordering::Relaxed);
+    let mut held = run.wave_chunks.load(Ordering::Relaxed);
     loop {
         let size = (k + 1).saturating_sub(batches + held).clamp(1, k);
-        match X_WAVE_CHUNKS.compare_exchange_weak(
+        match run.wave_chunks.compare_exchange_weak(
             held,
             held + size,
             Ordering::Relaxed,
             Ordering::Relaxed,
         ) {
-            Ok(_) => return XChunkWave(size),
+            Ok(_) => return XChunkWave(size, run),
             Err(now) => held = now,
         }
     }
 }
 
-/// No NCBI counterpart: whether a batch of the capped batch flow is being searched now (on this
-/// run's pool, every batch then is one).
-pub(crate) fn in_capped_batch() -> bool {
-    X_CAPPED_BATCHES.load(Ordering::Relaxed) > 0
+/// No NCBI counterpart: whether a batch of the capped batch flow of the run searched on `pool` is
+/// being searched now (every batch of that run then is one).
+pub(crate) fn in_capped_batch(pool: &crate::utils::threading::SearchPool<'_>) -> bool {
+    XCapRun::of(pool).batches.load(Ordering::Relaxed) > 0
 }
 
 /// No NCBI counterpart: batches the capped batch flow may have read and not yet written, under the
@@ -289,11 +453,12 @@ impl XScratch<'_> {
 // NCBI scans a chunk's subjects one after another on one diagonal table. Here they are tasks of
 // consecutive subjects on the pool, each task on its thread's table (module comment: the table's
 // history does not change a subject's computation), and the results are kept in subject order.
-/// `search::x_compute_chunk`'s subject loop as tasks of `UNIT_CAP_SUBJECTS_PER_TASK` consecutive
-/// subjects on the pool (`LOSAT_X_BXUNITCAP`): the subjects with something for the sink, in subject
+/// `search::x_compute_chunk`'s subject loop as tasks of `k` consecutive subjects on the pool
+/// (`LOSAT_X_BXUNITCAP`, `chunk_unit_cap`): the subjects with something for the sink, in subject
 /// order, or the error of the first subject that failed.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn chunk_subjects_on_pool(
+    k: usize,
     subjects: Subjects<'_>,
     batch: &PreparedQueryBatch,
     params: &[ContextParameters],
@@ -309,7 +474,6 @@ pub(super) fn chunk_subjects_on_pool(
     let last = batch.contexts.last().expect("BLASTX contexts");
     let length = last.offset + last.length;
     let n = subjects.len();
-    let k = UNIT_CAP_SUBJECTS_PER_TASK;
     // The fused loop's choice for the chunk's table, worked out once for every task (a thread
     // takes tasks of the wave's chunks in turn).
     let ratio = crate::algorithm::blastx::seed::x_seed_diag::x_shared_table_ratio(lookup, options);
@@ -357,14 +521,52 @@ pub(super) fn chunk_subjects_on_pool(
 
 #[cfg(test)]
 mod tests {
-    // No NCBI counterpart (scheduling only). Other tests may hold waves at the same time, so only
-    // the bounds are checked.
+    // No NCBI counterpart (scheduling only): the capped units' task sizes of LOSAT_X_BXCAPFILL.
+    #[test]
+    fn capped_units_have_f_tasks_for_each_thread_they_are_left() {
+        use super::filled_subjects_per_task as size;
+        // 50 subjects, K = 8: 16 threads leave each unit 2, so 8 tasks of 7; 64 threads 8, so 32
+        // tasks of 2; 6,600 subjects keep the size without the cap.
+        assert_eq!(size(4, 16, 8, 50, 64), 7);
+        assert_eq!(size(4, 64, 8, 50, 64), 2);
+        assert_eq!(size(4, 16, 8, 6_600, 64), 64);
+        assert_eq!(size(4, 16, 8, 6_600, 16), 16);
+        // K units then hold a task for every thread (the rule `unit_cap` keeps without the fill)
+        // wherever K units
+        // of one subject each would.
+        for threads in [9, 16, 17, 32, 48, 64, 128] {
+            for subjects in [2, 10, 50, 200, 543, 6_600] {
+                let per_task = size(4, threads, 8, subjects, 64);
+                let tasks = subjects.div_ceil(per_task);
+                assert!(
+                    8 * tasks >= threads || 8 * subjects < threads,
+                    "{threads} threads, {subjects} subjects: {per_task} per task"
+                );
+            }
+        }
+        // One subject at least, also for no subjects.
+        assert_eq!(size(4, 16, 8, 0, 64), 1);
+        assert_eq!(size(64, 4_096, 2, 1, 16), 1);
+    }
+
+    // No NCBI counterpart (scheduling only). The counts are the run's own (attached to its pool),
+    // so other tests searching at the same time do not move them.
     #[test]
     fn a_wave_holds_its_chunks_until_it_ends() {
-        let first = super::chunk_wave(8);
-        assert!((1..=8).contains(&first.size()));
-        let second = super::chunk_wave(8);
-        assert!(second.size() <= 9usize.saturating_sub(first.size()).max(1));
-        drop((first, second));
+        let run = super::XCapRun::default();
+        let pool = crate::utils::threading::SearchPool::x_serial();
+        let pool = run.attach(&pool);
+        assert!(!super::in_capped_batch(&pool));
+        let batch = super::XCappedBatch::enter(&pool);
+        assert!(super::in_capped_batch(&pool));
+        // K + 1 less the batch itself, then one while the first wave holds its chunks.
+        let first = super::chunk_wave(&pool, 8);
+        assert_eq!(first.size(), 8);
+        let second = super::chunk_wave(&pool, 8);
+        assert_eq!(second.size(), 1);
+        drop(first);
+        assert_eq!(super::chunk_wave(&pool, 8).size(), 7);
+        drop((second, batch));
+        assert!(!super::in_capped_batch(&pool));
     }
 }

@@ -434,10 +434,10 @@ fn write_subject_alignments_part<W: Write>(
 /// that `GenerateDefline` makes of an empty one (for a protein, `unnamed protein product`)
 /// has an encoding that is never unknown. `protein` is the database's molecule type (BLASTP
 /// and BLASTN share this heading).
-fn write_database_subject_alignments<W: Write>(
+fn write_database_subject_alignments<'h, W: Write>(
     writer: &mut W,
     probe: Option<&mut FormatProbe<'_>>,
-    title: &[u8],
+    title: impl Into<DatabaseHeading<'h>>,
     protein: bool,
     hits: &[&PairwiseHit],
     hsp_indices: &[HspIndex],
@@ -458,10 +458,10 @@ fn write_database_subject_alignments<W: Write>(
 /// `write_database_subject_alignments` for the HSPs `part` of the subject's (the heading with
 /// the first), as `write_subject_alignments_part`.
 #[allow(clippy::too_many_arguments)]
-fn write_database_subject_alignments_part<W: Write>(
+fn write_database_subject_alignments_part<'h, W: Write>(
     writer: &mut W,
     mut probe: Option<&mut FormatProbe<'_>>,
-    title: &[u8],
+    title: impl Into<DatabaseHeading<'h>>,
     protein: bool,
     hits: &[&PairwiseHit],
     hsp_indices: &[HspIndex],
@@ -494,15 +494,53 @@ fn write_database_subject_alignments_part<W: Write>(
     Ok(())
 }
 
+/// The definition lines of a database sequence's alignment heading: the stored title of a
+/// sequence without parsed Seq-ids, or the definition lines of one with them
+/// (`ParsedSubject::heading`).
+#[derive(Clone, Copy)]
+pub enum DatabaseHeading<'a> {
+    Title(&'a [u8]),
+    Parsed(&'a crate::report::db_subject::ParsedSubject),
+}
+
+impl<'a> From<&'a [u8]> for DatabaseHeading<'a> {
+    fn from(title: &'a [u8]) -> Self {
+        DatabaseHeading::Title(title)
+    }
+}
+
+impl<'a> From<&'a Vec<u8>> for DatabaseHeading<'a> {
+    fn from(title: &'a Vec<u8>) -> Self {
+        DatabaseHeading::Title(title)
+    }
+}
+
+impl<'a> From<&'a Arc<[u8]>> for DatabaseHeading<'a> {
+    fn from(title: &'a Arc<[u8]>) -> Self {
+        DatabaseHeading::Title(title)
+    }
+}
+
 /// The heading of a database sequence's alignments (`write_database_subject_alignments`):
-/// `>` and the stored title wrapped as `s_WrapOutputLine` wraps it, then `Length=` when the
+/// `>` and the stored title wrapped as `s_WrapOutputLine` wraps it (a sequence with parsed
+/// Seq-ids: the line of each definition line, `ParsedSubject::heading`), then `Length=` when the
 /// length is known, and one blank line. BLASTX writes it with its own HSP blocks.
-fn write_database_subject_heading<W: Write>(
+fn write_database_subject_heading<'h, W: Write>(
     writer: &mut W,
-    title: &[u8],
+    title: impl Into<DatabaseHeading<'h>>,
     protein: bool,
     length: Option<usize>,
 ) -> io::Result<()> {
+    let title = match title.into() {
+        DatabaseHeading::Title(title) => title,
+        DatabaseHeading::Parsed(subject) => {
+            writer.write_all(&subject.heading(protein))?;
+            if let Some(length) = length {
+                writeln!(writer, "Length={length}")?;
+            }
+            return writeln!(writer);
+        }
+    };
     let generated;
     let heading: &[u8] = if title.is_empty() {
         generated = super::defline::generate_defline(title, protein, false)
@@ -596,7 +634,8 @@ pub fn write_hsp_info<W: Write>(
     // NCBI: " Score = XXX bits (YYY),  Expect = Z.Ze-NN"
     let bit_score_str = format_bitscore_ncbi(h.bit_score);
     let evalue_str = format_evalue_ncbi(h.e_value);
-    if config.program == "blastp" {
+    // psiblast's first round has blastp's methods.
+    if matches!(config.program.as_str(), "blastp" | "psiblast") {
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3600-3603
         // ```c
         //             if (aln_vec_info->comp_adj_method == 1)
@@ -1281,7 +1320,14 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
 // "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Schaffer, ..."
 // "Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, ..."
 // ```
-fn write_blastp_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io::Result<()> {
+fn write_blastp_pairwise_intro<W: Write>(
+    writer: &mut W,
+    version: &str,
+    program: &str,
+) -> io::Result<()> {
+    if program == "psiblast" {
+        return write_psiblast_pairwise_intro(writer, version);
+    }
     writeln!(writer, "BLASTP {}", version)?;
     writeln!(writer)?;
     writeln!(writer)?;
@@ -1324,6 +1370,119 @@ fn write_blastp_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io::R
         "composition-based statistics and other refinements\", Nucleic Acids"
     )?;
     writeln!(writer, "Res. 29:2994-3005.")?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:416-426
+// ```c++
+//     if (m_Program == "psiblast" || m_Program == "deltablast") {
+//         m_Outfile << "\n";
+//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
+//                               m_Outfile, CReference::eCompAdjustedMatrices);
+//     }
+//     if (m_Program == "psiblast" || m_Program == "blastp") {
+//         m_Outfile << "\n";
+//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
+//                               m_Outfile, CReference::eCompBasedStats,
+//                               (bool)(m_Program == "psiblast"));
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:81-88
+// ```c++
+//     string reference("Reference");
+//     if (pub == blast::CReference::eCompAdjustedMatrices) {
+//         reference += " for compositional score matrix adjustment";
+//     } else if (pub == blast::CReference::eCompBasedStats) {
+//         reference += " for composition-based statistics";
+//         if (is_psiblast) {
+//             reference += " starting in round 2";
+//         }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/version.cpp:62-72
+// ```c
+//     // eCompBasedStats
+//     "Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei Shavirin, \
+// John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and Stephen F. Altschul \
+// (2001), \"Improving the accuracy of PSI-BLAST protein database searches \
+// with composition-based statistics and other refinements\", Nucleic Acids \
+// Res. 29:2994-3005.",
+//     // eCompAdjustedMatrices
+//     "Stephen F. Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala, \
+// Aleksandr Morgulis, Alejandro A. Sch&auml;ffer, and Yi-Kuo Yu (2005) \"Protein \
+// database searches using compositionally adjusted substitution matrices\", \
+// FEBS J. 272:5101-5109.",
+// ```
+/// psiblast's outfmt 0 intro: the program, the gapped BLAST reference, the reference of the
+/// compositionally adjusted matrices and the reference of composition-based statistics "starting
+/// in round 2", each wrapped at 68 columns (`x_WrapOutputLine`) as NCBI writes them.
+fn write_psiblast_pairwise_intro<W: Write>(writer: &mut W, version: &str) -> io::Result<()> {
+    writeln!(writer, "PSIBLAST {}", version)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
+    )?;
+    writeln!(
+        writer,
+        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
+    )?;
+    writeln!(
+        writer,
+        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
+    )?;
+    writeln!(
+        writer,
+        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
+    )?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "Reference for compositional score matrix adjustment: Stephen F."
+    )?;
+    writeln!(
+        writer,
+        "Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,"
+    )?;
+    writeln!(
+        writer,
+        "Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)"
+    )?;
+    writeln!(
+        writer,
+        "\"Protein database searches using compositionally adjusted"
+    )?;
+    writeln!(writer, "substitution matrices\", FEBS J. 272:5101-5109.")?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "Reference for composition-based statistics starting in round 2:"
+    )?;
+    writeln!(
+        writer,
+        "Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei"
+    )?;
+    writeln!(
+        writer,
+        "Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and"
+    )?;
+    writeln!(
+        writer,
+        "Stephen F. Altschul (2001), \"Improving the accuracy of PSI-BLAST"
+    )?;
+    writeln!(
+        writer,
+        "protein database searches with composition-based statistics and"
+    )?;
+    writeln!(
+        writer,
+        "other refinements\", Nucleic Acids Res. 29:2994-3005."
+    )?;
     writeln!(writer)?;
     writeln!(writer)?;
     writeln!(writer)?;
@@ -1437,12 +1596,13 @@ fn write_flatfile_wrapped(writer: &mut impl Write, text: &[u8], width: usize) ->
 pub fn write_blastp_pairwise_prolog<W: Write>(
     writer: &mut W,
     version: &str,
+    program: &str,
     database_name: &str,
     database_num_sequences: usize,
     database_total_letters: usize,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
-    write_blastp_pairwise_intro(writer, version)?;
+    write_blastp_pairwise_intro(writer, version, program)?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -1860,6 +2020,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
     queries: &[BlastpPairwiseQuery],
     query_titles: &[Arc<[u8]>],
     subject_titles: &[Arc<[u8]>],
+    parsed_subjects: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
@@ -1872,7 +2033,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
     let writer = &mut buffered;
 
     if prolog {
-        write_blastp_pairwise_intro(writer, &report.version)?;
+        write_blastp_pairwise_intro(writer, &report.version, &config.program)?;
         // The prolog ends with one blank line; each query's preamble starts with two
         // (blast_format.cpp:1491), after the query's warnings.
         match database {
@@ -1909,6 +2070,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
             query_titles,
             report,
             database,
+            parsed_subjects,
         },
         &hits_by_query,
         subject_titles,
@@ -1945,6 +2107,8 @@ struct BlastpSections<'a> {
     query_titles: &'a [Arc<[u8]>],
     report: &'a BlastpPairwiseReport,
     database: Option<&'a PairwiseDatabase>,
+    /// The subjects with parsed Seq-ids by subject (empty without them).
+    parsed_subjects: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
 }
 
 impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
@@ -1959,6 +2123,18 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
     ) -> io::Result<()> {
         let (query, report) = (&self.queries[q_idx], self.report);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
+        // ```c++
+        //     if (itr_num != numeric_limits<unsigned int>::max()) {
+        //         m_Outfile << "Results from round " << itr_num << "\n";
+        //     }
+        // ```
+        // psiblast's results carry their round (`PrintOneResultSet` with
+        // `itr.GetIterationNumber()`, psiblast_app.cpp:283-285); LOSAT's psiblast runs its
+        // first round only.
+        if self.config.program == "psiblast" {
+            writeln!(writer, "Results from round 1")?;
+        }
         // NCBI blast_format.cpp:1491: m_Outfile << "\n\n";
         writeln!(writer)?;
         writeln!(writer)?;
@@ -2005,14 +2181,19 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         // The table follows `x_InitDeflineTable` (`write_blastn_description_table`): the
         // subject's highest bit score and that HSP's E-value, and the protein title of the
         // record read (by subject index), as TBLASTN's.
-        write_blastn_description_table(
+        write_description_table(
             writer,
             group.described(report.num_descriptions),
             group.subject_order.len() <= report.num_descriptions,
             &group.subject_hits,
-            &group.subject_titles,
             false,
-            true,
+            |s_idx| {
+                let title = group
+                    .subject_titles
+                    .get(&s_idx)
+                    .map_or(&[][..], Vec::as_slice);
+                database_description_label(title, parsed_subject(self.parsed_subjects, s_idx), true)
+            },
         )?;
         // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1520-1589
         // x_DisplayDeflines(aln_set, ...); ... display.DisplaySeqalign(m_Outfile);
@@ -2029,10 +2210,14 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
     ) -> io::Result<()> {
         let config = self.config;
         if self.database.is_some() {
+            let heading = match parsed_subject(self.parsed_subjects, s_idx) {
+                Some(subject) => DatabaseHeading::Parsed(subject),
+                None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
+            };
             return write_database_subject_alignments_part(
                 writer,
                 probe,
-                &group.subject_titles[&s_idx],
+                heading,
                 true,
                 &group.subject_hits[&s_idx],
                 &group.subject_hit_indices[&s_idx],
@@ -2344,6 +2529,34 @@ fn write_description_table<W: Write>(
         writeln!(writer)?;
     }
     writeln!(writer)
+}
+
+/// The subject of `s_idx` among `parsed` when it has parsed Seq-ids.
+fn parsed_subject(
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    s_idx: u32,
+) -> Option<&crate::report::db_subject::ParsedSubject> {
+    parsed.get(s_idx as usize).and_then(Option::as_deref)
+}
+
+/// The description-table label of a database sequence (before the cut to the line): the title
+/// that `GenerateDefline` makes of the stored title `title` (`Unknown` where NCBI's
+/// `HtmlDecode` throws), or for a sequence with parsed Seq-ids its id and title
+/// (`ParsedSubject::description`).
+pub fn database_description_label(
+    title: &[u8],
+    parsed: Option<&crate::report::db_subject::ParsedSubject>,
+    protein: bool,
+) -> Vec<u8> {
+    if let Some(subject) = parsed {
+        let (mut label, title) = subject.description(protein);
+        label.extend_from_slice(&title.text);
+        return label;
+    }
+    match super::defline::generate_defline(title, protein, true) {
+        Ok(defline) => defline.text,
+        Err(super::defline::UnknownEncoding) => b"Unknown".to_vec(),
+    }
 }
 
 // The description table of BLASTN, BLASTP, TBLASTN and TBLASTX: a subject's line is the
@@ -2845,6 +3058,8 @@ pub struct TblastxPairwiseReport {
     pub database_name: String,
     pub database_num_sequences: usize,
     pub database_total_letters: usize,
+    /// The `-matrix` name as typed (`options.GetMatrixName()`), BLOSUM62 when omitted.
+    pub matrix_name: String,
     /// `-threshold` and `-window_size` (the epilog prints them when they are not 0).
     pub word_threshold: f64,
     pub window_size: usize,
@@ -3188,7 +3403,7 @@ fn write_tblastx_epilog<W: Write>(
             report.database_total_letters,
         )?,
     }
-    writeln!(writer, "Matrix: BLOSUM62")?;
+    writeln!(writer, "Matrix: {}", report.matrix_name)?;
     if report.word_threshold != 0.0 {
         // `GetWordThreshold()` is a double, written with the stream's default format.
         writeln!(
@@ -4576,7 +4791,11 @@ pub fn write_blastx_pairwise_report<W: Write>(
     subject_ids: &[Arc<str>],
     report: &BlastpPairwiseReport,
     options: &BlastxPairwiseOptions,
-    database: Option<(&PairwiseDatabase, &[Arc<[u8]>])>,
+    database: Option<(
+        &PairwiseDatabase,
+        &[Arc<[u8]>],
+        &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    )>,
 ) -> io::Result<()> {
     let mut writer = io::BufWriter::new(writer);
     let mut by_query: Vec<Vec<&PairwiseHit>> = vec![Vec::new(); queries.len()];
@@ -4640,9 +4859,12 @@ pub fn write_blastx_pairwise_report<W: Write>(
                 // A database sequence's heading is its stored title after `>` (as
                 // BLASTP's, BLASTN's and TBLASTN's `-db` reports).
                 match database {
-                    Some((_, titles)) => write_database_subject_heading(
+                    Some((_, titles, parsed)) => write_database_subject_heading(
                         &mut writer,
-                        &titles[*oid as usize],
+                        match parsed_subject(parsed, *oid) {
+                            Some(subject) => DatabaseHeading::Parsed(subject),
+                            None => DatabaseHeading::Title(&titles[*oid as usize]),
+                        },
                         true,
                         first.subject_length,
                     )?,

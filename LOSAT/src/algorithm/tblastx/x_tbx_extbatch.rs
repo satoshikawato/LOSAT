@@ -183,25 +183,40 @@ impl XPendBatch {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-605 (module doc)
 // The extension of one candidate and the cell write of `x_hit` (the statements after its call of
 // `extend_hit_two_hit`), the flag written with the value, since the cell holds the pending mark.
-/// Runs the extension of `c` and writes its cell as `x_hit` does.
+/// Runs the extension of `c` and writes its cell as `x_hit` does (`SENT`: LOSAT_X_TBXUNGAPSENT, as
+/// in `x_hit`).
 ///
-/// SAFETY: `c.cell` is below the length of the table `diag_ptr` points into.
+/// SAFETY: `c.cell` is below the length of the table `diag_ptr` points into; with `SENT`, the unit
+/// is one `x_unit_sent` accepts.
 #[inline(always)]
-unsafe fn resolve(c: &mut XCand, diag_ptr: *mut DiagStruct, h: &XHitCtx<'_>) {
+unsafe fn resolve<const SENT: bool>(c: &mut XCand, diag_ptr: *mut DiagStruct, h: &XHitCtx<'_>) {
     // SAFETY: the context index was returned by `get_context_idx` (below num_contexts).
     let ctx = unsafe { h.contexts.get_unchecked(c.ctx_idx as usize) };
     let query_full = &ctx.aa_seq;
-    let query = &query_full[1..query_full.len() - 1];
-    let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
+    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): as in `x_hit`.
+    let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) = if !SENT {
         extend_hit_two_hit(
-            query,
+            &query_full[1..query_full.len() - 1],
             h.subject,
             c.s_left as usize,
             c.s_right as usize,
             c.q_raw as usize,
             c.x_drop,
             false,
-        );
+        )
+    } else {
+        // SAFETY: as in `x_hit` (the caller's).
+        unsafe {
+            extend_hit_two_hit_sent(
+                query_full,
+                h.subject_sent,
+                c.s_left as usize,
+                c.s_right as usize,
+                c.q_raw as usize,
+                c.x_drop,
+            )
+        }
+    };
     // SAFETY: the caller's bound.
     unsafe {
         apply(
@@ -261,7 +276,7 @@ unsafe fn apply(
 /// SAFETY: as `resolve`.
 #[cold]
 #[inline(never)]
-unsafe fn resolve_early(
+unsafe fn resolve_early<const SENT: bool>(
     b: &mut XPendBatch,
     slot: usize,
     diag_ptr: *mut DiagStruct,
@@ -273,7 +288,7 @@ unsafe fn resolve_early(
     );
     b.early += 1;
     // SAFETY: the caller's bound; the slot holds the candidate that wrote the mark.
-    unsafe { resolve(b.c.get_unchecked_mut(slot), diag_ptr, h) };
+    unsafe { resolve::<SENT>(b.c.get_unchecked_mut(slot), diag_ptr, h) };
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:599-602
@@ -290,7 +305,7 @@ unsafe fn resolve_early(
 ///
 /// SAFETY: every candidate's cell is below the length of the table `diag_ptr` points into.
 #[inline(never)]
-pub(super) unsafe fn flush<S: XInitSink>(
+pub(super) unsafe fn flush<S: XInitSink, const SENT: bool>(
     b: &mut XPendBatch,
     diag_ptr: *mut DiagStruct,
     h: &XHitCtx<'_>,
@@ -299,7 +314,7 @@ pub(super) unsafe fn flush<S: XInitSink>(
     for c in &mut b.c[..b.n] {
         if !c.done {
             // SAFETY: the caller's bound.
-            unsafe { resolve(c, diag_ptr, h) };
+            unsafe { resolve::<SENT>(c, diag_ptr, h) };
         }
         // SAFETY: ctx_idx < contexts.len() == cutoff_scores.len().
         let cutoff = unsafe { *h.cutoff_scores.get_unchecked(c.ctx_idx as usize) };
@@ -338,7 +353,7 @@ pub(super) unsafe fn flush<S: XInitSink>(
 /// SAFETY: `cell` and the cell of every candidate of `b` are below the length of the table
 /// `diag_ptr` points into.
 #[inline(always)]
-pub(super) unsafe fn x_hit_batched<S: XInitSink>(
+pub(super) unsafe fn x_hit_batched<S: XInitSink, const SENT: bool>(
     diag_ptr: *mut DiagStruct,
     cell: usize,
     query_offset: u32,
@@ -361,7 +376,7 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink>(
             if last_hit < BATCH as u32 {
                 // The pending mark of slot `last_hit` (module doc).
                 // SAFETY: the caller's bounds.
-                unsafe { resolve_early(b, last_hit as usize, diag_ptr, h) };
+                unsafe { resolve_early::<SENT>(b, last_hit as usize, diag_ptr, h) };
                 continue;
             }
             // [C] if ((Int4)(subject_offset + diag_offset) < diag_array[diag_coord].last_hit)
@@ -442,7 +457,7 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink>(
         b.cands += 1;
         if b.n == b.len {
             // SAFETY: the caller's bounds.
-            unsafe { flush(b, diag_ptr, h, init_hsps) };
+            unsafe { flush::<S, SENT>(b, diag_ptr, h, init_hsps) };
         }
         return;
     }
@@ -498,16 +513,22 @@ impl XPairPar {
         init_hsps: &mut S,
         len: usize,
     ) -> (u64, u64) {
-        self.scan_unit_batched_hits::<S, PF, false>(unit, inp, scratch, init_hsps, len)
+        self.scan_unit_batched_hits::<S, PF, false, false>(unit, inp, scratch, init_hsps, len)
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
     // `x_hits_bf`, which takes the too-far and overlap outcomes without a branch and hands the
     // others (a flag, which includes a pending mark, or a candidate) to `x_hit_batched`; without
     // it this is the loop before the switch. `BF` runs only where `x_tbx_hitbf::fits` holds.
-    /// `scan_unit_batched`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF.
+    /// `scan_unit_batched`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF and with `SENT`
+    /// the extensions of `extend_hit_two_hit_sent` (LOSAT_X_TBXUNGAPSENT).
     #[inline(always)]
-    pub(super) fn scan_unit_batched_hits<S: XInitSink, const PF: bool, const BF: bool>(
+    pub(super) fn scan_unit_batched_hits<
+        S: XInitSink,
+        const PF: bool,
+        const BF: bool,
+        const SENT: bool,
+    >(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -518,12 +539,12 @@ impl XPairPar {
         // EXPERIMENT (LOSAT_X_TBXUNITMASK): the masked table where the rule holds (x_pair_par.rs
         // module doc), as in `scan_unit_hits`.
         match self.x_unit_mask(unit, inp.window) {
-            None => self.scan_unit_batched_cells::<S, XUnmasked, PF, BF>(
+            None => self.scan_unit_batched_cells::<S, XUnmasked, PF, BF, SENT>(
                 unit, inp, scratch, init_hsps, len, 0,
             ),
-            Some(mask) => {
-                self.scan_unit_batched_masked::<S, PF, BF>(unit, inp, scratch, init_hsps, len, mask)
-            }
+            Some(mask) => self.scan_unit_batched_masked::<S, PF, BF, SENT>(
+                unit, inp, scratch, init_hsps, len, mask,
+            ),
         }
     }
 
@@ -531,7 +552,7 @@ impl XPairPar {
     // `scan_unit_masked`.
     /// `scan_unit_batched_cells` with `XMasked`.
     #[inline(never)]
-    fn scan_unit_batched_masked<S: XInitSink, const PF: bool, const BF: bool>(
+    fn scan_unit_batched_masked<S: XInitSink, const PF: bool, const BF: bool, const SENT: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -540,7 +561,9 @@ impl XPairPar {
         len: usize,
         mask: u32,
     ) -> (u64, u64) {
-        self.scan_unit_batched_cells::<S, XMasked, PF, BF>(unit, inp, scratch, init_hsps, len, mask)
+        self.scan_unit_batched_cells::<S, XMasked, PF, BF, SENT>(
+            unit, inp, scratch, init_hsps, len, mask,
+        )
     }
 
     // The statements of `scan_unit_batched_hits` for one form of the unit's cells (`XCells`), as
@@ -548,7 +571,13 @@ impl XPairPar {
     /// `scan_unit_batched_hits` with the cells `C` (`mask`: the masked table's cells minus one).
     #[inline(always)]
     #[allow(clippy::too_many_arguments)]
-    fn scan_unit_batched_cells<S: XInitSink, C: XCells, const PF: bool, const BF: bool>(
+    fn scan_unit_batched_cells<
+        S: XInitSink,
+        C: XCells,
+        const PF: bool,
+        const BF: bool,
+        const SENT: bool,
+    >(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -558,6 +587,8 @@ impl XPairPar {
         mask: u32,
     ) -> (u64, u64) {
         debug_assert!((1..=BATCH).contains(&len));
+        // LOSAT_X_TBXUNGAPSENT: as in `scan_unit_cells`.
+        assert!(!SENT || self.x_unit_sent(unit, inp));
         let group = &self.groups[unit.g];
         let sub = &group.lookup;
         let wordsize = inp.wordsize;
@@ -609,6 +640,7 @@ impl XPairPar {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
+            subject_sent: if SENT { subject_full } else { &[] },
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
@@ -667,7 +699,7 @@ impl XPairPar {
                             window,
                             wordsize,
                             |cell, query_offset, subject_offset| {
-                                x_hit_batched(
+                                x_hit_batched::<S, SENT>(
                                     diag_ptr,
                                     cell,
                                     query_offset,
@@ -703,7 +735,7 @@ impl XPairPar {
                     // SAFETY: diag_coord < width = scratch.diag.len() (as in `scan_unit`), and
                     // every candidate's cell is such a cell of this unit.
                     unsafe {
-                        x_hit_batched(
+                        x_hit_batched::<S, SENT>(
                             diag_ptr,
                             diag_coord,
                             query_offset,
@@ -718,7 +750,7 @@ impl XPairPar {
         }
         if b.n > 0 {
             // SAFETY: the candidates' cells are cells of this unit's table.
-            unsafe { flush(&mut b, scratch.diag.as_mut_ptr(), &h, init_hsps) };
+            unsafe { flush::<S, SENT>(&mut b, scratch.diag.as_mut_ptr(), &h, init_hsps) };
         }
         (b.cands, b.early)
     }
@@ -816,13 +848,14 @@ mod tests {
             let cutoff_scores: Vec<i32> = (0..contexts.len())
                 .map(|i| 10 + (i as i32 % 4) * 3)
                 .collect();
-            // X-drops inside and outside LOSAT_X_TBXUNGAP's 1..=127 (its fallback).
+            // X-drops inside and outside the 1..=127 of the two-hit table walks (their fallback).
             let x_dropoff_per_context: Vec<i32> = (0..contexts.len())
                 .map(|i| [7, 16, 30, 200][i % 4])
                 .collect();
             let pp = XPairPar {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
@@ -988,6 +1021,7 @@ mod tests {
                 cutoff_scores: &cutoff_scores,
                 x_dropoff_per_context: &x_dropoff_per_context,
                 subject: &subject,
+                subject_sent: &[],
                 s_f_idx: 2,
                 s_frame: -1,
                 s_idx: 7,
@@ -1060,12 +1094,12 @@ mod tests {
             for i in 0..n {
                 if rng.below(10) == 0 {
                     // SAFETY: the cell is below n = diag.len().
-                    unsafe { resolve(&mut b.c[i], diag.as_mut_ptr(), &h) };
+                    unsafe { resolve::<false>(&mut b.c[i], diag.as_mut_ptr(), &h) };
                 }
             }
             let mut got: Vec<InitHSP> = Vec::new();
             // SAFETY: every candidate's cell is below n = diag.len().
-            unsafe { flush(&mut b, diag.as_mut_ptr(), &h, &mut got) };
+            unsafe { flush::<_, false>(&mut b, diag.as_mut_ptr(), &h, &mut got) };
             assert_eq!(diag, expect_cells, "round {round}: cells");
             assert_eq!(got, expect_hsps, "round {round}: init HSPs");
             assert_eq!(b.n, 0);

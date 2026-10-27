@@ -1,6 +1,7 @@
 //! The subjects of a TBLASTX search: the records of `-subject`, or the stored sequences of a
 //! `-db` database (DB-5, dbsearch-20261012 DESIGN_db5_tblastx_db.md).
 
+#[cfg(test)]
 use std::cell::Cell;
 use std::sync::OnceLock;
 
@@ -24,13 +25,16 @@ use crate::utils::genetic_code::GeneticCode;
 // The preliminary stage translates a subject's 2-bit bases, the ungapped re-evaluation its
 // ncbi4na codes. A record of `-subject` gives its letters and the bases its ambiguous letters
 // resolve to (`preliminary_subject_bases`); a database sequence gives the letters of its stored
-// codes and the bases makeblastdb stored (D2).
+// codes and the bases makeblastdb stored (D2); a record packed as read (LOSAT_X_TBXSTORE) gives
+// the letters of its codes and the bases its ambiguous letters were resolved to when it was packed
+// (`CRandom` of its length, as `preliminary_subject_bases`).
 /// The subjects of one search, by OID (`-db`: the ordinal).
 #[derive(Clone, Copy)]
 pub(crate) enum Subjects<'a> {
     /// The records of `-subject` (after `-subject_loc`).
     Fasta(&'a [FastaRecord]),
-    /// The sequences of a `-db` database, read whole.
+    /// The sequences of a `-db` database, read whole, or (LOSAT_X_TBXSTORE) the records of
+    /// `-subject` (after `-subject_loc`), packed as read.
     Stored(&'a [PackedNucleotide]),
     /// A `-db` database whose sequences could not be read: no subject is searched, and the
     /// first batch with a valid context raises the read error (`SubjectsUnreadable`).
@@ -61,11 +65,13 @@ impl<'a> Subjects<'a> {
         (0..self.count()).map(|oid| self.length(oid))
     }
 
-    /// `f` of the letters of subject `oid` and, when it has ambiguous bases, of the bases its
-    /// preliminary stage translates (`A`, `C`, `G` or `T` for every base). A stored sequence's
-    /// letters and bases are made in buffers that the thread keeps between subjects (one above
-    /// `KEPT_BUFFER` is freed after use); a nested call (a pool thread that takes another
-    /// subject while it waits) gets buffers of its own.
+    /// The reference of the unit tests: `f` of the letters of subject `oid` and, when it has
+    /// ambiguous bases, of the bases its preliminary stage translates (`A`, `C`, `G` or `T` for
+    /// every base), whole, as the search made them before its frames were made in windows
+    /// (`x_preliminary_frames`, `x_letter_frames`). A stored sequence's letters and bases are made
+    /// in buffers that the thread keeps between subjects (one above `KEPT_BUFFER` is freed after
+    /// use); a nested call gets buffers of its own.
+    #[cfg(test)]
     pub(crate) fn with_search_bases<R>(
         &self,
         oid: usize,
@@ -106,13 +112,13 @@ impl<'a> Subjects<'a> {
     //                                      subject->gen_code_string, &translation_buffer,
     //                                      &frame_offsets, NULL);
     // ```
-    // EXPERIMENT (LOSAT_X_TBXFRAMES): the frames of the bases `with_search_bases` gives the
-    // preliminary stage (its `bases`, or its letters when the subject has no ambiguous base),
-    // made in windows (`x_generate_frames_in_windows`) without the subject's letters, its bases
-    // or their reverse complement in a buffer of the subject's length: a record's ambiguous
-    // letters are resolved window by window in letter order from one `CRandom` seeded with the
-    // record's length, which draws what `preliminary_subject_bases` draws; a stored sequence
-    // gives the bases of its 2-bit codes (`resolved_letters_into`).
+    // The frames of the bases `with_search_bases` gives the preliminary stage (its `bases`, or
+    // its letters when the subject has no ambiguous base), made in windows
+    // (`x_generate_frames_in_windows`) without the subject's letters, its bases or their reverse
+    // complement in a buffer of the subject's length: a record's ambiguous letters are resolved
+    // window by window in letter order from one `CRandom` seeded with the record's length, which
+    // draws what `preliminary_subject_bases` draws; a stored sequence gives the bases of its
+    // 2-bit codes (`bases_into`).
     /// The frames the preliminary stage of subject `oid` translates, and whether they are the
     /// frames of its letters as well (true when it has no ambiguous base).
     pub(crate) fn x_preliminary_frames(
@@ -143,12 +149,7 @@ impl<'a> Subjects<'a> {
                 let store = &stores[oid];
                 let frames = x_generate_frames_in_windows(
                     store.len(),
-                    &mut |from, out| {
-                        store.codes_into(from, out);
-                        for base in out.iter_mut() {
-                            *base = b"ACGT"[usize::from(*base)];
-                        }
-                    },
+                    &mut |from, out| store.bases_into(from, out),
                     table,
                 );
                 (frames, store.ambiguity_runs().is_empty())
@@ -163,10 +164,9 @@ impl<'a> Subjects<'a> {
     //       	seq_arg.encoding =
     //        	  (kTranslateSubject ? eBlastEncodingNcbi4na : eBlastEncodingNucleotide);
     // ```
-    // EXPERIMENT (LOSAT_X_TBXFRAMES): the frames of the letters `with_search_bases` gives
-    // (`s_frames`), made in windows: a record's letters, or a stored sequence's letters of its
-    // codes (`letters_into`, the upper-case letters of `ascii_into`: a stored sequence has no
-    // lower-case interval, and the translation reads both cases alike).
+    // The frames of the letters `with_search_bases` gives (`s_frames`), made in windows: a
+    // record's letters, or a stored sequence's letters of its codes (`letters_to`, the
+    // upper-case letters of `ascii_into`; the translation reads both cases alike).
     /// The frames of the letters of subject `oid` (the ungapped re-evaluation's).
     pub(crate) fn x_letter_frames(&self, oid: usize, table: &GeneticCode) -> Vec<QueryFrame> {
         match self {
@@ -180,13 +180,9 @@ impl<'a> Subjects<'a> {
             }
             Self::Stored(stores) => {
                 let store = &stores[oid];
-                let mut window: Vec<u8> = Vec::new();
                 x_generate_frames_in_windows(
                     store.len(),
-                    &mut |from, out| {
-                        store.letters_into(from, from + out.len(), &mut window);
-                        out.copy_from_slice(&window);
-                    },
+                    &mut |from, out| store.letters_to(from, out),
                     table,
                 )
             }
@@ -195,20 +191,20 @@ impl<'a> Subjects<'a> {
     }
 }
 
-// No NCBI counterpart: the variable is read once per process; it chooses when LOSAT translates
-// a subject's frames, not a value NCBI computes.
-/// LOSAT_X_TBXFRAMES: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
-pub(crate) fn x_frames_late() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXFRAMES"))
-}
-
 // No NCBI counterpart: the variable is read once per process; it chooses how LOSAT resolves a
 // record's letters, not a value NCBI computes.
 /// LOSAT_X_TBXRESOLVE: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
 pub(crate) fn x_resolve_by_table() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXRESOLVE"))
+}
+
+// No NCBI counterpart: the variable is read once per process; it chooses where LOSAT holds the
+// letters of `-subject`, not a value NCBI computes.
+/// LOSAT_X_TBXSTORE: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
+pub(crate) fn x_tbx_store() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXSTORE"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:424-425,441-450
@@ -320,6 +316,7 @@ fn ncbi4na_of(letter: u8) -> u8 {
 /// ```
 /// The ncbi4na code of a letter is that of `GeneticCode::get` (both cases, `U` as `T`);
 /// another byte is a gap (0).
+#[cfg(test)]
 pub(crate) fn preliminary_subject_bases(subject: &[u8]) -> Option<Vec<u8>> {
     if is_unambiguous(subject) {
         return None;
@@ -334,6 +331,7 @@ pub(crate) fn preliminary_subject_bases(subject: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// `f` of the bytes `make` writes in this thread's buffer `cell` (see `with_search_bases`).
+#[cfg(test)]
 fn with_buffer<R>(
     cell: &'static std::thread::LocalKey<Cell<Vec<u8>>>,
     make: impl FnOnce(&mut Vec<u8>),
@@ -349,8 +347,10 @@ fn with_buffer<R>(
 }
 
 /// The largest buffer a thread keeps between subjects.
+#[cfg(test)]
 const KEPT_BUFFER: usize = 8 << 20;
 
+#[cfg(test)]
 thread_local! {
     /// This thread's letters of a stored subject.
     static LETTERS: Cell<Vec<u8>> = const { Cell::new(Vec::new()) };
@@ -480,8 +480,8 @@ mod tests {
         }
     }
 
-    /// LOSAT_X_TBXFRAMES: the two methods against the frames of `with_search_bases` (the frames
-    /// `process_subject` makes without the switch), for the subjects of both arms.
+    /// The two methods against the frames of `with_search_bases` (the frames `process_subject`
+    /// made before its frames were made in windows), for the subjects of both arms.
     fn check(subjects: Subjects<'_>, table: &GeneticCode) {
         for oid in 0..subjects.count() {
             let (letters, preliminary) = subjects.with_search_bases(oid, |letters, bases| {
@@ -594,6 +594,63 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// LOSAT_X_TBXSTORE: a record searched from its store (`PackedNucleotide::from_subject_letters`,
+    /// as `x_read_packed_subjects` packs it) has the record's length, the frames the record's
+    /// preliminary stage translates (its letters, or the bases its ambiguous letters resolve to
+    /// from `CRandom` of its length) and the frames of its letters, for every IUPAC letter in both
+    /// cases and gaps, with one ambiguous letter, and with an N block across a window border. A
+    /// record with `U` has no store (`ncbi4na_of` reads it as `T`, the store would not).
+    #[test]
+    fn stored_records_give_the_frames_of_their_records() {
+        let mut records = Vec::new();
+        for (i, len) in [0usize, 1, 2, 3, 4, 7, 50, 1000, 200_003]
+            .into_iter()
+            .enumerate()
+        {
+            records.push(FastaRecord::new(
+                format!("a{i}"),
+                b"",
+                &letters(i as u64, len, b"ACGTacgt"),
+            ));
+            records.push(FastaRecord::new(
+                format!("n{i}"),
+                b"",
+                &letters(i as u64 + 41, len, b"ACGTacgtNnRrYyKkMmSsWwBbDdHhVv-"),
+            ));
+            let mut one = letters(i as u64 + 61, len, b"ACGTacgt");
+            if len > 0 {
+                one[len / 2] = b'r';
+            }
+            records.push(FastaRecord::new(format!("o{i}"), b"", &one));
+        }
+        let mut block = letters(17, 400_000, b"ACGTacgt");
+        block[196_000..197_000].fill(b'N');
+        records.push(FastaRecord::new("block", b"", &block));
+        let stores: Vec<PackedNucleotide> = records
+            .iter()
+            .map(|record| PackedNucleotide::from_subject_letters(record.seq()).expect("IUPAC"))
+            .collect();
+        let (fasta, stored) = (Subjects::Fasta(&records), Subjects::Stored(&stores));
+        for id in [1, 4, 11] {
+            let table = GeneticCode::from_id(id);
+            for oid in 0..records.len() {
+                let what = format!("record {oid} code {id}");
+                assert_eq!(stored.length(oid), fasta.length(oid), "{what}");
+                let (frames, of_letters) = fasta.x_preliminary_frames(oid, &table);
+                let (got, got_of_letters) = stored.x_preliminary_frames(oid, &table);
+                assert_eq!(got_of_letters, of_letters, "{what}");
+                assert_same(&got, &frames, &what);
+                assert_same(
+                    &stored.x_letter_frames(oid, &table),
+                    &fasta.x_letter_frames(oid, &table),
+                    &what,
+                );
+            }
+        }
+        assert!(PackedNucleotide::from_subject_letters(b"ACGU").is_none());
+        assert!(PackedNucleotide::from_subject_letters(b"ACGu").is_none());
     }
 
     #[test]

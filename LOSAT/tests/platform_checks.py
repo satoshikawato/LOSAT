@@ -38,6 +38,17 @@ MODES = ("default",)
 HEADER = ["case", "threads", "mode", "exit_code", "sha256", "seconds"]
 
 
+def input_path(arg: str) -> str:
+    """An argument naming a file under LOSAT/tests/ becomes a path relative to the working directory
+    (ROOT/LOSAT), with forward slashes (Rust opens those on Windows too).  An absolute path would
+    differ per runner (/home/runner/..., /Users/runner/..., D:\\a\\...) and -outfmt 7 prints the
+    input path in its "# Database:" comment line, so the same output would hash differently."""
+    prefix = "LOSAT/"
+    if arg.startswith(prefix + "tests/"):
+        return arg[len(prefix):]
+    return arg
+
+
 def run_command(args: argparse.Namespace) -> int:
     losat = Path(args.losat).resolve()
     if not losat.exists() and losat.with_name(losat.name + ".exe").exists():
@@ -59,7 +70,7 @@ def run_command(args: argparse.Namespace) -> int:
     rows, failures = [], []
     print(f"platform {platform.platform()} machine {platform.machine()} cases {len(cases)}", flush=True)
     for case in cases:
-        argv = [str(ROOT / a) if a.startswith("LOSAT/tests/") else a for a in case["argv"]]
+        argv = [input_path(a) for a in case["argv"]]
         results = {}
         for threads in THREADS:
             for mode, variables in modes.items():

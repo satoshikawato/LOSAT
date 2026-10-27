@@ -3,20 +3,28 @@
 //! LOSAT/tests/ gets its two lines in its program's suite (`tests/suite_layout.rs` checks that
 //! every file is in exactly one test binary).
 
+#[path = "../blastn_bn_csr.rs"]
+mod blastn_bn_csr;
 #[path = "../blastn_db_cut.rs"]
 mod blastn_db_cut;
 #[path = "../blastn_db_search.rs"]
 mod blastn_db_search;
 #[path = "../blastn_db_stream.rs"]
 mod blastn_db_stream;
+#[path = "../blastn_dc_two_slots.rs"]
+mod blastn_dc_two_slots;
 #[path = "../blastn_diag_lv.rs"]
 mod blastn_diag_lv;
 #[path = "../blastn_disc_lookup_par.rs"]
 mod blastn_disc_lookup_par;
+#[path = "../blastn_eight_slots.rs"]
+mod blastn_eight_slots;
 #[path = "../blastn_few_subj.rs"]
 mod blastn_few_subj;
 #[path = "../blastn_greedy_row_fuse.rs"]
 mod blastn_greedy_row_fuse;
+#[path = "../blastn_hl_grow.rs"]
+mod blastn_hl_grow;
 #[path = "../blastn_lut_drop.rs"]
 mod blastn_lut_drop;
 #[path = "../blastn_mb_fill.rs"]
@@ -31,6 +39,8 @@ mod blastn_pairpar_disc;
 mod blastn_pairpar_disc_arr;
 #[path = "../blastn_pairpar_fold.rs"]
 mod blastn_pairpar_fold;
+#[path = "../blastn_pairpar_merge.rs"]
+mod blastn_pairpar_merge;
 #[path = "../blastn_pairpar_na.rs"]
 mod blastn_pairpar_na;
 #[path = "../blastn_qbatchpar.rs"]
@@ -45,6 +55,8 @@ mod blastn_query_drop;
 mod blastn_query_dust_par;
 #[path = "../blastn_query_prep_par.rs"]
 mod blastn_query_prep_par;
+#[path = "../blastn_query_scan_par.rs"]
+mod blastn_query_scan_par;
 #[path = "../blastn_query_stream.rs"]
 mod blastn_query_stream;
 #[path = "../blastn_report_stream.rs"]

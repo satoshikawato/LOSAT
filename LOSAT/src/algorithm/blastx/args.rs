@@ -74,7 +74,7 @@ pub struct BlastxArgs {
         long,
         value_name = "NAME",
         conflicts_with = "subject",
-        help = "BLAST database name (a protein database without parsed Seq-ids)"
+        help = "BLAST database name (a protein database, with or without parsed Seq-ids)"
     )]
     pub db: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237

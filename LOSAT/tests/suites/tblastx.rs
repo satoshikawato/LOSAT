@@ -23,6 +23,8 @@ mod tblastx_link_fast;
 mod tblastx_link_slices;
 #[path = "../tblastx_link_sort.rs"]
 mod tblastx_link_sort;
+#[path = "../tblastx_matrix.rs"]
+mod tblastx_matrix;
 #[path = "../tblastx_prefetch.rs"]
 mod tblastx_prefetch;
 #[path = "../tblastx_qslice.rs"]
@@ -45,7 +47,11 @@ mod tblastx_seed_compact;
 mod tblastx_seed_release;
 #[path = "../tblastx_seed_unmap.rs"]
 mod tblastx_seed_unmap;
+#[path = "../tblastx_store.rs"]
+mod tblastx_store;
 #[path = "../tblastx_subject_next.rs"]
 mod tblastx_subject_next;
+#[path = "../tblastx_ungap_sent.rs"]
+mod tblastx_ungap_sent;
 #[path = "../tblastx_unit_gate.rs"]
 mod tblastx_unit_gate;

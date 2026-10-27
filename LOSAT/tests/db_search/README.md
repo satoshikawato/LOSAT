@@ -271,6 +271,22 @@ writes (`Error: [blastn] ...`).
   `LOSAT_X_BPQBLOCK` of 50,000 letters and two with a value of at most 10,000, which
   `tests/blastp_query_blocks_fmt.rs` runs against these frozen bytes), the first 30 of that length in file order. Rows `db.sa.bpqb.{5,8,9,12}`: `blastp -db paja -evalue 0.1
   -max_target_seqs 2 -max_hsps 1` (9 rows of outfmt 6: some queries have hits, some do not).
+
+## -culling_limit rows (line NP, O3b)
+
+Rows `db.blastp.culling_*` and `db.tblastn.culling_*` search `paja` with `bpqb_q.faa` (BLASTP) and `tslice` with
+`tslice_q.faa` (TBLASTN) with `-culling_limit`. The split rows `db.{blastp,tblastn}.culling_split_*` use two databases
+of the `culling_dom_s.{faa,fna}` subjects in `tests/fasta/outfmt0/` (45 protein records; 25 nucleotide records, the
+`-subject` rows `culling.{blastp,tblastn}.*` of `outfmt0_manifest.tsv` search the same files) and the queries
+`culling_dom_q.faa` / `culling_domq_q.faa`; their `CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50` tokens are environment
+variables of both programs (a query is searched in chunks of 300 letters with an overlap of 50; each chunk is
+culled by itself). Version 4, no `-parse_seqids`; only `.pin .psq .phr` / `.nin .nsq .nhr` are kept. Run from `LOSAT/`:
+
+    makeblastdb -in tests/fasta/outfmt0/culling_dom_s.faa -dbtype prot -out tests/db_search/culldom \
+        -title "culling dom" -blastdb_version 4
+    makeblastdb -in tests/fasta/outfmt0/culling_dom_s.fna -dbtype nucl -out tests/db_search/culldomn \
+        -title "culling dom nucl" -blastdb_version 4
+    rm tests/db_search/culldom.pjs tests/db_search/culldomn.njs
 - OF-BPQB2 (outfmt 15 and 16 in the same block search): rows `db.sa.bpqb.15` and `db.sa.bpqb.16`, the same search as
   `db.sa.bpqb.8` (65 KB at most). `paja_taxid` is `paja` built with a taxid (`make_paja_taxid.py MAKEBLASTDB OUTDIR`: `makeblastdb
   -in tests/fasta/PajaWSV.faa -dbtype prot -blastdb_version 4 -taxid 10090`, then the taxid of BDT63547.1 patched to 9606 in
@@ -323,3 +339,18 @@ nothing hits, `-taxid 9606`; only `.phr .pin .psq` kept). `mixtax_blastx_{good,b
   and the `qwarn2` order puts the query without hits first. With `-evalue 1e-20` each query hits its own subject only. They search the
   existing databases `x16_ntaxid` (taxid 9606) and `x16_ntaxid_99990`: rows `db.sa.x16_xtaxid.*` (`BLASTDB=DIR` and `BATCH_SIZE=N`
   tokens as in the BLASTP, BLASTN and TBLASTN rows, the other tokens are options; the messages on standard error name `tblastx`).
+
+## Databases with parsed Seq-ids (line DBID, ID2a)
+
+`ids/`: rows `db.id.*`. `ids/make_ids.py` (its docstring has the usage and the records) writes
+`ids/prot_v5` (version 5) and `ids/prot_v4` (version 4) with `makeblastdb -parse_seqids` from the records of
+`LOSAT/tests/seqid/fasta` and `ids/gen.faa` (titles that NCBI makes from the Seq-ids), with every file
+makeblastdb writes: NCBI's formatters find a reported sequence again through the ISAM or LMDB files, so the
+frozen outputs need them (LOSAT reads the index, sequence and header files). Queries: `ids/ids_q.faa` (three
+proteins: one hits every sequence, one hits a few weakly, one has no hit), `ids/ids_q.fna` (the same
+back-translated, for BLASTX) and `ids/ids_qw.faa` (thirty W, which hits the records of
+`LOSAT/tests/seqid/db/variants` that no NCBI formatter finds again). `ids/refuse_v5` (version 5, from
+`ids/refuse.faa` and `ids/taxmap_refuse.txt`) holds one record per case of the rows `db.id.*.taxdb_nf.*` and
+of LOSAT's refusals, each hit by its own query `ids/refuse_<case>.faa` (`.fna` for BLASTX) alone with
+`-evalue 1e-20`: NCBI's outfmt 0 does not end on the records `long` and `punct`, so no other query may
+report them.

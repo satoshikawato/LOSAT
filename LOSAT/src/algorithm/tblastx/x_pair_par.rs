@@ -1497,6 +1497,9 @@ struct XHitCtx<'a> {
     cutoff_scores: &'a [i32],
     x_dropoff_per_context: &'a [i32],
     subject: &'a [u8],
+    /// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): with `SENT` (a unit `x_unit_sent` accepted: its chunk is
+    /// the whole frame), the frame's buffer `[0, subject.., 0]`; else empty.
+    subject_sent: &'a [u8],
     s_f_idx: usize,
     s_frame: i8,
     s_idx: usize,
@@ -1787,6 +1790,9 @@ pub(super) struct XPairPar {
     /// LOSAT_X_TBXUNITMASK: each group's extent (`x_group_extents`) while `mask_rule` is Some,
     /// else empty.
     extents: Vec<usize>,
+    /// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the batch's extensions may take the walks the
+    /// sentinels stop (`x_tbx_sent_contexts`); a unit takes them where its chunk is the whole frame.
+    sent: bool,
 }
 
 impl XPairPar {
@@ -1918,12 +1924,15 @@ impl XPairPar {
             Vec::new()
         };
         debug_assert!(extents.is_empty() || extents.len() == groups.len());
+        // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): checked once for the batch's contexts.
+        let sent = x_tbx_sent_contexts(b.contexts.iter().map(|c| c.aa_seq.as_slice()));
         Some(Self {
             groups,
             stub,
             sliced,
             mask_rule,
             extents,
+            sent,
         })
     }
 
@@ -2540,15 +2549,16 @@ impl XPairPar {
         init_hsps: &mut S,
         probe: &mut P,
     ) {
-        self.scan_unit_hits::<S, P, PF, false>(unit, inp, scratch, init_hsps, probe);
+        self.scan_unit_hits::<S, P, PF, false, false>(unit, inp, scratch, init_hsps, probe);
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
     // `x_hits_bf`, which takes the too-far and overlap outcomes of `x_hit` without a branch and
     // hands the others to `x_hit`; without it this is the loop before the switch. `BF` runs only
     // with `XNoProbe` (the probes count every outcome) and where `x_tbx_hitbf::fits` holds.
-    /// `scan_unit`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF.
-    fn scan_unit_hits<S: XInitSink, P: XProbe, const PF: bool, const BF: bool>(
+    /// `scan_unit`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF and with `SENT` the
+    /// extensions of `extend_hit_two_hit_sent` (LOSAT_X_TBXUNGAPSENT).
+    fn scan_unit_hits<S: XInitSink, P: XProbe, const PF: bool, const BF: bool, const SENT: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -2558,12 +2568,11 @@ impl XPairPar {
     ) {
         // EXPERIMENT (LOSAT_X_TBXUNITMASK): the masked table where the rule holds (module doc).
         match self.x_unit_mask(unit, inp.window) {
-            None => self.scan_unit_cells::<S, P, XUnmasked, PF, BF>(
+            None => self.scan_unit_cells::<S, P, XUnmasked, PF, BF, SENT>(
                 unit, inp, scratch, init_hsps, probe, 0,
             ),
-            Some(mask) => {
-                self.scan_unit_masked::<S, P, PF, BF>(unit, inp, scratch, init_hsps, probe, mask)
-            }
+            Some(mask) => self
+                .scan_unit_masked::<S, P, PF, BF, SENT>(unit, inp, scratch, init_hsps, probe, mask),
         }
     }
 
@@ -2571,7 +2580,13 @@ impl XPairPar {
     // unmasked form inlined into `scan_unit_hits` keeps the code it had before the switch.
     /// `scan_unit_cells` with `XMasked`.
     #[inline(never)]
-    fn scan_unit_masked<S: XInitSink, P: XProbe, const PF: bool, const BF: bool>(
+    fn scan_unit_masked<
+        S: XInitSink,
+        P: XProbe,
+        const PF: bool,
+        const BF: bool,
+        const SENT: bool,
+    >(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -2580,7 +2595,23 @@ impl XPairPar {
         probe: &mut P,
         mask: u32,
     ) {
-        self.scan_unit_cells::<S, P, XMasked, PF, BF>(unit, inp, scratch, init_hsps, probe, mask);
+        self.scan_unit_cells::<S, P, XMasked, PF, BF, SENT>(
+            unit, inp, scratch, init_hsps, probe, mask,
+        );
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): never on wasm32 (line W keeps its walks there).
+    /// Whether the extensions of `unit` take the walks the sentinels stop: the batch's contexts
+    /// allow them (`sent`) and the unit's chunk is its whole subject frame.
+    #[inline(always)]
+    pub(super) fn x_unit_sent(&self, unit: &XUnit, inp: &XSubject<'_>) -> bool {
+        cfg!(not(target_arch = "wasm32"))
+            && x_tbx_sent_subject(
+                self.sent,
+                &inp.s_frames_preliminary[unit.f].aa_seq,
+                unit.chunk.offset,
+                unit.chunk.length,
+            )
     }
 
     // The statements of `scan_unit_hits` for one form of the unit's cells (`XCells`): with
@@ -2588,7 +2619,14 @@ impl XPairPar {
     // `mask + 1` cells and the masked cell of every hit.
     /// `scan_unit_hits` with the cells `C` (`mask`: the masked table's cells minus one).
     #[inline(always)]
-    fn scan_unit_cells<S: XInitSink, P: XProbe, C: XCells, const PF: bool, const BF: bool>(
+    fn scan_unit_cells<
+        S: XInitSink,
+        P: XProbe,
+        C: XCells,
+        const PF: bool,
+        const BF: bool,
+        const SENT: bool,
+    >(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -2597,6 +2635,9 @@ impl XPairPar {
         probe: &mut P,
         mask: u32,
     ) {
+        // LOSAT_X_TBXUNGAPSENT: `SENT` only on the units `x_unit_sent` accepts (`x_hit`'s SAFETY;
+        // once per unit).
+        assert!(!SENT || self.x_unit_sent(unit, inp));
         let group = &self.groups[unit.g];
         let sub = &group.lookup;
         let wordsize = inp.wordsize;
@@ -2655,6 +2696,7 @@ impl XPairPar {
             cutoff_scores: inp.cutoff_scores,
             x_dropoff_per_context: inp.x_dropoff_per_context,
             subject,
+            subject_sent: if SENT { subject_full } else { &[] },
             s_f_idx: unit.f,
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
@@ -2681,7 +2723,7 @@ impl XPairPar {
             // [C] while (scan_range[1] <= scan_range[2])
             while scan_range[1] <= scan_range[2] {
                 // One batch per call (`x_unit_batch`: its own function on wasm32 only).
-                if !x_unit_batch::<S, P, C, PF, BF>(
+                if !x_unit_batch::<S, P, C, PF, BF, SENT>(
                     group,
                     subject,
                     &seq_ranges,
@@ -2724,7 +2766,14 @@ impl XPairPar {
 #[cfg_attr(target_arch = "wasm32", inline(never))]
 #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
 #[allow(clippy::too_many_arguments)]
-fn x_unit_batch<S: XInitSink, P: XProbe, C: XCells, const PF: bool, const BF: bool>(
+fn x_unit_batch<
+    S: XInitSink,
+    P: XProbe,
+    C: XCells,
+    const PF: bool,
+    const BF: bool,
+    const SENT: bool,
+>(
     group: &XGroup,
     subject: &[u8],
     seq_ranges: &[(i32, i32)],
@@ -2772,7 +2821,7 @@ fn x_unit_batch<S: XInitSink, P: XProbe, C: XCells, const PF: bool, const BF: bo
                 h.window,
                 h.wordsize,
                 |cell, query_offset, subject_offset| {
-                    x_hit(
+                    x_hit::<S, P, SENT>(
                         &mut *diag_ptr.add(cell),
                         query_offset,
                         subject_offset,
@@ -2819,7 +2868,7 @@ fn x_unit_batch<S: XInitSink, P: XProbe, C: XCells, const PF: bool, const BF: bo
         // a masked one is at most the mask, width - 1.
         let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
         probe.at(diag_coord, subject_offset);
-        let outcome = x_hit(
+        let outcome = x_hit::<S, P, SENT>(
             diag_entry,
             query_offset,
             subject_offset,
@@ -2919,9 +2968,10 @@ fn x_unit_batch<S: XInitSink, P: XProbe, C: XCells, const PF: bool, const BF: bo
 // saved (both read only local values, so the order is immaterial). The init HSP goes to the
 // caller's sink (today's `Vec<InitHSP>`, or the records of LOSAT_X_SEEDCOMPACT, section above
 // `XUnitHsp`), by the same push statement.
-/// The two-hit test and extension of one hit on its cell.
+/// The two-hit test and extension of one hit on its cell (`SENT`: LOSAT_X_TBXUNGAPSENT, the
+/// extension of `extend_hit_two_hit_sent`).
 #[inline(always)]
-fn x_hit<S: XInitSink, P: XProbe>(
+fn x_hit<S: XInitSink, P: XProbe, const SENT: bool>(
     diag_entry: &mut DiagStruct,
     query_offset: u32,
     subject_offset: u32,
@@ -2988,7 +3038,8 @@ fn x_hit<S: XInitSink, P: XProbe>(
         // Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): the probe around the extension
         // (x_unit_probe.rs; `XNoProbe` does nothing). No NCBI counterpart.
         let mark = probe.ext_begin();
-        let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
+        // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): with `SENT` the walks the sentinels stop.
+        let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) = if !SENT {
             extend_hit_two_hit(
                 query,
                 h.subject,
@@ -2997,7 +3048,22 @@ fn x_hit<S: XInitSink, P: XProbe>(
                 q_raw,
                 x_dropoff,
                 false,
-            );
+            )
+        } else {
+            // SAFETY: `SENT` runs on the units `x_unit_sent` accepts (`scan_unit_cells`): the
+            // batch's contexts passed `x_tbx_sent_contexts` (XPairPar::sent), and `h.subject_sent`
+            // is the buffer of a frame `x_tbx_sent_subject` accepted.
+            unsafe {
+                extend_hit_two_hit_sent(
+                    query_full,
+                    h.subject_sent,
+                    (last_hit + wordsize) as usize,
+                    subject_offset as usize,
+                    q_raw,
+                    x_dropoff,
+                )
+            }
+        };
         probe.ext_end(
             mark,
             query,
@@ -3435,6 +3501,7 @@ mod tests {
                     cutoff_scores,
                     x_dropoff_per_context,
                     subject,
+                    subject_sent: &[],
                     s_f_idx: f,
                     s_frame: s_frame.frame,
                     s_idx: 0,
@@ -3460,7 +3527,7 @@ mod tests {
                         {
                             aliased += 1;
                         }
-                        let outcome = x_hit(
+                        let outcome = x_hit::<_, _, false>(
                             &mut diag_array[cell],
                             pair.q_off,
                             pair.s_off,
@@ -3526,6 +3593,7 @@ mod tests {
         let pp = XPairPar {
             groups: build_groups(&lookup, &contexts),
             stub: false,
+            sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
             sliced: None,
             mask_rule: None,
             extents: Vec::new(),
@@ -3915,6 +3983,7 @@ mod tests {
             let pp = XPairPar {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
@@ -3966,6 +4035,9 @@ mod tests {
         let frame_numbers = [1i8, 2, 3, -1, -2, -3];
         let (mut masked_units, mut aliased_cases, mut saved) = (0usize, 0usize, 0usize);
         let (mut exact_fits, mut wide_groups, mut control_differs) = (0usize, 0usize, 0usize);
+        let mut sent_units = 0usize;
+        // LOSAT_X_TBXUNGAPSENT is on (the batches' contexts have their sentinels).
+        let on = x_tbx_sent_contexts(std::iter::empty());
         for case_no in 0..300 {
             let alphabet = &alphabets[case_no % alphabets.len()];
             let window = [40, 3 + x_tbx_extbatch::BATCH as i32, 64][case_no % 3];
@@ -4045,6 +4117,7 @@ mod tests {
             let plain = XPairPar {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
@@ -4053,6 +4126,7 @@ mod tests {
             let pp = XPairPar {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: None,
                 mask_rule: Some(XMaskRule {
                     max_cells: usize::MAX,
@@ -4067,6 +4141,7 @@ mod tests {
             let control = XPairPar {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: None,
                 mask_rule: pp.mask_rule,
                 extents: pp
@@ -4100,7 +4175,7 @@ mod tests {
                 exact_fits += usize::from(mask as usize + 1 == pp.extents[g] + window as usize);
                 wide_groups += usize::from(group_starts(&contexts).len() < contexts.len());
                 let mut want: Vec<InitHSP> = Vec::new();
-                plain.scan_unit_hits::<_, XNoProbe, false, false>(
+                plain.scan_unit_hits::<_, XNoProbe, false, false, false>(
                     &unit,
                     &inp,
                     &mut scratch,
@@ -4119,32 +4194,69 @@ mod tests {
                         .iter()
                         .any(|&b| a != b && (a - b).rem_euclid(cells) == 0)
                 });
+                // LOSAT_X_TBXUNGAPSENT: the subject is one whole frame with its sentinels, so its
+                // units take the sentinel walks whenever the batch does.
+                let sent = pp.x_unit_sent(&unit, &inp);
+                assert_eq!(sent, pp.sent);
+                sent_units += usize::from(sent);
                 let mut lists: Vec<(&str, Vec<InitHSP>)> = Vec::new();
-                for name in ["scan", "scan pf", "bf", "bf pf"] {
+                for name in [
+                    "scan",
+                    "scan pf",
+                    "bf",
+                    "bf pf",
+                    "scan sent",
+                    "bf sent",
+                    "bf pf sent",
+                ] {
+                    if name.ends_with("sent") && !sent {
+                        continue;
+                    }
                     let mut got: Vec<InitHSP> = Vec::new();
                     match name {
-                        "scan" => pp.scan_unit_hits::<_, XNoProbe, false, false>(
+                        "scan" => pp.scan_unit_hits::<_, XNoProbe, false, false, false>(
                             &unit,
                             &inp,
                             &mut scratch,
                             &mut got,
                             &mut XNoProbe,
                         ),
-                        "scan pf" => pp.scan_unit_hits::<_, XNoProbe, true, false>(
+                        "scan pf" => pp.scan_unit_hits::<_, XNoProbe, true, false, false>(
                             &unit,
                             &inp,
                             &mut scratch,
                             &mut got,
                             &mut XNoProbe,
                         ),
-                        "bf" => pp.scan_unit_hits::<_, XNoProbe, false, true>(
+                        "bf" => pp.scan_unit_hits::<_, XNoProbe, false, true, false>(
                             &unit,
                             &inp,
                             &mut scratch,
                             &mut got,
                             &mut XNoProbe,
                         ),
-                        _ => pp.scan_unit_hits::<_, XNoProbe, true, true>(
+                        "bf pf" => pp.scan_unit_hits::<_, XNoProbe, true, true, false>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            &mut XNoProbe,
+                        ),
+                        "scan sent" => pp.scan_unit_hits::<_, XNoProbe, false, false, true>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            &mut XNoProbe,
+                        ),
+                        "bf sent" => pp.scan_unit_hits::<_, XNoProbe, false, true, true>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            &mut XNoProbe,
+                        ),
+                        _ => pp.scan_unit_hits::<_, XNoProbe, true, true, true>(
                             &unit,
                             &inp,
                             &mut scratch,
@@ -4157,7 +4269,7 @@ mod tests {
                 }
                 for (name, len) in [("batched", x_tbx_extbatch::BATCH), ("batched 1", 1)] {
                     let mut got: Vec<InitHSP> = Vec::new();
-                    pp.scan_unit_batched_hits::<_, false, false>(
+                    pp.scan_unit_batched_hits::<_, false, false, false>(
                         &unit,
                         &inp,
                         &mut scratch,
@@ -4166,7 +4278,7 @@ mod tests {
                     );
                     lists.push((name, got));
                     let mut got: Vec<InitHSP> = Vec::new();
-                    pp.scan_unit_batched_hits::<_, true, true>(
+                    pp.scan_unit_batched_hits::<_, true, true, false>(
                         &unit,
                         &inp,
                         &mut scratch,
@@ -4174,6 +4286,26 @@ mod tests {
                         len,
                     );
                     lists.push((name, got));
+                    if sent {
+                        let mut got: Vec<InitHSP> = Vec::new();
+                        pp.scan_unit_batched_hits::<_, true, true, true>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            len,
+                        );
+                        lists.push((name, got));
+                        let mut got: Vec<InitHSP> = Vec::new();
+                        pp.scan_unit_batched_hits::<_, false, false, true>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            len,
+                        );
+                        lists.push((name, got));
+                    }
                 }
                 for (name, got) in &lists {
                     assert_eq!(
@@ -4185,7 +4317,7 @@ mod tests {
                     == Some((mask as usize + 1) / 2)
                 {
                     let mut got: Vec<InitHSP> = Vec::new();
-                    control.scan_unit_hits::<_, XNoProbe, false, false>(
+                    control.scan_unit_hits::<_, XNoProbe, false, false, false>(
                         &unit,
                         &inp,
                         &mut scratch,
@@ -4208,6 +4340,7 @@ mod tests {
             aliased_cases += usize::from(aliased);
         }
         assert!(masked_units > 600, "masked_units {masked_units}");
+        assert_eq!(sent_units, if on { masked_units } else { 0 });
         assert!(aliased_cases > 100, "aliased_cases {aliased_cases}");
         assert!(saved > 10_000, "saved {saved}");
         assert!(exact_fits > 50, "exact_fits {exact_fits}");
@@ -4974,6 +5107,7 @@ mod tests {
                 pp: XPairPar {
                     groups: build_groups(&lookup, &contexts),
                     stub: false,
+                    sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                     sliced: None,
                     mask_rule: None,
                     extents: Vec::new(),
@@ -5491,6 +5625,7 @@ mod tests {
             pp: XPairPar {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
+                sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),

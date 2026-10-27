@@ -1,11 +1,12 @@
 //! TBLASTN CLI, genetic-code, and internal seed-search boundary.
 mod args;
+mod tblastn_app;
 // NCBI c++/src/algo/blast/core/blast_engine.c:804-844:
 // for (context=first_context; context<=last_context; context++) {
 //     status = s_BlastSearchEngineOneContext(...);
 // }
 mod search_seed;
-// EXPERIMENT (LOSAT_X_TBNSCANBF): the lookup scan without a branch on the presence vector.
+// The lookup scan without a branch on the presence vector.
 pub(crate) mod x_scan_bf;
 // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the lookup scan on presence bytes, a block of indexes at once
 // (blastx's direct loop takes it too, LOSAT_X_BXSCANBYTE).
@@ -24,7 +25,7 @@ mod x_db_stream;
 // Blast_InitHitListSortByScore(init_hitlist);
 mod search_init;
 // NCBI c++/src/algo/blast/core/aa_ungapped.c:516-552: the two-hit tests of every hit.
-// EXPERIMENT (LOSAT_X_TBNHITBF): too far and overlap without a branch.
+// Too far and overlap without a branch.
 mod x_tbn_hitbf;
 // NCBI c++/src/algo/blast/core/blast_engine.c:522-552:
 // aux_struct->GetGappedScore(..., init_hitlist, &hsp_list, ...);
@@ -72,19 +73,20 @@ mod seqalign;
 // NCBI c++/src/app/blast/tblastn_app.cpp:188-194 and seqsrc_seqdb.cpp: the search of a BLAST
 // nucleotide database (`-db`): its sequences, numbers and titles.
 mod database;
-pub use args::{check_options, run_local, ResolvedTblastnArgs, TblastnArgs};
+pub use args::{check_options, ResolvedTblastnArgs, TblastnArgs};
+pub use tblastn_app::run_local;
 // The summary lines `main` prints at exit (`LOSAT_X_TBNXLATESIMD`, `LOSAT_X_TBNUNITXLATE`).
 // No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub use x_subject_translate::print_summary as x_subject_translate_print_summary;
 // EXPERIMENT (LOSAT_X_TBNSTORE): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use x_subject_store::print_summary as x_subject_store_print_summary;
-// EXPERIMENT (LOSAT_X_TBNSCANBF): the summary line `main` prints at exit. No NCBI counterpart: it
+// The summary line of the branch-free scan that `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use x_scan_bf::print_summary as x_scan_bf_print_summary;
 // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use x_scan_byte::print_summary as x_scan_byte_print_summary;
-// EXPERIMENT (LOSAT_X_TBNLINKWIN): the summary line `main` prints at exit. No NCBI counterpart: it
+// The summary line of the linking lookup that `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use stage_d_linking::x_link_window_print_summary;

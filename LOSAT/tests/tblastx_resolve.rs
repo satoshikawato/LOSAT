@@ -3,8 +3,8 @@
 //! `x_resolved_record_frames`) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): on unless it is `0`. It acts on each
-//! such record while `LOSAT_X_TBXFRAMES` is on; a record of A, C, G and T only copies its letters,
-//! and a `-db` sequence is read from its stored codes.
+//! such record; a record of A, C, G and T only copies its letters, and a `-db` sequence is read
+//! from its stored codes.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:443-450
 //! ```c
@@ -19,8 +19,11 @@
 //! ```
 //! The walk gives the letter-by-letter walk's frames for every record (the unit test of
 //! `subjects.rs` compares them in one process), so the property under test is that the report does
-//! not depend on the switch; that reports equal NCBI's is the business of the fixture comparisons
-//! (`tblastx_regression_fixtures.py`'s `ambig.*` and `input.rna_*`, outfmt0's `tblastx.ambig.*`).
+//! not depend on the switch. Since `LOSAT_X_TBXSTORE` the command line reads its records packed, so
+//! these runs set `LOSAT_X_TBXSTORE=0` (the other way to this switch is `run_local`); the record path
+//! gives the stored path's reports (`tests/tblastx_store.rs`, `tests/run_local_tblastx.rs`), and the
+//! stored path gives NCBI's (`tblastx_regression_fixtures.py`'s `ambig.*` and `input.rna_*`, outfmt0's
+//! `tblastx.ambig.*`).
 //! `LOSAT_X_REACH` shows the side each run took. The input (the first 6 kb of MjeNMV against the
 //! MelaMJNV genome with IUPAC codes, lower-case letters and N blocks, one across a translation
 //! window, and the PemoMJNVA genome as it is) gives HSPs in both records.
@@ -118,6 +121,9 @@ impl Inputs {
     fn tblastx(&self, threads: u32, switches: &[(&str, &str)]) -> (Vec<u8>, (bool, bool)) {
         let reach = reach_support::Reach::new("tblastx_resolve");
         let mut variables = switches.to_vec();
+        // The command line searches its records packed (`LOSAT_X_TBXSTORE`); `=0` keeps them, as
+        // `run_local` does, and their frames are the ones this switch makes.
+        variables.push(("LOSAT_X_TBXSTORE", "0"));
         variables.push(reach.var());
         let output = losat(&variables)
             .arg("tblastx")

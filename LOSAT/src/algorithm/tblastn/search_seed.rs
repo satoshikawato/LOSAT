@@ -4,7 +4,7 @@
 use crate::algorithm::blastp::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
 };
-use crate::algorithm::tblastx::blast_aascan::{s_blast_aa_scan_subject_one_range, BlastOffsetPair};
+use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 #[cfg(test)]
 use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, build_ncbi_lookup_for_profile};
 #[cfg(test)]
@@ -648,6 +648,24 @@ pub(super) fn x_lean_subject(
         && super::x_subject_translate::x_units_translate(length)
 }
 
+/// No NCBI counterpart: the offset array of `LOSAT_X_TBNPAIRCAP` holds this many entries more
+/// than the longest chain, eight times NCBI's OFFSET_ARRAY_SIZE (lookup_wrap.h:119). A scan call
+/// that stops on a full array starts again in the next call at the word that did not fit
+/// (`x_scan_byte.rs` builds that word's block of candidates again), which costs little per call
+/// but adds up at NCBI's size: dmel_b4.faa x zebrafish cDNAs (`-db`) at one thread took 1.0041 of
+/// the instructions with 4096 + the longest chain, 1.0016 with 8192 +, 1.0004 with 16384 + and
+/// 1.0001 with 32768 + (against 1024 x the longest chain; D14 s1 c1, 2026-10-26).
+const X_PAIR_ROOM: usize = 8 * 4096;
+
+// No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
+/// Whether a plan's offset array holds `X_PAIR_ROOM` + the longest chain entries (at most
+/// 1024 x the longest chain, the size without the switch) (`LOSAT_X_TBNPAIRCAP`, read once).
+fn x_pair_cap_on() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNPAIRCAP"))
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
 // ```c
 //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
@@ -856,7 +874,24 @@ pub(super) fn x_scan_plan(
     // NCBI builds the lookup table once per query batch: the first subject builds it and the
     // others read it.
     let lookup = std::sync::Arc::clone(x_lookup.get_or_init(x_build_lookup));
-    let pair_capacity = (lookup.longest_chain.max(1) as usize) * 1024;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266
+    // ```c
+    //    case eAaLookupTable:
+    //       offset_array_size = OFFSET_ARRAY_SIZE +
+    //          ((BlastAaLookupTable*)lookup->lut)->longest_chain;
+    // ```
+    // blast_engine.c:992,1040-1041 allocates each thread's offset array of that size and
+    // aa_ungapped.c:504-505 passes it to scansub (OFFSET_ARRAY_SIZE 4096, lookup_wrap.h:119).
+    // The size only decides where a scan call stops; the next call resumes there, so the pairs
+    // reach the caller in the same order at any size. With `LOSAT_X_TBNPAIRCAP` the array has
+    // NCBI's form with `X_PAIR_ROOM` for OFFSET_ARRAY_SIZE, never more entries than without it
+    // (1024 x the longest chain, which a table whose longest chain is below 33 keeps).
+    let longest_chain = lookup.longest_chain.max(1) as usize;
+    let pair_capacity = if x_pair_cap_on() {
+        (X_PAIR_ROOM + longest_chain).min(longest_chain.saturating_mul(1024))
+    } else {
+        longest_chain * 1024
+    };
     i32::try_from(pair_capacity).expect("NCBI offset array fits Int4");
     Ok(Some(XScanPlan {
         lookup,
@@ -901,21 +936,17 @@ pub(super) fn x_scan_unit(
     // (without AVX2 a sparse one); it writes up to X_SCAN_BYTE_SLACK entries after the capacity.
     let scan_byte = super::x_scan_byte::x_scan_byte();
     let presence = super::x_scan_byte::x_presence(scan_byte, &plan.lookup);
-    // EXPERIMENT (LOSAT_X_TBNSCANBF): the branch-free scan writes up to X_SCAN_BF_SLACK entries
-    // after the capacity.
-    let scan_bf = super::x_scan_bf::x_tbn_scan_bf();
+    // The branch-free scan writes up to X_SCAN_BF_SLACK entries after the capacity.
     let pairs_len = if presence.is_some() {
         plan.pair_capacity + super::x_scan_byte::X_SCAN_BYTE_SLACK
-    } else if scan_bf {
-        plan.pair_capacity + super::x_scan_bf::X_SCAN_BF_SLACK
     } else {
-        plan.pair_capacity
+        plan.pair_capacity + super::x_scan_bf::X_SCAN_BF_SLACK
     };
     if pairs.len() < pairs_len {
         pairs.resize(pairs_len, BlastOffsetPair::default());
     }
     let pair_capacity = plan.pair_capacity as i32;
-    // EXPERIMENT (LOSAT_X_TBNSCANBF): the scan calls of the unit, for LOSAT_X_STATS.
+    // The scan calls of the unit, for LOSAT_X_STATS.
     let mut x_calls = 0u64;
     for (range_index, &(left, right)) in ranges.iter().enumerate() {
         // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:496-501
@@ -939,16 +970,8 @@ pub(super) fn x_scan_unit(
                     pair_capacity,
                     &mut scan_range,
                 )
-            } else if scan_bf {
-                super::x_scan_bf::x_scan_one_range_bf(
-                    &plan.lookup,
-                    subject,
-                    pairs,
-                    pair_capacity,
-                    &mut scan_range,
-                )
             } else {
-                s_blast_aa_scan_subject_one_range(
+                super::x_scan_bf::x_scan_one_range_bf(
                     &plan.lookup,
                     subject,
                     pairs,
@@ -963,7 +986,7 @@ pub(super) fn x_scan_unit(
     if presence.is_some() {
         super::x_scan_byte::x_count_unit(x_calls);
     } else if super::x_scan_bf::x_stats() {
-        super::x_scan_bf::x_count_unit(scan_bf, x_calls);
+        super::x_scan_bf::x_count_unit(x_calls);
     }
 }
 

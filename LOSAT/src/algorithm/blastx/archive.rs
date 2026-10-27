@@ -97,17 +97,17 @@ pub(crate) fn handle_for(
     ArchiveHandle::for_program(&option_inputs(args), database, "BLASTX").map(Some)
 }
 
-/// The refusal of a title with a byte outside `0x20..=0x7E` (`report::archive::check_titles`)
-/// for BLASTX's records, before the first byte.
+/// The refusal of a title that the archive cannot write as NCBI does
+/// (`report::archive::ArchiveEncoding::writes_text`: in text and binary a byte outside
+/// `0x20..=0x7E`, in XML a control byte) for BLASTX's records, before the first byte.
 pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    if let Some(record) = records.iter().find(|record| {
-        !record
-            .title
-            .bytes()
-            .all(|byte| (0x20..=0x7E).contains(&byte))
-    }) {
+    let encoding = crate::report::archive::ArchiveEncoding::from_env();
+    if let Some(record) = records
+        .iter()
+        .find(|record| !encoding.writes_text(record.title.as_bytes()))
+    {
         anyhow::bail!(
-            "the title of the {role} {} has a character outside the visible ASCII range, which is not supported by LOSAT's BLASTX with -outfmt 11",
+            "the title of the {role} {} has a character the archive cannot write as NCBI does (outside the visible ASCII range in text and binary, a control character in XML), which is not supported by LOSAT's BLASTX with -outfmt 11",
             record.internal_id
         );
     }

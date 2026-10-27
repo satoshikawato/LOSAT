@@ -343,13 +343,26 @@ mod tests {
             missing.message,
             format!("Error: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/algo/winmask/seq_masker_istat_factory.cpp\", line 171: Error: (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open nosuch.obinary\n\n")
         );
-        // A directory opens and reads nothing: the unknown format.
+        // A directory opens and reads nothing on Unix: the unknown format. Windows cannot open a
+        // directory as a file, so the open fails first there: the "could not open" exception.
         let directory = open(env!("CARGO_MANIFEST_DIR"), &FileCounts).unwrap_err();
-        assert_eq!(directory.exit, 1);
-        assert_eq!(
-            directory.message,
-            "BLAST query/options error: Only optimized binary windowmasker stat files are supported\nPlease refer to the BLAST+ user manual.\n"
-        );
+        if cfg!(unix) {
+            assert_eq!(directory.exit, 1);
+            assert_eq!(
+                directory.message,
+                "BLAST query/options error: Only optimized binary windowmasker stat files are supported\nPlease refer to the BLAST+ user manual.\n"
+            );
+        } else {
+            assert_eq!(directory.exit, 255);
+            assert!(
+                directory.message.ends_with(&format!(
+                    "could not open {}\n\n",
+                    env!("CARGO_MANIFEST_DIR")
+                )),
+                "{}",
+                directory.message
+            );
+        }
         let binary = open(&counts_path("dm2L_u9.binary"), &FileCounts).unwrap();
         assert!(binary.build_error().is_none());
         assert_eq!(binary.name, counts_path("dm2L_u9.binary"));

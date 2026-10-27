@@ -1,0 +1,38 @@
+swissprot { name "ONE_HUMAN", accession "P11111", release "reviewed", version 1 }
+local str "Subject_8"
+local str "Subject_7"
+patent { seqid 7, cit { country "EP", id number "0238993" } }
+local id 123
+prf { name "DEF", accession "ABC" }
+other { accession "NP_000002" }
+patent { seqid 7, cit { country "EP", id number "0123456A1" } }
+patent { seqid 1, cit { country "US", id number "RE33188" } }
+general { db "ti", tag id 123 }
+local str "long1"
+gi 3000000000
+swissprot { accession "P99999", release "reviewed" }
+pdb { mol "1ABC" }
+pdb { mol "1ABC", chain-id "AA" }
+gibbmt 123
+gpipe { accession "GPP123" }
+tpd { accession "BK000013", version 1 }
+tpe { accession "BK000012", version 1 }
+swissprot { name "ONE_HUMAN", accession "P11111", release "reviewed", version 1 }
+local str "Subject_8"
+local str "Subject_7"
+patent { seqid 7, cit { country "EP", id number "0238993" } }
+local id 123
+prf { name "DEF", accession "ABC" }
+other { accession "NP_000002" }
+patent { seqid 7, cit { country "EP", id number "0123456A1" } }
+patent { seqid 1, cit { country "US", id number "RE33188" } }
+general { db "ti", tag id 123 }
+local str "long1"
+gi 3000000000
+swissprot { accession "P99999", release "reviewed" }
+pdb { mol "1ABC" }
+pdb { mol "1ABC", chain-id "AA" }
+gibbmt 123
+gpipe { accession "GPP123" }
+tpd { accession "BK000013", version 1 }
+tpe { accession "BK000012", version 1 }

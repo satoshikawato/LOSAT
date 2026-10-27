@@ -38,8 +38,9 @@
 //!    when every one of its units has been taken (`XSeedEnd::units_taken`, while the HSPs held are
 //!    below the limit): the next batch builds its tables while the last units run, then waits at a
 //!    gate before its subjects (`XGateView`) until the batch before has ended its seed stage and
-//!    the HSPs held leave room, or the batch before has returned, or the pipe stopped, taking the
-//!    board's items meanwhile.
+//!    the HSPs held leave room, or every unit of the batch before has run and the records they
+//!    returned (a bound on the HSPs that batch's merges keep) fit beside the HSPs held, or the
+//!    batch before has returned, or the pipe stopped, taking the board's items meanwhile.
 //! 3. The loop takes a started batch's result from its slot. Until the slot is filled the loop's
 //!    thread runs the pool's jobs (`rayon::yield_now`), and sleeps 50 us when there is none, so
 //!    no thread waits for a condition outside rayon's latches and no job waits at all (plan v4
@@ -184,16 +185,26 @@ pub(super) struct XSeedEnd<'a> {
     units_taken: Option<&'a (dyn Fn() + Sync)>,
     units_taken_once: AtomicBool,
     gate: Option<XGateView<'a>>,
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the subjects whose units have not all run, the records their
+    // units returned (a bound on the HSPs the merges keep), and what to do when the last one ends.
+    units_left: AtomicUsize,
+    unit_records: AtomicU64,
+    units_done: Option<&'a (dyn Fn(u64) + Sync)>,
 }
 
 // EXPERIMENT (LOSAT_X_TBXBOARD): a batch started when the batch before had all its units taken
 // builds its tables, then its subjects wait here until the batch before has ended its seed stage
-// and the HSPs held leave room (module header, item 4), or the batch before has returned, or the
-// pipe stopped. No NCBI counterpart (scheduling only).
+// and the HSPs held leave room (module header, item 4), or every unit of the batch before has run
+// and its units' records fit beside the HSPs held, or the batch before has returned, or the pipe
+// stopped. No NCBI counterpart (scheduling only).
 #[derive(Default)]
 pub(super) struct XGate {
     prev_seed_done: AtomicBool,
     prev_returned: AtomicBool,
+    /// Every unit of the batch before has run; `prev_bound` is the records they returned, which
+    /// bounds the HSPs the batch before will hold from its seed-stage end.
+    prev_units_done: AtomicBool,
+    prev_bound: AtomicU64,
 }
 
 #[derive(Clone, Copy)]
@@ -208,6 +219,10 @@ impl XGateView<'_> {
         self.stop.load(Ordering::SeqCst)
             || self.gate.prev_returned.load(Ordering::SeqCst)
             || (self.gate.prev_seed_done.load(Ordering::SeqCst) && self.held.room())
+            || (self.gate.prev_units_done.load(Ordering::SeqCst)
+                && self.held.now.load(Ordering::SeqCst)
+                    + self.gate.prev_bound.load(Ordering::SeqCst)
+                    <= self.held.limit)
     }
 }
 
@@ -229,6 +244,9 @@ impl<'a> XSeedEnd<'a> {
             units_taken: None,
             units_taken_once: AtomicBool::new(false),
             gate: None,
+            units_left: AtomicUsize::new(subjects),
+            unit_records: AtomicU64::new(0),
+            units_done: None,
         }
     }
 
@@ -236,11 +254,24 @@ impl<'a> XSeedEnd<'a> {
     fn with_early(
         mut self,
         units_taken: &'a (dyn Fn() + Sync),
+        units_done: &'a (dyn Fn(u64) + Sync),
         gate: Option<XGateView<'a>>,
     ) -> Self {
         self.units_taken = Some(units_taken);
+        self.units_done = Some(units_done);
         self.gate = gate;
         self
+    }
+
+    /// One subject's units have all run and returned `records` records (its HSPs for a subject
+    /// without units); the last one tells the pipe the batch's bound.
+    fn subject_units_done(&self, records: u64) {
+        let total = self.unit_records.fetch_add(records, Ordering::SeqCst) + records;
+        if self.units_left.fetch_sub(1, Ordering::SeqCst) == 1 {
+            if let Some(units_done) = self.units_done {
+                units_done(total);
+            }
+        }
     }
 
     /// Every unit of this batch has been taken (from the board): the next batch may build its
@@ -296,6 +327,7 @@ pub(super) struct XSeedGuard<'a> {
     seed_end: Option<&'a XSeedEnd<'a>>,
     ended: bool,
     hsps: u64,
+    units_reported: bool,
 }
 
 impl<'a> XSeedGuard<'a> {
@@ -304,6 +336,19 @@ impl<'a> XSeedGuard<'a> {
             seed_end,
             ended: false,
             hsps: 0,
+            units_reported: false,
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXBOARD): this subject's units have all run and returned `records`
+    // records (`XSeedEnd::subject_units_done`); once.
+    pub(super) fn units_done(&mut self, records: usize) {
+        if self.units_reported {
+            return;
+        }
+        self.units_reported = true;
+        if let Some(seed_end) = self.seed_end {
+            seed_end.subject_units_done(records as u64);
         }
     }
 
@@ -316,6 +361,8 @@ impl<'a> XSeedGuard<'a> {
         if self.ended {
             return true;
         }
+        // A subject that ran no units reports its HSPs as its bound.
+        self.units_done(hsps);
         self.ended = true;
         match self.seed_end {
             Some(seed_end) => {
@@ -503,14 +550,23 @@ impl<'s, R: Send> XPipe<'s, R> {
     fn run(&'s self, scope: &rayon::Scope<'s>, i: usize) -> Result<R> {
         let on_end = |_: u64| self.seed_ended(scope, i);
         let units_taken = || self.units_taken(scope, i);
+        let units_done = |bound: u64| {
+            if let Some(next) = self.gates.get(i + 1) {
+                next.prev_bound.store(bound, Ordering::SeqCst);
+                next.prev_units_done.store(true, Ordering::SeqCst);
+            }
+        };
         let last = i + 1 == self.plan.len();
         let gate = self.gated[i].load(Ordering::SeqCst).then(|| XGateView {
             gate: &self.gates[i],
             held: &self.held,
             stop: &self.stop,
         });
-        let seed_end =
-            XSeedEnd::new(self.subjects, &on_end, &self.held, last).with_early(&units_taken, gate);
+        let seed_end = XSeedEnd::new(self.subjects, &on_end, &self.held, last).with_early(
+            &units_taken,
+            &units_done,
+            gate,
+        );
         let result = (self.search)(self.plan[i].clone(), Some(&seed_end));
         if result.is_err() {
             self.stop.store(true, Ordering::SeqCst);

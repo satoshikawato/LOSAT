@@ -4682,6 +4682,7 @@ fn search_query_batch<S: TbxScore>(
                 x_lap.lap(XStage::Prepare);
                 let x_units = x.run_subject_units(&x_subject, parallel_pool);
                 x_lap.lap(XStage::Units);
+                x_pipe_seed.units_done(x_units.records());
                 // EXPERIMENT (LOSAT_X_TBXBOARD): every unit of the batch taken: the next batch
                 // may build its tables (tblastx/x_batch_pipe.rs `XSeedEnd::units_taken`).
                 if let (Some((_, batch)), Some(seed_end)) = (x_board_batch.as_ref(), x_seed_end) {

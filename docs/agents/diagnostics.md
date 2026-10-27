@@ -1841,9 +1841,11 @@ Rebuilding less:
   were 11 times as many (Swiss-Prot at 16 threads 2 -> 17, UniRef50 at 32 threads about 74 -> 794);
   (3) the index check (`seqdb/index.rs`) and the header pieces of the title checks read 64 KiB at a time, and
   BLASTP's title checks read each range from the index (`SeqDb::x_header_range`) instead of a list of all ranges;
-  (4) the chains of BLASTP's lookup build (`x_bp_build_direct`) take a capacity above 32 MiB
+  (4) the cells and chains of BLASTP's lookup build (`x_bp_build_direct`) come from allocations above 32 MiB
   (`utils/x_mapped.rs` `x_unthresholded_capacity`), which glibc maps whatever the threshold and whose free does not
-  move it (the pages not written are not resident).
+  move it (the pages not written are not resident); the chains' slabs are cut from one such region while it has room
+  (`tblastx/lookup/backbone.rs`), so a build reserves one region of address space per 32 MiB of chains, not one per
+  256 KiB slab (64-bit Linux with glibc only; elsewhere the sizes are the plain ones).
   Reports do not change: each block is searched as a task of the rounds searches it, from the one-thread order's
   diagonal offset of its first sequence, and the blocks' results go to the hit lists in ordinal order; a failed
   search stops at the first error in ordinal order, and `x_db_cut.rs` returns the one-thread order's error. The

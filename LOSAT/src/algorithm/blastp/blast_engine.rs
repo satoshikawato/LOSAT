@@ -6261,6 +6261,10 @@ fn search(
             if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
                 crate::utils::xreach::x_reach!("LOSAT_X_DBIDXREAD", false);
             }
+            // LOSAT_X_BPDBKEEP acts on the preliminary stage of `-db` (`database/x_db_keep.rs`).
+            if crate::seqdb::x_bp_db_keep() {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPDBKEEP", false);
+            }
             BlastpSubjectSource::Fasta(&subjects.records)
         }
     };
@@ -8535,6 +8539,8 @@ fn run_resolved_in_pool(
     // The kernel takes the subject from its caller: a record of the encoded FASTA set,
     // or a sequence of a database block (`BlastpSubjectRef`); `s_idx` is the subject's
     // index in the set, or its ordinal id in the database.
+    // The kernel runs no rayon work: with `-db` the window of `database/x_db_keep.rs` makes the
+    // workers wait for the one that runs it (header: why the waits end).
     let process_subject = |scratch: &mut BlastpSubjectScratch,
                            s_idx: usize,
                            subject: BlastpSubjectRef<'_>,

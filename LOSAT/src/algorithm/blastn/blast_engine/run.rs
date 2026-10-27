@@ -9680,6 +9680,7 @@ fn write_reports_untimed(
                 &mut hit_lists,
                 letters,
                 shown,
+                written.queries,
             )?)
         }
     };

@@ -993,13 +993,14 @@ pub(super) struct ReportedSubjects {
 /// read them; the tabular formats do not). A reported sequence whose stored title LOSAT
 /// does not report as NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the
 /// reports `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
-/// `shown.joined` `refuse_joined_hits`).
+/// `shown.joined` `refuse_joined_hits`; `first_query`: the index of the query of `hit_lists[0]`).
 pub(super) fn reported_subjects(
     database: &BlastnDatabase,
     titles: &DatabaseTitles,
     hit_lists: &mut [Option<BlastnHitList>],
     letters: bool,
     shown: ParsedShown,
+    first_query: usize,
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = hit_lists
         .iter()
@@ -1028,7 +1029,9 @@ pub(super) fn reported_subjects(
     }
     let mut records = Vec::with_capacity(ordinals.len());
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
-    let taxdb_found = shown.pairwise && database.db.taxdb_found();
+    // Whether `taxdb.bti` is on the search path, looked up at the first sequence with parsed
+    // Seq-ids that outfmt 0 shows.
+    let mut taxdb_found: Option<bool> = None;
     for (rank, &ordinal) in ordinals.iter().enumerate() {
         let header = titles
             .get(&ordinal)
@@ -1039,14 +1042,9 @@ pub(super) fn reported_subjects(
                 stored.title.clone()
             }
             ReportedHeader::Parsed(subject) => {
-                shared::check_reported_parsed(
-                    subject,
-                    shown,
-                    false,
-                    taxdb_found,
-                    ordinal,
-                    PROGRAM,
-                )?;
+                let taxdb =
+                    shown.pairwise && *taxdb_found.get_or_insert_with(|| database.db.taxdb_found());
+                shared::check_reported_parsed(subject, shown, false, taxdb, ordinal, PROGRAM)?;
                 if parsed.is_empty() {
                     parsed = vec![None; ordinals.len()];
                 }
@@ -1082,7 +1080,7 @@ pub(super) fn reported_subjects(
                 continue;
             };
             shared::refuse_joined_hits(
-                query,
+                first_query + query,
                 hit_list
                     .hsplist_array
                     .iter()
@@ -1138,7 +1136,7 @@ impl ReportedSubjects {
 /// results as `read_title` and `SeqDb::check_ambiguity`) instead of one sequence at a time.
 /// A database with parsed Seq-ids gives `Off::Titles` at its first definition line (`read_title`
 /// reads ordinal ids alone), so its reports come after the whole search, as BLASTP's do without
-/// its block search (line DBID, DECISIONS 9 (6)).
+/// its block search (line DBID, DECISIONS 9 (6)), except SAM (`Ready::sam_despite`).
 pub(super) fn x_streaming_refusal(
     database: &BlastnDatabase,
     pool: &crate::utils::threading::SearchPool<'_>,
@@ -1708,6 +1706,7 @@ mod tests {
             &mut hit_lists,
             true,
             ParsedShown::default(),
+            0,
         )
         .unwrap();
         assert_eq!(reported.ordinals, [5, 9]);
@@ -1750,6 +1749,7 @@ mod tests {
             &mut hit_lists,
             false,
             ParsedShown::default(),
+            0,
         )
         .unwrap();
         assert!(reported.records[0].seq().is_empty());
@@ -1783,14 +1783,22 @@ mod tests {
             &mut clean,
             false,
             ParsedShown::default(),
+            0,
         )
         .unwrap();
         let mut bad = vec![hit_list(vec![(1, 1e-9)], 1)];
         read_titles(&database, &bad, &mut titles).unwrap();
         assert_eq!(titles[&1].stored().title, b"n02 l#ngth 41");
-        let error = reported_subjects(&database, &titles, &mut bad, false, ParsedShown::default())
-            .err()
-            .expect("the bad byte");
+        let error = reported_subjects(
+            &database,
+            &titles,
+            &mut bad,
+            false,
+            ParsedShown::default(),
+            0,
+        )
+        .err()
+        .expect("the bad byte");
         assert!(
             format!("{error:#}").starts_with(
                 "database sequence 1 has a stored title with a byte outside ' ' to '~'"

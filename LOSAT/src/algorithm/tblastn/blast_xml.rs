@@ -457,12 +457,7 @@ impl PreparedXml {
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time (nothing for the other formats).
                     if let Some(warnings) = warnings.as_deref_mut() {
-                        taxdb_printer.at_hit(
-                            oid,
-                            names.taxid,
-                            &names.taxonomy,
-                            &mut *warnings.sink,
-                        )?;
+                        taxdb_printer.at_names(oid, names, &mut *warnings.sink)?;
                     }
                     sink.hit(&hit, |hsps| {
                         for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {

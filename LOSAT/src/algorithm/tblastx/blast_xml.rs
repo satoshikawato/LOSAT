@@ -352,12 +352,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time
                 // (nothing for the other formats).
                 if let Some(warnings) = warnings.as_deref_mut() {
-                    taxdb_printer.at_hit(
-                        s_idx as usize,
-                        subject.taxid,
-                        &subject.taxonomy,
-                        &mut *warnings.sink,
-                    )?;
+                    taxdb_printer.at_names(s_idx as usize, subject, &mut *warnings.sink)?;
                 }
                 sink.hit(&hit, |hsps| {
                     for hsp in &query_hits[first..end] {

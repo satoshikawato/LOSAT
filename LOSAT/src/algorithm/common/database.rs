@@ -607,8 +607,10 @@ pub(crate) fn refuse_parsed_taxonomy(ordinal: u32, program: &str) -> anyhow::Err
 
 /// LOSAT's refusals of the outfmt 0 description and alignment heading of the subject with
 /// parsed Seq-ids `subject` (the database sequence `ordinal`; `protein` for a protein database)
-/// that it does not write as NCBI: a title of punctuation that NCBI's `x_CleanAndCompress`
-/// reads past the end of (NCBI BLAST+ 2.17.0 crashes or does not end), a description id longer
+/// that it does not write as NCBI: a protein title of punctuation that NCBI's `x_CleanAndCompress`
+/// reads past the end of (NCBI BLAST+ 2.17.0 crashes or does not end; approved exception 2 of
+/// PD-LOSAT-NCBI-DEFECTS has BLASTN, TBLASTN and TBLASTX stop such a nucleotide title at the end
+/// of the string, as for a database without parsed Seq-ids), a description id longer
 /// than NCBI's cut of the line leaves room for (NCBI then pads the line without end), a
 /// generated heading title whose end NCBI rewrites from the taxids
 /// (`ParsedSubject::title_suffix_adjusted`), and a title that NCBI makes from the sequence's
@@ -626,7 +628,7 @@ pub(crate) fn check_shown_parsed_subject(
         && subject
             .bioseq_title(protein, false)
             .is_ok_and(|defline| defline.reads_past_end);
-    if title.reads_past_end || heading_reads_past_end {
+    if protein && (title.reads_past_end || heading_reads_past_end) {
         return Err(parsed_refusal(
             ordinal,
             "has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0)",

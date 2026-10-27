@@ -112,8 +112,9 @@ impl ParsedSubject {
     }
 
     /// `Err` for a subject whose sequence NCBI's formatters cannot find by its Seq-align id
-    /// (see `new`): the formats that read the subject's Bioseq (outfmt 0, 5, 6, 7 and 13 to 16)
-    /// refuse it; the Seq-annots and the archive (8, 9, 11, 12) write the Seq-align id alone.
+    /// (see `new`): the formats that read the subject's Bioseq (outfmt 0, 5, 6, 7, 13 to 16 and
+    /// SAM, 17) refuse it; the Seq-annots and the archive (8, 9, 11, 12) write the Seq-align id
+    /// alone.
     pub fn fetched(&self) -> Result<(), String> {
         if !self.unfetchable {
             return Ok(());
@@ -300,7 +301,9 @@ impl ParsedSubject {
         let defline = self
             .bioseq_title(protein, false)
             .map_err(|UnknownEncoding| "a title in no encoding that NCBI BLAST+ recognises")?;
-        if defline.reads_past_end {
+        // A nucleotide title stops at the end of the string (approved exception 2 of
+        // PD-LOSAT-NCBI-DEFECTS for BLASTN, TBLASTN and TBLASTX).
+        if protein && defline.reads_past_end {
             return Err("a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes)");
         }
         let end = defline
@@ -653,6 +656,48 @@ mod tests {
 
     fn text(bytes: &[u8]) -> &str {
         std::str::from_utf8(bytes).unwrap()
+    }
+
+    // Approved exception 2 of PD-LOSAT-NCBI-DEFECTS: BLASTN, TBLASTN and TBLASTX stop an outfmt 0
+    // title made only of punctuation at the end of the string (NCBI's `x_CleanAndCompress` reads
+    // past it and crashes); a nucleotide subject with parsed Seq-ids gets the title of the same
+    // stored title without them, and so does the tabular title word. A protein subject is refused.
+    #[test]
+    fn a_nucleotide_title_of_punctuation_stops_at_its_end() {
+        use crate::algorithm::common::database::check_shown_parsed_subject;
+        let subject = |id: ParsedSeqId| {
+            let defline = BlastDefline {
+                title: Some(b", ,".to_vec()),
+                ids: vec![id],
+                ..BlastDefline::default()
+            };
+            ParsedSubject::new(
+                DeflineSet {
+                    deflines: vec![defline],
+                },
+                true,
+            )
+            .unwrap()
+        };
+        let stored = crate::report::defline::generate_defline(b", ,", false, true).unwrap();
+        assert!(stored.reads_past_end);
+        let accession = subject(ParsedSeqId::Genbank(crate::seqid::model::TextseqId {
+            name: None,
+            accession: Some(b"AF000050".to_vec()),
+            release: None,
+            version: Some(1),
+        }));
+        let (start, title) = accession.description(false);
+        assert_eq!(text(&start), "AF000050.1 ");
+        assert_eq!(title.text, stored.text);
+        check_shown_parsed_subject(&accession, false, false, 0, "BLASTN")
+            .expect("a nucleotide title of punctuation is shown");
+        assert!(check_shown_parsed_subject(&accession, true, false, 0, "BLASTP").is_err());
+        let local = subject(ParsedSeqId::Local(ObjectId::Str(b"Subject_51".to_vec())));
+        assert!(local.tabular_ids(true).is_err());
+        let [id, _, _] = local.tabular_ids(false).unwrap();
+        let word = stored.text.split(|&byte| byte == b' ').next().unwrap();
+        assert_eq!(id, word);
     }
 
     // NCBI BLAST+ 2.17.0 `blastn -db tests/db_search/ids/nucl_v5 -outfmt 17` names the subjects

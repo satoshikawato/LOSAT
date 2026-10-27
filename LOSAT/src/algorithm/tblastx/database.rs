@@ -233,7 +233,9 @@ pub(crate) fn reported_subjects(
     }
     let mut records = Vec::with_capacity(ordinals.len());
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
-    let taxdb_found = shown.pairwise && database.db.taxdb_found();
+    // Whether `taxdb.bti` is on the search path, looked up at the first sequence with parsed
+    // Seq-ids that outfmt 0 shows.
+    let mut taxdb_found: Option<bool> = None;
     for (rank, &ordinal) in ordinals.iter().enumerate() {
         let header = titles
             .get(&ordinal)
@@ -244,14 +246,9 @@ pub(crate) fn reported_subjects(
                 stored.title.clone()
             }
             ReportedHeader::Parsed(subject) => {
-                shared::check_reported_parsed(
-                    subject,
-                    shown,
-                    false,
-                    taxdb_found,
-                    ordinal,
-                    PROGRAM,
-                )?;
+                let taxdb =
+                    shown.pairwise && *taxdb_found.get_or_insert_with(|| database.db.taxdb_found());
+                shared::check_reported_parsed(subject, shown, false, taxdb, ordinal, PROGRAM)?;
                 if parsed.is_empty() {
                     parsed = vec![None; ordinals.len()];
                 }

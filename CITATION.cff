@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: If you use this software, please cite it as below.
+title: LOSAT
+version: 0.2.0
+authors:
+  - given-names: Satoshi
+    family-names: Kawato
+repository-code: https://github.com/satoshikawato/LOSAT
+license: MIT

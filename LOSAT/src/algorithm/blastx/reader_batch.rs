@@ -255,6 +255,24 @@ pub(crate) fn prepare_unit(
     })
 }
 
+/// A reader batch of one unit prepared: its queries translated and filtered, and the statistical
+/// blocks of its contexts. `search::search_core` prepares such a batch with it when it is searched,
+/// and the capped batch flow (`LOSAT_X_BXCAPFILL`, `x_bx_mem.rs`) ahead of its search. Such a batch
+/// has no shape (its unit's values are the batch's) and no cutoff minima to reduce.
+pub(crate) fn prepare_lone_unit(
+    queries: &[FastaRecord],
+    options: &ResolvedOptions,
+) -> Result<UnitPrep> {
+    let prepared = prepare_queries(queries, options)?;
+    let params = score_block(&prepared);
+    Ok(UnitPrep {
+        prepared,
+        params,
+        word_cutoff_min: None,
+        redo_cutoff_min: None,
+    })
+}
+
 /// The end of phase 1 for one unit: the batch's shape replaces the layout.
 pub(crate) fn attach(unit: &mut UnitPrep, shape: &Arc<ReaderBatchShape>) {
     unit.prepared.reader_shape = Some(Arc::clone(shape));

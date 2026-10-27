@@ -1880,6 +1880,13 @@ impl ReaderBatchResults {
     }
 }
 
+/// No NCBI counterpart: whether `LOSAT_X_BXCAPREADY` is on (in the strict set).
+#[cfg(feature = "parallel")]
+fn x_cap_ready() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCAPREADY"))
+}
+
 /// A unit's search in the flow, or the panic it ended with (raised again where it is written).
 #[cfg(feature = "parallel")]
 type XSearched = std::thread::Result<Result<Vec<BatchResults>>>;
@@ -1939,15 +1946,26 @@ fn x_flow(
     // waits for its reader batch's phase 1 is spawned).
     struct XHeld {
         batches: VecDeque<(usize, XUnit)>,
+        // With LOSAT_X_BXCAPREADY: units released whose phase 1 has ended (or that have none),
+        // waiting for a place; a unit takes a place only from here.
+        ready: VecDeque<(usize, XUnit, bool)>,
         live: usize,
         ended: bool,
         // The writing ended (at the end, at an error, or at a panic it raises again): spawn no more.
         stopped: bool,
     }
+    // What `release` does next: search a unit (its place taken), or release a held unit.
+    enum XNext {
+        Search((usize, XUnit, bool)),
+        Release(usize, XUnit, bool),
+    }
     struct XLaunch<'f> {
         held: std::sync::Mutex<XHeld>,
         lookahead: usize,
         max_live: usize,
+        // LOSAT_X_BXCAPREADY: a unit takes one of the `max_live` places when its phase 1 has ended
+        // (a unit waiting for it holds no lookup table), not when it is released.
+        ready_first: bool,
         search: &'f (dyn Fn(&XUnit, bool) -> Result<Vec<BatchResults>> + Sync),
     }
     impl XLaunch<'_> {
@@ -1971,26 +1989,61 @@ fn x_flow(
                 let next = {
                     let mut held = self.held();
                     let keep = if held.ended { 0 } else { self.lookahead };
-                    if !held.stopped && held.batches.len() > keep && held.live < self.max_live {
+                    if held.stopped {
+                        None
+                    } else if held.live < self.max_live && !held.ready.is_empty() {
                         held.live += 1;
+                        held.ready.pop_front().map(XNext::Search)
+                    } else if held.batches.len() > keep
+                        && (self.ready_first || held.live < self.max_live)
+                    {
+                        if !self.ready_first {
+                            held.live += 1;
+                        }
                         let alone = held.ended;
                         held.batches
                             .pop_front()
-                            .map(|(index, unit)| (index, unit, alone))
+                            .map(|(index, unit)| XNext::Release(index, unit, alone))
                     } else {
                         None
                     }
                 };
-                let Some((index, unit, alone)) = next else {
-                    break;
-                };
-                super::x_probe::mark(index, super::x_probe::PLACE);
-                if alone {
-                    super::x_timing::run_add(XRun::FlowAlone, 1);
+                match next {
+                    None => break,
+                    Some(XNext::Search((index, unit, alone))) => {
+                        super::x_probe::mark(index, super::x_probe::PLACE);
+                        self.spawn_search(scope, sender, index, unit, alone);
+                    }
+                    Some(XNext::Release(index, unit, alone)) => {
+                        if !self.ready_first {
+                            super::x_probe::mark(index, super::x_probe::PLACE);
+                        }
+                        if alone {
+                            super::x_timing::run_add(XRun::FlowAlone, 1);
+                        }
+                        if let Some(unit) = unit.ready(index, alone) {
+                            self.prepared(scope, sender, index, unit, alone);
+                        }
+                    }
                 }
-                if let Some(unit) = unit.ready(index, alone) {
-                    self.spawn_search(scope, sender, index, unit, alone);
-                }
+            }
+        }
+
+        // Unit `index`, released, can be searched (its phase 1 has ended, or it has none): with
+        // LOSAT_X_BXCAPREADY it waits for a place, else it has one and is spawned.
+        fn prepared<'s>(
+            &'s self,
+            scope: &rayon::Scope<'s>,
+            sender: &mpsc::Sender<(usize, XSearched)>,
+            index: usize,
+            unit: XUnit,
+            alone: bool,
+        ) {
+            if self.ready_first {
+                self.held().ready.push_back((index, unit, alone));
+                self.release(scope, sender);
+            } else {
+                self.spawn_search(scope, sender, index, unit, alone);
             }
         }
 
@@ -2034,12 +2087,14 @@ fn x_flow(
     let launch = XLaunch {
         held: std::sync::Mutex::new(XHeld {
             batches: VecDeque::new(),
+            ready: VecDeque::new(),
             live: 0,
             ended: false,
             stopped: false,
         }),
         lookahead,
         max_live,
+        ready_first: x_cap_ready(),
         search,
     };
     // Marks the writing ended when the scope's body returns or unwinds, before the scope waits
@@ -2168,7 +2223,7 @@ fn x_flow(
                             let x_ready = unit.prepare_task(prepare);
                             super::x_probe::mark(x_base + x_i, super::x_probe::PREP1);
                             for (index, unit, alone) in x_ready {
-                                launch.spawn_search(scope, &sender, index, unit, alone);
+                                launch.prepared(scope, &sender, index, unit, alone);
                             }
                         });
                     }

@@ -729,10 +729,11 @@ pub(super) enum SlotRecords<'a> {
     Borrowed(&'a [FastaRecord]),
     Shared(Arc<Vec<FastaRecord>>),
     Owned(Vec<FastaRecord>),
-    /// EXPERIMENT (LOSAT_X_BNQSLOTS): a copy out of a LOSAT_X_BNQDROP `Store`, the slot's alone:
-    /// its search drops the letters after their encoding, as the loop's batch does (the store's
-    /// rule holds, and a slot writes no report).
-    Held(Vec<FastaRecord>),
+    /// EXPERIMENT (LOSAT_X_BNQSLOTS): a copy out of a LOSAT_X_BNQDROP `Store`, the slot's alone,
+    /// with the packed letters of its records (`x_query_drop::Packs`; its search makes a record's
+    /// letters for each reader, `x_query_drop::Letters`): the search drops them after their
+    /// encoding, as the loop's batch does (the store's rule holds, and a slot writes no report).
+    Held(Vec<FastaRecord>, super::x_query_drop::Packs),
 }
 
 impl std::ops::Deref for SlotRecords<'_> {
@@ -743,7 +744,7 @@ impl std::ops::Deref for SlotRecords<'_> {
             SlotRecords::Borrowed(records) => records,
             SlotRecords::Shared(records) => records,
             SlotRecords::Owned(records) => records,
-            SlotRecords::Held(records) => records,
+            SlotRecords::Held(records, _) => records,
         }
     }
 }
@@ -796,10 +797,13 @@ impl BatchRecords<'_> {
             };
             return super::x_query_drop::BatchQueries::Held(
                 Arc::get_mut(records).expect("held alone"),
+                Vec::new(),
             );
         }
         match self {
-            BatchRecords::Taken(records) => super::x_query_drop::BatchQueries::Held(records),
+            BatchRecords::Taken(records) => {
+                super::x_query_drop::BatchQueries::Held(records, Vec::new())
+            }
             other => super::x_query_drop::BatchQueries::Shared(other.searched()),
         }
     }
@@ -998,7 +1002,9 @@ impl<'a> Queries<'a> {
             Queries::Taken(store) => {
                 return Ok(store.slot_batch(searched).map(|batch| match batch {
                     super::x_query_drop::SlotBatch::Lent(records) => SlotRecords::Shared(records),
-                    super::x_query_drop::SlotBatch::Copied(records) => SlotRecords::Held(records),
+                    super::x_query_drop::SlotBatch::Copied(records, packs) => {
+                        SlotRecords::Held(records, packs)
+                    }
                 }));
             }
             Queries::Streamed(store) => store,

@@ -3452,8 +3452,13 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_QSTREAM` refuses its second reading for a file shorter than the slots' window (`Off::Slots`), so the whole
   query file was held (dc-megablast of 31,168 cDNAs at 32 threads: 86 MiB of a peak of 349). Memory only; no NCBI
   counterpart (NCBI does not split `-subject` searches by queries). The store serves the slots: a slot that searches
-  a batch the loop has not taken copies its records out of the store (`Store::slot_batch`; the packed letters of
-  `LOSAT_X_BNQPACK` made again on the slot's own thread), and the loop lends the batch it takes to the slot that may
+  a batch the loop has not taken copies its records out of the store with the packed letters of `LOSAT_X_BNQPACK`
+  (`Store::slot_batch`: shared with the store; the records of packed letters hold none), and its search makes a
+  record's letters for each reader that asks (`x_query_drop::Letters`, through `coordination::QueryLetters`:
+  WindowMasker, DUST, the lower-case masks, the encoding, a query chunk's cut), which drops them before its next
+  record, so no slot holds its batch's letters at once. (Making a slot's letters when it started held nine batches'
+  letters at once beside the packed store in dc-megablast of 15,600 cDNAs at 32 threads, and their freed space stayed
+  in the slots' arenas: peak `RssAnon` 748 -> 766 MiB, 740 -> 749 with `MALLOC_ARENA_MAX=1`.) The loop lends the batch it takes to the slot that may
   still search it (`Store::lend`: any batch but the first while the slots may run, `Arc`-shared) until it has the
   batch's result, the slot's or its own search once no slot runs (`Queries::unlend`, right after
   `x_qbatch_par::Driver::take`). A lent batch the loop searches itself is held by the loop alone by then and drops

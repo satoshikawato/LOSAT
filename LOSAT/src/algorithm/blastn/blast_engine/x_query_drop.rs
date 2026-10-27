@@ -81,10 +81,16 @@
 //! the records and all their letters were read before the search and held to its end
 //! (dc-megablast of 31,168 cDNAs at 32 threads: 86 MiB of a peak of 349). With the switch the rule
 //! does not look at the slots (`Rule::acts`), and the store serves the slots: a slot that searches
-//! a batch the loop has not taken copies its records out of the store, its packed letters made
-//! again on its own thread (`Store::slot_batch`); the copy is the slot's alone and its search drops
-//! the letters after their encoding, as the loop's (`x_query_stream::SlotRecords::Held`; a slot
-//! writes no report). The loop lends the batch it takes to the slot
+//! a batch the loop has not taken copies its records out of the store with their packed letters
+//! (`Store::slot_batch`: the records of packed letters hold none, and the copy shares the store's
+//! packed letters), and its search makes a record's letters for each reader that asks (`Letters`:
+//! WindowMasker, DUST, the lower-case masks, the encoding, a query chunk's cut), which drops them
+//! before its next record. The copy is the slot's alone and its search drops what it holds after
+//! the encoding, as the loop's (`x_query_stream::SlotRecords::Held`; a slot writes no report).
+//! Making every record's letters when the slot started (dc-megablast of 15,600 cDNAs at 32
+//! threads, nine slots) held nine batches' letters at once beside the packed store, more than
+//! the file's letters, and the freed copies stayed in the slots' arenas: the peak `RssAnon` was
+//! 18 MiB above the search without the store (9 MiB with one glibc arena). The loop lends the batch it takes to the slot
 //! that may still search it (`Store::lend`, any batch but the first while the slots may run), until
 //! it has the batch's result: the slot's, or its own search once no slot runs
 //! (`Queries::unlend`, called right after `x_qbatch_par::Driver::take`). A lent batch the loop
@@ -100,6 +106,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
+use crate::algorithm::blastn::coordination::QueryLetters;
 use crate::algorithm::blastn::hsp::BlastnOutputFormat;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::QueryInput;
@@ -182,10 +189,66 @@ struct Left {
 }
 
 /// The records of a batch for a LOSAT_X_QBATCHPAR slot (LOSAT_X_BNQSLOTS): the loop's batch lent
-/// by the store, or a copy of records the loop has not taken.
+/// by the store, or a copy of records the loop has not taken, with the packed letters of those
+/// that have them (`Packs`; their records hold no letters).
 pub(super) enum SlotBatch {
     Lent(Arc<Vec<FastaRecord>>),
-    Copied(Vec<FastaRecord>),
+    Copied(Vec<FastaRecord>, Packs),
+}
+
+/// The packed letters (LOSAT_X_BNQPACK) of a batch's records, by the record's position in the
+/// batch: `None` for a record that holds its letters; empty where none is packed.
+pub(super) type Packs = Vec<Option<Arc<PackedLetters>>>;
+
+/// EXPERIMENT (LOSAT_X_BNQSLOTS): the letters of a batch's records for the readers that set the
+/// batch up (`coordination::QueryLetters`: WindowMasker, DUST, the lower-case masks, the encoding,
+/// the query chunks' cut): a record's own letters, or those of its packed store made again for the
+/// one reader that asks, which drops them before its next record. A slot's copy out of the store
+/// so never holds its batch's letters at once (module comment).
+#[derive(Clone, Copy)]
+pub(super) struct Letters<'a> {
+    records: &'a [FastaRecord],
+    packs: &'a [Option<Arc<PackedLetters>>],
+}
+
+impl Letters<'_> {
+    /// Record `index` cut to `from..to`, with its letters (a query chunk, `FastaRecord::cut`).
+    pub(super) fn cut(&self, index: usize, from: usize, to: usize) -> FastaRecord {
+        match self.packs.get(index) {
+            Some(Some(store)) => {
+                let mut record = self.records[index].clone();
+                store.unpack_into(&mut record.sequence);
+                record.cut(from, to)
+            }
+            _ => self.records[index].cut(from, to),
+        }
+    }
+}
+
+impl QueryLetters for Letters<'_> {
+    fn count(&self) -> usize {
+        self.records.len()
+    }
+
+    fn length(&self, index: usize) -> usize {
+        match self.packs.get(index) {
+            Some(Some(store)) => store.len(),
+            _ => self.records[index].sequence.len(),
+        }
+    }
+
+    fn read<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> T) -> T {
+        match self.packs.get(index) {
+            Some(Some(store)) => {
+                let t0 = crate::utils::xtiming::clock();
+                let mut letters = Vec::new();
+                store.unpack_into(&mut letters);
+                add_unpack_time(t0);
+                read(&letters)
+            }
+            _ => read(&self.records[index].sequence),
+        }
+    }
 }
 
 impl Store {
@@ -308,21 +371,19 @@ impl Store {
             }
         }
         let from = range.start.checked_sub(left.taken)?;
-        let mut records = left.records.as_slice()[from..from + range.len()].to_vec();
+        let records = left.records.as_slice()[from..from + range.len()].to_vec();
         let first = left
             .packed
             .partition_point(|(index, _)| *index < range.start);
-        let mut stores: Vec<Option<Arc<PackedLetters>>> = Vec::new();
+        let mut packs: Packs = Vec::new();
         for (index, store) in left.packed.range(first..) {
             if *index >= range.end {
                 break;
             }
-            stores.resize_with(range.len(), || None);
-            stores[index - range.start] = Some(Arc::clone(store));
+            packs.resize_with(range.len(), || None);
+            packs[index - range.start] = Some(Arc::clone(store));
         }
-        drop(left);
-        unpack(&mut records, stores, &SearchPool::x_serial());
-        Some(SlotBatch::Copied(records))
+        Some(SlotBatch::Copied(records, packs))
     }
 
     /// Writes the reader's messages of every record (none taken yet).
@@ -388,31 +449,48 @@ fn add_unpack_time(t0: Option<std::time::Instant>) {
 /// after its last reader of them.
 pub(super) enum BatchQueries<'r> {
     Shared(&'r [FastaRecord]),
-    Held(&'r mut [FastaRecord]),
+    /// The records and the packed letters of those that have them (`Packs`, empty for the loop's
+    /// batch, whose letters were made when it was taken; LOSAT_X_BNQSLOTS: a slot's copy).
+    Held(&'r mut [FastaRecord], Packs),
 }
 
 impl BatchQueries<'_> {
     pub(super) fn records(&self) -> &[FastaRecord] {
         match self {
             BatchQueries::Shared(records) => records,
-            BatchQueries::Held(records) => records,
+            BatchQueries::Held(records, _) => records,
+        }
+    }
+
+    /// The records' letters for the readers that set the batch up (`Letters`).
+    pub(super) fn letters(&self) -> Letters<'_> {
+        match self {
+            BatchQueries::Shared(records) => Letters {
+                records,
+                packs: &[],
+            },
+            BatchQueries::Held(records, packs) => Letters { records, packs },
         }
     }
 
     /// The batch has encoded its letters and searched its query chunks: the letters of records the
     /// caller holds alone are dropped (with the switch).
     pub(super) fn after_encoding(&mut self) {
-        let BatchQueries::Held(records) = self else {
+        let BatchQueries::Held(records, packs) = self else {
             return;
         };
         if !on() {
             return;
         }
         let mut letters = 0;
-        for record in records.iter_mut() {
+        for (index, record) in records.iter_mut().enumerate() {
             letters += record.sequence.len() as u64;
             record.sequence = Vec::new();
+            if let Some(Some(store)) = packs.get(index) {
+                letters += store.len() as u64;
+            }
         }
+        *packs = Vec::new();
         BATCHES.fetch_add(1, Ordering::Relaxed);
         RECORDS.fetch_add(records.len() as u64, Ordering::Relaxed);
         LETTERS.fetch_add(letters, Ordering::Relaxed);
@@ -494,6 +572,27 @@ mod tests {
         assert_eq!(got, want);
     }
 
+    /// A slot's copy: its packed records hold no letters, and the letters its readers get
+    /// (`Letters`: whole and cut) are those of `want`, as are the other fields.
+    fn same_letters(copy: &[FastaRecord], packs: &Packs, want: &[FastaRecord]) {
+        let letters = Letters {
+            records: copy,
+            packs,
+        };
+        assert_eq!(letters.count(), want.len());
+        assert!(packs.iter().any(Option::is_some), "no packed record");
+        for (index, want) in want.iter().enumerate() {
+            let packed = matches!(packs.get(index), Some(Some(_)));
+            assert_eq!(copy[index].sequence.is_empty(), packed, "record {index}");
+            assert_eq!(letters.length(index), want.sequence.len());
+            letters.read(index, |got| assert_eq!(got, &want.sequence[..]));
+            assert_eq!(letters.cut(index, 90, 250), want.cut(90, 250));
+            let mut record = copy[index].clone();
+            record.sequence = want.sequence.clone();
+            assert_eq!(&record, want);
+        }
+    }
+
     // LOSAT_X_BNQSLOTS: a slot gets the records of a batch the loop has not taken (a copy, the
     // letters made again), and the loop's lent batch itself until the loop has its result; the
     // loop's batches are those `take` (the `=0` path) gives.
@@ -505,7 +604,9 @@ mod tests {
         // Ahead of the loop: copies.
         for range in [0..3, 3..6, 6..9, 4..7] {
             match lent.slot_batch(range.clone()) {
-                Some(SlotBatch::Copied(copy)) => same(&copy, &records[range]),
+                Some(SlotBatch::Copied(copy, packs)) => {
+                    same_letters(&copy, &packs, &records[range])
+                }
                 _ => panic!("no copy of {range:?}"),
             }
         }
@@ -523,7 +624,7 @@ mod tests {
             if range.end < 9 {
                 assert!(matches!(
                     lent.slot_batch(range.end..range.end + 3),
-                    Some(SlotBatch::Copied(_))
+                    Some(SlotBatch::Copied(..))
                 ));
             }
             lent.unlend();

@@ -1948,7 +1948,8 @@ mod tests {
             Vec::new(),
         ];
         let concat_len = 2 * q_len + 1;
-        let concat_sentinels = build_query_blastna_buffer(&[&query], &offsets, concat_len);
+        let concat_sentinels =
+            build_query_blastna_buffer(&[query.as_slice()][..], &offsets, concat_len);
         let concat = concat_sentinels[1..concat_len + 1].to_vec();
         let contexts: Vec<QueryContext> = (0..2)
             .map(|c| QueryContext {

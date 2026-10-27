@@ -1,0 +1,1 @@
+- `blastp -task blastp-fast` with more than one thread counts the words of each set of query letters about once in the check before its block search, its threads sharing the counts, instead of once per thread (`LOSAT_X_BPWORDSHARE`, a new switch of the strict set; `=0` counts per thread as before). Reports do not change.

@@ -7082,7 +7082,9 @@ fn x_block_search_refuses_nothing(
 // (`CompressedWordCount`): a batch whose words are at most four times the banks' cells cannot fill
 // them; a batch with more leaves the search to the reference path, which tests the batch exactly.
 // The batches are tested one by one, in groups on the pool's threads when it has more than one
-// (each group with its own counter); the outcome is whether all pass.
+// (each group with its own counter); the outcome is whether all pass. EXPERIMENT
+// (LOSAT_X_BPWORDSHARE): the counters share their counts (`XSharedWordCounts`), so that a set of
+// letters is counted about once in the check rather than once per group.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 fn x_block_words_fit(
     args: &ResolvedBlastpArgs,
@@ -7091,10 +7093,12 @@ fn x_block_words_fit(
     batch_size: u32,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> bool {
-    use crate::algorithm::tblastx::lookup::compressed::CompressedWordCount;
+    use crate::algorithm::tblastx::lookup::compressed::{CompressedWordCount, XSharedWordCounts};
     if args.lookup_table_type != BlastpLookupTableType::CompressedAaLookupTable {
         return true;
     }
+    let shared = x_bp_word_share().then(XSharedWordCounts::new);
+    crate::utils::xreach::x_reach!("LOSAT_X_BPWORDSHARE", shared.is_some());
     // The threshold as the table is built (`run_resolved_in_pool`).
     let counter = || {
         CompressedWordCount::new(
@@ -7112,7 +7116,7 @@ fn x_block_words_fit(
         let mut letters = encoded
             .iter()
             .map(|query| &query.aa_seq[1..query.aa_seq.len() - 1]);
-        words.fits_banks(&mut letters)
+        words.fits_banks(&mut letters, shared.as_ref())
     };
     let searched_batches: Vec<std::ops::Range<usize>> = query_input
         .batches(batch_size)
@@ -7146,6 +7150,14 @@ fn x_block_words_fit(
     searched_batches
         .iter()
         .all(|searched| fits(&mut words, searched))
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BPWORDSHARE switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPWORDSHARE): a strict-set switch, on unless it is `0`.
+fn x_bp_word_share() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPWORDSHARE"))
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): the outfmt 0 report of the search of all queries refuses a

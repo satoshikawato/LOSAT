@@ -1562,6 +1562,12 @@ impl CompressedWordCount {
 
     /// The words that `add_word_hits` adds for `word` (NCBISTDAA letters, `word_length` of them).
     fn words(&mut self, word: &[u8]) -> u64 {
+        self.words_with(word, None)
+    }
+
+    /// `words`, where a set of letters not kept here is looked up in `shared` (the counts of the
+    /// other counters of the check) before it is counted, and counted into `shared`.
+    fn words_with(&mut self, word: &[u8], shared: Option<&XSharedWordCounts>) -> u64 {
         let mut letters = 0u128;
         for &residue in word {
             let compressed = self.compress_table.get(usize::from(residue));
@@ -1574,7 +1580,10 @@ impl CompressedWordCount {
         if let Some(&words) = self.counts.get(&letters) {
             return words;
         }
-        let words = self.count(word);
+        let words = match shared {
+            Some(shared) => shared.words(word, || self.count(word)),
+            None => self.count(word),
+        };
         self.counts.insert(letters, words);
         words
     }
@@ -1626,12 +1635,22 @@ impl CompressedWordCount {
         queries: &mut dyn Iterator<Item = &[u8]>,
         overflow_cell_capacity: usize,
     ) -> bool {
+        self.fits_with(queries, overflow_cell_capacity, None)
+    }
+
+    /// `fits`, with the counts of `shared` (`words_with`).
+    fn fits_with(
+        &mut self,
+        queries: &mut dyn Iterator<Item = &[u8]>,
+        overflow_cell_capacity: usize,
+        shared: Option<&XSharedWordCounts>,
+    ) -> bool {
         let limit = (COMPRESSED_HITS_PER_OVERFLOW_CELL as u64)
             .saturating_mul(overflow_cell_capacity as u64);
         let mut words = 0u64;
         for query in queries {
             for word in query.windows(self.word_length) {
-                words = words.saturating_add(self.words(word));
+                words = words.saturating_add(self.words_with(word, shared));
                 if words > limit {
                     return false;
                 }
@@ -1643,9 +1662,68 @@ impl CompressedWordCount {
     /// Whether no table whose words are some of the words of `queries`' offsets can fill NCBI's
     /// overflow banks: a query batch's table, or the table of one of its query chunks (whose
     /// parts are pieces of the batch's queries). `false` when their words are more than four
-    /// times the banks' cells, though the table might still fit.
-    pub(crate) fn fits_banks(&mut self, queries: &mut dyn Iterator<Item = &[u8]>) -> bool {
-        self.fits(queries, NCBI_OVERFLOW_CELL_CAPACITY)
+    /// times the banks' cells, though the table might still fit. With `shared`
+    /// (EXPERIMENT LOSAT_X_BPWORDSHARE), the sets of letters this counter has not kept are looked up
+    /// in, and counted into, the counts that the other counters of the check share.
+    pub(crate) fn fits_banks(
+        &mut self,
+        queries: &mut dyn Iterator<Item = &[u8]>,
+        shared: Option<&XSharedWordCounts>,
+    ) -> bool {
+        self.fits_with(queries, NCBI_OVERFLOW_CELL_CAPACITY, shared)
+    }
+}
+
+// No NCBI counterpart: the counts of `CompressedWordCount` (above), for LOSAT's choice of a path; it
+// changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPWORDSHARE): the counts of the counters of one check (one counter per group
+/// of query batches, each on a thread of the pool, `blastp/blast_engine.rs` `x_block_words_fit`),
+/// so that a set of letters is counted about once in the check rather than once per counter (16
+/// counters counted the human proteome's sets 16 times: 10.3 G instructions at 16 threads against
+/// 1.0 G at one, v4-BPF s8). Slot `hash(key) mod 2^17` holds `key << 28 | words`, `key` being the
+/// word's letters sorted, 5 bits each (NCBISTDAA codes are below 32, words at most 7 letters, so
+/// a key has at most 35 bits), and `words` its count (at most 15^7 < 2^28 words for a word of at
+/// most 7 letters of an alphabet of at most 15). The count depends only on the set of letters
+/// (`CompressedWordCount`), so a slot read with the key of `word` holds `word`'s count, whichever
+/// counter stored it; a slot that holds another key (two sets in one slot, or none yet) is counted
+/// again and stored over it. Every store is of one atomic word, so no thread reads a key with
+/// another key's count.
+pub(crate) struct XSharedWordCounts(Vec<std::sync::atomic::AtomicU64>);
+
+impl XSharedWordCounts {
+    const SLOTS: usize = 1 << 17;
+    const COUNT_BITS: u32 = 28;
+
+    pub(crate) fn new() -> Self {
+        // u64::MAX holds no key (its key would have 36 bits).
+        Self(
+            (0..Self::SLOTS)
+                .map(|_| std::sync::atomic::AtomicU64::new(u64::MAX))
+                .collect(),
+        )
+    }
+
+    /// The count of `word`'s set of letters: the stored one, else `count()` stored. `word` has at
+    /// most 7 letters, each with a compressed letter (`CompressedWordCount::words_with`).
+    fn words(&self, word: &[u8], count: impl FnOnce() -> u64) -> u64 {
+        use std::sync::atomic::Ordering;
+        debug_assert!(word.len() <= 7 && word.iter().all(|&residue| residue < 32));
+        let mut sorted = [0u8; 7];
+        let sorted = &mut sorted[..word.len()];
+        sorted.copy_from_slice(word);
+        sorted.sort_unstable();
+        let key = sorted
+            .iter()
+            .fold(0u64, |key, &residue| key << 5 | u64::from(residue));
+        let slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 47) as usize & (Self::SLOTS - 1);
+        let entry = self.0[slot].load(Ordering::Relaxed);
+        if entry >> Self::COUNT_BITS == key {
+            return entry & ((1 << Self::COUNT_BITS) - 1);
+        }
+        let words = count();
+        debug_assert!(words < 1 << Self::COUNT_BITS);
+        self.0[slot].store(key << Self::COUNT_BITS | words, Ordering::Relaxed);
+        words
     }
 }
 
@@ -2188,6 +2266,43 @@ mod tests {
         }
     }
 
+    // LOSAT_X_BPWORDSHARE: counters that share their counts give each word the count of a counter
+    // of its own, whichever counter counted its set of letters first (a word, its reverse and other
+    // orders of its letters), and the same outcome of `fits_banks`.
+    #[test]
+    fn compressed_word_count_shared_counts_are_the_counts() {
+        let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
+        let standard = (*b"ACDEFGHIKLMNPQRSTVWY").map(aa_char_to_ncbistdaa);
+        let mut letters: Vec<u8> = (1..BLASTAA_SIZE as u8).collect();
+        for _ in 0..3 {
+            letters.extend_from_slice(&standard);
+        }
+        for (word_size, threshold) in [(5, 1100), (5, 2000), (6, 2400), (7, 2600)] {
+            let shared = XSharedWordCounts::new();
+            let mut own = CompressedWordCount::new(word_size, threshold).expect("word size");
+            let mut first = CompressedWordCount::new(word_size, threshold).expect("word size");
+            let mut second = CompressedWordCount::new(word_size, threshold).expect("word size");
+            let query: Vec<u8> = (0..400)
+                .map(|_| letters[rng.below(letters.len())])
+                .collect();
+            for word in query.windows(word_size) {
+                let mut reversed = word.to_vec();
+                reversed.reverse();
+                let count = own.words(word);
+                assert_eq!(first.words_with(word, Some(&shared)), count);
+                assert_eq!(second.words_with(&reversed, Some(&shared)), count);
+                assert_eq!(second.words_with(word, Some(&shared)), count);
+            }
+            let queries: Vec<&[u8]> = query.chunks(97).collect();
+            let mut alone = CompressedWordCount::new(word_size, threshold).expect("word size");
+            let mut sharing = CompressedWordCount::new(word_size, threshold).expect("word size");
+            assert_eq!(
+                sharing.fits_banks(&mut queries.iter().copied(), Some(&shared)),
+                alone.fits_banks(&mut queries.iter().copied(), None),
+            );
+        }
+    }
+
     // (e) The count clears a table exactly when a quarter of its words fits the capacity, and a
     // table it clears is not refused (`try_build_blosum62_compressed_lookup_with_capacity`).
     #[test]
@@ -2223,7 +2338,7 @@ mod tests {
         .expect("word size 5");
         assert!(table.is_ok());
         // The public test uses NCBI's capacity.
-        assert!(counter.fits_banks(&mut queries.iter().copied()));
+        assert!(counter.fits_banks(&mut queries.iter().copied(), None));
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:400-405

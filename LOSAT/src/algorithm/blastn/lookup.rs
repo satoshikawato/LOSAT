@@ -938,8 +938,8 @@ struct MbLookupTable {
 //    sfree(mb_lt->hashtable);
 // ```
 // EXPERIMENT (LOSAT_X_MBLUTKEEP): the hashtable goes back to the batch loop's keep instead (with
-// LOSAT_X_MB24 the words of the 3-byte heads; with LOSAT_X_MBCHAINKEEP their chains too while a
-// later batch may take them).
+// LOSAT_X_MB24 the words of the 3-byte heads; with LOSAT_X_MBCHAINKEEP the chains too while a
+// later table of the loop may take them).
 impl Drop for MbLookupTable {
     fn drop(&mut self) {
         if let Some((keep, dirty)) = self.x_keep.take() {
@@ -948,8 +948,10 @@ impl Drop for MbLookupTable {
                 None => std::mem::take(&mut self.hashtable),
             };
             keep.give_back(table, dirty);
-            if let Some(narrow) = self.x_narrow.as_mut() {
-                keep.give_back_chains(narrow.chains_mut());
+            match self.x_narrow.as_mut() {
+                Some(narrow) => keep.give_back_chains(narrow.chains_mut()),
+                None if !self.next_pos.is_empty() => keep.give_back_chains(&mut self.next_pos),
+                None => {}
             }
         }
     }
@@ -2019,18 +2021,18 @@ fn build_mb_lookup(
         None if x_csr_layout => (Vec::new(), false, 0),
         None => (vec![0u32; x_table_words], false, x_table_words),
     };
-    // Dispatch point of LOSAT_X_MBCHAINKEEP: the 3-byte chains of the batch loop's keep, not zeroed
-    // (`x_mb_lut_keep.rs`, "The chains"), otherwise zeroed ones as before.
+    // Dispatch point of LOSAT_X_MBCHAINKEEP: the chains' words from the batch loop's keep, not
+    // zeroed (`x_mb_lut_keep.rs`, "The chains"), otherwise zeroed ones as before.
+    let x_chains = |len: usize| match x_keep {
+        Some(keep) if x_mb_lut_keep::chains_on() && !debug_mode => keep.chains(len),
+        _ => vec![0u32; len],
+    };
     let mut next_pos = if x_csr_layout {
         Vec::new()
     } else if x_h24 {
-        let words = x_mb_narrow::words_for(max_query_offset + 1);
-        match x_keep {
-            Some(keep) if x_mb_lut_keep::chains_on() => keep.chains(words),
-            _ => vec![0u32; words],
-        }
+        x_chains(x_mb_narrow::words_for(max_query_offset + 1))
     } else {
-        vec![0u32; max_query_offset + 1]
+        x_chains(max_query_offset + 1)
     };
     let mut pv_array = vec![0u32; pv_size];
     const K_COMPRESSION_FACTOR: usize = 2048;

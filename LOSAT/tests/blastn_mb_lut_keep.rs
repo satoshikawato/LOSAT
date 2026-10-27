@@ -31,12 +31,18 @@
 //! chunks' tables go through the keep), and 16 pieces of 20 kb of LC738868 in batches of one with
 //! two slots and corrupted predictions (`LOSAT_X_QBATCHPARMISS`), where the slots stop partway and
 //! the loop keeps its table from then on. The subject is LC738868.
+//!
+//! `LOSAT_X_MBCHAINKEEP` (in the strict set from 2026-10-27, on unless it is `0`) keeps the chains
+//! of the 3-byte tables (`LOSAT_X_MB24`) from batch to batch as well, while a later batch may build
+//! a table of 4^12 cells: the genomes' last three tables take the chains the one before gave back
+//! (`chains_kept=` of the keep line), with the same report as with the switch off.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
 const OFF: (&str, &str) = ("LOSAT_X_MBLUTKEEP", "0");
+const CHAINS_OFF: (&str, &str) = ("LOSAT_X_MBCHAINKEEP", "0");
 const SWITCH: (&str, &str) = ("LOSAT_X_MBLUTKEEP", "1");
 const ONCE_OFF: (&str, &str) = ("LOSAT_X_MBLUTONCE", "0");
 const FILL_OFF: (&str, &str) = ("LOSAT_X_MBFILL", "0");
@@ -260,6 +266,30 @@ fn megablast_runs_the_prefault_round_on_fresh_tables_only() {
     let fresh = field(&stderr, KEEP, "fresh=");
     assert_eq!(fresh, 1, "{stderr}");
     assert_eq!(field(&stderr, ONCE, "prefault_rounds="), fresh, "{stderr}");
+}
+
+// The four genomes' tables of 4^12 cells (3-byte elements), one per batch: the last three take the
+// chains the one before gave back (the last frees its own), at 4 threads (the pool fill's exact
+// 3-byte stores) and at one (the serial fill's 4-byte stores), with the report of the search with
+// `LOSAT_X_MBCHAINKEEP=0`, which keeps none.
+#[test]
+fn megablast_tables_take_the_kept_chains() {
+    for threads in [4, 1] {
+        let (reference, stderr) = blastn(
+            "megablast",
+            genomes(),
+            threads,
+            &[CHAINS_OFF, BATCH, TIMING],
+        );
+        assert_eq!(field(&stderr, KEEP, "chains_kept="), 0, "{stderr}");
+        let (report, stderr) = blastn("megablast", genomes(), threads, &[BATCH, TIMING]);
+        assert!(report == reference, "threads {threads}: the report differs");
+        assert_eq!(
+            field(&stderr, KEEP, "chains_kept="),
+            3,
+            "threads {threads}:\n{stderr}"
+        );
+    }
 }
 
 /// The same report with the switch off and on, and the keep's counts (`kept=`, `fresh=`) as

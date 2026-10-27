@@ -63,35 +63,43 @@
 //! full batch's as before.
 //!
 //! The chains (EXPERIMENT LOSAT_X_MBCHAINKEEP; in the strict set from the pull request that added
-//! it, 2026-10-27: on unless it is `0`). A table of 3-byte elements (LOSAT_X_MB24, `x_mb_narrow.rs`:
-//! the megablast table of 4^12 cells) has its chains (NCBI's `next_pos`, 3 bytes a query position)
-//! beside the heads; they are freed with the table, after the preliminary stage
-//! (LOSAT_X_BNLUTDROP). Megablast of 31,168 D. melanogaster cDNAs against a database of 3 Mb
-//! builds 18 such tables, with chains of up to 28.6 MiB: once glibc's dynamic mmap threshold has
-//! risen past them (a freed mapped block raises it), each batch's chains come from the heap of the
-//! main arena, other blocks fill the hole they leave, and the next batch's chains grow the heap
-//! again, which glibc keeps (peak `RssAnon` 159.8 MiB at one thread and about 171 at 16, against
-//! 131 and 145 with the threshold fixed at 1 MiB, the floor of that retention). With the switch the
-//! keep takes a table's chains back as well when a later batch of the loop may build a table of
-//! 4^12 cells (`x_chains_ahead`, which the loop calls before each batch), and the next table of
-//! 3-byte elements takes them without zeroing them, extended (with zeros) when it needs more. A
-//! search holds one block of chains from the first such table to the last: no hole, no regrowth.
-//! When no later batch may build such a table (megablast of one genome, the last of the large
-//! batches) the chains are freed with the table as before, so that no traceback holds them; when
-//! neither this batch nor a later one may, the kept chains are freed before the batch. The loop
-//! answers from the letters of the records left (`2 *` their letters bounds the table entries of
-//! any batch of them, and the table's width grows with its entries), so it may keep chains that
-//! no table takes; they go when the loop ends.
+//! it, 2026-10-27: on unless it is `0`). Beside the heads a table has its chains (NCBI's
+//! `next_pos`, one element a query position: 4 bytes, or 3 in a table of LOSAT_X_MB24,
+//! `x_mb_narrow.rs`), allocated zeroed per build (`calloc`, `blast_nalookup.c:979`) and freed with
+//! the table after the preliminary stage (LOSAT_X_BNLUTDROP). Megablast of 31,168 D. melanogaster
+//! cDNAs against a database of 3 Mb builds 18 tables of 4^12 cells with chains of up to 28.6 MiB:
+//! once glibc's dynamic mmap threshold has risen past them (a freed mapped block raises it), each
+//! batch's chains come from the heap of the main arena, other blocks fill the hole they leave, and
+//! the next batch's chains grow the heap again, which glibc keeps (peak `RssAnon` 159.8 MiB at one
+//! thread and about 170 at 16, against 131 and 146 with the threshold fixed at 1 MiB, the floor of
+//! that retention). With the switch the keep is the chains' workspace too: a dropped table's chains
+//! go back to it while a later table may follow in the loop (a later batch, `x_batches_follow`,
+//! which the loop sets before each batch, or a later query chunk of a split batch,
+//! `x_chunks_follow`, which the chunk loop sets before each chunk), and the next build takes them
+//! as its `next_pos` without zeroing them, extended with zeros when it needs more elements (a
+//! longer one is used as it is: the readers index it by offset). A search holds one block of
+//! chains from its first build to its last: no hole, no regrowth. The last table frees its chains
+//! as before, and when no table follows, the kept chains are freed after the preliminary stage of
+//! the batch (`x_after_prelim`), so that the last traceback holds none. Between the builds the
+//! workspace stays resident: through the tracebacks of the batches before the last, which held no
+//! chains before (megablast of E. coli Sakai and 2 Mb of EDL933 against MG1655, two batches: peak
+//! `RssAnon` +5.0 MiB at one thread, +8.1 at 16).
 //!
 //! Why the chains are NCBI's although they are not zeroed. A chain is read from a head (0 or the
 //! 1-based offset of a word of this build) and then only at the offsets of the words it visits
-//! (`next_pos[q_off]`), and the fill writes the element of every word's offset (the link to the
-//! cell's previous head, `x_mb_narrow.rs`) before any reader runs, so every element a reader reads
-//! holds the value of NCBI's `calloc`ed array; the others are never read, and may hold anything.
-//! The fills write an element whole: on a pool as its exact 3 bytes (`store_exact`), serially as
-//! one 4-byte store whose fourth byte, the first byte of the next element, comes before that
-//! element's own store whenever that element is a word (the words come in increasing order of
-//! offset). The heads are zeroed by the keep as before. No floating-point operation is involved.
+//! (`next_pos[q_off]`), and every fill writes the element of every word's offset (the link to the
+//! cell's previous head, or the re-threaded link of `ascending_cells`) before any reader runs, so
+//! every element a reader reads holds the value of NCBI's `calloc`ed array; the others are never
+//! read and may hold anything. The fills write an element whole: 4-byte elements by plain stores;
+//! 3-byte elements on a pool as their exact 3 bytes (`store_exact`), serially as one 4-byte store
+//! whose fourth byte, the first byte of the next element, comes before that element's own store
+//! whenever that element is a word (the words come in increasing order of offset). The heads are
+//! zeroed by the keep as before. No floating-point operation is involved.
+//!
+//! Where. The builds of the loop's keep (above: no LOSAT_X_QBATCHPAR slot can run), except a
+//! table laid out as CSR (LOSAT_X_BNCSR: it has no chains, and the keep frees the kept chains with
+//! the kept table) and a build with `BLEMIR_DEBUG` (its counters print the length of `next_pos`).
+//! The discontiguous tables are not kept.
 //!
 //! Timing: with LOSAT_TIMING, `[TIMING] x_mb_lut_keep: kept= fresh= zero= chains_kept=` gives the
 //! loop's builds on the kept table, its builds on a fresh one, the time spent zeroing (also inside
@@ -133,12 +141,15 @@ struct Kept {
 #[derive(Default)]
 pub(crate) struct Keep {
     kept: Mutex<Option<Kept>>,
-    /// LOSAT_X_MBCHAINKEEP: the words of the chains of a table of 3-byte elements that a dropped
-    /// table gave back, their elements as the fills left them.
+    /// LOSAT_X_MBCHAINKEEP: the words of the chains a dropped table gave back, their elements as
+    /// the fills left them.
     chains: Mutex<Option<Vec<u32>>>,
-    /// LOSAT_X_MBCHAINKEEP: whether a later batch of the loop may build a table of 4^12 cells
-    /// (`x_chains_ahead`): a dropped table's chains then go back to the keep.
-    chains_later: AtomicBool,
+    /// LOSAT_X_MBCHAINKEEP: whether a later batch of the loop follows the current one
+    /// (`x_batches_follow`).
+    batches_follow: AtomicBool,
+    /// LOSAT_X_MBCHAINKEEP: whether a later query chunk of the current batch follows the current
+    /// one (`x_chunks_follow`).
+    chunks_follow: AtomicBool,
 }
 
 impl Keep {
@@ -175,12 +186,13 @@ impl Keep {
         (table, true, dirty.max(cells))
     }
 
-    /// Frees the kept table, if any: a build laid out as CSR (LOSAT_X_BNCSR, `x_bn_csr.rs`) takes
-    /// nothing from the keep, and the loop should not hold a table beside it; the next build
-    /// with chains allocates a fresh table, which the keep takes back as before.
+    /// Frees the kept table and chains, if any: a build laid out as CSR (LOSAT_X_BNCSR,
+    /// `x_bn_csr.rs`) takes nothing from the keep, and the loop should not hold a table beside it;
+    /// the next build with chains allocates a fresh table, which the keep takes back as before.
     pub(super) fn release(&self) {
         let old = self.kept.lock().unwrap_or_else(|e| e.into_inner()).take();
         drop(old);
+        self.release_chains();
     }
 
     /// Takes back the table of a dropped `MbLookupTable`, whose first `dirty` elements may hold
@@ -199,44 +211,61 @@ impl Keep {
         }
     }
 
-    /// LOSAT_X_MBCHAINKEEP (module documentation, "The chains"): what the loop knows before a
-    /// batch: whether this batch or a later one (`ahead`), and whether a later one (`later`), may
-    /// build a table of 4^12 cells. Without `ahead` the kept chains are freed now.
-    pub(crate) fn x_chains_ahead(&self, ahead: bool, later: bool) {
-        self.chains_later
-            .store(later && chains_on(), Ordering::Relaxed);
-        if !ahead {
-            let old = self.chains.lock().unwrap_or_else(|e| e.into_inner()).take();
-            drop(old);
+    /// LOSAT_X_MBCHAINKEEP (module documentation, "The chains"): whether a later batch of the
+    /// loop follows the one it is about to search.
+    pub(crate) fn x_batches_follow(&self, follow: bool) {
+        self.batches_follow.store(follow, Ordering::Relaxed);
+    }
+
+    /// LOSAT_X_MBCHAINKEEP: whether a later query chunk of the batch follows the one about to be
+    /// searched (`false` after the last).
+    pub(crate) fn x_chunks_follow(&self, follow: bool) {
+        self.chunks_follow.store(follow, Ordering::Relaxed);
+    }
+
+    /// LOSAT_X_MBCHAINKEEP: the end of a batch's preliminary stage: the kept chains are freed
+    /// when no later table may take them.
+    pub(crate) fn x_after_prelim(&self) {
+        if !self.follow() {
+            self.release_chains();
         }
     }
 
-    /// LOSAT_X_MBCHAINKEEP: the words for the chains of a table of 3-byte elements, `words` of
-    /// them or more: the kept ones, extended to `words` with zeros when shorter (their other
-    /// elements as earlier fills left them), else `vec![0; words]` as before.
-    pub(super) fn chains(&self, words: usize) -> Vec<u32> {
+    /// LOSAT_X_MBCHAINKEEP: whether a later batch or chunk follows.
+    fn follow(&self) -> bool {
+        self.batches_follow.load(Ordering::Relaxed) || self.chunks_follow.load(Ordering::Relaxed)
+    }
+
+    fn release_chains(&self) {
+        let old = self.chains.lock().unwrap_or_else(|e| e.into_inner()).take();
+        drop(old);
+    }
+
+    /// LOSAT_X_MBCHAINKEEP: the words for a build's chains, `len` of them or more: the kept ones,
+    /// extended to `len` with zeros when shorter (their other words as earlier fills left them),
+    /// else `vec![0; len]` as before.
+    pub(super) fn chains(&self, len: usize) -> Vec<u32> {
         let kept = self.chains.lock().unwrap_or_else(|e| e.into_inner()).take();
         let Some(mut chains) = kept else {
-            return vec![0u32; words];
+            return vec![0u32; len];
         };
-        if chains.len() < words {
-            chains.reserve_exact(words - chains.len());
-            chains.resize(words, 0);
+        if chains.len() < len {
+            chains.reserve_exact(len - chains.len());
+            chains.resize(len, 0);
         }
         CHAINS_KEPT.fetch_add(1, Ordering::Relaxed);
         chains
     }
 
-    /// LOSAT_X_MBCHAINKEEP: takes the chains of a dropped table of 3-byte elements when a later
-    /// batch may build a table of 4^12 cells (`x_chains_ahead`); otherwise leaves them to be
-    /// freed with the table, as before.
+    /// LOSAT_X_MBCHAINKEEP: takes the chains of a dropped table when a later batch or chunk
+    /// follows; otherwise leaves them to be freed with the table, as before.
     pub(super) fn give_back_chains(&self, chains: &mut Vec<u32>) {
         if !chains_on() {
             return;
         }
-        let later = self.chains_later.load(Ordering::Relaxed);
-        crate::utils::xreach::x_reach!("LOSAT_X_MBCHAINKEEP", later);
-        if later {
+        let follow = self.follow();
+        crate::utils::xreach::x_reach!("LOSAT_X_MBCHAINKEEP", follow);
+        if follow {
             let old = self
                 .chains
                 .lock()
@@ -489,6 +518,182 @@ mod tests {
                 assert!(
                     reused_dirty >= 7,
                     "threads {threads}: {reused_dirty} filled tables kept"
+                );
+            });
+        }
+    }
+
+    /// The words of the kept chains, if any (LOSAT_X_MBCHAINKEEP).
+    fn kept_chains(keep: &Keep) -> Option<usize> {
+        keep.chains.lock().unwrap().as_ref().map(Vec::len)
+    }
+
+    /// The walk of every cell of the first `cells` whose head is not 0, as the readers walk it
+    /// (`for_each_hit` without the PV test; `x_mb_narrow::Narrow::each` for 3-byte elements); a
+    /// walk of more than `limit` links fails.
+    fn walks(table: &MbLookupTable, cells: usize, limit: usize) -> Vec<(usize, Vec<u32>)> {
+        let heads: Vec<usize> = match table.x_narrow.as_ref() {
+            Some(narrow) => {
+                let words = &narrow.heads()[..x_mb_narrow::words_for(cells)];
+                let mut heads = std::collections::BTreeSet::new();
+                for (w, _) in words.iter().enumerate().filter(|(_, &word)| word != 0) {
+                    heads.extend((4 * w / 3..=(4 * w + 3) / 3).filter(|&cell| cell < cells));
+                }
+                heads.into_iter().collect()
+            }
+            None => (0..cells)
+                .filter(|&cell| table.hashtable[cell] != 0)
+                .collect(),
+        };
+        heads
+            .into_iter()
+            .filter_map(|cell| {
+                let mut walk = Vec::new();
+                let mut push = |q_off: u32| {
+                    walk.push(q_off);
+                    assert!(walk.len() <= limit, "cell {cell}: more than {limit} links");
+                };
+                match table.x_narrow.as_ref() {
+                    Some(narrow) => narrow.each(cell, push),
+                    None => {
+                        let mut q_off = table.hashtable[cell];
+                        while q_off != 0 {
+                            push(q_off);
+                            q_off = table.next_pos[q_off as usize];
+                        }
+                    }
+                }
+                (!walk.is_empty()).then_some((cell, walk))
+            })
+            .collect()
+    }
+
+    // LOSAT_X_MBCHAINKEEP (module documentation, "The chains"): random queries (ambiguity codes,
+    // masks) of tables of 4^9, 4^11 and 4^12 cells (3-byte elements, LOSAT_X_MB24, and 4-byte
+    // ones: 4^9, 4^11 and 4^12 in `ascending_cells` order) built in a row through one keep while a
+    // later batch follows, at one thread (the serial fills: 3-byte links stored as 4 bytes) and on
+    // pools of 2 and 5 threads (the pool fills: exact 3-byte stores). The first build takes kept
+    // chains of every byte 0xFF (each element past every chain) and fewer words than it needs
+    // (extended with zeros), the others the chains the build before filled, of the other width or
+    // longer: every walk, every head and the PV array equal the fresh build's, and the chains go
+    // back. A build with no later batch or chunk frees its chains with the table, a later chunk
+    // keeps them, and the end of a batch's preliminary stage frees the kept ones when nothing
+    // follows. With the switch off no chains are kept.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn builds_on_kept_chains_walk_the_fresh_chains() {
+        const LUTS: [(usize, bool); 6] = [
+            (12, false),
+            (11, false),
+            (12, true),
+            (9, false),
+            (12, false),
+            (11, true),
+        ];
+        let mut rng = Lcg(0x6368_6e73);
+        let cases: Vec<_> = LUTS
+            .iter()
+            .map(|&(lut, ascending)| (lut, ascending, random_case(&mut rng)))
+            .collect();
+        for threads in [1usize, 2, 5] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            pool.install(|| {
+                let keep = Arc::new(Keep::default());
+                keep.x_batches_follow(true);
+                if chains_on() {
+                    *keep.chains.lock().unwrap() = Some(vec![u32::MAX; 1_000]);
+                }
+                let build = |case: usize, keep: Option<&Arc<Keep>>| {
+                    let (lut, ascending, (queries, offsets, masks, word_length, _)) = &cases[case];
+                    let refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+                    let next_pos_len = queries
+                        .iter()
+                        .zip(offsets)
+                        .map(|(q, &o)| o.max(0) as usize + q.len())
+                        .max()
+                        .unwrap_or(0)
+                        + 1;
+                    let table = build_mb_lookup(
+                        &refs,
+                        offsets,
+                        (*word_length).max(*lut),
+                        *lut,
+                        masks,
+                        None,
+                        0,
+                        1_000_000,
+                        *ascending,
+                        keep,
+                    );
+                    (table, 1usize << (2 * lut), next_pos_len)
+                };
+                let mut taken = 0;
+                for case in 0..cases.len() {
+                    let what = format!("case {case} threads {threads}");
+                    let (fresh, cells, next_pos_len) = build(case, None);
+                    assert!(fresh.x_csr.is_none(), "{what}: a CSR table");
+                    let before = kept_chains(&keep);
+                    let (built, _, _) = build(case, Some(&keep));
+                    let narrow = built.x_narrow.as_ref();
+                    assert_eq!(narrow.is_some(), fresh.x_narrow.is_some(), "{what}");
+                    let (chain, need, head_words) = match narrow {
+                        Some(narrow) => (
+                            narrow.chain(),
+                            x_mb_narrow::words_for(next_pos_len),
+                            x_mb_narrow::words_for(cells),
+                        ),
+                        None => (&built.next_pos[..], next_pos_len, cells),
+                    };
+                    match before {
+                        Some(len) => {
+                            assert_eq!(chain.len(), len.max(need), "{what}: the kept chains");
+                            taken += 1;
+                        }
+                        None => assert_eq!(chain.len(), need, "{what}: fresh chains"),
+                    }
+                    assert!(
+                        built.x_table()[..head_words] == fresh.x_table()[..head_words],
+                        "{what}: heads"
+                    );
+                    assert!(built.pv_array == fresh.pv_array, "{what}: pv_array");
+                    assert!(
+                        walks(&built, cells, next_pos_len) == walks(&fresh, cells, next_pos_len),
+                        "{what}: walks"
+                    );
+                    let len = chain.len();
+                    drop(built);
+                    assert_eq!(
+                        kept_chains(&keep),
+                        chains_on().then_some(len),
+                        "{what}: given back"
+                    );
+                }
+                if chains_on() {
+                    assert_eq!(taken, cases.len(), "threads {threads}");
+                }
+                // The last batch: its chains go with its table.
+                keep.x_batches_follow(false);
+                drop(build(0, Some(&keep)));
+                assert_eq!(kept_chains(&keep), None, "threads {threads}: last batch");
+                // A later chunk of the last batch: they go back; after the last chunk and the
+                // batch's preliminary stage they go.
+                keep.x_chunks_follow(true);
+                drop(build(1, Some(&keep)));
+                assert_eq!(kept_chains(&keep).is_some(), chains_on(), "a chunk follows");
+                keep.x_after_prelim();
+                assert_eq!(kept_chains(&keep).is_some(), chains_on(), "a chunk follows");
+                keep.x_chunks_follow(false);
+                keep.x_after_prelim();
+                assert_eq!(
+                    kept_chains(&keep),
+                    None,
+                    "threads {threads}: nothing follows"
                 );
             });
         }

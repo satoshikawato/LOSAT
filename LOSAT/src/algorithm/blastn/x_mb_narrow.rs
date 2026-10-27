@@ -154,7 +154,7 @@ pub(super) struct Narrow {
     heads: Vec<u32>,
     /// The links, one per element of NCBI's `next_pos` (LOSAT_X_MBCHAINKEEP: the batch loop's kept
     /// chains, which may be longer, and whose elements at offsets that are no word of this table
-    /// hold what earlier fills wrote: no walk reads them).
+    /// hold what earlier fills wrote: no walk reads them; `x_mb_lut_keep.rs`, "The chains").
     chain: Vec<u32>,
 }
 
@@ -208,6 +208,12 @@ impl Narrow {
     #[cfg(test)]
     pub(super) fn heads(&self) -> &[u32] {
         &self.heads
+    }
+
+    /// Tests only: the words of the chains.
+    #[cfg(test)]
+    pub(super) fn chain(&self) -> &[u32] {
+        &self.chain
     }
 
     /// Tests only: the heads of `cells` cells and the `next_pos` of `next_pos_len` elements as

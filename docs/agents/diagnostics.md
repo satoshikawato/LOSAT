@@ -264,7 +264,7 @@ their variables mean
   switches off are a diagnostic aid: `TBNKEEPFEW` only with four or more query batches;
   `TBNBATCHRULE` only where query batches are searched side by side (2 or more threads, four or
   more batches); `TBNOWNPOOLS` only with `TBNBATCHRULE`, natively; `TBNREDOLPT` only where the
-  composition-based redo runs on the pool (2 to 16 threads, 2 or more matches); `REDOCONTAINIDX` only where
+  composition-based redo runs on the pool (2 or more threads, 2 or more matches); `REDOCONTAINIDX` only where
   one query's list of kept alignments in a composition-based redo reaches 32; `TBNXLATESIMD` only
   on a packed subject (`TBNSTORE`: `-subject`, the plans of `run_local`'s letters; `-db`) and with AVX2; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
   more threads, several subjects); `BPSEED` acts on the two-hit seed stage only; `BPDIAG` acts only
@@ -4920,9 +4920,9 @@ Scheduling (each value computed by one thread with the original function; order 
   `the_redo_lpt_scope_returns_the_par_iter_results_by_index`, `a_panicking_redo_match_propagates_and_the_pool_stays_usable`;
   `tests/tblastn_redo_lpt.rs`). NCBI runs the same matches in one `omp for schedule(static)` (`blast_kappa.c`
   3448-3451), whose fixed shares have the same problem. Conditional: two or more threads and two or more matches,
-  with at most 16 threads (`X_REDO_LPT_MAX_THREADS`), on each chunk with two or more matches to redo (`x_reach!`);
-  one thread (also each query batch searched side by side with others, on one thread) keeps the loop on the
-  calling thread, and a larger pool the `par_iter`. Measured 2026-10-25 on the workstation (2x Xeon Gold 6338,
+  on each chunk with two or more matches to redo (`x_reach!`); one thread (also each query batch searched side by
+  side with others, on one thread) keeps the loop on the calling thread. Until 2026-10-2x (below) a pool of more
+  than 16 threads kept the `par_iter` too. Measured 2026-10-25 on the workstation (2x Xeon Gold 6338,
   cores warmed 3 s before each run, pairs alternating in order, `perf stat` walls; this pull request's first
   commit against its base 313fd4e7; every output of a case the same bytes in both arms), proteins against the
   human genome (`-db hsap_dna -evalue 1e-5 -max_target_seqs 5`): the 122 proteins of four query batches (HsG_b4)
@@ -4933,7 +4933,14 @@ Scheduling (each value computed by one thread with the original function; order 
   (one line per match) showed the chunk's time is its longest match's (66,169 HSPs, 97-121 s) in both arms at 16
   and 32 threads; at 16 the `par_iter` gave one thread a run of adjacent heavy matches (redo 226 s against 112 s),
   at 32 its runs are short and it started the longest match within 1-8 s, while running the 32 heaviest matches
-  at once raised the redo's work by 5 %. Matches with few HSPs (node 1, 8 pairs at 8 / 16 threads): 16 proteins x
+  at once raised the redo's work by 5 %. That limit of 16 threads (`X_REDO_LPT_MAX_THREADS`) was set while the
+  reap of `tblastn/kappa.rs` was still quadratic in a match's HSPs (the 35 proteins took 271.5 s at 32 threads);
+  after `TBNREAPIDX` (35.8 s) the B11e probe of v4-B10 session 14 (one line per match and per thread, node 1, one
+  run each) found the 32-thread tail in the `par_iter` again: its redo took 14.49 s against 5.13 s of work per
+  thread (299.5 thread-s idle), one thread redoing six chromosome matches of query context 0 one after another,
+  while largest first took 8.05 s, the longest match (context 31 x chromosome 1, 66,169 HSPs), and the run
+  35.86 -> 29.63 s (x0.826) for 1.7 % more user time (763 -> 776 s). So from the pull request that removed the
+  limit (2026-10-2x) the rule holds at every thread count: MEASURED_ALL_PENDING Matches with few HSPs (node 1, 8 pairs at 8 / 16 threads): 16 proteins x
   E. coli x1.007 / x1.000, fly proteins x 5,000 16S x0.998 / x1.014, the same against 2,500 + 5,000 16S around fly
   chromosome arm 2L (`-subject`) x0.981 / x0.980, against the fly genome x0.987 / x0.994, one protein against the
   zebrafish genome x1.002 / x1.001. Instructions equal those of the base in every case and arm (x1.0000), `=0`
@@ -4974,7 +4981,7 @@ Scheduling (each value computed by one thread with the original function; order 
   396 matches) at 8 threads 330.8 -> 204.0 s (x0.619, 3 pairs, node 0 cores 8-15 with their siblings idle, load
   9-58; user 2,358 -> 1,477 s, instructions x0.934), at 16 threads 278.4 -> 185.4 s (x0.670, 3 pairs, node 1), at
   32 threads 269.3 -> 173.6 s (x0.650, 3 pairs, node 1); with `TBNREDOLPT` allowed up to 64 threads, 32 threads
-  ran x0.991 against this form (3 pairs), so its limit of 16 stays. Matches with few HSPs (node 1, 8 pairs at 8 /
+  ran x0.991 against this form (3 pairs), so its limit of 16 stayed (until `TBNREAPIDX`; see `TBNREDOLPT`). Matches with few HSPs (node 1, 8 pairs at 8 /
   16 threads): 16 proteins x E. coli x0.991 / x1.001, fly proteins x 5,000 16S x1.008 / x1.001, the same around fly
   2L (`-subject`) x0.998 / x1.006, against the fly genome x1.007 / x1.009, one protein against the zebrafish genome
   x1.001 / x0.992, instructions x1.0000 in every case. blastx of 50 kb of fly 2L x fly proteins (`-db`) at 8

@@ -2595,7 +2595,22 @@ Rebuilding less:
   Memory: the groups of one linking call are linked at once (as the pool path already did), so the
   kernels' per-HSP arrays (about 203 bytes per HSP, `link_group`) of a self pair's four large groups are
   live together instead of one at a time; and the next batch's tables are built while the batch
-  before's last units run, so two batches' tables are held for that time.
+  before's last units run, so two batches' tables are held for that time. A frame merge's chunk init
+  list and converted list get glibc's mapped capacity from 1 MiB on (`x_kmerge.rs` `x_frame_capacity`,
+  every path): any of the search's threads now merges a frame, and a 1-32 MiB list freed in a thread's
+  arena stayed resident there (without it the three genomes below peaked at +161 MiB over dev at 16
+  threads). On the workstation (node 1, 16 CPUs of one socket, 3 s warm-up per run, medians of
+  alternating runs, every report identical; dev 05d74972; one thread on one node-0 core) the three
+  genomes took 4.88 s with it and 5.94 s without at 16 threads (x0.822), 8.68 / 9.36 s at 8, 16.20 /
+  16.81 s at 4 and 61.3 / 61.9 s at 1; the same queries as a database (`-db`) 4.95 / 5.72 s at 16; the
+  three queries x AP027133 4.71 / 8.38 s at 16 and 5.95 / 9.10 s at 8; MelaMJNV x 9 MJNV genomes 0.846 /
+  0.891 s at 16, 1.430 / 1.424 s at 8 and 2.586 / 2.559 s at 4; AP027131 x AP027133 1.157 / 1.166 s at 16
+  and 7.35 / 7.39 s at 1; Sakai x 1 Mb of MG1655 11.76 / 11.77 s at 8. Peak memory (max RSS, MiB, with /
+  without): the three genomes 603 / 532 at 16 threads (396 / 380 with `MALLOC_ARENA_MAX=1`: the rest is
+  the link kernels' arrays freed in 16 threads' arenas), 415 / 476 at 8, 291 / 359 at 4 and 169 / 190 at
+  1; as a database 611 / 562 at 16; the three queries x AP027133 305 / 267 at 16 and 309 / 256 at 8;
+  MelaMJNV x 9 genomes 150 / 160, 131 / 124 and 101 / 104 at 16 / 8 / 4; AP027131 x AP027133 120 / 125 at
+  16 and 78 / 78 at 1; Sakai x 1 Mb of MG1655 748 / 743 at 8.
 - `LOSAT_X_TBXRPTPAR=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads))
   the report stage after the last query batch (`write_tblastx_outputs`) runs its per-HSP work on the

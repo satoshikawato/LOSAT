@@ -431,6 +431,10 @@ fn x_link_board(
         .iter_mut()
         .map(|group| (group.as_mut_ptr() as usize, group.len()))
         .collect();
+    // The kernels' work areas, made on this thread for the largest groups that can be linked at
+    // once and lent to the threads that link them (linking_incr.rs `XLinkLend`).
+    let sizes: Vec<usize> = slices.iter().map(|&(_, len)| len).collect();
+    let lend = super::super::linking_incr::XLinkLend::new(&sizes, rayon::current_num_threads());
     let run = |i: usize, _: &mut crate::algorithm::tblastx::x_work_board::XTaker| {
         let (ptr, len) = slices[i];
         // SAFETY: the slices are disjoint parts of the list this call borrows mutably (`groups`
@@ -446,7 +450,7 @@ fn x_link_board(
                     scratch.literal_port,
                 )
             });
-            kernel_times.time(|| link_one_slice(group, args, pool));
+            kernel_times.time(|| lend.lend(|| link_one_slice(group, args, pool)));
         });
     };
     board.run_groups(n, &run, rayon::current_num_threads() - 1);

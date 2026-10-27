@@ -331,18 +331,24 @@ fn stats_enabled() -> bool {
 /// Flat maximum tree over the stable post-sort list indices, one channel per
 /// ordering method, with keys (`LinkKey`) and an update that stops at the
 /// first unchanged parent. `K::default()` is "no entry".
+#[derive(Default)]
 struct MaxTree<K> {
     cap: usize,
     nodes: Vec<[K; 2]>,
 }
 
 impl<K: Copy + Ord + Default> MaxTree<K> {
+    #[cfg(test)]
     fn new(n: usize) -> Self {
-        let cap = n.max(1).next_power_of_two();
-        Self {
-            cap,
-            nodes: vec![[K::default(); 2]; cap * 2],
-        }
+        let mut tree = Self::default();
+        tree.reset(n);
+        tree
+    }
+
+    /// The tree of `new(n)` in this tree's buffer: every node "no entry".
+    fn reset(&mut self, n: usize) {
+        self.cap = n.max(1).next_power_of_two();
+        x_fill(&mut self.nodes, self.cap * 2, [K::default(); 2]);
     }
 
     #[inline]
@@ -408,18 +414,40 @@ impl<K: Copy + Ord + Default> MaxTree<K> {
 /// A tree key: a value and a list index packed so that the integer order is
 /// larger value first, then larger index. `Default` (0) is "no entry". A key
 /// holds values in `MIN_VALUE..=MAX_VALUE` (module documentation, "Sums").
-pub(super) trait LinkKey: Copy + Ord + Default {
+pub(super) trait LinkKey: Copy + Ord + Default + Send + 'static {
     const MIN_VALUE: i64;
     const MAX_VALUE: i64;
     fn new(value: i64, idx: usize) -> Self;
     fn idx(self) -> usize;
     fn value(self) -> i64;
+    /// A work area for a group of `n` HSPs lent by the linking call this thread links a group for
+    /// (`XLinkLend`), if any.
+    fn lent(n: usize) -> Option<Box<LinkBufs<Self>>>;
+    /// Gives `bufs` back to the lender it came from, or drops it.
+    fn give_back(bufs: Box<LinkBufs<Self>>);
 }
 
 /// A 40-bit value (offset by 2^39) and a 24-bit list index + 1.
 impl LinkKey for u64 {
     const MIN_VALUE: i64 = -(1 << 39);
     const MAX_VALUE: i64 = (1 << 39) - 1;
+
+    fn lent(n: usize) -> Option<Box<LinkBufs<u64>>> {
+        X_LEND.with(|lend| {
+            // SAFETY: set only by `XLinkLend::lend`, which restores it before the lender's frame ends.
+            unsafe { lend.get().as_ref() }.and_then(|lend| lend.take(n))
+        })
+    }
+
+    fn give_back(bufs: Box<LinkBufs<u64>>) {
+        X_LEND.with(|lend| {
+            // SAFETY: as in `lent`.
+            match unsafe { lend.get().as_ref() } {
+                Some(lend) => lend.give(bufs),
+                None => drop(bufs),
+            }
+        })
+    }
 
     #[inline(always)]
     fn new(value: i64, idx: usize) -> u64 {
@@ -441,6 +469,14 @@ impl LinkKey for u64 {
 impl LinkKey for u128 {
     const MIN_VALUE: i64 = i64::MIN;
     const MAX_VALUE: i64 = i64::MAX;
+
+    fn lent(_: usize) -> Option<Box<LinkBufs<u128>>> {
+        None
+    }
+
+    fn give_back(bufs: Box<LinkBufs<u128>>) {
+        drop(bufs);
+    }
 
     #[inline(always)]
     fn new(value: i64, idx: usize) -> u128 {
@@ -596,6 +632,7 @@ impl IncrStats {
 // find the HSPs that selected a given HSP.
 /// For one ordering method, the HSPs whose link is a given HSP, as
 /// intrusive doubly linked lists.
+#[derive(Default)]
 struct Children {
     first: Vec<u32>,
     next: Vec<u32>,
@@ -603,12 +640,11 @@ struct Children {
 }
 
 impl Children {
-    fn new(n: usize) -> Self {
-        Self {
-            first: vec![NONE; n],
-            next: vec![NONE; n],
-            prev: vec![NONE; n],
-        }
+    /// No child of any of `n` HSPs, in these lists' buffers.
+    fn reset(&mut self, n: usize) {
+        x_fill(&mut self.first, n, NONE);
+        x_fill(&mut self.next, n, NONE);
+        x_fill(&mut self.prev, n, NONE);
     }
 
     #[inline]
@@ -959,6 +995,186 @@ pub(super) fn link_hsp_group_incr_with_slice(
 // ...
 //       while (number_of_hsps > 0)
 // ```
+// No NCBI counterpart: NCBI allocates its link structures once per HSP list (link_hsps.c:452-454,
+// lh_helper with MAX(1024, hspcnt+5) entries); LOSAT's kernel allocates its arrays per group. These
+// choose only where the arrays live; every array is filled before it is read, with the values the
+// kernel gave it when it was a fresh Vec.
+/// `v` with `n` copies of `x`, in its buffer when it holds `n`.
+fn x_fill<T: Clone>(v: &mut Vec<T>, n: usize, x: T) {
+    x_keep(v, n);
+    v.resize(n, x);
+}
+
+/// `v` emptied, with room for `n`.
+fn x_keep<T>(v: &mut Vec<T>, n: usize) {
+    v.clear();
+    v.reserve(n);
+}
+
+/// `v` holding the items of `it` (at most `n`), in its buffer when it holds `n`.
+fn x_refill<T>(v: &mut Vec<T>, n: usize, it: impl Iterator<Item = T>) {
+    x_keep(v, n);
+    v.extend(it);
+}
+
+/// The arrays of one `link_group` call (its locals of the same names): a call fills those it reads,
+/// so a work area that served another group gives the values of fresh arrays.
+#[derive(Default)]
+pub(super) struct LinkBufs<K> {
+    score: Vec<i32>,
+    qo: Vec<i32>,
+    so: Vec<i32>,
+    qe: Vec<i32>,
+    se: Vec<i32>,
+    sl: Vec<f64>,
+    lk: Vec<f64>,
+    sum: [Vec<i64>; 2],
+    xsum: [Vec<f64>; 2],
+    num: [Vec<i16>; 2],
+    link: [Vec<u32>; 2],
+    indeg: Vec<i32>,
+    alive: Vec<bool>,
+    next_active: Vec<u32>,
+    prev_active: Vec<u32>,
+    children: [Children; 2],
+    queued: [Vec<bool>; 2],
+    sum_changed: [Vec<bool>; 2],
+    sum_changed_list: Vec<(u8, u32)>,
+    leaf_dirty: Vec<bool>,
+    leaf_list: Vec<u32>,
+    seeds: [Vec<u32>; 2],
+    addback_hsps: Vec<u32>,
+    removed: Vec<u32>,
+    heap: BinaryHeap<Reverse<u32>>,
+    grid_index: FxHashMap<u64, (u32, u32)>,
+    grid_items: Vec<u32>,
+    cells: Vec<(u64, u32)>,
+    elig1: Vec<u32>,
+    qorder: Vec<u32>,
+    iorder: Vec<u32>,
+    so_vals: Vec<i32>,
+    rr: Vec<u32>,
+    kq: Vec<u32>,
+    fen: Vec<K>,
+    tree: MaxTree<K>,
+    /// The HSPs of the largest group it has room for.
+    room: usize,
+}
+
+impl<K: LinkKey> LinkBufs<K> {
+    /// An empty work area with room for a group of `n` HSPs, allocated by this thread (the lists
+    /// that grow while linking get room for `n` items, which bounds most of them).
+    fn with_room(n: usize) -> Box<Self> {
+        let mut b = Box::<Self>::default();
+        let b_ref = &mut *b;
+        for v in [&mut b_ref.score, &mut b_ref.qo, &mut b_ref.so, &mut b_ref.qe, &mut b_ref.se] {
+            v.reserve(n);
+        }
+        b_ref.indeg.reserve(n);
+        b_ref.so_vals.reserve(n);
+        b_ref.sl.reserve(n);
+        b_ref.lk.reserve(n);
+        for m in 0..2 {
+            b_ref.sum[m].reserve(n);
+            b_ref.xsum[m].reserve(n);
+            b_ref.num[m].reserve(n);
+            b_ref.link[m].reserve(n);
+            b_ref.seeds[m].reserve(n);
+            b_ref.queued[m].reserve(n);
+            b_ref.sum_changed[m].reserve(n);
+            for v in [
+                &mut b_ref.children[m].first,
+                &mut b_ref.children[m].next,
+                &mut b_ref.children[m].prev,
+            ] {
+                v.reserve(n);
+            }
+        }
+        for v in [
+            &mut b_ref.next_active,
+            &mut b_ref.prev_active,
+            &mut b_ref.leaf_list,
+            &mut b_ref.addback_hsps,
+            &mut b_ref.removed,
+            &mut b_ref.grid_items,
+            &mut b_ref.elig1,
+            &mut b_ref.qorder,
+            &mut b_ref.iorder,
+            &mut b_ref.rr,
+            &mut b_ref.kq,
+        ] {
+            v.reserve(n);
+        }
+        b_ref.alive.reserve(n);
+        b_ref.leaf_dirty.reserve(n);
+        b_ref.sum_changed_list.reserve(n);
+        b_ref.heap.reserve(n);
+        b_ref.cells.reserve(n);
+        b_ref.grid_index.reserve(n);
+        b_ref.fen.reserve(n + 1);
+        b_ref.tree.nodes.reserve(n.max(1).next_power_of_two() * 2);
+        b.room = n;
+        b
+    }
+}
+
+// No NCBI counterpart (EXPERIMENT LOSAT_X_TBXBOARD): the work areas of a linking call's groups, made
+// by the call's thread and lent to the threads that link its groups on the board
+// (x_link_slices.rs). glibc returns a freed block to the arena it came from, so the groups' arrays
+// stay in the call's thread's arena, as when that thread linked every group itself, whichever
+// threads link them; a thread's arena would keep the space of the arrays freed there for that
+// thread alone (TBLASTX genome 3 x 3 at 16 threads: +155 MiB max RSS with every thread's arena
+// holding freed kernel arrays). No work area outlives the call.
+pub(crate) struct XLinkLend {
+    idle: std::sync::Mutex<Vec<Box<LinkBufs<u64>>>>,
+}
+
+thread_local! {
+    /// The lender of the groups this thread links (`XLinkLend::lend`).
+    static X_LEND: std::cell::Cell<*const XLinkLend> = const { std::cell::Cell::new(std::ptr::null()) };
+}
+
+impl XLinkLend {
+    /// Work areas for the first `k` groups of `sizes` (the call's groups, the largest first), made on
+    /// this thread: with the largest first, every later group fits one of them.
+    pub(crate) fn new(sizes: &[usize], k: usize) -> Self {
+        Self {
+            idle: std::sync::Mutex::new(sizes.iter().take(k).map(|&n| LinkBufs::with_room(n)).collect()),
+        }
+    }
+
+    /// Runs `f`, a kernel call on this thread, with its work area from this lender.
+    pub(crate) fn lend<R>(&self, f: impl FnOnce() -> R) -> R {
+        struct Restore(*const XLinkLend);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                X_LEND.with(|lend| lend.set(self.0));
+            }
+        }
+        let _restore = Restore(X_LEND.with(|lend| lend.replace(self)));
+        f()
+    }
+
+    /// The idle work area with the least room among those with room for `n`, else the one with the
+    /// most room (it grows on this thread).
+    fn take(&self, n: usize) -> Option<Box<LinkBufs<u64>>> {
+        let mut idle = self.idle.lock().unwrap_or_else(|e| e.into_inner());
+        let pick = idle
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.room >= n)
+            .min_by_key(|(_, b)| b.room)
+            .or_else(|| idle.iter().enumerate().max_by_key(|(_, b)| b.room))
+            .map(|(i, _)| i)?;
+        Some(idle.swap_remove(pick))
+    }
+
+    fn give(&self, mut bufs: Box<LinkBufs<u64>>) {
+        bufs.room = bufs.room.max(bufs.score.len());
+        self.idle.lock().unwrap_or_else(|e| e.into_inner()).push(bufs);
+    }
+}
+
 // The replacement for the per-group body of s_BlastEvenGapLinkHSPs: same rounds, same selection
 // rule, same removal; a pass after the first computes again only the HSPs described in the
 // module documentation. It takes the group's records as a slice (its own Vec, or a sub-slice of
@@ -1018,13 +1234,51 @@ fn link_group<'g, K: LinkKey>(
     // H->s_end_trim = hsp->subject.end - MIN(s_length, trim_size);
     // ```
     // The trimmed offsets, with the same expressions.
-    let mut score = Vec::with_capacity(n);
-    let mut qo = Vec::with_capacity(n);
-    let mut so = Vec::with_capacity(n);
-    let mut qe = Vec::with_capacity(n);
-    let mut se = Vec::with_capacity(n);
-    let mut sl = Vec::with_capacity(n);
-    let mut lk = Vec::with_capacity(n);
+    let mut bufs = K::lent(n).unwrap_or_default();
+    let LinkBufs {
+        score,
+        qo,
+        so,
+        qe,
+        se,
+        sl,
+        lk,
+        sum,
+        xsum,
+        num,
+        link,
+        indeg,
+        alive,
+        next_active,
+        prev_active,
+        children,
+        queued,
+        sum_changed,
+        sum_changed_list,
+        leaf_dirty,
+        leaf_list,
+        seeds,
+        addback_hsps,
+        removed,
+        heap,
+        grid_index,
+        grid_items,
+        cells,
+        elig1,
+        qorder,
+        iorder,
+        so_vals,
+        rr,
+        kq,
+        fen,
+        tree,
+        room: _,
+    } = &mut *bufs;
+    for v in [&mut *score, &mut *qo, &mut *so, &mut *qe, &mut *se] {
+        x_keep(v, n);
+    }
+    x_keep(sl, n);
+    x_keep(lk, n);
     for hit in group_hits.iter() {
         let q_off = hit.q_aa_start as i32;
         let q_end = hit.q_aa_end as i32;
@@ -1058,38 +1312,51 @@ fn link_group<'g, K: LinkKey>(
     // ```
     // The pass values of LinkHSPStruct (hsp_link.sum, num, xsum, link) per method, initialised to
     // the values of an HSP without a predecessor; `indeg` is linked_to.
-    let mut sum: [Vec<i64>; 2] = [
-        (0..n)
-            .map(|i| i64::from(score[i]) - i64::from(c[0]))
-            .collect(),
-        (0..n)
-            .map(|i| i64::from(score[i]) - i64::from(c[1]))
-            .collect(),
-    ];
-    let base_xsum: Vec<f64> = (0..n).map(|i| sl[i] - lk[i]).collect();
-    let mut xsum: [Vec<f64>; 2] = [base_xsum.clone(), base_xsum];
-    let mut num: [Vec<i16>; 2] = [vec![1; n], vec![1; n]];
-    let mut link: [Vec<u32>; 2] = [vec![NONE; n], vec![NONE; n]];
-    let mut indeg: Vec<i32> = vec![0; n];
-    let mut alive: Vec<bool> = vec![true; n];
-    let mut next_active: Vec<u32> = (0..n)
-        .map(|i| if i + 1 < n { (i + 1) as u32 } else { NONE })
-        .collect();
-    let mut prev_active: Vec<u32> = (0..n)
-        .map(|i| if i > 0 { (i - 1) as u32 } else { NONE })
-        .collect();
+    for m in 0..2 {
+        x_refill(
+            &mut sum[m],
+            n,
+            (0..n).map(|i| i64::from(score[i]) - i64::from(c[m])),
+        );
+    }
+    x_refill(&mut xsum[0], n, (0..n).map(|i| sl[i] - lk[i]));
+    {
+        let [base_xsum, xsum1] = &mut *xsum;
+        x_keep(xsum1, n);
+        xsum1.extend_from_slice(base_xsum);
+    }
+    for m in 0..2 {
+        x_fill(&mut num[m], n, 1);
+        x_fill(&mut link[m], n, NONE);
+    }
+    x_fill(indeg, n, 0);
+    x_fill(alive, n, true);
+    x_refill(
+        next_active,
+        n,
+        (0..n).map(|i| if i + 1 < n { (i + 1) as u32 } else { NONE }),
+    );
+    x_refill(
+        prev_active,
+        n,
+        (0..n).map(|i| if i > 0 { (i - 1) as u32 } else { NONE }),
+    );
     let mut active_head: u32 = 0;
-    let mut children = [Children::new(n), Children::new(n)];
+    for list in children.iter_mut() {
+        list.reset(n);
+    }
     // Per pass: queued for a method, sum changed in this pass, leaf to write.
-    let mut queued: [Vec<bool>; 2] = [vec![false; n], vec![false; n]];
-    let mut sum_changed: [Vec<bool>; 2] = [vec![false; n], vec![false; n]];
-    let mut sum_changed_list: Vec<(u8, u32)> = Vec::new();
-    let mut leaf_dirty: Vec<bool> = vec![false; n];
-    let mut leaf_list: Vec<u32> = Vec::new();
-    let mut seeds: [Vec<u32>; 2] = [Vec::new(), Vec::new()];
-    let mut addback_hsps: Vec<u32> = Vec::new();
-    let mut removed: Vec<u32> = Vec::new();
-    let mut heap: BinaryHeap<Reverse<u32>> = BinaryHeap::new();
+    for m in 0..2 {
+        x_fill(&mut queued[m], n, false);
+        x_fill(&mut sum_changed[m], n, false);
+        seeds[m].clear();
+    }
+    sum_changed_list.clear();
+    x_fill(leaf_dirty, n, false);
+    leaf_list.clear();
+    addback_hsps.clear();
+    removed.clear();
+    heap.clear();
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:702-745
     // ```c
@@ -1111,13 +1378,16 @@ fn link_group<'g, K: LinkKey>(
     let cell_of = |q: i32, s: i32| -> u64 {
         (((q.div_euclid(w)) as u32 as u64) << 32) | ((s.div_euclid(w)) as u32 as u64)
     };
-    let mut grid_index: FxHashMap<u64, (u32, u32)> = FxHashMap::default();
-    let mut grid_items: Vec<u32> = Vec::new();
+    grid_index.clear();
+    grid_items.clear();
     if !ignore_small_gaps {
-        let mut cells: Vec<(u64, u32)> = (0..n)
-            .filter(|&i| score[i] > c[0])
-            .map(|i| (cell_of(qo[i], so[i]), i as u32))
-            .collect();
+        x_refill(
+            cells,
+            n,
+            (0..n)
+                .filter(|&i| score[i] > c[0])
+                .map(|i| (cell_of(qo[i], so[i]), i as u32)),
+        );
         cells.sort_unstable();
         grid_items.reserve(cells.len());
         let mut start = 0usize;
@@ -1146,20 +1416,21 @@ fn link_group<'g, K: LinkKey>(
     // ```
     // The structures of the index-1 scan: the orders, ranks and Fenwick tree of the sweep (module
     // documentation, "Index 1"), over the HSPs with score > cutoff[1].
-    let elig1: Vec<u32> = (0..n)
-        .filter(|&i| score[i] > c[1])
-        .map(|i| i as u32)
-        .collect();
-    let mut qorder: Vec<u32> = elig1.clone();
+    x_refill(
+        elig1,
+        n,
+        (0..n).filter(|&i| score[i] > c[1]).map(|i| i as u32),
+    );
+    x_refill(qorder, elig1.len(), elig1.iter().copied());
     qorder.sort_unstable_by(|&a, &b| qe[b as usize].cmp(&qe[a as usize]).then_with(|| a.cmp(&b)));
-    let mut iorder: Vec<u32> = elig1.clone();
+    x_refill(iorder, elig1.len(), elig1.iter().copied());
     iorder.sort_unstable_by(|&a, &b| qo[b as usize].cmp(&qo[a as usize]).then_with(|| a.cmp(&b)));
-    let mut so_vals: Vec<i32> = elig1.iter().map(|&i| so[i as usize]).collect();
+    x_refill(so_vals, elig1.len(), elig1.iter().map(|&i| so[i as usize]));
     so_vals.sort_unstable();
     so_vals.dedup();
     let msz = so_vals.len();
-    let mut rr: Vec<u32> = vec![0; n];
-    let mut kq: Vec<u32> = vec![0; n];
+    x_fill(rr, n, 0);
+    x_fill(kq, n, 0);
     for &i in elig1.iter() {
         let i = i as usize;
         let rank = so_vals.partition_point(|&v| v < so[i]);
@@ -1167,9 +1438,8 @@ fn link_group<'g, K: LinkKey>(
         let le = so_vals.partition_point(|&v| v <= se[i]);
         kq[i] = (msz - le) as u32;
     }
-    let mut fen: Vec<K> = vec![K::default(); msz + 1];
-
-    let mut tree = MaxTree::<K>::new(n);
+    x_fill(fen, msz + 1, K::default());
+    tree.reset(n);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:584-589
     // ```c
@@ -1204,32 +1474,32 @@ fn link_group<'g, K: LinkKey>(
             se: &se,
             sl: &sl,
             lk: &lk,
-            sum: &mut sum,
-            xsum: &mut xsum,
-            num: &mut num,
-            link: &mut link,
-            indeg: &mut indeg,
-            alive: &mut alive,
-            next_active: &mut next_active,
-            prev_active: &mut prev_active,
-            children: &mut children,
-            queued: &mut queued,
-            sum_changed: &mut sum_changed,
-            sum_changed_list: &mut sum_changed_list,
-            leaf_dirty: &mut leaf_dirty,
-            leaf_list: &mut leaf_list,
-            seeds: &mut seeds,
-            addback_hsps: &mut addback_hsps,
-            removed: &mut removed,
-            heap: &mut heap,
+            sum: &mut *sum,
+            xsum: &mut *xsum,
+            num: &mut *num,
+            link: &mut *link,
+            indeg: &mut *indeg,
+            alive: &mut *alive,
+            next_active: &mut *next_active,
+            prev_active: &mut *prev_active,
+            children: &mut *children,
+            queued: &mut *queued,
+            sum_changed: &mut *sum_changed,
+            sum_changed_list: &mut *sum_changed_list,
+            leaf_dirty: &mut *leaf_dirty,
+            leaf_list: &mut *leaf_list,
+            seeds: &mut *seeds,
+            addback_hsps: &mut *addback_hsps,
+            removed: &mut *removed,
+            heap: &mut *heap,
             grid_index: &grid_index,
             grid_items: &grid_items,
-            qorder: &mut qorder,
-            iorder: &mut iorder,
+            qorder: &mut *qorder,
+            iorder: &mut *iorder,
             rr: &rr,
             kq: &kq,
-            fen: &mut fen,
-            tree: &mut tree,
+            fen: &mut *fen,
+            tree: &mut *tree,
             remaining: &mut remaining,
             first_pass: &mut first_pass,
             path_changed: &mut path_changed,
@@ -1240,6 +1510,7 @@ fn link_group<'g, K: LinkKey>(
         }
     }
 
+    K::give_back(bufs);
     (group_hits, stats)
 }
 

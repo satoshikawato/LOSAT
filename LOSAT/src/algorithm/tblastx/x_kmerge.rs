@@ -64,8 +64,9 @@
 
 use super::*;
 use crate::algorithm::tblastx::blast_gapalign::{
-    convert_init_hsps_unsorted, score_compare_init_hsps_ncbi, score_compare_ungapped_hits_ncbi,
+    score_compare_init_hsps_ncbi, score_compare_ungapped_hits_ncbi,
     sort_ungapped_hits_by_score_ncbi, ungapped_hits_is_sorted_by_score_ncbi,
+    x_convert_init_hsps_drain,
 };
 use std::cmp::Ordering;
 
@@ -257,8 +258,16 @@ fn x_merge_pass<T: Copy>(
 /// The stable merge of `lists`, each sorted by `R::cmp`, ties to the lower list (item 2), each
 /// record expanded by `unit`, in a Vec of their total length.
 fn x_kway<R: XRecord>(lists: Vec<Vec<R>>, unit: &XExpand<'_, '_>) -> Vec<InitHSP> {
+    let mut merged = Vec::with_capacity(lists.iter().map(Vec::len).sum());
+    x_kway_into(lists, unit, &mut merged);
+    merged
+}
+
+/// `x_kway` into `merged` (emptied first; its buffer is kept when it holds the total).
+fn x_kway_into<R: XRecord>(lists: Vec<Vec<R>>, unit: &XExpand<'_, '_>, merged: &mut Vec<InitHSP>) {
     let total = lists.iter().map(Vec::len).sum();
-    let mut merged = Vec::with_capacity(total);
+    merged.clear();
+    merged.reserve(total);
     // The empty lists are left out; the others keep their order, so a tie still goes to the lower
     // unit.
     let mut lists: Vec<std::vec::IntoIter<R>> = lists
@@ -293,7 +302,6 @@ fn x_kway<R: XRecord>(lists: Vec<Vec<R>>, unit: &XExpand<'_, '_>) -> Vec<InitHSP
         merged.push(r.init_hsp(unit));
         merged.extend(lists[b].by_ref().map(|r| r.init_hsp(unit)));
     }
-    merged
 }
 
 /// K1: the first three keys of `score_compare_ungapped_hits_ncbi` (score, subject start, subject end).
@@ -385,6 +393,40 @@ fn x_merge_frame(combined: &mut Vec<UngappedHit>, mut frame: Vec<UngappedHit>) {
     }
 }
 
+// EXPERIMENT (LOSAT_X_TBXBOARD): a frame's merge buffers, made by the subject's thread before its
+// frames go on the board (`x_merge`). No NCBI counterpart: they choose only where a frame's lists
+// are stored. glibc returns a freed block to the arena it came from, so the frames' lists stay in
+// the subject's thread's arena, as when that thread merged every frame itself, whichever threads
+// merge them; lists of 1-9 MiB (genome subjects) made and freed on every thread were kept by every
+// thread's arena (TBLASTX genome 3 x 3 at 16 threads).
+/// The buffers of one frame's merge (`x_merge_one_frame`).
+struct XFrameBufs {
+    /// A chunk's k-way merge: room for the frame's largest chunk.
+    init: Vec<InitHSP>,
+    /// The frame's list: room for all its records (one hit per record at most).
+    frame: Vec<UngappedHit>,
+    /// A later chunk's converted list: room for the largest chunk (empty for a frame of one chunk
+    /// with records).
+    chunk: Vec<UngappedHit>,
+}
+
+impl XFrameBufs {
+    /// The buffers for the lists of frame `f`'s units (`units` are the frame's, in unit order).
+    fn new<R>(chunks: usize, units: &[XUnit], lists: &[Vec<R>]) -> Self {
+        let mut chunk_records = vec![0usize; chunks];
+        for (unit, list) in units.iter().zip(lists) {
+            chunk_records[unit.k] += list.len();
+        }
+        let largest = chunk_records.iter().copied().max().unwrap_or(0);
+        let with_records = chunk_records.iter().filter(|&&r| r > 0).count();
+        Self {
+            init: Vec::with_capacity(largest),
+            frame: Vec::with_capacity(chunk_records.iter().sum()),
+            chunk: Vec::with_capacity(if with_records > 1 { largest } else { 0 }),
+        }
+    }
+}
+
 /// `combined_ungapped_hits` of one subject from its units' sorted lists (items 2-4); adds the init
 /// HSPs to the `[X_STATS] PAIRPAR` counter.
 fn x_merge<R: XRecord + Send>(
@@ -420,15 +462,25 @@ fn x_merge<R: XRecord + Send>(
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     if frame_chunks.len() > 1 {
         if let Some((board, _)) = crate::algorithm::tblastx::x_work_board::current() {
-            let inputs: Vec<std::sync::Mutex<Option<Vec<Vec<R>>>>> = per_frame
+            // The frames' buffers are made here, on the subject's thread (`XFrameBufs`).
+            let inputs: Vec<std::sync::Mutex<Option<(Vec<Vec<R>>, XFrameBufs)>>> = per_frame
                 .into_iter()
-                .map(|frame_lists| std::sync::Mutex::new(Some(frame_lists)))
+                .enumerate()
+                .map(|(f, frame_lists)| {
+                    let n = frame_lists.len();
+                    let bufs = XFrameBufs::new(
+                        frame_chunks[f].len(),
+                        &units[first_unit[f]..first_unit[f] + n],
+                        &frame_lists,
+                    );
+                    std::sync::Mutex::new(Some((frame_lists, bufs)))
+                })
                 .collect();
             let outputs: Vec<std::sync::OnceLock<Vec<UngappedHit>>> = (0..frame_chunks.len())
                 .map(|_| std::sync::OnceLock::new())
                 .collect();
             let run = |f: usize, _: &mut crate::algorithm::tblastx::x_work_board::XTaker| {
-                let frame_lists = inputs[f]
+                let (frame_lists, bufs) = inputs[f]
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .take()
@@ -439,6 +491,7 @@ fn x_merge<R: XRecord + Send>(
                     &units[first_unit[f]..first_unit[f] + frame_lists.len()],
                     frame_lists,
                     inp,
+                    Some(bufs),
                 );
                 if outputs[f].set(frame).is_err() {
                     unreachable!("a frame is merged once");
@@ -468,6 +521,7 @@ fn x_merge<R: XRecord + Send>(
             &units[first_unit[f]..first_unit[f] + n],
             frame_lists,
             inp,
+            None,
         );
         x_merge_frame(&mut combined_ungapped_hits, frame);
     }
@@ -475,14 +529,21 @@ fn x_merge<R: XRecord + Send>(
 }
 
 /// The list of subject frame `f`: its chunks' k-way merges, converted, and the chunks put together
-/// (the body of `x_merge`'s frame loop; `units` and `lists` are the frame's, in unit order).
+/// (the body of `x_merge`'s frame loop; `units` and `lists` are the frame's, in unit order), in
+/// `bufs` when the subject's thread made them.
 fn x_merge_one_frame<R: XRecord>(
     f: usize,
     chunks: &[SubjectChunk],
     units: &[XUnit],
     lists: Vec<Vec<R>>,
     inp: &XSubject<'_>,
+    bufs: Option<XFrameBufs>,
 ) -> Vec<UngappedHit> {
+    let lent = bufs.is_some();
+    let (mut init_buf, mut frame_buf, mut chunk_buf) = match bufs {
+        Some(b) => (Some(b.init), Some(b.frame), Some(b.chunk)),
+        None => (None, None, None),
+    };
     let unit = XExpand::new(f, inp);
     let mut lists = lists.into_iter();
     let mut next_unit = 0usize;
@@ -494,27 +555,47 @@ fn x_merge_one_frame<R: XRecord>(
             chunk_lists.push(lists.next().expect("one output per unit"));
             next_unit += 1;
         }
-        let init_hsps = x_kway(chunk_lists, &unit);
+        let mut init_hsps = match init_buf.take() {
+            Some(mut merged) => {
+                x_kway_into(chunk_lists, &unit, &mut merged);
+                merged
+            }
+            None => x_kway(chunk_lists, &unit),
+        };
         chunks_merged += 1;
         INIT_HSPS.fetch_add(init_hsps.len() as u64, AtomicOrdering::Relaxed);
         let mut hits = if init_hsps.is_empty() {
             Vec::new()
         } else {
-            let exact = Vec::with_capacity(init_hsps.len());
-            let mut hits = convert_init_hsps_unsorted(init_hsps, inp.contexts, inp.s_frames, exact);
+            // With `bufs`, the first chunk with records is converted into the frame's buffer and a
+            // later one into the chunk buffer.
+            let exact = if frame_ungapped_hits.is_empty() {
+                frame_buf.take()
+            } else {
+                chunk_buf.take()
+            }
+            .unwrap_or_else(|| Vec::with_capacity(init_hsps.len()));
+            let mut hits =
+                x_convert_init_hsps_drain(&mut init_hsps, inp.contexts, inp.s_frames, exact);
             x_sort_k1_runs(&mut hits);
             hits
         };
+        if lent {
+            init_buf = Some(init_hsps);
+        }
         adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
         if !hits.is_empty() && frame_ungapped_hits.is_empty() {
             frame_ungapped_hits = hits;
         } else if !hits.is_empty() {
-            merge_tblastx_subject_chunk_hits(
+            x_merge_chunk_hits_keep(
                 &mut frame_ungapped_hits,
-                hits,
+                &mut hits,
                 chunk.offset,
                 chunk.overlap,
             );
+            if lent {
+                chunk_buf = Some(hits);
+            }
         }
     }
     KM_CHUNKS.fetch_add(chunks_merged, AtomicOrdering::Relaxed);

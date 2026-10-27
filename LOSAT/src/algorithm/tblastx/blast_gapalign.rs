@@ -265,7 +265,20 @@ pub fn get_ungapped_hsp_list_into(
 // `sort_converted_hsps_by_score_ncbi`.
 /// The HSPs of `init_hsps` in their order, pushed onto `ungapped_hits`, which must be empty.
 pub(crate) fn convert_init_hsps_unsorted(
-    init_hsps: Vec<InitHSP>,
+    mut init_hsps: Vec<InitHSP>,
+    contexts: &[QueryContext],
+    s_frames: &[QueryFrame],
+    ungapped_hits: Vec<UngappedHit>,
+) -> Vec<UngappedHit> {
+    x_convert_init_hsps_drain(&mut init_hsps, contexts, s_frames, ungapped_hits)
+}
+
+// EXPERIMENT (LOSAT_X_TBXBOARD, x_kmerge.rs `XFrameBufs`): `convert_init_hsps_unsorted` on the
+// elements of `init_hsps` in order, leaving `init_hsps` empty with its buffer for the next chunk.
+// The same loop on the same elements in the same order.
+/// `convert_init_hsps_unsorted`, emptying `init_hsps` instead of dropping it.
+pub(crate) fn x_convert_init_hsps_drain(
+    init_hsps: &mut Vec<InitHSP>,
     contexts: &[QueryContext],
     s_frames: &[QueryFrame],
     mut ungapped_hits: Vec<UngappedHit>,
@@ -275,7 +288,7 @@ pub(crate) fn convert_init_hsps_unsorted(
         "get_ungapped_hsp_list_into: the list passed in must be empty"
     );
 
-    for init_hsp in init_hsps {
+    for init_hsp in init_hsps.drain(..) {
         let ctx = &contexts[init_hsp.ctx_idx];
         let _s_frame = &s_frames[init_hsp.s_f_idx];
 

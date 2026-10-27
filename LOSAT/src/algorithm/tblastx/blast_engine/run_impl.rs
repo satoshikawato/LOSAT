@@ -595,11 +595,24 @@ fn merge_tblastx_subject_chunk_hits(
     split_offset: usize,
     chunk_overlap_size: usize,
 ) {
+    x_merge_chunk_hits_keep(combined, &mut incoming, split_offset, chunk_overlap_size);
+}
+
+// EXPERIMENT (LOSAT_X_TBXBOARD, x_kmerge.rs `XFrameBufs`): `merge_tblastx_subject_chunk_hits`
+// leaving `incoming` empty with its buffer (its elements are appended to `combined` as before), so
+// that the next chunk is converted into the same buffer. The same statements on the same lists.
+/// `merge_tblastx_subject_chunk_hits`, emptying `incoming` instead of dropping it.
+fn x_merge_chunk_hits_keep(
+    combined: &mut Vec<UngappedHit>,
+    incoming: &mut Vec<UngappedHit>,
+    split_offset: usize,
+    chunk_overlap_size: usize,
+) {
     if incoming.is_empty() {
         return;
     }
     if combined.is_empty() {
-        combined.append(&mut incoming);
+        combined.append(incoming);
         return;
     }
 
@@ -647,7 +660,7 @@ fn merge_tblastx_subject_chunk_hits(
         delete_idx += 1;
         keep
     });
-    combined.append(&mut incoming);
+    combined.append(incoming);
     if !ungapped_hits_is_sorted_by_score_ncbi(combined) {
         sort_ungapped_hits_by_score_ncbi(combined);
     }

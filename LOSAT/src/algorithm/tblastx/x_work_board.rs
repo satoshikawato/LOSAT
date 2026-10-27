@@ -242,12 +242,28 @@ impl XBoard {
         self.run_one(taker)
     }
 
-    /// A subject's units: `run(i, taker)` for every `i < n`, on this thread and on the board's
-    /// takers, units of earlier subjects and groups first. Returns when every unit has run.
+    /// A subject's units: `run(i, taker)` for every `i < n`, on this thread, on the board's
+    /// takers and on up to `threads - 1` helper jobs of the set, units of earlier subjects and
+    /// groups first. Returns when every unit has run.
     pub(crate) fn run_units(&self, batch: &XBatch, s: usize, n: usize, run: &Run<'_>) {
         let set = XSet::new(run, n);
         *batch.slots[s].lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::clone(&set));
         batch.closed[s].store(true, Ordering::Release);
+        // The set's own helpers: the batch's only subject has no subject-loop threads to take its
+        // units, and in a subject loop an idle pool thread takes them too. A helper takes this
+        // set's units only, so a thread that runs it inside a pool wait holds it for this
+        // subject's units at most.
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        for _ in 0..rayon::current_num_threads().min(n).saturating_sub(1) {
+            let set = Arc::clone(&set);
+            rayon::spawn(move || {
+                let mut taker = XTaker::default();
+                while set.run_one(&mut taker) {}
+            });
+        }
         let mut taker = XTaker::default();
         while !set.taken() {
             if !self.run_one(&mut taker) {

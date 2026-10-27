@@ -1,0 +1,7 @@
+# The toolchain of CI (`toolchain: 1.92.0` in .github/workflows) and of the release builds.
+# Change it together with those workflow lines and `rust-version` in LOSAT/Cargo.toml.
+[toolchain]
+channel = "1.92.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-wasip1", "wasm32-wasip1-threads"]

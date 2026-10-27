@@ -47,10 +47,15 @@
 //! the other (`XPanicStop`), and the scope resumes the panic.
 //!
 //! Waiting: a driver waits (a `Condvar`) only between blocks, before it takes one, never inside a block's
-//! search. Both drivers are spawned before any block's work, and a rayon worker takes the oldest job of
-//! another's deque first, so each driver runs at the bottom of an idle worker's stack, not inside another
-//! block's join; nothing on the blastp-fast path waits for every worker (no `broadcast`, no barrier).
-//! Spawning a driver later, or inside a block's scope, would break this.
+//! search, and no driver takes a block before every driver has started (`x_wait_for_every_driver`; at
+//! most one driver per thread of the pool). The drivers are jobs of one `rayon::scope`, pushed to the
+//! deque of the thread that spawns them, and a thread waiting in a join inside a block's search runs any
+//! job of its own deque (rayon-core 1.13 `WorkerThread::take_local_job`). Had a block's search begun
+//! while a driver's job still waited in a deque, a thread could have run that driver nested above the
+//! unfinished block: the nested driver takes blocks until the window is full, then waits for the block
+//! below it to be written, which never comes (the hang of `x_bnstream`'s loops, `wait_for_every_loop`
+//! there). Once every driver has started, no driver's job is left in a deque, and the jobs a waiting
+//! thread runs are parts of the blocks' searches, which wait only for their own parts.
 //!
 //! Memory: each block in flight holds its lookup table and its hit lists until its report is written,
 //! and then gives the table's vectors to the block search's spare (`LOSAT_X_BPLKPFLAT`), which a later
@@ -99,7 +104,7 @@ use {
     anyhow::Result,
     std::collections::BTreeMap,
     std::io::Write,
-    std::sync::atomic::AtomicBool,
+    std::sync::atomic::{AtomicBool, AtomicUsize},
     std::sync::{Condvar, Mutex, PoisonError},
 };
 
@@ -260,6 +265,26 @@ impl Drop for XPanicStop<'_, '_> {
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+// No NCBI counterpart: scheduling only.
+/// EXPERIMENT (LOSAT_X_BPQSLOTS): counts a driver in `started` and waits until all `drivers` have
+/// started (module comment, "Waiting"): it spins, then yields the thread, and runs no job of the pool.
+fn x_wait_for_every_driver(started: &AtomicUsize, drivers: usize) {
+    started.fetch_add(1, Ordering::AcqRel);
+    let mut idle = 0u32;
+    while started.load(Ordering::Acquire) < drivers {
+        idle = idle.saturating_add(1);
+        if idle < 128 {
+            std::hint::spin_loop();
+        } else {
+            std::thread::yield_now();
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276 (module comment): the batches
 // searched and reported in order. Scheduling only: the blocks' reports are written in that order.
 /// EXPERIMENT (LOSAT_X_BPQSLOTS): the blocks `0..blocks` searched by `slots` drivers on `pool`
@@ -286,6 +311,8 @@ pub(crate) fn x_search_in_slots(
         failed: None,
     });
     let written = Condvar::new();
+    let drivers = slots.min(blocks).min(pool.threads().max(1));
+    let started = AtomicUsize::new(0);
     let driver = || loop {
         let _stop = XPanicStop {
             stop: &stop,
@@ -343,8 +370,11 @@ pub(crate) fn x_search_in_slots(
     };
     pool.install(|| {
         rayon::scope(|scope| {
-            for _ in 0..slots.min(blocks) {
-                scope.spawn(|_| driver());
+            for _ in 0..drivers {
+                scope.spawn(|_| {
+                    x_wait_for_every_driver(&started, drivers);
+                    driver()
+                });
             }
         })
     });
@@ -502,6 +532,78 @@ mod tests {
         assert_eq!(result.unwrap_err().to_string(), "the output is full");
         assert_eq!(sink.bytes, lines("row", 0..3));
         assert_eq!(diagnostics, lines("warning", 0..4));
+    }
+
+    // Probe (run by hand with `--ignored`, e.g. under `taskset -c 0,1`): many searches whose
+    // blocks hand out nested jobs at once, on more threads than CPUs. Before the start barrier, a
+    // thread waiting in a block's join could take a driver's job that no thread had started yet and
+    // run that driver nested above the unfinished block; the nested driver then waited for room in
+    // the window, which waited for the block below it. A search that makes no progress for
+    // LOSAT_SLOTS_STALL_S seconds ends the process (exit 3).
+    #[test]
+    #[ignore]
+    fn probe_slots_many_searches_with_nested_blocks() {
+        use rayon::prelude::*;
+        use std::time::{Duration, Instant};
+        let var = |name: &str, default: usize| {
+            std::env::var(name)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(default)
+        };
+        let threads = var("LOSAT_SLOTS_THREADS", 32);
+        let searches = var("LOSAT_SLOTS_SEARCHES", 20_000);
+        let stall = var("LOSAT_SLOTS_STALL_S", 20) as u64;
+        let chunks = var("LOSAT_SLOTS_CHUNKS", 256);
+        let done = AtomicUsize::new(0);
+        let start = Instant::now();
+        let light =
+            |x: usize| (0..200u64).fold(x as u64, |a, y| a.wrapping_mul(31).wrapping_add(y));
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                let mut last = 0;
+                let mut since = Instant::now();
+                loop {
+                    std::thread::sleep(Duration::from_millis(200));
+                    let now = done.load(Ordering::Relaxed);
+                    if now >= searches {
+                        return;
+                    }
+                    if now != last {
+                        last = now;
+                        since = Instant::now();
+                    } else if since.elapsed() > Duration::from_secs(stall) {
+                        eprintln!(
+                            "SLOTS HANG at search {now} of {searches} after {:.1} s (threads {threads})",
+                            start.elapsed().as_secs_f64()
+                        );
+                        std::process::exit(3);
+                    }
+                }
+            });
+            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                let search = |index: usize, outputs: &mut ReportOutputs<'_>| -> Result<()> {
+                    let sum = (0..chunks)
+                        .into_par_iter()
+                        .map(light)
+                        .reduce(|| 0, u64::wrapping_add);
+                    writeln!(outputs.diagnostics, "{index} {sum}")?;
+                    Ok(())
+                };
+                for p in 0..searches {
+                    let mut sink = Vec::new();
+                    let mut diagnostics = Vec::new();
+                    x_search_in_slots(16, 2, "6", pool, &mut sink, &mut diagnostics, &search)?;
+                    done.store(p + 1, Ordering::Relaxed);
+                }
+                Ok(())
+            })
+            .expect("the searches");
+        });
+        eprintln!(
+            "SLOTS {searches} searches in {:.3} s (threads {threads})",
+            start.elapsed().as_secs_f64()
+        );
     }
 
     #[test]

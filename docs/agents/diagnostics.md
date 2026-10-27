@@ -5772,7 +5772,13 @@ Scheduling (each value computed by one thread with the original function; order 
   every arm; dev f24d161f against the pull request's first commit): 800 cDNAs x 50 proteins at 16 threads
   0.170 -> 0.167 s, 127.5 -> 70.9 MiB; x 200 proteins 0.310 -> 0.229 s (x0.739), 71 -> 74 MiB; AP027131 x 50 / 200
   proteins x0.958 / x0.997; the full sets (800 cDNAs x 6,600 proteins `-subject` and `-db`, AP027131 x 543) at 16
-  threads x0.996-1.009, +2-3 MiB (the preparations held ahead); at 8 threads (no cap) x0.99-1.01.
+  threads x0.996-1.009, +2-3 MiB (the preparations held ahead); at 8 threads (no cap) x0.99-1.01. With the cap
+  wherever threads > K, `LOSAT_X_BXBUILDPAR` and `LOSAT_X_BXCTXONCE` (workstation node 1, 2026-10-27, dev d40021ba
+  against the pull request, 7-9 rounds in swapped order; peak = max(time %M, VmHWM), median of 3, untimed): peak
+  MiB at 16 / 32 / 64 threads, 800 cDNAs x 2 proteins 97 / 164 / 284 -> 61 / 78 / 99, x 8 111 / 187 / 315 -> 64 /
+  82 / 112, x 50 127 / 287 / 509 -> 67 / 90 / 131, x 200 71 / 93 / 304 -> 68 / 99 / 162; AP027131 x 2 / 10 proteins
+  at 64 threads 222 / 229 -> 97 / 99; the full sets within 4 MiB. Time x0.48 (x 200 proteins at 32 threads) to
+  x1.005, the full sets x0.991-0.998, except x 2 proteins at 32 threads x1.045 (0.100 -> 0.106 s).
 - `LOSAT_X_BXBUILDPAR=1` (BLASTX, speed with few subjects at many threads; in the strict set from the pull request
   that added it: on unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXUNITCAP` caps): the lookup table of a
   capped unit (a batch of the capped batch flow, a chunk of the capped chunk waves) is built in ceil(threads / K)
@@ -5791,7 +5797,9 @@ Scheduling (each value computed by one thread with the original function; order 
   was no faster. Before, with K units at a time the builds were the part of a unit no other thread could take
   (2.7 ms of a 3.6 ms batch at 32 threads). Build alone (workstation node 0, a 10,002-base batch's six frames,
   threshold 11): 7.8 ms on one thread, 1.84 ms in 4 parts on 4 threads, 1.72 ms in 8 on 8 (a form by target stripes,
-  where every stripe walks all source cells: x0.68 at 4). Measured: MEAS_BUILDPAR.
+  where every stripe walks all source cells: x0.68 at 4). Measured (workstation node 1, against dev, 800 cDNAs x 8
+  yeast proteins at 32 threads): the cap with serial builds x1.28 (2026-10-26, a probe), with this build x0.985
+  (2026-10-27, 7 rounds in swapped order).
 - `LOSAT_X_BXCTXONCE=1` (BLASTX, speed and memory; in the strict set from the pull request that added it: on unless
   `=0` or `LOSAT_X_DEFAULT=0`; acts where the `LOSAT_X_BXDIAG` fused loop runs): the fused loop's context table of a
   query batch (`XContextTable`, the binary search's index at every query offset) is made once per lookup table and

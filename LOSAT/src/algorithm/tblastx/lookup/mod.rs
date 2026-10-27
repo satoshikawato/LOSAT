@@ -222,8 +222,8 @@ pub(crate) fn compute_unmasked_intervals(
 //
 // ```
 pub(crate) use backbone::build_ncbi_lookup_from_prepared;
-// EXPERIMENT (LOSAT_X_BPLUT): BLASTP's table built in place
-// (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export itself.
+// BLASTP's table built in place (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export
+// itself.
 pub(crate) use backbone::x_bp_build_ncbi_lookup;
 // EXPERIMENT (LOSAT_X_BPLKPAHEAD): exact blastp's table built ahead of its block
 // (lookup/x_lut_direct.rs `XAaSpares`); no NCBI counterpart for the re-export itself.
@@ -231,8 +231,9 @@ pub(crate) use backbone::XAaSpares;
 // The comparison of two tables, for the unit tests (lookup/x_lut_direct.rs).
 #[cfg(test)]
 pub(crate) use backbone::{x_assert_same_table_as, x_same_table};
-// LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build (x_lut_direct.rs).
-pub(crate) use backbone::{x_bx_pooled_builds, x_give_back_pooled};
+// LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
+// by searches of two threads or more; x_lut_direct.rs).
+pub(crate) use backbone::{x_bx_pooled_for, x_give_back_pooled};
 
 // EXPERIMENT (LOSAT_X_TBXLUT): TBLASTX's full table built in place
 // (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export itself.

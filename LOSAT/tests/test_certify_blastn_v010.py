@@ -135,6 +135,18 @@ class CertifyBlastnV010Tests(unittest.TestCase):
             {"gapopen": 5, "length": 2, "mismatch": 2, "pident": 2},
         )
 
+    def test_declared_exception_case_with_equal_bytes_is_exact(self) -> None:
+        # The exception is consulted only when the bytes differ: a declared case
+        # that LOSAT now reproduces byte for byte is EXACT_TEXT, not accepted
+        # through the exception (and its footprint is not required).
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = CertificationFixture(Path(tmp), [EXCEPTION_CASE], exception=True)
+            ncbi, _ = allowed_residual()
+            fixture.write_pair(EXCEPTION_CASE, ncbi, ncbi)
+            result = fixture.certify(exception=True)[0]
+        self.assertEqual(result.classification, "EXACT_TEXT")
+        self.assertIsNone(result.field_diffs)
+
     def test_undeclared_value_diff_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = CertificationFixture(Path(tmp), ["exact"])

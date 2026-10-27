@@ -272,13 +272,13 @@ pub enum Lookup {
 }
 
 // No NCBI counterpart: buffer reuse only (LOSAT_X_BXLUTPOOL, tblastx/lookup/x_lut_direct.rs): a
-// dropped table's vectors are kept for the next build instead of freed, where the builds are pooled
-// (not in diagnostics mode, whose reference builder makes the tables, nor while a panic unwinds).
+// dropped table's vectors are kept for the next build instead of freed, where the table was built
+// pooled (not in diagnostics mode, whose reference builder makes the tables, nor with
+// LOSAT_X_BXPOOLN1 in a search on one thread) and no panic unwinds.
 impl Drop for Lookup {
     fn drop(&mut self) {
-        if let Self::Standard(table, _) = self {
-            if crate::algorithm::tblastx::lookup::x_bx_pooled_builds() && !std::thread::panicking()
-            {
+        if let Self::Standard(table, kept) = self {
+            if kept.pooled && !std::thread::panicking() {
                 crate::algorithm::tblastx::lookup::x_give_back_pooled(table);
             }
         }
@@ -323,6 +323,18 @@ impl Lookup {
         parameters: &[ContextParameters],
         options: &ResolvedOptions,
     ) -> Result<Self> {
+        Self::x_new_in_parts(batch, parameters, options, 1)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXBUILDPAR): [`Lookup::new`] with a pooled standard table's passes on
+    /// `parts` tasks of the pool it runs on (`tblastx/lookup/x_lut_direct.rs`
+    /// `x_partitioned_passes`); the table is the same.
+    pub(crate) fn x_new_in_parts(
+        batch: &PreparedQueryBatch,
+        parameters: &[ContextParameters],
+        options: &ResolvedOptions,
+        parts: usize,
+    ) -> Result<Self> {
         let query = batch.sequence_start[1..].to_vec();
         if options.word_size == 5 {
             return Ok(Self::Compressed(
@@ -362,14 +374,21 @@ impl Lookup {
                 }
             })
             .collect();
+        // Dispatch point (LOSAT_X_BXPOOLN1, in the strict set): a search on one thread builds its
+        // tables without the pool (tblastx/lookup/x_lut_direct.rs). No NCBI counterpart.
+        let pooled = crate::algorithm::tblastx::lookup::x_bx_pooled_for(
+            usize::try_from(options.num_threads).unwrap_or(1),
+        );
         Ok(Self::Standard(
             build_ncbi_lookup_from_prepared(
                 query,
                 batch.lookup_segments.clone(),
                 contexts,
                 options.threshold as i32,
+                pooled,
+                parts,
             ),
-            x_seed_scan::XKeptPresence::new(),
+            x_seed_scan::XKeptPresence::x_built(pooled),
         ))
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288

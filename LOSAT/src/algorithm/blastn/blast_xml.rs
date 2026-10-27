@@ -137,12 +137,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time.
                 if let Some(warnings) = warnings.as_deref_mut() {
-                    taxdb_printer.at_hit(
-                        s_idx,
-                        subject.taxid,
-                        &subject.taxonomy,
-                        &mut *warnings.sink,
-                    )?;
+                    taxdb_printer.at_names(s_idx, subject, &mut *warnings.sink)?;
                 }
                 sink.hit(&hit, |hsps| {
                     for hsp in &hsp_list.hsps {

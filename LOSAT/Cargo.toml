@@ -2,6 +2,7 @@
 name = "LOSAT"
 version = "0.2.0"
 edition = "2021"
+rust-version = "1.92"
 autotests = false
 description = "Pure-Rust local BLAST with NCBI-verified fixtures, genetic-code exceptions, and command-WASI support"
 license = "MIT"
@@ -16,6 +17,7 @@ exclude = [
     "**/*.pyc",
     "**/*.tmp",
     "**/*.orig",
+    "/matrix",
 ]
 
 [lib]
@@ -66,11 +68,8 @@ anyhow = "1.0"
 bio = "1.6"
 clap = { version = "4.5", features = ["derive"] }
 rayon = { version = "1.11", optional = true }
-lazy_static = "1.5"
 libm = "0.2.15"
-num_cpus = { version = "1.0", optional = true }
 indicatif = "0.17"
-bitvec = "1.0"
 rustc-hash = "1.1"
 
 # NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
@@ -106,7 +105,7 @@ xstats = []
 # sets (`utils/xdiag.rs`, docs/agents/diagnostics.md "Diagnostic build"). A build without it ignores
 # them and says so on stderr. No NCBI counterpart.
 diagnostics = []
-parallel = ["rayon", "num_cpus"]
+parallel = ["rayon"]
 # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 # ```c
 # int num_threads = args[kArgNumThreads].AsInteger();

@@ -134,8 +134,9 @@ pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error 
 }
 
 /// LOSAT's refusal of a database with parsed Seq-ids (`SeqDb::check_ordinal_ids`), which
-/// `program` does not search yet: each search program calls it right after it opens its
-/// database (`open_database`), so the refusal comes where the reader gave it before.
+/// `program` does not search: psiblast calls it right after it opens its database
+/// (`open_database`), so the refusal comes where the reader gave it before; the five search
+/// programs read such a database (`check_seqids`, line DBID ID2a and ID2b).
 pub(crate) fn refuse_parsed_seqids(db: &SeqDb, program: &str) -> Result<()> {
     db.check_ordinal_ids()
         .map_err(|error| database_error(error, program))
@@ -492,6 +493,17 @@ pub(crate) enum ReportedHeader {
     Parsed(std::sync::Arc<crate::report::db_subject::ParsedSubject>),
 }
 
+#[cfg(test)]
+impl ReportedHeader {
+    /// The stored title of a sequence without parsed Seq-ids.
+    pub(crate) fn stored(&self) -> &StoredTitle {
+        match self {
+            ReportedHeader::Stored(stored) => stored,
+            ReportedHeader::Parsed(_) => panic!("a sequence with parsed Seq-ids"),
+        }
+    }
+}
+
 /// `read_title` of a program that also reads databases with parsed Seq-ids: the header of the
 /// sequence `ordinal`, read as `read_title` reads it, or with every Seq-id where the record has
 /// parsed ones (`SeqDb::read_header`). A parsed subject that LOSAT does not write as NCBI
@@ -595,8 +607,10 @@ pub(crate) fn refuse_parsed_taxonomy(ordinal: u32, program: &str) -> anyhow::Err
 
 /// LOSAT's refusals of the outfmt 0 description and alignment heading of the subject with
 /// parsed Seq-ids `subject` (the database sequence `ordinal`; `protein` for a protein database)
-/// that it does not write as NCBI: a title of punctuation that NCBI's `x_CleanAndCompress`
-/// reads past the end of (NCBI BLAST+ 2.17.0 crashes or does not end), a description id longer
+/// that it does not write as NCBI: a protein title of punctuation that NCBI's `x_CleanAndCompress`
+/// reads past the end of (NCBI BLAST+ 2.17.0 crashes or does not end; approved exception 2 of
+/// PD-LOSAT-NCBI-DEFECTS has BLASTN, TBLASTN and TBLASTX stop such a nucleotide title at the end
+/// of the string, as for a database without parsed Seq-ids), a description id longer
 /// than NCBI's cut of the line leaves room for (NCBI then pads the line without end), a
 /// generated heading title whose end NCBI rewrites from the taxids
 /// (`ParsedSubject::title_suffix_adjusted`), and a title that NCBI makes from the sequence's
@@ -614,7 +628,7 @@ pub(crate) fn check_shown_parsed_subject(
         && subject
             .bioseq_title(protein, false)
             .is_ok_and(|defline| defline.reads_past_end);
-    if title.reads_past_end || heading_reads_past_end {
+    if protein && (title.reads_past_end || heading_reads_past_end) {
         return Err(parsed_refusal(
             ordinal,
             "has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0)",
@@ -649,6 +663,100 @@ pub(crate) fn check_shown_parsed_subject(
         return Err(refuse_parsed_taxonomy(ordinal, program));
     }
     Ok(())
+}
+
+/// What the reports of a run show of their reported database sequences, for LOSAT's refusals of
+/// those with parsed Seq-ids (`check_reported_parsed`).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ParsedShown {
+    /// The tabular formats (`sseqid`, `ParsedSubject::tabular_ids`).
+    pub(crate) tabular: bool,
+    /// Outfmt 0 (`check_shown_parsed_subject`).
+    pub(crate) pairwise: bool,
+    /// The formats that show the alignments of following hits whose Seq-align ids match as one
+    /// hit: outfmt 0, 5 and 13 to 16 (`refuse_joined_hits`).
+    pub(crate) joined: bool,
+    /// SAM (outfmt 17), which names a subject by an id of its Bioseq (`ParsedSubject::sam_id`).
+    pub(crate) sam: bool,
+}
+
+impl ParsedShown {
+    /// Whether a report reads the subject's Bioseq, which NCBI's formatters find by its
+    /// Seq-align id (`ParsedSubject::fetched`); the Seq-annots and the archive write the
+    /// Seq-align id alone.
+    pub(crate) fn reads_bioseq(self) -> bool {
+        self.tabular || self.pairwise || self.joined || self.sam
+    }
+}
+
+/// LOSAT's refusals of the reported database sequence `ordinal` with parsed Seq-ids `subject` in
+/// the reports `shown` (`protein` for a protein database; `taxdb_found`: `SeqDb::taxdb_found`),
+/// as BLASTX's (`blastx::database::ReportedSubjects::for_batch`): a sequence that NCBI's
+/// formatters do not find by its Seq-align id, an outfmt 0 description or heading that LOSAT
+/// does not write as NCBI (`check_shown_parsed_subject`), and a tabular id that it does not
+/// write as NCBI (`ParsedSubject::tabular_ids`).
+pub(crate) fn check_reported_parsed(
+    subject: &crate::report::db_subject::ParsedSubject,
+    shown: ParsedShown,
+    protein: bool,
+    taxdb_found: bool,
+    ordinal: u32,
+    program: &str,
+) -> Result<()> {
+    if shown.reads_bioseq() {
+        subject
+            .fetched()
+            .map_err(|reason| parsed_refusal(ordinal, &reason, program))?;
+    }
+    if shown.pairwise {
+        check_shown_parsed_subject(subject, protein, taxdb_found, ordinal, program)?;
+    }
+    if shown.tabular {
+        subject
+            .tabular_ids(protein)
+            .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program))?;
+    }
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40 (the fields of
+// `-outfmt 6` without a list)
+// ```c++
+// const char* kDfltArgTabularOutputFmt =
+//     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
+//     "evalue bitscore";
+// ```
+/// The subject id of the default tabular fields (`saccver`) of each reported database sequence by
+/// rank, for the programs that write no custom fields (BLASTN, TBLASTN, TBLASTX): the first word
+/// of the stored title (`tabular_subject_id`, the same for `sseqid`, `sacc` and `saccver`), or for
+/// a sequence with parsed Seq-ids (`parsed[rank]`) its `saccver` (`ParsedSubject::tabular_ids`).
+/// `records[rank]` holds the stored title, `ordinals[rank]` the ordinal id; `protein` for a
+/// protein database.
+pub(crate) fn tabular_subject_ids(
+    records: &[crate::blastinput::fasta_reader::FastaRecord],
+    ordinals: &[u32],
+    parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
+    protein: bool,
+    program: &str,
+) -> Result<Vec<std::sync::Arc<[u8]>>> {
+    records
+        .iter()
+        .zip(ordinals)
+        .enumerate()
+        .map(
+            |(rank, (record, &ordinal))| match parsed.get(rank).and_then(Option::as_deref) {
+                Some(subject) => {
+                    let [_, _, accession_version] =
+                        subject.tabular_ids(protein).map_err(|problem| {
+                            parsed_refusal(ordinal, &format!("has {problem}"), program)
+                        })?;
+                    Ok(std::sync::Arc::from(accession_version))
+                }
+                None => tabular_subject_id(&record.title, ordinal, protein, program)
+                    .map(std::sync::Arc::from),
+            },
+        )
+        .collect()
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1865-1886

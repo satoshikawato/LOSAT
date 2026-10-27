@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BPSEED with LOSAT_X_BPCLUT): the fused seed loop of blastp-fast
+//! With LOSAT_X_BPCLUT: the fused seed loop of blastp-fast
 //! (`x_seed_fused_compressed.rs`) on the flat compressed lookup table
 //! (`tblastx/lookup/x_clut_direct.rs`).
 //!
@@ -11,7 +11,7 @@
 //!
 //! EXPERIMENT (LOSAT_X_BPCLUTSCANBF): on a table with at least LOSAT_X_BPCLUTSCANBFMIN used cells
 //! per 10,000 (`XFlatCompressedLookup::x_scan_bf_pays`) the scan lists the offsets without a branch
-//! on the presence bit (`for_each_cell::<true, _>`, the form of LOSAT_X_BPSCANBF's
+//! on the presence bit (`for_each_cell::<true, _>`, the form of
 //! `x_seed_fused::x_scan_cells_bf`); the list, and so the cells and their order, are the same. That
 //! instance is out of line with a closure of its own type (`x_scan_flat_bf`), so the instance with
 //! the branch, which the other tables take, is compiled as without it. A switch of the strict set
@@ -61,7 +61,7 @@
 
 use std::cell::Cell;
 
-use super::x_seed_fused::{x_prefetch, x_prefetch_distance, x_test_hit, XHitBf};
+use super::x_seed_fused::{x_prefetch, x_test_hit, XHitBf, X_PREFETCH_DISTANCE};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
     x_prefetch as x_prefetch_ptr, XFlatCompressedLookup, X_HITS_AHEAD, X_STARTS_AHEAD,
@@ -787,7 +787,7 @@ fn x_scan_flat_in<const BRANCH_FREE: bool, F>(
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
     assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
-    let prefetch_distance = x_prefetch_distance();
+    let prefetch_distance = X_PREFETCH_DISTANCE;
     let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
     lookup.for_each_cell::<BRANCH_FREE, _>(subject, subject_length, &mut cells, |s, cell_hits| {
         for (i, &query_offset) in cell_hits.iter().enumerate() {

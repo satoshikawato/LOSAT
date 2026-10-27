@@ -117,10 +117,7 @@ where
             block_subject(&block, i),
             &mut subject_result,
         );
-        // (EXPERIMENT LOSAT_X_BPPCOMPACT: the HSP lists may all be compact ones.)
-        if !subject_result.query_hsp_lists.is_empty()
-            || !subject_result.x_compact_hsp_lists.is_empty()
-        {
+        if !subject_result.x_compact_hsp_lists.is_empty() {
             with_hits.push(std::mem::replace(
                 &mut subject_result,
                 BlastpSubjectResult::new(0),

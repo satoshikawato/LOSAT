@@ -9,7 +9,7 @@
 //! | `0` | off |
 //! | not set, empty, or any other value | on (for a value switch, the number given or the built-in value) |
 //!
-//! White space around a value is ignored (`set LOSAT_X_BPSEED=0 && ...` in cmd.exe stores `0 `),
+//! White space around a value is ignored (`set LOSAT_X_BPSUBJRUN=0 && ...` in cmd.exe stores `0 `),
 //! so a value of spaces only counts as empty. Only `0` means off: `00`, `false` or `off` are "any
 //! other value".
 //!
@@ -71,6 +71,10 @@ use std::ops::RangeInclusive;
 /// maskers that repeat segments, `utils/x_seg_trim_memo.rs`) graduated on 2026-10-26: they left
 /// `STRICT_SET` and their previous code was deleted (the maskers that do not ask for the memo keep
 /// trimming every segment, a rule of the masker and not a switch).
+/// `LOSAT_X_BPCOMPOREUSE`, `LOSAT_X_BPLUT`, `LOSAT_X_BPPCOMPACT`, `LOSAT_X_BPPFREE`,
+/// `LOSAT_X_BPREDOFIT`, `LOSAT_X_BPSCANBF`, `LOSAT_X_BPSEED` and `LOSAT_X_BPUNGAP` (all always on)
+/// graduated on 2026-10-26: they left `STRICT_SET` and their old code was deleted; nothing
+/// chooses any more, so they are not in `GRADUATED`.
 /// `LOSAT_X_LINKSLICES` (the groups of the TBLASTX linking call linked as slices of its one list,
 /// `tblastx/x_link_slices.rs`) was added after the change as a switch that is off unless set and
 /// joined the set once it was verified with it on.
@@ -169,6 +173,17 @@ use std::ops::RangeInclusive;
 /// shared and their vectors kept between builds, at most K query batches or chunks searched at a
 /// time, `blastx/x_bx_mem.rs`, `tblastx/lookup/x_lut_direct.rs`) joined the set in the pull
 /// request that added them, after they were verified and timed with them on and off.
+/// `LOSAT_X_BXCAPFILL` (BLASTX's capped units fill the threads with few subjects too: tasks of
+/// fewer subjects, each query batch prepared outside the cap, `blastx/x_bx_mem.rs`) joined the set
+/// in the pull request that added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_BXBUILDPAR` (BLASTX's lookup table of a capped unit built on the threads the cap
+/// leaves it, in parts by ranges of source cells, `blastx/x_bx_mem.rs`,
+/// `tblastx/lookup/x_lut_direct.rs`)
+/// joined the set in the pull request that added it, after it was verified and timed with it on
+/// and off.
+/// `LOSAT_X_BXCTXONCE` (BLASTX's context table of a query batch made once per lookup table and kept
+/// with it instead of once per thread, `blastx/x_seed_diag.rs`) joined the set in the pull request
+/// that added it, after it was verified and timed with it on and off.
 /// `LOSAT_X_PAIRPARGATE` (TBLASTX's unit path only for the query batches where it is expected to
 /// be faster than the reference frame loop, `tblastx/x_pair_par.rs`) and `LOSAT_X_TBXLUT` (the
 /// reference loop's full lookup table filled in place from per-cell counts,
@@ -197,7 +212,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNUNGAPCOUNT",
     "LOSAT_X_BPCLUT",
     "LOSAT_X_BPCLUTSCANBF",
-    "LOSAT_X_BPCOMPOREUSE",
     "LOSAT_X_BPDBCUT",
     "LOSAT_X_BPDBKEEP",
     "LOSAT_X_BPDEFER",
@@ -214,10 +228,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPLKPAHEAD",
     "LOSAT_X_BPLKPFLAT",
     "LOSAT_X_BPLKREUSE",
-    "LOSAT_X_BPLUT",
     "LOSAT_X_BPMASKED",
-    "LOSAT_X_BPPCOMPACT",
-    "LOSAT_X_BPPFREE",
     "LOSAT_X_BPQBLOCK",
     "LOSAT_X_BPQBLOCKFMT",
     "LOSAT_X_BPQBLOCKSA",
@@ -225,20 +236,19 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPQBLOCKXML",
     "LOSAT_X_BPQBLOCKXML2",
     "LOSAT_X_BPREDODBSUBJ",
-    "LOSAT_X_BPREDOFIT",
     "LOSAT_X_BPREDOLPT",
     "LOSAT_X_BPREDOPAR",
     "LOSAT_X_BPREDOWINEXPAND",
-    "LOSAT_X_BPSCANBF",
-    "LOSAT_X_BPSEED",
     "LOSAT_X_BPSEGWIN",
     "LOSAT_X_BPSUBJMETA",
     "LOSAT_X_BPSUBJRUN",
-    "LOSAT_X_BPUNGAP",
     "LOSAT_X_BPUNGAPSENT",
+    "LOSAT_X_BXBUILDPAR",
+    "LOSAT_X_BXCAPFILL",
     "LOSAT_X_BXCHUNKFLOW",
     "LOSAT_X_BXCROSS",
     "LOSAT_X_BXCROSSDEFER",
+    "LOSAT_X_BXCTXONCE",
     "LOSAT_X_BXDBSTREAM",
     "LOSAT_X_BXDEFER",
     "LOSAT_X_BXDIAG",
@@ -248,6 +258,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXHITBF",
     "LOSAT_X_BXKAONCE",
     "LOSAT_X_BXLUTPOOL",
+    "LOSAT_X_BXPOOLN1",
     "LOSAT_X_BXSCANBYTE",
     "LOSAT_X_BXSUBJFLOW",
     "LOSAT_X_BXUNGAPSENT",

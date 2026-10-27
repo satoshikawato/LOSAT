@@ -354,3 +354,12 @@ back-translated, for BLASTX) and `ids/ids_qw.faa` (thirty W, which hits the reco
 of LOSAT's refusals, each hit by its own query `ids/refuse_<case>.faa` (`.fna` for BLASTX) alone with
 `-evalue 1e-20`: NCBI's outfmt 0 does not end on the records `long` and `punct`, so no other query may
 report them.
+
+Nucleotides (line DBID, ID2b; rows `db.id.blastn.*`, `db.id.tblastn.*`, `db.id.tblastx.*`): `make_ids.py` also
+writes `ids/nucl_v5` and `ids/nucl_v4` from `ids/nucl.fna` and `ids/taxmap_nucl.txt` (the Seq-id forms of
+`LOSAT/tests/seqid/fasta/nucl_ids.fa`, every record with its sequence, and records whose titles NCBI makes
+from their Seq-ids), `ids/nrefuse_v5` from `ids/nrefuse.fna` (`lcl|777` before `gi|777`, which NCBI's
+formatters do not find again) and the two volumes `ids/njoined_a` and `ids/njoined_b` of the alias
+`ids/njoined.nal` (`gb|AF000040|` and `gb|AF000040.1|`, whose hits NCBI's XML and outfmt 0 join). Queries:
+`LOSAT/tests/seqid/fasta/qnucl.fa` (BLASTN, TBLASTX) and `qprot.fa` (TBLASTN); the second query of each has
+no hit. TBLASTN and TBLASTX run with `-max_hsps 1` to keep the frozen files small.

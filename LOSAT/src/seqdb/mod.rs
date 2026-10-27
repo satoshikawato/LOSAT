@@ -90,10 +90,15 @@ pub(crate) fn x_bp_db_keep() -> bool {
 }
 
 /// EXPERIMENT (LOSAT_X_BPDBKEEP): whether the blocks of the parallel preliminary stage are cut to
-/// `X_KEEP_BLOCK_BYTES` (the switch's value 1, built in); the value 2 (a diagnostic) keeps the
-/// blocks of `LOSAT_X_BPDBCUT`.
+/// `X_KEEP_BLOCK_BYTES` (every value of the switch).
 pub(crate) fn x_bp_db_small_blocks() -> bool {
-    matches!(x_bp_db_keep_value(), Some(1 | 3))
+    x_bp_db_keep()
+}
+
+/// EXPERIMENT (LOSAT_X_BPDBKEEP): whether the parallel preliminary stage searches the rounds of
+/// `search_blocks_of` with the kits instead of the window (the values 2 and 3, diagnostics).
+pub(crate) fn x_bp_db_keep_rounds() -> bool {
+    matches!(x_bp_db_keep_value(), Some(2 | 3))
 }
 
 /// EXPERIMENT (LOSAT_X_BPDBKEEP): whether a round of the cut blocks holds as many bytes as a round

@@ -13,24 +13,39 @@
 //! `GLIBC_TUNABLES` run; v4-MF t3, v4-D12 s15).
 //!
 //! With the switch, each worker of the pool keeps one scratch and one block buffer for the whole
-//! stage and takes the blocks of each round one at a time from a shared counter (as the `-subject`
-//! runs do, `x_subject_runs.rs`), the one-thread loop reads every block into one buffer, and the
-//! check of `IndexFile::open` reads 64 KiB at a time (`seqdb/index.rs`). NCBI's threads allocate
-//! their search structures once each (`BlastCoreAuxStruct`, `aux_struct->offset_pairs`, quoted at
-//! `BlastpSubjectScratch`) and read the sequences in the mapped files.
+//! stage, the one-thread loop reads every block into one buffer, and the check of
+//! `IndexFile::open` reads 64 KiB at a time (`seqdb/index.rs`). The workers take the blocks one at
+//! a time in ordinal order (the block and the one-thread order's diagonal offset of its first
+//! sequence, under one lock) and put each block's results into a window of `blocks_per_thread` x
+//! workers slots; the worker that ends the oldest block not yet merged merges it and every later
+//! block already ended, in ordinal order. A worker takes block j only once the blocks before j - W
+//! are merged (W, the window), and otherwise waits, so the results held for the merge stay within
+//! W blocks, as within a round of `search_blocks_of`, without the end of a round where every worker
+//! waits for the round's last block and the merge. NCBI's threads allocate their search structures
+//! once each (`BlastCoreAuxStruct`, `aux_struct->offset_pairs`, quoted at `BlastpSubjectScratch`)
+//! and read the sequences in the mapped files.
 //!
 //! Why the reports do not change: each block is searched as a task of `search_blocks_of` searches
 //! it, from `prepare_independent_subject` at the one-thread order's diagonal offset of its first
 //! sequence, with a scratch that may have searched an earlier block (as a task's scratch does for
-//! its next block); the blocks, their reads and checks, and the merge of each round's results in
-//! ordinal order (with the round's first error in that order) are those of `search_blocks_of`. No
-//! floating-point operation changes order.
+//! its next block); the blocks, their reads and checks are those of `search_blocks_of`, and the
+//! results of the blocks go to the hit lists in ordinal order, as the merge of its rounds puts
+//! them. A search that fails returns the first error in ordinal order, the error of the rounds of
+//! `search_blocks_of` (each round's merge stops at its first error, and the rounds before had
+//! none): the merge stops at the first block that failed, after every block before it, and no
+//! later block is taken. No floating-point operation changes order.
+//!
+//! Why the waits end: a worker waits only while block j - W, the oldest not merged, is taken and
+//! not ended, so another worker is searching it; that search waits for nothing a waiting worker
+//! holds and runs no rayon work (the kernel `process_subject` and the block's read are sequential),
+//! so no waiting task can sit below it on its thread, and its worker merges it. A worker that panics stops the search and
+//! wakes the others (`XStopOnPanic`); the scope then raises the panic.
 //!
 //! `LOSAT_X_BPDBKEEP` is a switch of the strict set: on unless it is `0`. It acts for every task of
 //! BLASTP with `-db`; the index check acts for every program that opens a database.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 
 use anyhow::Result;
 
@@ -114,11 +129,198 @@ where
     Ok(with_hits)
 }
 
+// No NCBI counterpart: the state of the window's scheduling and merge; it changes no value NCBI
+// computes.
+/// The window of `x_search_window`, under its lock.
+struct XWindow<'a, P> {
+    /// The ordinal id after the last block taken, and the one-thread order's diagonal offset of
+    /// the first sequence from there.
+    next_ordinal: u32,
+    diag_offset: i32,
+    /// The blocks taken (the index of the next block to take).
+    taken: usize,
+    /// The blocks merged (the index of the next block to merge). The slot of this block is empty:
+    /// the worker that ends it merges it.
+    merged: usize,
+    /// The results of the blocks taken and not merged, block j in slot j mod the window.
+    slots: Vec<Option<Result<Vec<BlastpSubjectResult>>>>,
+    sink: &'a mut P,
+    /// The first error in ordinal order, once the merge has reached it.
+    error: Option<anyhow::Error>,
+    /// The search stopped: an error merged, or a worker panicked.
+    stopped: bool,
+}
+
+/// The window and its condition: blocks merged, or the search stopped.
+struct XShared<'a, P> {
+    window: Mutex<XWindow<'a, P>>,
+    merged: Condvar,
+}
+
+impl<'a, P> XShared<'a, P> {
+    fn lock(&self) -> MutexGuard<'_, XWindow<'a, P>> {
+        self.window.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Stops the search and wakes the waiting workers when the worker that holds it panics, so that
+/// the scope can end and raise the panic.
+struct XStopOnPanic<'s, 'a, P>(&'s XShared<'a, P>);
+
+impl<P> Drop for XStopOnPanic<'_, '_, P> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.0.lock().stopped = true;
+            self.0.merged.notify_all();
+        }
+    }
+}
+
+/// A worker of `x_search_window`: takes the next block once the window has room for it, searches
+/// it with the worker's kit (made for its first block), and puts its results into its slot,
+/// merging them and the later blocks already ended when it is the oldest block not merged. Ends
+/// when no block is left or the search stopped.
+fn x_window_worker<S, K, P>(
+    db: &SeqDb,
+    window: i32,
+    block_bytes: u64,
+    shared: &XShared<'_, P>,
+    new_scratch: &S,
+    process_subject: &K,
+) where
+    S: Fn() -> BlastpSubjectScratch,
+    K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
+    P: PrelimSink,
+{
+    let _stop_on_panic = XStopOnPanic(shared);
+    let mut kit: Option<XKit> = None;
+    let mut state = shared.lock();
+    loop {
+        if state.stopped {
+            return;
+        }
+        let width = state.slots.len();
+        if state.taken >= state.merged + width {
+            state = shared
+                .merged
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
+            continue;
+        }
+        let Some(range) = db.next_block(state.next_ordinal, block_bytes) else {
+            return;
+        };
+        let index = state.taken;
+        let first_diag_offset = state.diag_offset;
+        state.taken += 1;
+        state.diag_offset = diag_offset_after(db, range, state.diag_offset, window);
+        state.next_ordinal = range.end_ordinal();
+        drop(state);
+        let kit = kit.get_or_insert_with(|| XKit {
+            scratch: new_scratch(),
+            bytes: Vec::new(),
+        });
+        let found = x_search_block(db, range, first_diag_offset, kit, process_subject);
+        state = shared.lock();
+        if state.stopped {
+            return;
+        }
+        state.slots[index % width] = Some(found);
+        if index != state.merged {
+            continue;
+        }
+        // The subjects without HSP lists change no hit list, so the order of the updates is
+        // the one-thread order.
+        let merge = &mut *state;
+        while let Some(found) = merge.slots[merge.merged % width].take() {
+            merge.merged += 1;
+            match found {
+                Ok(block_results) => {
+                    for mut subject_result in block_results {
+                        merge.sink.add(&mut subject_result);
+                    }
+                }
+                Err(error) => {
+                    merge.error = Some(error);
+                    merge.stopped = true;
+                    break;
+                }
+            }
+        }
+        shared.merged.notify_all();
+    }
+}
+
+// No NCBI counterpart: scheduling of the preliminary loop (NCBI's loop is quoted above
+// `search_blocks`); it changes no value NCBI computes.
+/// The parallel stage of `x_search_blocks_kept`: the blocks of at most `block_bytes` searched by
+/// one task per worker, in a window of `blocks_per_thread` blocks per worker (module header).
+#[allow(clippy::too_many_arguments)]
+fn x_search_window<S, K, P>(
+    db: &SeqDb,
+    pool: &SearchPool<'_>,
+    window: i32,
+    block_bytes: u64,
+    blocks_per_thread: usize,
+    new_scratch: &S,
+    process_subject: &K,
+    sink: &mut P,
+) -> Result<()>
+where
+    S: Fn() -> BlastpSubjectScratch + Sync,
+    K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
+    P: PrelimSink + Send,
+{
+    let workers = pool.threads().max(1);
+    let width = workers.saturating_mul(blocks_per_thread).max(1);
+    let shared = XShared {
+        window: Mutex::new(XWindow {
+            next_ordinal: 0,
+            diag_offset: window,
+            taken: 0,
+            merged: 0,
+            slots: std::iter::repeat_with(|| None).take(width).collect(),
+            sink,
+            error: None,
+            stopped: false,
+        }),
+        merged: Condvar::new(),
+    };
+    {
+        let shared = &shared;
+        pool.install(|| {
+            rayon::scope(|scope| {
+                for _ in 0..workers {
+                    scope.spawn(move |_| {
+                        x_window_worker(
+                            db,
+                            window,
+                            block_bytes,
+                            shared,
+                            new_scratch,
+                            process_subject,
+                        );
+                    });
+                }
+            });
+        });
+    }
+    let state = shared
+        .window
+        .into_inner()
+        .unwrap_or_else(PoisonError::into_inner);
+    if let Some(error) = state.error {
+        return Err(error);
+    }
+    debug_assert_eq!(state.merged, state.taken, "every block taken is merged");
+    Ok(())
+}
+
 // No NCBI counterpart: scheduling of the preliminary loop and where its buffers are kept (NCBI's
 // loop is quoted above `search_blocks`); it changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPDBKEEP): `search_blocks_of` (the same blocks of at most `block_bytes`,
-/// rounds of `blocks_per_thread` blocks per thread) with one scratch and one block buffer per
-/// worker for the whole stage (module header).
+/// EXPERIMENT (LOSAT_X_BPDBKEEP): `search_blocks_of` (the same blocks of at most `block_bytes`)
+/// with one scratch and one block buffer per worker for the whole stage, the blocks taken in a
+/// window of `blocks_per_thread` blocks per worker (module header).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn x_search_blocks_kept<S, K, P>(
     database: &BlastpDatabase,
@@ -133,7 +335,7 @@ pub(super) fn x_search_blocks_kept<S, K, P>(
 where
     S: Fn() -> BlastpSubjectScratch + Sync,
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
-    P: PrelimSink,
+    P: PrelimSink + Send,
 {
     crate::utils::xreach::x_reach!("LOSAT_X_BPDBKEEP", true);
     let db = &database.db;
@@ -146,72 +348,29 @@ where
         0,
     ) && pool.enabled()
     {
-        let workers = pool.threads().max(1);
-        let round_blocks = workers.saturating_mul(blocks_per_thread).max(1);
-        let mut kits: Vec<Option<XKit>> = std::iter::repeat_with(|| None).take(workers).collect();
-        let mut next_ordinal = 0u32;
-        let mut diag_offset = window;
-        loop {
-            // The blocks of the round and the diagonal offset of each one's first sequence in
-            // the one-thread order (as `search_blocks_of`).
-            let mut round: Vec<(BlockRange, i32)> = Vec::with_capacity(round_blocks);
-            while round.len() < round_blocks {
-                let Some(range) = db.next_block(next_ordinal, block_bytes) else {
-                    break;
-                };
-                round.push((range, diag_offset));
-                diag_offset = diag_offset_after(db, range, diag_offset, window);
-                next_ordinal = range.end_ordinal();
-            }
-            if round.is_empty() {
-                break;
-            }
-            let found: Vec<Mutex<Option<Result<Vec<BlastpSubjectResult>>>>> =
-                round.iter().map(|_| Mutex::new(None)).collect();
-            let next = AtomicUsize::new(0);
-            {
-                let (round, found, next) = (&round, &found, &next);
-                pool.install(|| {
-                    rayon::scope(|scope| {
-                        for kit in kits.iter_mut().take(round.len()) {
-                            scope.spawn(move |_| {
-                                let kit = kit.get_or_insert_with(|| XKit {
-                                    scratch: new_scratch(),
-                                    bytes: Vec::new(),
-                                });
-                                loop {
-                                    let index = next.fetch_add(1, Ordering::Relaxed);
-                                    let Some(&(range, first_diag_offset)) = round.get(index) else {
-                                        break;
-                                    };
-                                    let result = x_search_block(
-                                        db,
-                                        range,
-                                        first_diag_offset,
-                                        kit,
-                                        process_subject,
-                                    );
-                                    *found[index].lock().unwrap_or_else(PoisonError::into_inner) =
-                                        Some(result);
-                                }
-                            });
-                        }
-                    });
-                });
-            }
-            // The subjects without HSP lists change no hit list, so the order of the
-            // updates is the one-thread order.
-            for slot in found {
-                let block_results = slot
-                    .into_inner()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .expect("every block of the round is searched");
-                for mut subject_result in block_results? {
-                    sink.add(&mut subject_result);
-                }
-            }
+        // EXPERIMENT (LOSAT_X_BPDBKEEP=2 or 3, diagnostics): the rounds of `search_blocks_of`.
+        if crate::seqdb::x_bp_db_keep_rounds() {
+            return x_search_rounds_kept(
+                db,
+                pool,
+                window,
+                block_bytes,
+                blocks_per_thread,
+                new_scratch,
+                process_subject,
+                sink,
+            );
         }
-        return Ok(());
+        return x_search_window(
+            db,
+            pool,
+            window,
+            block_bytes,
+            blocks_per_thread,
+            new_scratch,
+            process_subject,
+            sink,
+        );
     }
 
     let mut scratch = new_scratch();
@@ -233,4 +392,87 @@ where
         bytes = block.x_into_data();
     }
     Ok(())
+}
+
+// No NCBI counterpart: scheduling (a diagnostic); it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPDBKEEP=2 or 3, diagnostics): the parallel stage of
+/// `x_search_blocks_kept` in the rounds of `search_blocks_of` (`blocks_per_thread` blocks per
+/// thread; every worker waits for the round's last block and its merge), with the kits.
+#[allow(clippy::too_many_arguments)]
+fn x_search_rounds_kept<S, K, P>(
+    db: &SeqDb,
+    pool: &SearchPool<'_>,
+    window: i32,
+    block_bytes: u64,
+    blocks_per_thread: usize,
+    new_scratch: &S,
+    process_subject: &K,
+    sink: &mut P,
+) -> Result<()>
+where
+    S: Fn() -> BlastpSubjectScratch + Sync,
+    K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
+    P: PrelimSink,
+{
+    let workers = pool.threads().max(1);
+    let round_blocks = workers.saturating_mul(blocks_per_thread).max(1);
+    let mut kits: Vec<Option<XKit>> = std::iter::repeat_with(|| None).take(workers).collect();
+    let mut next_ordinal = 0u32;
+    let mut diag_offset = window;
+    loop {
+        let mut round: Vec<(BlockRange, i32)> = Vec::with_capacity(round_blocks);
+        while round.len() < round_blocks {
+            let Some(range) = db.next_block(next_ordinal, block_bytes) else {
+                break;
+            };
+            round.push((range, diag_offset));
+            diag_offset = diag_offset_after(db, range, diag_offset, window);
+            next_ordinal = range.end_ordinal();
+        }
+        if round.is_empty() {
+            return Ok(());
+        }
+        let found: Vec<Mutex<Option<Result<Vec<BlastpSubjectResult>>>>> =
+            round.iter().map(|_| Mutex::new(None)).collect();
+        let next = AtomicUsize::new(0);
+        {
+            let (round, found, next) = (&round, &found, &next);
+            pool.install(|| {
+                rayon::scope(|scope| {
+                    for kit in kits.iter_mut().take(round.len()) {
+                        scope.spawn(move |_| {
+                            let kit = kit.get_or_insert_with(|| XKit {
+                                scratch: new_scratch(),
+                                bytes: Vec::new(),
+                            });
+                            loop {
+                                let index = next.fetch_add(1, Ordering::Relaxed);
+                                let Some(&(range, first_diag_offset)) = round.get(index) else {
+                                    break;
+                                };
+                                let result = x_search_block(
+                                    db,
+                                    range,
+                                    first_diag_offset,
+                                    kit,
+                                    process_subject,
+                                );
+                                *found[index].lock().unwrap_or_else(PoisonError::into_inner) =
+                                    Some(result);
+                            }
+                        });
+                    }
+                });
+            });
+        }
+        for slot in found {
+            let block_results = slot
+                .into_inner()
+                .unwrap_or_else(PoisonError::into_inner)
+                .expect("every block of the round is searched");
+            for mut subject_result in block_results? {
+                sink.add(&mut subject_result);
+            }
+        }
+    }
 }

@@ -208,7 +208,7 @@ pub(super) fn x_search_blocks_cut<S, K, P>(
 where
     S: Fn() -> BlastpSubjectScratch + Sync,
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
-    P: PrelimSink,
+    P: PrelimSink + Send,
 {
     let db = &database.db;
     let block_bytes = x_db_cut_block_bytes(database, pool);

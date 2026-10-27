@@ -488,7 +488,7 @@ pub(super) fn search_blocks<S, K, P>(
 where
     S: Fn() -> BlastpSubjectScratch + Sync,
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
-    P: PrelimSink,
+    P: PrelimSink + Send,
 {
     #[cfg(all(
         feature = "parallel",
@@ -546,7 +546,7 @@ fn search_blocks_of<S, K, P>(
 where
     S: Fn() -> BlastpSubjectScratch + Sync,
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
-    P: PrelimSink,
+    P: PrelimSink + Send,
 {
     // EXPERIMENT (LOSAT_X_BPDBKEEP): `database/x_db_keep.rs`.
     #[cfg(all(
@@ -1994,6 +1994,40 @@ mod tests {
             Kept(u64),
             /// `search_blocks_made` (without LOSAT_X_BPDBKEEP) with blocks of this many bytes.
             Made(u64),
+            /// `Kept` with the kernel's hook.
+            KeptWith(u64, XHook),
+        }
+
+        /// What the kernel does before it records a sequence (`Driver::KeptWith`).
+        #[derive(Clone, Copy, Debug)]
+        enum XHook {
+            /// Sleeps 50 ms at this ordinal id.
+            SleepAt(usize),
+            /// Panics at this ordinal id.
+            PanicAt(usize),
+        }
+
+        /// `kernel` after the hook `hook`.
+        fn hooked_kernel<'a>(
+            kernel: impl Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult)
+                + Sync
+                + 'a,
+            hook: Option<XHook>,
+        ) -> impl Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult)
+               + Sync
+               + 'a {
+            move |scratch, s_idx, subject, result| {
+                match hook {
+                    Some(XHook::SleepAt(ordinal)) if ordinal == s_idx => {
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    Some(XHook::PanicAt(ordinal)) if ordinal == s_idx => {
+                        panic!("the kernel's hook at {ordinal}");
+                    }
+                    _ => {}
+                }
+                kernel(scratch, s_idx, subject, result);
+            }
         }
 
         /// `search` with the driver `driver`.
@@ -2009,7 +2043,11 @@ mod tests {
             let mut compact: Vec<Option<BlastpHitList<XPrelimHsp>>> = vec![None];
             crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                 let new_scratch = || BlastpSubjectScratch::new(16, 64, window, 21);
-                let kernel = recording_kernel(window, &seen);
+                let hook = match driver {
+                    Driver::KeptWith(_, hook) => Some(hook),
+                    _ => None,
+                };
+                let kernel = hooked_kernel(recording_kernel(window, &seen), hook);
                 let mut sink = crate::algorithm::blastp::blast_engine::PrelimCollector {
                     preliminary_hit_lists: &mut hit_lists,
                     x_compact_hit_lists: &mut compact,
@@ -2035,16 +2073,18 @@ mod tests {
                         &kernel,
                         &mut sink,
                     ),
-                    Driver::Kept(block_bytes) => super::super::x_db_keep::x_search_blocks_kept(
-                        database,
-                        pool,
-                        window,
-                        block_bytes,
-                        blocks_per_thread,
-                        &new_scratch,
-                        &kernel,
-                        &mut sink,
-                    ),
+                    Driver::Kept(block_bytes) | Driver::KeptWith(block_bytes, _) => {
+                        super::super::x_db_keep::x_search_blocks_kept(
+                            database,
+                            pool,
+                            window,
+                            block_bytes,
+                            blocks_per_thread,
+                            &new_scratch,
+                            &kernel,
+                            &mut sink,
+                        )
+                    }
                     Driver::Made(block_bytes) => search_blocks_made(
                         database,
                         pool,
@@ -2297,6 +2337,45 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(single_dir);
             let _ = std::fs::remove_dir_all(multi_dir);
+        }
+
+        // No NCBI counterpart: the window of LOSAT_X_BPDBKEEP (`x_db_keep.rs`) with a slow block,
+        // the oldest one (the later blocks fill the window and their takers wait for its merge) or
+        // a later one: the kernel sees the same sequences from the same diagonal offsets and the
+        // hit lists receive the same updates as with a scratch and a buffer per task. A panic of
+        // the kernel in either block ends the search with the panic (the waiting workers stop).
+        // At 2, 3 and 7 threads, blocks of 4 KiB, windows of 2 blocks per thread.
+        #[test]
+        fn the_window_waits_for_its_oldest_block_and_ends_on_a_panic() {
+            let (dir, name) = generated_database("keepw", "3GB");
+            let database = open_path(&name);
+            let block_bytes = 4096;
+            assert!(x_count_blocks(&database.db, block_bytes) > 40);
+            for threads in [2usize, 3, 7] {
+                let made = search_with(&database, threads, 2, Driver::Made(block_bytes)).unwrap();
+                for ordinal in [0usize, 150] {
+                    let context = format!("{threads} threads, ordinal {ordinal}");
+                    let slow = search_with(
+                        &database,
+                        threads,
+                        2,
+                        Driver::KeptWith(block_bytes, XHook::SleepAt(ordinal)),
+                    )
+                    .unwrap();
+                    assert!(slow.0 == made.0, "{context}");
+                    assert_eq!(slow.1, made.1, "{context}");
+                    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        search_with(
+                            &database,
+                            threads,
+                            2,
+                            Driver::KeptWith(block_bytes, XHook::PanicAt(ordinal)),
+                        )
+                    }));
+                    assert!(panicked.is_err(), "{context}");
+                }
+            }
+            let _ = std::fs::remove_dir_all(dir);
         }
 
         fn error_text(result: Result<(Seen, Vec<u32>)>) -> String {

@@ -58,6 +58,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
+use super::coordination::QueryLetters;
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use crate::utils::threading::SearchPool;
 
@@ -77,9 +78,18 @@ fn on() -> bool {
 }
 
 /// The DUST masks of `seqs`, one list per sequence, in order: the serial map of NCBI's loop.
-fn serial(seqs: &[&[u8]], level: u32, window: usize, linker: usize) -> Vec<Vec<MaskedInterval>> {
-    seqs.iter()
-        .map(|seq| DustMasker::new(level, window, linker).mask_sequence(seq))
+fn serial<L: QueryLetters + ?Sized>(
+    seqs: &L,
+    level: u32,
+    window: usize,
+    linker: usize,
+) -> Vec<Vec<MaskedInterval>> {
+    (0..seqs.count())
+        .map(|index| {
+            seqs.read(index, |seq| {
+                DustMasker::new(level, window, linker).mask_sequence(seq)
+            })
+        })
         .collect()
 }
 
@@ -96,8 +106,8 @@ fn on_pool(pool: &SearchPool<'_>, seq_count: usize) -> bool {
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn parallel<P: Fn() + Sync>(
-    seqs: &[&[u8]],
+fn parallel<L: QueryLetters + ?Sized, P: Fn() + Sync>(
+    seqs: &L,
     level: u32,
     window: usize,
     linker: usize,
@@ -105,10 +115,13 @@ fn parallel<P: Fn() + Sync>(
     probe: &P,
 ) -> Vec<Vec<MaskedInterval>> {
     pool.install(|| {
-        seqs.par_iter()
-            .map(|seq| {
+        (0..seqs.count())
+            .into_par_iter()
+            .map(|index| {
                 probe();
-                DustMasker::new(level, window, linker).mask_sequence(seq)
+                seqs.read(index, |seq| {
+                    DustMasker::new(level, window, linker).mask_sequence(seq)
+                })
             })
             .collect()
     })
@@ -118,8 +131,8 @@ fn parallel<P: Fn() + Sync>(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 )))]
-fn parallel<P: Fn() + Sync>(
-    seqs: &[&[u8]],
+fn parallel<L: QueryLetters + ?Sized, P: Fn() + Sync>(
+    seqs: &L,
     level: u32,
     window: usize,
     linker: usize,
@@ -131,8 +144,8 @@ fn parallel<P: Fn() + Sync>(
 
 /// The masks of `seqs` as the switch `on` makes them. Separate from the environment so that tests
 /// choose the switch.
-pub(crate) fn masks_with_mode(
-    seqs: &[&[u8]],
+pub(crate) fn masks_with_mode<L: QueryLetters + ?Sized>(
+    seqs: &L,
     level: u32,
     window: usize,
     linker: usize,
@@ -143,8 +156,8 @@ pub(crate) fn masks_with_mode(
 }
 
 /// `masks_with_mode` with a `probe` that the parallel map calls once per query (see `parallel`).
-fn masks_with_probe<P: Fn() + Sync>(
-    seqs: &[&[u8]],
+fn masks_with_probe<L: QueryLetters + ?Sized, P: Fn() + Sync>(
+    seqs: &L,
     level: u32,
     window: usize,
     linker: usize,
@@ -153,9 +166,9 @@ fn masks_with_probe<P: Fn() + Sync>(
     probe: &P,
 ) -> Vec<Vec<MaskedInterval>> {
     if on {
-        crate::utils::xreach::x_reach!("LOSAT_X_QDUSTPAR", on_pool(pool, seqs.len()));
+        crate::utils::xreach::x_reach!("LOSAT_X_QDUSTPAR", on_pool(pool, seqs.count()));
     }
-    if !on || !on_pool(pool, seqs.len()) {
+    if !on || !on_pool(pool, seqs.count()) {
         return serial(seqs, level, window, linker);
     }
     parallel(seqs, level, window, linker, pool, probe)
@@ -178,8 +191,8 @@ fn timing_on() -> bool {
 }
 
 /// The masks of `seqs` as `apply_dust_masking` makes them: the environment's switch decides.
-pub(crate) fn masks(
-    seqs: &[&[u8]],
+pub(crate) fn masks<L: QueryLetters + ?Sized>(
+    seqs: &L,
     level: u32,
     window: usize,
     linker: usize,
@@ -276,7 +289,7 @@ mod tests {
         );
         let refs: Vec<&[u8]> = seqs.iter().map(Vec::as_slice).collect();
         for (level, window, linker) in [(20, 64, 1), (10, 32, 2), (30, 16, 1)] {
-            let expect = serial(&refs, level, window, linker);
+            let expect = serial(&refs[..], level, window, linker);
             for threads in [1usize, 2, 3, 7] {
                 with_search_pool(threads, "blastn", |pool| {
                     for take in [refs.len(), 2, 1, 0] {
@@ -285,7 +298,7 @@ mod tests {
                         let got = masks_with_mode(part, level, window, linker, pool, true);
                         assert_eq!(got, want, "threads {threads} take {take}");
                     }
-                    let got = masks_with_mode(&refs, level, window, linker, pool, true);
+                    let got = masks_with_mode(&refs[..], level, window, linker, pool, true);
                     assert_eq!(got, expect, "threads {threads}");
                     Ok(())
                 })
@@ -329,7 +342,7 @@ mod tests {
 
         let seqs: Vec<Vec<u8>> = (0..30).map(|i| vec![b"ACGT"[i % 4]; 200]).collect();
         let refs: Vec<&[u8]> = seqs.iter().map(Vec::as_slice).collect();
-        let want = serial(&refs, 20, 64, 1);
+        let want = serial(&refs[..], 20, 64, 1);
         with_search_pool(3, "blastn", |pool| {
             let calls = AtomicUsize::new(0);
             let workers = Mutex::new(BTreeSet::new());
@@ -355,7 +368,7 @@ mod tests {
             in_pool_of_three.store(0, Ordering::SeqCst);
             workers.lock().unwrap().clear();
             gave_up.store(false, Ordering::SeqCst);
-            let got = masks_with_probe(&refs, 20, 64, 1, pool, true, &probe);
+            let got = masks_with_probe(&refs[..], 20, 64, 1, pool, true, &probe);
             assert_eq!(got, want);
             assert_eq!(calls.load(Ordering::SeqCst), refs.len());
             assert_eq!(
@@ -373,7 +386,7 @@ mod tests {
             // Not acted on: switch off, one query.
             calls.store(0, Ordering::SeqCst);
             assert_eq!(
-                masks_with_probe(&refs, 20, 64, 1, pool, false, &probe),
+                masks_with_probe(&refs[..], 20, 64, 1, pool, false, &probe),
                 want
             );
             assert_eq!(
@@ -389,7 +402,10 @@ mod tests {
             let probe = || {
                 calls.fetch_add(1, Ordering::SeqCst);
             };
-            assert_eq!(masks_with_probe(&refs, 20, 64, 1, pool, true, &probe), want);
+            assert_eq!(
+                masks_with_probe(&refs[..], 20, 64, 1, pool, true, &probe),
+                want
+            );
             assert_eq!(calls.load(Ordering::SeqCst), 0);
             Ok(())
         })

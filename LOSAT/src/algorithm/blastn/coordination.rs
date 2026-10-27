@@ -864,11 +864,74 @@ pub fn collect_lowercase_masks(seq: &[u8]) -> Vec<MaskedInterval> {
 // const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking) ? ... : kDfltArgUseLCaseMasking;
 // ReadSequencesToBlast(... use_lcase_masks, subjects, ...);
 // ```
-fn collect_lowercase_masks_for_records<R: InputRecord>(records: &[R]) -> Vec<Vec<MaskedInterval>> {
-    records
-        .iter()
-        .map(|record| collect_lowercase_masks(record.seq()))
+fn collect_lowercase_masks_for_records<L: QueryLetters + ?Sized>(
+    records: &L,
+) -> Vec<Vec<MaskedInterval>> {
+    (0..records.count())
+        .map(|index| records.read(index, collect_lowercase_masks))
         .collect()
+}
+
+/// The letters of a query batch's records for the readers that set the batch up (WindowMasker,
+/// DUST, the lower-case masks, the encoding), one record at a time. No NCBI counterpart (how
+/// LOSAT holds the letters). EXPERIMENT (LOSAT_X_BNQSLOTS): a slot's copy out of the query store
+/// keeps its records' letters packed and makes a record's letters for the one reader that asks
+/// (`blast_engine::x_query_drop::Letters`), so no reader holds the batch's letters at once.
+pub(crate) trait QueryLetters: Sync {
+    /// The number of records.
+    fn count(&self) -> usize;
+    /// The number of letters of record `index`.
+    fn length(&self, index: usize) -> usize;
+    /// `read` of the letters of record `index`.
+    fn read<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> T) -> T;
+}
+
+impl<R: InputRecord + Sync> QueryLetters for [R] {
+    fn count(&self) -> usize {
+        self.len()
+    }
+
+    fn length(&self, index: usize) -> usize {
+        self[index].seq().len()
+    }
+
+    fn read<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> T) -> T {
+        read(self[index].seq())
+    }
+}
+
+impl QueryLetters for [&[u8]] {
+    fn count(&self) -> usize {
+        self.len()
+    }
+
+    fn length(&self, index: usize) -> usize {
+        self[index].len()
+    }
+
+    fn read<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> T) -> T {
+        read(self[index])
+    }
+}
+
+/// The reverse complements of `L`'s letters, each made for the reader of one record (`-strand
+/// minus` DUST below).
+struct ReverseComplements<'a, L: ?Sized>(&'a L);
+
+impl<L: QueryLetters + ?Sized> QueryLetters for ReverseComplements<'_, L> {
+    fn count(&self) -> usize {
+        self.0.count()
+    }
+
+    fn length(&self, index: usize) -> usize {
+        self.0.length(index)
+    }
+
+    fn read<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> T) -> T {
+        self.0.read(index, |letters| {
+            read(&super::lookup::reverse_complement(letters))
+        })
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:92-128
@@ -923,9 +986,9 @@ pub(crate) fn reverse_mask_intervals(
 }
 
 /// Apply DUST filter to query sequences
-pub fn apply_dust_masking<R: InputRecord>(
+pub(crate) fn apply_dust_masking<L: QueryLetters + ?Sized>(
     args: &BlastnArgs,
-    queries: &[R],
+    queries: &L,
     pool: &SearchPool<'_>,
 ) -> Vec<Vec<MaskedInterval>> {
     // NCBI blast_args.cpp:418-420: opt.SetDustFilteringLevel(...);
@@ -975,37 +1038,34 @@ pub fn apply_dust_masking<R: InputRecord>(
         // `plus` and `both` dust the letters as they are.
         let masks: Vec<Vec<MaskedInterval>> =
             if QueryStrand::from_option(&args.strand) == QueryStrand::Minus {
-                let reverse: Vec<Vec<u8>> = queries
-                    .iter()
-                    .map(|record| super::lookup::reverse_complement(record.seq()))
-                    .collect();
-                let seqs: Vec<&[u8]> = reverse.iter().map(Vec::as_slice).collect();
-                super::x_query_dust_par::masks(&seqs, dust_level, dust_window, dust_linker, pool)
+                let reverse = ReverseComplements(queries);
+                super::x_query_dust_par::masks(&reverse, dust_level, dust_window, dust_linker, pool)
                     .into_iter()
-                    .zip(&seqs)
-                    .map(|(masks, seq)| reverse_mask_intervals(&masks, seq.len()))
+                    .enumerate()
+                    .map(|(index, masks)| reverse_mask_intervals(&masks, queries.length(index)))
                     .collect()
             } else {
-                let seqs: Vec<&[u8]> = queries.iter().map(|record| record.seq()).collect();
-                super::x_query_dust_par::masks(&seqs, dust_level, dust_window, dust_linker, pool)
+                super::x_query_dust_par::masks(queries, dust_level, dust_window, dust_linker, pool)
             };
 
         let total_masked: usize = masks
             .iter()
             .map(|m| m.iter().map(|i| i.end - i.start).sum::<usize>())
             .sum();
-        let total_bases: usize = queries.iter().map(|r| r.seq().len()).sum();
+        let total_bases: usize = (0..queries.count())
+            .map(|index| queries.length(index))
+            .sum();
         if args.verbose && total_bases > 0 {
             eprintln!(
                 "DUST masked {} bases ({:.2}%) across {} sequences",
                 total_masked,
                 100.0 * total_masked as f64 / total_bases as f64,
-                queries.len()
+                queries.count()
             );
         }
         masks
     } else {
-        vec![Vec::new(); queries.len()]
+        vec![Vec::new(); queries.count()]
     }
 }
 
@@ -1201,9 +1261,9 @@ pub fn build_lookup_tables<R: InputRecord>(
 /// The masks of the queries: their DUST masks and, with `-lcase_masking`, their lower-case
 /// letters; with `-window_masker_db` the masks of WindowMasker, which replace both
 /// (`window_masker`). The error is that of the counts file or of the masker.
-pub fn query_masks<R: InputRecord>(
+pub(crate) fn query_masks<L: QueryLetters + ?Sized>(
     args: &BlastnArgs,
-    queries: &[R],
+    queries: &L,
     pool: &SearchPool<'_>,
 ) -> Result<Vec<Vec<MaskedInterval>>, crate::utils::winmask::WinMaskError> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:216-224
@@ -1217,10 +1277,10 @@ pub fn query_masks<R: InputRecord>(
     // After DUST, and `query.SetMaskedRegions(mqr)` (winmask_filter.cpp:311) replaces the
     // query's masks: DUST's and the lower case are not made.
     if let Some(window_masker) = &args.window_masker {
-        return window_masker.batch_masks(
-            queries.iter().map(|record| record.seq()),
-            QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
-        );
+        let minus = QueryStrand::from_option(&args.strand) == QueryStrand::Minus;
+        return (0..queries.count())
+            .map(|index| queries.read(index, |letters| window_masker.masks(letters, minus)))
+            .collect();
     }
     let mut query_masks = apply_dust_masking(args, queries, pool);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
@@ -1276,7 +1336,7 @@ pub fn query_masks<R: InputRecord>(
 /// search use the masked residues, which merging does not change. With `-window_masker_db`
 /// the chunk's `x_CalculateMasks` ends with WindowMasker on the part's letters, which
 /// replaces every mask the part had (`query_masks`).
-pub fn chunk_query_masks<R: InputRecord>(
+pub fn chunk_query_masks<R: InputRecord + Sync>(
     args: &BlastnArgs,
     parts: &[R],
     restricted: Vec<Vec<MaskedInterval>>,
@@ -1507,7 +1567,7 @@ mod tests {
         let masks = |strand: &str| {
             let args = blastn_args(&["-strand", strand]);
             crate::utils::threading::with_search_pool(1, "blastn", |pool| {
-                Ok(apply_dust_masking(&args, &records, pool))
+                Ok(apply_dust_masking(&args, &records[..], pool))
             })
             .unwrap()
             .remove(0)

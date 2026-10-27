@@ -73,6 +73,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
+use crate::algorithm::blastn::coordination::QueryLetters;
 use crate::algorithm::blastn::lookup::encode_reverse_complement_blastna_into;
 use crate::algorithm::blastn::pairwise::query_ungapped_karlin_blastna;
 use crate::algorithm::blastn::scoring::context_ungapped_blocks;
@@ -116,8 +117,8 @@ fn on_pool(pool: &SearchPool<'_>, count: usize) -> bool {
 }
 
 /// The serial buffer: today's `build_query_blastna_buffer`.
-fn serial_buffer(
-    query_letters: &[&[u8]],
+fn serial_buffer<L: QueryLetters + ?Sized>(
+    query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
 ) -> Vec<u8> {
@@ -149,23 +150,20 @@ fn place(offset: i32, length: usize, query_concat_length: usize) -> Option<std::
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn parallel_buffer<P: Fn() + Sync>(
-    query_letters: &[&[u8]],
+fn parallel_buffer<L: QueryLetters + ?Sized, P: Fn() + Sync>(
+    query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
     pool: &SearchPool<'_>,
     probe: &P,
 ) -> (Vec<u8>, bool) {
-    debug_assert_eq!(2 * query_letters.len(), context_offsets.len());
+    debug_assert_eq!(2 * query_letters.count(), context_offsets.len());
     // (first byte, end, query) of the span of each query with a placed context, in query order.
-    let mut spans: Vec<(usize, usize, usize)> = Vec::with_capacity(query_letters.len());
-    for (q, (letters, offsets)) in query_letters
-        .iter()
-        .zip(context_offsets.chunks_exact(2))
-        .enumerate()
-    {
-        let r0 = place(offsets[0], letters.len(), query_concat_length);
-        let r1 = place(offsets[1], letters.len(), query_concat_length);
+    let mut spans: Vec<(usize, usize, usize)> = Vec::with_capacity(query_letters.count());
+    for (q, offsets) in context_offsets.chunks_exact(2).enumerate() {
+        let length = query_letters.length(q);
+        let r0 = place(offsets[0], length, query_concat_length);
+        let r1 = place(offsets[1], length, query_concat_length);
         let (a, b) = match (&r0, &r1) {
             (Some(x), Some(y)) => (x.start.min(y.start), x.end.max(y.end)),
             (Some(x), None) | (None, Some(x)) => (x.start, x.end),
@@ -195,20 +193,24 @@ fn parallel_buffer<P: Fn() + Sync>(
     pool.install(|| {
         parts.par_iter_mut().for_each(|(part, a, q)| {
             probe();
-            let letters = query_letters[*q];
             let offsets = &context_offsets[2 * *q..2 * *q + 2];
             // The same two calls as `build_query_blastna_buffer` (run.rs), in its order, into the
             // same bytes (`range` is relative to the buffer, `a` is the buffer index of the part's
             // first byte). A copy: a change of the serial calls must be made here too.
-            if let Some(range) = place(offsets[0], letters.len(), query_concat_length) {
-                encode_iupac_to_blastna_into(letters, &mut part[range.start - *a..range.end - *a]);
-            }
-            if let Some(range) = place(offsets[1], letters.len(), query_concat_length) {
-                encode_reverse_complement_blastna_into(
-                    letters,
-                    &mut part[range.start - *a..range.end - *a],
-                );
-            }
+            query_letters.read(*q, |letters| {
+                if let Some(range) = place(offsets[0], letters.len(), query_concat_length) {
+                    encode_iupac_to_blastna_into(
+                        letters,
+                        &mut part[range.start - *a..range.end - *a],
+                    );
+                }
+                if let Some(range) = place(offsets[1], letters.len(), query_concat_length) {
+                    encode_reverse_complement_blastna_into(
+                        letters,
+                        &mut part[range.start - *a..range.end - *a],
+                    );
+                }
+            });
         });
     });
     (with_sentinels, true)
@@ -218,8 +220,8 @@ fn parallel_buffer<P: Fn() + Sync>(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 )))]
-fn parallel_buffer<P: Fn() + Sync>(
-    query_letters: &[&[u8]],
+fn parallel_buffer<L: QueryLetters + ?Sized, P: Fn() + Sync>(
+    query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
     _pool: &SearchPool<'_>,
@@ -293,8 +295,8 @@ fn same_bits(a: &Option<KarlinParams>, b: &Option<KarlinParams>) -> bool {
 
 /// The query buffer as the switch `on` makes it. Separate from the environment so that tests
 /// choose the switch.
-pub(super) fn buffer_with_mode(
-    query_letters: &[&[u8]],
+pub(super) fn buffer_with_mode<L: QueryLetters + ?Sized>(
+    query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
     pool: &SearchPool<'_>,
@@ -311,8 +313,8 @@ pub(super) fn buffer_with_mode(
 }
 
 /// `buffer_with_mode` with a `probe` that the parallel map calls once per query.
-fn buffer_with_probe<P: Fn() + Sync>(
-    query_letters: &[&[u8]],
+fn buffer_with_probe<L: QueryLetters + ?Sized, P: Fn() + Sync>(
+    query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
     pool: &SearchPool<'_>,
@@ -320,9 +322,9 @@ fn buffer_with_probe<P: Fn() + Sync>(
     probe: &P,
 ) -> Vec<u8> {
     if on {
-        crate::utils::xreach::x_reach!("LOSAT_X_QPREPPAR", on_pool(pool, query_letters.len()));
+        crate::utils::xreach::x_reach!("LOSAT_X_QPREPPAR", on_pool(pool, query_letters.count()));
     }
-    if !on || !on_pool(pool, query_letters.len()) {
+    if !on || !on_pool(pool, query_letters.count()) {
         return serial_buffer(query_letters, context_offsets, query_concat_length);
     }
     let (buffer, on_the_pool) = parallel_buffer(
@@ -370,8 +372,8 @@ fn blocks_with_probe<P: Fn() + Sync>(
 
 /// The BLASTNA buffer of a query batch with its sentinels, as `build_query_blastna_buffer` makes it:
 /// the environment's switch decides.
-pub(super) fn query_buffer(
-    query_letters: &[&[u8]],
+pub(super) fn query_buffer<L: QueryLetters + ?Sized>(
+    query_letters: &L,
     context_offsets: &[i32],
     query_concat_length: usize,
     pool: &SearchPool<'_>,
@@ -605,12 +607,12 @@ mod tests {
                         Some(gap) => compact_batch(&mut rng, count, gap),
                     };
                     let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
-                    let want = serial_buffer(&letters, &offsets, total);
-                    let got = buffer_with_mode(&letters, &offsets, total, pool, true);
+                    let want = serial_buffer(&letters[..], &offsets, total);
+                    let got = buffer_with_mode(&letters[..], &offsets, total, pool, true);
                     assert_eq!(got, want, "threads {threads} count {count} gap {gap:?}");
                     if gap.is_none() && count > 1 && pool.threads() > 1 {
                         let (got, on_the_pool) =
-                            parallel_buffer(&letters, &offsets, total, pool, &|| {});
+                            parallel_buffer(&letters[..], &offsets, total, pool, &|| {});
                         assert!(on_the_pool, "the production layout took the fallback");
                         assert_eq!(got, want);
                     }
@@ -642,12 +644,13 @@ mod tests {
                     // A minus context of one query overlapping the plus context of the next.
                     _ => offsets[9] = offsets[10] - 1,
                 }
-                let want = serial_buffer(&letters, &offsets, total);
-                let got = buffer_with_mode(&letters, &offsets, total, pool, true);
+                let want = serial_buffer(&letters[..], &offsets, total);
+                let got = buffer_with_mode(&letters[..], &offsets, total, pool, true);
                 assert_eq!(got, want, "mutation {mutate}");
                 // Out of order or overlapping spans are the fallback (the serial function
                 // made the buffer, nothing was encoded on the pool).
-                let (got, on_the_pool) = parallel_buffer(&letters, &offsets, total, pool, &|| {});
+                let (got, on_the_pool) =
+                    parallel_buffer(&letters[..], &offsets, total, pool, &|| {});
                 assert_eq!(got, want, "mutation {mutate}");
                 assert_eq!(on_the_pool, mutate < 2, "mutation {mutate}");
             }
@@ -664,7 +667,7 @@ mod tests {
         let mut rng = Rng(0xdead_beef_cafe_f00d);
         let (queries, offsets, total) = batch(&mut rng, 70);
         let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
-        let buffer = serial_buffer(&letters, &offsets, total);
+        let buffer = serial_buffer(&letters[..], &offsets, total);
         let contexts = contexts_of(&buffer[1..total + 1], &queries, &offsets);
         let mut compared = 0;
         for (reward, penalty) in [(1, -2), (2, -3), (1, -3), (4, -5)] {
@@ -732,7 +735,7 @@ mod tests {
         let mut rng = Rng(0x0bad_cafe_1234_5678);
         let (queries, offsets, total) = batch(&mut rng, 30);
         let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
-        let want_buffer = serial_buffer(&letters, &offsets, total);
+        let want_buffer = serial_buffer(&letters[..], &offsets, total);
         let contexts = contexts_of(&want_buffer[1..total + 1], &queries, &offsets);
         let spec = spec();
         let want_blocks = serial_blocks(&contexts, &spec);
@@ -774,7 +777,7 @@ mod tests {
             .count();
         with_search_pool(3, "blastn", |pool| {
             reset();
-            let got = buffer_with_probe(&letters, &offsets, total, pool, true, &probe);
+            let got = buffer_with_probe(&letters[..], &offsets, total, pool, true, &probe);
             assert_eq!(got, want_buffer);
             assert_eq!(calls.load(Ordering::SeqCst), placed);
             assert_eq!(in_pool_of_three.load(Ordering::SeqCst), placed);
@@ -800,7 +803,7 @@ mod tests {
             // Not acted on: switch off, one query, one context.
             reset();
             assert_eq!(
-                buffer_with_probe(&letters, &offsets, total, pool, false, &probe),
+                buffer_with_probe(&letters[..], &offsets, total, pool, false, &probe),
                 want_buffer
             );
             let got = blocks_with_probe(&contexts, &spec, pool, false, &probe);
@@ -816,7 +819,7 @@ mod tests {
         with_search_pool(1, "blastn", |pool| {
             reset();
             assert_eq!(
-                buffer_with_probe(&letters, &offsets, total, pool, true, &probe),
+                buffer_with_probe(&letters[..], &offsets, total, pool, true, &probe),
                 want_buffer
             );
             let got = blocks_with_probe(&contexts, &spec, pool, true, &probe);
@@ -879,12 +882,12 @@ mod tests {
                         }
                         let (offsets, total) = production_layout(&queries);
                         let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
-                        let want = serial_buffer(&letters, &offsets, total);
+                        let want = serial_buffer(&letters[..], &offsets, total);
                         let (got, on_the_pool) =
-                            parallel_buffer(&letters, &offsets, total, pool, &|| {});
+                            parallel_buffer(&letters[..], &offsets, total, pool, &|| {});
                         assert!(on_the_pool, "the production layout took the fallback");
                         assert_eq!(got, want, "threads {threads} count {count}");
-                        let got = buffer_with_mode(&letters, &offsets, total, pool, true);
+                        let got = buffer_with_mode(&letters[..], &offsets, total, pool, true);
                         assert_eq!(got, want, "threads {threads} count {count}");
                         let contexts = contexts_of(&want[1..total + 1], &queries, &offsets);
                         for (reward, penalty) in [(1, -2), (2, -3)] {
@@ -924,7 +927,7 @@ mod tests {
         let queries: Vec<Vec<u8>> = (0..64).map(|_| varied_sequence(&mut rng, 500)).collect();
         let (offsets, total) = production_layout(&queries);
         let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
-        let want = serial_buffer(&letters, &offsets, total);
+        let want = serial_buffer(&letters[..], &offsets, total);
         let contexts = contexts_of(&want[1..total + 1], &queries, &offsets);
         let spec = spec();
         with_search_pool(3, "blastn", |pool| {
@@ -940,7 +943,8 @@ mod tests {
                                 wrong.fetch_add(1, Ordering::SeqCst);
                             }
                         };
-                        let got = buffer_with_probe(&letters, &offsets, total, pool, true, &probe);
+                        let got =
+                            buffer_with_probe(&letters[..], &offsets, total, pool, true, &probe);
                         assert_eq!(got, want);
                         let got = blocks_with_probe(&contexts, &spec, pool, true, &probe);
                         assert_eq!(got.len(), contexts.len());
@@ -969,7 +973,7 @@ mod tests {
         let queries: Vec<Vec<u8>> = (0..200).map(|_| varied_sequence(&mut rng, 800)).collect();
         let (offsets, total) = production_layout(&queries);
         let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
-        let want = serial_buffer(&letters, &offsets, total);
+        let want = serial_buffer(&letters[..], &offsets, total);
         let contexts = contexts_of(&want[1..total + 1], &queries, &offsets);
         let spec = spec();
         let want_blocks = serial_blocks(&contexts, &spec);
@@ -983,7 +987,8 @@ mod tests {
                                 wrong.fetch_add(1, Ordering::SeqCst);
                             }
                         };
-                        let got = buffer_with_probe(&letters, &offsets, total, slot, true, &probe);
+                        let got =
+                            buffer_with_probe(&letters[..], &offsets, total, slot, true, &probe);
                         assert_eq!(got, want);
                         let got = blocks_with_probe(&contexts, &spec, slot, true, &probe);
                         assert!(got.iter().zip(&want_blocks).all(|(a, b)| same_bits(a, b)));
@@ -994,7 +999,7 @@ mod tests {
                 });
                 outer.install(|| {
                     (0..6).into_par_iter().for_each(|_| {
-                        let got = buffer_with_mode(&letters, &offsets, total, outer, true);
+                        let got = buffer_with_mode(&letters[..], &offsets, total, outer, true);
                         assert_eq!(got, want);
                         let got = blocks_with_mode(&contexts, &spec, outer, true);
                         assert!(got.iter().zip(&want_blocks).all(|(a, b)| same_bits(a, b)));

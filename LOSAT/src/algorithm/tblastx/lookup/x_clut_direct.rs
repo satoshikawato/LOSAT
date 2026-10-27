@@ -289,7 +289,19 @@ impl XFlatSpare {
     /// Keeps `table`'s `starts` and `hits` (in place of any vectors kept before); the rest of the
     /// table is dropped.
     pub(crate) fn give(&self, table: XFlatCompressedLookup) {
-        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = (table.starts, table.hits);
+        let old = std::mem::replace(
+            &mut *self.0.lock().unwrap_or_else(PoisonError::into_inner),
+            (table.starts, table.hits),
+        );
+        // PROBE (v4-BPF s8, LOSAT_BPF_S8STASH=1): the vectors held before are kept for later builds.
+        if x_clut_par::x_s8_stash() && (old.0.capacity() > 0 || old.1.capacity() > 0) {
+            let mut stash = x_clut_par::X_S8_TABLES
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if stash.len() < 4 {
+                stash.push(old);
+            }
+        }
     }
 
     // No NCBI counterpart: buffer reuse, and the thread that allocates the table's vectors

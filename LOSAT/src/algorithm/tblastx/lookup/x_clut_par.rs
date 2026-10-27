@@ -240,11 +240,27 @@ enum XPasses<'a> {
     OneLatch(Option<&'a dyn XExtraTasks>),
 }
 
+/// PROBE (v4-BPF s8, LOSAT_BPF_S8STASH=1): table vectors given while the spare held some, and the
+/// chunks' `packed` vectors of finished builds, kept for later builds instead of being freed.
+pub(crate) static X_S8_TABLES: Mutex<Vec<(Vec<u32>, Vec<i32>)>> = Mutex::new(Vec::new());
+static X_S8_CHUNKS: Mutex<Vec<Vec<u32>>> = Mutex::new(Vec::new());
+
+pub(crate) fn x_s8_stash() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::algorithm::blastp::x_query_slots::x_s8_env("LOSAT_BPF_S8STASH") == Some(1))
+}
+
 impl XFlatSpare {
     // No NCBI counterpart: buffer reuse only (`XFlatSpare`).
     /// The vectors kept (empty ones when none are); the spare then keeps none.
     fn take(&self) -> (Vec<u32>, Vec<i32>) {
-        std::mem::take(&mut *self.0.lock().unwrap_or_else(PoisonError::into_inner))
+        let kept = std::mem::take(&mut *self.0.lock().unwrap_or_else(PoisonError::into_inner));
+        if x_s8_stash() && kept.0.capacity() == 0 && kept.1.capacity() == 0 {
+            if let Some(stashed) = X_S8_TABLES.lock().unwrap_or_else(PoisonError::into_inner).pop() {
+                return stashed;
+            }
+        }
+        kept
     }
 
     // No NCBI counterpart: which thread allocates the table's vectors (LOSAT_X_BPLKPAHEAD); it
@@ -509,7 +525,18 @@ fn x_chunk_appends(
         stripe_starts[j + 1] += stripe_starts[j];
     }
     let mut cursors = stripe_starts[..stripes].to_vec();
-    let mut packed = vec![0u32; targets.len()];
+    let mut packed = if x_s8_stash() {
+        let mut stashed = X_S8_CHUNKS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pop()
+            .unwrap_or_default();
+        stashed.clear();
+        stashed.resize(targets.len(), 0);
+        stashed
+    } else {
+        vec![0u32; targets.len()]
+    };
     let mask = (1u32 << shift) - 1;
     let mut at = 0usize;
     for &(query_offset, appends) in per_offset.iter() {
@@ -887,7 +914,16 @@ fn x_try_build_flat_parallel_with(
             )
         }
     };
-    drop(appends);
+    if x_s8_stash() {
+        let mut stash = X_S8_CHUNKS.lock().unwrap_or_else(PoisonError::into_inner);
+        for chunk in appends {
+            if stash.len() < 4096 {
+                stash.push(chunk.packed);
+            }
+        }
+    } else {
+        drop(appends);
+    }
 
     // NCBI's tables (`x_try_build_flat_with_capacity`'s test, at each table's end).
     for (range_index, (range, is_table)) in ranges.iter().enumerate() {

@@ -2,15 +2,14 @@
 
 ## Supported Versions
 
-LOSAT has not published a stable release yet. Until v0.1.0 is released, security
-fixes are handled on the active development branch and in the v0.1.0 release
-candidate branch when one exists.
+LOSAT v0.1.0 was published on 2026-09-17. Security fixes go to the newest minor
+release line, as a new patch release, and to the `dev` branch.
 
 | Version | Supported |
 | --- | --- |
-| `v0.1.0` release candidates | Yes |
-| Unreleased development snapshots | Best effort |
-| Older snapshots | No |
+| Latest patch release of the newest minor line (`v0.2.x` once v0.2.0 is published; `v0.1.0` until then) | Yes |
+| `dev` branch (unreleased) | Best effort |
+| Older releases and snapshots | No |
 
 ## Reporting A Vulnerability
 

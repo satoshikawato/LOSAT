@@ -225,7 +225,9 @@ LOSAT_X_NEWTONEXACT_PROF
 - `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.
 - `LOSAT_WASI_PRESPAWN=auto|N` (Node threaded runner; `auto` when unset since
   2026-10-18, `0` boots none) boot N thread workers (`auto`: `-num_threads` - 1)
-  before `_start`; same output, extra `standby_*` debug events. See
+  before `_start`; with `auto`, a spawn that finds none left boots the next
+  `-num_threads` workers together (`standby_refill` event); same output, extra
+  `standby_*` debug events. See
   `LOSAT/tests/README.md`, "Threading contract gates".
 - `LOSAT_WASI_RECYCLE=0|1` (Node threaded runner, reactors; `1` when unset since
   2026-10-18) keep the thread workers between calls; a returned thread's worker

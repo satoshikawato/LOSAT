@@ -2,7 +2,9 @@
 //! the subject loop of a query chunk as a flow of tasks of `k` consecutive subjects
 //! (`search::X_BX_CHUNK` = 64, the waves' subjects per worker, when the variable is `1` or not a
 //! number from 2 to 65,536), searched ahead by the other threads of the pool and handed to the sink
-//! in subject order by the thread that runs the loop. Shadow: `LOSAT_X_BXSUBJFLOWSHADOW`.
+//! in subject order by the thread that runs the loop. Shadow: `LOSAT_X_BXSUBJFLOWSHADOW`. With
+//! `LOSAT_X_BXTASKRES` (in the strict set: on unless `=0`) a task also ends before the subject that
+//! would take its residues past `k` times the mean subject length (`XTasks`).
 //!
 //! The waves of `search::search_core` search `threads x X_BX_CHUNK` (= 64) subjects, wait for
 //! the slowest worker of the wave, then hand the wave's subjects to the sink on one thread while
@@ -66,13 +68,16 @@ fn task_residues() -> bool {
 
 /// No NCBI counterpart: the subjects of each task of a flow (scheduling only). `Grid`: task `t` is
 /// the subjects `t * k..(t + 1) * k`. `Cut` (`LOSAT_X_BXTASKRES`): the first subject of each task,
-/// then the number of subjects; a task ends after `k` subjects or before the subject that would take
-/// its residues past `k` times the mean subject length, so a run of long subjects (the isoforms of
-/// one long protein, stored next to each other) is spread over several tasks instead of making one
-/// task many times the others, which the ordered flow then waits for at its end.
+/// then the number of subjects; a task ends after `k` subjects or before the subject that would
+/// take its residues past `k` times the mean subject length, so a run of long subjects (the
+/// isoforms of one long protein, stored next to each other) is spread over several tasks instead
+/// of making one task many times the others, which the ordered flow then waits for at its end.
+/// With `-db` read in blocks the bounds for each `k` are made once per run and shared
+/// (`XStreamDb::x_task_starts`): a database of tens of millions of sequences would otherwise read
+/// its index and hold a copy of the bounds for every query batch.
 pub(super) enum XTasks {
     Grid { k: usize, subjects: usize },
-    Cut(Vec<u32>),
+    Cut(std::sync::Arc<[u32]>),
 }
 
 impl XTasks {
@@ -82,21 +87,42 @@ impl XTasks {
     pub(super) fn new(k: usize, subjects: Subjects<'_>) -> Self {
         let n = subjects.len();
         let grid = XTasks::Grid { k, subjects: n };
-        if !task_residues() || n == 0 || u32::try_from(n).is_err() {
+        if !task_residues() {
             return grid;
+        }
+        let tasks = Self::cut(k, subjects);
+        crate::utils::xreach::x_reach!("LOSAT_X_BXTASKRES", tasks.is_some());
+        tasks.unwrap_or(grid)
+    }
+
+    /// `Cut`, or `None` where `new` keeps the grid.
+    fn cut(k: usize, subjects: Subjects<'_>) -> Option<Self> {
+        match subjects {
+            Subjects::Stream(stream) => stream.db.x_task_starts(k, || Self::starts(k, subjects)),
+            _ => Self::starts(k, subjects),
+        }
+        .map(XTasks::Cut)
+    }
+
+    /// `Cut`'s bounds for tasks of `k` subjects of `subjects`, or `None` where `new` keeps the grid.
+    fn starts(k: usize, subjects: Subjects<'_>) -> Option<std::sync::Arc<[u32]>> {
+        let n = subjects.len();
+        if n == 0 || u32::try_from(n).is_err() {
+            return None;
         }
         let total = match subjects.total_length() {
             Ok(total) if total > 0 => total as u128,
-            _ => return grid,
+            _ => return None,
         };
         // `k` times the mean length, rounded up.
         let budget = (k as u128 * total).div_ceil(n as u128) as u64;
         let mut starts = vec![0u32];
         let (mut count, mut residues, mut oid) = (0usize, 0u64, 0usize);
         while oid < n {
-            let Ok(lengths) = subjects.x_lengths_from(oid) else {
-                return grid;
-            };
+            let lengths = subjects.x_lengths_from(oid).ok()?;
+            if lengths.is_empty() {
+                return None;
+            }
             for length in lengths {
                 let length = u64::from(length);
                 if count == k || (count > 0 && residues + length > budget) {
@@ -109,7 +135,7 @@ impl XTasks {
             }
         }
         starts.push(n as u32);
-        XTasks::Cut(starts)
+        Some(starts.into())
     }
 
     /// The number of tasks.
@@ -233,7 +259,64 @@ pub(super) fn offsets_stay_below_2_30(window_size: i32, longest: usize) -> bool 
 
 #[cfg(test)]
 mod tests {
-    use super::offsets_stay_below_2_30;
+    use super::{offsets_stay_below_2_30, XTasks};
+    use crate::algorithm::blastx::{input::FastaRecord, subjects::Subjects};
+
+    fn records(lengths: &[usize]) -> Vec<FastaRecord> {
+        lengths
+            .iter()
+            .enumerate()
+            .map(|(i, &length)| FastaRecord {
+                internal_id: format!("s{i}"),
+                title: String::new(),
+                sequence: vec![b'A'; length],
+                lowercase_masks: Vec::new(),
+                warnings: Vec::new(),
+                source: None,
+            })
+            .collect()
+    }
+
+    // The cut covers the subjects in order, no task holds more than `k` subjects, and a task of
+    // two or more subjects holds at most `k` times the mean length; equal lengths keep the grid.
+    #[test]
+    fn the_tasks_cut_by_residues_cover_the_subjects_in_order() {
+        let mut lengths = vec![300; 1_000];
+        for length in &mut lengths[400..420] {
+            *length = 20_000;
+        }
+        lengths[999] = 7;
+        for k in [1, 2, 7, 64, 2_000] {
+            let set = records(&lengths);
+            let tasks = XTasks::cut(k, Subjects::Fasta(&set)).unwrap();
+            let budget = (k * lengths.iter().sum::<usize>()).div_ceil(lengths.len());
+            let mut next = 0;
+            for task in 0..tasks.count() {
+                let range = tasks.range(task);
+                assert_eq!(range.start, next, "k {k} task {task}");
+                assert!(!range.is_empty() && range.len() <= k, "k {k} task {task}");
+                let residues: usize = lengths[range.clone()].iter().sum();
+                assert!(range.len() == 1 || residues <= budget, "k {k} task {task}");
+                next = range.end;
+            }
+            assert_eq!(next, lengths.len(), "k {k}");
+            if k == 64 {
+                // The twenty long subjects (subjects 400-419 of the grid's task 384..448): two per
+                // task under the budget of 64 x the mean length (693.707), 26 tasks for the grid's
+                // 16.
+                assert_eq!(budget, 44_398);
+                assert_eq!(tasks.count(), 26);
+                assert_eq!(tasks.range(6), 384..401);
+                assert_eq!(tasks.range(7), 401..403);
+                assert_eq!(tasks.range(16), 419..483);
+            }
+        }
+        let set = records(&[300; 1_000]);
+        let tasks = XTasks::cut(64, Subjects::Fasta(&set)).unwrap();
+        assert_eq!(tasks.count(), 16);
+        assert_eq!(tasks.range(15), 960..1_000);
+        assert!(XTasks::cut(64, Subjects::Fasta(&[])).is_none());
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
     // ```c++
@@ -682,7 +765,7 @@ impl XCrossScratch {
 /// EXPERIMENT (LOSAT_X_BXCHUNKCROSS, in the strict set): the chunk loop of a split query whose chunks
 /// `search::search_core` searches one after another, each with the subject flow
 /// (`LOSAT_X_BXCHUNKFLOW`), as one flow of tasks across the chunks. Task `c * tasks + t` is task `t`
-/// (`k` subjects) of chunk `c`; the helpers search up to a window ahead of this thread across a
+/// (at most `k` subjects, `XTasks`) of chunk `c`; the helpers search up to a window ahead of this thread across a
 /// chunk's end, so they do not wait while this thread hands the last tasks of a chunk to the sink
 /// and the next chunk is set up; the tasks offered are those of this thread's chunk and the next.
 /// A chunk's setup (`make(c, parts)`: `search_core`'s statements before the chunk's subject loop, a

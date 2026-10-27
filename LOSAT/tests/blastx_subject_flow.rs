@@ -10,8 +10,10 @@
 //! default, and 2, 7 and 16), outfmt 0, 6 and 7, a database (`-db`) and a
 //! FASTA subject set (`-subject`), and an ungapped search (whose subjects carry link cutoffs).
 //! The shadow (`LOSAT_X_BXSUBJFLOWSHADOW`) searches every task again on another table and must
-//! find the same subjects. `LOSAT_TIMING` shows that the flow ran (and the waves did not). The
-//! fallback to the waves where a diagonal offset could pass 2^30 (`-window_size` near 2^28, a
+//! find the same subjects. The tasks are cut by residues as well (`LOSAT_X_BXTASKRES`, in the
+//! strict set): a task ends after `k` subjects or before the subject that would take it past `k`
+//! times the mean subject length; with `=0` they are the grid of `k` subjects. `LOSAT_TIMING`
+//! shows that the flow ran (and the waves did not). The fallback to the waves where a diagonal offset could pass 2^30 (`-window_size` near 2^28, a
 //! diagonal table of 1 GiB or more) is a unit test of the module. That the bytes equal NCBI's
 //! is the business of the BLASTX fixtures and the campaign's comparison runs.
 //!
@@ -164,11 +166,12 @@ fn the_report_does_not_depend_on_the_subject_flow() {
                 "{args:?}: too few hits to test"
             );
             for threads in [2, 3, 4] {
-                for k in ["1", "2", "7", "16"] {
-                    let (report, _) = blastx(&query, &args, threads, &[("LOSAT_X_BXSUBJFLOW", k)]);
+                for (k, cut) in [("1", "1"), ("2", "1"), ("7", "1"), ("16", "1"), ("16", "0")] {
+                    let env = [("LOSAT_X_BXSUBJFLOW", k), ("LOSAT_X_BXTASKRES", cut)];
+                    let (report, _) = blastx(&query, &args, threads, &env);
                     assert!(
                         report == reference,
-                        "{args:?} threads {threads} LOSAT_X_BXSUBJFLOW={k}: report differs"
+                        "{args:?} threads {threads} {env:?}: report differs"
                     );
                 }
             }
@@ -199,7 +202,8 @@ fn an_ungapped_search_and_the_shadow_give_the_same_report() {
             ],
         );
         assert!(report == reference, "{extra:?}: report differs");
-        let tasks = 1_711_u64.div_ceil(2);
+        // Tasks of at most 2 subjects and twice the mean length (LOSAT_X_BXTASKRES).
+        let tasks = 1_143;
         assert!(
             stderr.contains(&format!(
                 "[X_SHADOW] BXSUBJFLOW tasks_compared={tasks} (subject results identical)"
@@ -223,12 +227,29 @@ fn the_flow_takes_the_subject_loop() {
     let (reference, stderr) = blastx(&query, &args, 2, &off);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 0);
     assert!(timing(&stderr, "blastx_subject_waves", "waves") > 0);
-    // The default: the 1,711 subjects as 27 tasks of 64, and no wave.
-    let (report, stderr) = blastx(&query, &args, 2, &[("LOSAT_TIMING", "1")]);
+    // The default: the 1,711 subjects as 29 tasks of at most 64 subjects and 64 times the mean
+    // length (LOSAT_X_BXTASKRES), and no wave; the grid of 64 with that switch off: 27 tasks.
+    let reach = dir.join("reach-taskres");
+    let reach_text = reach.to_str().unwrap().to_string();
+    let (report, stderr) = blastx(
+        &query,
+        &args,
+        2,
+        &[("LOSAT_TIMING", "1"), ("LOSAT_X_REACH", reach_text.as_str())],
+    );
     assert!(report == reference);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 1);
-    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 27);
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 29);
     assert_eq!(timing(&stderr, "blastx_subject_waves", "waves"), 0);
+    assert!(own_side_reached(&reach, "LOSAT_X_BXTASKRES"));
+    let (report, stderr) = blastx(
+        &query,
+        &args,
+        2,
+        &[("LOSAT_TIMING", "1"), ("LOSAT_X_BXTASKRES", "0")],
+    );
+    assert!(report == reference);
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 27);
     // A `-subject` file takes the same loop.
     let (subject_report, stderr) = blastx(
         &query,
@@ -244,10 +265,10 @@ fn the_flow_takes_the_subject_loop() {
     );
     assert!(subject_report == subject_reference);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 1);
-    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 27);
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 29);
     assert_eq!(timing(&stderr, "blastx_subject_waves", "waves"), 0);
-    // The helpers search: with 856 tasks of 2 subjects at 4 threads the loop takes tasks that
-    // were searched ahead (only a helper, or the loop's thread while it waits for a helper's task,
+    // The helpers search: with 1,143 tasks of at most 2 subjects at 4 threads the loop takes tasks
+    // that were searched ahead (only a helper, or the loop's thread while it waits for a helper's task,
     // searches ahead), so the helper tables are the ones under test above.
     let (report, stderr) = blastx(
         &query,
@@ -256,7 +277,7 @@ fn the_flow_takes_the_subject_loop() {
         &[("LOSAT_X_BXSUBJFLOW", "2"), ("LOSAT_TIMING", "1")],
     );
     assert!(report == reference);
-    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 856);
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 1_143);
     assert!(timing(&stderr, "blastx_subject_flow", "ahead") > 0);
     assert!(timing(&stderr, "blastx_subject_flow", "taken") > 0);
     // One thread: no pool, so the subject loop of the waves runs (on this thread).
@@ -274,8 +295,8 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
     ));
     std::fs::create_dir_all(&dir).unwrap();
     // 30,000 letters: three query chunks (blastx/split.rs), each against 3,422 subjects (the 1,711
-    // proteins twice), 54 tasks of 64. LOSAT_X_BXCHUNKFLOW needs at least 2,048 subjects and 256
-    // per thread: up to 8 threads the chunks run one after another, each with the flow; at 16
+    // proteins twice), 57 tasks of at most 64 (LOSAT_X_BXTASKRES; the grid's 54 with it off).
+    // LOSAT_X_BXCHUNKFLOW needs at least 2,048 subjects and 256 per thread: up to 8 threads the chunks run one after another, each with the flow; at 16
     // they run side by side.
     let (query, set, db) = inputs_of(&dir, 30_000, 2);
     let args = ["-db", db.as_str(), "-outfmt", "6"];
@@ -299,6 +320,7 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
         (2, &[("LOSAT_X_BXDIAGKEEP", "0")][..], 1),
         (4, &[("LOSAT_X_BXUNITCAP", "2")][..], 1),
         (16, &[][..], 0),
+        (2, &[("LOSAT_X_BXTASKRES", "0")][..], 1),
         (2, &[("LOSAT_X_BXCHUNKFLOW", "0")][..], 0),
         (2, &[("LOSAT_X_BXSUBJFLOW", "0")][..], 0),
     ] {
@@ -315,7 +337,9 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
             "threads {threads} {env:?}"
         );
         if loops > 0 {
-            assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 162);
+            let grid = env.contains(&("LOSAT_X_BXTASKRES", "0"));
+            let tasks = if grid { 162 } else { 171 };
+            assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), tasks);
         }
     }
     // The capped row runs inside the capped batch flow: the cap acted (`LOSAT_X_REACH`), which it
@@ -336,14 +360,14 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
         let (report, stderr) = blastx(&query, &args, 3, &env);
         assert!(report == reference);
         assert!(
-            stderr.contains("[X_SHADOW] BXSUBJFLOW tasks_compared=162 (subject results identical)"),
+            stderr.contains("[X_SHADOW] BXSUBJFLOW tasks_compared=171 (subject results identical)"),
             "{stderr}"
         );
     }
     // Chunks without a valid context (all N): the loop gives them `chunk_start` only, in the flow
     // across chunks as in the serial loop. 10,000 letters, 25,000 N, 10,000 letters: four chunks
-    // (blastx/split.rs), the third all N. The flow across chunks counts the tasks of all four (216,
-    // the third chunk's skipped); the loop per chunk searches the other three (162).
+    // (blastx/split.rs), the third all N. The flow across chunks counts the tasks of all four (228,
+    // the third chunk's skipped); the loop per chunk searches the other three (171).
     let letters: String = std::fs::read_to_string(&query)
         .unwrap()
         .lines()
@@ -362,9 +386,9 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
     .unwrap();
     let (reference, _) = blastx(&gapped, &args, 1, &[]);
     for (threads, env, loops, tasks) in [
-        (2, &[][..], 1, 216),
-        (8, &[][..], 1, 216),
-        (2, &[("LOSAT_X_BXCHUNKCROSS", "0")][..], 3, 162),
+        (2, &[][..], 1, 228),
+        (8, &[][..], 1, 228),
+        (2, &[("LOSAT_X_BXCHUNKCROSS", "0")][..], 3, 171),
     ] {
         let mut env = env.to_vec();
         env.push(("LOSAT_TIMING", "1"));

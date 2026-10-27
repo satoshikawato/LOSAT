@@ -12,9 +12,9 @@
 //! context. Nothing a head does reads or changes another context's HSPs, so each context's HSPs
 //! linked on their own, in that order restricted to the context, give the same chains, numbers and
 //! e-values; the values go back to the order of the list before the final sort by score. A subject
-//! whose units ran on the pool (one longer than a chunk's budget) links its contexts there side by
-//! side, the ones with the most HSPs first; any other subject links them one after another on its
-//! thread. A list of one context is linked as before.
+//! whose units ran on the pool (the single subject of a search, or one longer than a chunk's
+//! budget) links its contexts there side by side, the ones with the most HSPs first; any other
+//! subject links them one after another on its thread. A list of one context is linked as before.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -56,6 +56,9 @@ pub(super) fn x_link_by_context(
     input: &[(usize, GappedHsp)],
     link_values: impl Fn(&[(usize, GappedHsp)]) -> Vec<LinkedHsp> + Sync,
 ) -> Vec<LinkedHsp> {
+    if input.windows(2).all(|pair| pair[0].0 == pair[1].0) {
+        return link_values(input);
+    }
     let contexts = input
         .iter()
         .map(|&(context, _)| context + 1)
@@ -66,9 +69,6 @@ pub(super) fn x_link_by_context(
         groups[context].push(index);
     }
     groups.retain(|group| !group.is_empty());
-    if groups.len() <= 1 {
-        return link_values(input);
-    }
     let link_group = |group: &Vec<usize>| {
         let part: Vec<(usize, GappedHsp)> = group.iter().map(|&index| input[index]).collect();
         let mut values = link_values(&part);
@@ -200,7 +200,9 @@ mod tests {
     // No NCBI counterpart (LOSAT_X_TBNLINKCTX): each context linked on its own, on one thread
     // or on a pool of 4, gives the list of the one pass over every context (`=0`): order,
     // context, HSP, number, e-value bits, input position and best e-value; on lists of 1 to
-    // 3,000 HSPs over 1 to 35 contexts, with sets of two or more in most lists.
+    // 3,000 HSPs over 1 to 35 contexts, with sets of two or more in most lists, and on lists whose
+    // HSPs are each in the first and the last context (a query given twice), where the final
+    // sort meets ties in every field it reads and keeps the order of the list.
     #[test]
     fn contexts_linked_apart_give_the_list_of_one_pass() {
         let link = LocalLinkParameters {
@@ -252,6 +254,20 @@ mod tests {
                     let serial = x_link_list(x_link_by_context(None, &input, link_values));
                     assert_same(&serial, &expected, &format!("{label}, one thread"));
                     let pooled = x_link_list(x_link_by_context(Some(pool), &input, link_values));
+                    assert_same(&pooled, &expected, &format!("{label}, pool of 4"));
+                    if contexts == 1 {
+                        continue;
+                    }
+                    let twice: Vec<(usize, GappedHsp)> =
+                        hsps(&mut random, count, 1, subject_aa, &link)
+                            .into_iter()
+                            .flat_map(|(_, hsp)| [(contexts - 1, hsp), (0, hsp)])
+                            .collect();
+                    let expected = x_link_list(link_values(&twice));
+                    let label = format!("{label}, each HSP in contexts 0 and {}", contexts - 1);
+                    let serial = x_link_list(x_link_by_context(None, &twice, link_values));
+                    assert_same(&serial, &expected, &format!("{label}, one thread"));
+                    let pooled = x_link_list(x_link_by_context(Some(pool), &twice, link_values));
                     assert_same(&pooled, &expected, &format!("{label}, pool of 4"));
                 }
             }

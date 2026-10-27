@@ -5150,8 +5150,8 @@ Scheduling (each value computed by one thread with the original function; order 
   0.98.
 - `LOSAT_X_TBNLINKCTX=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-27;
   `=0` turns it off; `tblastn/stage_d_linking/x_link_ctx.rs` `x_link_by_context`): a subject's HSPs are linked one
-  query context at a time, and a subject whose units ran on the pool (one longer than a chunk's budget) links its
-  contexts there side by side, those with the most HSPs first. Before, the whole list was linked in one pass on the
+  query context at a time, and a subject whose units ran on the pool (the single subject of a search, or one longer
+  than a chunk's budget) links its contexts there side by side, those with the most HSPs first. Before, the whole list was linked in one pass on the
   thread that merged the subject's units: with many queries the long subjects ended in a serial link while the
   other threads waited (the B11e / B10-E probes, 35 human proteins x the human genome `-db`: chr1 936 k HSPs over
   35 contexts, link 1.38-1.47 s, of it 1.03 s the head loop, 0.23 s sorts; the six longest chromosomes ended the

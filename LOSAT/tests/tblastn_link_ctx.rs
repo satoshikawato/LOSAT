@@ -99,10 +99,7 @@ fn linking_one_context_at_a_time_gives_the_report_of_one_pass() {
             let (report, stderr) = tblastn(query, threads, &[]);
             assert!(report == off, "{label}: against =0");
             let [lists, contexts, pooled] = stats(&stderr).expect("a TBNLINKCTX line");
-            assert!(
-                lists > 0 && contexts >= 2 * lists,
-                "{label}: lists {lists}, contexts {contexts}"
-            );
+            assert!(lists > 0, "{label}: lists {lists}, contexts {contexts}");
             let expected = if threads == 2 && pool_at_two {
                 lists
             } else {

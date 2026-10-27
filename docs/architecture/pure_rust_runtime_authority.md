@@ -16,6 +16,20 @@ without changing BLAST behavior. Line numbers below describe `BASE_SHA`; the
 checker identity is the exact rule/path/symbol tuple and therefore does not
 depend on line numbers.
 
+## Pinned source
+
+The NCBI source quoted throughout the repository (`AGENTS.md`, source comments, and these
+documents) is commit `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4` of
+`https://github.com/satoshikawato/ncbi-blast` (commit subject `ncbi-blast-2.17.0+-src`,
+2025-12-21). That commit is an import of NCBI's official BLAST+ 2.17.0 source tarball
+`ncbi-blast-2.17.0+-src.tar.gz`
+(`https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/2.17.0/ncbi-blast-2.17.0+-src.tar.gz`),
+so quoted paths such as `c++/src/algo/blast/core/...` use the tarball's layout. It is not a
+commit of NCBI's `ncbi-cxx-toolkit-public` repository, whose `master` differs from the 2.17.0
+tarball (in line numbers and other later changes), so a commit hash from that repository does
+not locate these quotes. The `satoshikawato/ncbi-blast` mirror is private; quoted line numbers
+are reproducible from the 2.17.0 source tarball.
+
 ## Audited surfaces
 
 The live audit covered:

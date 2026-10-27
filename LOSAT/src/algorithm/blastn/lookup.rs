@@ -891,6 +891,15 @@ pub struct DiscTemplates {
     x_csr: Option<x_dc_csr::Csr>,
 }
 
+// EXPERIMENT (LOSAT_X_BNSHRINKFREE): the second template's chains are shrunk before they are freed
+// (`x_shrink_free`).
+impl Drop for DiscTemplates {
+    fn drop(&mut self) {
+        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.hashtable2));
+        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.next_pos2));
+    }
+}
+
 impl DiscTemplates {
     /// EXPERIMENT (LOSAT_X_DCCSR): the CSR of the first template's chains, which the scans read
     /// instead of the chains when there is one (`x_dc_csr.rs`).
@@ -939,6 +948,8 @@ struct MbLookupTable {
 // ```
 // EXPERIMENT (LOSAT_X_MBLUTKEEP): the hashtable goes back to the batch loop's keep instead (with
 // LOSAT_X_MB24 the words of the 3-byte heads).
+// EXPERIMENT (LOSAT_X_BNSHRINKFREE): the vectors that are freed are shrunk first, so that glibc's
+// mmap threshold stays put (`x_shrink_free`).
 impl Drop for MbLookupTable {
     fn drop(&mut self) {
         if let Some((keep, dirty)) = self.x_keep.take() {
@@ -948,6 +959,12 @@ impl Drop for MbLookupTable {
             };
             keep.give_back(table, dirty);
         }
+        if let Some(narrow) = self.x_narrow.as_mut() {
+            narrow.x_shrink_free();
+        }
+        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.hashtable));
+        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.next_pos));
+        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.pv_array));
     }
 }
 

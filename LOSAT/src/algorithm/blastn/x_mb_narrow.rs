@@ -166,6 +166,13 @@ impl Narrow {
         std::mem::take(&mut self.heads)
     }
 
+    /// EXPERIMENT (LOSAT_X_BNSHRINKFREE): the heads (unless the keep took them) and the chain,
+    /// shrunk before they are freed (`MbLookupTable`'s `Drop`, `x_shrink_free`).
+    pub(super) fn x_shrink_free(&mut self) {
+        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.heads));
+        crate::algorithm::blastn::x_shrink_free::free(std::mem::take(&mut self.chain));
+    }
+
     /// `for_each_hit` (blast_nascan.c:1406-1418 above): the chain of `cell`, newest first.
     #[inline(always)]
     pub(super) fn each(&self, cell: usize, mut callback: impl FnMut(u32)) {

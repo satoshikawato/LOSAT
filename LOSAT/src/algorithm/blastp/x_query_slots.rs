@@ -30,7 +30,12 @@
 //!   document, `x_query_blocks.rs`), several outputs, the hit records and an observer (the observer's
 //!   indices count the HSPs of the blocks before). Those take the block loop;
 //! - the buffers of the blocks are written one after the other in block order, the messages of a block
-//!   before its report as the block loop writes them, so the bytes on each stream are the block loop's.
+//!   before its report, and the report's output flushed after each block as the block loop flushes it
+//!   at the end of each block's report (a file is created at block 0's flush, and a failed write fails at
+//!   the block where the block loop fails), so the bytes on each stream are the block loop's. Where the
+//!   report and the messages go to one stream (`2>&1`) and a block's report passes the output's 8 KiB
+//!   buffer, the block loop's writes inside the block can come between that block's messages; here all of
+//!   a block's messages come before its report.
 //!
 //! Errors: the first block in block order whose search fails ends the search. No block after it is
 //! started once the failure is known; the blocks before it are written, then the failed block's
@@ -38,23 +43,34 @@
 //! returns it after the same bytes. A failed write to an output ends the search at that block. The
 //! release profile has `panic = "abort"`: a panic in a block's search ends the process, where the
 //! blocks written so far may be fewer than in the block loop (blocks after it may have been searched,
-//! blocks before it not yet written).
+//! blocks before it not yet written). Where panics unwind (tests, debug builds) a panicking driver stops
+//! the other (`XPanicStop`), and the scope resumes the panic.
 //!
-//! Memory: each block in flight holds its lookup table while its preliminary stage runs (the table is
-//! dropped before the redo, `LOSAT_X_BPLKDROP`) and its hit lists until its report is written. The
-//! block loop holds one block and, with `LOSAT_X_BPLKPAHEAD`, the next block's table built ahead: two
-//! blocks' tables, `2 x LOSAT_X_BPQBLOCK` letters. The blocks of `k` drivers hold `2 x LOSAT_X_BPQBLOCK
-//! / (k + 1)` letters each (`x_slot_letters`), so the `k` tables in flight and the build of one more
-//! hold the letters of the block loop's two (the build's transient vectors are as large as a table:
-//! 78 appends of 4 bytes per query letter recorded beside the 4-byte hits, line BPF s7). No block is
-//! built ahead. A driver takes a block only while fewer than `4 k` blocks are searched or wait to be
-//! written, so that the buffers of the finished blocks behind a slow one stay bounded.
+//! Waiting: a driver waits (a `Condvar`) only between blocks, before it takes one, never inside a block's
+//! search. Both drivers are spawned before any block's work, and a rayon worker takes the oldest job of
+//! another's deque first, so each driver runs at the bottom of an idle worker's stack, not inside another
+//! block's join; nothing on the blastp-fast path waits for every worker (no `broadcast`, no barrier).
+//! Spawning a driver later, or inside a block's scope, would break this.
 //!
-//! Where it acts: the block search of blastp-fast (`CompressedAaLookupTable`) on a pool of more than one
-//! thread, with one output that is not outfmt 11 or 13 to 16, no hit records and no observer, in
-//! builds with threads (native, or wasm32 with `wasm-threads`). Exact blastp keeps the block loop (its
-//! in-place builds share neighbour lists that only one build uses at a time, `x_lookup_ahead.rs`).
-//! `LOSAT_TIMING`'s lines of the blocks in flight come interleaved (each block prints its own).
+//! Memory: each block in flight holds its lookup table and its hit lists until its report is written,
+//! and then gives the table's vectors to the block search's spare (`LOSAT_X_BPLKPFLAT`), which a later
+//! block's build takes (`XAheadBlock::none`: a later block may take it, so `LOSAT_X_BPLKDROP` keeps it
+//! through the redo). The block loop holds one block and, with `LOSAT_X_BPLKPAHEAD`, the next block's
+//! table built ahead: two blocks' tables, `2 x LOSAT_X_BPQBLOCK` letters. The blocks of `k` drivers hold
+//! `2 x LOSAT_X_BPQBLOCK / (k + 1)` letters each (`x_slot_letters`), so the `k` tables in flight and the
+//! build of one more hold the letters of the block loop's two (the build's transient vectors are as
+//! large as a table: 78 appends of 4 bytes per query letter recorded beside the 4-byte hits, line BPF
+//! s7). No block is built ahead. A driver takes a block only while fewer than `2 k` blocks are searched
+//! or wait to be written: at most `k` finished reports wait behind a slow block (the block loop holds
+//! none past its flush, but holds that block's hit lists, of which a report is made).
+//!
+//! Where it acts: the block search with the compressed lookup table (`CompressedAaLookupTable`:
+//! `-task blastp-fast`, or a word size above 4) on a pool of more than one thread, with one output that is
+//! not outfmt 11 or 13 to 16, no hit records and no observer, in builds with threads (native, or wasm32
+//! with `wasm-threads`). The table `AaLookupTable` (exact blastp) keeps the block loop (its in-place
+//! builds share neighbour lists that only one build uses at a time, `x_lookup_ahead.rs`).
+//! `LOSAT_TIMING`'s lines of the blocks in flight come interleaved (each block prints its own, and the
+//! redo's range counters that each block's start resets are shared by the two blocks).
 //!
 //! One form, not tuned: two blocks in flight (`X_SLOTS`), the block loop's block and the next one, as
 //! `LOSAT_X_BPLKPAHEAD` keeps the next block's table beside the block (here its whole search), each of
@@ -106,6 +122,13 @@ pub(crate) fn x_bp_qslots_print_summary() {
 }
 
 /// EXPERIMENT (LOSAT_X_BPQSLOTS): the blocks in flight (module comment).
+#[cfg_attr(
+    not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )),
+    allow(dead_code)
+)]
 pub(crate) const X_SLOTS: usize = 2;
 
 // No NCBI counterpart: reads the LOSAT_X_BPQSLOTS switch once; it does not change any value NCBI
@@ -190,7 +213,8 @@ impl XOrdered<'_> {
             let written = self
                 .diagnostics
                 .write_all(&done.messages)
-                .and_then(|()| self.sink.write_all(&done.report));
+                .and_then(|()| self.sink.write_all(&done.report))
+                .and_then(|()| self.sink.flush());
             self.next += 1;
             if let Some(error) = done.error {
                 self.fail(at, error);
@@ -205,6 +229,33 @@ impl XOrdered<'_> {
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
+/// Stops the drivers when the one that holds it panics (module comment): `stop` set under the lock that
+/// the waiting driver reads it under, then the waiter woken.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+struct XPanicStop<'a, 's> {
+    stop: &'a AtomicBool,
+    ordered: &'a Mutex<XOrdered<'s>>,
+    written: &'a Condvar,
+}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+impl Drop for XPanicStop<'_, '_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            let state = self.ordered.lock().unwrap_or_else(PoisonError::into_inner);
+            self.stop.store(true, Ordering::Relaxed);
+            drop(state);
+            self.written.notify_all();
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276 (module comment): the batches
 // searched and reported in order. Scheduling only: the blocks' reports are written in that order.
 /// EXPERIMENT (LOSAT_X_BPQSLOTS): the blocks `0..blocks` searched by `slots` drivers on `pool`
@@ -220,7 +271,7 @@ pub(crate) fn x_search_in_slots(
     diagnostics: &mut (dyn Write + Send),
     search_block: &(dyn Fn(usize, &mut ReportOutputs<'_>) -> Result<()> + Sync),
 ) -> Result<()> {
-    let window = slots.saturating_mul(4).max(1);
+    let window = slots.saturating_mul(2).max(1);
     let stop = AtomicBool::new(false);
     let ordered = Mutex::new(XOrdered {
         next: 0,
@@ -232,6 +283,11 @@ pub(crate) fn x_search_in_slots(
     });
     let written = Condvar::new();
     let driver = || loop {
+        let _stop = XPanicStop {
+            stop: &stop,
+            ordered: &ordered,
+            written: &written,
+        };
         let index = {
             let mut state = ordered.lock().unwrap_or_else(PoisonError::into_inner);
             loop {
@@ -362,6 +418,12 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(sink, lines("row", 0..10));
         assert_eq!(diagnostics, lines("warning", 0..10));
+        // Two drivers: block 0 finishes after the three blocks the window lets the other driver take,
+        // which then waits for block 0 to be written.
+        let (sink, diagnostics, result) = run(4, 2, 12, 0, 3, None);
+        assert!(result.is_ok());
+        assert_eq!(sink, lines("row", 0..12));
+        assert_eq!(diagnostics, lines("warning", 0..12));
         // One driver per block and more drivers than blocks.
         for (slots, blocks) in [(3, 3), (8, 2)] {
             let (sink, diagnostics, result) = run(4, slots, blocks, usize::MAX, 0, None);
@@ -383,6 +445,59 @@ mod tests {
         let (sink, _, result) = run(4, 2, 5, usize::MAX, 0, Some(0));
         assert_eq!(result.unwrap_err().to_string(), "block 0 failed");
         assert_eq!(sink, lines("row", 0..1));
+    }
+
+    /// An output that takes `limit` bytes and fails the write that would pass them.
+    struct Full {
+        bytes: Vec<u8>,
+        limit: usize,
+    }
+
+    impl Write for Full {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if self.bytes.len() + buf.len() > self.limit {
+                return Err(std::io::Error::other("the output is full"));
+            }
+            self.bytes.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_failed_write_ends_the_search_at_its_block() {
+        // Rows of 6 bytes into 20: block 3's row fails, after its messages.
+        let mut sink = Full {
+            bytes: Vec::new(),
+            limit: 20,
+        };
+        let mut diagnostics = Vec::new();
+        let result = crate::utils::threading::with_search_pool(4, "blastp", |pool| {
+            let search = |index: usize, outputs: &mut ReportOutputs<'_>| -> Result<()> {
+                let OutputSink::Writer(report) = &mut outputs.formats[0].sink else {
+                    unreachable!("a writer of the slots")
+                };
+                writeln!(report, "row {index}")?;
+                writeln!(outputs.diagnostics, "warning {index}")?;
+                Ok(())
+            };
+            Ok(x_search_in_slots(
+                8,
+                2,
+                "6",
+                pool,
+                &mut sink,
+                &mut diagnostics,
+                &search,
+            ))
+        })
+        .expect("the pool");
+        assert_eq!(result.unwrap_err().to_string(), "the output is full");
+        assert_eq!(sink.bytes, lines("row", 0..3));
+        assert_eq!(diagnostics, lines("warning", 0..4));
     }
 
     #[test]

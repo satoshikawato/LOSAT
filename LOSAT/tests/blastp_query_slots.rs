@@ -220,7 +220,8 @@ fn database(dir: &Path) -> PathBuf {
 }
 
 // The reports the slots take, `-subject`: outfmt 6, 7 (its count of the queries in the last block),
-// 0 (the prolog with the first block, the epilog with the last), 5 (the iteration numbers) and 8; at
+// 0 (the prolog with the first block, the epilog with the last), 5 (the iteration numbers), 8, 9 and
+// 12 (a Seq-annot per query); at
 // four threads and at two (the pool's least). Every block of the search counted.
 #[test]
 fn block_reports_with_the_slots_are_the_block_loops() {
@@ -228,7 +229,7 @@ fn block_reports_with_the_slots_are_the_block_loops() {
     let subject = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     let four = four_queries(&dir);
-    for outfmt in ["6", "7", "0", "5", "8"] {
+    for outfmt in ["6", "7", "0", "5", "8", "9", "12"] {
         for threads in [4, 2] {
             let on = same_runs(
                 &dir,
@@ -257,14 +258,14 @@ fn block_reports_with_the_slots_are_the_block_loops() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-// `-db`: the database search in blocks; outfmt 6 and 0 at two and four threads.
+// `-db`: the database search in blocks; outfmt 6, 0, 7 and 5 at two and four threads.
 #[test]
 fn database_block_reports_with_the_slots_are_the_block_loops() {
     let dir = test_dir("db");
     let name = database(&dir);
     let subject = [OsStr::new("-db"), name.as_os_str()];
     let four = four_queries(&dir);
-    for (outfmt, threads) in [("6", 2), ("0", 4)] {
+    for (outfmt, threads) in [("6", 2), ("0", 4), ("7", 4), ("5", 2)] {
         let on = same_runs(
             &dir,
             "blastp-fast",

@@ -1820,6 +1820,33 @@ Rebuilding less:
   (the zero fill), cycles x1.000 (0.961-1.060) where the A/A arm read x1.001 (0.939-1.034), x0.999-1.002 in the 4
   quietest rounds (load 8-16); WSSV 8 rounds instructions x0.999998, cycles x1.002 (0.986-1.008), A/A x0.999
   (0.985-1.010); minor faults 13.2k -> 5.2k (human x yeast).
+- `LOSAT_X_BPLK16=1` (BLASTP, memory; **opt-in** during the prototype (perf/bp-lk16, v4-D12 s19, `DECISIONS` 59): off unless
+  the variable is set to anything but `0`; not in the strict set, so it is not in the `export` block above, and its row
+  of `switch_reach_expected.tsv` and its default come with the pull request after the measurement; it is in `OPT_IN`
+  of `xswitch.rs`, so `LOSAT_X_REACH` records its sides): exact blastp's block tables (`-task blastp`, the table built
+  in place) hold 16-bit hits in 8-byte cells where the block's lookup query is at most 65,535 letters
+  (`BlastAaLookupTable<BackboneCell16>`, `lookup/backbone.rs`: `num_used: u16` and `entries: [u16; 3]`; a cell with more
+  than three hits keeps its cursor in the overflow array as a `u32` over `entries[0]` (low) and `entries[1]` (high)).
+  A block's lookup query is at most about 50,000 letters (`LOSAT_X_BPQBLOCK`), so every query offset and every cell's
+  hit count (at most one hit per offset) fits 16 bits; the overflow array and the cells halve (one thread, ws:
+  `bp_wssv` overflow 6.20 MiB, `bp_hsap` 8.56 MiB with 32-bit hits). The table holds exactly the hits of the table of
+  32-bit hits in the same order, and the fused two-hit loop (`blastp/x_seed_fused.rs`, generic over the hit type
+  `XHit`: `i32`, `u16`) reads them with one `vpmovzxwd ymm, m128` for a batch of eight and the same widening load for
+  the tail of fewer than eight hits (the lanes past the hits are blended away as before). Every table of every other
+  program, the `-window_size 0` search (its offset-pair scan reads the 32-bit table), the query chunks of a split
+  batch, `-task blastp-fast`, the reference builder (`LOSAT_DIAGNOSTICS`) and a block above 65,535 letters keep the
+  32-bit table. The 16-byte tail load of a `u16` hit list may read up to 14 bytes past the list; the table keeps two zero
+  cells after its backbone and eight zero hits after its overflow array so that the load stays inside the allocation
+  (the padding is in no count, `longest_chain` or presence bit). The spares of the block search keep the vectors of one
+  width (`XAaSpares::give16`, `x_make_room` with the width); a spare of the other width is dropped, not reused.
+  `LOSAT_X_BPLK16SHADOW=1` (diagnostic, never in the set): for each table of 16-bit hits the reference builder also
+  builds the table of 32-bit hits and the two are compared cell by cell (same `num_used`, same hit list, same pv,
+  `longest_chain` and fields; the padding is zero), panicking with the cell's index on a difference. Lib tests
+  `table_of_u16_hits_equals_the_table_of_i32_hits` (short queries, a low-complexity query, the block at 65,535 and
+  65,536 letters), `spares_serve_the_builds_of_both_widths` and
+  `scans_of_the_table_of_u16_hits_equal_the_scans_of_the_table_of_i32_hits` (every cell test and scan of the fused
+  loop). The tables and loops of 32-bit hits are the generic instances for `BackboneCell`/`i32`, whose reads are the
+  expressions the code had before. Evidence of the speed and memory: with the measurement, before the default.
 - `LOSAT_X_BPDBKEEP=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-db-thresh):
   on unless it is `0`; the preliminary stage of every BLASTP task with `-db`, at any thread count; also the chains of
   every BLASTP lookup build, `-subject` too, and the reads of the index check and the title checks wherever a program

@@ -21,15 +21,16 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
 
-use super::xswitch::{GRADUATED, STRICT_SET};
+use super::xswitch::{GRADUATED, OPT_IN, STRICT_SET};
 
 /// The switch's own path ran.
 const NEW: u8 = 1;
 /// The reference path ran with the switch on (its rule did not hold).
 const REF: u8 = 2;
 
-/// The switches that can record a side: those of `STRICT_SET`, then those of `GRADUATED`.
-const SWITCHES: usize = STRICT_SET.len() + GRADUATED.len();
+/// The switches that can record a side: those of `STRICT_SET`, then those of `GRADUATED`, then the
+/// opt-in ones (`OPT_IN`).
+const SWITCHES: usize = STRICT_SET.len() + GRADUATED.len() + OPT_IN.len();
 
 static SIDES: [AtomicU8; SWITCHES] = [const { AtomicU8::new(0) }; SWITCHES];
 
@@ -52,7 +53,14 @@ pub const fn index(name: &str) -> usize {
         }
         g += 1;
     }
-    panic!("x_reach!: not in STRICT_SET or GRADUATED (utils/xswitch.rs)");
+    let mut o = 0;
+    while o < OPT_IN.len() {
+        if same(OPT_IN[o].as_bytes(), name.as_bytes()) {
+            return STRICT_SET.len() + GRADUATED.len() + o;
+        }
+        o += 1;
+    }
+    panic!("x_reach!: not in STRICT_SET, GRADUATED or OPT_IN (utils/xswitch.rs)");
 }
 
 const fn same(a: &[u8], b: &[u8]) -> bool {
@@ -114,7 +122,12 @@ pub fn write_report() {
     };
     let program = std::env::args().nth(1).unwrap_or_default();
     let mut text = String::from("switch\tnew\tref\tprogram\n");
-    for (name, sides) in STRICT_SET.iter().chain(GRADUATED).zip(SIDES.iter()) {
+    for (name, sides) in STRICT_SET
+        .iter()
+        .chain(GRADUATED)
+        .chain(OPT_IN)
+        .zip(SIDES.iter())
+    {
         let sides = sides.load(Ordering::Relaxed);
         if sides != 0 {
             text.push_str(&format!(
@@ -143,8 +156,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn index_finds_every_name_of_the_set_then_the_graduated_ones() {
-        for (i, name) in STRICT_SET.iter().chain(GRADUATED).enumerate() {
+    fn index_finds_every_name_of_the_set_then_the_graduated_and_opt_in_ones() {
+        for (i, name) in STRICT_SET.iter().chain(GRADUATED).chain(OPT_IN).enumerate() {
             assert_eq!(index(name), i);
         }
     }

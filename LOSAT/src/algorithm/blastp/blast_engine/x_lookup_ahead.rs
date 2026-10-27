@@ -389,6 +389,23 @@ fn x_make_room(
             );
             true
         }
+        // EXPERIMENT (LOSAT_X_BPLK16): the same for a table of 16-bit hits; the lengths of its
+        // vectors count their padding, which the next table of that width has as well.
+        BlastpRuntimeLookup::Aa16(table) => {
+            let Some(spares) = x_bp_aa_spares(pool) else {
+                return false;
+            };
+            let largest = largest_hits.get().max(table.overflow.len());
+            largest_hits.set(largest);
+            let room = (largest + largest / 2).max(X_MIN_HITS_ROOM);
+            spares.x_make_room16(
+                table.backbone.len(),
+                table.pv.len(),
+                room,
+                (2 * largest).max(room),
+            );
+            true
+        }
         BlastpRuntimeLookup::Compressed(_) => false,
     }
 }
@@ -1058,7 +1075,9 @@ mod tests {
         pool: &SearchPool<'_>,
     ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
         match args.lookup_table_type {
-            BlastpLookupTableType::AaLookupTable => super::super::blastp_aa_lookup(args, frames),
+            BlastpLookupTableType::AaLookupTable => {
+                super::super::blastp_aa_lookup(args, frames, false)
+            }
             BlastpLookupTableType::CompressedAaLookupTable => {
                 let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();
                 let batches = seq_range::QueryInput::whole(records).batches(batch_size);

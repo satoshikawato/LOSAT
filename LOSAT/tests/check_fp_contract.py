@@ -6,7 +6,7 @@ NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
             result *= expl(-z * z) / z;
 ```
 LOSAT's one fused multiply-add (`f64::mul_add` in `stats/spouge.rs`) is the exact rounding error
-of a product inside the double-double emulation of that long-double line. Every other
+of a product inside the double-double emulation of that long-double line's `expl`. Every other
 floating-point operation is a separate IEEE operation in the order of the NCBI source, so the
 compiler must not contract `a * b + c` into a fused multiply-add, and nothing may add one.
 

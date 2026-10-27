@@ -13,7 +13,7 @@
 //! ```c++
 //! #  define NCBI_CONST_LONGDOUBLE(v)   v##L
 //! ```
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
 //! ```c
 //!             result *= expl(-z * z) / z;
 //! ```
@@ -33,9 +33,9 @@
 //! range (2^-16382 .. 2^16384), so no denormal, overflow or NaN case arises. `ErfImpl`: the
 //! 64-bit `expl` result as the value nearest a double-double exponential, division and
 //! multiplication rounded to 64 bits (`/ z`, `result *= ...`) and the store to a double
-//! (`fstpl`), which rounds a second time, to 53 bits. Its operands are finite and nonnegative
-//! (`expl` is zero where the double-double exponential underflows), and the store can give a
-//! subnormal double or zero.
+//! (`fstpl`), which rounds the 64-bit product a second time, to 53 bits. Its operands are finite
+//! and nonnegative (LOSAT's double-double stand-in for `expl` is zero where it underflows; NCBI's
+//! 80-bit `expl` is still normal there), and the store can give a subnormal double or zero.
 
 use std::cmp::Ordering;
 
@@ -162,8 +162,14 @@ impl X87 {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
+    // ```c
+    //             result *= expl(-z * z) / z;
+    // ```
+    // No NCBI counterpart: the x87 `fdiv` of `expl(...) / z`.
     /// `fdiv` with precision control 64 bits and round to nearest, ties to even: the exact
-    /// quotient of the significands rounded once to 64 bits. `rhs` is nonzero.
+    /// quotient of the significands rounded once to 64 bits. `rhs` is nonzero. (A quotient of
+    /// two 64-bit significands is never exactly halfway, so the ties-to-even terms never decide.)
     pub(crate) fn div(self, rhs: X87) -> X87 {
         debug_assert!(rhs.significand != 0, "x87 division by zero");
         let negative = self.negative != rhs.negative;
@@ -194,12 +200,17 @@ impl X87 {
         X87::round_up_if(negative, exponent, significand, up)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
+    // ```c
+    //             result *= expl(-z * z) / z;
+    // ```
+    // No NCBI counterpart: the 64-bit result of `expl` from LOSAT's double-double stand-in.
     /// The value nearest the exact sum `hi + lo` (round to nearest, ties to even) of a
-    /// normalized double-double: `hi` finite and nonnegative, `lo` at most half a unit in the
-    /// last place of `hi`. This is the 64-bit `expl(-z * z)` that the double-double exponential
-    /// of `stats::spouge` holds to more than 64 bits.
+    /// normalized double-double: `hi` finite and nonnegative, and `hi + lo == hi` (the sum of
+    /// the double-double's own operations). This is the 64-bit `expl(-z * z)` that the
+    /// double-double exponential of `stats::spouge` holds to more than 64 bits.
     pub(crate) fn nearest_to_sum(hi: f64, lo: f64) -> X87 {
-        debug_assert!(hi.is_finite() && hi >= 0.0 && (hi != 0.0 || lo == 0.0));
+        debug_assert!(hi.is_finite() && hi >= 0.0 && hi + lo == hi);
         let h = X87::from_f64(hi);
         if h.significand == 0 {
             return X87::ZERO;
@@ -209,7 +220,9 @@ impl X87 {
         let base = h.exponent - 126;
         let mut sum = (h.significand as u128) << 63;
         // Set when bits of lo below 2^base are dropped: the exact sum then lies strictly between
-        // `sum` and `sum + 1` units.
+        // `sum` and `sum + 1` units. (For a double lo that happens only when |lo| is below 2^53
+        // units, far from the halfway point, so it never decides a result; it keeps the rounding
+        // exact for any input.)
         let mut sticky = false;
         if lo != 0.0 {
             let l = X87::from_f64(lo);
@@ -241,6 +254,11 @@ impl X87 {
         X87::round_up_if(false, base + drop + 63, significand, up)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
+    // ```c
+    //             result *= expl(-z * z) / z;
+    // ```
+    // No NCBI counterpart: the x87 `fstpl` of `result *= ...` to the double `result`.
     /// `fstpl` (the store to a double) with round to nearest, ties to even: the nearest double,
     /// subnormal results and the underflow to zero included. Values from 2^1024 up give
     /// infinity.
@@ -279,6 +297,11 @@ impl X87 {
         f64::from_bits(sign | (magnitude + up as u64))
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
+    // ```c
+    //             result *= expl(-z * z) / z;
+    // ```
+    // No NCBI counterpart: the rounding step of `fdiv`, `fmul`'s result and `expl`'s result.
     /// `significand` (bit 63 set) plus one unit in the last place when `up`; the carry out of
     /// 0xFFFF_FFFF_FFFF_FFFF gives 2^63 and increments the exponent.
     fn round_up_if(negative: bool, exponent: i32, significand: u64, up: bool) -> X87 {
@@ -380,7 +403,7 @@ impl X87 {
 
 #[cfg(test)]
 mod tests {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
     // ```c
     //             result *= expl(-z * z) / z;
     // ```
@@ -460,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn nearest_to_sum_rounds_ties_to_even_with_sticky_bits_and_borrows() {
+    fn nearest_to_sum_rounds_ties_to_even_with_lower_bits_and_borrows() {
         let sum = |hi: f64, lo: f64| X87::nearest_to_sum(hi, lo).parts();
         let p = |e: i32| 2f64.powi(e);
         // 1 + 2^-64: halfway, even kept significand.
@@ -471,7 +494,7 @@ mod tests {
             sum(1.0 + p(-52), 1.5 * p(-63)),
             (false, 0, 0x8000_0000_0000_0802)
         );
-        // Bits of lo far below the last place break the tie.
+        // Bits of lo far below the last place (above 2^-126, exact) break the tie.
         assert_eq!(
             sum(1.0, p(-64) + p(-100)),
             (false, 0, 0x8000_0000_0000_0001)
@@ -488,7 +511,10 @@ mod tests {
             (false, 0, 0x8000_0000_0000_07FF)
         );
         // A subnormal hi, and zero (the exponential below the double range).
-        assert_eq!(sum(p(-1070), 0.0), (false, -1070, 0x8000_0000_0000_0000));
+        assert_eq!(
+            sum(f64::from_bits(0x10), 0.0),
+            (false, -1070, 0x8000_0000_0000_0000)
+        );
         assert_eq!(sum(0.0, 0.0), (false, 0, 0));
     }
 

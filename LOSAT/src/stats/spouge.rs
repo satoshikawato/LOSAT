@@ -98,7 +98,7 @@ pub fn lookup_protein_gumbel_params(
     })
 }
 
-// NCBI c++/src/algo/blast/core/boost_erf.c:1-35,59-260 is adapted
+// NCBI c++/src/algo/blast/core/boost_erf.c:1-35,52-255 is adapted
 // from Boost. (C) Copyright John Maddock 2006.
 // Boost Software License - Version 1.0 - August 17th, 2003
 // Permission is hereby granted, free of charge, to any person or organization
@@ -421,7 +421,7 @@ const X_TWO_POW_900: f64 = f64::from_bits((1023 + 900) << 52);
 //             result *= expl(-z * z) / z;
 // ```
 // Dekker (1971) product error with Veltkamp splitting, used in place of `mul_add` inside
-// the double-double emulation of the long-double `expl(-z * z) / z` above.
+// the double-double emulation of the long-double `expl(-z * z)` above.
 #[inline(always)]
 #[allow(dead_code)]
 fn x_dekker_product_error(a: f64, b: f64, product: f64) -> f64 {
@@ -520,9 +520,12 @@ fn exp_long_double_product_ncbi(result: f64, z: f64) -> f64 {
     }
     // NCBI's x86-64 gcc build evaluates the line in x87 long double (`-z * z` is a double):
     // expl's 64-bit result, `fdiv` by z rounded to 64 bits, `fmul` by `result` rounded to 64
-    // bits, then the store to the double `result` (53 bits). Each rounding is reproduced: the
-    // 64-bit product can lie exactly halfway between two doubles, where the store rounds to
-    // even and a single rounding of the exact value may go the other way.
+    // bits, then the store to the double `result` (53 bits). The 64-bit product can lie exactly
+    // halfway between two doubles, where the store rounds to even and a single rounding of the
+    // exact value may go the other way, so the last three roundings are reproduced. expl is
+    // taken as the 64-bit value nearest the double-double exponential; glibc's expl is not
+    // always correctly rounded, and the result then differs for about 1 argument in 28,000
+    // (docs/evidence/spouge_x87_20261027/manifest.txt).
     let expl = X87::nearest_to_sum(exponential.hi, exponential.lo);
     X87::from_f64(result)
         .mul(expl.div(X87::from_f64(z)))
@@ -865,6 +868,39 @@ mod tests {
         assert_eq!(erfc_ncbi(z).to_bits(), 0x3F72_CC89_7A4D_E16E);
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:207-229
+    // ```c
+    //             static const double Y = 0.5579090118408203125;
+    //             ...
+    //             result *= expl(-z * z) / z;
+    // ```
+    // From z near 25.9 the low part of the double-double exponential is subnormal, from 26.6 its
+    // high part, and from about 27.3 it is zero (NCBI's 80-bit expl is still normal there, and the
+    // stored product is zero all the same). The x87 model gets subnormal and zero operands there:
+    // no panic under the test profile's overflow checks, results at most 1e-290 that do not
+    // increase with z, and zero from 27.3 on. NCBI's bits there are not reproduced (the e-value is
+    // 0.0 either way, docs/evidence/spouge_x87_20261027/manifest.txt).
+    #[test]
+    fn erfc_in_the_underflow_range_of_the_double_double_exponential() {
+        let mut previous = f64::INFINITY;
+        for z in [26.0, 26.5, 26.62, 27.0, 27.2257, 27.3, 27.99] {
+            let r = erfc_ncbi(z);
+            assert!(
+                (0.0..=1e-290).contains(&r) && r <= previous,
+                "ErfC({z}) = {r:e}"
+            );
+            if z >= 27.3 {
+                assert_eq!(r.to_bits(), 0, "ErfC({z})");
+            }
+            previous = r;
+        }
+        for i in 0..20_000 {
+            let z = 25.9 + i as f64 * (2.1 / 20_000.0);
+            let r = erf_impl_ncbi(z, true);
+            assert!((0.0..=1e-290).contains(&r), "ErfC({z}) = {r:e}");
+        }
+    }
+
     fn scaled_blosum62_11_1() -> (ProteinScoringSpec, KarlinParams) {
         let spec = ProteinScoringSpec {
             matrix: ScoringMatrix::Blosum62,
@@ -881,7 +917,7 @@ mod tests {
         (spec, kbp)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5222-5229
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5223-5229
     // ```c
     //     P_n_F = ErfC(-n_F / sqrt(2.0)) / 2.0;
     //     ...

@@ -19,7 +19,7 @@
 //!
 //! Only the default `FastWriteDouble` branches exist here (a registry or environment value that
 //! turns it off is rejected by the callers, outfmt-20261019 DECISIONS 13). The digits come from
-//! 80-bit x87 `long double` arithmetic on NCBI's x86-64 build; [`super::x87`] reproduces it, so
+//! 80-bit x87 `long double` arithmetic on NCBI's x86-64 build; [`crate::utils::x87`] reproduces it, so
 //! no `f64` formatting of the Rust standard library is involved and every platform prints the
 //! same bytes.
 

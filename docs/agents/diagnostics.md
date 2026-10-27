@@ -338,6 +338,7 @@ export LOSAT_X_BPGAP=1
 export LOSAT_X_BPGAP16=1
 export LOSAT_X_BPHITBF=1
 export LOSAT_X_BPLISTEDLEAN=1
+export LOSAT_X_BPLK16=1
 export LOSAT_X_BPLKDROP=1
 export LOSAT_X_BPLKPAHEAD=1
 export LOSAT_X_BPLKPFLAT=1
@@ -1822,10 +1823,9 @@ Rebuilding less:
   (the zero fill), cycles x1.000 (0.961-1.060) where the A/A arm read x1.001 (0.939-1.034), x0.999-1.002 in the 4
   quietest rounds (load 8-16); WSSV 8 rounds instructions x0.999998, cycles x1.002 (0.986-1.008), A/A x0.999
   (0.985-1.010); minor faults 13.2k -> 5.2k (human x yeast).
-- `LOSAT_X_BPLK16=1` (BLASTP, memory; **opt-in** during the prototype (perf/bp-lk16, v4-D12 s19, `DECISIONS` 59): off unless
-  the variable is set to anything but `0`; not in the strict set, so it is not in the `export` block above, and its row
-  of `switch_reach_expected.tsv`, its `LOSAT_X_REACH` sides and its default come with the pull request after the
-  measurement): exact blastp's block tables (`-task blastp`, the table built
+- `LOSAT_X_BPLK16=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-lk16, v4-D12 s19-s20,
+  `DECISIONS` 59-61): on unless it is `0`; recorded for `LOSAT_X_REACH` once per table, taken where the table has 16-bit
+  hits): exact blastp's block tables (`-task blastp`, the table built
   in place) hold 16-bit hits in 8-byte cells where the block's lookup query is at most 65,535 letters
   (`BlastAaLookupTable<BackboneCell16>`, `lookup/backbone.rs`: `num_used: u16` and `entries: [u16; 3]`; a cell with more
   than three hits keeps its cursor in the overflow array as a `u32` over `entries[0]` (low) and `entries[1]` (high)).
@@ -1848,7 +1848,20 @@ Rebuilding less:
   65,536 letters), `spares_serve_the_builds_of_both_widths` and
   `scans_of_the_table_of_u16_hits_equal_the_scans_of_the_table_of_i32_hits` (every cell test and scan of the fused
   loop). The tables and loops of 32-bit hits are the generic instances for `BackboneCell`/`i32`, whose reads are the
-  expressions the code had before. Evidence of the speed and memory: with the measurement, before the default.
+  expressions the code had before; with the switch off, every program runs the instructions of the code before
+  (`perf stat` instructions:u of the dev base and of `=0` x1.0000 on three blastp cases and a blastx one).
+  Evidence (ws, binary 4bcbaf70 on dev 03528945 against `=0` and the dev base, reports identical; v4-D12 s20): peak
+  RssAnon at one thread (node 0, samples every 2 ms) `bp_wssv` (WSSV x PajaWSV) `-subject` 8,976-8,980 against
+  12,376-12,380 KiB, `-db` 9,208-9,212 against 12,608-12,612, `bp_hsap` (3,000 human x `BlastDBSpecies6`) 13,240-13,244
+  against 17,852-17,860, Swiss-Prot q100 75,316 against 75,288 (its peak is the composition stage); UniRef50 q100
+  `-evalue 0.001` at 32 threads (node 1) 181.8 against 191.9 MiB (wall 406.8 against 415.3 s); q100 against a third of
+  UniRef50 at 16 threads (six pairs side by side): the search stage 42.8-43.1 against 47.4-47.8 MiB, the peak (the
+  traceback stage, after the table is freed) 63.2-82.1 (median 70.9) against 67.1-72.6 (median 69.4), no difference
+  in rank (sum 41, 39 expected), wider spread. Time: one thread (`perf stat` :u, node 0, A/A arm) `bp_hsap` cycles
+  x0.973 (8 of 8 below 1; A/A x1.008), wall x0.980; Swiss-Prot q100 cycles x0.981 (4 of 4; A/A x0.996), wall x0.979;
+  `bp_wssv` cycles x0.994 (8 of 8; A/A x1.003); instructions x0.9992, x0.9983, x1.0003; 16 threads (node 1 CPUs
+  32-47 warmed, 16 rounds rotated with an A/A arm) Swiss-Prot q100 wall x0.991 (15 of 16; A/A x0.999), cycles x0.990
+  (16 of 16), `bp_hsap` wall x0.980 (16 of 16; A/A x1.000), cycles x0.985.
 - `LOSAT_X_BPDBKEEP=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-db-thresh):
   on unless it is `0`; the preliminary stage of every BLASTP task with `-db`, at any thread count; also the chains of
   every BLASTP lookup build, `-subject` too, and the reads of the index check and the title checks wherever a program

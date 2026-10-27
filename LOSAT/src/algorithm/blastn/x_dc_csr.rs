@@ -815,6 +815,7 @@ mod tests {
         let csr = Csr {
             offsets: vec![0, 0, 3, 4, 4],
             qs: vec![90, 40, 7, 12],
+            x_keep: None,
         };
         for (cell, q, want) in [
             (0, 7, false),
@@ -836,6 +837,7 @@ mod tests {
         let csr = Csr {
             offsets: vec![0, 2, 2, 5],
             qs: vec![9, 3, 30, 20, 10],
+            x_keep: None,
         };
         for n in [0usize, 1, 15, 16, 17, 31, 32, 33, 100] {
             let mut ring: Ring<'_, (u32, usize)> = Ring::new(&csr);

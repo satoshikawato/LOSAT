@@ -50,12 +50,15 @@
 //! search, and no driver takes a block before every driver has started (`x_wait_for_every_driver`; at
 //! most one driver per thread of the pool). The drivers are jobs of one `rayon::scope`, pushed to the
 //! deque of the thread that spawns them, and a thread waiting in a join inside a block's search runs any
-//! job of its own deque (rayon-core 1.13 `WorkerThread::take_local_job`). Had a block's search begun
-//! while a driver's job still waited in a deque, a thread could have run that driver nested above the
+//! job of its own deque or the oldest job of another's (rayon-core 1.13 `WorkerThread::wait_until_cold`:
+//! `take_local_job`, then `find_work`'s steals). Had a block's search begun while a driver's job still
+//! waited in a deque, a thread could have run that driver nested above the
 //! unfinished block: the nested driver takes blocks until the window is full, then waits for the block
 //! below it to be written, which never comes (the hang of `x_bnstream`'s loops, `wait_for_every_loop`
 //! there). Once every driver has started, no driver's job is left in a deque, and the jobs a waiting
-//! thread runs are parts of the blocks' searches, which wait only for their own parts.
+//! thread runs are parts of the blocks' searches, which wait only for their own parts. The drivers
+//! start on idle threads of the pool, so the search is not called from a job of the pool (the block
+//! search calls it at the top of `with_search_pool`'s closure, which runs no other work then).
 //!
 //! Memory: each block in flight holds its lookup table and its hit lists until its report is written,
 //! and then gives the table's vectors to the block search's spare (`LOSAT_X_BPLKPFLAT`), which a later
@@ -265,10 +268,6 @@ impl Drop for XPanicStop<'_, '_> {
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
 // No NCBI counterpart: scheduling only.
 /// EXPERIMENT (LOSAT_X_BPQSLOTS): counts a driver in `started` and waits until all `drivers` have
 /// started (module comment, "Waiting"): it spins, then yields the thread, and runs no job of the pool.
@@ -285,12 +284,18 @@ fn x_wait_for_every_driver(started: &AtomicUsize, drivers: usize) {
     }
 }
 
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276 (module comment): the batches
 // searched and reported in order. Scheduling only: the blocks' reports are written in that order.
-/// EXPERIMENT (LOSAT_X_BPQSLOTS): the blocks `0..blocks` searched by `slots` drivers on `pool`
-/// (`search_block(index, outputs)` writes block `index`'s report of `outfmt` and its messages to
-/// `outputs`), the reports written to `sink` and the messages to `diagnostics` in block order; the
-/// first failure in block order is returned after the bytes before it (module comment).
+/// EXPERIMENT (LOSAT_X_BPQSLOTS): the blocks `0..blocks` searched by at most `slots` drivers (no more
+/// than the blocks or `pool`'s threads) on `pool` (`search_block(index, outputs)` writes block
+/// `index`'s report of `outfmt` and its messages to `outputs`), the reports written to `sink` and the
+/// messages to `diagnostics` in block order; the first failure in block order is returned after the
+/// bytes before it (module comment). Not called from a job of `pool`: the drivers need idle threads of
+/// the pool to start on (module comment, "Waiting").
 pub(crate) fn x_search_in_slots(
     blocks: usize,
     slots: usize,
@@ -598,7 +603,10 @@ mod tests {
                 }
                 Ok(())
             })
-            .expect("the searches");
+            .unwrap_or_else(|error| {
+                eprintln!("SLOTS ERROR {error}");
+                std::process::exit(2)
+            });
         });
         eprintln!(
             "SLOTS {searches} searches in {:.3} s (threads {threads})",

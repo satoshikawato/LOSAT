@@ -2707,7 +2707,7 @@ Rebuilding less:
   78 appends of 4 bytes per query letter). No table is built ahead; each block keeps its table to its end and
   gives its vectors to the spare that a later block's build takes (`LOSAT_X_BPLKPFLAT`). No driver takes a block
   before both have started (a driver left in a thread's deque could otherwise run nested inside a block's join and
-  wait for that block; fixed 2026-10-27 after the switch's pull request, by the probe test
+  wait for that block; found 2026-10-27 after the switch's pull request by the probe test
   `probe_slots_many_searches_with_nested_blocks`). A driver takes a block
   only while fewer than 4 blocks are searched or wait to be written, and the output is flushed after each
   block, as the block loop flushes it. Where: a pool of more than one thread, one output that is not outfmt 11 (the archive carries state from

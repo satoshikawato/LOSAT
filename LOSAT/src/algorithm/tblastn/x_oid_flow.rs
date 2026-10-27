@@ -123,11 +123,95 @@ struct XFlowState<T> {
     changes: u64,
 }
 
+/// PROBE (B10 E): one spell of waits of a caller of the flow (between two chunks, or before its
+/// list), printed at its end: who, the thread, the times, the jobs of the pool it ran and their
+/// time, and the flow when it began (chunks not taken yet, whether the window held the next one,
+/// the oldest chunk not taken back).
+struct XSpell {
+    on: bool,
+    owner: bool,
+    start: Option<(f64, usize, bool, usize)>,
+    jobs: u64,
+    help_s: f64,
+    idle_s: f64,
+}
+
+impl XSpell {
+    fn new(owner: bool) -> Self {
+        XSpell {
+            on: crate::utils::x_b11e::on(),
+            owner,
+            start: None,
+            jobs: 0,
+            help_s: 0.0,
+            idle_s: 0.0,
+        }
+    }
+    fn t(&self) -> f64 {
+        if self.on {
+            crate::utils::x_b11e::now()
+        } else {
+            0.0
+        }
+    }
+    fn begin<T>(&mut self, state: &XFlowState<T>, chunks: usize, window: usize) {
+        if self.on && self.start.is_none() {
+            let left = chunks.saturating_sub(state.next);
+            let held = state.next < chunks && state.next >= state.taken_back.saturating_add(window);
+            self.start = Some((crate::utils::x_b11e::now(), left, held, state.taken_back));
+        }
+    }
+    fn add(&mut self, t: f64, helped: bool) {
+        if self.on {
+            let dt = crate::utils::x_b11e::now() - t;
+            if helped {
+                self.jobs += 1;
+                self.help_s += dt;
+            } else {
+                self.idle_s += dt;
+            }
+        }
+    }
+    fn end<T>(&mut self, state: &XFlowState<T>, chunks: usize) {
+        if let Some((t0, left, held, oldest)) = self.start.take() {
+            eprintln!(
+                "[B11E] fspell b={} who={} thr={} t0={t0:.4} t1={:.4} jobs={} help_ms={:.2} idle_ms={:.2} left={left} held={} oldest={oldest} left1={} oldest1={}",
+                crate::utils::x_b11e::batch(),
+                if self.owner { "o" } else { "w" },
+                crate::utils::x_b11e::thread(),
+                crate::utils::x_b11e::now(),
+                self.jobs,
+                self.help_s * 1e3,
+                self.idle_s * 1e3,
+                u8::from(held),
+                chunks.saturating_sub(state.next),
+                state.taken_back,
+            );
+            self.jobs = 0;
+            self.help_s = 0.0;
+            self.idle_s = 0.0;
+        }
+    }
+}
+
 impl<T: Send> XOidFlow<T> {
     /// A flow over `chunks` (consecutive ranges of subject indices, in OID order) with at most
     /// `window` chunks (at least one) taken or waiting beyond the oldest one not taken back, for
     /// the owner and `workers` threads that run `work`.
     pub(super) fn new(chunks: Vec<Range<usize>>, window: usize, workers: usize) -> Self {
+        // PROBE (B10 E): the chunks of this flow.
+        if crate::utils::x_b11e::on() {
+            let b = crate::utils::x_b11e::batch();
+            eprintln!(
+                "[B11E] flow b={b} chunks={} window={} workers={workers} t={:.4}",
+                chunks.len(),
+                window.max(1),
+                crate::utils::x_b11e::now()
+            );
+            for (c, r) in chunks.iter().enumerate() {
+                eprintln!("[B11E] fdef b={b} c={c} s={} e={}", r.start, r.end);
+            }
+        }
         XOidFlow {
             chunks,
             window: window.max(1),
@@ -172,6 +256,7 @@ impl<T: Send> XOidFlow<T> {
         state: MutexGuard<'s, XFlowState<T>>,
         owner: bool,
         idle: &mut u32,
+        x_helped: &mut bool,
     ) -> MutexGuard<'s, XFlowState<T>> {
         let start = self.stats.as_ref().map(|_| Instant::now());
         let who = usize::from(!owner);
@@ -214,6 +299,7 @@ impl<T: Send> XOidFlow<T> {
                 stats.idle_ns[who].fetch_add(ns, Ordering::Relaxed);
             }
         }
+        *x_helped = helped;
         state
     }
 
@@ -276,7 +362,16 @@ impl<T: Send> XOidFlow<T> {
             }
         }
         let _failed = Failed(self);
+        let x_t0 = crate::utils::x_b11e::on().then(crate::utils::x_b11e::now);
         let lists: Vec<T> = self.chunks[index].clone().map(search).collect();
+        if let Some(t0) = x_t0 {
+            eprintln!(
+                "[B11E] fchunk b={} c={index} thr={} t0={t0:.4} t1={:.4}",
+                crate::utils::x_b11e::batch(),
+                crate::utils::x_b11e::thread(),
+                crate::utils::x_b11e::now()
+            );
+        }
         let mut state = self.lock();
         state.finished.insert(index, lists);
         state.peak_waiting = state.peak_waiting.max(state.finished.len());
@@ -294,17 +389,32 @@ impl<T: Send> XOidFlow<T> {
         self.changed.notify_all();
         state = self.start_together(state);
         let mut idle = 0;
+        let mut x_spell = XSpell::new(false);
         loop {
             if state.closed || state.failed || state.next >= self.chunks.len() {
+                x_spell.end(&state, self.chunks.len());
+                if crate::utils::x_b11e::on() {
+                    eprintln!(
+                        "[B11E] fexit b={} who=w thr={} t={:.4}",
+                        crate::utils::x_b11e::batch(),
+                        crate::utils::x_b11e::thread(),
+                        crate::utils::x_b11e::now()
+                    );
+                }
                 return;
             }
             if let Some(index) = self.take(&mut state) {
+                x_spell.end(&state, self.chunks.len());
                 drop(state);
                 self.search_chunk(index, search);
                 idle = 0;
                 state = self.lock();
             } else {
-                state = self.wait(state, false, &mut idle);
+                x_spell.begin(&state, self.chunks.len(), self.window);
+                let t = x_spell.t();
+                let mut helped = false;
+                state = self.wait(state, false, &mut idle, &mut helped);
+                x_spell.add(t, helped);
             }
         }
     }
@@ -316,14 +426,36 @@ impl<T: Send> XOidFlow<T> {
         &self,
         search: &(impl Fn(usize) -> T + Sync),
     ) -> Result<Option<Vec<T>>> {
+        let x_enter = crate::utils::x_b11e::on().then(crate::utils::x_b11e::now);
         let mut state = self.start_together(self.lock());
         let mut idle = 0;
+        let mut x_spell = XSpell::new(true);
         loop {
             let wanted = state.taken_back;
             if wanted >= self.chunks.len() {
+                x_spell.end(&state, self.chunks.len());
+                if let Some(enter) = x_enter {
+                    eprintln!(
+                        "[B11E] fback b={} c=end thr={} enter={enter:.4} t={:.4} waiting=0",
+                        crate::utils::x_b11e::batch(),
+                        crate::utils::x_b11e::thread(),
+                        crate::utils::x_b11e::now()
+                    );
+                }
                 return Ok(None);
             }
             if let Some(lists) = state.finished.remove(&wanted) {
+                x_spell.end(&state, self.chunks.len());
+                if let Some(enter) = x_enter {
+                    eprintln!(
+                        "[B11E] fback b={} c={wanted} thr={} enter={enter:.4} t={:.4} waiting={} next={}",
+                        crate::utils::x_b11e::batch(),
+                        crate::utils::x_b11e::thread(),
+                        crate::utils::x_b11e::now(),
+                        state.finished.len(),
+                        state.next
+                    );
+                }
                 state.taken_back += 1;
                 state.changes += 1;
                 drop(state);
@@ -336,12 +468,17 @@ impl<T: Send> XOidFlow<T> {
                 );
             }
             if let Some(index) = self.take(&mut state) {
+                x_spell.end(&state, self.chunks.len());
                 drop(state);
                 self.search_chunk(index, search);
                 idle = 0;
                 state = self.lock();
             } else {
-                state = self.wait(state, true, &mut idle);
+                x_spell.begin(&state, self.chunks.len(), self.window);
+                let t = x_spell.t();
+                let mut helped = false;
+                state = self.wait(state, true, &mut idle, &mut helped);
+                x_spell.add(t, helped);
             }
         }
     }

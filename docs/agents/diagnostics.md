@@ -5378,14 +5378,16 @@ Scheduling (each value computed by one thread with the original function; order 
   x0.995 / x0.991, one protein against the zebrafish genome x0.996 / x1.002.
 - `LOSAT_X_TBNCOLLECTCTX=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-27;
   `=0` turns it off; `tblastn/stage_d_pipeline.rs` `PreliminaryCollector::x_add_by_context`): the collector of the
-  preliminary stage splits a subject's linked list by query context in one pass (a count, then each HSP to its
-  context's list of exact capacity, in list order), as NCBI's collector does (`hspfilter_collector.c` 115-151), and
-  the contexts update their hit lists in context order as before. Before, each context of the query set filtered the
-  whole list: with 35 human proteins x the human genome (`-db`) that was 35 passes over chromosome 1's 936 k HSPs,
+  preliminary stage splits a subject's linked list by query context with a count and one placement pass (each HSP
+  to its context's list of exact capacity, in list order), as NCBI's collector does (`hspfilter_collector.c`
+  115-151), and the touched contexts update their hit lists in context order as before. Only the contexts the list
+  touches are counted, filled and reset, so a list costs its own length, not the number of contexts. Before, each
+  context of the query set filtered the whole list (contexts x HSPs): with 35 human proteins x the human genome
+  (`-db`) that was 35 passes over chromosome 1's 936 k HSPs,
   about 160 ns per linked HSP, run by the owner of the search as it took the subjects in OID order; when chromosome 1
   ended last, the 25 other chromosomes' lists waited behind it and their filters ended the run (0.2 s at 16 and at
   32 threads, the B10-E probe). Each context's list holds the same HSPs in the same order, so the best e-values and
-  the hit lists are the same (unit test `the_collector_split_in_one_pass_gives_the_hit_lists_of_the_filters`;
+  the hit lists are the same (unit test `the_collector_split_by_context_gives_the_hit_lists_of_the_filters`;
   `tests/tblastn_collect_ctx.rs`). Always: every run without `-culling_limit` (whose culling writer takes the lists
   instead). MEASURED_PENDING.
 - `LOSAT_X_TBNREAPIDX=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-26;

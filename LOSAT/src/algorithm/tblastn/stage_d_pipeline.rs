@@ -2,7 +2,6 @@
 //! The public CLI remains gated while Stage D and Stage E are incomplete.
 
 use std::collections::HashMap;
-#[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{ensure, Context, Result};
@@ -2429,10 +2428,12 @@ trait PreliminarySink {
 struct PreliminaryCollector {
     hitlists: Vec<Option<KappaResultHitList>>,
     prelim_size: usize,
-    /// `LOSAT_X_TBNCOLLECTCTX`: the HSPs of each context of the list being added, and their
-    /// counts (kept from one subject to the next).
+    /// `LOSAT_X_TBNCOLLECTCTX`: one list per context for the list being added (the outer Vec is
+    /// kept; each touched context gets a new list that moves into its hit list), the counts per
+    /// context (all zero between lists) and the contexts the list touches.
     x_lists: Vec<Vec<LinkedHsp>>,
     x_counts: Vec<usize>,
+    x_touched: Vec<usize>,
 }
 
 impl PreliminaryCollector {
@@ -2440,8 +2441,9 @@ impl PreliminaryCollector {
         Self {
             hitlists: (0..inputs.queries.len()).map(|_| None).collect(),
             prelim_size: inputs.prelim_size,
-            x_lists: Vec::new(),
-            x_counts: Vec::new(),
+            x_lists: (0..inputs.queries.len()).map(|_| Vec::new()).collect(),
+            x_counts: vec![0; inputs.queries.len()],
+            x_touched: Vec::new(),
         }
     }
 
@@ -2461,44 +2463,47 @@ impl PreliminaryCollector {
     //                                 hsp_list_array[index]);
     // ```
     // `LOSAT_X_TBNCOLLECTCTX` (strict set; `=0` filters the whole list once per query context, as
-    // before): one pass over the list puts each HSP in the list of its context, in list order, as
-    // NCBI's collector does; the contexts then update their hit lists in context order with the
-    // same lists and best e-values as the filters made. Exact capacity per context.
+    // before): a count over the list, then one placement pass, puts each HSP in the list of its
+    // context, in list order, as NCBI's collector does; the touched contexts then update their hit
+    // lists in context order with the same lists as the filters made. Exact capacity per context.
+    // Only the contexts the list touches are counted, filled and reset, so a list costs its own
+    // length whatever the number of contexts (the filters cost contexts x HSPs).
     fn x_add_by_context(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()> {
-        let contexts = self.hitlists.len();
-        self.x_counts.clear();
-        self.x_counts.resize(contexts, 0);
+        self.x_touched.clear();
         for hsp in &linked.hsps {
             if let Some(count) = self.x_counts.get_mut(hsp.context) {
+                if *count == 0 {
+                    self.x_touched.push(hsp.context);
+                }
                 *count += 1;
             }
         }
-        self.x_lists.resize_with(contexts, Vec::new);
-        for (list, &count) in self.x_lists.iter_mut().zip(&self.x_counts) {
-            if count > 0 {
-                *list = Vec::with_capacity(count);
-            }
+        self.x_touched.sort_unstable();
+        for &context in &self.x_touched {
+            self.x_lists[context] = Vec::with_capacity(self.x_counts[context]);
+            self.x_counts[context] = 0;
         }
         for hsp in &linked.hsps {
             if let Some(list) = self.x_lists.get_mut(hsp.context) {
                 list.push(*hsp);
             }
         }
-        x_collect_ctx_count(linked.hsps.len());
-        for context in 0..contexts {
-            if self.x_counts[context] == 0 {
-                continue;
-            }
+        x_collect_ctx_count(linked.hsps.len(), self.x_touched.len());
+        for &context in &self.x_touched {
             let hsps = std::mem::take(&mut self.x_lists[context]);
-            let best_evalue = hsps.iter().map(|h| h.evalue).reduce(f64::min).unwrap();
             // NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
             // Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
-            // Each context owns an independently capped preliminary list.
+            // Each context owns an independently capped preliminary list. `update` sets the best
+            // e-value itself (`refresh_best_evalue`, NCBI's s_BlastGetBestEvalue), so none is
+            // computed here.
             let collector =
                 self.hitlists[context].get_or_insert(KappaResultHitList::new(self.prelim_size)?);
             collector.update(KappaResultList {
                 oid: i32::try_from(oid)?,
-                hsps: LinkedHspList { hsps, best_evalue },
+                hsps: LinkedHspList {
+                    hsps,
+                    best_evalue: f64::MAX,
+                },
                 payloads: Vec::new(),
             })?;
         }
@@ -2515,25 +2520,27 @@ fn x_collect_ctx_on() -> bool {
 }
 
 // No NCBI counterpart: LOSAT_X_STATS counters; they do not change any value NCBI computes.
-/// Lists the collector split by context in one pass, and their HSPs.
-static X_COLLECT_CTX_STATS: [AtomicUsize; 2] = [const { AtomicUsize::new(0) }; 2];
+/// The lists the collector split by context (every `add`, empty ones too), the contexts they
+/// touched and their HSPs (those beyond the query set too).
+static X_COLLECT_CTX_STATS: [AtomicUsize; 3] = [const { AtomicUsize::new(0) }; 3];
 
-fn x_collect_ctx_count(hsps: usize) {
+fn x_collect_ctx_count(hsps: usize, contexts: usize) {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if *ON.get_or_init(|| std::env::var_os("LOSAT_X_STATS").is_some()) {
         X_COLLECT_CTX_STATS[0].fetch_add(1, Ordering::Relaxed);
-        X_COLLECT_CTX_STATS[1].fetch_add(hsps, Ordering::Relaxed);
+        X_COLLECT_CTX_STATS[1].fetch_add(contexts, Ordering::Relaxed);
+        X_COLLECT_CTX_STATS[2].fetch_add(hsps, Ordering::Relaxed);
     }
 }
 
 /// The `[X_STATS] TBNCOLLECTCTX` line (printed by `main` at exit) with `LOSAT_X_STATS`, when the
-/// collector split a list in one pass.
+/// collector split a list by context.
 pub fn x_collect_ctx_print_summary() {
-    let [lists, hsps] = X_COLLECT_CTX_STATS
+    let [lists, contexts, hsps] = X_COLLECT_CTX_STATS
         .each_ref()
         .map(|v| v.load(Ordering::Relaxed));
     if lists > 0 {
-        eprintln!("[X_STATS] TBNCOLLECTCTX lists={lists} hsps={hsps}");
+        eprintln!("[X_STATS] TBNCOLLECTCTX lists={lists} contexts={contexts} hsps={hsps}");
     }
 }
 
@@ -3206,14 +3213,15 @@ fn finish_local_mode0_no_sum_stats(
 mod tests {
     use super::*;
 
-    // No NCBI counterpart (LOSAT_X_TBNCOLLECTCTX): the collector's one pass by context gives the
-    // hit lists of one filter per context (`=0`): per context, the lists in order with their oid,
-    // HSPs (context, HSP, number, e-value bits, input position), best e-value bits and payload
-    // count, and the hit list's worst e-value, low score and heap state; on 40 subjects whose lists
-    // hold 0 to 399 HSPs over 1, 2 and 9 contexts and one beyond the query set (dropped by both),
-    // with equal e-values, and hit lists of 1, 3 and 50 lists (the heap path runs).
+    // No NCBI counterpart (LOSAT_X_TBNCOLLECTCTX): the collector's split by context gives the hit
+    // lists of one filter per context (`=0`): per context, the lists in order with their oid, HSPs
+    // (context, HSP, number, e-value bits, input position), best e-value bits (the split leaves
+    // them to `update`) and payload count, and the hit list's worst e-value, low score and heap
+    // state; on 40 subjects through one collector (counts reset between lists) whose lists hold 0
+    // to 399 HSPs over 1, 2 and 9 contexts and one beyond the query set (dropped by both), with
+    // equal e-values, and hit lists of 1, 3 and 50 lists (the heap path runs with 1 and 3).
     #[test]
-    fn the_collector_split_in_one_pass_gives_the_hit_lists_of_the_filters() {
+    fn the_collector_split_by_context_gives_the_hit_lists_of_the_filters() {
         let mut state = 0x9E37_79B9_7F4A_7C15_u64;
         let mut next = move || {
             state ^= state >> 12;
@@ -3227,8 +3235,9 @@ mod tests {
                 let collector = || PreliminaryCollector {
                     hitlists: (0..contexts).map(|_| None).collect(),
                     prelim_size,
-                    x_lists: Vec::new(),
-                    x_counts: Vec::new(),
+                    x_lists: (0..contexts).map(|_| Vec::new()).collect(),
+                    x_counts: vec![0; contexts],
+                    x_touched: Vec::new(),
                 };
                 let (mut filters, mut one_pass) = (collector(), collector());
                 for oid in 0..40 {

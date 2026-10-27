@@ -589,6 +589,18 @@ pub struct GreedyAlignScratch {
     affine_mem: GreedyAffineMem,
     fwd_prelim_tback: GapPrelimEditBlock,
     rev_prelim_tback: GapPrelimEditBlock,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2499-2503
+    // ```c
+    //     size = rev_prelim_tback->num_ops + fwd_prelim_tback->num_ops;
+    //     if (merge_ops)
+    //         size--;
+    //
+    //     esp = GapEditScriptNew(size);
+    // ```
+    // No NCBI counterpart: the arrays of the last edit script that the traceback copied into
+    // its own operations (`greedy_gapped_alignment_with_traceback`), given to the next script
+    // instead of new ones. Reuse only: the next script is sized and filled as a new one.
+    x_edit_script: GapEditScript,
 }
 
 impl GreedyAlignScratch {
@@ -599,6 +611,7 @@ impl GreedyAlignScratch {
             affine_mem: GreedyAffineMem::new(),
             fwd_prelim_tback: GapPrelimEditBlock::new(),
             rev_prelim_tback: GapPrelimEditBlock::new(),
+            x_edit_script: GapEditScript::new(0),
         }
     }
 }
@@ -619,6 +632,16 @@ impl GapEditScript {
             num: vec![0; size],
             size,
         }
+    }
+
+    /// No NCBI counterpart: `new(size)` in the arrays of `self` (the same contents).
+    fn x_renew(mut self, size: usize) -> Self {
+        self.op_type.clear();
+        self.op_type.resize(size, GapAlignOpType::Invalid);
+        self.num.clear();
+        self.num.resize(size, 0);
+        self.size = size;
+        self
     }
 }
 
@@ -1769,9 +1792,11 @@ pub fn affine_greedy_align_one_direction_with_max_dist(
 
 /// Convert preliminary greedy edit blocks to a gap edit script.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2471-2536
+/// `recycled` gives its arrays to the script (`GapEditScript::x_renew`).
 fn prelim_edit_block_to_gap_edit_script(
     rev_prelim_tback: &GapPrelimEditBlock,
     fwd_prelim_tback: &GapPrelimEditBlock,
+    recycled: GapEditScript,
 ) -> Option<GapEditScript> {
     let mut merge_ops = false;
 
@@ -1788,7 +1813,7 @@ fn prelim_edit_block_to_gap_edit_script(
         size = size.saturating_sub(1);
     }
 
-    let mut esp = GapEditScript::new(size);
+    let mut esp = recycled.x_renew(size);
     let mut index = 0usize;
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2509-2515
@@ -4424,7 +4449,8 @@ pub(super) fn greedy_gapped_alignment_internal(
     if do_traceback {
         let rev = rev_prelim_tback.as_ref().unwrap();
         let fwd = fwd_prelim_tback.as_ref().unwrap();
-        if let Some(mut esp) = prelim_edit_block_to_gap_edit_script(rev, fwd) {
+        let recycled = std::mem::replace(&mut scratch.x_edit_script, GapEditScript::new(0));
+        if let Some(mut esp) = prelim_edit_block_to_gap_edit_script(rev, fwd, recycled) {
             let q_start = q_off as i32 - q_ext_l;
             let s_start = s_off as i32 - s_ext_l;
             let q_end = q_off as i32 + q_ext_r;
@@ -4568,6 +4594,8 @@ pub fn greedy_gapped_alignment_with_traceback(
         let num = edit_script.num[i];
         edit_ops.push(op.to_gap_edit_op(num));
     }
+    // The script's arrays go back to the scratch for the next one (`x_edit_script`).
+    scratch.x_edit_script = edit_script;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-597
     // ```c
     // Blast_HSPUpdateWithTraceback(gap_align, hsp);

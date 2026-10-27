@@ -11393,6 +11393,103 @@ fn search_query_batch(
     // ```
     // The initial hits that the word finder saved in every subject chunk of the batch; they
     // size the next batch.
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:336-377
+    // ```c
+    // if (!gapped_calculation || sbp->matrix_only_scoring) {
+    //     ...
+    // } else {
+    //     new_cutoff = gap_trigger;
+    // }
+    // new_cutoff = MIN(new_cutoff,
+    //                  hit_params->cutoffs[context].cutoff_score_max);
+    // curr_cutoffs->cutoff_score = new_cutoff;
+    // ```
+    // NCBI updates these per subject (`BlastInitialWordParametersUpdate`); LOSAT's values do not
+    // depend on the subject, so they are computed once for the batch instead of in every subject
+    // (`process_subject`): the cutoff scores, the hit-saving cutoff scores, the X-dropoffs and the
+    // reduced cutoff scores of each context.
+    let x_batch_cutoffs = {
+        let mut cutoff_scores: Vec<i32> = Vec::with_capacity(query_contexts.len());
+        let mut hit_saving_cutoff_scores: Vec<i32> = Vec::with_capacity(query_contexts.len());
+        // NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-211;
+        // c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181;
+        // c++/src/algo/blast/core/blast_engine.c:1434-1445
+        // db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
+        // if (dbscan_mode) { ... m_iTotalLength += (Int8) (*iter)->length; }
+        // if (db_length == 0) { BLAST_OneSubjectUpdateParameters(...); }
+        // The CLI subject set has a nonzero total length. Its context search
+        // space is retained across subjects, just as for output statistics.
+        for context_idx in 0..query_contexts.len() {
+            // An invalid context has an infinite cutoff and, unset, a zero X-drop and
+            // reduced cutoff (blast_parameters.c:324-332 above).
+            if !context_valid_ref[context_idx] {
+                cutoff_scores.push(i32::MAX);
+                hit_saving_cutoff_scores.push(i32::MAX);
+                continue;
+            }
+            // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:925-946
+            // searchsp = query_info->contexts[context].eff_searchsp;
+            // BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
+            // params->cutoffs[context].cutoff_score_max = new_cutoff;
+            let hit_saving_cutoff = cutoff_score_max_from_evalue(
+                evalue_threshold,
+                query_eff_searchsp[context_idx],
+                &search_karlin_ref[context_idx].gapped,
+            );
+            // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-374
+            // gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
+            // new_cutoff = gap_trigger;
+            // new_cutoff *= (Int4)sbp->scale_factor;
+            // new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
+            let gap_trigger = gap_trigger_raw_score(
+                GAP_TRIGGER_BIT_SCORE_NUCL,
+                &search_karlin_ref[context_idx].ungapped,
+            );
+            let cutoff = cutoff_score_for_ungapped_extension(gap_trigger, hit_saving_cutoff, 1.0);
+            cutoff_scores.push(cutoff);
+            hit_saving_cutoff_scores.push(hit_saving_cutoff);
+        }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:380-383
+        // ```c
+        // if (curr_cutoffs->x_dropoff_init == 0)
+        //    curr_cutoffs->x_dropoff = new_cutoff;
+        // else
+        //    curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
+        // ```
+        let mut x_dropoff_scores: Vec<i32> = Vec::with_capacity(cutoff_scores.len());
+        for ((cutoff, &x_dropoff_init), &valid) in cutoff_scores
+            .iter()
+            .zip(x_dropoff_init_ref)
+            .zip(context_valid_ref)
+        {
+            let x_dropoff = if !valid {
+                0
+            } else if x_dropoff_init == 0 {
+                *cutoff
+            } else {
+                x_dropoff_init
+            };
+            x_dropoff_scores.push(x_dropoff);
+        }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:408-412
+        // ```c
+        // curr_cutoffs->reduced_nucl_cutoff_score = (Int4)(0.8 * new_cutoff);
+        // ```
+        let mut reduced_cutoff_scores: Vec<i32> = Vec::with_capacity(cutoff_scores.len());
+        for (cutoff, &valid) in cutoff_scores.iter().zip(context_valid_ref) {
+            reduced_cutoff_scores.push(if valid {
+                (0.8 * (*cutoff as f64)) as i32
+            } else {
+                0
+            });
+        }
+        (
+            cutoff_scores,
+            hit_saving_cutoff_scores,
+            x_dropoff_scores,
+            reduced_cutoff_scores,
+        )
+    };
     let good_init_extends = std::sync::atomic::AtomicU64::new(0);
     let process_subject = |s_idx: usize,
                            subject: BlastnSubjectRef<'_>,
@@ -11600,80 +11697,14 @@ fn search_query_batch(
         // ```
         // NCBI uses UNGAPPED params (kbp_std) for gap_trigger calculation
         // and GAPPED params (kbp_gap) for cutoff_score_max calculation
-        let mut cutoff_scores: Vec<i32> = Vec::with_capacity(query_contexts.len());
-        let mut hit_saving_cutoff_scores: Vec<i32> = Vec::with_capacity(query_contexts.len());
-        // NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-211;
-        // c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181;
-        // c++/src/algo/blast/core/blast_engine.c:1434-1445
-        // db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
-        // if (dbscan_mode) { ... m_iTotalLength += (Int8) (*iter)->length; }
-        // if (db_length == 0) { BLAST_OneSubjectUpdateParameters(...); }
-        // The CLI subject set has a nonzero total length. Its context search
-        // space is retained across subjects, just as for output statistics.
-        for context_idx in 0..query_contexts.len() {
-            // An invalid context has an infinite cutoff and, unset, a zero X-drop and
-            // reduced cutoff (blast_parameters.c:324-332 above).
-            if !context_valid_ref[context_idx] {
-                cutoff_scores.push(i32::MAX);
-                hit_saving_cutoff_scores.push(i32::MAX);
-                continue;
-            }
-            // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:925-946
-            // searchsp = query_info->contexts[context].eff_searchsp;
-            // BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
-            // params->cutoffs[context].cutoff_score_max = new_cutoff;
-            let hit_saving_cutoff = cutoff_score_max_from_evalue(
-                evalue_threshold,
-                query_eff_searchsp[context_idx],
-                &search_karlin_ref[context_idx].gapped,
-            );
-            // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-374
-            // gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
-            // new_cutoff = gap_trigger;
-            // new_cutoff *= (Int4)sbp->scale_factor;
-            // new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
-            let gap_trigger = gap_trigger_raw_score(
-                GAP_TRIGGER_BIT_SCORE_NUCL,
-                &search_karlin_ref[context_idx].ungapped,
-            );
-            let cutoff = cutoff_score_for_ungapped_extension(gap_trigger, hit_saving_cutoff, 1.0);
-            cutoff_scores.push(cutoff);
-            hit_saving_cutoff_scores.push(hit_saving_cutoff);
-        }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:380-383
-        // ```c
-        // if (curr_cutoffs->x_dropoff_init == 0)
-        //    curr_cutoffs->x_dropoff = new_cutoff;
-        // else
-        //    curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
-        // ```
-        let mut x_dropoff_scores: Vec<i32> = Vec::with_capacity(cutoff_scores.len());
-        for ((cutoff, &x_dropoff_init), &valid) in cutoff_scores
-            .iter()
-            .zip(x_dropoff_init_ref)
-            .zip(context_valid_ref)
-        {
-            let x_dropoff = if !valid {
-                0
-            } else if x_dropoff_init == 0 {
-                *cutoff
-            } else {
-                x_dropoff_init
-            };
-            x_dropoff_scores.push(x_dropoff);
-        }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:408-412
-        // ```c
-        // curr_cutoffs->reduced_nucl_cutoff_score = (Int4)(0.8 * new_cutoff);
-        // ```
-        let mut reduced_cutoff_scores: Vec<i32> = Vec::with_capacity(cutoff_scores.len());
-        for (cutoff, &valid) in cutoff_scores.iter().zip(context_valid_ref) {
-            reduced_cutoff_scores.push(if valid {
-                (0.8 * (*cutoff as f64)) as i32
-            } else {
-                0
-            });
-        }
+        // The values depend on the context only (the gapped calculation's branch above: gap_trigger
+        // capped by cutoff_score_max), so the batch computes them once (`x_batch_cutoffs`).
+        let (cutoff_scores, hit_saving_cutoff_scores, x_dropoff_scores, reduced_cutoff_scores) = (
+            &x_batch_cutoffs.0,
+            &x_batch_cutoffs.1,
+            &x_batch_cutoffs.2,
+            &x_batch_cutoffs.3,
+        );
 
         // BLASTN debug: Log cutoff scores for this query-subject pair
         if blastn_debug {

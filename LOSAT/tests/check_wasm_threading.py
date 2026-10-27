@@ -181,6 +181,35 @@ def main():
                 assert data == reference, f"raw output differs: {row_id}/{kind}-n{n}"
                 validate_thread_evidence(log, n, "native" if kind == "native-serial" else kind)
         print(row_id, "-db raw parity + thread contract PASS", flush=True)
+    # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-300
+    # ```c++
+    #         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+    #             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    # ```
+    # LOSAT_X_QBATCHPAR: blastn's query batches searched ahead of the loop in slots. On wasm32 the
+    # loop's thread starts every slot's thread and the threads of each slot's pool (a WASI thread
+    # worker cannot start threads; utils/threading.rs `x_spawn_search_pool`). 32 pieces of LC738874
+    # (as LOSAT/tests/blastn_qbatchpar.rs) against LC738868, BATCH_SIZE=3000 (several batches), two
+    # slots: two pools of 2 threads at 4 threads, of 4 at 8. The output is the loop's (native, one
+    # thread), and the slots searched batches (`precomputed=`).
+    genome = "".join(line.strip() for line in (TESTS / "fasta/LC738874.fasta").read_text().splitlines()
+                     if not line.startswith(">"))
+    pieces = out / "fixtures" / "qbatchpar-pieces.fasta"
+    pieces.write_text("".join(f">q{i} piece {i * 8000}\n{genome[i * 8000:i * 8000 + 1500 + (i * 373) % 2400]}\n"
+                              for i in range(32)))
+    common = ["blastn", "-task", "megablast", "-query", pieces, "-subject", TESTS / "fasta/LC738868.fasta",
+              "-outfmt", "6", "-out", "{out}"]
+    batches = {"BATCH_SIZE": "3000"}
+    reference, _ = execute("qbatchpar/native-n1", [*prefixes["native"], *common, "-num_threads", "1"], batches)
+    for kind in ["native", "threaded"]:
+        for n in [4, 8]:
+            data, log = execute(f"qbatchpar/{kind}-n{n}", [*prefixes[kind], *common, "-num_threads", str(n)],
+                                {**batches, "LOSAT_X_QBATCHPARSLOTS": "2", "LOSAT_X_STATS": "1"})
+            assert data == reference, f"raw output differs: qbatchpar/{kind}-n{n}"
+            line = next((x for x in log.splitlines() if x.startswith("[X_STATS] QBATCHPAR ")), "")
+            stats = dict(field.split("=", 1) for field in line.split()[2:] if "=" in field)
+            assert int(stats.get("precomputed", 0)) > 0 and (stats.get("k"), stats.get("m")) == ("2", str(n // 2)), (kind, n, line)
+    print("qbatchpar slots raw parity PASS", flush=True)
     for program, query in [("blastn", "nuc1"), ("tblastx", "nuc1"), ("blastp", "aa1")]:
         common = [program, "-query", inputs[query], "-subject", inputs[query], "-outfmt", "6", "-out", "{out}"]
         for kind, prefix in prefixes.items():

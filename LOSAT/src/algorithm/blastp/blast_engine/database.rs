@@ -2353,7 +2353,7 @@ mod tests {
 
         /// EXPERIMENT (LOSAT_X_BPDBKEEP): `cut` with the switch's largest block.
         fn x_keep_cut(cut: u64) -> u64 {
-            if crate::seqdb::x_bp_db_small_blocks() {
+            if crate::seqdb::x_bp_db_keep() {
                 cut.min(super::super::x_db_keep::X_KEEP_BLOCK_BYTES)
             } else {
                 cut

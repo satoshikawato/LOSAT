@@ -44,7 +44,6 @@
 //! `LOSAT_X_BPDBKEEP` is a switch of the strict set: on unless it is `0`. It acts for every task of
 //! BLASTP with `-db`; the index check acts for every program that opens a database.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 
 use anyhow::Result;
@@ -348,19 +347,6 @@ where
         0,
     ) && pool.enabled()
     {
-        // EXPERIMENT (LOSAT_X_BPDBKEEP=2 or 3, diagnostics): the rounds of `search_blocks_of`.
-        if crate::seqdb::x_bp_db_keep_rounds() {
-            return x_search_rounds_kept(
-                db,
-                pool,
-                window,
-                block_bytes,
-                blocks_per_thread,
-                new_scratch,
-                process_subject,
-                sink,
-            );
-        }
         return x_search_window(
             db,
             pool,
@@ -392,87 +378,4 @@ where
         bytes = block.x_into_data();
     }
     Ok(())
-}
-
-// No NCBI counterpart: scheduling (a diagnostic); it changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPDBKEEP=2 or 3, diagnostics): the parallel stage of
-/// `x_search_blocks_kept` in the rounds of `search_blocks_of` (`blocks_per_thread` blocks per
-/// thread; every worker waits for the round's last block and its merge), with the kits.
-#[allow(clippy::too_many_arguments)]
-fn x_search_rounds_kept<S, K, P>(
-    db: &SeqDb,
-    pool: &SearchPool<'_>,
-    window: i32,
-    block_bytes: u64,
-    blocks_per_thread: usize,
-    new_scratch: &S,
-    process_subject: &K,
-    sink: &mut P,
-) -> Result<()>
-where
-    S: Fn() -> BlastpSubjectScratch + Sync,
-    K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
-    P: PrelimSink,
-{
-    let workers = pool.threads().max(1);
-    let round_blocks = workers.saturating_mul(blocks_per_thread).max(1);
-    let mut kits: Vec<Option<XKit>> = std::iter::repeat_with(|| None).take(workers).collect();
-    let mut next_ordinal = 0u32;
-    let mut diag_offset = window;
-    loop {
-        let mut round: Vec<(BlockRange, i32)> = Vec::with_capacity(round_blocks);
-        while round.len() < round_blocks {
-            let Some(range) = db.next_block(next_ordinal, block_bytes) else {
-                break;
-            };
-            round.push((range, diag_offset));
-            diag_offset = diag_offset_after(db, range, diag_offset, window);
-            next_ordinal = range.end_ordinal();
-        }
-        if round.is_empty() {
-            return Ok(());
-        }
-        let found: Vec<Mutex<Option<Result<Vec<BlastpSubjectResult>>>>> =
-            round.iter().map(|_| Mutex::new(None)).collect();
-        let next = AtomicUsize::new(0);
-        {
-            let (round, found, next) = (&round, &found, &next);
-            pool.install(|| {
-                rayon::scope(|scope| {
-                    for kit in kits.iter_mut().take(round.len()) {
-                        scope.spawn(move |_| {
-                            let kit = kit.get_or_insert_with(|| XKit {
-                                scratch: new_scratch(),
-                                bytes: Vec::new(),
-                            });
-                            loop {
-                                let index = next.fetch_add(1, Ordering::Relaxed);
-                                let Some(&(range, first_diag_offset)) = round.get(index) else {
-                                    break;
-                                };
-                                let result = x_search_block(
-                                    db,
-                                    range,
-                                    first_diag_offset,
-                                    kit,
-                                    process_subject,
-                                );
-                                *found[index].lock().unwrap_or_else(PoisonError::into_inner) =
-                                    Some(result);
-                            }
-                        });
-                    }
-                });
-            });
-        }
-        for slot in found {
-            let block_results = slot
-                .into_inner()
-                .unwrap_or_else(PoisonError::into_inner)
-                .expect("every block of the round is searched");
-            for mut subject_result in block_results? {
-                sink.add(&mut subject_result);
-            }
-        }
-    }
 }

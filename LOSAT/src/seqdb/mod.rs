@@ -86,30 +86,8 @@ pub(crate) fn x_dbidxread() -> XDbIdxRead {
 /// EXPERIMENT (LOSAT_X_BPDBKEEP): a strict-set switch, on unless it is `0`
 /// (`algorithm/blastp/blast_engine/database/x_db_keep.rs`).
 pub(crate) fn x_bp_db_keep() -> bool {
-    x_bp_db_keep_value().is_some()
-}
-
-/// EXPERIMENT (LOSAT_X_BPDBKEEP): whether the blocks of the parallel preliminary stage are cut to
-/// `X_KEEP_BLOCK_BYTES` (every value of the switch).
-pub(crate) fn x_bp_db_small_blocks() -> bool {
-    x_bp_db_keep()
-}
-
-/// EXPERIMENT (LOSAT_X_BPDBKEEP): whether the parallel preliminary stage searches the rounds of
-/// `search_blocks_of` with the kits instead of the window (the values 2 and 3, diagnostics).
-pub(crate) fn x_bp_db_keep_rounds() -> bool {
-    matches!(x_bp_db_keep_value(), Some(2 | 3))
-}
-
-/// EXPERIMENT (LOSAT_X_BPDBKEEP): whether a round of the cut blocks holds as many bytes as a round
-/// of the cut's blocks (the value 3, a diagnostic).
-pub(crate) fn x_bp_db_byte_rounds() -> bool {
-    x_bp_db_keep_value() == Some(3)
-}
-
-fn x_bp_db_keep_value() -> Option<usize> {
-    static VALUE: OnceLock<Option<usize>> = OnceLock::new();
-    *VALUE.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BPDBKEEP", 1..=3, 1))
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPDBKEEP"))
 }
 
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): the most sequences of a range of

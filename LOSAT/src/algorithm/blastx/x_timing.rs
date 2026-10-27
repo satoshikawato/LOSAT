@@ -187,6 +187,7 @@ fn mode() -> usize {
 #[inline]
 pub(crate) fn run(stage: Run, start: Option<Instant>) -> u64 {
     let ns = since(start);
+    crate::utils::xtiming::x_stamp(&format!("run:{}", stage as usize));
     if start.is_some() {
         RUN[stage as usize].fetch_add(ns, Ordering::Relaxed);
     }
@@ -269,6 +270,7 @@ impl SubjectWave {
 
 // No NCBI counterpart: adds one subject flow (`x_subject_flow::run`) to the run's counters.
 pub(crate) fn subject_flow(start: Option<Instant>, tasks: u64, (ahead, taken): (u64, u64)) {
+    crate::utils::xtiming::x_stamp("flow_end");
     if start.is_none() {
         return;
     }
@@ -286,6 +288,7 @@ pub(crate) fn subject_flow(start: Option<Instant>, tasks: u64, (ahead, taken): (
 // No NCBI counterpart: adds the time since `start` to a stage of this thread's batch mode.
 #[inline]
 pub(crate) fn batch(stage: Batch, start: Option<Instant>) {
+    crate::utils::xtiming::x_stamp(&format!("batch:{}", stage as usize));
     if start.is_some() {
         let ns = since(start);
         BATCH[mode()][stage as usize].fetch_add(ns, Ordering::Relaxed);

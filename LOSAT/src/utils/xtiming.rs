@@ -81,6 +81,23 @@ pub fn start() {
     }
 }
 
+/// PROBE (v4-A s17, LOSAT_X_S17STAMP with LOSAT_TIMING): prints `XSTAMP name us` (microseconds since
+/// the entry of `main`).
+pub fn x_stamp(name: &str) {
+    static ON: OnceLock<bool> = OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var_os("LOSAT_X_S17STAMP").is_some()) {
+        return;
+    }
+    if let Some(t) = START.get() {
+        eprintln!("XSTAMP {name} {}", t.elapsed().as_micros());
+    }
+}
+
+/// PROBE (v4-A s17): microseconds since the entry of `main` (0 without LOSAT_TIMING).
+pub fn x_since_us() -> u64 {
+    START.get().map_or(0, |t| t.elapsed().as_micros() as u64)
+}
+
 /// The clock at the start of an interval: `Some` only with `LOSAT_TIMING`.
 #[inline]
 pub fn clock() -> Option<Instant> {

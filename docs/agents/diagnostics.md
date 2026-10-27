@@ -3445,7 +3445,7 @@ Scheduling (each value computed by one thread with the original function; order 
   batch, not packed): `instructions:u` x1.000. The 22.3 MB of packed letters replace 89.3 MB. Before the reader
   packed in place of its copy, packing after it with `PackedNucleotide` cost x1.020 (one thread) and x1.098 (`-db`,
   16 threads) of the time (plan v4 line A10 session 19).
-- `LOSAT_X_BNQSLOTS=1` (BLASTN, every task, `-subject`; in the strict set since 2026-10-2x (perf/bn-q-slots,
+- `LOSAT_X_BNQSLOTS=1` (BLASTN, every task, `-subject`; in the strict set since 2026-10-27 (perf/bn-q-slots-packed,
   evidence at the end of this entry): on unless it is `0`) the `LOSAT_X_BNQDROP` store also where `LOSAT_X_QBATCHPAR`
   slots may run (`blastn/blast_engine/x_query_drop.rs`); with `=0` its rule refuses the store there and the records
   read before the search keep all their letters to the end of the search, as before. Where slots may run,
@@ -3458,8 +3458,8 @@ Scheduling (each value computed by one thread with the original function; order 
   WindowMasker, DUST, the lower-case masks, the encoding, a query chunk's cut), which drops them before its next
   record, so no slot holds its batch's letters at once. (Making a slot's letters when it started held nine batches'
   letters at once beside the packed store in dc-megablast of 15,600 cDNAs at 32 threads, and their freed space stayed
-  in the slots' arenas: peak `RssAnon` 748 -> 766 MiB, 740 -> 749 with `MALLOC_ARENA_MAX=1`.) The loop lends the batch it takes to the slot that may
-  still search it (`Store::lend`: any batch but the first while the slots may run, `Arc`-shared) until it has the
+  in the slots' arenas: peak `RssAnon` 748 -> 766 MiB, 740 -> 749 with `MALLOC_ARENA_MAX=1`.) The loop lends the
+  batch it takes to the slot that may still search it (`Store::lend`: any batch but the first while the slots may run, `Arc`-shared) until it has the
   batch's result, the slot's or its own search once no slot runs (`Queries::unlend`, right after
   `x_qbatch_par::Driver::take`). A lent batch the loop searches itself is held by the loop alone by then and drops
   its letters after the encoding; a batch a slot searched keeps them until the loop is done with it, and the records
@@ -3469,8 +3469,14 @@ Scheduling (each value computed by one thread with the original function; order 
   batch's take about 0.1 ms per million, while the pool's threads, waking for them while the slots hold the CPUs, took
   0.17 s in all at 16 threads against 0.003 s on one (blastn of 5,000 cDNAs). Without the lending (a prototype) a slot
   that started a batch after the loop took it out of the store found no records, was cancelled, and the plan queued
-  it again for ever while the loop waited for its result; the integration test runs with a deadline. Evidence: (w8,
-  to be filled in).
+  it again for ever while the loop waited for its result; the integration test runs with a deadline. Evidence (ws,
+  node 1, 2026-10-27, plan v4 line D sessions 19-21; the default against `=0` in one binary, order alternated, median
+  of the per-round ratios; `-subject` the first 3 Mb of D. melanogaster chromosome 2L; one sha per cell):
+  dc-megablast of 31,168 cDNAs at 32 threads peak `RssAnon` 341 -> 286 MiB (NCBI max RSS 313 MiB at one thread),
+  time x0.986 (0.960-0.997, 8 rounds); of 15,600 cDNAs at 32 threads 748 -> 729 MiB, x1.002 (0.966-1.028, 8; cycles
+  x1.001); at 16 threads 332 -> 304 MiB, x0.987; of 5,000 cDNAs at 16 threads 264 -> 260 MiB, x0.989; blastn of
+  4,000 / 5,000 cDNAs at 16 threads 217 -> 207 / 347 -> 338 MiB, x1.012 (cycles x0.999) / x1.004; of 31,168 cDNAs
+  at 16 / 32 threads 395 -> 396 / 522 -> 458 MiB, x0.993 / x0.999 (6 rounds each).
 - `LOSAT_X_GREEDYROWFUSE=1` (BLASTN megablast, the distances of the non-affine greedy alignment that `x_greedy_row` runs:
   every traceback, and the score-only calls the fused loop GREEDYFUSE declines; speed; in the strict set from the pull
   request that added it, 2026-10-24; `=0` runs `x_greedy_row_avx2`, the three passes) runs one distance in two passes per

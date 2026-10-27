@@ -1445,23 +1445,15 @@ pub fn build_ncbi_lookup(
 //         }
 //     }
 // ```
-/// EXPERIMENT (LOSAT_X_BPLUT): [`build_ncbi_lookup`] for
-/// BLASTP; with the switch the table is filled in place from the per-cell counts, in the same
-/// append order as the loop above and BlastAaLookupFinalize (x_lut_direct.rs), so the chains of
-/// the reference builder are never held.
+/// [`build_ncbi_lookup`] for BLASTP: the table is filled in place from the per-cell counts, in
+/// the same append order as the loop above and BlastAaLookupFinalize (x_lut_direct.rs), so the
+/// chains of the reference builder are never held.
 pub(crate) fn x_bp_build_ncbi_lookup(
     queries: &[Vec<QueryFrame>],
     threshold: i32,
-    karlin_params: &crate::stats::KarlinParams,
     check_ideal: bool,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    x_lut_direct::x_bp_build_lookup(
-        x_lut_direct::x_bplut_on(),
-        queries,
-        threshold,
-        karlin_params,
-        check_ideal,
-    )
+    x_lut_direct::x_bp_build_lookup(queries, threshold, check_ideal)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:356-360

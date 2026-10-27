@@ -1,8 +1,7 @@
 //! BLASTP `-culling_limit` (`src/algorithm/blastp/blast_engine/culling.rs`) on whole searches:
 //! the option is read as NCBI reads it (non-negative, hexadecimal too, 0 is no culling), the
 //! search with it culls (the preliminary writer and the pipe of `hspfilter_culling.c`), and the
-//! report does not depend on the thread count, on the subject source (`-subject` or `-db`) or on
-//! the representation of the preliminary lists (`LOSAT_X_BPPCOMPACT`). That the bytes equal NCBI's
+//! report does not depend on the thread count or on the subject source (`-subject` or `-db`). That the bytes equal NCBI's
 //! is the business of the parity probe (`O3b`); the unit tests of `culling.rs` pin the key, the
 //! length of the tree, the shape of the final hit list and the order of the pipe.
 //!
@@ -175,8 +174,7 @@ fn the_limit_culls_the_related_subjects() {
     assert_eq!(rows(&subject_search(&["-culling_limit", "5"], &[])), 5);
 }
 
-// The report does not depend on the thread count, on the representation of the preliminary
-// lists, or on the subject source.
+// The report does not depend on the thread count or on the subject source.
 #[test]
 fn the_report_is_the_same_at_every_thread_count_and_source() {
     let db = Db::new();
@@ -185,22 +183,13 @@ fn the_report_is_the_same_at_every_thread_count_and_source() {
         assert_eq!(rows(&reference), limit.parse::<usize>().unwrap());
         for threads in ["1", "4"] {
             let args = ["-culling_limit", limit, "-num_threads", threads];
-            for env in [
-                &[][..],
-                &[("LOSAT_X_BPPCOMPACT", "0")][..],
-                &[("LOSAT_X_BPPCOMPACT", "shadow")][..],
-            ] {
-                let subject = subject_search(&args, env);
-                assert_eq!(
-                    subject.stdout, reference.stdout,
-                    "{limit} -subject {threads} {env:?}"
-                );
-                let database = db_search(&db, &args, env);
-                assert_eq!(
-                    database.stdout, reference.stdout,
-                    "{limit} -db {threads} {env:?}"
-                );
-            }
+            let subject = subject_search(&args, &[]);
+            assert_eq!(
+                subject.stdout, reference.stdout,
+                "{limit} -subject {threads}"
+            );
+            let database = db_search(&db, &args, &[]);
+            assert_eq!(database.stdout, reference.stdout, "{limit} -db {threads}");
         }
     }
 }

@@ -19,7 +19,6 @@ LOSAT_X_BNTBRANGE	blastn	conditional	gap	required	-db only, sequences of 1 Mi ba
 LOSAT_X_BNUNGAPCOUNT	blastn	always			Exact ungapped extension with step counts worked out first
 LOSAT_X_BPCLUT	blastp	conditional	required	required	-task blastp-fast only; exact blastp builds no compressed table
 LOSAT_X_BPCLUTSCANBF	blastp	conditional	required	required	-task blastp-fast, fused loop on the flat compressed table with >= BPCLUTSCANBFMIN used cells per 10,000 (built-in 500, 0 on wasm32; a short query keeps the PV branch natively); reference compressed table never
-LOSAT_X_BPCOMPOREUSE	blastp	always			Subject composition kept in SEG cache entry, reused by redo
 LOSAT_X_BPDBCUT	blastp	conditional	required	required	-db only, 2+ threads; DB below 4 x threads MiB (Swiss-Prot keeps 1 MiB blocks)
 LOSAT_X_BPDEFER	blastp	platform			only where BPDIAG AVX2 batch runs (x86 AVX2)
 LOSAT_X_BPDIAG	blastp	platform			x86 AVX2 only; elsewhere per-hit loop runs
@@ -34,11 +33,8 @@ LOSAT_X_BPLISTEDLEAN	blastp	conditional	required	gap	-db searches only (every ta
 LOSAT_X_BPLKDROP	blastp	conditional	required	gap	the lookup table dropped before the redo; kept only in the block search of BPQBLOCK at 2+ threads by a block whose table a later block's build takes (all but the last two blocks with BPLKPAHEAD, all but the last without); ref gap: needs a block search of 3+ blocks at 2+ threads (the CI fixtures make at most 2); tests/blastp_redo_memory.rs reaches it
 LOSAT_X_BPLKPAHEAD	blastp	conditional	required	required	only in BPQBLOCK block search (>50,000 query letters, 2+ blocks, supported outfmt), more than one thread
 LOSAT_X_BPLKPFLAT	blastp	conditional	required	required	-task blastp-fast and more than one thread
-LOSAT_X_BPLKREUSE	blastp	conditional	required	required	exact blastp (BPLUT) in BPQBLOCK block search (>50,000 query letters) where no table is built ahead: one thread (or BPLKPAHEAD=0); ref = block search at 2+ threads (BPLKPAHEAD builds ahead)
-LOSAT_X_BPLUT	blastp	always			Default (non-compressed) lookup table filled in place from per-cell counts
+LOSAT_X_BPLKREUSE	blastp	conditional	required	required	exact blastp in BPQBLOCK block search (>50,000 query letters) where no table is built ahead: one thread (or BPLKPAHEAD=0); ref = block search at 2+ threads (BPLKPAHEAD builds ahead)
 LOSAT_X_BPMASKED	blastp	conditional	required	required	x86-64 AVX2, where BPDEFER deferred calls run; tables with >=2.5 hits per used cell (BPMASKEDMIN 250) take it, fewer take the deferred calls (short queries); never blastp-fast (no AVX2 batches on the compressed table)
-LOSAT_X_BPPCOMPACT	blastp	always			Preliminary HSPs kept as 64-byte elements instead of 168-byte
-LOSAT_X_BPPFREE	blastp	always			Preliminary hit lists give back room; serial redo frees each list
 LOSAT_X_BPQBLOCK	blastp	conditional	required	required	outfmt 6 only (other formats need FMT/SA/XML switches), >50,000 query letters, 2+ blocks, no -query_loc, no refusals
 LOSAT_X_BPQBLOCKFMT	blastp	conditional	required	required	outfmt 0 or 7 only, with BPQBLOCK rules (>50,000 letters, 2+ blocks); title checks
 LOSAT_X_BPQBLOCKSA	blastp	conditional	gap	required	outfmt 8/9/11/12 only, with BPQBLOCK rules (>50,000 letters, 2+ blocks); -db titles must be plain; new gap: needs outfmt 8/9/11/12 with a query > 50,000 letters in 2+ blocks
@@ -46,17 +42,13 @@ LOSAT_X_BPQBLOCKWEB	blastp	conditional	gap	gap	run_local only (Web ABI v2, libra
 LOSAT_X_BPQBLOCKXML	blastp	conditional	gap	required	outfmt 5 only, with BPQBLOCK rules; fallback if writer would refuse; new gap: needs outfmt 5 with a query > 50,000 letters in 2+ blocks
 LOSAT_X_BPQBLOCKXML2	blastp	conditional	gap	required	outfmt 13, 14, 15 or 16, with BPQBLOCK rules; fallback if the writer or the taxonomy database would refuse (-db: titles, taxids, taxdb_may_refuse); new gap: needs outfmt 13 to 16 with a query > 50,000 letters in 2+ blocks
 LOSAT_X_BPREDODBSUBJ	blastp	always			redo reads each match's subject from the database; every -db run (-subject keeps no listed copy)
-LOSAT_X_BPREDOFIT	blastp	always			Composition-based redo HSP lists allocated at exact size
 LOSAT_X_BPREDOLPT	blastp	conditional	required	required	only with BPREDOPAR, more than one thread, window of 2+ jobs
 LOSAT_X_BPREDOPAR	blastp	conditional	required	required	more than one thread and at least two matches
 LOSAT_X_BPREDOWINEXPAND	blastp	always			acts wherever BPREDOPAR's windowed redo runs (its sides are BPREDOPAR's)
-LOSAT_X_BPSCANBF	blastp	always			Branch-free finding of lookup cells with hits in fused loop
-LOSAT_X_BPSEED	blastp	always			Fused two-hit seed stage: scan and diagonal test in one loop
 LOSAT_X_BPSEGWIN	blastp	conditional	gap	required	only where BPREDOPAR's windowed redo runs (more than one thread, at least two matches) and the store holds 4,096 entries (the switch's value) or more after a window; new gap: the CI fixtures' stores stay below 4,096 entries; tests/blastp_redo_memory.rs reaches it with LOSAT_X_BPSEGWIN=2
 LOSAT_X_BPSUBJMETA	blastp	conditional	required	gap	-subject with query-block path (BPQBLOCK: >50,000 query letters, several blocks, supported outfmt); not -db; ref gap: needs blastp -db with a query > 50,000 letters, outfmt 6, 2+ blocks
 LOSAT_X_BPSUBJRUN	blastp	conditional	required	required	-subject only, 2+ threads and more than one subject; not -db, not 1 thread
-LOSAT_X_BPUNGAP	blastp,blastx	always			Flat BLOSUM62 score table for ungapped extension walks
-LOSAT_X_BPUNGAPSENT	blastp	conditional	required	required	word size 3 with the fused loop (default blastp); blastp-fast (other word sizes) and subjects with a code >= 32 run the BPUNGAP closure
+LOSAT_X_BPUNGAPSENT	blastp	conditional	required	required	word size 3 with the fused loop (default blastp); blastp-fast (other word sizes) and subjects with a code >= 32 run the plain closure (`extend_two_hit_blosum62`)
 LOSAT_X_BXBATCH	blastx	conditional	required	required	2+ threads, several query batches; at 4 threads (ci_fast) only the BATCH_SIZE=1 rows db.sa.arch.bx.batch1 (9 batches) reach the new side
 LOSAT_X_BXBUILDPAR	blastx	conditional	gap	required	where BXUNITCAP caps (a batch of the capped batch flow, a chunk of the capped chunk waves): the unit's lookup table built on ceil(threads / K) tasks; ref = every other build; new gap: needs 9+ threads or LOSAT_X_BXUNITCAP=k below the thread count (tests/blastx_unit_cap.rs covers it)
 LOSAT_X_BXCAPFILL	blastx	conditional	gap	required	where BXUNITCAP caps (more threads than K, BXDIAGKEEP on; with the fill no task rule); ref = every other call of the cap's rule; new gap: needs 9+ threads or LOSAT_X_BXUNITCAP=k below the thread count (tests/blastx_unit_cap.rs covers it)

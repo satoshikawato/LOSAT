@@ -1,22 +1,18 @@
-//! blastp's redone HSP lists with `LOSAT_X_BPREDOFIT` (`src/algorithm/blastp/x_redo_fit.rs`) on
-//! whole searches.
+//! blastp's redone HSP lists (`src/algorithm/blastp/x_redo_fit.rs`) on whole searches.
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`): it is on by default, unless its
-//! variable is `0`. With it on, the
-//! composition-based redo builds each redone HSP list with room for exactly its alignments. Every
-//! test states the default it runs with: the reference is the search of all queries with the
-//! switch off (`LOSAT_X_BPQBLOCK=0 LOSAT_X_BPREDOFIT=0`), and the search with the switch on is the
-//! default (with `LOSAT_X_BPQBLOCK=0` where one line per search is counted);
-//! `LOSAT_X_BPREDOFIT=0` gives no line. These tests
-//! compare the reports, alone and with the block search of `LOSAT_X_BPQBLOCK`, at one and four
-//! threads, and check from the
+//! The composition-based redo builds each redone HSP list with room for exactly its alignments.
+//! Every test states the default it runs with: the reference is the one-thread search of all
+//! queries (`LOSAT_X_BPQBLOCK=0`, where one line per search is counted). These tests compare the
+//! reports, alone and with the block search of `LOSAT_X_BPQBLOCK`, at one and four threads, with
+//! the reference (that the reports equal NCBI's is the business of the frozen fixtures), and check
+//! from the
 //! `[TIMING] x_bpredofit: lists=<n> hsps=<m>` lines that lists were built that way, not only that
 //! the report is equal.
 //! The switch acts on each query's lists, so three queries of the fixture are enough (`queries`),
 //! each its own query batch (`BATCH`); the block test sets the blocks' letters so that there are
 //! two and three blocks. `blastp_redo_par.rs` runs all the fixture's queries (batches of 3,000
-//! letters) at one and four threads with the switch on by default: a query without a preliminary
-//! list and batches of many queries.
+//! letters) at one and four threads: a query without a preliminary list and batches of many
+//! queries.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:321-356
 //! ```c
@@ -36,7 +32,6 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-const SWITCH_OFF: (&str, &str) = ("LOSAT_X_BPREDOFIT", "0");
 const BLOCKS_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCK", "0");
 /// Each query its own batch: the three queries of `queries` have 629, 944 and 918 letters.
 const BATCH: (&str, &str) = ("BATCH_SIZE", "500");
@@ -127,21 +122,12 @@ fn blastp(
 }
 
 #[test]
-fn fitted_redone_lists_give_the_reports_of_pushed_lists() {
+fn fitted_redone_lists_give_the_reports_of_the_one_thread_search() {
     let query = queries("reports");
     for outfmt in ["6", "0"] {
+        let (reference, _) = blastp(&query, 1, &[BATCH, BLOCKS_OFF], &["-outfmt", outfmt]);
+        assert!(!reference.is_empty(), "the queries have a report");
         for threads in [1, 4] {
-            let (reference, reference_fitted) = blastp(
-                &query,
-                threads,
-                &[BATCH, BLOCKS_OFF, SWITCH_OFF],
-                &["-outfmt", outfmt],
-            );
-            assert!(!reference.is_empty(), "the queries have a report");
-            assert!(
-                reference_fitted.is_empty(),
-                "no line with the switch off: {reference_fitted:?}"
-            );
             let vars = &[BATCH, BLOCKS_OFF][..];
             let (report, fitted) = blastp(&query, threads, vars, &["-outfmt", outfmt]);
             assert!(
@@ -165,13 +151,8 @@ fn fitted_redone_lists_give_the_reports_of_pushed_lists() {
 #[test]
 fn fitted_redone_lists_in_query_blocks_give_the_rows_of_the_search_of_all_queries() {
     let query = queries("blocks");
+    let (reference, _) = blastp(&query, 1, &[BATCH, BLOCKS_OFF], &["-outfmt", "6"]);
     for threads in [1, 4] {
-        let (reference, _) = blastp(
-            &query,
-            threads,
-            &[BATCH, BLOCKS_OFF, SWITCH_OFF],
-            &["-outfmt", "6"],
-        );
         // Blocks of 1,500 letters (BDT62583.1 and BDT62584.1, two batches, then BDT62585.1), as the
         // default blocks of 50,000 letters hold several batches; and one batch per block.
         for (vars, blocks) in [

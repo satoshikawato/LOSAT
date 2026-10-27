@@ -11,7 +11,7 @@
 //! `LOSAT_X_BPQBLOCK` and blastp-fast in blocks of one batch (there also with the switch off at
 //! four threads); a search with
 //! `-max_target_seqs 1`, where the early termination test ends matches; one query; the release of
-//! the preliminary lists (`LOSAT_X_BPPFREE`, `LOSAT_X_BPPCOMPACT`) and pairwise output;
+//! the preliminary lists and pairwise output;
 //! small windows (`LOSAT_X_BPREDOPARWINDOW=1`) that end inside queries and leave out the matches
 //! the test has ended before them, at two and eight threads, and in one search of all queries with
 //! the jobs largest first at four; and the windows that expand the compact lists as they reach
@@ -125,7 +125,7 @@ impl RedoPar {
 }
 
 /// What one run printed: the report, the counts of each `[TIMING] x_bpredopar:` line (one per
-/// search the path ran), the lists `LOSAT_X_BPPFREE` freed (`[TIMING] x_bppfree:`, summed), and
+/// search the path ran), the lists the redo freed (`[TIMING] x_bppfree:`, summed), and
 /// standard error.
 struct Run {
     stdout: Vec<u8>,
@@ -350,11 +350,7 @@ fn early_termination_ends_the_matches_it_ends_in_the_one_thread_redo() {
 fn released_lists_and_pairwise_reports_are_unchanged() {
     let query = fixture("MeenMJNV.faa");
     for (vars, args, lpt) in [
-        (
-            vec![("LOSAT_X_BPPFREE", "1"), ("LOSAT_X_BPPCOMPACT", "1")],
-            ["-evalue", "0.001", "-outfmt", "6"],
-            true,
-        ),
+        (vec![], ["-evalue", "0.001", "-outfmt", "6"], true),
         (vec![], ["-evalue", "0.001", "-outfmt", "0"], false),
     ] {
         let reference = blastp(&query, 1, &vars, &args);
@@ -382,7 +378,8 @@ fn released_lists_and_pairwise_reports_are_unchanged() {
 /// of whose queries hit) more matches than a window of one job per thread holds, so with
 /// `-max_target_seqs 1` the test ends matches in later windows than the one that fills the heaps.
 const SMALL_WINDOW_ARGS: [&str; 6] = ["-evalue", "10", "-max_target_seqs", "1", "-outfmt", "6"];
-const RELEASE: [(&str, &str); 2] = [("LOSAT_X_BPPFREE", "1"), ("LOSAT_X_BPPCOMPACT", "1")];
+/// The variables of the release tests: none, the lists are released by default.
+const RELEASE: [(&str, &str); 0] = [];
 
 /// Windows of one job per thread end inside queries; the matches that the test has ended before a
 /// window are not computed; the preliminary lists are released after their last match. The
@@ -458,12 +455,12 @@ fn small_windows_in_one_search_of_all_queries_give_the_one_thread_report() {
 }
 
 /// `LOSAT_X_BPREDOWINEXPAND` (a switch of the strict set, so on in the searches above with the
-/// switch at more than one thread): the windows expand the compact preliminary lists of
-/// `LOSAT_X_BPPCOMPACT` as they reach them instead of every list before the redo
+/// switch at more than one thread): the windows expand the compact preliminary lists as they
+/// reach them instead of every list before the redo
 /// (`src/algorithm/blastp/x_redo_par.rs`, `XExpandAhead`). `=0` expands every list first.
 const WIN_EXPAND_OFF: (&str, &str) = ("LOSAT_X_BPREDOWINEXPAND", "0");
 
-/// The lists `LOSAT_X_BPPCOMPACT` expanded in a run (`[TIMING] x_bppcompact: expanded_lists=`,
+/// The compact lists expanded in a run (`[TIMING] x_bppcompact: expanded_lists=`,
 /// summed).
 fn expanded_lists(stderr: &str) -> usize {
     stderr

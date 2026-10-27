@@ -5,15 +5,15 @@
 //! The switch is in the strict set (`src/utils/xswitch.rs`), but every run here names it (see
 //! `PREVIOUS_DEFAULT`). It acts in the block search of `LOSAT_X_BPQBLOCK` with more than one
 //! thread: for blastp-fast where `LOSAT_X_BPLKPFLAT` acts on the flat table of `LOSAT_X_BPCLUT`,
-//! and for exact blastp where its table is built in place (`LOSAT_X_BPLUT`, outside
-//! `LOSAT_DIAGNOSTICS`); these are in the strict set too, so "off" for any of them is `=0`. These
+//! and for exact blastp, whose table is built in place outside `LOSAT_DIAGNOSTICS`; the switches
+//! of the flat table are in the strict set too, so "off" for any of them is `=0`. These
 //! tests compare the reports, standard error and exit codes with the switch off and on, with
 //! `-subject` and `-db`, and read the `[X_STATS] BPLKPAHEAD` line of the run with the switch on
 //! (printed with `LOSAT_X_STATS`, when a counter is not zero) at exit: `blocks` (blocks searched
 //! where the switch acts), `prebuilt` (blocks that took values built ahead), `dropped` (builds
 //! ahead that gave none). That the values built ahead are the values the block builds itself is a
 //! unit test of `x_lookup_ahead.rs`. Every run states `LOSAT_X_BPQBLOCK`, and
-//! `LOSAT_X_BPCLUT` and `LOSAT_X_BPLKPFLAT` (blastp-fast) or `LOSAT_X_BPLUT` (exact blastp),
+//! `LOSAT_X_BPCLUT` and `LOSAT_X_BPLKPFLAT` (blastp-fast),
 //! itself, so that the tests do not depend on the defaults of the strict set. Each test writes its
 //! files to a directory of its own.
 //!
@@ -246,7 +246,7 @@ const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 /// Where the switch acts: the block search with the pool's build of the flat table.
 const ACTS: [(&str, &str); 2] = [("LOSAT_X_BPCLUT", "1"), ("LOSAT_X_BPLKPFLAT", "1")];
 /// Where the switch acts for exact blastp: the block search with the table built in place.
-const EXACT_ACTS: [(&str, &str); 1] = [("LOSAT_X_BPLUT", "1")];
+const EXACT_ACTS: [(&str, &str); 0] = [];
 /// Both tasks with the variables under which the switch acts for them.
 const TASKS: [(&str, &[(&str, &str)]); 2] = [("blastp-fast", &ACTS), ("blastp", &EXACT_ACTS)];
 /// The composition-based redo's nested scopes (redo windows) run beside the build ahead.
@@ -461,11 +461,10 @@ fn the_switch_does_not_act_without_the_pools_flat_table() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-// Exact blastp where its table is not built in place by the pool's search (one thread,
-// `LOSAT_X_BPLUT=0`, which builds the reference builder's table, and `LOSAT_DIAGNOSTICS`, whose
-// reference builder prints its phases in order): the switch changes nothing and the run prints no
-// `[X_STATS] BPLKPAHEAD` line (`XAaSpares::x_applies`: the in-place build only). The flat table's
-// switches do not decide it.
+// Exact blastp where its table is not built in place by the pool's search (one thread, and
+// `LOSAT_DIAGNOSTICS`, whose reference builder prints its phases in order): the switch changes
+// nothing and the run prints no `[X_STATS] BPLKPAHEAD` line (`XAaSpares::x_applies`: the in-place
+// build only). The flat table's switches do not decide it.
 #[test]
 fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
     let dir = test_dir("exact-off");
@@ -473,11 +472,9 @@ fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     let queries = four_queries(&dir);
     let block = ("LOSAT_X_BPQBLOCK", "1");
-    let lut = ("LOSAT_X_BPLUT", "1");
     for (threads, base) in [
-        (1, vec![block, lut]),
-        (4, vec![block, ("LOSAT_X_BPLUT", "0")]),
-        (4, vec![block, lut, ("LOSAT_DIAGNOSTICS", "1")]),
+        (1, vec![block]),
+        (4, vec![block, ("LOSAT_DIAGNOSTICS", "1")]),
     ] {
         let (off, on) = same_runs(&dir, "blastp", &queries, &subject, threads, &base, &[]);
         assert_eq!(off.searches(), 4, "{base:?}");
@@ -488,12 +485,7 @@ fn the_switch_does_not_act_for_exact_blastp_without_the_in_place_table() {
         );
     }
     // Without the flat table's switches the switch still acts for exact blastp.
-    let base = [
-        block,
-        lut,
-        ("LOSAT_X_BPCLUT", "0"),
-        ("LOSAT_X_BPLKPFLAT", "0"),
-    ];
+    let base = [block, ("LOSAT_X_BPCLUT", "0"), ("LOSAT_X_BPLKPFLAT", "0")];
     let (off, on) = same_runs(&dir, "blastp", &queries, &subject, 4, &base, &[]);
     assert_built_ahead(
         &on.printed("BPLKPAHEAD"),

@@ -147,32 +147,29 @@ fn assert_engaged(reach: &reach_support::Reach, what: &str) {
     assert!(sides.0, "{what}: the runs were not searched: {sides:?}");
 }
 
-// blastp and blastp-fast, the reference loops (the two-hit loop of
-// `blastp_for_each_offset_pair` and the reference compressed scan; `LOSAT_X_BPSEED=0`, and
-// `LOSAT_X_BPCLUT=0` for blastp-fast) and the fused loop of `LOSAT_X_BPSEED` (the default; with
-// the flat table of `LOSAT_X_BPCLUT` for blastp-fast): one search of all queries, run by the
-// switch, each kernel at 2 or 4 threads.
+// blastp and blastp-fast, the fused loops (the default; blastp-fast with the reference compressed
+// table under `LOSAT_X_BPCLUT=0` and with the flat table of `LOSAT_X_BPCLUT` by default): one
+// search of all queries, run by the switch, each kernel at 2 or 4 threads.
 #[test]
 fn search_of_all_queries_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     for (task, kernel, base, threads) in [
-        ("blastp", "reference", &[("LOSAT_X_BPSEED", "0")][..], 2),
         ("blastp", "fused", &[][..], 4),
         (
             "blastp-fast",
-            "reference",
-            &[("LOSAT_X_BPSEED", "0"), ("LOSAT_X_BPCLUT", "0")][..],
+            "reference table",
+            &[("LOSAT_X_BPCLUT", "0")][..],
             4,
         ),
-        ("blastp-fast", "fused", &[][..], 2),
+        ("blastp-fast", "flat table", &[][..], 2),
     ] {
         let reach = same_reports(task, &subject, threads, base, &[], "6");
         assert_engaged(&reach, &format!("{task} {kernel} threads {threads}"));
     }
 }
 
-// One hit (`-window_size 0`, the one-hit loop of `blastp_for_each_offset_pair`; `LOSAT_X_BPSEED`
+// One hit (`-window_size 0`, the one-hit loop of `blastp_for_each_offset_pair`; the fused loop
 // does not act at window 0): an entry left by an earlier subject of a run reads as a cleared one
 // there too (`diff >= 0`).
 #[test]

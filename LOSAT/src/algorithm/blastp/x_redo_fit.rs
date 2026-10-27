@@ -1,5 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BPREDOFIT): blastp's redone HSP lists hold no more memory than their HSPs
-//! need.
+//! blastp's redone HSP lists hold no more memory than their HSPs need.
 //!
 //! The composition-based redo builds a new HSP list for every subject of a query that it
 //! redoes, from the alignments it found (`kappa.rs` `hsplist_from_distinct_alignments`, NCBI's
@@ -11,14 +10,12 @@
 //! 50,404 letters) against the human proteome kept 78,337 redone HSPs in 52.6 MB of vectors
 //! (massif, one thread, `LOSAT_X_BPQBLOCK=50000`).
 //!
-//! With the switch on, a list is built with room for exactly the alignments it is made from, and
+//! A list is built with room for exactly the alignments it is made from, and
 //! a list from which HSPs were removed afterwards (`reap_contained_hits`, `evaluate_and_purge`)
 //! gives back their room (`Vec::shrink_to_fit`) before it is kept. Neither changes a value: the
 //! list holds the same HSPs in the same order, and only the vector's capacity differs.
 //!
-//! `LOSAT_X_BPREDOFIT` is a switch of the strict set (`utils/xswitch.rs`): on unless it is `0`.
-//! With `LOSAT_TIMING=1` each search
-//! of a query set prints `[TIMING] x_bpredofit: lists=<n> hsps=<m>` (the redone lists kept with
+//! With `LOSAT_TIMING=1` each search of a query set prints `[TIMING] x_bpredofit: lists=<n> hsps=<m>` (the redone lists kept with
 //! fitted room, and their HSPs).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:321-356
@@ -35,22 +32,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::core::composition_adjustment::redo_alignment::BlastCompoAlignment;
 
-// No NCBI counterpart: reads the LOSAT_X_BPREDOFIT switch once; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BPREDOFIT): a strict-set switch, on unless it is `0`.
-pub(crate) fn x_bp_redo_fit() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPREDOFIT"))
-}
-
 /// The redone lists kept with fitted room since the last timing line, and their HSPs.
 static FITTED_LISTS: AtomicUsize = AtomicUsize::new(0);
 static FITTED_HSPS: AtomicUsize = AtomicUsize::new(0);
 
 // No NCBI counterpart: counts the alignments of the list `s_HSPListFromDistinctAlignments` walks,
 // to size the vector; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPREDOFIT): the number of alignments in the linked list.
+/// The number of alignments in the linked list.
 pub(crate) fn x_alignment_count(mut align: Option<&BlastCompoAlignment>) -> usize {
     let mut count = 0;
     while let Some(current) = align {
@@ -61,7 +49,7 @@ pub(crate) fn x_alignment_count(mut align: Option<&BlastCompoAlignment>) -> usiz
 }
 
 // No NCBI counterpart: gives back unused room of a vector; the same elements in the same order.
-/// EXPERIMENT (LOSAT_X_BPREDOFIT): the kept list's vector without spare room, and counted.
+/// The kept list's vector without spare room, and counted.
 pub(crate) fn x_fit_redone_hsps<T>(hsps: &mut Vec<T>) {
     if hsps.len() < hsps.capacity() {
         hsps.shrink_to_fit();
@@ -71,16 +59,13 @@ pub(crate) fn x_fit_redone_hsps<T>(hsps: &mut Vec<T>) {
 }
 
 // No NCBI counterpart: a LOSAT timing line.
-/// EXPERIMENT (LOSAT_X_BPREDOFIT): with the switch on, the timing line of the lists kept since
-/// the last one.
+/// The timing line of the lists kept since the last one.
 pub(crate) fn x_bp_redo_fit_print_timing() {
-    if x_bp_redo_fit() {
-        eprintln!(
-            "[TIMING] x_bpredofit: lists={} hsps={}",
-            FITTED_LISTS.swap(0, Ordering::Relaxed),
-            FITTED_HSPS.swap(0, Ordering::Relaxed)
-        );
-    }
+    eprintln!(
+        "[TIMING] x_bpredofit: lists={} hsps={}",
+        FITTED_LISTS.swap(0, Ordering::Relaxed),
+        FITTED_HSPS.swap(0, Ordering::Relaxed)
+    );
 }
 
 #[cfg(test)]

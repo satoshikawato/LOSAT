@@ -170,7 +170,7 @@ impl BlastpHsp {
 }
 
 // No NCBI counterpart: NCBI keeps one BlastHSP type in every HSP list. LOSAT's preliminary
-// hit lists may hold a smaller element (EXPERIMENT LOSAT_X_BPPCOMPACT, `x_prelim_compact.rs`);
+// hit lists hold a smaller element (`x_prelim_compact.rs`);
 // this trait gives the hit-list helpers the fields they read, in `BlastpHsp`'s convention.
 /// The fields of an HSP that the HSP-list and hit-list helpers read: the E-value, the raw score
 /// and the offsets of `ScoreCompareHSPs`.

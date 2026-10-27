@@ -41,8 +41,7 @@
 //!    on the heaps of the query's batch; then the match's error, if it has one (the first error of
 //!    a match that the test does not end is the one the one-thread loop reports); then
 //!    `BlastCompo_HeapWouldInsert` / `BlastCompo_HeapInsert` on the query's heap. A query's
-//!    preliminary list is released as the one-thread loop releases it (`LOSAT_X_BPPFREE`,
-//!    `LOSAT_X_BPPCOMPACT`), after the replay of the window that holds its last match.
+//!    preliminary list is released as the one-thread loop releases it (`x_prelim_free.rs`), after the replay of the window that holds its last match.
 //!
 //! The matches the test ends. A heap's `ecutoff` is fixed when it is made; `n` only grows (the redo
 //! only inserts; `pop` comes after it); and a heap filled to its cutoff (`n >= heapThreshold` and
@@ -106,8 +105,8 @@
 //! the `[TIMING] x_bpredopar:` line ends with `lpt_windows=<windows computed so>`.
 //!
 //! `LOSAT_X_BPREDOWINEXPAND` (a switch of the strict set, on by default from the pull request that
-//! added it; it acts only where this path runs, with the compact lists of
-//! `LOSAT_X_BPPCOMPACT`) leaves each compact preliminary list (`x_prelim_compact.rs`) as it is until
+//! added it; it acts only where this path runs) leaves each compact preliminary list
+//! (`x_prelim_compact.rs`) as it is until
 //! a window reaches it, instead of expanding the lists of all queries before the redo: before each
 //! window the lists from the first one not expanded are expanded in query order, by the same
 //! `x_expand_hit_list`, until the queries expanded from the window's start hold more jobs than a
@@ -315,7 +314,7 @@ struct XCounts {
 }
 
 /// The matches of one query's preliminary hit list: its lists with HSPs. A compact list
-/// (`LOSAT_X_BPPCOMPACT`) has the lists, and the HSPs per list, of its expansion.
+/// (`x_prelim_compact.rs`) has the lists, and the HSPs per list, of its expansion.
 fn x_list_matches<H>(list: &BlastpHitList<H>) -> usize {
     list.hsplist_array
         .iter()
@@ -576,7 +575,7 @@ fn x_local_match(lists: &[Option<BlastpHitList>], matched: XMatch) -> &BlastpHsp
         .hsplist_array[matched.position]
 }
 
-/// EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the compact preliminary lists (`LOSAT_X_BPPCOMPACT`) that
+/// EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the compact preliminary lists (`x_prelim_compact.rs`) that
 /// the windows expand as they reach them, in query order.
 pub(crate) struct XExpandAhead<'a> {
     /// A query's compact list until it is expanded into its preliminary hit list.
@@ -1063,17 +1062,15 @@ fn x_replay(
 //                 } else {
 // ```
 /// The windows of a search, each computed (`compute`, with the lists and the heaps as the replay
-/// of the windows before left them) and then replayed in stream order into `heaps`. With
-/// `release`, a query's preliminary list is released after the replay of the window that holds
-/// its last match. With `expand` (LOSAT_X_BPREDOWINEXPAND), the compact lists are expanded ahead
-/// of each window.
+/// of the windows before left them) and then replayed in stream order into `heaps`. A query's
+/// preliminary list is released after the replay of the window that holds its last match. With
+/// `expand` (LOSAT_X_BPREDOWINEXPAND), the compact lists are expanded ahead of each window.
 #[allow(clippy::too_many_arguments)]
 fn x_redo_windows(
     lists: &mut [Option<BlastpHitList>],
     heaps: &mut [BlastCompoHeap],
     query_batches: &[Range<usize>],
     limits: XWindowLimits,
-    release: bool,
     timing: bool,
     mut expand: Option<&mut XExpandAhead<'_>>,
     compute: &mut dyn FnMut(
@@ -1151,15 +1148,13 @@ fn x_redo_windows(
                 caps[q_idx] = limits.at_risk_jobs;
             }
         }
-        // EXPERIMENT (LOSAT_X_BPPFREE / LOSAT_X_BPPCOMPACT): nothing reads a query's preliminary
+        // Nothing reads a query's preliminary
         // list after its redo; the one-thread loop releases each one after its query
         // (`x_prelim_free.rs`). The queries before the next window's first match are done.
         let done = window.next.map_or(lists.len(), |next| next.q_idx);
-        if release {
-            for list in &mut lists[released_to..done] {
-                if list.take().is_some() {
-                    counts.released += 1;
-                }
+        for list in &mut lists[released_to..done] {
+            if list.take().is_some() {
+                counts.released += 1;
             }
         }
         released_to = done;
@@ -1169,13 +1164,12 @@ fn x_redo_windows(
 }
 
 /// The redo of a search: windows of jobs computed on the pool and replayed in stream order into
-/// `heaps`; with `release`, each query's preliminary list is released after its redo; with
-/// `expand`, the compact lists are expanded ahead of the windows.
+/// `heaps`; each query's preliminary list is released after its redo; with `expand`, the compact
+/// lists are expanded ahead of the windows.
 fn x_redo<P>(
     search: &XRedoParSearch<'_, P>,
     lists: &mut [Option<BlastpHitList>],
     heaps: &mut [BlastCompoHeap],
-    release: bool,
     expand: Option<&mut XExpandAhead<'_>>,
 ) -> Result<XCounts>
 where
@@ -1205,7 +1199,6 @@ where
         heaps,
         search.query_batches,
         limits,
-        release,
         search.timing,
         expand,
         &mut |lists, heaps, window| {
@@ -1246,8 +1239,8 @@ fn x_print_timing(counts: &XCounts) {
 }
 
 /// EXPERIMENT (LOSAT_X_BPREDOPAR): the redo of a search in jobs of a few matches, into `heaps`
-/// (the redone heaps of the search). With `release`, the preliminary lists are released after
-/// their redo, as the one-thread loop releases them. With `compact` (LOSAT_X_BPREDOWINEXPAND, one
+/// (the redone heaps of the search). The preliminary lists are released after their redo, as the
+/// one-thread loop releases them. With `compact` (LOSAT_X_BPREDOWINEXPAND, one
 /// entry per query), a query's compact list stands for its list until the windows expand it; none
 /// is left afterwards. Returns the number of lists released.
 pub(crate) fn x_redo_par_run<P>(
@@ -1255,13 +1248,12 @@ pub(crate) fn x_redo_par_run<P>(
     lists: &mut [Option<BlastpHitList>],
     compact: Option<&mut [Option<BlastpHitList<XPrelimHsp>>]>,
     heaps: &mut [BlastCompoHeap],
-    release: bool,
 ) -> Result<usize>
 where
     P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
 {
     let mut expand = compact.map(|compact| XExpandAhead::new(lists, compact));
-    let counts = x_redo(search, lists, heaps, release, expand.as_mut())?;
+    let counts = x_redo(search, lists, heaps, expand.as_mut())?;
     if search.timing {
         x_print_timing(&counts);
     }
@@ -1773,7 +1765,6 @@ mod tests {
             heaps,
             batches,
             limits,
-            true,
             false,
             expand,
             &mut |lists, _, window| {
@@ -2000,7 +1991,7 @@ mod tests {
         );
     }
 
-    /// The compact list (`LOSAT_X_BPPCOMPACT`) of a preliminary hit list: the same fields,
+    /// The compact list of a preliminary hit list: the same fields,
     /// subjects, best E-values and HSPs per list.
     fn compact_of(list: &Option<BlastpHitList>) -> Option<BlastpHitList<XPrelimHsp>> {
         list.as_ref().map(|list| BlastpHitList {

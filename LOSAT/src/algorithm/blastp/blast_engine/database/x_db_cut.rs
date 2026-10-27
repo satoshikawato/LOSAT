@@ -117,8 +117,19 @@ pub(super) fn x_sequence_bytes(database: &BlastpDatabase) -> u64 {
 /// The block size of the search of `database` on `pool`: the cut when the pool searches the rounds
 /// with more than one thread, else `BLOCK_BYTES`.
 pub(super) fn x_db_cut_block_bytes(database: &BlastpDatabase, pool: &SearchPool<'_>) -> u64 {
+    x_keep_cap(x_db_cut_bytes(database, pool))
+}
+
+// No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
+/// The cut of `database` on `pool` (`x_cut_block_bytes` at the pool's threads, 1 when it is off).
+fn x_db_cut_bytes(database: &BlastpDatabase, pool: &SearchPool<'_>) -> u64 {
     let threads = if pool.enabled() { pool.threads() } else { 1 };
-    let cut = x_cut_block_bytes(x_sequence_bytes(database), threads);
+    x_cut_block_bytes(x_sequence_bytes(database), threads)
+}
+
+// No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
+/// `cut`, or with LOSAT_X_BPDBKEEP at most `X_KEEP_BLOCK_BYTES`.
+fn x_keep_cap(cut: u64) -> u64 {
     // EXPERIMENT (LOSAT_X_BPDBKEEP): blocks that a worker's kept buffer holds below glibc's mmap
     // threshold (`x_db_keep.rs`).
     if crate::seqdb::x_bp_db_keep() {
@@ -213,8 +224,10 @@ where
     P: PrelimSink + Send,
 {
     let db = &database.db;
-    let block_bytes = x_db_cut_block_bytes(database, pool);
-    crate::utils::xreach::x_reach!("LOSAT_X_BPDBCUT", block_bytes != BLOCK_BYTES);
+    let cut = x_db_cut_bytes(database, pool);
+    // The cut's own rule (LOSAT_X_BPDBKEEP's cap acts at every thread count, `x_keep_cap`).
+    crate::utils::xreach::x_reach!("LOSAT_X_BPDBCUT", cut != BLOCK_BYTES);
+    let block_bytes = x_keep_cap(cut);
     search_blocks_of(
         database,
         pool,

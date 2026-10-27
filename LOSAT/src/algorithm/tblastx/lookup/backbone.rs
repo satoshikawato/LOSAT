@@ -312,7 +312,8 @@ impl XChainArena {
     /// (`utils::x_mapped::x_unthresholded_capacity`: zeroed by `calloc`, whose mapped pages are not
     /// touched until written). The slabs and long chains are cut from the last region while it has
     /// room, so that a build reserves the address space of one region per 32 MiB of chains, not
-    /// one per slab (tens of slabs for a block of 50,000 query letters).
+    /// one per slab (3,000 human proteins x `BlastDBSpecies6` at one thread, blocks of 50,000 query
+    /// letters: VmPeak 129 -> 97 MB, RssAnon the same).
     #[inline(never)]
     fn x_allocate_unthresholded(&mut self, ints: usize) -> *mut i32 {
         let room = self

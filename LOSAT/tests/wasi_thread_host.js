@@ -90,6 +90,19 @@ function prespawnCount(argv) {
   return count;
 }
 
+// LOSAT_WASI_PRESPAWN=auto only: when a spawn finds no standby worker left, the workers of the
+// next set of threads boot together, as many as the -num_threads that argv requests. That is
+// the most one set asks for: a pool whose threads are all new (LOSAT/src/utils/threading.rs
+// x_spawn_search_pool), as blastn's query-batch slots start after the search's pool, k pools
+// of m threads with k x m = -num_threads. One new worker per spawn instead, each spawn waits
+// for its own worker's boot (16 one after another, about 40 ms each, for the slots of a
+// 16-thread search on the workstation). Unused workers are terminated at close, as the first
+// set's. 0 (a new worker per spawn, as before) for a number of workers and without standby.
+function refillCount(argv) {
+  if ((process.env.LOSAT_WASI_PRESPAWN ?? "auto") !== "auto" || !prespawnCount(argv)) return 0;
+  return requestedThreads(argv);
+}
+
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Host-only (LOSAT_WASI_GUARD_CACHE; on by default since 2026-10-19, `0` turns it off): reuse
@@ -654,7 +667,7 @@ async function prepareThreadHost(wasmPath, kind) {
 
 async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) {
   const args = [wasmPath, ...argv];
-  const prespawn = prespawnCount(argv), recycle = recycleWorkers(kind);
+  const prespawn = prespawnCount(argv), recycle = recycleWorkers(kind), refill = recycle ? 0 : refillCount(argv);
   // The table of the files that every thread reads (sharedFileImports), in a command that
   // requests 2 or more threads.
   const files = kind === "threaded-command" && requestedThreads(argv) >= 2 ? sharedFileTable() : null;
@@ -662,7 +675,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   // LOSAT_WASI_RECYCLE: the workers that run one guest thread after another, the guest threads
   // they run now (tids), and how each of those threads' exit promise is resolved.
   const recycled = [], running = new Set(), returned = new Map();
-  let nextTid = 1, attempt = 0, nextSlot = 0, mainMemory, closing = false, failure = null;
+  let nextTid = 1, attempt = 0, nextSlot = 0, nextStandby = 0, mainMemory, closing = false, failure = null;
   const event = (type, fields = {}) => {
     const record = { event: type, at_ms: performance.now(), ...fields }; events.push(record);
     if (DEBUG) fs.writeSync(2, `[losat-wasi-event] ${JSON.stringify(record)}\n`);
@@ -766,6 +779,8 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   const spawnThread = (startArg) => {
     attempt++; const tid = nextTid++; event("spawn_attempt", { tid, attempt });
     if (options.rejectSpawn && options.rejectSpawn(attempt)) { event("spawn_rejected", { tid }); return -1; }
+    // refillCount: the next set boots together; this spawn takes the first of it.
+    if (!standby.length && refill) { event("standby_refill", { tid, count: refill }); prespawnWorkers(refill); }
     if (standby.length) return startStandby(standby.shift(), tid, startArg);
     if (recycle) {
       const waiting = claimRecycled();
@@ -799,10 +814,12 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   // ```
   // LOSAT_WASI_PRESPAWN: boot the workers together, before the guest asks for them. Each
   // instantiates the module with the shared memory and waits for its start order; spawnThread
-  // hands them out in order and creates new workers when none is left. A standby worker never
-  // keeps the process alive (unref until taken), and close() terminates the unused ones.
+  // hands them out in order and, when none is left, boots the next set (refillCount) or creates
+  // a new worker per spawn. A standby worker never keeps the process alive (unref until taken),
+  // and close() terminates the unused ones.
   const prespawnWorkers = (count) => {
-    for (let index = 0; index < count; index++) {
+    for (let n = 0; n < count; n++) {
+      const index = nextStandby++;
       if (recycle) {
         // A recycled worker that waits from the start; spawnThread takes it like the others.
         try { recycledWorker({ standby: index }).worker.unref(); }

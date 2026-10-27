@@ -121,6 +121,20 @@ fn blastx(query: &Path, args: &[&str], threads: u32, env: &[(&str, &str)]) -> (V
     (output.stdout, stderr)
 }
 
+/// Whether a search that wrote its reach files (`LOSAT_X_REACH`) into `reach` took `switch`'s own
+/// path.
+fn own_side_reached(reach: &Path, switch: &str) -> bool {
+    std::fs::read_dir(reach).unwrap().any(|file| {
+        std::fs::read_to_string(file.unwrap().path())
+            .unwrap()
+            .lines()
+            .any(|line| {
+                let fields: Vec<&str> = line.split('\t').collect();
+                fields[0] == switch && fields[1] == "1"
+            })
+    })
+}
+
 /// The numbers of a `[TIMING] blastx_subject_flow` or `blastx_subject_waves` line: `name=value`.
 fn timing(stderr: &str, line: &str, name: &str) -> u64 {
     let text = stderr
@@ -270,12 +284,20 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
         reference.iter().filter(|&&b| b == b'\n').count() > 20,
         "too few hits to test"
     );
-    // (threads, environment, flow loops): in order at 2 and 8 threads; side by side at 16 threads
-    // and with the switch off; with LOSAT_X_BXSUBJFLOW=0 the chunks run side by side (2 threads)
-    // with the waves.
+    // (threads, environment, flow loops): in order at 2 and 8 threads, as one flow across the
+    // three chunks (LOSAT_X_BXCHUNKCROSS), or one flow per chunk with that switch off; side by side
+    // at 16 threads and with LOSAT_X_BXCHUNKFLOW off; with LOSAT_X_BXSUBJFLOW=0 the chunks run
+    // side by side (2 threads) with the waves.
     for (threads, env, loops) in [
-        (2, &[][..], 3),
-        (8, &[][..], 3),
+        (2, &[][..], 1),
+        (8, &[][..], 1),
+        (3, &[("LOSAT_X_BXBUILDPAR", "0")][..], 1),
+        (2, &[("LOSAT_X_BXCHUNKCROSS", "0")][..], 3),
+        (8, &[("LOSAT_X_BXCHUNKCROSS", "0")][..], 3),
+        // The helpers' own diagonal tables; the batch inside the capped batch flow (K = 2 below
+        // the thread count), whose helpers leave once every task is claimed.
+        (2, &[("LOSAT_X_BXDIAGKEEP", "0")][..], 1),
+        (4, &[("LOSAT_X_BXUNITCAP", "2")][..], 1),
         (16, &[][..], 0),
         (2, &[("LOSAT_X_BXCHUNKFLOW", "0")][..], 0),
         (2, &[("LOSAT_X_BXSUBJFLOW", "0")][..], 0),
@@ -296,17 +318,76 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
             assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 162);
         }
     }
-    // The flow's shadow compares every task of the three chunks.
-    let (report, stderr) = blastx(&query, &args, 3, &[("LOSAT_X_BXSUBJFLOWSHADOW", "1")]);
-    assert!(report == reference);
-    assert!(
-        stderr.contains("[X_SHADOW] BXSUBJFLOW tasks_compared=162 (subject results identical)"),
-        "{stderr}"
-    );
+    // The capped row runs inside the capped batch flow: the cap acted (`LOSAT_X_REACH`), which it
+    // does not at 4 threads without `LOSAT_X_BXUNITCAP=2` (K = 8).
+    for (cap, acted) in [(Some("2"), true), (None, false)] {
+        let reach = dir.join(format!("reach-cap-{acted}"));
+        let reach_text = reach.to_str().unwrap().to_string();
+        let mut env = vec![("LOSAT_X_REACH", reach_text.as_str())];
+        env.extend(cap.map(|k| ("LOSAT_X_BXUNITCAP", k)));
+        let (report, _) = blastx(&query, &args, 4, &env);
+        assert!(report == reference);
+        assert_eq!(own_side_reached(&reach, "LOSAT_X_BXUNITCAP"), acted);
+    }
+    // The flow's shadow compares every task of the three chunks, across the chunks and per chunk.
+    for env in [&[][..], &[("LOSAT_X_BXCHUNKCROSS", "0")][..]] {
+        let mut env = env.to_vec();
+        env.push(("LOSAT_X_BXSUBJFLOWSHADOW", "1"));
+        let (report, stderr) = blastx(&query, &args, 3, &env);
+        assert!(report == reference);
+        assert!(
+            stderr.contains("[X_SHADOW] BXSUBJFLOW tasks_compared=162 (subject results identical)"),
+            "{stderr}"
+        );
+    }
+    // Chunks without a valid context (all N): the loop gives them `chunk_start` only, in the flow
+    // across chunks as in the serial loop. 10,000 letters, 25,000 N, 10,000 letters: four chunks
+    // (blastx/split.rs), the third all N. The flow across chunks counts the tasks of all four (216,
+    // the third chunk's skipped); the loop per chunk searches the other three (162).
+    let letters: String = std::fs::read_to_string(&query)
+        .unwrap()
+        .lines()
+        .skip(1)
+        .collect();
+    let gapped = dir.join("gapped.fna");
+    std::fs::write(
+        &gapped,
+        format!(
+            ">gapped\n{}{}{}\n",
+            &letters[..10_000],
+            "N".repeat(25_000),
+            &letters[10_000..20_000]
+        ),
+    )
+    .unwrap();
+    let (reference, _) = blastx(&gapped, &args, 1, &[]);
+    for (threads, env, loops, tasks) in [
+        (2, &[][..], 1, 216),
+        (8, &[][..], 1, 216),
+        (2, &[("LOSAT_X_BXCHUNKCROSS", "0")][..], 3, 162),
+    ] {
+        let mut env = env.to_vec();
+        env.push(("LOSAT_TIMING", "1"));
+        let (report, stderr) = blastx(&gapped, &args, threads, &env);
+        assert!(
+            report == reference,
+            "N stretch, threads {threads} {env:?}: report differs"
+        );
+        assert_eq!(
+            timing(&stderr, "blastx_subject_flow", "loops"),
+            loops,
+            "N stretch, threads {threads} {env:?}"
+        );
+        assert_eq!(
+            timing(&stderr, "blastx_subject_flow", "tasks"),
+            tasks,
+            "N stretch, threads {threads} {env:?}"
+        );
+    }
     // A `-subject` file takes the same rule.
     let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
     let (reference, _) = blastx(&query, &args, 1, &[]);
-    for (threads, loops) in [(4, 3), (16, 0)] {
+    for (threads, loops) in [(4, 1), (16, 0)] {
         let (report, stderr) = blastx(&query, &args, threads, &[("LOSAT_TIMING", "1")]);
         assert!(
             report == reference,

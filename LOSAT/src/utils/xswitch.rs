@@ -184,6 +184,10 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BXCTXONCE` (BLASTX's context table of a query batch made once per lookup table and kept
 /// with it instead of once per thread, `blastx/x_seed_diag.rs`) joined the set in the pull request
 /// that added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_BXCHUNKCROSS` (BLASTX's chunks of a split query searched one after another with the
+/// subject flow run as one flow of tasks across the chunks, each chunk's setup made once by the
+/// first thread that needs it or ahead by a helper, `blastx/x_subject_flow.rs`) joined the set in
+/// the pull request that added it, after it was verified and timed with it on and off.
 /// `LOSAT_X_PAIRPARGATE` (TBLASTX's unit path only for the query batches where it is expected to
 /// be faster than the reference frame loop, `tblastx/x_pair_par.rs`) and `LOSAT_X_TBXLUT` (the
 /// reference loop's full lookup table filled in place from per-cell counts,
@@ -247,6 +251,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPUNGAPSENT",
     "LOSAT_X_BXBUILDPAR",
     "LOSAT_X_BXCAPFILL",
+    "LOSAT_X_BXCHUNKCROSS",
     "LOSAT_X_BXCHUNKFLOW",
     "LOSAT_X_BXCROSS",
     "LOSAT_X_BXCROSSDEFER",

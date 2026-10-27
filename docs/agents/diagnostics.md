@@ -2392,19 +2392,6 @@ Rebuilding less:
   dropoff outside 1..=127, a word size outside 1..=11 or a residue code >= 32 run the reference
   (`extend_one_hit_impl` / `extend_two_hit_impl`). The unit tests of `x_ungapped_fast.rs` compare the walks
   with the reference functions on random inputs, boundaries, ties, very long walks and sentinels in words.
-- `LOSAT_X_BPWORDSHARE=1` (BLASTP with the compressed lookup table: `-task blastp-fast`, or a word size above 4; speed; in
-  the strict set from the pull request that added it, 2026-10-27, on unless it is `0`; acts only in the check before the
-  block search of `LOSAT_X_BPQBLOCK`) the counters of the check `x_block_words_fit` (whether no query batch's table can
-  fill NCBI's overflow banks; one counter per group of batches, each group on a thread of the pool) share their counts
-  of the words of each set of letters (`tblastx/lookup/compressed.rs` `XSharedWordCounts`): a counter that has not
-  kept a set looks it up in a table of 2^17 one-word slots (the set's letters sorted, and its count) before it
-  enumerates the set's neighbours, and stores what it counts. The count depends only on the set, so the check's
-  outcome is the same. Before, each group counted every set it met: on the human proteome (Species4, 23,879 proteins)
-  at 16 threads the 16 counters spent 10.3 G instructions in `count_neighbors` against 1.0 G at one thread (v4-BPF
-  s8 probe (a)). Reports identical; off = `LOSAT_X_BPWORDSHARE=0`. Evidence: workstation node 1, dev cbf649c7
-  against 57be2034, 3 rounds alternating: n16 wall bpff (human proteome x yeast `-subject`) x0.992, its first 3,000
-  proteins x0.955, `-db` 4_6 x0.994, 0_3 x0.995; n8 x0.991 / x0.968 / x0.993 / x0.996; one-thread instructions
-  x0.9989; max RSS under NCBI's (v4-BPF s8wsab).
 - `LOSAT_X_BPUNGAPSENT=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-23;
   `=0` turns it off) the two-hit ungapped extension of blastp's fused seed loop for word size 3
   (`blastp/x_ungapped_sent.rs`, exactness argument in its header): a closure of its own, with the extension
@@ -2736,6 +2723,21 @@ Rebuilding less:
   97 -> 142; Species4 x Species6 `-db` at 2 / 4 threads 106 -> 134 / 117 -> 147 (NCBI 304 / 360). Three blocks of
   50,000 letters were faster at 16 threads (x0.870 on the first case) but held 175 MiB on the 3,000 proteins, above
   NCBI's 166; 16 one-thread blocks (x0.858) held 813 MiB.
+- `LOSAT_X_BPWORDSHARE=1` (BLASTP with the compressed lookup table: `-task blastp-fast`, or a word size above 4;
+  speed; in the strict set from the pull request that added it, 2026-10-27, on unless it is `0`; acts only in the
+  check before the block search of `LOSAT_X_BPQBLOCK`) the counters of the check `x_block_words_fit` (whether no query
+  batch's table can fill NCBI's overflow banks; one counter per group of batches, each group on a thread of the pool)
+  share their counts of the words of each set of letters (`tblastx/lookup/compressed.rs` `XSharedWordCounts`): a
+  counter that has not kept a set looks it up in a table of 2^17 one-word slots (the set's letters sorted, and its
+  count) before it enumerates the set's neighbours, and stores what it counts. The count depends only on the set, so
+  the check's outcome is the same. With word size 5 (42,504 sets of 20 letters, 2^17 slots) a set is counted about
+  once; with word sizes 6 and 7 more sets share a slot and are counted again. At one thread the one counter never
+  finds a set in the table (it reads the table only for sets it has not kept). Before, each group counted every set it
+  met: on the human proteome (Species4, 23,879 proteins) at 16 threads the 16 counters spent 10.3 G instructions in
+  `count_neighbors` against 1.0 G at one thread (v4-BPF s8 probe (a)). Reports identical; off =
+  `LOSAT_X_BPWORDSHARE=0`. Evidence: workstation node 1, dev cbf649c7 against 57be2034, 3 rounds alternating: n16 wall
+  bpff (human proteome x yeast `-subject`) x0.992, its first 3,000 proteins x0.955, `-db` 4_6 x0.994, 0_3 x0.995; n8
+  x0.991 / x0.968 / x0.993 / x0.996; one-thread instructions x0.9989; max RSS under NCBI's (v4-BPF s8wsab).
 - `LOSAT_X_BPQBLOCKWEB=1` (BLASTP in `run_local`, the LOSAT Web build's search, speed and memory; in the strict set
   from the pull request that added it, 2026-10-22, on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search
   of `LOSAT_X_BPQBLOCK` also for a call with more than one output, the hit records or a format observer (ABI v2 of the

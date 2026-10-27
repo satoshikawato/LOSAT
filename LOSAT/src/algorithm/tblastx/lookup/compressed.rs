@@ -1561,6 +1561,7 @@ impl CompressedWordCount {
     }
 
     /// The words that `add_word_hits` adds for `word` (NCBISTDAA letters, `word_length` of them).
+    #[cfg(test)]
     fn words(&mut self, word: &[u8]) -> u64 {
         self.words_with(word, None)
     }
@@ -1630,6 +1631,7 @@ impl CompressedWordCount {
     /// with n offsets takes cells(n) <= n / 4 of them
     /// (`try_build_blosum62_compressed_lookup_with_capacity`), so such a table takes at most a
     /// quarter of the queries' words. Stops counting once they are more than that.
+    #[cfg(test)]
     fn fits(
         &mut self,
         queries: &mut dyn Iterator<Item = &[u8]>,
@@ -1678,9 +1680,13 @@ impl CompressedWordCount {
 // changes no value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPWORDSHARE): the counts of the counters of one check (one counter per group
 /// of query batches, each on a thread of the pool, `blastp/blast_engine.rs` `x_block_words_fit`),
-/// so that a set of letters is counted about once in the check rather than once per counter (16
+/// so that a set of letters is counted once in the check rather than once per counter (16
 /// counters counted the human proteome's sets 16 times: 10.3 G instructions at 16 threads against
-/// 1.0 G at one, v4-BPF s8). Slot `hash(key) mod 2^17` holds `key << 28 | words`, `key` being the
+/// 1.0 G at one, v4-BPF s8). With word size 5 (`-task blastp-fast`) there are 42,504 sets of 20
+/// letters for 2^17 slots, so a set is counted about once; with word sizes 6 and 7 (177,100 and
+/// 657,800 sets) more sets share a slot and are counted again. With one counter (one thread) the
+/// table is read only for sets that counter has not kept, so it never holds them: it costs its
+/// 1 MiB and a load and a store per set counted. Slot `hash(key) mod 2^17` holds `key << 28 | words`, `key` being the
 /// word's letters sorted, 5 bits each (NCBISTDAA codes are below 32, words at most 7 letters, so
 /// a key has at most 35 bits), and `words` its count (at most 15^7 < 2^28 words for a word of at
 /// most 7 letters of an alphabet of at most 15). The count depends only on the set of letters
@@ -2285,21 +2291,60 @@ mod tests {
             let query: Vec<u8> = (0..400)
                 .map(|_| letters[rng.below(letters.len())])
                 .collect();
+            let mut stored = 0usize;
             for word in query.windows(word_size) {
                 let mut reversed = word.to_vec();
                 reversed.reverse();
                 let count = own.words(word);
                 assert_eq!(first.words_with(word, Some(&shared)), count);
+                // A word of letters without a compressed letter counts 0 and reaches no table.
+                let reaches = word.iter().all(|&residue| {
+                    usize::from(own.compress_table[usize::from(residue)])
+                        < own.compressed_alphabet_size
+                });
+                if reaches {
+                    // The set `first` counted, or took, is in the table under its reverse too.
+                    assert_eq!(
+                        shared.words(&reversed, || panic!("{reversed:?} not in the table")),
+                        count
+                    );
+                    stored += 1;
+                }
                 assert_eq!(second.words_with(&reversed, Some(&shared)), count);
-                assert_eq!(second.words_with(word, Some(&shared)), count);
             }
-            let queries: Vec<&[u8]> = query.chunks(97).collect();
-            let mut alone = CompressedWordCount::new(word_size, threshold).expect("word size");
-            let mut sharing = CompressedWordCount::new(word_size, threshold).expect("word size");
-            assert_eq!(
-                sharing.fits_banks(&mut queries.iter().copied(), Some(&shared)),
-                alone.fits_banks(&mut queries.iter().copied(), None),
+            assert!(
+                stored > 100,
+                "word size {word_size}: {stored} words reached the table"
             );
+        }
+
+        // `fits_with` with the table has the outcomes of a counter of its own on either side of the
+        // capacity where they change (test (e)).
+        let mut rng = XorShift(0x5851_f42d_4c95_7f2d);
+        let (query, locations) = concatenated_queries(&mut rng, &[120, 300, 80, 200], &FEW_LETTERS);
+        let queries: Vec<&[u8]> = locations
+            .iter()
+            .map(|&(left, right)| &query[left as usize..=right as usize])
+            .collect();
+        let mut alone = CompressedWordCount::new(5, LOW_THRESHOLD).expect("word size 5");
+        let words: u64 = queries
+            .iter()
+            .flat_map(|query| query.windows(5))
+            .map(|word| alone.words(word))
+            .sum();
+        let cleared = words.div_ceil(4) as usize;
+        let shared = XSharedWordCounts::new();
+        for capacity in [cleared, cleared - 1] {
+            let fits = alone.fits(&mut queries.iter().copied(), capacity);
+            assert_eq!(fits, capacity == cleared);
+            // The first counter fills the table; the others take its counts.
+            for _ in 0..2 {
+                let mut sharing = CompressedWordCount::new(5, LOW_THRESHOLD).expect("word size 5");
+                assert_eq!(
+                    sharing.fits_with(&mut queries.iter().copied(), capacity, Some(&shared)),
+                    fits
+                );
+            }
         }
     }
 

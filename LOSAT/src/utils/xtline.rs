@@ -13,7 +13,35 @@ pub fn on() -> bool {
 }
 
 pub fn base() -> Instant {
-    *BASE.get_or_init(Instant::now)
+    *BASE.get_or_init(|| {
+        let b = Instant::now();
+        if on() {
+            start_rss(b);
+        }
+        b
+    })
+}
+
+/// RssAnon samples every `LOSAT_XTLINE_RSS` ms (s22 RSS probe): kind "rss", id = RssAnon KiB
+/// (statm resident - shared), thread -2.
+fn start_rss(b: Instant) {
+    let ms: u64 = match std::env::var("LOSAT_XTLINE_RSS").ok().and_then(|v| v.parse().ok()) {
+        Some(v) if v > 0 => v,
+        _ => return,
+    };
+    std::thread::spawn(move || loop {
+        if let Ok(s) = std::fs::read_to_string("/proc/self/statm") {
+            let mut it = s.split_ascii_whitespace().skip(1);
+            let res: u64 = it.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+            let sh: u64 = it.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+            let t = b.elapsed().as_nanos() as u64;
+            let kib = (res.saturating_sub(sh) * 4) as u32;
+            EV.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(("rss", kib, -2, t, t));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    });
 }
 
 #[inline]

@@ -1487,6 +1487,7 @@ pub(super) fn csr(
     pv_array: &mut [PvArrayType],
     pv_array_bts: usize,
     helper_array: &mut [u32],
+    x_offsets: Vec<u32>,
 ) -> (super::x_dc_csr::Csr, bool) {
     debug_assert!(!words.two_templates);
     #[cfg(all(
@@ -1505,11 +1506,19 @@ pub(super) fn csr(
             pv_array_bts,
             helper_array,
             CHUNK_POSITIONS,
+            x_offsets,
         );
         return (csr, true);
     }
     let _ = parts;
-    let csr = super::x_dc_csr::build(words, cells, pv_array, pv_array_bts, helper_array);
+    let csr = super::x_dc_csr::build(
+        words,
+        cells,
+        pv_array,
+        pv_array_bts,
+        helper_array,
+        x_offsets,
+    );
     (csr, false)
 }
 
@@ -1527,6 +1536,7 @@ fn csr_on_pool(
     pv_array_bts: usize,
     helper_array: &mut [u32],
     chunk: usize,
+    x_offsets: Vec<u32>,
 ) -> super::x_dc_csr::Csr {
     use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier};
     let chunk = chunk.max(1);
@@ -1589,7 +1599,8 @@ fn csr_on_pool(
     };
     // `offsets` is written in full by its owners (zeroed, then counted, summed and placed) and
     // `offsets[cells]` below; `qs` gets one element per word (`total` positions bound them).
-    let mut offsets: Vec<u32> = Vec::with_capacity(cells + 1);
+    // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
+    let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 1);
     let mut qs: Vec<u32> = Vec::with_capacity(total);
     let ob = Shared {
         ptr: offsets.as_mut_ptr(),
@@ -3516,6 +3527,7 @@ mod tests {
             pv_array_bts,
             &mut helper,
             chunk,
+            Vec::new(),
         );
         super::super::x_dc_csr::x_assert_runs_are_the_chains(
             &words,
@@ -3561,7 +3573,15 @@ mod tests {
                 let words = words_of(&case, &query_refs, (11, DiscWordType::Coding, 16));
                 let mut pv = vec![0; 1 << 15];
                 let mut helper = vec![0; (1 << 22) / 2048];
-                let (_, on_pool) = csr(threads, &words, 1 << 22, &mut pv, 7, &mut helper);
+                let (_, on_pool) = csr(
+                    threads,
+                    &words,
+                    1 << 22,
+                    &mut pv,
+                    7,
+                    &mut helper,
+                    Vec::new(),
+                );
                 assert!(on_pool, "threads {threads}");
                 Ok(())
             })
@@ -3572,7 +3592,7 @@ mod tests {
         let words = words_of(&case, &query_refs, (11, DiscWordType::Coding, 16));
         let mut pv = vec![0; 1 << 15];
         let mut helper = vec![0; (1 << 22) / 2048];
-        let (_, on_pool) = csr(4, &words, 1 << 22, &mut pv, 7, &mut helper);
+        let (_, on_pool) = csr(4, &words, 1 << 22, &mut pv, 7, &mut helper, Vec::new());
         assert!(!on_pool, "off a pool");
     }
 

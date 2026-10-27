@@ -3297,8 +3297,10 @@ Scheduling (each value computed by one thread with the original function; order 
   loop's in every case. Applying each word at once, or batching only the first 64 words of a run, was faster on the
   workstation for long runs (the cDNAs x0.82) but slower than the queued loop on the i9 (short runs x1.24, Sakai x1.07),
   so wasm32 takes the batch. The machine code of the x86_64 loops is unchanged.
-- `LOSAT_X_MBLUTKEEP=1` (BLASTN megablast and blastn, the contiguous megablast lookup table of `build_mb_lookup`; in the
-  strict set since 2026-10-19 (perf/mb-lut-keep, evidence at the end of this entry): on unless it is `0`)
+- `LOSAT_X_MBLUTKEEP=1` (BLASTN megablast, blastn and dc-megablast: the array of one element per cell of a batch's
+  lookup table, the contiguous megablast table's `hashtable` of `build_mb_lookup` and since perf/bn-keep-cells a CSR
+  table's `offsets` and a one-template discontiguous table's chain heads; in the strict set since 2026-10-19
+  (perf/mb-lut-keep, evidence at the end of this entry): on unless it is `0`)
   the batch loop keeps the table's `hashtable` from one query batch to the next
   (`blastn/x_mb_lut_keep.rs`). NCBI allocates each batch's table zeroed (`calloc`, `blast_nalookup.c:1262`) and frees it
   with the batch (`sfree`, `:1376`); a 4^12-cell table is 64 MiB, which glibc maps per batch and unmaps at the batch's
@@ -3318,11 +3320,22 @@ Scheduling (each value computed by one thread with the original function; order 
   the counters are allocated as before. Where: only the batch loop of `run_in_pool`, for the batches it searches itself
   and the query chunks of a split batch, and only while no `LOSAT_X_QBATCHPAR` slot can run (the driver turned off, or
   before the first commit with no `LOSAT_X_QBATCHPARSLOTS` and a budget of 0 or one thread): the slots' tables are what
-  QBATCHPAR's budget counts. Not the discontiguous tables, the PAIRPAR sub-lookups or the tests. Memory:
-  between batches the loop holds the longest table instead of freeing it; a probe batch's peak with it stays below the
-  full batch's. With `LOSAT_TIMING` `[TIMING]
-  x_mb_lut_keep: kept= fresh= zero=` gives the loop's builds on the kept table, its builds on a fresh one and the time
-  spent zeroing (also in `x_mb_lookup_split`'s `alloc=`). Evidence. Premise probe (v4-D
+  QBATCHPAR's budget counts. Not the discontiguous tables of two templates, the PAIRPAR sub-lookups or the tests.
+  Memory: between batches the loop holds the longest table instead of freeing it; a probe batch's peak with it stays
+  below the full batch's. Since perf/bn-keep-cells the keep also serves the tables that have no `hashtable`: a build
+  laid out as CSR (`LOSAT_X_BNCSR`, `LOSAT_X_DCCSR`) builds its `offsets` (one element per cell and one or two more) in
+  the kept table (`Keep::take_buffer`; the build writes 0 to every element it uses before counting into it) and gives
+  it back when the batch drops the CSR, where it freed the kept table before; a one-template discontiguous table takes
+  its chain heads from the keep as the megablast table does. These arrays depend on the table's cells only (4^11 or
+  4^12), so one kept table serves the CSR builds of `CBatchSizeMixer`'s full batches and the chain builds of its probe
+  batches (dc-megablast of 31,168 cDNAs: 18 CSR and 19 chain builds of 4^11 cells); a fresh table has two elements more
+  than its cells for a later CSR. Why: glibc raises its mmap threshold to the size of a mapped block it frees (up to
+  32 MiB); a 16 MiB array freed after each batch put it up after the first batch, the heap then took the batches' other
+  buffers and the free space in its arena stayed resident (the dc-megablast above at one thread: anonymous RSS 84-92
+  MiB depending on the build, against 80.8 for the memory floor of plan v4 line MF). With `LOSAT_TIMING` `[TIMING]
+  x_mb_lut_keep: kept= fresh= csr= zero=` gives the loop's builds of a `hashtable` or chain heads on the kept table, its
+  builds (of either layout) on a fresh one, its CSR builds on the kept table and the time spent zeroing (also in
+  `x_mb_lookup_split`'s `alloc=`). Evidence. Premise probe (v4-D
   `results/d10d2_probe1_summary.md`, workstation node 1, `LOSAT_X_QBATCHPAR=0`): megablast of 31,168 D. melanogaster
   cDNAs against 3 Mb of chromosome 2L at 16 threads spent 0.141 s unmapping the batches' tables at their ends (serial,
   outside `[TIMING] total`) and 0.060 s in prefault rounds; keeping the table took 0.038 s of zeroing instead, with
@@ -3334,7 +3347,9 @@ Scheduling (each value computed by one thread with the original function; order 
   0.90-0.91 at one, blastn and dc-megablast of cDNAs 0.97-1.02; by default (`LOSAT_X_QBATCHPAR`'s slots, which the
   switch leaves alone, at 8-32 threads) 0.97-1.02; megablast of 1,775 cDNAs (the loop by default) 1.00 at one thread and
   1.02-1.03 at 8 and 16 threads, within the rounds' spread (0.97-1.09) with the same page faults, TLB shootdowns, user
-  and system time as dev. Max RSS: the same (the 31,168 cDNAs in the loop 236 MiB against 249).
+  and system time as dev. Max RSS: the same (the 31,168 cDNAs in the loop 236 MiB against 249). Evidence of
+  perf/bn-keep-cells (CSR `offsets` and discontiguous chain heads): to be filled in (n1 on a node-0 core against dev,
+  and a window at 16 and 32 threads).
 - `LOSAT_X_BNHLGROW=1` (BLASTN, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
   added it (perf/bn-hl-grow): on unless it is `0`) a hit list's array (`blastn/hsp.rs` `HitList`, the preliminary
   stage's lists per query and the final ones) is no longer reserved to NCBI's array size when a list comes

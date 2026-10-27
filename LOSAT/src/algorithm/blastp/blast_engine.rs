@@ -7877,6 +7877,15 @@ fn x_lookup_after_prelim(
             BlastpRuntimeLookup::Compressed(_) => false,
         };
     crate::utils::xreach::x_reach!("LOSAT_X_BPLKDROP", !taken_later);
+    // PROBE (v4-BPF s8): LOSAT_BPF_S8EARLY=1 gives the flat table's vectors to the spare here.
+    if taken_later && super::x_query_slots::x_s8_env("LOSAT_BPF_S8EARLY") == Some(1) {
+        if let BlastpRuntimeLookup::CompressedFlat(table) = lookup {
+            if let Some(spare) = super::x_query_blocks::x_bp_lookup_spare(pool) {
+                spare.give(table);
+            }
+            return None;
+        }
+    }
     taken_later.then_some(lookup)
 }
 

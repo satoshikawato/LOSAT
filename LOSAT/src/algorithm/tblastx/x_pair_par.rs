@@ -2368,7 +2368,10 @@ impl XPairPar {
                     |i: usize, taker: &mut crate::algorithm::tblastx::x_work_board::XTaker| {
                         let scratch = taker
                             .scratch
-                            .get_or_insert_with(|| Box::new(XScratch::new(unmap)))
+                            .get_or_insert_with(|| {
+                                crate::algorithm::tblastx::x_work_board::x_spare_take()
+                                    .unwrap_or_else(|| Box::new(XScratch::new(unmap)))
+                            })
                             .downcast_mut::<XScratch>()
                             .expect("a board taker's scratch is the unit path's");
                         let list = run(&units[i], scratch);

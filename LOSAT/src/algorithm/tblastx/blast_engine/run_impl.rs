@@ -3167,6 +3167,7 @@ fn run_batch_loop(
         done.spans.push(start..end);
         input_start = input_end;
     }
+    crate::algorithm::tblastx::x_work_board::x_spare_clear();
     reports.write(outputs, done, &warnings, true)
 }
 

@@ -56,7 +56,31 @@ pub(crate) fn on() -> bool {
 /// unit the taker runs and dropped when the taker stops (as rayon's `map_init` made one per split).
 #[derive(Default)]
 pub(crate) struct XTaker {
-    pub(crate) scratch: Option<Box<dyn Any>>,
+    pub(crate) scratch: Option<Box<dyn Any + Send>>,
+}
+
+// PROBE (v4-B s23, never a PR): LOSAT_X_B23MAP=unit keeps a stopped taker's scratch for the next taker.
+static X_SPARE: Mutex<Vec<Box<dyn Any + Send>>> = Mutex::new(Vec::new());
+
+impl Drop for XTaker {
+    fn drop(&mut self) {
+        if let Some(scratch) = self.scratch.take() {
+            if crate::algorithm::tblastx::sum_stats_linking::x_b23("unit") {
+                X_SPARE.lock().unwrap_or_else(|e| e.into_inner()).push(scratch);
+            }
+        }
+    }
+}
+
+/// PROBE: a kept scratch, if any.
+pub(crate) fn x_spare_take() -> Option<Box<dyn Any + Send>> {
+    X_SPARE.lock().unwrap_or_else(|e| e.into_inner()).pop()
+}
+
+/// PROBE: drops the kept scratches (search end).
+pub(crate) fn x_spare_clear() {
+    let spare = std::mem::take(&mut *X_SPARE.lock().unwrap_or_else(|e| e.into_inner()));
+    drop(spare);
 }
 
 type Run<'a> = dyn Fn(usize, &mut XTaker) + Sync + 'a;

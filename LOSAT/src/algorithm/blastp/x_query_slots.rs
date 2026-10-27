@@ -256,6 +256,10 @@ impl Drop for XPanicStop<'_, '_> {
     }
 }
 
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276 (module comment): the batches
 // searched and reported in order. Scheduling only: the blocks' reports are written in that order.
 /// EXPERIMENT (LOSAT_X_BPQSLOTS): the blocks `0..blocks` searched by `slots` drivers on `pool`

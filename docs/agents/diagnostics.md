@@ -383,7 +383,6 @@ export LOSAT_X_DCTWOSLOTS=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
 export LOSAT_X_DISCLUTPAR=1
-export LOSAT_X_DISPTABLE=1
 export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPNEON2=1
 export LOSAT_X_DPNIBBLE=1
@@ -437,7 +436,6 @@ export LOSAT_X_TBXEXTBATCH=256
 export LOSAT_X_TBXHITBF=1
 export LOSAT_X_TBXKMERGE=1
 export LOSAT_X_TBXLUT=1
-export LOSAT_X_TBXMASKSEEK=1
 export LOSAT_X_TBXNEXT=1
 export LOSAT_X_TBXPIPE=1
 export LOSAT_X_TBXPREFETCH=1536
@@ -948,8 +946,9 @@ Same values, faster computation:
   eight threads (eight cores, siblings idle) x0.923 and x0.965 (cycles x0.944 and x0.946). LOSAT Web (Node, serial
   reactor, 8 rounds in one process against dev 32a63700): the whole search x0.945 and x0.946 of the cycles, the sum
   P-value stage x0.09 and x0.15.
-- `LOSAT_X_DISPTABLE=1` (TBLASTX and TBLASTN, the displayed residues; speed; in the strict set from the pull request
-  that added it, 2026-10-24; `=0` translates each codon by the scan) `display_residue` (`tblastx/report.rs`) reads a
+- DISPTABLE (graduated 2026-10-27, in the set from the pull request that added it, 2026-10-24; no variable; always
+  on; the scan of each codon stays as the reference of the unit test) (TBLASTX and TBLASTN, the displayed residues;
+  speed) `display_residue` (`tblastx/report.rs`) reads a
   codon's displayed residue from a table of the 4,096 codons of 4-bit codes, made once per genetic code at its first
   use (`display_table`, each entry `display_codon` of its codon; `GeneticCode::display_slot`), and the bases' codes
   from two 256-byte tables (plus strand and complement). NCBI's display does the same (`CTrans_table`: `sm_BaseToIdx`
@@ -2535,8 +2534,9 @@ Rebuilding less:
   threads 1.16 / 1.44 s (outfmt 6) and 1.29 / 1.84 s (outfmt 0); AP027131 x AP027133 at 8 threads 1.96 /
   2.07 s and 2.05 / 2.35 s, at 1 thread 10.43 / 10.41 s (the serial stage). Peak memory is equal within the
   runs' spread (three genomes at 16 threads 529 / 527 MiB with outfmt 6, 485 / 568 with outfmt 0).
-- `LOSAT_X_TBXMASKSEEK=1` (TBLASTX, the outfmt 0 rows and the hit records of LOSAT Web; speed; in the strict set from
-  the pull request that added it, 2026-10-24; `=0` scans every range) `PairwiseRows` keeps the shown SEG masks of each
+- TBXMASKSEEK (graduated 2026-10-27, in the set from the pull request that added it, 2026-10-24; no variable; always
+  on; the scan of every range stays as the reference of the unit test) (TBLASTX, the outfmt 0 rows and the hit
+  records of LOSAT Web; speed) `PairwiseRows` keeps the shown SEG masks of each
   query frame sorted by start, with the running maximum of their ends (`FrameMasks`, `tblastx/report.rs`), and
   `lowercase_query_row` starts the scan of a row at the first range whose end, or the end of a range before it,
   reaches the row (`partition_point`) and stops at the first range that starts after the row. A letter is lowercase

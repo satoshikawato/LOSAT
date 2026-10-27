@@ -341,8 +341,8 @@ fn cases() -> Vec<Case> {
 /// `TBXPIPE`: the next batch starts while the batch before links) and the always-on ones
 /// (`SUMPMEMO`) change what the search does, not what the
 /// archive reads: the first query's block, search space and masks and the final hits.
-/// `DISPTABLE` is not here: it acts only where a format reads displayed counts, which outfmt 11
-/// never builds, so its `=0` run is the default run. `lenbatch_sub` x `TBXPIPE` is not here for
+/// `DISPTABLE` (graduated 2026-10-27) was not here: it acted only where a format reads displayed
+/// counts, which outfmt 11 never builds, so its `=0` run was the default run. `lenbatch_sub` x `TBXPIPE` is not here for
 /// the same reason (4 threads take the reference side on that case). `TBXEXTBATCH`, `TBXLUT`,
 /// `TBXPREFETCH`, `TBXQSLICE`, `TBXUNITMASK` and `SEEDUNMAP` are not needed: they change only
 /// the seed scan of the PAIRPAR units (value switches reach their new side with a small value on

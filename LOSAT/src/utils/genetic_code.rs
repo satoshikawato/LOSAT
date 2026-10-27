@@ -154,7 +154,7 @@ pub struct GeneticCode {
 }
 
 // No NCBI counterpart: one slot per row of `TABLES` for the display's translation table of that
-// code (`tblastx::report::display_table`, `LOSAT_X_DISPTABLE`), made at its first use and kept
+// code (`tblastx::report::display_table`; graduated `LOSAT_X_DISPTABLE`), made at its first use and kept
 // for the process, so a code is tabulated once however many `GeneticCode` values name it.
 static DISPLAY_TABLES: [OnceLock<Box<[u8; 4096]>>; TABLES.len()] =
     [const { OnceLock::new() }; TABLES.len()];

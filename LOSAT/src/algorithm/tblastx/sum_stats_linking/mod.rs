@@ -80,4 +80,5 @@ pub use linking::x_link_sort_print_summary;
 // ```
 // No NCBI counterpart for the summary: it prints counters.
 pub(crate) use linking::x_link_helped;
+pub(crate) use linking_incr::x_link_pool_clear;
 pub use linking::x_link_slices_print_summary;

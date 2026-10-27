@@ -125,7 +125,7 @@ struct XPoolState<T> {
     lent: Vec<(usize, usize)>,
 }
 
-impl<T: Copy> XPool<T> {
+impl<T: Clone> XPool<T> {
     /// A pool whose idle buffers may hold `idle_bytes()` touched bytes.
     pub(crate) const fn new(idle_bytes: fn() -> usize) -> Self {
         Self {

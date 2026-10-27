@@ -331,18 +331,24 @@ fn stats_enabled() -> bool {
 /// Flat maximum tree over the stable post-sort list indices, one channel per
 /// ordering method, with keys (`LinkKey`) and an update that stops at the
 /// first unchanged parent. `K::default()` is "no entry".
+#[derive(Default)]
 struct MaxTree<K> {
     cap: usize,
     nodes: Vec<[K; 2]>,
 }
 
 impl<K: Copy + Ord + Default> MaxTree<K> {
+    #[cfg(test)]
     fn new(n: usize) -> Self {
-        let cap = n.max(1).next_power_of_two();
-        Self {
-            cap,
-            nodes: vec![[K::default(); 2]; cap * 2],
-        }
+        let mut tree = Self::default();
+        tree.reset(n);
+        tree
+    }
+
+    /// The tree of `new(n)` in this tree's buffer: every node "no entry".
+    fn reset(&mut self, n: usize) {
+        self.cap = n.max(1).next_power_of_two();
+        x_fill(&mut self.nodes, self.cap * 2, [K::default(); 2]);
     }
 
     #[inline]
@@ -408,18 +414,25 @@ impl<K: Copy + Ord + Default> MaxTree<K> {
 /// A tree key: a value and a list index packed so that the integer order is
 /// larger value first, then larger index. `Default` (0) is "no entry". A key
 /// holds values in `MIN_VALUE..=MAX_VALUE` (module documentation, "Sums").
-pub(super) trait LinkKey: Copy + Ord + Default {
+pub(super) trait LinkKey: Copy + Ord + Default + Send + 'static {
     const MIN_VALUE: i64;
     const MAX_VALUE: i64;
     fn new(value: i64, idx: usize) -> Self;
     fn idx(self) -> usize;
     fn value(self) -> i64;
+    /// The kept work areas of the kernels with this key (`XLinkPool`).
+    fn pool() -> &'static XLinkPool<Self>;
 }
 
 /// A 40-bit value (offset by 2^39) and a 24-bit list index + 1.
 impl LinkKey for u64 {
     const MIN_VALUE: i64 = -(1 << 39);
     const MAX_VALUE: i64 = (1 << 39) - 1;
+
+    fn pool() -> &'static XLinkPool<u64> {
+        static POOL: XLinkPool<u64> = XLinkPool::new();
+        &POOL
+    }
 
     #[inline(always)]
     fn new(value: i64, idx: usize) -> u64 {
@@ -441,6 +454,11 @@ impl LinkKey for u64 {
 impl LinkKey for u128 {
     const MIN_VALUE: i64 = i64::MIN;
     const MAX_VALUE: i64 = i64::MAX;
+
+    fn pool() -> &'static XLinkPool<u128> {
+        static POOL: XLinkPool<u128> = XLinkPool::new();
+        &POOL
+    }
 
     #[inline(always)]
     fn new(value: i64, idx: usize) -> u128 {
@@ -596,6 +614,7 @@ impl IncrStats {
 // find the HSPs that selected a given HSP.
 /// For one ordering method, the HSPs whose link is a given HSP, as
 /// intrusive doubly linked lists.
+#[derive(Default)]
 struct Children {
     first: Vec<u32>,
     next: Vec<u32>,
@@ -603,12 +622,11 @@ struct Children {
 }
 
 impl Children {
-    fn new(n: usize) -> Self {
-        Self {
-            first: vec![NONE; n],
-            next: vec![NONE; n],
-            prev: vec![NONE; n],
-        }
+    /// No child of any of `n` HSPs, in these lists' buffers.
+    fn reset(&mut self, n: usize) {
+        x_fill(&mut self.first, n, NONE);
+        x_fill(&mut self.next, n, NONE);
+        x_fill(&mut self.prev, n, NONE);
     }
 
     #[inline]
@@ -959,6 +977,147 @@ pub(super) fn link_hsp_group_incr_with_slice(
 // ...
 //       while (number_of_hsps > 0)
 // ```
+// No NCBI counterpart: NCBI allocates its link structures once per HSP list (link_hsps.c:452-454,
+// lh_helper with MAX(1024, hspcnt+5) entries) and LOSAT's kernel used to allocate its arrays per
+// group. These choose only where the arrays live; every array is filled before it is read, with
+// the values the kernel gave it when it was a fresh Vec.
+/// `v` with `n` copies of `x`, in its buffer when it holds `n`; a new buffer is mapped by glibc once
+/// it reaches `X_MAPPED_FROM` bytes (`utils/x_mapped.rs`), so that dropping it returns its pages.
+fn x_fill<T: Clone>(v: &mut Vec<T>, n: usize, x: T) {
+    x_keep(v, n);
+    v.resize(n, x);
+}
+
+/// `v` emptied, with room for `n` (`x_fill`'s buffer rule).
+fn x_keep<T>(v: &mut Vec<T>, n: usize) {
+    v.clear();
+    if v.capacity() < n {
+        *v = Vec::with_capacity(crate::utils::x_mapped::x_mapped_capacity(
+            n,
+            std::mem::size_of::<T>(),
+        ));
+    }
+}
+
+/// `v` holding the items of `it` (at most `n`), in its buffer when it holds `n`.
+fn x_refill<T>(v: &mut Vec<T>, n: usize, it: impl Iterator<Item = T>) {
+    x_keep(v, n);
+    v.extend(it);
+}
+
+/// The arrays of one `link_group` call (its locals of the same names), kept between calls by an
+/// `XLinkPool`: a call fills those it reads, so a work area that served another group gives the
+/// same values as fresh arrays.
+#[derive(Default)]
+struct LinkBufs<K> {
+    score: Vec<i32>,
+    qo: Vec<i32>,
+    so: Vec<i32>,
+    qe: Vec<i32>,
+    se: Vec<i32>,
+    sl: Vec<f64>,
+    lk: Vec<f64>,
+    sum: [Vec<i64>; 2],
+    xsum: [Vec<f64>; 2],
+    num: [Vec<i16>; 2],
+    link: [Vec<u32>; 2],
+    indeg: Vec<i32>,
+    alive: Vec<bool>,
+    next_active: Vec<u32>,
+    prev_active: Vec<u32>,
+    children: [Children; 2],
+    queued: [Vec<bool>; 2],
+    sum_changed: [Vec<bool>; 2],
+    sum_changed_list: Vec<(u8, u32)>,
+    leaf_dirty: Vec<bool>,
+    leaf_list: Vec<u32>,
+    seeds: [Vec<u32>; 2],
+    addback_hsps: Vec<u32>,
+    removed: Vec<u32>,
+    heap: BinaryHeap<Reverse<u32>>,
+    grid_index: FxHashMap<u64, (u32, u32)>,
+    grid_items: Vec<u32>,
+    cells: Vec<(u64, u32)>,
+    elig1: Vec<u32>,
+    qorder: Vec<u32>,
+    iorder: Vec<u32>,
+    so_vals: Vec<i32>,
+    rr: Vec<u32>,
+    kq: Vec<u32>,
+    fen: Vec<K>,
+    tree: MaxTree<K>,
+    /// The most HSPs of a group it served.
+    served: usize,
+}
+
+/// No NCBI counterpart: the idle work areas of an `XLinkPool` may have served this many HSPs in
+/// all (~250 bytes each: ~64 MiB); the oldest beyond it are dropped.
+const X_LINK_POOL_IDLE_HSPS: usize = 1 << 18;
+
+/// No NCBI counterpart: the work areas of the link kernel, lent to any thread. A thread's arena
+/// keeps the space of arrays freed there for that thread alone; with the groups of one linking
+/// call linked on many threads (`x_link_slices.rs`, `x_work_board.rs`) the arrays of every group
+/// came from, and went back to, the arena of whichever thread linked it. Here a call takes the
+/// idle work area that served the fewest HSPs among those that served at least its group (else the
+/// one that served the most, else a new one) and gives it back when it ends, so the arrays in use
+/// are those of the groups linked at the busiest moment plus at most the idle bound. `x_clear`
+/// drops the idle ones at the end of a search.
+pub(super) struct XLinkPool<K> {
+    idle: std::sync::Mutex<Vec<Box<LinkBufs<K>>>>,
+}
+
+impl<K: LinkKey> XLinkPool<K> {
+    const fn new() -> Self {
+        Self {
+            idle: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn take(&self, n: usize) -> Box<LinkBufs<K>> {
+        let mut idle = self.idle.lock().unwrap_or_else(|e| e.into_inner());
+        let pick = idle
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.served >= n)
+            .min_by_key(|(_, b)| b.served)
+            .or_else(|| idle.iter().enumerate().max_by_key(|(_, b)| b.served))
+            .map(|(i, _)| i);
+        match pick {
+            // `remove`, not `swap_remove`: `give` drops the oldest first.
+            Some(i) => idle.remove(i),
+            None => Box::default(),
+        }
+    }
+
+    fn give(&self, mut bufs: Box<LinkBufs<K>>, n: usize) {
+        bufs.served = bufs.served.max(n);
+        let dropped = {
+            let mut idle = self.idle.lock().unwrap_or_else(|e| e.into_inner());
+            idle.push(bufs);
+            let mut served: usize = idle.iter().map(|b| b.served).sum();
+            let mut dropped = Vec::new();
+            while served > X_LINK_POOL_IDLE_HSPS && !idle.is_empty() {
+                let old = idle.remove(0);
+                served -= old.served;
+                dropped.push(old);
+            }
+            dropped
+        };
+        drop(dropped);
+    }
+
+    fn clear(&self) {
+        let idle = std::mem::take(&mut *self.idle.lock().unwrap_or_else(|e| e.into_inner()));
+        drop(idle);
+    }
+}
+
+/// Drops the idle work areas of the link kernel (the end of a TBLASTX search).
+pub(crate) fn x_link_pool_clear() {
+    <u64 as LinkKey>::pool().clear();
+    <u128 as LinkKey>::pool().clear();
+}
+
 // The replacement for the per-group body of s_BlastEvenGapLinkHSPs: same rounds, same selection
 // rule, same removal; a pass after the first computes again only the HSPs described in the
 // module documentation. It takes the group's records as a slice (its own Vec, or a sub-slice of
@@ -1018,13 +1177,51 @@ fn link_group<'g, K: LinkKey>(
     // H->s_end_trim = hsp->subject.end - MIN(s_length, trim_size);
     // ```
     // The trimmed offsets, with the same expressions.
-    let mut score = Vec::with_capacity(n);
-    let mut qo = Vec::with_capacity(n);
-    let mut so = Vec::with_capacity(n);
-    let mut qe = Vec::with_capacity(n);
-    let mut se = Vec::with_capacity(n);
-    let mut sl = Vec::with_capacity(n);
-    let mut lk = Vec::with_capacity(n);
+    let mut bufs = K::pool().take(n);
+    let LinkBufs {
+        score,
+        qo,
+        so,
+        qe,
+        se,
+        sl,
+        lk,
+        sum,
+        xsum,
+        num,
+        link,
+        indeg,
+        alive,
+        next_active,
+        prev_active,
+        children,
+        queued,
+        sum_changed,
+        sum_changed_list,
+        leaf_dirty,
+        leaf_list,
+        seeds,
+        addback_hsps,
+        removed,
+        heap,
+        grid_index,
+        grid_items,
+        cells,
+        elig1,
+        qorder,
+        iorder,
+        so_vals,
+        rr,
+        kq,
+        fen,
+        tree,
+        served: _,
+    } = &mut *bufs;
+    for v in [&mut *score, &mut *qo, &mut *so, &mut *qe, &mut *se] {
+        x_keep(v, n);
+    }
+    x_keep(sl, n);
+    x_keep(lk, n);
     for hit in group_hits.iter() {
         let q_off = hit.q_aa_start as i32;
         let q_end = hit.q_aa_end as i32;
@@ -1058,38 +1255,51 @@ fn link_group<'g, K: LinkKey>(
     // ```
     // The pass values of LinkHSPStruct (hsp_link.sum, num, xsum, link) per method, initialised to
     // the values of an HSP without a predecessor; `indeg` is linked_to.
-    let mut sum: [Vec<i64>; 2] = [
-        (0..n)
-            .map(|i| i64::from(score[i]) - i64::from(c[0]))
-            .collect(),
-        (0..n)
-            .map(|i| i64::from(score[i]) - i64::from(c[1]))
-            .collect(),
-    ];
-    let base_xsum: Vec<f64> = (0..n).map(|i| sl[i] - lk[i]).collect();
-    let mut xsum: [Vec<f64>; 2] = [base_xsum.clone(), base_xsum];
-    let mut num: [Vec<i16>; 2] = [vec![1; n], vec![1; n]];
-    let mut link: [Vec<u32>; 2] = [vec![NONE; n], vec![NONE; n]];
-    let mut indeg: Vec<i32> = vec![0; n];
-    let mut alive: Vec<bool> = vec![true; n];
-    let mut next_active: Vec<u32> = (0..n)
-        .map(|i| if i + 1 < n { (i + 1) as u32 } else { NONE })
-        .collect();
-    let mut prev_active: Vec<u32> = (0..n)
-        .map(|i| if i > 0 { (i - 1) as u32 } else { NONE })
-        .collect();
+    for m in 0..2 {
+        x_refill(
+            &mut sum[m],
+            n,
+            (0..n).map(|i| i64::from(score[i]) - i64::from(c[m])),
+        );
+    }
+    x_refill(&mut xsum[0], n, (0..n).map(|i| sl[i] - lk[i]));
+    {
+        let [base_xsum, xsum1] = &mut *xsum;
+        x_keep(xsum1, n);
+        xsum1.extend_from_slice(base_xsum);
+    }
+    for m in 0..2 {
+        x_fill(&mut num[m], n, 1);
+        x_fill(&mut link[m], n, NONE);
+    }
+    x_fill(indeg, n, 0);
+    x_fill(alive, n, true);
+    x_refill(
+        next_active,
+        n,
+        (0..n).map(|i| if i + 1 < n { (i + 1) as u32 } else { NONE }),
+    );
+    x_refill(
+        prev_active,
+        n,
+        (0..n).map(|i| if i > 0 { (i - 1) as u32 } else { NONE }),
+    );
     let mut active_head: u32 = 0;
-    let mut children = [Children::new(n), Children::new(n)];
+    for list in children.iter_mut() {
+        list.reset(n);
+    }
     // Per pass: queued for a method, sum changed in this pass, leaf to write.
-    let mut queued: [Vec<bool>; 2] = [vec![false; n], vec![false; n]];
-    let mut sum_changed: [Vec<bool>; 2] = [vec![false; n], vec![false; n]];
-    let mut sum_changed_list: Vec<(u8, u32)> = Vec::new();
-    let mut leaf_dirty: Vec<bool> = vec![false; n];
-    let mut leaf_list: Vec<u32> = Vec::new();
-    let mut seeds: [Vec<u32>; 2] = [Vec::new(), Vec::new()];
-    let mut addback_hsps: Vec<u32> = Vec::new();
-    let mut removed: Vec<u32> = Vec::new();
-    let mut heap: BinaryHeap<Reverse<u32>> = BinaryHeap::new();
+    for m in 0..2 {
+        x_fill(&mut queued[m], n, false);
+        x_fill(&mut sum_changed[m], n, false);
+        seeds[m].clear();
+    }
+    sum_changed_list.clear();
+    x_fill(leaf_dirty, n, false);
+    leaf_list.clear();
+    addback_hsps.clear();
+    removed.clear();
+    heap.clear();
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:702-745
     // ```c
@@ -1111,13 +1321,16 @@ fn link_group<'g, K: LinkKey>(
     let cell_of = |q: i32, s: i32| -> u64 {
         (((q.div_euclid(w)) as u32 as u64) << 32) | ((s.div_euclid(w)) as u32 as u64)
     };
-    let mut grid_index: FxHashMap<u64, (u32, u32)> = FxHashMap::default();
-    let mut grid_items: Vec<u32> = Vec::new();
+    grid_index.clear();
+    grid_items.clear();
     if !ignore_small_gaps {
-        let mut cells: Vec<(u64, u32)> = (0..n)
-            .filter(|&i| score[i] > c[0])
-            .map(|i| (cell_of(qo[i], so[i]), i as u32))
-            .collect();
+        x_refill(
+            cells,
+            n,
+            (0..n)
+                .filter(|&i| score[i] > c[0])
+                .map(|i| (cell_of(qo[i], so[i]), i as u32)),
+        );
         cells.sort_unstable();
         grid_items.reserve(cells.len());
         let mut start = 0usize;
@@ -1146,20 +1359,21 @@ fn link_group<'g, K: LinkKey>(
     // ```
     // The structures of the index-1 scan: the orders, ranks and Fenwick tree of the sweep (module
     // documentation, "Index 1"), over the HSPs with score > cutoff[1].
-    let elig1: Vec<u32> = (0..n)
-        .filter(|&i| score[i] > c[1])
-        .map(|i| i as u32)
-        .collect();
-    let mut qorder: Vec<u32> = elig1.clone();
+    x_refill(
+        elig1,
+        n,
+        (0..n).filter(|&i| score[i] > c[1]).map(|i| i as u32),
+    );
+    x_refill(qorder, elig1.len(), elig1.iter().copied());
     qorder.sort_unstable_by(|&a, &b| qe[b as usize].cmp(&qe[a as usize]).then_with(|| a.cmp(&b)));
-    let mut iorder: Vec<u32> = elig1.clone();
+    x_refill(iorder, elig1.len(), elig1.iter().copied());
     iorder.sort_unstable_by(|&a, &b| qo[b as usize].cmp(&qo[a as usize]).then_with(|| a.cmp(&b)));
-    let mut so_vals: Vec<i32> = elig1.iter().map(|&i| so[i as usize]).collect();
+    x_refill(so_vals, elig1.len(), elig1.iter().map(|&i| so[i as usize]));
     so_vals.sort_unstable();
     so_vals.dedup();
     let msz = so_vals.len();
-    let mut rr: Vec<u32> = vec![0; n];
-    let mut kq: Vec<u32> = vec![0; n];
+    x_fill(rr, n, 0);
+    x_fill(kq, n, 0);
     for &i in elig1.iter() {
         let i = i as usize;
         let rank = so_vals.partition_point(|&v| v < so[i]);
@@ -1167,9 +1381,8 @@ fn link_group<'g, K: LinkKey>(
         let le = so_vals.partition_point(|&v| v <= se[i]);
         kq[i] = (msz - le) as u32;
     }
-    let mut fen: Vec<K> = vec![K::default(); msz + 1];
-
-    let mut tree = MaxTree::<K>::new(n);
+    x_fill(fen, msz + 1, K::default());
+    tree.reset(n);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:584-589
     // ```c
@@ -1204,32 +1417,32 @@ fn link_group<'g, K: LinkKey>(
             se: &se,
             sl: &sl,
             lk: &lk,
-            sum: &mut sum,
-            xsum: &mut xsum,
-            num: &mut num,
-            link: &mut link,
-            indeg: &mut indeg,
-            alive: &mut alive,
-            next_active: &mut next_active,
-            prev_active: &mut prev_active,
-            children: &mut children,
-            queued: &mut queued,
-            sum_changed: &mut sum_changed,
-            sum_changed_list: &mut sum_changed_list,
-            leaf_dirty: &mut leaf_dirty,
-            leaf_list: &mut leaf_list,
-            seeds: &mut seeds,
-            addback_hsps: &mut addback_hsps,
-            removed: &mut removed,
-            heap: &mut heap,
+            sum: &mut *sum,
+            xsum: &mut *xsum,
+            num: &mut *num,
+            link: &mut *link,
+            indeg: &mut *indeg,
+            alive: &mut *alive,
+            next_active: &mut *next_active,
+            prev_active: &mut *prev_active,
+            children: &mut *children,
+            queued: &mut *queued,
+            sum_changed: &mut *sum_changed,
+            sum_changed_list: &mut *sum_changed_list,
+            leaf_dirty: &mut *leaf_dirty,
+            leaf_list: &mut *leaf_list,
+            seeds: &mut *seeds,
+            addback_hsps: &mut *addback_hsps,
+            removed: &mut *removed,
+            heap: &mut *heap,
             grid_index: &grid_index,
             grid_items: &grid_items,
-            qorder: &mut qorder,
-            iorder: &mut iorder,
+            qorder: &mut *qorder,
+            iorder: &mut *iorder,
             rr: &rr,
             kq: &kq,
-            fen: &mut fen,
-            tree: &mut tree,
+            fen: &mut *fen,
+            tree: &mut *tree,
             remaining: &mut remaining,
             first_pass: &mut first_pass,
             path_changed: &mut path_changed,
@@ -1240,6 +1453,7 @@ fn link_group<'g, K: LinkKey>(
         }
     }
 
+    K::pool().give(bufs, n);
     (group_hits, stats)
 }
 

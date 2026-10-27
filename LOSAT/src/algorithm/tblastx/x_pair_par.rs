@@ -599,6 +599,11 @@ fn add_ns(counter: &AtomicU64, t0: Option<Instant>) {
     }
 }
 
+/// EXPERIMENT (LOSAT_X_TBXBOARD): drops the idle lists of the merges' pools (x_kmerge.rs).
+pub(super) fn x_frame_pools_clear() {
+    x_kmerge::x_frame_pools_clear();
+}
+
 /// The summary lines (printed by `main` at exit): the LOSAT_X_STATS counters and the LOSAT_TIMING
 /// lines.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.

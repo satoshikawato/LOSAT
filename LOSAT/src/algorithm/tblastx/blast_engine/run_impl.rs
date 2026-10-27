@@ -595,11 +595,24 @@ fn merge_tblastx_subject_chunk_hits(
     split_offset: usize,
     chunk_overlap_size: usize,
 ) {
+    x_merge_chunk_hits_keep(combined, &mut incoming, split_offset, chunk_overlap_size);
+}
+
+// EXPERIMENT (LOSAT_X_TBXBOARD, x_kmerge.rs `X_FRAME_HITS`): `merge_tblastx_subject_chunk_hits`
+// leaving `incoming` empty with its buffer (its elements are appended to `combined` as before), so
+// that the caller can lend the buffer again. The same statements on the same lists.
+/// `merge_tblastx_subject_chunk_hits`, emptying `incoming` instead of dropping it.
+fn x_merge_chunk_hits_keep(
+    combined: &mut Vec<UngappedHit>,
+    incoming: &mut Vec<UngappedHit>,
+    split_offset: usize,
+    chunk_overlap_size: usize,
+) {
     if incoming.is_empty() {
         return;
     }
     if combined.is_empty() {
-        combined.append(&mut incoming);
+        combined.append(incoming);
         return;
     }
 
@@ -647,7 +660,7 @@ fn merge_tblastx_subject_chunk_hits(
         delete_idx += 1;
         keep
     });
-    combined.append(&mut incoming);
+    combined.append(incoming);
     if !ungapped_hits_is_sorted_by_score_ncbi(combined) {
         sort_ungapped_hits_by_score_ncbi(combined);
     }
@@ -3167,6 +3180,10 @@ fn run_batch_loop(
         done.spans.push(start..end);
         input_start = input_end;
     }
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the idle work areas the merges and the link kernel kept for
+    // the next subject are dropped before the output (x_kmerge.rs, linking_incr.rs).
+    x_pair_par::x_frame_pools_clear();
+    crate::algorithm::tblastx::sum_stats_linking::x_link_pool_clear();
     reports.write(outputs, done, &warnings, true)
 }
 

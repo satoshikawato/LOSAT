@@ -593,6 +593,8 @@ pub(crate) fn search_core(
             }
         };
         super::x_timing::batch(XBatch::QuerySetup, x_t);
+        #[cfg(feature = "parallel")]
+        super::x_probe::mark_here(super::x_probe::QSETUP);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
         // ```c++
         //
@@ -948,6 +950,8 @@ pub(crate) fn search_core(
                 Vec::new()
             };
             super::x_timing::batch(XBatch::Lookup, x_t);
+            #[cfg(feature = "parallel")]
+            super::x_probe::mark_here(super::x_probe::BUILT);
             let mut subject_stages = Vec::new();
             // Dispatch point (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0`): the
             // subjects as a flow of tasks of k consecutive subjects, handed to the sink in subject
@@ -1263,9 +1267,13 @@ pub(crate) fn search_core(
         //             m_InternalData->m_Queries = query_data->GetSequenceBlk();
         //         }
         // ```
+        #[cfg(feature = "parallel")]
+        super::x_probe::mark_here(super::x_probe::CHUNKS);
         let x_t = super::x_timing::lap();
         sink.batch_end(&full, &full_params)?;
         super::x_timing::batch(XBatch::BatchEnd, x_t);
+        #[cfg(feature = "parallel")]
+        super::x_probe::mark_here(super::x_probe::ENDED);
         super::x_timing::batch(XBatch::Sum, x_t_batch);
         super::x_timing::batch_count();
         if diagnostics {

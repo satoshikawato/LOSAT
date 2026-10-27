@@ -1984,6 +1984,7 @@ fn x_flow(
                 let Some((index, unit, alone)) = next else {
                     break;
                 };
+                super::x_probe::mark(index, super::x_probe::PLACE);
                 if alone {
                     super::x_timing::run_add(XRun::FlowAlone, 1);
                 }
@@ -2014,9 +2015,13 @@ fn x_flow(
             }
             let sender = sender.clone();
             scope.spawn(move |scope| {
+                super::x_probe::mark(index, super::x_probe::BEGIN);
+                let x_prev = super::x_probe::enter(index);
                 let searched = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     (self.search)(&unit, alone)
                 }));
+                super::x_probe::leave(x_prev);
+                super::x_probe::mark(index, super::x_probe::DONE);
                 self.held().live -= 1;
                 // The receiver is gone only when the run already ended at an error.
                 let _ = sender.send((index, searched));
@@ -2045,7 +2050,8 @@ fn x_flow(
             self.0.held().stopped = true;
         }
     }
-    rayon::in_place_scope(|scope| {
+    super::x_probe::start();
+    let x_result = rayon::in_place_scope(|scope| {
         let _stop = XStop(&launch);
         let (sender, receiver) = mpsc::channel::<(usize, XSearched)>();
         let state = RefCell::new(XState {
@@ -2093,7 +2099,8 @@ fn x_flow(
                             };
                             match searched {
                                 Ok(results) => {
-                                    write_unit(&unit.batch, unit.range.start, unit.last, results)?
+                                    write_unit(&unit.batch, unit.range.start, unit.last, results)?;
+                                    super::x_probe::mark(index, super::x_probe::WRITTEN);
                                 }
                                 Err(panic) => std::panic::resume_unwind(panic),
                             }
@@ -2108,6 +2115,8 @@ fn x_flow(
                     }
                 }
                 let x_t = super::x_timing::lap();
+                let x_read = state.borrow().read;
+                super::x_probe::mark(x_read, super::x_probe::BLOCK0);
                 if let Some(rayon::Yield::Executed) = rayon::yield_now() {
                     let x_ns = super::x_timing::run(XRun::FlowJobTime, x_t);
                     super::x_timing::run_add(XRun::FlowJobs, 1);
@@ -2129,6 +2138,7 @@ fn x_flow(
                     let x_ns = super::x_timing::run(XRun::FlowBlocked, x_t);
                     super::x_timing::run_add(XRun::Search, x_ns);
                 }
+                super::x_probe::mark(x_read, super::x_probe::BLOCK1);
             }
         };
         let parsed = parse_fasta_stream_keeping(
@@ -2149,11 +2159,15 @@ fn x_flow(
                 // last task ends phase 1 and starts the searches that were due before it ended
                 // (no thread waits for phase 1).
                 let units = split(queries);
+                let x_base = state.borrow().read;
                 if units.first().is_some_and(|unit| unit.prep.is_some()) {
-                    for unit in &units {
+                    for (x_i, unit) in units.iter().enumerate() {
                         let (unit, sender, launch) = (unit.clone(), sender.clone(), &launch);
                         scope.spawn(move |scope| {
-                            for (index, unit, alone) in unit.prepare_task(prepare) {
+                            super::x_probe::mark(x_base + x_i, super::x_probe::PREP0);
+                            let x_ready = unit.prepare_task(prepare);
+                            super::x_probe::mark(x_base + x_i, super::x_probe::PREP1);
+                            for (index, unit, alone) in x_ready {
                                 launch.spawn_search(scope, &sender, index, unit, alone);
                             }
                         });
@@ -2166,6 +2180,7 @@ fn x_flow(
                         state.read += 1;
                         state.unwritten += 1;
                         state.events.push_back(XEvent::Batch(index, unit.clone()));
+                        super::x_probe::mark(index, super::x_probe::READ);
                         let mut held = launch.held();
                         held.batches.push_back((index, unit));
                     }
@@ -2189,12 +2204,15 @@ fn x_flow(
         if !failed.get() {
             // The end of the input: the held batches (the last of the input) are searched alone,
             // side by side.
+            super::x_probe::mark(state.borrow().read, super::x_probe::INPUT_END);
             launch.held().ended = true;
             release();
             write(true)?;
         }
         parsed
-    })
+    });
+    super::x_probe::dump();
+    x_result
 }
 
 /// The formatting handler's warnings of a BLASTX run with output format `outfmt`

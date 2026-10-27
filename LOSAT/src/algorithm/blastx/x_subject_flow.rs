@@ -392,6 +392,10 @@ pub(super) fn run(
     result.map(|()| call)
 }
 
+/// No NCBI counterpart: tasks per thread that the flow across chunks searches ahead of the loop's
+/// thread (`run_chunks`; scheduling only).
+const X_CROSS_AHEAD: usize = 16;
+
 /// No NCBI counterpart: what the subject loop of one query chunk needs, made by the statements of
 /// `search::search_core` before that loop (`LOSAT_X_BXCHUNKCROSS`): the chunk's Karlin blocks with
 /// its subject parameters, its lookup table, its X-drop, and a diagonal table of its length for
@@ -675,18 +679,17 @@ pub(super) fn run_chunks(
             x_containment,
         )
     };
-    // As in `run`: four tasks per thread ahead of this thread; inside the capped batch flow the
-    // helpers leave once every task is claimed.
-    // PROTOTYPE (s16, not for the PR): tasks per thread ahead from LOSAT_X_BXCROSSAHEAD.
-    let per_thread = std::env::var("LOSAT_X_BXCROSSAHEAD")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(4)
-        .max(1);
+    // Sixteen tasks per thread ahead of this thread (`run` keeps four): a task much slower than
+    // the others (a subject with many hits) holds this thread at its place in the order while the
+    // helpers search the rest of the window, and with four per thread they ran out of tasks and
+    // spun (16 threads, fly 2L 50 kb x the fly proteins: 1.6 s of `sched_yield` in 0.69 s); with
+    // sixteen they seldom do (0.08 s), and the tasks held at once stay few next to the lookup
+    // tables (only subjects with hits are kept). Inside the capped batch flow the helpers leave
+    // once every task is claimed.
     let ahead = if capped {
-        crate::utils::xahead::Ahead::x_new_leaving(per_thread * (helpers + 1))
+        crate::utils::xahead::Ahead::x_new_leaving(X_CROSS_AHEAD * (helpers + 1))
     } else {
-        crate::utils::xahead::Ahead::new(per_thread * (helpers + 1))
+        crate::utils::xahead::Ahead::new(X_CROSS_AHEAD * (helpers + 1))
     };
     let scratches: Vec<_> = (0..helpers)
         .map(|_| {

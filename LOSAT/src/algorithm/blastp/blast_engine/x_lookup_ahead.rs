@@ -1161,6 +1161,34 @@ mod tests {
                             panic!("{task}: the tables differ");
                         }
                     }
+                    // LOSAT_X_BPLK16: the tables of 16-bit hits, field by field as
+                    // `x_same_table`.
+                    (BlastpRuntimeLookup::Aa16(got), BlastpRuntimeLookup::Aa16(want)) => {
+                        assert!(
+                            want.backbone.iter().any(|cell| cell.num_used > 0)
+                                || !want.overflow.is_empty(),
+                            "{task}: the table has no hits"
+                        );
+                        assert!(
+                            got.backbone.len() == want.backbone.len()
+                                && got.backbone.iter().zip(&want.backbone).all(|(a, b)| {
+                                    a.num_used == b.num_used && a.entries == b.entries
+                                })
+                                && got.overflow == want.overflow
+                                && got.pv == want.pv
+                                && got.frame_bases == want.frame_bases
+                                && got.num_contexts == want.num_contexts
+                                && got.query_length == want.query_length
+                                && got.word_length == want.word_length
+                                && got.alphabet_size == want.alphabet_size
+                                && got.charsize == want.charsize
+                                && got.mask == want.mask
+                                && got.longest_chain == want.longest_chain
+                                && got.threshold == want.threshold
+                                && got.row_max == want.row_max,
+                            "{task}: the tables of 16-bit hits differ"
+                        );
+                    }
                     _ => panic!("{task}: the tables are of different kinds"),
                 }
                 if !x_same_contexts(&ahead.contexts, &contexts) {

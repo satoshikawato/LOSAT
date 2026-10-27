@@ -2800,6 +2800,13 @@ fn run_batch_loop(
         .formats
         .first()
         .is_none_or(|format| report::output_format(format.outfmt).writes_query_warnings());
+    // Whether the batches' prefetch of a `-db` search writes the taxonomy database's messages
+    // with the query warnings: the first format is outfmt 0, 5, 6 or 7
+    // (`TblastxOutputFormat::prefetches_subjects`; see the batch's prefetch below).
+    let prefetches = outputs
+        .formats
+        .first()
+        .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
     // A batch is read from the input records (`input_start..input_end`); its searched
     // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
     // whole records, and a record whose range starts past its end is skipped
@@ -3098,6 +3105,37 @@ fn run_batch_loop(
                     }
                     Err(error) => return Err(error),
                 }
+            }
+            // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-205
+            // ```c++
+            //             if (fmt_args->ArchiveFormatRequested(args)) {
+            //                 formatter.WriteArchive(*queries, *opts_hndl, *results, 0, bah.GetMessages());
+            //                 bah.ResetMessages();
+            //             } else {
+            //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+            //                 		                            fmt_args->GetFormattedOutputChoice());
+            //                 ITERATE(CSearchResultSet, result, *results) {
+            //                     formatter.PrintOneResultSet(**result, query_batch);
+            //                 }
+            // ```
+            // Before the reports of a batch NCBI fetches every subject that the batch reports
+            // (the sequences of `ordered`), and with `taxdb.bti` on the search path the taxonomy
+            // database writes its messages there (`database::prefetch_messages`: the texts of
+            // opening it at the run's first lookup, a volume's lookup of a taxid once per run):
+            // after the reader's messages of the batch and before the warnings of its first
+            // query, which are added below. They go with the warnings, where the first format is
+            // outfmt 0, 5, 6 or 7 (`prefetches`), so every writer of the reports writes them
+            // there (the reports after the loop, the error paths that write the reports of the
+            // batches before). Without `taxdb.bti` nothing is read. A refusal (a taxonomy
+            // database or a taxid that LOSAT cannot read as NCBI does) stops the run before any
+            // report, as the refusals of the titles above and XML2's lookups (`read_taxids`) do.
+            if prefetches && database.taxdb_found() {
+                let messages = super::super::database::prefetch_messages(
+                    database,
+                    &ordered,
+                    &reports.titles.borrow(),
+                )?;
+                warnings[start].extend(messages);
             }
         }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1450-1452

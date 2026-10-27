@@ -4165,6 +4165,15 @@ struct SubjectScratch {
     // that holds its working memory. A helper never uses the caller's scratch. Reuse only.
     // No NCBI counterpart: scratch memory of the look-ahead helpers.
     x_ahead_scratch: Vec<(GapAlignScratch, GreedyAlignScratch)>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-513
+    // ```c
+    //             BLAST_GappedAlignmentWithTraceback(program_number,
+    //                 query, adjusted_subject, gap_align, score_params,
+    // ```
+    // No NCBI counterpart: the scratch of the speculative traceback batches, one pair per thread
+    // of the pool, kept with the rest of this scratch so that each subject's traceback reuses it
+    // instead of making it again. Reuse only, as `x_ahead_scratch`.
+    x_spec_scratch: Vec<(GapAlignScratch, GreedyAlignScratch)>,
     cutoff_scores: Vec<i32>,
     x_dropoff_scores: Vec<i32>,
     reduced_cutoff_scores: Vec<i32>,
@@ -4271,6 +4280,7 @@ impl SubjectScratch {
             // No NCBI counterpart: the helper scratch list starts empty and is filled when helpers are used;
             // it does not change any value NCBI computes.
             x_ahead_scratch: Vec::new(),
+            x_spec_scratch: Vec::new(),
             cutoff_scores: Vec::with_capacity(query_count),
             x_dropoff_scores: Vec::with_capacity(query_count),
             reduced_cutoff_scores: Vec::with_capacity(query_count),
@@ -15955,10 +15965,18 @@ fn search_query_batch(
                             x_helper_scratch: Option<
             &mut Vec<(GapAlignScratch, GreedyAlignScratch)>,
         >,
+                            x_spec_scratch: Option<
+            &mut Vec<(GapAlignScratch, GreedyAlignScratch)>,
+        >,
                             hits: &mut Vec<BlastnHsp>,
                             traceback_edit_script_lengths: &mut Vec<u32>,
                             traceback_alignment_lengths: &mut Vec<u32>| {
             let speculative_traceback = speculative_traceback && x_helper_scratch.is_some();
+            #[cfg(not(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            )))]
+            let _ = &x_spec_scratch;
             if x_greedy_spec {
                 crate::utils::xreach::x_reach!("LOSAT_X_GREEDYSPEC", speculative_traceback);
             }
@@ -16104,26 +16122,36 @@ fn search_query_batch(
                     feature = "parallel",
                     any(not(target_arch = "wasm32"), feature = "wasm-threads")
                 ))]
+                let mut x_no_spec = Vec::new();
+                #[cfg(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                ))]
+                let x_spec_scratch = x_spec_scratch.unwrap_or(&mut x_no_spec);
+                #[cfg(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                ))]
                 let mut speculative_scratch: Vec<_> = if speculative_traceback {
                     // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-513
                     // BLAST_GappedAlignmentWithTraceback(...);
                     // Each independent scratch slot retains its intermediate results.
-                    (0..num_threads)
-                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507
-                        // ```c
-                        //         } else if (kGreedyTraceback) {
-                        //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
-                        //                 query_length, adjusted_s_length, gap_align,
-                        // ```
-                        // Each slot of the batch also has the scratch of the greedy aligner, so that
-                        // the greedy traceback call can run on a slot instead of on the ordered loop. Scratch only.
-                        .map(|_| {
-                            (
-                                GapAlignScratch::new(),
-                                GreedyAlignScratch::new(),
-                                Vec::new(),
-                            )
-                        })
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507
+                    // ```c
+                    //         } else if (kGreedyTraceback) {
+                    //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
+                    //                 query_length, adjusted_s_length, gap_align,
+                    // ```
+                    // Each slot of the batch also has the scratch of the greedy aligner, so that
+                    // the greedy traceback call can run on a slot instead of on the ordered loop.
+                    // Scratch only, made once per subject scratch (`x_spec_scratch`).
+                    while x_spec_scratch.len() < num_threads {
+                        x_spec_scratch.push((GapAlignScratch::new(), GreedyAlignScratch::new()));
+                    }
+                    x_spec_scratch
+                        .iter_mut()
+                        .take(num_threads)
+                        .map(|(gap, greedy)| (gap, greedy, Vec::new()))
                         .collect()
                 } else {
                     Vec::new()
@@ -17761,6 +17789,7 @@ fn search_query_batch(
                             gap,
                             greedy,
                             None,
+                            None,
                             &mut hits,
                             &mut edit_lengths,
                             &mut alignment_lengths,
@@ -17791,6 +17820,7 @@ fn search_query_batch(
                     gap_scratch,
                     &mut subject_scratch.greedy_align_scratch,
                     Some(&mut subject_scratch.x_ahead_scratch),
+                    Some(&mut subject_scratch.x_spec_scratch),
                     hits,
                     &mut traceback_edit_script_lengths,
                     &mut traceback_alignment_lengths,

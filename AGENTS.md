@@ -211,6 +211,18 @@ authoritative, current guidance for agent behavior in LOSAT.
   (`LOSAT_X_STATS`, `LOSAT_X_REACH`, `LOSAT_TIMING`; `docs/agents/diagnostics.md`) change no output
   and are not switches.
 
+- A speed-up pull request's body names the structural cause the change removes (what allocates,
+  copies, waits or rescans, and why), says whether the new form holds for every input, and lists the
+  inputs where it does not with their ratios. A body that only says "X is slow" or "X uses memory"
+  is not ready for review. Owner, 2026-10-27.
+- No new conditional switch (a path that runs only under a rule) while these structural items are
+  open: blastn's QBATCHPAR slots each holding a lookup table and a query-batch copy, one lookup table
+  per parallel unit in blastx and tblastx, and tblastn's OID-order hand-back waits. A rule-limited
+  path lands only as a deadline fallback that its body names as such and the Owner approves.
+  Thresholds (`..MIN`, capacities, backoffs) and stacked variants of one loop are folded to one form
+  per family before graduation freezes them as constants. Owner, 2026-10-27 (audit of #329-#553
+  after #554 was closed).
+
 ### Benchmark target protocol
 - Treat repository benchmark figures as compute-program benchmarks, not as
   biological interpretation or downstream bioinformatics analysis.

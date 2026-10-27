@@ -489,7 +489,7 @@ const DIAGHASH_CHAIN_LENGTH: usize = 256;
 // ```
 struct SubjectSplitState {
     full_right: i32,
-    hard_ranges: Vec<(i32, i32)>,
+    hard_ranges: [(i32, i32); 1],
     soft_ranges: Vec<(i32, i32)>,
     hm_index: usize,
     sm_index: usize,
@@ -613,7 +613,8 @@ impl SubjectSplitState {
         let full_right = subject_len as i32;
         Self {
             full_right,
-            hard_ranges: vec![(0, full_right)],
+            // One range, as NCBI's `&(backup->full_range)`: an array, not a vector per subject.
+            hard_ranges: [(0, full_right)],
             soft_ranges,
             hm_index: 0,
             sm_index: 0,
@@ -3534,36 +3535,27 @@ fn purge_prelim_hits_with_common_endpoints(mut hsps: Vec<PrelimHit>) -> Vec<Prel
     // duplicates are deleted, not trimmed. The full traceback stage still uses
     // the later purge=FALSE/TRUE passes over final HSPs with edit scripts.
     qsort_prelim_hits_by(&mut hsps, query_offset_compare_prelim_hits);
-    let mut kept: Vec<PrelimHit> = Vec::with_capacity(hsps.len());
-    for hsp in hsps {
-        let same_common_start = kept.last().is_some_and(|prev| {
-            prev.context_idx == hsp.context_idx
-                && prev.prelim_qs == hsp.prelim_qs
-                && prev.prelim_ss == hsp.prelim_ss
-        });
-        if !same_common_start {
-            kept.push(hsp);
-        }
-    }
+    // In place: `dedup_by` drops an HSP that matches the last one kept, as the copy into a
+    // second vector did.
+    hsps.dedup_by(|hsp, prev| {
+        prev.context_idx == hsp.context_idx
+            && prev.prelim_qs == hsp.prelim_qs
+            && prev.prelim_ss == hsp.prelim_ss
+    });
+    let mut kept = hsps;
 
     if kept.len() <= 1 {
         return kept;
     }
 
     qsort_prelim_hits_by(&mut kept, query_end_compare_prelim_hits);
-    let mut out: Vec<PrelimHit> = Vec::with_capacity(kept.len());
-    for hsp in kept {
-        let same_common_end = out.last().is_some_and(|prev| {
-            prev.context_idx == hsp.context_idx
-                && prev.prelim_qe == hsp.prelim_qe
-                && prev.prelim_se == hsp.prelim_se
-        });
-        if !same_common_end {
-            out.push(hsp);
-        }
-    }
+    kept.dedup_by(|hsp, prev| {
+        prev.context_idx == hsp.context_idx
+            && prev.prelim_qe == hsp.prelim_qe
+            && prev.prelim_se == hsp.prelim_se
+    });
 
-    out
+    kept
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits_priv.h:66-72
@@ -11629,10 +11621,12 @@ fn search_query_batch(
             _ => Vec::new(),
         };
         let subject_masked = !subject_masks.is_empty();
+        // Unmasked, every chunk carries its range inline (`SeqRanges::Inline`) and no one reads
+        // the soft ranges, so none are made (NCBI points them at `full_range`).
         let soft_ranges = if subject_masked {
             build_subject_seq_ranges_from_masks(subject_masks.as_slice(), s_len_full)
         } else {
-            vec![(0i32, s_len_full as i32)]
+            Vec::new()
         };
 
         if s_len_full < effective_word_size {

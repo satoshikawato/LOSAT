@@ -2623,6 +2623,25 @@ Rebuilding less:
   threads 1.16 / 1.44 s (outfmt 6) and 1.29 / 1.84 s (outfmt 0); AP027131 x AP027133 at 8 threads 1.96 /
   2.07 s and 2.05 / 2.35 s, at 1 thread 10.43 / 10.41 s (the serial stage). Peak memory is equal within the
   runs' spread (three genomes at 16 threads 529 / 527 MiB with outfmt 6, 485 / 568 with outfmt 0).
+- `LOSAT_X_TBXRPTBATCH=1` (TBLASTX, speed and memory; in the strict set from the pull request that added it,
+  2026-10-28, on by default; `=0` orders every batch in the write) the batch loop puts each query batch's HSPs in
+  report order (`report_order`: the final order, or the culled order with `-culling_limit`) when it takes the
+  batch's result, and the write after the last batch keeps that order (`tblastx/x_rpt_batch.rs`, exactness
+  argument in its header: a query's order depends on its own HSPs only, and the batches hold disjoint,
+  increasing ranges of queries). A `-db` search reads the titles of a batch's reported sequences from that
+  ordered list instead of ordering a copy. Before, the write began with the order of every batch's HSPs (two
+  stable sorts per hit list of ~190-byte HSPs) on the loop's thread while the pool waited: on the three
+  genomes above at 16 threads (ws, 2026-10-28) the report stage took 0.187 s, two thirds of it in that order.
+  With the batch pipe (TBXPIPE) a batch's order is made while the next batch is searched, so only the last
+  batch's order is left after the search; a search of one query batch orders at the same point as before.
+  On the workstation (16 CPUs of one socket, 3 s warm-up per run, alternating order, every report identical
+  to `=0`; medians of paired rounds, dev 601a3ece2), the three genomes above at 16 threads took x0.995 of the
+  time (6 rounds, 5 below), with `-db` x0.966 (3), at 8 threads x1.002 (3); the same queries against the
+  three genomes cut into 18,838 pieces of 100 bp x0.992 with peak memory 300 -> 209 MiB, against one genome
+  x0.990 with 267 -> 242 MiB; one-batch inputs (MelaMJNV x 9 MJNV genomes, AP027131 x AP027133 at 16
+  threads) x0.984 and x0.995. The memory saved is the order of every batch at once after the search
+  (per-pair lists and the ordered list of all HSPs); the order of one batch is made while the next batch
+  searches.
 - `LOSAT_X_TBXMASKSEEK=1` (TBLASTX, the outfmt 0 rows and the hit records of LOSAT Web; speed; in the strict set from
   the pull request that added it, 2026-10-24; `=0` scans every range) `PairwiseRows` keeps the shown SEG masks of each
   query frame sorted by start, with the running maximum of their ends (`FrameMasks`, `tblastx/report.rs`), and

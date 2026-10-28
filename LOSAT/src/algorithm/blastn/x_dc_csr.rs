@@ -78,6 +78,7 @@ use super::{build_unmasked_ranges, DiscWords, PvArrayType, BLAST2NA_MASK, PV_ARR
 #[cfg(test)]
 use super::{disc_longest_chain, fill_disc_mb_tables, DiscTables};
 use crate::algorithm::blastn::disc_lookup::compute_discontiguous_index;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
@@ -194,14 +195,99 @@ pub(super) fn x_rank(bits: &[u64], cell: usize) -> Option<usize> {
     Some(bits[j + 1] as usize + (w & (m - 1)).count_ones() as usize)
 }
 
-/// No NCBI counterpart (layout only): EXPERIMENT (LOSAT_X_BNCSRPACK) the ranks of the blocks
-/// `b0 .. b1` of `bits` (two words per 64 cells, the presence bits written): the second word of
-/// each gets the number of non-empty cells before it, from `base`; returns the number after `b1`.
-pub(super) fn x_rank_blocks(bits: &mut [u64], b0: usize, b1: usize, base: usize) -> usize {
-    let mut r = base;
+/// No NCBI counterpart (layout only): EXPERIMENT (LOSAT_X_BNCSRPACK) the presence bits of 64 cells
+/// from their counts `c` (`x_count8`): bit `k` is set when `c[k]` is not 0. Eight bytes at a time:
+/// the high bit of a byte of `((x & 0x7f..) + 0x7f..) | x` is set when the byte is not 0 (no sum
+/// leaves its byte), and the product of those bits (bit `8 k`) by `0x0102040810204080` puts byte
+/// `k`'s at bit `56 + k` (the products' bits are distinct, so nothing carries).
+#[inline(always)]
+pub(super) fn x_nonzero_bits(c: &[u8; 64]) -> u64 {
+    const LOW7: u64 = 0x7f7f_7f7f_7f7f_7f7f;
+    const GATHER: u64 = 0x0102_0408_1020_4080;
+    let mut m = 0u64;
+    for (i, b) in c.chunks_exact(8).enumerate() {
+        let x = u64::from_le_bytes(b.try_into().unwrap());
+        let t = (((x & LOW7) + LOW7) | x) & !LOW7;
+        m |= ((t >> 7).wrapping_mul(GATHER) >> 56) << (8 * i);
+    }
+    m
+}
+
+/// No NCBI counterpart (layout only): EXPERIMENT (LOSAT_X_BNCSRPACK) one more word of `cell` in the
+/// counts of a packed build: one byte per cell up to `u8::MAX`, and the words beyond in `more`
+/// (a byte of `u8::MAX` without an entry is a count of 255).
+///
+/// SAFETY: `cnt.add(cell)` is a byte of the counts that no other thread uses meanwhile.
+#[inline(always)]
+pub(super) unsafe fn x_count8(cnt: *mut u8, more: &mut HashMap<u32, u32>, cell: usize) {
+    // SAFETY: the caller's.
+    let p = unsafe { &mut *cnt.add(cell) };
+    if *p == u8::MAX {
+        x_count_more(more, cell);
+    } else {
+        *p += 1;
+    }
+}
+
+/// `x_count8` beyond 255 words of a cell (rare: a cell of 4^9 cells or more that many words of a
+/// batch share).
+#[cold]
+#[inline(never)]
+fn x_count_more(more: &mut HashMap<u32, u32>, cell: usize) {
+    *more.entry(cell as u32).or_insert(0) += 1;
+}
+
+/// No NCBI counterpart (layout only): EXPERIMENT (LOSAT_X_BNCSRPACK) the presence bits of the
+/// blocks `b0 .. b1` of `bits` (two words per 64 cells) from the counts `cnt` (`x_count8`): word
+/// `2 j` gets those of the cells `64 j ..`; returns the number of non-empty cells of the blocks.
+///
+/// SAFETY: `cnt` holds the blocks' cells and `bits` their words, which no other thread uses
+/// meanwhile.
+pub(super) unsafe fn x_presence8(bits: *mut u64, cnt: *const u8, b0: usize, b1: usize) -> usize {
+    let mut n = 0;
     for j in b0..b1 {
-        bits[2 * j + 1] = r as u64;
-        r += bits[2 * j].count_ones() as usize;
+        // SAFETY: the caller's; the 64 counts of block `j`.
+        let w = x_nonzero_bits(unsafe { &*(cnt.add(j << 6) as *const [u8; 64]) });
+        // SAFETY: the caller's.
+        unsafe { *bits.add(2 * j) = w };
+        n += w.count_ones() as usize;
+    }
+    n
+}
+
+/// No NCBI counterpart (layout only): EXPERIMENT (LOSAT_X_BNCSRPACK) the ranks of the blocks
+/// `b0 .. b1` of `bits` (presence bits written, `x_presence8`): the second word of each gets the
+/// number of non-empty cells before it, from `r0`, and `starts.add(r)` the count (`x_count8`) of
+/// the non-empty cell of rank `r`; returns the rank after `b1`.
+///
+/// SAFETY: as `x_presence8`, and `starts.add(r)` for the blocks' ranks is no other thread's.
+pub(super) unsafe fn x_rank_counts8(
+    bits: *mut u64,
+    cnt: *const u8,
+    more: &HashMap<u32, u32>,
+    starts: *mut u32,
+    b0: usize,
+    b1: usize,
+    r0: usize,
+) -> usize {
+    let mut r = r0;
+    for j in b0..b1 {
+        // SAFETY: the caller's (the words of block `j`, its counts and ranks).
+        unsafe {
+            *bits.add(2 * j + 1) = r as u64;
+            let mut w = *bits.add(2 * j);
+            while w != 0 {
+                let cell = (j << 6) + w.trailing_zeros() as usize;
+                w &= w - 1;
+                let c = *cnt.add(cell);
+                *starts.add(r) = if c == u8::MAX {
+                    u32::from(c) + more.get(&(cell as u32)).copied().unwrap_or(0)
+                } else {
+                    u32::from(c)
+                };
+                r += 1;
+            }
+        }
     }
     r
 }
@@ -1011,13 +1097,84 @@ mod tests {
         }
     }
 
+    // LOSAT_X_BNCSRPACK: the byte counts of a packed build give each cell its number of words, past
+    // 255 too, and the presence bits of the non-zero counts and the ranks in cell order, built by
+    // two owners of 32 blocks each; a single non-zero byte of any value sets its bit only.
+    #[test]
+    fn byte_counts_give_the_presence_ranks_and_exact_counts() {
+        for k in 0..64 {
+            for v in [1u8, 0x7f, 0x80, 0xff] {
+                let mut c = [0u8; 64];
+                c[k] = v;
+                assert_eq!(x_nonzero_bits(&c), 1u64 << k, "byte {k} = {v}");
+            }
+        }
+        assert_eq!(x_nonzero_bits(&[0; 64]), 0);
+        assert_eq!(x_nonzero_bits(&[0xff; 64]), u64::MAX);
+        let cells = 4096usize;
+        let mut cnt = vec![0u8; cells];
+        let mut more = HashMap::new();
+        let mut want = vec![0u32; cells];
+        let mut x = 0x9E37_79B9u32;
+        for (cell, w) in want.iter_mut().enumerate() {
+            x = x.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            *w = match cell % 9 {
+                0 | 4 | 6 => 0,
+                1 => 254 + (x >> 16) % 4,
+                2 => 1000 + (x >> 16) % 300,
+                _ => (x >> 16) % 3,
+            };
+            for _ in 0..*w {
+                // SAFETY: `cell < cells`; one thread.
+                unsafe { x_count8(cnt.as_mut_ptr(), &mut more, cell) };
+            }
+        }
+        let mut bits = vec![0u64; cells >> 5];
+        let mut starts = vec![0u32; cells];
+        // SAFETY: 64 blocks of 64 cells: `cells` counts, `2 x 64` words, `cells` ranks at most.
+        let (present, r) = unsafe {
+            let present = x_presence8(bits.as_mut_ptr(), cnt.as_ptr(), 0, 32)
+                + x_presence8(bits.as_mut_ptr(), cnt.as_ptr(), 32, 64);
+            let r = x_rank_counts8(
+                bits.as_mut_ptr(),
+                cnt.as_ptr(),
+                &more,
+                starts.as_mut_ptr(),
+                0,
+                32,
+                0,
+            );
+            let r = x_rank_counts8(
+                bits.as_mut_ptr(),
+                cnt.as_ptr(),
+                &more,
+                starts.as_mut_ptr(),
+                32,
+                64,
+                r,
+            );
+            (present, r)
+        };
+        assert_eq!(present, want.iter().filter(|&&w| w > 0).count());
+        assert_eq!(r, present);
+        let mut rank = 0usize;
+        for (cell, &w) in want.iter().enumerate() {
+            if w == 0 {
+                assert_eq!(x_rank(&bits, cell), None, "cell {cell}");
+            } else {
+                assert_eq!(x_rank(&bits, cell), Some(rank), "cell {cell}");
+                assert_eq!(starts[rank], w, "cell {cell}");
+                rank += 1;
+            }
+        }
+    }
+
     // LOSAT_X_BNCSRPACK: the packed head of the table above (cells 0 and 2 non-empty, then 61 empty
     // cells, then cell 64 with one word) gives the same runs, and its ring emits the words of the
     // non-empty cells, in order, and no other.
     #[test]
     fn a_packed_head_gives_the_same_runs_and_the_ring_skips_empty_cells() {
-        let mut bits = vec![0b101u64, 0, 1, 0];
-        assert_eq!(x_rank_blocks(&mut bits, 0, 2, 0), 3);
+        let bits = vec![0b101u64, 0, 1, 2];
         let csr = Csr {
             offsets: vec![0, 2, 5, 6],
             x_bits: bits,

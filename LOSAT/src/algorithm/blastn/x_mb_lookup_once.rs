@@ -1423,16 +1423,20 @@ fn csr_on_pool(
         #[cfg(test)]
         checks: &checks,
     };
-    // EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head (`x_bn_csr::x_serial_packed`) on the pool. Three
-    // phases of the chunks' readings instead of two: owner `o` sets the presence bits of its cells
-    // (its blocks own whole words of `bits`), then, after a barrier at which every owner has
-    // published its number of non-empty cells, writes the ranks of its blocks from the number of
-    // the owners before it and zeroes the counts of its ranks; the count, sum and place phases are
-    // those below on the counts of its ranks instead of its cells.
+    // EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head (`x_bn_csr::x_serial_packed`) on the pool, with
+    // the two phases of the chunks' readings below. Owner `o` counts the words of its cells into
+    // their bytes (`x_count8`; the words past 255 in its own map), then sets the presence bits of
+    // its blocks (they own whole words of `bits`) and publishes its number of non-empty cells; after
+    // a barrier it writes the ranks of its blocks from the number of the owners before it and its
+    // cells' counts by rank (`x_rank_counts8`), and after another the sum and place phases below run
+    // on the counts of its ranks instead of its cells.
     if super::x_bn_csr::x_packed(words.ascending_cells) {
-        use super::x_dc_csr::{x_assemble_packed, x_rank, x_sum_packed};
+        use super::x_dc_csr::{
+            x_assemble_packed, x_count8, x_presence8, x_rank, x_rank_counts8, x_sum_packed,
+        };
         let blocks = cells >> 6;
         let mut bits = vec![0u64; 2 * blocks];
+        let mut cnt = vec![0u8; cells];
         // The non-empty cells are at most the cells and the words (bounded by the positions).
         let cap = cells.min(total) + 1;
         // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
@@ -1441,6 +1445,10 @@ fn csr_on_pool(
         let bb = Shared {
             ptr: bits.as_mut_ptr(),
             len: 2 * blocks,
+        };
+        let cb = Shared {
+            ptr: cnt.as_mut_ptr(),
+            len: cells,
         };
         let sb = Shared {
             ptr: starts.as_mut_ptr(),
@@ -1470,45 +1478,18 @@ fn csr_on_pool(
         rayon::broadcast(|ctx| {
             let o = ctx.index();
             let _poison = Poison(bar);
-            let (bb, sb, qb, pv, helper, own_w, own_p) = (bb, sb, qb, pv, helper, own_w, own_p);
+            let (bb, cb, sb, qb, pv, helper, own_w, own_p) =
+                (bb, cb, sb, qb, pv, helper, own_w, own_p);
             let (c0, c1) = own[o];
             let (b0, b1) = (c0 >> 6, c1 >> 6);
+            let mut more = std::collections::HashMap::new();
             // SAFETY (all of the job's accesses): as in the unpacked build below; owner `o` alone
-            // writes the words of its blocks in `bits` (presence, then ranks, all before the barrier
-            // after which every thread only reads `bits`), the counts of its ranks (`starts[p0 ..
-            // p0 + its non-empty cells]`, disjoint from the other owners'), its entries of the
-            // owners' words and non-empty cells (read by the later owners after a barrier) and `qs`
-            // at its places.
+            // writes its cells' bytes of `cnt`, the words of its blocks in `bits` (presence, then
+            // ranks, before the barrier after which every thread only reads `bits`), the counts of
+            // its ranks (`starts[p0 .. p0 + its non-empty cells]`, disjoint from the other owners'),
+            // its entries of the owners' words and non-empty cells (read by the later owners after a
+            // barrier) and `qs` at its places.
             unsafe {
-                for c in 0..chunks {
-                    let (s0, s1) = span(c, o);
-                    fill.read::<false, false>(o, s0, s1);
-                    bar.wait();
-                    for a in 0..parts {
-                        for e in fill.subrange(a, o) {
-                            let cell = e.value as usize;
-                            *bb.ptr.add((cell >> 6) << 1) |= 1u64 << (cell & 63);
-                        }
-                    }
-                    bar.wait();
-                }
-                let mine: u64 = (b0..b1)
-                    .map(|j| (*bb.ptr.add(2 * j)).count_ones() as u64)
-                    .sum();
-                own_p.set(o, mine);
-                bar.wait();
-                let p0: u64 = (0..o).map(|p| own_p.get(p)).sum();
-                let mut r = p0;
-                for j in b0..b1 {
-                    *bb.ptr.add(2 * j + 1) = r;
-                    r += (*bb.ptr.add(2 * j)).count_ones() as u64;
-                }
-                std::ptr::write_bytes(sb.ptr.add(p0 as usize), 0, mine as usize);
-                bar.wait();
-                let bits_r: &[u64] = std::slice::from_raw_parts(bb.ptr as *const u64, bb.len);
-                let rank = |cell: u32| {
-                    x_rank(bits_r, cell as usize).expect("BNCSRPACK: a word of an empty cell")
-                };
                 let mut got = 0u64;
                 for c in 0..chunks {
                     let (s0, s1) = span(c, o);
@@ -1519,9 +1500,9 @@ fn csr_on_pool(
                         got += es.len() as u64;
                         for j in 0..es.len() {
                             if let Some(ahead) = es.get(j + 16) {
-                                prefetch(sb.ptr.wrapping_add(rank(ahead.value)));
+                                prefetch(cb.ptr.wrapping_add(ahead.value as usize));
                             }
-                            *sb.ptr.add(rank(es[j].value)) += 1;
+                            x_count8(cb.ptr, &mut more, es[j].value as usize);
                         }
                     }
                     if c + 1 == chunks {
@@ -1529,6 +1510,18 @@ fn csr_on_pool(
                     }
                     bar.wait();
                 }
+                let mine = x_presence8(bb.ptr, cb.ptr, b0, b1);
+                own_p.set(o, mine as u64);
+                bar.wait();
+                let p0: u64 = (0..o).map(|p| own_p.get(p)).sum();
+                let ranked = x_rank_counts8(bb.ptr, cb.ptr, &more, sb.ptr, b0, b1, p0 as usize);
+                debug_assert_eq!(ranked, p0 as usize + mine);
+                drop(more);
+                bar.wait();
+                let bits_r: &[u64] = std::slice::from_raw_parts(bb.ptr as *const u64, bb.len);
+                let rank = |cell: u32| {
+                    x_rank(bits_r, cell as usize).expect("BNCSRPACK: a word of an empty cell")
+                };
                 let base: u64 = (0..o).map(|p| own_w.get(p)).sum();
                 if c0 < c1 {
                     x_sum_packed(
@@ -1561,6 +1554,7 @@ fn csr_on_pool(
                 }
             }
         });
+        drop(cnt);
         let n_words: u64 = own_words.iter().sum();
         let present = own_present.iter().sum::<u64>() as usize;
         assert!(
@@ -2614,7 +2608,7 @@ mod tests {
     ))]
     #[test]
     fn csr_on_a_pool_is_the_serial_build() {
-        use super::super::x_bn_csr::tests::{chains, pv_params, random_case};
+        use super::super::x_bn_csr::tests::{chains, pv_params, random_case, x_with_repeats};
         use super::super::x_bn_csr::{serial, x_assert_runs_are_the_chains};
         let mut rng = Lcg(0xB4C5_0003);
         for threads in [2usize, 3, 8, 40] {
@@ -2629,7 +2623,11 @@ mod tests {
                     };
                     // both orders for every lut and every chunk size
                     let ascending = (round + round / 4) % 2 == 1;
-                    let case = random_case(&mut rng, 2 + round, 2_000 + 900 * round);
+                    let mut case = random_case(&mut rng, 2 + round, 2_000 + 900 * round);
+                    if round % 2 == 0 {
+                        // cells of more words than a byte of LOSAT_X_BNCSRPACK's counts holds
+                        x_with_repeats(&mut case, lut);
+                    }
                     let refs = case.refs();
                     let words = case.words(&refs, lut + rng.below(4) as usize, lut, ascending);
                     let cells = 1usize << (2 * lut);

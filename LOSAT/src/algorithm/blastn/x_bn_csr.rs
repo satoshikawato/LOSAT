@@ -89,10 +89,12 @@
 //! words=<their words>` (the build times are in `[TIMING] x_mb_lookup_build`).
 
 use super::x_dc_csr::{
-    assemble, prefetch, sum_cells, x_assemble_packed, x_rank, x_rank_blocks, x_sum_packed, Csr,
+    assemble, prefetch, sum_cells, x_assemble_packed, x_count8, x_presence8, x_rank,
+    x_rank_counts8, x_sum_packed, Csr,
 };
 use super::x_mb_lookup_par::Words;
 use super::{build_unmasked_ranges, PvArrayType, BLAST2NA_MASK};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
@@ -110,8 +112,10 @@ pub(super) fn on() -> bool {
 /// and the number of non-empty cells before them) and one offset per non-empty cell and one more,
 /// instead of one offset per cell. A table of 4^11 cells has 4,194,305 offsets (16 MiB), of which
 /// a query batch of about 1 Mb of `-task blastn` fills 1.2-1.6 M; the packed head is 1 MiB of bits
-/// and ranks and 4.6-6.1 MiB of offsets, and the build zeroes and sums 1 MiB and the non-empty
-/// cells instead of 16 MiB. A scan reads a word's bits (1 MiB) and, for a non-empty cell, its two
+/// and ranks and 4.6-6.1 MiB of offsets. The build counts the words into one byte per cell (4 MiB,
+/// freed before the scan; `x_count8`), takes the presence bits and ranks from the bytes and sums
+/// the non-empty cells instead of 16 MiB, with two passes over the words as the unpacked build. A
+/// scan reads a word's bits (1 MiB) and, for a non-empty cell, its two
 /// offsets; a word of an empty cell, whose presence-vector bit is set for 8 cells of a 4^11 table,
 /// is dropped there instead of reading the 16 MiB array. The runs, their order and the presence
 /// vector and helper counters are those of the unpacked head (`x_sum_packed`), so every value
@@ -418,11 +422,12 @@ pub(super) fn x_serial_unpacked(
     unsafe { assemble(offsets, qs, cells, n_words) }
 }
 
-/// EXPERIMENT (LOSAT_X_BNCSRPACK): `serial` with a packed head (newest first): the presence pass
-/// (each word's bit), the ranks of the blocks, the count pass on the non-empty cells' counts by
-/// rank (prefetched and counted 16 words later), the sum pass (`x_sum_packed`, with the presence
-/// bits and helper counters), and the place pass, as `x_serial_unpacked` does on the offsets of
-/// all cells.
+/// EXPERIMENT (LOSAT_X_BNCSRPACK): `serial` with a packed head (newest first): the count pass into
+/// one byte per cell (`x_count8`, each word's byte prefetched and counted 16 words later), the
+/// presence bits of the non-zero counts (`x_presence8`), the ranks of the blocks and the counts by
+/// rank (`x_rank_counts8`; the bytes are freed then), the sum pass (`x_sum_packed`, with the
+/// presence bits and helper counters), and the place pass, as `x_serial_unpacked` does on the
+/// offsets of all cells: two passes over the words, as there.
 pub(super) fn x_serial_packed(
     words: &Words<'_>,
     cells: usize,
@@ -434,35 +439,37 @@ pub(super) fn x_serial_packed(
     assert!(cells % 2048 == 0 && pv_array_bts >= 5 && !words.ascending_cells);
     assert_eq!(helper_array.len(), cells >> 11);
     let blocks = cells >> 6;
-    let mut bits = vec![0u64; 2 * blocks];
-    each_word(words, |cell, _| {
-        bits[(cell >> 6) << 1] |= 1u64 << (cell & 63);
-    });
-    let present = x_rank_blocks(&mut bits, 0, blocks, 0);
-    // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
-    let mut starts = super::x_dc_csr::x_offsets_buffer(x_offsets, present + 1);
-    let sb = starts.as_mut_ptr();
-    // SAFETY: `present + 1` elements of the capacity, written here before anything reads them.
-    unsafe { std::ptr::write_bytes(sb, 0, present + 1) };
+    let mut cnt = vec![0u8; cells];
+    let mut more = HashMap::new();
+    let cb = cnt.as_mut_ptr();
     const AHEAD: usize = 16;
     let mut ring = [0usize; AHEAD];
     let mut seen = 0usize;
     each_word(words, |cell, _| {
-        // Every word's cell is non-empty (its bit was set by the presence pass).
-        let r = x_rank(&bits, cell).expect("BNCSRPACK: a word of an empty cell");
-        prefetch(sb.wrapping_add(r));
+        prefetch(cb.wrapping_add(cell));
         let slot = seen % AHEAD;
         if seen >= AHEAD {
-            // SAFETY: `ring[slot] < present`; `starts` has `present + 1` elements.
-            unsafe { *sb.add(ring[slot]) += 1 };
+            // SAFETY: `ring[slot] < cells`, a byte of `cnt`; one thread.
+            unsafe { x_count8(cb, &mut more, ring[slot]) };
         }
-        ring[slot] = r;
+        ring[slot] = cell;
         seen += 1;
     });
     for i in seen.saturating_sub(AHEAD)..seen {
         // SAFETY: as above.
-        unsafe { *sb.add(ring[i % AHEAD]) += 1 };
+        unsafe { x_count8(cb, &mut more, ring[i % AHEAD]) };
     }
+    let mut bits = vec![0u64; 2 * blocks];
+    // SAFETY: `blocks` blocks of 64 cells: the `cells` bytes of `cnt`, the `2 blocks` words of
+    // `bits`.
+    let present = unsafe { x_presence8(bits.as_mut_ptr(), cb, 0, blocks) };
+    // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
+    let mut starts = super::x_dc_csr::x_offsets_buffer(x_offsets, present + 1);
+    let sb = starts.as_mut_ptr();
+    // SAFETY: as above, and the ranks `0 .. present` of the capacity's `present + 1` elements.
+    let ranked = unsafe { x_rank_counts8(bits.as_mut_ptr(), cb, &more, sb, 0, blocks, 0) };
+    debug_assert_eq!(ranked, present);
+    drop((cnt, more));
     let n_words = seen;
     assert!(
         n_words <= u32::MAX as usize,
@@ -627,6 +634,28 @@ pub(super) mod tests {
         }
     }
 
+    /// EXPERIMENT (LOSAT_X_BNCSRPACK): `case` with four more queries whose words fill a few cells
+    /// with more words than a byte counts: 1,200 letters A (one cell), 800 letters ACAC... (two
+    /// cells), and one letter repeated so that its cell gets exactly 255 (T) or 256 (G) words of a
+    /// table of `lut` letters.
+    pub(crate) fn x_with_repeats(case: &mut Case, lut: usize) {
+        let mut at = match (case.offsets.last(), case.queries.last()) {
+            (Some(&o), Some(q)) => o + q.len() as i32 + 1,
+            _ => 0,
+        };
+        for seq in [
+            vec![0u8; 1200],
+            (0..800).map(|i| (i % 2) as u8).collect(),
+            vec![3u8; 255 + lut - 1],
+            vec![2u8; 256 + lut - 1],
+        ] {
+            case.offsets.push(at);
+            at += seq.len() as i32 + 1;
+            case.queries.push(seq);
+            case.masks.push(Vec::new());
+        }
+    }
+
     /// `n` random queries of about `len` letters: few distinct letters in half of them (so cells
     /// get long chains), ambiguities (N), masked intervals, and an empty query, a query of N only
     /// and a query of 5 letters (shorter than every table's words) among them.
@@ -758,8 +787,17 @@ pub(super) mod tests {
     fn the_packed_head_lists_the_chains_too() {
         let mut rng = Lcg(0xB4C5_0002);
         for lut in MIN_LUT..=MAX_LUT {
-            for (n, len) in [(1, 6), (3, 300), (5, 6000), (40, 3000)] {
-                let case = random_case(&mut rng, n, len);
+            for (n, len, repeats) in [
+                (1, 6, false),
+                (3, 300, false),
+                (5, 6000, false),
+                (40, 3000, false),
+                (2, 500, true),
+            ] {
+                let mut case = random_case(&mut rng, n, len);
+                if repeats {
+                    x_with_repeats(&mut case, lut);
+                }
                 let refs = case.refs();
                 let word_length = lut + rng.below(6) as usize;
                 let words = case.words(&refs, word_length, lut, false);
@@ -776,6 +814,14 @@ pub(super) mod tests {
                         x_serial_unpacked
                     };
                     let csr = build(&words, cells, &mut pv, bts, &mut helper, Vec::new());
+                    let what = format!("lut {lut} packed {packed} n {n} len {len}");
+                    if repeats {
+                        // the cells of 255, 256 and more words
+                        let mut runs: Vec<usize> = (0..cells).map(|c| csr.run(c).len()).collect();
+                        runs.sort_unstable();
+                        assert!(runs.contains(&255) && runs.contains(&256), "{what}");
+                        assert!(runs[cells - 1] >= 1200 - lut, "{what}");
+                    }
                     x_assert_runs_are_the_chains(
                         &csr,
                         &pv,
@@ -784,7 +830,7 @@ pub(super) mod tests {
                         &next_pos,
                         &fill_pv,
                         &fill_helper,
-                        &format!("lut {lut} packed {packed} n {n} len {len}"),
+                        &what,
                     );
                 }
             }

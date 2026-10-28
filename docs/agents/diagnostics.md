@@ -6231,7 +6231,19 @@ Scheduling (each value computed by one thread with the original function; order 
   threads it took 7.7 ms (stamps on the workstation: SEG 7.2 ms, chunk preparation 4.5, the first chunk's setup
   8.9, the flow starting 44 ms after the spawn). The pool's helpers ran their first work 1.1-3.9 times slower than
   later (cores waking from idle; the workstation's `intel_pstate` powersave governor): a pool kept busy from the
-  masking on loses less of that than three short phases. TIMINGS_PENDING
+  masking on loses less of that than three short phases. Measured 2026-10-28 on the workstation (node 1, the first n
+  physical cores with their HT siblings idle, `--membind=1`, cores warmed 3 s per case, rounds in rotated arm order,
+  medians of the per-round ratios; every output the same bytes as dev's), dev 601a3ece against the gated binary
+  (12 rounds at 16 threads): 50 kb slice x the fly proteins `-db` at 16 threads 0.548 -> 0.542 s (x0.989,
+  0.984-0.993, 12 of 12 rounds), one thread x0.999 (S(16) in the same run 14.32 -> 14.48), 32 threads x0.993, 8
+  threads x0.997, 4 threads x1.001 (10 rounds; with the switch off the same binary x1.002), 2 threads x1.000; the
+  150 kb slice at 16 threads x0.995; 800 cDNAs x the yeast proteins `-db` at 32 threads x0.995 (the switch does not
+  act there: its batches are below the rule). A first run with the prototype (a copy of the batch instead of the
+  collected words): 16 threads x0.988, S(16) 14.24 -> 14.48. Max RSS (the 2 ms-sampled `VmHWM`; `ru_maxrss` reads
+  3-13 MiB below it at 8-16 threads), 16 rounds against dev in the same run: 150 kb slice at 16 threads -0.1 %, 50
+  kb slice at 8 / 16 threads +0.2 / +0.2 % (peak `RssAnon` -0.4 .. +0.1 %). Stamps of the run head at 16 threads
+  (4 runs each side): the first chunk's lookup 7.5-8.1 -> 2.1-2.3 ms, the end of translation to the flow's start
+  20.1 -> 14.6 ms, the run 566.3 -> 558.5 ms.
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

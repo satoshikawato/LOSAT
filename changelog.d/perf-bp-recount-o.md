@@ -1,0 +1,1 @@
+- `blastp` tests each query and each subject for pyrrolysine (O) once per report, not once per HSP, before it recounts the identities of the HSPs that have one (`LOSAT_X_BPRECOUNTO`, a new switch of the strict set; `=0` tests both sequences for every HSP as before). Reports do not change.

@@ -3868,6 +3868,33 @@ fn restore_displayed_o(
     )
 }
 
+// No NCBI counterpart: reads the LOSAT_X_BPRECOUNTO switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPRECOUNTO): strict set (on unless `0`). `recount_pyrrolysine_identities`
+/// tests each query's and each subject's letters for an O once per call, not once per HSP: a
+/// sequence's test reads all its letters, and a query with many HSPs, or a subject in many of them,
+/// was read again for each (line BPF s12: about 0.15 s of the human x yeast `-task blastp-fast`
+/// search at 16 threads, on the search's thread between the blocks, while the pool waited).
+fn x_bprecounto() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPRECOUNTO"))
+}
+
+// No NCBI counterpart: remembers a test's answer (LOSAT_X_BPRECOUNTO); it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPRECOUNTO): `test()` for the sequence `index`, run the first time that index
+/// is asked and remembered in `memo` (0 = not tested, 1 = false, 2 = true). The tests read
+/// sequences that do not change during the call, so each answer is the one a new test would give.
+fn x_tested_once(memo: &mut Vec<u8>, index: usize, test: impl FnOnce() -> bool) -> bool {
+    if memo.len() <= index {
+        memo.resize(index + 1, 0);
+    }
+    if memo[index] == 0 {
+        memo[index] = 1 + u8::from(test());
+    }
+    memo[index] == 2
+}
+
 /// Recounts the identities, mismatches and positives of the HSPs whose query or subject has
 /// pyrrolysine (O). The search reads O as X (`encode_protein_sequence`), but NCBI's reports
 /// compare the letters of the alignment as read, where O is identical only to O (and O and
@@ -3903,6 +3930,11 @@ fn recount_pyrrolysine_identities(
             .iter()
             .any(|residue| residue.eq_ignore_ascii_case(&b'O'))
     };
+    // EXPERIMENT (LOSAT_X_BPRECOUNTO): the answers of the O tests by query and by subject index
+    // (`x_tested_once`).
+    let x_once = x_bprecounto();
+    let mut x_query_o = Vec::new();
+    let mut x_subject_o = Vec::new();
     for (q_idx, hit_list) in hit_lists.iter_mut().enumerate() {
         let Some(hit_list) = hit_list else {
             continue;
@@ -3925,7 +3957,14 @@ fn recount_pyrrolysine_identities(
             ) else {
                 continue;
             };
-            if !(has_o(query.seq()) || subject.has_o()) {
+            // LOSAT_X_BPRECOUNTO: each query's and each subject's letters read once per call.
+            let with_o = if x_once {
+                x_tested_once(&mut x_query_o, hsp.q_idx as usize, || has_o(query.seq()))
+                    || x_tested_once(&mut x_subject_o, hsp.s_idx as usize, || subject.has_o())
+            } else {
+                has_o(query.seq()) || subject.has_o()
+            };
+            if !with_o {
                 continue;
             }
             let implicit = [GapEditOp::Sub(hsp.length as u32)];
@@ -12441,6 +12480,31 @@ fn run_resolved_in_pool(
 mod tests {
     use super::*;
     use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
+
+    // EXPERIMENT (LOSAT_X_BPRECOUNTO): each index is tested once, its answer kept, whatever the order
+    // of the questions.
+    #[test]
+    fn x_tested_once_runs_each_test_once() {
+        let mut memo = Vec::new();
+        let mut tests = 0;
+        let answers = [
+            (5, true),
+            (2, false),
+            (5, true),
+            (0, true),
+            (2, false),
+            (5, true),
+        ];
+        for (index, answer) in answers {
+            let got = x_tested_once(&mut memo, index, || {
+                tests += 1;
+                answer
+            });
+            assert_eq!(got, answer, "index {index}");
+        }
+        assert_eq!(tests, 3);
+        assert_eq!(memo, [2, 0, 1, 0, 0, 2]);
+    }
 
     // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): all four documents (outfmt 13 to 16) get a block plan; a
     // kind added to `Xml2Kind` is not admitted until `x_xml2_kind_takes_blocks` names it.

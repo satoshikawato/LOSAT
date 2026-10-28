@@ -354,6 +354,7 @@ export LOSAT_X_BPQBLOCKWEB=1
 export LOSAT_X_BPQBLOCKXML=1
 export LOSAT_X_BPQBLOCKXML2=1
 export LOSAT_X_BPQSLOTS=1
+export LOSAT_X_BPRECOUNTO=1
 export LOSAT_X_BPREDODBSUBJ=1
 export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
@@ -2833,6 +2834,16 @@ Rebuilding less:
   (x0.972); Species0 x Species3 `-db` 14.204 -> 14.161 (x0.997) / 27.049 -> 26.852 (x0.993). Cycles x0.964-0.970
   (x0.993 on Species0 x Species3), instructions x0.989-0.991; the median of the per-round max RSS differences
   -5.2 to +1.5 MiB (no rise); one-thread instructions the same (the serial builder).
+- `LOSAT_X_BPRECOUNTO=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-28, on
+  unless it is `0`; acts on every report) tests each query's and each subject's letters for a pyrrolysine (O) once
+  per call of `recount_pyrrolysine_identities` (`blastp/blast_engine.rs` `x_tested_once`), not once per HSP: the
+  recount reads only the HSPs whose query or subject has an O, and the test reads all the letters of both
+  sequences, so a query with many HSPs, or a subject in many of them, was read again for each. The answers are
+  those of the tests (the sequences do not change during the call); memory: one byte per query and per subject
+  up to the largest index asked. The recount runs on the search's thread after the redo, between the query blocks of
+  `LOSAT_X_BPQBLOCK`, where the pool waited for it: line BPF s12 (`REPORT.md` §17) found it in 86 of the 270
+  samples of that thread in the dips of the human x yeast `-task blastp-fast` search at 16 threads (about 0.15 s
+  of 4.8 s).
 - `LOSAT_X_BPQBLOCKWEB=1` (BLASTP in `run_local`, the LOSAT Web build's search, speed and memory; in the strict set
   from the pull request that added it, 2026-10-22, on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search
   of `LOSAT_X_BPQBLOCK` also for a call with more than one output, the hit records or a format observer (ABI v2 of the

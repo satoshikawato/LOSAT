@@ -120,6 +120,9 @@ pub(crate) struct XStreamDb<'a> {
     block_bytes: u64,
     /// Shadow mode: the copy that every read is compared with.
     shadow: Option<&'a StoredProteins>,
+    /// EXPERIMENT (LOSAT_X_BXTASKRES): the subject flow's task bounds by tasks' `k`, made once
+    /// (`x_task_starts`).
+    x_task_starts: std::sync::Mutex<Vec<(usize, std::sync::Arc<[u32]>)>>,
 }
 
 impl<'a> XStreamDb<'a> {
@@ -138,6 +141,7 @@ impl<'a> XStreamDb<'a> {
             longest,
             block_bytes,
             shadow,
+            x_task_starts: std::sync::Mutex::new(Vec::new()),
         };
         if let Some(stores) = shadow {
             X_SHADOW_OPENED.store(true, Ordering::Relaxed);
@@ -205,6 +209,12 @@ impl<'a> XStreamDb<'a> {
     /// The lengths of the sequences from `oid` on, at most `LENGTH_WINDOW` of them (to the end of
     /// `oid`'s volume), from the index.
     fn read_lengths(&self, oid: usize) -> Result<Vec<u32>> {
+        self.read_lengths_counted(oid, true)
+    }
+
+    /// `read_lengths`; in shadow mode compared with the copy and, when `counted`, added to the
+    /// lengths the summary counts (the sink's reads).
+    fn read_lengths_counted(&self, oid: usize, counted: bool) -> Result<Vec<u32>> {
         let first = u32::try_from(oid)?;
         let end = first.saturating_add(LENGTH_WINDOW as u32);
         let lengths = self.db.x_protein_lengths(first, end).map_err(read_error)?;
@@ -218,9 +228,40 @@ impl<'a> XStreamDb<'a> {
                     )
                 });
             }
-            X_SHADOW_LENGTHS.fetch_add(lengths.len() as u64, Ordering::Relaxed);
+            if counted {
+                X_SHADOW_LENGTHS.fetch_add(lengths.len() as u64, Ordering::Relaxed);
+            }
         }
         Ok(lengths)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXTASKRES): `read_lengths`, for the bounds of the subject flow's tasks
+    /// (`x_subject_flow::XTasks`), not counted in the shadow's summary (which counts the sink's
+    /// reads).
+    #[cfg(feature = "parallel")]
+    pub(crate) fn x_lengths_from(&self, oid: usize) -> Result<Vec<u32>> {
+        self.read_lengths_counted(oid, false)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXTASKRES): the subject flow's task bounds for tasks of `k` subjects:
+    /// those made before in this run, or `make`'s (kept unless it gives `None`). A flow that asks
+    /// while another makes them waits for them.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn x_task_starts(
+        &self,
+        k: usize,
+        make: impl FnOnce() -> Option<std::sync::Arc<[u32]>>,
+    ) -> Option<std::sync::Arc<[u32]>> {
+        let mut held = self
+            .x_task_starts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((_, starts)) = held.iter().find(|(held_k, _)| *held_k == k) {
+            return Some(starts.clone());
+        }
+        let starts = make()?;
+        held.push((k, starts.clone()));
+        Some(starts)
     }
 
     /// The residues of `oid` (`SeqDb::read_sequence`), for the stages after the preliminary

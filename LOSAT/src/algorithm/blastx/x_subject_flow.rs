@@ -366,6 +366,7 @@ fn search_task(
         Err(error) => return (kept, Some((first, error))),
     };
     let subjects = subjects.x_with_block(x_block.as_ref());
+    let mut gapped = crate::algorithm::blastx::preliminary::GappedScratch::default();
     for oid in first..end {
         match compute_subject(
             subjects,
@@ -379,6 +380,7 @@ fn search_task(
             db_length,
             oid,
             x_containment,
+            &mut gapped,
         ) {
             Ok(mut computed) => {
                 // Only the diagnostic stages read these (not with the flow).

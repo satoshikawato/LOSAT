@@ -507,6 +507,7 @@ pub(super) fn chunk_subjects_on_pool(
             let mut slot = XDiagSlot::new(length, options.window_size);
             let table = slot.get()?;
             let mut kept = Vec::new();
+            let mut gapped = crate::algorithm::blastx::preliminary::GappedScratch::default();
             for oid in first..end {
                 let mut computed = compute_subject(
                     subjects,
@@ -520,6 +521,7 @@ pub(super) fn chunk_subjects_on_pool(
                     db_length,
                     oid,
                     x_containment,
+                    &mut gapped,
                 )?;
                 computed.seeds = Vec::new();
                 computed.initial = Vec::new();

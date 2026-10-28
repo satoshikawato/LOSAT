@@ -63,6 +63,9 @@ use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score, BLAST
 
 mod culling;
 mod database;
+// EXPERIMENT (LOSAT_X_BPIHPOOL): the arrays of initial hits past NCBI's first size in one pool
+// shared by the threads.
+mod x_ih_pool;
 // EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel `-subject` loop in runs of subjects, one diagonal
 // table fill per run.
 #[cfg(all(
@@ -537,7 +540,7 @@ impl BlastpSubjectScratch {
             // init_hitlist->init_hsp_array =
             //     malloc(init_hitlist->allocated * sizeof(BlastInitHSP));
             // ```
-            init_hsps: Vec::new(),
+            init_hsps: x_ih_pool::own_array(),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3524-3527
             // ```c
             // BlastInitHSPNode* nodes = gap_align->chaining->nodes;
@@ -1543,6 +1546,17 @@ fn blastp_save_init_hsp(
     len: i32,
     score: i32,
 ) {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:336-341
+    // ```c
+    // if (num >= num_avail) {
+    //     ...
+    //     num_avail *= 2;
+    //     match_array = (BlastInitHSP *)
+    //         realloc(match_array, num_avail * sizeof(BlastInitHSP));
+    // ```
+    if init_hsps.len() == init_hsps.capacity() {
+        x_ih_pool::before_full_push(init_hsps);
+    }
     init_hsps.push(InitHSP {
         q_seed_absolute: q_off_absolute,
         s_seed: s_off,
@@ -8721,6 +8735,7 @@ fn run_resolved_in_pool(
     // The preliminary hit lists with the compact element (`x_prelim_compact.rs`), the lists the
     // subject scan keeps until the redo.
     let x_expanded_at_start = x_expanded_lists();
+    let x_pooled_at_start = x_ih_pool::x_pooled();
     let mut x_compact_hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>> =
         std::iter::repeat_with(|| None)
             .take(query_ids.len())
@@ -9675,6 +9690,7 @@ fn run_resolved_in_pool(
             );
         }
         scratch.init_hsps = init_hsps;
+        x_ih_pool::at_subject_end(&mut scratch.init_hsps);
         scratch.init_hsps.clear();
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:540-555
@@ -11154,6 +11170,10 @@ fn run_resolved_in_pool(
         eprintln!(
             "[TIMING] x_bppcompact: expanded_lists={}",
             x_expanded_lists() - x_expanded_at_start
+        );
+        eprintln!(
+            "[TIMING] x_bpihpool: pooled={}",
+            x_ih_pool::x_pooled() - x_pooled_at_start
         );
     }
     let mut hit_lists =

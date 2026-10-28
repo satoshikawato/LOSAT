@@ -339,6 +339,7 @@ export LOSAT_X_BPFSTAGE=1
 export LOSAT_X_BPGAP=1
 export LOSAT_X_BPGAP16=1
 export LOSAT_X_BPHITBF=1
+export LOSAT_X_BPIHPOOL=1
 export LOSAT_X_BPLISTEDLEAN=1
 export LOSAT_X_BPLK16=1
 export LOSAT_X_BPLKDROP=1
@@ -1827,6 +1828,24 @@ Rebuilding less:
   (the zero fill), cycles x1.000 (0.961-1.060) where the A/A arm read x1.001 (0.939-1.034), x0.999-1.002 in the 4
   quietest rounds (load 8-16); WSSV 8 rounds instructions x0.999998, cycles x1.002 (0.986-1.008), A/A x0.999
   (0.985-1.010); minor faults 13.2k -> 5.2k (human x yeast).
+- `LOSAT_X_BPIHPOOL=1` (BLASTP, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
+  added it (perf/bp-ih-pool, v4-D12 s21-s22, `DECISIONS` 62-63): on unless it is `0`) a subject's array of initial hits
+  (`BlastpSubjectScratch::init_hsps`, the ungapped hits `blastp_save_init_hsp` saves) past NCBI's first array size lives
+  in one pool shared by the threads (`blastp/blast_engine/x_ih_pool.rs`). NCBI starts each thread's list at
+  `MIN_INIT_HITLIST_SIZE` (100) and doubles it with `realloc` (`blast_extend.c:221-224`, `336-341`); the list is reset,
+  never shrunk, for each subject, so each thread keeps the largest array any of its subjects needed. The scratch did
+  the same, and each worker's malloc arena also kept the arrays its vector outgrew, so the preliminary stage held the
+  sum over the threads of each thread's largest (UniRef50 q100 at 32 threads: 53 MiB of capacity, of which a subject
+  used at most 0.2 MiB at any time). With the switch on the scratch holds an array of 100; a subject that fills it
+  continues in an array of twice the length from the pool (the smallest that holds it, or a new one) and the scratch's
+  array goes to the pool; a pool array that fills is exchanged for a larger one from the pool, or doubled in place when
+  the pool has none; at the subject's end the array goes back to the pool and the scratch takes an array of 100 from
+  it. The hits, their order and every value are those of the scratch's own vector (lib tests
+  `hits_through_the_pool_equal_the_scratch_vector`, `threads_sharing_the_pool_keep_their_own_hits`;
+  `tests/blastp_ih_pool.rs` compares reports with `=0`: `-subject` and `-db`, 1 and 4 threads, a subject past 100,
+  200 and 400 hits). At one thread the pool holds the largest array, as the scratch did. `LOSAT_TIMING=1` prints
+  `[TIMING] x_bpihpool: pooled=<n>` per search (the arrays that continued through the pool).
+  EVIDENCE-PENDING
 - `LOSAT_X_BPLK16=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-lk16, v4-D12 s19-s20,
   `DECISIONS` 59-61): on unless it is `0`; recorded for `LOSAT_X_REACH` once per table, taken where the table has 16-bit
   hits): exact blastp's block tables (`-task blastp`, the table built

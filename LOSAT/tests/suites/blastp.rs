@@ -23,6 +23,8 @@ mod blastp_fast_stage;
 mod blastp_hitbf;
 #[path = "../blastp_hsp_tie_order.rs"]
 mod blastp_hsp_tie_order;
+#[path = "../blastp_ih_pool.rs"]
+mod blastp_ih_pool;
 #[path = "../blastp_listed_lean.rs"]
 mod blastp_listed_lean;
 #[path = "../blastp_lookup_ahead.rs"]

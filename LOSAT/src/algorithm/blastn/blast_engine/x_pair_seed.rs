@@ -166,6 +166,20 @@ struct Seed {
     s_range: u32,
 }
 
+/// No NCBI counterpart (scheduling only): where `seed_of_pair` puts a strip's seeds, in scan
+/// order: a list (`Vec<Seed>`), or EXPERIMENT (LOSAT_X_DCSEEDLEAN) the lists of the strip's
+/// partitions (`part::PartSink`).
+trait SeedOut {
+    fn push(&mut self, seed: Seed);
+}
+
+impl SeedOut for Vec<Seed> {
+    #[inline(always)]
+    fn push(&mut self, seed: Seed) {
+        Vec::push(self, seed);
+    }
+}
+
 /// One strip of the scan grid: the kernel runs from `start` to `end` with `s_range`.
 #[derive(Clone, Copy, Debug)]
 struct StripJob {
@@ -534,14 +548,15 @@ fn scan_kernel<F: FnMut(usize, u64)>(
 /// ```
 /// Phase 1 for one pair: the statements of `process_offset_pairs` before the diagonal is
 /// read (context, bounds test, word extension), which read only the inputs. A pair that
-/// the reference drops with `continue` here is dropped; any other becomes a `Seed`.
+/// the reference drops with `continue` here is dropped; any other becomes a `Seed`, pushed to
+/// `out` (a strip's list, or with LOSAT_X_DCSEEDLEAN its partition's list, `part::PartSink`).
 #[inline(always)]
-fn seed_of_pair(
+fn seed_of_pair<O: SeedOut>(
     x: &Inputs<'_>,
     q_off0: usize,
     kmer_start: usize,
     s_range: usize,
-    out: &mut Vec<Seed>,
+    out: &mut O,
 ) {
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();

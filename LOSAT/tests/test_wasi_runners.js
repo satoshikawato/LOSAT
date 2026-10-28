@@ -978,3 +978,86 @@ test("a descriptor that the main thread opened reads on a thread worker (-num_th
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:225-228
+// ```c++
+//         CBlastFormat formatter(opt, *db_adapter,
+//                                fmt_args->GetFormattedOutputChoice(),
+//                                query_opts->GetParseDeflines(),
+//                                m_CmdLineArgs->GetOutputStream(),
+// ```
+// A command whose main thread creates `file` (path_open on the preopened "/" with create and
+// truncate, for writing) and writes "main\n" to it, whose one thread writes "thread\n" with that
+// descriptor (fd_write), and whose main thread then writes "main again\n", closes it and exits with
+// the thread's errno: the writes of blastp-fast's query blocks (LOSAT_X_BPQSLOTS), which the pool
+// thread that completes the order makes to the -out file another thread created.
+function descriptorWriter(file) {
+  const types = vector([
+    [0x60, 1, 0x7f, 0],                          // proc_exit(i32)
+    [0x60, 0, 0],                                // _start()
+    [0x60, 1, 0x7f, 1, 0x7f],                    // thread-spawn(i32) -> i32, fd_close(i32) -> i32
+    [0x60, 2, 0x7f, 0x7f, 0],                    // wasi_thread_start(i32, i32)
+    [0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f],  // fd_write(i32, i32, i32, i32) -> i32
+    // path_open(fd, dirflags, path, path_len, oflags, rights_base, rights_inheriting, fdflags, fd_out) -> i32
+    [0x60, 9, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7e, 0x7e, 0x7f, 0x7f, 1, 0x7f],
+  ]);
+  const imports = [
+    [...name("wasi_snapshot_preview1"), ...name("proc_exit"), 0, 0],
+    [...name("env"), ...name("memory"), 2, 3, 1, ...uleb(16384)],
+    [...name("wasi"), ...name("thread-spawn"), 0, 2],
+    [...name("wasi_snapshot_preview1"), ...name("fd_write"), 0, 4],
+    [...name("wasi_snapshot_preview1"), ...name("path_open"), 0, 5],
+    [...name("wasi_snapshot_preview1"), ...name("fd_close"), 0, 2],
+  ];
+  const load = (address) => [...i32(address), 0x28, 2, 0];                          // i32.load
+  const store = (address, value) => [...i32(address), ...value, 0x36, 2, 0];         // i32.store
+  const bytes = (address, text) => [...Buffer.from(text)].flatMap((value, i) => [...i32(address + i), ...i32(value), 0x3a, 0, 0]);
+  // fd_write(fd, iovec, 1, nwritten) of `length` bytes at `address` -> errno
+  const write = (iovec, address, length, nwritten) => [...store(iovec, i32(address)), ...store(iovec + 4, i32(length)),
+    ...load(8), ...i32(iovec), ...i32(1), ...i32(nwritten), 0x10, 2];
+  const exitIf = (code) => [0x04, 0x40, ...i32(code), 0x10, 0, 0x0b];             // if (errno) proc_exit(code)
+  const pathBytes = Buffer.from(file);
+  // 0: thread done, 4: its errno, 8: the descriptor, 16/32/48: iovecs, 24/40: bytes written,
+  // 64: the path, 256/272/288: the texts.
+  const main = [...bytes(64, file), ...bytes(256, "main\n"), ...bytes(272, "thread\n"), ...bytes(288, "main again\n")];
+  main.push(
+    // if (path_open(3, 0, 64, len, CREAT | TRUNC, FD_WRITE, 0, 0, 8) != 0) proc_exit(100)
+    ...i32(3), ...i32(0), ...i32(64), ...i32(pathBytes.length), ...i32(9), 0x42, 0xc0, 0, 0x42, 0, ...i32(0), ...i32(8),
+    0x10, 3, ...exitIf(100),
+    ...write(16, 256, 5, 24), ...exitIf(101),
+    // if (thread-spawn(0) < 1) proc_exit(90)
+    ...i32(0), 0x10, 1, ...i32(1), 0x48, 0x04, 0x40, ...i32(90), 0x10, 0, 0x0b,
+    // block { loop { if (done) break; memory.atomic.wait32(0, 0, -1) } }
+    0x02, 0x40, 0x03, 0x40, ...i32(0), 0xfe, 0x10, 2, 0, 0x0d, 1,
+    ...i32(0), ...i32(0), 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b,
+    ...write(48, 288, 11, 24), ...exitIf(102),
+    ...load(8), 0x10, 4, ...exitIf(103),                                         // if (fd_close(fd)) proc_exit(103)
+    ...load(4), 0x10, 0,                                                         // proc_exit(errno)
+  );
+  const thread = [...i32(4), ...write(32, 272, 7, 40), 0x36, 2, 0,              // errno = fd_write(fd, ...)
+    ...i32(0), ...i32(1), 0xfe, 0x17, 2, 0,                                       // done (atomic store)
+    ...i32(0), ...i32(1), 0xfe, 0x00, 2, 0, 0x1a];                               // notify(0, 1)
+  return Buffer.from([
+    0, 97, 115, 109, 1, 0, 0, 0,
+    ...section(1, types),
+    ...section(2, vector(imports)),
+    ...section(3, vector([[1], [3]])),
+    ...section(7, vector([[...name("memory"), 2, 0], [...name("_start"), 0, 5],
+      [...name("wasi_thread_start"), 0, 6]])),
+    ...section(10, vector([body(main), body(thread)])),
+  ]);
+}
+
+test("a file that the main thread created is written on a thread worker (-num_threads 2)", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-writer-"));
+  try {
+    for (const env of [{}, { LOSAT_WASI_PRESPAWN: "0" }]) {
+      const file = path.join(directory, `out-${Object.keys(env).length}.txt`);
+      const result = runThreaded(descriptorWriter(path.relative("/", file)), ["-num_threads", "2"], env);
+      assert.deepEqual(outcome(result), { status: 0, signal: null, stdout: "", stderr: "" }, JSON.stringify(env));
+      assert.equal(fs.readFileSync(file, "utf8"), "main\nthread\nmain again\n", JSON.stringify(env));
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

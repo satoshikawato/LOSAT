@@ -197,7 +197,9 @@ fn unit_cap(
 
 /// No NCBI counterpart: `LOSAT_X_BXUNITCAP`'s K for the batch flow (`native.rs`), where each capped
 /// batch's subjects would run as the subject flow (`x_subject_flow::fits`) in tasks of its `k`
-/// (`LOSAT_X_BXCAPFILL`: of `capped_subjects_per_task`).
+/// (`LOSAT_X_BXCAPFILL`: of `capped_subjects_per_task`). The tasks counted are the grid's (`k`
+/// subjects each); `LOSAT_X_BXTASKRES`'s tasks are never fewer, so where the count matters
+/// (`LOSAT_X_BXCAPFILL=0`, a task for every thread) the rule only asks for more than it needs.
 pub(crate) fn flow_unit_cap(
     pool: &crate::utils::threading::SearchPool<'_>,
     options: &ResolvedOptions,

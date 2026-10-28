@@ -380,11 +380,13 @@ export LOSAT_X_BXLUTPOOL=1
 export LOSAT_X_BXPOOLN1=1
 export LOSAT_X_BXSCANBYTE=1
 export LOSAT_X_BXSUBJFLOW=1
+export LOSAT_X_BXTASKRES=1
 export LOSAT_X_BXUNGAPSENT=1
 export LOSAT_X_BXUNITCAP=8
 export LOSAT_X_CTXO1=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
+export LOSAT_X_DCSEEDLEAN=1
 export LOSAT_X_DCTWOSLOTS=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
@@ -3842,6 +3844,71 @@ Scheduling (each value computed by one thread with the original function; order 
   both arms) x1.003. `=0` is dev's (x0.998); instructions of megablast and blastn at one thread move by at most
   0.04 %. Peak RSS with `MALLOC_ARENA_MAX=1`: 374 against 386 MiB (`-subject`, 16 threads) and 113 against
   115 MiB (`-db`); with the default arenas both arms vary between about 130 and 144 MiB on `-db`.
+- `LOSAT_X_DCSEEDLEAN=1` (BLASTN `-task dc-megablast`, and megablast given template options, at two threads or more;
+  in the strict set from the pull request that added it, 2026-10-28: `LOSAT_X_DCSEEDLEAN=0` turns it off) changes
+  three LOSAT-only parts of dc-megablast's seed stage; each gives the same table, seeds and hits in the same order:
+  - the CSR of a one-template table built on a pool (`LOSAT_X_DCCSR` above; `x_disc_lookup_par::csr_on_pool_steps`):
+    two sets of the owners' buckets, chunk k's in set k % 2. Step k of each pass (count, then place) reads chunk k into
+    its set with the lean reader (`Fill::read`'s word loop with the template a const parameter, so a word's index is
+    computed without the dispatch per word of `compute_discontiguous_index`, and a range read through one slice), then
+    does the owner's work on chunk k - 1 from the other set; one spin barrier ends the step. `csr_on_pool` waits twice
+    per chunk (after the reading and after the owners' work), so each chunk costs the slowest reading plus the slowest
+    owner's work; a step costs the slowest thread's reading and owner's work together (about as many barriers per pass:
+    chunks of half the size, one barrier each). Chunks are 2^18 positions (`STEP_POSITIONS`, half of
+    `CHUNK_POSITIONS`, so the two sets keep room for about as many entries as one set did); the place pass prefetches the
+    `offsets` element of the entry 16 ahead, as the count pass does. A cell gets its words in the same order (chunks
+    in order, readers' spans in stream order, a bucket in reading order), so the counts, sums and runs are
+    `csr_on_pool`'s.
+  - the partitioned stage of `LOSAT_X_PAIRPARDISC` (`LOSAT_X_PAIRPARFOLD`) in `LOSAT_X_PAIRPARHOME`'s home loop: a
+    strip's scan pushes each seed into its partition's list (`x_pair_seed_part::PartSink`; the partition of the seed's
+    diagonal bucket from a table of the 512 buckets made at the stage's start), numbered in scan order, instead of into
+    one list that a stable counting sort then cuts by partition (two more passes over the strip's seeds and a copy of
+    each 16-byte seed and its 4-byte position). A partition gets the same seeds in the same order with the same
+    positions, so its folds and the merge's key order are the same.
+  - the folds of that stage (home loop or not) do not record the buckets their inserts change (`insert_t` without
+    `TRACK`), and the merge writes back every bucket of each partition: a bucket no fold changed has the stage's chain,
+    cells below the stage's occupancy, so writing it back changes nothing. That is one copy of the table's cells per
+    stage, where `rebuild` copies the table into each partition at the stage's start; the stages of dc-megablast begin
+    with a nearly empty table (at most 256 cells in the 27 stages of the 31,168 cDNAs below).
+  The scan into lists and the untracked folds are dc-megablast's only: the partitioned stages of `-task blastn` and
+  `blastn-short` (`LOSAT_X_PAIRPAR`, `LOSAT_X_PAIRPARNA`) keep the cut and the tracked folds. `x_reach!` at each pool
+  build and each partitioned stage, always the switch's side while it is on. Tests: `csr_on_a_pool_lists_the_chains`
+  (`csr_on_pool` and `csr_on_pool_steps` on pools of 2, 3 and 5 threads, chunks of 1, 97, 5,000 and `CHUNK_POSITIONS`
+  positions, against the chains of the serial loop), `seed_stage_part_equals_the_reference_fold` (the stage with and
+  without the lists and untracked folds, in every pairing with the home loop for each level setting, one scratch
+  passing its strip buffers from one form to the other, against the reference fold's hits and table cell for cell),
+  the dc-megablast stage test of `x_pair_seed_disc.rs` (both forms in both `LOSAT_X_FOLDLEAN` instances against the
+  reference fold) and `LOSAT/tests/blastn_dc_seed_lean.rs` (the reports at 2 and 4 threads, and at 4 with
+  `LOSAT_X_PAIRPARHOME=0`, against `=0` at 2 and 4: Sakai against MG1655, a CSR table built on the pool, and 9,800
+  letters of LC738874 against LC738868, a table of chains; with the sides of `LOSAT_X_REACH`, of `LOSAT_X_DCCSR`,
+  `LOSAT_X_DISCLUTPAR` and `LOSAT_X_PAIRPARFOLD` too).
+  Probe (v4-A15 s15-s18, 2026-10-26/28, exp/a15-csrpool; workstation 2x Xeon Gold 6338, node 1 booked through its FIFO,
+  16 / 8 physical cores with the siblings idle, `numactl --membind 1`, the arms in rotated order, 16 rounds at 16
+  threads; dc-megablast of 31,168 D. melanogaster cDNAs against 3 Mb of chromosome 2L, `-subject`, every output NCBI's
+  5c357f81): dev's form 1.441 s, 147.07 G instructions, 58.39 G cycles, max RSS 237 MiB; the lean reader, the scan into
+  lists and the untracked folds x0.957 (cycles x0.946, 133.04 G instructions, 221 MiB); with the steps as well (this
+  switch) x0.951 (median x0.952, no round slower, cycles x0.939, 137.12 G instructions, 220 MiB), at 8 threads x0.946.
+  Of the parts (s16, the same window): the untracked folds -2.7 G instructions and -0.5 G cycles; the scan into lists
+  -4 G instructions and -15 MiB (the strip buffers' copies) but about the same cycles (its stores go to buffers other
+  cores read in their folds); the steps against the lean reader alone -0.45 G cycles of the build (the waits of two
+  barriers per chunk, each waiting for the slowest thread, not the overlap of reading and owner's work: s15's form
+  taking one entry after each word read gained no more). Chunks of 2^19 positions took 55.42 against 54.75 G cycles
+  (screening on node 0). One thread takes none of these paths (no pool, no partitioned stage): 117.68 G instructions as
+  dev's.
+  Pull request A/B (v4-A15 s19, 2026-10-28; 7466dbc1b against dev 1ad262297, a byte copy of dev's binary (A/A) and the
+  pull request's binary with `=0`; node 1 as above at 16 threads unless noted, every arm's outputs the same, NCBI's
+  5c357f81 for the 31,168 cDNAs; median of the per-round ratios, pull request / dev [dev's copy / dev]): dc-megablast
+  of the 31,168 cDNAs x0.951 (24 rounds, none slower; 1.418 -> 1.348 s, CPU x0.947, max RSS 235 -> 220 MiB) [0.997], at
+  8 threads x0.944 (12 rounds, none slower; 2.518 -> 2.377 s, 212 -> 200 MiB) [0.998], against the 3 Mb as `-db` x0.953
+  (12, none slower; 129 -> 120 MiB) [1.000]; of 1,775 cDNAs x0.951 (40, none slower; 98 -> 93 MiB) [1.000]. The small
+  stages, inside the A/A spread: 236 cDNAs (two stages, 1.37 M seeds, 53 hits; 45 ms) 0.997 [1.001] and 7 cDNAs (no
+  hit) 0.995 [0.992]; with `LOSAT_TIMING` (node 0, 8 runs per arm) the merge of the 236 cDNAs takes under 1 ms with and
+  without the switch, and the folds 0.033-0.040 s against 0.040-0.043 s. Other tasks (the switch off their paths):
+  megablast of the 1,775 / 31,168 cDNAs 0.998 / 0.973 [0.999 / 0.968], the 31,168 with `LOSAT_X_QBATCHPAR=0` 1.006
+  [0.986]; blastn of the 1,775 / 5,000 cDNAs 1.001 / 0.999 [0.996 / 1.002], the 31,168 with `LOSAT_X_QBATCHPAR=0` 1.005
+  [1.008]; blastn-short of the 236 cDNAs 1.001 [0.997]; max RSS of these within the A/A spread. `=0` against dev:
+  0.993-1.005 in every case. One thread (node 0, `perf stat`, outputs the same): instructions of dev, the switch and
+  `=0` within 0.01 % (31,168 cDNAs 117.750 / 117.751 / 117.749 G; 1,775 cDNAs dc-megablast, megablast and blastn too).
 - `LOSAT_X_BNCSR=1` (BLASTN `-task blastn` and every task with word size 9, 10 or 11 that builds the contiguous
   two-stage table of `build_mb_lookup`, `-subject` and `-db`, any thread count, speed; in the strict set from the pull
   request that added it, 2026-10-25 (perf/bn-csr, evidence at the end of this entry): on unless it is `0`) lays out the
@@ -6093,6 +6160,33 @@ Scheduling (each value computed by one thread with the original function; order 
   same times as 16. 800 cDNAs x the yeast proteins at 16 threads `-subject` x1.000 (0.999-1.001), `-db` x1.000
   (1.000-1.003), `-db` at 32 threads x0.997 (0.995-1.006); max RSS at 16 threads +7 MiB (70 -> 79, 65 -> 72), at
   32 threads 90 -> 91 (NCBI 143-154 MiB; the v4-MF floor of the 800-cDNA `-db` row at 16 threads is about 85).
+- `LOSAT_X_BXTASKRES=1` (BLASTX, speed at 2+ threads; in the strict set from the pull request that added it: on
+  unless `=0`; no condition of its own: it acts on every subject flow, `x_subject_flow::run` and `run_chunks`, i.e.
+  where `LOSAT_X_BXSUBJFLOW` runs): a flow's task ends after `k` subjects (as before) or before the subject that would
+  take the task's residues past `k` times the mean subject length (`XTasks::Cut`), so a run of long subjects stored
+  next to each other is spread over several tasks. The bounds come from the subjects' lengths (the records, the
+  stored sequences, or with `-db` read in blocks the index, 16,384 lengths per read); with `-db` read in blocks they
+  are made once per run for each `k` and shared (`XStreamDb::x_task_starts`). Where the lengths cannot be read (an
+  index read error) the grid of `k` subjects is kept, so the reader's error comes where it did before. Exactness:
+  only which thread computes which subjects changes; a task's value depends on its chunk and subjects alone and the
+  loop's thread makes the sink calls in subject order (`x_subject_flow.rs` header); `LOSAT_X_BXSUBJFLOWSHADOW`
+  compares every task (`tests/blastx_subject_flow.rs`: task counts of the cut and, with `=0`, of the grid; a unit
+  test of the bounds). Why: the ordered flow ends when its last task ends. Fly 2L 50 kb x the 30,802 fly proteins:
+  task 400 of each chunk (subjects 25,600-25,663, the isoforms of dumpy, about 20-23 kaa each) holds 248,369
+  residues against a median task of 38,410 and took 42-60 ms against a median of 4 ms (local probe), and in the last
+  chunk it ran alone for the last 21 ms of a 0.58 s run at 16 threads (about 2 of 16 CPUs busy). Cut by residues the
+  largest task holds 42,344 residues (547 tasks per chunk instead of 482) and the tail is gone. Measured 2026-10-28
+  on the workstation (node 1, the first n physical cores with their HT siblings idle, `--membind=1`, cores warmed
+  3 s per case, rounds in rotated arm order, medians of the per-round ratios; every output the same bytes as dev's,
+  the 50 kb slice also as the progress board's d26), dev 4403cc12 against this change: 50 kb slice x the fly
+  proteins `-db` at 16 threads 0.580 -> 0.562 s (x0.965, 0.928-0.983, 8 of 8 rounds), 32 threads x0.910, 8
+  threads x0.997, one thread x1.000 (S(16) in the same run 13.51 -> 13.95); 20 kb and 150 kb slices at 16
+  threads x0.910 and x0.976; 800 cDNAs x the yeast proteins at 16 threads `-subject` x0.995, `-db` x0.998, `-db` at
+  32 threads x0.991; with the switch off the same binary gives dev's times (x0.987-1.003). Max RSS at 16 / 32
+  threads of the 50 kb slice 26 -> 20 / 28 -> 19 MiB. A second run with the gated binary (12 rounds): 16 threads
+  0.571 -> 0.549 s (x0.962, 0.959-0.968, 12 of 12), S(16) 13.70 -> 14.29; the capped few-subject rows (800 cDNAs x
+  2 / 8 / 50 yeast proteins, AP027131 x 10 / 50 proteins, 16 and 32 threads) x0.986-1.031, each within its
+  per-round spread (`k` is 1 on the 2 and 8 protein rows, so the cut changes no task there).
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

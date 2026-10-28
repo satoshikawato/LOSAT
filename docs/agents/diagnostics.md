@@ -3888,8 +3888,23 @@ Scheduling (each value computed by one thread with the original function; order 
   -4 G instructions and -15 MiB (the strip buffers' copies) but about the same cycles (its stores go to buffers other
   cores read in their folds); the steps against the lean reader alone -0.45 G cycles of the build (the waits of two
   barriers per chunk, each waiting for the slowest thread, not the overlap of reading and owner's work: s15's form
-  taking one entry after each word read gained no more). Chunks of 2^19 positions took 55.42 against 54.75 G cycles (screening on node 0). One thread
-  takes none of these paths (no pool, no partitioned stage): 117.68 G instructions as dev's.
+  taking one entry after each word read gained no more). Chunks of 2^19 positions took 55.42 against 54.75 G cycles
+  (screening on node 0). One thread takes none of these paths (no pool, no partitioned stage): 117.68 G instructions as
+  dev's.
+  Pull request A/B (v4-A15 s19, 2026-10-28; 7466dbc1b against dev 1ad262297, a byte copy of dev's binary (A/A) and the
+  pull request's binary with `=0`; node 1 as above at 16 threads unless noted, every arm's outputs the same, NCBI's
+  5c357f81 for the 31,168 cDNAs; median of the per-round ratios, pull request / dev [dev's copy / dev]): dc-megablast
+  of the 31,168 cDNAs x0.951 (24 rounds, none slower; 1.418 -> 1.348 s, CPU x0.947, max RSS 235 -> 220 MiB) [0.997], at
+  8 threads x0.944 (12 rounds, none slower; 2.518 -> 2.377 s, 212 -> 200 MiB) [0.998], against the 3 Mb as `-db` x0.953
+  (12, none slower; 129 -> 120 MiB) [1.000]; of 1,775 cDNAs x0.951 (40, none slower; 98 -> 93 MiB) [1.000]. The small
+  stages, inside the A/A spread: 236 cDNAs (two stages, 1.37 M seeds, 53 hits; 45 ms) 0.997 [1.001] and 7 cDNAs (no
+  hit) 0.995 [0.992]; with `LOSAT_TIMING` (node 0, 8 runs per arm) the merge of the 236 cDNAs takes under 1 ms with and
+  without the switch, and the folds 0.033-0.040 s against 0.040-0.043 s. Other tasks (the switch off their paths):
+  megablast of the 1,775 / 31,168 cDNAs 0.998 / 0.973 [0.999 / 0.968], the 31,168 with `LOSAT_X_QBATCHPAR=0` 1.006
+  [0.986]; blastn of the 1,775 / 5,000 cDNAs 1.001 / 0.999 [0.996 / 1.002], the 31,168 with `LOSAT_X_QBATCHPAR=0` 1.005
+  [1.008]; blastn-short of the 236 cDNAs 1.001 [0.997]; max RSS of these within the A/A spread. `=0` against dev:
+  0.993-1.005 in every case. One thread (node 0, `perf stat`, outputs the same): instructions of dev, the switch and
+  `=0` within 0.01 % (31,168 cDNAs 117.750 / 117.751 / 117.749 G; 1,775 cDNAs dc-megablast, megablast and blastn too).
 - `LOSAT_X_BNCSR=1` (BLASTN `-task blastn` and every task with word size 9, 10 or 11 that builds the contiguous
   two-stage table of `build_mb_lookup`, `-subject` and `-db`, any thread count, speed; in the strict set from the pull
   request that added it, 2026-10-25 (perf/bn-csr, evidence at the end of this entry): on unless it is `0`) lays out the

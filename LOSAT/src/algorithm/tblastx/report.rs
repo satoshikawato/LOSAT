@@ -966,6 +966,27 @@ pub(crate) fn pairwise_hits(
     hits.iter().map(|hsp| rows.hit(hsp, &mut window)).collect()
 }
 
+/// The windows of the queries `0..num_queries` whose outfmt 0 rows are made and written
+/// together (`x_pairwise_par::query_windows` of the estimates of their HSPs' lengths, before any
+/// row is made, with the budget of `x_pool`, `x_pairwise_par::window_bytes`), as BLASTN's
+/// (`blastn::pairwise::pairwise_windows`). `hits` is the final list in report order (queries in
+/// input order).
+#[inline(never)]
+pub(crate) fn pairwise_windows(
+    hits: &[TblastxHsp],
+    num_queries: usize,
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
+) -> Vec<std::ops::Range<usize>> {
+    use crate::report::x_pairwise_par::{query_estimate_of, query_windows, window_bytes};
+    let mut estimates = vec![query_estimate_of(std::iter::empty()); num_queries];
+    for query_hits in hits.chunk_by(|a, b| a.hit.q_idx == b.hit.q_idx) {
+        if let Some(estimate) = estimates.get_mut(query_hits[0].hit.q_idx as usize) {
+            *estimate = query_estimate_of(query_hits.iter().map(|hsp| hsp.hit.length));
+        }
+    }
+    query_windows(&estimates, window_bytes(x_pool))
+}
+
 /// The positives of the outfmt 0 rows `hits` by `matrix`, a matrix other than BLOSUM62, counted
 /// again from the rows (`row_counts`) after `PairwiseRows::hit` counted BLOSUM62's: the query
 /// row's masked letters are lower case there, and the letters of the rows are upper case. One

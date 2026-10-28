@@ -2011,9 +2011,6 @@ fn write_tblastx_outputs(
         let mut writer = format.sink.open()?;
         match output_format {
             report::TblastxOutputFormat::Pairwise => {
-                let pairwise = pairwise
-                    .as_deref()
-                    .expect("pairwise hits are built for outfmt 0");
                 let queries: Vec<crate::report::pairwise::TblastxPairwiseQuery> = run
                     .queries
                     .iter()
@@ -2073,22 +2070,81 @@ fn write_tblastx_outputs(
                         None => Vec::new(),
                     },
                 };
-                crate::report::pairwise::write_tblastx_pairwise_report(
-                    pairwise,
-                    &mut writer,
-                    &crate::report::pairwise::PairwiseConfig {
-                        program: "tblastx".to_string(),
-                        protein_matrix: matrix,
-                        ..crate::report::pairwise::PairwiseConfig::default()
-                    },
-                    &queries,
-                    &subject_titles,
-                    &pairwise_report,
-                    run.database.map(|database| database.pairwise),
-                    probe.as_mut(),
-                    warnings.as_mut(),
-                    run.x_pairwise_pool,
-                )?;
+                let config = crate::report::pairwise::PairwiseConfig {
+                    program: "tblastx".to_string(),
+                    protein_matrix: matrix,
+                    ..crate::report::pairwise::PairwiseConfig::default()
+                };
+                let mut write = |rows: &[crate::report::pairwise::PairwiseHit],
+                                 range: std::ops::Range<usize>| {
+                    crate::report::pairwise::write_tblastx_pairwise_report(
+                        rows,
+                        &mut writer,
+                        &config,
+                        &queries,
+                        range,
+                        &subject_titles,
+                        &pairwise_report,
+                        run.database.map(|database| database.pairwise),
+                        probe.as_mut(),
+                        warnings.as_mut(),
+                        run.x_pairwise_pool,
+                    )
+                };
+                match pairwise.as_deref() {
+                    Some(rows) => write(rows, 0..queries.len())?,
+                    None => {
+                        // The rows of a window of queries (`report::pairwise_windows`), written
+                        // and dropped before the next window's (line DBID, ID4t): the same rows
+                        // as `report_counts` makes for all queries, from the same hits
+                        // (`shift_to_records` leaves them as they are here, `rows_up_front`).
+                        // Making a row cannot fail, so no window's rows stop the report after
+                        // the windows before were written.
+                        let shown = report::PairwiseRows::new(
+                            run.queries,
+                            run.subjects,
+                            run.subject_letters,
+                            run.query_stats,
+                            &query_code,
+                            &db_code,
+                            &run.ranges.input.placements,
+                            run.ranges.subject_placements,
+                        );
+                        debug_assert!(hits.is_sorted_by_key(|hsp| hsp.hit.q_idx));
+                        let windows =
+                            report::pairwise_windows(&hits, queries.len(), run.x_pairwise_pool);
+                        if windows.is_empty() {
+                            // No query: the prolog and the epilog alone.
+                            write(&[], 0..0)?;
+                        }
+                        for range in windows {
+                            let first =
+                                hits.partition_point(|hsp| (hsp.hit.q_idx as usize) < range.start);
+                            let end =
+                                hits.partition_point(|hsp| (hsp.hit.q_idx as usize) < range.end);
+                            let window = &hits[first..end];
+                            // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows as an indexed map on
+                            // the pool.
+                            let mut rows = match run.x_pool {
+                                Some(pool) => crate::algorithm::tblastx::x_rpt_par::pairwise_hits(
+                                    pool, window, &shown,
+                                ),
+                                None => {
+                                    let mut buffer = Vec::new();
+                                    window
+                                        .iter()
+                                        .map(|hsp| shown.hit(hsp, &mut buffer))
+                                        .collect()
+                                }
+                            };
+                            // The rows count BLOSUM62's positives (`report::set_row_positives`).
+                            if matrix != ScoringMatrix::Blosum62 {
+                                report::set_row_positives(&mut rows, matrix);
+                            }
+                            write(&rows, range)?;
+                        }
+                    }
+                }
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
             // ```c++
@@ -2256,8 +2312,35 @@ fn write_tblastx_outputs(
     Ok(())
 }
 
+/// Whether the outfmt 0 rows of every query are made before any format is written
+/// (`report_counts`): for the caller's hit records, for a format observer with outfmt 0 (its HSP
+/// numbers count over the whole report), and for outfmt 0 where the hits move into the records
+/// (`-query_loc`, `-subject_loc`: `report::shift_to_records` moves the hits that the rows are
+/// read from). Otherwise outfmt 0 makes the rows of a window of queries, writes them and drops
+/// them before the next window's (`write_tblastx_outputs`).
+///
+/// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411-1585
+/// ```c++
+/// CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+/// ...
+///     display.DisplaySeqalign(m_Outfile);
+/// ```
+/// NCBI makes and prints the alignments of one query's result set at a time.
+fn rows_up_front(
+    outputs: &ReportOutputs<'_>,
+    run: &TblastxReportRun<'_>,
+    output_formats: &[report::TblastxOutputFormat],
+) -> bool {
+    outputs.hits.is_some()
+        || (output_formats.contains(&report::TblastxOutputFormat::Pairwise)
+            && (outputs.observer.is_some()
+                || run.ranges.input.placements.ranged()
+                || run.ranges.subject_placements.ranged()))
+}
+
 /// The Seq-aligns' engine counts (outfmt 8, 12), the display counts of `hits` and the outfmt 0
-/// rows, with the positives of the search's matrix `sc` (`write_tblastx_outputs`).
+/// rows made up front (`rows_up_front`), with the positives of the search's matrix `sc`
+/// (`write_tblastx_outputs`).
 #[allow(clippy::too_many_arguments)]
 fn report_counts<S: TbxScore>(
     sc: S,
@@ -2335,15 +2418,27 @@ fn report_counts<S: TbxScore>(
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
     // ```
     // The caller receives the same final result that every formatter prints, with the
-    // displayed rows of outfmt 0.
-    let mut pairwise = (outputs.hits.is_some()
-        || output_formats.contains(&report::TblastxOutputFormat::Pairwise))
-    // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows as an indexed map on the pool.
-    .then(|| match run.x_pool {
-        Some(pool) => crate::algorithm::tblastx::x_rpt_par::pairwise_hits(
-            pool,
-            hits,
-            &report::PairwiseRows::new(
+    // displayed rows of outfmt 0. Otherwise outfmt 0 makes its rows a window of queries at a
+    // time (`rows_up_front`).
+    let mut pairwise = rows_up_front(outputs, run, output_formats)
+        // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows as an indexed map on the pool.
+        .then(|| match run.x_pool {
+            Some(pool) => crate::algorithm::tblastx::x_rpt_par::pairwise_hits(
+                pool,
+                hits,
+                &report::PairwiseRows::new(
+                    run.queries,
+                    run.subjects,
+                    run.subject_letters,
+                    run.query_stats,
+                    query_code,
+                    db_code,
+                    &run.ranges.input.placements,
+                    run.ranges.subject_placements,
+                ),
+            ),
+            None => report::pairwise_hits(
+                hits,
                 run.queries,
                 run.subjects,
                 run.subject_letters,
@@ -2353,19 +2448,7 @@ fn report_counts<S: TbxScore>(
                 &run.ranges.input.placements,
                 run.ranges.subject_placements,
             ),
-        ),
-        None => report::pairwise_hits(
-            hits,
-            run.queries,
-            run.subjects,
-            run.subject_letters,
-            run.query_stats,
-            query_code,
-            db_code,
-            &run.ranges.input.placements,
-            run.ranges.subject_placements,
-        ),
-    });
+        });
     // The rows count BLOSUM62's positives (`report::set_row_positives`).
     if !S::BLOSUM62 {
         if let Some(rows) = pairwise.as_mut() {

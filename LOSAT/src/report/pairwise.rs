@@ -3476,10 +3476,12 @@ fn cpp_default_double(value: f64) -> String {
     }
 }
 
-/// Writes the TBLASTX pairwise report (outfmt 0).
+/// Writes the TBLASTX pairwise report (outfmt 0) of the queries `query_range` of `queries`.
 ///
-/// `hits` is the final hit list of the run in its order (queries in input order, then
-/// subjects and HSPs in result order); each hit's index in it identifies it to the probe.
+/// `hits` is the final hit list of those queries in its order (queries in input order, then
+/// subjects and HSPs in result order); each hit's index in it identifies it to the probe. The
+/// prolog comes with the first query of `queries`, the epilog with the last: the reports of
+/// consecutive ranges written in turn are the report of all of them.
 ///
 /// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1491-1589
 /// ```c++
@@ -3509,6 +3511,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     writer: &mut W,
     config: &PairwiseConfig,
     queries: &[TblastxPairwiseQuery],
+    query_range: std::ops::Range<usize>,
     subject_titles: &[Arc<[u8]>],
     report: &TblastxPairwiseReport,
     database: Option<&PairwiseDatabase>,
@@ -3519,7 +3522,9 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
-    if report.prolog {
+    // The prolog with the report's first query, the epilog with its last (`query_range` is all of
+    // `queries`, or one window of a caller that makes the rows a window at a time).
+    if report.prolog && query_range.start == 0 {
         write_tblastx_pairwise_prolog(
             writer,
             &report.version,
@@ -3529,9 +3534,12 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             database,
         )?;
     }
-    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
+    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
-        if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
+        if let Some(bucket) = (hit.hit.q_idx as usize)
+            .checked_sub(query_range.start)
+            .and_then(|offset| hits_by_query.get_mut(offset))
+        {
             bucket.push((hsp_index, hit));
         }
     }
@@ -3544,7 +3552,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             report,
             database,
         },
-        0,
+        query_range.start,
         &hits_by_query,
         subject_titles,
         probe,
@@ -3558,7 +3566,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     // ```
     // An error in a later query batch skips the epilog, and nothing follows the last
     // query's footer.
-    if report.epilog {
+    if report.epilog && query_range.end == queries.len() {
         write_tblastx_epilog(writer, report, database)?;
     }
     writer.flush()
@@ -5535,6 +5543,105 @@ mod tblastx_tests {
             comp_adjust_method: None,
             sum_n: Some(sum_n),
         }
+    }
+
+    // Line DBID item ID4t: TBLASTX's outfmt 0 makes its rows a window of queries at a time and
+    // writes each window's report (`algorithm::tblastx::blast_engine::run_impl`), as BLASTN's
+    // (ID4f, above): the reports of consecutive query ranges, each given only its own hits, are
+    // the report of all queries, on one thread and on a pool.
+    #[test]
+    fn tblastx_reports_of_consecutive_query_ranges_are_the_whole_report() {
+        let config = PairwiseConfig {
+            program: "tblastx".to_string(),
+            ..PairwiseConfig::default()
+        };
+        let karlin = KarlinParams {
+            lambda: 0.3176,
+            k: 0.134,
+            h: 0.4012,
+            alpha: 0.0,
+            beta: 0.0,
+        };
+        let queries: Vec<TblastxPairwiseQuery> = (0..4)
+            .map(|q_idx| TblastxPairwiseQuery {
+                query_name: format!("q{q_idx} query {q_idx}").into_bytes(),
+                query_length: 300,
+                karlin: Some(karlin),
+                effective_search_space: 10_000,
+            })
+            .collect();
+        let report = TblastxPairwiseReport {
+            version: "2.17.0+".to_string(),
+            database_name: "subjects".to_string(),
+            database_num_sequences: 3,
+            database_total_letters: 900,
+            matrix_name: "BLOSUM62".to_string(),
+            word_threshold: 13.0,
+            window_size: 40,
+            num_descriptions: 500,
+            num_alignments: 250,
+            unsearched: vec![false; queries.len()],
+            epilog: true,
+            prolog: true,
+            parsed_subjects: Vec::new(),
+        };
+        // Query 0: subjects 1 (2 HSPs) and 2; query 1: no hits; queries 2 and 3: subject 1.
+        let hits: Vec<PairwiseHit> = [(0, 1, 4), (0, 1, 4), (0, 2, 1), (2, 1, 1), (3, 1, 1)]
+            .into_iter()
+            .map(|(q_idx, s_idx, sum_n)| {
+                let mut hit = tblastx_hit(sum_n);
+                hit.hit.q_idx = q_idx;
+                hit.hit.s_idx = s_idx;
+                hit
+            })
+            .collect();
+        let titles: Vec<Arc<[u8]>> = (0..3)
+            .map(|s_idx| Arc::from(format!("s{s_idx} subject {s_idx}").as_bytes()))
+            .collect();
+        crate::utils::threading::with_search_pool(4, "test", |pool| {
+            for x_pool in [None, Some(pool)] {
+                let write = |range: std::ops::Range<usize>| {
+                    let range_hits: Vec<PairwiseHit> = hits
+                        .iter()
+                        .filter(|hit| range.contains(&(hit.hit.q_idx as usize)))
+                        .cloned()
+                        .collect();
+                    let mut written = Vec::new();
+                    write_tblastx_pairwise_report(
+                        &range_hits,
+                        &mut written,
+                        &config,
+                        &queries,
+                        range,
+                        &titles,
+                        &report,
+                        None,
+                        None,
+                        None,
+                        x_pool,
+                    )
+                    .unwrap();
+                    written
+                };
+                let whole = write(0..queries.len());
+                let text = String::from_utf8(whole.clone()).unwrap();
+                assert!(text.starts_with("TBLASTX 2.17.0+"), "{text}");
+                assert_eq!(text.matches("Query= ").count(), queries.len(), "{text}");
+                assert!(text.contains("No hits found"), "{text}");
+                assert!(text.contains("Expect(4)"), "{text}");
+                for cuts in [vec![1], vec![2], vec![3], vec![1, 2, 3], vec![1, 3]] {
+                    let mut joined = Vec::new();
+                    let mut start = 0;
+                    for end in cuts.into_iter().chain([queries.len()]) {
+                        joined.extend(write(start..end));
+                        start = end;
+                    }
+                    assert_eq!(String::from_utf8(joined).unwrap(), text);
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
     }
 
     // NCBI c++/src/objtools/align_format/showalign.cpp:3593-3606 and 310-332: Expect(n)

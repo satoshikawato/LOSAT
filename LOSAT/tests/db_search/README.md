@@ -370,8 +370,8 @@ Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTD
 (the last entry, taxid 99990, begins past the end of `taxdb.btd`):
 
 - `tm_fast_q289.faa`: 289 copies of `qp1` of `x16_taxid_q.faa`, the first with its first letter replaced by `O` (a warning
-  of its own). With `-task blastp-fast` against `x16_taxid_99990` at two or more threads LOSAT_X_BPQSLOTS would search it
-  as two query blocks in flight; the offset error must come before that warning, at any thread count.
+  of its own). With `-task blastp-fast` against `x16_taxid_99990` the search makes two query blocks; the offset error
+  must come before that warning, at any thread count.
 - `tm_2vol.pal` (`DBLIST tm_2vol_a tm_2vol_b`): two volumes that are copies of `x16_taxid_99990` (`.phr .pin .psq`); NCBI
   writes the offset error once per volume.
 - `tm_cache.faa` (`st1`, `st2`, `st3`: the same protein), `tm_cache_q.faa` (its query), and the databases built from them

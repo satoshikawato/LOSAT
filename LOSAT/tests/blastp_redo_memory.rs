@@ -144,9 +144,6 @@ fn losat(env: &[(&str, &str)], worker_log: &Path) -> Command {
     }
     command
         .env("LOSAT_BLASTX_WORKER_LOG", worker_log)
-        // `LOSAT_X_BPQSLOTS=0`: the block loop of `LOSAT_X_BPQBLOCK`, one block at a time (the switch searches
-        // blastp-fast's blocks two at a time, of other sizes, with no table built ahead), unless the run names it.
-        .env("LOSAT_X_BPQSLOTS", "0")
         .envs(env.iter().copied());
     command
 }

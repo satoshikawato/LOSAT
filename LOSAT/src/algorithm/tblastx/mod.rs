@@ -36,6 +36,8 @@ pub mod sum_stats_linking;
 pub mod tracing;
 pub mod translation;
 mod ungapped_hit_sort;
+// EXPERIMENT (LOSAT_X_TBXLINKLEAN): the linking call's working arrays without unused room.
+mod x_link_lean;
 // Diagnostic (LOSAT_TIMING): the stage times of the two linking calls of a subject. No NCBI
 // counterpart; it computes no value the search reads.
 mod x_link_timing;

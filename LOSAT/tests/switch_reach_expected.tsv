@@ -161,6 +161,7 @@ LOSAT_X_TBXBAND	tblastx	conditional	required	gap	only batches the old guard reje
 LOSAT_X_TBXEXTBATCH	tblastx	conditional	gap	required	x86-64 only; only units with query-group span >=256 Ki letters (query ~>0.8 Mb); window >= wordsize+16; new gap: needs a query-group span >= 256 Ki letters (query ~0.8 Mb), x86-64
 LOSAT_X_TBXHITBF	tblastx	conditional	required	required	only units of the PAIRPAR unit path (gated by size) with 1<=wordsize<window; not under LOSAT_TIMING/STATS
 LOSAT_X_TBXKMERGE	tblastx	conditional	required	required	only where PAIRPAR unit path runs (gated by query size)
+LOSAT_X_TBXLINKLEAN	tblastx	always			A linking call's maximum tree with one leaf per HSP; the sweep's lists freed after the ranks
 LOSAT_X_TBXLUT	tblastx	conditional	required	required	only batches that run the reference frame loop (short queries via PAIRPARGATE, guard); diagnostics keeps chains
 LOSAT_X_TBXMASKSEEK	tblastx	always			scan of a frame's SEG masks in an outfmt 0 row (and a Web hit record) starts at the first mask range that reaches the row
 LOSAT_X_TBXNEXT	tblastx	conditional	required	required	2+ threads and more than one subject (native; threaded Wasm since 2026-10-20)

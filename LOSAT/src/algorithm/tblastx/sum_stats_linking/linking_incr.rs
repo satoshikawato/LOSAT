@@ -332,13 +332,24 @@ fn stats_enabled() -> bool {
 /// ordering method, with keys (`LinkKey`) and an update that stops at the
 /// first unchanged parent. `K::default()` is "no entry".
 struct MaxTree<K> {
+    /// The index of the first leaf: the number of leaves, and of inner nodes plus one.
     cap: usize,
     nodes: Vec<[K; 2]>,
 }
 
 impl<K: Copy + Ord + Default> MaxTree<K> {
     fn new(n: usize) -> Self {
-        let cap = n.max(1).next_power_of_two();
+        Self::with_layout(n, crate::algorithm::tblastx::x_link_lean::on())
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXLINKLEAN): `lean` = one leaf per HSP instead of a power of two of
+    // leaves (tblastx/x_link_lean.rs item 1).
+    fn with_layout(n: usize, lean: bool) -> Self {
+        let cap = if lean {
+            n.max(1)
+        } else {
+            n.max(1).next_power_of_two()
+        };
         Self {
             cap,
             nodes: vec![[K::default(); 2]; cap * 2],
@@ -1166,6 +1177,12 @@ fn link_group<'g, K: LinkKey>(
         rr[i] = (msz - rank) as u32;
         let le = so_vals.partition_point(|&v| v <= se[i]);
         kq[i] = (msz - le) as u32;
+    }
+    // EXPERIMENT (LOSAT_X_TBXLINKLEAN): the two lists are not read after the ranks
+    // (tblastx/x_link_lean.rs item 2).
+    if crate::algorithm::tblastx::x_link_lean::on() {
+        drop(elig1);
+        drop(so_vals);
     }
     let mut fen: Vec<K> = vec![K::default(); msz + 1];
 
@@ -2031,5 +2048,42 @@ impl<K: LinkKey> LinkRounds<'_, K> {
         *path_changed_at = path_changed;
         *active_head_at = active_head;
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LinkKey, MaxTree};
+
+    // EXPERIMENT (LOSAT_X_TBXLINKLEAN): the tree with one leaf per HSP has the root of the tree
+    // with a power of two of leaves after every update, for sizes on both sides of a power of two.
+    #[test]
+    fn the_lean_tree_has_the_maxima_of_the_power_of_two_tree() {
+        let mut seed = 0x2810_2026_u32;
+        for n in [1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 33, 64, 65, 100, 129] {
+            let mut lean = MaxTree::<u64>::with_layout(n, true);
+            let mut full = MaxTree::<u64>::with_layout(n, false);
+            assert_eq!(lean.nodes.len(), 2 * n);
+            let mut leaves = vec![[0u64; 2]; n];
+            for _ in 0..40 * n {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                let i = (seed >> 8) as usize % n;
+                let mut v = [0u64; 2];
+                for (c, key) in v.iter_mut().enumerate() {
+                    seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                    // About one entry in four is "no entry" (the default key).
+                    if seed % 4 != c as u32 {
+                        *key = <u64 as LinkKey>::new(i64::from((seed >> 12) % 50) - 25, i);
+                    }
+                }
+                leaves[i] = v;
+                lean.set(i, v);
+                full.set(i, v);
+                let expected = [0, 1].map(|c| leaves.iter().map(|l| l[c]).max().unwrap_or(0));
+                assert_eq!(lean.root(), expected, "n {n}");
+                assert_eq!(full.root(), expected, "n {n}");
+                assert_eq!(lean.leaf(i), v);
+            }
+        }
     }
 }

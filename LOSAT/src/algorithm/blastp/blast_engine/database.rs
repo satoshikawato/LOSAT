@@ -165,14 +165,6 @@ impl BlastpDatabase {
         self.taxdb.found(&self.db)
     }
 
-    /// Whether a batch's prefetch can write a text (`shared::TaxdbRun::prefetch_may_write`): the
-    /// texts of opening the taxonomy database or its offset error, which go with the batch whose
-    /// prefetch makes the run's first lookup (or the volume's first lookup of the taxid). `false`
-    /// without `taxdb.bti` and for a taxonomy database that writes no text, NCBI's own among them.
-    pub(super) fn prefetch_may_write(&self) -> bool {
-        self.taxdb.prefetch_may_write(&self.db)
-    }
-
     /// The number of sequences (`CSeqDB::GetNumSeqs`).
     pub(super) fn num_sequences(&self) -> u32 {
         self.db.num_seqs()
@@ -3320,8 +3312,7 @@ mod tests {
     // 9606) with no taxonomy database, ones whose lookups cannot be refused (a wrong magic number
     // is a message; a scientific name of 9606 that XML2 cannot write is not asked for by the
     // prefetch) and one whose record of 9606 is (an empty `taxdb.btd`, `shared::taxdb_may_refuse`),
-    // at one thread and in a pool. The slots (LOSAT_X_BPQSLOTS) are declined where a lookup can
-    // write a text (`prefetch_may_write`).
+    // at one thread and in a pool.
     #[test]
     fn blocks_with_the_prefetch_need_lookups_that_cannot_be_refused() {
         use crate::seqdb::alias::SearchPath;
@@ -3333,12 +3324,12 @@ mod tests {
         ));
         std::fs::create_dir_all(&cwd).unwrap();
         let path = tests.join("fixtures/outfmt16/db/sprot_tax");
-        for (taxdb, refused, writes) in [
-            (None, false, false),
-            (Some("good"), false, false),
-            (Some("bad_magic"), false, true),
-            (Some("high_bytes_utf8"), false, false),
-            (Some("btd_empty"), true, true),
+        for (taxdb, refused) in [
+            (None, false),
+            (Some("good"), false),
+            (Some("bad_magic"), false),
+            (Some("high_bytes_utf8"), false),
+            (Some("btd_empty"), true),
         ] {
             let taxdb = taxdb.map(|name| tests.join("seqdb/taxdb").join(name));
             let search =
@@ -3350,7 +3341,6 @@ mod tests {
                 taxdb: shared::TaxdbRun::default(),
             };
             assert_eq!(database.taxdb_found(), taxdb.is_some());
-            assert_eq!(database.prefetch_may_write(), writes, "{taxdb:?}");
             for threads in [1, 4] {
                 crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
                     for pairwise in [false, true] {

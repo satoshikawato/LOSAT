@@ -200,6 +200,10 @@ use std::ops::RangeInclusive;
 /// branch-free candidate loop, `blastx/x_seed_scan.rs`) graduated on 2026-10-26: it left
 /// `STRICT_SET` and the scan on the presence test was deleted (the compressed lookup table keeps
 /// its own scan, a rule of the table and not a switch).
+/// `LOSAT_X_BPQSLOTS` (blastp-fast's query blocks searched two at a time on the pool,
+/// `blastp/x_query_slots.rs`) was removed on 2026-10-28 (Owner): at 16 threads it saved 7.0 % of
+/// the time and raised the max RSS by 9.1 %. It left `STRICT_SET` and its code was deleted; a run
+/// ignores the variable and searches the blocks one at a time, as it did with `=0`.
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNCSR",
     "LOSAT_X_BNDBCUT",
@@ -245,7 +249,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPQBLOCKWEB",
     "LOSAT_X_BPQBLOCKXML",
     "LOSAT_X_BPQBLOCKXML2",
-    "LOSAT_X_BPQSLOTS",
     "LOSAT_X_BPREDODBSUBJ",
     "LOSAT_X_BPREDOLPT",
     "LOSAT_X_BPREDOPAR",

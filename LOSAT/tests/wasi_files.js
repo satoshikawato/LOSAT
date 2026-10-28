@@ -37,11 +37,9 @@ const tty = require("tty");
 //                                m_CmdLineArgs->GetOutputStream(),
 // ```
 // The output (-out) is one stream of the process too. LOSAT creates the file at the report's
-// first write, and blastp-fast's query blocks searched two at a time (LOSAT_X_BPQSLOTS,
-// LOSAT/src/algorithm/blastp/x_query_slots.rs) are written by whichever pool thread finished
-// the block that completes the order: the file opened by one thread was written by another,
-// EBADF (blastp-fast -subject -out with 2 or more threads, 2026-10-28), so opens for writing
-// enter the table as well as opens for reading.
+// first write, and a write from a thread other than the one that opened -out must work: a file
+// opened by one thread and written by another gave EBADF, so opens for writing enter the table as
+// well as opens for reading.
 //
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729
 // ```c++

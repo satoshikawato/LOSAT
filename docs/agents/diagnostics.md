@@ -353,7 +353,6 @@ export LOSAT_X_BPQBLOCKSA=1
 export LOSAT_X_BPQBLOCKWEB=1
 export LOSAT_X_BPQBLOCKXML=1
 export LOSAT_X_BPQBLOCKXML2=1
-export LOSAT_X_BPQSLOTS=1
 export LOSAT_X_BPREDODBSUBJ=1
 export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
@@ -2778,39 +2777,12 @@ Rebuilding less:
   In a `run_local` call with several outputs, hit records or an observer (`LOSAT_X_BPQBLOCKWEB`), an outfmt 13 to 16
   output does not take blocks (the run-level frame and carry were verified for one CLI-style output only): the
   format is recorded for `LOSAT_X_REACH` and the search of all queries runs (Owner-delegated 2026-10-22).
-- `LOSAT_X_BPQSLOTS=1` (BLASTP with the compressed lookup table: `-task blastp-fast`, or a word size above 4; speed; in the strict set from the pull request that added it,
-  2026-10-27, on unless it is `0`; acts only in the block search of `LOSAT_X_BPQBLOCK`) two query blocks searched at
-  a time on the search's pool, each block's report and messages written in block order
-  (`blastp/x_query_slots.rs`, exactness argument in its header). The block loop runs one block at a time on the
-  whole pool, and each block's stages end in joins with serial parts between them: in the human x yeast blastp-fast
-  search at 16 threads (Species4 x Species6 `-subject`, 254 blocks of about 18 ms) about 1.8 of the 16 threads
-  waited all the time, and most block ends drained the pool (line R `REPORT_R17.md` §3.1). With the switch two
-  drivers on the pool each take the next block and search it with the block loop's call; a thread that waits in
-  one block's join takes the other block's tasks. One form (two blocks: the block and the next one, whose whole
-  search runs beside it where `LOSAT_X_BPLKPAHEAD` builds only its table), with blocks of `2 x LOSAT_X_BPQBLOCK / 3`
-  letters (33,333 by default), so that the two tables in flight and the build of the next hold the letters of
-  the block loop's block and its table built ahead (the build's transient vectors are as large as a table:
-  78 appends of 4 bytes per query letter). No table is built ahead; each block keeps its table to its end and
-  gives its vectors to the spare that a later block's build takes (`LOSAT_X_BPLKPFLAT`). No driver takes a block
-  before both have started (a driver left in a thread's deque could otherwise run nested inside a block's join and
-  wait for that block; found 2026-10-27 after the switch's pull request by the probe test
-  `probe_slots_many_searches_with_nested_blocks`). A driver takes a block
-  only while fewer than 4 blocks are searched or wait to be written, and the output is flushed after each
-  block, as the block loop flushes it. Where: a pool of more than one thread, one output that is not outfmt 11 (the archive carries state from
-  document to document) or 13 to 16 (`Xml2Carry`), no hit records and no observer, native and wasm32 with
-  `wasm-threads`; exact blastp's `AaLookupTable` keeps the block loop (its in-place builds share neighbour lists
-  that one build uses at a time). One thread runs the block loop unchanged. `LOSAT_TIMING`'s per-block lines of the two blocks come
-  interleaved. `LOSAT_X_STATS` prints `[X_STATS] BPQSLOTS searches=<n> blocks=<n>`. Reports identical; off =
-  `LOSAT_X_BPQSLOTS=0`. Evidence (workstation, dev 3a83c151 against the switch's pull request, 2026-10-27, v4-BPF
-  s7): 16 threads (node 1 CPUs 32-47, 3 alternating rounds, one output hash per case) Species4 x Species6 `-subject`
-  4.87 -> 4.56 s (x0.937; busy CPUs 13.3 -> 14.5), the first 3,000 Species4 proteins x Species6 `-subject` x0.945,
-  Species4 x Species6 `-db` 5.21 -> 4.87 s (x0.935), Species0 x Species3 `-db` 16.79 -> 15.16 s (x0.903); 8 threads
-  x0.969 / x0.983 / x0.966 / x0.941; one thread: instructions x1.0000. Instructions at 16 threads +1.8 % (the
-  smaller blocks scan the subjects more often). Max RSS (MiB, dev -> switch, NCBI 2.17.0): 16 threads 136 -> 156
-  (NCBI `-subject` 335), 110 -> 113 (166), 125 -> 141, 107 -> 165; 8 threads 131 -> 149, 99 -> 122, 121 -> 147,
-  97 -> 142; Species4 x Species6 `-db` at 2 / 4 threads 106 -> 134 / 117 -> 147 (NCBI 304 / 360). Three blocks of
-  50,000 letters were faster at 16 threads (x0.870 on the first case) but held 175 MiB on the 3,000 proteins, above
-  NCBI's 166; 16 one-thread blocks (x0.858) held 813 MiB.
+- `LOSAT_X_BPQSLOTS` (two query blocks of `-task blastp-fast` searched at a time on the pool, `blastp/x_query_slots.rs`) was
+  removed on 2026-10-28 (Owner): at 16 threads on the workstation it saved 7.0 % of the time and raised the max RSS by
+  9.1 % (136 -> 150 MiB), which breaks the rule that the rise in max RSS in percent must not exceed the time saved in
+  percent. A run ignores the variable and searches the blocks of `LOSAT_X_BPQBLOCK` one at a time, as it did with
+  `LOSAT_X_BPQSLOTS=0`; the reports are unchanged. The entry and its evidence are in the history of this file
+  (dev b1af130b).
 - `LOSAT_X_BPSTRIPEFILL=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added
   it, 2026-10-28, on unless it is `0`; acts wherever `LOSAT_X_BPLKPFLAT`'s one-latch build of the flat table of
   `LOSAT_X_BPCLUT` runs, so with more than one thread) builds each stripe of that table from one read of the query

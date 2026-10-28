@@ -117,9 +117,6 @@ fn blastp_fast(subject: &[&OsStr], threads: u32, vars: &[(&str, &str)], outfmt: 
         .args(["-evalue", "0.001", "-outfmt", outfmt])
         .args(["-num_threads", &threads.to_string()])
         .env("BATCH_SIZE", "3000")
-        // `LOSAT_X_BPQSLOTS=0`: the block loop of `LOSAT_X_BPQBLOCK`, one block at a time (the switch searches
-        // blastp-fast's blocks two at a time, of other sizes, with no table built ahead), unless the run names it.
-        .env("LOSAT_X_BPQSLOTS", "0")
         .envs(vars.iter().copied())
         .output()
         .expect("run LOSAT");

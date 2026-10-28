@@ -113,7 +113,7 @@ pub(super) fn on() -> bool {
 /// instead of one offset per cell. A table of 4^11 cells has 4,194,305 offsets (16 MiB), of which
 /// a query batch of about 1 Mb of `-task blastn` fills 1.2-1.6 M; the packed head is 1 MiB of bits
 /// and ranks and 4.6-6.1 MiB of offsets. The build counts the words into one byte per cell (4 MiB,
-/// freed before the scan; `x_count8`), takes the presence bits and ranks from the bytes and sums
+/// in the capacity of the run list before the place pass writes it; `x_count8`), takes the presence bits and ranks from the bytes and sums
 /// the non-empty cells instead of 16 MiB, with two passes over the words as the unpacked build. A
 /// scan reads a word's bits (1 MiB) and, for a non-empty cell, its two
 /// offsets; a word of an empty cell, whose presence-vector bit is set for 8 cells of a 4^11 table,
@@ -425,7 +425,8 @@ pub(super) fn x_serial_unpacked(
 /// EXPERIMENT (LOSAT_X_BNCSRPACK): `serial` with a packed head (newest first): the count pass into
 /// one byte per cell (`x_count8`, each word's byte prefetched and counted 16 words later), the
 /// presence bits of the non-zero counts (`x_presence8`), the ranks of the blocks and the counts by
-/// rank (`x_rank_counts8`; the bytes are freed then), the sum pass (`x_sum_packed`, with the
+/// rank (`x_rank_counts8`; the bytes are in `qs`'s capacity, which the place pass writes then), the
+/// sum pass (`x_sum_packed`, with the
 /// presence bits and helper counters), and the place pass, as `x_serial_unpacked` does on the
 /// offsets of all cells: two passes over the words, as there.
 pub(super) fn x_serial_packed(
@@ -439,9 +440,25 @@ pub(super) fn x_serial_packed(
     assert!(cells % 2048 == 0 && pv_array_bts >= 5 && !words.ascending_cells);
     assert_eq!(helper_array.len(), cells >> 11);
     let blocks = cells >> 6;
-    let mut cnt = vec![0u8; cells];
+    // `qs` has room for every position the loop reads (each word ends at one); the counts take its
+    // first `cells` bytes when they fit (always for a table of the size rule, `wanted`), so the
+    // build frees nothing in the middle of a batch (a freed block there is trimmed and faulted in
+    // again; with threads each trim interrupts them all), else a vector of their own.
+    let mut qs: Vec<u32> = Vec::with_capacity(positions(words));
+    let mut own: Vec<u8> = if qs.capacity() * 4 >= cells {
+        Vec::new()
+    } else {
+        vec![0u8; cells]
+    };
+    let cb = if own.is_empty() {
+        let p = qs.as_mut_ptr() as *mut u8;
+        // SAFETY: `cells` bytes of the capacity, before the place pass writes any element.
+        unsafe { std::ptr::write_bytes(p, 0, cells) };
+        p
+    } else {
+        own.as_mut_ptr()
+    };
     let mut more = HashMap::new();
-    let cb = cnt.as_mut_ptr();
     const AHEAD: usize = 16;
     let mut ring = [0usize; AHEAD];
     let mut seen = 0usize;
@@ -449,7 +466,7 @@ pub(super) fn x_serial_packed(
         prefetch(cb.wrapping_add(cell));
         let slot = seen % AHEAD;
         if seen >= AHEAD {
-            // SAFETY: `ring[slot] < cells`, a byte of `cnt`; one thread.
+            // SAFETY: `ring[slot] < cells`, a byte of the counts; one thread.
             unsafe { x_count8(cb, &mut more, ring[slot]) };
         }
         ring[slot] = cell;
@@ -460,7 +477,7 @@ pub(super) fn x_serial_packed(
         unsafe { x_count8(cb, &mut more, ring[i % AHEAD]) };
     }
     let mut bits = vec![0u64; 2 * blocks];
-    // SAFETY: `blocks` blocks of 64 cells: the `cells` bytes of `cnt`, the `2 blocks` words of
+    // SAFETY: `blocks` blocks of 64 cells: the `cells` bytes of the counts, the `2 blocks` words of
     // `bits`.
     let present = unsafe { x_presence8(bits.as_mut_ptr(), cb, 0, blocks) };
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
@@ -469,7 +486,7 @@ pub(super) fn x_serial_packed(
     // SAFETY: as above, and the ranks `0 .. present` of the capacity's `present + 1` elements.
     let ranked = unsafe { x_rank_counts8(bits.as_mut_ptr(), cb, &more, sb, 0, blocks, 0) };
     debug_assert_eq!(ranked, present);
-    drop((cnt, more));
+    drop((own, more));
     let n_words = seen;
     assert!(
         n_words <= u32::MAX as usize,
@@ -491,7 +508,7 @@ pub(super) fn x_serial_packed(
         )
     };
     debug_assert_eq!(total as usize, n_words);
-    let mut qs: Vec<u32> = Vec::with_capacity(n_words);
+    debug_assert!(qs.capacity() >= n_words);
     let qb = qs.as_mut_ptr();
     // SAFETY: `present < present + 1`; `starts[present]` is no cell's end.
     unsafe { *sb.add(present) = total };

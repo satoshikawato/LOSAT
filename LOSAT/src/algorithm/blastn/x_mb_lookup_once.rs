@@ -1436,18 +1436,32 @@ fn csr_on_pool(
         };
         let blocks = cells >> 6;
         let mut bits = vec![0u64; 2 * blocks];
-        let mut cnt = vec![0u8; cells];
         // The non-empty cells are at most the cells and the words (bounded by the positions).
         let cap = cells.min(total) + 1;
         // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
         let mut starts = super::x_dc_csr::x_offsets_buffer(x_offsets, cap);
         let mut qs: Vec<u32> = Vec::with_capacity(total);
+        // The counts take the first `cells` bytes of `qs`'s capacity when they fit (always for a table
+        // of `x_bn_csr`'s size rule; each owner zeroes its cells' bytes first, and the place phase
+        // writes `qs` only after the barrier that follows the last read of a count), so the build
+        // frees nothing in the middle of a batch (a freed block there is trimmed and faulted in again,
+        // each trim interrupting every thread of the process); else a vector of their own.
+        let mut own_cnt: Vec<u8> = if qs.capacity() * 4 >= cells {
+            Vec::new()
+        } else {
+            vec![0u8; cells]
+        };
+        let in_qs = own_cnt.is_empty();
         let bb = Shared {
             ptr: bits.as_mut_ptr(),
             len: 2 * blocks,
         };
         let cb = Shared {
-            ptr: cnt.as_mut_ptr(),
+            ptr: if in_qs {
+                qs.as_mut_ptr() as *mut u8
+            } else {
+                own_cnt.as_mut_ptr()
+            },
             len: cells,
         };
         let sb = Shared {
@@ -1484,12 +1498,16 @@ fn csr_on_pool(
             let (b0, b1) = (c0 >> 6, c1 >> 6);
             let mut more = std::collections::HashMap::new();
             // SAFETY (all of the job's accesses): as in the unpacked build below; owner `o` alone
-            // writes its cells' bytes of `cnt`, the words of its blocks in `bits` (presence, then
+            // writes its cells' bytes of the counts (before the barrier after which the place phase
+            // writes `qs`), the words of its blocks in `bits` (presence, then
             // ranks, before the barrier after which every thread only reads `bits`), the counts of
             // its ranks (`starts[p0 .. p0 + its non-empty cells]`, disjoint from the other owners'),
             // its entries of the owners' words and non-empty cells (read by the later owners after a
             // barrier) and `qs` at its places.
             unsafe {
+                if in_qs {
+                    std::ptr::write_bytes(cb.ptr.add(c0), 0, c1 - c0);
+                }
                 let mut got = 0u64;
                 for c in 0..chunks {
                     let (s0, s1) = span(c, o);
@@ -1554,7 +1572,7 @@ fn csr_on_pool(
                 }
             }
         });
-        drop(cnt);
+        drop(own_cnt);
         let n_words: u64 = own_words.iter().sum();
         let present = own_present.iter().sum::<u64>() as usize;
         assert!(

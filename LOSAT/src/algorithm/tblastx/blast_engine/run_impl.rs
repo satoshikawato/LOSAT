@@ -3091,12 +3091,17 @@ fn run_batch_loop(
         // `-db`: the definition lines of the batch's reported sequences are read where NCBI
         // makes the batch's Seq-aligns (`database::read_titles`, in report order); a header file
         // that NCBI cannot read fails this batch, after the reports of the batches before.
-        // EXPERIMENT (LOSAT_X_TBXRPTBATCH): the batch's HSPs in report order now, while the pipe
-        // searches the next batch, instead of in the write after the last batch
+        // EXPERIMENT (LOSAT_X_TBXRPTBATCH): the batch's HSPs in report order now (with the pipe,
+        // while the next batch is searched), instead of in the write after the last batch
         // (tblastx/x_rpt_batch.rs); the `-db` titles below read this list.
-        let x_ordered = done
-            .x_in_order
-            .then(|| report_order(&args, batch_queries, std::mem::take(&mut batch.hits)));
+        let x_ordered = done.x_in_order.then(|| {
+            // Diagnostic (LOSAT_TIMING): counted with the report (utils/xtiming.rs), as the order
+            // of the write was. No NCBI counterpart.
+            let t_order = crate::utils::xtiming::clock();
+            let ordered = report_order(&args, batch_queries, std::mem::take(&mut batch.hits));
+            crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_order);
+            ordered
+        });
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
             let x_copy;
             let ordered: &[TblastxHsp] = match &x_ordered {
@@ -3202,11 +3207,24 @@ fn run_batch_loop(
             ));
         }
         // The batch numbers its queries from 0.
-        let hits = x_ordered.unwrap_or(batch.hits);
-        done.hits.extend(hits.into_iter().map(|mut hsp| {
-            hsp.hit.q_idx += start as u32;
-            hsp
-        }));
+        match x_ordered {
+            // EXPERIMENT (LOSAT_X_TBXRPTBATCH): the ordered list shifted in place, then moved (the
+            // first batch) or appended, without a copy of each HSP (tblastx/x_rpt_batch.rs).
+            Some(mut hits) => {
+                for hsp in &mut hits {
+                    hsp.hit.q_idx += start as u32;
+                }
+                if done.hits.is_empty() {
+                    done.hits = hits;
+                } else {
+                    done.hits.append(&mut hits);
+                }
+            }
+            None => done.hits.extend(batch.hits.into_iter().map(|mut hsp| {
+                hsp.hit.q_idx += start as u32;
+                hsp
+            })),
+        }
         done.query_stats.extend(batch.queries);
         done.searched
             .extend(std::iter::repeat_n(batch.searched, end - start));
@@ -7364,7 +7382,8 @@ fn search_query_batch<S: TbxScore>(
         None
     };
     // The hit list of each query (blast_hits.c Blast_HitListUpdate and its final e-value
-    // sort) is applied over all batches in `report::final_hit_order`.
+    // sort) is applied in `report::final_hit_order`: by the write, over all batches, or for each
+    // batch when it ends with LOSAT_X_TBXRPTBATCH (a query's list depends on its own HSPs only).
     let hits = final_hits.unwrap_or_default();
     if diag_enabled {
         print_diagnostics_summary(&diagnostics);

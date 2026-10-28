@@ -5,10 +5,11 @@
 //! is `0`. With it on, the batch loop puts each batch's HSPs in report order when the batch ends
 //! and the write after the last batch keeps that order; off, the write orders every batch's HSPs
 //! at once. The property under test is that the reports, the messages and the exit status do not
-//! depend on the switch: searches of several query batches (`BATCH_SIZE` makes every query its own
-//! batch; without it the short queries share a batch) are compared with the switch off, with the
-//! options that act on the order (`-max_target_seqs`, `-max_hsps`, `-culling_limit`,
-//! `-qcov_hsp_perc`), the report formats, `-subject` and `-db`, at 1 and 4 threads.
+//! depend on the switch: searches of several query batches (with `BATCH_SIZE` 4000 the batches are
+//! q1, the empty record + q2 + q3, and q4; without it q1 and the other four) are compared with the
+//! switch off, with the options that act on the order (`-max_target_seqs`, `-max_hsps`,
+//! `-culling_limit`, `-qcov_hsp_perc`), the report formats, `-subject` and `-db`, at 1 and 4
+//! threads; and a search whose last batch fails after the reports of the batches before.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -194,4 +195,67 @@ fn pairwise_and_structured_reports_do_not_depend_on_the_switch() {
     check(&["-outfmt", "0", "-max_target_seqs", "1"]);
     check(&["-outfmt", "5"]);
     check(&["-outfmt", "11"]);
+}
+
+/// Three queries of their own batch each (`BATCH_SIZE` 1500) and a last batch of one record
+/// without letters, which fails ("Sequence contains no data") after the reports of the three.
+fn failing_queries() -> &'static Path {
+    static QUERIES: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    QUERIES.get_or_init(|| {
+        let q = letters("MjeNMV.fasta");
+        write_fasta(
+            "failing_queries.fa",
+            &[
+                ("a", &q[..2_000]),
+                ("b", &q[100_000..101_500]),
+                ("c", &q[150_000..152_000]),
+                ("empty", b""),
+            ],
+        )
+    })
+}
+
+#[test]
+fn a_failing_last_batch_writes_the_same_reports_before_it() {
+    let (fasta, database) = subjects();
+    let search = |db: bool, threads: u32, off: bool| -> Output {
+        let mut command = losat();
+        if off {
+            command.env(OFF.0, OFF.1);
+        }
+        command
+            .env("BATCH_SIZE", "1500")
+            .arg("tblastx")
+            .arg("-query")
+            .arg(failing_queries());
+        if db {
+            command.args(["-db", database]);
+        } else {
+            command.arg("-subject").arg(fasta);
+        }
+        command
+            .args(["-outfmt", "6", "-max_target_seqs", "1"])
+            .args(["-num_threads", &threads.to_string()])
+            .output()
+            .expect("run LOSAT")
+    };
+    for db in [false, true] {
+        let off = search(db, 1, true);
+        assert!(!off.status.success(), "db {db}: the last batch fails");
+        assert!(
+            !off.stdout.is_empty(),
+            "db {db}: the batches before have hits"
+        );
+        for threads in [1, 4] {
+            let on = search(db, threads, false);
+            let case = format!("db {db} threads {threads}");
+            assert_eq!(on.status.code(), off.status.code(), "{case}");
+            assert_eq!(
+                String::from_utf8_lossy(&on.stderr),
+                String::from_utf8_lossy(&off.stderr),
+                "{case}"
+            );
+            assert!(on.stdout == off.stdout, "{case}: reports differ");
+        }
+    }
 }

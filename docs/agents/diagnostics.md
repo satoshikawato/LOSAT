@@ -2633,15 +2633,20 @@ Rebuilding less:
   stable sorts per hit list of ~190-byte HSPs) on the loop's thread while the pool waited: on the three
   genomes above at 16 threads (ws, 2026-10-28) the report stage took 0.187 s, two thirds of it in that order.
   With the batch pipe (TBXPIPE) a batch's order is made while the next batch is searched, so only the last
-  batch's order is left after the search; a search of one query batch orders at the same point as before.
+  batch's order is left after the search (at one thread it runs between batches); a search of one query
+  batch orders once at its end, as before, and with `-db` each batch is ordered once instead of twice (a
+  copy for the titles, then the write). The ordered list is moved (first batch) or appended to the run's
+  list without a copy. `LOSAT_TIMING` counts the order in the output phase, as before.
   On the workstation (16 CPUs of one socket, 3 s warm-up per run, alternating order, every report identical
   to `=0`; medians of paired rounds, dev 601a3ece2), the three genomes above at 16 threads took x0.995 of the
   time (6 rounds, 5 below), with `-db` x0.966 (3), at 8 threads x1.002 (3); the same queries against the
-  three genomes cut into 18,838 pieces of 100 bp x0.992 with peak memory 300 -> 209 MiB, against one genome
-  x0.990 with 267 -> 242 MiB; one-batch inputs (MelaMJNV x 9 MJNV genomes, AP027131 x AP027133 at 16
-  threads) x0.984 and x0.995. The memory saved is the order of every batch at once after the search
-  (per-pair lists and the ordered list of all HSPs); the order of one batch is made while the next batch
-  searches.
+  three genomes cut into 18,838 pieces of 100 bp x0.992, against one genome x0.990; one-batch inputs
+  (MelaMJNV x 9 MJNV genomes, AP027131 x AP027133 at 16 threads) x0.984 and x0.995. Peak memory (node 0,
+  untimed, 8 alternating rounds, the same binary with `=0` twice as a null arm): the three genomes 526 -> 517
+  MiB at 16 threads (null x1.011), 544 -> 536 with `-db`, 457 -> 467 at 8 threads (null x1.033), the 18,838
+  pieces 299 -> 210 MiB, one genome 266 -> 247, Sakai x MG1655 (genetic code 11, 16 threads) 2,157 -> 1,962
+  MiB: there the order of every batch at once after the search was the run's peak in 14 of 16 runs with
+  `=0` (2,152-2,163 MiB), and the linking of four groups at once is the peak with the switch (1,954-1,968).
 - `LOSAT_X_TBXMASKSEEK=1` (TBLASTX, the outfmt 0 rows and the hit records of LOSAT Web; speed; in the strict set from
   the pull request that added it, 2026-10-24; `=0` scans every range) `PairwiseRows` keeps the shown SEG masks of each
   query frame sorted by start, with the running maximum of their ends (`FrameMasks`, `tblastx/report.rs`), and

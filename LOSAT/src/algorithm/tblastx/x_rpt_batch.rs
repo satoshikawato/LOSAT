@@ -23,9 +23,21 @@
 //! ordered lists one after the other, with the batch's query numbers shifted by its first query,
 //! are the order of all of them. The `-db` path already relied on this for the titles.
 //!
+//! The order now runs between batches at one thread, and with the pipe beside the next batch's
+//! search. A search of one query batch orders once at its end, as the write did; with `-db` each
+//! batch was ordered twice before (a copy for the titles, then the write's order of every batch)
+//! and is ordered once now.
+//!
+//! Memory: `report_order`'s temporary lists (the input list until its HSPs are grouped, a list
+//! per query and subject, the ordered list; up to two or three times the HSPs it orders) are made
+//! for one batch at a time, with the pipe beside the next batch's search, instead of for every
+//! batch at once after the search; the ordered list is moved (the first batch) or appended to the
+//! run's list, not copied; the `-db` path no longer holds a copy of a batch's HSPs while it reads
+//! the titles. The peak of a search of several batches is lower where the order of all batches
+//! was the peak (docs/agents/diagnostics.md).
+//!
 //! Off (`LOSAT_X_TBXRPTBATCH=0`): every batch's HSPs are kept as the search returns them and put
-//! in order by the write, as before. Memory: the same list, held ordered instead of unordered;
-//! the `-db` path no longer holds a copy of a batch's HSPs while it reads the titles.
+//! in order by the write, as before.
 
 use std::sync::OnceLock;
 

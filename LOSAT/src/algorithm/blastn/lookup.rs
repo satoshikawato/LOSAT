@@ -2090,8 +2090,20 @@ fn build_mb_lookup(
     };
     let mut x_filled = x_mb_lookup_par::FillStats::default();
     if x_csr_layout {
-        let (x_offsets, x_length, x_dirty) =
+        let (mut x_offsets, mut x_length, x_dirty) =
             x_csr_keep.map_or((Vec::new(), 0, 0), |keep| keep.take_buffer(table_size + 2));
+        // EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head writes one element per non-empty cell, so
+        // the buffer a fresh build gives back to the keep is the zeroed table `Keep::take` makes for
+        // a chains build (two elements more), of which the build wrote its first elements: a later
+        // chains build of the loop takes it (zeroing what was written) as it takes an unpacked
+        // CSR's offsets.
+        if x_csr_keep.is_some()
+            && x_offsets.capacity() == 0
+            && x_bn_csr::x_will_pack(x_words.ascending_cells)
+        {
+            x_offsets = vec![0u32; table_size + 2];
+            x_length = table_size + 2;
+        }
         let (csr, on_pool) = x_bn_csr::build(
             &x_words,
             table_size,

@@ -121,9 +121,15 @@ pub(super) fn x_pack_on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNCSRPACK"))
 }
 
+/// No NCBI counterpart: whether a CSR of this order will be packed (LOSAT_X_BNCSRPACK; newest
+/// first only), without a reach record.
+pub(super) fn x_will_pack(ascending_cells: bool) -> bool {
+    !ascending_cells && x_pack_on()
+}
+
 /// No NCBI counterpart: whether a CSR of this order is packed (LOSAT_X_BNCSRPACK; newest first only).
 pub(super) fn x_packed(ascending_cells: bool) -> bool {
-    let packed = !ascending_cells && x_pack_on();
+    let packed = x_will_pack(ascending_cells);
     crate::utils::xreach::x_reach!("LOSAT_X_BNCSRPACK", packed);
     packed
 }

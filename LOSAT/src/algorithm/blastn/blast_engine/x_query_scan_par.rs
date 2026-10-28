@@ -670,6 +670,67 @@ mod tests {
             .or((limit == text.len()).then_some(text.len()))
     }
 
+    /// The records of one reader over the whole text (the second reading without the parts), up to
+    /// the first failure.
+    fn serial_records(
+        bytes: &[u8],
+        config: ReaderConfig,
+    ) -> Vec<crate::blastinput::fasta_reader::FastaRecord> {
+        let mut source = FastaInputSource::from_bytes(bytes, config);
+        let mut records = Vec::new();
+        while !source.end() {
+            match source.next_sequence(&mut |_| Ok(())) {
+                Ok(record) => records.push(record),
+                Err(_) => break,
+            }
+        }
+        records
+    }
+
+    #[test]
+    fn the_parts_read_again_give_the_records_of_one_reader() {
+        // EXPERIMENT (LOSAT_X_QSCANPAR's second reading, `read_span`): wherever the first reading
+        // takes its parts, each part read again by a reader started at its first record holds the
+        // records of the one reader (local IDs, titles, letters, messages with their line numbers).
+        let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+        let mut spans_read = 0;
+        for round in 0..300 {
+            let loaders = round % 2 == 0;
+            let config = ReaderConfig::query("BLASTN", false, loaders);
+            let text = random_fasta(&mut rng, 1 + round % 40);
+            let expected = serial_records(&text, config);
+            let (path, file) = file_of(&text, "r");
+            for threads in [2, 3, 8] {
+                for limits in [SMALL, Limits::DEFAULT] {
+                    let Some(scanned) = scan_with(&file, 0, config, threads, 0, limits) else {
+                        continue;
+                    };
+                    assert_eq!(scanned.lengths.len(), expected.len(), "round {round}");
+                    let mut got = Vec::new();
+                    let mut first = 0;
+                    for span in &scanned.spans {
+                        assert_eq!(span.first, first, "round {round}");
+                        let records = read_span(&file, span, config, &scanned.lengths)
+                            .unwrap_or_else(|| panic!("round {round}: span {span:?} not read"));
+                        assert_eq!(records.len(), span.records, "round {round}");
+                        first += span.records;
+                        got.extend(records);
+                        spans_read += 1;
+                    }
+                    assert_eq!(got, expected, "round {round} threads {threads}");
+                    // A length the file no longer has: the part is refused.
+                    if let Some(span) = scanned.spans.iter().find(|span| span.records > 0) {
+                        let mut lengths = scanned.lengths.clone();
+                        lengths[span.first] += 1;
+                        assert!(read_span(&file, span, config, &lengths).is_none());
+                    }
+                }
+            }
+            let _ = std::fs::remove_file(path);
+        }
+        assert!(spans_read > 1000, "spans read {spans_read}");
+    }
+
     #[test]
     fn record_starts_across_blocks_are_those_of_every_byte() {
         let mut rng = Rng(0x2545_f491_4f6c_dd1d);

@@ -3979,6 +3979,7 @@ mod tests {
                     7,
                     &mut helper,
                     Vec::new(),
+                    Vec::new(),
                 );
                 assert!(on_pool, "threads {threads}");
                 Ok(())
@@ -3990,7 +3991,16 @@ mod tests {
         let words = words_of(&case, &query_refs, (11, DiscWordType::Coding, 16));
         let mut pv = vec![0; 1 << 15];
         let mut helper = vec![0; (1 << 22) / 2048];
-        let (_, on_pool) = csr(4, &words, 1 << 22, &mut pv, 7, &mut helper, Vec::new());
+        let (_, on_pool) = csr(
+            4,
+            &words,
+            1 << 22,
+            &mut pv,
+            7,
+            &mut helper,
+            Vec::new(),
+            Vec::new(),
+        );
         assert!(!on_pool, "off a pool");
     }
 

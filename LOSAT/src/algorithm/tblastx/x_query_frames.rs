@@ -135,6 +135,11 @@ fn mask_frame_soft(seg: &SegMasker, frame: &mut QueryFrame) {
 // (`mask_frame_soft`, `mask_frame`); it computes nothing NCBI does not.
 #[inline(always)]
 fn mask_frame_as<const MASK_AT_HASH: bool>(seg: &SegMasker, frame: &mut QueryFrame) {
+    let _x_rec = crate::utils::xtline::XRecOnDrop(
+        "segf",
+        frame.aa_seq.len() as u32,
+        std::time::Instant::now(),
+    );
     if MASK_AT_HASH {
         mask_frame_soft(seg, frame)
     } else {

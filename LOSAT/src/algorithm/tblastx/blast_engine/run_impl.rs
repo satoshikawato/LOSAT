@@ -3283,7 +3283,9 @@ impl BatchReports<'_> {
                 super::super::archive::check_titles(records, "subject")?;
             }
         }
+        let x_t0 = Instant::now();
         let mut hits = report_order(self.args, queries, done.hits);
+        crate::utils::xtline::rec("rorder", hits.len() as u32, x_t0, Instant::now());
         // `-db`: the reported sequences by rank (their records hold the stored titles, their
         // letters are read from the stored codes).
         let reported_subjects;

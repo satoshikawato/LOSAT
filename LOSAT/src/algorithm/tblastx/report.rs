@@ -1517,9 +1517,47 @@ impl crate::algorithm::blastn::hsp::HitListEntry for TblastxHspList {
     //             s_EvalueCompareHSPs);
     // ```
     fn sort_by_evalue(&mut self) {
-        self.hsps
-            .sort_by(|a, b| crate::common::evalue_compare_hsps(&a.hit, &b.hit));
+        x_sort_by_index(&mut self.hsps, |a, b| {
+            crate::common::evalue_compare_hsps(&a.hit, &b.hit)
+        });
     }
+}
+
+/// PROTOTYPE (b26): `v.sort_by(compare)` by a stable sort of the positions with the same
+/// comparator, then one move of every element to its place. A stable sort's result is unique, so
+/// the order is `sort_by`'s; the HSPs move once instead of at every level of the sort.
+fn x_sort_by_index<T>(v: &mut Vec<T>, compare: impl Fn(&T, &T) -> std::cmp::Ordering) {
+    if v.len() < 2 {
+        return;
+    }
+    if std::env::var_os("LOSAT_X_B26IDX").is_some_and(|v| v == "0") {
+        v.sort_by(compare);
+        return;
+    }
+    let mut order: Vec<u32> = (0..v.len() as u32).collect();
+    order.sort_by(|&a, &b| compare(&v[a as usize], &v[b as usize]));
+    if !std::env::var_os("LOSAT_X_B26IDX").is_some_and(|v| v == "1") {
+        // Position k takes the element at `order[k]`: follow each cycle with swaps, in place.
+        for start in 0..order.len() {
+            let mut k = start;
+            loop {
+                let from = order[k] as usize;
+                order[k] = k as u32;
+                if from == start {
+                    break;
+                }
+                v.swap(k, from);
+                k = from;
+            }
+        }
+        return;
+    }
+    let mut slots: Vec<Option<T>> = v.drain(..).map(Some).collect();
+    v.extend(order.iter().map(|&i| {
+        slots[i as usize]
+            .take()
+            .expect("a permutation takes each element once")
+    }));
 }
 
 /// The filters of NCBI's `s_FilterBlastResults` that TBLASTX has: `-max_hsps` (`max_hsps`,
@@ -1653,7 +1691,9 @@ pub(crate) fn final_hit_order(
         let context_lengths = filters.context_lengths(q_idx);
         let mut hit_list: HitList<TblastxHspList> = HitList::new(hitlist_size);
         while let Some(((_, oid), mut hsps)) = lists.next_if(|((q, _), _)| *q == q_idx) {
-            hsps.sort_by(|a, b| crate::common::score_compare_hsps(&a.hit, &b.hit));
+            x_sort_by_index(&mut hsps, |a, b| {
+                crate::common::score_compare_hsps(&a.hit, &b.hit)
+            });
             if filters.reap_by_query_coverage(&mut hsps, &context_lengths) {
                 continue;
             }
@@ -1784,7 +1824,9 @@ pub(crate) fn culled_hit_order(
         let context_lengths = tblastx_context_lengths(query_lengths[q_idx as usize]);
         let mut writer = CullingWriter::new(prelim_max, context_lengths);
         for (oid, mut hsps) in subjects {
-            hsps.sort_by(|a, b| crate::common::score_compare_hsps(&a.hit, &b.hit));
+            x_sort_by_index(&mut hsps, |a, b| {
+                crate::common::score_compare_hsps(&a.hit, &b.hit)
+            });
             if filters.reap_by_query_coverage(&mut hsps, &context_lengths) {
                 continue;
             }

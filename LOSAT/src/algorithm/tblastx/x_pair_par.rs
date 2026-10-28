@@ -1097,7 +1097,9 @@ pub(super) fn lut_build(e: XLutEarly<'_>) -> Option<XLutBatch> {
 // `diag_array_size`), then the groups and the stub.
 fn lut_direct(e: &XLutEarly<'_>) -> Option<XLutBatch> {
     // The reference query preparation (contexts, concatenated query, lookup locations).
+    let x_t0 = std::time::Instant::now();
     let q = XPairLutQuery::x_prepare(e.query_frames, e.threshold, true)?;
+    crate::utils::xtline::rec("lutp", 0, x_t0, std::time::Instant::now());
     let contexts = q.contexts();
     let query_length: i32 = contexts
         .last()
@@ -1205,6 +1207,12 @@ fn lut_direct_tables(
         q_min: g.q_min,
         q_max: g.q_max,
     };
+    let to_group = |g: XPairLutGroup| {
+        let x_t0 = std::time::Instant::now();
+        let r = to_group(g);
+        crate::utils::xtline::rec("lutbf", 0, x_t0, std::time::Instant::now());
+        r
+    };
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1213,14 +1221,28 @@ fn lut_direct_tables(
         return pool.install(|| {
             locations
                 .par_iter()
-                .map(|group_locations| to_group(q.x_build_group(group_locations)))
+                .map(|group_locations| {
+                    let _x_rec = crate::utils::xtline::XRecOnDrop(
+                        "lutg",
+                        group_locations.len() as u32,
+                        std::time::Instant::now(),
+                    );
+                    to_group(q.x_build_group(group_locations))
+                })
                 .collect()
         });
     }
     let _ = (pool, on_pool);
     locations
         .iter()
-        .map(|group_locations| to_group(q.x_build_group(group_locations)))
+        .map(|group_locations| {
+            let _x_rec = crate::utils::xtline::XRecOnDrop(
+                "lutg",
+                group_locations.len() as u32,
+                std::time::Instant::now(),
+            );
+            to_group(q.x_build_group(group_locations))
+        })
         .collect()
 }
 

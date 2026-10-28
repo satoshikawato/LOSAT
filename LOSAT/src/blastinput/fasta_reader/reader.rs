@@ -577,6 +577,17 @@ impl<R: Read> FastaReader<R> {
         self.lines.line_number()
     }
 
+    /// EXPERIMENT (LOSAT_X_QSCANPAR's second reading): a reader over a part of a query file that
+    /// starts at the defline of its record `records` (0-based) after `lines` lines, which numbers
+    /// the records' local IDs and its lines as the reader of the whole file does there
+    /// (`GenerateID`'s counter starts at 1 and moves once per record; `x_start_after_lines`).
+    /// Called before the first record is read. No NCBI counterpart.
+    pub(crate) fn x_start_at_record(&mut self, records: usize, lines: u64) {
+        debug_assert_eq!(self.id_counter, 1);
+        self.id_counter = 1 + records as i64;
+        self.lines.x_start_after_lines(lines);
+    }
+
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2196-2214
     /// ```c++
     /// void CFastaReader::PostWarning(

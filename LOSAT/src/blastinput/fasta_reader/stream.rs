@@ -1308,6 +1308,17 @@ impl<R: Read> LineReader<R> {
     pub(crate) fn line_number(&self) -> u64 {
         self.line_number
     }
+
+    /// EXPERIMENT (LOSAT_X_QSCANPAR's second reading, `x_query_scan_par::read_span`): a line reader
+    /// that starts at the start of a line of a file whose first `lines` lines another reader read,
+    /// numbered as that reader numbers its next line (`line_number` is the number of lines read
+    /// before it: no line is ungot at a record's start once its defline is read again). Called
+    /// before the first line is read. No NCBI counterpart: the line numbers of the messages of a
+    /// part of a query file read by a reader of its own.
+    pub(crate) fn x_start_after_lines(&mut self, lines: u64) {
+        debug_assert!(self.line_number == 0 && !self.unget_line);
+        self.line_number = lines;
+    }
 }
 
 #[cfg(test)]

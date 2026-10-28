@@ -416,6 +416,21 @@ struct State {
     /// of the failed reading are lost, and the reader is past the record that failed).
     failed: Option<String>,
     stats: Stats,
+    /// EXPERIMENT (LOSAT_X_QSCANPAR): the first reading's parts, read again whole on the search
+    /// pool (`read_to`) while `source` stays at the file's start; `None` where the first reading
+    /// was not read in parts or a part read again was not the first reading's (`source` then reads
+    /// from that part on).
+    x_spans: Option<SpanPlan>,
+}
+
+/// EXPERIMENT (LOSAT_X_QSCANPAR): the second reading in the first reading's parts
+/// (`x_query_scan_par::Span`): a handle of the query file read at offsets, the reader's
+/// configuration, and the next part to read (its first record is `State::next`).
+struct SpanPlan {
+    file: File,
+    config: ReaderConfig,
+    spans: Vec<super::x_query_scan_par::Span>,
+    next: usize,
 }
 
 #[derive(Default)]
@@ -468,9 +483,22 @@ impl Store {
         } else {
             None
         };
-        let (input_lengths, end) = match parts {
-            Some(lengths) => (lengths, QueryEnd::Input),
-            None => scan(source, config.keep_defline)?,
+        // EXPERIMENT (LOSAT_X_QSCANPAR): the parts the lengths were read in, which the second
+        // reading reads again on the search pool (`State::read_to`), from a handle of its own.
+        let (input_lengths, end, x_spans) = match parts {
+            Some(super::x_query_scan_par::Scanned { lengths, spans }) => {
+                let x_spans = again.try_clone().ok().map(|file| SpanPlan {
+                    file,
+                    config,
+                    spans,
+                    next: 0,
+                });
+                (lengths, QueryEnd::Input, x_spans)
+            }
+            None => {
+                let (lengths, end) = scan(source, config.keep_defline)?;
+                (lengths, end, None)
+            }
         };
         let scan = started.elapsed();
         let (query_input, lengths) = query_input_of(input_lengths, range);
@@ -501,6 +529,7 @@ impl Store {
                     current: None,
                     failed: None,
                     stats: Stats::default(),
+                    x_spans,
                 }),
             }),
         };
@@ -579,10 +608,42 @@ impl Acting {
     }
 }
 
+/// EXPERIMENT (LOSAT_X_QSCANPAR): the records of the parts `range` of `plan`, each read again by a
+/// reader of its own (`x_query_scan_par::read_span`; `None` for a part that is not the first
+/// reading's), side by side on the search pool when it has two threads or more, else in turn on
+/// this thread. No NCBI counterpart: it is speed only.
+fn read_spans(
+    plan: &SpanPlan,
+    range: Range<usize>,
+    input_lengths: &[usize],
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
+) -> Vec<Option<Vec<FastaRecord>>> {
+    let spans = &plan.spans[range];
+    let read = |span: &super::x_query_scan_par::Span| {
+        super::x_query_scan_par::read_span(&plan.file, span, plan.config, input_lengths)
+    };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if let Some(pool) = pool.filter(|pool| pool.enabled() && pool.threads() > 1 && spans.len() > 1)
+    {
+        use rayon::prelude::*;
+        return pool.install(|| spans.par_iter().with_max_len(1).map(read).collect());
+    }
+    let _ = pool;
+    spans.iter().map(read).collect()
+}
+
 impl State {
     /// Reads the input records up to `end` into one new chunk (`input_lengths`: the first
     /// reading's lengths).
-    fn read_to(&mut self, end: usize, input_lengths: &[usize]) -> Result<()> {
+    fn read_to(
+        &mut self,
+        end: usize,
+        input_lengths: &[usize],
+        pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    ) -> Result<()> {
         if let Some(failed) = &self.failed {
             return Err(anyhow::anyhow!("{failed}"));
         }
@@ -592,6 +653,52 @@ impl State {
         let started = Instant::now();
         let first = self.next;
         let mut records = Vec::with_capacity(end - first);
+        // EXPERIMENT (LOSAT_X_QSCANPAR): whole parts of the first reading up to the one that holds
+        // record `end - 1`, read again side by side on the search pool; the records past `end` wait
+        // in the window (the next batch's first records).
+        if let Some(mut plan) = self.x_spans.take() {
+            let from = plan.next;
+            let mut to = from;
+            while to < plan.spans.len() && plan.spans[to].first < end {
+                to += 1;
+            }
+            debug_assert!(from == plan.spans.len() || plan.spans[from].first == self.next);
+            let parts = read_spans(&plan, from..to, input_lengths, pool);
+            let mut redo = None;
+            for (span, part) in plan.spans[from..to].iter().zip(parts) {
+                match part {
+                    Some(part) => {
+                        records.extend(part);
+                        self.next = span.first + span.records;
+                    }
+                    None => {
+                        redo = Some(*span);
+                        break;
+                    }
+                }
+            }
+            match redo {
+                None => {
+                    plan.next = to;
+                    self.x_spans = Some(plan);
+                }
+                // A part that is not the first reading's: one reader reads on from its start, as
+                // the second reading does without the parts (`read_one`'s message names the first
+                // record that differs).
+                Some(span) => {
+                    let mut handle = plan
+                        .file
+                        .try_clone()
+                        .context("LOSAT_X_QSTREAM: the query file cannot be read again")?;
+                    handle
+                        .seek(SeekFrom::Start(span.from))
+                        .context("LOSAT_X_QSTREAM: the query file cannot be read again")?;
+                    self.source = FastaInputSource::from_file(handle, plan.config);
+                    self.source.x_start_at_record(span.first, span.lines);
+                    debug_assert_eq!(self.next, span.first);
+                }
+            }
+        }
         while self.next < end {
             records.push(self.read_one(input_lengths)?);
             self.next += 1;
@@ -630,8 +737,9 @@ impl State {
         &mut self,
         input: Range<usize>,
         input_lengths: &[usize],
+        pool: Option<&crate::utils::threading::SearchPool<'_>>,
     ) -> Result<Arc<Vec<FastaRecord>>> {
-        self.read_to(input.end, input_lengths)?;
+        self.read_to(input.end, input_lengths, pool)?;
         self.split(input.end);
         let mut taken = Vec::new();
         while self
@@ -934,7 +1042,8 @@ impl<'a> Queries<'a> {
                     "LOSAT_X_QSTREAM: the batch of the input records {input:?} after those up to {}",
                     state.base
                 );
-                let records = state.take(input.clone(), &acting.query_input.input_lengths)?;
+                let records =
+                    state.take(input.clone(), &acting.query_input.input_lengths, Some(pool))?;
                 state.current = Some((input.start, Arc::clone(&records)));
                 state.stats.batches += 1;
                 let cut = acting.ranged.then(|| {
@@ -1025,8 +1134,8 @@ impl<'a> Queries<'a> {
             state.stats.stale += 1;
             return Ok(None);
         }
-        state.read_to(first, input_lengths)?;
-        state.read_to(last, input_lengths)?;
+        state.read_to(first, input_lengths, None)?;
+        state.read_to(last, input_lengths, None)?;
         state.stats.slots += 1;
         let shared = if acting.ranged || first < state.base {
             None

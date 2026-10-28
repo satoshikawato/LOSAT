@@ -526,6 +526,13 @@ impl<R: Read> FastaInputSource<R> {
         Self::from_stream(FastaStream::new(input), config)
     }
 
+    /// EXPERIMENT (LOSAT_X_QSCANPAR's second reading): the source starts at the defline of input
+    /// record `records` (0-based), after `lines` lines of the file (`FastaReader::x_start_at_record`).
+    #[cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
+    pub(crate) fn x_start_at_record(&mut self, records: usize, lines: u64) {
+        self.reader.x_start_at_record(records, lines);
+    }
+
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:370-374
     /// ```c++
     /// bool

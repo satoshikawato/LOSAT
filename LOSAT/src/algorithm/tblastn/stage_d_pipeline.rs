@@ -2429,10 +2429,9 @@ struct PreliminaryCollector {
     hitlists: Vec<Option<KappaResultHitList>>,
     prelim_size: usize,
     /// `LOSAT_X_TBNCOLLECTCTX`: one list per context for the list being added (the outer Vec is
-    /// kept; each touched context gets a new list that moves into its hit list), the counts per
-    /// context (all zero between lists) and the contexts the list touches.
+    /// kept; each touched context's list moves into its hit list, so all are empty between lists)
+    /// and the contexts the list touches.
     x_lists: Vec<Vec<LinkedHsp>>,
-    x_counts: Vec<usize>,
     x_touched: Vec<usize>,
 }
 
@@ -2442,7 +2441,6 @@ impl PreliminaryCollector {
             hitlists: (0..inputs.queries.len()).map(|_| None).collect(),
             prelim_size: inputs.prelim_size,
             x_lists: (0..inputs.queries.len()).map(|_| Vec::new()).collect(),
-            x_counts: vec![0; inputs.queries.len()],
             x_touched: Vec::new(),
         }
     }
@@ -2463,31 +2461,24 @@ impl PreliminaryCollector {
     //                                 hsp_list_array[index]);
     // ```
     // `LOSAT_X_TBNCOLLECTCTX` (strict set; `=0` filters the whole list once per query context, as
-    // before): a count over the list, then one placement pass, puts each HSP in the list of its
-    // context, in list order, as NCBI's collector does; the touched contexts then update their hit
-    // lists in context order with the same lists as the filters made. Exact capacity per context.
-    // Only the contexts the list touches are counted, filled and reset, so a list costs its own
-    // length whatever the number of contexts (the filters cost contexts x HSPs).
+    // before): one pass over the list pushes each HSP onto the list of its context, in list order,
+    // as NCBI's collector does; the touched contexts then update their hit lists in context order
+    // with the same lists as the filters made. A context's list grows from empty as the filter's
+    // `collect` grew it (4, then doubling), so the kept lists have the capacities they had before
+    // (exact capacities cost more instructions later: docs/agents/diagnostics.md). Only the
+    // contexts the list touches are filled, so a list costs its own length whatever the number of
+    // contexts (the filters cost contexts x HSPs).
     fn x_add_by_context(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()> {
         self.x_touched.clear();
         for hsp in &linked.hsps {
-            if let Some(count) = self.x_counts.get_mut(hsp.context) {
-                if *count == 0 {
+            if let Some(list) = self.x_lists.get_mut(hsp.context) {
+                if list.is_empty() {
                     self.x_touched.push(hsp.context);
                 }
-                *count += 1;
-            }
-        }
-        self.x_touched.sort_unstable();
-        for &context in &self.x_touched {
-            self.x_lists[context] = Vec::with_capacity(self.x_counts[context]);
-            self.x_counts[context] = 0;
-        }
-        for hsp in &linked.hsps {
-            if let Some(list) = self.x_lists.get_mut(hsp.context) {
                 list.push(*hsp);
             }
         }
+        self.x_touched.sort_unstable();
         x_collect_ctx_count(linked.hsps.len(), self.x_touched.len());
         for &context in &self.x_touched {
             let hsps = std::mem::take(&mut self.x_lists[context]);
@@ -3217,7 +3208,7 @@ mod tests {
     // lists of one filter per context (`=0`): per context, the lists in order with their oid, HSPs
     // (context, HSP, number, e-value bits, input position), best e-value bits (the split leaves
     // them to `update`) and payload count, and the hit list's worst e-value, low score and heap
-    // state; on 40 subjects through one collector (counts reset between lists) whose lists hold 0
+    // state; on 40 subjects through one collector (lists emptied between subjects) whose lists hold 0
     // to 399 HSPs over 1, 2 and 9 contexts and one beyond the query set (dropped by both), with
     // equal e-values, and hit lists of 1, 3 and 50 lists (the heap path runs with 1 and 3).
     #[test]
@@ -3236,7 +3227,6 @@ mod tests {
                     hitlists: (0..contexts).map(|_| None).collect(),
                     prelim_size,
                     x_lists: (0..contexts).map(|_| Vec::new()).collect(),
-                    x_counts: vec![0; contexts],
                     x_touched: Vec::new(),
                 };
                 let (mut filters, mut one_pass) = (collector(), collector());

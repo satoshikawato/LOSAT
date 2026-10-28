@@ -5378,10 +5378,11 @@ Scheduling (each value computed by one thread with the original function; order 
   x0.995 / x0.991, one protein against the zebrafish genome x0.996 / x1.002.
 - `LOSAT_X_TBNCOLLECTCTX=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-27;
   `=0` turns it off; `tblastn/stage_d_pipeline.rs` `PreliminaryCollector::x_add_by_context`): the collector of the
-  preliminary stage splits a subject's linked list by query context with a count and one placement pass (each HSP
-  to its context's list of exact capacity, in list order), as NCBI's collector does (`hspfilter_collector.c`
-  115-151), and the touched contexts update their hit lists in context order as before. Only the contexts the list
-  touches are counted, filled and reset, so a list costs its own length, not the number of contexts. Before, each
+  preliminary stage splits a subject's linked list by query context in one pass (each HSP pushed onto its context's
+  list, in list order), as NCBI's collector does (`hspfilter_collector.c` 115-151), and the touched contexts update
+  their hit lists in context order as before. A context's list grows from empty as the filter's `collect` grew it
+  (4, then doubling), so the kept lists have the capacities they had before. Only the contexts the list touches are
+  filled, so a list costs its own length, not the number of contexts. Before, each
   context of the query set filtered the whole list (contexts x HSPs): with 35 human proteins x the human genome
   (`-db`) that was 35 passes over chromosome 1's 936 k HSPs,
   about 160 ns per linked HSP, run by the owner of the search as it took the subjects in OID order; when chromosome 1

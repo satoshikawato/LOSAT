@@ -7108,8 +7108,11 @@ fn x_block_words_fit(
     };
     // PROBE (v4-BPF s8): LOSAT_BPF_S8WF=1 shares the counts among the groups.
     let x_s8_shared: Option<Vec<std::sync::atomic::AtomicU64>> =
-        (super::x_query_slots::x_s8_env("LOSAT_BPF_S8WF") == Some(1))
-            .then(|| (0..1 << 17).map(|_| std::sync::atomic::AtomicU64::new(u64::MAX)).collect());
+        (super::x_query_slots::x_s8_env("LOSAT_BPF_S8WF") == Some(1)).then(|| {
+            (0..1 << 17)
+                .map(|_| std::sync::atomic::AtomicU64::new(u64::MAX))
+                .collect()
+        });
     // The letters of the lookup query (`encode_protein_query_frame_with_seg`) where SEG does
     // not mask them; a lookup segment holds only those (`build_lookup_segments_for_context`).
     let fits = |words: &mut CompressedWordCount, searched: &std::ops::Range<usize>| {

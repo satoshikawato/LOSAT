@@ -145,7 +145,10 @@ pub(crate) fn x_s8_log(event: &str, a: usize, b: usize) {
     if !*ON.get_or_init(|| std::env::var("LOSAT_BPF_S8LOG").is_ok_and(|v| v == "1")) {
         return;
     }
-    let t = START.get_or_init(std::time::Instant::now).elapsed().as_micros();
+    let t = START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_micros();
     let anon = std::fs::read_to_string("/proc/self/status")
         .ok()
         .and_then(|status| {

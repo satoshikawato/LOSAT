@@ -250,7 +250,9 @@ static X_S8_CHUNKS: Mutex<Vec<Vec<u32>>> = Mutex::new(Vec::new());
 
 pub(crate) fn x_s8_stash() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::algorithm::blastp::x_query_slots::x_s8_env("LOSAT_BPF_S8STASH") == Some(1))
+    *ON.get_or_init(|| {
+        crate::algorithm::blastp::x_query_slots::x_s8_env("LOSAT_BPF_S8STASH") == Some(1)
+    })
 }
 
 impl XFlatSpare {
@@ -259,7 +261,11 @@ impl XFlatSpare {
     fn take(&self) -> (Vec<u32>, Vec<i32>) {
         let kept = std::mem::take(&mut *self.0.lock().unwrap_or_else(PoisonError::into_inner));
         if x_s8_stash() && kept.0.capacity() == 0 && kept.1.capacity() == 0 {
-            if let Some(stashed) = X_S8_TABLES.lock().unwrap_or_else(PoisonError::into_inner).pop() {
+            if let Some(stashed) = X_S8_TABLES
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .pop()
+            {
                 return stashed;
             }
         }
@@ -733,7 +739,32 @@ fn x_stripe_build_s9(
     run.clear();
     run.reserve(hits.len());
     let mut cells = vec![0usize; ranges];
-    for (chunk, chunk_appends) in chunks.iter().zip(appends) {
+    // PROBE (v4-BPF s9): LOSAT_BPF_S9PF=d prefetches the lines of the part of chunk c + d while
+    // chunk c's part is read (x86_64 only).
+    static PF: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let pf = *PF.get_or_init(|| {
+        crate::algorithm::blastp::x_query_slots::x_s8_env("LOSAT_BPF_S9PF").unwrap_or(0)
+    });
+    for (index, (chunk, chunk_appends)) in chunks.iter().zip(appends).enumerate() {
+        #[cfg(target_arch = "x86_64")]
+        if pf > 0 {
+            if let Some(ahead) = appends.get(index + pf) {
+                let lo = ahead.stripe_starts[stripe] as usize;
+                let hi = ahead.stripe_starts[stripe + 1] as usize;
+                let mut at = lo & !15;
+                while at < hi {
+                    // SAFETY: `at` is below `hi <= packed.len()`; a prefetch reads nothing.
+                    unsafe {
+                        std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_T0 }>(
+                            ahead.packed.as_ptr().add(at).cast(),
+                        )
+                    };
+                    at += 16;
+                }
+            }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        let _ = (index, pf);
         let part = &chunk_appends.packed[chunk_appends.stripe_starts[stripe] as usize
             ..chunk_appends.stripe_starts[stripe + 1] as usize];
         let chunk_base = chunk.base as u32;
@@ -871,10 +902,13 @@ fn x_try_build_flat_parallel_with(
     // buckets (`x_stripe_build_s9`), stripes of 2^10 cells unless LOSAT_BPF_S8SHIFT says otherwise.
     let s9_on = crate::algorithm::blastp::x_query_slots::x_s8_env("LOSAT_BPF_S9B") == Some(1)
         && matches!(cuts.passes, XPasses::OneLatch(_));
-    let shift = cuts.stripe_shift.or(s9_on.then_some(10)).unwrap_or_else(|| {
-        let stripes = (X_PARTS_PER_THREAD * threads).min(X_MAX_PARTS / chunks.len().max(1));
-        x_stripe_shift(backbone_size, stripes, largest_pv_shift)
-    });
+    let shift = cuts
+        .stripe_shift
+        .or(s9_on.then_some(10))
+        .unwrap_or_else(|| {
+            let stripes = (X_PARTS_PER_THREAD * threads).min(X_MAX_PARTS / chunks.len().max(1));
+            x_stripe_shift(backbone_size, stripes, largest_pv_shift)
+        });
     assert!(
         (largest_pv_shift..=X_MAX_STRIPE_SHIFT).contains(&shift),
         "stripe shift {shift} outside {largest_pv_shift}..={X_MAX_STRIPE_SHIFT}"

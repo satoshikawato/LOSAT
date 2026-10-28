@@ -145,12 +145,13 @@ impl Diagonals {
         self.window
     }
     // No NCBI counterpart: buffer reuse only (LOSAT_X_BXBATCHMEM, blastx/x_bx_mem.rs). The table
-    // gets the length `new(query_length, window)` gives (so the same mask and collisions) by a
-    // realloc of its entries, and keeps its offset: every entry it holds was written for an earlier
-    // subject, below the offset, which only grows between clears (`finish_subject`), so it lies at
-    // least a window behind the next subject's hits and reads as cleared, as in a kept table of the
-    // same length (LOSAT_X_BXDIAGKEEP: the x_subject_flow.rs module comment, x_seed_scan.rs on the
-    // flag-0 values). New entries are zero, as in `new`.
+    // gets the length `new(query_length, window)` gives (so the same mask and collisions), its
+    // entries truncated or grown (by a realloc only past the capacity), and keeps its offset: every
+    // entry it holds was written for an earlier subject, below the offset, which only grows between
+    // clears (`finish_subject`), so it lies at least a window behind the next subject's hits and
+    // reads as cleared, as in a kept table of the same length (LOSAT_X_BXDIAGKEEP: the
+    // x_subject_flow.rs module comment, x_seed_scan.rs on the flag-0 values). New entries are zero,
+    // as in `new`.
     /// Resize this table to the length `new(query_length, window)` gives for its window.
     #[cfg(feature = "parallel")]
     pub(crate) fn x_refit(&mut self, query_length: usize) -> Result<()> {
@@ -163,9 +164,11 @@ impl Diagonals {
             "BLASTX diagonal length exceeds Int4"
         );
         if n < self.entries.len() {
+            // The capacity stays (a shrinking realloc of a mapped block would unmap its tail on
+            // every thread of the process).
             self.entries.truncate(n);
-            self.entries.shrink_to_fit();
         } else {
+            // A no-op where the capacity holds `n` already.
             self.entries.reserve_exact(n - self.entries.len());
             self.entries.resize(n, DiagStruct::default());
         }

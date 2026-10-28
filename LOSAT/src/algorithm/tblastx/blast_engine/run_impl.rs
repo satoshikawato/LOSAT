@@ -6337,7 +6337,8 @@ fn search_query_batch<S: TbxScore>(
         // input order of the second BLAST_LinkHsps (blast_engine.c:1515-1520), whose
         // `>=` chain choices (link_hsps.c:613-622, 759, 887) give the better chain to
         // the later of two comparator-equal HSPs of different frames.
-        // (The sort at the end of the second BLAST_LinkHsps is `report::final_hit_order`.)
+        // (The sort at the end of the second BLAST_LinkHsps is the score sort of each
+        // subject's list in `hit_collector::QueryLists::add`.)
         if !ungapped_hits_is_sorted_by_score_ncbi(&prelinked_ungapped_hits) {
             sort_ungapped_hits_by_score_ncbi(&mut prelinked_ungapped_hits);
         }
@@ -6912,7 +6913,8 @@ fn search_query_batch<S: TbxScore>(
                 // }
                 // ```
                 // The subject's final HSPs, sent at the end of the subject (`emit_subject_hits`).
-                st.hits.extend(final_hits);
+                debug_assert!(st.hits.is_empty());
+                st.hits = final_hits;
             }
             x_lap.lap(XStage::Emit);
         }

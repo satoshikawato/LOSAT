@@ -42,9 +42,8 @@
 //! not depend on which thread searched which subject or in which order: each subject's HSPs are
 //! sent as one message with its index (`WorkerState::tx`) and the batch's collector takes them in
 //! subject order (`hit_collector.rs`), as for rayon's pieces, whose order of completion is not
-//! fixed either. The
-//! tables of the seed release (`x_seed_release.rs`) count the subjects whose stages have ended, not
-//! their order.
+//! fixed either. The tables of the seed release (`x_seed_release.rs`) count the subjects whose
+//! stages have ended, not their order.
 //!
 //! The threads run their loops as one broadcast job each, not as jobs a thread may steal, so a
 //! thread that waits inside a search (the unit path of PAIRPAR runs a subject's units on

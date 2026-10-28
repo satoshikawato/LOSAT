@@ -1562,8 +1562,9 @@ impl HitFilters<'_> {
 /// (`HitFilters`).
 ///
 /// The search of a query batch runs the same steps on its queries' hit lists as the subjects'
-/// lists come (`hit_collector::QueryLists`, in OID order); this is the reference, on the HSPs of
-/// a run at once.
+/// lists come (`hit_collector::QueryLists`, in OID order); this is the reference of the tests,
+/// on the HSPs of a run at once.
+#[cfg(test)]
 pub(crate) fn final_hit_order(
     hits: Vec<TblastxHsp>,
     hitlist_size: usize,

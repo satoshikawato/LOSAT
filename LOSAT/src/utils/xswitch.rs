@@ -161,6 +161,10 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BNCSR` (the chains of BLASTN's contiguous lookup tables of word sizes 9 to 11 laid out
 /// as CSR and scanned through a prefetch ring, `blastn/x_bn_csr.rs`) joined the set in the pull
 /// request that added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_BNCSRPACK` (the head of a CSR table of BLASTN whose chains list their words newest
+/// first packed as presence bits, ranks and one offset per non-empty cell, `blastn/x_bn_csr.rs`)
+/// joined the set in the pull request that added it, after it was verified and timed with it on
+/// and off.
 /// `LOSAT_X_QGROUPPAR` (BLASTN's preliminary gapped loop and traceback of a subject searched on one
 /// thread run per query on the pool, `blastn/blast_engine/x_qgroup_par.rs`) joined the set in the
 /// pull request that added it, after it was verified and timed with it on and off.
@@ -199,6 +203,7 @@ use std::ops::RangeInclusive;
 /// its own scan, a rule of the table and not a switch).
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNCSR",
+    "LOSAT_X_BNCSRPACK",
     "LOSAT_X_BNDBCUT",
     "LOSAT_X_BNDBSTREAM",
     "LOSAT_X_BNDCONE",

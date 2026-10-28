@@ -109,9 +109,14 @@ pub fn print_summary() {
 }
 
 /// No NCBI counterpart (layout only): the chains of a table's first template as CSR (module
-/// comment): `offsets` has one element per cell and one more, `qs` one per word.
+/// comment): `offsets` has one element per cell and one more, `qs` one per word. With
+/// LOSAT_X_BNCSRPACK (`x_bn_csr.rs`) a contiguous table's head is packed: `x_bits` holds two
+/// words per 64 cells (the cells' presence bits, then the number of non-empty cells before them)
+/// and `offsets` one element per non-empty cell and one more, indexed by that rank.
 pub struct Csr {
     offsets: Vec<u32>,
+    /// EXPERIMENT (LOSAT_X_BNCSRPACK): empty for a head of one element per cell.
+    x_bits: Vec<u64>,
     qs: Vec<u32>,
     /// EXPERIMENT (LOSAT_X_MBLUTKEEP): the batch loop's keep that takes `offsets` back when the CSR
     /// is dropped, with `Keep::take_buffer`'s length and written elements (`x_kept`).
@@ -143,7 +148,14 @@ impl Csr {
     /// The 1-based query offsets of the cell's chain, in its order.
     #[inline(always)]
     pub fn run(&self, cell: usize) -> &[u32] {
-        &self.qs[self.offsets[cell] as usize..self.offsets[cell + 1] as usize]
+        if self.x_bits.is_empty() {
+            return &self.qs[self.offsets[cell] as usize..self.offsets[cell + 1] as usize];
+        }
+        // EXPERIMENT (LOSAT_X_BNCSRPACK): an empty cell has no element of the packed head.
+        match x_rank(&self.x_bits, cell) {
+            Some(r) => &self.qs[self.offsets[r] as usize..self.offsets[r + 1] as usize],
+            None => &[],
+        }
     }
 
     /// Whether the cell's chain holds `q_off_1` (the run is sorted by decreasing offset).
@@ -166,6 +178,89 @@ impl Csr {
     fn qs(&self) -> &[u32] {
         &self.qs
     }
+}
+
+/// No NCBI counterpart (layout only): EXPERIMENT (LOSAT_X_BNCSRPACK) the element of a packed head
+/// that holds `cell`'s run start (the number of non-empty cells before it), or `None` when the cell
+/// is empty. `bits`: two words per 64 cells, the presence bits and the rank of the first.
+#[inline(always)]
+pub(super) fn x_rank(bits: &[u64], cell: usize) -> Option<usize> {
+    let j = (cell >> 6) << 1;
+    let w = bits[j];
+    let m = 1u64 << (cell & 63);
+    if w & m == 0 {
+        return None;
+    }
+    Some(bits[j + 1] as usize + (w & (m - 1)).count_ones() as usize)
+}
+
+/// No NCBI counterpart (layout only): EXPERIMENT (LOSAT_X_BNCSRPACK) the ranks of the blocks
+/// `b0 .. b1` of `bits` (two words per 64 cells, the presence bits written): the second word of
+/// each gets the number of non-empty cells before it, from `base`; returns the number after `b1`.
+pub(super) fn x_rank_blocks(bits: &mut [u64], b0: usize, b1: usize, base: usize) -> usize {
+    let mut r = base;
+    for j in b0..b1 {
+        bits[2 * j + 1] = r as u64;
+        r += bits[2 * j].count_ones() as usize;
+    }
+    r
+}
+
+/// The sum pass of a packed head (LOSAT_X_BNCSRPACK) over the blocks `b0 .. b1` (64 cells each,
+/// `b0` a multiple of 32): `cnt.add(r)` holds the count of the non-empty cell of rank `r` and
+/// receives the inclusive running sum from `base`; returns the running sum after `b1`. The
+/// presence-vector words and counters get what `sum_cells` gives them over the same cells: the
+/// presence bits of each 32 cells OR-ed into word `c >> pv_array_bts` (if it is below `pv_len`),
+/// and each counter `c >> 11` the run's growth over its 2048 cells minus their non-empty cells.
+///
+/// SAFETY: as `sum_cells`, for the cells of the blocks and the ranks of their non-empty cells.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+pub(super) unsafe fn x_sum_packed(
+    pv: *mut PvArrayType,
+    pv_len: usize,
+    helper: *mut u32,
+    bits: &[u64],
+    cnt: *mut u32,
+    base: u32,
+    b0: usize,
+    b1: usize,
+    pv_array_bts: usize,
+) -> u32 {
+    debug_assert!(b0 % 32 == 0 && pv_array_bts >= 5);
+    let (mut end, mut pop, mut h0) = (base, 0u32, base);
+    for j in b0..b1 {
+        let w = bits[2 * j];
+        let r0 = bits[2 * j + 1] as usize;
+        let k = w.count_ones() as usize;
+        for r in r0..r0 + k {
+            // SAFETY: rank `r` is of a non-empty cell of the blocks.
+            unsafe {
+                end = end.wrapping_add(*cnt.add(r));
+                *cnt.add(r) = end;
+            }
+        }
+        pop += k as u32;
+        for (half, g) in [(w as u32, j << 6), ((w >> 32) as u32, (j << 6) + 32)] {
+            let i = g >> pv_array_bts;
+            if half != 0 && i < pv_len {
+                // SAFETY: presence-vector word `i` holds cells of the blocks only (or the range
+                // ends in it).
+                unsafe { *pv.add(i) |= half };
+            }
+        }
+        if (j + 1) % 32 == 0 || j + 1 == b1 {
+            let h = j >> 5;
+            // SAFETY: counter `h` holds cells of the blocks only (or the range ends in it).
+            unsafe {
+                *helper.add(h) =
+                    (*helper.add(h)).wrapping_add(end.wrapping_sub(h0).wrapping_sub(pop))
+            };
+            h0 = end;
+            pop = 0;
+        }
+    }
+    end
 }
 
 /// No NCBI counterpart: how `build_disc_mb_lookup` lays out a table.
@@ -351,6 +446,33 @@ pub(super) unsafe fn assemble(
     }
     Csr {
         offsets,
+        x_bits: Vec::new(),
+        qs,
+        x_keep: None,
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BNCSRPACK): the CSR of a packed head whose `starts` (`present + 1`
+/// elements: the run start of each non-empty cell by rank, then the number of words), `bits` (two
+/// words per 64 cells, presence and rank) and `qs` (`words` elements) have been written in full.
+///
+/// SAFETY: every element of `starts[..present + 1]` and `qs[..words]` is initialized.
+pub(super) unsafe fn x_assemble_packed(
+    mut starts: Vec<u32>,
+    bits: Vec<u64>,
+    mut qs: Vec<u32>,
+    present: usize,
+    words: usize,
+) -> Csr {
+    debug_assert!(starts.capacity() > present && qs.capacity() >= words);
+    // SAFETY: the caller's.
+    unsafe {
+        starts.set_len(present + 1);
+        qs.set_len(words);
+    }
+    Csr {
+        offsets: starts,
+        x_bits: bits,
         qs,
         x_keep: None,
     }
@@ -514,6 +636,10 @@ pub(crate) struct Ring<'a, T: Copy> {
     n: usize,
     offsets: &'a [u32],
     qs: &'a [u32],
+    /// EXPERIMENT (LOSAT_X_BNCSRPACK): the packed head's presence and ranks (empty for a head of
+    /// one element per cell), and the rank of each word in `buf`.
+    x_bits: &'a [u64],
+    x_ranks: [u32; RING],
 }
 
 impl<'a, T: Copy + Default> Ring<'a, T> {
@@ -523,6 +649,8 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
             n: 0,
             offsets: csr.offsets(),
             qs: csr.qs(),
+            x_bits: &csr.x_bits,
+            x_ranks: [0; RING],
         }
     }
 
@@ -532,6 +660,9 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
     #[inline(always)]
     pub(crate) fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) {
         const MASK: usize = RING - 1;
+        if !self.x_bits.is_empty() {
+            return self.x_push_packed(w, cell, emit);
+        }
         let offsets = self.offsets;
         prefetch(offsets.as_ptr().wrapping_add(cell(&w)));
         if self.n >= RING / 2 {
@@ -552,6 +683,38 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
             emit(self.buf[slot]);
         }
         self.buf[slot] = w;
+        self.n += 1;
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNCSRPACK): `push` on a packed head. A word of an empty cell does not
+    /// enter (its run is empty: `emit` would read no offset of it); the others enter with their
+    /// rank, the head's element of their run prefetched, and the word `RING / 2` places back gets
+    /// the first and the last line of its run prefetched, as on a head of one element per cell.
+    #[inline(always)]
+    fn x_push_packed(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) {
+        const MASK: usize = RING - 1;
+        let Some(r) = x_rank(self.x_bits, cell(&w)) else {
+            return;
+        };
+        let offsets = self.offsets;
+        prefetch(offsets.as_ptr().wrapping_add(r));
+        if self.n >= RING / 2 {
+            let k = self.x_ranks[(self.n - RING / 2) & MASK] as usize;
+            let a = offsets[k] as usize;
+            let b = offsets[k + 1] as usize;
+            let pa = self.qs.as_ptr().wrapping_add(a);
+            let pb = self.qs.as_ptr().wrapping_add(b.max(a + 1) - 1);
+            prefetch(pa);
+            if (pa as usize >> 6) != (pb as usize >> 6) {
+                prefetch(pb);
+            }
+        }
+        let slot = self.n & MASK;
+        if self.n >= RING {
+            emit(self.buf[slot]);
+        }
+        self.buf[slot] = w;
+        self.x_ranks[slot] = r as u32;
         self.n += 1;
     }
 
@@ -810,6 +973,7 @@ mod tests {
     fn contains_finds_exactly_the_runs_offsets() {
         let csr = Csr {
             offsets: vec![0, 0, 3, 4, 4],
+            x_bits: Vec::new(),
             qs: vec![90, 40, 7, 12],
             x_keep: None,
         };
@@ -832,6 +996,7 @@ mod tests {
     fn the_ring_emits_every_word_once_in_order() {
         let csr = Csr {
             offsets: vec![0, 2, 2, 5],
+            x_bits: Vec::new(),
             qs: vec![9, 3, 30, 20, 10],
             x_keep: None,
         };
@@ -843,6 +1008,39 @@ mod tests {
             }
             ring.flush(&mut |w| out.push(w.0));
             assert_eq!(out, (0..n as u32).collect::<Vec<_>>());
+        }
+    }
+
+    // LOSAT_X_BNCSRPACK: the packed head of the table above (cells 0 and 2 non-empty, then 61 empty
+    // cells, then cell 64 with one word) gives the same runs, and its ring emits the words of the
+    // non-empty cells, in order, and no other.
+    #[test]
+    fn a_packed_head_gives_the_same_runs_and_the_ring_skips_empty_cells() {
+        let mut bits = vec![0b101u64, 0, 1, 0];
+        assert_eq!(x_rank_blocks(&mut bits, 0, 2, 0), 3);
+        let csr = Csr {
+            offsets: vec![0, 2, 5, 6],
+            x_bits: bits,
+            qs: vec![9, 3, 30, 20, 10, 77],
+            x_keep: None,
+        };
+        assert_eq!(csr.run(0), &[9, 3]);
+        assert!(csr.run(1).is_empty() && csr.run(63).is_empty());
+        assert_eq!(csr.run(2), &[30, 20, 10]);
+        assert_eq!(csr.run(64), &[77]);
+        assert!(csr.contains(2, 20) && !csr.contains(1, 20));
+        let cells = [0usize, 1, 2, 64, 5];
+        for n in [0usize, 1, 15, 16, 17, 31, 32, 33, 100] {
+            let mut ring: Ring<'_, (u32, usize)> = Ring::new(&csr);
+            let mut out = Vec::new();
+            for i in 0..n {
+                ring.push((i as u32, cells[i % 5]), |w| w.1, &mut |w| out.push(w.0));
+            }
+            ring.flush(&mut |w| out.push(w.0));
+            let want: Vec<u32> = (0..n as u32)
+                .filter(|&i| !csr.run(cells[i as usize % 5]).is_empty())
+                .collect();
+            assert_eq!(out, want);
         }
     }
 

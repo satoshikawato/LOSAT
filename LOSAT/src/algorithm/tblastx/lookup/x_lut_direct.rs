@@ -178,13 +178,30 @@ fn x_shared_memo(
 // one the build would make.
 /// EXPERIMENT (LOSAT_X_BXLISTAHEAD): makes the shared neighbour lists (the pooled builds' memo,
 /// [`x_shared_memo`]) of BLASTX's standard table (BLOSUM62, words of 3) with `threshold` for the
-/// words of `query` at `locations` (as `x_for_each_exact_word` reads them), on the pool this runs
-/// on, so that a pooled build of a table of these words finds them made.
+/// words of `query` at `locations` (as `x_for_each_exact_word` reads them) as a task of the pool
+/// this runs on, which the caller does not wait for: a pooled build of a table of these words finds
+/// each list made, waits for one being made (`OnceLock`), or makes it itself.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-pub(crate) fn x_bx_lists_ahead(query: &[u8], locations: &[(i32, i32)], threshold: i32) {
+pub(crate) fn x_bx_lists_ahead(query: Vec<u8>, locations: Vec<(i32, i32)>, threshold: i32) {
+    rayon::spawn(move || {
+        let x0 = crate::utils::xtiming::x_since_us();
+        x_bx_make_lists(&query, &locations, threshold);
+        crate::utils::xtiming::x_stamp_t(&format!(
+            "listahead:{x0}-{}",
+            crate::utils::xtiming::x_since_us()
+        ));
+    });
+}
+
+// No NCBI counterpart (scheduling only): the task of `x_bx_lists_ahead`.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_bx_make_lists(query: &[u8], locations: &[(i32, i32)], threshold: i32) {
     use rayon::prelude::*;
     let (matrix, word_length) = (ScoringMatrix::Blosum62, 3);
     let alphabet_size = LOOKUP_ALPHABET_SIZE;

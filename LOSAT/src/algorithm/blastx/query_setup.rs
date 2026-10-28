@@ -456,10 +456,11 @@ pub fn prepare_queries(
                     })
                     .collect()
             };
-            // Dispatch point (LOSAT_X_BXLISTAHEAD, in the strict set): the threads that the contexts
-            // leave idle make the shared neighbour lists of the query's words for the pooled table
-            // builds that follow (the lists are those the builds would make). No NCBI counterpart.
-            seg_ready = if x_lists_ahead(options) {
+            // Dispatch point (LOSAT_X_BXLISTAHEAD, in the strict set): a task of the pool makes the
+            // shared neighbour lists of the query's words for the pooled table builds that follow, on
+            // the threads the contexts leave idle (the lists are those the builds would make). No
+            // NCBI counterpart.
+            if x_lists_ahead(options) {
                 let locations: Vec<(i32, i32)> = contexts
                     .iter()
                     .filter(|context| context.is_valid)
@@ -470,22 +471,13 @@ pub fn prepare_queries(
                         )
                     })
                     .collect();
-                rayon::join(seg, || {
-                    let x0 = crate::utils::xtiming::x_since_us();
-                    crate::algorithm::tblastx::lookup::x_bx_lists_ahead(
-                        &buffer[1..],
-                        &locations,
-                        options.threshold as i32,
-                    );
-                    crate::utils::xtiming::x_stamp_t(&format!(
-                        "listahead:{x0}-{}",
-                        crate::utils::xtiming::x_since_us()
-                    ));
-                })
-                .0
-            } else {
-                seg()
-            };
+                crate::algorithm::tblastx::lookup::x_bx_lists_ahead(
+                    buffer[1..].to_vec(),
+                    locations,
+                    options.threshold as i32,
+                );
+            }
+            seg_ready = seg();
             crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
         }
     }

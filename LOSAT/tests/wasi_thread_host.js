@@ -439,17 +439,19 @@ function blockingStdioWrite(fdWrite) {
 // EBADF (blastp-fast -subject -out with 2 or more threads, 2026-10-28). Each open for writing
 // therefore enters the table too: from the preopened "/", with no open flag but create,
 // exclusive and truncate and no descriptor flag but append, of a regular file (a new one with
-// create) or of a character device or a FIFO (/dev/null, /dev/stdout, a named pipe). A regular
-// file not opened to append is written at the table's position, the bytes of one write
-// reserved before they are written as one write() moves the native offset; an append and a
-// device or FIFO are written at the OS's position (the end of the file, the stream), and a
-// device or FIFO has no position (ESPIPE). Opens for writing with other flags (a directory, sync
-// or nonblocking descriptor flags) stay with the calling thread's uvwasi.
+// create) or of a character device or a FIFO (/dev/null; /dev/stdout when standard output is one
+// of these; a named pipe). A regular file not opened to append is written at the table's
+// position, the bytes of one write reserved before they are written as one write() moves the
+// native offset; an append and a device or FIFO are written at the OS's position (the end of the
+// file, the stream). A device or FIFO is not seeked through the table (ESPIPE, where native
+// /dev/null seeks; LOSAT does not seek an output). Every other open for writing (from another
+// directory descriptor, with other flags, of a directory, a socket or a block device, a symbolic
+// link not followed, one that fails) stays with the calling thread's uvwasi.
 const SHARED_FD_BASE = 0x40000000, SHARED_FDS = 1024;
 const WASI_EBADF = 8, WASI_EINVAL = 28, WASI_EIO = 29, WASI_ENOTSUP = 58, WASI_ESPIPE = 70, WASI_ENOTCAPABLE = 76;
-const WASI_ERRNO = { EACCES: 2, EAGAIN: 6, EBADF: WASI_EBADF, EEXIST: 20, EFBIG: 22, EINVAL: WASI_EINVAL, EIO: WASI_EIO,
-  EISDIR: 31, ELOOP: 32, ENOENT: 44, ENOSPC: 51, ENOTDIR: 54, EOVERFLOW: 61, EPERM: 63, EPIPE: 64, EROFS: 69,
-  ESPIPE: WASI_ESPIPE };
+const WASI_ERRNO = { EACCES: 2, EAGAIN: 6, EBADF: WASI_EBADF, EDQUOT: 19, EEXIST: 20, EFBIG: 22, EINTR: 27, EINVAL: WASI_EINVAL,
+  EIO: WASI_EIO, EISDIR: 31, ELOOP: 32, ENOENT: 44, ENOSPC: 51, ENOTDIR: 54, EOVERFLOW: 61, EPERM: 63, EPIPE: 64,
+  EROFS: 69, ESPIPE: WASI_ESPIPE };
 const RIGHT_FD_READ = 1n << 1n, RIGHT_FD_WRITE = 1n << 6n, RIGHT_FD_ALLOCATE = 1n << 8n, RIGHT_FD_FILESTAT_SET_SIZE = 1n << 22n;
 const LOOKUP_SYMLINK_FOLLOW = 1, OFLAGS_CREAT = 1, OFLAGS_EXCL = 4, OFLAGS_TRUNC = 8, FDFLAGS_APPEND = 1, PREOPEN_ROOT_FD = 3;
 // The filetypes of the table's files, as uvwasi gives them (a FIFO is a socket stream there).
@@ -490,7 +492,7 @@ function sharedFileImports(table, memory, local) {
   };
   // fs.readSync or fs.writeSync over the guest's vectors at `at` (null: the OS's position); an
   // error after some bytes ends the call with their count, as read() and write() do. writeSync
-  // takes a Number (it writes a BigInt position at the OS's position).
+  // takes a Number (it writes at the OS's position when given a BigInt); readSync a BigInt.
   const transfer = (move, descriptor, iovs, count, at) => {
     let total = 0n;
     const vectors = view(iovs, 8 * count);
@@ -500,7 +502,7 @@ function sharedFileImports(table, memory, local) {
       let done;
       try {
         done = move(descriptor, new Uint8Array(buffer(pointer + length), pointer, length), 0, length,
-          at === null ? null : Number(at + total));
+          at === null ? null : move === fs.writeSync ? Number(at + total) : at + total);
       } catch (err) {
         if (total > 0n) break;
         throw err;
@@ -576,9 +578,8 @@ function sharedFileImports(table, memory, local) {
     if (!regular(slot)) return WASI_ESPIPE;
     view(result, 8).setBigUint64(0, Atomics.load(position, slot), true);
   });
-  own("fd_close", (slot) => {
-    const descriptor = Atomics.exchange(os, slot, -1);
-    if (descriptor < 0) return WASI_EBADF;
+  own("fd_close", (slot, descriptor) => {
+    if (Atomics.compareExchange(os, slot, descriptor, -1) !== descriptor) return WASI_EBADF;
     fs.closeSync(descriptor);
   });
   own("fd_filestat_get", (slot, descriptor, result) => {
@@ -633,7 +634,8 @@ function sharedFileImports(table, memory, local) {
       : oflags !== 0 || fdflags !== 0)) return pathOpen(...args);
     let slot = -1, descriptor = -1;
     try {
-      const host = "/" + Buffer.from(buffer(path + pathLength), path, pathLength).toString();
+      // The guest's bytes as they are (the path may create a file).
+      const host = Buffer.concat([Buffer.from("/"), new Uint8Array(buffer(path + pathLength), path, pathLength)]);
       const follow = (dirflags & LOOKUP_SYMLINK_FOLLOW) !== 0;
       // Not opened for reading unless it is a regular file now (opening a FIFO waits for its
       // writer); for writing, a regular file, a new one, a character device or a FIFO.

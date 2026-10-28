@@ -2276,6 +2276,39 @@ mod tests {
         assert_eq!(order(1), vec![(1, 110)]);
     }
 
+    // TBXRPTPAR item 4 (x_rpt_par.rs): each list's sorts on the report pool give this thread's
+    // order, ties included (HSPs equal in every compared field, told apart by `identity`).
+    #[test]
+    fn final_hit_order_on_a_pool_is_this_threads() {
+        let hits: Vec<TblastxHsp> = (0..600u32)
+            .map(|i| {
+                let mut h = hsp(
+                    i % 3,
+                    (i * 7) % 29,
+                    40 + (i % 7) as i32,
+                    1e-3 / f64::from(1 + i % 4),
+                    (i % 5) as usize,
+                );
+                h.hit.identity = f64::from(i);
+                h
+            })
+            .collect();
+        let order = |size, pool: Option<&crate::utils::threading::SearchPool<'_>>| -> Vec<u32> {
+            final_hit_order(hits.clone(), size, &HitFilters::default(), pool)
+                .iter()
+                .map(|hsp| hsp.hit.identity as u32)
+                .collect()
+        };
+        for size in [1, 10, 500] {
+            let serial = order(size, None);
+            crate::utils::threading::with_search_pool(4, "tblastx", |pool| {
+                assert_eq!(order(size, Some(pool)), serial);
+                Ok(())
+            })
+            .unwrap();
+        }
+    }
+
     #[test]
     fn outfmt7_headers_follow_print_header() {
         let header = |hits| {

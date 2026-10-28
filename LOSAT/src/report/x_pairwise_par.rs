@@ -51,6 +51,14 @@
 //! Memory: formatted text of at most `WINDOW_BYTES_PER_THREAD` x threads estimated bytes (16 MiB
 //! at 16 threads) plus one piece (`PIECE_BYTES` plus one HSP) at a time, also for one large
 //! query; the groups of one window of queries.
+//!
+//! BLASTN's outfmt 0 makes its rows a window of queries at a time (line DBID item ID4f): the
+//! windows of `query_windows` over the queries' estimates (`query_estimate_of` of their HSPs'
+//! lengths, before any row is made) with `window_bytes` of its pool, each written (`write` of
+//! the window, `first_query` its first query) before the next window's rows are made, as NCBI
+//! formats one query's result set at a time (`PrintOneResultSet`). With the same budget a row
+//! window is one window of the parallel writer. Not where the caller's hit records or a format
+//! observer read every row (the Web adapter, `algorithm::blastn::blast_engine::run`).
 
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -186,11 +194,13 @@ pub(crate) trait QuerySections: Sync {
 }
 
 /// Writes the per-query reports of `hits_by_query` (each query's hits with their indices in
-/// the report's hit list) between a writer's prolog and epilog: on `pool` (`pool`) without a
-/// `probe`, else by the serial writer.
+/// the report's hit list; the first is query `first_query`) between a writer's prolog and
+/// epilog: on `pool` (`pool`) without a `probe`, else by the serial writer.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn write<S: QuerySections, W: Write>(
     writer: &mut W,
     sections: &S,
+    first_query: usize,
     hits_by_query: &[Vec<(HspIndex, &PairwiseHit)>],
     subject_titles: &[Arc<[u8]>],
     probe: Option<&mut FormatProbe<'_>>,
@@ -206,6 +216,7 @@ pub(crate) fn write<S: QuerySections, W: Write>(
             return write_serial(
                 writer,
                 sections,
+                first_query,
                 hits_by_query,
                 subject_titles,
                 probe,
@@ -217,6 +228,7 @@ pub(crate) fn write<S: QuerySections, W: Write>(
     write_parallel(
         writer,
         sections,
+        first_query,
         hits_by_query,
         subject_titles,
         warnings,
@@ -229,12 +241,13 @@ pub(crate) fn write<S: QuerySections, W: Write>(
 fn write_serial<S: QuerySections, W: Write>(
     writer: &mut W,
     sections: &S,
+    first_query: usize,
     hits_by_query: &[Vec<(HspIndex, &PairwiseHit)>],
     subject_titles: &[Arc<[u8]>],
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> io::Result<()> {
-    for (q_idx, query_hits) in hits_by_query.iter().enumerate() {
+    for (q_idx, query_hits) in (first_query..).zip(hits_by_query) {
         // The query's warnings (and those of its batch's reading) come before its preamble
         // (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
@@ -256,7 +269,12 @@ fn write_serial<S: QuerySections, W: Write>(
 /// The estimated bytes of a hit's alignment: its header lines and three rows of ~80 bytes per
 /// 60 columns. Only the windows', chunks' and pieces' sizes depend on the estimates.
 fn estimate(hit: &PairwiseHit) -> usize {
-    400 + 4 * hit.hit.length
+    hit_estimate(hit.hit.length)
+}
+
+/// `estimate` of a hit of alignment length `length`.
+fn hit_estimate(length: usize) -> usize {
+    400 + 4 * length
 }
 
 /// The estimated bytes of a query's header with "No hits found" or the start of its table, and
@@ -268,9 +286,39 @@ const DESCRIPTION_BYTES: usize = 100;
 
 /// The estimated bytes of a query's report (windows of queries).
 fn query_estimate(query_hits: &[(HspIndex, &PairwiseHit)]) -> usize {
-    query_hits.iter().fold(QUERY_BYTES, |bytes, &(_, hit)| {
-        bytes + DESCRIPTION_BYTES + estimate(hit)
+    query_estimate_of(query_hits.iter().map(|&(_, hit)| hit.hit.length))
+}
+
+/// `query_estimate` of a query whose hits have the alignment lengths `lengths`.
+pub(crate) fn query_estimate_of(lengths: impl IntoIterator<Item = usize>) -> usize {
+    lengths.into_iter().fold(QUERY_BYTES, |bytes, length| {
+        bytes + DESCRIPTION_BYTES + hit_estimate(length)
     })
+}
+
+/// The estimated bytes of a window of queries: `WINDOW_BYTES_PER_THREAD` per thread of `pool`
+/// (one without a pool).
+pub(crate) fn window_bytes(pool: Option<&SearchPool<'_>>) -> usize {
+    WINDOW_BYTES_PER_THREAD.saturating_mul(pool.map_or(1, |pool| pool.threads()))
+}
+
+/// The windows of the queries of `estimates` (each query's estimated bytes, in order): from each
+/// window's first query, the queries up to the one that brings the window to `budget` (at least
+/// one query).
+pub(crate) fn query_windows(estimates: &[usize], budget: usize) -> Vec<std::ops::Range<usize>> {
+    let mut windows = Vec::new();
+    let mut first = 0;
+    while first < estimates.len() {
+        let mut end = first;
+        let mut bytes = 0usize;
+        while end < estimates.len() && (end == first || bytes < budget) {
+            bytes += estimates[end];
+            end += 1;
+        }
+        windows.push(first..end);
+        first = end;
+    }
+    windows
 }
 
 /// What a piece of a query's report holds.
@@ -411,6 +459,7 @@ fn map<T: Sync, R: Send>(
 fn write_parallel<S: QuerySections, W: Write>(
     writer: &mut W,
     sections: &S,
+    first_query: usize,
     hits_by_query: &[Vec<(HspIndex, &PairwiseHit)>],
     subject_titles: &[Arc<[u8]>],
     warnings: Option<&mut QueryWarnings<'_>>,
@@ -419,11 +468,12 @@ fn write_parallel<S: QuerySections, W: Write>(
     write_parallel_with(
         writer,
         sections,
+        first_query,
         hits_by_query,
         subject_titles,
         warnings,
         pool,
-        WINDOW_BYTES_PER_THREAD.saturating_mul(pool.threads()),
+        window_bytes(Some(pool)),
         PIECE_BYTES,
     )
 }
@@ -434,6 +484,7 @@ fn write_parallel<S: QuerySections, W: Write>(
 fn write_parallel_with<S: QuerySections, W: Write>(
     writer: &mut W,
     sections: &S,
+    first_query: usize,
     hits_by_query: &[Vec<(HspIndex, &PairwiseHit)>],
     subject_titles: &[Arc<[u8]>],
     mut warnings: Option<&mut QueryWarnings<'_>>,
@@ -442,17 +493,15 @@ fn write_parallel_with<S: QuerySections, W: Write>(
     piece_bytes: usize,
 ) -> io::Result<(usize, usize)> {
     let (mut chunks, mut pieces_written) = (0, 0);
-    let mut first = 0;
-    while first < hits_by_query.len() {
-        let mut end = first;
-        let mut bytes = 0usize;
-        while end < hits_by_query.len() && (end == first || bytes < budget) {
-            bytes += query_estimate(&hits_by_query[end]);
-            end += 1;
-        }
-        let groups = map(pool, &hits_by_query[first..end], |query_hits| {
+    let estimates: Vec<usize> = hits_by_query
+        .iter()
+        .map(|query_hits| query_estimate(query_hits))
+        .collect();
+    for window in query_windows(&estimates, budget) {
+        let groups = map(pool, &hits_by_query[window.clone()], |query_hits| {
             QueryGroup::new(query_hits, subject_titles)
         });
+        let first = first_query + window.start;
         let planned = pieces(sections, first, &groups, piece_bytes);
         let mut at = 0;
         while at < planned.len() {
@@ -479,7 +528,6 @@ fn write_parallel_with<S: QuerySections, W: Write>(
             at = to;
         }
         pieces_written += planned.len();
-        first = end;
     }
     Ok((chunks, pieces_written))
 }
@@ -605,7 +653,7 @@ mod tests {
                 fail_at: None,
             };
             let mut serial = Vec::new();
-            write_serial(&mut serial, &marks, &by_query, &titles, None, None).unwrap();
+            write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).unwrap();
             let groups: Vec<_> = by_query
                 .iter()
                 .map(|query_hits| QueryGroup::new(query_hits, &titles))
@@ -663,13 +711,14 @@ mod tests {
             fail_at: None,
         };
         let mut serial = Vec::new();
-        write_serial(&mut serial, &marks, &by_query, &titles, None, None).unwrap();
+        write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).unwrap();
         crate::utils::threading::with_search_pool(4, "test", |pool| {
             for (budget, piece_bytes) in [(1, 1), (1_000, 500), (3_000, 900), (usize::MAX, 2_000)] {
                 let mut parallel = Vec::new();
                 let (chunks, pieces) = write_parallel_with(
                     &mut parallel,
                     &marks,
+                    0,
                     &by_query,
                     &titles,
                     None,
@@ -692,6 +741,89 @@ mod tests {
     }
 
     #[test]
+    fn windows_of_queries_written_in_turn_write_the_whole_report() {
+        let hits = report_hits();
+        let by_query = by_query(&hits);
+        let titles = titles();
+        let marks = Marks {
+            num_alignments: 10,
+            fail_at: None,
+        };
+        let mut serial = Vec::new();
+        write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).unwrap();
+        let estimates: Vec<usize> = by_query
+            .iter()
+            .map(|query_hits| query_estimate(query_hits))
+            .collect();
+        assert_eq!(
+            estimates,
+            [0, 1, 2].map(|q_idx| query_estimate_of(
+                hits.iter()
+                    .filter(|hit| hit.hit.q_idx == q_idx)
+                    .map(|hit| hit.hit.length)
+            ))
+        );
+        crate::utils::threading::with_search_pool(4, "test", |pool| {
+            for budget in [1, 3_000, 10_000, usize::MAX] {
+                let windows = query_windows(&estimates, budget);
+                assert_eq!(windows.first().map(|window| window.start), Some(0));
+                assert_eq!(
+                    windows.last().map(|window| window.end),
+                    Some(by_query.len())
+                );
+                assert!(windows.iter().all(|window| !window.is_empty()));
+                assert!(windows.windows(2).all(|pair| pair[0].end == pair[1].start));
+                if budget == 1 {
+                    assert_eq!(windows.len(), by_query.len());
+                }
+                if budget == usize::MAX {
+                    assert_eq!(windows.len(), 1);
+                }
+                let (mut serial_windows, mut parallel_windows) = (Vec::new(), Vec::new());
+                for window in windows {
+                    // Only the window's hits, numbered from 0 (a caller that makes the rows of
+                    // one window at a time).
+                    let window_hits: Vec<PairwiseHit> = hits
+                        .iter()
+                        .filter(|hit| window.contains(&(hit.hit.q_idx as usize)))
+                        .cloned()
+                        .collect();
+                    let mut window_by_query = vec![Vec::new(); window.len()];
+                    for (index, hit) in window_hits.iter().enumerate() {
+                        window_by_query[hit.hit.q_idx as usize - window.start].push((index, hit));
+                    }
+                    write_serial(
+                        &mut serial_windows,
+                        &marks,
+                        window.start,
+                        &window_by_query,
+                        &titles,
+                        None,
+                        None,
+                    )
+                    .unwrap();
+                    write_parallel_with(
+                        &mut parallel_windows,
+                        &marks,
+                        window.start,
+                        &window_by_query,
+                        &titles,
+                        None,
+                        pool,
+                        budget,
+                        900,
+                    )
+                    .unwrap();
+                }
+                assert_eq!(serial_windows, serial, "budget {budget}");
+                assert_eq!(parallel_windows, serial, "budget {budget}");
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn a_failed_part_writes_its_bytes_before_the_error_as_the_serial_writer() {
         let hits = report_hits();
         let by_query = by_query(&hits);
@@ -702,13 +834,14 @@ mod tests {
             fail_at: Some(185),
         };
         let mut serial = Vec::new();
-        assert!(write_serial(&mut serial, &marks, &by_query, &titles, None, None).is_err());
+        assert!(write_serial(&mut serial, &marks, 0, &by_query, &titles, None, None).is_err());
         crate::utils::threading::with_search_pool(4, "test", |pool| {
             for piece_bytes in [1, 900, usize::MAX] {
                 let mut parallel = Vec::new();
                 let result = write_parallel_with(
                     &mut parallel,
                     &marks,
+                    0,
                     &by_query,
                     &titles,
                     None,

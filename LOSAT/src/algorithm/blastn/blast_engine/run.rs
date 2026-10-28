@@ -122,7 +122,7 @@ use crate::blastinput::seq_range::{
 };
 use crate::report::pairwise::{
     write_blastn_pairwise_prolog, write_blastn_pairwise_report, BlastnPairwiseQuery,
-    BlastnPairwiseReport, PairwiseConfig, PairwiseDatabase,
+    BlastnPairwiseReport, PairwiseConfig, PairwiseDatabase, PairwiseHit,
 };
 use crate::report::query_warnings::{invalid_query_warning, query_warning};
 use crate::sequence::packed_subject::PackedNucleotide;
@@ -6073,54 +6073,73 @@ fn post_process_hits_and_write(
     // the subject's interval (`shift_to_records`); their internal offsets stay those of
     // the searched letters, from which the shown rows are read.
     shift_to_records(&mut hit_lists, report.ranges);
-    let pairwise_hits =
-        if outputs.hits.is_some() || output_formats.contains(&BlastnOutputFormat::Pairwise) {
-            // The records as read with `-subject_loc` (never packed), else the searched ones.
-            let subject_records = match report.ranges.subjects.records {
-                Some(records) => SubjectLetters::new(records, None),
-                None => report.subjects,
-            };
-            // EXPERIMENT (LOSAT_X_RPTSTREAM): the same masks, made once for every batch.
-            let subject_masks = report.lcase_masking.then(|| {
-                match report
-                    .subject_cache
-                    .and_then(|cache| cache.masks.as_deref())
-                {
-                    Some(masks) => std::borrow::Cow::Borrowed(masks),
-                    None => std::borrow::Cow::Owned(
-                        (0..subject_records.records().len())
-                            .map(|index| subject_records.lowercase_masks(index))
-                            .collect::<Vec<_>>(),
-                    ),
-                }
-            });
-            let mut hits = pairwise_hits(
-                &hit_lists,
-                report.queries,
-                report.subjects,
-                &DisplayMasks {
-                    query: report.query_masks,
-                    query_offsets: &report.ranges.queries.placements,
-                    subject: subject_masks.as_deref(),
-                },
-                report.x_pairwise_pool,
-            )?;
-            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2479
-            // ```c++
-            //     out<<kLengthString<<bsp_handle.GetBioseqLength()<<"\n";
-            // ```
-            // The length of the subject's record, also where `-subject_loc` searches part
-            // of it.
-            for hit in &mut hits {
-                let s_idx = hit.hit.s_idx as usize;
-                hit.subject_length = hit
-                    .subject_length
-                    .map(|searched| report.ranges.subjects.placements.length(s_idx, searched));
-            }
-            Some(hits)
-        } else {
-            None
+    let wants_rows =
+        outputs.hits.is_some() || output_formats.contains(&BlastnOutputFormat::Pairwise);
+    // EXPERIMENT (LOSAT_X_RPTSTREAM): the same masks, made once for every batch.
+    let subject_masks = (wants_rows && report.lcase_masking).then(|| {
+        // The records as read with `-subject_loc` (never packed), else the searched ones.
+        let subject_records = match report.ranges.subjects.records {
+            Some(records) => SubjectLetters::new(records, None),
+            None => report.subjects,
         };
+        match report
+            .subject_cache
+            .and_then(|cache| cache.masks.as_deref())
+        {
+            Some(masks) => std::borrow::Cow::Borrowed(masks),
+            None => std::borrow::Cow::Owned(
+                (0..subject_records.records().len())
+                    .map(|index| subject_records.lowercase_masks(index))
+                    .collect::<Vec<_>>(),
+            ),
+        }
+    });
+    let display_masks = DisplayMasks {
+        query: report.query_masks,
+        query_offsets: &report.ranges.queries.placements,
+        subject: subject_masks.as_deref(),
+    };
+    // The rendered hits of the queries `queries`.
+    let rows_of = |queries: std::ops::Range<usize>| -> Result<Vec<PairwiseHit>> {
+        let mut hits = pairwise_hits(
+            &hit_lists[queries],
+            report.queries,
+            report.subjects,
+            &display_masks,
+            report.x_pairwise_pool,
+        )?;
+        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2479
+        // ```c++
+        //     out<<kLengthString<<bsp_handle.GetBioseqLength()<<"\n";
+        // ```
+        // The length of the subject's record, also where `-subject_loc` searches part
+        // of it.
+        for hit in &mut hits {
+            let s_idx = hit.hit.s_idx as usize;
+            hit.subject_length = hit
+                .subject_length
+                .map(|searched| report.ranges.subjects.placements.length(s_idx, searched));
+        }
+        Ok(hits)
+    };
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1491-1589
+    // ```c++
+    // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+    // ...
+    //     display.DisplaySeqalign(m_Outfile);
+    // ```
+    // NCBI makes and prints the alignments of one query's result set at a time; outfmt 0 makes
+    // the rows of a window of queries, writes them and drops them before the next window's
+    // (`x_pairwise_par::query_windows`, line DBID item ID4f). The caller's hit records and a
+    // format observer (whose HSP numbers count over the whole report) read every query's
+    // rows: those are made once, before any format is written.
+    let pairwise_hits = if outputs.hits.is_some()
+        || (outputs.observer.is_some() && output_formats.contains(&BlastnOutputFormat::Pairwise))
+    {
+        Some(rows_of(0..hit_lists.len())?)
+    } else {
+        None
+    };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
     // ```c
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
@@ -6213,27 +6232,62 @@ fn post_process_hits_and_write(
         // ```
         let mut writer = format.sink.open()?;
         if output_format == BlastnOutputFormat::Pairwise {
-            let hits = pairwise_hits
-                .as_deref()
-                .expect("pairwise hits are built for outfmt 0");
             let (queries, pairwise_report) = pairwise_data
                 .as_ref()
                 .expect("the pairwise report data is built for outfmt 0");
-            write_blastn_pairwise_report(
-                hits,
-                &mut writer,
-                &PairwiseConfig {
-                    program: "blastn".to_string(),
-                    show_frame: false,
-                    ..PairwiseConfig::default()
-                },
-                queries,
-                &subject_titles,
-                pairwise_report,
-                probe.as_mut(),
-                format_warnings.as_mut(),
-                report.x_pairwise_pool,
-            )?;
+            let config = PairwiseConfig {
+                program: "blastn".to_string(),
+                show_frame: false,
+                ..PairwiseConfig::default()
+            };
+            let mut write = |hits: &[PairwiseHit], range: std::ops::Range<usize>| {
+                write_blastn_pairwise_report(
+                    hits,
+                    &mut writer,
+                    &config,
+                    queries,
+                    range,
+                    &subject_titles,
+                    pairwise_report,
+                    probe.as_mut(),
+                    format_warnings.as_mut(),
+                    report.x_pairwise_pool,
+                )
+            };
+            match pairwise_hits.as_deref() {
+                Some(hits) => write(hits, 0..queries.len())?,
+                None => {
+                    // The windows of the parallel writer (`x_pairwise_par`), from the HSPs'
+                    // lengths before any row is made.
+                    let estimates: Vec<usize> = (0..queries.len())
+                        .map(|q_idx| {
+                            crate::report::x_pairwise_par::query_estimate_of(
+                                hit_lists
+                                    .get(q_idx)
+                                    .and_then(Option::as_ref)
+                                    .into_iter()
+                                    .flat_map(|hit_list| &hit_list.hsplist_array)
+                                    .flat_map(|hsp_list| &hsp_list.hsps)
+                                    .map(|hsp| hsp.length),
+                            )
+                        })
+                        .collect();
+                    let windows = crate::report::x_pairwise_par::query_windows(
+                        &estimates,
+                        crate::report::x_pairwise_par::window_bytes(report.x_pairwise_pool),
+                    );
+                    if windows.is_empty() {
+                        // No query: the prolog and the epilog alone.
+                        write(&[], 0..0)?;
+                    }
+                    for range in windows {
+                        let lists =
+                            range.start.min(hit_lists.len())..range.end.min(hit_lists.len());
+                        let hits = rows_of(lists)?;
+                        write(&hits, range)?;
+                    }
+                }
+            }
         } else if let BlastnOutputFormat::Seqalign(serial) = output_format {
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
             // ```c++

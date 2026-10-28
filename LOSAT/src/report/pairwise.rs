@@ -2072,6 +2072,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
             database,
             parsed_subjects,
         },
+        0,
         &hits_by_query,
         subject_titles,
         probe,
@@ -2822,10 +2823,12 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
     )
 }
 
-/// Writes the BLASTN pairwise report (outfmt 0).
+/// Writes the BLASTN pairwise report (outfmt 0) of the queries `query_range` of `queries`.
 ///
-/// `hits` is the final hit list of the run in its order (queries in input order, then
-/// subjects and HSPs in result order); each hit's index in it identifies it to the probe.
+/// `hits` is the final hit list of those queries in its order (queries in input order, then
+/// subjects and HSPs in result order); each hit's index in it identifies it to the probe. The
+/// prolog comes with the first query of `queries`, the epilog with the last: the reports of
+/// consecutive ranges written in turn are the report of all of them.
 ///
 /// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1491-1589
 /// ```c++
@@ -2850,11 +2853,13 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
 // Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
 // shared post-processing makes every BLASTN run compile it in Wasm hosts.
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 pub fn write_blastn_pairwise_report<W: Write>(
     hits: &[PairwiseHit],
     writer: &mut W,
     config: &PairwiseConfig,
     queries: &[BlastnPairwiseQuery],
+    query_range: std::ops::Range<usize>,
     subject_titles: &[Arc<[u8]>],
     report: &BlastnPairwiseReport,
     probe: Option<&mut FormatProbe<'_>>,
@@ -2864,7 +2869,10 @@ pub fn write_blastn_pairwise_report<W: Write>(
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
-    if report.prolog {
+    // The prolog with the report's first query, the epilog with its last (`query_range` is all of
+    // `queries`, or one window of a caller that makes the rows a window at a time,
+    // `x_pairwise_par::query_windows`).
+    if report.prolog && query_range.start == 0 {
         write_blastn_pairwise_prolog(
             writer,
             &report.version,
@@ -2875,9 +2883,12 @@ pub fn write_blastn_pairwise_report<W: Write>(
             report.database.as_ref(),
         )?;
     }
-    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
+    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
-        if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
+        if let Some(bucket) = (hit.hit.q_idx as usize)
+            .checked_sub(query_range.start)
+            .and_then(|offset| hits_by_query.get_mut(offset))
+        {
             bucket.push((hsp_index, hit));
         }
     }
@@ -2889,6 +2900,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
             queries,
             report,
         },
+        query_range.start,
         &hits_by_query,
         subject_titles,
         probe,
@@ -2903,7 +2915,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
     // ```
     // An error in a later query batch skips the epilog, and nothing follows the last
     // query's footer. The epilog starts with two blank lines (blast_format.cpp:2249).
-    if report.epilog {
+    if report.epilog && query_range.end == queries.len() {
         writer.write_all(b"\n\n")?;
         write_blastn_final_footer(writer, report)?;
     }
@@ -3532,6 +3544,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             report,
             database,
         },
+        0,
         &hits_by_query,
         subject_titles,
         probe,

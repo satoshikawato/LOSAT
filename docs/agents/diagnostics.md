@@ -415,7 +415,6 @@ export LOSAT_X_PAIRPARMERGE=1
 export LOSAT_X_PAIRPARN1=1
 export LOSAT_X_PAIRPARNA=1
 export LOSAT_X_PAIRWISEPAR=1
-export LOSAT_X_QBATCHPAR=1
 export LOSAT_X_QDUSTPAR=1
 export LOSAT_X_QGROUPPAR=1
 export LOSAT_X_QPREPPAR=1
@@ -4554,7 +4553,7 @@ Scheduling (each value computed by one thread with the original function; order 
   12): every case within the A/A spread. b6b3a2d5 / its `=0`: blastn of 1,775 cDNAs x0.943, of the 31,168 in the batch
   loop x0.947, of 5,000 1.002, blastn-short 0.995; the inputs with small stages only 0.976-1.035, inside their spread.
   CPU time x0.997-1.006, max RSS within 2 % (`ru_maxrss`).
-- `LOSAT_X_QBATCHPAR=1` (BLASTN, all tasks, `-subject` with two or more threads; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`) NCBI's query batches are searched side by
+- `LOSAT_X_QBATCHPAR=1` (BLASTN, all tasks, `-subject` with two or more threads; OFF BY DEFAULT since 2026-10-28, on only with `=1`: it was in the strict set from 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry) to 2026-10-28, and left it by Owner decision 2026-10-28 because the slots' max RSS rise exceeds their time saving (31,168 cDNAs x 3 Mb at 16 threads: blastn 107 -> 400 MiB for 6.0 -> 4.6 s, dc-megablast 136 -> 238 MiB for 3.2 -> 1.8 s); the slot code is to be removed in a later pull request; it has no `x_reach!` marks and no row in `switch_reach_expected.tsv` any more; the text below describes the slots as they run with `=1`, and the "default" in it means the default before 2026-10-28) NCBI's query batches are searched side by
   side ahead of the batch loop of `run_in_pool` (`blastn/blast_engine/x_qbatch_par.rs`). The size of each
   batch after the first comes from the successful initial extensions of the batch before (NCBI's
   `CBatchSizeMixer`), so a planner advances a copy of the loop's mixer with predicted extensions (the hit

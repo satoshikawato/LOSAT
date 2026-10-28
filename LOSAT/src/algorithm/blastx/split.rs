@@ -433,7 +433,12 @@ pub fn split_queries(
                 (left <= right).then_some((left - start as i32, right - start as i32))
             })
             .collect();
+        let x0 = crate::utils::xtiming::x_since_us();
         let prepared = prepare_queries(&[record], options)?;
+        crate::utils::xtiming::x_stamp_t(&format!(
+            "chunkprep{index}:{x0}-{}",
+            crate::utils::xtiming::x_since_us()
+        ));
         let shift = match length % 3 {
             1 => -1,
             2 => 1,

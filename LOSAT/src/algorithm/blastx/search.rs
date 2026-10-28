@@ -660,6 +660,7 @@ pub(crate) fn search_core(
         //     int retval = 0;
         // ```
         sink.batch_start(range.start, &full, &full_params)?;
+        crate::utils::xtiming::x_stamp_t("split_start");
         let chunks = split_queries(queries, &full, options)?;
         super::x_timing::batch(XBatch::Setup, x_t);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-236
@@ -817,15 +818,22 @@ pub(crate) fn search_core(
                 let x_chunks = &chunks;
                 let x_make =
                     |c: usize, x_parts: usize| -> Result<Option<x_subject_flow::XChunkSetup>> {
+                        let x0 = crate::utils::xtiming::x_since_us();
                         let batch = &x_chunks[c].prepared;
                         let mut params = score_block(batch);
+                        let x1 = crate::utils::xtiming::x_since_us();
                         if !params.iter().any(|p| p.valid) {
                             return Ok(None);
                         }
                         let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
+                        let x2 = crate::utils::xtiming::x_since_us();
                         let last = batch.contexts.last().expect("BLASTX contexts");
                         let length = last.offset + last.length;
                         let table = Diagonals::new(length, options.window_size)?;
+                        crate::utils::xtiming::x_stamp_t(&format!(
+                            "make{c}p{x_parts}:{x0}-{x1}-{x2}-{}",
+                            crate::utils::xtiming::x_since_us()
+                        ));
                         let xdrop = subject_parameters(
                             batch,
                             &mut params,

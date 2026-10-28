@@ -1030,18 +1030,24 @@ pub(crate) fn x_check_protein_stores(
     mut each: impl FnMut(u32, usize),
 ) -> Result<()> {
     let mut next_ordinal = 0u32;
+    let (mut x_blocks, mut x_read, mut x_bytes) = (0u64, 0u64, 0usize);
     while let Some(range) = db.next_block(next_ordinal, PROTEIN_STORE_BLOCK_BYTES) {
+        let x0 = crate::utils::xtiming::x_since_us();
         let block = db
             .read_block(range)
             .map_err(|error| search_read_error(error, program))?;
+        x_read += crate::utils::xtiming::x_since_us() - x0;
+        x_blocks += 1;
         for i in 0..block.len() {
             let with_sentinels = block.protein_with_sentinels(i);
             let ordinal = range.first_ordinal + i as u32;
+            x_bytes += with_sentinels.len();
             check_protein_sequence(with_sentinels, u64::from(ordinal), program)?;
             each(ordinal, with_sentinels.len() - 2);
         }
         next_ordinal = range.end_ordinal();
     }
+    crate::utils::xtiming::x_stamp(&format!("dbcheck:blocks={x_blocks}:read_us={x_read}:bytes={x_bytes}"));
     Ok(())
 }
 

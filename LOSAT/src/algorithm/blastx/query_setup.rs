@@ -258,6 +258,10 @@ pub fn prepare_queries(
     // Diagnostic (LOSAT_TIMING): the contexts' layout and the six-frame translation for the
     // common line (utils/xtiming.rs). No NCBI counterpart.
     let t_translate = crate::utils::xtiming::clock();
+    let x_big = records.iter().map(|r| r.sequence.len()).sum::<usize>() > 30_000;
+    if x_big {
+        crate::utils::xtiming::x_stamp_t("prep_start");
+    }
     let (mut contexts, mut max_length, mut min_length) = (Vec::new(), 0, usize::MAX);
     let mut offset = 0;
     for (q, record) in records.iter().enumerate() {
@@ -312,6 +316,9 @@ pub fn prepare_queries(
         }
     }
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Translate, t_translate);
+    if x_big {
+        crate::utils::xtiming::x_stamp_t("translate_end");
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup.hpp:192-197
     // ```c++
     //     TSeqPos size() const {
@@ -416,7 +423,8 @@ pub fn prepare_queries(
             seg_ready = contexts
                 .par_iter()
                 .map(|context| {
-                    context.is_valid.then(|| {
+                    let x0 = crate::utils::xtiming::x_since_us();
+                    let x_value = context.is_valid.then(|| {
                         masker
                             .mask_sequence(
                                 &buffer[context.offset + 1..context.offset + 1 + context.length],
@@ -424,7 +432,14 @@ pub fn prepare_queries(
                             .into_iter()
                             .map(|r| (r.start as i32, r.end as i32 - 1))
                             .collect()
-                    })
+                    });
+                    crate::utils::xtiming::x_stamp_t(&format!(
+                        "segc{}:{}-{}",
+                        context.frame,
+                        x0,
+                        crate::utils::xtiming::x_since_us()
+                    ));
+                    x_value
                 })
                 .collect();
             crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
@@ -483,6 +498,9 @@ pub fn prepare_queries(
             )),
             context.frame,
         );
+    }
+    if x_big {
+        crate::utils::xtiming::x_stamp_t("mask_end");
     }
     let lookup_segments = complement_masks(&contexts);
     let x_ungap_sent =

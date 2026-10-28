@@ -290,5 +290,7 @@ fn main() -> Result<()> {
     LOSAT::utils::x_logclone::print_shadow_stats();
     // Diagnostic (LOSAT_TIMING): the common line, last (utils/xtiming.rs).
     LOSAT::utils::xtiming::print();
+    LOSAT::utils::xtiming::x_stamp("main_end");
+    LOSAT::utils::xtiming::x_flush_deferred();
     Ok(())
 }

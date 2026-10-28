@@ -264,7 +264,9 @@ pub(crate) fn prepare_lone_unit(
     options: &ResolvedOptions,
 ) -> Result<UnitPrep> {
     let prepared = prepare_queries(queries, options)?;
+    crate::utils::xtiming::x_stamp_t("lone_prepared");
     let params = score_block(&prepared);
+    crate::utils::xtiming::x_stamp_t("lone_scored");
     Ok(UnitPrep {
         prepared,
         params,

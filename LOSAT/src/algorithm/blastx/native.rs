@@ -261,6 +261,7 @@ fn run_inner(
 ) -> Result<()> {
     // Diagnostic (LOSAT_TIMING): the clock of the run (x_timing.rs). No NCBI counterpart.
     let x_t_run = super::x_timing::lap();
+    crate::utils::xtiming::x_stamp("run_inner");
     use super::x_timing::Run as XRun;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
     // ```c++
@@ -397,6 +398,7 @@ fn run_inner(
         archive::check_titles(&subjects, "subject")?;
     }
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, x_t_read_fasta);
+    crate::utils::xtiming::x_stamp("subject_fasta");
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
     // ```c++
     // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
@@ -511,6 +513,7 @@ fn run_inner(
         }
         None => None,
     };
+    crate::utils::xtiming::x_stamp("db_open");
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
     if let (Some(database), Some(serial)) = (
@@ -1449,6 +1452,7 @@ fn run_inner(
                 options.num_threads as usize,
                 "BLASTX",
                 |pool| {
+                    crate::utils::xtiming::x_stamp_t("pool_body");
                     // The run's counts of LOSAT_X_BXUNITCAP (scheduling only), on its pool.
                     #[cfg(feature = "parallel")]
                     let x_caps = super::search::x_bx_mem::XCapRun::default();
@@ -1463,6 +1467,7 @@ fn run_inner(
         } else {
             x_run_batches(None)
         };
+        crate::utils::xtiming::x_stamp("pool_joined");
         x_batches.map_err(input_error)?;
     }
     super::x_timing::run(XRun::Loop, x_t_loop);
@@ -1497,6 +1502,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     let mut output: Option<BufWriter<Box<dyn Write>>> = None;
     let mut archive: Option<crate::report::archive::ArchiveHandle> = None;
     let result = run_inner(args, &mut output, &mut archive);
+    crate::utils::xtiming::x_stamp("run_inner_ret");
     if let (Some(handle), Some(writer)) = (&archive, output.as_mut()) {
         match &result {
             Err(error) => {

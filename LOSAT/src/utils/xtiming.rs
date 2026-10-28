@@ -78,7 +78,45 @@ pub fn on() -> bool {
 pub fn start() {
     if on() {
         let _ = START.set(Instant::now());
+        if std::env::var_os("LOSAT_X_S17STAMP").is_some() {
+            eprintln!("XMONO {}", x_mono_ns());
+        }
     }
+}
+
+/// PROBE (v4-A s18): CLOCK_MONOTONIC in nanoseconds (to align the stamps with a sampler's clock).
+pub fn x_mono_ns() -> u128 {
+    #[repr(C)]
+    struct Ts {
+        sec: i64,
+        nsec: i64,
+    }
+    extern "C" {
+        fn clock_gettime(clock: i32, ts: *mut Ts) -> i32;
+    }
+    let mut ts = Ts { sec: 0, nsec: 0 };
+    // SAFETY: probe only; CLOCK_MONOTONIC = 1 on Linux.
+    unsafe { clock_gettime(1, &mut ts) };
+    ts.sec as u128 * 1_000_000_000 + ts.nsec as u128
+}
+
+/// PROBE (v4-A s18): lines kept until `x_flush_deferred` (so that printing them does not move the
+/// stamps after them).
+pub static X_DEFERRED: Mutex<String> = Mutex::new(String::new());
+
+/// PROBE (v4-A s18): prints the deferred lines.
+pub fn x_flush_deferred() {
+    let text = std::mem::take(&mut *X_DEFERRED.lock().unwrap_or_else(|e| e.into_inner()));
+    eprint!("{text}");
+}
+
+/// PROBE (v4-A s18): `x_stamp` with the rayon thread index (999 off the pool).
+pub fn x_stamp_t(name: &str) {
+    #[cfg(feature = "parallel")]
+    let t = rayon::current_thread_index().unwrap_or(999);
+    #[cfg(not(feature = "parallel"))]
+    let t = 999;
+    x_stamp(&format!("{name}@{t}"));
 }
 
 /// PROBE (v4-A s17, LOSAT_X_S17STAMP with LOSAT_TIMING): prints `XSTAMP name us` (microseconds since

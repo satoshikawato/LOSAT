@@ -180,12 +180,15 @@ where
                 search.install(|| work.take().expect("one search per pool")(&search))
             }));
             *result_slot.borrow_mut() = Some(result);
+            crate::utils::xtiming::x_stamp("pool_drop");
             drop(pool);
+            crate::utils::xtiming::x_stamp("pool_dropped");
         };
         // SAFETY: only captured slot zero invokes this callback, synchronously
         // on this caller below. body lives until its loop and all scoped children
         // have returned; failed construction never starts slot zero.
         let callback = unsafe { CallerCallback::new(&mut body) };
+        crate::utils::xtiming::x_stamp("pool_build");
         std::thread::scope(|scope| -> Result<()> {
             let mut caller = None;
             let pool = rayon::ThreadPoolBuilder::new()
@@ -217,9 +220,12 @@ where
                     format!("failed to build {program} pool with {requested} threads; a thread count that the system cannot start is not supported by LOSAT")
                 })?;
             *pool_slot.borrow_mut() = Some(pool);
+            crate::utils::xtiming::x_stamp("pool_built");
             caller.expect("caller owns pool slot zero").run();
+            crate::utils::xtiming::x_stamp("caller_ran");
             Ok(())
         })?;
+        crate::utils::xtiming::x_stamp("scope_joined");
         #[cfg(feature = "blastx-worker-probe")]
         for index in 0..requested {
             probe_lifecycle("joined", index);

@@ -952,8 +952,12 @@ pub(super) fn run_chunks(
     });
     super::super::x_timing::subject_flow(x_t, total as u64, ahead.counts());
     if x_probe {
+        use std::fmt::Write as _;
+        let mut text = crate::utils::xtiming::X_DEFERRED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         for (index, thread, t0, t1, kept, hsps) in x_lock(&x_tasks).iter() {
-            eprintln!("XTASK {index} {thread} {t0} {t1} {kept} {hsps}");
+            let _ = writeln!(text, "XTASK {index} {thread} {t0} {t1} {kept} {hsps}");
         }
     }
     result.map(|()| call)

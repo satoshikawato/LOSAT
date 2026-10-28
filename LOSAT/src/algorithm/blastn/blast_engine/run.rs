@@ -92,7 +92,9 @@ use super::super::lookup::{
     build_unmasked_ranges, encode_reverse_complement_blastna_into, DiscTemplates,
 };
 use super::super::lookup::{x_dc_csr, x_mb_lut_keep};
-use super::super::pairwise::{pairwise_hits, shown_query_masks, DisplayMasks};
+use super::super::pairwise::{
+    pairwise_hits, pairwise_windows, shown_query_masks, DisplayMasks, Rows as PairwiseRows,
+};
 use super::super::query_split::{
     calculate_num_chunks, restrict_masks, split_query_batch, QueryChunk, SplitSizes,
 };
@@ -6094,20 +6096,24 @@ fn post_process_hits_and_write(
             ),
         }
     });
-    let display_masks = DisplayMasks {
-        query: report.query_masks,
-        query_offsets: &report.ranges.queries.placements,
-        subject: subject_masks.as_deref(),
-    };
-    // The rendered hits of the queries `queries`.
-    let rows_of = |queries: std::ops::Range<usize>| -> Result<Vec<PairwiseHit>> {
-        let mut hits = pairwise_hits(
-            &hit_lists[queries],
+    // The shown masks of every query and subject, made once for every window of queries.
+    let rows = wants_rows.then(|| {
+        PairwiseRows::new(
             report.queries,
             report.subjects,
-            &display_masks,
-            report.x_pairwise_pool,
-        )?;
+            &DisplayMasks {
+                query: report.query_masks,
+                query_offsets: &report.ranges.queries.placements,
+                subject: subject_masks.as_deref(),
+            },
+        )
+    });
+    // The rendered hits of the queries `queries`.
+    let rows_of = |queries: std::ops::Range<usize>| -> Result<Vec<PairwiseHit>> {
+        let rows = rows
+            .as_ref()
+            .expect("the rows' inputs are made for outfmt 0");
+        let mut hits = pairwise_hits(&hit_lists[queries], rows, report.x_pairwise_pool)?;
         // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2479
         // ```c++
         //     out<<kLengthString<<bsp_handle.GetBioseqLength()<<"\n";
@@ -6122,7 +6128,7 @@ fn post_process_hits_and_write(
         }
         Ok(hits)
     };
-    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1491-1589
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411-1585
     // ```c++
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
     // ...
@@ -6130,9 +6136,11 @@ fn post_process_hits_and_write(
     // ```
     // NCBI makes and prints the alignments of one query's result set at a time; outfmt 0 makes
     // the rows of a window of queries, writes them and drops them before the next window's
-    // (`x_pairwise_par::query_windows`, line DBID item ID4f). The caller's hit records and a
-    // format observer (whose HSP numbers count over the whole report) read every query's
-    // rows: those are made once, before any format is written.
+    // (`pairwise::pairwise_windows`, line DBID, ID4f). The rows' errors are LOSAT's internal
+    // invariants (`pairwise_hits`), so making them while the report is written changes no
+    // run's output. The caller's hit records and a format observer (whose HSP numbers count
+    // over the whole report) read every query's rows: those are made once, before any format
+    // is written.
     let pairwise_hits = if outputs.hits.is_some()
         || (outputs.observer.is_some() && output_formats.contains(&BlastnOutputFormat::Pairwise))
     {
@@ -6257,25 +6265,9 @@ fn post_process_hits_and_write(
             match pairwise_hits.as_deref() {
                 Some(hits) => write(hits, 0..queries.len())?,
                 None => {
-                    // The windows of the parallel writer (`x_pairwise_par`), from the HSPs'
-                    // lengths before any row is made.
-                    let estimates: Vec<usize> = (0..queries.len())
-                        .map(|q_idx| {
-                            crate::report::x_pairwise_par::query_estimate_of(
-                                hit_lists
-                                    .get(q_idx)
-                                    .and_then(Option::as_ref)
-                                    .into_iter()
-                                    .flat_map(|hit_list| &hit_list.hsplist_array)
-                                    .flat_map(|hsp_list| &hsp_list.hsps)
-                                    .map(|hsp| hsp.length),
-                            )
-                        })
-                        .collect();
-                    let windows = crate::report::x_pairwise_par::query_windows(
-                        &estimates,
-                        crate::report::x_pairwise_par::window_bytes(report.x_pairwise_pool),
-                    );
+                    // The windows of the parallel writer (`x_pairwise_par`).
+                    let windows =
+                        pairwise_windows(&hit_lists, queries.len(), report.x_pairwise_pool);
                     if windows.is_empty() {
                         // No query: the prolog and the epilog alone.
                         write(&[], 0..0)?;

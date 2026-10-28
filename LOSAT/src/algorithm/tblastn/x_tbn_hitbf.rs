@@ -87,7 +87,7 @@ pub(super) fn fits(window: i32, word_size: usize) -> bool {
 /// exact when `fits(window, word_size)` (module doc); `entries.len()` is a power of two.
 #[inline(always)]
 pub(super) fn x_hits_bf(
-    entries: &mut [(i32, bool)],
+    entries: &mut [u32],
     offset: i32,
     window: i32,
     word_size: i32,
@@ -114,7 +114,9 @@ pub(super) fn x_hits_bf(
         // SAFETY: index <= mask = entries.len() - 1.
         let entry = unsafe { base.add(index) };
         // SAFETY: as above.
-        let (last_hit, flag) = unsafe { entry.read() };
+        // PROBE (exp/d14-s2): bit 31 = flag; with it clear the cell is last_hit.
+        let cell = unsafe { entry.read() } as i32;
+        let (last_hit, flag) = (cell, cell < 0);
         // [C] last_hit = diag_array[diag_coord].last_hit - diag_offset;
         // [C] diff = subject_offset - last_hit;
         let s_diag = (pair.s_off as i32).wrapping_add(offset);
@@ -128,7 +130,7 @@ pub(super) fn x_hits_bf(
         // [C] if (diff < wordsize) continue;
         let next = if diff >= window { s_diag } else { last_hit };
         // SAFETY: as above.
-        unsafe { (*entry).0 = next };
+        unsafe { *entry = next as u32 };
         // SAFETY: p < end, so p + 1 <= end.
         p = unsafe { p.add(1) };
     }

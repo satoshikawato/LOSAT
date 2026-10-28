@@ -31,7 +31,8 @@ pub(super) struct InitHsp {
 // if (ewp->diag_table->offset >= INT4_MAX / 4) { ... clear ... }
 // else ewp->diag_table->offset += subject_length + ewp->diag_table->window;
 pub(super) struct Diagonals {
-    entries: Vec<(i32, bool)>,
+    // PROBE (exp/d14-s2): NCBI's DiagStruct layout, `last_hit:31` in bits 0-30 and `flag:1` in bit 31.
+    entries: Vec<u32>,
     mask: i32,
     offset: i32,
     window: i32,
@@ -41,7 +42,7 @@ impl Diagonals {
     fn new(query_length: usize, window: i32) -> Self {
         let size = (query_length + window as usize).next_power_of_two();
         Self {
-            entries: vec![(0, false); size],
+            entries: vec![0u32; size],
             mask: size as i32 - 1,
             offset: window,
             window,
@@ -51,7 +52,7 @@ impl Diagonals {
     fn finish_frame(&mut self, subject_length: usize) {
         if self.offset >= i32::MAX / 4 {
             self.offset = self.window;
-            self.entries.fill((0, false));
+            self.entries.fill(0);
         } else {
             self.offset += subject_length as i32 + self.window;
         }
@@ -245,8 +246,8 @@ impl<'a> XTwoHit<'a> {
 
     /// The diagonal table, for tests.
     #[cfg(test)]
-    pub(super) fn x_table(&self) -> &[(i32, bool)] {
-        &self.diagonals.entries
+    pub(super) fn x_table(&self) -> Vec<(i32, bool)> {
+        self.diagonals.entries.iter().map(|&e| ((e & 0x7fff_ffff) as i32, e >> 31 != 0)).collect()
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
@@ -284,19 +285,19 @@ impl<'a> XTwoHit<'a> {
             let s = pair.s_off as i32;
             // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:516-547
             let index = ((q - s) & diagonals.mask) as usize;
-            let (last_hit, flag) = &mut diagonals.entries[index];
-            if *flag {
-                if s + diagonals.offset < *last_hit {
+            let cell = &mut diagonals.entries[index];
+            let last_hit = (*cell & 0x7fff_ffff) as i32;
+            if *cell >> 31 != 0 {
+                if s + diagonals.offset < last_hit {
                     continue;
                 }
-                *last_hit = s + diagonals.offset;
-                *flag = false;
+                *cell = (s + diagonals.offset) as u32;
                 continue;
             }
-            let previous = *last_hit - diagonals.offset;
+            let previous = last_hit - diagonals.offset;
             let diff = s - previous;
             if diff >= window {
-                *last_hit = s + diagonals.offset;
+                *cell = (s + diagonals.offset) as u32;
                 continue;
             }
             if diff < word_size_i32 {
@@ -308,7 +309,7 @@ impl<'a> XTwoHit<'a> {
             //     query_info->contexts[curr_context].query_offset) continue;
             let context = self.context_offsets.partition_point(|&offset| offset <= q) - 1;
             if q - diff < self.context_offsets[context] {
-                *last_hit = s + diagonals.offset;
+                *cell = (s + diagonals.offset) as u32;
                 continue;
             }
             // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1155:
@@ -360,10 +361,9 @@ impl<'a> XTwoHit<'a> {
             }
             // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:588-607
             if result.right_extend {
-                *flag = true;
-                *last_hit = result.s_last_off - (word_size_i32 - 1) + diagonals.offset;
+                *cell = (result.s_last_off - (word_size_i32 - 1) + diagonals.offset) as u32 | 1 << 31;
             } else {
-                *last_hit = s + diagonals.offset;
+                *cell = (s + diagonals.offset) as u32;
             }
         }
     }

@@ -245,16 +245,24 @@ pub(crate) fn context_frame(letters: usize, i: usize, strand: &str) -> (usize, b
 //      virtual bool Verify(const string& value) const {
 //          static int gcs[] = {1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33};
 // ```
-// No NCBI counterpart (scheduling only): whether the masking of a long query makes the shared
-// neighbour lists of its words ahead of its tables (LOSAT_X_BXLISTAHEAD): with the strict-set
-// switch, for a search whose tables are the pooled standard ones (words of 3, `Lookup::x_new_in_parts`).
-#[cfg(feature = "parallel")]
+// No NCBI counterpart (scheduling only): whether the masking of a long query on the pool makes the
+// shared neighbour lists of its words ahead of its tables (LOSAT_X_BXLISTAHEAD, in the strict set):
+// where its tables are the pooled standard ones (words of 3, `Lookup::x_new_in_parts`, which read
+// the shared lists).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 fn x_lists_ahead(options: &ResolvedOptions) -> bool {
-    crate::utils::xswitch::on("LOSAT_X_BXLISTAHEAD")
-        && options.word_size == 3
+    if !crate::utils::xswitch::on("LOSAT_X_BXLISTAHEAD") {
+        return false;
+    }
+    let own = options.word_size == 3
         && crate::algorithm::tblastx::lookup::x_bx_pooled_for(
             usize::try_from(options.num_threads).unwrap_or(1),
-        )
+        );
+    crate::utils::xreach::x_reach!("LOSAT_X_BXLISTAHEAD", own);
+    own
 }
 
 pub fn prepare_queries(
@@ -425,35 +433,20 @@ pub fn prepare_queries(
             // Diagnostic (LOSAT_TIMING): the parallel SEG's wall time for the common line
             // (utils/xtiming.rs). No NCBI counterpart.
             let t_seg = crate::utils::xtiming::clock();
-            let seg = || {
-                contexts
-                    .par_iter()
-                    .map(|context| {
-                        context.is_valid.then(|| {
-                            masker
-                                .mask_sequence(
-                                    &buffer[context.offset + 1..context.offset + 1 + context.length],
-                                )
-                                .into_iter()
-                                .map(|r| (r.start as i32, r.end as i32 - 1))
-                                .collect()
-                        })
-                    })
-                    .collect()
-            };
-            // Dispatch point (LOSAT_X_BXLISTAHEAD, in the strict set): a task of the pool makes the
-            // shared neighbour lists of the query's words for the pooled table builds that follow, on
-            // the threads the contexts leave idle (the lists are those the builds would make). No
-            // NCBI counterpart.
+            // Dispatch point (LOSAT_X_BXLISTAHEAD, in the strict set): a task of the pool, which this
+            // thread does not wait for, makes the shared neighbour lists of the query's words for the
+            // pooled table builds that follow, on the threads the contexts leave idle; the lists are
+            // those the builds would make (`x_bx_lists_ahead`). The contexts' words at the offsets
+            // of the lookup segments (`complement_masks`, `sequence_start[1..]`), before masking: the
+            // segments' words and those of the masked residues. No NCBI counterpart.
+            #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-threads"))]
             if x_lists_ahead(options) {
-                let locations: Vec<(i32, i32)> = contexts
+                let locations = contexts
                     .iter()
                     .filter(|context| context.is_valid)
                     .map(|context| {
-                        (
-                            context.offset as i32,
-                            (context.offset + context.length) as i32 - 1,
-                        )
+                        let start = context.offset as i32;
+                        (start, start + context.length as i32 - 1)
                     })
                     .collect();
                 crate::algorithm::tblastx::lookup::x_bx_lists_ahead(
@@ -462,7 +455,20 @@ pub fn prepare_queries(
                     options.threshold as i32,
                 );
             }
-            seg_ready = seg();
+            seg_ready = contexts
+                .par_iter()
+                .map(|context| {
+                    context.is_valid.then(|| {
+                        masker
+                            .mask_sequence(
+                                &buffer[context.offset + 1..context.offset + 1 + context.length],
+                            )
+                            .into_iter()
+                            .map(|r| (r.start as i32, r.end as i32 - 1))
+                            .collect()
+                    })
+                })
+                .collect();
             crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
         }
     }

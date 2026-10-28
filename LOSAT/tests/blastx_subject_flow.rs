@@ -12,7 +12,9 @@
 //! The shadow (`LOSAT_X_BXSUBJFLOWSHADOW`) searches every task again on another table and must
 //! find the same subjects. The tasks are cut by residues as well (`LOSAT_X_BXTASKRES`, in the
 //! strict set): a task ends after `k` subjects or before the subject that would take it past `k`
-//! times the mean subject length; with `=0` they are the grid of `k` subjects. `LOSAT_TIMING`
+//! times the mean subject length; with `=0` they are the grid of `k` subjects. A long query masked
+//! on the pool has the neighbour lists of its tables made ahead by a pool task
+//! (`LOSAT_X_BXLISTAHEAD`, in the strict set); with `=0` the builds make them. `LOSAT_TIMING`
 //! shows that the flow ran (and the waves did not). The fallback to the waves where a diagonal offset could pass 2^30 (`-window_size` near 2^28, a
 //! diagonal table of 1 GiB or more) is a unit test of the module. That the bytes equal NCBI's
 //! is the business of the BLASTX fixtures and the campaign's comparison runs.
@@ -324,6 +326,8 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
         (4, &[("LOSAT_X_BXUNITCAP", "2")][..], 1),
         (16, &[][..], 0),
         (2, &[("LOSAT_X_BXTASKRES", "0")][..], 1),
+        (2, &[("LOSAT_X_BXLISTAHEAD", "0")][..], 1),
+        (8, &[("LOSAT_X_BXLISTAHEAD", "0")][..], 1),
         (2, &[("LOSAT_X_BXCHUNKFLOW", "0")][..], 0),
         (2, &[("LOSAT_X_BXSUBJFLOW", "0")][..], 0),
     ] {
@@ -355,6 +359,27 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
         let (report, _) = blastx(&query, &args, 4, &env);
         assert!(report == reference);
         assert_eq!(own_side_reached(&reach, "LOSAT_X_BXUNITCAP"), acted);
+    }
+    // The 30,000 letters (six contexts of 10,000 residues) are masked on the pool, which makes the
+    // lists of the pooled tables ahead (`LOSAT_X_REACH`); one thread masks them alone, and with the
+    // switch off the builds make the lists.
+    for (threads, env, acted) in [
+        (2, &[][..], true),
+        (16, &[][..], true),
+        (1, &[][..], false),
+        (2, &[("LOSAT_X_BXLISTAHEAD", "0")][..], false),
+    ] {
+        let reach = dir.join(format!("reach-lists-{threads}-{}", env.len()));
+        let reach_text = reach.to_str().unwrap().to_string();
+        let mut env = env.to_vec();
+        env.push(("LOSAT_X_REACH", reach_text.as_str()));
+        let (report, _) = blastx(&query, &args, threads, &env);
+        assert!(report == reference, "threads {threads} {env:?}");
+        assert_eq!(
+            reach.exists() && own_side_reached(&reach, "LOSAT_X_BXLISTAHEAD"),
+            acted,
+            "threads {threads} {env:?}"
+        );
     }
     // The flow's shadow compares every task of the three chunks, across the chunks and per chunk.
     for env in [&[][..], &[("LOSAT_X_BXCHUNKCROSS", "0")][..]] {

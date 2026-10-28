@@ -377,6 +377,7 @@ export LOSAT_X_BXEVALEMPTY=1
 export LOSAT_X_BXFLOW=1
 export LOSAT_X_BXHITBF=1
 export LOSAT_X_BXKAONCE=1
+export LOSAT_X_BXLISTAHEAD=1
 export LOSAT_X_BXLUTPOOL=1
 export LOSAT_X_BXPOOLN1=1
 export LOSAT_X_BXSCANBYTE=1
@@ -6210,6 +6211,24 @@ Scheduling (each value computed by one thread with the original function; order 
   0.571 -> 0.549 s (x0.962, 0.959-0.968, 12 of 12), S(16) 13.70 -> 14.29; the capped few-subject rows (800 cDNAs x
   2 / 8 / 50 yeast proteins, AP027131 x 10 / 50 proteins, 16 and 32 threads) x0.986-1.031, each within its
   per-round spread (`k` is 1 on the 2 and 8 protein rows, so the cut changes no task there).
+- `LOSAT_X_BXLISTAHEAD=1` (BLASTX, speed at 2+ threads; in the strict set from the pull request that added it: on
+  unless `=0`; acts where a query batch's contexts are masked on the pool, the rule of 60,000+ residues in the
+  batch, i.e. one query of about 30 kb or more, and its tables are the pooled standard ones: word size 3 with
+  `LOSAT_X_BXLUTPOOL`): before the contexts are masked, a task of the pool (`rayon::spawn`, which the masking does
+  not wait for) makes the shared neighbour lists (`x_lut_direct.rs`, the memo of the pooled builds) of the words of
+  the contexts as translated, before masking. A build then finds a list made, waits for one being made (its
+  `OnceLock`), or makes it itself, as before. Exactness: a list is a function of its word, the matrix and the
+  threshold alone (the module comment of `x_lut_direct.rs`), so a list made ahead is the one the build would make;
+  the masked residues' words get lists no build reads. `tests/blastx_subject_flow.rs` (a query of 30,000 letters:
+  outputs at 2 and 8 threads with `=0` equal to one thread's, the new side recorded at 2 and 16 threads and not
+  at one thread or with `=0`). Why: the lists are most of a first table's build (one thread, fly 2L 50 kb: the
+  first chunk's table 13.2 ms on the workstation; locally the neighbour search 11.5 ms of the 16.8 ms of all five
+  chunks' builds), and the first chunk's table is built in parts (`LOSAT_X_BXBUILDPAR`) only after the query's
+  SEG (six contexts on six threads) and the chunks' preparation (five tasks), with the other threads idle; at 16
+  threads it took 7.7 ms (stamps on the workstation: SEG 7.2 ms, chunk preparation 4.5, the first chunk's setup
+  8.9, the flow starting 44 ms after the spawn). The pool's helpers ran their first work 1.1-3.9 times slower than
+  later (cores waking from idle; the workstation's `intel_pstate` powersave governor): a pool kept busy from the
+  masking on loses less of that than three short phases. TIMINGS_PENDING
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

@@ -212,7 +212,10 @@ fn x_bx_make_lists(query: &[u8], locations: &[(i32, i32)], threshold: i32) {
                 .unwrap_or(i32::MIN)
         })
         .collect();
-    let shared = x_shared_memo((matrix, threshold, word_length, alphabet_size), backbone_size);
+    let shared = x_shared_memo(
+        (matrix, threshold, word_length, alphabet_size),
+        backbone_size,
+    );
     // The first offset of each word not listed yet.
     let mut first = vec![u32::MAX; backbone_size];
     x_for_each_exact_word(query, locations, word_length, charsize, |idx, offset| {
@@ -226,19 +229,22 @@ fn x_bx_make_lists(query: &[u8], locations: &[(i32, i32)], threshold: i32) {
         .filter(|(_, &offset)| offset != u32::MAX)
         .map(|(idx, &offset)| (idx, offset as usize))
         .collect();
-    words.par_iter().with_min_len(64).for_each(|&(idx, offset)| {
-        shared.lists[idx].get_or_init(|| {
-            x_target_list(
-                &query[offset..],
-                alphabet_size,
-                word_length,
-                charsize,
-                &row_max,
-                threshold,
-                matrix,
-            )
+    words
+        .par_iter()
+        .with_min_len(64)
+        .for_each(|&(idx, offset)| {
+            shared.lists[idx].get_or_init(|| {
+                x_target_list(
+                    &query[offset..],
+                    alphabet_size,
+                    word_length,
+                    charsize,
+                    &row_max,
+                    threshold,
+                    matrix,
+                )
+            });
         });
-    });
 }
 
 /// No NCBI counterpart: the neighbour lists a build reads, its thread's or the shared ones.

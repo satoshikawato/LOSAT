@@ -1789,6 +1789,8 @@ fn report_order(
     args: &TblastxArgs,
     queries: &[FastaRecord],
     hits: Vec<TblastxHsp>,
+    // EXPERIMENT (LOSAT_X_TBXRPTPAR): the report pool (`x_rpt_par::pool`), `None` for this thread.
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Vec<TblastxHsp> {
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2960-2962,2978
     // ```c
@@ -1840,7 +1842,7 @@ fn report_order(
             &filters,
         )
     } else {
-        report::final_hit_order(hits, hitlist_size, &filters)
+        report::final_hit_order(hits, hitlist_size, &filters, x_pool)
     }
 }
 
@@ -3089,7 +3091,7 @@ fn run_batch_loop(
         // makes the batch's Seq-aligns (`database::read_titles`, in report order); a header file
         // that NCBI cannot read fails this batch, after the reports of the batches before.
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
-            let ordered = report_order(&args, batch_queries, batch.hits.clone());
+            let ordered = report_order(&args, batch_queries, batch.hits.clone(), None);
             let read = super::super::database::read_titles(
                 database,
                 &ordered,
@@ -3260,7 +3262,12 @@ impl BatchReports<'_> {
                 super::super::archive::check_titles(records, "subject")?;
             }
         }
-        let mut hits = report_order(self.args, queries, done.hits);
+        let mut hits = report_order(
+            self.args,
+            queries,
+            done.hits,
+            crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
+        );
         // `-db`: the reported sequences by rank (their records hold the stored titles, their
         // letters are read from the stored codes).
         let reported_subjects;

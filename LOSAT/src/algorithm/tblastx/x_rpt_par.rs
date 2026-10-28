@@ -24,8 +24,11 @@
 //!    flushes around every row) the rows are written by the serial function.
 //! With a Seq-align format requested (outfmt 8, 12), the engine counts of the Seq-aligns
 //! (`report::engine_counts`) run over chunks of the final list on the pool as item 1 does.
-//! The final order (`report_order`), the outfmt 0 text (`write_tblastx_pairwise_report`) and the
-//! writes stay on the loop's thread.
+//! 4. The final order (`report_order`, `report::final_hit_order`): each (query, subject) list's sort
+//!    by score and, after the hit list's order, its sort by e-value run on the pool, one list per
+//!    task (`for_each_list`); the grouping, the hit list and the concatenation stay on the loop's
+//!    thread.
+//! The outfmt 0 text (`write_tblastx_pairwise_report`) and the writes stay on the loop's thread.
 //!
 //! Why the bytes are those of the serial stage: every value is computed by the serial code's
 //! function of one HSP (or of one row) on the same inputs (the HSP, the query and subject
@@ -89,6 +92,25 @@ pub(crate) fn pool<'p, 'q>(pool: &'p SearchPool<'q>) -> Option<&'p SearchPool<'q
         crate::utils::xreach::x_reach!("LOSAT_X_TBXRPTPAR", pooled);
     }
     pooled.then_some(pool)
+}
+
+/// `f` on every element of `lists` (the (query, subject) lists of `report::final_hit_order`), on
+/// `pool` when there is one, else on this thread in order (item 4).
+pub(crate) fn for_each_list<T: Send>(
+    pool: Option<&SearchPool<'_>>,
+    lists: &mut [T],
+    f: impl Fn(&mut T) + Sync + Send,
+) {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if let Some(pool) = pool.filter(|_| lists.len() > 1) {
+        pool.install(|| lists.par_iter_mut().for_each(&f));
+        return;
+    }
+    let _ = pool;
+    lists.iter_mut().for_each(f);
 }
 
 /// `report::write_tabular` without a format observer, with the rows of each query formatted on

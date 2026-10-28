@@ -1637,6 +1637,9 @@ pub(crate) fn final_hit_order(
     hits: Vec<TblastxHsp>,
     hitlist_size: usize,
     filters: &HitFilters<'_>,
+    // EXPERIMENT (LOSAT_X_TBXRPTPAR, x_rpt_par.rs item 4): the pool the lists' sorts run on, `None`
+    // for this thread.
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Vec<TblastxHsp> {
     use crate::algorithm::blastn::hsp::HitList;
     let mut lists: std::collections::BTreeMap<(u32, u32), Vec<TblastxHsp>> =
@@ -1647,13 +1650,17 @@ pub(crate) fn final_hit_order(
             .or_default()
             .push(hsp);
     }
+    let mut lists: Vec<((u32, u32), Vec<TblastxHsp>)> = lists.into_iter().collect();
+    // Each list's sort by score depends on that list alone: on the pool or here, the same order.
+    super::x_rpt_par::for_each_list(x_pool, &mut lists, |(_, hsps)| {
+        hsps.sort_by(|a, b| crate::common::score_compare_hsps(&a.hit, &b.hit));
+    });
     let mut ordered = Vec::new();
     let mut lists = lists.into_iter().peekable();
     while let Some(&((q_idx, _), _)) = lists.peek() {
         let context_lengths = filters.context_lengths(q_idx);
         let mut hit_list: HitList<TblastxHspList> = HitList::new(hitlist_size);
         while let Some(((_, oid), mut hsps)) = lists.next_if(|((q, _), _)| *q == q_idx) {
-            hsps.sort_by(|a, b| crate::common::score_compare_hsps(&a.hit, &b.hit));
             if filters.reap_by_query_coverage(&mut hsps, &context_lengths) {
                 continue;
             }
@@ -1669,8 +1676,11 @@ pub(crate) fn final_hit_order(
             }
         }
         hit_list.sort_by_evalue();
-        for mut list in hit_list.hsplist_array {
-            crate::algorithm::blastn::hsp::HitListEntry::sort_by_evalue(&mut list);
+        // Each list's sort by e-value depends on that list alone (as the sort by score above).
+        super::x_rpt_par::for_each_list(x_pool, &mut hit_list.hsplist_array, |list| {
+            crate::algorithm::blastn::hsp::HitListEntry::sort_by_evalue(list);
+        });
+        for list in hit_list.hsplist_array {
             ordered.extend(list.hsps);
         }
     }
@@ -2255,7 +2265,7 @@ mod tests {
             hsp(0, 1, 110, 1e-5, 0),
         ];
         let order = |size| -> Vec<(u32, i32)> {
-            final_hit_order(hits.clone(), size, &HitFilters::default())
+            final_hit_order(hits.clone(), size, &HitFilters::default(), None)
                 .iter()
                 .map(|hsp| (hsp.hit.s_idx, hsp.hit.raw_score))
                 .collect()

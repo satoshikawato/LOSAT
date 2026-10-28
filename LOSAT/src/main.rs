@@ -277,6 +277,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastn::blast_engine::x_qgroup_par_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_tb_range_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_lut_drop_print_summary();
+    LOSAT::algorithm::blastn::blast_engine::x_scratch_keep_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_query_drop_print_summary();
     LOSAT::algorithm::blastp::x_bp_hit_bf_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bplkpflat_print_summary();

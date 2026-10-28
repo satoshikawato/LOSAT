@@ -25,6 +25,7 @@ pub use run::x_lut_drop_print_summary;
 pub use run::x_qgroup_par_print_summary;
 pub use run::x_query_drop_print_summary;
 pub use run::x_query_prep_par_print_summary;
+pub use run::x_scratch_keep_print_summary;
 pub use run::x_tb_range_print_summary;
 // ABI v1 (`web_api::v1_blastn`) checks a search without subjects as the CLI does.
 #[cfg(target_arch = "wasm32")]

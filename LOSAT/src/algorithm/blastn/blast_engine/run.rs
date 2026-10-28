@@ -221,6 +221,11 @@ mod culling;
 #[path = "x_qbatch_par.rs"]
 mod x_qbatch_par;
 
+// EXPERIMENT (LOSAT_X_BNSCRATCHKEEP): the subject search's scratches kept from one query batch to
+// the next.
+#[path = "x_scratch_keep.rs"]
+mod x_scratch_keep;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603 (the query buffer
 // of a batch) and c++/src/algo/blast/core/blast_stat.c:2754-2784 (the ungapped Karlin block of
 // each context).
@@ -279,6 +284,12 @@ pub fn x_tb_range_print_summary() {
 /// counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_lut_drop_print_summary() {
     x_lut_drop::print_summary();
+}
+
+/// EXPERIMENT (LOSAT_X_BNSCRATCHKEEP): the summary line `main` prints at exit (LOSAT_TIMING). No
+/// NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_scratch_keep_print_summary() {
+    x_scratch_keep::print_summary();
 }
 
 /// EXPERIMENT (LOSAT_X_BNQDROP): the summary line `main` prints at exit (LOSAT_TIMING). No NCBI
@@ -4251,6 +4262,9 @@ struct SubjectScratch {
     // this scratch and given each subject's ranges with `reset_with_bounds` (the same state as a
     // new tree) instead of being made again for every subject. Reuse only.
     x_tree: BlastIntervalTree,
+    // No NCBI counterpart: the allocation of a subject's BLASTNA letters that the traceback makes
+    // from its packed letters (LOSAT_X_BNSTORE), written whole for each subject. Reuse only.
+    x_blastna: Vec<u8>,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
@@ -4334,8 +4348,86 @@ impl SubjectScratch {
             ],
             // No NCBI counterpart: every user sets the subject's ranges first (`reset_with_bounds`).
             x_tree: BlastIntervalTree::new(0, 1, 0, 1),
+            x_blastna: Vec::new(),
         }
     }
+
+    // No NCBI counterpart: EXPERIMENT (LOSAT_X_BNSCRATCHKEEP, `x_scratch_keep.rs`) a kept scratch
+    // made ready for the next query batch: every part that a batch reads before it writes it gets
+    // the value `new` gives it, in its own allocation; the parts that every use writes first (the
+    // interval tree, the partition tables, the alignment scratch, the BLASTNA letters) are kept.
+    // The literal names every field, so a field added later has to choose.
+    fn renew(self, query_count: usize, offset_array_size: usize, window_size: usize) -> Self {
+        fn cleared<T>(mut v: Vec<T>) -> Vec<T> {
+            v.clear();
+            v
+        }
+        let mut cutoff_scores = cleared(self.cutoff_scores);
+        cutoff_scores.reserve(query_count);
+        let mut x_dropoff_scores = cleared(self.x_dropoff_scores);
+        x_dropoff_scores.reserve(query_count);
+        let mut reduced_cutoff_scores = cleared(self.reduced_cutoff_scores);
+        reduced_cutoff_scores.reserve(query_count);
+        let mut offset_pairs = cleared(self.offset_pairs);
+        offset_pairs.resize(
+            offset_array_size,
+            OffsetPair {
+                q_off: 0,
+                s_off: 0,
+                s_range: 0,
+            },
+        );
+        Self {
+            hits: cleared(self.hits),
+            prelim_hits: cleared(self.prelim_hits),
+            ungapped_hits: cleared(self.ungapped_hits),
+            greedy_align_scratch: self.greedy_align_scratch,
+            x_ahead_scratch: self.x_ahead_scratch,
+            x_spec_scratch: self.x_spec_scratch,
+            cutoff_scores,
+            x_dropoff_scores,
+            reduced_cutoff_scores,
+            seq_ranges_scratch: cleared(self.seq_ranges_scratch),
+            hit_level_array: cleared(self.hit_level_array),
+            hit_len_array: cleared(self.hit_len_array),
+            diag_hash: DiagHashTable::new(window_size as i32),
+            x_pair_fold: self.x_pair_fold,
+            diag_table_offset: window_size as i32,
+            offset_pairs,
+            x_tree: self.x_tree,
+            x_blastna: self.x_blastna,
+        }
+    }
+}
+
+// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNSCRATCHKEEP) the state of one thread of a batch's
+// subject search, and the search's keep of these states (`x_scratch_keep.rs`).
+type ScratchState = (GapAlignScratch, SubjectScratch);
+type ScratchKeep = x_scratch_keep::Keep<ScratchState>;
+
+// No NCBI counterpart: a batch's state for one thread, from the search's keep when it has one
+// (LOSAT_X_BNSCRATCHKEEP).
+fn x_lend_scratch(
+    keep: Option<&ScratchKeep>,
+    query_count: usize,
+    offset_array_size: usize,
+    window_size: usize,
+) -> x_scratch_keep::Lent<'_, ScratchState> {
+    x_scratch_keep::lend(
+        keep,
+        |(gap, subject)| {
+            (
+                gap,
+                subject.renew(query_count, offset_array_size, window_size),
+            )
+        },
+        || {
+            (
+                GapAlignScratch::new(),
+                SubjectScratch::new(query_count, offset_array_size, window_size),
+            )
+        },
+    )
 }
 
 #[derive(Clone)]
@@ -8393,6 +8485,9 @@ fn run_in_pool(
         Some(x_qbatch_par::Off::NotSet)
     };
     let qbp_batching = batching;
+    // EXPERIMENT (LOSAT_X_BNSCRATCHKEEP): the subject scratches this search keeps between its
+    // query batches (the loop's and the slots'), freed when the search ends.
+    let x_scratch_keep: Option<ScratchKeep> = x_scratch_keep::Keep::for_search();
     let qbp_search = |job: &x_qbatch_par::Job, pool: &crate::utils::threading::SearchPool<'_>| {
         // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records read again (a chunk shared with the
         // window, or a copy); none for a batch the loop has passed, which the loop never takes
@@ -8426,6 +8521,7 @@ fn run_in_pool(
                 query_masks: None,
             },
             None,
+            x_scratch_keep.as_ref(),
         )
     };
     let qbp_input = x_qbatch_par::PlanInput {
@@ -8866,6 +8962,7 @@ fn run_in_pool(
                             query_masks: window_masker_masks.as_deref(),
                         },
                         x_keep,
+                        x_scratch_keep.as_ref(),
                     )
                 }
             };
@@ -10003,7 +10100,9 @@ fn window_masker_rejection(
 /// Searches one query batch against the subjects, with the query block, lookup table and
 /// diagonal table of the batch, as NCBI's `CLocalBlast` does for each batch that
 /// `run_in_pool` reads. `x_keep`: the batch loop's keep of LOSAT_X_MBLUTKEEP, which the batch's
-/// megablast table is built on and goes back to (`lookup::x_mb_lut_keep`).
+/// megablast table is built on and goes back to (`lookup::x_mb_lut_keep`). `x_scratch`: the
+/// search's keep of LOSAT_X_BNSCRATCHKEEP, which the batch's subject scratches are borrowed from
+/// and go back to (`x_scratch_keep.rs`).
 fn search_query_batch(
     args: &BlastnArgs,
     mut query_records: x_query_drop::BatchQueries<'_>,
@@ -10014,6 +10113,7 @@ fn search_query_batch(
     first_batch: bool,
     stage: BatchStage<'_>,
     x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
+    x_scratch: Option<&ScratchKeep>,
 ) -> Result<QueryBatch> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
@@ -11025,6 +11125,7 @@ fn search_query_batch(
             batching,
             first_batch,
             x_keep,
+            x_scratch,
         )?,
         _ => None,
     };
@@ -15802,25 +15903,23 @@ fn search_query_batch(
                             chunk_batch
                                 .par_iter()
                                 .map_init(
+                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+                                    // ```c
+                                    // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+                                    // ...
+                                    // aux_struct->offset_pairs =
+                                    //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+                                    // ```
                                     || {
-                                        (
-                                            GapAlignScratch::new(),
-                                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-                                            // ```c
-                                            // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-                                            // ...
-                                            // aux_struct->offset_pairs =
-                                            //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-                                            // ```
-                                            SubjectScratch::new(
-                                                queries_ref.len(),
-                                                offset_array_size,
-                                                window_size,
-                                            ),
+                                        x_lend_scratch(
+                                            x_scratch,
+                                            queries_ref.len(),
+                                            offset_array_size,
+                                            window_size,
                                         )
                                     },
                                     |state, chunk| {
-                                        let (gap_scratch, subject_scratch) = state;
+                                        let (gap_scratch, subject_scratch) = &mut **state;
                                         let hits = collect_prelim_hits_for_chunk(
                                             chunk,
                                             soft_ranges,
@@ -16007,12 +16106,16 @@ fn search_query_batch(
         // are made here, for this subject only, instead of being kept for every subject of the
         // search. A database sequence comes with its blastna letters, read with its
         // ambiguity codes (`database::traceback_listed`).
-        let mut s_seq_blastna_vec: Vec<u8>;
+        let mut s_seq_blastna_vec: Vec<u8> = Vec::new();
+        // EXPERIMENT (LOSAT_X_BNSCRATCHKEEP): the letters are made in the scratch's allocation,
+        // which goes back to the scratch at the end of the subject.
+        let mut x_blastna_taken = false;
         let s_seq_blastna: &[u8] = match (subject.blastna, subject.store) {
             (Some(blastna), _) => blastna,
             // EXPERIMENT (LOSAT_X_BNSTORE): made from the packed subject.
             (None, Some(store)) => {
-                s_seq_blastna_vec = Vec::new();
+                s_seq_blastna_vec = std::mem::take(&mut subject_scratch.x_blastna);
+                x_blastna_taken = true;
                 x_blastna_into(store, &mut s_seq_blastna_vec);
                 s_seq_blastna_vec.as_slice()
             }
@@ -17943,6 +18046,9 @@ fn search_query_batch(
             // NCBI reference: blast_traceback.c:633-692 (post-gapped processing is per-subject)
             *subject_hits = Some(final_hits);
         }
+        if x_blastna_taken {
+            subject_scratch.x_blastna = s_seq_blastna_vec;
+        }
         if let Some(timing) = timing_ref {
             timing.record_traceback_lengths(
                 std::mem::take(&mut traceback_edit_script_lengths),
@@ -18034,17 +18140,13 @@ fn search_query_batch(
         // aux_struct->offset_pairs =
         //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
         // ```
-        let new_state = || {
-            (
-                GapAlignScratch::new(),
-                SubjectScratch::new(queries_ref.len(), offset_array_size, window_size),
-            )
-        };
-        let search_one = |state: &mut (GapAlignScratch, SubjectScratch), s_idx: usize| {
+        let new_state =
+            || x_lend_scratch(x_scratch, queries_ref.len(), offset_array_size, window_size);
+        let search_one = |state: &mut x_scratch_keep::Lent<'_, ScratchState>, s_idx: usize| {
             if x_cancelled() {
                 return (None, Vec::new());
             }
-            let (gap_scratch, subject_scratch) = state;
+            let (gap_scratch, subject_scratch) = &mut **state;
             let mut subject_hits: Option<Vec<BlastnHsp>> = None;
             let mut prelim_hits: Vec<PrelimHit> = Vec::new();
             process_subject(
@@ -18141,12 +18243,8 @@ fn search_query_batch(
     // aux_struct->offset_pairs =
     //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
     // ```
-    let new_scratch = || {
-        (
-            GapAlignScratch::new(),
-            SubjectScratch::new(queries_ref.len(), offset_array_size, window_size),
-        )
-    };
+    let new_scratch =
+        || x_lend_scratch(x_scratch, queries_ref.len(), offset_array_size, window_size);
     let prelim_lists = match split_prelim_lists {
         Some(lists) => lists,
         None => match subjects {
@@ -18188,10 +18286,10 @@ fn search_query_batch(
                         parallel_pool,
                         use_parallel,
                         &new_scratch,
-                        &|state: &mut (GapAlignScratch, SubjectScratch),
+                        &|state: &mut x_scratch_keep::Lent<'_, ScratchState>,
                           ordinal: u32,
                           subject: BlastnSubjectRef<'_>| {
-                            let (gap_scratch, subject_scratch) = state;
+                            let (gap_scratch, subject_scratch) = &mut **state;
                             let mut subject_hits: Option<Vec<BlastnHsp>> = None;
                             let mut prelim_hits: Vec<PrelimHit> = Vec::new();
                             process_subject(
@@ -18245,10 +18343,10 @@ fn search_query_batch(
                         parallel_pool,
                         use_parallel,
                         &new_scratch,
-                        &|state: &mut (GapAlignScratch, SubjectScratch),
+                        &|state: &mut x_scratch_keep::Lent<'_, ScratchState>,
                           ordinal: u32,
                           subject: BlastnSubjectRef<'_>| {
-                            let (gap_scratch, subject_scratch) = state;
+                            let (gap_scratch, subject_scratch) = &mut **state;
                             let mut subject_hits: Option<Vec<BlastnHsp>> = None;
                             let mut prelim_hits: Vec<PrelimHit> = Vec::new();
                             process_subject(
@@ -18309,11 +18407,11 @@ fn search_query_batch(
                 use_parallel,
                 &listed,
                 &new_scratch,
-                &|state: &mut (GapAlignScratch, SubjectScratch),
+                &|state: &mut x_scratch_keep::Lent<'_, ScratchState>,
                   ordinal: u32,
                   subject: BlastnSubjectRef<'_>,
                   kept: &Vec<PrelimHit>| {
-                    let (gap_scratch, subject_scratch) = state;
+                    let (gap_scratch, subject_scratch) = &mut **state;
                     let mut subject_hits: Option<Vec<BlastnHsp>> = None;
                     let mut prelim_hits: Vec<PrelimHit> = Vec::new();
                     process_subject(
@@ -18420,6 +18518,7 @@ fn search_query_chunks(
     batching: QueryBatching,
     first_batch: bool,
     x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
+    x_scratch: Option<&ScratchKeep>,
 ) -> Result<Option<PrelimHitLists>> {
     let lengths: Vec<usize> = (0..queries.count())
         .map(|index| queries.length(index))
@@ -18485,6 +18584,7 @@ fn search_query_chunks(
                 batch_eff_searchsp,
             },
             x_keep,
+            x_scratch,
         )?;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:174-178
         // ```c

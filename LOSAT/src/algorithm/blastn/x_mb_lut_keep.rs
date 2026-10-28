@@ -126,6 +126,10 @@ struct Kept {
 #[derive(Default)]
 pub(crate) struct Keep {
     kept: Mutex<Option<Kept>>,
+    /// The `qs` of the last CSR of a one-template discontiguous table (`x_dc_csr::Csr`), kept for
+    /// the next CSR's build (`take_words`): its words are written before they are read, so it is
+    /// never zeroed.
+    words: Mutex<Vec<u32>>,
 }
 
 impl Keep {
@@ -190,6 +194,23 @@ impl Keep {
                 drop(kept);
                 (Vec::new(), 0, 0)
             }
+        }
+    }
+
+    /// The kept `qs` of the loop's CSRs (empty, with the capacity of the largest one given back),
+    /// for a build that writes every element it uses (`x_dc_csr::x_offsets_buffer`); an empty
+    /// vector when none is kept.
+    pub(super) fn take_words(&self) -> Vec<u32> {
+        std::mem::take(&mut *self.words.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    /// Takes back a CSR's `qs`: kept when it has more room than the kept one, else freed.
+    pub(super) fn give_back_words(&self, words: Vec<u32>) {
+        let mut slot = self.words.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.capacity() < words.capacity() {
+            let old = std::mem::replace(&mut *slot, words);
+            drop(slot);
+            drop(old);
         }
     }
 

@@ -1513,6 +1513,7 @@ pub(super) fn csr(
     pv_array_bts: usize,
     helper_array: &mut [u32],
     x_offsets: Vec<u32>,
+    x_qs: Vec<u32>,
 ) -> (super::x_dc_csr::Csr, bool) {
     debug_assert!(!words.two_templates);
     #[cfg(all(
@@ -1535,6 +1536,7 @@ pub(super) fn csr(
                 helper_array,
                 STEP_POSITIONS,
                 x_offsets,
+                x_qs,
             )
         } else {
             csr_on_pool(
@@ -1546,6 +1548,7 @@ pub(super) fn csr(
                 helper_array,
                 CHUNK_POSITIONS,
                 x_offsets,
+                x_qs,
             )
         };
         return (csr, true);
@@ -1558,6 +1561,7 @@ pub(super) fn csr(
         pv_array_bts,
         helper_array,
         x_offsets,
+        x_qs,
     );
     (csr, false)
 }
@@ -1577,6 +1581,7 @@ fn csr_on_pool(
     helper_array: &mut [u32],
     chunk: usize,
     x_offsets: Vec<u32>,
+    x_qs: Vec<u32>,
 ) -> super::x_dc_csr::Csr {
     use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier};
     let chunk = chunk.max(1);
@@ -1641,7 +1646,8 @@ fn csr_on_pool(
     // `offsets[cells]` below; `qs` gets one element per word (`total` positions bound them).
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
     let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 1);
-    let mut qs: Vec<u32> = Vec::with_capacity(total);
+    // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_qs` is the batch loop's kept `qs` or an empty vector.
+    let mut qs = super::x_dc_csr::x_offsets_buffer(x_qs, total);
     let ob = Shared {
         ptr: offsets.as_mut_ptr(),
         len: cells + 1,
@@ -1955,6 +1961,7 @@ fn csr_on_pool_steps(
     helper_array: &mut [u32],
     chunk: usize,
     x_offsets: Vec<u32>,
+    x_qs: Vec<u32>,
 ) -> super::x_dc_csr::Csr {
     use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier};
     let chunk = chunk.max(1);
@@ -1990,7 +1997,8 @@ fn csr_on_pool_steps(
     // As `csr_on_pool`'s (EXPERIMENT LOSAT_X_MBLUTKEEP: `x_offsets` is the batch loop's kept table
     // or an empty vector).
     let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 1);
-    let mut qs: Vec<u32> = Vec::with_capacity(total);
+    // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_qs` is the batch loop's kept `qs` or an empty vector.
+    let mut qs = super::x_dc_csr::x_offsets_buffer(x_qs, total);
     let ob = Shared {
         ptr: offsets.as_mut_ptr(),
         len: cells + 1,
@@ -3915,6 +3923,7 @@ mod tests {
                 pv_array_bts,
                 &mut helper,
                 chunk,
+                Vec::new(),
                 Vec::new(),
             );
             super::super::x_dc_csr::x_assert_runs_are_the_chains(

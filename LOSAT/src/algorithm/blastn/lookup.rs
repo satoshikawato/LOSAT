@@ -2757,6 +2757,9 @@ pub(crate) fn build_disc_mb_lookup_kept(
         x_clock.fill();
         let (x_offsets, x_length, x_dirty) =
             x_keep.map_or((Vec::new(), 0, 0), |keep| keep.take_buffer(hashsize + 1));
+        // EXPERIMENT (LOSAT_X_MBLUTKEEP): the `qs` of the loop's last CSR, whose allocation the
+        // build reuses (`x_mb_lut_keep::Keep::take_words`).
+        let x_qs = x_keep.map_or(Vec::new(), |keep| keep.take_words());
         let (csr, on_pool) = match x_disc_lookup_par::parts() {
             Some(parts) => x_disc_lookup_par::csr(
                 parts,
@@ -2766,6 +2769,7 @@ pub(crate) fn build_disc_mb_lookup_kept(
                 pv_array_bts,
                 &mut helper_array,
                 x_offsets,
+                x_qs,
             ),
             None => (
                 x_dc_csr::build(
@@ -2775,6 +2779,7 @@ pub(crate) fn build_disc_mb_lookup_kept(
                     pv_array_bts,
                     &mut helper_array,
                     x_offsets,
+                    x_qs,
                 ),
                 false,
             ),

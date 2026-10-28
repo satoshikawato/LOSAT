@@ -124,6 +124,7 @@ impl Drop for Csr {
     fn drop(&mut self) {
         if let Some((keep, length, dirty)) = self.x_keep.take() {
             keep.give_back_buffer(std::mem::take(&mut self.offsets), length, dirty);
+            keep.give_back_words(std::mem::take(&mut self.qs));
         }
     }
 }
@@ -382,6 +383,7 @@ pub(super) fn build(
     pv_array_bts: usize,
     helper_array: &mut [u32],
     x_offsets: Vec<u32>,
+    x_qs: Vec<u32>,
 ) -> Csr {
     // Once per table: the bounds the unchecked writes below rely on.
     assert!(!words.two_templates && cells % 2048 == 0 && pv_array_bts >= 5);
@@ -431,7 +433,8 @@ pub(super) fn build(
     debug_assert_eq!(total as usize, n_words);
     // SAFETY: `cells < cells + 1`; `offsets[cells]` is no cell's end.
     unsafe { *ob.add(cells) = total };
-    let mut qs: Vec<u32> = Vec::with_capacity(n_words);
+    // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_qs` is the batch loop's kept `qs` or an empty vector.
+    let mut qs = x_offsets_buffer(x_qs, n_words);
     let qb = qs.as_mut_ptr();
     each_word(words, |cell, index| {
         // SAFETY: `cell < cells` (the same words as the count pass), `offsets[cell]` is the end
@@ -640,6 +643,7 @@ pub(super) fn x_assert_runs_are_the_chains(
             pv_array_bts,
             &mut helper2,
             Vec::new(),
+            Vec::new(),
         );
         if serial.offsets != csr.offsets || serial.qs != csr.qs || pv2 != pv || helper2 != helper {
             diffs.push("pool build != serial build".to_string());
@@ -784,7 +788,15 @@ mod tests {
                     chains(&w, cells, pv_len, pv_array_bts);
                 let mut pv = vec![0 as PvArrayType; pv_len];
                 let mut helper = vec![0u32; cells >> 11];
-                let csr = build(&w, cells, &mut pv, pv_array_bts, &mut helper, Vec::new());
+                let csr = build(
+                    &w,
+                    cells,
+                    &mut pv,
+                    pv_array_bts,
+                    &mut helper,
+                    Vec::new(),
+                    Vec::new(),
+                );
                 let longest = disc_longest_chain(&fill_helper, &[], false);
                 x_assert_runs_are_the_chains(
                     &w,

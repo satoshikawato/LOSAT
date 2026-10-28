@@ -140,6 +140,9 @@ struct XChunk {
 struct XChunkAppends {
     packed: Vec<u32>,
     stripe_starts: Vec<u32>,
+    /// PROBE (v4-BPF s9, LOSAT_BPF_S9G=1): unsorted, `packed` holds the appends' cells in order and
+    /// this the (query offset, appends) of the offsets with any; else empty.
+    per_offset: Vec<(i32, u32)>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
@@ -488,10 +491,12 @@ fn x_chunk_appends(
     too_large: &AtomicBool,
     targets: &mut Vec<u32>,
     per_offset: &mut Vec<(i32, u32)>,
+    sort: bool,
 ) -> XChunkAppends {
     let empty = || XChunkAppends {
         packed: Vec::new(),
         stripe_starts: vec![0; stripes + 1],
+        per_offset: Vec::new(),
     };
     targets.clear();
     per_offset.clear();
@@ -533,6 +538,16 @@ fn x_chunk_appends(
     for j in 0..stripes {
         stripe_starts[j + 1] += stripe_starts[j];
     }
+    if !sort {
+        // PROBE (v4-BPF s9, LOSAT_BPF_S9G=1): the appends as they are; the thread's next chunk takes
+        // new vectors of the same capacity.
+        let (targets_capacity, offsets_capacity) = (targets.capacity(), per_offset.capacity());
+        return XChunkAppends {
+            packed: std::mem::replace(targets, Vec::with_capacity(targets_capacity)),
+            stripe_starts,
+            per_offset: std::mem::replace(per_offset, Vec::with_capacity(offsets_capacity)),
+        };
+    }
     let mut cursors = stripe_starts[..stripes].to_vec();
     let mut packed = if x_s8_stash() {
         let mut stashed = X_S8_CHUNKS
@@ -562,6 +577,49 @@ fn x_chunk_appends(
     XChunkAppends {
         packed,
         stripe_starts,
+        per_offset: Vec::new(),
+    }
+}
+
+/// PROBE (v4-BPF s9, LOSAT_BPF_S9G=1): the table's `hits` written by the chunks' tasks at disjoint
+/// slots.
+struct XHitsOut(*mut i32);
+// SAFETY: the tasks write disjoint slots (`x_scatter_s9g`).
+unsafe impl Send for XHitsOut {}
+// SAFETY: as above.
+unsafe impl Sync for XHitsOut {}
+
+/// PROBE (v4-BPF s9, LOSAT_BPF_S9G=1): chunk `chunk`'s appends written into the table's hits as
+/// `x_chunk_appends` packs them, stripe j's from slot `positions[j]` on: the stripes' slices of the
+/// hits hold their parts of the chunks in chunk order.
+fn x_scatter_s9g(
+    chunk: &XChunk,
+    chunk_appends: &XChunkAppends,
+    positions: &[u32],
+    shift: usize,
+    out: &XHitsOut,
+    cursors: &mut Vec<u32>,
+) {
+    cursors.clear();
+    cursors.extend_from_slice(positions);
+    let mask = (1u32 << shift) - 1;
+    let mut at = 0usize;
+    for &(query_offset, appends) in &chunk_appends.per_offset {
+        let delta = (query_offset - chunk.base) as u32;
+        let end = at + appends as usize;
+        for &index in &chunk_appends.packed[at..end] {
+            let cursor = &mut cursors[index as usize >> shift];
+            // SAFETY: chunk c's appends to stripe j take the slots from `positions[j]`, the stripe's
+            // first hit plus the appends of the chunks before c to it, on; the chunks' ranges of a
+            // stripe's slots are disjoint and lie in the stripe's slice of the hits.
+            unsafe {
+                out.0
+                    .add(*cursor as usize)
+                    .write(((index & mask) << 16 | delta) as i32)
+            };
+            *cursor += 1;
+        }
+        at = end;
     }
 }
 
@@ -722,6 +780,7 @@ fn x_stripe_build_s9(
     chunks: &[XChunk],
     appends: &[XChunkAppends],
     need_cells: bool,
+    global: Option<&[Vec<u32>]>,
     scratch: &mut XS9Scratch,
 ) -> XStripeCounts {
     let XStripe {
@@ -765,8 +824,22 @@ fn x_stripe_build_s9(
         }
         #[cfg(not(target_arch = "x86_64"))]
         let _ = (index, pf);
-        let part = &chunk_appends.packed[chunk_appends.stripe_starts[stripe] as usize
-            ..chunk_appends.stripe_starts[stripe + 1] as usize];
+        let part: &[u32] = match global {
+            // LOSAT_BPF_S9G: the chunk's part is in the stripe's slice of the hits.
+            Some(positions) => {
+                let lo = (positions[index][stripe] - base) as usize;
+                let hi = positions
+                    .get(index + 1)
+                    .map_or(hits.len(), |next| (next[stripe] - base) as usize);
+                let part = &hits[lo..hi];
+                // SAFETY: i32 and u32 have the same layout.
+                unsafe { std::slice::from_raw_parts(part.as_ptr().cast::<u32>(), part.len()) }
+            }
+            None => {
+                &chunk_appends.packed[chunk_appends.stripe_starts[stripe] as usize
+                    ..chunk_appends.stripe_starts[stripe + 1] as usize]
+            }
+        };
         let chunk_base = chunk.base as u32;
         if need_cells {
             let mut taken = 0usize;
@@ -915,6 +988,9 @@ fn x_try_build_flat_parallel_with(
     );
     let stripes = backbone_size.div_ceil(1 << shift);
     let s9 = s9_on && (query.len() as u64) < (1u64 << (32 - shift));
+    // PROBE (v4-BPF s9): LOSAT_BPF_S9G=1 (with S9B) scatters the chunks' appends straight into the
+    // table's hits at their stripes' slots (`x_scatter_s9g`) instead of sorting each chunk's own.
+    let s9g = s9 && crate::algorithm::blastp::x_query_slots::x_s8_env("LOSAT_BPF_S9G") == Some(1);
 
     // The chunks' appends, sorted by stripe.
     let appended = AtomicUsize::new(0);
@@ -931,9 +1007,10 @@ fn x_try_build_flat_parallel_with(
             &too_large,
             targets,
             per_offset,
+            !s9g,
         )
     };
-    let appends: Vec<XChunkAppends> = match cuts.passes {
+    let mut appends: Vec<XChunkAppends> = match cuts.passes {
         XPasses::Rayon => chunks
             .par_iter()
             .map_init(
@@ -1008,6 +1085,49 @@ fn x_try_build_flat_parallel_with(
     X_LKPFLAT_RECYCLED_HITS.fetch_add(u64::from(hits_reused), Ordering::Relaxed);
     starts[backbone_size] = total as u32;
 
+    // LOSAT_BPF_S9G: each chunk's slots in each stripe, then the chunks' appends written there.
+    let mut global_positions: Vec<Vec<u32>> = Vec::new();
+    if s9g {
+        let mut running: Vec<u32> = Vec::with_capacity(stripes);
+        let mut first_hit = 0u32;
+        for &stripe_total in &stripe_hits {
+            running.push(first_hit);
+            first_hit += stripe_total as u32;
+        }
+        for chunk_appends in &appends {
+            global_positions.push(running.clone());
+            for (position, bounds) in running
+                .iter_mut()
+                .zip(chunk_appends.stripe_starts.windows(2))
+            {
+                *position += bounds[1] - bounds[0];
+            }
+        }
+        let out = XHitsOut(hits.as_mut_ptr());
+        x_one_latch_pass(
+            threads,
+            chunks.len(),
+            0,
+            Vec::<u32>::new,
+            |cursors, index| {
+                x_scatter_s9g(
+                    &chunks[index],
+                    &appends[index],
+                    &global_positions[index],
+                    shift,
+                    &out,
+                    cursors,
+                )
+            },
+            |_| {},
+        );
+        // The chunks' appends are in the hits now.
+        for chunk_appends in &mut appends {
+            chunk_appends.packed = Vec::new();
+            chunk_appends.per_offset = Vec::new();
+        }
+    }
+
     // The stripes: count, layout and fill.
     let mut parts = Vec::with_capacity(stripes);
     let mut starts_rest = &mut starts[..backbone_size];
@@ -1050,8 +1170,9 @@ fn x_try_build_flat_parallel_with(
             // capacity, no table's test can refuse it.
             let mut range_appends = vec![0usize; ranges.len()];
             for (chunk, chunk_appends) in chunks.iter().zip(&appends) {
-                range_appends[chunk.range] += chunk_appends.packed.len();
+                range_appends[chunk.range] += chunk_appends.stripe_starts[stripes] as usize;
             }
+            let global = s9g.then_some(&global_positions[..]);
             let need_cells = ranges
                 .iter()
                 .zip(&range_appends)
@@ -1079,6 +1200,7 @@ fn x_try_build_flat_parallel_with(
                         &chunks,
                         &appends,
                         need_cells,
+                        global,
                         scratch,
                     )
                 },

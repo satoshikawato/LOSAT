@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -181,6 +182,30 @@ def main():
                 assert data == reference, f"raw output differs: {row_id}/{kind}-n{n}"
                 validate_thread_evidence(log, n, "native" if kind == "native-serial" else kind)
         print(row_id, "-db raw parity + thread contract PASS", flush=True)
+    # NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:225-228
+    # ```c++
+    #         CBlastFormat formatter(opt, *db_adapter,
+    #                                fmt_args->GetFormattedOutputChoice(),
+    #                                query_opts->GetParseDeflines(),
+    #                                m_CmdLineArgs->GetOutputStream(),
+    # ```
+    # The output is one stream of the process. blastp-fast's query blocks searched two at a time
+    # (LOSAT_X_BPQSLOTS) are written by whichever pool thread completes the order, to the -out file
+    # that another thread created (the Node host's threads write a descriptor that another thread
+    # opened), and to /dev/null; against the native bytes. MeenMJNV x MejoMJNV makes two blocks, the
+    # second the larger, so the thread that wrote the first one rarely writes the second (the host
+    # test in test_wasi_runners.js always writes from the other thread).
+    common = ["blastp", "-task", "blastp-fast", "-query", TESTS / "fasta/MeenMJNV.faa",
+              "-subject", TESTS / "fasta/MejoMJNV.faa", "-outfmt", "6", "-evalue", "0.001", "-num_threads", "2"]
+    reference, _ = execute("slots/native-n2", [*prefixes["native"], *common, "-out", "{out}"])
+    for label, target in [("file", "{out}"), ("dev-null", "/dev/null")]:
+        data, log = execute(f"slots/threaded-n2-{label}", [*prefixes["threaded"], *common, "-out", target],
+                            {"LOSAT_X_STATS": "1", "LOSAT_WASI_THREADS_DEBUG": "1"})
+        assert data == (reference if label == "file" else b""), f"raw output differs: slots/threaded-n2-{label}"
+        slots = re.search(r"\[X_STATS\] BPQSLOTS searches=1 blocks=(\d+)", log)
+        assert slots and int(slots.group(1)) >= 2, f"the blocks did not take the slots: {label}"
+        validate_thread_evidence(log, 2, "threaded")
+    print("blastp-fast slots -out parity + thread contract PASS", flush=True)
     for program, query in [("blastn", "nuc1"), ("tblastx", "nuc1"), ("blastp", "aa1")]:
         common = [program, "-query", inputs[query], "-subject", inputs[query], "-outfmt", "6", "-out", "{out}"]
         for kind, prefix in prefixes.items():

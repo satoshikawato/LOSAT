@@ -4190,6 +4190,115 @@ mod tests {
         }
     }
 
+    // Line DBID item ID4f: BLASTN's outfmt 0 makes its rows a window of queries at a time and
+    // writes each window's report (`algorithm::blastn::blast_engine::run`); the reports of
+    // consecutive query ranges, each given only its own hits, are the report of all queries,
+    // on one thread and on a pool.
+    #[test]
+    fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
+        let config = PairwiseConfig {
+            program: "blastn".to_string(),
+            show_frame: false,
+            ..PairwiseConfig::default()
+        };
+        let karlin = KarlinParams {
+            lambda: 1.28,
+            k: 0.46,
+            h: 0.85,
+            alpha: 0.0,
+            beta: 0.0,
+        };
+        let queries: Vec<BlastnPairwiseQuery> = (0..4)
+            .map(|q_idx| BlastnPairwiseQuery {
+                query_name: format!("q{q_idx} query {q_idx}").into_bytes(),
+                query_length: 100,
+                karlin: Some((karlin, karlin)),
+                effective_search_space: 10_000,
+            })
+            .collect();
+        let report = BlastnPairwiseReport {
+            version: "2.17.0+".to_string(),
+            megablast: true,
+            database_name: "subjects".to_string(),
+            database_num_sequences: 3,
+            database_total_letters: 300,
+            database: None,
+            reward: 1,
+            penalty: -2,
+            gap_open: 0,
+            gap_extend: 0,
+            zero_gap_extension_formula: true,
+            window_size: 0,
+            num_descriptions: 500,
+            num_alignments: 250,
+            unsearched: vec![false; queries.len()],
+            epilog: true,
+            prolog: true,
+            parsed_subjects: Vec::new(),
+        };
+        // Query 0: subjects 1 (2 HSPs) and 2; query 1: no hits; queries 2 and 3: subject 1.
+        let hits: Vec<PairwiseHit> = [(0, 1), (0, 1), (0, 2), (2, 1), (3, 1)]
+            .into_iter()
+            .map(|(q_idx, s_idx)| {
+                let mut hit = PairwiseHit::from(Hit {
+                    q_idx,
+                    s_idx,
+                    ..make_hit()
+                });
+                hit.query_seq = Some("A".repeat(100));
+                hit.subject_seq = Some("A".repeat(100));
+                hit.gaps = Some(0);
+                hit.subject_length = Some(100);
+                hit
+            })
+            .collect();
+        let titles: Vec<Arc<[u8]>> = (0..3)
+            .map(|s_idx| Arc::from(format!("s{s_idx} subject {s_idx}").as_bytes()))
+            .collect();
+        crate::utils::threading::with_search_pool(4, "test", |pool| {
+            for x_pool in [None, Some(pool)] {
+                let write = |range: std::ops::Range<usize>| {
+                    let range_hits: Vec<PairwiseHit> = hits
+                        .iter()
+                        .filter(|hit| range.contains(&(hit.hit.q_idx as usize)))
+                        .cloned()
+                        .collect();
+                    let mut written = Vec::new();
+                    write_blastn_pairwise_report(
+                        &range_hits,
+                        &mut written,
+                        &config,
+                        &queries,
+                        range,
+                        &titles,
+                        &report,
+                        None,
+                        None,
+                        x_pool,
+                    )
+                    .unwrap();
+                    written
+                };
+                let whole = write(0..queries.len());
+                let text = String::from_utf8(whole.clone()).unwrap();
+                assert!(text.starts_with("BLASTN 2.17.0+"), "{text}");
+                assert_eq!(text.matches("Query= ").count(), queries.len(), "{text}");
+                assert!(text.contains("No hits found"), "{text}");
+                for cuts in [vec![1], vec![2], vec![3], vec![1, 2, 3], vec![1, 3]] {
+                    let mut joined = Vec::new();
+                    let mut start = 0;
+                    for end in cuts.into_iter().chain([queries.len()]) {
+                        joined.extend(write(start..end));
+                        start = end;
+                    }
+                    assert_eq!(String::from_utf8(joined).unwrap(), text);
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+
     #[test]
     fn test_write_pairwise_simple() {
         let hits = vec![make_hit()];

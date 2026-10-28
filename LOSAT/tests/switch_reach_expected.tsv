@@ -50,6 +50,7 @@ LOSAT_X_BPREDOLPT	blastp	conditional	required	required	only with BPREDOPAR, more
 LOSAT_X_BPREDOPAR	blastp	conditional	required	required	more than one thread and at least two matches
 LOSAT_X_BPREDOWINEXPAND	blastp	always			acts wherever BPREDOPAR's windowed redo runs (its sides are BPREDOPAR's)
 LOSAT_X_BPSEGWIN	blastp	conditional	gap	required	only where BPREDOPAR's windowed redo runs (more than one thread, at least two matches) and the store holds 4,096 entries (the switch's value) or more after a window; new gap: the CI fixtures' stores stay below 4,096 entries; tests/blastp_redo_memory.rs reaches it with LOSAT_X_BPSEGWIN=2
+LOSAT_X_BPSTRIPEFILL	blastp	always			acts wherever BPLKPFLAT's one-latch build of the flat compressed table runs (its sides are BPLKPFLAT's)
 LOSAT_X_BPSUBJMETA	blastp	conditional	required	gap	-subject with query-block path (BPQBLOCK: >50,000 query letters, several blocks, supported outfmt); not -db; ref gap: needs blastp -db with a query > 50,000 letters, outfmt 6, 2+ blocks
 LOSAT_X_BPSUBJRUN	blastp	conditional	required	required	-subject only, 2+ threads and more than one subject; not -db, not 1 thread
 LOSAT_X_BPUNGAPSENT	blastp	conditional	required	required	word size 3 with the fused loop (default blastp); blastp-fast (other word sizes) and subjects with a code >= 32 run the plain closure (`extend_two_hit_blosum62`)

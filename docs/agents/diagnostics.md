@@ -358,6 +358,7 @@ export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
 export LOSAT_X_BPREDOWINEXPAND=1
 export LOSAT_X_BPSEGWIN=4096
+export LOSAT_X_BPSTRIPEFILL=1
 export LOSAT_X_BPSUBJMETA=1
 export LOSAT_X_BPSUBJRUN=1
 export LOSAT_X_BPUNGAPSENT=1
@@ -2770,6 +2771,21 @@ Rebuilding less:
   97 -> 142; Species4 x Species6 `-db` at 2 / 4 threads 106 -> 134 / 117 -> 147 (NCBI 304 / 360). Three blocks of
   50,000 letters were faster at 16 threads (x0.870 on the first case) but held 175 MiB on the 3,000 proteins, above
   NCBI's 166; 16 one-thread blocks (x0.858) held 813 MiB.
+- `LOSAT_X_BPSTRIPEFILL=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added
+  it, 2026-10-28, on unless it is `0`; acts wherever `LOSAT_X_BPLKPFLAT`'s one-latch build of the flat table of
+  `LOSAT_X_BPCLUT` runs, so with more than one thread) builds each stripe of that table from one read of the query
+  chunks' parts (`tblastx/lookup/x_clut_par.rs` `x_stripe_fill`, exactness argument in its header): the stripe
+  copies its part of each chunk, in chunk order, while it counts its cells, then lays out and fills from the copy;
+  before, `x_stripe_build` read the 128 parts (at 16 threads) twice, once to count and once to fill, and the second
+  read of short parts written by other cores stalled (line BPF `REPORT.md` §13-§14: the stripes pass was about 14 %
+  of the cycles of the human x yeast search at 16 threads, with a cycles per instruction of 0.565 against 0.395 for
+  the serial bucket fill). The overflow cells of NCBI's table are counted only where a table's appends pass its
+  capacity (an append takes at most one, so elsewhere the capacity test cannot refuse); the stripes are at most
+  2^12 cells wide (their counts stay in L1). Memory: each thread keeps the copy of one stripe's appends (4 bytes
+  each) during the pass. At one thread nothing changes (the serial builder runs). A form that wrote the chunks'
+  appends straight into the table's hits instead (line BPF s10, `exp/bpf-s8` 3c405fdb) was as fast and took
+  20-35 MiB more (its scattered stores stalled in turn).
+  MEASURED_PLACEHOLDER
 - `LOSAT_X_BPQBLOCKWEB=1` (BLASTP in `run_local`, the LOSAT Web build's search, speed and memory; in the strict set
   from the pull request that added it, 2026-10-22, on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search
   of `LOSAT_X_BPQBLOCK` also for a call with more than one output, the hit records or a format observer (ABI v2 of the

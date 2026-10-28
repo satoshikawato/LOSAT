@@ -102,6 +102,16 @@
 //!   after the appends pass and makes no table (`None`, the spare keeps the vectors); the block then
 //!   builds its table itself.
 //!
+//! With `LOSAT_X_BPSTRIPEFILL` (a strict-set switch: on unless `=0`) the one-latch stripes pass
+//! makes each stripe's part another way (`x_stripe_fill`, `XParallelCuts::stripe_fill`); the table
+//! is the same: the stripe reads its parts of the chunks once, in chunk order, into a copy while it
+//! counts the cells (the copy holds the cells' appends in the serial order, chunk by chunk, each
+//! packed as in its chunk), then lays out and fills from the copy as `x_stripe_build` does, the
+//! copy's part of chunk c taking chunk c's first offset. The overflow cells are counted only where a
+//! table's appends pass the capacity: an append takes at most one, so elsewhere no table's test can
+//! refuse it. The stripes are at most 2^`X_FILL_STRIPE_SHIFT` cells wide (or `x_largest_pv_shift`
+//! where that is wider) unless the cuts give the width.
+//!
 //! On with `LOSAT_X_BPCLUT` (a strict-set switch: on unless `=0`)
 //! where the search's pool has more than one thread; at one thread the serial builder runs.
 
@@ -124,6 +134,10 @@ const X_OFFSET_SPAN: i64 = 1 << 16;
 // No NCBI counterpart: the 16 bits of a packed append that hold the cell's index in its stripe.
 /// The widest stripe: 2^16 cells.
 const X_MAX_STRIPE_SHIFT: usize = 16;
+// No NCBI counterpart: the stripes' width with LOSAT_X_BPSTRIPEFILL. Scheduling only.
+/// The widest stripe of `x_stripe_fill` (unless `x_largest_pv_shift` is wider): its cells' counts
+/// (16 KiB) stay in L1 (2^10 timed slower, 2^11 the same, v4-BPF s9).
+const X_FILL_STRIPE_SHIFT: usize = 12;
 
 /// A contiguous run of the query offsets of one count range.
 struct XChunk {
@@ -164,7 +178,7 @@ pub(super) fn x_try_build_flat_in_pool(
     x_flat_args: XFlatArgs<'_>,
 ) -> Option<XFlatBuild> {
     let threads = pool.threads();
-    let build = |passes, spare, x_ahead| {
+    let build = |passes, spare, x_ahead, stripe_fill| {
         pool.install(|| {
             x_try_build_flat_parallel_with(
                 word_size,
@@ -181,6 +195,7 @@ pub(super) fn x_try_build_flat_in_pool(
                     passes,
                     spare,
                     x_ahead,
+                    stripe_fill,
                 },
             )
         })
@@ -190,17 +205,28 @@ pub(super) fn x_try_build_flat_in_pool(
         if x_flat_args.x_ahead {
             return None;
         }
-        return build(XPasses::Rayon, None, false);
+        return build(XPasses::Rayon, None, false, false);
     }
     let built = build(
         XPasses::OneLatch(x_flat_args.extra),
         x_flat_args.spare,
         x_flat_args.x_ahead,
+        x_bpstripefill_on(),
     );
     if matches!(built, Some(XFlatBuild::Table(_))) {
         X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
     }
     built
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BPSTRIPEFILL switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPSTRIPEFILL): a strict-set switch, on unless it is `0`: the one-latch
+/// stripes pass reads each stripe's parts once and fills from the copy (`x_stripe_fill`, module
+/// header).
+fn x_bpstripefill_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPSTRIPEFILL"))
 }
 
 /// EXPERIMENT (LOSAT_X_BPLKPFLAT): how the build's two passes reach the pool's threads.
@@ -328,6 +354,9 @@ struct XParallelCuts<'a> {
     /// the build makes no table (`None`); nothing of the table is allocated here
     /// (`XFlatArgs::x_ahead`).
     x_ahead: bool,
+    /// LOSAT_X_BPSTRIPEFILL: with one-latch passes, the stripes made by `x_stripe_fill` (else by
+    /// `x_stripe_build`).
+    stripe_fill: bool,
 }
 
 // No NCBI counterpart: the largest PV shift that `finalize` (blast_aalookup.c:1219-1222, below)
@@ -342,10 +371,10 @@ fn x_largest_pv_shift(backbone_size: usize) -> usize {
 }
 
 // No NCBI counterpart: chooses the stripes' width. Scheduling only.
-/// The widest stripes (2^shift cells, shift from `smallest` to `X_MAX_STRIPE_SHIFT`) that make at
-/// least `stripes` of them, or the narrowest.
-fn x_stripe_shift(backbone_size: usize, stripes: usize, smallest: usize) -> usize {
-    let mut shift = X_MAX_STRIPE_SHIFT;
+/// The widest stripes (2^shift cells, shift from `smallest` to `widest`) that make at least
+/// `stripes` of them, or the narrowest.
+fn x_stripe_shift(backbone_size: usize, stripes: usize, smallest: usize, widest: usize) -> usize {
+    let mut shift = widest;
     while shift > smallest && backbone_size.div_ceil(1 << shift) < stripes {
         shift -= 1;
     }
@@ -639,6 +668,124 @@ fn x_stripe_build(
     }
 }
 
+/// LOSAT_X_BPSTRIPEFILL: a thread's scratch for `x_stripe_fill`: the copy of the stripe's parts,
+/// the cells' counts (then cursors), the cells of more than 5 offsets, a cell's offsets.
+type XFillScratch = (Vec<u32>, Vec<u32>, Vec<u32>, Vec<i32>);
+
+// NCBI reference (598d8ae6): as `x_stripe_build` (blast_aalookup.c:787-849, :1197-1235)
+// ```c
+//     Int4 num_entries = backbone_cell->num_used;
+//     ...
+//     backbone_cell->num_used++;
+// ```
+/// LOSAT_X_BPSTRIPEFILL: `x_stripe_build` with the stripe's parts of the chunks read once, in chunk
+/// order, into a copy while the cells are counted; the layout and the fill from the copy (module
+/// header). The overflow cells are counted only with `need_cells`.
+#[allow(clippy::too_many_arguments)]
+fn x_stripe_fill(
+    part: XStripe<'_>,
+    shift: usize,
+    backbone_size: usize,
+    ranges: usize,
+    chunks: &[XChunk],
+    appends: &[XChunkAppends],
+    need_cells: bool,
+    scratch: &mut XFillScratch,
+) -> XStripeCounts {
+    let XStripe {
+        stripe,
+        base,
+        starts,
+        hits,
+        pv,
+    } = part;
+    let (copy, counts, overflowed, appended) = scratch;
+    let first = stripe << shift;
+    counts.clear();
+    counts.resize((backbone_size - first).min(1 << shift), 0);
+    copy.clear();
+    copy.reserve(hits.len());
+    let part_of = |chunk_appends: &XChunkAppends| {
+        chunk_appends.stripe_starts[stripe] as usize
+            ..chunk_appends.stripe_starts[stripe + 1] as usize
+    };
+
+    // Count: each cell's appends in the serial order; the overflow cells they take.
+    let mut cells = vec![0usize; ranges];
+    for (chunk, chunk_appends) in chunks.iter().zip(appends) {
+        let part = &chunk_appends.packed[part_of(chunk_appends)];
+        if need_cells {
+            let mut taken = 0usize;
+            copy.extend(part.iter().map(|&packed| {
+                let count = &mut counts[(packed >> 16) as usize];
+                taken += usize::from(x_takes_overflow_cell(*count));
+                *count += 1;
+                packed
+            }));
+            cells[chunk.range] += taken;
+        } else {
+            copy.extend(part.iter().map(|&packed| {
+                counts[(packed >> 16) as usize] += 1;
+                packed
+            }));
+        }
+    }
+
+    // Layout, as `x_stripe_build`'s; the cells of more than 5 offsets noted.
+    let mut nonempty = 0usize;
+    let mut longest = 0u32;
+    let mut slot = 0u32;
+    overflowed.clear();
+    for (cell, (start, cursor)) in starts.iter_mut().zip(counts.iter_mut()).enumerate() {
+        let count = *cursor;
+        *start = base + slot;
+        if count > 0 {
+            nonempty += 1;
+            longest = longest.max(count);
+            if !pv.is_empty() {
+                pv[cell >> PV_ARRAY_BTS] |= 1u32 << ((first + cell) & PV_ARRAY_MASK);
+            }
+            if count > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
+                overflowed.push(cell as u32);
+            }
+        }
+        *cursor = slot;
+        slot += count;
+    }
+
+    // Fill: the serial fill on the stripe's cells, the appends in order, each at its cell's cursor;
+    // the copy holds the chunks' parts one after the other.
+    let mut at = 0usize;
+    for (chunk, chunk_appends) in chunks.iter().zip(appends) {
+        let end = at + part_of(chunk_appends).len();
+        for &packed in &copy[at..end] {
+            let cursor = &mut counts[(packed >> 16) as usize];
+            hits[*cursor as usize] = chunk.base + (packed & 0xffff) as i32;
+            *cursor += 1;
+        }
+        at = end;
+    }
+    // A cursor ends at its cell's end; the cells of more than 5 offsets put o_k at
+    // `x_emission_position(k, n)`.
+    for &cell in overflowed.iter() {
+        let cell = cell as usize;
+        let begin = (starts[cell] - base) as usize;
+        let end = counts[cell] as usize;
+        let n = (end - begin) as u32;
+        let cell_hits = &mut hits[begin..end];
+        appended.clear();
+        appended.extend_from_slice(cell_hits);
+        for (k, &query_offset) in appended.iter().enumerate() {
+            cell_hits[x_emission_position(k as u32, n) as usize] = query_offset;
+        }
+    }
+    XStripeCounts {
+        nonempty,
+        longest,
+        cells,
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (the passes) and
 // :1197-1235 (`finalize`, the statements of `x_try_build_flat_with_capacity`'s layout)
 // ```c
@@ -698,9 +845,16 @@ fn x_try_build_flat_parallel_with(
         cuts.chunk_sizes
     };
     let chunks = x_chunks(word_size, &ranges, locations, sizes);
+    // LOSAT_X_BPSTRIPEFILL (module header).
+    let fill = cuts.stripe_fill && matches!(cuts.passes, XPasses::OneLatch(_));
     let shift = cuts.stripe_shift.unwrap_or_else(|| {
         let stripes = (X_PARTS_PER_THREAD * threads).min(X_MAX_PARTS / chunks.len().max(1));
-        x_stripe_shift(backbone_size, stripes, largest_pv_shift)
+        let widest = if fill {
+            X_FILL_STRIPE_SHIFT.max(largest_pv_shift)
+        } else {
+            X_MAX_STRIPE_SHIFT
+        };
+        x_stripe_shift(backbone_size, stripes, largest_pv_shift, widest)
     });
     assert!(
         (largest_pv_shift..=X_MAX_STRIPE_SHIFT).contains(&shift),
@@ -837,6 +991,48 @@ fn x_try_build_flat_parallel_with(
             .into_par_iter()
             .map(|part| x_stripe_build(part, shift, backbone_size, ranges.len(), &chunks, &appends))
             .collect(),
+        XPasses::OneLatch(_) if fill => {
+            // An append takes at most one overflow cell: where no table's appends pass the capacity,
+            // no table's test can refuse it (module header).
+            let mut range_appends = vec![0usize; ranges.len()];
+            for (chunk, chunk_appends) in chunks.iter().zip(&appends) {
+                range_appends[chunk.range] += chunk_appends.packed.len();
+            }
+            let need_cells = ranges
+                .iter()
+                .zip(&range_appends)
+                .any(|((_, is_table), &appends)| {
+                    *is_table && appends > cuts.overflow_cell_capacity
+                });
+            let parts: Vec<Mutex<Option<XStripe<'_>>>> = parts
+                .into_iter()
+                .map(|part| Mutex::new(Some(part)))
+                .collect();
+            x_one_latch_pass(
+                threads,
+                parts.len(),
+                0,
+                XFillScratch::default,
+                |scratch, stripe| {
+                    let part = parts[stripe]
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .take()
+                        .expect("each stripe taken once");
+                    x_stripe_fill(
+                        part,
+                        shift,
+                        backbone_size,
+                        ranges.len(),
+                        &chunks,
+                        &appends,
+                        need_cells,
+                        scratch,
+                    )
+                },
+                |_| {},
+            )
+        }
         XPasses::OneLatch(_) => {
             // Each stripe's part, taken by the task that takes its index.
             let parts: Vec<Mutex<Option<XStripe<'_>>>> = parts
@@ -973,6 +1169,7 @@ mod tests {
         chunk_sizes: &[usize],
         stripe_shift: Option<usize>,
         passes: XPasses<'_>,
+        stripe_fill: bool,
         spare: Option<(&XFlatSpare, bool)>,
     ) -> XFlatBuild {
         if let Some((spare, true)) = spare {
@@ -994,6 +1191,7 @@ mod tests {
                     passes,
                     spare: spare.map(|(spare, _)| spare),
                     x_ahead: false,
+                    stripe_fill,
                 },
             )
         })
@@ -1012,8 +1210,13 @@ mod tests {
         hits.fill(i32::MIN);
     }
 
-    // The two pass implementations (LOSAT_X_BPLKPFLAT): `par_iter` and one-latch passes.
-    const PASSES: [XPasses<'static>; 2] = [XPasses::Rayon, XPasses::OneLatch(None)];
+    // The pass implementations (LOSAT_X_BPLKPFLAT): `par_iter`, and one-latch passes with the stripes
+    // of `x_stripe_build` or (LOSAT_X_BPSTRIPEFILL) of `x_stripe_fill`.
+    const FORMS: [(XPasses<'static>, bool); 3] = [
+        (XPasses::Rayon, false),
+        (XPasses::OneLatch(None), false),
+        (XPasses::OneLatch(None), true),
+    ];
 
     /// Extra tasks that count how often each one ran.
     struct Counted(Vec<AtomicUsize>);
@@ -1125,7 +1328,7 @@ mod tests {
             for (i, threads) in THREADS.into_iter().enumerate() {
                 for (j, chunk_sizes) in CHUNK_SIZES.into_iter().enumerate() {
                     let stripe_shift = SHIFTS[(i + j + round) % SHIFTS.len()];
-                    for passes in PASSES {
+                    for (passes, stripe_fill) in FORMS {
                         let built = flat(Some(parallel(
                             threads,
                             threshold,
@@ -1137,6 +1340,7 @@ mod tests {
                             chunk_sizes,
                             stripe_shift,
                             passes,
+                            stripe_fill,
                             None,
                         )));
                         x_assert_same_flat_tables(&built, &serial);
@@ -1168,7 +1372,7 @@ mod tests {
             ));
             for (threads, chunk_sizes) in [(2, &[usize::MAX][..]), (3, &[][..]), (7, &[40_000][..])]
             {
-                for passes in PASSES {
+                for (passes, stripe_fill) in FORMS {
                     let built = flat(Some(parallel(
                         threads,
                         2000,
@@ -1180,6 +1384,7 @@ mod tests {
                         chunk_sizes,
                         None,
                         passes,
+                        stripe_fill,
                         None,
                     )));
                     x_assert_same_flat_tables(&built, &serial);
@@ -1238,7 +1443,7 @@ mod tests {
                 )
                 .expect("word size 5");
                 for (threads, chunk_sizes) in [(2, &[][..]), (3, &[7, 1, 50][..]), (7, &[1][..])] {
-                    for one_latch in [false, true] {
+                    for (one_latch, stripe_fill) in [(false, false), (true, false), (true, true)] {
                         let extra = Counted::new(1 + rng.below(40));
                         let passes = if one_latch {
                             XPasses::OneLatch(Some(&extra))
@@ -1263,6 +1468,7 @@ mod tests {
                                 chunk_sizes,
                                 None,
                                 passes,
+                                stripe_fill,
                                 one_latch.then_some((&spare, poison)),
                             ),
                         ) {
@@ -1294,7 +1500,7 @@ mod tests {
                 (appends, false),
                 (appends + 1, false),
             ] {
-                for one_latch in [false, true] {
+                for (one_latch, stripe_fill) in [(false, false), (true, false), (true, true)] {
                     let extra = Counted::new(1 + rng.below(40));
                     let passes = if one_latch {
                         XPasses::OneLatch(Some(&extra))
@@ -1317,6 +1523,7 @@ mod tests {
                         &[5],
                         None,
                         passes,
+                        stripe_fill,
                         one_latch.then_some((&spare, poison)),
                     );
                     assert_eq!(
@@ -1364,7 +1571,7 @@ mod tests {
             let total = serial.hits.len();
             for case in 0..3 {
                 for threads in THREADS {
-                    for passes in PASSES {
+                    for (passes, stripe_fill) in FORMS {
                         let mut random = |len: usize| -> Vec<u32> {
                             (0..len)
                                 .map(|_| rng.below(u32::MAX as usize) as u32)
@@ -1403,6 +1610,7 @@ mod tests {
                                 &[],
                                 None,
                                 passes,
+                                stripe_fill,
                                 Some((&spare, build == 1)),
                             )));
                             x_assert_same_flat_tables(&built, &serial);
@@ -1443,7 +1651,10 @@ mod tests {
         ));
         for threads in THREADS {
             for chunk_sizes in CHUNK_SIZES {
-                for count in [0, 1, 3, 64] {
+                for (count, stripe_fill) in [0, 1, 3, 64]
+                    .into_iter()
+                    .flat_map(|count| [(count, false), (count, true)])
+                {
                     let extra = Counted::new(count);
                     let built = flat(Some(parallel(
                         threads,
@@ -1456,6 +1667,7 @@ mod tests {
                         chunk_sizes,
                         None,
                         XPasses::OneLatch(Some(&extra)),
+                        stripe_fill,
                         None,
                     )));
                     x_assert_same_flat_tables(&built, &serial);
@@ -1476,6 +1688,7 @@ mod tests {
             &[],
             None,
             XPasses::OneLatch(Some(&extra)),
+            true,
             None,
         )));
         assert!(none.hits.is_empty());
@@ -1538,6 +1751,7 @@ mod tests {
                     chunk_sizes: &[],
                     stripe_shift: None,
                     passes: XPasses::OneLatch(None),
+                    stripe_fill: true,
                     spare,
                     x_ahead: true,
                 },

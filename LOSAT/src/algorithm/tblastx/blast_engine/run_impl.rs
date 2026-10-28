@@ -2110,6 +2110,10 @@ fn write_tblastx_outputs(
                             &run.ranges.input.placements,
                             run.ranges.subject_placements,
                         );
+                        // The final list is in report order, queries in input order: each batch's
+                        // lists come in query order (`HitCollector::finish`, `culled_hit_order`)
+                        // and the batches follow each other (`run_batch_loop`); `-db` renumbers
+                        // the subjects only (`reported_subjects`).
                         debug_assert!(hits.is_sorted_by_key(|hsp| hsp.hit.q_idx));
                         let windows =
                             report::pairwise_windows(&hits, queries.len(), run.x_pairwise_pool);

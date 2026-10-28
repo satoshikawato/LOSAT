@@ -3481,7 +3481,8 @@ fn cpp_default_double(value: f64) -> String {
 /// `hits` is the final hit list of those queries in its order (queries in input order, then
 /// subjects and HSPs in result order); each hit's index in it identifies it to the probe. The
 /// prolog comes with the first query of `queries`, the epilog with the last: the reports of
-/// consecutive ranges written in turn are the report of all of them.
+/// consecutive ranges written in turn are the report of all of them. The probe numbers the HSPs
+/// over the whole report, so a caller with a probe passes every query (`0..queries.len()`).
 ///
 /// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1491-1589
 /// ```c++
@@ -5580,7 +5581,8 @@ mod tblastx_tests {
             window_size: 40,
             num_descriptions: 500,
             num_alignments: 250,
-            unsearched: vec![false; queries.len()],
+            // Query 1 is not searched (a batch without a valid context).
+            unsearched: vec![false, true, false, false],
             epilog: true,
             prolog: true,
             parsed_subjects: Vec::new(),
@@ -5598,8 +5600,20 @@ mod tblastx_tests {
         let titles: Vec<Arc<[u8]>> = (0..3)
             .map(|s_idx| Arc::from(format!("s{s_idx} subject {s_idx}").as_bytes()))
             .collect();
+        // The warnings written before queries 0 and 2 (`QueryWarnings`, by query index).
+        let before: Vec<Vec<u8>> = (0..queries.len())
+            .map(|q_idx| match q_idx {
+                0 | 2 => format!(
+                    "Warning: [tblastx] Query_{} q{q_idx}: a warning\n",
+                    q_idx + 1
+                )
+                .into_bytes(),
+                _ => Vec::new(),
+            })
+            .collect();
         crate::utils::threading::with_search_pool(4, "test", |pool| {
             for x_pool in [None, Some(pool)] {
+                // The report and the warnings of the queries `range`.
                 let write = |range: std::ops::Range<usize>| {
                     let range_hits: Vec<PairwiseHit> = hits
                         .iter()
@@ -5607,6 +5621,7 @@ mod tblastx_tests {
                         .cloned()
                         .collect();
                     let mut written = Vec::new();
+                    let mut diagnostics = Vec::new();
                     write_tblastx_pairwise_report(
                         &range_hits,
                         &mut written,
@@ -5617,26 +5632,39 @@ mod tblastx_tests {
                         &report,
                         None,
                         None,
-                        None,
+                        Some(&mut crate::report::query_warnings::QueryWarnings {
+                            before: &before,
+                            sink: &mut diagnostics,
+                        }),
                         x_pool,
                     )
                     .unwrap();
-                    written
+                    (written, diagnostics)
                 };
-                let whole = write(0..queries.len());
+                let (whole, whole_warnings) = write(0..queries.len());
                 let text = String::from_utf8(whole.clone()).unwrap();
                 assert!(text.starts_with("TBLASTX 2.17.0+"), "{text}");
                 assert_eq!(text.matches("Query= ").count(), queries.len(), "{text}");
                 assert!(text.contains("No hits found"), "{text}");
                 assert!(text.contains("Expect(4)"), "{text}");
+                assert!(text.ends_with("Window for multiple hits: 40\n"), "{text}");
+                assert_eq!(text.matches("Window for multiple hits").count(), 1, "{text}");
+                assert_eq!(
+                    String::from_utf8(whole_warnings.clone()).unwrap(),
+                    "Warning: [tblastx] Query_1 q0: a warning\nWarning: [tblastx] Query_3 q2: a warning\n"
+                );
                 for cuts in [vec![1], vec![2], vec![3], vec![1, 2, 3], vec![1, 3]] {
                     let mut joined = Vec::new();
+                    let mut joined_warnings = Vec::new();
                     let mut start = 0;
                     for end in cuts.into_iter().chain([queries.len()]) {
-                        joined.extend(write(start..end));
+                        let (written, warnings) = write(start..end);
+                        joined.extend(written);
+                        joined_warnings.extend(warnings);
                         start = end;
                     }
                     assert_eq!(String::from_utf8(joined).unwrap(), text);
+                    assert_eq!(joined_warnings, whole_warnings);
                 }
             }
             Ok(())

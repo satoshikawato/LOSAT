@@ -932,7 +932,9 @@ fn lowercase_query_row(
 }
 
 /// Every HSP of the final hit list (in the order of all formats) with its displayed rows,
-/// frames, counts, linked-set size and subject.
+/// frames, counts, linked-set size and subject: the rows made up front (`run_impl::rows_up_front`,
+/// the Web adapter's hit records); otherwise outfmt 0 makes the rows of one window of queries at a
+/// time with the same `PairwiseRows::hit` (`run_impl::write_tblastx_outputs`).
 // Kept out of line: this runs only for outfmt 0 or hit records.
 #[inline(never)]
 ///

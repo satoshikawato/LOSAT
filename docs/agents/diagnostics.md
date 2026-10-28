@@ -1129,8 +1129,11 @@ Rebuilding less:
 - TBNSSIDE (graduated 2026-10-22; no variable; conditional: its rule stays) tblastn: subject
   six-frame translations once per search of four or more
   query batches (20,000 query residues per batch), up to 256 MiB of translated residues
-  (`XSubjectSide::KEEP_FROM_BATCHES`, `KEEP_LIMIT`). The batches go to `x_search_batches` at any
-  thread count. A
+  (`XSubjectSide::KEEP_FROM_BATCHES`, `KEEP_LIMIT`; whether a plan is kept is decided from the
+  subject's length by the first batch that reaches it, `XSubjectSide::keeps`, and a plan that is
+  not kept is made per use as the plans of a search without a side are: since 2026-10-28 without
+  residues when its first frame has 1 MiB or more, `TBNUNITXLATE`). The batches go to
+  `x_search_batches` at any thread count. A
   search of one to three batches keeps none and translates a subject again for each batch, as
   NCBI does (`blast_engine.c:627-631`): one batch has no later reader, and two or three give
   the time the kept translations would save for their memory. Timed with two and three batches
@@ -5591,9 +5594,10 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_TBNUNITXLATE=1` tblastn (speed and memory; in the strict set from the pull request that added it,
   2026-10-23; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_packed_lean_plan`, `x_unit_residues`,
   `tblastn/search_gapped.rs` `X_UNIT_RESIDUES`): the plan of a packed subject (every `-db` sequence, `-subject`
-  with `TBNSTORE`) whose first frame has 1 MiB or more (3,145,722 bases) and which is made for its search alone
-  (a search that keeps no subject plans: not one of 4+ query batches with `TBNSSIDE`, whose plans, kept or made
-  per use, keep their frames) has no residues: its frames have their lengths and its units
+  with `TBNSTORE`) whose first frame has 1 MiB or more (3,145,722 bases) and which is made for its use alone
+  (a search that keeps no plan of it: fewer than 4 query batches, or, since 2026-10-28, a plan that the 256 MiB
+  of kept plans of `TBNSSIDE` refuses and every batch makes per use; `XSubjectSide::keeps`) has no residues: its
+  frames have their lengths and its units
   their chunks, and each (frame, chunk) unit translates the residues it reads, from the chunk's first to 4,096
   past its last (or the frame's end sentinel), into a buffer its thread keeps, from the packed bytes of its
   phase and strand with the tables and loops of `TBNXLATESIMD` (32 codons with AVX2, else eight from one word).
@@ -5623,7 +5627,29 @@ Scheduling (each value computed by one thread with the original function; order 
   cycles and user time, the flow's tail: 21-22 of 32 CPUs busy in both). E. coli x 16 protein batches (the plans of
   `TBNSSIDE`) and fly proteins against 5,000 16S sequences (frames below 1 MiB) take the frames as before
   (x1.000-1.006, the same instructions). With `=0` the binary ran as its base (the human genome at one thread
-  x1.002, the same instructions).
+  x1.002, the same instructions). Widened 2026-10-28 to the plans a search of 4+ batches does not keep: whether
+  a subject's plan is kept is decided from its length before the plan is made (`XSubjectSide::keeps`, the
+  same bytes and limit as before, `plan_bytes_of`), and a plan the limit refuses, which every batch made per
+  use with its six frames (a human chromosome of 128 Mb or more never fits; a search of 4 batches at 16 or 32
+  threads keeps its side, `TBNKEEPFEW`), is made as a plan without a side is: without residues when its
+  first frame has 1 MiB or more. Same reports; no new rule (`=0` makes every plan with its frames, as before
+  the widening for such a search). Measured 2026-10-28 on the workstation (node 1, physical cores with their HT
+  siblings idle, `--membind=1`, cores warmed 3 s, pairs with the order alternated, walls by the driver's monotonic
+  clock, peak anonymous memory sampled every 50 ms from the process; load 22-138 from node 0), the pull request's
+  binary (82db3a82) against its base (dev 2087618e), `-db -evalue 1e-5 -max_target_seqs 5`, every report the same
+  bytes in every arm: 122 human proteins (4 batches) against the human genome at 16 threads 137.2 -> 135.7 s
+  (x0.990, 2 of 2 pairs faster), peak RssAnon 7,267 -> 3,477 MiB (-3,791 MiB; -3,856 and -3,725 per pair), page
+  faults 8.30 M -> 2.65 M; at 32 threads 96.8 -> 95.3 s (x0.984, 2 of 2), 9,483 -> 4,700 MiB (-4,783), faults
+  8.73 M -> 3.00 M, where the same binary with `=0` ran as the base (x1.000, -140 MiB); 4 batches of zebrafish
+  proteins against the zebrafish genome at 32 threads (23 of 25 chromosomes refused) 26.7 -> 25.8 s (x0.965, 2 of
+  2), 3,318 -> 1,327 MiB (-1,991); one batch (35 human proteins, no side) x1.001 and -64 MiB (the unchanged path).
+  **Where it does not hold:** 4 batches of fly proteins against the fly genome at 16 threads (one refused
+  chromosome of about 32 Mb whose six frames were not at the peak) x0.996 but peak RssAnon 384 -> 425 MiB (+39;
+  +39, +16 and +49 per pair): the per-thread unit buffers of its lean plan (a chunk of its frame, about 3.6 MB per
+  thread that ran one of its units) stay for the search where the refused frames were freed after the subject.
+  NCBI BLAST+ 2.17.0 on the first batch alone (35 proteins) at 16 threads holds 6,240 MiB of anonymous memory
+  (capped at 900 s, unfinished; node 0), above the 4-batch search with the change (3,477) and the base's one batch
+  (2,474).
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject`: each subject record's letters are packed as soon as the
   reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST database volume: ncbi2na 4
   bases per byte with the remainder count in the last byte, the runs of letters other than `ACGT`

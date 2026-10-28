@@ -5575,7 +5575,23 @@ Scheduling (each value computed by one thread with the original function; order 
   use with its six frames (a human chromosome of 128 Mb or more never fits; a search of 4 batches at 16 or 32
   threads keeps its side, `TBNKEEPFEW`), is made as a plan without a side is: without residues when its
   first frame has 1 MiB or more. Same reports; no new rule (`=0` makes every plan with its frames, as before
-  the widening for such a search). MEASURED_PENDING
+  the widening for such a search). Measured 2026-10-28 on the workstation (node 1, physical cores with their HT
+  siblings idle, `--membind=1`, cores warmed 3 s, pairs with the order alternated, walls by the driver's monotonic
+  clock, peak anonymous memory sampled every 50 ms from the process; load 22-138 from node 0), the pull request's
+  binary (82db3a82) against its base (dev 2087618e), `-db -evalue 1e-5 -max_target_seqs 5`, every report the same
+  bytes in every arm: 122 human proteins (4 batches) against the human genome at 16 threads 137.2 -> 135.7 s
+  (x0.990, 2 of 2 pairs faster), peak RssAnon 7,267 -> 3,477 MiB (-3,791 MiB; -3,856 and -3,725 per pair), page
+  faults 8.30 M -> 2.65 M; at 32 threads 96.8 -> 95.3 s (x0.984, 2 of 2), 9,483 -> 4,700 MiB (-4,783), faults
+  8.73 M -> 3.00 M, where the same binary with `=0` ran as the base (x1.000, -140 MiB); 4 batches of zebrafish
+  proteins against the zebrafish genome at 32 threads (23 of 25 chromosomes refused) 26.7 -> 25.8 s (x0.965, 2 of
+  2), 3,318 -> 1,327 MiB (-1,991); one batch (35 human proteins, no side) x1.001 and -64 MiB (the unchanged path).
+  **Where it does not hold:** 4 batches of fly proteins against the fly genome at 16 threads (one refused
+  chromosome of about 32 Mb whose six frames were not at the peak) x0.996 but peak RssAnon 384 -> 425 MiB (+39;
+  +39, +16 and +49 per pair): the per-thread unit buffers of its lean plan (a chunk of its frame, about 3.6 MB per
+  thread that ran one of its units) stay for the search where the refused frames were freed after the subject.
+  NCBI BLAST+ 2.17.0 on the first batch alone (35 proteins) at 16 threads holds 6,240 MiB of anonymous memory
+  (capped at 900 s, unfinished; node 0), above the 4-batch search with the change (3,477) and the base's one batch
+  (2,474).
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject`: each subject record's letters are packed as soon as the
   reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST database volume: ncbi2na 4
   bases per byte with the remainder count in the last byte, the runs of letters other than `ACGT`

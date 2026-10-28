@@ -4,7 +4,7 @@
 //! TBLASTX is an ungapped search, so NCBI makes one `diags` Seq-align per subject of a query's
 //! final hit list, one Std-seg per HSP (`BLASTUngappedHspListToSeqAlign`, see `seqalign`), and
 //! the XML writer takes each Std-seg as an `Hsp` of the subject's `Hit`
-//! (`PrepareBlastUngappedSeqalign`): the final list (`report_order`) holds the HSPs in that
+//! (`PrepareBlastUngappedSeqalign`): the final list (`hit_collector.rs`) holds the HSPs in that
 //! order, query by query, one run of HSPs per subject. What `s_SeqAlignSetToXMLHsps` reads of an
 //! HSP is its Seq-align (the coordinates in the records, lower first, the score, the bit score,
 //! the e-value or the sum e-value of a linked set) and the two rows of the alignment, from which

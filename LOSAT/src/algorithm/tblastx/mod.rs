@@ -20,6 +20,8 @@ pub mod diagnostics;
 pub mod extension;
 pub mod filtering;
 pub mod hsp_culling;
+// NCBI's HSP collector inside the search of a query batch: the hit lists of its queries.
+pub(crate) mod hit_collector;
 pub mod lookup;
 pub mod ncbi_cutoffs;
 pub mod reevaluate;

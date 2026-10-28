@@ -1968,6 +1968,13 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
 //     lookup->alphabet_size = BLASTAA_SIZE;
 //     lookup->threshold = (Int4)opt->threshold;
 // ```
+/// PROBE (exp/d14-s2, LOSAT_PROBE_TBNLUTMAP=1): the exact and thin backbones of a build in regions
+/// glibc maps and unmaps (`x_new_unthresholded`, as LOSAT_X_BPDBKEEP's).
+fn x_probe_lut_map() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("LOSAT_PROBE_TBNLUTMAP").is_ok_and(|v| v == "1"))
+}
+
 fn build_lookup_from_prepared(
     prepared: PreparedLookupQuery,
     threshold: i32,
@@ -2055,7 +2062,11 @@ fn build_lookup_from_prepared(
     // exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
     // ```
     // Same empty backbone as the C code; its chains come from an arena.
-    let mut exact_backbone = LookupBackboneChains::new(backbone_size);
+    let mut exact_backbone = if x_probe_lut_map() {
+        LookupBackboneChains::x_new_unthresholded(backbone_size)
+    } else {
+        LookupBackboneChains::new(backbone_size)
+    };
     build_stats.total_exact_positions = blast_lookup_index_query_exact_matches(
         &mut exact_backbone,
         word_length as i32,
@@ -2101,7 +2112,11 @@ fn build_lookup_from_prepared(
     //     (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
     // ```
     // Same empty thin backbone as the C code; its chains come from an arena.
-    let mut thin_backbone = LookupBackboneChains::new(backbone_size);
+    let mut thin_backbone = if x_probe_lut_map() {
+        LookupBackboneChains::x_new_unthresholded(backbone_size)
+    } else {
+        LookupBackboneChains::new(backbone_size)
+    };
     let mut counts: Vec<u32> = vec![0; backbone_size];
 
     for idx in 0..backbone_size {

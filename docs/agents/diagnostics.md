@@ -2570,9 +2570,10 @@ Rebuilding less:
   stable sorts of at least the parallel size (`x_link_sort.rs` `x_board_sort`), a subject's frame merges
   (`x_kmerge.rs`), and the subjects' units (`x_pair_par.rs` `run_units`), in that order: groups, sorts and
   merges of any batch first, then units by batch and subject index (a batch without the unit path has
-  only groups, merges and sorts). A subject's thread puts its units on the board, with up to threads - 1
-  helper jobs that take that subject's units, and takes items until its units are all taken, then blocks
-  until the units others took have run; a thread of the subject loop without a subject takes items until
+  only groups, merges and sorts). A subject's thread puts its units on the board (a batch's only subject
+  also spawns up to threads - 1 helper jobs that take its units), takes its own units only, then blocks until the units others took have run (taking groups and earlier subjects' units
+  first left it blocked on its own units that others had taken: slower than without the board on 18,838
+  subjects of 100 bp at 16 threads); a thread of the subject loop without a subject takes items until
   the batch's units are all taken;
   a chain's thread does the same with its groups and sorts, with `rayon::spawn` helpers that take one
   item each. An item makes no pool call and waits for nothing, so no thread waits in the pool and no

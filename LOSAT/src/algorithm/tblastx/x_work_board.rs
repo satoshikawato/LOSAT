@@ -18,14 +18,18 @@
 //!
 //! 1. Units are taken in batch order, then subject order: a batch's first subject ends its seed
 //!    stage first, and its chain links while the later subjects' units run.
-//! 2. Groups are taken before units: a chain's groups run on the threads that take items as soon as
-//!    they are free, while the remaining units wait, so the chain ends early.
+//! 2. A thread that helps takes groups before units: a chain's groups run on the threads that take
+//!    items as soon as they are free, while the remaining units wait, so the chain ends early.
+//! 3. A subject's thread takes its own units only. When it took groups and earlier subjects' units
+//!    first, the other threads took most of its units meanwhile and it then blocked on them: with
+//!    the genome 3 x 3 input's subjects cut into 18,838 pieces of 100 bp the search took longer at
+//!    16 threads than without the board.
 //!
 //! # How (no thread waits in the pool)
 //!
 //! An owner (a subject's thread with its units, a chain's thread with its groups) puts an item
-//! set on the board and takes items until its set has none left to take, then blocks until the
-//! items others took have run. A helper (a thread of the batch's subject loop without a subject,
+//! set on the board and takes its set's items only, until none is left to take, then blocks until
+//! the items others took have run. A helper (a thread of the batch's subject loop without a subject,
 //! or a `rayon::spawn` job of a group set) takes items until there is nothing left it may take.
 //! Items are pure work: a unit's scan and a group's kernel make no pool call and wait for nothing,
 //! so an item that was taken always ends, and a blocked owner always wakes. Taking an item never
@@ -269,6 +273,18 @@ impl XBoard {
     /// Takes and runs one item: a group of any linking call first, then a unit by batch and
     /// subject order. False when there was none.
     fn run_one(&self, taker: &mut XTaker) -> bool {
+        self.run_group(taker) || {
+            let batches: Vec<Arc<XBatch>> = self
+                .batches
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            batches.iter().any(|batch| batch.run_one(taker))
+        }
+    }
+
+    /// Takes and runs one group (or sort, or merge) of any set; false when there was none.
+    fn run_group(&self, taker: &mut XTaker) -> bool {
         loop {
             let set = {
                 let mut groups = self.groups.lock().unwrap_or_else(|e| e.into_inner());
@@ -281,15 +297,9 @@ impl XBoard {
                         return true;
                     }
                 }
-                None => break,
+                None => return false,
             }
         }
-        let batches: Vec<Arc<XBatch>> = self
-            .batches
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        batches.iter().any(|batch| batch.run_one(taker))
     }
 
     /// Takes and runs one item (groups first, then units by batch and subject order); false when
@@ -298,9 +308,9 @@ impl XBoard {
         self.run_one(taker)
     }
 
-    /// A subject's units: `run(i, taker)` for every `i < n`, on this thread, on the board's
-    /// takers and on up to `threads - 1` helper jobs of the set, units of earlier subjects and
-    /// groups first. Returns when every unit has run.
+    /// A subject's units: `run(i, taker)` for every `i < n`, on this thread (which takes this
+    /// set's units only, Why 3.), on the board's takers and, for a batch's only subject, on up to
+    /// `threads - 1` helper jobs of the set. Returns when every unit has run.
     pub(crate) fn run_units(&self, batch: &XBatch, s: usize, n: usize, run: &Run<'_>) {
         let set = XSet::new(run, n);
         let owned = XOwned(&set);
@@ -325,12 +335,7 @@ impl XBoard {
             }
         }
         let mut taker = XTaker::default();
-        while !set.taken() {
-            if !self.run_one(&mut taker) {
-                // Nothing before this subject's units is left and they are taken.
-                set.run_one(&mut taker);
-            }
-        }
+        while set.run_one(&mut taker) {}
         drop(taker);
         set.wait();
         drop(owned);

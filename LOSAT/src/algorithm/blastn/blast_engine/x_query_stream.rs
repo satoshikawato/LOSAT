@@ -401,15 +401,16 @@ impl Store {
 
     /// The first reading, on `source` (the reader `search_cli` made of the file, after its
     /// `IsIStreamEmpty`), where `read_queries` reads without the switch: each record's length is
-    /// kept and the record dropped. Returns how the reading ended. `config` is the source's
-    /// configuration, `range` `-query_loc` and `threads` the search's threads (EXPERIMENT
-    /// LOSAT_X_QSCANPAR: the reading in parts on them, `x_query_scan_par.rs`).
+    /// kept and the record dropped. Returns how the reading ended. `path` is `-query`, `config` the
+    /// source's configuration, `range` `-query_loc` and `pool` the search's pool (EXPERIMENT
+    /// LOSAT_X_QSCANPAR: the reading in parts on its threads, `x_query_scan_par.rs`).
     pub(super) fn read(
         opening: Opening,
+        path: &Path,
         source: &mut FastaInputSource<File>,
         config: ReaderConfig,
         range: Option<&SequenceRange>,
-        threads: usize,
+        pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Result<(Store, QueryEnd)> {
         let (again, start) = opening
             .again
@@ -421,7 +422,8 @@ impl Store {
         // second handle at the position the source starts from; where the parts are not taken, the
         // source reads them (its position is where it was: the parts read at offsets).
         let parts = if super::x_query_scan_par::on() && !config.keep_defline {
-            super::x_query_scan_par::lengths(&again, start, config, threads)
+            let input = super::x_query_scan_par::Input { file: &again, path };
+            super::x_query_scan_par::lengths(input, start, config, pool)
         } else {
             None
         };
@@ -1066,7 +1068,8 @@ mod tests {
         assert!(opening.acts());
         let mut source = FastaInputSource::from_file(file, config());
         assert!(!source.stream_is_empty());
-        Store::read(opening, &mut source, config(), range, 1).expect("the first reading")
+        let pool = crate::utils::threading::SearchPool::x_serial();
+        Store::read(opening, path, &mut source, config(), range, &pool).expect("the first reading")
     }
 
     /// The records as `search_cli` reads them without the switch.

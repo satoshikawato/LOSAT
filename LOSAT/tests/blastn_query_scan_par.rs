@@ -1,6 +1,6 @@
-//! The first reading of LOSAT_X_QSTREAM (each query record's length) read in parts at record starts
-//! by the search's threads (`LOSAT_X_QSCANPAR`, `src/algorithm/blastn/blast_engine/x_query_scan_par.rs`)
-//! on whole searches.
+//! The first reading of LOSAT_X_QSTREAM (each query record's length), and where it does not act the
+//! reading of every record before the search, read in parts at record starts by the search's threads
+//! (`LOSAT_X_QSCANPAR`, `src/algorithm/blastn/blast_engine/x_query_scan_par.rs`) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is `0`.
 //! It changes who reads the lengths, not the lengths, so the property under test is that nothing a
@@ -70,6 +70,12 @@ fn letters(name: &str) -> Vec<u8> {
 /// a run of `N` and lower case letters; a line with digits (the reader's warning), a record without
 /// letters and one without an id; `tail` appended.
 fn query_text(tail: &[u8]) -> Vec<u8> {
+    query_text_with(tail, true)
+}
+
+/// `query_text`, with `messages` its line with digits and its record without letters (without
+/// them the reader writes no message).
+fn query_text_with(tail: &[u8], messages: bool) -> Vec<u8> {
     let genomes = [letters("LC738874.fasta"), letters("Sakai.fna")];
     let mut text = Vec::new();
     for i in 0..240usize {
@@ -93,8 +99,8 @@ fn query_text(tail: &[u8]) -> Vec<u8> {
             text.push(b'\n');
         }
         match i {
-            33 => text.extend_from_slice(b"ACGT12ACGT\n"),
-            90 => text.extend_from_slice(b">without letters\n"),
+            33 if messages => text.extend_from_slice(b"ACGT12ACGT\n"),
+            90 if messages => text.extend_from_slice(b">without letters\n"),
             _ => {}
         }
     }
@@ -162,10 +168,11 @@ fn check(query: &Path, target: [&str; 2], task: &str, threads: &[u32], own: bool
             String::from_utf8_lossy(&expected.2),
             "{what}: standard error"
         );
-        // The parts are read with `read_at` of `std::os::unix::fs::FileExt` and need the `parallel`
-        // feature: elsewhere (Windows, WebAssembly) the switch never acts and the sides stay
-        // `(false, true)` (module doc of `x_query_scan_par.rs`).
-        let took = own && n >= 2 && cfg!(all(unix, feature = "parallel"));
+        // The parts are read with `read_at` of `std::os::unix::fs::FileExt` (on WASI with handles
+        // of their own) and need the `parallel` feature: elsewhere (Windows, the serial
+        // WebAssembly command) the switch never acts and the sides stay `(false, true)` (module doc
+        // of `x_query_scan_par.rs`).
+        let took = own && n >= 2 && cfg!(all(feature = "parallel", any(unix, target_os = "wasi")));
         assert_eq!(
             reach.sides(SWITCH),
             (took, !took),
@@ -183,6 +190,22 @@ fn the_parts_give_the_reports_of_the_one_thread_reading() {
     let target = ["-subject", subject.to_str().unwrap()];
     check(&query, target, "dc-megablast", &[1, 2, 4], true);
     check(&query, target, "blastn", &[1, 4], true);
+}
+
+/// Where LOSAT_X_QSTREAM does not act (`-task megablast`, its rule) the records are read before the
+/// search, in parts by the switch's default: the same bytes; with a reader message after the first
+/// part (`query_text`'s line with digits), the one-thread reading.
+#[test]
+fn the_records_read_before_the_search_give_the_reports_of_the_one_thread_reading() {
+    let dir = TestDir::new("records");
+    let subject = fasta("LC738868.fasta");
+    let target = ["-subject", subject.to_str().unwrap()];
+    let query = dir.path("q.fa");
+    std::fs::write(&query, query_text_with(b"", false)).expect("write the queries");
+    check(&query, target, "megablast", &[1, 2, 4], true);
+    let query = dir.path("messages.fa");
+    std::fs::write(&query, query_text(b"")).expect("write the queries");
+    check(&query, target, "megablast", &[4], false);
 }
 
 #[test]

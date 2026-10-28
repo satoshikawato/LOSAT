@@ -1,7 +1,9 @@
 //! EXPERIMENT (LOSAT_X_QSCANPAR, in the strict set: on unless it is `0`): the first reading of
 //! LOSAT_X_QSTREAM (`x_query_stream::scan`, which keeps each query record's length and how the
-//! reading ends) cut into parts at record starts and read on `-num_threads` threads (the calling
-//! thread and scoped helpers, before the search pool exists), each part by a reader of its own.
+//! reading ends) cut into parts at record starts and read on the search pool's `-num_threads`
+//! threads (`search_cli` makes the pool before the reading), each part by a reader of its own;
+//! and, where LOSAT_X_QSTREAM does not act, the reading of every record before the search
+//! (`read_queries`, `x_read_queries_packed`) cut and read the same way (`records`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
 //! ```c++
@@ -13,16 +15,24 @@
 //! before its first batch (the batch planner, LOSAT_X_RPTSTREAM's checks),
 //! so where LOSAT_X_QSTREAM acts it reads the whole query file once for the lengths alone, on one
 //! thread, while every other thread of the search waits: for dc-megablast of 31,168 D. melanogaster
-//! cDNAs (96 MB) against 3 Mb at 16 threads on the workstation, 0.12 s of a 1.55 s search. No NCBI
+//! cDNAs (96 MB) against 3 Mb at 16 threads on the workstation, 0.12 s of a 1.55 s search. Where it
+//! does not act (`-task megablast`, and the threaded WebAssembly command, whose WASI has no second
+//! handle on a file), every record is read there, on one thread: 0.28-0.30 s of the same search's
+//! 2.6 s in the threaded command (Node, workstation), before the first thread starts. No NCBI
 //! counterpart: it is speed only.
 //!
 //! What it does. The bytes from the reader's start to the end of the file are cut at `parts`
 //! targets (at most `MAX_SPAN` bytes apart, at least four per thread). Each part runs from the
-//! first record start at or after its target (a `>` at the start of a line, not followed by `?`)
-//! to the next part's. The threads take the parts in turn; each part is read by a new reader over
-//! its bytes (`FastaInputSource::x_from_reader`, the same configuration) with the loop of `scan`:
-//! `end()`, then `next_sequence`, the length of each record kept and the record dropped. The
-//! lengths of the parts, in order, are the result.
+//! first record start at or after its target (a `>` at the start of a line, not followed by `?`) to
+//! the next part's. The pool's threads, the caller's among them (one broadcast), take the parts in
+//! turn until none is left, so no thread is started for the reading: the threaded WebAssembly
+//! command starts each thread on a worker its host keeps ready, and a set of helper threads before
+//! the pool made the pool's threads wait for new workers to boot (about 45 ms at 16 threads). Each
+//! part is read by a new reader over its bytes (`FastaInputSource::x_from_reader`, the same
+//! configuration) with the loop of `scan`: `end()`, then `next_sequence`, the length of each record
+//! kept and the record dropped. The lengths of the parts, in order, are the result. `records` keeps
+//! each record (and, with LOSAT_X_BNQPACK, its packed letters, as `x_read_queries_packed` takes
+//! them) instead.
 //!
 //! Why the lengths are the first reading's. `scan` keeps only the records' lengths and how the
 //! reading ends; the warnings of the records it reads are dropped there (the second reading posts
@@ -45,34 +55,58 @@
 //! first line of the file be a Seq-id line (`read_one_seq` with the data loaders) or the reading
 //! meet an `eEOF` before a record; a later part's first line is its defline.
 //!
-//! When it does not act (the first reading runs as before, `scan` on the search's reader, which no
-//! part has moved: the parts read with `read_at`, which leaves the file position alone): the switch
-//! is off; one thread; a target without `unix` file reads at an offset or without the `parallel`
-//! feature (WebAssembly, Windows); the BLAST archive (its title check, `check_titles_for`, comes
-//! from the first reading); a file of fewer than `MIN_BYTES` bytes after the reader's start
-//! (`LOSAT_X_QSCANPARMIN`, tuning, sets it); and, found while the parts are read, a `\r` anywhere in
-//! the file, a `>?` anywhere in it (a gap line, whose length becomes that many `N`s, or a `>?_`
-//! defline), a target with no record start within `MAX_REACH` bytes after it (a record that long
-//! would take that much memory in every thread that reads one), a part whose bytes cannot all be
-//! read (an I/O error or a file that ends early: a reader takes either for the end of its input),
-//! or a part whose reading ends with anything but the end of its bytes (an `eEOF`, a reader error or
-//! LOSAT's rejection of a Seq-id line: the first reading then finds it, with its messages, as
-//! before). What is read twice then is the parts' bytes up to the failure.
+//! Why the records are those of one reading. Of what the reader carries, the records keep two:
+//! the local ID (`Query_N`, the counter's N) and the messages, whose line numbers count from the
+//! reader's first line. A part's reader starts its counter at 1, so `records` takes a part only
+//! where each of its records has the ID of its place in the part (one count per record, as in one
+//! reading of those lines) and gives it the ID of its place among all the records; and it takes a
+//! part after the first only where none of its records has a message (the first part's messages
+//! count lines as one reading does: it starts where the reading starts). Elsewhere every record is
+//! read as before.
 //!
-//! Memory: a part holds at most `MAX_SPAN + MAX_REACH` bytes of records, and without gap lines a
-//! record has no more letters than bytes, so a thread holds one record of at most that many letters
-//! and the reader's buffers at a time. No floating-point operation is involved.
+//! Where the parts read. On unix each thread reads the search's handle at its offsets (`read_at`,
+//! which leaves the file position alone). WASI preview 1 has neither such a read in Rust's stable
+//! library nor a second handle (`try_clone`), so there each thread opens the path again and seeks
+//! it, and takes no part unless the file it opened is a regular file of the handle's length and
+//! modification time.
+//!
+//! When it does not act (the reading runs as before, on the search's reader, which no part has
+//! moved): the switch is off; one thread (no pool); a target with neither unix file reads at an
+//! offset nor WASI, or without the `parallel` feature (the serial WebAssembly command, Windows);
+//! standard input or a file that is not a regular one; the BLAST archive (its title check,
+//! `check_titles_for`, comes from the first reading); a file of fewer than `MIN_BYTES` bytes after
+//! the reader's start (`LOSAT_X_QSCANPARMIN`, tuning, sets it); and, found while the parts are
+//! read, a `\r` anywhere in the file, a `>?` anywhere in it (a gap line, whose length becomes that
+//! many `N`s, or a `>?_` defline), a target with no record start within `MAX_REACH` bytes after it
+//! (a record that long would take that much memory in every thread that reads one), a part whose
+//! bytes cannot all be read (an I/O error or a file that ends early: a reader takes either for the
+//! end of its input), a part whose reading ends with anything but the end of its bytes (an `eEOF`,
+//! a reader error or LOSAT's rejection of a Seq-id line: the first reading then finds it, with its
+//! messages, as before), and, for `records`, a part whose IDs or messages are not those of one
+//! reading (above). What is read twice then is the parts' bytes up to the failure.
+//!
+//! Memory: for the lengths, a part holds at most `MAX_SPAN + MAX_REACH` bytes of records, and
+//! without gap lines a record has no more letters than bytes, so a thread holds one record of at
+//! most that many letters and the reader's buffers at a time. `records` holds what the reading
+//! before the search holds (every record), and the parts' records until they are joined. No
+//! floating-point operation is involved.
 //!
 //! The decision is marked with `x_reach!("LOSAT_X_QSCANPAR", acts)` where LOSAT_X_QSTREAM reads
-//! the lengths and the switch is on, without the BLAST archive (`acts`: the parts' lengths are
-//! taken).
+//! the lengths, or the records are read before the search, and the switch is on, without the BLAST
+//! archive (`acts`: the parts are taken).
 
-#![cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
+#![cfg_attr(
+    not(all(feature = "parallel", any(unix, target_os = "wasi"))),
+    allow(dead_code)
+)]
 
 use std::fs::File;
+use std::path::Path;
 use std::sync::OnceLock;
 
-use crate::blastinput::fasta_reader::ReaderConfig;
+use crate::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
+use crate::sequence::packed_letters::PackedLetters;
+use crate::utils::threading::SearchPool;
 
 /// The bytes after the reader's start below which the first reading stays on one thread: about
 /// 4 ms of it on the workstation.
@@ -101,19 +135,95 @@ fn min_bytes() -> u64 {
     })
 }
 
-/// The lengths of the query records from byte `start` of `file` to its end, read in parts by
-/// `threads` threads, or `None` where the first reading runs as before (the module's header).
-/// `config` is the first reading's configuration, without the BLAST archive.
+/// The query file the parts read: `file`, a handle on it (the search's, or a second one), opened
+/// at `path` (where the parts read, the module's header).
+#[derive(Clone, Copy)]
+pub(super) struct Input<'a> {
+    pub(super) file: &'a File,
+    pub(super) path: &'a Path,
+}
+
+/// No NCBI counterpart (NCBI reads the query once): a handle for `records` on the query file
+/// `file` that the search opened at `path`, and the position its reader starts from, where `file`
+/// is a regular file: a clone of `file` (`try_clone`, the same open file), or on WASI, which has
+/// no descriptor duplication, the path opened again where it is a regular file of `file`'s length
+/// and modification time.
+pub(super) fn second_handle(path: &Path, file: &File) -> Option<(File, u64)> {
+    use std::io::Seek;
+
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    let mut handle = file;
+    let start = handle.stream_position().ok()?;
+    let again = match file.try_clone() {
+        Ok(again) => again,
+        Err(_) if cfg!(target_os = "wasi") => {
+            let again = File::open(path).ok()?;
+            let reopened = again.metadata().ok()?;
+            let same = reopened.is_file()
+                && reopened.len() == metadata.len()
+                && reopened.modified().ok()? == metadata.modified().ok()?;
+            if !same {
+                return None;
+            }
+            again
+        }
+        Err(_) => return None,
+    };
+    Some((again, start))
+}
+
+/// The lengths of the query records from byte `start` of `input` to its end, read in parts by
+/// the threads of `pool` (the search's), or `None` where the first reading runs as before (the
+/// module's header). `config` is the first reading's configuration, without the BLAST archive.
 pub(super) fn lengths(
-    file: &File,
+    input: Input<'_>,
     start: u64,
     config: ReaderConfig,
-    threads: usize,
+    pool: &SearchPool<'_>,
 ) -> Option<Vec<usize>> {
     debug_assert!(!config.keep_defline);
-    let lengths = lengths_with(file, start, config, threads, min_bytes(), Limits::DEFAULT);
+    let lengths = lengths_with(input, start, config, pool, min_bytes(), Limits::DEFAULT);
     crate::utils::xreach::x_reach!("LOSAT_X_QSCANPAR", lengths.is_some());
     lengths
+}
+
+/// The records of the query file from byte `start` of `input` to its end, as the reading before
+/// the search reads them (`read_queries`, or with `pack` `x_read_queries_packed`: the records, a
+/// packed one without letters, and the packed letters with their records' places), read in parts
+/// by the threads of `pool` (the search's); `None` where that reading runs as before (the
+/// module's header), which
+/// then also reads how the input ends. `config` is that reading's configuration, without the
+/// BLAST archive. A reading of the parts ends at the end of the input (`QueryEnd::Input`).
+pub(super) fn records(
+    input: Input<'_>,
+    start: u64,
+    config: ReaderConfig,
+    pool: &SearchPool<'_>,
+    pack: bool,
+) -> Option<PartRecords> {
+    debug_assert!(!config.keep_defline);
+    let records = records_with(
+        input,
+        start,
+        config,
+        pool,
+        pack,
+        min_bytes(),
+        Limits::DEFAULT,
+    );
+    crate::utils::xreach::x_reach!("LOSAT_X_QSCANPAR", records.is_some());
+    records
+}
+
+/// The records of `records`: every record in order, and with `pack` the packed letters of the
+/// packed ones with their places among the records.
+#[derive(Debug, Default)]
+pub(super) struct PartRecords {
+    pub(super) records: Vec<FastaRecord>,
+    pub(super) packed: Vec<(usize, PackedLetters)>,
 }
 
 /// The sizes of the parts (tests make them small).
@@ -132,33 +242,106 @@ impl Limits {
     };
 }
 
-#[cfg(not(all(unix, feature = "parallel")))]
 fn lengths_with(
-    _file: &File,
-    _start: u64,
-    _config: ReaderConfig,
-    _threads: usize,
-    _min_bytes: u64,
-    _limits: Limits,
-) -> Option<Vec<usize>> {
-    None
-}
-
-#[cfg(all(unix, feature = "parallel"))]
-fn lengths_with(
-    file: &File,
+    input: Input<'_>,
     start: u64,
     config: ReaderConfig,
-    threads: usize,
+    pool: &SearchPool<'_>,
     min_bytes: u64,
     limits: Limits,
 ) -> Option<Vec<usize>> {
+    let parts = in_parts(input, start, pool, min_bytes, limits, |at, part| {
+        read_part(at, part, config, &mut |record| record.sequence.len())
+    })?;
+    Some(parts.into_iter().flatten().collect())
+}
+
+fn records_with(
+    input: Input<'_>,
+    start: u64,
+    config: ReaderConfig,
+    pool: &SearchPool<'_>,
+    pack: bool,
+    min_bytes: u64,
+    limits: Limits,
+) -> Option<PartRecords> {
+    let parts = in_parts(input, start, pool, min_bytes, limits, |at, part| {
+        read_part_records(at, part, config, pack)
+    })?;
+    let mut joined = PartRecords {
+        records: Vec::with_capacity(parts.iter().map(|part| part.records.len()).sum()),
+        packed: Vec::with_capacity(parts.iter().map(|part| part.packed.len()).sum()),
+    };
+    for (index, part) in parts.into_iter().enumerate() {
+        let offset = joined.records.len();
+        for mut record in part.records {
+            if index > 0 {
+                record.local_id = local_id(config, joined.records.len());
+            }
+            joined.records.push(record);
+        }
+        joined.packed.extend(
+            part.packed
+                .into_iter()
+                .map(|(place, letters)| (offset + place, letters)),
+        );
+    }
+    Some(joined)
+}
+
+/// The local ID that one reading gives its record at `place` (from 0): the counter starts at 1
+/// and moves one per record (`FastaReader::generate_id`).
+fn local_id(config: ReaderConfig, place: usize) -> String {
+    format!("{}{}", config.id_prefix, place + 1)
+}
+
+/// One part: its place among the parts and its bytes `from..to`, and whether a part has failed.
+struct Part<'a> {
+    index: usize,
+    from: u64,
+    to: u64,
+    failed: &'a std::sync::atomic::AtomicBool,
+}
+
+#[cfg(not(all(feature = "parallel", any(unix, target_os = "wasi"))))]
+fn in_parts<T>(
+    _input: Input<'_>,
+    _start: u64,
+    _pool: &SearchPool<'_>,
+    _min_bytes: u64,
+    _limits: Limits,
+    _read: impl Fn(&mut At<'_>, &Part<'_>) -> Option<T>,
+) -> Option<Vec<T>> {
+    None
+}
+
+/// The results of `read` for the parts of `input` from byte `start` to its end, in order, read
+/// by the threads of `pool` (each with its own `At`), or `None` where the reading is left as
+/// before: no pool (one thread), fewer than `min_bytes` bytes, a part's start not found, or a part
+/// for which `read` gives `None`. Called on the pool's caller (`search_cli`), outside its jobs.
+#[cfg(all(feature = "parallel", any(unix, target_os = "wasi")))]
+fn in_parts<T: Send>(
+    input: Input<'_>,
+    start: u64,
+    pool: &SearchPool<'_>,
+    min_bytes: u64,
+    limits: Limits,
+    read: impl Fn(&mut At<'_>, &Part<'_>) -> Option<T> + Sync,
+) -> Option<Vec<T>> {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Mutex;
 
-    let end = file.metadata().ok()?.len();
+    let threads = pool.threads();
+    if !pool.enabled() || threads < 2 {
+        return None;
+    }
+    let metadata = input.file.metadata().ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    let end = metadata.len();
     let bytes = end.checked_sub(start)?;
-    if threads < 2 || bytes == 0 || bytes < min_bytes {
+    if bytes == 0 || bytes < min_bytes {
         return None;
     }
     let parts = bytes
@@ -169,8 +352,12 @@ fn lengths_with(
     let target = |part: usize| start + part as u64 * span;
     let next = AtomicUsize::new(0);
     let failed = AtomicBool::new(false);
-    let results: Vec<Mutex<Vec<usize>>> = (0..parts).map(|_| Mutex::new(Vec::new())).collect();
+    let results: Vec<Mutex<Option<T>>> = (0..parts).map(|_| Mutex::new(None)).collect();
     let work = || {
+        let Some(mut at) = At::open(input) else {
+            failed.store(true, Ordering::Relaxed);
+            return;
+        };
         while !failed.load(Ordering::Relaxed) {
             let part = next.fetch_add(1, Ordering::Relaxed);
             if part >= parts {
@@ -179,65 +366,128 @@ fn lengths_with(
             let from = if part == 0 {
                 Some(start)
             } else {
-                record_start(file, start, target(part), end, limits.max_reach)
+                record_start(&mut at, start, target(part), end, limits.max_reach)
             };
             let to = if part + 1 == parts {
                 Some(end)
             } else {
-                record_start(file, start, target(part + 1), end, limits.max_reach)
+                record_start(&mut at, start, target(part + 1), end, limits.max_reach)
             };
-            let read = match (from, to) {
-                (Some(from), Some(to)) => read_part(file, from, to, config, &failed),
+            let result = match (from, to) {
+                (Some(from), Some(to)) => read(
+                    &mut at,
+                    &Part {
+                        index: part,
+                        from,
+                        to,
+                        failed: &failed,
+                    },
+                ),
                 _ => None,
             };
-            match read {
-                Some(lengths) => {
+            match result {
+                Some(result) => {
                     *results[part]
                         .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) = lengths;
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result);
                 }
                 None => failed.store(true, Ordering::Relaxed),
             }
         }
     };
-    let helpers = threads.min(parts) - 1;
-    std::thread::scope(|scope| {
-        let spawned: Vec<_> = (0..helpers)
-            .map(|_| std::thread::Builder::new().spawn_scoped(scope, work))
-            .collect();
-        work();
-        for handle in spawned {
-            match handle {
-                Ok(handle) => {
-                    if handle.join().is_err() {
-                        failed.store(true, Ordering::Relaxed);
-                    }
-                }
-                // A helper that could not start leaves its parts to the others.
-                Err(_) => {}
-            }
-        }
-    });
+    // Every thread of the pool runs `work` once (the caller's too, which waits for the others on
+    // the pool, `rayon::broadcast` inside `install`); a thread that starts late finds the parts
+    // taken. A panic of a part's reading comes back to the caller once every thread has returned.
+    pool.install(|| rayon::broadcast(|_| work()));
     if failed.load(Ordering::Relaxed) || next.load(Ordering::Relaxed) < parts {
         return None;
     }
-    let mut lengths = Vec::new();
-    for part in results {
-        lengths.extend(
+    results
+        .into_iter()
+        .map(|part| {
             part.into_inner()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        );
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        })
+        .collect()
+}
+
+/// One thread's reads of the query file at offsets (where the parts read, the module's header).
+#[cfg(unix)]
+struct At<'a> {
+    file: &'a File,
+}
+
+#[cfg(unix)]
+impl<'a> At<'a> {
+    fn open(input: Input<'a>) -> Option<At<'a>> {
+        Some(At { file: input.file })
     }
-    Some(lengths)
+
+    fn read_at(&mut self, buf: &mut [u8], at: u64) -> std::io::Result<usize> {
+        std::os::unix::fs::FileExt::read_at(self.file, buf, at)
+    }
+}
+
+/// One thread's reads of the query file at offsets (where the parts read, the module's header).
+#[cfg(not(unix))]
+struct At<'a> {
+    file: File,
+    /// The handle's position.
+    position: u64,
+    input: std::marker::PhantomData<Input<'a>>,
+}
+
+#[cfg(not(unix))]
+impl<'a> At<'a> {
+    /// `input`'s path opened again, where it is a regular file of `input.file`'s length and
+    /// modification time.
+    fn open(input: Input<'a>) -> Option<At<'a>> {
+        let file = File::open(input.path).ok()?;
+        let (first, again) = (input.file.metadata().ok()?, file.metadata().ok()?);
+        let same = again.is_file()
+            && again.len() == first.len()
+            && again.modified().ok()? == first.modified().ok()?;
+        same.then_some(At {
+            file,
+            position: 0,
+            input: std::marker::PhantomData,
+        })
+    }
+
+    fn read_at(&mut self, buf: &mut [u8], at: u64) -> std::io::Result<usize> {
+        use std::io::{Read, Seek, SeekFrom};
+
+        if self.position != at {
+            self.position = self.file.seek(SeekFrom::Start(at))?;
+        }
+        let n = self.file.read(buf)?;
+        self.position += n as u64;
+        Ok(n)
+    }
+}
+
+impl At<'_> {
+    /// `buf.len()` bytes at `at`, or an error (an early end of the file among them).
+    fn read_exact_at(&mut self, mut buf: &mut [u8], mut at: u64) -> std::io::Result<()> {
+        while !buf.is_empty() {
+            match self.read_at(buf, at) {
+                Ok(0) => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+                Ok(n) => {
+                    buf = &mut buf[n..];
+                    at += n as u64;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The first record start at or after `target` (a `>` that begins a line after `start` and is not
 /// followed by `?`), `end` if none comes before the end of the file, or `None` if none comes within
 /// `max_reach` bytes after `target` before the end. Reads blocks of `BLOCK` bytes from `target`.
-#[cfg(all(unix, feature = "parallel"))]
-fn record_start(file: &File, start: u64, target: u64, end: u64, max_reach: u64) -> Option<u64> {
-    use std::os::unix::fs::FileExt;
-
+fn record_start(at: &mut At<'_>, start: u64, target: u64, end: u64, max_reach: u64) -> Option<u64> {
     const BLOCK: usize = 8192;
     if target >= end {
         return Some(end);
@@ -246,98 +496,143 @@ fn record_start(file: &File, start: u64, target: u64, end: u64, max_reach: u64) 
     // The record starts looked for are in `target..limit`.
     let limit = end.min(target.saturating_add(max_reach));
     let mut prev = [0u8];
-    file.read_exact_at(&mut prev, target - 1).ok()?;
+    at.read_exact_at(&mut prev, target - 1).ok()?;
     let mut prev = prev[0];
     let mut block = vec![0u8; BLOCK];
-    let mut at = target;
-    while at < limit {
-        let want = usize::try_from(end - at).map_or(BLOCK, |left| left.min(BLOCK));
-        file.read_exact_at(&mut block[..want], at).ok()?;
+    let mut position = target;
+    while position < limit {
+        let want = usize::try_from(end - position).map_or(BLOCK, |left| left.min(BLOCK));
+        at.read_exact_at(&mut block[..want], position).ok()?;
         // A position is looked at with the byte after it in the block, or as the file's last byte.
-        let at_end = at + want as u64 == end;
+        let at_end = position + want as u64 == end;
         let looked = if at_end { want } else { want - 1 };
-        let looked = looked.min(usize::try_from(limit - at).unwrap_or(usize::MAX));
+        let looked = looked.min(usize::try_from(limit - position).unwrap_or(usize::MAX));
         for index in 0..looked {
             let byte = block[index];
             if byte == b'>' && prev == b'\n' && block[..want].get(index + 1) != Some(&b'?') {
-                return Some(at + index as u64);
+                return Some(position + index as u64);
             }
             prev = byte;
         }
-        at += looked as u64;
+        position += looked as u64;
     }
     (limit == end).then_some(end)
 }
 
-/// The lengths of the records of bytes `from..to` of `file`, read by a new reader with the loop of
-/// `x_query_stream::scan`, or `None` if they hold a `\r` or a `>?`, cannot all be read, the reading
-/// ends otherwise than at the end of the bytes, or another part failed (`failed`).
-#[cfg(all(unix, feature = "parallel"))]
-fn read_part(
-    file: &File,
-    from: u64,
-    to: u64,
+/// What `keep` makes of each record of `part`, read by a new reader with the loop of
+/// `x_query_stream::scan`, or `None` if its bytes hold a `\r` or a `>?`, cannot all be read, the
+/// reading ends otherwise than at the end of the bytes, or another part failed.
+fn read_part<T>(
+    at: &mut At<'_>,
+    part: &Part<'_>,
     config: ReaderConfig,
-    failed: &std::sync::atomic::AtomicBool,
-) -> Option<Vec<usize>> {
+    keep: &mut dyn FnMut(FastaRecord) -> T,
+) -> Option<Vec<T>> {
+    let mut kept = Vec::new();
+    let completed = read_part_with(at, part, config, false, &mut |record, _| {
+        kept.push(keep(record));
+        true
+    })?;
+    completed.then_some(kept)
+}
+
+/// The records of `part` as the reading before the search keeps them (with `pack` with their
+/// packed letters), or `None` as for `read_part`, or if a record's ID or messages are not those of
+/// one reading (the module's header).
+fn read_part_records(
+    at: &mut At<'_>,
+    part: &Part<'_>,
+    config: ReaderConfig,
+    pack: bool,
+) -> Option<PartRecords> {
+    let mut kept = PartRecords::default();
+    let completed = read_part_with(at, part, config, pack, &mut |record, packed| {
+        if record.local_id != local_id(config, kept.records.len())
+            || (part.index > 0 && !record.warnings.is_empty())
+        {
+            return false;
+        }
+        if let Some(letters) = packed {
+            kept.packed.push((kept.records.len(), letters));
+        }
+        kept.records.push(record);
+        true
+    })?;
+    completed.then_some(kept)
+}
+
+/// The loop of `x_query_stream::scan` over `part`'s bytes, each record given to `record` (with
+/// `pack` with its packed letters, `FastaInputSource::x_pack_letters`) until it returns false;
+/// `Some(true)` where every record was taken and the reading ended at the end of the bytes without
+/// a `\r` or a `>?` in them, `Some(false)` where `record` refused one, `None` otherwise.
+fn read_part_with(
+    at: &mut At<'_>,
+    part: &Part<'_>,
+    config: ReaderConfig,
+    pack: bool,
+    record: &mut dyn FnMut(FastaRecord, Option<PackedLetters>) -> bool,
+) -> Option<bool> {
     use crate::blastinput::fasta_reader::FastaInputSource;
     use std::sync::atomic::Ordering;
 
-    let mut lengths = Vec::new();
-    if from >= to {
-        return Some(lengths);
+    if part.from >= part.to {
+        return Some(true);
     }
     let mut refused = false;
     let mut source = FastaInputSource::x_from_reader(
         PartReader {
-            file,
-            at: from,
-            end: to,
+            at,
+            position: part.from,
+            end: part.to,
             last: b'\n',
             refused: &mut refused,
         },
         config,
     );
+    if pack {
+        source.x_pack_letters();
+    }
     loop {
         if source.end() {
             break;
         }
-        if failed.load(Ordering::Relaxed) {
+        if part.failed.load(Ordering::Relaxed) {
             return None;
         }
         match source.next_sequence(&mut |_| Ok(())) {
-            Ok(record) => lengths.push(record.sequence.len()),
+            Ok(read) => {
+                let packed = if pack { source.x_take_packed() } else { None };
+                if !record(read, packed) {
+                    return Some(false);
+                }
+            }
             Err(_) => return None,
         }
     }
     drop(source);
-    (!refused).then_some(lengths)
+    (!refused).then_some(true)
 }
 
-/// Bytes `at..end` of a file, read at their offsets (the file's position stays where it is), that
-/// notes (`refused`) a `\r` or a `>?` in what it returns, and an I/O error or an end of the file
-/// before `end` (which the reader would take for the end of its input).
-#[cfg(all(unix, feature = "parallel"))]
-struct PartReader<'a> {
-    file: &'a File,
-    at: u64,
+/// Bytes `position..end` of a file, read at their offsets (`At`), that notes (`refused`) a `\r`
+/// or a `>?` in what it returns, and an I/O error or an end of the file before `end` (which the
+/// reader would take for the end of its input).
+struct PartReader<'a, 'b> {
+    at: &'a mut At<'b>,
+    position: u64,
     end: u64,
     /// The last byte returned (a part starts at the start of a line).
     last: u8,
     refused: &'a mut bool,
 }
 
-#[cfg(all(unix, feature = "parallel"))]
-impl std::io::Read for PartReader<'_> {
+impl std::io::Read for PartReader<'_, '_> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        use std::os::unix::fs::FileExt;
-
-        let left = usize::try_from(self.end - self.at).unwrap_or(usize::MAX);
+        let left = usize::try_from(self.end - self.position).unwrap_or(usize::MAX);
         let want = buf.len().min(left);
         if want == 0 {
             return Ok(0);
         }
-        let n = match self.file.read_at(&mut buf[..want], self.at) {
+        let n = match self.at.read_at(&mut buf[..want], self.position) {
             Ok(0) | Err(_) => {
                 *self.refused = true;
                 return Ok(0);
@@ -353,7 +648,7 @@ impl std::io::Read for PartReader<'_> {
             *self.refused = true;
         }
         self.last = bytes[n - 1];
-        self.at += n as u64;
+        self.position += n as u64;
         Ok(n)
     }
 }
@@ -397,6 +692,16 @@ mod tests {
         (path, file)
     }
 
+    fn at_of<'a>(file: &'a File, path: &'a std::path::Path) -> At<'a> {
+        At::open(Input { file, path }).expect("the test file")
+    }
+
+    /// `work` on a search pool of `threads` threads (none for one), as `search_cli` makes it.
+    fn on_pool<R: Send>(threads: usize, work: impl FnOnce(&SearchPool<'_>) -> R + Send) -> R {
+        crate::utils::threading::with_search_pool(threads, "blastn", |pool| Ok(work(pool)))
+            .expect("the test's pool")
+    }
+
     /// The parallel reading of `bytes` from byte `start`, without a minimum size.
     fn parallel(
         bytes: &[u8],
@@ -406,7 +711,13 @@ mod tests {
         limits: Limits,
     ) -> Option<Vec<usize>> {
         let (path, file) = file_of(bytes, "p");
-        let lengths = lengths_with(&file, start, config, threads, 0, limits);
+        let input = Input {
+            file: &file,
+            path: &path,
+        };
+        let lengths = on_pool(threads, |pool| {
+            lengths_with(input, start, config, pool, 0, limits)
+        });
         let _ = std::fs::remove_file(path);
         lengths
     }
@@ -548,6 +859,7 @@ mod tests {
                 }
             }
             let (path, file) = file_of(&text, "rsb");
+            let mut at = at_of(&file, &path);
             let end = text.len() as u64;
             for target in (1..text.len())
                 .step_by(37)
@@ -555,7 +867,7 @@ mod tests {
             {
                 for reach in [1usize, 50, 8_191, 8_192, 8_193, 20_000, 1 << 20] {
                     assert_eq!(
-                        record_start(&file, 0, target as u64, end, reach as u64),
+                        record_start(&mut at, 0, target as u64, end, reach as u64),
                         record_start_by_bytes(&text, target, reach).map(|at| at as u64),
                         "round {round} target {target} reach {reach}"
                     );
@@ -583,10 +895,20 @@ mod tests {
         plain.extend_from_slice(b">b\nACGT\n");
         for (bytes, taken) in [(&gap, false), (&plain, true)] {
             let (path, file) = file_of(bytes, "gap");
+            let mut at = at_of(&file, &path);
             let end = bytes.len() as u64;
-            assert_eq!(read_part(&file, 0, end, config, &failed).is_some(), taken);
+            let lengths = |at: &mut At<'_>, to: u64| {
+                let part = Part {
+                    index: 0,
+                    from: 0,
+                    to,
+                    failed: &failed,
+                };
+                read_part(at, &part, config, &mut |record| record.sequence.len())
+            };
+            assert_eq!(lengths(&mut at, end).is_some(), taken);
             // A part past the end of the file: the reader would take the early end for its own.
-            assert_eq!(read_part(&file, 0, end + 100, config, &failed), None);
+            assert_eq!(lengths(&mut at, end + 100), None);
             let _ = std::fs::remove_file(path);
         }
     }
@@ -637,7 +959,14 @@ mod tests {
         // One thread, or fewer bytes than the minimum.
         assert_eq!(parallel(&good, 0, config, 1, SMALL), None);
         let (path, file) = file_of(&good, "min");
-        assert_eq!(lengths_with(&file, 0, config, 4, 1 << 20, SMALL), None);
+        let input = Input {
+            file: &file,
+            path: &path,
+        };
+        let lengths = on_pool(4, |pool| {
+            lengths_with(input, 0, config, pool, 1 << 20, SMALL)
+        });
+        assert_eq!(lengths, None);
         let _ = std::fs::remove_file(path);
     }
 
@@ -658,12 +987,142 @@ mod tests {
     fn record_starts_skip_gap_lines_and_lines_that_do_not_begin_with_the_mark() {
         let text = b">a\nAC\n>?5\n x>y\n>b\nAC\n".to_vec();
         let (path, file) = file_of(&text, "rs");
+        let mut at = at_of(&file, &path);
         let end = text.len() as u64;
-        assert_eq!(record_start(&file, 0, 1, end, 100), Some(15));
-        assert_eq!(record_start(&file, 0, 15, end, 100), Some(15));
-        assert_eq!(record_start(&file, 0, 16, end, 100), Some(end));
-        assert_eq!(record_start(&file, 0, 1, end, 5), None);
-        assert_eq!(record_start(&file, 0, 1, end, 15), Some(15));
+        assert_eq!(record_start(&mut at, 0, 1, end, 100), Some(15));
+        assert_eq!(record_start(&mut at, 0, 15, end, 100), Some(15));
+        assert_eq!(record_start(&mut at, 0, 16, end, 100), Some(end));
+        assert_eq!(record_start(&mut at, 0, 1, end, 5), None);
+        assert_eq!(record_start(&mut at, 0, 1, end, 15), Some(15));
         let _ = std::fs::remove_file(path);
+    }
+
+    /// The reading before the search as `search_cli` makes it without the parts: the records (with
+    /// `pack` their packed letters), and whether it ended at the end of the input.
+    fn serial_records(bytes: &[u8], config: ReaderConfig, pack: bool) -> (PartRecords, bool) {
+        use crate::blastinput::fasta_reader::{
+            read_queries, x_read_queries_packed, QueryEnd, QueryRecords,
+        };
+        let mut source = FastaInputSource::from_bytes(bytes, config);
+        let (QueryRecords { records, end }, packed) = if pack {
+            x_read_queries_packed(&mut source)
+        } else {
+            (read_queries(&mut source), Vec::new())
+        };
+        (
+            PartRecords { records, packed },
+            matches!(end, QueryEnd::Input),
+        )
+    }
+
+    /// `records` of `bytes` from byte `start`, without a minimum size.
+    fn parallel_records(
+        bytes: &[u8],
+        start: u64,
+        config: ReaderConfig,
+        threads: usize,
+        pack: bool,
+        limits: Limits,
+    ) -> Option<PartRecords> {
+        let (path, file) = file_of(bytes, "r");
+        let input = Input {
+            file: &file,
+            path: &path,
+        };
+        let records = on_pool(threads, |pool| {
+            records_with(input, start, config, pool, pack, 0, limits)
+        });
+        let _ = std::fs::remove_file(path);
+        records
+    }
+
+    /// A FASTA text of records with titles and letters only (upper and lower case, `N` runs, lines
+    /// of any length), of which the reader writes no message.
+    fn plain_fasta(rng: &mut Rng, records: usize) -> Vec<u8> {
+        let mut text = Vec::new();
+        for index in 0..records {
+            text.extend_from_slice(format!(">q{index} a title {index}\n").as_bytes());
+            for _ in 0..1 + rng.below(6) {
+                let width = 1 + rng.below(90) as usize;
+                for _ in 0..width {
+                    let letters = b"ACGTACGTacgtNn";
+                    text.push(letters[rng.below(letters.len() as u64) as usize]);
+                }
+                text.push(b'\n');
+            }
+        }
+        text
+    }
+
+    #[test]
+    fn the_parts_give_the_readings_records() {
+        let mut rng = Rng(0x6a09_e667_f3bc_c908);
+        let (mut taken, mut refused) = (0, 0);
+        for round in 0..200 {
+            let config = ReaderConfig::query("BLASTN", false, round % 4 < 2);
+            // Every other text of records the reader writes no message for, as most query files.
+            let mut text = if round % 2 == 0 {
+                random_fasta(&mut rng, 1 + round % 40)
+            } else {
+                plain_fasta(&mut rng, 1 + round % 40)
+            };
+            // In one text of five a hyphen in a data line (a message of the reader).
+            if round % 5 == 0 {
+                if let Some(at) = text.windows(3).position(|bytes| bytes == b"\nAC") {
+                    text.insert(at + 2, b'-');
+                }
+            }
+            for pack in [false, true] {
+                let (expected, clean) = serial_records(&text, config, pack);
+                for threads in [2, 8] {
+                    for limits in [
+                        SMALL,
+                        Limits {
+                            max_span: 7,
+                            max_reach: 2000,
+                            parts_per_thread: 1,
+                        },
+                    ] {
+                        match parallel_records(&text, 0, config, threads, pack, limits) {
+                            Some(parts) => {
+                                assert!(
+                                    clean,
+                                    "round {round}: parts taken where the reading fails"
+                                );
+                                assert_eq!(parts.records, expected.records, "round {round}");
+                                assert_eq!(parts.packed, expected.packed, "round {round}");
+                                taken += 1;
+                            }
+                            None => refused += 1,
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            taken > 300 && refused > 100,
+            "taken {taken}, refused {refused}"
+        );
+    }
+
+    #[test]
+    fn records_with_messages_after_the_first_part_are_left_to_the_reading() {
+        let config = ReaderConfig::query("BLASTN", false, true);
+        let late = b">a\nACGT\n>b\nACGTACGT\n>c\nAC\n>d\nAC-GTA\n";
+        let (expected, clean) = serial_records(late, config, false);
+        assert!(clean && !expected.records[3].warnings.is_empty());
+        assert!(parallel_records(late, 0, config, 4, false, SMALL).is_none());
+        // The same record first: its messages count lines as one reading does.
+        let first = b">d\nAC-GTA\n>a\nACGT\n>b\nACGTACGT\n>c\nAC\n";
+        let (expected, clean) = serial_records(first, config, false);
+        assert!(clean && !expected.records[0].warnings.is_empty());
+        let parts = parallel_records(first, 0, config, 4, false, SMALL).expect("the parts");
+        assert_eq!(parts.records, expected.records);
+        let ids: Vec<&str> = parts
+            .records
+            .iter()
+            .map(|record| record.local_id.as_str())
+            .collect();
+        assert_eq!(ids, ["Query_1", "Query_2", "Query_3", "Query_4"]);
     }
 }

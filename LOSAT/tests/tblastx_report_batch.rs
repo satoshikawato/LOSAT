@@ -121,7 +121,11 @@ fn losat() -> Command {
 fn tblastx(db: bool, threads: u32, args: &[&str], env: &[(&str, &str)]) -> Output {
     let (fasta, database) = subjects();
     let mut command = losat();
-    command.envs(env.iter().copied()).arg("tblastx").arg("-query").arg(queries());
+    command
+        .envs(env.iter().copied())
+        .arg("tblastx")
+        .arg("-query")
+        .arg(queries());
     if db {
         command.args(["-db", database]);
     } else {
@@ -153,7 +157,10 @@ fn check(args: &[&str]) {
                 "{args:?} db {db}: {}",
                 String::from_utf8_lossy(&off.stderr)
             );
-            assert!(!off.stdout.is_empty(), "{args:?} db {db}: the queries have hits");
+            assert!(
+                !off.stdout.is_empty(),
+                "{args:?} db {db}: the queries have hits"
+            );
             for threads in [1, 4] {
                 let on = tblastx(db, threads, args, &env(false));
                 let case = format!("{args:?} db {db} BATCH_SIZE {batch_size:?} threads {threads}");

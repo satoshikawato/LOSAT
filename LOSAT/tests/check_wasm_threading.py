@@ -234,8 +234,25 @@ def main():
             query_bytes = Path(inputs[query]).read_bytes()
             for kind, n in [("native", 1), ("serial", 1), ("threaded", 1), ("threaded", 2)]:
                 if kind not in prefixes: continue
-                data, _ = execute(f"dev-stdio/{program}-{kind}-n{n}", [*prefixes[kind], *pipe_args, "-num_threads", str(n)], stdin=query_bytes)
+                data, log = execute(f"dev-stdio/{program}-{kind}-n{n}", [*prefixes[kind], *pipe_args, "-num_threads", str(n)],
+                                    {"LOSAT_WASI_THREADS_DEBUG": "1"}, stdin=query_bytes)
                 assert data == reference, f"raw output differs: dev-stdio/{program}-{kind}-n{n}"
+                validate_thread_evidence(log, n, kind)
+            # NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:211-213
+            # ```c++
+            #         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
+            #            	ERR_POST(Warning << "Query is Empty!");
+            #            	return BLAST_EXIT_SUCCESS;
+            # ```
+            # LOSAT tells and seeks a FASTA input to find it empty (LOSAT/src/blastinput/input_files.rs);
+            # /dev/null seeks, as native lseek does there: the warning and no report.
+            empty_args = [program, "-query", "/dev/null", "-subject", inputs[query], "-outfmt", "7"]
+            empty, empty_log = execute(f"dev-null/{program}-native", [*prefixes["native"], *empty_args, "-num_threads", "1"])
+            assert "Query is Empty!" in empty_log, empty_log
+            for kind, n in [("serial", 1), ("threaded", 1), ("threaded", 2)]:
+                if kind not in prefixes: continue
+                data, log = execute(f"dev-null/{program}-{kind}-n{n}", [*prefixes[kind], *empty_args, "-num_threads", str(n)])
+                assert data == empty and log == empty_log, f"output or messages differ: dev-null/{program}-{kind}-n{n}"
     # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
     # AddDefaultKey(kArgOutputFormat, ..., eString, ...);
     # Unported format routes must reject explicitly before starting any worker

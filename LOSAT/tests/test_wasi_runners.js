@@ -1066,12 +1066,12 @@ test("a file that the main thread created is written on a thread worker (-num_th
 // ```c++
 //             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
 // ```
-// The host's table of files (wasi_thread_host.js, the comment above SHARED_FD_BASE) writes a
+// The hosts' table of files (wasi_files.js, the comment above SHARED_FD_BASE) writes a
 // regular file at the OS's offset, as native write() does, until the guest seeks or reads it, and
 // at the table's position from then on. Another write to the same open file (as the descriptor 1
 // that macOS's /dev/stdout duplicates) moves the OS's offset, here through the table's descriptor.
 test("the table of files writes at the OS's offset until a seek or a read, then at its own position", () => {
-  const { sharedFileTable, sharedFileImports } = require("./wasi_thread_host");
+  const { sharedFileTable, sharedFileImports } = require("./wasi_files");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-table-"));
   try {
     const file = path.join(directory, "out.txt");

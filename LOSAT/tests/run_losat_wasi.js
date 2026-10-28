@@ -5,7 +5,7 @@
 const fs = require("fs");
 const { WASI } = require("wasi");
 const { prepareArtifact, unsignedWasiImports } = require("./wasi_artifact");
-const { sharedFileTable, sharedFileImports } = require("./wasi_thread_host");
+const { sharedFileTable, sharedFileImports } = require("./wasi_files");
 
 // NCBI reference:
 // ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
@@ -47,9 +47,9 @@ const wasi = new WASI({
   const { module } = prepareArtifact(bytes, "serial-command");
   // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729 (see createWasi above)
   // The files the command opens from "/" are opened by name as the OS opens them, through the
-  // threaded host's table of files (wasi_thread_host.js, the comment above SHARED_FD_BASE): uvwasi
-  // cannot open /dev/stdin or /dev/stdout when they are pipes. The module exports its memory, so
-  // the table reads it through the instance.
+  // table of files that the threaded host uses too (wasi_files.js, the comment above
+  // SHARED_FD_BASE): uvwasi cannot open /dev/stdin or /dev/stdout when they are pipes. The module
+  // exports its memory, so the table reads it through the instance.
   let memory = null;
   const guestMemory = { get buffer() { return memory.buffer; }, grow: (pages) => memory.grow(pages) };
   const local = unsignedWasiImports(wasi.wasiImport);

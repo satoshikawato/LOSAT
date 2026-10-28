@@ -269,6 +269,18 @@ impl XBoard {
     /// Takes and runs one item: a group of any linking call first, then a unit by batch and
     /// subject order. False when there was none.
     fn run_one(&self, taker: &mut XTaker) -> bool {
+        self.run_group(taker) || {
+            let batches: Vec<Arc<XBatch>> = self
+                .batches
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            batches.iter().any(|batch| batch.run_one(taker))
+        }
+    }
+
+    /// Takes and runs one group (or sort, or merge) of any set; false when there was none.
+    fn run_group(&self, taker: &mut XTaker) -> bool {
         loop {
             let set = {
                 let mut groups = self.groups.lock().unwrap_or_else(|e| e.into_inner());
@@ -281,15 +293,9 @@ impl XBoard {
                         return true;
                     }
                 }
-                None => break,
+                None => return false,
             }
         }
-        let batches: Vec<Arc<XBatch>> = self
-            .batches
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        batches.iter().any(|batch| batch.run_one(taker))
     }
 
     /// Takes and runs one item (groups first, then units by batch and subject order); false when
@@ -325,12 +331,7 @@ impl XBoard {
             }
         }
         let mut taker = XTaker::default();
-        while !set.taken() {
-            if !self.run_one(&mut taker) {
-                // Nothing before this subject's units is left and they are taken.
-                set.run_one(&mut taker);
-            }
-        }
+        while set.run_one(&mut taker) {}
         drop(taker);
         set.wait();
         drop(owned);

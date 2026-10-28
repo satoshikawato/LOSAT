@@ -10138,6 +10138,9 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPLKDROP): nothing reads the lookup table after the preliminary stage;
     // it is dropped here unless a later block's build may take its vectors (at the end below).
     let lookup = x_lookup_after_prelim(lookup, blastp_parallel_pool, &x_ahead);
+    // EXPERIMENT (LOSAT_X_BPIHPOOL): no subject scan runs any more; the pool's arrays of initial
+    // hits are freed, as the subject loop's scratches freed theirs.
+    x_ih_pool::release();
     let kappa_redo_start = blastp_timing_start(timing_enabled);
     // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2228-2236
     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;

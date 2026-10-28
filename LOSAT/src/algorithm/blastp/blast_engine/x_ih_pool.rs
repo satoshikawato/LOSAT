@@ -32,7 +32,9 @@
 //! goes back to the pool and the scratch takes an array of the first size from it. The pool holds
 //! the arrays the threads use at the same time, not each thread's largest. The hits, their order
 //! and every value are those of the scratch's own vector; only where the arrays live changes. At
-//! one thread the pool holds the thread's largest array, as the scratch did.
+//! one thread the pool holds the thread's largest array, as the scratch did. After a search's
+//! preliminary stage the pool's arrays are freed ([`release`]), as the scratches' arrays were when
+//! the subject loop dropped its scratches.
 //!
 //! `LOSAT_TIMING=1` prints `[TIMING] x_bpihpool: pooled=<n>` per search: the arrays filled at
 //! [`OWN_LEN`] or more that continued through the pool.
@@ -138,6 +140,19 @@ fn grow(pool: &Pool, init_hsps: &mut Vec<InitHSP>) {
         .push(outgrown);
 }
 
+// No NCBI counterpart: frees the arrays no subject uses; it does not change any value NCBI computes.
+/// After a search's preliminary stage (no subject scan runs any more): the pool's arrays are freed.
+pub(super) fn release() {
+    if x_bpihpool() {
+        release_pool(&POOL);
+    }
+}
+
+fn release_pool(pool: &Pool) {
+    let arrays = std::mem::take(&mut *pool.lock().unwrap_or_else(PoisonError::into_inner));
+    drop(arrays);
+}
+
 /// The subject's array (larger than [`OWN_LEN`]) goes back to the pool; `init_hsps` becomes an
 /// array of [`OWN_LEN`] from the pool, or a new one.
 fn give_back(pool: &Pool, init_hsps: &mut Vec<InitHSP>) {
@@ -240,6 +255,10 @@ mod tests {
         }
         // 12,800 hits fit 12,800 places (100 doubled 7 times); 25,601 need 51,200.
         assert_eq!(largest, 51_200);
+        release_pool(&pool);
+        assert!(pool.lock().unwrap().is_empty());
+        assert_eq!(push_subject(&pool, &mut scratch, 450, 0), 3);
+        assert_eq!(scratch.capacity(), 800);
     }
 
     // Threads that share one pool: every subject's hits equal the reference, and when all are done

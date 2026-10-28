@@ -157,7 +157,11 @@ fn the_report_does_not_depend_on_where_the_initial_hits_live() {
             let (default, default_stderr) = search(&query, &target, threads, &[]);
             assert_eq!(default_stderr, "", "{what}");
             assert!(
-                default.split(|&b| b == b'\n').filter(|l| !l.is_empty()).count() >= 450,
+                default
+                    .split(|&b| b == b'\n')
+                    .filter(|l| !l.is_empty())
+                    .count()
+                    >= 450,
                 "{what}: fewer rows than windows"
             );
             let (old, old_stderr) = search(&query, &target, threads, &[SWITCH_OFF]);

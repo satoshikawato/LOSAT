@@ -3458,7 +3458,9 @@ Scheduling (each value computed by one thread with the original function; order 
   probe batch zeroes its own cells only and the rest of a full batch's cells wait for the next build that uses them
   (megablast of 1,775 cDNAs builds tables of 4^11, 4^8 and 4^12 cells; zeroing the whole 4^11 start for the 4^8 build
   cost 1.7 % of the run at one thread). The prefault round does not run on a kept table (its pages are mapped; the round
-  writes zeros over zeros). The fill finds every cell of its table at 0, as in a fresh one, and every reader takes cells
+  writes zeros over zeros): the zeroing writes every cell of the build, also those past the start that builds wrote,
+  which a packed CSR of `LOSAT_X_BNCSRPACK` leaves unwritten (a fill that read such a page first mapped the zero page and
+  copied it on its write, one TLB flush of every CPU of the search per page). The fill finds every cell of its table at 0, as in a fresh one, and every reader takes cells
   below the table's size, so every array and every report is what it is without the switch; `next_pos`, `pv_array` and
   the counters are allocated as before. Where: only the batch loop of `run_in_pool`, for the batches it searches itself
   and the query chunks of a split batch, and only while no `LOSAT_X_QBATCHPAR` slot can run (the driver turned off, or

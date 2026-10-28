@@ -691,10 +691,22 @@ fn restricted_rows<const AVX2: bool>(
     let mut col_ready = 0usize;
 
     // Cell `b` of a row is `h[PAD + b]`. Row 0 goes to `h[0]`.
-    let XRestrictedScratch { h, e10, col, .. } = sc;
+    let XRestrictedScratch {
+        h,
+        e10: e10_vec,
+        col: col_vec,
+        ..
+    } = sc;
     let [row0, row1] = h;
-    // LOSAT_X_BPGAPBAND: the rows grow the arrays when `last_b_index` reaches `grow_at`.
-    let mut grow_at = band_grow_at(band_cells32(row0, row1, e10, col, len2), len2, p.ahead);
+    // LOSAT_X_BPGAPBAND: the rows grow the arrays when `last_b_index` reaches `grow_at`; the
+    // slices below are taken again after that.
+    let mut grow_at = band_grow_at(
+        band_cells32(row0, row1, e10_vec, col_vec, len2),
+        len2,
+        p.ahead,
+    );
+    let mut e10 = &mut e10_vec[..];
+    let mut col = &mut col_vec[..];
     let mut score = -gap_open_extend;
     row0[PAD] = 0;
     e10[0] = -gap_open_extend;
@@ -799,14 +811,18 @@ fn restricted_rows<const AVX2: bool>(
         //             gap_align->dp_mem = score_array;
         //         }
         // ```
-        if band.last >= grow_at {
-            let cells = band_grow32(row0, row1, e10, col, band.last + p.ahead, len2);
+        let cur = if band.last >= grow_at {
+            let cells = band_grow32(row0, row1, e10_vec, col_vec, band.last + p.ahead, len2);
             grow_at = band_grow_at(cells, len2, p.ahead);
-        }
-        let cur: &mut [i32] = if a_index % 2 == 1 {
-            &mut row1[..]
+            e10 = &mut e10_vec[..];
+            col = &mut col_vec[..];
+            if a_index % 2 == 1 {
+                &mut row1[..]
+            } else {
+                &mut row0[..]
+            }
         } else {
-            &mut row0[..]
+            cur
         };
         if band.last < band.b_size.saturating_sub(1) {
             band.b_size = band.last + 1;
@@ -1595,10 +1611,21 @@ unsafe fn restricted_rows16_avx2(
     let col_cap = len2 + 2 + TAIL;
     let mut col_ready = 0usize;
 
-    let XRestrictedScratch { h16, e16, col, .. } = sc;
+    let XRestrictedScratch {
+        h16,
+        e16: e16_vec,
+        col: col_vec,
+        ..
+    } = sc;
     let [row0, row1] = h16;
     // LOSAT_X_BPGAPBAND: as in `restricted_rows`.
-    let mut grow_at = band_grow_at(band_cells16(row0, row1, e16, col, len2), len2, p.ahead);
+    let mut grow_at = band_grow_at(
+        band_cells16(row0, row1, e16_vec, col_vec, len2),
+        len2,
+        p.ahead,
+    );
+    let mut e16 = &mut e16_vec[..];
+    let mut col = &mut col_vec[..];
     let mut score = -gap_open_extend;
     row0[PAD] = 0;
     e16[0] = -gap_open_extend as i16;
@@ -1678,14 +1705,18 @@ unsafe fn restricted_rows16_avx2(
         if band.first == band.b_size {
             break;
         }
-        if band.last >= grow_at {
-            let cells = band_grow16(row0, row1, e16, col, band.last + p.ahead, len2);
+        let cur = if band.last >= grow_at {
+            let cells = band_grow16(row0, row1, e16_vec, col_vec, band.last + p.ahead, len2);
             grow_at = band_grow_at(cells, len2, p.ahead);
-        }
-        let cur: &mut [i16] = if a_index % 2 == 1 {
-            &mut row1[..]
+            e16 = &mut e16_vec[..];
+            col = &mut col_vec[..];
+            if a_index % 2 == 1 {
+                &mut row1[..]
+            } else {
+                &mut row0[..]
+            }
         } else {
-            &mut row0[..]
+            cur
         };
         if band.last < band.b_size.saturating_sub(1) {
             band.b_size = band.last + 1;

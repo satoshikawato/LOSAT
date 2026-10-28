@@ -25,7 +25,10 @@ pub fn base() -> Instant {
 /// RssAnon samples every `LOSAT_XTLINE_RSS` ms (s22 RSS probe): kind "rss", id = RssAnon KiB
 /// (statm resident - shared), thread -2.
 fn start_rss(b: Instant) {
-    let ms: u64 = match std::env::var("LOSAT_XTLINE_RSS").ok().and_then(|v| v.parse().ok()) {
+    let ms: u64 = match std::env::var("LOSAT_XTLINE_RSS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
         Some(v) if v > 0 => v,
         _ => return,
     };
@@ -71,4 +74,17 @@ pub fn dump() {
         s.push_str(&format!("{k}\t{id}\t{th}\t{a}\t{z}\n"));
     }
     let _ = std::fs::write(path, s);
+}
+
+/// PROBE (b26 timeline): records `kind` from `t0` to the drop.
+pub(crate) struct XRecOnDrop(
+    pub(crate) &'static str,
+    pub(crate) u32,
+    pub(crate) std::time::Instant,
+);
+
+impl Drop for XRecOnDrop {
+    fn drop(&mut self) {
+        rec(self.0, self.1, self.2, std::time::Instant::now());
+    }
 }

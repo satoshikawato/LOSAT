@@ -293,6 +293,8 @@ impl<'a> XSeedEnd<'a> {
         let Some(gate) = self.gate else {
             return;
         };
+        let x_t0 = std::time::Instant::now();
+        let _x_rec = crate::utils::xtline::XRecOnDrop("gate", 0, x_t0);
         let mut taker = crate::algorithm::tblastx::x_work_board::XTaker::default();
         while !gate.open() {
             if board.is_some_and(|board| board.take_one(&mut taker)) {
@@ -514,6 +516,7 @@ impl<'s, R: Send> XPipe<'s, R> {
     /// The slot of batch `i`, once its search has filled it; the thread runs the pool's jobs
     /// meanwhile. A panic of that search is raised again here.
     fn wait(&self, i: usize) -> Result<R> {
+        let _x_rec = crate::utils::xtline::XRecOnDrop("pwait", i as u32, std::time::Instant::now());
         let mut waited = false;
         // One taker for the whole wait: the units it runs keep one scratch (`XTaker`).
         let mut taker = crate::algorithm::tblastx::x_work_board::XTaker::default();

@@ -337,7 +337,9 @@ impl XBoard {
         let mut taker = XTaker::default();
         while set.run_one(&mut taker) {}
         drop(taker);
+        let x_w = crate::utils::xtline::XRecOnDrop("swait", s as u32, std::time::Instant::now());
         set.wait();
+        drop(x_w);
         drop(owned);
         // The slot stays closed and drained; the set is not kept until the batch ends.
         *batch.slots[s].lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -361,7 +363,9 @@ impl XBoard {
         let _ = helpers;
         let mut taker = XTaker::default();
         while set.run_one(&mut taker) {}
+        let x_w = crate::utils::xtline::XRecOnDrop("gwait", n as u32, std::time::Instant::now());
         set.wait();
+        drop(x_w);
         drop(owned);
     }
 
@@ -370,6 +374,11 @@ impl XBoard {
     /// the loop stopped (`stopped`: a subject's search panicked, so the subjects not yet taken will
     /// never close).
     pub(crate) fn help(&self, batch: &XBatch, stopped: &AtomicBool) {
+        let _x_rec = crate::utils::xtline::XRecOnDrop(
+            "help",
+            batch.slots.len() as u32,
+            std::time::Instant::now(),
+        );
         let mut taker = XTaker::default();
         let mut idle = 0u32;
         loop {

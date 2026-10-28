@@ -321,6 +321,7 @@ export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNQDROP=1
 export LOSAT_X_BNQPACK=1
 export LOSAT_X_BNQSLOTS=1
+export LOSAT_X_BNSEEDLISTS=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BNTABPAR=1
@@ -3969,6 +3970,48 @@ Scheduling (each value computed by one thread with the original function; order 
   [1.008]; blastn-short of the 236 cDNAs 1.001 [0.997]; max RSS of these within the A/A spread. `=0` against dev:
   0.993-1.005 in every case. One thread (node 0, `perf stat`, outputs the same): instructions of dev, the switch and
   `=0` within 0.01 % (31,168 cDNAs 117.750 / 117.751 / 117.749 G; 1,775 cDNAs dc-megablast, megablast and blastn too).
+- `LOSAT_X_BNSEEDLISTS=1` (BLASTN `-task blastn`, `megablast` and `blastn-short`: the partitioned stages of
+  `LOSAT_X_PAIRPAR` and `LOSAT_X_PAIRPARNA` with `LOSAT_X_PAIRPARFOLD`, two threads or more, one unmasked subject, a
+  query block above 8,000 letters; in the strict set from the pull request that added it, 2026-10-28:
+  `LOSAT_X_BNSEEDLISTS=0` turns it off) gives those stages the form `LOSAT_X_DCSEEDLEAN` gives dc-megablast's
+  (`x_pair_seed_part::seed_stage_part_lists`); each partition gets the same seeds in the same order, so the hits and
+  the table are the same:
+  - in the home loop (`LOSAT_X_PAIRPARHOME`) a strip's scan pushes each seed into its partition's list (`PartSink`)
+    instead of into one list that a stable counting sort then cuts by partition (`produce`: a count pass, the
+    partition of each seed's bucket, and a copy of each 16-byte seed and its 4-byte position);
+  - the folds (`fold_t`, `fold_na_t` without `TRACK`) do not record the buckets their inserts change, and the merge
+    writes back every bucket of each partition (an unchanged one as it was).
+  The scans (`scan_strip`, `scan_strip_csr`, `scan_strip_na`) take the receiver as a type parameter (`SeedOut`), so
+  the lists are one more instance of each; the stages without partitions and one thread are unchanged. `x_reach!` at
+  each partitioned stage, always the switch's side while it is on. Tests: `seed_stage_on_strips_equals_one_scan` of
+  `x_pair_seed.rs` (the partitioned stage in both forms on 1 to 8 threads and 2 to 16 partitions, on tables with and
+  without level bounds, two chunks in a row on one scratch, against the serial fold) and of `x_pair_seed_na.rs` (word
+  sizes 6, 7 and 8, both forms on 2 to 6 threads), and `LOSAT/tests/blastn_bn_seed_lists.rs` (blastn and megablast of
+  LC738874 against LC738868 and blastn-short of 700 24-mers of LC738868: the reports at 2 and 4 threads and at 4 with
+  `LOSAT_X_PAIRPARHOME=0` against `=0` at 2 and 4, with the sides of `LOSAT_X_REACH`, `LOSAT_X_PAIRPARFOLD` and the
+  stage's switch).
+  Probe (v4-A15 s20, 2026-10-28, exp/a15-bnlists; workstation as above, 16 threads unless noted, against the 3 Mb of
+  chromosome 2L): the cut took 7-8 % of the cycles of blastn-short of 236 D. melanogaster cDNAs (three stages, 313 M
+  seeds) and about 2 % of blastn of 31,168 and 5,000 cDNAs (216 M and 35 M seeds; `perf record`, node 0). Time A/B on
+  node 1 (dev's form, a byte copy of its binary, this form; every output the same; median of the per-round ratios
+  [A/A]): blastn-short x0.972 (16 rounds, none slower; max RSS 408 -> 385 MiB) [1.002], at 8 threads x0.960 [1.000];
+  blastn of the 31,168 cDNAs x0.988 [0.999], against the 3 Mb as `-db` x0.991 [1.001] (104 -> 95 MiB), with
+  `LOSAT_X_QBATCHPAR=0` x0.993 [0.996] (101 -> 93 MiB); of 5,000 cDNAs x0.988 [1.002]; of 1,775 x0.998 [0.999].
+  Pull request A/B (v4-A15 s21, node 1: dev 2087618e6, a byte copy of its binary, d6e69cd1f, and d6e69cd1f with `=0`;
+  every output the same; median [95 %], rounds slower, [A/A]): blastn-short of the 236 cDNAs x0.969 [0.966-0.974]
+  0/16 [0.997] (2.359 -> 2.285 s, max RSS 416 -> 386 MiB), at 8 threads x0.961 0/8 [1.000] (383 -> 373 MiB); blastn
+  of the 31,168 cDNAs x0.986 1/16 [0.999] (392 -> 383 MiB), as `-db` x0.996 [1.002] (103 -> 94 MiB), with
+  `LOSAT_X_QBATCHPAR=0` x1.003 8 rounds [1.005] and x0.998 16 rounds [1.000] (102 -> 92-96 MiB); of 5,000 x0.996
+  [1.001]; of 1,775 x0.994 [0.998]; megablast of 1,775 x0.994 40 rounds [0.989], of the 31,168 x0.999 [0.985];
+  dc-megablast of the 31,168 (not reached) x0.997 [0.999]. Max RSS rises in no case. `=0` against dev 0.996-1.005.
+  The one case it does not help: megablast of the 31,168 cDNAs with `LOSAT_X_QBATCHPAR=0` at 16 threads, x1.020 in 12
+  rounds and x1.012 [0.998-1.024] in 40 (25 slower; A/A 0.999; CPU x1.013 in both), at 8 threads x1.004 [0.980-1.021]
+  (A/A 0.992). Its partitioned stages are small: 25 stages, 131 k seeds, 15 seeds a strip, so about one per partition,
+  which the lists put in 16 vectors per strip where the cut wrote one; `[TIMING]` fold and merge the same,
+  instructions +0.1-0.2 % at 16 threads and +0.02 % at 8, page faults the same (both arms 70-150 k, run to run), sys
+  time +0.03-0.05 s (node 0, `perf stat`). One thread (node 0, `perf stat`, outputs the same): instructions of dev,
+  the switch and `=0` within 0.01 % (blastn-short of the 236 cDNAs 260.834 / 260.821 / 260.821 G; 1,775 cDNAs
+  blastn, megablast and dc-megablast too).
 - `LOSAT_X_BNCSR=1` (BLASTN `-task blastn` and every task with word size 9, 10 or 11 that builds the contiguous
   two-stage table of `build_mb_lookup`, `-subject` and `-db`, any thread count, speed; in the strict set from the pull
   request that added it, 2026-10-25 (perf/bn-csr, evidence at the end of this entry): on unless it is `0`) lays out the

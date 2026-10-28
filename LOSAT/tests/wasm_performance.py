@@ -337,10 +337,10 @@ def freeze(args):
             "runners": runners,
             # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
             # x_PrintField(*iter); ... m_Ostream << "\n";
-            # Freeze the memory adapter too: it affects the executed module.
+            # Freeze the memory adapter and the table of files too: they affect the executed module.
             "runner_hashes": {
                 p: digest(p)
-                for p in [*runners.values(), str(TESTS / "wasi_shared_memory.js")]
+                for p in [*runners.values(), str(TESTS / "wasi_shared_memory.js"), str(TESTS / "wasi_files.js")]
             },
         },
         "hardware": {

@@ -33,16 +33,16 @@
 //! after the other (3 transcripts against the fruit fly genome: 11.4 s at 8 threads, 11.6 s at
 //! one). With the switch each thread of the pool takes the next index from one counter when it
 //! is free, so the long subjects go to different threads. The threaded Wasm module
-//! (`wasm-threads`) runs the same loop: its subject loop in `run_impl.rs` keeps each subject's
-//! HSPs with the subject index, without the switch in rayon's pieces (`map_init`), with it in one
-//! list the threads append to, and orders the lists by that index after the loop.
+//! (`wasm-threads`) runs the same loop, with the collector the subject loop keeps in place of
+//! the writer thread (`hit_collector.rs`).
 //!
 //! What a thread does with a subject is unchanged: the same `process_subject` on a worker state
 //! made by the same `init`. Each thread makes its state once, when it takes its first subject (a
 //! thread that takes none makes none), where rayon made one per piece. The search's results do
 //! not depend on which thread searched which subject or in which order: each subject's HSPs are
-//! sent as one list (`WorkerState::tx`) and `report::final_hit_order` orders them by query and
-//! subject index, as for rayon's pieces, whose order of completion is not fixed either. The
+//! sent as one message with its index (`WorkerState::tx`) and the batch's collector takes them in
+//! subject order (`hit_collector.rs`), as for rayon's pieces, whose order of completion is not
+//! fixed either. The
 //! tables of the seed release (`x_seed_release.rs`) count the subjects whose stages have ended, not
 //! their order.
 //!

@@ -76,7 +76,7 @@ use super::super::{
 };
 use super::{
     part, plan_strips, pool_threads, run_strips, scan_kernel, FoldCounts, PartScratch, Seed,
-    StageStats, StripJob,
+    SeedOut, StageStats, StripJob,
 };
 use crate::algorithm::blastn::lookup::{NaLookupTable, PvDirectLookup};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -194,7 +194,7 @@ fn in_scope(x: &NaInputs<'_>) -> bool {
 /// word length and step (unmasked subject), from `job.start` to `job.end`; every lookup hit of
 /// a word in the table's order, `q_off_1 == 0` skipped as the reference skips it; each pair
 /// becomes a `Seed` with the context of its query offset.
-fn scan_strip_na(x: &NaInputs<'_>, job: &StripJob, out: &mut Vec<Seed>) {
+fn scan_strip_na<O: SeedOut>(x: &NaInputs<'_>, job: &StripJob, out: &mut O) {
     let s_range = job.s_range;
     let mut on_kmer = |kmer_start: usize, current_kmer: u64| {
         for &q_off_1 in x.hits(current_kmer) {
@@ -281,7 +281,36 @@ fn scan_strip_na(x: &NaInputs<'_>, job: &StripJob, out: &mut Vec<Seed>) {
 /// inserts change, and the time of the ungapped extensions (instead of the shared LOSAT_TIMING
 /// counters); without it `out` and `pos` are not read.
 #[allow(clippy::too_many_arguments)]
+#[inline(always)]
 fn fold_na<const PT: bool>(
+    x: &NaInputs<'_>,
+    seeds: &[Seed],
+    diag_hash: &mut DiagHashTable,
+    ungapped_hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    scan_pause_ns: &mut u64,
+    counts: &mut FoldCounts,
+    out: &mut part::PartOut,
+    pos: &[u32],
+) {
+    fold_na_t::<PT, true>(
+        x,
+        seeds,
+        diag_hash,
+        ungapped_hits,
+        timing,
+        scan_pause_ns,
+        counts,
+        out,
+        pos,
+    );
+}
+
+/// `fold_na`; EXPERIMENT (LOSAT_X_BNSEEDLISTS): without `TRACK` the inserts of a partition do
+/// not record the buckets they change (`part::insert_t`; the merge then writes back every
+/// bucket of the partition).
+#[allow(clippy::too_many_arguments)]
+fn fold_na_t<const PT: bool, const TRACK: bool>(
     x: &NaInputs<'_>,
     seeds: &[Seed],
     diag_hash: &mut DiagHashTable,
@@ -504,7 +533,7 @@ fn fold_na<const PT: bool>(
             //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
             //                       hit_ready, s_off_pos, window_size + Delta + 1);
             // ```
-            part::insert::<PT, false, false>(
+            part::insert_t::<PT, false, false, TRACK>(
                 diag_hash,
                 out,
                 x_key,
@@ -549,7 +578,7 @@ fn fold_na<const PT: bool>(
         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
         //                       hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
-        part::insert::<PT, false, false>(
+        part::insert_t::<PT, false, false, TRACK>(
             diag_hash,
             out,
             x_key,
@@ -588,6 +617,32 @@ fn seed_stage(
     timed: bool,
     fold_part: Option<part::FoldPart<'_>>,
 ) -> StageStats {
+    seed_stage_of(
+        x,
+        threads,
+        target_strips,
+        hash,
+        hits,
+        timing,
+        timed,
+        fold_part,
+        super::seed_lists_on(),
+    )
+}
+
+/// `seed_stage`; `lists`: LOSAT_X_BNSEEDLISTS's partitioned stage (`super::seed_lists_on`).
+#[allow(clippy::too_many_arguments)]
+fn seed_stage_of(
+    x: &NaInputs<'_>,
+    threads: usize,
+    target_strips: usize,
+    hash: &mut DiagHashTable,
+    hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    timed: bool,
+    fold_part: Option<part::FoldPart<'_>>,
+    lists: bool,
+) -> StageStats {
     let jobs = plan_strips(
         x.subject_seq_ranges,
         x.s_len,
@@ -599,6 +654,48 @@ fn seed_stage(
     let produce = |i: usize, out: &mut Vec<Seed>| scan_strip_na(x, &jobs[i], out);
     if let Some(fold_part) = fold_part {
         let parts = fold_part.parts;
+        // EXPERIMENT (LOSAT_X_BNSEEDLISTS): every partitioned stage takes the partitions' lists and
+        // the folds that do not record their buckets.
+        if lists {
+            crate::utils::xreach::x_reach!("LOSAT_X_BNSEEDLISTS", true);
+            let produce_lists =
+                |i: usize, out: &mut part::PartSink<'_>| scan_strip_na(x, &jobs[i], out);
+            let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
+                let part::PartState {
+                    hash,
+                    hits,
+                    out,
+                    counts,
+                    scan_pause_ns,
+                    ..
+                } = st;
+                fold_na_t::<true, false>(
+                    x,
+                    seeds,
+                    hash,
+                    hits,
+                    timing,
+                    scan_pause_ns,
+                    counts,
+                    out,
+                    pos,
+                );
+            };
+            let r = part::seed_stage_part_lists(
+                jobs.len(),
+                threads,
+                AHEAD_PER_THREAD * threads,
+                hash,
+                hits,
+                fold_part,
+                &produce,
+                &produce_lists,
+                &fold_one,
+                timed,
+            );
+            part::record(part::NA_ONE_HIT, parts, &r);
+            return StageStats::of_part(jobs.len(), r, timing);
+        }
         let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
             let part::PartState {
                 hash,
@@ -829,7 +926,8 @@ mod tests {
     // on both strands, query masks on one context, so `s_TypeOfWord` checks words there) for
     // the direct table at word sizes 6, 7 and 8: the pairs of the reference wrapper
     // `scan_subject_kmers_with_ranges` folded in one go, against `seed_stage` on 1..6 threads
-    // with the owner's fold and (2 threads or more) the partitioned fold, for the strip target
+    // with the owner's fold and (2 threads or more) the partitioned fold in both forms of
+    // LOSAT_X_BNSEEDLISTS's stage, for the strip target
     // of `run` and for two small targets whose strips start at offsets that are not a
     // multiple of 4 (`plan_strips`: per = max(ceil(grid points / target), 512)). Hit lists and
     // diagonal hashes must be the same.
@@ -1029,12 +1127,13 @@ mod tests {
                     odd_targets[1],
                 ] {
                     let per = grid.div_ceil(target).max(512);
-                    for partitioned in [false, true] {
+                    // unpartitioned, and partitioned in both forms of LOSAT_X_BNSEEDLISTS's stage
+                    for (partitioned, lists) in [(false, false), (true, false), (true, true)] {
                         if partitioned && threads < 2 {
                             continue;
                         }
                         let at =
-                            format!("word {word_length} threads {threads} target {target} partitioned {partitioned}");
+                            format!("word {word_length} threads {threads} target {target} partitioned {partitioned} lists {lists}");
                         let (state, keys, stats_seeds, strips) = pool.install(|| {
                             let mut hash = new_hash();
                             let mut hits = Vec::new();
@@ -1043,8 +1142,9 @@ mod tests {
                                 scratch: &mut scratch,
                                 parts: threads.min(DIAGHASH_NUM_BUCKETS),
                             });
-                            let stats = seed_stage(
+                            let stats = seed_stage_of(
                                 &x, threads, target, &mut hash, &mut hits, None, false, fold_part,
+                                lists,
                             );
                             (
                                 hash_state(&hash),

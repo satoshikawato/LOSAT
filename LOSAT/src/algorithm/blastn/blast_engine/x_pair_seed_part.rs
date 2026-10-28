@@ -76,12 +76,13 @@
 //! until the stall exit releases it. At the end the hits are put in the order of their seeds'
 //! keys (strip, position in the strip's scan order) and the changed buckets of every partition
 //! are written into the stage's table with the reference's cell numbers (`merge`).
-//! EXPERIMENT (LOSAT_X_DCSEEDLEAN, dc-megablast's stage only: `seed_stage_part_lists`): the home
-//! loop's strips are scanned straight into the partitions' lists (`PartSink`: each seed in the
-//! partition of the cut, numbered in scan order, so the lists are those of the stable cut), and
-//! the folds do not record the buckets they change, so the merge writes back every bucket of
-//! each partition (an unchanged one has the stage's chain, its cells below the stage's
-//! occupancy, so writing it back changes nothing).
+//! EXPERIMENT (`seed_stage_part_lists`: LOSAT_X_DCSEEDLEAN for dc-megablast's stages,
+//! LOSAT_X_BNSEEDLISTS for those of `x_pair_seed.rs` and `na`): the home loop's strips are
+//! scanned straight into the partitions' lists (`PartSink`: each seed in the partition of the
+//! cut, numbered in scan order, so the lists are those of the stable cut), and the folds do not
+//! record the buckets they change, so the merge writes back every bucket of each partition (an
+//! unchanged one has the stage's chain, its cells below the stage's occupancy, so writing it
+//! back changes nothing).
 //! With LOSAT_X_PAIRPARHOME (on by default) the participants share the folds otherwise: each
 //! partition has a home participant that folds it run by run of ready strips, and the others
 //! fold it only in the cases `seed_stage_home` lists; the argument below needs only that each
@@ -202,7 +203,8 @@ pub(super) struct PartOut {
     appends: Vec<(u64, u32)>,
     touched: Vec<bool>,
     dirty: Vec<u16>,
-    /// EXPERIMENT (LOSAT_X_DCSEEDLEAN): the stage's folds do not record the buckets they change
+    /// EXPERIMENT (LOSAT_X_DCSEEDLEAN, LOSAT_X_BNSEEDLISTS): the stage's folds do not record the
+    /// buckets they change
     /// (`touched`, `dirty`; `insert_t` without `TRACK`), and the merge writes back every bucket of
     /// the partition.
     all_dirty: bool,
@@ -417,10 +419,10 @@ struct PartSeeds {
     pos: Vec<u32>,
 }
 
-/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): the receiver of a strip's seeds
-/// that puts each seed in its partition's list (`table`: the partition of each bucket, `bucket %
-/// parts`), numbering them in scan order, so the strip needs no cut: the lists are those of the
-/// stable counting sort of `seed_stage_home`'s `produce`.
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN, LOSAT_X_BNSEEDLISTS): the receiver
+/// of a strip's seeds that puts each seed in its partition's list (`table`: the partition of
+/// each bucket, `bucket % parts`), numbering them in scan order, so the strip needs no cut: the
+/// lists are those of the stable counting sort of `seed_stage_home`'s `produce`.
 pub(super) struct PartSink<'a> {
     table: &'a [u16; DIAGHASH_NUM_BUCKETS],
     lists: &'a mut [PartSeeds],
@@ -618,7 +620,8 @@ where
 /// No NCBI counterpart (scheduling only): a stage without a scan into the partitions' lists.
 type NoLists = fn(usize, &mut PartSink<'_>);
 
-/// No NCBI counterpart (scheduling only): EXPERIMENT (LOSAT_X_DCSEEDLEAN) `seed_stage_part` of
+/// No NCBI counterpart (scheduling only): EXPERIMENT (LOSAT_X_DCSEEDLEAN, LOSAT_X_BNSEEDLISTS)
+/// `seed_stage_part` of
 /// a caller whose `fold` does not record the buckets it changes (`insert_t` without `TRACK`):
 /// the merge writes back every bucket of each partition (`PartOut::all_dirty`; a bucket no fold
 /// changed has the stage's chain, cells below the stage's occupancy, so writing it back changes

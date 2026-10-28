@@ -19898,4 +19898,70 @@ mod tests {
             ]
         );
     }
+
+    // LOSAT_X_BNSCRATCHKEEP: a kept scratch renewed for a batch holds, in every part a batch reads
+    // before it writes it, what a new scratch of that batch holds, in the allocations it had.
+    #[test]
+    fn a_renewed_subject_scratch_reads_as_a_new_one() {
+        let mut kept = SubjectScratch::new(3, 64, 40);
+        kept.hits.reserve(8);
+        kept.prelim_hits.reserve(8);
+        kept.ungapped_hits.reserve(8);
+        kept.seq_ranges_scratch.push((1, 2));
+        kept.cutoff_scores.push(5);
+        kept.x_dropoff_scores.push(6);
+        kept.reduced_cutoff_scores.push(7);
+        kept.hit_level_array.resize(
+            100,
+            DiagStruct {
+                last_hit: 7,
+                flag: 1,
+            },
+        );
+        kept.hit_len_array.resize(100, 3);
+        kept.diag_table_offset = 12_345;
+        kept.offset_pairs.truncate(10);
+        kept.offset_pairs[5] = OffsetPair {
+            q_off: 9,
+            s_off: 9,
+            s_range: 9,
+        };
+        kept.diag_hash.offset = 999;
+        kept.diag_hash.occupancy = 7;
+        kept.diag_hash.backbone[3] = 4;
+        kept.x_blastna.extend_from_slice(b"ACGT");
+        for (query_count, offset_array_size, window_size) in [(5, 128, 0), (2, 16, 40)] {
+            let fresh = SubjectScratch::new(query_count, offset_array_size, window_size);
+            let renewed = kept.renew(query_count, offset_array_size, window_size);
+            assert!(renewed.hits.is_empty() && renewed.hits.capacity() >= 8);
+            assert!(renewed.prelim_hits.is_empty() && renewed.prelim_hits.capacity() >= 8);
+            assert!(renewed.ungapped_hits.is_empty() && renewed.ungapped_hits.capacity() >= 8);
+            assert!(renewed.seq_ranges_scratch.is_empty());
+            assert!(renewed.cutoff_scores.is_empty());
+            assert!(renewed.x_dropoff_scores.is_empty());
+            assert!(renewed.reduced_cutoff_scores.is_empty());
+            assert!(renewed.cutoff_scores.capacity() >= query_count);
+            assert!(
+                renewed.hit_level_array.is_empty() && renewed.hit_level_array.capacity() >= 100
+            );
+            assert!(renewed.hit_len_array.is_empty() && renewed.hit_len_array.capacity() >= 100);
+            assert_eq!(renewed.diag_table_offset, fresh.diag_table_offset);
+            assert_eq!(renewed.offset_pairs.len(), fresh.offset_pairs.len());
+            assert!(renewed
+                .offset_pairs
+                .iter()
+                .all(|pair| pair.q_off == 0 && pair.s_off == 0 && pair.s_range == 0));
+            let (a, b) = (&renewed.diag_hash, &fresh.diag_hash);
+            assert_eq!(
+                (a.num_buckets, a.occupancy, a.capacity, a.offset, a.window),
+                (b.num_buckets, b.occupancy, b.capacity, b.offset, b.window)
+            );
+            assert_eq!(a.backbone, b.backbone);
+            assert_eq!(a.chain.len(), b.chain.len());
+            assert_eq!(a.max_level, b.max_level);
+            assert_eq!(a.x_last, b.x_last);
+            assert_eq!(renewed.x_blastna, b"ACGT", "written whole by its next use");
+            kept = renewed;
+        }
+    }
 }

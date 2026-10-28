@@ -61,6 +61,8 @@ mod blastn_query_scan_par;
 mod blastn_query_stream;
 #[path = "../blastn_report_stream.rs"]
 mod blastn_report_stream;
+#[path = "../blastn_scratch_keep.rs"]
+mod blastn_scratch_keep;
 #[path = "../blastn_strand.rs"]
 mod blastn_strand;
 #[path = "../blastn_subject_store.rs"]

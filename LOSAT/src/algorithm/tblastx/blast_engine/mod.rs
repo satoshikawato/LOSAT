@@ -64,6 +64,7 @@ pub(crate) use indicatif::ProgressBar;
 pub(crate) use rayon::prelude::*;
 pub(crate) use std::collections::HashSet;
 pub(crate) use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 pub(crate) use std::sync::mpsc::channel;
 pub(crate) use std::time::{Duration, Instant};
 
@@ -216,7 +217,9 @@ pub(crate) struct TblastxQueryStats {
 //                 results = lcl_blast.Run();
 // ```
 /// The result of one query batch. The query indices of `hits` and `queries` are the
-/// queries' positions in the batch.
+/// queries' positions in the batch. `hits` are in report order (`hit_collector.rs`: each
+/// query's `-max_target_seqs` subjects in NCBI's order), so the batches' hits follow each other
+/// in the run's report.
 #[derive(Debug, Default)]
 pub(crate) struct TblastxBatch {
     pub hits: Vec<TblastxHsp>,
@@ -239,7 +242,10 @@ pub(crate) struct WorkerState<S> {
     //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
     // }
     // ```
-    pub tx: Option<std::sync::mpsc::Sender<Vec<TblastxHsp>>>,
+    /// The channel to the writer thread (`hit_collector.rs`), which takes each subject's final
+    /// HSPs with the subject's index; `None` when the subject loop keeps the collector itself.
+    pub tx: Option<std::sync::mpsc::Sender<(usize, Vec<TblastxHsp>)>>,
+    /// The final HSPs of the subject being searched, sent at the end of the subject.
     pub hits: Vec<TblastxHsp>,
     pub offset_pairs: Vec<OffsetPair>,
     pub diag_array: Vec<DiagStruct>,

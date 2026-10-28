@@ -7,7 +7,8 @@
 //! 1.31 s of 8.6 s with outfmt 6 and 3.37 s of 10.6 s with outfmt 0, of which the displayed
 //! identities took 0.99 s (each HSP's codons translated again from the nucleotides), the
 //! outfmt 0 rows 1.80 s (translated a second time, with the masks lowercased), the tabular rows
-//! 0.17 s (outfmt 0's text 0.41 s) and the final order (`report_order`) 0.15 s.
+//! 0.17 s (outfmt 0's text 0.41 s) and the final order (then `report_order` over every batch's
+//! HSPs at once; now `hit_collector.rs` inside each batch's search) 0.15 s.
 //!
 //! What the switch changes (read once per process, `on`), when the pool has two threads or
 //! more (`pool`):
@@ -24,8 +25,8 @@
 //!    flushes around every row) the rows are written by the serial function.
 //! With a Seq-align format requested (outfmt 8, 12), the engine counts of the Seq-aligns
 //! (`report::engine_counts`) run over chunks of the final list on the pool as item 1 does.
-//! The final order (`report_order`), the outfmt 0 text (`write_tblastx_pairwise_report`) and the
-//! writes stay on the loop's thread.
+//! The outfmt 0 text (`write_tblastx_pairwise_report`) and the writes stay on the loop's thread
+//! (the final order is made in each batch's search, `hit_collector.rs`).
 //!
 //! Why the bytes are those of the serial stage: every value is computed by the serial code's
 //! function of one HSP (or of one row) on the same inputs (the HSP, the query and subject

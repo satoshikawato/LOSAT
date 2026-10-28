@@ -5,6 +5,7 @@
 const fs = require("fs");
 const { WASI } = require("wasi");
 const { prepareArtifact, unsignedWasiImports } = require("./wasi_artifact");
+const { sharedFileTable, sharedFileImports } = require("./wasi_thread_host");
 
 // NCBI reference:
 // ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
@@ -44,10 +45,19 @@ const wasi = new WASI({
   // CATCH_ALL(status); return status;
   // Module reuse is host preparation only; preserve validation and exit status.
   const { module } = prepareArtifact(bytes, "serial-command");
+  // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729 (see createWasi above)
+  // The files the command opens from "/" are opened by name as the OS opens them, through the
+  // threaded host's table of files (wasi_thread_host.js, the comment above SHARED_FD_BASE): uvwasi
+  // cannot open /dev/stdin or /dev/stdout when they are pipes. The module exports its memory, so
+  // the table reads it through the instance.
+  let memory = null;
+  const guestMemory = { get buffer() { return memory.buffer; }, grow: (pages) => memory.grow(pages) };
+  const local = unsignedWasiImports(wasi.wasiImport);
   const instance = await WebAssembly.instantiate(module, {
     // The serial memory has no declared maximum, so it can pass 2 GiB.
-    wasi_snapshot_preview1: unsignedWasiImports(wasi.wasiImport),
+    wasi_snapshot_preview1: { ...local, ...sharedFileImports(sharedFileTable(), guestMemory, local) },
   });
+  memory = instance.exports.memory;
   if (typeof instance.exports._start !== "function") {
     throw new Error(
       `${wasmPath} does not export _start; use the LOSAT command-Wasm artifact.`,

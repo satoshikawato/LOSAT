@@ -99,12 +99,12 @@ def main():
     (out / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     environment = {k: v for k, v in os.environ.items() if not k.startswith(("LOSAT_", "RAYON_")) and k != "BL2SEQ_LEGACY"}
     environment.update(NODE_NO_WARNINGS="1", LC_ALL="C")
-    def execute(label, argv, env=None, expected=0, timeout=60):
+    def execute(label, argv, env=None, expected=0, timeout=60, stdin=None):
         directory = out / label; directory.mkdir(parents=True, exist_ok=True)
         result_path = directory / "result.out"
         argv = [str(x).replace("{out}", str(result_path)) for x in argv]
         try:
-            result = subprocess.run(argv, cwd=ROOT, env={**environment, **(env or {})}, capture_output=True, timeout=timeout)
+            result = subprocess.run(argv, cwd=ROOT, env={**environment, **(env or {})}, input=stdin, capture_output=True, timeout=timeout)
         except subprocess.TimeoutExpired as error:
             (directory / "stdout").write_bytes(error.stdout or b"")
             (directory / "stderr").write_bytes(error.stderr or b"")
@@ -223,6 +223,19 @@ def main():
         for kind in (kind for kind in ["serial", "threaded"] if kind in prefixes):
             data, _ = execute(f"stdout/{program}-{kind}", [*prefixes[kind], *stdout_args])
             assert data == reference
+        # NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729
+        # ```c++
+        #             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
+        # ```
+        # A file argument is opened by its name through the OS: -query /dev/stdin and -out
+        # /dev/stdout with pipes there (uvwasi gave ENOENT for both, at every thread count).
+        if program == "blastp":
+            pipe_args = [program, "-query", "/dev/stdin", "-subject", inputs[query], "-outfmt", "6", "-out", "/dev/stdout"]
+            query_bytes = Path(inputs[query]).read_bytes()
+            for kind, n in [("native", 1), ("serial", 1), ("threaded", 1), ("threaded", 2)]:
+                if kind not in prefixes: continue
+                data, _ = execute(f"dev-stdio/{program}-{kind}-n{n}", [*prefixes[kind], *pipe_args, "-num_threads", str(n)], stdin=query_bytes)
+                assert data == reference, f"raw output differs: dev-stdio/{program}-{kind}-n{n}"
     # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
     # AddDefaultKey(kArgOutputFormat, ..., eString, ...);
     # Unported format routes must reject explicitly before starting any worker

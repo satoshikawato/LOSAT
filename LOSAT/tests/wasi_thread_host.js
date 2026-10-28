@@ -413,14 +413,11 @@ function blockingStdioWrite(fdWrite) {
 // descriptor must name the same open file on every thread, as in the native process's table.
 // Node's WASI keeps its table in the instance (uvwasi), and each thread worker has its own, so a
 // descriptor that one thread opened was EBADF on the others (-db with 2 or more threads,
-// 2026-10-26). In a command that may run more than one thread, the host therefore opens itself
-// (Node's fs, whose descriptors belong to the process) each regular file that path_open opens
-// from the preopened "/" for reading only (no open or descriptor flags, no write right), enters
-// it in a table that every thread shares (the OS descriptor, the file position, the rights and
-// the kind) and gives the guest SHARED_FD_BASE + its slot; each thread then reads, seeks, stats
-// and closes such a descriptor itself, through the table. Every other open for reading (a
-// directory, a FIFO, one that fails, with uvwasi's errno) stays with the calling thread's uvwasi
-// as before.
+// 2026-10-26). The host therefore opens itself (Node's fs, whose descriptors belong to the
+// process) each file that path_open opens from the preopened "/", enters it in a table that every
+// thread shares (the OS descriptor, the file position, the rights and the kind) and gives the
+// guest SHARED_FD_BASE + its slot; each thread then reads, writes, seeks, stats and closes such a
+// descriptor itself, through the table.
 // (One I/O worker that ran the file functions of every thread was tried first: each call waited
 // until that worker was scheduled on the 16 busy CPUs, and BLASTN at 16 threads took 22.6 s
 // instead of 9.3 s on ws, 2026-10-27.)
@@ -436,17 +433,34 @@ function blockingStdioWrite(fdWrite) {
 // first write, and blastp-fast's query blocks searched two at a time (LOSAT_X_BPQSLOTS,
 // LOSAT/src/algorithm/blastp/x_query_slots.rs) are written by whichever pool thread finished
 // the block that completes the order: the file opened by one thread was written by another,
-// EBADF (blastp-fast -subject -out with 2 or more threads, 2026-10-28). Each open for writing
-// therefore enters the table too: from the preopened "/", with no open flag but create,
-// exclusive and truncate and no descriptor flag but append, of a regular file (a new one with
-// create) or of a character device or a FIFO (/dev/null; /dev/stdout when standard output is one
-// of these; a named pipe). A regular file not opened to append is written at the table's
-// position, the bytes of one write reserved before they are written as one write() moves the
-// native offset; an append and a device or FIFO are written at the OS's position (the end of the
-// file, the stream). A device or FIFO is not seeked through the table (ESPIPE, where native
-// /dev/null seeks; LOSAT does not seek an output). Every other open for writing (from another
-// directory descriptor, with other flags, of a directory, a socket or a block device, a symbolic
-// link not followed, one that fails) stays with the calling thread's uvwasi.
+// EBADF (blastp-fast -subject -out with 2 or more threads, 2026-10-28), so opens for writing
+// enter the table as well as opens for reading.
+//
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729
+// ```c++
+//             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
+//             if ( !fstrm->is_open() ) {
+//                 delete fstrm;
+// ```
+// NCBI opens a file argument by its name through the OS, so -query /dev/stdin and -out /dev/stdout
+// name the process's standard input and output whatever they are. uvwasi resolves symbolic links
+// itself and cannot follow /dev/stdout -> /proc/self/fd/1 -> "pipe:[N]": with a pipe there it gave
+// ENOENT ("File is not accessible", at 1 thread too and in the serial runner, which uses this
+// table too). The host opens these by name as the OS does.
+//
+// The table takes an open from the preopened "/" of a regular file (a new one for writing, with
+// create), a character device or a FIFO, with no open flag but create, exclusive and truncate (for
+// writing) and no descriptor flag but append (for writing); the kind is what stat finds before the
+// open (a FIFO's open waits for its other end, as native). A regular file is read at the table's
+// position, and written at the OS's position, which moves as the native offset moves (on macOS
+// /dev/stdout is a duplicate of descriptor 1 and shares its offset), until the guest seeks or
+// reads it; from then on it is written at the table's position, the bytes of one write reserved
+// before they are written as one write() moves the native offset (Node has no lseek). An append
+// leaves the position at the end of the file. A device or FIFO is read and written at the OS's
+// position and not seeked through the table (ESPIPE, where native /dev/null seeks; LOSAT seeks
+// neither). Every other open (from another directory descriptor, with other flags, of a
+// directory, a socket or a block device, a symbolic link not followed, one that fails, with
+// uvwasi's errno) stays with the calling thread's uvwasi.
 const SHARED_FD_BASE = 0x40000000, SHARED_FDS = 1024;
 const WASI_EBADF = 8, WASI_EINVAL = 28, WASI_EIO = 29, WASI_ENOTSUP = 58, WASI_ESPIPE = 70, WASI_ENOTCAPABLE = 76;
 const WASI_ERRNO = { EACCES: 2, EAGAIN: 6, EBADF: WASI_EBADF, EDQUOT: 19, EEXIST: 20, EFBIG: 22, EINTR: 27, EINVAL: WASI_EINVAL,
@@ -457,8 +471,9 @@ const LOOKUP_SYMLINK_FOLLOW = 1, OFLAGS_CREAT = 1, OFLAGS_EXCL = 4, OFLAGS_TRUNC
 // The filetypes of the table's files, as uvwasi gives them (a FIFO is a socket stream there).
 const FILETYPE_CHARACTER_DEVICE = 2, FILETYPE_REGULAR_FILE = 4, FILETYPE_SOCKET_STREAM = 6;
 // The table: per slot the OS descriptor (-1 free, -2 being entered), the position, the rights and
-// the kind (the filetype, with KIND_APPEND for a file opened to append).
-const KIND_APPEND = 0x100;
+// the kind (the filetype, with KIND_APPEND for a file opened to append and KIND_OWN_POSITION once
+// the guest seeked or read a regular file).
+const KIND_APPEND = 0x100, KIND_OWN_POSITION = 0x200;
 const sharedFileViews = table => ({ os: new Int32Array(table, 0, SHARED_FDS),
   position: new BigInt64Array(table, 4 * SHARED_FDS, SHARED_FDS),
   rights: new BigUint64Array(table, 12 * SHARED_FDS, 2 * SHARED_FDS),
@@ -475,8 +490,9 @@ function sharedFileImports(table, memory, local) {
   const { os, position, rights, kind } = sharedFileViews(table);
   const slotOf = fd => (fd >>> 0) - SHARED_FD_BASE;
   const shared = fd => slotOf(fd) >= 0 && slotOf(fd) < SHARED_FDS;
-  // A regular file has the table's position; it is written there unless it was opened to append.
-  const regular = slot => (kind[slot] & 0xff) === FILETYPE_REGULAR_FILE;
+  // A regular file has the table's position (the comment above SHARED_FD_BASE).
+  const regular = slot => (Atomics.load(kind, slot) & 0xff) === FILETYPE_REGULAR_FILE;
+  const ownPosition = slot => Atomics.or(kind, slot, KIND_OWN_POSITION);
   // The guest's memory as this isolate sees it; memory.grow(0) updates the view when the guest
   // grew the memory on another thread (see the start of a thread below).
   const buffer = end => {
@@ -535,8 +551,13 @@ function sharedFileImports(table, memory, local) {
   const allowed = (slot, right) => (rights[2 * slot] & right) !== 0n;
   own("fd_read", (slot, descriptor, iovs, count, nread) => {
     if (!allowed(slot, RIGHT_FD_READ)) return WASI_ENOTCAPABLE;
-    const got = transfer(fs.readSync, descriptor, iovs, count, regular(slot) ? Atomics.load(position, slot) : null);
-    if (regular(slot)) Atomics.add(position, slot, got);
+    if (!regular(slot)) {
+      view(nread, 4).setUint32(0, Number(transfer(fs.readSync, descriptor, iovs, count, null)), true);
+      return;
+    }
+    ownPosition(slot);
+    const got = transfer(fs.readSync, descriptor, iovs, count, Atomics.load(position, slot));
+    Atomics.add(position, slot, got);
     view(nread, 4).setUint32(0, Number(got), true);
   });
   own("fd_pread", (slot, descriptor, iovs, count, offset, nread) => {
@@ -547,7 +568,8 @@ function sharedFileImports(table, memory, local) {
   own("fd_write", (slot, descriptor, iovs, count, nwritten) => {
     if (!allowed(slot, RIGHT_FD_WRITE)) return WASI_ENOTCAPABLE;
     let wrote;
-    if (kind[slot] === FILETYPE_REGULAR_FILE) {
+    const type = Atomics.load(kind, slot);
+    if (type === (FILETYPE_REGULAR_FILE | KIND_OWN_POSITION)) {
       const length = lengthOf(iovs, count), at = Atomics.add(position, slot, length);
       try {
         wrote = transfer(fs.writeSync, descriptor, iovs, count, at);
@@ -557,8 +579,10 @@ function sharedFileImports(table, memory, local) {
       }
     } else {
       wrote = transfer(fs.writeSync, descriptor, iovs, count, null);
-      // An append leaves the position at the end of the file, as it leaves the native offset.
-      if (regular(slot)) Atomics.store(position, slot, fs.fstatSync(descriptor, { bigint: true }).size);
+      // An append leaves the position at the end of the file, as it leaves the native offset;
+      // another write moves it by the bytes written, as the OS's.
+      if (type & KIND_APPEND) Atomics.store(position, slot, fs.fstatSync(descriptor, { bigint: true }).size);
+      else if ((type & 0xff) === FILETYPE_REGULAR_FILE) Atomics.add(position, slot, wrote);
     }
     view(nwritten, 4).setUint32(0, Number(wrote), true);
   });
@@ -569,6 +593,7 @@ function sharedFileImports(table, memory, local) {
   });
   own("fd_seek", (slot, descriptor, offset, whence, result) => {
     if (!regular(slot)) return WASI_ESPIPE;
+    ownPosition(slot);
     const from = [0n, Atomics.load(position, slot), fs.fstatSync(descriptor, { bigint: true }).size][whence];
     if (from === undefined || from + offset < 0n) return WASI_EINVAL;
     Atomics.store(position, slot, from + offset);
@@ -637,10 +662,8 @@ function sharedFileImports(table, memory, local) {
       // The guest's bytes as they are (the path may create a file).
       const host = Buffer.concat([Buffer.from("/"), new Uint8Array(buffer(path + pathLength), path, pathLength)]);
       const follow = (dirflags & LOOKUP_SYMLINK_FOLLOW) !== 0;
-      // Not opened for reading unless it is a regular file now (opening a FIFO waits for its
-      // writer); for writing, a regular file, a new one, a character device or a FIFO.
       const stat = (follow ? fs.statSync : fs.lstatSync)(host, { throwIfNoEntry: false });
-      const kept = stat => stat.isFile() || (write && (stat.isCharacterDevice() || stat.isFIFO()));
+      const kept = stat => stat.isFile() || stat.isCharacterDevice() || stat.isFIFO();
       if (stat ? !kept(stat) : !(write && (oflags & OFLAGS_CREAT))) return pathOpen(...args);
       // A full table: the thread's own uvwasi opens it, as before (reserved before the open,
       // which may create the file).
@@ -654,8 +677,8 @@ function sharedFileImports(table, memory, local) {
       if (!kept(now)) throw new Error("not a file of the table");
       Atomics.store(position, slot, 0n);
       [rights[2 * slot], rights[2 * slot + 1]] = [base, inheriting];
-      kind[slot] = (now.isFile() ? FILETYPE_REGULAR_FILE : now.isFIFO() ? FILETYPE_SOCKET_STREAM : FILETYPE_CHARACTER_DEVICE)
-        | (fdflags & FDFLAGS_APPEND ? KIND_APPEND : 0);
+      Atomics.store(kind, slot, (now.isFile() ? FILETYPE_REGULAR_FILE : now.isFIFO() ? FILETYPE_SOCKET_STREAM
+        : FILETYPE_CHARACTER_DEVICE) | (fdflags & FDFLAGS_APPEND ? KIND_APPEND : 0));
       Atomics.store(os, slot, descriptor);
       view(opened, 4).setUint32(0, SHARED_FD_BASE + slot, true);
       return 0;
@@ -777,9 +800,9 @@ async function prepareThreadHost(wasmPath, kind) {
 async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) {
   const args = [wasmPath, ...argv];
   const prespawn = prespawnCount(argv), recycle = recycleWorkers(kind), refill = recycle ? 0 : refillCount(argv);
-  // The table of the files that every thread reads (sharedFileImports), in a command that
-  // requests 2 or more threads.
-  const files = kind === "threaded-command" && requestedThreads(argv) >= 2 ? sharedFileTable() : null;
+  // The table of the files that every thread reads and writes (sharedFileImports), in a command
+  // at every thread count (a reactor opens no files).
+  const files = kind === "threaded-command" ? sharedFileTable() : null;
   const workers = new Set(), exits = new Map(), events = [], standby = [];
   // LOSAT_WASI_RECYCLE: the workers that run one guest thread after another, the guest threads
   // they run now (tids), and how each of those threads' exit promise is resolved.
@@ -1001,7 +1024,8 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     },
   };
 }
-module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir };
+module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir,
+  sharedFileTable, sharedFileImports };
 
 if (!isMainThread) {
   const { control, fault, standby, recycle, early } = workerData;

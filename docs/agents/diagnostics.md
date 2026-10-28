@@ -380,6 +380,7 @@ export LOSAT_X_BXLUTPOOL=1
 export LOSAT_X_BXPOOLN1=1
 export LOSAT_X_BXSCANBYTE=1
 export LOSAT_X_BXSUBJFLOW=1
+export LOSAT_X_BXTASKRES=1
 export LOSAT_X_BXUNGAPSENT=1
 export LOSAT_X_BXUNITCAP=8
 export LOSAT_X_CTXO1=1
@@ -6093,6 +6094,33 @@ Scheduling (each value computed by one thread with the original function; order 
   same times as 16. 800 cDNAs x the yeast proteins at 16 threads `-subject` x1.000 (0.999-1.001), `-db` x1.000
   (1.000-1.003), `-db` at 32 threads x0.997 (0.995-1.006); max RSS at 16 threads +7 MiB (70 -> 79, 65 -> 72), at
   32 threads 90 -> 91 (NCBI 143-154 MiB; the v4-MF floor of the 800-cDNA `-db` row at 16 threads is about 85).
+- `LOSAT_X_BXTASKRES=1` (BLASTX, speed at 2+ threads; in the strict set from the pull request that added it: on
+  unless `=0`; no condition of its own: it acts on every subject flow, `x_subject_flow::run` and `run_chunks`, i.e.
+  where `LOSAT_X_BXSUBJFLOW` runs): a flow's task ends after `k` subjects (as before) or before the subject that would
+  take the task's residues past `k` times the mean subject length (`XTasks::Cut`), so a run of long subjects stored
+  next to each other is spread over several tasks. The bounds come from the subjects' lengths (the records, the
+  stored sequences, or with `-db` read in blocks the index, 16,384 lengths per read); with `-db` read in blocks they
+  are made once per run for each `k` and shared (`XStreamDb::x_task_starts`). Where the lengths cannot be read (an
+  index read error) the grid of `k` subjects is kept, so the reader's error comes where it did before. Exactness:
+  only which thread computes which subjects changes; a task's value depends on its chunk and subjects alone and the
+  loop's thread makes the sink calls in subject order (`x_subject_flow.rs` header); `LOSAT_X_BXSUBJFLOWSHADOW`
+  compares every task (`tests/blastx_subject_flow.rs`: task counts of the cut and, with `=0`, of the grid; a unit
+  test of the bounds). Why: the ordered flow ends when its last task ends. Fly 2L 50 kb x the 30,802 fly proteins:
+  task 400 of each chunk (subjects 25,600-25,663, the isoforms of dumpy, about 20-23 kaa each) holds 248,369
+  residues against a median task of 38,410 and took 42-60 ms against a median of 4 ms (local probe), and in the last
+  chunk it ran alone for the last 21 ms of a 0.58 s run at 16 threads (about 2 of 16 CPUs busy). Cut by residues the
+  largest task holds 42,344 residues (547 tasks per chunk instead of 482) and the tail is gone. Measured 2026-10-28
+  on the workstation (node 1, the first n physical cores with their HT siblings idle, `--membind=1`, cores warmed
+  3 s per case, rounds in rotated arm order, medians of the per-round ratios; every output the same bytes as dev's,
+  the 50 kb slice also as the progress board's d26), dev 4403cc12 against this change: 50 kb slice x the fly
+  proteins `-db` at 16 threads 0.580 -> 0.562 s (x0.965, 0.928-0.983, 8 of 8 rounds), 32 threads x0.910, 8
+  threads x0.997, one thread x1.000 (S(16) in the same run 13.51 -> 13.95); 20 kb and 150 kb slices at 16
+  threads x0.910 and x0.976; 800 cDNAs x the yeast proteins at 16 threads `-subject` x0.995, `-db` x0.998, `-db` at
+  32 threads x0.991; with the switch off the same binary gives dev's times (x0.987-1.003). Max RSS at 16 / 32
+  threads of the 50 kb slice 26 -> 20 / 28 -> 19 MiB. A second run with the gated binary (12 rounds): 16 threads
+  0.571 -> 0.549 s (x0.962, 0.959-0.968, 12 of 12), S(16) 13.70 -> 14.29; the capped few-subject rows (800 cDNAs x
+  2 / 8 / 50 yeast proteins, AP027131 x 10 / 50 proteins, 16 and 32 threads) x0.986-1.031, each within its
+  per-round spread (`k` is 1 on the 2 and 8 protein rows, so the cut changes no task there).
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

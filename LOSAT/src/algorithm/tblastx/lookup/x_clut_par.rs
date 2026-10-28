@@ -806,7 +806,7 @@ fn x_stripe_build_s9(
     });
     for (index, (chunk, chunk_appends)) in chunks.iter().zip(appends).enumerate() {
         #[cfg(target_arch = "x86_64")]
-        if pf > 0 {
+        if pf > 0 && global.is_none() {
             if let Some(ahead) = appends.get(index + pf) {
                 let lo = ahead.stripe_starts[stripe] as usize;
                 let hi = ahead.stripe_starts[stripe + 1] as usize;

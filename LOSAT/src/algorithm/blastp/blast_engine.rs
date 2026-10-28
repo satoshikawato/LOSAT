@@ -7880,16 +7880,24 @@ fn x_lookup_after_prelim(
             BlastpRuntimeLookup::Compressed(_) => false,
         };
     crate::utils::xreach::x_reach!("LOSAT_X_BPLKDROP", !taken_later);
+    // PROBE (v4-BPF s11): the preliminary stage is done; the table is still held.
+    super::x_query_slots::x_s8_log("prelim", usize::from(taken_later), 0);
     // PROBE (v4-BPF s8): LOSAT_BPF_S8EARLY=1 gives the flat table's vectors to the spare here.
     if taken_later && super::x_query_slots::x_s8_env("LOSAT_BPF_S8EARLY") == Some(1) {
         if let BlastpRuntimeLookup::CompressedFlat(table) = lookup {
             if let Some(spare) = super::x_query_blocks::x_bp_lookup_spare(pool) {
                 spare.give(table);
             }
+            super::x_query_slots::x_s8_log("gave", 1, 0);
             return None;
         }
     }
-    taken_later.then_some(lookup)
+    if !taken_later {
+        drop(lookup);
+        super::x_query_slots::x_s8_log("dropped", 0, 0);
+        return None;
+    }
+    Some(lookup)
 }
 
 fn run_resolved_in_pool(
@@ -12183,6 +12191,8 @@ fn run_resolved_in_pool(
             if let Some(spare) = super::x_query_blocks::x_bp_lookup_spare(blastp_parallel_pool) {
                 spare.give(table);
             }
+            // PROBE (v4-BPF s11): the table's vectors went to the spare at the block's end.
+            super::x_query_slots::x_s8_log("gave", 0, 0);
         }
         Some(BlastpRuntimeLookup::Aa(table)) => {
             if let Some(spares) = super::x_query_blocks::x_bp_aa_spares(blastp_parallel_pool)

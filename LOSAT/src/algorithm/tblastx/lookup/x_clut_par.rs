@@ -1032,6 +1032,12 @@ fn x_try_build_flat_parallel_with(
             },
         ),
     };
+    // PROBE (v4-BPF s11): the chunks' packed appends are all allocated here.
+    crate::algorithm::blastp::x_query_slots::x_s8_log(
+        "appends",
+        appends.iter().map(|a| a.packed.len()).sum(),
+        appends.len(),
+    );
     if too_large.load(Ordering::Relaxed) {
         // LOSAT_X_BPLKPFLAT: the reference builder makes this table; the spare's vectors are not
         // kept beside it (module header).
@@ -1084,6 +1090,12 @@ fn x_try_build_flat_parallel_with(
     X_LKPFLAT_RECYCLED.fetch_add(u64::from(starts_reused), Ordering::Relaxed);
     X_LKPFLAT_RECYCLED_HITS.fetch_add(u64::from(hits_reused), Ordering::Relaxed);
     starts[backbone_size] = total as u32;
+    // PROBE (v4-BPF s11): the table's vectors are sized (reused from the spare or new).
+    crate::algorithm::blastp::x_query_slots::x_s8_log(
+        "hitsvec",
+        total,
+        usize::from(hits_reused) + 2 * usize::from(starts_reused),
+    );
 
     // LOSAT_BPF_S9G: each chunk's slots in each stripe, then the chunks' appends written there.
     let mut global_positions: Vec<Vec<u32>> = Vec::new();
@@ -1230,6 +1242,8 @@ fn x_try_build_flat_parallel_with(
             )
         }
     };
+    // PROBE (v4-BPF s11): the stripes pass is done; the chunks' packed appends are still held.
+    crate::algorithm::blastp::x_query_slots::x_s8_log("stripes", total, 0);
     if x_s8_stash() {
         let mut stash = X_S8_CHUNKS.lock().unwrap_or_else(PoisonError::into_inner);
         for chunk in appends {
@@ -1240,6 +1254,9 @@ fn x_try_build_flat_parallel_with(
     } else {
         drop(appends);
     }
+    // PROBE (v4-BPF s11): the chunks' packed appends are freed (RssAnon tells whether the arenas gave
+    // them back).
+    crate::algorithm::blastp::x_query_slots::x_s8_log("freed", total, 0);
 
     // NCBI's tables (`x_try_build_flat_with_capacity`'s test, at each table's end).
     for (range_index, (range, is_table)) in ranges.iter().enumerate() {

@@ -715,6 +715,17 @@ fn x_own_plan(
 /// 1.0001 with 32768 + (against 1024 x the longest chain; D14 s1 c1, 2026-10-26).
 const X_PAIR_ROOM: usize = 8 * 4096;
 
+/// PROBE (exp/d14-s2b): LOSAT_PROBE_TBNPAIRN=<n> replaces X_PAIR_ROOM.
+fn x_probe_pair_room() -> usize {
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(|| {
+        std::env::var("LOSAT_PROBE_TBNPAIRN")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(X_PAIR_ROOM)
+    })
+}
+
 // No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
 /// Whether a plan's offset array holds `X_PAIR_ROOM` + the longest chain entries (at most
 /// 1024 x the longest chain, the size without the switch) (`LOSAT_X_TBNPAIRCAP`, read once).
@@ -953,7 +964,7 @@ pub(super) fn x_scan_plan(
     // (1024 x the longest chain, which a table whose longest chain is below 33 keeps).
     let longest_chain = lookup.longest_chain.max(1) as usize;
     let pair_capacity = if x_pair_cap_on() {
-        (X_PAIR_ROOM + longest_chain).min(longest_chain.saturating_mul(1024))
+        (x_probe_pair_room() + longest_chain).min(longest_chain.saturating_mul(1024))
     } else {
         longest_chain * 1024
     };

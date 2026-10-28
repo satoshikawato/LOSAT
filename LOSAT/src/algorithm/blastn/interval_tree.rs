@@ -238,6 +238,17 @@ struct XCellEntry {
 // tree walk answers.
 /// Grid cells at most (the per-cell heads take four bytes each).
 const X_MAX_CELLS: usize = 1 << 16;
+
+/// PROBE (exp/d14-s2b): LOSAT_PROBE_TREECELLS=<n> replaces X_MAX_CELLS.
+fn x_probe_max_cells() -> usize {
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(|| {
+        std::env::var("LOSAT_PROBE_TREECELLS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(X_MAX_CELLS)
+    })
+}
 /// An HSP whose box overlaps more cells than this is kept in `overflow`.
 const X_MAX_CELLS_PER_HSP: usize = 1024;
 /// With more HSPs than this in `overflow` the index is abandoned.
@@ -407,7 +418,7 @@ impl XTreeIndex {
         let q_span = (q_max as i64 - q_min as i64).max(0) as usize;
         let s_span = (s_max as i64 - s_min as i64).max(0) as usize;
         let mut shift = 6u32;
-        while ((q_span >> shift) + 1).saturating_mul((s_span >> shift) + 1) > X_MAX_CELLS {
+        while ((q_span >> shift) + 1).saturating_mul((s_span >> shift) + 1) > x_probe_max_cells() {
             shift += 1;
         }
         self.shift = shift;

@@ -96,6 +96,26 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
+/// EXPERIMENT (LOSAT_X_BXBATCHMEM, in the strict set: on unless `=0`): whether a batch's large
+/// buffers are kept or grown in place instead of freed (the owner's diagonal table taken from the
+/// thread's kept tables, a kept table resized by realloc, the lookup's overflow grown by realloc)
+/// and the batch end makes no more composition-redo workers than it has matches. glibc raises its
+/// mmap threshold (and with it the trim threshold, to twice that) whenever a mapped block is freed,
+/// and each arena then keeps up to that much free at its top: at 32-64 threads the arenas held
+/// 48-83 MiB with 4-5 MiB in use (v4-A DECISIONS 56). With no mapped block freed the thresholds
+/// stay at their defaults.
+pub(crate) fn batch_mem_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXBATCHMEM"))
+}
+
+/// No NCBI counterpart (`LOSAT_X_BXBATCHMEM`): whether a chunk's owner takes its diagonal table
+/// from the tables its thread keeps (`XDiagSlot`), under the rule that lets the workers keep theirs
+/// (`LOSAT_X_BXDIAGKEEP`: a kept table's history does not change a subject's computation).
+pub(crate) fn owner_keeps_table(options: &ResolvedOptions, subjects: Subjects<'_>) -> bool {
+    batch_mem_on() && keeps_tables(options, subjects)
+}
+
 /// No NCBI counterpart: whether `LOSAT_X_BXDIAGKEEP` is on.
 fn diag_keep_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
@@ -392,13 +412,18 @@ pub(crate) fn flow_bound(k: usize) -> usize {
 }
 
 thread_local! {
-    // No NCBI counterpart: the diagonal table this thread keeps between searches (buffer reuse).
-    static X_DIAG: RefCell<Option<Diagonals>> = const { RefCell::new(None) };
+    // No NCBI counterpart: the diagonal tables this thread keeps between searches (buffer reuse):
+    // one, or with `LOSAT_X_BXBATCHMEM` one per slot it held at a time (an owner's table and a
+    // helper's, when the owner runs another chunk's task while it waits).
+    static X_DIAG: RefCell<Vec<Diagonals>> = const { RefCell::new(Vec::new()) };
 }
 
 /// No NCBI counterpart (buffer reuse, `LOSAT_X_BXDIAGKEEP`): a worker's diagonal table, taken on
 /// first use from the thread that uses it (the table that thread keeps where its length and window
-/// are the chunk's, else a new one) and given back to the thread that drops it.
+/// are the chunk's, else a new one) and given back to the thread that drops it. With
+/// `LOSAT_X_BXBATCHMEM` (also the owner's table, `owner_keeps_table`) a kept table of the window
+/// but another length is resized in place (`Diagonals::x_refit`) instead of freed, and every table
+/// given back is kept.
 pub(crate) struct XDiagSlot {
     table: Option<Diagonals>,
     length: usize,
@@ -420,10 +445,22 @@ impl XDiagSlot {
     /// The slot's table, taken from this thread on first use.
     pub(crate) fn get(&mut self) -> Result<&mut Diagonals> {
         if self.table.is_none() {
-            let kept = X_DIAG.with(|kept| kept.borrow_mut().take());
+            let (length, window) = (self.length, self.window);
+            let kept = X_DIAG.with(|kept| {
+                let mut kept = kept.borrow_mut();
+                let at = kept.iter().rposition(|table| table.x_fits(length, window));
+                match at {
+                    Some(at) => Some(kept.swap_remove(at)),
+                    None => kept.pop(),
+                }
+            });
             self.table = Some(match kept {
-                Some(table) if table.x_fits(self.length, self.window) => table,
-                _ => Diagonals::new(self.length, self.window)?,
+                Some(table) if table.x_fits(length, window) => table,
+                Some(mut table) if batch_mem_on() && table.x_window() == window => {
+                    table.x_refit(length)?;
+                    table
+                }
+                _ => Diagonals::new(length, window)?,
             });
         }
         Ok(self.table.as_mut().expect("set above"))
@@ -436,7 +473,13 @@ impl Drop for XDiagSlot {
     fn drop(&mut self) {
         if let Some(table) = self.table.take() {
             if !std::thread::panicking() {
-                let _ = X_DIAG.try_with(|kept| *kept.borrow_mut() = Some(table));
+                let _ = X_DIAG.try_with(|kept| {
+                    let mut kept = kept.borrow_mut();
+                    if !batch_mem_on() {
+                        kept.clear();
+                    }
+                    kept.push(table);
+                });
             }
         }
     }

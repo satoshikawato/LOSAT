@@ -956,7 +956,27 @@ pub(crate) fn search_core(
             let x_parts = 1;
             let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
             let last = batch.contexts.last().expect("BLASTX contexts");
-            let mut diagonals = Diagonals::new(last.offset + last.length, options.window_size)?;
+            // EXPERIMENT (LOSAT_X_BXBATCHMEM): the owner's table from those its thread keeps.
+            #[cfg(feature = "parallel")]
+            let mut x_owner = x_bx_mem::owner_keeps_table(options, subjects)
+                .then(|| x_bx_mem::XDiagSlot::new(last.offset + last.length, options.window_size));
+            #[cfg(feature = "parallel")]
+            let mut x_made = match x_owner {
+                Some(_) => None,
+                None => Some(Diagonals::new(
+                    last.offset + last.length,
+                    options.window_size,
+                )?),
+            };
+            #[cfg(feature = "parallel")]
+            let diagonals = match (&mut x_owner, &mut x_made) {
+                (Some(slot), _) => slot.get()?,
+                (None, made) => made.as_mut().expect("made above"),
+            };
+            #[cfg(not(feature = "parallel"))]
+            let mut x_made = Diagonals::new(last.offset + last.length, options.window_size)?;
+            #[cfg(not(feature = "parallel"))]
+            let diagonals = &mut x_made;
             let xdrop = subject_parameters(
                 batch,
                 &mut params,
@@ -1047,7 +1067,7 @@ pub(crate) fn search_core(
                     &params,
                     options,
                     &lookup,
-                    &mut diagonals,
+                    &mut *diagonals,
                     helper_tables,
                     xdrop,
                     db_length,
@@ -1170,7 +1190,7 @@ pub(crate) fn search_core(
                             &params,
                             options,
                             &lookup,
-                            &mut diagonals,
+                            &mut *diagonals,
                             xdrop,
                             diagnostics,
                             db_length,

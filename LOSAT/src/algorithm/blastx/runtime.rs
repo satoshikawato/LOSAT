@@ -313,6 +313,50 @@ struct XKappaWorker(KappaState);
 #[cfg(feature = "parallel")]
 unsafe impl Send for XKappaWorker {}
 
+// No NCBI counterpart (NCBI keeps one record per thread for the whole search): how many redo
+// workers a batch end makes. EXPERIMENT (LOSAT_X_BXBATCHMEM, `x_bx_mem.rs`): no more than its
+// matches, since one speculative batch then holds every match and each match takes its own
+// worker; `=0`: one per pool thread. A worker's state does not change a match's result
+// (`x_speculate_match`: a result that read a predecessor's matrix is redone in stream order).
+#[cfg(feature = "parallel")]
+fn x_kappa_workers(threads: usize, matches: usize) -> usize {
+    let fit = super::search::x_bx_mem::batch_mem_on();
+    crate::utils::xreach::x_reach!("LOSAT_X_BXBATCHMEM", fit && matches < threads);
+    if fit {
+        threads.min(matches)
+    } else {
+        threads
+    }
+}
+
+// No NCBI counterpart (LOSAT_X_BXBATCHMEM): the redo workers of a batch end, each boxed so that
+// their array stays small (with `=0` the states lie in the array, a mapped block from 7 workers on,
+// whose free raises glibc's mmap threshold).
+#[cfg(feature = "parallel")]
+enum XKappaWorkers {
+    Inline(Vec<std::sync::Mutex<XKappaWorker>>),
+    Boxed(Vec<Box<std::sync::Mutex<XKappaWorker>>>),
+}
+
+#[cfg(feature = "parallel")]
+impl XKappaWorkers {
+    fn len(&self) -> usize {
+        match self {
+            Self::Inline(workers) => workers.len(),
+            Self::Boxed(workers) => workers.len(),
+        }
+    }
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    fn slot(&self, i: usize) -> &std::sync::Mutex<XKappaWorker> {
+        match self {
+            Self::Inline(workers) => &workers[i],
+            Self::Boxed(workers) => &workers[i],
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1234
 // ```c
 //                 if (compo_adjust_mode != eNoCompositionBasedStats &&
@@ -1771,20 +1815,29 @@ impl PreliminarySink for Runtime<'_> {
                     && rayon::current_num_threads() > 1
                     && matches.len() > 1
             }) {
-                (0..rayon::current_num_threads())
-                    .map(|_| {
-                        Ok(std::sync::Mutex::new(XKappaWorker(state.x_for_thread(
-                            batch,
-                            &full,
-                            self.options,
-                        )?)))
-                    })
-                    .collect::<Result<Vec<_>>>()?
+                let make = || -> Result<_> {
+                    Ok(std::sync::Mutex::new(XKappaWorker(state.x_for_thread(
+                        batch,
+                        &full,
+                        self.options,
+                    )?)))
+                };
+                let count = x_kappa_workers(rayon::current_num_threads(), matches.len());
+                if super::search::x_bx_mem::batch_mem_on() {
+                    XKappaWorkers::Boxed(
+                        (0..count)
+                            .map(|_| make().map(Box::new))
+                            .collect::<Result<Vec<_>>>()?,
+                    )
+                } else {
+                    XKappaWorkers::Inline((0..count).map(|_| make()).collect::<Result<Vec<_>>>()?)
+                }
             } else {
-                Vec::new()
+                XKappaWorkers::Inline(Vec::new())
             };
-            // `x_workers` has one entry per pool thread (none outside a pool; asking
-            // Rayon for the thread count there would start its global pool).
+            // `x_workers` has one entry per pool thread, or one per match where there are fewer
+            // matches (`x_kappa_workers`); none outside a pool (asking Rayon for the thread count
+            // there would start its global pool).
             // No NCBI counterpart: size of one speculative batch (scheduling only); it does not
             // change any value NCBI computes.
             #[cfg(feature = "parallel")]
@@ -1830,15 +1883,24 @@ impl PreliminarySink for Runtime<'_> {
                     let full = &full;
                     let workers = &x_workers;
                     let x_t = super::x_timing::lap();
+                    // One worker per thread: the thread's own. One per match (fewer matches than
+                    // threads, so this batch holds them all): the match's own.
+                    let per_thread = workers.len() == rayon::current_num_threads();
                     speculated = batch_lists
                         .par_iter()
                         .zip(wanted.par_iter())
-                        .map(|(list, &wanted)| {
+                        .enumerate()
+                        .map(|(position, (list, &wanted))| {
                             if !wanted {
                                 return None;
                             }
-                            let slot = rayon::current_thread_index().unwrap_or(0) % workers.len();
-                            let mut guard = workers[slot].lock().expect("BLASTX redo worker state");
+                            let slot = if per_thread {
+                                rayon::current_thread_index().unwrap_or(0) % workers.len()
+                            } else {
+                                position % workers.len()
+                            };
+                            let mut guard =
+                                workers.slot(slot).lock().expect("BLASTX redo worker state");
                             x_speculate_match(
                                 &mut guard.0,
                                 list,

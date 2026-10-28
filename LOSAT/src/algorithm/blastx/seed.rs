@@ -138,6 +138,38 @@ impl Diagonals {
             .and_then(|n| n.max(1).checked_next_power_of_two());
         self.window == window && n == Some(self.entries.len())
     }
+    // No NCBI counterpart: buffer reuse only (LOSAT_X_BXBATCHMEM, blastx/x_bx_mem.rs).
+    /// The table's window.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn x_window(&self) -> i32 {
+        self.window
+    }
+    // No NCBI counterpart: buffer reuse only (LOSAT_X_BXBATCHMEM, blastx/x_bx_mem.rs). The table
+    // gets the length `new(query_length, window)` gives (so the same mask and collisions) by a
+    // realloc of its entries, and keeps its offset: every entry it holds was written for an earlier
+    // subject, at or below the offset, which only grows, so it lies at least a window behind the
+    // next subject's hits and reads as cleared, as in a kept table of the same length
+    // (LOSAT_X_BXDIAGKEEP, x_seed_diag.rs). New entries are zero, as in `new`.
+    /// Resize this table to the length `new(query_length, window)` gives for its window.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn x_refit(&mut self, query_length: usize) -> Result<()> {
+        let n = query_length
+            .checked_add(usize::try_from(self.window)?)
+            .and_then(|n| n.max(1).checked_next_power_of_two())
+            .ok_or_else(|| anyhow::anyhow!("BLASTX diagonal length exceeds Int4"))?;
+        ensure!(
+            n <= i32::MAX as usize,
+            "BLASTX diagonal length exceeds Int4"
+        );
+        if n < self.entries.len() {
+            self.entries.truncate(n);
+            self.entries.shrink_to_fit();
+        } else {
+            self.entries.reserve_exact(n - self.entries.len());
+            self.entries.resize(n, DiagStruct::default());
+        }
+        Ok(())
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
     // ```c++
     // Blast_ExtendWordExit(Blast_ExtendWord * ewp, Int4 subject_length)

@@ -1568,14 +1568,23 @@ fn x_claimed<T: Send, R: Send>(parts: Vec<T>, f: &(dyn Fn(T) -> R + Sync)) -> Ve
 
 // No NCBI counterpart: `vector` with `n` entries for a build that writes every entry itself: the
 // entries kept are not cleared (new ones are zero), and one short of room is replaced as by
-// `x_zeroed`.
+// `x_zeroed` (with `LOSAT_X_BXBATCHMEM` grown in place, all its entries then zero).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 fn x_sized<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
     if vector.capacity() < n {
-        vector = Vec::with_capacity(if slack { n + n / 4 } else { n });
+        let want = if slack { n + n / 4 } else { n };
+        static GROW: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *GROW.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXBATCHMEM")) {
+            // EXPERIMENT (LOSAT_X_BXBATCHMEM): grown by realloc (a mapped block is remapped, not
+            // freed, so glibc keeps its mmap threshold).
+            vector.clear();
+            vector.reserve_exact(want);
+        } else {
+            vector = Vec::with_capacity(want);
+        }
     }
     vector.truncate(n);
     vector.resize(n, T::default());

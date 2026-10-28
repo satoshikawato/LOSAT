@@ -428,6 +428,7 @@ export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_SUMPMEMO=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNDBSTREAM=1
+export LOSAT_X_TBNDIAGPACK=1
 export LOSAT_X_TBNFLOWHELP=1
 export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNKEEPFEW=1
@@ -5454,6 +5455,27 @@ Scheduling (each value computed by one thread with the original function; order 
   path of the base, read x1.0001 / x1.0055 / x1.0039 (the layout of the new binary), so that the switch against `=0`
   in one binary is x0.9986 / x0.9978 / x0.9900 (11 / 11 / 12 of 16 faster; instructions x1.00002); AP027131 `-subject`
   x0.9963 at 1 thread (8 of 8 faster) and x0.9986 at 16.
+- `LOSAT_X_TBNDIAGPACK=1` tblastn (memory and speed; in the strict set from the pull request that added it,
+  2026-10-29; `=0` turns it off; `tblastn/search_init.rs` `XDiagCells`, `x_packs`, `tblastn/x_tbn_hitbf.rs`
+  `XDiagCell`): the diagonal table of the two-hit word finder (one per running unit; the units a thread runs one
+  after another share it, `XUnitBuffers`) holds NCBI's `DiagStruct` in four bytes (`blast_extend.h:51-55`:
+  `last_hit` in bits 0-30, `flag` in bit 31) instead of eight-byte `(last_hit, flag)` pairs: 128 KiB instead of 256
+  KiB for a query batch of 20,000 letters. The values fit: `last_hit` starts at 0 and is set to `s + offset` or
+  `s_last_off - (wordsize - 1) + offset`, the offset runs from the window to below INT4_MAX / 4 + 2 x (window + the
+  longest unit, at most 5,000,000 residues), so with a window above the word size and at most 2^28 (the default is
+  40) every value is below 2^31 and not negative; another window keeps the pairs. A flag-0 cell read as `i32` is then
+  its `last_hit` and a flag-1 cell is negative, so the branch-free loop (`x_hits_bf`) reads one word per hit. The
+  tables give the same init HSPs and the same values in every cell (unit tests
+  `x_hits_bf_on_packed_cells_equals_pair_cells`, and `x_pairs_bf_gives_the_hits_and_table_of_pairs` on both
+  layouts against `pairs` on pairs). Always: every tblastn search with the default window.
+  Measured 2026-10-28 on the workstation (2x Xeon Gold 6338; base dev 593fff35; every output of a case the same
+  bytes in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, 16 CPUs
+  for every run, medians of 4 rounds in rotating order): the 595 proteins of AP027131 x AP027133 (`-db_gencode
+  4`) `-subject` at 16 / 32 / 40 / 48 threads 56 / 74 / 83 / 92 -> 55 / 71 / 80 / 88 MiB (NCBI `-subject` runs
+  one thread: 80), `-db` at 48 106 -> 101; `dmel_b4.faa` x zebrafish cDNAs (`-db`) at 32 / 48 105 / 137 -> 101 /
+  133. At one thread (`perf stat`, 3 runs each, node 0, untimed): AP027131 `-subject` instructions x0.99995, cycles
+  x0.989; the `dmel_b4.faa` case instructions x1.00004, cycles x0.946 (64.8 -> 61.2 s): half the table's bytes
+  on the random reads of the two-hit test.
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

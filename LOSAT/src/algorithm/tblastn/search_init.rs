@@ -31,17 +31,82 @@ pub(super) struct InitHsp {
 // if (ewp->diag_table->offset >= INT4_MAX / 4) { ... clear ... }
 // else ewp->diag_table->offset += subject_length + ewp->diag_table->window;
 pub(super) struct Diagonals {
-    entries: Vec<(i32, bool)>,
+    entries: XDiagCells,
     mask: i32,
     offset: i32,
     window: i32,
 }
 
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:51-55
+// ```c
+// typedef struct DiagStruct {
+//    Int4 last_hit : 31; /**< Offset of the last hit */
+//    Uint4 flag : 1; /**< Reset this hit? */
+// } DiagStruct;
+// ```
+/// The cells of a diagonal table: NCBI's `DiagStruct` in four bytes (`LOSAT_X_TBNDIAGPACK`: last_hit
+/// in bits 0-30, flag in bit 31, `x_tbn_hitbf::XDiagCell`), or the eight of `(last_hit, flag)`.
+#[derive(Debug, PartialEq)]
+pub(super) enum XDiagCells {
+    Packed(Vec<u32>),
+    Pair(Vec<(i32, bool)>),
+}
+
+impl XDiagCells {
+    fn len(&self) -> usize {
+        match self {
+            Self::Packed(cells) => cells.len(),
+            Self::Pair(cells) => cells.len(),
+        }
+    }
+
+    fn packed(&self) -> bool {
+        matches!(self, Self::Packed(_))
+    }
+
+    fn clear(&mut self) {
+        match self {
+            Self::Packed(cells) => cells.fill(0),
+            Self::Pair(cells) => cells.fill((0, false)),
+        }
+    }
+}
+
+// No NCBI counterpart: reads the LOSAT_X_TBNDIAGPACK variable once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNDIAGPACK): a switch of the strict set (`utils/xswitch.rs`), on unless it
+/// is `0`: the diagonal tables of the two-hit word finder hold NCBI's four-byte `DiagStruct`
+/// (`XDiagCells::Packed`) where the table's values fit it (`x_packs`).
+fn x_tbn_diag_pack() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNDIAGPACK"))
+}
+
+/// No NCBI counterpart: the largest window of a packed table (`x_packs`), 2^28.
+const X_PACK_MAX_WINDOW: i32 = 1 << 28;
+
+// No NCBI counterpart: chooses the layout of a diagonal table; both hold the same values.
+/// Whether a table of `window` and `word_size` is packed (`LOSAT_X_TBNDIAGPACK`). Its values then
+/// fit 31 bits without a sign: `last_hit` starts at 0 and is set to `s + offset` or to
+/// `s_last_off - (wordsize - 1) + offset` (`XTwoHit::pairs`), with `offset` from `window` (at
+/// least `wordsize + 1`, `x_tbn_hitbf::fits`) to below INT4_MAX / 4 + 2 x (window + the longest
+/// unit) (`Diagonals::finish_frame`), the units at most `MAX_DBSEQ_LEN` (5,000,000) residues long
+/// (`search_seed.rs`) and the window at most `X_PACK_MAX_WINDOW`: below 1.1 x 10^9 < 2^31. So
+/// bit 31 is free for the flag, and a flag-0 cell read as `i32` is its `last_hit`
+/// (`x_tbn_hitbf::x_hits_bf`).
+fn x_packs(window: i32, word_size: usize) -> bool {
+    x_tbn_diag_pack() && super::x_tbn_hitbf::fits(window, word_size) && window <= X_PACK_MAX_WINDOW
+}
+
 impl Diagonals {
-    fn new(query_length: usize, window: i32) -> Self {
+    fn new(query_length: usize, window: i32, packed: bool) -> Self {
         let size = (query_length + window as usize).next_power_of_two();
         Self {
-            entries: vec![(0, false); size],
+            entries: if packed {
+                XDiagCells::Packed(vec![0; size])
+            } else {
+                XDiagCells::Pair(vec![(0, false); size])
+            },
             mask: size as i32 - 1,
             offset: window,
             window,
@@ -51,7 +116,7 @@ impl Diagonals {
     fn finish_frame(&mut self, subject_length: usize) {
         if self.offset >= i32::MAX / 4 {
             self.offset = self.window;
-            self.entries.fill((0, false));
+            self.entries.clear();
         } else {
             self.offset += subject_length as i32 + self.window;
         }
@@ -194,11 +259,44 @@ impl<'a> XTwoHit<'a> {
         window: i32,
         word_size: usize,
     ) -> Self {
+        let packed = x_packs(window, word_size);
+        Self::x_with_layout(
+            packed,
+            table,
+            query_sequence,
+            context_offsets,
+            x_dropoffs,
+            cutoff_scores,
+            matrix,
+            window,
+            word_size,
+        )
+    }
+
+    /// `with_table` with a table packed or not (`x_packs`; a test may take either).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn x_with_layout(
+        packed: bool,
+        table: Option<Diagonals>,
+        query_sequence: &'a [u8],
+        context_offsets: &'a [i32],
+        x_dropoffs: &'a [i32],
+        cutoff_scores: &'a [i32],
+        matrix: ScoringMatrix,
+        window: i32,
+        word_size: usize,
+    ) -> Self {
         let query_length = query_sequence.len().saturating_sub(1);
         let size = (query_length + window as usize).next_power_of_two();
         let diagonals = match table {
-            Some(table) if table.entries.len() == size && table.window == window => table,
-            _ => Diagonals::new(query_length, window),
+            Some(table)
+                if table.entries.len() == size
+                    && table.window == window
+                    && table.entries.packed() == packed =>
+            {
+                table
+            }
+            _ => Diagonals::new(query_length, window, packed),
         };
         Self {
             diagonals,
@@ -243,10 +341,23 @@ impl<'a> XTwoHit<'a> {
         self.diagonals
     }
 
-    /// The diagonal table, for tests.
+    /// The diagonal table as `(last_hit, flag)`, for tests.
     #[cfg(test)]
-    pub(super) fn x_table(&self) -> &[(i32, bool)] {
-        &self.diagonals.entries
+    pub(super) fn x_table(&self) -> Vec<(i32, bool)> {
+        use super::x_tbn_hitbf::XDiagCell;
+        match &self.diagonals.entries {
+            XDiagCells::Packed(cells) => cells.iter().map(|cell| cell.get()).collect(),
+            XDiagCells::Pair(cells) => cells.clone(),
+        }
+    }
+
+    /// Where the diagonal table's cells are, for tests.
+    #[cfg(test)]
+    pub(super) fn x_table_at(&self) -> *const u8 {
+        match &self.diagonals.entries {
+            XDiagCells::Packed(cells) => cells.as_ptr().cast(),
+            XDiagCells::Pair(cells) => cells.as_ptr().cast(),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
@@ -275,28 +386,53 @@ impl<'a> XTwoHit<'a> {
         pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
         hits: &mut Vec<InitHsp>,
     ) {
+        // The cells are taken out for the loop over them and put back (a move of the vector).
+        let mut entries =
+            std::mem::replace(&mut self.diagonals.entries, XDiagCells::Pair(Vec::new()));
+        match &mut entries {
+            XDiagCells::Packed(cells) => {
+                self.pairs_on(cells, frame, chunk_offset, subject_sequence, pairs, hits)
+            }
+            XDiagCells::Pair(cells) => {
+                self.pairs_on(cells, frame, chunk_offset, subject_sequence, pairs, hits)
+            }
+        }
+        self.diagonals.entries = entries;
+    }
+
+    /// `pairs` on the table's `cells` (either layout, `x_tbn_hitbf::XDiagCell`).
+    #[inline]
+    fn pairs_on<C: super::x_tbn_hitbf::XDiagCell>(
+        &self,
+        cells: &mut [C],
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) {
         let window = self.window;
         let word_size = self.word_size;
         let word_size_i32 = word_size as i32;
-        let diagonals = &mut self.diagonals;
+        let diagonals = &self.diagonals;
         for pair in pairs {
             let q = pair.q_off as i32;
             let s = pair.s_off as i32;
             // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:516-547
             let index = ((q - s) & diagonals.mask) as usize;
-            let (last_hit, flag) = &mut diagonals.entries[index];
-            if *flag {
-                if s + diagonals.offset < *last_hit {
+            let cell = &mut cells[index];
+            let (last_hit, flag) = cell.get();
+            if flag {
+                if s + diagonals.offset < last_hit {
                     continue;
                 }
-                *last_hit = s + diagonals.offset;
-                *flag = false;
+                cell.set(s + diagonals.offset, false);
                 continue;
             }
-            let previous = *last_hit - diagonals.offset;
+            let previous = last_hit - diagonals.offset;
             let diff = s - previous;
             if diff >= window {
-                *last_hit = s + diagonals.offset;
+                cell.set_last_hit(s + diagonals.offset);
                 continue;
             }
             if diff < word_size_i32 {
@@ -308,7 +444,7 @@ impl<'a> XTwoHit<'a> {
             //     query_info->contexts[curr_context].query_offset) continue;
             let context = self.context_offsets.partition_point(|&offset| offset <= q) - 1;
             if q - diff < self.context_offsets[context] {
-                *last_hit = s + diagonals.offset;
+                cell.set_last_hit(s + diagonals.offset);
                 continue;
             }
             // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1155:
@@ -360,10 +496,12 @@ impl<'a> XTwoHit<'a> {
             }
             // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:588-607
             if result.right_extend {
-                *flag = true;
-                *last_hit = result.s_last_off - (word_size_i32 - 1) + diagonals.offset;
+                cell.set(
+                    result.s_last_off - (word_size_i32 - 1) + diagonals.offset,
+                    true,
+                );
             } else {
-                *last_hit = s + diagonals.offset;
+                cell.set_last_hit(s + diagonals.offset);
             }
         }
     }
@@ -390,13 +528,15 @@ impl<'a> XTwoHit<'a> {
         let word_size = self.word_size as i32;
         let mut done = 0;
         while done < pairs.len() {
-            done += super::x_tbn_hitbf::x_hits_bf(
-                &mut self.diagonals.entries,
-                self.diagonals.offset,
-                self.window,
-                word_size,
-                &pairs[done..],
-            );
+            let (offset, window, rest) = (self.diagonals.offset, self.window, &pairs[done..]);
+            done += match &mut self.diagonals.entries {
+                XDiagCells::Packed(cells) => {
+                    super::x_tbn_hitbf::x_hits_bf(cells, offset, window, word_size, rest)
+                }
+                XDiagCells::Pair(cells) => {
+                    super::x_tbn_hitbf::x_hits_bf(cells, offset, window, word_size, rest)
+                }
+            };
             if let Some(pair) = pairs.get(done) {
                 self.pairs(
                     frame,
@@ -1466,11 +1606,11 @@ mod tests {
             )
         };
         let cleared_b = cleared_hits(|| new_b(None), &query_b, &units);
+        let entries = near_limit.x_table_at();
         let table = near_limit.into_table();
-        let entries = table.entries.as_ptr();
         let mut taken_over = new_b(Some(table));
         assert_eq!(
-            taken_over.diagonals.entries.as_ptr(),
+            taken_over.x_table_at(),
             entries,
             "the table must be taken over"
         );
@@ -1502,8 +1642,9 @@ mod tests {
     // `x_pairs_bf` against `pairs` on units made as in the test above (fragments
     // of the queries with substitutions, so that extensions and flag-1 cells occur), on cleared
     // tables, on a kept table and across the clear near INT4_MAX / 4, for windows 40 and
-    // wordsize + 1; each unit's offset pairs come in arrays of random lengths, as the scan fills
-    // them. The init HSPs and every cell must be equal after every unit.
+    // wordsize + 1, with the branch-free loop on either layout of the table (LOSAT_X_TBNDIAGPACK)
+    // and `pairs` on `(last_hit, flag)` cells; each unit's offset pairs come in arrays of random
+    // lengths, as the scan fills them. The init HSPs and every cell must be equal after every unit.
     #[test]
     fn x_pairs_bf_gives_the_hits_and_table_of_pairs() {
         let mut seed = 0x9e37_79b9_u64;
@@ -1548,14 +1689,18 @@ mod tests {
         let mut found = 0;
         // too far, overlap, flag 1, candidate (the last two go to `pairs` in `x_pairs_bf`).
         let mut outcomes = [0u64; 4];
-        for window in [40, 4] {
+        for (window, packed) in [(40, false), (4, false), (40, true), (4, true)] {
             for (mode, start) in [
                 ("cleared", None),
                 ("kept", None),
                 ("near the clear", Some(i32::MAX / 4 - 5_000)),
             ] {
-                let new = || {
-                    XTwoHit::new(
+                // The reference on `(last_hit, flag)` cells; the branch-free loop on either layout
+                // (LOSAT_X_TBNDIAGPACK).
+                let new_in = |packed| {
+                    XTwoHit::x_with_layout(
+                        packed,
+                        None,
                         &query,
                         &offsets,
                         &x_dropoffs,
@@ -1565,8 +1710,10 @@ mod tests {
                         3,
                     )
                 };
+                let new = || new_in(false);
+                let new_bf = || new_in(packed);
                 let mut reference = new();
-                let mut branch_free = new();
+                let mut branch_free = new_bf();
                 if let Some(start) = start {
                     reference.diagonals.offset = start;
                     branch_free.diagonals.offset = start;
@@ -1574,7 +1721,7 @@ mod tests {
                 for (u, unit) in units.iter().enumerate() {
                     if mode == "cleared" {
                         reference = new();
-                        branch_free = new();
+                        branch_free = new_bf();
                     }
                     let pairs = x_word_pairs(&query, unit);
                     // The reference one hit at a time, its outcomes counted from the cell before.
@@ -1603,11 +1750,14 @@ mod tests {
                         branch_free.x_pairs_bf(1, 0, unit, array, &mut got);
                         rest = tail;
                     }
-                    assert_eq!(got, expected, "window {window} {mode} unit {u}: init HSPs");
+                    assert_eq!(
+                        got, expected,
+                        "window {window} packed {packed} {mode} unit {u}: init HSPs"
+                    );
                     assert_eq!(
                         branch_free.x_table(),
                         reference.x_table(),
-                        "window {window} {mode} unit {u}: table"
+                        "window {window} packed {packed} {mode} unit {u}: table"
                     );
                     found += expected.len();
                     if mode != "cleared" {

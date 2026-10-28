@@ -2775,7 +2775,10 @@ fn run_batch_loop(
 ) -> Result<()> {
     let query_records = query_runs.records;
     let input = query_runs.input;
-    let mut done = SearchedBatches::default();
+    let mut done = SearchedBatches {
+        x_in_order: crate::algorithm::tblastx::x_rpt_batch::on(),
+        ..SearchedBatches::default()
+    };
     // The warnings written before each query's report (`QueryWarnings`).
     let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); query_records.len()];
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
@@ -3032,7 +3035,7 @@ fn run_batch_loop(
             .into());
         }
         warnings[start].extend_from_slice(&batch_warnings);
-        let batch = match take(start..end) {
+        let mut batch = match take(start..end) {
             Ok(batch) => {
                 // LOSAT_TIMING: the batch's block, kept in its result by a search of the pipe
                 // (LOSAT_X_TBXPIPE), in the batch order.
@@ -3088,11 +3091,24 @@ fn run_batch_loop(
         // `-db`: the definition lines of the batch's reported sequences are read where NCBI
         // makes the batch's Seq-aligns (`database::read_titles`, in report order); a header file
         // that NCBI cannot read fails this batch, after the reports of the batches before.
+        // EXPERIMENT (LOSAT_X_TBXRPTBATCH): the batch's HSPs in report order now, while the pipe
+        // searches the next batch, instead of in the write after the last batch
+        // (tblastx/x_rpt_batch.rs); the `-db` titles below read this list.
+        let x_ordered = done
+            .x_in_order
+            .then(|| report_order(&args, batch_queries, std::mem::take(&mut batch.hits)));
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
-            let ordered = report_order(&args, batch_queries, batch.hits.clone());
+            let x_copy;
+            let ordered: &[TblastxHsp] = match &x_ordered {
+                Some(ordered) => ordered,
+                None => {
+                    x_copy = report_order(&args, batch_queries, batch.hits.clone());
+                    &x_copy
+                }
+            };
             let read = super::super::database::read_titles(
                 database,
-                &ordered,
+                ordered,
                 start,
                 &mut reports.titles.borrow_mut(),
             );
@@ -3132,7 +3148,7 @@ fn run_batch_loop(
             if prefetches && database.taxdb_found() {
                 let messages = super::super::database::prefetch_messages(
                     database,
-                    &ordered,
+                    ordered,
                     &reports.titles.borrow(),
                 )?;
                 warnings[start].extend(messages);
@@ -3186,7 +3202,8 @@ fn run_batch_loop(
             ));
         }
         // The batch numbers its queries from 0.
-        done.hits.extend(batch.hits.into_iter().map(|mut hsp| {
+        let hits = x_ordered.unwrap_or(batch.hits);
+        done.hits.extend(hits.into_iter().map(|mut hsp| {
             hsp.hit.q_idx += start as u32;
             hsp
         }));
@@ -3212,7 +3229,11 @@ const CODON_LENGTH: usize = 3;
 /// The results of the query batches searched so far, by query.
 #[derive(Default)]
 struct SearchedBatches {
+    /// The batches' HSPs, in report order when `x_in_order`.
     hits: Vec<TblastxHsp>,
+    /// EXPERIMENT (LOSAT_X_TBXRPTBATCH): each batch's HSPs were put in report order when the
+    /// batch ended (tblastx/x_rpt_batch.rs), so the write keeps their order.
+    x_in_order: bool,
     query_stats: Vec<TblastxQueryStats>,
     searched: Vec<bool>,
     /// The queries of each batch searched, in order: the batches of the BLAST archive (outfmt 11).
@@ -3260,7 +3281,12 @@ impl BatchReports<'_> {
                 super::super::archive::check_titles(records, "subject")?;
             }
         }
-        let mut hits = report_order(self.args, queries, done.hits);
+        // EXPERIMENT (LOSAT_X_TBXRPTBATCH): already in report order (tblastx/x_rpt_batch.rs).
+        let mut hits = if done.x_in_order {
+            done.hits
+        } else {
+            report_order(self.args, queries, done.hits)
+        };
         // `-db`: the reported sequences by rank (their records hold the stored titles, their
         // letters are read from the stored codes).
         let reported_subjects;

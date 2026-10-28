@@ -33,6 +33,8 @@ mod tblastx_qslice;
 mod tblastx_query_frames;
 #[path = "../tblastx_ref_lut.rs"]
 mod tblastx_ref_lut;
+#[path = "../tblastx_report_batch.rs"]
+mod tblastx_report_batch;
 #[path = "../tblastx_report_par.rs"]
 mod tblastx_report_par;
 #[path = "../tblastx_resolve.rs"]

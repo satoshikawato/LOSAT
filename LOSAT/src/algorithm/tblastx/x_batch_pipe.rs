@@ -515,6 +515,8 @@ impl<'s, R: Send> XPipe<'s, R> {
     /// meanwhile. A panic of that search is raised again here.
     fn wait(&self, i: usize) -> Result<R> {
         let mut waited = false;
+        // One taker for the whole wait: the units it runs keep one scratch (`XTaker`).
+        let mut taker = crate::algorithm::tblastx::x_work_board::XTaker::default();
         loop {
             if let Some(result) = self.slots[i]
                 .lock()
@@ -531,7 +533,6 @@ impl<'s, R: Send> XPipe<'s, R> {
                 // The board's items, then this thread's own pool jobs and its part of a broadcast
                 // (a later batch's subject loop waits until every thread has run its part), never
                 // another thread's jobs.
-                let mut taker = crate::algorithm::tblastx::x_work_board::XTaker::default();
                 if !board.take_one(&mut taker)
                     && !matches!(rayon::yield_local(), Some(rayon::Yield::Executed))
                 {

@@ -97,15 +97,21 @@ impl XSet {
         if i >= self.n {
             return false;
         }
-        let was = IN_ITEM.with(|flag| flag.replace(true));
+        // The item counts as run when it returns or panics, so its owner never waits for it forever.
+        struct Ran<'a>(&'a XSet, bool);
+        impl Drop for Ran<'_> {
+            fn drop(&mut self) {
+                IN_ITEM.with(|flag| flag.set(self.1));
+                let mut done = self.0.done.lock().unwrap_or_else(|e| e.into_inner());
+                *done += 1;
+                if *done == self.0.n {
+                    self.0.all_done.notify_all();
+                }
+            }
+        }
+        let _ran = Ran(self, IN_ITEM.with(|flag| flag.replace(true)));
         // SAFETY: see the type's `Send` / `Sync`.
         unsafe { (*self.run)(i, taker) };
-        IN_ITEM.with(|flag| flag.set(was));
-        let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
-        *done += 1;
-        if *done == self.n {
-            self.all_done.notify_all();
-        }
         true
     }
 
@@ -116,9 +122,32 @@ impl XSet {
 
     /// Blocks until every item has run.
     fn wait(&self) {
+        self.wait_for(self.n);
+    }
+
+    /// Blocks until `n` items have run.
+    fn wait_for(&self, n: usize) {
         let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
-        while *done < self.n {
+        while *done < n {
             done = self.all_done.wait(done).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+}
+
+/// The owner's hold on its set: if the owner unwinds (a panic in an item it ran), no item is taken
+/// any more and the guard waits for the items others took, which borrow the owner's frame, before
+/// the panic goes on.
+struct XOwned<'a>(&'a XSet);
+
+impl Drop for XOwned<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            let taken = self
+                .0
+                .next
+                .fetch_max(self.0.n, Ordering::AcqRel)
+                .min(self.0.n);
+            self.0.wait_for(taken);
         }
     }
 }
@@ -130,19 +159,37 @@ pub(crate) struct XBatch {
     closed: Box<[AtomicBool]>,
     /// No subject below this one has units left to take (a hint).
     lowest: AtomicUsize,
+    /// Every subject below this one is drained (`drained`): a slot that is closed and has no unit
+    /// left to take stays so, so the scan never goes back.
+    drained_below: AtomicUsize,
 }
 
 impl XBatch {
+    /// Subject `s` has put its units on the board (or will put none) and none is left to take.
+    fn slot_drained(&self, s: usize) -> bool {
+        // `closed` before the slot: `run_units` stores its set before it closes the slot.
+        self.closed[s].load(Ordering::Acquire)
+            && self.slots[s]
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .is_none_or(|set| set.taken())
+    }
+
     /// Every subject has put its units on the board (or will put none) and none is left to take.
+    /// Each call reads the slots from the first one not yet known to be drained and stops at the
+    /// first that is not, so the calls of a batch read each slot about once.
     pub(crate) fn drained(&self) -> bool {
-        self.closed.iter().enumerate().all(|(s, closed)| {
-            closed.load(Ordering::Acquire)
-                && self.slots[s]
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .as_ref()
-                    .is_none_or(|set| set.taken())
-        })
+        let n = self.slots.len();
+        let mut s = self.drained_below.load(Ordering::Acquire);
+        while s < n {
+            if !self.slot_drained(s) {
+                return false;
+            }
+            s += 1;
+            self.drained_below.fetch_max(s, Ordering::AcqRel);
+        }
+        true
     }
 
     /// Takes and runs one unit of the lowest subject that has one left.
@@ -151,6 +198,8 @@ impl XBatch {
         let mut s = self.lowest.load(Ordering::Acquire);
         let mut all_below_taken = true;
         while s < n {
+            // `closed` before the slot (`slot_drained`).
+            let closed = self.closed[s].load(Ordering::Acquire);
             let set = self.slots[s]
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -165,6 +214,12 @@ impl XBatch {
                     self.lowest.fetch_max(s + 1, Ordering::AcqRel);
                 }
                 Some(_) => {}
+                // Closed without units, or after its units ran (`run_units` clears its slot).
+                None if closed => {
+                    if all_below_taken {
+                        self.lowest.fetch_max(s + 1, Ordering::AcqRel);
+                    }
+                }
                 None => {
                     all_below_taken = false;
                 }
@@ -194,6 +249,7 @@ impl XBoard {
             slots: (0..subjects).map(|_| Mutex::new(None)).collect(),
             closed: (0..subjects).map(|_| AtomicBool::new(false)).collect(),
             lowest: AtomicUsize::new(0),
+            drained_below: AtomicUsize::new(0),
         });
         self.batches
             .lock()
@@ -247,22 +303,26 @@ impl XBoard {
     /// groups first. Returns when every unit has run.
     pub(crate) fn run_units(&self, batch: &XBatch, s: usize, n: usize, run: &Run<'_>) {
         let set = XSet::new(run, n);
+        let owned = XOwned(&set);
         *batch.slots[s].lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::clone(&set));
         batch.closed[s].store(true, Ordering::Release);
-        // The set's own helpers: the batch's only subject has no subject-loop threads to take its
-        // units, and in a subject loop an idle pool thread takes them too. A helper takes this
-        // set's units only, so a thread that runs it inside a pool wait holds it for this
-        // subject's units at most.
+        // The set's own helpers, for the batch's only subject: it has no subject-loop threads to
+        // take its units. In a subject loop (TBXNEXT's broadcast) every pool thread is in the loop
+        // and takes units from the board (its subjects', then `help`), so helpers there would only
+        // wait in the threads' queues until the loop ends. A helper takes this set's units only,
+        // so a thread that runs it inside a pool wait holds it for this subject's units at most.
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
-        for _ in 0..rayon::current_num_threads().min(n).saturating_sub(1) {
-            let set = Arc::clone(&set);
-            rayon::spawn(move || {
-                let mut taker = XTaker::default();
-                while set.run_one(&mut taker) {}
-            });
+        if batch.slots.len() == 1 {
+            for _ in 0..rayon::current_num_threads().min(n).saturating_sub(1) {
+                let set = Arc::clone(&set);
+                rayon::spawn(move || {
+                    let mut taker = XTaker::default();
+                    while set.run_one(&mut taker) {}
+                });
+            }
         }
         let mut taker = XTaker::default();
         while !set.taken() {
@@ -273,6 +333,9 @@ impl XBoard {
         }
         drop(taker);
         set.wait();
+        drop(owned);
+        // The slot stays closed and drained; the set is not kept until the batch ends.
+        *batch.slots[s].lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     /// A linking call's groups: `run(i, taker)` for every `i < n` (the largest group first is the
@@ -280,6 +343,7 @@ impl XBoard {
     /// `helpers` pool jobs. Returns when every group has run.
     pub(crate) fn run_groups(&self, n: usize, run: &Run<'_>, helpers: usize) {
         let set = XSet::new(run, n);
+        let owned = XOwned(&set);
         self.groups
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -288,24 +352,19 @@ impl XBoard {
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
-        for _ in 0..helpers.min(n.saturating_sub(1)) {
-            let set = Arc::clone(&set);
-            // One item per helper: a helper that a thread runs inside a pool wait (nested) holds that
-            // thread for one item at most.
-            rayon::spawn(move || {
-                let mut taker = XTaker::default();
-                set.run_one(&mut taker);
-            });
-        }
+        x_spawn_group_helper(Arc::clone(&set), helpers.min(n.saturating_sub(1)));
         let _ = helpers;
         let mut taker = XTaker::default();
         while set.run_one(&mut taker) {}
         set.wait();
+        drop(owned);
     }
 
     /// A thread of `batch`'s subject loop without a subject: takes items until the batch's units
-    /// are all taken (it waits, without the pool, while a subject has not yet put its units).
-    pub(crate) fn help(&self, batch: &XBatch) {
+    /// are all taken (it waits, without the pool, while a subject has not yet put its units), or
+    /// the loop stopped (`stopped`: a subject's search panicked, so the subjects not yet taken will
+    /// never close).
+    pub(crate) fn help(&self, batch: &XBatch, stopped: &AtomicBool) {
         let mut taker = XTaker::default();
         let mut idle = 0u32;
         loop {
@@ -313,7 +372,7 @@ impl XBoard {
                 idle = 0;
                 continue;
             }
-            if batch.drained() {
+            if batch.drained() || stopped.load(Ordering::Relaxed) {
                 return;
             }
             idle += 1;
@@ -324,6 +383,27 @@ impl XBoard {
             }
         }
     }
+}
+
+/// One helper job of a group set, which spawns the next before it takes its item while items are
+/// left, `left` helpers in all: idle threads join one after the other, and a set whose items were
+/// all taken by others leaves at most one job in a thread's queue. One item per helper: a helper
+/// that a thread runs inside a pool wait (nested) holds that thread for one item at most.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_spawn_group_helper(set: Arc<XSet>, left: usize) {
+    if left == 0 || set.taken() {
+        return;
+    }
+    rayon::spawn(move || {
+        if !set.taken() {
+            x_spawn_group_helper(Arc::clone(&set), left - 1);
+        }
+        let mut taker = XTaker::default();
+        set.run_one(&mut taker);
+    });
 }
 
 thread_local! {
@@ -433,7 +513,7 @@ mod tests {
                             }
                             checked.fetch_add(1, Ordering::Relaxed);
                         }
-                        board.help(&batch);
+                        board.help(&batch, &AtomicBool::new(false));
                     });
                 });
                 board.end_batch(&batch);
@@ -448,6 +528,90 @@ mod tests {
                 );
                 assert_eq!(checked.load(Ordering::Relaxed), subjects);
             }
+        }
+    }
+
+    // `drained` reads each slot once per batch (its cursor never goes back) and is true only when
+    // every slot is closed and taken; a slot closed without units does not hold the unit order's
+    // hint (`lowest`) back.
+    #[test]
+    fn drained_and_lowest_pass_closed_slots_once() {
+        let board = XBoard::default();
+        let batch = board.batch(4);
+        batch.close_without_units(0);
+        batch.close_without_units(2);
+        assert!(!batch.drained());
+        assert_eq!(batch.drained_below.load(Ordering::Relaxed), 1);
+        let ran = AtomicUsize::new(0);
+        board.run_units(&batch, 1, 3, &|_, _: &mut XTaker| {
+            ran.fetch_add(1, Ordering::Relaxed);
+        });
+        assert_eq!(ran.load(Ordering::Relaxed), 3);
+        assert!(
+            batch.slots[1].lock().unwrap().is_none(),
+            "the slot is cleared"
+        );
+        assert!(!batch.drained());
+        assert_eq!(batch.drained_below.load(Ordering::Relaxed), 3);
+        assert!(!batch.run_one(&mut XTaker::default()));
+        assert_eq!(batch.lowest.load(Ordering::Relaxed), 3);
+        batch.close_without_units(3);
+        assert!(batch.drained());
+        assert_eq!(batch.drained_below.load(Ordering::Relaxed), 4);
+    }
+
+    // An item that panics on another thread counts as run, so its owner returns, and the panic
+    // reaches the caller (a hang here would stop the test at the watchdog).
+    #[test]
+    fn a_panicking_item_on_another_thread_does_not_hang_its_owner() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(2)
+                .build()
+                .expect("test pool");
+            let board = XBoard::default();
+            let other_took = AtomicBool::new(false);
+            let owner_done = AtomicBool::new(false);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                pool.install(|| {
+                    rayon::broadcast(|ctx| {
+                        if ctx.index() == 0 {
+                            board.run_groups(
+                                4,
+                                &|_, _| {
+                                    if rayon::current_thread_index() != Some(0) {
+                                        other_took.store(true, Ordering::SeqCst);
+                                        panic!("an item panics on the other thread");
+                                    }
+                                    let start = std::time::Instant::now();
+                                    while !other_took.load(Ordering::SeqCst)
+                                        && start.elapsed() < std::time::Duration::from_secs(5)
+                                    {
+                                        std::hint::spin_loop();
+                                    }
+                                },
+                                0,
+                            );
+                            owner_done.store(true, Ordering::SeqCst);
+                        } else {
+                            let mut taker = XTaker::default();
+                            while !owner_done.load(Ordering::SeqCst) {
+                                if !board.take_one(&mut taker) {
+                                    std::thread::yield_now();
+                                }
+                            }
+                        }
+                    });
+                });
+            }));
+            let _ = tx.send((result.is_err(), other_took.load(Ordering::SeqCst)));
+        });
+        let (panicked, other_took) = rx
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .expect("the owner returned");
+        if other_took {
+            assert!(panicked, "the item's panic reaches the caller");
         }
     }
 }

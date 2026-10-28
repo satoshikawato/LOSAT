@@ -74,8 +74,8 @@ pub(super) fn for_each_subject<S>(
     init: &(impl Fn() -> S + Sync),
     search: &(impl Fn(&mut S, usize) + Sync),
     // EXPERIMENT (LOSAT_X_TBXBOARD): what a thread does once no subject is left to take (it helps
-    // with the batch's units, tblastx/x_work_board.rs `XBoard::help`).
-    help: Option<&(dyn Fn() + Sync)>,
+    // with the batch's units, tblastx/x_work_board.rs `XBoard::help`), given the loop's stop flag.
+    help: Option<&(dyn Fn(&AtomicBool) + Sync)>,
 ) {
     if n == 0 {
         return;
@@ -91,7 +91,7 @@ pub(super) fn for_each_subject<S>(
             take_subjects(n, &next, &stopped, init, search);
             if let Some(help) = help {
                 if !stopped.load(Ordering::Relaxed) {
-                    help();
+                    help(&stopped);
                 }
             }
         });

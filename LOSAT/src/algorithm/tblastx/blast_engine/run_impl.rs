@@ -2635,10 +2635,14 @@ fn run_in_pool(
         TblastxMatrix::Table(matrix) => Some(MatrixScores::new(matrix)),
     };
     // EXPERIMENT (LOSAT_X_TBXBOARD): one board for the search's batches (tblastx/x_work_board.rs).
+    // Only when the batches use it (`search_query_batch`, `x_board_batch`): with the serial chunk
+    // scan, or several subjects without TBXNEXT's loop, the batches and the pipe run as before.
     let x_board = (crate::algorithm::tblastx::x_work_board::on()
         && parallel_pool.enabled()
-        && parallel_pool.threads() > 1)
-        .then(crate::algorithm::tblastx::x_work_board::XBoard::default);
+        && parallel_pool.threads() > 1
+        && std::env::var_os("LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS").is_none()
+        && (search_subjects.count() == 1 || x_subject_next::on()))
+    .then(crate::algorithm::tblastx::x_work_board::XBoard::default);
     let search: &x_batch_pipe::XSearch<'_, TblastxBatch> = &|range, seed_end| match &matrix_scores {
         None => search_query_batch(
             Blosum62Score,
@@ -4066,6 +4070,8 @@ fn search_query_batch<S: TbxScore>(
     if crate::algorithm::tblastx::x_work_board::on() {
         crate::utils::xreach::x_reach!("LOSAT_X_TBXBOARD", x_board_batch.is_some());
     }
+    // Whether the batch puts units on the board (`x_board_help` below).
+    let x_board_unit_path = x_pair_par_batch.is_some();
     let x_seed_batch = x_seed_release::XSeedBatch::new(lookup, x_pair_par_batch, subjects.count());
     let x_worker_diag_cells = x_seed_batch.worker_table_cells(diag_array_size as usize);
 
@@ -7210,10 +7216,11 @@ fn search_query_batch<S: TbxScore>(
     // EXPERIMENT (LOSAT_X_TBXBOARD): a thread of the subject loop without a subject helps with the
     // batch's units (tblastx/x_work_board.rs `XBoard::help`).
     let x_board_help = x_board_batch.as_ref().map(|(board, batch)| {
-        move || {
-            board.help(batch);
-            // Every unit of the batch has been taken: the next batch may build its tables.
-            if let Some(seed_end) = x_seed_end {
+        move |stopped: &std::sync::atomic::AtomicBool| {
+            board.help(batch, stopped);
+            // Every unit of the batch has been taken: the next batch may build its tables. A batch
+            // without the unit path has no units; its next batch starts at its seed-stage end.
+            if let Some(seed_end) = x_seed_end.filter(|_| x_board_unit_path) {
                 seed_end.units_taken();
             }
         }
@@ -7250,7 +7257,9 @@ fn search_query_batch<S: TbxScore>(
                     sc,
                 },
                 &process_subject,
-                x_board_help.as_ref().map(|help| help as &(dyn Fn() + Sync)),
+                x_board_help
+                    .as_ref()
+                    .map(|help| help as &(dyn Fn(&std::sync::atomic::AtomicBool) + Sync)),
             );
         });
     } else if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {

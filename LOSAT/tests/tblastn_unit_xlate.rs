@@ -14,7 +14,8 @@
 //! ```
 //! NCBI translates the six frames of a subject and each unit reads its chunk of a frame. With the
 //! switch, the plan of a packed subject whose first frame has 1 MiB or more (3,145,722 bases)
-//! made for its search alone (the search keeps no subject plans for several query batches) has
+//! made for its use alone (the search keeps no plan of it: fewer than four query batches, or a
+//! plan over the 256 MiB of kept plans, `XSubjectSide::keeps`) has
 //! no residues, and each unit translates those of its chunk (and
 //! a margin) into a buffer of its thread, so the report does not depend on the switch. It is on
 //! by default and off with `LOSAT_X_TBNUNITXLATE=0`. This test compares the reports and reads

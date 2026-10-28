@@ -1061,3 +1061,52 @@ test("a file that the main thread created is written on a thread worker (-num_th
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729
+// ```c++
+//             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
+// ```
+// The hosts' table of files (wasi_files.js, the comment above SHARED_FD_BASE) writes a
+// regular file at the OS's offset, as native write() does, until the guest seeks or reads it, and
+// at the table's position from then on. Another write to the same open file (as the descriptor 1
+// that macOS's /dev/stdout duplicates) moves the OS's offset, here through the table's descriptor.
+test("the table of files writes at the OS's offset until a seek or a read, then at its own position", () => {
+  const { sharedFileTable, sharedFileImports } = require("./wasi_files");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-table-"));
+  try {
+    const file = path.join(directory, "out.txt");
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    const local = Object.fromEntries(["path_open", "fd_write", "fd_read", "fd_seek", "fd_close"].map(name => [name, () => 52]));
+    const table = sharedFileTable(), wasi = sharedFileImports(table, memory, local), bytes = new Uint8Array(memory.buffer);
+    const name = Buffer.from(path.relative("/", file));
+    bytes.set(name, 64);
+    // path_open(3, follow, 64, len, CREAT | TRUNC, FD_READ | FD_SEEK | FD_WRITE, 0, 0, 8)
+    assert.equal(wasi.path_open(3, 1, 64, name.length, 9, (1n << 1n) | (1n << 2n) | (1n << 6n), 0n, 0, 8), 0);
+    const fd = new DataView(memory.buffer).getUint32(8, true), descriptor = new Int32Array(table, 0, 1024).find(d => d >= 0);
+    const write = (text) => {
+      bytes.set(Buffer.from(text), 256);
+      new DataView(memory.buffer).setUint32(16, 256, true);
+      new DataView(memory.buffer).setUint32(20, text.length, true);
+      assert.equal(wasi.fd_write(fd, 16, 1, 24), 0);
+    };
+    write("abc");
+    fs.writeSync(descriptor, "zz");                        // the OS's offset moves to 5
+    write("Q");                                            // at the OS's offset
+    assert.equal(fs.readFileSync(file, "utf8"), "abczzQ");
+    assert.equal(wasi.fd_seek(fd, 1n, 0, 32), 0);         // from here on at the table's position
+    write("X");
+    assert.equal(wasi.fd_seek(fd, 0n, 2, 32), 0);
+    write("d");
+    assert.equal(fs.readFileSync(file, "utf8"), "aXczzQd");
+    assert.equal(wasi.fd_seek(fd, 0n, 0, 32), 0);
+    new DataView(memory.buffer).setUint32(16, 512, true);
+    new DataView(memory.buffer).setUint32(20, 2, true);
+    assert.equal(wasi.fd_read(fd, 16, 1, 24), 0);
+    assert.equal(Buffer.from(bytes.subarray(512, 514)).toString(), "aX");
+    write("Y");
+    assert.equal(wasi.fd_close(fd), 0);
+    assert.equal(fs.readFileSync(file, "utf8"), "aXYzzQd");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

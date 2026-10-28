@@ -5,6 +5,8 @@
 
 #[path = "../blastn_bn_csr.rs"]
 mod blastn_bn_csr;
+#[path = "../blastn_bn_seed_lists.rs"]
+mod blastn_bn_seed_lists;
 #[path = "../blastn_db_cut.rs"]
 mod blastn_db_cut;
 #[path = "../blastn_db_search.rs"]

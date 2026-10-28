@@ -319,6 +319,7 @@ export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNQDROP=1
 export LOSAT_X_BNQPACK=1
+export LOSAT_X_BNSEEDLISTS=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BNTABPAR=1
@@ -337,6 +338,7 @@ export LOSAT_X_BPFSTAGE=1
 export LOSAT_X_BPGAP=1
 export LOSAT_X_BPGAP16=1
 export LOSAT_X_BPHITBF=1
+export LOSAT_X_BPIHPOOL=1
 export LOSAT_X_BPLISTEDLEAN=1
 export LOSAT_X_BPLK16=1
 export LOSAT_X_BPLKDROP=1
@@ -1124,8 +1126,11 @@ Rebuilding less:
 - TBNSSIDE (graduated 2026-10-22; no variable; conditional: its rule stays) tblastn: subject
   six-frame translations once per search of four or more
   query batches (20,000 query residues per batch), up to 256 MiB of translated residues
-  (`XSubjectSide::KEEP_FROM_BATCHES`, `KEEP_LIMIT`). The batches go to `x_search_batches` at any
-  thread count. A
+  (`XSubjectSide::KEEP_FROM_BATCHES`, `KEEP_LIMIT`; whether a plan is kept is decided from the
+  subject's length by the first batch that reaches it, `XSubjectSide::keeps`, and a plan that is
+  not kept is made per use as the plans of a search without a side are: since 2026-10-28 without
+  residues when its first frame has 1 MiB or more, `TBNUNITXLATE`). The batches go to
+  `x_search_batches` at any thread count. A
   search of one to three batches keeps none and translates a subject again for each batch, as
   NCBI does (`blast_engine.c:627-631`): one batch has no later reader, and two or three give
   the time the kept translations would save for their memory. Timed with two and three batches
@@ -1826,6 +1831,40 @@ Rebuilding less:
   (the zero fill), cycles x1.000 (0.961-1.060) where the A/A arm read x1.001 (0.939-1.034), x0.999-1.002 in the 4
   quietest rounds (load 8-16); WSSV 8 rounds instructions x0.999998, cycles x1.002 (0.986-1.008), A/A x0.999
   (0.985-1.010); minor faults 13.2k -> 5.2k (human x yeast).
+- `LOSAT_X_BPIHPOOL=1` (BLASTP, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
+  added it (perf/bp-ih-pool, v4-D12 s21-s22, `DECISIONS` 62-63): on unless it is `0`) a subject's array of initial hits
+  (`BlastpSubjectScratch::init_hsps`, the ungapped hits `blastp_save_init_hsp` saves) past NCBI's first array size lives
+  in one pool shared by the threads (`blastp/blast_engine/x_ih_pool.rs`). NCBI starts each thread's list at
+  `MIN_INIT_HITLIST_SIZE` (100) and doubles it with `realloc` (`blast_extend.c:221-224`, `336-341`); the list is reset,
+  never shrunk, for each subject, so each thread keeps the largest array any of its subjects needed. The scratch did
+  the same, and each worker's malloc arena also kept the arrays its vector outgrew, so the preliminary stage held the
+  sum over the threads of each thread's largest (UniRef50 q100 at 32 threads: 53 MiB of capacity, of which a subject
+  used at most 0.2 MiB at any time). With the switch on the scratch holds an array of 100; a subject that fills it
+  continues in an array of twice the length from the pool (the smallest that holds it, or a new one) and the scratch's
+  array goes to the pool; a pool array that fills is exchanged for a larger one from the pool, or doubled in place when
+  the pool has none; at the subject's end the array goes back to the pool and the scratch takes an array of 100 from
+  it. The hits, their order and every value are those of the scratch's own vector (lib tests
+  `hits_through_the_pool_equal_the_scratch_vector`, `threads_sharing_the_pool_keep_their_own_hits`;
+  `tests/blastp_ih_pool.rs` compares reports with `=0`: `-subject` and `-db`, 1 and 4 threads, a subject past 100,
+  200 and 400 hits). At one thread the pool holds the largest array, as the scratch did. `LOSAT_TIMING=1` prints
+  `[TIMING] x_bpihpool: pooled=<n>` per search (the arrays that continued through the pool). After a search's
+  preliminary stage the pool's arrays are freed (`x_ih_pool::release`, next to the lookup table's drop), as the
+  subject loop's scratches freed theirs; without that, Swiss-Prot q100 at one thread, whose peak comes after the
+  preliminary stage, kept the largest array. The comparison before the push changes the code of the fused two-hit
+  loop: `=0` runs the previous allocation path, not the dev base's instructions (x0.9954-0.9959 of them, as the default).
+  Evidence 2026-10-28 (v4-D12 s22, workstation, heads 4bab83fa and fece4d68 (with `release`) on dev 4403cc12; arms default,
+  `=0`, and the dev base built the same way; every report identical): peak RssAnon of UniRef50 q100 `-evalue 0.001`
+  at 32 threads (node 1, 50 ms samples, runs alternated) 158.5, 160.0, 161.4, 162.1 MiB against `=0` 183.1, 185.1,
+  189.3 MiB (wall 402.9-403.4 against 403.3-408.3 s); q100 against a third of UniRef50 at 16 threads (4 pairs side
+  by side) 63.9-72.7 against 66.0-74.5 MiB; one thread (node 0, 2 ms samples) WSSV x PajaWSV `-db` 9,192-9,240
+  against the dev base 9,188-9,228 KiB, `-subject` 9,004-9,008 against 9,008-9,012, 3,000 human x
+  `BlastDBSpecies6` 13,240-13,264 against 13,264-13,300, Swiss-Prot q100 76,600-78,012 against 75,340-76,720 and
+  `=0` 75,628-77,748 (its peak is the last 0.4 s, the output stage, and spreads as much in every arm). Time: one
+  thread (`perf stat` `:u`, node 0, arms rotated) instructions default / `=0` x0.99998-1.00000, default / dev base
+  x0.9953 (WSSV), x0.9959 (human), x0.9956 (Swiss-Prot); cycles default / dev base x0.996 and x1.003 (WSSV, 4 and 8
+  rounds), x0.997 and x0.995 (human, 3 and 6), x0.995 and x0.995 (Swiss-Prot, 2 and 3); 16 threads (node 1 CPUs
+  32-47 warmed, 8 rounds rotated with an A/A arm, head 4bab83fa) Swiss-Prot q100 wall x1.0000 (A/A x0.9992), cycles
+  x1.0008 (A/A x0.9986), `bp_hsap` wall x1.0000 (A/A x1.0000), cycles x1.0004 (A/A x1.0017).
 - `LOSAT_X_BPLK16=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-lk16, v4-D12 s19-s20,
   `DECISIONS` 59-61): on unless it is `0`; recorded for `LOSAT_X_REACH` once per table, taken where the table has 16-bit
   hits): exact blastp's block tables (`-task blastp`, the table built
@@ -3886,6 +3925,48 @@ Scheduling (each value computed by one thread with the original function; order 
   [1.008]; blastn-short of the 236 cDNAs 1.001 [0.997]; max RSS of these within the A/A spread. `=0` against dev:
   0.993-1.005 in every case. One thread (node 0, `perf stat`, outputs the same): instructions of dev, the switch and
   `=0` within 0.01 % (31,168 cDNAs 117.750 / 117.751 / 117.749 G; 1,775 cDNAs dc-megablast, megablast and blastn too).
+- `LOSAT_X_BNSEEDLISTS=1` (BLASTN `-task blastn`, `megablast` and `blastn-short`: the partitioned stages of
+  `LOSAT_X_PAIRPAR` and `LOSAT_X_PAIRPARNA` with `LOSAT_X_PAIRPARFOLD`, two threads or more, one unmasked subject, a
+  query block above 8,000 letters; in the strict set from the pull request that added it, 2026-10-28:
+  `LOSAT_X_BNSEEDLISTS=0` turns it off) gives those stages the form `LOSAT_X_DCSEEDLEAN` gives dc-megablast's
+  (`x_pair_seed_part::seed_stage_part_lists`); each partition gets the same seeds in the same order, so the hits and
+  the table are the same:
+  - in the home loop (`LOSAT_X_PAIRPARHOME`) a strip's scan pushes each seed into its partition's list (`PartSink`)
+    instead of into one list that a stable counting sort then cuts by partition (`produce`: a count pass, the
+    partition of each seed's bucket, and a copy of each 16-byte seed and its 4-byte position);
+  - the folds (`fold_t`, `fold_na_t` without `TRACK`) do not record the buckets their inserts change, and the merge
+    writes back every bucket of each partition (an unchanged one as it was).
+  The scans (`scan_strip`, `scan_strip_csr`, `scan_strip_na`) take the receiver as a type parameter (`SeedOut`), so
+  the lists are one more instance of each; the stages without partitions and one thread are unchanged. `x_reach!` at
+  each partitioned stage, always the switch's side while it is on. Tests: `seed_stage_on_strips_equals_one_scan` of
+  `x_pair_seed.rs` (the partitioned stage in both forms on 1 to 8 threads and 2 to 16 partitions, on tables with and
+  without level bounds, two chunks in a row on one scratch, against the serial fold) and of `x_pair_seed_na.rs` (word
+  sizes 6, 7 and 8, both forms on 2 to 6 threads), and `LOSAT/tests/blastn_bn_seed_lists.rs` (blastn and megablast of
+  LC738874 against LC738868 and blastn-short of 700 24-mers of LC738868: the reports at 2 and 4 threads and at 4 with
+  `LOSAT_X_PAIRPARHOME=0` against `=0` at 2 and 4, with the sides of `LOSAT_X_REACH`, `LOSAT_X_PAIRPARFOLD` and the
+  stage's switch).
+  Probe (v4-A15 s20, 2026-10-28, exp/a15-bnlists; workstation as above, 16 threads unless noted, against the 3 Mb of
+  chromosome 2L): the cut took 7-8 % of the cycles of blastn-short of 236 D. melanogaster cDNAs (three stages, 313 M
+  seeds) and about 2 % of blastn of 31,168 and 5,000 cDNAs (216 M and 35 M seeds; `perf record`, node 0). Time A/B on
+  node 1 (dev's form, a byte copy of its binary, this form; every output the same; median of the per-round ratios
+  [A/A]): blastn-short x0.972 (16 rounds, none slower; max RSS 408 -> 385 MiB) [1.002], at 8 threads x0.960 [1.000];
+  blastn of the 31,168 cDNAs x0.988 [0.999], against the 3 Mb as `-db` x0.991 [1.001] (104 -> 95 MiB), with
+  `LOSAT_X_QBATCHPAR=0` x0.993 [0.996] (101 -> 93 MiB); of 5,000 cDNAs x0.988 [1.002]; of 1,775 x0.998 [0.999].
+  Pull request A/B (v4-A15 s21, node 1: dev 2087618e6, a byte copy of its binary, d6e69cd1f, and d6e69cd1f with `=0`;
+  every output the same; median [95 %], rounds slower, [A/A]): blastn-short of the 236 cDNAs x0.969 [0.966-0.974]
+  0/16 [0.997] (2.359 -> 2.285 s, max RSS 416 -> 386 MiB), at 8 threads x0.961 0/8 [1.000] (383 -> 373 MiB); blastn
+  of the 31,168 cDNAs x0.986 1/16 [0.999] (392 -> 383 MiB), as `-db` x0.996 [1.002] (103 -> 94 MiB), with
+  `LOSAT_X_QBATCHPAR=0` x1.003 8 rounds [1.005] and x0.998 16 rounds [1.000] (102 -> 92-96 MiB); of 5,000 x0.996
+  [1.001]; of 1,775 x0.994 [0.998]; megablast of 1,775 x0.994 40 rounds [0.989], of the 31,168 x0.999 [0.985];
+  dc-megablast of the 31,168 (not reached) x0.997 [0.999]. Max RSS rises in no case. `=0` against dev 0.996-1.005.
+  The one case it does not help: megablast of the 31,168 cDNAs with `LOSAT_X_QBATCHPAR=0` at 16 threads, x1.020 in 12
+  rounds and x1.012 [0.998-1.024] in 40 (25 slower; A/A 0.999; CPU x1.013 in both), at 8 threads x1.004 [0.980-1.021]
+  (A/A 0.992). Its partitioned stages are small: 25 stages, 131 k seeds, 15 seeds a strip, so about one per partition,
+  which the lists put in 16 vectors per strip where the cut wrote one; `[TIMING]` fold and merge the same,
+  instructions +0.1-0.2 % at 16 threads and +0.02 % at 8, page faults the same (both arms 70-150 k, run to run), sys
+  time +0.03-0.05 s (node 0, `perf stat`). One thread (node 0, `perf stat`, outputs the same): instructions of dev,
+  the switch and `=0` within 0.01 % (blastn-short of the 236 cDNAs 260.834 / 260.821 / 260.821 G; 1,775 cDNAs
+  blastn, megablast and dc-megablast too).
 - `LOSAT_X_BNCSR=1` (BLASTN `-task blastn` and every task with word size 9, 10 or 11 that builds the contiguous
   two-stage table of `build_mb_lookup`, `-subject` and `-db`, any thread count, speed; in the strict set from the pull
   request that added it, 2026-10-25 (perf/bn-csr, evidence at the end of this entry): on unless it is `0`) lays out the
@@ -5320,9 +5401,10 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_TBNUNITXLATE=1` tblastn (speed and memory; in the strict set from the pull request that added it,
   2026-10-23; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_packed_lean_plan`, `x_unit_residues`,
   `tblastn/search_gapped.rs` `X_UNIT_RESIDUES`): the plan of a packed subject (every `-db` sequence, `-subject`
-  with `TBNSTORE`) whose first frame has 1 MiB or more (3,145,722 bases) and which is made for its search alone
-  (a search that keeps no subject plans: not one of 4+ query batches with `TBNSSIDE`, whose plans, kept or made
-  per use, keep their frames) has no residues: its frames have their lengths and its units
+  with `TBNSTORE`) whose first frame has 1 MiB or more (3,145,722 bases) and which is made for its use alone
+  (a search that keeps no plan of it: fewer than 4 query batches, or, since 2026-10-28, a plan that the 256 MiB
+  of kept plans of `TBNSSIDE` refuses and every batch makes per use; `XSubjectSide::keeps`) has no residues: its
+  frames have their lengths and its units
   their chunks, and each (frame, chunk) unit translates the residues it reads, from the chunk's first to 4,096
   past its last (or the frame's end sentinel), into a buffer its thread keeps, from the packed bytes of its
   phase and strand with the tables and loops of `TBNXLATESIMD` (32 codons with AVX2, else eight from one word).
@@ -5352,7 +5434,29 @@ Scheduling (each value computed by one thread with the original function; order 
   cycles and user time, the flow's tail: 21-22 of 32 CPUs busy in both). E. coli x 16 protein batches (the plans of
   `TBNSSIDE`) and fly proteins against 5,000 16S sequences (frames below 1 MiB) take the frames as before
   (x1.000-1.006, the same instructions). With `=0` the binary ran as its base (the human genome at one thread
-  x1.002, the same instructions).
+  x1.002, the same instructions). Widened 2026-10-28 to the plans a search of 4+ batches does not keep: whether
+  a subject's plan is kept is decided from its length before the plan is made (`XSubjectSide::keeps`, the
+  same bytes and limit as before, `plan_bytes_of`), and a plan the limit refuses, which every batch made per
+  use with its six frames (a human chromosome of 128 Mb or more never fits; a search of 4 batches at 16 or 32
+  threads keeps its side, `TBNKEEPFEW`), is made as a plan without a side is: without residues when its
+  first frame has 1 MiB or more. Same reports; no new rule (`=0` makes every plan with its frames, as before
+  the widening for such a search). Measured 2026-10-28 on the workstation (node 1, physical cores with their HT
+  siblings idle, `--membind=1`, cores warmed 3 s, pairs with the order alternated, walls by the driver's monotonic
+  clock, peak anonymous memory sampled every 50 ms from the process; load 22-138 from node 0), the pull request's
+  binary (82db3a82) against its base (dev 2087618e), `-db -evalue 1e-5 -max_target_seqs 5`, every report the same
+  bytes in every arm: 122 human proteins (4 batches) against the human genome at 16 threads 137.2 -> 135.7 s
+  (x0.990, 2 of 2 pairs faster), peak RssAnon 7,267 -> 3,477 MiB (-3,791 MiB; -3,856 and -3,725 per pair), page
+  faults 8.30 M -> 2.65 M; at 32 threads 96.8 -> 95.3 s (x0.984, 2 of 2), 9,483 -> 4,700 MiB (-4,783), faults
+  8.73 M -> 3.00 M, where the same binary with `=0` ran as the base (x1.000, -140 MiB); 4 batches of zebrafish
+  proteins against the zebrafish genome at 32 threads (23 of 25 chromosomes refused) 26.7 -> 25.8 s (x0.965, 2 of
+  2), 3,318 -> 1,327 MiB (-1,991); one batch (35 human proteins, no side) x1.001 and -64 MiB (the unchanged path).
+  **Where it does not hold:** 4 batches of fly proteins against the fly genome at 16 threads (one refused
+  chromosome of about 32 Mb whose six frames were not at the peak) x0.996 but peak RssAnon 384 -> 425 MiB (+39;
+  +39, +16 and +49 per pair): the per-thread unit buffers of its lean plan (a chunk of its frame, about 3.6 MB per
+  thread that ran one of its units) stay for the search where the refused frames were freed after the subject.
+  NCBI BLAST+ 2.17.0 on the first batch alone (35 proteins) at 16 threads holds 6,240 MiB of anonymous memory
+  (capped at 900 s, unfinished; node 0), above the 4-batch search with the change (3,477) and the base's one batch
+  (2,474).
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject`: each subject record's letters are packed as soon as the
   reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST database volume: ncbi2na 4
   bases per byte with the remainder count in the last byte, the runs of letters other than `ACGT`

@@ -1,0 +1,1 @@
+- `blastp -task blastp-fast` with more than one thread builds each stripe of its lookup table from one read of the query chunks' parts (`LOSAT_X_BPSTRIPEFILL`, a new switch of the strict set; `=0` reads them twice as before). Reports do not change.

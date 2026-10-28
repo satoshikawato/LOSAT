@@ -2135,6 +2135,11 @@ fn build_lookup_from_prepared(
             }
         }
     }
+    // PROBE (exp/d14-s2b, LOSAT_PROBE_EXACTDROP=1): NCBI frees the exact backbone here
+    // (blast_aalookup.c:462-469), before the table is finalized.
+    if std::env::var("LOSAT_PROBE_EXACTDROP").is_ok_and(|v| v == "1") {
+        exact_backbone = LookupBackboneChains::new(0);
+    }
     for idx in 0..backbone_size {
         counts[idx] = thin_backbone[idx]
             .as_deref()

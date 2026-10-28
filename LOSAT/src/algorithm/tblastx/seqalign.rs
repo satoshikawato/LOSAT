@@ -4,7 +4,7 @@
 //! TBLASTX is an ungapped search, so NCBI makes one `diags` Seq-align per subject of a query's
 //! final hit list (`BLASTUngappedHspListToSeqAlign`), one Std-seg per HSP with the HSP's scores,
 //! subject by subject in hit-list order, each subject's HSPs sorted by e-value. The final list
-//! (`report_order`) holds the HSPs in that order, query by query, one run of HSPs per subject
+//! (`hit_collector.rs`) holds the HSPs in that order, query by query, one run of HSPs per subject
 //! (the order of the tabular rows).
 //!
 //! What NCBI's `BlastHSP` holds, from LOSAT's `TblastxHsp`:

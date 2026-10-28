@@ -372,6 +372,7 @@ fn standard_input_with_slots_lends_the_batches() {
             .args(["-outfmt", "6", "-num_threads", "4"])
             .envs([
                 ("BATCH_SIZE", "2000"),
+                ("LOSAT_X_QBATCHPAR", "1"),
                 ("LOSAT_X_QBATCHPARSLOTS", "2"),
                 ("LOSAT_X_STATS", "1"),
                 TIMING,

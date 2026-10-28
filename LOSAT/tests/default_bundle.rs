@@ -7,10 +7,12 @@
 //! give the report of each switch off (`=0`) and of
 //! all of them off, with the same standard error. And the default runs them: the
 //! `[TIMING] x_bpredopar:` line of BPREDOPAR, with BPREDOLPT's `lpt_windows=`, comes without a
-//! variable and not with `LOSAT_X_BPREDOPAR=0`; QBATCHPAR's `[X_STATS]` line comes without a
-//! variable, and its off reason for these small query files is the budget, which is 0 by default
-//! for a query file that NCBI's blastn would not split by queries (`x_qbatch_par.rs`,
-//! `Profile::of_search`), and `LOSAT_X_QBATCHPARMEM` still sets one. `LOSAT_X_REACH`, set in the
+//! variable and not with `LOSAT_X_BPREDOPAR=0`. QBATCHPAR left the default set on 2026-10-28
+//! (Owner decision: the slots' max RSS rise exceeds their time saving): it is off without a
+//! variable (no `[X_STATS]` line) and runs only with `LOSAT_X_QBATCHPAR=1`, where its off reason
+//! for these small query files is the budget, which is 0 by default for a query file that NCBI's
+//! blastn would not split by queries (`x_qbatch_par.rs`, `Profile::of_search`), and
+//! `LOSAT_X_QBATCHPARMEM` still sets one. `LOSAT_X_REACH`, set in the
 //! default run of a search, shows that BPLKPAHEAD, BPSUBJMETA, BPDBCUT, DIAGLV, QDUSTPAR and
 //! QPREPPAR take their own paths on these searches.
 
@@ -337,8 +339,9 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
             );
         }
     }
-    // QBATCHPAR runs by default; these query files get no default budget, and the variable
-    // still sets one.
+    // QBATCHPAR is off by default (since 2026-10-28) and gives no `[X_STATS]` line; with
+    // `LOSAT_X_QBATCHPAR=1` these query files get no default budget, and the variable still sets
+    // one.
     let args = [
         "blastn",
         "-task",
@@ -352,6 +355,8 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
         "-num_threads",
         "4",
     ];
+    let (_, stderr) = losat(&args, &[("BATCH_SIZE", "4000"), ("LOSAT_X_STATS", "1")]);
+    assert!(!stderr.contains("[X_STATS] QBATCHPAR "), "{stderr}");
     let stats = |vars: &[(&str, &str)]| -> String {
         let (_, stderr) = losat(&args, vars);
         stderr
@@ -360,7 +365,11 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
             .unwrap_or_else(|| panic!("no QBATCHPAR line with {vars:?}: {stderr}"))
             .to_string()
     };
-    let line = stats(&[("BATCH_SIZE", "4000"), ("LOSAT_X_STATS", "1")]);
+    let line = stats(&[
+        ("BATCH_SIZE", "4000"),
+        ("LOSAT_X_STATS", "1"),
+        ("LOSAT_X_QBATCHPAR", "1"),
+    ]);
     assert!(
         line.contains(" budget_mib=0 ") && line.ends_with(" off=budget"),
         "{line}"
@@ -368,6 +377,7 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
     let line = stats(&[
         ("BATCH_SIZE", "4000"),
         ("LOSAT_X_STATS", "1"),
+        ("LOSAT_X_QBATCHPAR", "1"),
         ("LOSAT_X_QBATCHPARMEM", "84"),
     ]);
     assert!(line.contains(" budget_mib=84 "), "{line}");
@@ -385,6 +395,7 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
     let slots = [
         ("BATCH_SIZE", "4000"),
         ("LOSAT_X_STATS", "1"),
+        ("LOSAT_X_QBATCHPAR", "1"),
         ("LOSAT_X_QBATCHPARMEM", "4096"),
         ("LOSAT_X_QBATCHPARSLOTS", "2"),
     ];

@@ -200,6 +200,10 @@ use std::ops::RangeInclusive;
 /// branch-free candidate loop, `blastx/x_seed_scan.rs`) graduated on 2026-10-26: it left
 /// `STRICT_SET` and the scan on the presence test was deleted (the compressed lookup table keeps
 /// its own scan, a rule of the table and not a switch).
+/// `LOSAT_X_QBATCHPAR` (BLASTN's query-batch slots, `blastn/blast_engine/x_qbatch_par.rs`) left
+/// the set on 2026-10-28 (Owner decision: at 16 threads the slots' max RSS rise exceeds their time
+/// saving; the slot code is to be removed). It is read there as a switch that is off unless its
+/// variable is `1`, and it has no `x_reach!` marks or row in `switch_reach_expected.tsv` any more.
 /// `LOSAT_X_BPQSLOTS` (blastp-fast's query blocks searched two at a time on the pool,
 /// `blastp/x_query_slots.rs`) was removed on 2026-10-28 (Owner): at 16 threads it saved 7.0 % of
 /// the time and raised the max RSS by 9.1 %. It left `STRICT_SET` and its code was deleted; a run
@@ -217,6 +221,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNQDROP",
     "LOSAT_X_BNQPACK",
     "LOSAT_X_BNQSLOTS",
+    "LOSAT_X_BNSEEDLISTS",
     "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
     "LOSAT_X_BNTABPAR",
@@ -310,7 +315,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_PAIRPARN1",
     "LOSAT_X_PAIRPARNA",
     "LOSAT_X_PAIRWISEPAR",
-    "LOSAT_X_QBATCHPAR",
     "LOSAT_X_QDUSTPAR",
     "LOSAT_X_QGROUPPAR",
     "LOSAT_X_QPREPPAR",

@@ -17,6 +17,7 @@ use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::protein_display_score;
 
 use super::blast_engine::{TblastxHsp, TblastxQueryStats};
+use super::hit_collector::{QueryLists, TblastxHspList};
 use super::scoring::{Blosum62Score, TbxScore};
 
 /// The version that NCBI's TBLASTX reports print.
@@ -931,7 +932,9 @@ fn lowercase_query_row(
 }
 
 /// Every HSP of the final hit list (in the order of all formats) with its displayed rows,
-/// frames, counts, linked-set size and subject.
+/// frames, counts, linked-set size and subject: the rows made up front (`run_impl::rows_up_front`,
+/// the Web adapter's hit records); otherwise outfmt 0 makes the rows of one window of queries at a
+/// time with the same `PairwiseRows::hit` (`run_impl::write_tblastx_outputs`).
 // Kept out of line: this runs only for outfmt 0 or hit records.
 #[inline(never)]
 ///
@@ -963,6 +966,27 @@ pub(crate) fn pairwise_hits(
     );
     let mut window = Vec::new();
     hits.iter().map(|hsp| rows.hit(hsp, &mut window)).collect()
+}
+
+/// The windows of the queries `0..num_queries` whose outfmt 0 rows are made and written
+/// together (`x_pairwise_par::query_windows` of the estimates of their HSPs' lengths, before any
+/// row is made, with the budget of `x_pool`, `x_pairwise_par::window_bytes`), as BLASTN's
+/// (`blastn::pairwise::pairwise_windows`). `hits` is the final list in report order (queries in
+/// input order).
+#[inline(never)]
+pub(crate) fn pairwise_windows(
+    hits: &[TblastxHsp],
+    num_queries: usize,
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
+) -> Vec<std::ops::Range<usize>> {
+    use crate::report::x_pairwise_par::{query_estimate_of, query_windows, window_bytes};
+    let mut estimates = vec![query_estimate_of(std::iter::empty()); num_queries];
+    for query_hits in hits.chunk_by(|a, b| a.hit.q_idx == b.hit.q_idx) {
+        if let Some(estimate) = estimates.get_mut(query_hits[0].hit.q_idx as usize) {
+            *estimate = query_estimate_of(query_hits.iter().map(|hsp| hsp.hit.length));
+        }
+    }
+    query_windows(&estimates, window_bytes(x_pool))
 }
 
 /// The positives of the outfmt 0 rows `hits` by `matrix`, a matrix other than BLOSUM62, counted
@@ -1448,80 +1472,6 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-// ```c
-// typedef struct BlastHSPList {
-//    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-//    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-//                       Set to 0 if not applicable */
-//    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
-//    Int4 hspcnt; /**< Number of HSPs saved */
-//    ...
-//    double best_evalue; /**< Smallest e-value for HSPs in this list. Filled after
-//                           e-values are calculated. Necessary because HSPs are
-//                           sorted by score, but highest scoring HSP may not have
-//                           the lowest e-value if sum statistics is used. */
-// } BlastHSPList;
-// ```
-/// The final HSPs of one query and one subject, as the hit list holds them.
-struct TblastxHspList {
-    oid: u32,
-    hsps: Vec<TblastxHsp>,
-    best_evalue: f64,
-}
-
-impl crate::algorithm::blastn::hsp::HitListEntry for TblastxHspList {
-    fn oid(&self) -> u32 {
-        self.oid
-    }
-
-    fn hsp_count(&self) -> usize {
-        self.hsps.len()
-    }
-
-    fn best_evalue(&self) -> f64 {
-        self.best_evalue
-    }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1739-1749
-    // ```c
-    // static double
-    // s_BlastGetBestEvalue(const BlastHSPList* hsp_list)
-    // {
-    //     int index = 0;
-    //     double best_evalue = (double) INT4_MAX;
-    //
-    //     for (index=0; index<hsp_list->hspcnt; index++)
-    //        best_evalue = MIN(hsp_list->hsp_array[index]->evalue, best_evalue);
-    //
-    //     return best_evalue;
-    // }
-    // ```
-    fn update_best_evalue(&mut self) {
-        let mut best = i32::MAX as f64;
-        for hsp in &self.hsps {
-            if hsp.hit.e_value < best {
-                best = hsp.hit.e_value;
-            }
-        }
-        self.best_evalue = best;
-    }
-
-    fn first_score(&self) -> Option<i32> {
-        self.hsps.first().map(|hsp| hsp.hit.raw_score)
-    }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1452-1454
-    // ```c
-    //       qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-    //             s_EvalueCompareHSPs);
-    // ```
-    fn sort_by_evalue(&mut self) {
-        self.hsps
-            .sort_by(|a, b| crate::common::evalue_compare_hsps(&a.hit, &b.hit));
-    }
-}
-
 /// The filters of NCBI's `s_FilterBlastResults` that TBLASTX has: `-max_hsps` (`max_hsps`,
 /// 0 when omitted) and `-qcov_hsp_perc` (`query_cov_hsp_perc`, 0 when omitted), with the
 /// nucleotide lengths of the queries (`query_lengths`, read for the coverage only).
@@ -1558,7 +1508,7 @@ pub(crate) struct HitFilters<'a> {
 
 impl HitFilters<'_> {
     /// The lengths of the contexts (frames) of query `q_idx`, read only by the coverage.
-    fn context_lengths(&self, q_idx: u32) -> [i32; 6] {
+    pub(super) fn context_lengths(&self, q_idx: u32) -> [i32; 6] {
         if self.query_cov_hsp_perc > 0.0 {
             super::hsp_culling::tblastx_context_lengths(self.query_lengths[q_idx as usize])
         } else {
@@ -1568,7 +1518,7 @@ impl HitFilters<'_> {
 
     /// `Blast_HSPListReapByQueryCoverage` on one subject's HSPs; returns whether none is
     /// left (NCBI's collector and culling writer skip an empty list).
-    fn reap_by_query_coverage(
+    pub(super) fn reap_by_query_coverage(
         &self,
         hsps: &mut Vec<TblastxHsp>,
         context_lengths: &[i32; 6],
@@ -1633,48 +1583,29 @@ impl HitFilters<'_> {
 ///
 /// `filters` (`-qcov_hsp_perc`, `-max_hsps`) apply where NCBI applies them
 /// (`HitFilters`).
+///
+/// The search of a query batch runs the same steps on its queries' hit lists as the subjects'
+/// lists come (`hit_collector::QueryLists`, in OID order); this is the reference of the tests,
+/// on the HSPs of a run at once.
+#[cfg(test)]
 pub(crate) fn final_hit_order(
     hits: Vec<TblastxHsp>,
     hitlist_size: usize,
     filters: &HitFilters<'_>,
 ) -> Vec<TblastxHsp> {
-    use crate::algorithm::blastn::hsp::HitList;
-    let mut lists: std::collections::BTreeMap<(u32, u32), Vec<TblastxHsp>> =
+    let mut pairs: std::collections::BTreeMap<(u32, u32), Vec<TblastxHsp>> =
         std::collections::BTreeMap::new();
     for hsp in hits {
-        lists
+        pairs
             .entry((hsp.hit.q_idx, hsp.hit.s_idx))
             .or_default()
             .push(hsp);
     }
-    let mut ordered = Vec::new();
-    let mut lists = lists.into_iter().peekable();
-    while let Some(&((q_idx, _), _)) = lists.peek() {
-        let context_lengths = filters.context_lengths(q_idx);
-        let mut hit_list: HitList<TblastxHspList> = HitList::new(hitlist_size);
-        while let Some(((_, oid), mut hsps)) = lists.next_if(|((q, _), _)| *q == q_idx) {
-            hsps.sort_by(|a, b| crate::common::score_compare_hsps(&a.hit, &b.hit));
-            if filters.reap_by_query_coverage(&mut hsps, &context_lengths) {
-                continue;
-            }
-            hit_list.update(TblastxHspList {
-                oid,
-                hsps,
-                best_evalue: 0.0,
-            });
-        }
-        if filters.max_hsps > 0 {
-            for list in &mut hit_list.hsplist_array {
-                trim_by_max_hsps(&mut list.hsps, filters.max_hsps);
-            }
-        }
-        hit_list.sort_by_evalue();
-        for mut list in hit_list.hsplist_array {
-            crate::algorithm::blastn::hsp::HitListEntry::sort_by_evalue(&mut list);
-            ordered.extend(list.hsps);
-        }
+    let mut lists = QueryLists::new(hitlist_size);
+    for ((q_idx, oid), hsps) in pairs {
+        lists.add(q_idx, oid, hsps, filters);
     }
-    ordered
+    lists.finish(filters)
 }
 
 /// The final HSP list of a run with `-culling_limit` (`culling_limit` > 0) in NCBI's order:

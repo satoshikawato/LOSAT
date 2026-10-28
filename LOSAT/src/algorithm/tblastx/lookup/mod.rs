@@ -235,6 +235,13 @@ pub(crate) use backbone::{x_assert_same_table_as, x_same_table};
 // LOSAT_X_BXLUTPOOL: the BLASTX table's vectors given back for the next build (LOSAT_X_BXPOOLN1:
 // by searches of two threads or more; x_lut_direct.rs).
 pub(crate) use backbone::{x_bx_pooled_for, x_give_back_pooled};
+// LOSAT_X_BXLISTAHEAD: the shared neighbour lists of a long BLASTX query made ahead of its pooled
+// table builds (x_lut_direct.rs).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) use backbone::x_bx_lists_ahead;
 
 // EXPERIMENT (LOSAT_X_TBXLUT): TBLASTX's full table built in place
 // (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export itself.

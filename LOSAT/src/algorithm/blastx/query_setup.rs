@@ -245,6 +245,18 @@ pub(crate) fn context_frame(letters: usize, i: usize, strand: &str) -> (usize, b
 //      virtual bool Verify(const string& value) const {
 //          static int gcs[] = {1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33};
 // ```
+// No NCBI counterpart (scheduling only): whether the masking of a long query makes the shared
+// neighbour lists of its words ahead of its tables (LOSAT_X_BXLISTAHEAD): with the strict-set
+// switch, for a search whose tables are the pooled standard ones (words of 3, `Lookup::x_new_in_parts`).
+#[cfg(feature = "parallel")]
+fn x_lists_ahead(options: &ResolvedOptions) -> bool {
+    crate::utils::xswitch::on("LOSAT_X_BXLISTAHEAD")
+        && options.word_size == 3
+        && crate::algorithm::tblastx::lookup::x_bx_pooled_for(
+            usize::try_from(options.num_threads).unwrap_or(1),
+        )
+}
+
 pub fn prepare_queries(
     records: &[FastaRecord],
     options: &ResolvedOptions,
@@ -413,20 +425,47 @@ pub fn prepare_queries(
             // Diagnostic (LOSAT_TIMING): the parallel SEG's wall time for the common line
             // (utils/xtiming.rs). No NCBI counterpart.
             let t_seg = crate::utils::xtiming::clock();
-            seg_ready = contexts
-                .par_iter()
-                .map(|context| {
-                    context.is_valid.then(|| {
-                        masker
-                            .mask_sequence(
-                                &buffer[context.offset + 1..context.offset + 1 + context.length],
-                            )
-                            .into_iter()
-                            .map(|r| (r.start as i32, r.end as i32 - 1))
-                            .collect()
+            let seg = || {
+                contexts
+                    .par_iter()
+                    .map(|context| {
+                        context.is_valid.then(|| {
+                            masker
+                                .mask_sequence(
+                                    &buffer[context.offset + 1..context.offset + 1 + context.length],
+                                )
+                                .into_iter()
+                                .map(|r| (r.start as i32, r.end as i32 - 1))
+                                .collect()
+                        })
                     })
+                    .collect()
+            };
+            // Dispatch point (LOSAT_X_BXLISTAHEAD, in the strict set): the threads that the contexts
+            // leave idle make the shared neighbour lists of the query's words for the pooled table
+            // builds that follow (the lists are those the builds would make). No NCBI counterpart.
+            seg_ready = if x_lists_ahead(options) {
+                let locations: Vec<(i32, i32)> = contexts
+                    .iter()
+                    .filter(|context| context.is_valid)
+                    .map(|context| {
+                        (
+                            context.offset as i32,
+                            (context.offset + context.length) as i32 - 1,
+                        )
+                    })
+                    .collect();
+                rayon::join(seg, || {
+                    crate::algorithm::tblastx::lookup::x_bx_lists_ahead(
+                        &buffer[1..],
+                        &locations,
+                        options.threshold as i32,
+                    )
                 })
-                .collect();
+                .0
+            } else {
+                seg()
+            };
             crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
         }
     }

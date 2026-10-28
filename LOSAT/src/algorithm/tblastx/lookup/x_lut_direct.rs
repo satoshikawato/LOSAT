@@ -173,6 +173,64 @@ fn x_shared_memo(
     memo
 }
 
+// No NCBI counterpart (scheduling only): the lists of `x_target_list`, made before the build that
+// reads them; each is a function of its word alone (module comment), so a list made here is the
+// one the build would make.
+/// EXPERIMENT (LOSAT_X_BXLISTAHEAD): makes the shared neighbour lists (the pooled builds' memo,
+/// [`x_shared_memo`]) of BLASTX's standard table (BLOSUM62, words of 3) with `threshold` for the
+/// words of `query` at `locations` (as `x_for_each_exact_word` reads them), on the pool this runs
+/// on, so that a pooled build of a table of these words finds them made.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) fn x_bx_lists_ahead(query: &[u8], locations: &[(i32, i32)], threshold: i32) {
+    use rayon::prelude::*;
+    let (matrix, word_length) = (ScoringMatrix::Blosum62, 3);
+    let alphabet_size = LOOKUP_ALPHABET_SIZE;
+    let charsize = ilog2(alphabet_size) + 1;
+    if word_length * charsize > 16 {
+        return;
+    }
+    let backbone_size = compute_backbone_size(word_length, alphabet_size, charsize);
+    // Same expression as build_lookup_from_prepared (blast_aalookup.c:438-444).
+    let row_max: Vec<i32> = (0..alphabet_size)
+        .map(|i| {
+            (0..alphabet_size)
+                .map(|j| lookup_matrix_score(matrix, i, j))
+                .max()
+                .unwrap_or(i32::MIN)
+        })
+        .collect();
+    let shared = x_shared_memo((matrix, threshold, word_length, alphabet_size), backbone_size);
+    // The first offset of each word not listed yet.
+    let mut first = vec![u32::MAX; backbone_size];
+    x_for_each_exact_word(query, locations, word_length, charsize, |idx, offset| {
+        if first[idx] == u32::MAX && shared.lists[idx].get().is_none() {
+            first[idx] = offset as u32;
+        }
+    });
+    let words: Vec<(usize, usize)> = first
+        .iter()
+        .enumerate()
+        .filter(|(_, &offset)| offset != u32::MAX)
+        .map(|(idx, &offset)| (idx, offset as usize))
+        .collect();
+    words.par_iter().with_min_len(64).for_each(|&(idx, offset)| {
+        shared.lists[idx].get_or_init(|| {
+            x_target_list(
+                &query[offset..],
+                alphabet_size,
+                word_length,
+                charsize,
+                &row_max,
+                threshold,
+                matrix,
+            )
+        });
+    });
+}
+
 /// No NCBI counterpart: the neighbour lists a build reads, its thread's or the shared ones.
 enum XLists<'a> {
     Own(&'a mut Vec<Option<Box<[u16]>>>),

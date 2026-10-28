@@ -443,14 +443,17 @@ async function terminateWorkers(workers) {
 // Host-owned lifecycle records count attempts, ready confirmations, and real exit
 // events separately. Test-only failure injection never changes search behavior.
 async function createThreadHost(wasmPath, kind, argv = [], options = {}) {
-  // LOSAT_WASI_PRESPAWN: a command's standby workers start booting here, while the module is
-  // read, guarded and compiled, and get the module and the memory once they exist (`early`).
-  // Booting one is most of a thread's start (Node's worker bootstrap: 0.1-0.3 s for 15 workers at
-  // once), so they no longer start only after the compile.
-  const early = kind === "threaded-command" && !recycleWorkers(kind)
-    ? bootEarlyWorkers(prespawnCount(argv), options.fault) : [];
+  // LOSAT_WASI_PRESPAWN: a command's standby workers start booting while the module is compiled,
+  // and get the module and the memory once they exist (`early`). Booting one is most of a
+  // thread's start (Node's worker bootstrap: 0.1-0.3 s for 15 workers at once), so they do not
+  // start only after the compile. They start after the module is read and guarded: the read, the
+  // hash and the guard cache run on this thread 2-3x slower while 15 workers boot (ws node 0:
+  // 78 vs 121 ms to the guest's start), and the compile runs on V8's threads meanwhile.
+  const count = kind === "threaded-command" && !recycleWorkers(kind) ? prespawnCount(argv) : 0;
+  let early = [];
   try {
-    return await (await prepareThreadHost(wasmPath, kind)).create(argv, early.length ? { ...options, early } : options);
+    const prepared = await prepareThreadHost(wasmPath, kind, () => { early = bootEarlyWorkers(count, options.fault); });
+    return await prepared.create(argv, early.length ? { ...options, early } : options);
   } catch (err) {
     await terminateWorkers(new Set(early.map(slot => slot.worker)));
     throw err;
@@ -480,7 +483,7 @@ function bootEarlyWorkers(count, fault) {
 // instance/memory/worker set. There is no global cache or retained search pool
 // (LOSAT_WASI_GUARD_CACHE keeps only guarded bytes on disk); a reactor's
 // thread workers stay with its host between searches (LOSAT_WASI_RECYCLE) until close().
-async function prepareThreadHost(wasmPath, kind) {
+async function prepareThreadHost(wasmPath, kind, compiling = () => {}) {
   const start = performance.now();
   const bytes = fs.readFileSync(wasmPath);
   // One compile: the identity (imports, exports) is read from the guarded module, whose imports
@@ -493,7 +496,10 @@ async function prepareThreadHost(wasmPath, kind) {
   try {
     guarded = guardSharedMemoryCached(bytes, inputSha256);
     guardedAt = performance.now();
-    module = await WebAssembly.compile(guarded.bytes);
+    const compiled = WebAssembly.compile(guarded.bytes);
+    // createThreadHost boots its early workers here, while V8 compiles.
+    compiling();
+    module = await compiled;
   } catch (err) {
     inspectArtifact(bytes, kind);
     throw err;

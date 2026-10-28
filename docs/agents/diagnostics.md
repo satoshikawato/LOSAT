@@ -364,6 +364,7 @@ export LOSAT_X_BPSTRIPEFILL=1
 export LOSAT_X_BPSUBJMETA=1
 export LOSAT_X_BPSUBJRUN=1
 export LOSAT_X_BPUNGAPSENT=1
+export LOSAT_X_BXBATCHMEM=1
 export LOSAT_X_BXBUILDPAR=1
 export LOSAT_X_BXCAPFILL=4
 export LOSAT_X_BXCHUNKCROSS=1
@@ -6313,6 +6314,28 @@ Scheduling (each value computed by one thread with the original function; order 
   0.571 -> 0.549 s (x0.962, 0.959-0.968, 12 of 12), S(16) 13.70 -> 14.29; the capped few-subject rows (800 cDNAs x
   2 / 8 / 50 yeast proteins, AP027131 x 10 / 50 proteins, 16 and 32 threads) x0.986-1.031, each within its
   per-round spread (`k` is 1 on the 2 and 8 protein rows, so the cut changes no task there).
+- `LOSAT_X_BXBATCHMEM=1` (BLASTX, memory at many threads; in the strict set from the pull request that added it: on
+  unless `=0`): a query batch's large buffers are kept or grown in place instead of freed, and a batch end makes no
+  more composition-redo workers than it has matches. (a) The chunk owner's diagonal table comes from the tables its
+  thread keeps (`x_bx_mem::XDiagSlot`, under `LOSAT_X_BXDIAGKEEP`'s rule `keeps_tables`), and a kept table of the
+  window but another length is resized by realloc (`Diagonals::x_refit`, offset kept) instead of freed; the thread
+  keeps every table it gives back (one per slot it held at a time). (b) The partitioned lookup build grows a kept
+  overflow vector by realloc (`x_lut_direct::x_sized`) instead of replacing it. (c) The batch end's redo workers are
+  boxed and there are `min(threads, matches)` of them; with fewer matches than threads one speculative batch holds
+  every match and each match takes the worker of its position (`runtime.rs`, `x_kappa_workers`). Why: glibc raises
+  its mmap threshold to the size of a freed mapped block (and the trim threshold to twice that), and each arena then
+  keeps up to that much free at its top. On dev a `-subject` search of 800 fly cDNAs against 50 yeast proteins at 32
+  threads raised the threshold 14 times, to 3.2 MiB (gdb probe `memory_mallopt_free_dyn_thresholds`: the owner's
+  132 KiB diagonal table 8 times, the batch end's 632 KiB array of 32 redo states, the lookup overflow 2.4-3.2 MiB),
+  and the batch ends made one redo state per thread for a handful of matches. With the change no mapped block is
+  freed before the threads exit at 32 threads (two 140-170 KiB interval-tree indexes at 64 threads against 200
+  proteins). Exactness: a resized table has the length and mask of a new one, and every entry it holds was written at
+  or below its offset, which only grows, so it lies at least a window behind the next subject's hits and reads as
+  cleared, the argument of the workers' kept tables (`x_seed_diag.rs`); the NCBI-pinned word-finder test runs a table
+  resized from a shorter and from a longer one (`seed.rs`); a redo worker's state does not change a match's result
+  (`x_speculate_match` redoes in stream order a result that read a predecessor's matrix); `tests/blastx_unit_cap.rs`
+  compares reports with the switch on and off at 2, 4 and 8 threads for 3, 10 and 40 subjects and the batch flow.
+  TIMINGS_PENDING
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

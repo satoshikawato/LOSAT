@@ -320,13 +320,11 @@ unsafe impl Send for XKappaWorker {}
 // (`x_speculate_match`: a result that read a predecessor's matrix is redone in stream order).
 #[cfg(feature = "parallel")]
 fn x_kappa_workers(threads: usize, matches: usize) -> usize {
-    let fit = super::search::x_bx_mem::batch_mem_on();
-    crate::utils::xreach::x_reach!("LOSAT_X_BXBATCHMEM", fit && matches < threads);
-    if fit {
-        threads.min(matches)
-    } else {
-        threads
+    if !super::search::x_bx_mem::batch_mem_on() {
+        return threads;
     }
+    crate::utils::xreach::x_reach!("LOSAT_X_BXBATCHMEM", matches < threads);
+    threads.min(matches)
 }
 
 // No NCBI counterpart (LOSAT_X_BXBATCHMEM): the redo workers of a batch end, each boxed so that

@@ -1180,6 +1180,24 @@ mod session_f_word_finder_reset_tests {
                 assert_eq!(actual, seeds, "window={window} state={state}");
                 assert_eq!(hits, initial, "window={window} state={state}");
             }
+            // LOSAT_X_BXBATCHMEM: a kept table of another length (shorter, then longer), resized
+            // in place (`x_refit`) after a subject whose hits it holds (flagged, at its offset).
+            #[cfg(feature = "parallel")]
+            for other in [1, length * 4] {
+                let mut r = Diagonals::new(other, window).unwrap();
+                r.offset = 5_000;
+                r.entries.fill(flagged(5_000));
+                r.finish_subject(83).unwrap();
+                r.x_refit(length).unwrap();
+                assert!(r.x_fits(length, window), "window={window} from {other}");
+                let mut actual = Vec::new();
+                let hits = word_finder(&batch, &params, &options, &subject, &lookup, &mut r, |x| {
+                    actual.extend_from_slice(x)
+                })
+                .unwrap();
+                assert_eq!(actual, seeds, "window={window} refit from {other}");
+                assert_eq!(hits, initial, "window={window} refit from {other}");
+            }
         }
     }
 }

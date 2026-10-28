@@ -107,10 +107,9 @@
 //! is the same: the stripe reads its parts of the chunks once, in chunk order, into a copy while it
 //! counts the cells (the copy holds the cells' appends in the serial order, chunk by chunk, each
 //! packed as in its chunk), then lays out and fills from the copy as `x_stripe_build` does, the
-//! copy's part of chunk c taking chunk c's first offset. The overflow cells are counted only where a
-//! table's appends pass the capacity: an append takes at most one, so elsewhere no table's test can
-//! refuse it. The stripes are at most 2^`X_FILL_STRIPE_SHIFT` cells wide (or `x_largest_pv_shift`
-//! where that is wider) unless the cuts give the width.
+//! copy's part of chunk c taking chunk c's first offset. The overflow cells are counted only when
+//! some table's appends pass the capacity: an append takes at most one, so otherwise no table's test
+//! can refuse it, and each stripe's counts of them are left 0.
 //!
 //! On with `LOSAT_X_BPCLUT` (a strict-set switch: on unless `=0`)
 //! where the search's pool has more than one thread; at one thread the serial builder runs.
@@ -134,10 +133,6 @@ const X_OFFSET_SPAN: i64 = 1 << 16;
 // No NCBI counterpart: the 16 bits of a packed append that hold the cell's index in its stripe.
 /// The widest stripe: 2^16 cells.
 const X_MAX_STRIPE_SHIFT: usize = 16;
-// No NCBI counterpart: the stripes' width with LOSAT_X_BPSTRIPEFILL. Scheduling only.
-/// The widest stripe of `x_stripe_fill` (unless `x_largest_pv_shift` is wider): its cells' counts
-/// (16 KiB) stay in L1 (2^10 timed slower, 2^11 the same, v4-BPF s9).
-const X_FILL_STRIPE_SHIFT: usize = 12;
 
 /// A contiguous run of the query offsets of one count range.
 struct XChunk {
@@ -371,10 +366,10 @@ fn x_largest_pv_shift(backbone_size: usize) -> usize {
 }
 
 // No NCBI counterpart: chooses the stripes' width. Scheduling only.
-/// The widest stripes (2^shift cells, shift from `smallest` to `widest`) that make at least
-/// `stripes` of them, or the narrowest.
-fn x_stripe_shift(backbone_size: usize, stripes: usize, smallest: usize, widest: usize) -> usize {
-    let mut shift = widest;
+/// The widest stripes (2^shift cells, shift from `smallest` to `X_MAX_STRIPE_SHIFT`) that make at
+/// least `stripes` of them, or the narrowest.
+fn x_stripe_shift(backbone_size: usize, stripes: usize, smallest: usize) -> usize {
+    let mut shift = X_MAX_STRIPE_SHIFT;
     while shift > smallest && backbone_size.div_ceil(1 << shift) < stripes {
         shift -= 1;
     }
@@ -548,7 +543,8 @@ struct XStripeCounts {
     nonempty: usize,
     longest: u32,
     /// The overflow cells of the reference's table of all batches that each count range's appends
-    /// to the stripe's cells take.
+    /// to the stripe's cells take (0 where `x_stripe_fill` does not count them: no table's appends
+    /// pass the capacity).
     cells: Vec<usize>,
 }
 
@@ -849,12 +845,7 @@ fn x_try_build_flat_parallel_with(
     let fill = cuts.stripe_fill && matches!(cuts.passes, XPasses::OneLatch(_));
     let shift = cuts.stripe_shift.unwrap_or_else(|| {
         let stripes = (X_PARTS_PER_THREAD * threads).min(X_MAX_PARTS / chunks.len().max(1));
-        let widest = if fill {
-            X_FILL_STRIPE_SHIFT.max(largest_pv_shift)
-        } else {
-            X_MAX_STRIPE_SHIFT
-        };
-        x_stripe_shift(backbone_size, stripes, largest_pv_shift, widest)
+        x_stripe_shift(backbone_size, stripes, largest_pv_shift)
     });
     assert!(
         (largest_pv_shift..=X_MAX_STRIPE_SHIFT).contains(&shift),
@@ -992,18 +983,20 @@ fn x_try_build_flat_parallel_with(
             .map(|part| x_stripe_build(part, shift, backbone_size, ranges.len(), &chunks, &appends))
             .collect(),
         XPasses::OneLatch(_) if fill => {
-            // An append takes at most one overflow cell: where no table's appends pass the capacity,
-            // no table's test can refuse it (module header).
+            // No NCBI counterpart: whether the stripes count the overflow cells that the capacity test
+            // below reads (module header); it changes no value NCBI computes. An append takes at most
+            // one: when no table's appends pass the capacity, no table's test can refuse it.
             let mut range_appends = vec![0usize; ranges.len()];
             for (chunk, chunk_appends) in chunks.iter().zip(&appends) {
                 range_appends[chunk.range] += chunk_appends.packed.len();
             }
-            let need_cells = ranges
-                .iter()
-                .zip(&range_appends)
-                .any(|((_, is_table), &appends)| {
-                    *is_table && appends > cuts.overflow_cell_capacity
-                });
+            let need_cells =
+                ranges
+                    .iter()
+                    .zip(&range_appends)
+                    .any(|((_, is_table), &range_total)| {
+                        *is_table && range_total > cuts.overflow_cell_capacity
+                    });
             let parts: Vec<Mutex<Option<XStripe<'_>>>> = parts
                 .into_iter()
                 .map(|part| Mutex::new(Some(part)))
@@ -1323,7 +1316,7 @@ mod tests {
                     .expect("not refused");
             x_assert_same_compressed_table(&serial, &reference);
             overflow_seen |= serial.longest_chain > 5;
-            // Every thread count with every chunk size and both pass implementations; the stripe
+            // Every thread count with every chunk size and every form (`FORMS`); the stripe
             // widths in turn.
             for (i, threads) in THREADS.into_iter().enumerate() {
                 for (j, chunk_sizes) in CHUNK_SIZES.into_iter().enumerate() {
@@ -1548,7 +1541,7 @@ mod tests {
 
     // LOSAT_X_BPLKPFLAT: a build on vectors of garbage (`u32::MAX`, `i32::MIN`, random values) longer
     // or shorter than the table's, with and without the room for it, and then on the vectors that
-    // build gives back, is the fresh build slot for slot, with both pass implementations and at 1, 2,
+    // build gives back, is the fresh build slot for slot, with every form and at 1, 2,
     // 3 and 7 threads; where the spare's `hits` has the room, the table holds that buffer.
     #[test]
     fn builds_on_recycled_vectors_equal_fresh_builds() {
@@ -1676,23 +1669,25 @@ mod tests {
             }
         }
         // No offsets: no chunk, the tasks still run once.
-        let extra = Counted::new(5);
-        let none = flat(Some(parallel(
-            3,
-            1100,
-            &query,
-            &[],
-            &[],
-            NCBI_OVERFLOW_CELL_CAPACITY,
-            None,
-            &[],
-            None,
-            XPasses::OneLatch(Some(&extra)),
-            true,
-            None,
-        )));
-        assert!(none.hits.is_empty());
-        extra.assert_each_ran(1, "no chunks");
+        for stripe_fill in [false, true] {
+            let extra = Counted::new(5);
+            let none = flat(Some(parallel(
+                3,
+                1100,
+                &query,
+                &[],
+                &[],
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                None,
+                &[],
+                None,
+                XPasses::OneLatch(Some(&extra)),
+                stripe_fill,
+                None,
+            )));
+            assert!(none.hits.is_empty());
+            extra.assert_each_ran(1, "no chunks");
+        }
         // The entry of the search: the pool's build at 3 threads, the serial builder at one thread
         // (no task runs; the caller runs them), and nothing with the switch off.
         for (threads, mode, runs) in [
@@ -1733,6 +1728,7 @@ mod tests {
         tables: &[std::ops::Range<usize>],
         spare: Option<&XFlatSpare>,
         poisoned: bool,
+        stripe_fill: bool,
     ) -> Option<XFlatBuild> {
         if let (Some(spare), true) = (spare, poisoned) {
             poison(spare);
@@ -1751,7 +1747,7 @@ mod tests {
                     chunk_sizes: &[],
                     stripe_shift: None,
                     passes: XPasses::OneLatch(None),
-                    stripe_fill: true,
+                    stripe_fill,
                     spare,
                     x_ahead: true,
                 },
@@ -1794,7 +1790,9 @@ mod tests {
             let total = serial.hits.len();
             let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
             for threads in THREADS {
-                for poison in [false, true] {
+                for (poison, stripe_fill) in
+                    [(false, false), (false, true), (true, false), (true, true)]
+                {
                     // The room, with garbage in it.
                     let spare = XFlatSpare::default();
                     let mut hits = Vec::with_capacity(total + 5);
@@ -1812,6 +1810,7 @@ mod tests {
                         &tables,
                         Some(&spare),
                         poison,
+                        stripe_fill,
                     ));
                     x_assert_same_flat_tables(&built, &serial);
                     let held = [
@@ -1844,12 +1843,20 @@ mod tests {
                             &tables,
                             Some(&spare),
                             poison,
+                            stripe_fill,
                         );
                         assert!(none.is_none(), "round {round}, short {short}: no table");
                         assert_eq!(spare_addresses(&spare), kept, "the spare keeps them");
                     }
                     let none = ahead(
-                        threads, threshold, &query, &locations, &tables, None, poison,
+                        threads,
+                        threshold,
+                        &query,
+                        &locations,
+                        &tables,
+                        None,
+                        poison,
+                        stripe_fill,
                     );
                     assert!(none.is_none());
                 }

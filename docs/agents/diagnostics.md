@@ -2779,10 +2779,10 @@ Rebuilding less:
   before, `x_stripe_build` read the 128 parts (at 16 threads) twice, once to count and once to fill, and the second
   read of short parts written by other cores stalled (line BPF `REPORT.md` §13-§14: the stripes pass was about 14 %
   of the cycles of the human x yeast search at 16 threads, with a cycles per instruction of 0.565 against 0.395 for
-  the serial bucket fill). The overflow cells of NCBI's table are counted only where a table's appends pass its
-  capacity (an append takes at most one, so elsewhere the capacity test cannot refuse); the stripes are at most
-  2^12 cells wide (their counts stay in L1). Memory: each thread keeps the copy of one stripe's appends (4 bytes
-  each) during the pass. At one thread nothing changes (the serial builder runs). A form that wrote the chunks'
+  the serial bucket fill). The overflow cells of NCBI's table are counted only when some table's appends pass
+  its capacity (an append takes at most one, so otherwise the capacity test cannot refuse). Memory: each task of
+  the pass keeps a copy as large as the largest stripe it took (4 bytes an append) beside the stripe's counts.
+  At one thread nothing changes (the serial builder runs). A form that wrote the chunks'
   appends straight into the table's hits instead (line BPF s10, `exp/bpf-s8` 3c405fdb) was as fast and took
   20-35 MiB more (its scattered stores stalled in turn).
   MEASURED_PLACEHOLDER

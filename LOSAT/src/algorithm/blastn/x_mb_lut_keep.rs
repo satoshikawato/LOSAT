@@ -70,8 +70,9 @@
 //! The prefault round. On a kept table the round of LOSAT_X_MBLUTPREFAULT does not run: it exists
 //! to map the pages of a fresh table by writing them before the fill reads them (its module
 //! documentation, `x_mb_lookup_once.rs`), and a kept table's pages are mapped already (written by
-//! the zeroing or by an earlier fill). Its writes are zeros over zeros, so the arrays are the same
-//! either way.
+//! an earlier fill or by the zeroing, which writes every cell of the build: the cells past those
+//! that builds wrote too, as a packed CSR of LOSAT_X_BNCSRPACK writes only the start of a table).
+//! Its writes are zeros over zeros, so the arrays are the same either way.
 //!
 //! Where. Only the batch loop of `run_in_pool` keeps a table, for the batches it searches itself
 //! (and the query chunks of a split batch), and only while no LOSAT_X_QBATCHPAR slot can run:
@@ -136,10 +137,10 @@ impl Keep {
 
     /// A table for a build of `cells` cells, its first `cells` elements 0, and the number of its
     /// first elements that may hold values once the build has filled it: the kept one when it has
-    /// at least that many elements (`true`; the build uses its first `cells`), with the elements of
-    /// its first `cells` that earlier fills wrote set to 0 (the written elements past them stay as
-    /// they are and stay counted); else a fresh `vec![0; cells]` (`false`), after the kept one is
-    /// freed. `on_pool`: the build runs on a pool of two threads or more, which writes the zeros.
+    /// at least that many elements (`true`; the build uses its first `cells`), with its first
+    /// `cells` elements written with 0 (the written elements past them stay as they are and stay
+    /// counted); else a fresh `vec![0; cells]` (`false`), after the kept one is freed. `on_pool`:
+    /// the build runs on a pool of two threads or more, which writes the zeros.
     pub(super) fn take(&self, cells: usize, on_pool: bool) -> (Vec<u32>, bool, usize) {
         let kept = self.kept.lock().unwrap_or_else(|e| e.into_inner()).take();
         // The reference side is a kept table too small for this build (the first build of a loop
@@ -157,7 +158,13 @@ impl Keep {
             return (table, false, cells);
         };
         let start = super::x_mb_lookup_par::timing_on().then(std::time::Instant::now);
-        zero(&mut table[..dirty.min(cells)], on_pool);
+        // Every element of the build's cells, also those past `dirty`, which no build wrote: a
+        // packed CSR (LOSAT_X_BNCSRPACK) writes only the start of its `offsets`, so the rest of a
+        // table it gave back may be pages never mapped. The fill reads a cell before it writes it,
+        // and on such a page the read maps the zero page and the write copies it, a TLB flush of
+        // every CPU the search runs on; writing first maps the page as the prefault round does on
+        // a fresh table. Elsewhere `dirty` covers the cells already, and this writes the same.
+        zero(&mut table[..cells], on_pool);
         if let Some(start) = start {
             ZERO_NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }

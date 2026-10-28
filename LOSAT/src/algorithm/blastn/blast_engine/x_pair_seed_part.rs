@@ -259,8 +259,8 @@ pub(super) fn insert<const PT: bool, const LEAN: bool, const MEMO: bool>(
     );
 }
 
-/// `insert`; EXPERIMENT (LOSAT_X_DCSEEDLEAN): without `TRACK` a partition's insert does not
-/// record the diagonal's bucket (`PartOut::all_dirty`).
+/// `insert`; EXPERIMENT (LOSAT_X_DCSEEDLEAN, LOSAT_X_BNSEEDLISTS): without `TRACK` a partition's
+/// insert does not record the diagonal's bucket (`PartOut::all_dirty`).
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 pub(super) fn insert_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool>(
@@ -387,7 +387,8 @@ impl PartState {
 
 /// The seeds of one strip cut by partition: partition p's seeds are `seeds[offs[p]..offs[p +
 /// 1]]`, in scan order, with their positions in the strip's scan order in `pos`; or, where the
-/// scan filled the partitions' lists (`split`, EXPERIMENT LOSAT_X_DCSEEDLEAN), `lists[p]`.
+/// scan filled the partitions' lists (`split`, EXPERIMENT LOSAT_X_DCSEEDLEAN /
+/// LOSAT_X_BNSEEDLISTS), `lists[p]`.
 #[derive(Default)]
 struct StripBuf {
     seeds: Vec<Seed>,
@@ -411,8 +412,8 @@ impl StripBuf {
     }
 }
 
-/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): one partition's seeds of a strip,
-/// in scan order, with their positions in the strip's scan order.
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN, LOSAT_X_BNSEEDLISTS): one
+/// partition's seeds of a strip, in scan order, with their positions in the strip's scan order.
 #[derive(Default)]
 struct PartSeeds {
     seeds: Vec<Seed>,
@@ -666,8 +667,9 @@ where
 
 /// No NCBI counterpart (scheduling only): `seed_stage_part` with the sharing of the folds given
 /// (`home`: LOSAT_X_PAIRPARHOME, `seed_stage_home`; else any participant folds any partition it
-/// can lock). EXPERIMENT (LOSAT_X_DCSEEDLEAN): with `scan_lists` (`seed_stage_part_lists`) the
-/// folds do not record their buckets, and the home stage scans into the partitions' lists.
+/// can lock). EXPERIMENT (LOSAT_X_DCSEEDLEAN, LOSAT_X_BNSEEDLISTS): with `scan_lists`
+/// (`seed_stage_part_lists`) the folds do not record their buckets, and the home stage scans
+/// into the partitions' lists.
 #[allow(clippy::too_many_arguments)]
 fn seed_stage_in<FS, FL, FF>(
     home: bool,
@@ -992,9 +994,9 @@ enum Run {
 /// helpers' stall test sums the cursor and the partitions' next strips instead of a shared
 /// count per fold unit; and each partition's next strip and state are on lines of their own.
 /// The owner alone can still scan every strip and fold every partition. EXPERIMENT
-/// (LOSAT_X_DCSEEDLEAN): with `scan_lists` a strip is scanned into its partitions' lists
-/// (`PartSink`) instead of by `scan` into one list cut by partition (the same seeds of each
-/// partition in the same order, with the same positions).
+/// (LOSAT_X_DCSEEDLEAN, LOSAT_X_BNSEEDLISTS): with `scan_lists` a strip is scanned into its
+/// partitions' lists (`PartSink`) instead of by `scan` into one list cut by partition (the same
+/// seeds of each partition in the same order, with the same positions).
 #[allow(clippy::too_many_arguments)]
 fn seed_stage_home<FS, FL, FF>(
     n: usize,
@@ -1065,7 +1067,8 @@ where
         min_next
     };
 
-    // EXPERIMENT (LOSAT_X_DCSEEDLEAN): the partition of each bucket, for `PartSink`.
+    // EXPERIMENT (LOSAT_X_DCSEEDLEAN, LOSAT_X_BNSEEDLISTS): the partition of each bucket, for
+    // `PartSink`.
     let table: Option<[u16; DIAGHASH_NUM_BUCKETS]> =
         scan_lists.map(|_| std::array::from_fn(|b| (b % parts) as u16));
     // A strip's seeds, cut by partition with a stable counting sort (or scanned into the
@@ -1697,8 +1700,9 @@ fn merge(
             }
         };
         if out.all_dirty {
-            // EXPERIMENT (LOSAT_X_DCSEEDLEAN): every bucket of the partition (an unchanged one
-            // has the stage's chain, its cells below occ0, so writing it back changes nothing).
+            // EXPERIMENT (LOSAT_X_DCSEEDLEAN, LOSAT_X_BNSEEDLISTS): every bucket of the partition
+            // (an unchanged one has the stage's chain, its cells below occ0, so writing it back
+            // changes nothing).
             for b in (p..DIAGHASH_NUM_BUCKETS).step_by(parts) {
                 put(b);
             }

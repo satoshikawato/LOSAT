@@ -1128,7 +1128,11 @@ mod tests {
                 ] {
                     let per = grid.div_ceil(target).max(512);
                     // unpartitioned, and partitioned in both forms of LOSAT_X_BNSEEDLISTS's stage
-                    for (partitioned, lists) in [(false, false), (true, false), (true, true)] {
+                    // on one scratch (its strip buffers passing from one form to the other)
+                    let mut scratch = PartScratch::default();
+                    for (partitioned, lists) in
+                        [(false, false), (true, false), (true, true), (true, false)]
+                    {
                         if partitioned && threads < 2 {
                             continue;
                         }
@@ -1137,7 +1141,6 @@ mod tests {
                         let (state, keys, stats_seeds, strips) = pool.install(|| {
                             let mut hash = new_hash();
                             let mut hits = Vec::new();
-                            let mut scratch = PartScratch::default();
                             let fold_part = partitioned.then(|| part::FoldPart {
                                 scratch: &mut scratch,
                                 parts: threads.min(DIAGHASH_NUM_BUCKETS),

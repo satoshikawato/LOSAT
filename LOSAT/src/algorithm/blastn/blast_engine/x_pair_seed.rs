@@ -549,7 +549,8 @@ fn scan_kernel<F: FnMut(usize, u64)>(
 /// Phase 1 for one pair: the statements of `process_offset_pairs` before the diagonal is
 /// read (context, bounds test, word extension), which read only the inputs. A pair that
 /// the reference drops with `continue` here is dropped; any other becomes a `Seed`, pushed to
-/// `out` (a strip's list, or with LOSAT_X_BNSEEDLISTS its partition's list, `part::PartSink`).
+/// `out` (a strip's list, or with LOSAT_X_BNSEEDLISTS / LOSAT_X_DCSEEDLEAN its partition's list,
+/// `part::PartSink`).
 #[inline(always)]
 fn seed_of_pair<O: SeedOut>(
     x: &Inputs<'_>,
@@ -1328,6 +1329,7 @@ impl StageStats {
 /// partitioned fold (LOSAT_X_PAIRPARFOLD), and strips per thread that the participants may scan
 /// past the slowest partition (`seed_stage`).
 const PART_STRIPS_PER_THREAD: usize = 64;
+const PART_AHEAD_PER_THREAD: usize = 2;
 
 /// No NCBI counterpart: reads LOSAT_X_BNSEEDLISTS once (a strict-set switch: on unless it is
 /// `0`). With it the partitioned stages of this module and of `na` (LOSAT_X_PAIRPARFOLD) take
@@ -1339,7 +1341,6 @@ pub(super) fn seed_lists_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNSEEDLISTS"))
 }
-const PART_AHEAD_PER_THREAD: usize = 2;
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
 /// ```c

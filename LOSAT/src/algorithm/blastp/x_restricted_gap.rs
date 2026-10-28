@@ -142,6 +142,11 @@ const MININT: i32 = GAP_MININT;
 /// `b_size`); they hold no value NCBI computes.
 const PAD: usize = 8;
 const TAIL: usize = 24;
+/// No NCBI counterpart: the cells past `b_size` that a row touches in arrays holding `cells`
+/// cells (LOSAT_X_BPGAPBAND): the column letters are copied up to `need + 56` with `need =
+/// b_size + 17` (the sixteen-bit rows; `+ 9` in the 32-bit rows), and `col` keeps `2 + TAIL`
+/// cells past its last cell.
+const ROW_AHEAD: usize = 17 + 56 - (2 + TAIL);
 /// No NCBI counterpart: the largest gap cost and X-drop this module takes, so that no sum below
 /// overflows 32 bits (otherwise the reference function runs).
 const MAX_GAP_COST: i32 = 1 << 16;
@@ -160,6 +165,14 @@ pub(super) fn x_bpgap() -> bool {
 pub(super) fn x_bpgap16() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPGAP16"))
+}
+
+// No NCBI counterpart: reads the strict-set switch LOSAT_X_BPGAPBAND once (on: the arrays of
+// `XRestrictedScratch` hold the cells the band reaches, as NCBI's `dp_mem`; off: the subject
+// letters `len2`); it does not change any value NCBI computes.
+pub(super) fn x_bpgapband() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPGAPBAND"))
 }
 
 // No NCBI counterpart: counters of LOSAT_X_STATS; they do not change any value NCBI computes.
@@ -343,6 +356,7 @@ pub(super) fn restricted_gapped_align_protein_x(
                 &mut scratch.x_restricted,
                 true,
                 x_bpgap16(),
+                x_bpgapband(),
             )
         } else {
             None
@@ -443,7 +457,9 @@ struct XBand {
 // ```
 /// `s_RestrictedGappedAlign` on the arrays of `sc`. `use_avx2` selects the vector rows (only
 /// when the CPU has AVX2); with it, `narrow` (LOSAT_X_BPGAP16) runs the sixteen-bit rows first
-/// where `fits16` holds, and the 32-bit rows when they stop. None: the problem is not taken (module comment); nothing outside
+/// where `fits16` holds, and the 32-bit rows when they stop. `band` (LOSAT_X_BPGAPBAND) starts the
+/// arrays at the cells the first rows can reach and lets the rows grow them with the band; without
+/// it they hold `len2` cells. None: the problem is not taken (module comment); nothing outside
 /// `sc` has been changed.
 fn restricted_fast(
     query: &[u8],
@@ -460,6 +476,7 @@ fn restricted_fast(
     sc: &mut XRestrictedScratch,
     use_avx2: bool,
     narrow: bool,
+    band: bool,
 ) -> Option<(usize, usize, i32)> {
     if !(0..=MAX_GAP_COST).contains(&gap_open)
         || !(0..=MAX_GAP_COST).contains(&gap_extend)
@@ -474,22 +491,51 @@ fn restricted_fast(
     }
     let tables = x_score_tables(score_matrix)?;
 
-    let cells = PAD + len2 + 2 + TAIL;
+    // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1040-1051
+    // ```c
+    //     if (gap_extend > 0)
+    //         num_extra_cells = x_dropoff / gap_extend + 3;
+    //     else
+    //         num_extra_cells = N + 3;
+    //
+    //     if (num_extra_cells > gap_align->dp_mem_alloc) {
+    //         gap_align->dp_mem_alloc = MAX(num_extra_cells + 100,
+    //                                       2 * gap_align->dp_mem_alloc);
+    //         sfree(gap_align->dp_mem);
+    //         gap_align->dp_mem = (BlastGapDP *)malloc(gap_align->dp_mem_alloc *
+    //                                                   sizeof(BlastGapDP));
+    //     }
+    // ```
+    // LOSAT_X_BPGAPBAND: `ahead` is the most cells past `last_b_index` that the next row touches:
+    // the band extension after a row adds at most `(x_dropoff + 2 * max) / gap_extend + 1` cells
+    // and the `MININT` cell (it starts from a score at most `best_score + 2 * max`, module comment:
+    // a cell of the previous row is at most `max(best, max)`, plus an entry), the next row reads
+    // `ROW_AHEAD` cells past its `b_size`. The arrays start at `ahead + 100` cells (NCBI's
+    // `num_extra_cells + 100`) and grow in the rows; without a gap extension cost the band can
+    // run to `len2`, as NCBI's `N + 3`.
+    let ahead = if band && gap_extend > 0 {
+        ((x_dropoff + 2 * tables.max.max(0)) / gap_extend) as usize + 3 + ROW_AHEAD
+    } else {
+        len2 + 3 + ROW_AHEAD
+    };
+    let first = len2.min(ahead + 100);
+    let cells = PAD + first + 2 + TAIL;
     for h in sc.h.iter_mut() {
         if h.len() < cells {
             h.resize(cells, MININT);
         }
     }
-    if sc.e10.len() < len2 / RESTRICT_SIZE + 2 {
-        sc.e10.resize(len2 / RESTRICT_SIZE + 2, MININT);
+    if sc.e10.len() < first / RESTRICT_SIZE + 2 {
+        sc.e10.resize(first / RESTRICT_SIZE + 2, MININT);
     }
-    if sc.col.len() < len2 + 2 + TAIL {
-        sc.col.resize(len2 + 2 + TAIL, 0);
+    if sc.col.len() < first + 2 + TAIL {
+        sc.col.resize(first + 2 + TAIL, 0);
     }
     let p = XParams {
         x_dropoff,
         gap_open_extend,
         gap_extend,
+        ahead,
     };
     #[cfg(target_arch = "x86_64")]
     if use_avx2 && narrow {
@@ -502,7 +548,8 @@ fn restricted_fast(
             if sc.e16.len() < cells {
                 sc.e16.resize(cells, i16::MIN);
             }
-            // SAFETY: as for the 32-bit rows below; the 16-bit arrays were sized for `len2` here.
+            // SAFETY: as for the 32-bit rows below; the 16-bit arrays were sized for `first` cells
+            // here, `len2` or the cells the first rows reach (LOSAT_X_BPGAPBAND).
             // None: a score came near the 16-bit bound, and the 32-bit rows start again from row 0.
             unsafe {
                 restricted_rows16_avx2(
@@ -531,7 +578,8 @@ fn restricted_fast(
     #[cfg(target_arch = "x86_64")]
     if use_avx2 {
         // SAFETY: `use_avx2` is true only when the CPU has AVX2, BMI1 and LZCNT (`cpu_has_avx2`,
-        // which the tests also call). The arrays of `sc` were sized for `len2` above.
+        // which the tests also call). The arrays of `sc` were sized above (for `len2`, or for the
+        // first rows with LOSAT_X_BPGAPBAND, the rows growing them with the band).
         return unsafe {
             restricted_rows_avx2(
                 query,
@@ -569,7 +617,7 @@ fn restricted_fast(
 /// The rows with the vector kernel, compiled for AVX2 as a whole (no call per row).
 ///
 /// # Safety
-/// AVX2, BMI1 and LZCNT; `sc` sized for `len2` by `restricted_fast`.
+/// AVX2, BMI1 and LZCNT; `sc` sized by `restricted_fast`.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,bmi1,lzcnt")]
 unsafe fn restricted_rows_avx2(
@@ -621,7 +669,8 @@ unsafe fn restricted_rows_avx2(
 //     for (a_index = 1; a_index <= M; a_index++) {
 // ```
 /// Row 0 and the row loop of `s_RestrictedGappedAlign` (`AVX2`: the vector rows; the caller
-/// guarantees the CPU features and has sized the arrays of `sc` for `len2`).
+/// guarantees the CPU features and has sized the arrays of `sc` for `len2`, or for the first rows
+/// when they grow with the band: LOSAT_X_BPGAPBAND).
 #[inline(always)]
 fn restricted_rows<const AVX2: bool>(
     query: &[u8],
@@ -642,9 +691,10 @@ fn restricted_rows<const AVX2: bool>(
     let mut col_ready = 0usize;
 
     // Cell `b` of a row is `h[PAD + b]`. Row 0 goes to `h[0]`.
-    let [row0, row1] = &mut sc.h;
-    let e10 = &mut sc.e10[..];
-    let col = &mut sc.col[..];
+    let XRestrictedScratch { h, e10, col, .. } = sc;
+    let [row0, row1] = h;
+    // LOSAT_X_BPGAPBAND: the rows grow the arrays when `last_b_index` reaches `grow_at`.
+    let mut grow_at = band_grow_at(band_cells32(row0, row1, e10, col, len2), len2, p.ahead);
     let mut score = -gap_open_extend;
     row0[PAD] = 0;
     e10[0] = -gap_open_extend;
@@ -737,6 +787,27 @@ fn restricted_rows<const AVX2: bool>(
         if band.first == band.b_size {
             break;
         }
+        // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1261-1269
+        // ```c
+        //         if (last_b_index + num_extra_cells + 3 >= gap_align->dp_mem_alloc) {
+        //
+        //             gap_align->dp_mem_alloc = MAX(last_b_index + num_extra_cells + 100,
+        //                                           2 * gap_align->dp_mem_alloc);
+        //             score_array = (BlastGapDP *)realloc(score_array,
+        //                                                gap_align->dp_mem_alloc *
+        //                                                sizeof(BlastGapDP));
+        //             gap_align->dp_mem = score_array;
+        //         }
+        // ```
+        if band.last >= grow_at {
+            let cells = band_grow32(row0, row1, e10, col, band.last + p.ahead, len2);
+            grow_at = band_grow_at(cells, len2, p.ahead);
+        }
+        let cur: &mut [i32] = if a_index % 2 == 1 {
+            &mut row1[..]
+        } else {
+            &mut row0[..]
+        };
         if band.last < band.b_size.saturating_sub(1) {
             band.b_size = band.last + 1;
         } else {
@@ -766,6 +837,106 @@ struct XParams {
     x_dropoff: i32,
     gap_open_extend: i32,
     gap_extend: i32,
+    /// LOSAT_X_BPGAPBAND: the cells past `last_b_index` the arrays hold before the band extension
+    /// of a row (`restricted_fast`); unused where they hold `len2`.
+    ahead: usize,
+}
+
+// No NCBI counterpart (LOSAT_X_BPGAPBAND): the `last_b_index` at which arrays holding `cells` of
+// the `len2` cells grow (`last_b_index + ahead > cells`); never where they hold `len2`.
+fn band_grow_at(cells: usize, len2: usize, ahead: usize) -> usize {
+    if cells >= len2 {
+        usize::MAX
+    } else {
+        (cells + 1).saturating_sub(ahead)
+    }
+}
+
+// No NCBI counterpart (LOSAT_X_BPGAPBAND): the cells, at most `len2`, the 32-bit arrays hold, by
+// the sizes `restricted_fast` gives them for `len2`: `PAD + len2 + 2 + TAIL` rows, `len2 /
+// RESTRICT_SIZE + 2` column gaps, `len2 + 2 + TAIL` letters.
+fn band_cells32(row0: &[i32], row1: &[i32], e10: &[i32], col: &[u8], len2: usize) -> usize {
+    let rows = row0.len().min(row1.len()).saturating_sub(PAD + 2 + TAIL);
+    let gaps = match e10.len() {
+        0 | 1 => 0,
+        n => (n - 2) * RESTRICT_SIZE + RESTRICT_SIZE - 1,
+    };
+    len2.min(rows)
+        .min(gaps)
+        .min(col.len().saturating_sub(2 + TAIL))
+}
+
+// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1263-1268
+// ```c
+//             gap_align->dp_mem_alloc = MAX(last_b_index + num_extra_cells + 100,
+//                                           2 * gap_align->dp_mem_alloc);
+//             score_array = (BlastGapDP *)realloc(score_array,
+//                                                gap_align->dp_mem_alloc *
+//                                                sizeof(BlastGapDP));
+// ```
+// LOSAT_X_BPGAPBAND: the 32-bit arrays grown to `target + 100` cells (at most `len2`); returns
+// the cells they hold. NCBI's block doubles but is written only where the band reaches; the
+// vectors write the cells they hold (their capacity grows as `Vec` grows it).
+#[cold]
+#[inline(never)]
+fn band_grow32(
+    row0: &mut Vec<i32>,
+    row1: &mut Vec<i32>,
+    e10: &mut Vec<i32>,
+    col: &mut Vec<u8>,
+    target: usize,
+    len2: usize,
+) -> usize {
+    let cells = len2.min(target + 100);
+    for h in [&mut *row0, &mut *row1] {
+        if h.len() < PAD + cells + 2 + TAIL {
+            h.resize(PAD + cells + 2 + TAIL, MININT);
+        }
+    }
+    if e10.len() < cells / RESTRICT_SIZE + 2 {
+        e10.resize(cells / RESTRICT_SIZE + 2, MININT);
+    }
+    if col.len() < cells + 2 + TAIL {
+        col.resize(cells + 2 + TAIL, 0);
+    }
+    band_cells32(row0, row1, e10, col, len2)
+}
+
+// No NCBI counterpart (LOSAT_X_BPGAPBAND): as `band_cells32` for the sixteen-bit arrays
+// (`PAD + len2 + 2 + TAIL` rows and column gaps).
+#[cfg(target_arch = "x86_64")]
+fn band_cells16(row0: &[i16], row1: &[i16], e16: &[i16], col: &[u8], len2: usize) -> usize {
+    let rows = row0
+        .len()
+        .min(row1.len())
+        .min(e16.len())
+        .saturating_sub(PAD + 2 + TAIL);
+    len2.min(rows).min(col.len().saturating_sub(2 + TAIL))
+}
+
+// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1263-1268 (as `band_grow32`)
+// LOSAT_X_BPGAPBAND: `band_grow32` for the sixteen-bit arrays.
+#[cfg(target_arch = "x86_64")]
+#[cold]
+#[inline(never)]
+fn band_grow16(
+    row0: &mut Vec<i16>,
+    row1: &mut Vec<i16>,
+    e16: &mut Vec<i16>,
+    col: &mut Vec<u8>,
+    target: usize,
+    len2: usize,
+) -> usize {
+    let cells = len2.min(target + 100);
+    for h in [&mut *row0, &mut *row1, &mut *e16] {
+        if h.len() < PAD + cells + 2 + TAIL {
+            h.resize(PAD + cells + 2 + TAIL, i16::MIN);
+        }
+    }
+    if col.len() < cells + 2 + TAIL {
+        col.resize(cells + 2 + TAIL, 0);
+    }
+    band_cells16(row0, row1, e16, col, len2)
 }
 
 // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1091-1094,1114-1115
@@ -867,8 +1038,9 @@ fn run_row<const AVX2: bool>(
     if AVX2 {
         // SAFETY: `AVX2` is true only inside `restricted_rows_avx2`, whose caller checked AVX2,
         // BMI1 and LZCNT. `prev` and `cur` hold `PAD` cells before cell 0 and `TAIL` cells after
-        // cell `len2 + 1`, `col` and `e10` cover every index the row reads (sizes set in
-        // `restricted_fast`; `b_size <= len2 + 1`).
+        // cell `cells + 1`, `col` and `e10` cover every index the row reads (sizes set in
+        // `restricted_fast` for `cells` = `len2`, or grown by the rows so that `cells` is `len2` or
+        // at least `b_size + ROW_AHEAD`, LOSAT_X_BPGAPBAND; `b_size <= cells + 1`).
         unsafe {
             return if gap_row {
                 x_avx2::row::<true>(band, p, a_index, row, lut, prev, cur, col, e10)
@@ -1400,7 +1572,8 @@ fn fits16(p: &XParams, tables: &XScoreTables) -> bool {
 /// 32-bit rows from row 0; nothing outside `sc` has been changed).
 ///
 /// # Safety
-/// AVX2, BMI1 and LZCNT; the arrays of `sc` (16-bit ones included) sized for `len2`; `fits16`.
+/// AVX2, BMI1 and LZCNT; the arrays of `sc` (16-bit ones included) sized by `restricted_fast`;
+/// `fits16`.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,bmi1,lzcnt")]
 unsafe fn restricted_rows16_avx2(
@@ -1422,9 +1595,10 @@ unsafe fn restricted_rows16_avx2(
     let col_cap = len2 + 2 + TAIL;
     let mut col_ready = 0usize;
 
-    let [row0, row1] = &mut sc.h16;
-    let e16 = &mut sc.e16[..];
-    let col = &mut sc.col[..];
+    let XRestrictedScratch { h16, e16, col, .. } = sc;
+    let [row0, row1] = h16;
+    // LOSAT_X_BPGAPBAND: as in `restricted_rows`.
+    let mut grow_at = band_grow_at(band_cells16(row0, row1, e16, col, len2), len2, p.ahead);
     let mut score = -gap_open_extend;
     row0[PAD] = 0;
     e16[0] = -gap_open_extend as i16;
@@ -1504,6 +1678,15 @@ unsafe fn restricted_rows16_avx2(
         if band.first == band.b_size {
             break;
         }
+        if band.last >= grow_at {
+            let cells = band_grow16(row0, row1, e16, col, band.last + p.ahead, len2);
+            grow_at = band_grow_at(cells, len2, p.ahead);
+        }
+        let cur: &mut [i16] = if a_index % 2 == 1 {
+            &mut row1[..]
+        } else {
+            &mut row0[..]
+        };
         if band.last < band.b_size.saturating_sub(1) {
             band.b_size = band.last + 1;
         } else {
@@ -1829,27 +2012,24 @@ mod tests {
             &[(false, false)]
         };
         for &(avx2, narrow) in kernels {
-            let got = restricted_fast(
-                q,
-                qb,
-                s,
-                sb,
-                len1,
-                len2,
-                m,
-                go,
-                ge,
-                x,
-                rev,
-                &mut scratch.x_restricted,
-                avx2,
-                narrow,
-            )
-            .expect("problem taken");
-            assert_eq!(
-                got, want,
-                "avx2={avx2} narrow={narrow} len1={len1} len2={len2} qb={qb} sb={sb} go={go} ge={ge} x={x} rev={rev}"
-            );
+            // LOSAT_X_BPGAPBAND on a scratch of its own, so that the rows grow its arrays from
+            // the first rows' cells (the shared scratch holds the largest `len2` so far).
+            for band in [false, true] {
+                let mut own = XRestrictedScratch::new();
+                let sc = if band {
+                    &mut own
+                } else {
+                    &mut scratch.x_restricted
+                };
+                let got = restricted_fast(
+                    q, qb, s, sb, len1, len2, m, go, ge, x, rev, sc, avx2, narrow, band,
+                )
+                .expect("problem taken");
+                assert_eq!(
+                    got, want,
+                    "avx2={avx2} narrow={narrow} band={band} len1={len1} len2={len2} qb={qb} sb={sb} go={go} ge={ge} x={x} rev={rev}"
+                );
+            }
         }
         want
     }
@@ -1951,12 +2131,15 @@ mod tests {
         assert!(cpu_has_avx2() && len1 > 0 && len2 > 0);
         // The 32-bit rows alone size `h`, `e10` and `col`.
         let sc = &mut scratch.x_restricted;
-        restricted_fast(q, qb, s, sb, len1, len2, m, go, ge, x, rev, sc, true, false)?;
+        restricted_fast(
+            q, qb, s, sb, len1, len2, m, go, ge, x, rev, sc, true, false, false,
+        )?;
         let tables = x_score_tables(m)?;
         let p = XParams {
             x_dropoff: x.max(go + ge),
             gap_open_extend: go + ge,
             gap_extend: ge,
+            ahead: 0,
         };
         if !fits16(&p, tables) {
             return None;
@@ -2285,6 +2468,108 @@ mod tests {
     }
 
     #[test]
+    fn x_bpgapband_reused_scratch_matches_reference() {
+        // LOSAT_X_BPGAPBAND: one scratch whose arrays long bands grow, then reused by short bands,
+        // by long subjects that an unrelated query leaves after a few cells, and by other costs.
+        let mut rng = Rng(0x0BAD_5EED_1234_4321);
+        let mut scratch = GapAlignScratch::new();
+        let mut shared = XRestrictedScratch::new();
+        let kernels: &[(bool, bool)] = if cpu_has_avx2() {
+            &[(false, false), (true, false), (true, true)]
+        } else {
+            &[(false, false)]
+        };
+        for round in 0..300 {
+            let len = [5usize, 3000, 30, 700, 1][round % 5] + rng.below(20) as usize;
+            let q = random_seq(&mut rng, len, 20, false);
+            let s = if round % 2 == 0 {
+                mutate(&mut rng, &q, 10)
+            } else {
+                random_seq(&mut rng, 3 * len + 50, 20, false)
+            };
+            if s.is_empty() {
+                continue;
+            }
+            let qs = rng.below(q.len() as u64) as usize;
+            let ss = qs.min(s.len() - 1);
+            let (go, ge) = [(11, 1), (10, 1), (8, 2)][round % 3];
+            let x = [16, 38, 200][rng.below(3) as usize];
+            for (qb, sb, len1, len2, rev) in [
+                (0, 0, qs + 1, ss + 1, true),
+                (qs, ss, q.len() - qs - 1, s.len() - ss - 1, false),
+            ] {
+                if len1 == 0 || len2 == 0 {
+                    continue;
+                }
+                let m = MATRICES[0];
+                let want = reference(&q, qb, &s, sb, len1, len2, m, go, ge, x, rev, &mut scratch);
+                for &(avx2, narrow) in kernels {
+                    let got = restricted_fast(
+                        &q,
+                        qb,
+                        &s,
+                        sb,
+                        len1,
+                        len2,
+                        m,
+                        go,
+                        ge,
+                        x,
+                        rev,
+                        &mut shared,
+                        avx2,
+                        narrow,
+                        true,
+                    )
+                    .expect("problem taken");
+                    assert_eq!(
+                        got, want,
+                        "round={round} avx2={avx2} narrow={narrow} len1={len1} len2={len2} rev={rev}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn x_bpgapband_arrays_hold_the_band_not_the_subject() {
+        // LOSAT_X_BPGAPBAND: an unrelated query against a subject of 50,000 letters leaves the
+        // band after a few cells, so the arrays keep the first rows' cells (without the switch
+        // they hold the subject's letters); a related pair of 3,000 letters grows them to its
+        // band. Both give the reference's result.
+        let mut rng = Rng(0x5EED_0F_BA4D_0001);
+        let mut scratch = GapAlignScratch::new();
+        let m = MATRICES[0];
+        let fast = cpu_has_avx2();
+        let q = random_seq(&mut rng, 300, 20, false);
+        let s = random_seq(&mut rng, 50_000, 20, false);
+        let want = reference(&q, 0, &s, 0, 300, 50_000, m, 11, 1, 38, false, &mut scratch);
+        for band in [false, true] {
+            let mut sc = XRestrictedScratch::new();
+            let got = restricted_fast(
+                &q, 0, &s, 0, 300, 50_000, m, 11, 1, 38, false, &mut sc, fast, fast, band,
+            );
+            assert_eq!(got, Some(want), "band={band}");
+            let rows = sc.h[0].len();
+            if band {
+                assert!(rows < 1_000, "{rows} cells for a band of a few cells");
+            } else {
+                assert_eq!(rows, PAD + 50_000 + 2 + TAIL);
+            }
+        }
+        let q = random_seq(&mut rng, 3_000, 20, false);
+        let s = mutate(&mut rng, &q, 5);
+        let len2 = s.len() - 1;
+        let want = reference(&q, 0, &s, 0, 2_999, len2, m, 11, 1, 38, false, &mut scratch);
+        let mut sc = XRestrictedScratch::new();
+        let got = restricted_fast(
+            &q, 0, &s, 0, 2_999, len2, m, 11, 1, 38, false, &mut sc, fast, fast, true,
+        );
+        assert_eq!(got, Some(want));
+        assert!(sc.h[0].len() > 2_000 || sc.h16[0].len() > 2_000);
+    }
+
+    #[test]
     fn x_bpgap_column_letters_are_the_reference_reads() {
         // Every window position, including bases and lengths that reach past the subject.
         let mut rng = Rng(0x7777_1111_2222_9999);
@@ -2345,7 +2630,8 @@ mod tests {
                     false,
                     &mut scratch.x_restricted,
                     avx2,
-                    narrow
+                    narrow,
+                    x_bpgapband()
                 )
                 .is_none());
             }
@@ -2371,7 +2657,8 @@ mod tests {
                 false,
                 &mut scratch.x_restricted,
                 false,
-                false
+                false,
+                x_bpgapband()
             )
             .is_none());
         }
@@ -2423,6 +2710,7 @@ mod tests {
                             &mut scratch.x_restricted,
                             kernel >= 2,
                             kernel == 3,
+                            x_bpgapband(),
                         )
                         .unwrap()
                     };

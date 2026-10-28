@@ -254,6 +254,41 @@ fn mask_with_probe<const MASK_AT_HASH: bool, P: Fn() + Sync>(
     parallel::<MASK_AT_HASH, P>(query_frames, seg, pool, probe);
 }
 
+/// PROTOTYPE (b26, LOSAT_X_B26SETUP=1): every frame that SEG reads masked as an item set on the
+/// search's board (each item takes its own frame).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(super) fn x_mask_on_board(
+    query_frames: &mut [Vec<QueryFrame>],
+    seg: &SegMasker,
+    pool: &SearchPool<'_>,
+    board: &crate::algorithm::tblastx::x_work_board::XBoard,
+    soft: bool,
+) {
+    let frames: Vec<std::sync::Mutex<Option<&mut QueryFrame>>> = query_frames
+        .iter_mut()
+        .flatten()
+        .filter(|frame| frame.aa_seq.len() >= 3)
+        .map(|frame| std::sync::Mutex::new(Some(frame)))
+        .collect();
+    let n = frames.len();
+    let run = |i: usize, _: &mut crate::algorithm::tblastx::x_work_board::XTaker| {
+        let frame = frames[i]
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+            .expect("a frame is masked once");
+        if soft {
+            mask_frame_as::<true>(seg, frame);
+        } else {
+            mask_frame_as::<false>(seg, frame);
+        }
+    };
+    pool.install(|| board.run_groups(n, &run, n.saturating_sub(1)));
+}
+
 /// SEG of every frame of `query_frames` as `run_impl` makes it: the environment's switch decides.
 pub(super) fn mask(query_frames: &mut [Vec<QueryFrame>], seg: &SegMasker, pool: &SearchPool<'_>) {
     mask_with_mode::<false>(query_frames, seg, pool, on())

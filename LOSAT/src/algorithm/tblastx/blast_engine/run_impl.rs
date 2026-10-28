@@ -3651,7 +3651,17 @@ fn search_query_batch<S: TbxScore>(
         //     }
         // ```
         // `-soft_masking true` keeps the intervals for the lookup table and the frames' letters.
-        if args.soft_masking() {
+        if let Some(board) = x_board.filter(|_| {
+            x_pair_par::x_b26_setup() && parallel_pool.enabled() && parallel_pool.threads() > 1
+        }) {
+            x_query_frames::x_mask_on_board(
+                &mut query_frames,
+                &seg,
+                parallel_pool,
+                board,
+                args.soft_masking(),
+            );
+        } else if args.soft_masking() {
             x_query_frames::mask_soft(&mut query_frames, &seg, parallel_pool);
         } else {
             x_query_frames::mask(&mut query_frames, &seg, parallel_pool);
@@ -3715,6 +3725,7 @@ fn search_query_batch<S: TbxScore>(
             requested_parallel,
             use_serial_scan_chunks,
             pool: parallel_pool,
+            x_board,
         })
     };
     let x_pair_lut_stub = x_pair_lut_batch

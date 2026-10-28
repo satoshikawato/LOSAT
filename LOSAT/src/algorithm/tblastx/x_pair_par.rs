@@ -991,6 +991,8 @@ pub(super) struct XLutEarly<'a> {
     pub requested_parallel: bool,
     pub use_serial_scan_chunks: bool,
     pub pool: &'a crate::utils::threading::SearchPool<'a>,
+    /// PROTOTYPE (b26, LOSAT_X_B26SETUP=1): the search's board, on which the group tables are built.
+    pub x_board: Option<&'a crate::algorithm::tblastx::x_work_board::XBoard>,
 }
 
 /// The direct groups of a batch, made at the lookup build site and handed to `prepare`.
@@ -1138,7 +1140,10 @@ fn lut_direct(e: &XLutEarly<'_>) -> Option<XLutBatch> {
     // built directly as the groups are (x_tbx_qslice.rs).
     let starts = group_starts(contexts);
     let (groups, sliced) = match x_tbx_qslice::partition(contexts, &starts, e.pool.threads()) {
-        None => (lut_direct_groups(&q, e.pool, lut_on_pool())?, None),
+        None => (
+            lut_direct_groups(&q, e.pool, lut_on_pool(), e.x_board)?,
+            None,
+        ),
         Some(parts) => {
             let sliced =
                 x_tbx_qslice::lut_direct_sliced(&q, &starts, &parts, e.pool, lut_on_pool())?;
@@ -1184,10 +1189,18 @@ fn lut_direct_groups(
     q: &XPairLutQuery,
     pool: &crate::utils::threading::SearchPool<'_>,
     on_pool: bool,
+    board: Option<&crate::algorithm::tblastx::x_work_board::XBoard>,
 ) -> Option<Vec<XGroup>> {
     let starts = group_starts(q.contexts());
     let locations = q.x_group_locations(&starts)?;
-    Some(lut_direct_tables(q, &locations, pool, on_pool))
+    Some(lut_direct_tables(q, &locations, pool, on_pool, board))
+}
+
+/// PROTOTYPE (b26): LOSAT_X_B26SETUP=1 builds a batch's group tables and masks its frames on the
+/// search's board.
+pub(super) fn x_b26_setup() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_B26SETUP").is_some_and(|v| v == "1"))
 }
 
 // No NCBI counterpart: scheduling of the builds (the NCBI reference above `lut_direct_groups`;
@@ -1200,6 +1213,7 @@ fn lut_direct_tables(
     locations: &[Vec<(i32, i32)>],
     pool: &crate::utils::threading::SearchPool<'_>,
     on_pool: bool,
+    board: Option<&crate::algorithm::tblastx::x_work_board::XBoard>,
 ) -> Vec<XGroup> {
     let to_group = |g: XPairLutGroup| XGroup {
         scan_bf: crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&g.table),
@@ -1213,6 +1227,33 @@ fn lut_direct_tables(
         crate::utils::xtline::rec("lutbf", 0, x_t0, std::time::Instant::now());
         r
     };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if let Some(board) = board.filter(|_| x_b26_setup() && pool.enabled() && pool.threads() > 1) {
+        let n = locations.len();
+        let built: Vec<OnceLock<XGroup>> = (0..n).map(|_| OnceLock::new()).collect();
+        let run = |i: usize, _: &mut crate::algorithm::tblastx::x_work_board::XTaker| {
+            let _x_rec = crate::utils::xtline::XRecOnDrop(
+                "lutg",
+                locations[i].len() as u32,
+                std::time::Instant::now(),
+            );
+            if built[i]
+                .set(to_group(q.x_build_group(&locations[i])))
+                .is_err()
+            {
+                unreachable!("a group is built once");
+            }
+        };
+        pool.install(|| board.run_groups(n, &run, n.saturating_sub(1)));
+        return built
+            .into_iter()
+            .map(|g| g.into_inner().expect("every group built"))
+            .collect();
+    }
+    let _ = board;
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -4545,7 +4586,8 @@ mod tests {
         let reference = build_groups(&full, &contexts);
         let q = XPairLutQuery::x_prepare(queries, threshold, true).expect("direct builder applies");
         // On the pool when the caller has one, else in order on this thread.
-        let direct = lut_direct_groups(&q, pool, true).expect("every location inside one group");
+        let direct =
+            lut_direct_groups(&q, pool, true, None).expect("every location inside one group");
         let stub = q.x_into_stub(direct.iter().map(|g| &g.lookup));
         let lut = XLutBatch {
             groups: direct,
@@ -4722,7 +4764,7 @@ mod tests {
         let q = XPairLutQuery::x_prepare(std::slice::from_ref(&frames), 13, true)
             .expect("direct builder applies");
         let groups =
-            lut_direct_groups(&q, &serial, false).expect("every location inside one group");
+            lut_direct_groups(&q, &serial, false, None).expect("every location inside one group");
         for g in [1usize, 2, 3] {
             assert_eq!(groups[g].lookup.longest_chain, 0);
             assert_eq!((groups[g].q_min, groups[g].q_max), (0, 0));
@@ -5081,8 +5123,8 @@ mod tests {
         ]];
         let batch = || {
             let q = XPairLutQuery::x_prepare(&queries, 11, true).expect("direct builder applies");
-            let groups =
-                lut_direct_groups(&q, &serial, false).expect("every location inside one group");
+            let groups = lut_direct_groups(&q, &serial, false, None)
+                .expect("every location inside one group");
             let stub = q.x_into_stub(groups.iter().map(|g| &g.lookup));
             XLutBatch {
                 groups,

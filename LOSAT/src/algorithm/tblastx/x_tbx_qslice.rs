@@ -351,7 +351,7 @@ pub(super) fn lut_direct_sliced(
         .collect();
     Some(x_assemble(
         parts,
-        lut_direct_tables(q, &pieces, pool, on_pool),
+        lut_direct_tables(q, &pieces, pool, on_pool, None),
     ))
 }
 

@@ -88,7 +88,9 @@
 //! With LOSAT_TIMING `main` prints `[TIMING] x_bn_csr: builds=<CSR tables> parallel=<on a pool>
 //! words=<their words>` (the build times are in `[TIMING] x_mb_lookup_build`).
 
-use super::x_dc_csr::{assemble, prefetch, sum_cells, Csr};
+use super::x_dc_csr::{
+    assemble, prefetch, sum_cells, x_assemble_packed, x_rank, x_rank_blocks, x_sum_packed, Csr,
+};
 use super::x_mb_lookup_par::Words;
 use super::{build_unmasked_ranges, PvArrayType, BLAST2NA_MASK};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -100,6 +102,30 @@ use std::sync::OnceLock;
 pub(super) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNCSR"))
+}
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNCSRPACK, in the strict set: on unless it is `0`)
+/// the head of a CSR table whose chains list their words newest first (every table of `plan`
+/// but the reading-order one of 4^8 cells) is packed: two words per 64 cells (their presence bits
+/// and the number of non-empty cells before them) and one offset per non-empty cell and one more,
+/// instead of one offset per cell. A table of 4^11 cells has 4,194,305 offsets (16 MiB), of which
+/// a query batch of about 1 Mb of `-task blastn` fills 1.2-1.6 M; the packed head is 1 MiB of bits
+/// and ranks and 4.6-6.1 MiB of offsets, and the build zeroes and sums 1 MiB and the non-empty
+/// cells instead of 16 MiB. A scan reads a word's bits (1 MiB) and, for a non-empty cell, its two
+/// offsets; a word of an empty cell, whose presence-vector bit is set for 8 cells of a 4^11 table,
+/// is dropped there instead of reading the 16 MiB array. The runs, their order and the presence
+/// vector and helper counters are those of the unpacked head (`x_sum_packed`), so every value
+/// read from the table is the same.
+pub(super) fn x_pack_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNCSRPACK"))
+}
+
+/// No NCBI counterpart: whether a CSR of this order is packed (LOSAT_X_BNCSRPACK; newest first only).
+pub(super) fn x_packed(ascending_cells: bool) -> bool {
+    let packed = !ascending_cells && x_pack_on();
+    crate::utils::xreach::x_reach!("LOSAT_X_BNCSRPACK", packed);
+    packed
 }
 
 // No NCBI counterpart: counters of the summary line.
@@ -279,6 +305,38 @@ pub(super) fn serial(
     assert!(cells % 2048 == 0 && pv_array_bts >= 5);
     assert_eq!(helper_array.len(), cells >> 11);
     let ascending = words.ascending_cells;
+    if x_packed(ascending) {
+        return x_serial_packed(
+            words,
+            cells,
+            pv_array,
+            pv_array_bts,
+            helper_array,
+            x_offsets,
+        );
+    }
+    x_serial_unpacked(
+        words,
+        cells,
+        pv_array,
+        pv_array_bts,
+        helper_array,
+        x_offsets,
+    )
+}
+
+/// `serial` with one offset per cell (either order).
+pub(super) fn x_serial_unpacked(
+    words: &Words<'_>,
+    cells: usize,
+    pv_array: &mut [PvArrayType],
+    pv_array_bts: usize,
+    helper_array: &mut [u32],
+    x_offsets: Vec<u32>,
+) -> Csr {
+    assert!(cells % 2048 == 0 && pv_array_bts >= 5);
+    assert_eq!(helper_array.len(), cells >> 11);
+    let ascending = words.ascending_cells;
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
     let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 2);
     let ob = offsets.as_mut_ptr();
@@ -352,6 +410,91 @@ pub(super) fn serial(
     // SAFETY: `offsets[..cells + 1]` was written in full; the runs partition `0 .. n_words`, and
     // the place pass wrote each place once.
     unsafe { assemble(offsets, qs, cells, n_words) }
+}
+
+/// EXPERIMENT (LOSAT_X_BNCSRPACK): `serial` with a packed head (newest first): the presence pass
+/// (each word's bit), the ranks of the blocks, the count pass on the non-empty cells' counts by
+/// rank (prefetched and counted 16 words later), the sum pass (`x_sum_packed`, with the presence
+/// bits and helper counters), and the place pass, as `x_serial_unpacked` does on the offsets of
+/// all cells.
+pub(super) fn x_serial_packed(
+    words: &Words<'_>,
+    cells: usize,
+    pv_array: &mut [PvArrayType],
+    pv_array_bts: usize,
+    helper_array: &mut [u32],
+    x_offsets: Vec<u32>,
+) -> Csr {
+    assert!(cells % 2048 == 0 && pv_array_bts >= 5 && !words.ascending_cells);
+    assert_eq!(helper_array.len(), cells >> 11);
+    let blocks = cells >> 6;
+    let mut bits = vec![0u64; 2 * blocks];
+    each_word(words, |cell, _| {
+        bits[(cell >> 6) << 1] |= 1u64 << (cell & 63);
+    });
+    let present = x_rank_blocks(&mut bits, 0, blocks, 0);
+    // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
+    let mut starts = super::x_dc_csr::x_offsets_buffer(x_offsets, present + 1);
+    let sb = starts.as_mut_ptr();
+    // SAFETY: `present + 1` elements of the capacity, written here before anything reads them.
+    unsafe { std::ptr::write_bytes(sb, 0, present + 1) };
+    const AHEAD: usize = 16;
+    let mut ring = [0usize; AHEAD];
+    let mut seen = 0usize;
+    each_word(words, |cell, _| {
+        // Every word's cell is non-empty (its bit was set by the presence pass).
+        let r = x_rank(&bits, cell).expect("BNCSRPACK: a word of an empty cell");
+        prefetch(sb.wrapping_add(r));
+        let slot = seen % AHEAD;
+        if seen >= AHEAD {
+            // SAFETY: `ring[slot] < present`; `starts` has `present + 1` elements.
+            unsafe { *sb.add(ring[slot]) += 1 };
+        }
+        ring[slot] = r;
+        seen += 1;
+    });
+    for i in seen.saturating_sub(AHEAD)..seen {
+        // SAFETY: as above.
+        unsafe { *sb.add(ring[i % AHEAD]) += 1 };
+    }
+    let n_words = seen;
+    assert!(
+        n_words <= u32::MAX as usize,
+        "BNCSR: more words than u32 offsets"
+    );
+    // SAFETY: the counts of all non-empty cells are this build's; the presence vector and the
+    // counters are of the fill's lengths.
+    let total = unsafe {
+        x_sum_packed(
+            pv_array.as_mut_ptr(),
+            pv_array.len(),
+            helper_array.as_mut_ptr(),
+            &bits,
+            sb,
+            0,
+            0,
+            blocks,
+            pv_array_bts,
+        )
+    };
+    debug_assert_eq!(total as usize, n_words);
+    let mut qs: Vec<u32> = Vec::with_capacity(n_words);
+    let qb = qs.as_mut_ptr();
+    // SAFETY: `present < present + 1`; `starts[present]` is no cell's end.
+    unsafe { *sb.add(present) = total };
+    each_word(words, |cell, q_off_1| {
+        let r = x_rank(&bits, cell).expect("BNCSRPACK: a word of an empty cell");
+        // SAFETY: `r < present`, `starts[r]` is the end of the cell's non-empty run (>= 1), so the
+        // place `e < n_words` is in the capacity.
+        unsafe {
+            let e = *sb.add(r) - 1;
+            *sb.add(r) = e;
+            *qb.add(e as usize) = q_off_1;
+        }
+    });
+    // SAFETY: `starts[..present + 1]` was written in full; the runs partition `0 .. n_words`, and
+    // the place pass wrote each place once.
+    unsafe { x_assemble_packed(starts, bits, qs, present, n_words) }
 }
 
 /// No NCBI counterpart: whether `run` (a cell's run, sorted: increasing in reading order,
@@ -596,6 +739,46 @@ pub(super) mod tests {
                         &fill_pv,
                         &fill_helper,
                         &format!("lut {lut} ascending {ascending} n {n} len {len}"),
+                    );
+                }
+            }
+        }
+    }
+
+    // LOSAT_X_BNCSRPACK: the packed head and the head of one offset per cell list the loop's chains
+    // (newest first), with the fill's presence vector, counters and longest chain, whatever the
+    // switch reads; many queries make tables with most cells non-empty.
+    #[test]
+    fn the_packed_head_lists_the_chains_too() {
+        let mut rng = Lcg(0xB4C5_0002);
+        for lut in MIN_LUT..=MAX_LUT {
+            for (n, len) in [(1, 6), (3, 300), (5, 6000), (40, 3000)] {
+                let case = random_case(&mut rng, n, len);
+                let refs = case.refs();
+                let word_length = lut + rng.below(6) as usize;
+                let words = case.words(&refs, word_length, lut, false);
+                let cells = 1usize << (2 * lut);
+                let (pv_len, bts) = pv_params(&case, lut);
+                let (hashtable, next_pos, fill_pv, fill_helper) =
+                    chains(&case, &words, cells, pv_len, bts);
+                for packed in [false, true] {
+                    let mut pv = vec![0 as PvArrayType; pv_len];
+                    let mut helper = vec![0u32; cells >> 11];
+                    let build = if packed {
+                        x_serial_packed
+                    } else {
+                        x_serial_unpacked
+                    };
+                    let csr = build(&words, cells, &mut pv, bts, &mut helper, Vec::new());
+                    x_assert_runs_are_the_chains(
+                        &csr,
+                        &pv,
+                        &helper,
+                        &hashtable,
+                        &next_pos,
+                        &fill_pv,
+                        &fill_helper,
+                        &format!("lut {lut} packed {packed} n {n} len {len}"),
                     );
                 }
             }

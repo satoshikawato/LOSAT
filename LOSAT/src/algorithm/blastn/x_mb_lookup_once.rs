@@ -1423,6 +1423,158 @@ fn csr_on_pool(
         #[cfg(test)]
         checks: &checks,
     };
+    // EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head (`x_bn_csr::x_serial_packed`) on the pool. Three
+    // phases of the chunks' readings instead of two: owner `o` sets the presence bits of its cells
+    // (its blocks own whole words of `bits`), then, after a barrier at which every owner has
+    // published its number of non-empty cells, writes the ranks of its blocks from the number of
+    // the owners before it and zeroes the counts of its ranks; the count, sum and place phases are
+    // those below on the counts of its ranks instead of its cells.
+    if super::x_bn_csr::x_packed(words.ascending_cells) {
+        use super::x_dc_csr::{x_assemble_packed, x_rank, x_sum_packed};
+        let blocks = cells >> 6;
+        let mut bits = vec![0u64; 2 * blocks];
+        // The non-empty cells are at most the cells and the words (bounded by the positions).
+        let cap = cells.min(total) + 1;
+        // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
+        let mut starts = super::x_dc_csr::x_offsets_buffer(x_offsets, cap);
+        let mut qs: Vec<u32> = Vec::with_capacity(total);
+        let bb = Shared {
+            ptr: bits.as_mut_ptr(),
+            len: 2 * blocks,
+        };
+        let sb = Shared {
+            ptr: starts.as_mut_ptr(),
+            len: cap,
+        };
+        let qb = Shared {
+            ptr: qs.as_mut_ptr(),
+            len: total,
+        };
+        let pv = Shared::new(pv_array);
+        let helper = Shared::new(helper_array);
+        let mut own_words = vec![0u64; parts];
+        let own_w = Shared::new(&mut own_words);
+        let mut own_present = vec![0u64; parts];
+        let own_p = Shared::new(&mut own_present);
+        let chunks = total.div_ceil(chunk);
+        let span = |c: usize, a: usize| {
+            let start = c * chunk;
+            let end = total.min(start + chunk);
+            (
+                start + (end - start) * a / parts,
+                start + (end - start) * (a + 1) / parts,
+            )
+        };
+        let bar = SpinBarrier::new(parts);
+        let (fill, own, bar) = (&fill, &own, &bar);
+        rayon::broadcast(|ctx| {
+            let o = ctx.index();
+            let _poison = Poison(bar);
+            let (bb, sb, qb, pv, helper, own_w, own_p) = (bb, sb, qb, pv, helper, own_w, own_p);
+            let (c0, c1) = own[o];
+            let (b0, b1) = (c0 >> 6, c1 >> 6);
+            // SAFETY (all of the job's accesses): as in the unpacked build below; owner `o` alone
+            // writes the words of its blocks in `bits` (presence, then ranks, all before the barrier
+            // after which every thread only reads `bits`), the counts of its ranks (`starts[p0 ..
+            // p0 + its non-empty cells]`, disjoint from the other owners'), its entries of the
+            // owners' words and non-empty cells (read by the later owners after a barrier) and `qs`
+            // at its places.
+            unsafe {
+                for c in 0..chunks {
+                    let (s0, s1) = span(c, o);
+                    fill.read::<false, false>(o, s0, s1);
+                    bar.wait();
+                    for a in 0..parts {
+                        for e in fill.subrange(a, o) {
+                            let cell = e.value as usize;
+                            *bb.ptr.add((cell >> 6) << 1) |= 1u64 << (cell & 63);
+                        }
+                    }
+                    bar.wait();
+                }
+                let mine: u64 = (b0..b1)
+                    .map(|j| (*bb.ptr.add(2 * j)).count_ones() as u64)
+                    .sum();
+                own_p.set(o, mine);
+                bar.wait();
+                let p0: u64 = (0..o).map(|p| own_p.get(p)).sum();
+                let mut r = p0;
+                for j in b0..b1 {
+                    *bb.ptr.add(2 * j + 1) = r;
+                    r += (*bb.ptr.add(2 * j)).count_ones() as u64;
+                }
+                std::ptr::write_bytes(sb.ptr.add(p0 as usize), 0, mine as usize);
+                bar.wait();
+                let bits_r: &[u64] = std::slice::from_raw_parts(bb.ptr as *const u64, bb.len);
+                let rank = |cell: u32| {
+                    x_rank(bits_r, cell as usize).expect("BNCSRPACK: a word of an empty cell")
+                };
+                let mut got = 0u64;
+                for c in 0..chunks {
+                    let (s0, s1) = span(c, o);
+                    fill.read::<false, false>(o, s0, s1);
+                    bar.wait();
+                    for a in 0..parts {
+                        let es = fill.subrange(a, o);
+                        got += es.len() as u64;
+                        for j in 0..es.len() {
+                            if let Some(ahead) = es.get(j + 16) {
+                                prefetch(sb.ptr.wrapping_add(rank(ahead.value)));
+                            }
+                            *sb.ptr.add(rank(es[j].value)) += 1;
+                        }
+                    }
+                    if c + 1 == chunks {
+                        own_w.set(o, got);
+                    }
+                    bar.wait();
+                }
+                let base: u64 = (0..o).map(|p| own_w.get(p)).sum();
+                if c0 < c1 {
+                    x_sum_packed(
+                        pv.ptr,
+                        pv.len,
+                        helper.ptr,
+                        bits_r,
+                        sb.ptr,
+                        base as u32,
+                        b0,
+                        b1,
+                        pv_array_bts,
+                    );
+                }
+                for c in 0..chunks {
+                    let (s0, s1) = span(c, o);
+                    fill.read::<false, false>(o, s0, s1);
+                    bar.wait();
+                    for a in 0..parts {
+                        for e in fill.subrange(a, o) {
+                            let r = rank(e.value);
+                            let p = sb.get(r) - 1;
+                            sb.set(r, p);
+                            qb.set(p as usize, e.index);
+                        }
+                    }
+                    if c + 1 < chunks {
+                        bar.wait();
+                    }
+                }
+            }
+        });
+        let n_words: u64 = own_words.iter().sum();
+        let present = own_present.iter().sum::<u64>() as usize;
+        assert!(
+            n_words <= total as u64 && n_words <= u32::MAX as u64 && present < cap,
+            "BNCSR: more words than positions"
+        );
+        // SAFETY: no job is running. Every element of `starts[..present]` was written (each owner
+        // zeroed, counted, summed and placed its ranks, which cover `0 .. present`), `starts[present]`
+        // (no cell's end) now, and the runs partition `0 .. n_words`, each place written once.
+        unsafe {
+            sb.set(present, n_words as u32);
+            return x_assemble_packed(starts, bits, qs, present, n_words as usize);
+        }
+    }
     // `offsets` is written by its owners (their counts zeroed, then counted, summed and placed)
     // and by this thread (the elements before the first count, and `offsets[cells]` newest first);
     // `qs` gets one element per word (`total` positions bound them).

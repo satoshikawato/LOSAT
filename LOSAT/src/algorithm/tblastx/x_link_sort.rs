@@ -324,6 +324,11 @@ fn x_board_sort<C>(
         let base = indices.as_mut_ptr() as usize;
         let sort_chunk = |c: usize, _: &mut XTaker| {
             let (a, b) = runs[c];
+            let _x_rec = crate::utils::xtline::XRecOnDrop(
+                "sortc",
+                (b - a) as u32,
+                std::time::Instant::now(),
+            );
             // SAFETY: the runs are disjoint ranges of `indices`; the board runs index `c` once,
             // and `run_groups` returns after every index has run.
             let chunk =
@@ -346,6 +351,11 @@ fn x_board_sort<C>(
         let merge = |p: usize, _: &mut XTaker| {
             let ((a0, a1), right) = pairs[p];
             let end = right.map_or(a1, |(_, b1)| b1);
+            let _x_rec = crate::utils::xtline::XRecOnDrop(
+                "mergec",
+                (end - a0) as u32,
+                std::time::Instant::now(),
+            );
             // SAFETY: pair `p` reads `src[a0..end]` and writes `dst[a0..end]`, ranges disjoint
             // from every other pair's; `src` and `dst` are different buffers of length `n`; the
             // board runs index `p` once, and `run_groups` returns after every index has run.

@@ -439,6 +439,8 @@ fn x_link_board(
         .collect();
     let run = |i: usize, _: &mut crate::algorithm::tblastx::x_work_board::XTaker| {
         let (ptr, len) = slices[i];
+        let _x_rec =
+            crate::utils::xtline::XRecOnDrop("kernel", len as u32, std::time::Instant::now());
         // SAFETY: the slices are disjoint parts of the list this call borrows mutably (`groups`
         // came from `split_at_mut`); the board runs index `i` once, and `run_groups` returns only
         // after every index has run.

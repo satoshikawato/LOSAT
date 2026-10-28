@@ -439,6 +439,8 @@ fn x_merge<R: XRecord + Send>(
                 .map(|_| std::sync::OnceLock::new())
                 .collect();
             let run = |f: usize, _: &mut crate::algorithm::tblastx::x_work_board::XTaker| {
+                let _x_rec =
+                    crate::utils::xtline::XRecOnDrop("fmerge", f as u32, std::time::Instant::now());
                 let frame_lists = inputs[f]
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())

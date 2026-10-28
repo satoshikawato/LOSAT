@@ -6214,14 +6214,17 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_BXLISTAHEAD=1` (BLASTX, speed at 2+ threads; in the strict set from the pull request that added it: on
   unless `=0`; acts where a query batch's contexts are masked on the pool, the rule of 60,000+ residues in the
   batch, i.e. one query of about 30 kb or more, and its tables are the pooled standard ones: word size 3 with
-  `LOSAT_X_BXLUTPOOL`): before the contexts are masked, a task of the pool (`rayon::spawn`, which the masking does
-  not wait for) makes the shared neighbour lists (`x_lut_direct.rs`, the memo of the pooled builds) of the words of
-  the contexts as translated, before masking. A build then finds a list made, waits for one being made (its
-  `OnceLock`), or makes it itself, as before. Exactness: a list is a function of its word, the matrix and the
-  threshold alone (the module comment of `x_lut_direct.rs`), so a list made ahead is the one the build would make;
-  the masked residues' words get lists no build reads. `tests/blastx_subject_flow.rs` (a query of 30,000 letters:
-  outputs at 2 and 8 threads with `=0` equal to one thread's, the new side recorded at 2 and 16 threads and not
-  at one thread or with `=0`). Why: the lists are most of a first table's build (one thread, fly 2L 50 kb: the
+  `LOSAT_X_BXLUTPOOL`): before the contexts are masked, the masking thread collects the words of the whole valid
+  contexts as translated (one per backbone cell without a list yet, its three residues) and a task of the pool
+  (`rayon::spawn`, which the masking does not wait for; taken by an idle helper, or by a thread that waits for
+  other work) makes their shared neighbour lists (`x_lut_direct.rs`, the memo of the pooled builds). A build then
+  finds a list made, waits for one being made (its `OnceLock`), or makes it itself, as before. Exactness: a list
+  is a function of its word, the matrix and the threshold alone (the module comment of `x_lut_direct.rs`), so a
+  list made ahead is the one the build would make; the masked residues' words get lists no build reads. Tests:
+  `x_lut_direct.rs` (pooled tables in one part and in parts after the lists were made ahead, for the build's words
+  and for every word of the query, equal the reference table) and `tests/blastx_subject_flow.rs` (a query of
+  30,000 letters: outputs at 2 and 8 threads with `=0` equal to one thread's; the new side recorded at 2 and 16
+  threads, not at one thread or with `=0`). Why: the lists are most of a first table's build (one thread, fly 2L 50 kb: the
   first chunk's table 13.2 ms on the workstation; locally the neighbour search 11.5 ms of the 16.8 ms of all five
   chunks' builds), and the first chunk's table is built in parts (`LOSAT_X_BXBUILDPAR`) only after the query's
   SEG (six contexts on six threads) and the chunks' preparation (five tasks), with the other threads idle; at 16

@@ -245,26 +245,6 @@ pub(crate) fn context_frame(letters: usize, i: usize, strand: &str) -> (usize, b
 //      virtual bool Verify(const string& value) const {
 //          static int gcs[] = {1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33};
 // ```
-// No NCBI counterpart (scheduling only): whether the masking of a long query on the pool makes the
-// shared neighbour lists of its words ahead of its tables (LOSAT_X_BXLISTAHEAD, in the strict set):
-// where its tables are the pooled standard ones (words of 3, `Lookup::x_new_in_parts`, which read
-// the shared lists).
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-fn x_lists_ahead(options: &ResolvedOptions) -> bool {
-    if !crate::utils::xswitch::on("LOSAT_X_BXLISTAHEAD") {
-        return false;
-    }
-    let own = options.word_size == 3
-        && crate::algorithm::tblastx::lookup::x_bx_pooled_for(
-            usize::try_from(options.num_threads).unwrap_or(1),
-        );
-    crate::utils::xreach::x_reach!("LOSAT_X_BXLISTAHEAD", own);
-    own
-}
-
 pub fn prepare_queries(
     records: &[FastaRecord],
     options: &ResolvedOptions,
@@ -433,15 +413,16 @@ pub fn prepare_queries(
             // Diagnostic (LOSAT_TIMING): the parallel SEG's wall time for the common line
             // (utils/xtiming.rs). No NCBI counterpart.
             let t_seg = crate::utils::xtiming::clock();
-            // Dispatch point (LOSAT_X_BXLISTAHEAD, in the strict set): a task of the pool, which this
-            // thread does not wait for, makes the shared neighbour lists of the query's words for the
-            // pooled table builds that follow, on the threads the contexts leave idle; the lists are
-            // those the builds would make (`x_bx_lists_ahead`). The contexts' words at the offsets
-            // of the lookup segments (`complement_masks`, `sequence_start[1..]`), before masking: the
-            // segments' words and those of the masked residues. No NCBI counterpart.
+            // Dispatch point (LOSAT_X_BXLISTAHEAD, in the strict set): the shared neighbour lists of
+            // the query's words, for the pooled table builds that follow, are made by a task of the
+            // pool that this thread does not wait for (taken by a helper, or by a thread that waits
+            // for other work); the lists are those the builds would make (`x_bx_lists_ahead`). The
+            // words of the whole valid contexts before masking, in the coordinates of the lookup
+            // segments (`complement_masks`, on `sequence_start[1..]`): the segments' words and those
+            // of the masked residues. No NCBI counterpart.
             #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-threads"))]
             if x_lists_ahead(options) {
-                let locations = contexts
+                let locations: Vec<(i32, i32)> = contexts
                     .iter()
                     .filter(|context| context.is_valid)
                     .map(|context| {
@@ -450,8 +431,8 @@ pub fn prepare_queries(
                     })
                     .collect();
                 crate::algorithm::tblastx::lookup::x_bx_lists_ahead(
-                    buffer[1..].to_vec(),
-                    locations,
+                    &buffer[1..],
+                    &locations,
                     options.threshold as i32,
                 );
             }
@@ -542,6 +523,27 @@ pub fn prepare_queries(
         x_ungap_sent,
     })
 }
+// No NCBI counterpart (scheduling only): whether the masking of a long query on the pool has the
+// shared neighbour lists of its words made ahead of its tables (LOSAT_X_BXLISTAHEAD, in the strict
+// set): where its tables are the pooled standard ones (word size 3, `Lookup::x_new_in_parts`, which
+// read the shared lists); the reference side otherwise (word size 5's compressed tables, tables
+// built without the pool).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_lists_ahead(options: &ResolvedOptions) -> bool {
+    if !crate::utils::xswitch::on("LOSAT_X_BXLISTAHEAD") {
+        return false;
+    }
+    let own = options.word_size == 3
+        && crate::algorithm::tblastx::lookup::x_bx_pooled_for(
+            usize::try_from(options.num_threads).unwrap_or(1),
+        );
+    crate::utils::xreach::x_reach!("LOSAT_X_BXLISTAHEAD", own);
+    own
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:923-929
 // ```c++
 // BLAST_GetTranslatedProteinLength(size_t nucleotide_length, unsigned int context)

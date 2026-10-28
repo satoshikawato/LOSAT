@@ -360,9 +360,9 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
         assert!(report == reference);
         assert_eq!(own_side_reached(&reach, "LOSAT_X_BXUNITCAP"), acted);
     }
-    // The 30,000 letters (six contexts of 10,000 residues) are masked on the pool, which makes the
-    // lists of the pooled tables ahead (`LOSAT_X_REACH`); one thread masks them alone, and with the
-    // switch off the builds make the lists.
+    // The 30,000 letters (six contexts of 9,999-10,000 residues, 60,003 bytes with the sentinels: the
+    // rule's 60,000) are masked on the pool, which has the lists of the pooled tables made ahead
+    // (`LOSAT_X_REACH`); one thread masks them alone, and with the switch off the builds make them.
     for (threads, env, acted) in [
         (2, &[][..], true),
         (16, &[][..], true),

@@ -1942,7 +1942,13 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
     // kept vectors; the caller gives them back (`x_give_back_pooled`) when it drops the table, or
     // the pool goes without them (a missed reuse only).
     let built = if pooled {
-        x_lut_direct::x_build_direct_pooled(prepared, threshold, ScoringMatrix::Blosum62, 3, parts)
+        x_lut_direct::x_build_direct_pooled(
+            prepared,
+            threshold,
+            x_lut_direct::X_BX_MATRIX,
+            x_lut_direct::X_BX_WORD,
+            parts,
+        )
     } else {
         x_lut_direct::x_build_direct(prepared, threshold, ScoringMatrix::Blosum62, 3)
     };

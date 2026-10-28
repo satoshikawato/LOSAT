@@ -173,78 +173,96 @@ fn x_shared_memo(
     memo
 }
 
+// No NCBI counterpart: the matrix and word length of BLASTX's standard tables
+// (`build_ncbi_lookup_from_prepared`), whose pooled builds read the shared lists.
+pub(super) const X_BX_MATRIX: ScoringMatrix = ScoringMatrix::Blosum62;
+pub(super) const X_BX_WORD: usize = 3;
+
 // No NCBI counterpart (scheduling only): the lists of `x_target_list`, made before the build that
 // reads them; each is a function of its word alone (module comment), so a list made here is the
 // one the build would make.
-/// EXPERIMENT (LOSAT_X_BXLISTAHEAD): makes the shared neighbour lists (the pooled builds' memo,
-/// [`x_shared_memo`]) of BLASTX's standard table (BLOSUM62, words of 3) with `threshold` for the
-/// words of `query` at `locations` (as `x_for_each_exact_word` reads them) as a task of the pool
-/// this runs on, which the caller does not wait for: a pooled build of a table of these words finds
-/// each list made, waits for one being made (`OnceLock`), or makes it itself.
+/// EXPERIMENT (LOSAT_X_BXLISTAHEAD): the shared neighbour lists (the pooled builds' memo,
+/// [`x_shared_memo`]) of BLASTX's standard table with `threshold`, made for the words of `query`
+/// at `locations` (as `x_for_each_exact_word` reads them) that have none yet. This thread collects
+/// the words (one per cell, their three residues); a task of the pool it runs on, which it does not
+/// wait for, makes the lists: a pooled build of a table of these words finds each list made, waits
+/// for one being made (its `OnceLock`), or makes it itself.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-pub(crate) fn x_bx_lists_ahead(query: Vec<u8>, locations: Vec<(i32, i32)>, threshold: i32) {
-    rayon::spawn(move || x_bx_make_lists(&query, &locations, threshold));
+pub(crate) fn x_bx_lists_ahead(query: &[u8], locations: &[(i32, i32)], threshold: i32) {
+    if let Some((shared, words)) = x_bx_unlisted(query, locations, threshold) {
+        rayon::spawn(move || x_bx_make_lists(&shared, &words, threshold));
+    }
 }
 
-// No NCBI counterpart (scheduling only): the task of `x_bx_lists_ahead`.
+// No NCBI counterpart (scheduling only): the shared lists of `x_bx_lists_ahead` and the words of
+// `query` at `locations` without a list there, one per cell; `None` when there is none.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn x_bx_make_lists(query: &[u8], locations: &[(i32, i32)], threshold: i32) {
-    use rayon::prelude::*;
-    let (matrix, word_length) = (ScoringMatrix::Blosum62, 3);
+#[allow(clippy::type_complexity)]
+fn x_bx_unlisted(
+    query: &[u8],
+    locations: &[(i32, i32)],
+    threshold: i32,
+) -> Option<(std::sync::Arc<XSharedMemo>, Vec<(usize, [u8; X_BX_WORD])>)> {
     let alphabet_size = LOOKUP_ALPHABET_SIZE;
     let charsize = ilog2(alphabet_size) + 1;
-    if word_length * charsize > 16 {
-        return;
+    if X_BX_WORD * charsize > 16 {
+        return None;
     }
-    let backbone_size = compute_backbone_size(word_length, alphabet_size, charsize);
+    let backbone_size = compute_backbone_size(X_BX_WORD, alphabet_size, charsize);
+    let key = (X_BX_MATRIX, threshold, X_BX_WORD, alphabet_size);
+    let shared = x_shared_memo(key, backbone_size);
+    let mut seen = vec![false; backbone_size];
+    let mut words = Vec::new();
+    x_for_each_exact_word(query, locations, X_BX_WORD, charsize, |idx, offset| {
+        // A cell past the backbone (a residue code 28-31) is left to the build.
+        if idx < backbone_size && !std::mem::replace(&mut seen[idx], true) {
+            if shared.lists[idx].get().is_none() {
+                let mut word = [0; X_BX_WORD];
+                word.copy_from_slice(&query[offset..offset + X_BX_WORD]);
+                words.push((idx, word));
+            }
+        }
+    });
+    (!words.is_empty()).then_some((shared, words))
+}
+
+// No NCBI counterpart (scheduling only): the lists of `words` in `shared`, on the pool this runs on.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_bx_make_lists(shared: &XSharedMemo, words: &[(usize, [u8; X_BX_WORD])], threshold: i32) {
+    use rayon::prelude::*;
+    let alphabet_size = LOOKUP_ALPHABET_SIZE;
+    let charsize = ilog2(alphabet_size) + 1;
     // Same expression as build_lookup_from_prepared (blast_aalookup.c:438-444).
     let row_max: Vec<i32> = (0..alphabet_size)
         .map(|i| {
             (0..alphabet_size)
-                .map(|j| lookup_matrix_score(matrix, i, j))
+                .map(|j| lookup_matrix_score(X_BX_MATRIX, i, j))
                 .max()
                 .unwrap_or(i32::MIN)
         })
         .collect();
-    let shared = x_shared_memo(
-        (matrix, threshold, word_length, alphabet_size),
-        backbone_size,
-    );
-    // The first offset of each word not listed yet.
-    let mut first = vec![u32::MAX; backbone_size];
-    x_for_each_exact_word(query, locations, word_length, charsize, |idx, offset| {
-        if first[idx] == u32::MAX && shared.lists[idx].get().is_none() {
-            first[idx] = offset as u32;
-        }
-    });
-    let words: Vec<(usize, usize)> = first
-        .iter()
-        .enumerate()
-        .filter(|(_, &offset)| offset != u32::MAX)
-        .map(|(idx, &offset)| (idx, offset as usize))
-        .collect();
-    words
-        .par_iter()
-        .with_min_len(64)
-        .for_each(|&(idx, offset)| {
-            shared.lists[idx].get_or_init(|| {
-                x_target_list(
-                    &query[offset..],
-                    alphabet_size,
-                    word_length,
-                    charsize,
-                    &row_max,
-                    threshold,
-                    matrix,
-                )
-            });
+    words.par_iter().with_min_len(64).for_each(|(idx, word)| {
+        shared.lists[*idx].get_or_init(|| {
+            x_target_list(
+                word,
+                alphabet_size,
+                X_BX_WORD,
+                charsize,
+                &row_max,
+                threshold,
+                X_BX_MATRIX,
+            )
         });
+    });
 }
 
 /// No NCBI counterpart: the neighbour lists a build reads, its thread's or the shared ones.
@@ -2589,6 +2607,69 @@ mod tests {
                         threshold,
                         matrix,
                         3,
+                        parts,
+                    ) {
+                        Ok(table) => table,
+                        Err(_) => panic!("in-place builder declined"),
+                    };
+                    x_assert_same_table(&table, &reference);
+                    x_give_back_pooled(&mut table);
+                }
+            }
+        });
+    }
+
+    // No NCBI counterpart (scheduling only): LOSAT_X_BXLISTAHEAD's lists made before a pooled build
+    // (here on this thread, as the pool's task would) give the reference table, in one part and in
+    // parts: the lists of the words the build reads, and of every word of the query (its masked
+    // residues and the sentinels between contexts too). A test on another thread may swap the shared
+    // lists' key in between; the build then makes the lists itself, the same table.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn tables_after_lists_made_ahead_equal_the_reference() {
+        let mut seed = 37u64;
+        let mut low_complexity = vec![1u8; 400];
+        low_complexity.extend(residues(&mut seed, 60));
+        let queries = vec![
+            vec![
+                frame(residues(&mut seed, 2_500), vec![(100, 140), (143, 200)], 1),
+                frame(low_complexity, vec![(350, 399)], -1),
+            ],
+            vec![frame(residues(&mut seed, 1_800), vec![(0, 99)], 2)],
+        ];
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            for threshold in [11, 12, 13] {
+                let reference = build_lookup_from_prepared(
+                    prepared(&queries, X_BX_MATRIX),
+                    threshold,
+                    X_BX_MATRIX,
+                    X_BX_WORD,
+                )
+                .0;
+                for (whole, parts) in [(false, 1), (true, 1), (false, 4), (true, 4)] {
+                    let ahead = prepared(&queries, X_BX_MATRIX);
+                    let locations = if whole {
+                        vec![(0, ahead.concat_query.len() as i32 - 1)]
+                    } else {
+                        ahead.lookup_locations.clone()
+                    };
+                    if let Some((shared, words)) =
+                        x_bx_unlisted(&ahead.concat_query, &locations, threshold)
+                    {
+                        x_bx_make_lists(&shared, &words, threshold);
+                    }
+                    let mut table = match x_build_direct_pooled(
+                        prepared(&queries, X_BX_MATRIX),
+                        threshold,
+                        X_BX_MATRIX,
+                        X_BX_WORD,
                         parts,
                     ) {
                         Ok(table) => table,

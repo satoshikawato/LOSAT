@@ -379,6 +379,7 @@ export LOSAT_X_BXEVALEMPTY=1
 export LOSAT_X_BXFLOW=1
 export LOSAT_X_BXHITBF=1
 export LOSAT_X_BXKAONCE=1
+export LOSAT_X_BXKAPPAFIT=1
 export LOSAT_X_BXLUTPOOL=1
 export LOSAT_X_BXPOOLN1=1
 export LOSAT_X_BXSCANBYTE=1
@@ -6313,6 +6314,19 @@ Scheduling (each value computed by one thread with the original function; order 
   0.571 -> 0.549 s (x0.962, 0.959-0.968, 12 of 12), S(16) 13.70 -> 14.29; the capped few-subject rows (800 cDNAs x
   2 / 8 / 50 yeast proteins, AP027131 x 10 / 50 proteins, 16 and 32 threads) x0.986-1.031, each within its
   per-round spread (`k` is 1 on the 2 and 8 protein rows, so the cut changes no task there).
+- `LOSAT_X_BXKAPPAFIT=1` (BLASTX, memory at many threads; in the strict set from the pull request that added it: on
+  unless `=0`; acts where a batch end at 2+ threads redoes composition for 2 or more matches, fewer than the
+  threads): the batch end makes `min(threads, matches)` composition-redo workers (`runtime.rs`, `x_kappa_workers`)
+  instead of one per pool thread; with fewer matches than threads one speculative batch holds every match and each
+  match takes the worker of its position (with as many matches or more, the thread's own, as before). Why: each
+  worker is a full redo state (`KappaState::x_for_thread`: the redo parameters, a gapped-alignment scratch and a
+  composition workspace), made per batch end; a `-subject` search of 800 fly cDNAs against a few yeast proteins at
+  32-64 threads made 32-64 of them at every batch end for a handful of matches, from several batch ends at a time
+  (the capped batch flow), and the threads' arenas kept that memory. Exactness: a worker's state does not change a
+  match's result (`x_speculate_match` redoes in stream order a result that read a predecessor's matrix); with fewer
+  matches than threads `x_batch` (32 per worker, at least 64) holds every match, so positions name distinct workers;
+  `tests/blastx_unit_cap.rs` compares reports with the switch on and off at 2, 4 and 8 threads for 3, 10 and 40
+  subjects and the batch flow, and checks both sides of the reach. TIMINGS_PENDING
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

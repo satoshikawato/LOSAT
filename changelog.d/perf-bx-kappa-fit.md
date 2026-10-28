@@ -1,0 +1,1 @@
+- `blastx` at many threads makes no more composition-redo states at a query batch's end than the batch has matches, instead of one per thread: CHANGELOG_PENDING (`LOSAT_X_BXKAPPAFIT`; `=0` restores one per thread). Reports are unchanged.

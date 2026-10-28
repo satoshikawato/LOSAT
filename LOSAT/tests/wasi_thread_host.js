@@ -416,23 +416,53 @@ function blockingStdioWrite(fdWrite) {
 // 2026-10-26). In a command that may run more than one thread, the host therefore opens itself
 // (Node's fs, whose descriptors belong to the process) each regular file that path_open opens
 // from the preopened "/" for reading only (no open or descriptor flags, no write right), enters
-// it in a table that every thread shares (the OS descriptor, the file position and the rights)
-// and gives the guest SHARED_FD_BASE + its slot; each thread then reads, seeks, stats and closes
-// such a descriptor itself, through the table. Every other open (for writing, a directory, a
-// FIFO, one that fails, with uvwasi's errno) stays with the calling thread's uvwasi as before.
+// it in a table that every thread shares (the OS descriptor, the file position, the rights and
+// the kind) and gives the guest SHARED_FD_BASE + its slot; each thread then reads, seeks, stats
+// and closes such a descriptor itself, through the table. Every other open for reading (a
+// directory, a FIFO, one that fails, with uvwasi's errno) stays with the calling thread's uvwasi
+// as before.
 // (One I/O worker that ran the file functions of every thread was tried first: each call waited
 // until that worker was scheduled on the 16 busy CPUs, and BLASTN at 16 threads took 22.6 s
 // instead of 9.3 s on ws, 2026-10-27.)
+//
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:225-228
+// ```c++
+//         CBlastFormat formatter(opt, *db_adapter,
+//                                fmt_args->GetFormattedOutputChoice(),
+//                                query_opts->GetParseDeflines(),
+//                                m_CmdLineArgs->GetOutputStream(),
+// ```
+// The output (-out) is one stream of the process too. LOSAT creates the file at the report's
+// first write, and blastp-fast's query blocks searched two at a time (LOSAT_X_BPQSLOTS,
+// LOSAT/src/algorithm/blastp/x_query_slots.rs) are written by whichever pool thread finished
+// the block that completes the order: the file opened by one thread was written by another,
+// EBADF (blastp-fast -subject -out with 2 or more threads, 2026-10-28). Each open for writing
+// therefore enters the table too: from the preopened "/", with no open flag but create,
+// exclusive and truncate and no descriptor flag but append, of a regular file (a new one with
+// create) or of a character device or a FIFO (/dev/null, /dev/stdout, a named pipe). A regular
+// file not opened to append is written at the table's position, the bytes of one write
+// reserved before they are written as one write() moves the native offset; an append and a
+// device or FIFO are written at the OS's position (the end of the file, the stream), and a
+// device or FIFO has no position (ESPIPE). Opens for writing with other flags (a directory, sync
+// or nonblocking descriptor flags) stay with the calling thread's uvwasi.
 const SHARED_FD_BASE = 0x40000000, SHARED_FDS = 1024;
-const WASI_EBADF = 8, WASI_EINVAL = 28, WASI_EIO = 29, WASI_ENOTSUP = 58, WASI_ENOTCAPABLE = 76;
-const WASI_ERRNO = { EACCES: 2, EBADF: WASI_EBADF, EINVAL: WASI_EINVAL, EIO: WASI_EIO, EISDIR: 31, ENOENT: 44, EOVERFLOW: 61 };
-const RIGHT_FD_WRITE = 1n << 6n, LOOKUP_SYMLINK_FOLLOW = 1, FILETYPE_REGULAR_FILE = 4, PREOPEN_ROOT_FD = 3;
-// The table: per slot the OS descriptor (-1 free, -2 being entered), the position, the rights.
+const WASI_EBADF = 8, WASI_EINVAL = 28, WASI_EIO = 29, WASI_ENOTSUP = 58, WASI_ESPIPE = 70, WASI_ENOTCAPABLE = 76;
+const WASI_ERRNO = { EACCES: 2, EAGAIN: 6, EBADF: WASI_EBADF, EEXIST: 20, EFBIG: 22, EINVAL: WASI_EINVAL, EIO: WASI_EIO,
+  EISDIR: 31, ELOOP: 32, ENOENT: 44, ENOSPC: 51, ENOTDIR: 54, EOVERFLOW: 61, EPERM: 63, EPIPE: 64, EROFS: 69,
+  ESPIPE: WASI_ESPIPE };
+const RIGHT_FD_READ = 1n << 1n, RIGHT_FD_WRITE = 1n << 6n, RIGHT_FD_ALLOCATE = 1n << 8n, RIGHT_FD_FILESTAT_SET_SIZE = 1n << 22n;
+const LOOKUP_SYMLINK_FOLLOW = 1, OFLAGS_CREAT = 1, OFLAGS_EXCL = 4, OFLAGS_TRUNC = 8, FDFLAGS_APPEND = 1, PREOPEN_ROOT_FD = 3;
+// The filetypes of the table's files, as uvwasi gives them (a FIFO is a socket stream there).
+const FILETYPE_CHARACTER_DEVICE = 2, FILETYPE_REGULAR_FILE = 4, FILETYPE_SOCKET_STREAM = 6;
+// The table: per slot the OS descriptor (-1 free, -2 being entered), the position, the rights and
+// the kind (the filetype, with KIND_APPEND for a file opened to append).
+const KIND_APPEND = 0x100;
 const sharedFileViews = table => ({ os: new Int32Array(table, 0, SHARED_FDS),
   position: new BigInt64Array(table, 4 * SHARED_FDS, SHARED_FDS),
-  rights: new BigUint64Array(table, 12 * SHARED_FDS, 2 * SHARED_FDS) });
+  rights: new BigUint64Array(table, 12 * SHARED_FDS, 2 * SHARED_FDS),
+  kind: new Int32Array(table, 28 * SHARED_FDS, SHARED_FDS) });
 function sharedFileTable() {
-  const table = new SharedArrayBuffer(28 * SHARED_FDS);
+  const table = new SharedArrayBuffer(32 * SHARED_FDS);
   sharedFileViews(table).os.fill(-1);
   return table;
 }
@@ -440,9 +470,11 @@ function sharedFileTable() {
 // The file functions of one thread with the shared table in front of its own uvwasi functions
 // (`local`, which take the guest's signed i32 values themselves).
 function sharedFileImports(table, memory, local) {
-  const { os, position, rights } = sharedFileViews(table);
+  const { os, position, rights, kind } = sharedFileViews(table);
   const slotOf = fd => (fd >>> 0) - SHARED_FD_BASE;
   const shared = fd => slotOf(fd) >= 0 && slotOf(fd) < SHARED_FDS;
+  // A regular file has the table's position; it is written there unless it was opened to append.
+  const regular = slot => (kind[slot] & 0xff) === FILETYPE_REGULAR_FILE;
   // The guest's memory as this isolate sees it; memory.grow(0) updates the view when the guest
   // grew the memory on another thread (see the start of a thread below).
   const buffer = end => {
@@ -450,15 +482,31 @@ function sharedFileImports(table, memory, local) {
     return memory.buffer;
   };
   const view = (pointer, length) => new DataView(buffer(pointer + length), pointer, length);
-  const read = (descriptor, iovs, count, at) => {
+  const lengthOf = (iovs, count) => {
+    let total = 0n;
+    const vectors = view(iovs, 8 * count);
+    for (let i = 0; i < count; i++) total += BigInt(vectors.getUint32(8 * i + 4, true));
+    return total;
+  };
+  // fs.readSync or fs.writeSync over the guest's vectors at `at` (null: the OS's position); an
+  // error after some bytes ends the call with their count, as read() and write() do. writeSync
+  // takes a Number (it writes a BigInt position at the OS's position).
+  const transfer = (move, descriptor, iovs, count, at) => {
     let total = 0n;
     const vectors = view(iovs, 8 * count);
     for (let i = 0; i < count; i++) {
       const pointer = vectors.getUint32(8 * i, true), length = vectors.getUint32(8 * i + 4, true);
       if (length === 0) continue;
-      const got = fs.readSync(descriptor, new Uint8Array(buffer(pointer + length), pointer, length), 0, length, at + total);
-      total += BigInt(got);
-      if (got < length) break;
+      let done;
+      try {
+        done = move(descriptor, new Uint8Array(buffer(pointer + length), pointer, length), 0, length,
+          at === null ? null : Number(at + total));
+      } catch (err) {
+        if (total > 0n) break;
+        throw err;
+      }
+      total += BigInt(done);
+      if (done < length) break;
     }
     return total;
   };
@@ -482,21 +530,52 @@ function sharedFileImports(table, memory, local) {
       }
     };
   };
+  const allowed = (slot, right) => (rights[2 * slot] & right) !== 0n;
   own("fd_read", (slot, descriptor, iovs, count, nread) => {
-    const got = read(descriptor, iovs, count, Atomics.load(position, slot));
-    Atomics.add(position, slot, got);
+    if (!allowed(slot, RIGHT_FD_READ)) return WASI_ENOTCAPABLE;
+    const got = transfer(fs.readSync, descriptor, iovs, count, regular(slot) ? Atomics.load(position, slot) : null);
+    if (regular(slot)) Atomics.add(position, slot, got);
     view(nread, 4).setUint32(0, Number(got), true);
   });
   own("fd_pread", (slot, descriptor, iovs, count, offset, nread) => {
-    view(nread, 4).setUint32(0, Number(read(descriptor, iovs, count, BigInt.asUintN(64, offset))), true);
+    if (!allowed(slot, RIGHT_FD_READ)) return WASI_ENOTCAPABLE;
+    if (!regular(slot)) return WASI_ESPIPE;
+    view(nread, 4).setUint32(0, Number(transfer(fs.readSync, descriptor, iovs, count, BigInt.asUintN(64, offset))), true);
+  });
+  own("fd_write", (slot, descriptor, iovs, count, nwritten) => {
+    if (!allowed(slot, RIGHT_FD_WRITE)) return WASI_ENOTCAPABLE;
+    let wrote;
+    if (kind[slot] === FILETYPE_REGULAR_FILE) {
+      const length = lengthOf(iovs, count), at = Atomics.add(position, slot, length);
+      try {
+        wrote = transfer(fs.writeSync, descriptor, iovs, count, at);
+      } finally {
+        // The bytes not written given back, unless another write came after them.
+        if (wrote !== length) Atomics.compareExchange(position, slot, at + length, at + (wrote ?? 0n));
+      }
+    } else {
+      wrote = transfer(fs.writeSync, descriptor, iovs, count, null);
+      // An append leaves the position at the end of the file, as it leaves the native offset.
+      if (regular(slot)) Atomics.store(position, slot, fs.fstatSync(descriptor, { bigint: true }).size);
+    }
+    view(nwritten, 4).setUint32(0, Number(wrote), true);
+  });
+  own("fd_pwrite", (slot, descriptor, iovs, count, offset, nwritten) => {
+    if (!allowed(slot, RIGHT_FD_WRITE)) return WASI_ENOTCAPABLE;
+    if (!regular(slot)) return WASI_ESPIPE;
+    view(nwritten, 4).setUint32(0, Number(transfer(fs.writeSync, descriptor, iovs, count, BigInt.asUintN(64, offset))), true);
   });
   own("fd_seek", (slot, descriptor, offset, whence, result) => {
+    if (!regular(slot)) return WASI_ESPIPE;
     const from = [0n, Atomics.load(position, slot), fs.fstatSync(descriptor, { bigint: true }).size][whence];
     if (from === undefined || from + offset < 0n) return WASI_EINVAL;
     Atomics.store(position, slot, from + offset);
     view(result, 8).setBigUint64(0, from + offset, true);
   });
-  own("fd_tell", (slot, descriptor, result) => { view(result, 8).setBigUint64(0, Atomics.load(position, slot), true); });
+  own("fd_tell", (slot, descriptor, result) => {
+    if (!regular(slot)) return WASI_ESPIPE;
+    view(result, 8).setBigUint64(0, Atomics.load(position, slot), true);
+  });
   own("fd_close", (slot) => {
     const descriptor = Atomics.exchange(os, slot, -1);
     if (descriptor < 0) return WASI_EBADF;
@@ -506,12 +585,13 @@ function sharedFileImports(table, memory, local) {
     const stat = fs.fstatSync(descriptor, { bigint: true }), out = view(result, 64);
     for (const [at, value] of [[0, stat.dev], [8, stat.ino], [16, 0n], [24, stat.nlink], [32, stat.size],
       [40, stat.atimeNs], [48, stat.mtimeNs], [56, stat.ctimeNs]]) out.setBigUint64(at, value, true);
-    out.setUint8(16, FILETYPE_REGULAR_FILE);
+    out.setUint8(16, kind[slot] & 0xff);
   });
   own("fd_fdstat_get", (slot, descriptor, result) => {
     const out = view(result, 24);
     out.setBigUint64(0, 0n, true);
-    out.setUint8(0, FILETYPE_REGULAR_FILE);
+    out.setUint8(0, kind[slot] & 0xff);
+    out.setUint16(2, kind[slot] & KIND_APPEND ? FDFLAGS_APPEND : 0, true);
     out.setBigUint64(8, rights[2 * slot], true);
     out.setBigUint64(16, rights[2 * slot + 1], true);
   });
@@ -520,41 +600,68 @@ function sharedFileImports(table, memory, local) {
     if ((base & ~rights[2 * slot]) || (inheriting & ~rights[2 * slot + 1])) return WASI_ENOTCAPABLE;
     [rights[2 * slot], rights[2 * slot + 1]] = [base, inheriting];
   });
-  own("fd_fdstat_set_flags", (slot, descriptor, flags) => (flags === 0 ? 0 : WASI_ENOTSUP));
+  own("fd_fdstat_set_flags", (slot, descriptor, flags) => (flags === (kind[slot] & KIND_APPEND ? FDFLAGS_APPEND : 0) ? 0 : WASI_ENOTSUP));
+  own("fd_filestat_set_size", (slot, descriptor, size) => {
+    if (!allowed(slot, RIGHT_FD_FILESTAT_SET_SIZE)) return WASI_ENOTCAPABLE;
+    fs.ftruncateSync(descriptor, Number(BigInt.asUintN(64, size)));
+  });
+  // Grows the file to offset + length, as uvwasi does (Node has no posix_fallocate).
+  own("fd_allocate", (slot, descriptor, offset, length) => {
+    if (!allowed(slot, RIGHT_FD_ALLOCATE)) return WASI_ENOTCAPABLE;
+    const end = BigInt.asUintN(64, offset) + BigInt.asUintN(64, length);
+    if (fs.fstatSync(descriptor, { bigint: true }).size < end) fs.ftruncateSync(descriptor, Number(end));
+  });
   own("fd_advise", () => 0);
   own("fd_sync", (slot, descriptor) => { fs.fsyncSync(descriptor); });
   own("fd_datasync", (slot, descriptor) => { fs.fdatasyncSync(descriptor); });
   own("fd_prestat_get", () => WASI_EBADF);
   own("fd_prestat_dir_name", () => WASI_EBADF);
+  // A free slot marked as being entered, or -1 when the table is full.
+  const reserve = () => {
+    for (let slot = 0; slot < SHARED_FDS; slot++) {
+      if (Atomics.load(os, slot) === -1 && Atomics.compareExchange(os, slot, -1, -2) === -1) return slot;
+    }
+    return -1;
+  };
   const pathOpen = imports.path_open;
   imports.path_open = (...args) => {
     const [dirfd, dirflags, path, pathLength, oflags] = args.slice(0, 5).map(arg => arg >>> 0);
     const [base, inheriting, fdflags, opened] = [BigInt.asUintN(64, args[5]), BigInt.asUintN(64, args[6]), args[7] >>> 0, args[8] >>> 0];
-    if (dirfd !== PREOPEN_ROOT_FD || oflags !== 0 || fdflags !== 0 || (base & RIGHT_FD_WRITE)) return pathOpen(...args);
-    let descriptor = -1;
+    const write = (base & RIGHT_FD_WRITE) !== 0n;
+    if (dirfd !== PREOPEN_ROOT_FD || (write
+      ? (oflags & ~(OFLAGS_CREAT | OFLAGS_EXCL | OFLAGS_TRUNC)) || (fdflags & ~FDFLAGS_APPEND)
+      : oflags !== 0 || fdflags !== 0)) return pathOpen(...args);
+    let slot = -1, descriptor = -1;
     try {
       const host = "/" + Buffer.from(buffer(path + pathLength), path, pathLength).toString();
       const follow = (dirflags & LOOKUP_SYMLINK_FOLLOW) !== 0;
-      // Not opened unless it is a regular file now (opening a FIFO waits for its writer).
+      // Not opened for reading unless it is a regular file now (opening a FIFO waits for its
+      // writer); for writing, a regular file, a new one, a character device or a FIFO.
       const stat = (follow ? fs.statSync : fs.lstatSync)(host, { throwIfNoEntry: false });
-      if (!stat || !stat.isFile()) return pathOpen(...args);
-      descriptor = fs.openSync(host, fs.constants.O_RDONLY | (follow ? 0 : fs.constants.O_NOFOLLOW));
-      if (!fs.fstatSync(descriptor).isFile()) throw new Error("not a regular file");
-    } catch {
-      if (descriptor >= 0) fs.closeSync(descriptor);
-      return pathOpen(...args);
-    }
-    for (let slot = 0; slot < SHARED_FDS; slot++) {
-      if (Atomics.load(os, slot) !== -1 || Atomics.compareExchange(os, slot, -1, -2) !== -1) continue;
+      const kept = stat => stat.isFile() || (write && (stat.isCharacterDevice() || stat.isFIFO()));
+      if (stat ? !kept(stat) : !(write && (oflags & OFLAGS_CREAT))) return pathOpen(...args);
+      // A full table: the thread's own uvwasi opens it, as before (reserved before the open,
+      // which may create the file).
+      slot = reserve();
+      if (slot < 0) return pathOpen(...args);
+      const { O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC, O_APPEND, O_NOFOLLOW } = fs.constants;
+      descriptor = fs.openSync(host, (write ? (base & RIGHT_FD_READ ? O_RDWR : O_WRONLY) : O_RDONLY)
+        | (oflags & OFLAGS_CREAT ? O_CREAT : 0) | (oflags & OFLAGS_EXCL ? O_EXCL : 0) | (oflags & OFLAGS_TRUNC ? O_TRUNC : 0)
+        | (fdflags & FDFLAGS_APPEND ? O_APPEND : 0) | (follow ? 0 : O_NOFOLLOW));
+      const now = fs.fstatSync(descriptor);
+      if (!kept(now)) throw new Error("not a file of the table");
       Atomics.store(position, slot, 0n);
       [rights[2 * slot], rights[2 * slot + 1]] = [base, inheriting];
+      kind[slot] = (now.isFile() ? FILETYPE_REGULAR_FILE : now.isFIFO() ? FILETYPE_SOCKET_STREAM : FILETYPE_CHARACTER_DEVICE)
+        | (fdflags & FDFLAGS_APPEND ? KIND_APPEND : 0);
       Atomics.store(os, slot, descriptor);
       view(opened, 4).setUint32(0, SHARED_FD_BASE + slot, true);
       return 0;
+    } catch {
+      if (descriptor >= 0) fs.closeSync(descriptor);
+      if (slot >= 0) Atomics.store(os, slot, -1);
+      return pathOpen(...args);
     }
-    // A full table: the thread's own uvwasi opens it, as before.
-    fs.closeSync(descriptor);
-    return pathOpen(...args);
   };
   return imports;
 }

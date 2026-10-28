@@ -478,7 +478,9 @@ test("the guard cache keeps the entries used last", () => {
 // repeated or misdirected start changes stdout or the status. `bulk` adds a memory.fill
 // and a memory.copy for the shared-memory guard. The host options under test change
 // when workers boot, never this output.
-function spawner(spawns, { bulk = false } = {}) {
+// With `pauseAfter` k, the main thread spawns k threads, waits until they have counted
+// themselves, waits 0.5 s more (memory.atomic.wait32 on a word that stays 0) and spawns the rest.
+function spawner(spawns, { bulk = false, pauseAfter = 0 } = {}) {
   const types = vector([
     [0x60, 1, 0x7f, 0],                          // proc_exit(i32)
     [0x60, 0, 0],                                // _start()
@@ -497,6 +499,13 @@ function spawner(spawns, { bulk = false } = {}) {
   const byte = (address, value) => [...i32(address), ...value, 0x3a, 0, 0];          // i32.store8
   const main = [];
   for (let i = 0; i < spawns; i++) {
+    if (pauseAfter && i === pauseAfter) {
+      // block { loop { if (count == pauseAfter) break; memory.atomic.wait32(0, count, -1) } }
+      main.push(0x02, 0x40, 0x03, 0x40, ...load(0), ...i32(pauseAfter), 0x46, 0x0d, 1,
+        ...i32(0), ...load(0), 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b);
+      // memory.atomic.wait32(48, 0, 500 ms): times out
+      main.push(...i32(48), ...i32(0), 0x42, ...i32(500_000_000).slice(1), 0xfe, 0x01, 2, 0, 0x1a);
+    }
     // if (thread-spawn(1 << i) < 1) proc_exit(90)
     main.push(...i32(1 << i), 0x10, 1, ...i32(1), 0x48, 0x04, 0x40, ...i32(90), 0x10, 0, 0x0b);
   }
@@ -630,13 +639,41 @@ test("LOSAT_WASI_PRESPAWN=auto boots the next set together when its standby work
     [5, "2", 2, []]]) {
     const label = `${spawns} spawns PRESPAWN=${prespawn}`;
     const reference = runThreaded(spawner(spawns), argv, { LOSAT_WASI_PRESPAWN: "0" });
-    const result = runThreaded(spawner(spawns), argv, { LOSAT_WASI_PRESPAWN: prespawn, LOSAT_WASI_THREADS_DEBUG: "1" });
+    // Without the reuse of returned workers (the threads of this guest return at once, so whether
+    // the next spawn finds one is a race; the next test has the reuse).
+    const result = runThreaded(spawner(spawns), argv,
+      { LOSAT_WASI_PRESPAWN: prespawn, LOSAT_WASI_RECYCLE: "0", LOSAT_WASI_THREADS_DEBUG: "1" });
     assert.equal(result.status, reference.status, `${label}\n${result.stderr}`);
     assert.equal(result.stdout, reference.stdout, label);
     const events = hostEvents(result.stderr);
     checkLifecycle(events, spawns, standby, label);
     assert.deepEqual(events.filter((e) => e.event === "standby_refill").map((e) => [e.tid, e.count]),
       refills.map((tid) => [tid, 3]), label);
+  }
+});
+
+// LOSAT_WASI_RECYCLE in a command (on by default): the standby workers whose threads returned run
+// the next set of threads, before a refill boots new ones; `0` boots the refill as before.
+test("a command's returned standby workers run its next set of threads (LOSAT_WASI_RECYCLE)", () => {
+  const argv = ["-num_threads", "4"];
+  const bytes = spawner(6, { pauseAfter: 3 });
+  const reference = runThreaded(bytes, argv, { LOSAT_WASI_PRESPAWN: "0" });
+  assert.equal(reference.status, 63, reference.stderr);
+  for (const [recycle, reused, refills] of [[undefined, 3, 0], ["1", 3, 0], ["0", 0, 1]]) {
+    const label = `LOSAT_WASI_RECYCLE=${recycle}`;
+    const result = runThreaded(bytes, argv, { LOSAT_WASI_RECYCLE: recycle, LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.deepEqual(outcome({ ...result, stderr: "" }), outcome({ ...reference, stderr: "" }), label);
+    const events = hostEvents(result.stderr);
+    const tids = [1, 2, 3, 4, 5, 6];
+    for (const type of ["spawn_attempt", "spawned", "ready", "exited"]) {
+      assert.deepEqual(tidsOf(events, type), tids, `${label} ${type}`);
+    }
+    assert.ok(events.filter((e) => e.event === "exited").every((e) => e.code === 0), label);
+    assert.deepEqual(events.filter((e) => e.event === "spawned" && e.standby !== undefined).map((e) => e.tid),
+      recycle === "0" ? [1, 2, 3, 4, 5, 6] : [1, 2, 3], label);
+    assert.deepEqual(events.filter((e) => e.event === "spawned" && e.recycled !== undefined).map((e) => e.tid),
+      reused ? [4, 5, 6] : [], label);
+    assert.equal(countOf(events, "standby_refill"), refills, label);
   }
 });
 

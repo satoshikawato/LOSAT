@@ -307,8 +307,12 @@ give the runner of before).
   waiting worker, waits briefly for one that is instantiating again, and boots a
   new worker only when every worker runs a thread (a thread of the previous pool
   returns only after the next pool's spawns). `close()` ends the workers. The
-  guest gets the same threads in the same order. Commands are not affected:
-  their workers exit with their threads. With `LOSAT_WASI_THREADS_DEBUG=1`,
+  guest gets the same threads in the same order. In a command (since
+  2026-10-28) the standby workers of `LOSAT_WASI_PRESPAWN` (a refill's too) do
+  the same: a spawn takes a standby worker, then a returned one (waiting briefly
+  for one that instantiates again), then the refill, so a set of threads started
+  after another (LOSAT_X_QSCANPAR's parts, then the search's pool) takes the
+  workers of the last; with `0` a command's workers exit with their threads. With `LOSAT_WASI_THREADS_DEBUG=1`,
   `spawned` of a recycled worker carries its `recycled` index, and `exited`
   (code 0) records that the worker reported its thread's return. Measured on
   p03 (TBLASTX, `-num_threads 8`, ABI v2 reactor, i9): the host's spawns took

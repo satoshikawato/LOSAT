@@ -231,7 +231,11 @@ LOSAT_X_NEWTONEXACT_PROF
   `LOSAT/tests/README.md`, "Threading contract gates".
 - `LOSAT_WASI_RECYCLE=0|1` (Node threaded runner, reactors; `1` when unset since
   2026-10-18) keep the thread workers between calls; a returned thread's worker
-  instantiates the module again and waits for the next thread. Same output.
+  instantiates the module again and waits for the next thread. Same output. Since
+  2026-10-28 also in a command: a standby worker (`LOSAT_WASI_PRESPAWN`, a refill's
+  too) whose thread returned waits for the next thread, and a spawn takes a standby
+  worker, then such a worker (waiting for one that instantiates again), then the
+  refill; `0` lets the command's workers exit with their threads as before.
 - `LOSAT_WASI_GUARD_CACHE=<dir>|0` (Node threaded runner; on by default since
   2026-10-19 in `losat/wasi-guard` of the user's cache directory, `0` turns it
   off) reuse the shared-memory guard's output, checked by SHA-256 and rebuilt

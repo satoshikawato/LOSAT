@@ -297,13 +297,27 @@ const SLOT_RUNNING = 0, SLOT_READY = 1, SLOT_TAKEN = 2, SLOT_PREPARING = 3;
 // module again on the shared memory (a new instance per guest thread, as before) and waits
 // for a start order, so a later search's `thread-spawn` takes it instead of booting a new
 // Node worker (about 20 ms each, one after another while the guest waits). This is what the
-// browser's thread host (web/app/src/infra/engine-worker/thread-host.ts) does. A command
-// runs one search, so its workers still exit with their threads. The guest gets the same
-// threads in the same order; only the worker that runs each one changes.
+// browser's thread host (web/app/src/infra/engine-worker/thread-host.ts) does. In a command
+// the standby workers do the same (reuseCommandWorkers). The guest gets the same threads in
+// the same order; only the worker that runs each one changes.
 function recycleWorkers(kind) {
+  return kind === "threaded-reactor" && recycleOn();
+}
+
+// LOSAT_WASI_RECYCLE in a command: a standby worker (LOSAT_WASI_PRESPAWN, also one of a refill)
+// whose thread returned instantiates the module again and waits for the next thread, as a
+// reactor's worker does. A command that starts one set of threads after another (the parts of
+// LOSAT_X_QSCANPAR's reading, then the search's pool) then gives the next set the workers of the
+// last instead of booting new ones (about 45 ms for the first of them, locally). A spawn takes a
+// standby worker first, then one that waits or is about to (claimRecycled), then the refill.
+function reuseCommandWorkers(kind) {
+  return kind === "threaded-command" && recycleOn();
+}
+
+function recycleOn() {
   const raw = process.env.LOSAT_WASI_RECYCLE ?? "1";
   if (raw !== "0" && raw !== "1") throw new Error("LOSAT_WASI_RECYCLE must be 0 or 1");
-  return kind === "threaded-reactor" && raw === "1";
+  return raw === "1";
 }
 
 function markWorkerStart(control, state) {
@@ -668,6 +682,7 @@ async function prepareThreadHost(wasmPath, kind) {
 async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) {
   const args = [wasmPath, ...argv];
   const prespawn = prespawnCount(argv), recycle = recycleWorkers(kind), refill = recycle ? 0 : refillCount(argv);
+  const reuse = reuseCommandWorkers(kind);
   // The table of the files that every thread reads (sharedFileImports), in a command that
   // requests 2 or more threads.
   const files = kind === "threaded-command" && requestedThreads(argv) >= 2 ? sharedFileTable() : null;
@@ -707,7 +722,14 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   const startStandby = (slot, tid, startArg) => {
     const view = new Int32Array(slot.control);
     slot.tid = tid; slot.worker.ref();
-    workers.add(slot.worker); exits.set(slot.worker, slot.exited); event("spawned", { tid, standby: slot.index });
+    if (reuse) {
+      // The worker lives on after this thread (reuseCommandWorkers): the thread ends with its
+      // `returned` message, and claimRecycled may give the worker the next thread.
+      Atomics.store(view, SLOT_STATE, SLOT_TAKEN); threadStarted(tid); recycled.push(slot);
+    } else {
+      workers.add(slot.worker); exits.set(slot.worker, slot.exited);
+    }
+    event("spawned", { tid, standby: slot.index });
     Atomics.store(view, START_TID, tid); Atomics.store(view, START_ARG, startArg);
     Atomics.store(view, START_ORDER, 1); Atomics.notify(view, START_ORDER, 1);
     return awaitThreadStart(view, tid);
@@ -779,9 +801,16 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   const spawnThread = (startArg) => {
     attempt++; const tid = nextTid++; event("spawn_attempt", { tid, attempt });
     if (options.rejectSpawn && options.rejectSpawn(attempt)) { event("spawn_rejected", { tid }); return -1; }
-    // refillCount: the next set boots together; this spawn takes the first of it.
-    if (!standby.length && refill) { event("standby_refill", { tid, count: refill }); prespawnWorkers(refill); }
     if (standby.length) return startStandby(standby.shift(), tid, startArg);
+    if (reuse) {
+      const waiting = claimRecycled();
+      if (waiting) return startRecycled(waiting, tid, startArg);
+    }
+    // refillCount: the next set boots together; this spawn takes the first of it.
+    if (refill) {
+      event("standby_refill", { tid, count: refill }); prespawnWorkers(refill);
+      if (standby.length) return startStandby(standby.shift(), tid, startArg);
+    }
     if (recycle) {
       const waiting = claimRecycled();
       if (waiting) return startRecycled(waiting, tid, startArg);
@@ -834,17 +863,30 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
       try {
         if (early) {
           worker = early.worker;
-          worker.postMessage({ module, wasmPath, args, memory: mainMemory, files });
+          worker.postMessage({ module, wasmPath, args, memory: mainMemory, files, recycle: reuse });
         } else {
           worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
-            control, files, standby: index, fault: options.fault || null } });
+            control, files, standby: index, recycle: reuse, fault: options.fault || null } });
         }
       } catch (err) { event("standby_rejected", { standby: index, error: String(err) }); return; }
       worker.unref();
-      const slot = { index, worker, control, tid: null };
+      const slot = { index, worker, control, state: new Int32Array(control), tid: null };
+      if (reuse) {
+        worker.on("message", message => {
+          if (!message || message.type !== "returned") return;
+          threadEnded(message.tid, 0);
+          // An idle worker never keeps the process alive; spawnThread refs it again.
+          if (Atomics.load(slot.state, SLOT_STATE) !== SLOT_TAKEN) worker.unref();
+        });
+      }
       slot.exited = new Promise(resolve => {
         worker.on("exit", code => {
-          if (slot.tid !== null) threadExited(worker, slot.tid, code);
+          if (reuse && slot.tid !== null) {
+            const at = recycled.indexOf(slot);
+            if (at >= 0) recycled.splice(at, 1);
+            if (!closing) failure = new Error(`WASI worker ${slot.tid} exited with code ${code}`);
+            threadEnded(slot.tid, code);
+          } else if (slot.tid !== null) threadExited(worker, slot.tid, code);
           else {
             const at = standby.indexOf(slot);
             if (at >= 0) standby.splice(at, 1);
@@ -895,7 +937,10 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
 module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir };
 
 if (!isMainThread) {
-  const { control, fault, standby, recycle, early } = workerData;
+  const { control, fault, standby, early } = workerData;
+  // A recycled worker (a reactor's, or a command's standby worker: reuseCommandWorkers) runs one
+  // guest thread after another; an early worker learns it from its `init` message.
+  let { recycle } = workerData;
   // An early worker (createThreadHost) boots before the module and the memory exist and gets
   // them in one message (`init`) from prespawnWorkers.
   let { module: workerModule, wasmPath, args, memory, files } = workerData;
@@ -921,8 +966,9 @@ if (!isMainThread) {
       if (fault === "startup-timeout") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
       if (fault === "startup-error") throw new Error("injected worker startup error");
       if (early) {
-        ({ module: workerModule, wasmPath, args, memory, files } =
-          await new Promise(resolve => parentPort.once("message", resolve)));
+        const init = await new Promise(resolve => parentPort.once("message", resolve));
+        ({ module: workerModule, wasmPath, args, memory, files } = init);
+        recycle = Boolean(init.recycle);
       }
       const module = workerModule || await compileThreadedModule(wasmPath);
       const spawnThread = () => -1;

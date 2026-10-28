@@ -35,8 +35,9 @@
 //! eight at a time from one word). With `LOSAT_X_STATS` set, `main` prints `[X_STATS]
 //! TBNXLATESIMD codons_vector= codons_scalar=` at exit, when a packed subject was translated.
 //!
-//! A long packed subject whose plan is made for its search alone (the search keeps no subject
-//! plans for several query batches) gets a plan without residues (`x_packed_lean_plan`;
+//! A long packed subject whose plan is made for its use alone (the search keeps no plan of it:
+//! fewer than four query batches, or a plan over the limit of kept plans, `XSubjectSide::keeps`)
+//! gets a plan without residues (`x_packed_lean_plan`;
 //! `LOSAT_X_TBNUNITXLATE`, in the strict set: on unless it is `0`): its frames have their lengths
 //! only, and each (frame, chunk) unit translates the residues it reads into a buffer of its thread
 //! (`x_unit_residues`), one strand of one phase from the packed bytes, by the same tables and loops
@@ -1040,7 +1041,8 @@ fn x_units_on() -> bool {
 // 16 threads: 5.2 GiB at most, most of it the frames of the chromosomes searched at the same
 // time). A unit reads its chunk and nothing else.
 /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): whether the plan of a packed subject of `length` bases
-/// made for its search alone (a search that keeps no subject plans, `XSubjectSide`) is made
+/// made for its use alone (a search that keeps no plan of it: no `XSubjectSide`, or one whose
+/// limit of kept plans refuses it, `XSubjectSide::keeps`) is made
 /// without residues (`x_packed_lean_plan`): with the switch, when its first frame has
 /// `X_MAPPED_FRAME` bytes or more (the frames that are mapped on Linux with glibc; the rule is the
 /// same everywhere).

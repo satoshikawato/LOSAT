@@ -2785,7 +2785,14 @@ Rebuilding less:
   At one thread nothing changes (the serial builder runs). A form that wrote the chunks'
   appends straight into the table's hits instead (line BPF s10, `exp/bpf-s8` 3c405fdb) was as fast and took
   20-35 MiB more (its scattered stores stalled in turn).
-  MEASURED_PLACEHOLDER
+  Measured 2026-10-28 on the workstation (node 1 CPUs 32-47 / 32-39, siblings idle, `--membind=1`, CPUs warmed 3 s
+  before every run, 8 rounds in alternating order, dev 4403cc12 against 1cbb5109, one output hash per case and
+  thread count; line BPF `results/s10ab`), `-task blastp-fast`, wall at 16 / 8 threads: human x yeast (Species4 x
+  Species6 `-subject`) 4.550 -> 4.447 s (x0.977) / 8.270 -> 8.044 s (x0.973); its first 3,000 proteins 0.458 ->
+  0.448 (x0.978) / 0.778 -> 0.758 (x0.974); Species4 x Species6 `-db` 4.723 -> 4.607 (x0.976) / 8.389 -> 8.157
+  (x0.972); Species0 x Species3 `-db` 14.204 -> 14.161 (x0.997) / 27.049 -> 26.852 (x0.993). Cycles x0.964-0.970
+  (x0.993 on Species0 x Species3), instructions x0.989-0.991; the median of the per-round max RSS differences
+  -5.2 to +1.5 MiB (no rise); one-thread instructions the same (the serial builder).
 - `LOSAT_X_BPQBLOCKWEB=1` (BLASTP in `run_local`, the LOSAT Web build's search, speed and memory; in the strict set
   from the pull request that added it, 2026-10-22, on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search
   of `LOSAT_X_BPQBLOCK` also for a call with more than one output, the hit records or a format observer (ABI v2 of the

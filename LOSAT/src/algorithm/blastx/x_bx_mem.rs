@@ -116,7 +116,10 @@ pub(crate) fn batch_mem_on() -> bool {
 /// (`LOSAT_X_BXDIAGKEEP`'s `keeps_tables`: a kept table's history does not change a subject's
 /// computation). It holds at one thread, in diagnostics mode and in the chunk waves too.
 pub(crate) fn owner_keeps_table(options: &ResolvedOptions, subjects: Subjects<'_>) -> bool {
-    batch_mem_on() && keeps_tables(options, subjects)
+    // PROBE s19: LOSAT_X_S19OWNER=0 makes the owner's table new.
+    static OWN: OnceLock<bool> = OnceLock::new();
+    let own = *OWN.get_or_init(|| std::env::var_os("LOSAT_X_S19OWNER").is_none_or(|v| v != "0"));
+    own && batch_mem_on() && keeps_tables(options, subjects)
 }
 
 /// No NCBI counterpart: whether `LOSAT_X_BXDIAGKEEP` is on.

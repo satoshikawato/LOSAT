@@ -164,7 +164,10 @@ impl Diagonals {
         );
         if n < self.entries.len() {
             self.entries.truncate(n);
-            self.entries.shrink_to_fit();
+            // PROBE s19: LOSAT_X_S19SHRINK=0 keeps the capacity.
+            if std::env::var_os("LOSAT_X_S19SHRINK").is_none_or(|v| v != "0") {
+                self.entries.shrink_to_fit();
+            }
         } else {
             self.entries.reserve_exact(n - self.entries.len());
             self.entries.resize(n, DiagStruct::default());

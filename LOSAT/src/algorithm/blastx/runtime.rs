@@ -324,6 +324,10 @@ fn x_kappa_workers(threads: usize, matches: usize) -> usize {
         return threads;
     }
     crate::utils::xreach::x_reach!("LOSAT_X_BXBATCHMEM", matches < threads);
+    // PROBE s19: LOSAT_X_S19KFIT=0 keeps one worker per thread (boxed).
+    if std::env::var_os("LOSAT_X_S19KFIT").is_some_and(|v| v == "0") {
+        return threads;
+    }
     threads.min(matches)
 }
 

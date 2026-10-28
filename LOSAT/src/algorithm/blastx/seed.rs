@@ -147,9 +147,10 @@ impl Diagonals {
     // No NCBI counterpart: buffer reuse only (LOSAT_X_BXBATCHMEM, blastx/x_bx_mem.rs). The table
     // gets the length `new(query_length, window)` gives (so the same mask and collisions) by a
     // realloc of its entries, and keeps its offset: every entry it holds was written for an earlier
-    // subject, at or below the offset, which only grows, so it lies at least a window behind the
-    // next subject's hits and reads as cleared, as in a kept table of the same length
-    // (LOSAT_X_BXDIAGKEEP, x_seed_diag.rs). New entries are zero, as in `new`.
+    // subject, below the offset, which only grows between clears (`finish_subject`), so it lies at
+    // least a window behind the next subject's hits and reads as cleared, as in a kept table of the
+    // same length (LOSAT_X_BXDIAGKEEP: the x_subject_flow.rs module comment, x_seed_scan.rs on the
+    // flag-0 values). New entries are zero, as in `new`.
     /// Resize this table to the length `new(query_length, window)` gives for its window.
     #[cfg(feature = "parallel")]
     pub(crate) fn x_refit(&mut self, query_length: usize) -> Result<()> {
@@ -1181,12 +1182,17 @@ mod session_f_word_finder_reset_tests {
                 assert_eq!(hits, initial, "window={window} state={state}");
             }
             // LOSAT_X_BXBATCHMEM: a kept table of another length (shorter, then longer), resized
-            // in place (`x_refit`) after a subject whose hits it holds (flagged, at its offset).
+            // in place (`x_refit`) after a subject of 83 letters whose hits it holds (flagged, one
+            // past its last position), and one resized after the offset's reset.
             #[cfg(feature = "parallel")]
-            for other in [1, length * 4] {
+            for (other, offset, hit) in [
+                (1, 5_000, 5_083),
+                (length * 4, 5_000, 5_083),
+                (length * 4, 536_870_911, 536_870_900),
+            ] {
                 let mut r = Diagonals::new(other, window).unwrap();
-                r.offset = 5_000;
-                r.entries.fill(flagged(5_000));
+                r.offset = offset;
+                r.entries.fill(flagged(hit));
                 r.finish_subject(83).unwrap();
                 r.x_refit(length).unwrap();
                 assert!(r.x_fits(length, window), "window={window} from {other}");

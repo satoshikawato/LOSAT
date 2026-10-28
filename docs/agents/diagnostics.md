@@ -6318,9 +6318,12 @@ Scheduling (each value computed by one thread with the original function; order 
   unless `=0`): a query batch's large buffers are kept or grown in place instead of freed, and a batch end makes no
   more composition-redo workers than it has matches. (a) The chunk owner's diagonal table comes from the tables its
   thread keeps (`x_bx_mem::XDiagSlot`, under `LOSAT_X_BXDIAGKEEP`'s rule `keeps_tables`), and a kept table of the
-  window but another length is resized by realloc (`Diagonals::x_refit`, offset kept) instead of freed; the thread
-  keeps every table it gives back (one per slot it held at a time). (b) The partitioned lookup build grows a kept
-  overflow vector by realloc (`x_lut_direct::x_sized`) instead of replacing it. (c) The batch end's redo workers are
+  window but another length is resized by realloc (`Diagonals::x_refit`, offset kept) instead of freed; a thread
+  keeps up to two tables given back (an owner's and a helper's; one past that is freed). The rule is BXDIAGKEEP's
+  own, so this part also acts at one thread, in diagnostics mode and in the chunk waves. (b) The partitioned lookup
+  build grows its kept vectors (per-range counts, backbone, overflow) by realloc (`x_lut_direct::x_sized`) instead
+  of replacing them. Not covered: `x_compute_chunk`'s table, the tables of BXCHUNKCROSS's chunk setups and the
+  one-part build's `x_zeroed` (a split query can still raise the threshold). (c) The batch end's redo workers are
   boxed and there are `min(threads, matches)` of them; with fewer matches than threads one speculative batch holds
   every match and each match takes the worker of its position (`runtime.rs`, `x_kappa_workers`). Why: glibc raises
   its mmap threshold to the size of a freed mapped block (and the trim threshold to twice that), and each arena then
@@ -6329,10 +6332,11 @@ Scheduling (each value computed by one thread with the original function; order 
   132 KiB diagonal table 8 times, the batch end's 632 KiB array of 32 redo states, the lookup overflow 2.4-3.2 MiB),
   and the batch ends made one redo state per thread for a handful of matches. With the change no mapped block is
   freed before the threads exit at 32 threads (two 140-170 KiB interval-tree indexes at 64 threads against 200
-  proteins). Exactness: a resized table has the length and mask of a new one, and every entry it holds was written at
-  or below its offset, which only grows, so it lies at least a window behind the next subject's hits and reads as
-  cleared, the argument of the workers' kept tables (`x_seed_diag.rs`); the NCBI-pinned word-finder test runs a table
-  resized from a shorter and from a longer one (`seed.rs`); a redo worker's state does not change a match's result
+  proteins). Exactness: a resized table has the length and mask of a new one, and every entry it holds was written
+  below its offset, which only grows between clears, so it lies at least a window behind the next subject's hits and
+  reads as cleared, the argument of the workers' kept tables (`x_subject_flow.rs` module comment, `x_seed_scan.rs` on
+  the flag-0 values); the NCBI-pinned word-finder test runs a table resized from a shorter and from a longer one and
+  one resized after the offset's reset (`seed.rs`); a redo worker's state does not change a match's result
   (`x_speculate_match` redoes in stream order a result that read a predecessor's matrix); `tests/blastx_unit_cap.rs`
   compares reports with the switch on and off at 2, 4 and 8 threads for 3, 10 and 40 subjects and the batch flow.
   TIMINGS_PENDING

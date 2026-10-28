@@ -1576,8 +1576,7 @@ fn x_claimed<T: Send, R: Send>(parts: Vec<T>, f: &(dyn Fn(T) -> R + Sync)) -> Ve
 fn x_sized<T: Default + Clone>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
     if vector.capacity() < n {
         let want = if slack { n + n / 4 } else { n };
-        static GROW: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        if *GROW.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXBATCHMEM")) {
+        if crate::algorithm::blastx::search::x_bx_mem::batch_mem_on() {
             // EXPERIMENT (LOSAT_X_BXBATCHMEM): grown by realloc (a mapped block is remapped, not
             // freed, so glibc keeps its mmap threshold).
             vector.clear();

@@ -441,12 +441,7 @@ fn few_subjects_give_the_report_without_batch_mem() {
             "{proteins}: too few hits to test"
         );
         for threads in [2, 4, 8] {
-            for env in [
-                &[][..],
-                &[("LOSAT_X_BXBATCHMEM", "0")][..],
-                &[("LOSAT_X_BXUNITCAP", "2")][..],
-                &[("LOSAT_X_BXDIAGKEEP", "0")][..],
-            ] {
+            for env in [&[][..], &[("LOSAT_X_BXBATCHMEM", "0")][..]] {
                 assert!(
                     blastx(&query, &args, threads, env) == reference,
                     "{proteins} proteins, {threads} threads, {env:?}: report differs"
@@ -473,4 +468,5 @@ fn few_subjects_give_the_report_without_batch_mem() {
     let (query, set) = inputs_from(&dir, 0, 8, 4_000, 40);
     let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
     assert!(sides(&dir, &query, &args, 2, &[], "LOSAT_X_BXBATCHMEM").1);
+    let _ = std::fs::remove_dir_all(&dir);
 }

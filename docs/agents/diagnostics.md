@@ -339,6 +339,7 @@ export LOSAT_X_BPFSTAGE=1
 export LOSAT_X_BPGAP=1
 export LOSAT_X_BPGAP16=1
 export LOSAT_X_BPHITBF=1
+export LOSAT_X_BPIHPOOL=1
 export LOSAT_X_BPLISTEDLEAN=1
 export LOSAT_X_BPLK16=1
 export LOSAT_X_BPLKDROP=1
@@ -1830,6 +1831,40 @@ Rebuilding less:
   (the zero fill), cycles x1.000 (0.961-1.060) where the A/A arm read x1.001 (0.939-1.034), x0.999-1.002 in the 4
   quietest rounds (load 8-16); WSSV 8 rounds instructions x0.999998, cycles x1.002 (0.986-1.008), A/A x0.999
   (0.985-1.010); minor faults 13.2k -> 5.2k (human x yeast).
+- `LOSAT_X_BPIHPOOL=1` (BLASTP, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
+  added it (perf/bp-ih-pool, v4-D12 s21-s22, `DECISIONS` 62-63): on unless it is `0`) a subject's array of initial hits
+  (`BlastpSubjectScratch::init_hsps`, the ungapped hits `blastp_save_init_hsp` saves) past NCBI's first array size lives
+  in one pool shared by the threads (`blastp/blast_engine/x_ih_pool.rs`). NCBI starts each thread's list at
+  `MIN_INIT_HITLIST_SIZE` (100) and doubles it with `realloc` (`blast_extend.c:221-224`, `336-341`); the list is reset,
+  never shrunk, for each subject, so each thread keeps the largest array any of its subjects needed. The scratch did
+  the same, and each worker's malloc arena also kept the arrays its vector outgrew, so the preliminary stage held the
+  sum over the threads of each thread's largest (UniRef50 q100 at 32 threads: 53 MiB of capacity, of which a subject
+  used at most 0.2 MiB at any time). With the switch on the scratch holds an array of 100; a subject that fills it
+  continues in an array of twice the length from the pool (the smallest that holds it, or a new one) and the scratch's
+  array goes to the pool; a pool array that fills is exchanged for a larger one from the pool, or doubled in place when
+  the pool has none; at the subject's end the array goes back to the pool and the scratch takes an array of 100 from
+  it. The hits, their order and every value are those of the scratch's own vector (lib tests
+  `hits_through_the_pool_equal_the_scratch_vector`, `threads_sharing_the_pool_keep_their_own_hits`;
+  `tests/blastp_ih_pool.rs` compares reports with `=0`: `-subject` and `-db`, 1 and 4 threads, a subject past 100,
+  200 and 400 hits). At one thread the pool holds the largest array, as the scratch did. `LOSAT_TIMING=1` prints
+  `[TIMING] x_bpihpool: pooled=<n>` per search (the arrays that continued through the pool). After a search's
+  preliminary stage the pool's arrays are freed (`x_ih_pool::release`, next to the lookup table's drop), as the
+  subject loop's scratches freed theirs; without that, Swiss-Prot q100 at one thread, whose peak comes after the
+  preliminary stage, kept the largest array. The comparison before the push changes the code of the fused two-hit
+  loop: `=0` runs the previous allocation path, not the dev base's instructions (x0.9954-0.9959 of them, as the default).
+  Evidence 2026-10-28 (v4-D12 s22, workstation, heads 4bab83fa and fece4d68 (with `release`) on dev 4403cc12; arms default,
+  `=0`, and the dev base built the same way; every report identical): peak RssAnon of UniRef50 q100 `-evalue 0.001`
+  at 32 threads (node 1, 50 ms samples, runs alternated) 158.5, 160.0, 161.4, 162.1 MiB against `=0` 183.1, 185.1,
+  189.3 MiB (wall 402.9-403.4 against 403.3-408.3 s); q100 against a third of UniRef50 at 16 threads (4 pairs side
+  by side) 63.9-72.7 against 66.0-74.5 MiB; one thread (node 0, 2 ms samples) WSSV x PajaWSV `-db` 9,192-9,240
+  against the dev base 9,188-9,228 KiB, `-subject` 9,004-9,008 against 9,008-9,012, 3,000 human x
+  `BlastDBSpecies6` 13,240-13,264 against 13,264-13,300, Swiss-Prot q100 76,600-78,012 against 75,340-76,720 and
+  `=0` 75,628-77,748 (its peak is the last 0.4 s, the output stage, and spreads as much in every arm). Time: one
+  thread (`perf stat` `:u`, node 0, arms rotated) instructions default / `=0` x0.99998-1.00000, default / dev base
+  x0.9953 (WSSV), x0.9959 (human), x0.9956 (Swiss-Prot); cycles default / dev base x0.996 and x1.003 (WSSV, 4 and 8
+  rounds), x0.997 and x0.995 (human, 3 and 6), x0.995 and x0.995 (Swiss-Prot, 2 and 3); 16 threads (node 1 CPUs
+  32-47 warmed, 8 rounds rotated with an A/A arm, head 4bab83fa) Swiss-Prot q100 wall x1.0000 (A/A x0.9992), cycles
+  x1.0008 (A/A x0.9986), `bp_hsap` wall x1.0000 (A/A x1.0000), cycles x1.0004 (A/A x1.0017).
 - `LOSAT_X_BPLK16=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-lk16, v4-D12 s19-s20,
   `DECISIONS` 59-61): on unless it is `0`; recorded for `LOSAT_X_REACH` once per table, taken where the table has 16-bit
   hits): exact blastp's block tables (`-task blastp`, the table built

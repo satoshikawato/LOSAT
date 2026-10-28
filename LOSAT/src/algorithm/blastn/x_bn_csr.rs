@@ -106,20 +106,20 @@ pub(super) fn on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNCSR"))
 }
 
-/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNCSRPACK, in the strict set: on unless it is `0`)
-/// the head of a CSR table whose chains list their words newest first (every table of `plan`
-/// but the reading-order one of 4^8 cells) is packed: two words per 64 cells (their presence bits
-/// and the number of non-empty cells before them) and one offset per non-empty cell and one more,
-/// instead of one offset per cell. A table of 4^11 cells has 4,194,305 offsets (16 MiB), of which
-/// a query batch of about 1 Mb of `-task blastn` fills 1.2-1.6 M; the packed head is 1 MiB of bits
-/// and ranks and 4.6-6.1 MiB of offsets. The build counts the words into one byte per cell (4 MiB,
-/// in the capacity of the run list before the place pass writes it; `x_count8`), takes the presence bits and ranks from the bytes and sums
-/// the non-empty cells instead of 16 MiB, with two passes over the words as the unpacked build. A
-/// scan reads a word's bits (1 MiB) and, for a non-empty cell, its two
-/// offsets; a word of an empty cell, whose presence-vector bit is set for 8 cells of a 4^11 table,
-/// is dropped there instead of reading the 16 MiB array. The runs, their order and the presence
-/// vector and helper counters are those of the unpacked head (`x_sum_packed`), so every value
-/// read from the table is the same.
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNCSRPACK, in the strict set: on unless it is `0`) the
+/// head of a CSR table whose chains list their words newest first (every table of `plan` but the
+/// reading-order one of 4^8 cells) is packed: two words per 64 cells (their presence bits and the
+/// number of non-empty cells before them) and one offset per non-empty cell and one more, instead
+/// of one offset per cell. A table of 4^11 cells has 4,194,305 offsets (16 MiB), of which a query
+/// batch of about 1 Mb of `-task blastn` fills 1.2-1.6 M; the packed head is 1 MiB of bits and
+/// ranks and 4.6-6.1 MiB of offsets. The build counts the words into one byte per cell (4 MiB, in
+/// the capacity of the run list before the place pass writes it; `x_count8`), takes the presence
+/// bits and ranks from the bytes and sums the non-empty cells instead of 16 MiB, with two passes
+/// over the words as the unpacked build. A scan reads a word's bits (1 MiB) and, for a non-empty
+/// cell, its two offsets; a word of an empty cell, whose presence-vector bit is set for 8 cells of
+/// a 4^11 table, is dropped there instead of reading the 16 MiB array. The runs, their order and
+/// the presence vector and helper counters are those of the unpacked head (`x_sum_packed`), so
+/// every value read from the table is the same.
 pub(super) fn x_pack_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNCSRPACK"))
@@ -426,9 +426,8 @@ pub(super) fn x_serial_unpacked(
 /// one byte per cell (`x_count8`, each word's byte prefetched and counted 16 words later), the
 /// presence bits of the non-zero counts (`x_presence8`), the ranks of the blocks and the counts by
 /// rank (`x_rank_counts8`; the bytes are in `qs`'s capacity, which the place pass writes then), the
-/// sum pass (`x_sum_packed`, with the
-/// presence bits and helper counters), and the place pass, as `x_serial_unpacked` does on the
-/// offsets of all cells: two passes over the words, as there.
+/// sum pass (`x_sum_packed`, with the presence bits and helper counters), and the place pass, as
+/// `x_serial_unpacked` does on the offsets of all cells: two passes over the words, as there.
 pub(super) fn x_serial_packed(
     words: &Words<'_>,
     cells: usize,

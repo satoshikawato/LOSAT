@@ -1426,10 +1426,10 @@ fn csr_on_pool(
     // EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head (`x_bn_csr::x_serial_packed`) on the pool, with
     // the two phases of the chunks' readings below. Owner `o` counts the words of its cells into
     // their bytes (`x_count8`; the words past 255 in its own map), then sets the presence bits of
-    // its blocks (they own whole words of `bits`) and publishes its number of non-empty cells; after
-    // a barrier it writes the ranks of its blocks from the number of the owners before it and its
-    // cells' counts by rank (`x_rank_counts8`), and after another the sum and place phases below run
-    // on the counts of its ranks instead of its cells.
+    // its blocks (they own whole words of `bits`) and publishes its number of non-empty cells;
+    // after a barrier it writes the ranks of its blocks from the number of the owners before it and
+    // its cells' counts by rank (`x_rank_counts8`), and after another the sum and place phases
+    // below run on the counts of its ranks instead of its cells.
     if super::x_bn_csr::x_packed(words.ascending_cells) {
         use super::x_dc_csr::{
             x_assemble_packed, x_count8, x_presence8, x_rank, x_rank_counts8, x_sum_packed,
@@ -1441,11 +1441,12 @@ fn csr_on_pool(
         // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
         let mut starts = super::x_dc_csr::x_offsets_buffer(x_offsets, cap);
         let mut qs: Vec<u32> = Vec::with_capacity(total);
-        // The counts take the first `cells` bytes of `qs`'s capacity when they fit (always for a table
-        // of `x_bn_csr`'s size rule; each owner zeroes its cells' bytes first, and the place phase
-        // writes `qs` only after the barrier that follows the last read of a count), so the build
-        // frees nothing in the middle of a batch (a freed block there is trimmed and faulted in again,
-        // each trim interrupting every thread of the process); else a vector of their own.
+        // The counts take the first `cells` bytes of `qs`'s capacity when they fit (always for a
+        // table of `x_bn_csr`'s size rule; each owner zeroes its cells' bytes first, and the place
+        // phase writes `qs` only after the barrier that follows the last read of a count), so the
+        // build frees nothing in the middle of a batch (a freed block there is trimmed and faulted
+        // in again, each trim interrupting every thread of the process); else a vector of their
+        // own.
         let mut own_cnt: Vec<u8> = if qs.capacity() * 4 >= cells {
             Vec::new()
         } else {

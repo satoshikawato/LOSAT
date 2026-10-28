@@ -578,7 +578,9 @@ impl XSubjectSide {
         self.slots.get(oid)
     }
 
-    /// Translated residues of a plan: what `KEEP_LIMIT` counts.
+    /// Translated residues of a plan: what `KEEP_LIMIT` counts
+    /// (`plan_bytes_of`, from the length; this one checks it in tests).
+    #[cfg(test)]
     fn plan_bytes(plan: &XSubjectPlan) -> usize {
         plan.frames.iter().map(|frame| frame.aa_seq.len()).sum()
     }
@@ -590,8 +592,8 @@ impl XSubjectSide {
     fn plan_bytes_of(length: usize) -> usize {
         (0..3)
             .filter(|&i| i + 3 <= length)
-            .map(|i| 2 * ((length - i) / 3 + 2))
-            .sum()
+            .map(|i| ((length - i) / 3 + 2).saturating_mul(2))
+            .fold(0usize, usize::saturating_add)
     }
 
     /// Whether the plan of the subject in `slot`, of `length` bases, is kept:
@@ -672,16 +674,19 @@ impl XSubjectSide {
 // No NCBI counterpart: the rule of LOSAT_X_TBNUNITXLATE in `x_scan_plan` (its packed arm) for a
 // subject that is not read yet; it computes no value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): whether `x_scan_plan` makes the plan of a packed subject of
-/// `length` bases without residues (LOSAT_X_TBNUNITXLATE): the plan is made for its use alone
-/// (`x_own_plan`) and `x_units_translate`.
+/// `length` bases without residues (LOSAT_X_TBNUNITXLATE): `x_units_translate` and the plan is
+/// made for its use alone (`x_own_plan`). The length is read first, so only a subject long enough
+/// for a plan without residues decides here whether its plan is kept; the others decide in
+/// `x_scan_plan`, after its check of the subject's length (a subject too short to be searched
+/// charges nothing).
 pub(super) fn x_lean_subject(
     x_subject: Option<(&XSubjectSide, usize)>,
     length: usize,
     db_gencode: u8,
     mask_lowercase: bool,
 ) -> bool {
-    x_own_plan(x_subject, length, db_gencode, mask_lowercase)
-        && super::x_subject_translate::x_units_translate(length)
+    super::x_subject_translate::x_units_translate(length)
+        && x_own_plan(x_subject, length, db_gencode, mask_lowercase)
 }
 
 // No NCBI counterpart: where a plan is made for one use (NCBI makes every plan so); it computes
@@ -2418,6 +2423,28 @@ mod tests {
         assert_eq!(XSubjectSide::plan_bytes_of(2), 0);
         assert_eq!(XSubjectSide::plan_bytes_of(3), 6);
         assert_eq!(XSubjectSide::plan_bytes_of(5), 6 + 6 + 6);
+        assert_eq!(XSubjectSide::plan_bytes_of(usize::MAX), usize::MAX);
+        // A subject too short to be searched (x_scan_plan returns None before the plan) is not
+        // charged: the pre-read decides only for a subject long enough for a lean plan, and
+        // x_scan_plan decides after its length check.
+        let side = XSubjectSide::new(1, 1, false);
+        assert!(!x_lean_subject(Some((&side, 0)), 10, 1, false));
+        assert_eq!(side.kept_bytes(), 0);
+        assert!(x_scan_plan(
+            &[b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ".as_slice()],
+            crate::sequence::packed_subject::SubjectNt::Letters(b"ACGTACGTAC").into(),
+            1,
+            None,
+            13,
+            false,
+            ScoringMatrix::Blosum62,
+            3,
+            &std::sync::OnceLock::new(),
+            Some((&side, 0)),
+        )
+        .unwrap()
+        .is_none());
+        assert_eq!(side.kept_bytes(), 0);
     }
 
     // No NCBI counterpart: test of the plans a side does not keep; it does not change any value

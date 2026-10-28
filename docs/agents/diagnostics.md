@@ -6117,7 +6117,10 @@ Scheduling (each value computed by one thread with the original function; order 
   threads x0.997, one thread x1.000 (S(16) in the same run 13.51 -> 13.95); 20 kb and 150 kb slices at 16
   threads x0.910 and x0.976; 800 cDNAs x the yeast proteins at 16 threads `-subject` x0.995, `-db` x0.998, `-db` at
   32 threads x0.991; with the switch off the same binary gives dev's times (x0.987-1.003). Max RSS at 16 / 32
-  threads of the 50 kb slice 26 -> 20 / 28 -> 19 MiB.
+  threads of the 50 kb slice 26 -> 20 / 28 -> 19 MiB. A second run with the gated binary (12 rounds): 16 threads
+  0.571 -> 0.549 s (x0.962, 0.959-0.968, 12 of 12), S(16) 13.70 -> 14.29; the capped few-subject rows (800 cDNAs x
+  2 / 8 / 50 yeast proteins, AP027131 x 10 / 50 proteins, 16 and 32 threads) x0.986-1.031, each within its
+  per-round spread (`k` is 1 on the 2 and 8 protein rows, so the cut changes no task there).
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

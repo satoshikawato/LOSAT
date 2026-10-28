@@ -2,7 +2,8 @@
 //! more (`LOSAT_X_BNEIGHTSLOTS`, `src/algorithm/blastn/blast_engine/x_qbatch_par.rs`) on whole
 //! searches.
 //!
-//! The switch is in the strict set: on unless it is `0`. It chooses only how many slots search
+//! The switch is in the strict set: on unless it is `0` (the slots themselves, `LOSAT_X_QBATCHPAR`,
+//! are off by default since 2026-10-28, so every run here sets `LOSAT_X_QBATCHPAR=1`). It chooses only how many slots search
 //! the planned query batches ahead of the batch loop, whose results the loop takes under the keys
 //! it computes itself, so the property under test is that the report does not depend on it:
 //! pieces of LC738874 against LC738874, one query per batch (`BATCH_SIZE=1`), with the
@@ -33,6 +34,8 @@ mod reach_support;
 const OFF: (&str, &str) = ("LOSAT_X_BNEIGHTSLOTS", "0");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const ONE_QUERY_PER_BATCH: (&str, &str) = ("BATCH_SIZE", "1");
+/// The slots are off by default since 2026-10-28; every run here is meant to use them.
+const SLOTS_ON: (&str, &str) = ("LOSAT_X_QBATCHPAR", "1");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -128,7 +131,7 @@ fn blastn(queries: &Queries, task: &str, threads: u64, switches: &[(&str, &str)]
         .args(["-outfmt", "6"])
         .args(["-num_threads", &threads.to_string()])
         .env("LOSAT_X_QBATCHPARMEM", &budget)
-        .envs([ONE_QUERY_PER_BATCH, STATS])
+        .envs([ONE_QUERY_PER_BATCH, STATS, SLOTS_ON])
         .envs(switches.iter().copied())
         .output()
         .expect("run LOSAT");

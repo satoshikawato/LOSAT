@@ -114,7 +114,7 @@ pub(crate) fn batch_mem_on() -> bool {
 /// No NCBI counterpart (`LOSAT_X_BXBATCHMEM`): whether a chunk's owner takes its diagonal table
 /// from the tables its thread keeps (`XDiagSlot`), under the rule that lets the workers keep theirs
 /// (`LOSAT_X_BXDIAGKEEP`'s `keeps_tables`: a kept table's history does not change a subject's
-/// computation). It holds at one thread, in diagnostics mode and in the chunk waves too.
+/// computation). The caller asks it where a chunk is searched with the pool inside.
 pub(crate) fn owner_keeps_table(options: &ResolvedOptions, subjects: Subjects<'_>) -> bool {
     batch_mem_on() && keeps_tables(options, subjects)
 }

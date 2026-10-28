@@ -6319,8 +6319,8 @@ Scheduling (each value computed by one thread with the original function; order 
   more composition-redo workers than it has matches. (a) The chunk owner's diagonal table comes from the tables its
   thread keeps (`x_bx_mem::XDiagSlot`, under `LOSAT_X_BXDIAGKEEP`'s rule `keeps_tables`), and a kept table of the
   window but another length is resized by realloc (`Diagonals::x_refit`, offset kept) instead of freed; a thread
-  keeps up to two tables given back (an owner's and a helper's; one past that is freed). The rule is BXDIAGKEEP's
-  own, so this part also acts at one thread, in diagnostics mode and in the chunk waves. (b) The partitioned lookup
+  keeps up to two tables given back (an owner's and a helper's; one past that is freed). The owner does so where the
+  chunk is searched with the pool inside (2+ threads, as its helpers), under BXDIAGKEEP's rule. (b) The partitioned lookup
   build grows its kept vectors (per-range counts, backbone, overflow) by realloc (`x_lut_direct::x_sized`) instead
   of replacing them. Not covered: `x_compute_chunk`'s table, the tables of BXCHUNKCROSS's chunk setups and the
   one-part build's `x_zeroed` (a split query can still raise the threshold). (c) The batch end's redo workers are

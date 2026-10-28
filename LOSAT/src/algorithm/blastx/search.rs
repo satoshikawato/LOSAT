@@ -956,9 +956,10 @@ pub(crate) fn search_core(
             let x_parts = 1;
             let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
             let last = batch.contexts.last().expect("BLASTX contexts");
-            // EXPERIMENT (LOSAT_X_BXBATCHMEM): the owner's table from those its thread keeps.
+            // EXPERIMENT (LOSAT_X_BXBATCHMEM): the owner's table from those its thread keeps, where
+            // the chunk is searched with the pool inside (where its helpers keep theirs).
             #[cfg(feature = "parallel")]
-            let mut x_owner = x_bx_mem::owner_keeps_table(options, subjects)
+            let mut x_owner = (pool.enabled() && x_bx_mem::owner_keeps_table(options, subjects))
                 .then(|| x_bx_mem::XDiagSlot::new(last.offset + last.length, options.window_size));
             #[cfg(feature = "parallel")]
             let mut x_made = match x_owner {

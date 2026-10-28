@@ -155,7 +155,9 @@
 //! chunk. Before each chunk a reader gives back the room above `bucket_keep` (four times a
 //! bucket's share of a chunk, plus 64 entries) that one of its buckets grew for an earlier chunk,
 //! so that the buckets of one template reserve at most `6 * CHUNK_POSITIONS + 68 * P^2` entries
-//! (24 MiB plus 544 bytes per bucket) whatever the input. Measured on blocks of one chunk, each a
+//! (24 MiB plus 544 bytes per bucket) whatever the input (LOSAT_X_DCSEEDLEAN's
+//! `csr_on_pool_steps`: two sets of buckets for chunks of half the size, at most
+//! `6 * CHUNK_POSITIONS + 136 * P^2` entries, and twice the bucket headers). Measured on blocks of one chunk, each a
 //! different unmasked repeat of period 1 to 4 (each chunk's words on the cells of one or two
 //! owners, which change from chunk to chunk): 16, 15 and 12 MiB per template at P = 4, 16 and 64,
 //! where buckets that kept their room reserved 16, 32 and 48 MiB (up to 2 x P x 4 MiB). The
@@ -245,6 +247,11 @@ use super::{
 #[cfg(test)]
 use super::{disc_longest_chain, fill_disc_mb_tables};
 use crate::algorithm::blastn::disc_lookup::compute_discontiguous_index;
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+use crate::algorithm::blastn::disc_lookup::DiscTemplateType;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -256,6 +263,20 @@ use std::sync::OnceLock;
 fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DISCLUTPAR"))
+}
+
+/// No NCBI counterpart: reads LOSAT_X_DCSEEDLEAN once (a switch of the strict set: on unless
+/// `LOSAT_X_DCSEEDLEAN=0`): the CSR of a one-template table built on a pool (`csr`) is read and
+/// placed in steps over two sets of buckets (`csr_on_pool_steps`) instead of `csr_on_pool`'s
+/// chunks. It chooses between two LOSAT code paths with the same result and changes no value NCBI
+/// computes.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn seed_lean_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCSEEDLEAN"))
 }
 
 /// No NCBI counterpart: the number of workers of the fill when `on`, i.e. the size of the
@@ -1480,6 +1501,10 @@ pub(super) fn fill(parts: usize, words: &DiscWords<'_>, tables: DiscTables<'_>, 
 /// of the pool, so it needs them free while the table is built: `build_disc_mb_lookup` runs on
 /// the search thread before its batch is scanned, with nothing else queued on its pool, and the
 /// broadcast's jobs wait for nothing but each other.
+///
+/// EXPERIMENT (LOSAT_X_DCSEEDLEAN): with the switch on, the pool's build is `csr_on_pool_steps`
+/// (the same CSR: the reading and the owners' work of the chunks in steps over two sets of
+/// buckets, one barrier per step).
 pub(super) fn csr(
     parts: usize,
     words: &DiscWords<'_>,
@@ -1498,16 +1523,31 @@ pub(super) fn csr(
         && rayon::current_thread_index().is_some()
         && rayon::current_num_threads() == parts
     {
-        let csr = csr_on_pool(
-            parts,
-            words,
-            cells,
-            pv_array,
-            pv_array_bts,
-            helper_array,
-            CHUNK_POSITIONS,
-            x_offsets,
-        );
+        // EXPERIMENT (LOSAT_X_DCSEEDLEAN): every build on a pool takes the steps.
+        let csr = if seed_lean_on() {
+            crate::utils::xreach::x_reach!("LOSAT_X_DCSEEDLEAN", true);
+            csr_on_pool_steps(
+                parts,
+                words,
+                cells,
+                pv_array,
+                pv_array_bts,
+                helper_array,
+                STEP_POSITIONS,
+                x_offsets,
+            )
+        } else {
+            csr_on_pool(
+                parts,
+                words,
+                cells,
+                pv_array,
+                pv_array_bts,
+                helper_array,
+                CHUNK_POSITIONS,
+                x_offsets,
+            )
+        };
         return (csr, true);
     }
     let _ = parts;
@@ -1699,6 +1739,346 @@ fn csr_on_pool(
     // SAFETY: no job is running; `offsets[cells]` is no cell's end. Every element of `offsets`
     // was written (the owners' cells cover `0 .. cells`) and the runs partition `0 .. n_words`,
     // each place written once.
+    unsafe {
+        ob.set(cells, n_words as u32);
+        assemble(offsets, qs, cells, n_words as usize)
+    }
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): the positions of a chunk of
+/// `csr_on_pool_steps`, half of `CHUNK_POSITIONS`, so that its two sets of buckets keep room
+/// (`bucket_keep`) for about as many entries as `csr_on_pool`'s one set (module comment). Chunks
+/// of `CHUNK_POSITIONS` took more cycles on the workstation (v4-A15 s18 screening).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+const STEP_POSITIONS: usize = CHUNK_POSITIONS / 2;
+
+/// NCBI reference: `Fill::read`'s (blast_nalookup.c:749-767,775,793), first template only.
+/// EXPERIMENT (LOSAT_X_DCSEEDLEAN): the words that end at the stream positions `[s0, s1)`, read
+/// by `Fill::read`'s loop (the same ranges entered up to `template_length - 1` positions before
+/// `s0`, resets, `accum`, `index` and first-template index), `f(ecode1, index)` for each, in
+/// reading order. The template is the const `TT` (`DiscTemplateType::from_value`), so the index is computed
+/// without the per-word dispatch of `compute_discontiguous_index`, and a range is read through
+/// one slice (one bounds check per range).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[inline(always)]
+fn lean_span<const TT: u8>(
+    segments: &[Segment<'_>],
+    template_length: usize,
+    s0: usize,
+    s1: usize,
+    f: &mut impl FnMut(u32, u32),
+) {
+    let template = const { DiscTemplateType::from_value(TT as i32) };
+    if s0 >= s1 {
+        return;
+    }
+    let mut g = segments.partition_point(|seg| seg.stream + (seg.end - seg.start) <= s0);
+    while g < segments.len() && segments[g].stream < s1 {
+        let seg = &segments[g];
+        let len = seg.end - seg.start;
+        let first_pos = seg.start + (s0.max(seg.stream) - seg.stream);
+        let end_pos = seg.start + (s1.min(seg.stream + len) - seg.stream);
+        let warm_start = seg.start.max(first_pos.saturating_sub(template_length - 1));
+        // The 1-based start of the word that ends at `warm_start + i` in the concatenated query
+        // is `base + i` (`Fill::read`'s `index`; formed only for words, where it is >= 1).
+        let base = (seg.query_offset + warm_start + 2).wrapping_sub(template_length);
+        let first = first_pos - warm_start;
+        let mut accum: u64 = 0;
+        let mut valid_bases = 0usize;
+        for (i, &val) in seg.seq[warm_start..end_pos].iter().enumerate() {
+            if (val & BLAST2NA_MASK) != 0 {
+                accum = 0;
+                valid_bases = 0;
+                continue;
+            }
+            accum = (accum << 2) | val as u64;
+            valid_bases += 1;
+            if valid_bases < template_length || i < first {
+                continue;
+            }
+            f(
+                compute_discontiguous_index(accum, template),
+                base.wrapping_add(i) as u32,
+            );
+        }
+        g += 1;
+    }
+}
+
+/// No NCBI counterpart (LOSAT_X_DCSEEDLEAN): `lean_span` with the words' template (one instance
+/// per template).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[inline(always)]
+fn lean_words(
+    words: &DiscWords<'_>,
+    segments: &[Segment<'_>],
+    s0: usize,
+    s1: usize,
+    mut f: impl FnMut(u32, u32),
+) {
+    let tl = words.template_length;
+    let f = &mut f;
+    match words.template_type as u8 {
+        1 => lean_span::<1>(segments, tl, s0, s1, f),
+        2 => lean_span::<2>(segments, tl, s0, s1, f),
+        3 => lean_span::<3>(segments, tl, s0, s1, f),
+        4 => lean_span::<4>(segments, tl, s0, s1, f),
+        5 => lean_span::<5>(segments, tl, s0, s1, f),
+        6 => lean_span::<6>(segments, tl, s0, s1, f),
+        7 => lean_span::<7>(segments, tl, s0, s1, f),
+        8 => lean_span::<8>(segments, tl, s0, s1, f),
+        9 => lean_span::<9>(segments, tl, s0, s1, f),
+        10 => lean_span::<10>(segments, tl, s0, s1, f),
+        11 => lean_span::<11>(segments, tl, s0, s1, f),
+        12 => lean_span::<12>(segments, tl, s0, s1, f),
+        _ => lean_span::<0>(segments, tl, s0, s1, f),
+    }
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): what one thread of
+/// `csr_on_pool_steps` reads with.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+struct StepCtx<'a, 'w> {
+    t: usize,
+    chunks: usize,
+    /// The entries a bucket keeps room for from one chunk to the next (`bucket_keep`).
+    keep: usize,
+    block_shift: usize,
+    words: &'a DiscWords<'w>,
+    segments: &'a [Segment<'w>],
+    owner: &'a [u8],
+    /// Chunk `k`'s buckets are set `k % 2`.
+    sets: [SharedBuckets; 2],
+    bar: &'a super::x_dc_csr::SpinBarrier,
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): `Fill::read::<false>` of a
+/// one-template table through `lean_words`: reader `c.t`'s words of `[s0, s1)` into row `c.t` of
+/// `set`, each in the bucket of its cell's owner, after emptying the row (`empty`).
+///
+/// SAFETY: row `c.t` of `set` is this reader's (no other thread uses it during the step).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[inline(never)]
+unsafe fn read_lean_row(c: &StepCtx<'_, '_>, set: SharedBuckets, s0: usize, s1: usize) {
+    let (t, owner, shift) = (c.t, c.owner, c.block_shift);
+    for o in 0..set.parts {
+        // SAFETY: row `t` is this reader's.
+        unsafe { empty(set.at(t, o), c.keep) };
+    }
+    lean_words(c.words, c.segments, s0, s1, |cell, index| {
+        debug_assert!(((cell as usize) >> shift) < owner.len());
+        // SAFETY: the cell is in the table, whose blocks `owner` covers; row `t` is this reader's.
+        unsafe {
+            let o = *owner.get_unchecked((cell as usize) >> shift) as usize;
+            set.at(t, o).push(Entry { index, value: cell });
+        }
+    });
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): one pass of `csr_on_pool_steps`
+/// on thread `c.t`. Step `k` (`0 ..= chunks`) reads chunk `k` (if any) into row `c.t` of set
+/// `k % 2`, then applies `op` to each entry of column `c.t` of set `(k - 1) % 2` (chunk `k - 1`,
+/// if any: bucket `(0, t)` to `(parts - 1, t)`, each in order), with the cell of the entry 16
+/// places after it in its bucket (if any); a barrier ends each step.
+///
+/// SAFETY: row `t` of a set is written only by reader `t` and column `t` read only by owner `t`;
+/// a set read at step `k` was written at step `k - 1` and is written again at step `k + 1`, with
+/// barriers between; `op` touches only owner `t`'s cells and places.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[inline(always)]
+unsafe fn steps_pass(
+    c: &StepCtx<'_, '_>,
+    span: &impl Fn(usize, usize) -> (usize, usize),
+    mut op: impl FnMut(Entry, Option<u32>),
+) {
+    let (t, parts) = (c.t, c.sets[0].parts);
+    for k in 0..=c.chunks {
+        if k < c.chunks {
+            let (s0, s1) = span(k, t);
+            // SAFETY: row `t` of set `k % 2` is this reader's during step `k`.
+            unsafe { read_lean_row(c, c.sets[k % 2], s0, s1) };
+        }
+        if k >= 1 {
+            let set = c.sets[(k - 1) % 2];
+            for a in 0..parts {
+                // SAFETY: column `t` of set `(k - 1) % 2` is this owner's during step `k`.
+                let es = unsafe { set.at(a, t) };
+                for j in 0..es.len() {
+                    op(es[j], es.get(j + 16).map(|e| e.value));
+                }
+            }
+        }
+        c.bar.wait();
+    }
+}
+
+/// No NCBI counterpart (scheduling only): EXPERIMENT (LOSAT_X_DCSEEDLEAN) `csr` on the calling
+/// worker's pool of `parts` threads, as `csr_on_pool` builds it (the same owners, buckets, count
+/// pass, sum pass and place pass, so the same CSR) but in steps: two sets of buckets, chunk `k`'s
+/// in set `k % 2`; step `k` of a pass reads chunk `k` with the lean loop (`read_lean_row`) and
+/// then does the owner's work of chunk `k - 1`, and one barrier ends the step (`steps_pass`).
+/// `csr_on_pool` waits twice per chunk (after the reading, after the owners' work), so each
+/// chunk costs the slowest reading plus the slowest owner's work; here a step costs the slowest
+/// thread's reading and owner's work together (about as many barriers per pass: half-size
+/// chunks, one barrier each). The place pass prefetches the `offsets` element of the entry 16
+/// ahead, as the count pass does. Chunks of `chunk` positions (`STEP_POSITIONS`; the tests take
+/// others).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[allow(clippy::too_many_arguments)]
+fn csr_on_pool_steps(
+    parts: usize,
+    words: &DiscWords<'_>,
+    cells: usize,
+    pv_array: &mut [PvArrayType],
+    pv_array_bts: usize,
+    helper_array: &mut [u32],
+    chunk: usize,
+    x_offsets: Vec<u32>,
+) -> super::x_dc_csr::Csr {
+    use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier};
+    let chunk = chunk.max(1);
+    let (block_shift, mut owner) = plan(cells, pv_array_bts, parts);
+    debug_assert!(
+        block_shift >= K_COMPRESSION_FACTOR_SHIFT && block_shift >= pv_array_bts,
+        "a block must own whole counters and presence-vector words"
+    );
+    let blocks = owner.len();
+    for (b, o) in owner.iter_mut().enumerate() {
+        *o = (b * parts / blocks) as u8;
+    }
+    // Owner `o`'s cells `own[o].0 .. own[o].1` (empty when it has no block).
+    let mut own = vec![(0usize, 0usize); parts];
+    for (b, &o) in owner.iter().enumerate().rev() {
+        let r = (b << block_shift)..((b + 1) << block_shift).min(cells);
+        let e = &mut own[o as usize];
+        *e = (r.start, if e.1 == 0 { r.end } else { e.1 });
+    }
+    assert_eq!(own.iter().map(|&(c0, c1)| c1 - c0).sum::<usize>(), cells);
+    assert!(pv_array_bts >= 5 && helper_array.len() == cells >> 11);
+    let (segments, total) = segments(words);
+    assert!(
+        total <= u32::MAX as usize,
+        "DCCSR: more positions than u32 offsets"
+    );
+    let mut set0: Vec<Bucket> = (0..parts * parts).map(|_| Bucket::default()).collect();
+    let mut set1: Vec<Bucket> = (0..parts * parts).map(|_| Bucket::default()).collect();
+    let sets = [
+        SharedBuckets::new(&mut set0, parts),
+        SharedBuckets::new(&mut set1, parts),
+    ];
+    // As `csr_on_pool`'s (EXPERIMENT LOSAT_X_MBLUTKEEP: `x_offsets` is the batch loop's kept table
+    // or an empty vector).
+    let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 1);
+    let mut qs: Vec<u32> = Vec::with_capacity(total);
+    let ob = Shared {
+        ptr: offsets.as_mut_ptr(),
+        len: cells + 1,
+    };
+    let qb = Shared {
+        ptr: qs.as_mut_ptr(),
+        len: total,
+    };
+    let pv = Shared::new(pv_array);
+    let helper = Shared::new(helper_array);
+    let mut own_words = vec![0u64; parts];
+    let own_w = Shared::new(&mut own_words);
+    let chunks = total.div_ceil(chunk);
+    let span = |c: usize, a: usize| {
+        let start = c * chunk;
+        let end = total.min(start + chunk);
+        (
+            start + (end - start) * a / parts,
+            start + (end - start) * (a + 1) / parts,
+        )
+    };
+    let bar = SpinBarrier::new(parts);
+    let keep = bucket_keep(chunk, parts);
+    let (segments, own, owner, bar) = (&segments, &own, &owner, &bar);
+    rayon::broadcast(|ctx| {
+        let t = ctx.index();
+        let _poison = Poison(bar);
+        let (ob, qb, pv, helper, own_w) = (ob, qb, pv, helper, own_w);
+        let (c0, c1) = own[t];
+        let c = StepCtx {
+            t,
+            chunks,
+            keep,
+            block_shift,
+            words,
+            segments,
+            owner,
+            sets,
+            bar,
+        };
+        // SAFETY (all of the job's accesses): `steps_pass`'s for the sets; owner `t` alone writes
+        // `offsets[c0 .. c1]`, the presence-vector words and counters of its blocks, its entry of
+        // the owners' words (read by the later owners after a barrier) and `qs` at its places,
+        // which lie in `base .. base + its words` (disjoint from the other owners'), as in
+        // `csr_on_pool`.
+        unsafe {
+            std::ptr::write_bytes(ob.ptr.add(c0), 0, c1 - c0);
+            let mut got = 0u64;
+            steps_pass(&c, &span, |e, ahead| {
+                if let Some(cell) = ahead {
+                    prefetch(ob.ptr.wrapping_add(cell as usize));
+                }
+                let cell = e.value as usize;
+                ob.set(cell, ob.get(cell) + 1);
+                got += 1;
+            });
+            own_w.set(t, got);
+            bar.wait();
+            let base: u64 = (0..t).map(|p| own_w.get(p)).sum();
+            if c0 < c1 {
+                sum_cells(
+                    pv.ptr,
+                    pv.len,
+                    helper.ptr,
+                    ob.ptr,
+                    base as u32,
+                    c0,
+                    c1,
+                    pv_array_bts,
+                );
+            }
+            steps_pass(&c, &span, |e, ahead| {
+                if let Some(cell) = ahead {
+                    prefetch(ob.ptr.wrapping_add(cell as usize));
+                }
+                let cell = e.value as usize;
+                let p = ob.get(cell) - 1;
+                ob.set(cell, p);
+                qb.set(p as usize, e.index);
+            });
+        }
+    });
+    let n_words: u64 = own_words.iter().sum();
+    assert!(
+        n_words <= total as u64 && n_words <= u32::MAX as u64,
+        "DCCSR: more words than positions"
+    );
+    // SAFETY: as `csr_on_pool`'s.
     unsafe {
         ob.set(cells, n_words as u32);
         assemble(offsets, qs, cells, n_words as usize)
@@ -3502,10 +3882,11 @@ mod tests {
         }
     }
 
-    // EXPERIMENT (LOSAT_X_DCCSR): the CSR built on the pool, in chunks of any size, is the serial
-    // build's and lists the chains of the original loop (`x_dc_csr::x_assert_runs_are_the_chains`
-    // compares every cell's run with its chain, the presence vector, the counters, the longest
-    // chain and the two builds; it panics on a difference).
+    // EXPERIMENT (LOSAT_X_DCCSR): the CSR built on the pool (`csr_on_pool`, and LOSAT_X_DCSEEDLEAN's
+    // `csr_on_pool_steps`), in chunks of any size, is the serial build's and lists the chains of
+    // the original loop (`x_dc_csr::x_assert_runs_are_the_chains` compares every cell's run with
+    // its chain, the presence vector, the counters, the longest chain and the two builds; it
+    // panics on a difference).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -3517,31 +3898,39 @@ mod tests {
         let cells = reference.hashtable.len();
         let approx: usize = case.queries.iter().map(Vec::len).sum();
         let (_, pv_array_bts) = compute_mb_pv_params(cells, approx, false, combo.0);
-        let mut pv = vec![0; reference.pv_array.len()];
-        let mut helper = vec![0; reference.helper_array.len()];
-        let csr = csr_on_pool(
-            parts,
-            &words,
-            cells,
-            &mut pv,
-            pv_array_bts,
-            &mut helper,
-            chunk,
-            Vec::new(),
-        );
-        super::super::x_dc_csr::x_assert_runs_are_the_chains(
-            &words,
-            &csr,
-            true,
-            &pv,
-            &helper,
-            pv_array_bts,
-            &reference.hashtable,
-            &reference.next_pos,
-            &reference.pv_array,
-            &reference.helper_array,
-            reference.longest_chain,
-        );
+        // EXPERIMENT (LOSAT_X_DCSEEDLEAN): `csr_on_pool` and `csr_on_pool_steps`.
+        for steps in [false, true] {
+            let mut pv = vec![0; reference.pv_array.len()];
+            let mut helper = vec![0; reference.helper_array.len()];
+            let build = if steps {
+                csr_on_pool_steps
+            } else {
+                csr_on_pool
+            };
+            let csr = build(
+                parts,
+                &words,
+                cells,
+                &mut pv,
+                pv_array_bts,
+                &mut helper,
+                chunk,
+                Vec::new(),
+            );
+            super::super::x_dc_csr::x_assert_runs_are_the_chains(
+                &words,
+                &csr,
+                true,
+                &pv,
+                &helper,
+                pv_array_bts,
+                &reference.hashtable,
+                &reference.next_pos,
+                &reference.pv_array,
+                &reference.helper_array,
+                reference.longest_chain,
+            );
+        }
     }
 
     #[cfg(all(

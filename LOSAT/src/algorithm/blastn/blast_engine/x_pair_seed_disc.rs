@@ -70,7 +70,7 @@ use super::super::{
 };
 use super::{
     part, plan_strips, pool_threads, run_strips, seed_of_pair, DiagArray, FoldCounts, Inputs,
-    PartScratch, Seed, StageStats, StripJob,
+    PartScratch, Seed, SeedOut, StageStats, StripJob,
 };
 use crate::algorithm::blastn::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
 use crate::algorithm::blastn::lookup::x_dc_csr::{Csr, Ring};
@@ -104,6 +104,16 @@ pub(super) fn arr_on() -> bool {
 fn lean_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_FOLDLEAN"))
+}
+
+/// No NCBI counterpart: reads LOSAT_X_DCSEEDLEAN once (a switch of the strict set: on unless
+/// `LOSAT_X_DCSEEDLEAN=0`). With it the partitioned stage of the strips (`seed_stage_of` with a
+/// `part::FoldPart`) folds without recording the buckets it changes and, in LOSAT_X_PAIRPARHOME's
+/// home loop, scans each strip into its partitions' lists (`seed_stage_lists`). The same seeds folded in the same order into the
+/// same tables, so it does not change any value NCBI computes.
+fn seed_lean_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCSEEDLEAN"))
 }
 
 /// No NCBI counterpart: reads LOSAT_X_BNDCONE once (a strict-set switch since 2026-10-24: on unless
@@ -215,8 +225,9 @@ fn in_scope_array(x: &Inputs<'_>) -> bool {
 /// Phase 1 for one strip: the discontiguous scan kernel `scan_subject_disc_words_with_ranges`
 /// picks (`choose_disc_scan_subject`), from `job.start` to `job.end` (stride 1); every word's
 /// first-template chain, then its second-template chain, as `on_word` walks them; every pair
-/// through `seed_of_pair`.
-fn scan_strip_disc(x: &Inputs<'_>, disc: &DiscTemplates, job: &StripJob, out: &mut Vec<Seed>) {
+/// through `seed_of_pair`, into `out` (a list, or with LOSAT_X_DCSEEDLEAN the strip's
+/// partitions' lists).
+fn scan_strip_disc<O: SeedOut>(x: &Inputs<'_>, disc: &DiscTemplates, job: &StripJob, out: &mut O) {
     // EXPERIMENT (LOSAT_X_DCCSR): a table laid out as CSR has no chains to walk.
     if let Some(csr) = disc.x_csr() {
         return scan_strip_disc_csr(x, disc, csr, job, out);
@@ -280,12 +291,12 @@ fn scan_strip_disc(x: &Inputs<'_>, disc: &DiscTemplates, job: &StripJob, out: &m
 ///     }
 /// ```
 #[inline(never)]
-fn scan_strip_disc_csr(
+fn scan_strip_disc_csr<O: SeedOut>(
     x: &Inputs<'_>,
     disc: &DiscTemplates,
     csr: &Csr,
     job: &StripJob,
-    out: &mut Vec<Seed>,
+    out: &mut O,
 ) {
     debug_assert!(!disc.two_templates);
     let two_stage = x.two_stage;
@@ -382,7 +393,36 @@ fn scan_strip_disc_csr(
 /// says the table has the memo of LOSAT_X_DIAGLV2 (`x_last`); without it the retrieve and the
 /// insert do not test for one, so with both off this is the fold before those switches.
 #[allow(clippy::too_many_arguments)]
+#[inline(always)]
 fn fold_two_hit<const PT: bool, const LEAN: bool, const MEMO: bool>(
+    x: &Inputs<'_>,
+    seeds: &[Seed],
+    diag_hash: &mut DiagHashTable,
+    ungapped_hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    scan_pause_ns: &mut u64,
+    counts: &mut FoldCounts,
+    out: &mut part::PartOut,
+    pos: &[u32],
+) {
+    fold_two_hit_t::<PT, LEAN, MEMO, true>(
+        x,
+        seeds,
+        diag_hash,
+        ungapped_hits,
+        timing,
+        scan_pause_ns,
+        counts,
+        out,
+        pos,
+    );
+}
+
+/// `fold_two_hit`; EXPERIMENT (LOSAT_X_DCSEEDLEAN): without `TRACK` the inserts of a partition
+/// do not record the buckets they change (`part::insert_t`; the merge then writes back every
+/// bucket of the partition).
+#[allow(clippy::too_many_arguments)]
+fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool>(
     x: &Inputs<'_>,
     seeds: &[Seed],
     diag_hash: &mut DiagHashTable,
@@ -665,7 +705,7 @@ fn fold_two_hit<const PT: bool, const LEAN: bool, const MEMO: bool>(
         //                           hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
         if !hit_ready {
-            part::insert::<PT, LEAN, MEMO>(
+            part::insert_t::<PT, LEAN, MEMO, TRACK>(
                 diag_hash,
                 out,
                 x_key,
@@ -762,7 +802,7 @@ fn fold_two_hit<const PT: bool, const LEAN: bool, const MEMO: bool>(
         // ```
         if !(off_found || ungapped_score >= cutoff_score) {
             hit_ready = false;
-            part::insert::<PT, LEAN, MEMO>(
+            part::insert_t::<PT, LEAN, MEMO, TRACK>(
                 diag_hash,
                 out,
                 x_key,
@@ -832,7 +872,7 @@ fn fold_two_hit<const PT: bool, const LEAN: bool, const MEMO: bool>(
         //                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
         //                           hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
-        part::insert::<PT, LEAN, MEMO>(
+        part::insert_t::<PT, LEAN, MEMO, TRACK>(
             diag_hash,
             out,
             x_key,
@@ -881,24 +921,25 @@ fn seed_stage(
     if memo {
         hash.x_lv2_reset();
     }
+    let lists = seed_lean_on();
     match (lean_on(), memo) {
-        (false, false) => {
-            seed_stage_of::<false, false>(x, disc, threads, hash, hits, timing, timed, fold_part)
-        }
-        (false, true) => {
-            seed_stage_of::<false, true>(x, disc, threads, hash, hits, timing, timed, fold_part)
-        }
-        (true, false) => {
-            seed_stage_of::<true, false>(x, disc, threads, hash, hits, timing, timed, fold_part)
-        }
-        (true, true) => {
-            seed_stage_of::<true, true>(x, disc, threads, hash, hits, timing, timed, fold_part)
-        }
+        (false, false) => seed_stage_of::<false, false>(
+            x, disc, threads, hash, hits, timing, timed, fold_part, lists,
+        ),
+        (false, true) => seed_stage_of::<false, true>(
+            x, disc, threads, hash, hits, timing, timed, fold_part, lists,
+        ),
+        (true, false) => seed_stage_of::<true, false>(
+            x, disc, threads, hash, hits, timing, timed, fold_part, lists,
+        ),
+        (true, true) => seed_stage_of::<true, true>(
+            x, disc, threads, hash, hits, timing, timed, fold_part, lists,
+        ),
     }
 }
 
 /// `seed_stage` for one pair of LOSAT_X_FOLDLEAN (`LEAN`) and the table's memo of
-/// LOSAT_X_DIAGLV2 (`MEMO`).
+/// LOSAT_X_DIAGLV2 (`MEMO`); `lists`: LOSAT_X_DCSEEDLEAN's partitioned stage (`seed_stage_lists`).
 #[allow(clippy::too_many_arguments)]
 fn seed_stage_of<const LEAN: bool, const MEMO: bool>(
     x: &Inputs<'_>,
@@ -909,6 +950,7 @@ fn seed_stage_of<const LEAN: bool, const MEMO: bool>(
     timing: Option<&BlastnTiming>,
     timed: bool,
     fold_part: Option<part::FoldPart<'_>>,
+    lists: bool,
 ) -> StageStats {
     let jobs = plan_strips(
         x.subject_seq_ranges,
@@ -921,6 +963,16 @@ fn seed_stage_of<const LEAN: bool, const MEMO: bool>(
     let produce = |i: usize, out: &mut Vec<Seed>| scan_strip_disc(x, disc, &jobs[i], out);
     if let Some(fold_part) = fold_part {
         let parts = fold_part.parts;
+        // EXPERIMENT (LOSAT_X_DCSEEDLEAN): every partitioned stage takes the partitions' lists and
+        // the folds that do not record their buckets.
+        if lists {
+            crate::utils::xreach::x_reach!("LOSAT_X_DCSEEDLEAN", true);
+            let r = seed_stage_lists::<LEAN, MEMO>(
+                x, disc, &jobs, threads, hash, hits, timing, timed, fold_part,
+            );
+            part::record(part::TWO_HITS, parts, &r);
+            return StageStats::of_part(jobs.len(), r, timing);
+        }
         let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
             let part::PartState {
                 hash,
@@ -995,6 +1047,62 @@ fn seed_stage_of<const LEAN: bool, const MEMO: bool>(
         timed,
     );
     stats
+}
+
+/// No NCBI counterpart (scheduling only): EXPERIMENT (LOSAT_X_DCSEEDLEAN) `seed_stage_of`'s
+/// partitioned stage (LOSAT_X_PAIRPARFOLD) on the strips `jobs`: the home loop's strips are
+/// scanned into their partitions' lists (`scan_strip_disc` into a `part::PartSink`) instead of
+/// into one list cut by partition, and the folds do not record the buckets they change
+/// (`fold_two_hit_t` without `TRACK`), the merge writing back every bucket of each partition
+/// (`part::seed_stage_part_lists`). Each partition folds the same seeds in the same order.
+#[allow(clippy::too_many_arguments)]
+fn seed_stage_lists<const LEAN: bool, const MEMO: bool>(
+    x: &Inputs<'_>,
+    disc: &DiscTemplates,
+    jobs: &[StripJob],
+    threads: usize,
+    hash: &mut DiagHashTable,
+    hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    timed: bool,
+    fold_part: part::FoldPart<'_>,
+) -> part::PartStats {
+    let produce = |i: usize, out: &mut Vec<Seed>| scan_strip_disc(x, disc, &jobs[i], out);
+    let produce_lists =
+        |i: usize, out: &mut part::PartSink<'_>| scan_strip_disc(x, disc, &jobs[i], out);
+    let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
+        let part::PartState {
+            hash,
+            hits,
+            out,
+            counts,
+            scan_pause_ns,
+            ..
+        } = st;
+        fold_two_hit_t::<true, LEAN, MEMO, false>(
+            x,
+            seeds,
+            hash,
+            hits,
+            timing,
+            scan_pause_ns,
+            counts,
+            out,
+            pos,
+        );
+    };
+    part::seed_stage_part_lists(
+        jobs.len(),
+        threads,
+        AHEAD_PER_THREAD * threads,
+        hash,
+        hits,
+        fold_part,
+        &produce,
+        &produce_lists,
+        &fold_one,
+        timed,
+    )
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
@@ -1768,10 +1876,12 @@ mod tests {
     type HashState = (Vec<u32>, Vec<(i32, i32, bool, i32, u32)>, u32, u32, i32);
 
     /// `seed_stage_of` in the instance of `lean` (LOSAT_X_FOLDLEAN) and of the table's memo
-    /// (LOSAT_X_DIAGLV2), whatever the environment says (`seed_stage` reads the switch), after
-    /// the memo is made again at the stage's start as `seed_stage` does.
+    /// (LOSAT_X_DIAGLV2), with LOSAT_X_DCSEEDLEAN's stage or not (`lists`), whatever the
+    /// environment says (`seed_stage` reads the switches), after the memo is made again at the
+    /// stage's start as `seed_stage` does.
     fn stage_of(
         lean: bool,
+        lists: bool,
         x: &Inputs<'_>,
         disc: &DiscTemplates,
         threads: usize,
@@ -1783,18 +1893,18 @@ mod tests {
             hash.x_lv2_reset();
         }
         match (lean, !hash.x_last.is_empty()) {
-            (false, false) => {
-                seed_stage_of::<false, false>(x, disc, threads, hash, hits, None, false, fold_part)
-            }
-            (false, true) => {
-                seed_stage_of::<false, true>(x, disc, threads, hash, hits, None, false, fold_part)
-            }
-            (true, false) => {
-                seed_stage_of::<true, false>(x, disc, threads, hash, hits, None, false, fold_part)
-            }
-            (true, true) => {
-                seed_stage_of::<true, true>(x, disc, threads, hash, hits, None, false, fold_part)
-            }
+            (false, false) => seed_stage_of::<false, false>(
+                x, disc, threads, hash, hits, None, false, fold_part, lists,
+            ),
+            (false, true) => seed_stage_of::<false, true>(
+                x, disc, threads, hash, hits, None, false, fold_part, lists,
+            ),
+            (true, false) => seed_stage_of::<true, false>(
+                x, disc, threads, hash, hits, None, false, fold_part, lists,
+            ),
+            (true, true) => seed_stage_of::<true, true>(
+                x, disc, threads, hash, hits, None, false, fold_part, lists,
+            ),
         }
     }
 
@@ -2378,6 +2488,8 @@ mod tests {
                         .enumerate()
                         {
                             let lean = k % 2 == 1;
+                            // LOSAT_X_DCSEEDLEAN's stage or not, in both instances of `lean`
+                            let lists = (k / 2) % 2 == 0;
                             let pool = rayon::ThreadPoolBuilder::new()
                                 .num_threads(threads)
                                 .build()
@@ -2387,7 +2499,7 @@ mod tests {
                                 let mut scratch = PartScratch::default();
                                 for (chunk, &(xc, stage)) in chunks.iter().enumerate() {
                                     let at = format!(
-                                        "case {case_no} threads {threads} parts {parts} levels {levels} memo {memo} lean {lean} chunk {chunk}"
+                                        "case {case_no} threads {threads} parts {parts} levels {levels} memo {memo} lean {lean} lists {lists} chunk {chunk}"
                                     );
                                     hash.offset = xc.diag_offset as i32;
                                     let mut hits = Vec::new();
@@ -2396,17 +2508,18 @@ mod tests {
                                             scratch: &mut scratch,
                                             parts,
                                         });
-                                        let stats = if lean == lean_on() {
-                                            seed_stage(
-                                                xc, disc, threads, &mut hash, &mut hits, None,
-                                                false, fold_part,
-                                            )
-                                        } else {
-                                            stage_of(
-                                                lean, xc, disc, threads, &mut hash, &mut hits,
-                                                fold_part,
-                                            )
-                                        };
+                                        let stats =
+                                            if lean == lean_on() && lists == seed_lean_on() {
+                                                seed_stage(
+                                                    xc, disc, threads, &mut hash, &mut hits, None,
+                                                    false, fold_part,
+                                                )
+                                            } else {
+                                                stage_of(
+                                                    lean, lists, xc, disc, threads, &mut hash,
+                                                    &mut hits, fold_part,
+                                                )
+                                            };
                                         assert_eq!(stats.counts.seeds, seeds.len() as u64, "{at}");
                                     } else {
                                         fold_memo_free(xc, &mut hash, &mut hits);

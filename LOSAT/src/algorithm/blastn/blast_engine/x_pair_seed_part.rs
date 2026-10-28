@@ -76,6 +76,12 @@
 //! until the stall exit releases it. At the end the hits are put in the order of their seeds'
 //! keys (strip, position in the strip's scan order) and the changed buckets of every partition
 //! are written into the stage's table with the reference's cell numbers (`merge`).
+//! EXPERIMENT (LOSAT_X_DCSEEDLEAN, dc-megablast's stage only: `seed_stage_part_lists`): the home
+//! loop's strips are scanned straight into the partitions' lists (`PartSink`: each seed in the
+//! partition of the cut, numbered in scan order, so the lists are those of the stable cut), and
+//! the folds do not record the buckets they change, so the merge writes back every bucket of
+//! each partition (an unchanged one has the stage's chain, its cells below the stage's
+//! occupancy, so writing it back changes nothing).
 //! With LOSAT_X_PAIRPARHOME (on by default) the participants share the folds otherwise: each
 //! partition has a home participant that folds it run by run of ready strips, and the others
 //! fold it only in the cases `seed_stage_home` lists; the argument below needs only that each
@@ -118,7 +124,7 @@
 //!   operations changes.
 
 use super::super::{DiagHashCell, DiagHashTable, UngappedHit, DIAGHASH_NUM_BUCKETS};
-use super::{FoldCounts, Seed};
+use super::{FoldCounts, Seed, SeedOut};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
@@ -196,6 +202,10 @@ pub(super) struct PartOut {
     appends: Vec<(u64, u32)>,
     touched: Vec<bool>,
     dirty: Vec<u16>,
+    /// EXPERIMENT (LOSAT_X_DCSEEDLEAN): the stage's folds do not record the buckets they change
+    /// (`touched`, `dirty`; `insert_t` without `TRACK`), and the merge writes back every bucket of
+    /// the partition.
+    all_dirty: bool,
     pub(super) ungapped_ns: u64,
     pub(super) ungapped_calls: u64,
 }
@@ -234,7 +244,40 @@ pub(super) fn insert<const PT: bool, const LEAN: bool, const MEMO: bool>(
     s_off: i32,
     window_size: i32,
 ) {
+    insert_t::<PT, LEAN, MEMO, true>(
+        hash,
+        out,
+        key,
+        diag,
+        level,
+        hit_len,
+        hit_saved,
+        s_off,
+        window_size,
+    );
+}
+
+/// `insert`; EXPERIMENT (LOSAT_X_DCSEEDLEAN): without `TRACK` a partition's insert does not
+/// record the diagonal's bucket (`PartOut::all_dirty`).
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub(super) fn insert_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool>(
+    hash: &mut DiagHashTable,
+    out: &mut PartOut,
+    key: u64,
+    diag: i32,
+    level: i32,
+    hit_len: i32,
+    hit_saved: bool,
+    s_off: i32,
+    window_size: i32,
+) {
     if PT {
+        // a stage whose folds do not record their buckets merges every bucket
+        debug_assert!(
+            TRACK || out.all_dirty,
+            "an untracked fold outside its stage"
+        );
         let occupancy = hash.occupancy;
         if LEAN {
             hash.insert_inl::<MEMO>(diag, level, hit_len, hit_saved, s_off, window_size);
@@ -243,10 +286,12 @@ pub(super) fn insert<const PT: bool, const LEAN: bool, const MEMO: bool>(
         } else {
             hash.insert_plain(diag, level, hit_len, hit_saved, s_off, window_size);
         }
-        let bucket = bucket_of_diag(diag);
-        if !out.touched[bucket] {
-            out.touched[bucket] = true;
-            out.dirty.push(bucket as u16);
+        if TRACK {
+            let bucket = bucket_of_diag(diag);
+            if !out.touched[bucket] {
+                out.touched[bucket] = true;
+                out.dirty.push(bucket as u16);
+            }
         }
         if hash.occupancy != occupancy {
             out.appends.push((key, occupancy));
@@ -339,12 +384,60 @@ impl PartState {
 }
 
 /// The seeds of one strip cut by partition: partition p's seeds are `seeds[offs[p]..offs[p +
-/// 1]]`, in scan order, with their positions in the strip's scan order in `pos`.
+/// 1]]`, in scan order, with their positions in the strip's scan order in `pos`; or, where the
+/// scan filled the partitions' lists (`split`, EXPERIMENT LOSAT_X_DCSEEDLEAN), `lists[p]`.
 #[derive(Default)]
 struct StripBuf {
     seeds: Vec<Seed>,
     pos: Vec<u32>,
     offs: Vec<u32>,
+    lists: Vec<PartSeeds>,
+    split: bool,
+}
+
+impl StripBuf {
+    /// Partition p's seeds of the strip and their positions in the strip's scan order.
+    #[inline(always)]
+    fn part(&self, p: usize) -> (&[Seed], &[u32]) {
+        if self.split {
+            let list = &self.lists[p];
+            (&list.seeds, &list.pos)
+        } else {
+            let (a, b) = (self.offs[p] as usize, self.offs[p + 1] as usize);
+            (&self.seeds[a..b], &self.pos[a..b])
+        }
+    }
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): one partition's seeds of a strip,
+/// in scan order, with their positions in the strip's scan order.
+#[derive(Default)]
+struct PartSeeds {
+    seeds: Vec<Seed>,
+    pos: Vec<u32>,
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): the receiver of a strip's seeds
+/// that puts each seed in its partition's list (`table`: the partition of each bucket, `bucket %
+/// parts`), numbering them in scan order, so the strip needs no cut: the lists are those of the
+/// stable counting sort of `seed_stage_home`'s `produce`.
+pub(super) struct PartSink<'a> {
+    table: &'a [u16; DIAGHASH_NUM_BUCKETS],
+    lists: &'a mut [PartSeeds],
+    k: u32,
+}
+
+impl SeedOut for PartSink<'_> {
+    #[inline(always)]
+    fn push(&mut self, seed: Seed) {
+        let p = self.table[bucket_of(&seed)] as usize;
+        debug_assert!(p < self.lists.len());
+        // SAFETY: the table holds `bucket % parts` and there are `parts` lists (`produce`).
+        let list = unsafe { self.lists.get_unchecked_mut(p) };
+        list.seeds.push(seed);
+        list.pos.push(self.k);
+        self.k += 1;
+    }
 }
 
 /// No NCBI counterpart (scheduling only): the allocations of the partitioned fold's partition
@@ -508,15 +601,72 @@ where
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARHOME", true);
     }
     seed_stage_in(
-        home, n, threads, ahead, hash, hits, fold_part, scan, fold, timed,
+        home,
+        n,
+        threads,
+        ahead,
+        hash,
+        hits,
+        fold_part,
+        scan,
+        None::<&NoLists>,
+        fold,
+        timed,
+    )
+}
+
+/// No NCBI counterpart (scheduling only): a stage without a scan into the partitions' lists.
+type NoLists = fn(usize, &mut PartSink<'_>);
+
+/// No NCBI counterpart (scheduling only): EXPERIMENT (LOSAT_X_DCSEEDLEAN) `seed_stage_part` of
+/// a caller whose `fold` does not record the buckets it changes (`insert_t` without `TRACK`):
+/// the merge writes back every bucket of each partition (`PartOut::all_dirty`; a bucket no fold
+/// changed has the stage's chain, cells below the stage's occupancy, so writing it back changes
+/// nothing). With LOSAT_X_PAIRPARHOME the strips are scanned by `scan_lists` into their
+/// partitions' lists (`PartSink`) instead of by `scan` into one list that `produce` cuts.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn seed_stage_part_lists<FS, FL, FF>(
+    n: usize,
+    threads: usize,
+    ahead: usize,
+    hash: &mut DiagHashTable,
+    hits: &mut Vec<UngappedHit>,
+    fold_part: FoldPart<'_>,
+    scan: &FS,
+    scan_lists: &FL,
+    fold: &FF,
+    timed: bool,
+) -> PartStats
+where
+    FS: Fn(usize, &mut Vec<Seed>) + Sync,
+    FL: Fn(usize, &mut PartSink<'_>) + Sync,
+    FF: Fn(&mut PartState, &[Seed], &[u32]) + Sync,
+{
+    let home = home_on();
+    if home {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARHOME", true);
+    }
+    seed_stage_in(
+        home,
+        n,
+        threads,
+        ahead,
+        hash,
+        hits,
+        fold_part,
+        scan,
+        Some(scan_lists),
+        fold,
+        timed,
     )
 }
 
 /// No NCBI counterpart (scheduling only): `seed_stage_part` with the sharing of the folds given
 /// (`home`: LOSAT_X_PAIRPARHOME, `seed_stage_home`; else any participant folds any partition it
-/// can lock).
+/// can lock). EXPERIMENT (LOSAT_X_DCSEEDLEAN): with `scan_lists` (`seed_stage_part_lists`) the
+/// folds do not record their buckets, and the home stage scans into the partitions' lists.
 #[allow(clippy::too_many_arguments)]
-fn seed_stage_in<FS, FF>(
+fn seed_stage_in<FS, FL, FF>(
     home: bool,
     n: usize,
     threads: usize,
@@ -525,11 +675,13 @@ fn seed_stage_in<FS, FF>(
     hits: &mut Vec<UngappedHit>,
     fold_part: FoldPart<'_>,
     scan: &FS,
+    scan_lists: Option<&FL>,
     fold: &FF,
     timed: bool,
 ) -> PartStats
 where
     FS: Fn(usize, &mut Vec<Seed>) + Sync,
+    FL: Fn(usize, &mut PartSink<'_>) + Sync,
     FF: Fn(&mut PartState, &[Seed], &[u32]) + Sync,
 {
     let FoldPart { scratch, parts } = fold_part;
@@ -538,11 +690,11 @@ where
         "LOSAT_X_PAIRPARFOLD: {parts} partitions"
     );
     let ahead = ahead.max(1);
-    rebuild(scratch, hash, parts);
+    rebuild(scratch, hash, parts, scan_lists.is_some());
     let occ0 = hash.occupancy;
     if home {
         return seed_stage_home(
-            n, threads, ahead, hash, hits, scratch, parts, occ0, scan, fold, timed,
+            n, threads, ahead, hash, hits, scratch, parts, occ0, scan, scan_lists, fold, timed,
         );
     }
 
@@ -568,7 +720,10 @@ where
         raw.clear();
         scan(i, raw);
         let mut buf = lock(&spare).pop().unwrap_or_default();
-        let StripBuf { seeds, pos, offs } = &mut buf;
+        buf.split = false;
+        let StripBuf {
+            seeds, pos, offs, ..
+        } = &mut buf;
         offs.clear();
         offs.resize(parts + 1, 0);
         for seed in raw.iter() {
@@ -833,9 +988,12 @@ enum Run {
 /// strip; the strips are read under a read lock instead of a shared pointer per fold unit; the
 /// helpers' stall test sums the cursor and the partitions' next strips instead of a shared
 /// count per fold unit; and each partition's next strip and state are on lines of their own.
-/// The owner alone can still scan every strip and fold every partition.
+/// The owner alone can still scan every strip and fold every partition. EXPERIMENT
+/// (LOSAT_X_DCSEEDLEAN): with `scan_lists` a strip is scanned into its partitions' lists
+/// (`PartSink`) instead of by `scan` into one list cut by partition (the same seeds of each
+/// partition in the same order, with the same positions).
 #[allow(clippy::too_many_arguments)]
-fn seed_stage_home<FS, FF>(
+fn seed_stage_home<FS, FL, FF>(
     n: usize,
     threads: usize,
     ahead: usize,
@@ -845,11 +1003,13 @@ fn seed_stage_home<FS, FF>(
     parts: usize,
     occ0: u32,
     scan: &FS,
+    scan_lists: Option<&FL>,
     fold: &FF,
     timed: bool,
 ) -> PartStats
 where
     FS: Fn(usize, &mut Vec<Seed>) + Sync,
+    FL: Fn(usize, &mut PartSink<'_>) + Sync,
     FF: Fn(&mut PartState, &[Seed], &[u32]) + Sync,
 {
     let threads = threads.max(1);
@@ -902,10 +1062,16 @@ where
         min_next
     };
 
-    // A strip's seeds, cut by partition with a stable counting sort.
+    // EXPERIMENT (LOSAT_X_DCSEEDLEAN): the partition of each bucket, for `PartSink`.
+    let table: Option<[u16; DIAGHASH_NUM_BUCKETS]> =
+        scan_lists.map(|_| std::array::from_fn(|b| (b % parts) as u16));
+    // A strip's seeds, cut by partition with a stable counting sort (or scanned into the
+    // partitions' lists).
     let produce = |i: usize, raw: &mut Vec<Seed>, fill: &mut Vec<u32>| {
-        raw.clear();
-        scan(i, raw);
+        if scan_lists.is_none() {
+            raw.clear();
+            scan(i, raw);
+        }
         // (no spare buffer: first the strips every partition has passed, which wait for the
         // next participant that reads the slowest partition)
         let mut buf = lock(&spare).pop();
@@ -914,7 +1080,29 @@ where
             buf = lock(&spare).pop();
         }
         let mut buf = buf.unwrap_or_default();
-        let StripBuf { seeds, pos, offs } = &mut buf;
+        if let (Some(scan_lists), Some(table)) = (scan_lists, &table) {
+            buf.lists.resize_with(parts, PartSeeds::default);
+            for list in &mut buf.lists {
+                list.seeds.clear();
+                list.pos.clear();
+            }
+            scan_lists(
+                i,
+                &mut PartSink {
+                    table,
+                    lists: &mut buf.lists,
+                    k: 0,
+                },
+            );
+            buf.split = true;
+            *write(&slots[i]) = Some(buf);
+            ready[i].store(true, Ordering::Release);
+            return;
+        }
+        buf.split = false;
+        let StripBuf {
+            seeds, pos, offs, ..
+        } = &mut buf;
         offs.clear();
         offs.resize(parts + 1, 0);
         for seed in raw.iter() {
@@ -988,12 +1176,12 @@ where
             while i < n && ready[i].load(Ordering::Acquire) {
                 let slot = read(&slots[i]);
                 let strip = slot.as_ref().expect("a ready strip");
-                let (a, b) = (strip.offs[p] as usize, strip.offs[p + 1] as usize);
-                if a < b {
+                let (seeds, pos) = strip.part(p);
+                if !seeds.is_empty() {
                     st.out.strip = i as u64;
                     let t0 = timed.then(std::time::Instant::now);
                     let pause0 = st.scan_pause_ns;
-                    fold(st, &strip.seeds[a..b], &strip.pos[a..b]);
+                    fold(st, seeds, pos);
                     if let Some(t0) = t0 {
                         st.fold_ns += t0.elapsed().as_nanos() as u64;
                     }
@@ -1195,13 +1383,14 @@ fn run_participants(
 
 /// No NCBI counterpart: every partition's table made a copy of the stage's table, and its
 /// per-stage fields reset (at the start of every stage; only the allocations are reused).
-fn rebuild(scratch: &mut PartScratch, hash: &DiagHashTable, parts: usize) {
+fn rebuild(scratch: &mut PartScratch, hash: &DiagHashTable, parts: usize, all_dirty: bool) {
     scratch.parts.truncate(parts);
     while scratch.parts.len() < parts {
         scratch.parts.push(PartState::new());
     }
     for st in &mut scratch.parts {
         st.reset();
+        st.out.all_dirty = all_dirty;
         let t = &mut st.hash;
         t.num_buckets = hash.num_buckets;
         t.occupancy = hash.occupancy;
@@ -1409,7 +1598,8 @@ fn hits_of_strips(
 /// ```
 /// The end of a partitioned stage of `strips` strips (module comment): the hits in key order
 /// after `hits`; the appended cells numbered `occ0 + rank` of their keys; the chains of the
-/// changed buckets of every partition written into `hash` with those numbers (each cell at its
+/// changed buckets of every partition (of all its buckets where its folds did not record them,
+/// `PartOut::all_dirty`) written into `hash` with those numbers (each cell at its
 /// number, its link and the bucket's head mapped; the partition tables themselves are left as
 /// they are); the capacity of the reference's doublings.
 fn merge(
@@ -1484,8 +1674,7 @@ fn merge(
                 map[(index - occ0) as usize]
             }
         };
-        for &bucket in &out.dirty {
-            let b = bucket as usize;
+        let mut put = |b: usize| {
             debug_assert_eq!(b % parts, p);
             let mut local = t.backbone[b];
             hash.backbone[b] = remap(local);
@@ -1502,6 +1691,17 @@ fn merge(
             // EXPERIMENT (LOSAT_X_DIAGLV2): the bucket's memo is its partition's.
             if let Some(last) = hash.x_last.get_mut(b) {
                 *last = t.x_last[b];
+            }
+        };
+        if out.all_dirty {
+            // EXPERIMENT (LOSAT_X_DCSEEDLEAN): every bucket of the partition (an unchanged one
+            // has the stage's chain, its cells below occ0, so writing it back changes nothing).
+            for b in (p..DIAGHASH_NUM_BUCKETS).step_by(parts) {
+                put(b);
+            }
+        } else {
+            for &bucket in &out.dirty {
+                put(bucket as usize);
             }
         }
         #[cfg(debug_assertions)]
@@ -1872,6 +2072,46 @@ mod tests {
         owner_waits: bool,
         home: bool,
     ) -> (Vec<usize>, PartStats, usize) {
+        partitioned_with(
+            pool,
+            threads,
+            slow,
+            hash,
+            scratch,
+            ops,
+            first,
+            cuts,
+            parts,
+            ahead,
+            window,
+            nested,
+            owner_waits,
+            home,
+            false,
+        )
+    }
+
+    /// `partitioned_on`; with `lists` the stage of LOSAT_X_DCSEEDLEAN (`seed_stage_part_lists`):
+    /// the folds do not record their buckets (`insert_t` without `TRACK`) and the home stage
+    /// scans the strips into the partitions' lists (`PartSink`).
+    #[allow(clippy::too_many_arguments)]
+    fn partitioned_with(
+        pool: &rayon::ThreadPool,
+        threads: usize,
+        slow: Option<Slow>,
+        hash: &mut DiagHashTable,
+        scratch: &mut PartScratch,
+        ops: &[Op],
+        first: usize,
+        cuts: &[usize],
+        parts: usize,
+        ahead: usize,
+        window: i32,
+        nested: bool,
+        owner_waits: bool,
+        home: bool,
+        lists: bool,
+    ) -> (Vec<usize>, PartStats, usize) {
         let folders = Mutex::new(std::collections::BTreeSet::new());
         let helper_folded = AtomicBool::new(false);
         let owner_waited = AtomicUsize::new(0);
@@ -1882,7 +2122,7 @@ mod tests {
                 Some(Slow::Scans(t)) => Some(t),
                 _ => None,
             };
-            let scan = |i: usize, out: &mut Vec<Seed>| {
+            let before_scan = || {
                 if slow_scans.is_some() && rayon::current_thread_index() == slow_scans {
                     std::thread::sleep(std::time::Duration::from_millis(1));
                 }
@@ -1897,10 +2137,42 @@ mod tests {
                     let sum: u64 = (0..64u64).into_par_iter().map(|v| v * v).sum();
                     assert_eq!(sum, 85344);
                 }
+            };
+            let scan = |i: usize, out: &mut Vec<Seed>| {
+                before_scan();
                 for k in cuts[i]..cuts[i + 1] {
                     out.push(seed_of(first + k, &ops[k]));
                 }
             };
+            let scan_lists = |i: usize, out: &mut PartSink<'_>| {
+                before_scan();
+                for k in cuts[i]..cuts[i + 1] {
+                    out.push(seed_of(first + k, &ops[k]));
+                }
+            };
+            #[allow(clippy::too_many_arguments)]
+            fn put(
+                lists: bool,
+                hash: &mut DiagHashTable,
+                out: &mut PartOut,
+                key: u64,
+                diag: i32,
+                level: i32,
+                hit_len: i32,
+                hit_saved: bool,
+                s_off: i32,
+                window: i32,
+            ) {
+                if lists {
+                    insert_t::<true, false, true, false>(
+                        hash, out, key, diag, level, hit_len, hit_saved, s_off, window,
+                    );
+                } else {
+                    insert::<true, false, true>(
+                        hash, out, key, diag, level, hit_len, hit_saved, s_off, window,
+                    );
+                }
+            }
             let fold = |st: &mut PartState, seeds: &[Seed], pos: &[u32]| {
                 if nested {
                     use rayon::prelude::*;
@@ -1934,7 +2206,8 @@ mod tests {
                     if op.pass {
                         st.hits.push(hit_of(index));
                         st.out.hit_keys.push(key);
-                        insert::<true, false, true>(
+                        put(
+                            lists,
                             &mut st.hash,
                             &mut st.out,
                             key,
@@ -1946,7 +2219,8 @@ mod tests {
                             window,
                         );
                     } else {
-                        insert::<true, false, true>(
+                        put(
+                            lists,
                             &mut st.hash,
                             &mut st.out,
                             key,
@@ -1970,6 +2244,7 @@ mod tests {
                 &mut hits,
                 FoldPart { scratch, parts },
                 &scan,
+                lists.then_some(&scan_lists),
                 &fold,
                 false,
             );
@@ -2045,9 +2320,10 @@ mod tests {
     //     if (table->occupancy == table->capacity) {
     //         table->capacity *= 2;
     // ```
-    // `seed_stage_part` against the reference on random op streams, for 2, 3, 7 and 16
-    // partitions on 1..8 threads, with and without level bounds, all stages of a case on one
-    // scratch: a stage on a new table that grows past 256 cells (many diagonals within the
+    // `seed_stage_part` (and LOSAT_X_DCSEEDLEAN's `seed_stage_part_lists`, alternating with it
+    // and with LOSAT_X_PAIRPARHOME's two ways) against the reference on random op streams, for 2,
+    // 3, 7 and 16 partitions on 1..8 threads, with and without level bounds, all stages of a case
+    // on one scratch (its strip buffers passing from one form to the other): a stage on a new table that grows past 256 cells (many diagonals within the
     // insert window), a second stage after the offset moved on (the next subject or chunk), a
     // third after the clear of the offset (occupancy 1), a chunk the reference folds, a stage
     // after it, a stage of no strips, and a stage with another partition count. Every stage
@@ -2142,8 +2418,10 @@ mod tests {
                             };
                             let ahead = 1 + rng.below(2 * threads as u64) as usize;
                             most_ahead = most_ahead.max(ahead);
-                            let (got, stats, folders) = partitioned(
+                            let (got, stats, folders) = partitioned_with(
                                 &pool,
+                                threads,
+                                None,
                                 &mut hash,
                                 &mut scratch,
                                 &ops,
@@ -2157,6 +2435,10 @@ mod tests {
                                 // both ways of sharing the folds (LOSAT_X_PAIRPARHOME), the
                                 // stages of a case alternating
                                 (case + stage) % 2 == 1,
+                                // and with or without LOSAT_X_DCSEEDLEAN's lists and untracked
+                                // folds: every pairing with the above, for each `levels`, over
+                                // two neighbouring cases' stages
+                                (case / 2 + stage / 2) % 2 == 0,
                             );
                             most_folders = most_folders.max(folders);
                             assert_eq!(got, expected, "{at}: hits");
@@ -2315,6 +2597,7 @@ mod tests {
                                 parts: threads,
                             },
                             &scan,
+                            None::<&NoLists>,
                             &fold,
                             false,
                         )

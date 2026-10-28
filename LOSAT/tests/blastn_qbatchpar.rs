@@ -1,8 +1,8 @@
 //! NCBI's query batches searched side by side ahead of blastn's batch loop
 //! (`LOSAT_X_QBATCHPAR`, `src/algorithm/blastn/blast_engine/x_qbatch_par.rs`) on whole searches.
 //!
-//! The switch is in the strict set (on unless it is `0`); these searches run with it `0` unless
-//! they set it (`PREVIOUS_DEFAULT`). It chooses between
+//! The switch is off by default since 2026-10-28 (it was in the strict set before; on only with
+//! `=1` now); these searches run with it `0` unless they set it (`PREVIOUS_DEFAULT`). It chooses between
 //! two LOSAT code paths with the same result: the loop searching every batch itself, or slots
 //! searching the planned batches ahead of it, whose results the loop takes only under the key it
 //! computes itself. So the property under test is that nothing the run writes depends on it:

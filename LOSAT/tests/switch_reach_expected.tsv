@@ -121,7 +121,6 @@ LOSAT_X_PAIRPARMERGE	blastn	conditional	required	gap	only in the merges of the s
 LOSAT_X_PAIRPARN1	tblastx	conditional	required	required	one thread only: translated query batch >=5,000 letters (nucleotide ~2.5 kb) and reference table <2^18 cells, threshold >=13
 LOSAT_X_PAIRPARNA	blastn	conditional	gap	required	-task blastn-short (word 4-8 tables), 2+ threads, one subject <=5 Mb, query block >8000 letters (about 4000+ query letters); new gap: needs blastn-short, 2+ threads, one subject, query block > 8000 letters
 LOSAT_X_PAIRWISEPAR	blastn,blastp,tblastx	conditional	required	required	outfmt 0 only, 2+ threads; serial for Web observer and while QBATCHPAR slots exist
-LOSAT_X_QBATCHPAR	blastn	conditional	gap	required	-subject only, 2+ threads, 2+ batches, query file NCBI splits (>10 MB, memory budget), model predicts >=3% gain; not -db or debug; new gap: needs a query file NCBI splits (> 10 MB) with 2+ batches at 2+ threads
 LOSAT_X_QDUSTPAR	blastn	conditional	required	required	DUST on (default except blastn-short), 2+ threads and 2+ queries in the batch
 LOSAT_X_QGROUPPAR	blastn	conditional	required	required	2+ threads, one subject at a time, 2+ queries with HSPs, no query holding >1/4 of HSPs, no debug
 LOSAT_X_QPREPPAR	blastn	conditional	required	required	2+ threads and 2+ queries (encoding) or contexts (blocks)

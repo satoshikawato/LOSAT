@@ -957,6 +957,8 @@ pub(crate) fn search_core(
             let lookup = Lookup::x_new_in_parts(batch, &params, options, x_parts)?;
             let last = batch.contexts.last().expect("BLASTX contexts");
             let mut diagonals = Diagonals::new(last.offset + last.length, options.window_size)?;
+            // The serial subject loop's gapped-stage scratch (the waves' workers keep their own).
+            let mut gapped = super::preliminary::GappedScratch::default();
             let xdrop = subject_parameters(
                 batch,
                 &mut params,
@@ -1112,6 +1114,8 @@ pub(crate) fn search_core(
                                     .enumerate()
                                     .flat_map_iter(|(x_slot, (x_part, scratch))| {
                                         x_wave.task(|| {
+                                            let mut gapped =
+                                                super::preliminary::GappedScratch::default();
                                             x_part
                                                 .iter()
                                                 .enumerate()
@@ -1134,6 +1138,7 @@ pub(crate) fn search_core(
                                                         db_length,
                                                         oid,
                                                         x_containment,
+                                                        &mut gapped,
                                                     )
                                                 })
                                                 .collect::<Vec<_>>()
@@ -1176,6 +1181,7 @@ pub(crate) fn search_core(
                             db_length,
                             oid,
                             x_containment,
+                            &mut gapped,
                         );
                         super::x_timing::batch(XBatch::ScanInline, x_t);
                         computed?
@@ -1452,6 +1458,7 @@ fn x_compute_chunk(
     let mut results = Vec::new();
     // EXPERIMENT (LOSAT_X_BXDBSTREAM): the blocks of the chunk's pass.
     let mut x_pass = subjects.x_pass();
+    let mut gapped = super::preliminary::GappedScratch::default();
     for oid in 0..subjects.len() {
         let mut computed = compute_subject(
             x_pass.view(oid)?,
@@ -1465,6 +1472,7 @@ fn x_compute_chunk(
             db_length,
             oid,
             x_containment,
+            &mut gapped,
         )?;
         // Only the diagnostic stages read these.
         // No NCBI counterpart: drops the seed and initial-HSP lists, which only the diagnostic
@@ -1536,6 +1544,7 @@ fn compute_subject(
     db_length: i64,
     oid: usize,
     x_containment: bool,
+    gapped: &mut super::preliminary::GappedScratch,
 ) -> Result<SubjectComputation> {
     #[cfg(feature = "blastx-worker-probe")]
     worker_probe("start", oid);
@@ -1671,6 +1680,7 @@ fn compute_subject(
             &encoded,
             &initial,
             xdrop,
+            gapped,
             &mut |h, contained| {
                 // No NCBI counterpart: the copy is skipped when nothing reads it; it does not
                 // change any value NCBI computes.

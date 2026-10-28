@@ -372,9 +372,21 @@ pub fn gapped(
         subject,
         initial,
         xdrop,
+        &mut GappedScratch::default(),
         &mut |_, _| {},
     )
 }
+
+/// No NCBI counterpart (buffer reuse): the gapped stage's DP scratch and interval tree, kept by a
+/// subject loop for its subjects instead of made again for each subject. NCBI keeps one
+/// `BlastGapAlignStruct` (its `dp_mem`) per search thread for all its subjects
+/// (blast_gapalign.c:313-319, `BLAST_GapAlignStructNew`) and gives each subject a tree in the
+/// state of `Blast_IntervalTreeInit`; `gapped_observed` gives a kept tree the subject's ranges with
+/// `reset_with_bounds`. Empty until the loop's first subject reaches the gapped stage, and dropped
+/// with the loop, so the live scratches that `XdropScratch` counts fall back as before.
+#[derive(Default)]
+pub(crate) struct GappedScratch(Option<(GapAlignScratch, BlastIntervalTree)>);
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3909-3921
 // ```c++
 //       tmp_hsp.context = context;
@@ -398,6 +410,7 @@ pub(crate) fn gapped_observed(
     subject: &[u8],
     initial: &[InitHsp],
     xdrop: i32,
+    kept: &mut GappedScratch,
     observe: &mut dyn FnMut(&PreliminaryHsp, bool),
 ) -> Result<Vec<PreliminaryHsp>> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3707-3708
@@ -413,13 +426,28 @@ pub(crate) fn gapped_observed(
         return Ok(Vec::new());
     }
     let last = batch.contexts.last().expect("BLASTX contexts");
-    let mut tree = BlastIntervalTree::new(
-        0,
-        (last.offset + last.length + 1) as i32,
-        0,
-        subject.len() as i32,
-    );
-    let mut scratch = GapAlignScratch::new();
+    let q_max = (last.offset + last.length + 1) as i32;
+    let s_max = subject.len() as i32;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:166-170
+    // ```c
+    //     tree->s_min = s_start;
+    //     tree->s_max = s_end;
+    //
+    //     /* The first structure in tree->nodes is the root */
+    //     s_IntervalRootNodeInit(tree, q_start, q_end, &retval);
+    // ```
+    // A tree kept from the loop's earlier subject gets this subject's ranges (the state of
+    // Blast_IntervalTreeInit); the first subject that reaches here makes the tree and the DP
+    // scratch.
+    if let Some((_, tree)) = kept.0.as_mut() {
+        tree.reset_with_bounds(0, q_max, 0, s_max);
+    }
+    let (scratch, tree) = kept.0.get_or_insert_with(|| {
+        (
+            GapAlignScratch::new(),
+            BlastIntervalTree::new(0, q_max, 0, s_max),
+        )
+    });
     let mut hits = Vec::new();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:213-227
     // ```c++
@@ -503,7 +531,7 @@ pub(crate) fn gapped_observed(
             options.gap_extend,
             xdrop,
             BlastpGappedAlignmentMode::Exact,
-            &mut scratch,
+            scratch,
         );
         if a.score < parameters[context].hit_cutoff {
             continue;

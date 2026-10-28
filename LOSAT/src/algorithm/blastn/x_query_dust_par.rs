@@ -25,11 +25,9 @@
 //! `DustMasker::new(level, window, linker).mask_sequence(seq)` is an ordered parallel map
 //! (`par_iter().map().collect()`, which returns the results in the order of the input; rayon
 //! splits the queries into ranges, so the masks are per query but the jobs are not) run with
-//! `SearchPool::install`, so on the pool of the search that calls it: the whole search pool, or
-//! the private pool of a LOSAT_X_QBATCHPAR slot with two or more threads. Rayon's global pool is
-//! never used. A search without a pool (one thread, a slot of one thread, a build without the
-//! `parallel` feature, WebAssembly without `wasm-threads`), and a batch of fewer than two
-//! queries, run the serial map. With `-dust no` there is no map at all (`apply_dust_masking`
+//! `SearchPool::install`, so on the pool of the search that calls it. Rayon's global pool is never
+//! used. A search without a pool (one thread, a build without the `parallel` feature, WebAssembly
+//! without `wasm-threads`), and a batch of fewer than two queries, run the serial map. With `-dust no` there is no map at all (`apply_dust_masking`
 //! makes no masks).
 //!
 //! Why the masks are the same: the mask of a query is a function of that query's letters and of
@@ -51,9 +49,7 @@
 //! With `LOSAT_TIMING`, `main` prints `[TIMING] query_dust: <seconds>s`, and with `LOSAT_X_STATS`
 //! `[X_STATS] QDUSTPAR dust_s=<seconds>`, only when at least one batch was masked (so not for
 //! BLASTP, BLASTX, TBLASTN, TBLASTX or `-dust no`), with or without the switch. The seconds are
-//! the sum of the wall times of every DUST call of the process, not the wall time of the step:
-//! with `LOSAT_X_QBATCHPAR` they include the slots' batches, which run concurrently, and those
-//! that the loop discards.
+//! the sum of the wall times of every DUST call of the process (every batch's).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;

@@ -203,6 +203,17 @@ use std::sync::{Mutex, PoisonError};
 ))]
 #[path = "x_clut_par.rs"]
 mod x_clut_par;
+/// PROBE (v4-BPF s11): the table-set pool's entry points for the block search.
+#[cfg(feature = "parallel")]
+pub(crate) use x_clut_par::{x_s11_give_table, x_s11_t};
+/// PROBE (v4-BPF s11): no pool without threads.
+#[cfg(not(feature = "parallel"))]
+pub(crate) fn x_s11_t() -> Option<usize> {
+    None
+}
+/// PROBE (v4-BPF s11): no pool without threads.
+#[cfg(not(feature = "parallel"))]
+pub(crate) fn x_s11_give_table(_starts: Vec<u32>, _hits: Vec<i32>) {}
 
 // No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPCLUT): a strict-set switch, on unless it is `0`: the flat table
@@ -285,6 +296,12 @@ pub fn x_bplkpflat_print_summary() {
 pub(crate) struct XFlatSpare(Mutex<(Vec<u32>, Vec<i32>)>, Mutex<Vec<u32>>);
 
 impl XFlatSpare {
+    /// PROBE (v4-BPF s11): holds `starts` and `hits` (a set of the pool) for the build that takes
+    /// this spare.
+    pub(crate) fn x_s11_put(&self, starts: Vec<u32>, hits: Vec<i32>) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = (starts, hits);
+    }
+
     // No NCBI counterpart: buffer reuse only (above).
     /// Keeps `table`'s `starts` and `hits` (in place of any vectors kept before); the rest of the
     /// table is dropped.

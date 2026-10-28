@@ -7882,6 +7882,17 @@ fn x_lookup_after_prelim(
     crate::utils::xreach::x_reach!("LOSAT_X_BPLKDROP", !taken_later);
     // PROBE (v4-BPF s11): the preliminary stage is done; the table is still held.
     super::x_query_slots::x_s8_log("prelim", usize::from(taken_later), 0);
+    // PROBE (v4-BPF s11, LOSAT_BPF_S11T): the flat table's vectors back to the pool here.
+    if taken_later && crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_s11_t().is_some() {
+        if let BlastpRuntimeLookup::CompressedFlat(table) = lookup {
+            crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_s11_give_table(
+                table.starts,
+                table.hits,
+            );
+            super::x_query_slots::x_s8_log("gave", 2, 0);
+            return None;
+        }
+    }
     // PROBE (v4-BPF s8): LOSAT_BPF_S8EARLY=1 gives the flat table's vectors to the spare here.
     if taken_later && super::x_query_slots::x_s8_env("LOSAT_BPF_S8EARLY") == Some(1) {
         if let BlastpRuntimeLookup::CompressedFlat(table) = lookup {

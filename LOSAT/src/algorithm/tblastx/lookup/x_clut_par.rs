@@ -143,6 +143,29 @@ struct XChunkAppends {
     /// PROBE (v4-BPF s9, LOSAT_BPF_S9G=1): unsorted, `packed` holds the appends' cells in order and
     /// this the (query offset, appends) of the offsets with any; else empty.
     per_offset: Vec<(i32, u32)>,
+    /// PROBE (v4-BPF s11, LOSAT_BPF_S11P): the appends are in the build's shared buffer from `at`
+    /// (`packed` is empty).
+    shared_at: Option<usize>,
+}
+
+impl XChunkAppends {
+    /// Stripe `stripe`'s part of the chunk's appends: in the build's shared buffer `shared`
+    /// (LOSAT_BPF_S11P) or in the chunk's own vector.
+    fn part<'a>(&'a self, shared: &'a [u32], stripe: usize) -> &'a [u32] {
+        let (lo, hi) = (
+            self.stripe_starts[stripe] as usize,
+            self.stripe_starts[stripe + 1] as usize,
+        );
+        match self.shared_at {
+            Some(at) => &shared[at + lo..at + hi],
+            None => &self.packed[lo..hi],
+        }
+    }
+
+    /// The chunk's appends.
+    fn count(&self) -> usize {
+        self.stripe_starts.last().copied().unwrap_or(0) as usize
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
@@ -219,11 +242,34 @@ pub(super) fn x_try_build_flat_in_pool(
         }
         return build(XPasses::Rayon, None, false);
     }
+    // PROBE (v4-BPF s11, LOSAT_BPF_S11T=n): the table's vectors from the pool of at most n sets
+    // (`X_S11_TABLES`), held in a spare of this build's own.
+    let s11_local = XFlatSpare::default();
+    let s11_t = (!x_flat_args.x_ahead).then(x_s11_t).flatten();
+    if let Some(cap) = s11_t {
+        let (starts, hits, waited) = x_s11_take_table(cap);
+        crate::algorithm::blastp::x_query_slots::x_s8_log("ttake", waited, hits.capacity());
+        s11_local.x_s11_put(starts, hits);
+    }
     let built = build(
         XPasses::OneLatch(x_flat_args.extra),
-        x_flat_args.spare,
+        if s11_t.is_some() {
+            Some(&s11_local)
+        } else {
+            x_flat_args.spare
+        },
         x_flat_args.x_ahead,
     );
+    if s11_t.is_some() {
+        // The set is in the table (given back after the block's preliminary stage), still here (the
+        // build did not take it), or dropped with a table that was not made.
+        let left = s11_local.take();
+        if left.0.capacity() > 0 || left.1.capacity() > 0 {
+            x_s11_give_table(left.0, left.1);
+        } else if !matches!(built, Some(XFlatBuild::Table(_))) {
+            x_s11_table_lost();
+        }
+    }
     if matches!(built, Some(XFlatBuild::Table(_))) {
         X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
     }
@@ -250,6 +296,112 @@ enum XPasses<'a> {
 /// chunks' `packed` vectors of finished builds, kept for later builds instead of being freed.
 pub(crate) static X_S8_TABLES: Mutex<Vec<(Vec<u32>, Vec<i32>)>> = Mutex::new(Vec::new());
 static X_S8_CHUNKS: Mutex<Vec<Vec<u32>>> = Mutex::new(Vec::new());
+
+/// PROBE (v4-BPF s11, LOSAT_BPF_S11T=n): a pool of at most n table sets (`starts`, `hits`): a block's
+/// build takes one (a free one, else a new one while fewer than n are out, else it runs the pool's
+/// jobs until one is given back), and the block gives it back after its preliminary stage. Nothing
+/// is freed: no churn through the allocator's arenas. (free sets, sets out)
+pub(crate) static X_S11_TABLES: Mutex<(Vec<(Vec<u32>, Vec<i32>)>, usize)> =
+    Mutex::new((Vec::new(), 0));
+/// PROBE (v4-BPF s11, LOSAT_BPF_S11P=n): a pool of at most n buffers for the chunks' packed appends
+/// of one build each (the chunks take disjoint regions by one cursor; a chunk past the capacity
+/// takes a vector of its own). (free buffers, buffers out, the most appends of a build so far)
+static X_S11_PACKED: Mutex<(Vec<Vec<u32>>, usize, usize)> = Mutex::new((Vec::new(), 0, 0));
+
+/// PROBE (v4-BPF s11): LOSAT_BPF_S11T, read once.
+pub(crate) fn x_s11_t() -> Option<usize> {
+    static V: OnceLock<Option<usize>> = OnceLock::new();
+    *V.get_or_init(|| crate::algorithm::blastp::x_query_slots::x_s8_env("LOSAT_BPF_S11T"))
+}
+
+/// PROBE (v4-BPF s11): LOSAT_BPF_S11P, read once.
+fn x_s11_p() -> Option<usize> {
+    static V: OnceLock<Option<usize>> = OnceLock::new();
+    *V.get_or_init(|| crate::algorithm::blastp::x_query_slots::x_s8_env("LOSAT_BPF_S11P"))
+}
+
+/// PROBE (v4-BPF s11): runs one of the pool's jobs, or spins when there is none.
+fn x_s11_yield() {
+    if !matches!(rayon::yield_now(), Some(rayon::Yield::Executed)) {
+        std::hint::spin_loop();
+    }
+}
+
+/// PROBE (v4-BPF s11): a table set from the pool (above); the yields waited.
+fn x_s11_take_table(cap: usize) -> (Vec<u32>, Vec<i32>, usize) {
+    let mut waited = 0usize;
+    loop {
+        {
+            let mut pool = X_S11_TABLES.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some((starts, hits)) = pool.0.pop() {
+                pool.1 += 1;
+                return (starts, hits, waited);
+            }
+            if pool.1 < cap {
+                pool.1 += 1;
+                return (Vec::new(), Vec::new(), waited);
+            }
+        }
+        waited += 1;
+        x_s11_yield();
+    }
+}
+
+/// PROBE (v4-BPF s11): a table set back to the pool.
+pub(crate) fn x_s11_give_table(starts: Vec<u32>, hits: Vec<i32>) {
+    let mut pool = X_S11_TABLES.lock().unwrap_or_else(PoisonError::into_inner);
+    pool.0.push((starts, hits));
+    pool.1 = pool.1.saturating_sub(1);
+}
+
+/// PROBE (v4-BPF s11): a table set that was dropped (a build that made no table).
+fn x_s11_table_lost() {
+    let mut pool = X_S11_TABLES.lock().unwrap_or_else(PoisonError::into_inner);
+    pool.1 = pool.1.saturating_sub(1);
+}
+
+/// PROBE (v4-BPF s11): a packed buffer from the pool (above), of at least the room of the largest
+/// build so far plus an eighth, or 90 appends per query letter; the yields waited.
+fn x_s11_take_packed(cap: usize, letters: usize) -> (Vec<u32>, usize) {
+    let mut waited = 0usize;
+    loop {
+        {
+            let mut pool = X_S11_PACKED.lock().unwrap_or_else(PoisonError::into_inner);
+            let need = (pool.2 + pool.2 / 8).max(letters.saturating_mul(90));
+            if let Some(mut buffer) = pool.0.pop() {
+                pool.1 += 1;
+                if buffer.len() < need {
+                    buffer.resize(need, 0);
+                }
+                return (buffer, waited);
+            }
+            if pool.1 < cap {
+                pool.1 += 1;
+                return (vec![0u32; need], waited);
+            }
+        }
+        waited += 1;
+        x_s11_yield();
+    }
+}
+
+/// PROBE (v4-BPF s11): a packed buffer back to the pool; `appends` were made by its build.
+fn x_s11_give_packed(buffer: Vec<u32>, appends: usize) {
+    let mut pool = X_S11_PACKED.lock().unwrap_or_else(PoisonError::into_inner);
+    pool.2 = pool.2.max(appends);
+    pool.0.push(buffer);
+    pool.1 = pool.1.saturating_sub(1);
+}
+
+/// PROBE (v4-BPF s11): the build's packed buffer, written by the chunks' tasks at disjoint regions.
+struct XPackedOut {
+    ptr: *mut u32,
+    cap: usize,
+}
+// SAFETY: the tasks write disjoint regions (`x_chunk_appends`).
+unsafe impl Send for XPackedOut {}
+// SAFETY: as above.
+unsafe impl Sync for XPackedOut {}
 
 pub(crate) fn x_s8_stash() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
@@ -492,11 +644,13 @@ fn x_chunk_appends(
     targets: &mut Vec<u32>,
     per_offset: &mut Vec<(i32, u32)>,
     sort: bool,
+    shared: Option<(&XPackedOut, &AtomicUsize)>,
 ) -> XChunkAppends {
     let empty = || XChunkAppends {
         packed: Vec::new(),
         stripe_starts: vec![0; stripes + 1],
         per_offset: Vec::new(),
+        shared_at: None,
     };
     targets.clear();
     per_offset.clear();
@@ -546,20 +700,40 @@ fn x_chunk_appends(
             packed: std::mem::replace(targets, Vec::with_capacity(targets_capacity)),
             stripe_starts,
             per_offset: std::mem::replace(per_offset, Vec::with_capacity(offsets_capacity)),
+            shared_at: None,
         };
     }
     let mut cursors = stripe_starts[..stripes].to_vec();
-    let mut packed = if x_s8_stash() {
-        let mut stashed = X_S8_CHUNKS
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .pop()
-            .unwrap_or_default();
-        stashed.clear();
-        stashed.resize(targets.len(), 0);
-        stashed
-    } else {
-        vec![0u32; targets.len()]
+    // PROBE (v4-BPF s11, LOSAT_BPF_S11P): a region of the build's shared buffer when it has the room.
+    let mut shared_at = None;
+    if let Some((out, cursor)) = shared {
+        let start = cursor.fetch_add(targets.len(), Ordering::Relaxed);
+        if start + targets.len() <= out.cap {
+            shared_at = Some(start);
+        }
+    }
+    let mut own: Vec<u32> = Vec::new();
+    let packed: &mut [u32] = match shared_at {
+        // SAFETY: `start..start + len` lies below the buffer's capacity and is this chunk's alone
+        // (the cursor hands out disjoint regions), and the buffer outlives the pass.
+        Some(start) => unsafe {
+            std::slice::from_raw_parts_mut(shared.expect("shared").0.ptr.add(start), targets.len())
+        },
+        None => {
+            own = if x_s8_stash() {
+                let mut stashed = X_S8_CHUNKS
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .pop()
+                    .unwrap_or_default();
+                stashed.clear();
+                stashed.resize(targets.len(), 0);
+                stashed
+            } else {
+                vec![0u32; targets.len()]
+            };
+            &mut own[..]
+        }
     };
     let mask = (1u32 << shift) - 1;
     let mut at = 0usize;
@@ -575,9 +749,10 @@ fn x_chunk_appends(
         at = end;
     }
     XChunkAppends {
-        packed,
+        packed: own,
         stripe_starts,
         per_offset: Vec::new(),
+        shared_at,
     }
 }
 
@@ -670,6 +845,7 @@ fn x_stripe_build(
     ranges: usize,
     chunks: &[XChunk],
     appends: &[XChunkAppends],
+    shared: &[u32],
 ) -> XStripeCounts {
     let XStripe {
         stripe,
@@ -683,13 +859,7 @@ fn x_stripe_build(
         chunks
             .iter()
             .zip(appends)
-            .map(move |(chunk, chunk_appends)| {
-                (
-                    chunk,
-                    &chunk_appends.packed[chunk_appends.stripe_starts[stripe] as usize
-                        ..chunk_appends.stripe_starts[stripe + 1] as usize],
-                )
-            })
+            .map(move |(chunk, chunk_appends)| (chunk, chunk_appends.part(shared, stripe)))
     };
 
     // Count: each cell's appends in the serial order; the overflow cells they take.
@@ -782,6 +952,7 @@ fn x_stripe_build_s9(
     need_cells: bool,
     global: Option<&[Vec<u32>]>,
     scratch: &mut XS9Scratch,
+    shared: &[u32],
 ) -> XStripeCounts {
     let XStripe {
         stripe,
@@ -808,14 +979,13 @@ fn x_stripe_build_s9(
         #[cfg(target_arch = "x86_64")]
         if pf > 0 && global.is_none() {
             if let Some(ahead) = appends.get(index + pf) {
-                let lo = ahead.stripe_starts[stripe] as usize;
-                let hi = ahead.stripe_starts[stripe + 1] as usize;
-                let mut at = lo & !15;
-                while at < hi {
-                    // SAFETY: `at` is below `hi <= packed.len()`; a prefetch reads nothing.
+                let part = ahead.part(shared, stripe);
+                let mut at = 0usize;
+                while at < part.len() {
+                    // SAFETY: `at` is below the part's length; a prefetch reads nothing.
                     unsafe {
                         std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_T0 }>(
-                            ahead.packed.as_ptr().add(at).cast(),
+                            part.as_ptr().add(at).cast(),
                         )
                     };
                     at += 16;
@@ -835,10 +1005,7 @@ fn x_stripe_build_s9(
                 // SAFETY: i32 and u32 have the same layout.
                 unsafe { std::slice::from_raw_parts(part.as_ptr().cast::<u32>(), part.len()) }
             }
-            None => {
-                &chunk_appends.packed[chunk_appends.stripe_starts[stripe] as usize
-                    ..chunk_appends.stripe_starts[stripe + 1] as usize]
-            }
+            None => chunk_appends.part(shared, stripe),
         };
         let chunk_base = chunk.base as u32;
         if need_cells {
@@ -992,6 +1159,30 @@ fn x_try_build_flat_parallel_with(
     // table's hits at their stripes' slots (`x_scatter_s9g`) instead of sorting each chunk's own.
     let s9g = s9 && crate::algorithm::blastp::x_query_slots::x_s8_env("LOSAT_BPF_S9G") == Some(1);
 
+    // PROBE (v4-BPF s11, LOSAT_BPF_S11P=n): one buffer for the chunks' packed appends, from a pool
+    // of at most n (the chunks take disjoint regions by `s11_cursor`).
+    let s11_p = (matches!(cuts.passes, XPasses::OneLatch(_)) && !s9g)
+        .then(x_s11_p)
+        .flatten();
+    let mut s11_buffer: Vec<u32> = Vec::new();
+    let s11_cursor = AtomicUsize::new(0);
+    let mut s11_out = None;
+    if let Some(cap) = s11_p {
+        let (buffer, waited) = x_s11_take_packed(cap, query.len());
+        crate::algorithm::blastp::x_query_slots::x_s8_log("ptake", waited, buffer.len());
+        s11_buffer = buffer;
+        s11_out = Some(XPackedOut {
+            ptr: s11_buffer.as_mut_ptr(),
+            cap: s11_buffer.len(),
+        });
+    }
+    let s11_shared = s11_out.as_ref().map(|out| (out, &s11_cursor));
+    let s11_give = |buffer: Vec<u32>, appends: usize| {
+        if s11_p.is_some() {
+            x_s11_give_packed(buffer, appends);
+        }
+    };
+
     // The chunks' appends, sorted by stripe.
     let appended = AtomicUsize::new(0);
     let too_large = AtomicBool::new(false);
@@ -1008,6 +1199,7 @@ fn x_try_build_flat_parallel_with(
             targets,
             per_offset,
             !s9g,
+            s11_shared,
         )
     };
     let mut appends: Vec<XChunkAppends> = match cuts.passes {
@@ -1032,11 +1224,16 @@ fn x_try_build_flat_parallel_with(
             },
         ),
     };
-    // PROBE (v4-BPF s11): the chunks' packed appends are all allocated here.
+    // PROBE (v4-BPF s11): the chunks' packed appends are all allocated here (b = the chunks past the
+    // shared buffer's room).
+    let shared: &[u32] = &s11_buffer;
     crate::algorithm::blastp::x_query_slots::x_s8_log(
         "appends",
-        appends.iter().map(|a| a.packed.len()).sum(),
-        appends.len(),
+        appends.iter().map(XChunkAppends::count).sum(),
+        appends
+            .iter()
+            .filter(|a| a.shared_at.is_none() && a.count() > 0)
+            .count(),
     );
     if too_large.load(Ordering::Relaxed) {
         // LOSAT_X_BPLKPFLAT: the reference builder makes this table; the spare's vectors are not
@@ -1044,6 +1241,8 @@ fn x_try_build_flat_parallel_with(
         if let Some(spare) = cuts.spare {
             drop(spare.take());
         }
+        drop(appends);
+        s11_give(s11_buffer, appended.load(Ordering::Relaxed));
         return Some(XFlatBuild::TooLarge);
     }
 
@@ -1175,7 +1374,9 @@ fn x_try_build_flat_parallel_with(
     let stripe_counts: Vec<XStripeCounts> = match cuts.passes {
         XPasses::Rayon => parts
             .into_par_iter()
-            .map(|part| x_stripe_build(part, shift, backbone_size, ranges.len(), &chunks, &appends))
+            .map(|part| {
+                x_stripe_build(part, shift, backbone_size, ranges.len(), &chunks, &appends, shared)
+            })
             .collect(),
         XPasses::OneLatch(_) if s9 => {
             // An append takes at most one overflow cell: where no table's appends pass the
@@ -1214,6 +1415,7 @@ fn x_try_build_flat_parallel_with(
                         need_cells,
                         global,
                         scratch,
+                        shared,
                     )
                 },
                 |_| {},
@@ -1236,7 +1438,15 @@ fn x_try_build_flat_parallel_with(
                         .unwrap_or_else(PoisonError::into_inner)
                         .take()
                         .expect("each stripe taken once");
-                    x_stripe_build(part, shift, backbone_size, ranges.len(), &chunks, &appends)
+                    x_stripe_build(
+                        part,
+                        shift,
+                        backbone_size,
+                        ranges.len(),
+                        &chunks,
+                        &appends,
+                        shared,
+                    )
                 },
                 |_| {},
             )
@@ -1255,7 +1465,8 @@ fn x_try_build_flat_parallel_with(
         drop(appends);
     }
     // PROBE (v4-BPF s11): the chunks' packed appends are freed (RssAnon tells whether the arenas gave
-    // them back).
+    // them back); the shared buffer goes back to its pool.
+    s11_give(s11_buffer, appended.load(Ordering::Relaxed));
     crate::algorithm::blastp::x_query_slots::x_s8_log("freed", total, 0);
 
     // NCBI's tables (`x_try_build_flat_with_capacity`'s test, at each table's end).

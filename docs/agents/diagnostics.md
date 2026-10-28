@@ -358,6 +358,7 @@ export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
 export LOSAT_X_BPREDOWINEXPAND=1
 export LOSAT_X_BPSEGWIN=4096
+export LOSAT_X_BPSTRIPEFILL=1
 export LOSAT_X_BPSUBJMETA=1
 export LOSAT_X_BPSUBJRUN=1
 export LOSAT_X_BPUNGAPSENT=1
@@ -2772,6 +2773,28 @@ Rebuilding less:
   97 -> 142; Species4 x Species6 `-db` at 2 / 4 threads 106 -> 134 / 117 -> 147 (NCBI 304 / 360). Three blocks of
   50,000 letters were faster at 16 threads (x0.870 on the first case) but held 175 MiB on the 3,000 proteins, above
   NCBI's 166; 16 one-thread blocks (x0.858) held 813 MiB.
+- `LOSAT_X_BPSTRIPEFILL=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added
+  it, 2026-10-28, on unless it is `0`; acts wherever `LOSAT_X_BPLKPFLAT`'s one-latch build of the flat table of
+  `LOSAT_X_BPCLUT` runs, so with more than one thread) builds each stripe of that table from one read of the query
+  chunks' parts (`tblastx/lookup/x_clut_par.rs` `x_stripe_fill`, exactness argument in its header): the stripe
+  copies its part of each chunk, in chunk order, while it counts its cells, then lays out and fills from the copy;
+  before, `x_stripe_build` read the 128 parts (at 16 threads) twice, once to count and once to fill, and the second
+  read of short parts written by other cores stalled (line BPF `REPORT.md` §13-§14: the stripes pass was about 14 %
+  of the cycles of the human x yeast search at 16 threads, with a cycles per instruction of 0.565 against 0.395 for
+  the serial bucket fill). The overflow cells of NCBI's table are counted only when some table's appends pass
+  its capacity (an append takes at most one, so otherwise the capacity test cannot refuse). Memory: each task of
+  the pass keeps a copy as large as the largest stripe it took (4 bytes an append) beside the stripe's counts.
+  At one thread nothing changes (the serial builder runs). A form that wrote the chunks'
+  appends straight into the table's hits instead (line BPF s10, `exp/bpf-s8` 3c405fdb) was as fast and took
+  20-35 MiB more (its scattered stores stalled in turn).
+  Measured 2026-10-28 on the workstation (node 1 CPUs 32-47 / 32-39, siblings idle, `--membind=1`, CPUs warmed 3 s
+  before every run, 8 rounds in alternating order, dev 4403cc12 against 1cbb5109, one output hash per case and
+  thread count; line BPF `results/s10ab`), `-task blastp-fast`, wall at 16 / 8 threads: human x yeast (Species4 x
+  Species6 `-subject`) 4.550 -> 4.447 s (x0.977) / 8.270 -> 8.044 s (x0.973); its first 3,000 proteins 0.458 ->
+  0.448 (x0.978) / 0.778 -> 0.758 (x0.974); Species4 x Species6 `-db` 4.723 -> 4.607 (x0.976) / 8.389 -> 8.157
+  (x0.972); Species0 x Species3 `-db` 14.204 -> 14.161 (x0.997) / 27.049 -> 26.852 (x0.993). Cycles x0.964-0.970
+  (x0.993 on Species0 x Species3), instructions x0.989-0.991; the median of the per-round max RSS differences
+  -5.2 to +1.5 MiB (no rise); one-thread instructions the same (the serial builder).
 - `LOSAT_X_BPQBLOCKWEB=1` (BLASTP in `run_local`, the LOSAT Web build's search, speed and memory; in the strict set
   from the pull request that added it, 2026-10-22, on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search
   of `LOSAT_X_BPQBLOCK` also for a call with more than one output, the hit records or a format observer (ABI v2 of the

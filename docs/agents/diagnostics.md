@@ -5461,9 +5461,10 @@ Scheduling (each value computed by one thread with the original function; order 
   after another share it, `XUnitBuffers`) holds NCBI's `DiagStruct` in four bytes (`blast_extend.h:51-55`:
   `last_hit` in bits 0-30, `flag` in bit 31) instead of eight-byte `(last_hit, flag)` pairs: 128 KiB instead of 256
   KiB for a query batch of 20,000 letters. The values fit: `last_hit` starts at 0 and is set to `s + offset` or
-  `s_last_off - (wordsize - 1) + offset`, the offset runs from the window to below INT4_MAX / 4 + 2 x (window + the
-  longest unit, at most 5,000,000 residues), so with a window above the word size and at most 2^28 (the default is
-  40) every value is below 2^31 and not negative; another window keeps the pairs. A flag-0 cell read as `i32` is then
+  `s_last_off - (wordsize - 1) + offset`, the offset runs from the window to below INT4_MAX / 4 + the window + the
+  longest unit (at most 5,000,000 residues), so with a window above the word size and at most 2^28 every value is
+  below 2^30 and not negative, inside NCBI's signed 31 bits too; another window keeps the pairs (LOSAT's TBLASTN
+  takes window 40 with word size 3 and 60 with 2, both packed). A flag-0 cell read as `i32` is then
   its `last_hit` and a flag-1 cell is negative, so the branch-free loop (`x_hits_bf`) reads one word per hit. The
   tables give the same init HSPs and the same values in every cell (unit tests
   `x_hits_bf_on_packed_cells_equals_pair_cells`, and `x_pairs_bf_gives_the_hits_and_table_of_pairs` on both

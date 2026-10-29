@@ -84,6 +84,9 @@
 //! outfmt 0, which refuses a reported subject's title (`check_shown_subject_titles`); the
 //! debugging output; and the refusals above.
 //!
+//! Diagnostics: with `LOSAT_X_STATS`, `[X_STATS] TBXRPTSTREAM off=` before the search (`none` when
+//! the loop writes each batch's reports, else the reason, `Off::name`).
+//!
 //! Memory: a batch's lists, statistics and warnings are dropped after its write. Kept for the
 //! whole search, as without the stream: one (empty) warnings slot per query, and with `-db` the
 //! header of every distinct sequence that a batch reported (`database::DatabaseTitles`, at most
@@ -123,6 +126,27 @@ pub(super) enum Off {
     Unreadable,
     /// A database sequence whose report could be refused (`ReportRefusal`).
     Database(crate::algorithm::common::database::ReportRefusal),
+}
+
+impl Off {
+    /// The name of `[X_STATS] TBXRPTSTREAM off=`.
+    pub(super) fn name(self) -> &'static str {
+        use crate::algorithm::common::database::ReportRefusal;
+        match self {
+            Off::OneBatch => "one_batch",
+            Off::Outputs => "outputs",
+            Off::Format => "format",
+            Off::V1Titles => "v1_titles",
+            Off::Debug => "debug",
+            Off::Window => "window",
+            Off::SearchSpace => "search_space",
+            Off::SubjectIds => "subject_ids",
+            Off::Unreadable => "unreadable",
+            Off::Database(ReportRefusal::Headers) => "database_headers",
+            Off::Database(ReportRefusal::Joined) => "database_joined",
+            Off::Database(ReportRefusal::Taxonomy) => "database_taxonomy",
+        }
+    }
 }
 
 /// Whether the loop writes each batch's reports when it takes the batch (`Ok`), or why not.

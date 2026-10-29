@@ -2690,8 +2690,16 @@ fn run_in_pool(
         stores_error.is_some(),
         batch_size,
         parallel_pool,
-    )
-    .is_ok();
+    );
+    // Diagnostic (LOSAT_X_STATS): whether the loop writes each batch's reports, or why not. No NCBI
+    // counterpart.
+    if std::env::var_os("LOSAT_X_STATS").is_some() {
+        eprintln!(
+            "[X_STATS] TBXRPTSTREAM off={}",
+            stream.map_or_else(report_stream::Off::name, |()| "none")
+        );
+    }
+    let stream = stream.is_ok();
     // The loop's result of the batch of queries `start..end`: the search above, or with
     // LOSAT_X_TBXPIPE the pipe's (`XPipe::take`).
     let batch_loop = |take: &mut dyn FnMut(std::ops::Range<usize>) -> Result<TblastxBatch>| {

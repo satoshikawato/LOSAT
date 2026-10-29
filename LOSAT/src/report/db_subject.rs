@@ -295,6 +295,12 @@ impl ParsedSubject {
         if matches!(seq_id_list(ids, b"x"), std::borrow::Cow::Borrowed(_)) {
             return Ok(Vec::new());
         }
+        self.generated_title_word(protein)
+    }
+
+    /// The first word of the subject Bioseq's generated title (`title_word` without the check
+    /// of the target's ids).
+    fn generated_title_word(&self, protein: bool) -> Result<Vec<u8>, &'static str> {
         if self.title_suffix_adjusted(protein) {
             return Err("a title ending in ']' whose first word NCBI BLAST+ takes after it rewrites the title's end from the taxids (x_AdjustProteinTitleSuffix)");
         }
@@ -360,7 +366,17 @@ impl ParsedSubject {
         &self,
         protein: bool,
     ) -> Result<Vec<super::tabular::DeflineIds>, &'static str> {
-        let word = self.title_word(protein)?;
+        // `GetSeqIdList` replaces the ids of each definition line, so the word is made when any
+        // line has an id to replace, not only the target's.
+        let replaced =
+            self.set.deflines.iter().any(|defline| {
+                matches!(seq_id_list(&defline.ids, b"x"), std::borrow::Cow::Owned(_))
+            });
+        let word = if replaced {
+            self.generated_title_word(protein)?
+        } else {
+            Vec::new()
+        };
         Ok(self
             .set
             .deflines

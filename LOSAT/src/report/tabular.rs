@@ -720,6 +720,45 @@ impl TabularWriter<'_> {
         };
         let spec = self.spec;
         let csv = spec.is_csv();
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908
+        // ```c++
+        //     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
+        //         x_IsFieldRequested(eSubjectStart) || x_IsFieldRequested(eSubjectEnd) ||
+        //         x_IsFieldRequested(eAlignmentLength) || x_IsFieldRequested(eGaps) ||
+        //         x_IsFieldRequested(eGapOpenings) || x_IsFieldRequested(eQuerySeq) ||
+        //         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
+        //         x_IsFieldRequested(ePositives) || x_IsFieldRequested(eMismatches) ||
+        //         x_IsFieldRequested(ePercentPositives) || x_IsFieldRequested(ePercentIdentical) ||
+        //         x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eBTOP) ||
+        //         x_IsFieldRequested(eSubjectStrand)) {
+        // ```
+        // Only that block sets the frames (`SetCounts`); without one of its fields `frames` and
+        // `sframe` keep the 0 of `x_ResetFields`.
+        let counts_set = spec.has_any(&[
+            QueryStart,
+            QueryEnd,
+            SubjectStart,
+            SubjectEnd,
+            AlignmentLength,
+            Gaps,
+            GapOpenings,
+            QuerySeq,
+            SubjectSeq,
+            Positives,
+            Mismatches,
+            PercentPositives,
+            PercentIdentical,
+            QueryFrame,
+            Btop,
+            SubjectStrand,
+        ]) || (spec.has(NumIdentical) && hsp.num_ident > 0);
+        let frames = |hsp: &TabularHsp<'_>| {
+            if counts_set {
+                (hsp.q_frame, hsp.s_frame)
+            } else {
+                (0, 0)
+            }
+        };
         for (i, field) in spec.fields.iter().enumerate() {
             if i > 0 {
                 out.extend_from_slice(spec.delimiter.as_bytes());
@@ -780,12 +819,13 @@ impl TabularWriter<'_> {
                     format_percent_identity_ncbi(positives, hsp.length, 2).as_bytes(),
                 ),
                 Frames => {
-                    push_num(out, hsp.q_frame);
+                    let (q_frame, s_frame) = frames(hsp);
+                    push_num(out, q_frame);
                     out.push(b'/');
-                    push_num(out, hsp.s_frame);
+                    push_num(out, s_frame);
                 }
                 QueryFrame => push_num(out, hsp.q_frame),
-                SubjectFrame => push_num(out, hsp.s_frame),
+                SubjectFrame => push_num(out, frames(hsp).1),
                 Btop => {
                     if let Some((qrow, srow)) = hsp.rows {
                         write_btop(out, qrow, srow);

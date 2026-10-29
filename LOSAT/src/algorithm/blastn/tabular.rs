@@ -414,6 +414,15 @@ pub(crate) fn write_blastn_tabular(
     check_taxonomy_names(tab, hit_lists)?;
     let spec = tab.spec;
     let needs = spec.needs();
+    // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
+    // those of the other ids are the reader's (`ShownSubjects`).
+    for hit_list in hit_lists.iter().flatten().filter(|_| needs.all_deflines) {
+        for hsp_list in &hit_list.hsplist_array {
+            if let Some(first) = hsp_list.hsps.first() {
+                tab.subjects.values(first.s_idx as usize, spec)?;
+            }
+        }
+    }
     let version = format!("BLASTN {NCBI_BLASTN_VERSION}");
     let table = TabularWriter {
         spec,

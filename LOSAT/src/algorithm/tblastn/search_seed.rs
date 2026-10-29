@@ -409,8 +409,8 @@ impl XCompressedSide {
 /// `stage_d_pipeline::lookup_threshold`): the masked query frames of the standard table
 /// (`x_scan_plan`), their concatenation and lookup segments as the standard table takes them (the
 /// coordinates of the word finder's query, `XBlosum62LookupQuery::without_karlin`), and
-/// blastp-fast's build of NCBI's one table of the query batch (`x_bp_build_compressed_lookup`: the
-/// flat table, or the reference one with `LOSAT_X_BPCLUT=0`) on this thread.
+/// blastp-fast's builders of NCBI's one table of the query batch (`x_tbn_build_compressed_lookup`:
+/// the flat table, or the reference one with `LOSAT_X_BPCLUT=0`) on this thread.
 fn x_build_compressed(
     queries: &[&[u8]],
     seg: Option<&SegParams>,
@@ -418,23 +418,19 @@ fn x_build_compressed(
     threshold: i32,
     word_length: usize,
 ) -> Result<XCompressedLookup> {
-    use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-        x_bp_build_compressed_lookup, XFlatArgs,
-    };
+    use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::x_tbn_build_compressed_lookup;
     let query_frames: Vec<_> = queries
         .iter()
         .map(|query| vec![encode_tblastn_lookup_query(query, seg, mask_lowercase)])
         .collect();
     let (query, locations, _) = crate::algorithm::tblastx::lookup::XBlosum62LookupQuery::new(false)
         .without_karlin(&query_frames, word_length);
-    x_bp_build_compressed_lookup(
+    x_tbn_build_compressed_lookup(
         word_length,
         threshold,
         &query,
         &locations,
         &[0..locations.len()],
-        &crate::utils::threading::SearchPool::x_serial(),
-        XFlatArgs::default(),
     )
     .ok_or_else(|| {
         anyhow::anyhow!(

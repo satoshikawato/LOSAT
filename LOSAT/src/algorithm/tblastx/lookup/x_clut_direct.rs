@@ -2240,6 +2240,64 @@ pub(crate) fn x_bp_build_compressed_lookup(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// TBLASTN's compressed lookup table (word sizes 5 to 7, `tblastn/search_seed.rs`): what
+/// `x_bp_build_compressed_lookup` builds on one thread, the reference table with the switch off and
+/// otherwise the flat one (the bucket fill, the count-and-fill builder where it declines, the
+/// reference builder where that declines), with the same refusal. A function of its own, which
+/// calls only the builders that blastp-fast's build calls out of line, so that blastp-fast's build
+/// keeps its code.
+#[inline(never)]
+pub(crate) fn x_tbn_build_compressed_lookup(
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+) -> Option<Result<XCompressedLookup, ()>> {
+    let reference = || {
+        try_build_blosum62_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
+            .map(|built| built.map(XCompressedLookup::Reference))
+    };
+    if !x_bpclut_on() {
+        return reference();
+    }
+    let bucket = if x_bpffill_on() {
+        x_try_build_flat_by_buckets(
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            NCBI_OVERFLOW_CELL_CAPACITY,
+        )
+    } else {
+        XBucketBuild::Declined
+    };
+    let built = match bucket {
+        XBucketBuild::Built(built) => built,
+        XBucketBuild::Declined => x_try_build_flat_with_capacity(
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            NCBI_OVERFLOW_CELL_CAPACITY,
+            X_COUNT_CHUNK,
+        ),
+    };
+    match built? {
+        XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
+        XFlatBuild::Refused => Some(Err(())),
+        XFlatBuild::TooLarge => reference(),
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149
 // ```c
 //     TBlastThreads the_threads(GetNumberOfThreads());

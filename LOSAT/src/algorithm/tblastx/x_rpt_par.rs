@@ -106,7 +106,7 @@ pub(crate) fn write_tabular<W: Write>(
     query_ids: &[Arc<[u8]>],
     subject_ids: &[Arc<[u8]>],
     unsearched: &[bool],
-    epilog: bool,
+    epilog: Option<usize>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> io::Result<()> {
     let config = crate::report::outfmt6::OutputConfig::ncbi_compat();
@@ -146,8 +146,12 @@ pub(crate) fn write_tabular<W: Write>(
     //         tabinfo.PrintNumProcessed(m_QueriesFormatted);
     // ```
     // The same last line as `report::write_tabular`.
-    if comments && epilog {
-        writeln!(writer, "# BLAST processed {} queries", query_titles.len())?;
+    if let (true, Some(queries_before)) = (comments, epilog) {
+        writeln!(
+            writer,
+            "# BLAST processed {} queries",
+            queries_before + query_titles.len()
+        )?;
     }
     Ok(())
 }

@@ -129,7 +129,7 @@ fn canonical_options_for_every_program() {
 #[test]
 fn makedb_takes_makeblastdb_s_option_names() {
     let makedb = |extra: &[&str]| {
-        let mut argv = vec!["losat", "makedb"];
+        let mut argv = vec!["losat", "makeblastdb"];
         argv.extend(extra);
         try_parse_from(argv)
     };
@@ -159,42 +159,40 @@ fn makedb_takes_makeblastdb_s_option_names() {
     assert_eq!(given.title.as_deref(), Some("a title"));
     assert_eq!(given.max_file_sz, "1GB");
 
-    // makeblastdb's defaults, but for the format version: LOSAT writes version 4.
+    // makeblastdb's defaults.
     let defaults = args(makedb(&["-dbtype", "nucl"]).unwrap());
     assert_eq!(defaults.input, "-");
     assert_eq!(defaults.input_type, "fasta");
     assert_eq!(defaults.out, None);
     assert_eq!(defaults.title, None);
     assert_eq!(defaults.max_file_sz, "3GB");
-    assert_eq!(defaults.blastdb_version, 4);
+    assert_eq!(defaults.blastdb_version, 5);
+    assert_eq!(defaults.logfile, None);
 
     // `-dbtype` is mandatory and takes makeblastdb's two values.
     assert!(makedb(&["-in", "x.faa"]).is_err());
     assert!(makedb(&["-in", "x.faa", "-dbtype", "protein"]).is_err());
     assert!(makedb(&["-in", "x.faa", "-dbtype", "prot", "-blastdb_version", "3"]).is_err());
 
-    // The options of makeblastdb that LOSAT does not implement are named; `-h` is the
-    // short usage of every NCBI program (ncbiargs.cpp:74), refused as for the search
-    // programs.
+    // The options of makeblastdb that LOSAT does not implement are named (`-h` and
+    // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
     for option in [
         "-parse_seqids",
         "-hash_index",
         "-mask_data",
         "-taxid",
         "-taxid_map",
-        "-logfile",
-        "-h",
     ] {
         let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
         assert!(
             err.to_string().contains(&format!(
-                "the NCBI BLAST+ option {option} is not supported by LOSAT's makedb"
+                "the NCBI BLAST+ option {option} is not supported by LOSAT's makeblastdb"
             )),
             "{option}: {err}"
         );
     }
 
-    // `-help` prints LOSAT's usage of makedb, under makeblastdb's option names.
+    // `-help` prints LOSAT's usage of makeblastdb, under makeblastdb's option names.
     for help in ["-help", "--help"] {
         let err = makedb(&[help]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
@@ -207,7 +205,7 @@ fn makedb_takes_makeblastdb_s_option_names() {
         );
     }
 
-    // The options of the search programs are unknown to makedb, and makedb's
+    // The options of the search programs are unknown to makeblastdb, and makeblastdb's
     // options are unknown to the search programs.
     assert!(makedb(&["-dbtype", "prot", "-evalue", "1"]).is_err());
     assert!(makedb(&["-dbtype", "prot", "-query", "q.fa"]).is_err());
@@ -218,7 +216,7 @@ fn makedb_takes_makeblastdb_s_option_names() {
             &["-in", "x.faa"],
         ] {
             let err = parse(program, option).unwrap_err();
-            assert!(!err.to_string().contains("makedb"), "{program}: {err}");
+            assert!(!err.to_string().contains("makeblastdb"), "{program}: {err}");
         }
     }
 }
@@ -760,12 +758,7 @@ fn numeric_values_are_validated_before_io() {
     };
     assert_eq!(args.gap_open, Some(0));
     // NCBI's other blastn tasks and options are rejected explicitly (AGENTS.md rule 2).
-    for extra in [
-        &["-task", "rmblastn"][..],
-        &["-ungapped"],
-        &["-h"],
-        &["-version"],
-    ] {
+    for extra in [&["-task", "rmblastn"][..], &["-ungapped"], &["-version"]] {
         let mut words = vec!["-outfmt", "6"];
         words.extend_from_slice(extra);
         let error = LOSAT::cli::render_message(&parse("blastn", &words).unwrap_err());
@@ -990,13 +983,19 @@ enum Outfmt {
     /// NCBI's error after the input and output files are opened (its formatting handler or the
     /// XInclude check): the message of "BLAST query/options error: ...".
     NcbiLater(&'static str),
+    /// A format LOSAT writes whose custom specification NCBI's formatting handler then rejects
+    /// (`s_ValidateCustomDelim`): the message of "BLAST query/options error: ...".
+    WritesThenNcbi(LOSAT::blastinput::app::ReportFormat, &'static str),
     /// LOSAT's rejection before the inputs are read; `{P}` is the program's name.
     Losat(&'static str),
 }
 
 const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
-const CUSTOM: &[&str] = &["blastp", "blastx"];
-const NO_CUSTOM: &[&str] = &["blastn", "tblastn", "tblastx"];
+const CUSTOM: &[&str] = &["blastn", "blastp", "blastx"];
+/// The programs that check their own field lists and take no delimiter (line CLI C2 moves them to
+/// the shared tabular writer in its PR 3).
+const OWN_FIELDS: &[&str] = &["blastp", "blastx"];
+const NO_CUSTOM: &[&str] = &["tblastn", "tblastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
 const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
@@ -1032,7 +1031,8 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "0 delim=,", None, Writes(Pairwise)),
         (ALL, "6 delim=", None, Writes(Tabular)),
         (ALL, "7 delim= ", None, Writes(TabularWithComments)),
-        // Custom fields (BLASTP and BLASTX check their own lists) and delimiters.
+        // Custom fields (BLASTP and BLASTX check their own lists; BLASTN writes every field and
+        // a delimiter with the shared tabular writer, line CLI C2) and delimiters.
         (CUSTOM, "6 std", None, Writes(Tabular)),
         (CUSTOM, "07 std", None, Writes(TabularWithComments)),
         (CUSTOM, "6 qseqid sseqid pident length", None, Writes(Tabular)),
@@ -1042,8 +1042,20 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (NO_CUSTOM, "7  qaccver", None, CUSTOM_SPEC),
         (NO_CUSTOM, "6 delim=,", None, CUSTOM_SPEC),
         (NO_CUSTOM, "6 delimiter=;", None, CUSTOM_SPEC),
-        (CUSTOM, "6 delim=, std", None, DELIMITER),
-        (CUSTOM, "6 delim=;", None, DELIMITER),
+        (OWN_FIELDS, "6 delim=, std", None, DELIMITER),
+        (OWN_FIELDS, "6 delim=;", None, DELIMITER),
+        (&["blastn"], "7  qaccver", None, Writes(TabularWithComments)),
+        (&["blastn"], "6 delim=,", None, Writes(Tabular)),
+        (&["blastn"], "6 delimiter=;", None, Writes(Tabular)),
+        (&["blastn"], "6 delim=, std", None, Writes(Tabular)),
+        (&["blastn"], "7 delim=| qseqid sseqid", None, Writes(TabularWithComments)),
+        (&["blastn"], "6 delim=; qseqid", None, Writes(Tabular)),
+        // NCBI's check of a custom delimiter against the fields that separate their entries with
+        // it, searched as text (blast_args.cpp:2753-2792).
+        (&["blastn"], "6 delim=; qseqid staxids", None, WritesThenNcbi(Tabular, "Your custom record separator (;) is also used by the format specifier (staxids) to separate multiple entries. Please use a different record separator (delim keyword).")),
+        (&["blastn"], "6 delim=; qseqid xstaxidsx", None, WritesThenNcbi(Tabular, "Your custom record separator (;) is also used by the format specifier (staxids) to separate multiple entries. Please use a different record separator (delim keyword).")),
+        (&["blastn"], "7 delim=/ frames", None, WritesThenNcbi(TabularWithComments, "Your custom record separator (/) is also used by the format specifier (frames) to separate multiple entries. Please use a different record separator (delim keyword).")),
+        (&["blastn"], "10 delim=<> salltitles", None, WritesThenNcbi(CommaSeparatedValues, "Your custom record separator (<>) is also used by the format specifier (salltitles) to separate multiple entries. Please use a different record separator (delim keyword).")),
         // NCBI's errors when it reads the value (the delimiter is read before the number).
         (ALL, "abc", None, Ncbi(1, "BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
         (ALL, "0x6", None, Ncbi(1, "BLAST query/options error: '0x6' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
@@ -1072,9 +1084,14 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "2", None, UNSUPPORTED),
         (ALL, "3", None, UNSUPPORTED),
         (ALL, "4", None, UNSUPPORTED),
-        (ALL, "10", None, UNSUPPORTED),
+        (NOT_BLASTN, "10", None, UNSUPPORTED),
         (ALL, "18", None, UNSUPPORTED),
-        (ALL, "20", None, UNSUPPORTED),
+        (NOT_BLASTN, "20", None, UNSUPPORTED),
+        // Line CLI C2 (PR 1): BLASTN writes 10 and 20 with the shared tabular writer.
+        (&["blastn"], "10", None, Writes(CommaSeparatedValues)),
+        (&["blastn"], "10 delim=; qseqid sseqid", None, Writes(CommaSeparatedValues)),
+        (&["blastn"], "20", None, Writes(CommaSeparatedValuesWithHeader)),
+        (&["blastn"], " 20 qseqid sseqid qcovus ", None, Writes(CommaSeparatedValuesWithHeader)),
         // Line OF track S (structured formats): 8 and 12 in every program (OF3b), 9 (OF3c), 5 in
         // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in every program (BLASTP and BLASTN: OF5a; BLASTX, TBLASTN and TBLASTX: OF5b), NCBI dropping a custom specification
         // (blast_args.cpp:2844-2851); the others not yet.
@@ -1164,6 +1181,18 @@ fn output_formats_follow_the_format_table() {
                     let error = formatting_handler_check(&choice, program)
                         .and_then(|()| xinclude_check(&choice))
                         .unwrap_err();
+                    assert_eq!(
+                        native(error),
+                        (
+                            1,
+                            format!("BLAST query/options error: {message}\nPlease refer to the BLAST+ user manual.\n")
+                        ),
+                        "{case}"
+                    );
+                }
+                Outfmt::WritesThenNcbi(format, message) => {
+                    assert_eq!(report.unwrap(), Some(format), "{case}");
+                    let error = formatting_handler_check(&choice, program).unwrap_err();
                     assert_eq!(
                         native(error),
                         (
@@ -1265,9 +1294,7 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("blastp", &["-taxids", "9606"]),
         ("blastp", &["-db_soft_mask", "21"]),
         ("blastp", &["-db_hard_mask", "21"]),
-        ("blastp", &["-mt_mode", "1"]),
         ("blastp", &["-lcase_masking"]),
-        ("blastp", &["-h"]),
         ("blastp", &["-version"]),
         ("blastp", &["-xdrop_gap_final", "30"]),
         ("blastn", &["-logfile", "log"]),
@@ -1616,7 +1643,9 @@ fn toolkit_words_in_an_option_value_are_rejected_as_options() {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001: the application reads
     // -version, -version-full*, -dryrun, -logfile and -conffile anywhere before `--`, also
     // in an option's value (`-out -version` prints the version). LOSAT rejects them (D9)
-    // in that place too, instead of writing a file named "-version".
+    // in that place too, instead of writing a file named "-version". The parser refuses
+    // `-version` (the Web engine's); the command line prints it before parsing
+    // (`ncbi_version_request_reads_the_word_before_the_arguments`).
     for (program, upper) in [
         ("blastn", "BLASTN"),
         ("blastp", "BLASTP"),
@@ -1657,7 +1686,7 @@ fn a_last_double_dash_changes_nothing_and_a_word_after_it_is_an_error() {
     // makeblastdb reads its arguments with the same parser: it builds the database
     // when `--` is the last word.
     let makedb = |words: &[&str]| {
-        let mut argv = vec!["losat", "makedb", "-dbtype", "prot"];
+        let mut argv = vec!["losat", "makeblastdb", "-dbtype", "prot"];
         argv.extend(words);
         try_parse_from::<Cli, _, _>(argv)
     };
@@ -1726,4 +1755,161 @@ fn blastx_takes_a_database_and_its_size() {
             .contains("unsupported BLASTX option '-subject_loc'"),
         "{error}"
     );
+}
+
+#[test]
+fn makedb_is_not_a_command_and_makeblastdb_checks_apply() {
+    let makedb = |words: &[&str]| {
+        let mut argv = vec!["losat", "makeblastdb", "-dbtype", "prot"];
+        argv.extend(words);
+        try_parse_from::<Cli, _, _>(argv)
+    };
+    // The old name is gone: an unknown command, with every spelling of its arguments.
+    for words in [
+        &["makedb", "-in", "x.faa", "-dbtype", "prot"][..],
+        &["makedb", "-h"],
+        &["makedb", "-version"],
+    ] {
+        let mut argv = vec!["losat"];
+        argv.extend(words);
+        let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::UnknownArgument,
+            "{words:?}"
+        );
+        assert_ne!(error.exit_code(), 0);
+        assert!(error.to_string().contains("makedb"), "{words:?}: {error}");
+    }
+    let Commands::Makedb(args) = makedb(&["-in", "x.faa", "-out", "db"]).unwrap().command else {
+        unreachable!("makeblastdb")
+    };
+    assert_eq!(
+        (args.input.as_str(), args.out.as_deref()),
+        ("x.faa", Some("db"))
+    );
+    // The checks that name the command apply.
+    let error = makedb(&["-parse_seqids"]).unwrap_err().to_string();
+    assert!(
+        error.contains(
+            "the NCBI BLAST+ option -parse_seqids is not supported by LOSAT's makeblastdb"
+        ),
+        "{error}"
+    );
+    assert!(makedb(&["-in", "x.faa", "--"]).is_ok());
+    assert!(makedb(&["--", "-in", "x.faa"]).is_err());
+    assert!(makedb(&["-evalue", "1"]).is_err());
+    let error = makedb(&["-h"]).unwrap_err();
+    assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp);
+    assert_eq!(error.exit_code(), 0);
+}
+
+#[test]
+fn short_help_h_is_display_help_for_every_program() {
+    for program in [
+        "blastn",
+        "blastp",
+        "blastx",
+        "tblastn",
+        "tblastx",
+        "psiblast",
+        "makeblastdb",
+    ] {
+        let error = try_parse_from::<Cli, _, _>(["losat", program, "-h"]).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::DisplayHelp,
+            "{program}"
+        );
+        assert_eq!(error.exit_code(), 0);
+        // As an option's value, `-h` is the value.
+        assert!(
+            parse(program, &["-out", "-h"]).is_ok() || program == "makeblastdb",
+            "{program}"
+        );
+    }
+}
+
+#[test]
+fn ncbi_version_request_reads_the_word_before_the_arguments() {
+    use LOSAT::cli::ncbi_version_request;
+    let version = |words: &[&str]| ncbi_version_request(words.iter().copied());
+    let text = version(&["losat", "blastn", "-version"]).unwrap();
+    assert!(
+        text.starts_with("blastn: 2.17.0+\n Package: LOSAT "),
+        "{text}"
+    );
+    assert!(
+        text.ends_with(", output compatible with blast 2.17.0\n"),
+        "{text}"
+    );
+    assert!(version(&["losat", "makeblastdb", "-x", "-version"])
+        .unwrap()
+        .starts_with("makeblastdb: 2.17.0+\n"));
+    // Where another option expects its value, and next to invalid arguments.
+    assert!(version(&["losat", "blastx", "-out", "-version"]).is_some());
+    assert!(version(&["losat", "blastp", "-evalue", "x", "-version", "-bogus"]).is_some());
+    // Not a request: after `--`, a longer word, no program, the top level.
+    assert!(version(&["losat", "blastn", "--", "-version"]).is_none());
+    assert!(version(&["losat", "blastn", "-version-full"]).is_none());
+    assert!(version(&["losat", "blastn", "-version=1"]).is_none());
+    assert!(version(&["losat", "-version"]).is_none());
+    assert!(version(&["losat", "--version"]).is_none());
+    assert!(version(&["losat", "nosuch", "-version"]).is_none());
+    assert!(version(&["losat"]).is_none());
+}
+
+#[test]
+fn mt_mode_takes_zero_to_two_and_needs_num_threads() {
+    for program in ["blastn", "blastp", "blastx", "tblastn"] {
+        for mode in ["0", "1", "2"] {
+            assert!(
+                parse(program, &["-mt_mode", mode, "-num_threads", "2"]).is_ok(),
+                "{program} {mode}"
+            );
+            // clap's `requires` is not met by the default of `-num_threads`.
+            let error = parse(program, &["-mt_mode", mode]).unwrap_err().to_string();
+            assert!(error.contains("num_threads"), "{program} {mode}: {error}");
+        }
+        for mode in ["3", "-1", "x", "1.5", ""] {
+            assert!(
+                parse(program, &["-mt_mode", mode, "-num_threads", "2"]).is_err(),
+                "{program} {mode:?}"
+            );
+        }
+    }
+    // NCBI's tblastx and psiblast have no -mt_mode.
+    for program in ["tblastx", "psiblast"] {
+        let error = parse(program, &["-mt_mode", "1", "-num_threads", "2"])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("unknown option or argument"),
+            "{program}: {error}"
+        );
+    }
+}
+
+#[test]
+fn use_index_false_parses_and_true_is_an_unsupported_error() {
+    for value in ["false", "False", "f", "no", "0"] {
+        assert!(parse("blastn", &["-use_index", value]).is_ok(), "{value}");
+    }
+    for value in ["true", "T", "yes", "1"] {
+        let error =
+            LOSAT::cli::render_message(&parse("blastn", &["-use_index", value]).unwrap_err());
+        assert!(
+            error.contains(
+                "-use_index true (the megablast index) is not supported by LOSAT's BLASTN"
+            ),
+            "{value}: {error}"
+        );
+    }
+    assert!(parse("blastn", &["-use_index", "maybe"]).is_err());
+    // NCBI's other programs have no -use_index; `-index_name` stays unported.
+    assert!(parse("blastp", &["-use_index", "false"]).is_err());
+    let error = parse("blastn", &["-index_name", "x"])
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
 }

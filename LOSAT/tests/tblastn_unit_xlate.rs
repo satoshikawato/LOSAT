@@ -24,7 +24,7 @@
 //! The query is the first protein of `tests/fasta/PemoMJNVA.faa`; the subjects are eleven copies
 //! of `tests/fasta/MelaMJNV.fasta`, forward and reverse complement in turn (one long subject),
 //! and the genome once more (a short one, whose plan keeps its frames). A `-db` search of the
-//! same subjects (`losat makedb`) reads the long one before its plan when it reads each database
+//! same subjects (`losat makeblastdb`) reads the long one before its plan when it reads each database
 //! sequence where it is searched (`LOSAT_X_TBNDBSTREAM`), and translates it in its units as the
 //! search on the copy of the database (`LOSAT_X_TBNDBSTREAM=0`) does.
 
@@ -205,23 +205,23 @@ fn the_report_does_not_depend_on_where_the_units_read_their_residues() {
     assert!(report == expected, "four threads with =0");
 }
 
-/// The database of the subject file (`losat makedb`, one volume), made once per test process.
+/// The database of the subject file (`losat makeblastdb`, one volume), made once per test process.
 fn database() -> &'static PathBuf {
     static DB: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     DB.get_or_init(|| {
         let (_, subject, _) = inputs();
         let db = subject.with_file_name(format!("db{}", std::process::id()));
         let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-            .arg("makedb")
+            .arg("makeblastdb")
             .arg("-in")
             .arg(subject)
             .args(["-dbtype", "nucl", "-out"])
             .arg(&db)
             .output()
-            .expect("run LOSAT makedb");
+            .expect("run LOSAT makeblastdb");
         assert!(
             output.status.success(),
-            "makedb: {}",
+            "makeblastdb: {}",
             String::from_utf8_lossy(&output.stderr)
         );
         db

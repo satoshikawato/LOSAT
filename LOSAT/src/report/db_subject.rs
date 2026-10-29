@@ -295,6 +295,12 @@ impl ParsedSubject {
         if matches!(seq_id_list(ids, b"x"), std::borrow::Cow::Borrowed(_)) {
             return Ok(Vec::new());
         }
+        self.generated_title_word(protein)
+    }
+
+    /// The first word of the subject Bioseq's generated title (`title_word` without the check
+    /// of the target's ids).
+    fn generated_title_word(&self, protein: bool) -> Result<Vec<u8>, &'static str> {
         if self.title_suffix_adjusted(protein) {
             return Err("a title ending in ']' whose first word NCBI BLAST+ takes after it rewrites the title's end from the taxids (x_AdjustProteinTitleSuffix)");
         }
@@ -329,6 +335,66 @@ impl ParsedSubject {
             field(TabularId::Accession),
             field(TabularId::AccessionVersion),
         ])
+    }
+
+    /// The tabular `sgi`: the first GI of the subject Bioseq's ids (`FindGi`; `seq_id_list` only
+    /// replaces ids that are no GI), 0 for none.
+    pub fn tabular_gi(&self) -> i64 {
+        self.target().gi()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:544-556
+    // ```c++
+    //     if (bdlRef.NotEmpty() && bdlRef->CanGet() && bdlRef->IsSet() && !bdlRef->Get().empty()){
+    //         vector< CConstRef<CSeq_id> > original_seqids;
+    //
+    //         ITERATE(CBlast_def_line_set::Tdata, itr, bdlRef->Get()) {
+    //             original_seqids.clear();
+    //             ITERATE(CBlast_def_line::TSeqid, id, (*itr)->GetSeqid()) {
+    //                 original_seqids.push_back(*id);
+    //             }
+    //             list<CRef<objects::CSeq_id> > next_seqid_list;
+    //             // Next call replaces BL_ORD_ID if found.
+    //             CShowBlastDefline::GetSeqIdList(bh,original_seqids,next_seqid_list);
+    //             m_SubjectIds.push_back(next_seqid_list);
+    //         }
+    // ```
+    /// The tabular ids of every definition line (`x_SetSubjectIds`: `sallseqid`, `sallgi`,
+    /// `sallacc`), in the stored order: each line's ids after `seq_id_list` with the first word
+    /// of the subject Bioseq's title, as `tabular_ids` makes them. `Err` as `tabular_ids`'.
+    pub fn all_tabular_ids(
+        &self,
+        protein: bool,
+    ) -> Result<Vec<super::tabular::DeflineIds>, &'static str> {
+        // `GetSeqIdList` replaces the ids of each definition line, so the word is made when any
+        // line has an id to replace, not only the target's.
+        let replaced =
+            self.set.deflines.iter().any(|defline| {
+                matches!(seq_id_list(&defline.ids, b"x"), std::borrow::Cow::Owned(_))
+            });
+        let word = if replaced {
+            self.generated_title_word(protein)?
+        } else {
+            Vec::new()
+        };
+        Ok(self
+            .set
+            .deflines
+            .iter()
+            .map(|defline| {
+                let ids = seq_id_list(&defline.ids, &word);
+                let field = |kind| {
+                    let mut out = Vec::new();
+                    tabular_id(&ids, kind, &mut out);
+                    out
+                };
+                super::tabular::DeflineIds {
+                    id: field(TabularId::Full),
+                    gi: defline.gi(),
+                    accession: field(TabularId::Accession),
+                }
+            })
+            .collect())
     }
 
     /// The title of the first definition line, empty for none (`stitle`; the writers show an
@@ -629,6 +695,14 @@ pub fn wrap_title(title: &[u8], out: &mut Vec<u8>) {
 /// ```
 pub fn joined_in_reports(a: &ParsedSubject, b: &ParsedSubject) -> bool {
     compare(&a.alignment_id, &b.alignment_id) == Sic::Yes
+}
+
+// No NCBI counterpart: LOSAT's check that no two sequences of a database are joined
+// (`common::database::reports_may_refuse`).
+/// Adds to `keys` the keys of the Seq-align id of `subject` (`defline_set::match_keys`): two
+/// subjects that the reports join (`joined_in_reports`) share one.
+pub fn join_keys(subject: &ParsedSubject, keys: &mut Vec<u64>) {
+    crate::seqid::defline_set::match_keys(&subject.alignment_id, keys);
 }
 
 #[cfg(test)]

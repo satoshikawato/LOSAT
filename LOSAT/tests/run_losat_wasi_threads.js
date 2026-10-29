@@ -10,10 +10,10 @@ const { createThreadHost } = require("./wasi_thread_host");
     process.exitCode = host.start();
     await host.waitForWorkers();
   } finally { await host.close(); }
-  // Every thread worker has exited, the files are closed and the command's output was written
-  // synchronously (WASI fd_write): exit with the command's status now. Node's own end of the
-  // process (freeing the environment and the main isolate after the 'exit' event) took 5-10 ms
-  // more on the workstation and does nothing for the command. A failure above still ends the
-  // usual way, after its message.
-  process.exit();
+  // The process ends when its event loop is empty, with process.exitCode, and never with
+  // process.exit(): Node's exit handler shuts down V8's worker threads before it frees the main
+  // isolate, and a background compile there that waits for a garbage collection on this thread
+  // then waits forever (one 4-thread tblastn command of a local gate, 2026-10-29: the main
+  // thread joined a node-V8Worker in ConcurrentBaselineCompiler -> CollectionBarrier::
+  // AwaitCollectionBackground for 3 hours). Freeing the isolate first ends such a wait.
 })().catch(err => { console.error(err); process.exitCode = 1; });

@@ -191,6 +191,9 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BXTASKRES` (BLASTX's subject flow cutting its tasks by residues as well as by subjects,
 /// `blastx/x_subject_flow.rs`) joined the set in the pull request that added it, after it was
 /// verified and timed with it on and off.
+/// `LOSAT_X_BXKAPPAFIT` (BLASTX's batch end making no more composition-redo workers than it has
+/// matches instead of one per thread, `blastx/runtime.rs`) joined the set in the pull request that
+/// added it, after it was verified, timed and its memory measured with it on and off.
 /// `LOSAT_X_PAIRPARGATE` (TBLASTX's unit path only for the query batches where it is expected to
 /// be faster than the reference frame loop, `tblastx/x_pair_par.rs`) and `LOSAT_X_TBXLUT` (the
 /// reference loop's full lookup table filled in place from per-cell counts,
@@ -278,6 +281,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXFLOW",
     "LOSAT_X_BXHITBF",
     "LOSAT_X_BXKAONCE",
+    "LOSAT_X_BXKAPPAFIT",
     "LOSAT_X_BXLUTPOOL",
     "LOSAT_X_BXPOOLN1",
     "LOSAT_X_BXSCANBYTE",

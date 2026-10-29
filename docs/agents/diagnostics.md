@@ -378,6 +378,7 @@ export LOSAT_X_BXEVALEMPTY=1
 export LOSAT_X_BXFLOW=1
 export LOSAT_X_BXHITBF=1
 export LOSAT_X_BXKAONCE=1
+export LOSAT_X_BXKAPPAFIT=1
 export LOSAT_X_BXLUTPOOL=1
 export LOSAT_X_BXPOOLN1=1
 export LOSAT_X_BXSCANBYTE=1
@@ -6327,6 +6328,37 @@ Scheduling (each value computed by one thread with the original function; order 
   0.571 -> 0.549 s (x0.962, 0.959-0.968, 12 of 12), S(16) 13.70 -> 14.29; the capped few-subject rows (800 cDNAs x
   2 / 8 / 50 yeast proteins, AP027131 x 10 / 50 proteins, 16 and 32 threads) x0.986-1.031, each within its
   per-round spread (`k` is 1 on the 2 and 8 protein rows, so the cut changes no task there).
+- `LOSAT_X_BXKAPPAFIT=1` (BLASTX, memory at many threads; in the strict set from the pull request that added it: on
+  unless `=0`; acts where a batch end at 2+ threads redoes composition for 2 or more matches, fewer than the
+  threads): the batch end makes `min(threads, matches)` composition-redo workers (`runtime.rs`, `x_kappa_workers`)
+  instead of one per pool thread; with fewer matches than threads one speculative batch holds every match and each
+  match takes the worker of its position (with as many matches or more, the thread's own, as before). Why: each
+  worker is a full redo state (`KappaState::x_for_thread`: the redo parameters, a gapped-alignment scratch and a
+  composition workspace), made per batch end; a `-subject` search of 800 fly cDNAs against a few yeast proteins at
+  32-64 threads made 32-64 of them at every batch end for a handful of matches, from several batch ends at a time
+  (the capped batch flow), and the threads' arenas kept that memory. Exactness: a worker's state does not change a
+  match's result (`x_speculate_match` redoes in stream order a result that read a predecessor's matrix); with fewer
+  matches than threads `x_batch` (32 per worker, at least 64) holds every match, so positions name distinct workers;
+  `tests/blastx_unit_cap.rs` compares reports with the switch on and off at 2, 4 and 8 threads for 3, 10 and 40
+  subjects and the batch flow, and checks both sides of the reach. Measured 2026-10-29 on the workstation, dev
+  ec91ea18 against this change, max RSS as the peak `VmHWM` sampled every 2 ms (`ru_maxrss` at 24-64 threads reads
+  9-31 MiB below it); every output the same bytes in every arm. Against NCBI BLAST+ 2.17.0 (node 0, 3 rounds, NCBI
+  `-subject` at one thread in the same window, the same bytes as NCBI's): 800 fly cDNAs x 8 / 50 / 200 yeast proteins
+  `-subject` at 32 threads 82.2 / 87.2 / 97.9 -> 79.5 / 81.6 / 83.3 MiB (NCBI 81.3 / 82.0 / 83.7), at 64 threads 112.6
+  / 131.5 / 161.4 -> 106.8 / 113.4 / 116.5, still above NCBI at 48 and 64 threads (the rest is per-thread live memory:
+  kept diagonal tables, scratch, 48-64 arenas). Time and max RSS in the same runs (node 1, the first n physical cores
+  with their HT siblings idle except at 64 threads, `--membind=1`, cores warmed 3 s per case, arms dev / new / `=0`
+  rotated per round, medians of per-round ratios; run 3 12 rounds on 26 cases, run 4 16 rounds with an exact end time
+  on 10): where the switch acts, max RSS 800 cDNAs x 200 proteins at 64 / 32 / 16 threads x0.716 / x0.855 / x0.968, x
+  50 proteins x0.865 / x0.930 / x0.981, x 8 proteins at 64 / 32 threads x0.954 / x0.972 (lower in 12 of 12 and 14-16
+  of 16 rounds), the proteome `-db` at 64 threads x0.933, AP027131 x 10 proteins at 16 threads x0.989; AP027131 x 50
+  proteins at 64 threads and the proteome `-subject` at 16 threads x1.002 / x1.007 (new / `=0` x1.001 / x1.010: batch
+  ends that are not the peak). Time x0.962-1.002 on every case (800 cDNAs x 2 / 8 / 50 / 200 proteins, AP027131 x 10 /
+  50, the proteome `-subject` / `-db`, AP027131 x AP027133, fly 2L 50 / 150 kb `-db`; 1-64 threads), each within its
+  per-round spread; the three run-3 readings above x1.01 (x 2 proteins at 16 threads x1.014, AP027131 x AP027133 at 32
+  x1.017, x 8 proteins at 64 x1.011) were run 3's clock, which moved in 2.35 ms steps, and read x0.990-0.997 in run 4.
+  The switch is not reached on 800 cDNAs x 2 proteins (no batch end with two matches) and takes the reference side on
+  AP027131 x AP027133 and the fly rows.
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

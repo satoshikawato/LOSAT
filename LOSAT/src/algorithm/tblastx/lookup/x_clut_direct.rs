@@ -385,6 +385,12 @@ pub(crate) struct XFlatArgs<'a> {
 // ```
 const X_TARGET_PV_BYTES: usize = 262_144;
 
+// No NCBI counterpart: the callers of `XFlatCompressedLookup::scan_subject`, one copy each.
+/// BLASTP's caller of `XFlatCompressedLookup::scan_subject` (and the tests').
+pub(crate) const X_BLASTP: u8 = 0;
+/// TBLASTN's caller of `XFlatCompressedLookup::scan_subject` (`tblastn/search_seed.rs`).
+pub(crate) const X_TBLASTN: u8 = 1;
+
 /// EXPERIMENT (LOSAT_X_BPCLUT): the compressed lookup table with each cell's hits in one slice of
 /// `hits` (`starts[index]..starts[index + 1]`), in NCBI's scan order. The other fields are those of
 /// `BlastCompressedAaLookupTable` that the scans read.
@@ -1438,8 +1444,9 @@ impl XFlatCompressedLookup {
     // }
     // ```
     /// `BlastCompressedAaLookupTable::scan_subject` on the flat table: the same statements, a cell's
-    /// hits copied from its slice.
-    pub(crate) fn scan_subject(
+    /// hits copied from its slice. `CALLER` gives each program's caller a copy of its own (`X_BLASTP`,
+    /// `X_TBLASTN`), so that the compiler inlines BLASTP's as it did when that was the only caller.
+    pub(crate) fn scan_subject<const CALLER: u8>(
         &self,
         subject: &[u8],
         seq_ranges: &[(i32, i32)],
@@ -2977,7 +2984,7 @@ mod tests {
                         });
                     let (got, got_rounds) =
                         rounds(5, length, array_size, |ranges, pairs, size, range| {
-                            flat.scan_subject(subject, ranges, pairs, size, range)
+                            flat.scan_subject::<X_BLASTP>(subject, ranges, pairs, size, range)
                         });
                     assert_eq!(got, want, "subject {n}, array {array_size}");
                     assert_eq!(got_rounds, want_rounds, "subject {n}, array {array_size}");

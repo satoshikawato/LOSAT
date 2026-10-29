@@ -5,7 +5,7 @@ use crate::algorithm::blastp::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
 };
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
-use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::XCompressedLookup;
+use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{XCompressedLookup, X_TBLASTN};
 #[cfg(test)]
 use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, build_ncbi_lookup_for_profile};
 #[cfg(test)]
@@ -408,7 +408,7 @@ impl XCompressedSide {
 /// The compressed lookup table of the query set (word sizes 5 to 7, `threshold` in its units,
 /// `stage_d_pipeline::lookup_threshold`): the masked query frames of the standard table
 /// (`x_scan_plan`), their concatenation and lookup segments as the standard table takes them (the
-/// coordinates of the word finder's query, `XBlosum62LookupQuery::without_karlin`), and
+/// coordinates of the word finder's query, `x_lookup_query_for_profile`), and
 /// blastp-fast's builders of NCBI's one table of the query batch (`x_tbn_build_compressed_lookup`:
 /// the flat table, or the reference one with `LOSAT_X_BPCLUT=0`) on this thread.
 fn x_build_compressed(
@@ -423,8 +423,8 @@ fn x_build_compressed(
         .iter()
         .map(|query| vec![encode_tblastn_lookup_query(query, seg, mask_lowercase)])
         .collect();
-    let (query, locations, _) = crate::algorithm::tblastx::lookup::XBlosum62LookupQuery::new(false)
-        .without_karlin(&query_frames, word_length);
+    let (query, locations) =
+        crate::algorithm::tblastx::lookup::x_lookup_query_for_profile(&query_frames, word_length);
     x_tbn_build_compressed_lookup(
         word_length,
         threshold,
@@ -1250,9 +1250,13 @@ fn x_scan_unit_compressed(
                 XCompressedLookup::Reference(table) => {
                     table.scan_subject(subject, &range, pairs, pair_capacity, &mut scan_range)
                 }
-                XCompressedLookup::Flat(table) => {
-                    table.scan_subject(subject, &range, pairs, pair_capacity, &mut scan_range)
-                }
+                XCompressedLookup::Flat(table) => table.scan_subject::<X_TBLASTN>(
+                    subject,
+                    &range,
+                    pairs,
+                    pair_capacity,
+                    &mut scan_range,
+                ),
             };
             on_pairs(&pairs[..hits as usize]);
         }
@@ -2894,9 +2898,8 @@ mod tests {
                 .iter()
                 .map(|query| vec![encode_tblastn_lookup_query(query, None, false)])
                 .collect();
-            let (query, locations, _) =
-                crate::algorithm::tblastx::lookup::XBlosum62LookupQuery::new(false)
-                    .without_karlin(&frames, word);
+            let (query, locations) =
+                crate::algorithm::tblastx::lookup::x_lookup_query_for_profile(&frames, word);
             let tables = [0..locations.len()];
             let XFlatBuild::Table(flat) =
                 x_try_build_flat_compressed_lookup(word, threshold, &query, &locations, &tables)

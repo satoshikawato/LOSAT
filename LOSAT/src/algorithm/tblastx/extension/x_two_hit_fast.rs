@@ -239,22 +239,17 @@ fn build_table() -> Option<Box<Table>> {
     let mut t: Box<Table> = vec![0i8; TABLE_LEN].into_boxed_slice().try_into().ok()?;
     for q in 0..=255u8 {
         for s in 0..=255u8 {
-            t[(q as usize) << 8 | s as usize] = table_byte(get_score(q, s), MAX_WORD_SCORE)?;
+            let v = get_score(q, s);
+            t[(q as usize) << 8 | s as usize] = if v == BLAST_SCORE_MIN {
+                -128
+            } else if (-127..=MAX_WORD_SCORE).contains(&v) {
+                v as i8
+            } else {
+                return None;
+            };
         }
     }
     Some(t)
-}
-
-/// The cell of the score `v`: -128 for `BLAST_SCORE_MIN`, `None` for another score outside
-/// -127..=`max`.
-fn table_byte(v: i32, max: i32) -> Option<i8> {
-    if v == BLAST_SCORE_MIN {
-        Some(-128)
-    } else if (-127..=max).contains(&v) {
-        Some(v as i8)
-    } else {
-        None
-    }
 }
 
 /// Writes the scores `score(q, s)` of the bytes below `MATRIX_LETTERS` into another matrix's
@@ -262,10 +257,14 @@ fn table_byte(v: i32, max: i32) -> Option<i8> {
 fn fill_matrix_table(t: &mut [i8; MATRIX_TABLE_LEN], score: impl Fn(u8, u8) -> i32) -> bool {
     for q in 0..MATRIX_LETTERS as u8 {
         for s in 0..MATRIX_LETTERS as u8 {
-            match table_byte(score(q, s), MAX_MATRIX_SCORE) {
-                Some(v) => t[(q as usize) << 5 | s as usize] = v,
-                None => return false,
-            }
+            let v = score(q, s);
+            t[(q as usize) << 5 | s as usize] = if v == BLAST_SCORE_MIN {
+                -128
+            } else if (-127..=MAX_MATRIX_SCORE).contains(&v) {
+                v as i8
+            } else {
+                return false;
+            };
         }
     }
     true

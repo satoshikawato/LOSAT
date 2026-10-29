@@ -306,6 +306,26 @@ impl DbVersion {
     }
 }
 
+/// The offset arrays of a closed index file, emptied, for the index file of
+/// the next volume.
+///
+/// NCBI frees the arrays of a volume when it writes them and the next volume
+/// grows its own from nothing. With glibc that puts the allocator's history
+/// into the peak: the free of a small first volume's arrays (mapped blocks
+/// of 1-32 MiB) raises the mmap threshold to their size, the next volumes
+/// grow theirs in the heap up to that size, and the heap copies they leave
+/// when they move to a mapping stay resident unless they exceed the trim
+/// threshold (UniRef50, 5 volumes: 43 MiB stayed for the rest of the build).
+/// Arrays that are handed on are grown in place and freed only when the
+/// database is closed, so no free moves the thresholds, and their pages are
+/// not faulted in again for every volume.
+#[derive(Debug, Default)]
+pub(crate) struct OffsetArrays {
+    hdr: Vec<u32>,
+    seq: Vec<u32>,
+    amb: Vec<u32>,
+}
+
 /// `CWriteDB_IndexFile`: the index file, kept in memory until the volume is
 /// closed.
 #[derive(Debug)]
@@ -406,6 +426,9 @@ impl IndexFile {
     // ```
     // `m_DataSize` starts at the header's size, so the LMDB name of version 5
     // takes room from the limit of `-max_file_sz` (`can_fit`).
+    /// `arrays` are those of the previous volume (`take_offset_arrays`), or
+    /// new ones for the first volume.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn create(
         dbname: &str,
         protein: bool,
@@ -414,6 +437,7 @@ impl IndexFile {
         index: u32,
         max_file_size: u64,
         version: DbVersion,
+        arrays: OffsetArrays,
     ) -> Result<Self, WriteDbError> {
         let file = WriteDbFile::create(
             dbname,
@@ -425,6 +449,16 @@ impl IndexFile {
             DbVersion::V4 => Vec::new(),
             DbVersion::V5 => make_lmdb_name(dbname, protein).into_bytes(),
         };
+        let OffsetArrays {
+            mut hdr,
+            mut seq,
+            mut amb,
+        } = arrays;
+        hdr.clear();
+        seq.clear();
+        amb.clear();
+        hdr.push(0);
+        seq.push(1);
         Ok(Self {
             file,
             protein,
@@ -437,15 +471,10 @@ impl IndexFile {
             oids: 0,
             letters: 0,
             max_length: 0,
-            hdr: vec![0],
-            seq: vec![1],
-            amb: Vec::new(),
+            hdr,
+            seq,
+            amb,
         })
-    }
-
-    /// `m_OIDs`: the number of sequences in the volume.
-    pub(crate) fn oids(&self) -> u32 {
-        self.oids
     }
 
     /// `m_Letters`: the residues or bases of the volume.
@@ -584,17 +613,18 @@ impl IndexFile {
     //     }
     // ```
     /// `x_Flush` and `Close`.
+    // NCBI writes the offsets one by one to the file's stream. They go out
+    // here through a buffer of a fixed size: a copy of the whole index next
+    // to the offset arrays would double what a volume of many sequences
+    // holds at its close (UniRef50: 16.6 million sequences in one volume,
+    // 127 MiB of arrays and 127 MiB of copy; makedb-v5 survey/MEM_RCA.md).
     pub(crate) fn close(&mut self) -> Result<(), WriteDbError> {
         let mut pad_date = self.date.clone();
         while overhead(self.version, &self.title, &self.lmdb_name, &pad_date) & 0x7 != 0 {
             pad_date.push(0);
         }
-        let mut out = Vec::with_capacity(
-            40 + self.title.len()
-                + self.lmdb_name.len()
-                + pad_date.len()
-                + 4 * (self.hdr.len() * 3 + 1),
-        );
+        let mut out =
+            Vec::with_capacity(40 + self.title.len() + self.lmdb_name.len() + pad_date.len());
         let write_int4 =
             |out: &mut Vec<u8>, value: u32| out.extend_from_slice(&value.to_be_bytes());
         write_int4(&mut out, self.version.number());
@@ -614,20 +644,43 @@ impl IndexFile {
         write_int4(&mut out, self.oids);
         out.extend_from_slice(&self.letters.to_le_bytes());
         write_int4(&mut out, self.max_length);
+        self.file.write(&out)?;
+        let mut chunk = [0u8; 1 << 14];
         for array in [&self.hdr, &self.seq, &self.amb] {
-            for &value in array {
-                write_int4(&mut out, value);
+            for values in array.chunks(chunk.len() / 4) {
+                let bytes = &mut chunk[..values.len() * 4];
+                for (out, value) in bytes.chunks_exact_mut(4).zip(values) {
+                    out.copy_from_slice(&value.to_be_bytes());
+                }
+                self.file.write(bytes)?;
             }
         }
         if !self.amb.is_empty() {
             let last = *self.seq.last().unwrap_or(&1);
-            write_int4(&mut out, last);
+            self.file.write(&last.to_be_bytes())?;
         }
-        self.file.write(&out)?;
-        self.hdr = Vec::new();
-        self.seq = Vec::new();
-        self.amb = Vec::new();
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:432-435
+        // ```c++
+        //     vector<unsigned int> tmp1, tmp2, tmp3;
+        //     m_Hdr.swap(tmp1);
+        //     m_Seq.swap(tmp2);
+        //     m_Amb.swap(tmp3);
+        // ```
+        // NCBI frees the arrays here; LOSAT empties them and keeps their
+        // memory for the next volume's index file (`OffsetArrays`).
+        self.hdr.clear();
+        self.seq.clear();
+        self.amb.clear();
         self.file.close()
+    }
+
+    /// The offset arrays, emptied by `close`, for the next volume.
+    pub(crate) fn take_offset_arrays(&mut self) -> OffsetArrays {
+        OffsetArrays {
+            hdr: std::mem::take(&mut self.hdr),
+            seq: std::mem::take(&mut self.seq),
+            amb: std::mem::take(&mut self.amb),
+        }
     }
 
     pub(crate) fn file(&self) -> &WriteDbFile {

@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use super::bioseq::Bioseq;
 use super::convert::{seq_data_to_binary, BinarySequence};
 pub use super::files::DbVersion;
+use super::files::OffsetArrays;
 use super::header::{defline_set, BadTitleChar};
 use super::lmdb::{
     lmdb_file_name, lmdb_map_size_from_env, LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
@@ -345,8 +346,12 @@ impl WriteDb {
         }
         if !done {
             let index = self.volumes.len() as u32;
+            // The new volume's index file takes the arrays of the closed one
+            // (`OffsetArrays`).
+            let mut arrays = OffsetArrays::default();
             if let Some(volume) = self.volumes.last_mut() {
                 volume.close()?;
+                arrays = volume.take_offset_arrays();
             }
             self.volumes.push(Volume::create(
                 &self.dbname,
@@ -356,6 +361,7 @@ impl WriteDb {
                 index,
                 self.max_file_size,
                 self.version,
+                arrays,
             )?);
             binhdr = self.cook_header(&bioseq.title);
             let volume = self.volumes.last_mut().expect("a volume was pushed");
@@ -542,6 +548,7 @@ impl WriteDb {
             return Ok(());
         }
         self.volumes[count - 1].close()?;
+        drop(self.volumes[count - 1].take_offset_arrays());
         if count == 1 {
             self.volumes[0].rename_single()?;
         } else if count > 100 {

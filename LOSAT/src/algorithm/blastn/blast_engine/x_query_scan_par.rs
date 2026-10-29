@@ -10,7 +10,7 @@
 //!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
 //! ```
 //! NCBI reads its query batches one at a time, inside the loop. LOSAT needs every record's length
-//! before its first batch (the batch planner, LOSAT_X_QBATCHPAR's plan, LOSAT_X_RPTSTREAM's checks),
+//! before its first batch (the batch planner, LOSAT_X_RPTSTREAM's checks),
 //! so where LOSAT_X_QSTREAM acts it reads the whole query file once for the lengths alone, on one
 //! thread, while every other thread of the search waits: for dc-megablast of 31,168 D. melanogaster
 //! cDNAs (96 MB) against 3 Mb at 16 threads on the workstation, 0.12 s of a 1.55 s search. No NCBI

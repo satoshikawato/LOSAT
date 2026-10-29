@@ -98,17 +98,10 @@ pub struct MakedbArgs {
     pub logfile: Option<String>,
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:76-77
-// ```c++
-// static const char* s_AutoHelp     = "h";
-// static const char* s_AutoHelpFull = "help";
-// ```
-/// The options of makeblastdb 2.17.0 that `losat makedb` refuses
-/// (makeblastdb.cpp:246-333), and `-h`, the short usage that the NCBI C++
-/// Toolkit gives every program (`-help` prints LOSAT's own usage, as for the
-/// search programs).
-pub const UNSUPPORTED_OPTIONS: [&str; 14] = [
-    "h",
+/// The options of makeblastdb 2.17.0 that `losat makeblastdb` refuses
+/// (makeblastdb.cpp:246-333). `-h` and `-version` are served (`crate::cli`);
+/// `-logfile` is read.
+pub const UNSUPPORTED_OPTIONS: [&str; 12] = [
     "parse_seqids",
     "hash_index",
     "randomize",
@@ -121,7 +114,6 @@ pub const UNSUPPORTED_OPTIONS: [&str; 14] = [
     "taxid",
     "taxid_map",
     "oid_masks",
-    "version",
 ];
 
 /// How `losat makedb` ends when it does not build a database, or cannot
@@ -228,7 +220,7 @@ impl std::fmt::Display for MakedbError {
         match self {
             MakedbError::Build(error) => error.fmt(f),
             MakedbError::Database(error) => write!(f, "BLAST Database error: {error}"),
-            MakedbError::Unsupported(message) => write!(f, "losat makedb: {message}"),
+            MakedbError::Unsupported(message) => write!(f, "losat makeblastdb: {message}"),
             MakedbError::Argument(message) => write!(f, "Command line argument error: {message}"),
         }
     }
@@ -380,7 +372,7 @@ pub fn check_environment(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Re
     if env(DONT_SCAN).is_some_and(|value| !value.is_empty()) {
         return Err(format!(
             "the environment variable {DONT_SCAN}, with which NCBI makeblastdb stores other \
-             titles for some FASTA definition lines, is not supported by LOSAT's makedb"
+             titles for some FASTA definition lines, is not supported by LOSAT's makeblastdb"
         ));
     }
     Ok(())
@@ -664,7 +656,7 @@ fn build_database_with_log(
     let names = split_quoted(&args.input);
     if names.is_empty() {
         return Err(unsupported(
-            "-in names no input file; losat makedb reads FASTA files or the standard input",
+            "-in names no input file; losat makeblastdb reads FASTA files or the standard input",
         ));
     }
     let from_stdin = names[0] == "-";
@@ -684,7 +676,7 @@ fn build_database_with_log(
     if !from_stdin {
         if let Some(name) = names.iter().find(|name| is_compressed_name(name)) {
             return Err(unsupported(format!(
-                "{name}: makeblastdb reads a file of this name as compressed; losat makedb \
+                "{name}: makeblastdb reads a file of this name as compressed; losat makeblastdb \
                  reads uncompressed FASTA only"
             )));
         }

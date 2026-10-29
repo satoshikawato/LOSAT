@@ -118,8 +118,8 @@ fn seed_lean_on() -> bool {
 
 /// No NCBI counterpart: reads LOSAT_X_BNDCONE once (a strict-set switch since 2026-10-24: on unless
 /// it is `0`). With it a chunk in the scope of either stage (`in_scope`, `in_scope_array`) that
-/// has no pool (a search on one thread, or a one-thread slot of LOSAT_X_QBATCHPAR) runs the stage
-/// on this thread: its strips are scanned and folded in order. The owner folds the pairs in
+/// has no pool (a search on one thread) runs the stage on this thread: its strips are scanned and
+/// folded in order. The owner folds the pairs in
 /// the reference order with the reference statements whatever the number of threads (module
 /// comment), so it does not change any value NCBI computes.
 fn one_thread_on() -> bool {

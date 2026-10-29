@@ -353,17 +353,17 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
     let dir = test_dir("db");
     let name = dir.join("MejoMJNV");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
         .args(["-dbtype", "prot"])
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let subject = [OsStr::new("-db"), name.as_os_str()];

@@ -66,7 +66,7 @@ pub enum Commands {
     //                   + CBlastVersion().Print());
     // ```
     /// makeblastdb: create a BLAST database from a FASTA file, format version 4
-    #[command(visible_alias = "makeblastdb")]
+    #[command(name = "makeblastdb")]
     Makedb(crate::writedb::makeblastdb::MakedbArgs),
 }
 
@@ -174,7 +174,7 @@ where
             && input.len() == 0
             && matches!(
                 scope.get_name(),
-                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast" | "makedb"
+                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast" | "makeblastdb"
             )
         {
             continue;
@@ -489,14 +489,14 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     //     arg_desc->AddFlag("hash_index",
     //                       "Create index of sequence hash values.",
     // ```
-    // makeblastdb's options that LOSAT's makedb does not serve are named in
+    // makeblastdb's options that LOSAT's makeblastdb does not serve are named in
     // its refusal (AGENTS.md rule 2: explicit unsupported errors).
-    if scope.get_name() == "makedb"
+    if scope.get_name() == "makeblastdb"
         && crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.contains(&name)
     {
         return clap::Error::raw(
             ErrorKind::InvalidValue,
-            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's makedb"),
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's makeblastdb"),
         );
     }
     if scope.get_name() == "blastn" && is_unported_blastn_arg(name) {
@@ -557,7 +557,7 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
 /// The text is the two lines of `fVersionInfo | fPackageShort`:
 /// the program name and version, then the package. NCBI's second line names its own
 /// package and build date; LOSAT's names LOSAT and the BLAST+ release its output follows.
-/// `makedb` and `makeblastdb` print `makeblastdb` as NCBI's program does. `main` prints the
+/// `makeblastdb` prints `makeblastdb`, as NCBI's program does. `main` prints the
 /// text on stdout and exits 0, before any argument is parsed. The top level `losat --version`
 /// is clap's and is not read here.
 ///
@@ -585,7 +585,7 @@ where
         "tblastn" => "tblastn",
         "tblastx" => "tblastx",
         "psiblast" => "psiblast",
-        "makedb" => "makeblastdb",
+        "makeblastdb" => "makeblastdb",
         _ => return None,
     };
     for token in &tokens[2..] {

@@ -254,7 +254,7 @@ fn record(defline: &str, letters: &str) -> String {
 // BlastInitHitListReset(init_hitlist);
 // ```
 // A database search (the inputs of tests/tblastx_db_search.rs: the first 6 kb of MjeNMV against
-// a database of MelaMJNV and PemoMJNVA made by `losat makedb`) at one and four threads: with the
+// a database of MelaMJNV and PemoMJNVA made by `losat makeblastdb`) at one and four threads: with the
 // switch (on by default) both subjects run on the compact lists, and the report is the report of
 // the same search with `LOSAT_X_SEEDCOMPACT=0`.
 #[test]
@@ -282,15 +282,15 @@ fn a_database_search_gives_the_report_of_the_search_without_the_switch() {
     .unwrap();
     let db = dir.join("set").to_str().unwrap().to_string();
     let made = losat(&[])
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&set)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         made.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&made.stderr)
     );
     for threads in THREADS {

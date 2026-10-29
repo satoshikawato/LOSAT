@@ -1111,7 +1111,7 @@ fn a_name_is_a_list_as_for_ncbi() {
 }
 
 /// One database name is a path taken as it is: a space or a double quote in
-/// it does not split it (the entry point of `losat makedb`, whose output name
+/// it does not split it (the entry point of `losat makeblastdb`, whose output name
 /// is one name).
 #[test]
 fn one_name_is_not_a_list() {

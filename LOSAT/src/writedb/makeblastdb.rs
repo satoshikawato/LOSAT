@@ -199,7 +199,7 @@ impl std::fmt::Display for MakedbError {
         match self {
             MakedbError::Build(error) => error.fmt(f),
             MakedbError::Database(error) => write!(f, "BLAST Database error: {error}"),
-            MakedbError::Unsupported(message) => write!(f, "losat makedb: {message}"),
+            MakedbError::Unsupported(message) => write!(f, "losat makeblastdb: {message}"),
         }
     }
 }
@@ -350,7 +350,7 @@ pub fn check_environment(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Re
     if env(DONT_SCAN).is_some_and(|value| !value.is_empty()) {
         return Err(format!(
             "the environment variable {DONT_SCAN}, with which NCBI makeblastdb stores other \
-             titles for some FASTA definition lines, is not supported by LOSAT's makedb"
+             titles for some FASTA definition lines, is not supported by LOSAT's makeblastdb"
         ));
     }
     Ok(())
@@ -518,7 +518,7 @@ pub fn build_database(
     let names = split_quoted(&args.input);
     let [name] = names.as_slice() else {
         return Err(unsupported(
-            "-in names several input files (or none); losat makedb reads one FASTA file",
+            "-in names several input files (or none); losat makeblastdb reads one FASTA file",
         ));
     };
     let name = *name;
@@ -542,7 +542,7 @@ pub fn build_database(
             .any(|ext| lower.ends_with(ext))
     {
         return Err(unsupported(format!(
-            "{name}: makeblastdb reads a file of this name as compressed; losat makedb reads \
+            "{name}: makeblastdb reads a file of this name as compressed; losat makeblastdb reads \
              uncompressed FASTA only"
         )));
     }

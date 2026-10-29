@@ -482,7 +482,7 @@ fn errors_after_earlier_batches_give_the_off_bytes() {
     }
 }
 
-/// A database (`-db`, made by `losat makedb` from four genomes): the off bytes, every format,
+/// A database (`-db`, made by `losat makeblastdb` from four genomes): the off bytes, every format,
 /// each (task, format) at one thread count. The pass over the database's sequences in the pool
 /// (`database::x_streaming_refusal`) runs at 1 and 4 threads in
 /// `a_database_search_where_the_switch_must_not_act` (the intact database).
@@ -497,13 +497,13 @@ fn a_database_search_gives_the_off_bytes() {
     std::fs::write(dir.path("set.fna"), set).unwrap();
     let db = dir.path("set").to_str().unwrap().to_string();
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(dir.path("set.fna"))
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
-    assert!(output.status.success(), "makedb");
+        .expect("run losat makeblastdb");
+    assert!(output.status.success(), "makeblastdb");
     for (task, outfmt, threads) in [
         ("megablast", "0", 1),
         ("blastn", "6", 4),
@@ -530,7 +530,7 @@ fn a_database_search_gives_the_off_bytes() {
     }
 }
 
-/// `losat makedb` of LC738868 and of a part of LC738874 (150,000-190,000, with three runs of `N`, so
+/// `losat makeblastdb` of LC738868 and of a part of LC738874 (150,000-190,000, with three runs of `N`, so
 /// with ambiguity data) that only the queries of the last batches hit; `patch` changes the files.
 fn database(dir: &TempDir, name: &str, patch: impl FnOnce(&str)) -> String {
     let mut part = letters("LC738874.fasta")[150_000..190_000].to_vec();
@@ -544,13 +544,13 @@ fn database(dir: &TempDir, name: &str, patch: impl FnOnce(&str)) -> String {
     std::fs::write(&fasta, text).unwrap();
     let db = dir.path(name).to_str().unwrap().to_string();
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&fasta)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
-    assert!(output.status.success(), "makedb");
+        .expect("run losat makeblastdb");
+    assert!(output.status.success(), "makeblastdb");
     patch(&db);
     db
 }

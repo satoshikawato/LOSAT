@@ -1122,7 +1122,7 @@ fn the_loop_keeps_the_batches_where_the_path_is_off() {
 }
 
 // Debug output (written while a batch is searched) and a BLAST database (`-db`, made here by
-// `losat makedb`) keep the loop: the reports are those without the switch. (`-verbose` is not a
+// `losat makeblastdb`) keep the loop: the reports are those without the switch. (`-verbose` is not a
 // command-line option of LOSAT's blastn.)
 #[test]
 fn debug_output_and_a_database_keep_the_loop() {
@@ -1161,9 +1161,17 @@ fn debug_output_and_a_database_keep_the_loop() {
     let name = db.join("subject");
     let name = name.to_str().expect("UTF-8 path");
     let made = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .args(["makedb", "-in", subject, "-dbtype", "nucl", "-out", name])
+        .args([
+            "makeblastdb",
+            "-in",
+            subject,
+            "-dbtype",
+            "nucl",
+            "-out",
+            name,
+        ])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         made.status.success(),
         "{}",

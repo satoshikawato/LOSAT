@@ -58,7 +58,7 @@ fn letters(path: &Path) -> String {
 /// The queries in `dir`: five records from LC738874 (2,000 letters each, the third without
 /// letters, the fourth 50 `N`s, which has no valid context), so `BATCH_SIZE=3000` makes two
 /// batches with the two invalid queries in the second; and a database of LC738868 made with
-/// `losat makedb`.
+/// `losat makeblastdb`.
 fn inputs(dir: &TestDir) -> (PathBuf, PathBuf) {
     let genome = letters(&fasta("LC738874.fasta"));
     let query = dir.0.join("queries.fna");
@@ -75,17 +75,17 @@ fn inputs(dir: &TestDir) -> (PathBuf, PathBuf) {
     .expect("write the queries");
     let db = dir.0.join("lc738868");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fasta("LC738868.fasta"))
         .args(["-dbtype", "nucl"])
         .arg("-out")
         .arg(&db)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run LOSAT makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     (query, db)

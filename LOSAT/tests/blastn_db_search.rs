@@ -43,7 +43,7 @@ fn temp_dir(tag: &str) -> PathBuf {
 }
 
 /// The subject set (seven genomes without ambiguity codes, 2.1 Mb) as one FASTA file, and
-/// its database made by `losat makedb`.
+/// its database made by `losat makeblastdb`.
 fn subject_set(dir: &Path) -> (PathBuf, String) {
     let set = dir.join("set.fna");
     let mut bytes = Vec::new();
@@ -55,15 +55,15 @@ fn subject_set(dir: &Path) -> (PathBuf, String) {
     std::fs::write(&set, bytes).unwrap();
     let db = dir.join("set").to_str().unwrap().to_string();
     let output = losat()
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&set)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     (set, db)

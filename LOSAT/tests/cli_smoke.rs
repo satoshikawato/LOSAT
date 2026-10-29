@@ -396,7 +396,6 @@ fn ncbi_version_is_two_lines_for_every_program() {
         ("tblastn", "tblastn"),
         ("tblastx", "tblastx"),
         ("psiblast", "psiblast"),
-        ("makedb", "makeblastdb"),
         ("makeblastdb", "makeblastdb"),
     ] {
         let expected = format!("{printed}: 2.17.0+\n{package}");
@@ -441,7 +440,6 @@ fn short_help_h_succeeds_for_every_program() {
         "tblastn",
         "tblastx",
         "psiblast",
-        "makedb",
         "makeblastdb",
     ] {
         for words in [vec![name, "-h"]] {
@@ -461,58 +459,58 @@ fn short_help_h_succeeds_for_every_program() {
 //                   "Application to create BLAST databases, version "
 //                   + CBlastVersion().Print());
 // ```
-// `losat makeblastdb` is `losat makedb`: the same files from the same input.
+// `losat makeblastdb` writes the database; its old name `makedb` is an unknown command.
 #[test]
-fn makeblastdb_writes_the_files_makedb_writes() {
+fn makeblastdb_writes_a_database_and_makedb_is_unknown() {
     let input = temp_path("mkdb_in", "faa");
     fs::write(
         &input,
         ">a first\nMKTAYIAKQRQISFVKSHFSRQ\n>b second\nLEERLGLIEVQAPILSRVGDGTQDN\n",
     )
     .unwrap();
-    let input_text = input.to_str().unwrap();
-    let mut outputs = Vec::new();
-    for name in ["makedb", "makeblastdb"] {
-        let base = temp_path(name, "db");
-        let base_text = base.to_str().unwrap();
-        let output = run_losat(&[
-            name, "-in", input_text, "-dbtype", "prot", "-out", base_text,
-        ]);
-        assert!(output.status.success(), "{name}: {:?}", output);
-        // The log names the database's own path; compare it with the path removed.
-        // The log also holds the time and the seconds of the run.
-        let log = String::from_utf8_lossy(&output.stdout)
-            .replace(base_text, "<db>")
-            .lines()
-            .filter(|line| !line.contains("current time") && !line.contains(" seconds"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let mut files = Vec::new();
-        for extension in ["phr", "psq", "pin"] {
-            let path = format!("{base_text}.{extension}");
-            files.push((extension, fs::read(&path).unwrap()));
-            fs::remove_file(path).unwrap();
-        }
-        outputs.push((log.replace(input_text, "<in>"), files));
+    let base = temp_path("makeblastdb", "db");
+    let (input_text, base_text) = (input.to_str().unwrap(), base.to_str().unwrap());
+    let output = run_losat(&[
+        "makeblastdb",
+        "-in",
+        input_text,
+        "-dbtype",
+        "prot",
+        "-out",
+        base_text,
+    ]);
+    assert!(output.status.success(), "{:?}", output);
+    for extension in ["phr", "psq", "pin"] {
+        let path = format!("{base_text}.{extension}");
+        assert!(!fs::read(&path).unwrap().is_empty(), ".{extension}");
+        fs::remove_file(path).unwrap();
+    }
+    // `makedb` is not a command, with or without a valid command line.
+    for words in [
+        vec![
+            "makedb", "-in", input_text, "-dbtype", "prot", "-out", base_text,
+        ],
+        vec!["makedb", "-help"],
+        vec!["makedb", "-version"],
+    ] {
+        let output = run_losat(&words);
+        assert!(!output.status.success(), "{words:?}");
+        assert!(output.stdout.is_empty(), "{words:?}");
+        assert!(
+            !std::path::Path::new(&format!("{base_text}.psq")).exists(),
+            "{words:?}"
+        );
     }
     fs::remove_file(&input).unwrap();
-    assert_eq!(outputs[0].0, outputs[1].0);
-    for ((extension, first), (_, second)) in outputs[0].1.iter().zip(&outputs[1].1) {
-        // The index file holds the creation date (README, section 5).
-        if *extension == "pin" {
-            assert_eq!(first.len(), second.len());
-        } else {
-            assert_eq!(first, second, ".{extension}");
-        }
-    }
-    // `-help` works under both names, and the top level lists makeblastdb.
-    for name in ["makedb", "makeblastdb"] {
-        let output = run_losat(&[name, "-help"]);
-        assert!(output.status.success());
-        assert!(String::from_utf8_lossy(&output.stdout).contains("-dbtype <molecule_type>"));
-    }
+    // `-help` works, and the top level lists makeblastdb and not makedb.
+    let output = run_losat(&["makeblastdb", "-help"]);
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("-dbtype <molecule_type>"));
     let top = String::from_utf8_lossy(&run_losat(&["-help"]).stdout).into_owned();
-    assert!(top.contains("makeblastdb"), "{top}");
+    assert!(
+        top.contains("makeblastdb") && !top.contains("makedb"),
+        "{top}"
+    );
 }
 
 const MT_PROTEIN: &str = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVV";

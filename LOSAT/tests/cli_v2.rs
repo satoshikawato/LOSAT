@@ -129,7 +129,7 @@ fn canonical_options_for_every_program() {
 #[test]
 fn makedb_takes_makeblastdb_s_option_names() {
     let makedb = |extra: &[&str]| {
-        let mut argv = vec!["losat", "makedb"];
+        let mut argv = vec!["losat", "makeblastdb"];
         argv.extend(extra);
         try_parse_from(argv)
     };
@@ -174,7 +174,7 @@ fn makedb_takes_makeblastdb_s_option_names() {
     assert!(makedb(&["-in", "x.faa", "-dbtype", "prot", "-blastdb_version", "3"]).is_err());
 
     // The options of makeblastdb that LOSAT does not implement are named (`-h` and
-    // `-version` are served: `makeblastdb_is_makedb_and_serves_h_and_version`).
+    // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
     for option in [
         "-parse_seqids",
         "-hash_index",
@@ -186,7 +186,7 @@ fn makedb_takes_makeblastdb_s_option_names() {
         let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
         assert!(
             err.to_string().contains(&format!(
-                "the NCBI BLAST+ option {option} is not supported by LOSAT's makedb"
+                "the NCBI BLAST+ option {option} is not supported by LOSAT's makeblastdb"
             )),
             "{option}: {err}"
         );
@@ -216,7 +216,7 @@ fn makedb_takes_makeblastdb_s_option_names() {
             &["-in", "x.faa"],
         ] {
             let err = parse(program, option).unwrap_err();
-            assert!(!err.to_string().contains("makedb"), "{program}: {err}");
+            assert!(!err.to_string().contains("makeblastdb"), "{program}: {err}");
         }
     }
 }
@@ -1646,7 +1646,7 @@ fn a_last_double_dash_changes_nothing_and_a_word_after_it_is_an_error() {
     // makeblastdb reads its arguments with the same parser: it builds the database
     // when `--` is the last word.
     let makedb = |words: &[&str]| {
-        let mut argv = vec!["losat", "makedb", "-dbtype", "prot"];
+        let mut argv = vec!["losat", "makeblastdb", "-dbtype", "prot"];
         argv.extend(words);
         try_parse_from::<Cli, _, _>(argv)
     };
@@ -1718,44 +1718,62 @@ fn blastx_takes_a_database_and_its_size() {
 }
 
 #[test]
-fn makeblastdb_is_a_name_of_makedb() {
-    let makedb = |name: &str, words: &[&str]| {
-        let mut argv = vec!["losat", name, "-dbtype", "prot"];
+fn makedb_is_not_a_command_and_makeblastdb_checks_apply() {
+    let makedb = |words: &[&str]| {
+        let mut argv = vec!["losat", "makeblastdb", "-dbtype", "prot"];
         argv.extend(words);
         try_parse_from::<Cli, _, _>(argv)
     };
-    for name in ["makedb", "makeblastdb"] {
-        let Commands::Makedb(args) = makedb(name, &["-in", "x.faa", "-out", "db"])
-            .unwrap()
-            .command
-        else {
-            unreachable!("makedb")
-        };
+    // The old name is gone: an unknown command, with every spelling of its arguments.
+    for words in [
+        &["makedb", "-in", "x.faa", "-dbtype", "prot"][..],
+        &["makedb", "-h"],
+        &["makedb", "-version"],
+    ] {
+        let mut argv = vec!["losat"];
+        argv.extend(words);
+        let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
         assert_eq!(
-            (args.input.as_str(), args.out.as_deref()),
-            ("x.faa", Some("db"))
+            error.kind(),
+            clap::error::ErrorKind::UnknownArgument,
+            "{words:?}"
         );
-        // The checks that name `makedb` apply under the alias.
-        let error = makedb(name, &["-parse_seqids"]).unwrap_err().to_string();
-        assert!(
-            error.contains(
-                "the NCBI BLAST+ option -parse_seqids is not supported by LOSAT's makedb"
-            ),
-            "{name}: {error}"
-        );
-        assert!(makedb(name, &["-in", "x.faa", "--"]).is_ok(), "{name}");
-        assert!(makedb(name, &["--", "-in", "x.faa"]).is_err(), "{name}");
-        assert!(makedb(name, &["-evalue", "1"]).is_err(), "{name}");
-        let error = makedb(name, &["-h"]).unwrap_err();
-        assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp, "{name}");
-        assert_eq!(error.exit_code(), 0);
+        assert_ne!(error.exit_code(), 0);
+        assert!(error.to_string().contains("makedb"), "{words:?}: {error}");
     }
+    let Commands::Makedb(args) = makedb(&["-in", "x.faa", "-out", "db"]).unwrap().command else {
+        unreachable!("makeblastdb")
+    };
+    assert_eq!(
+        (args.input.as_str(), args.out.as_deref()),
+        ("x.faa", Some("db"))
+    );
+    // The checks that name the command apply.
+    let error = makedb(&["-parse_seqids"]).unwrap_err().to_string();
+    assert!(
+        error.contains(
+            "the NCBI BLAST+ option -parse_seqids is not supported by LOSAT's makeblastdb"
+        ),
+        "{error}"
+    );
+    assert!(makedb(&["-in", "x.faa", "--"]).is_ok());
+    assert!(makedb(&["--", "-in", "x.faa"]).is_err());
+    assert!(makedb(&["-evalue", "1"]).is_err());
+    let error = makedb(&["-h"]).unwrap_err();
+    assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp);
+    assert_eq!(error.exit_code(), 0);
 }
 
 #[test]
 fn short_help_h_is_display_help_for_every_program() {
     for program in [
-        "blastn", "blastp", "blastx", "tblastn", "tblastx", "psiblast", "makedb",
+        "blastn",
+        "blastp",
+        "blastx",
+        "tblastn",
+        "tblastx",
+        "psiblast",
+        "makeblastdb",
     ] {
         let error = try_parse_from::<Cli, _, _>(["losat", program, "-h"]).unwrap_err();
         assert_eq!(
@@ -1766,7 +1784,7 @@ fn short_help_h_is_display_help_for_every_program() {
         assert_eq!(error.exit_code(), 0);
         // As an option's value, `-h` is the value.
         assert!(
-            parse(program, &["-out", "-h"]).is_ok() || program == "makedb",
+            parse(program, &["-out", "-h"]).is_ok() || program == "makeblastdb",
             "{program}"
         );
     }
@@ -1786,9 +1804,6 @@ fn ncbi_version_request_reads_the_word_before_the_arguments() {
         "{text}"
     );
     assert!(version(&["losat", "makeblastdb", "-x", "-version"])
-        .unwrap()
-        .starts_with("makeblastdb: 2.17.0+\n"));
-    assert!(version(&["losat", "makedb", "-version"])
         .unwrap()
         .starts_with("makeblastdb: 2.17.0+\n"));
     // Where another option expects its value, and next to invalid arguments.

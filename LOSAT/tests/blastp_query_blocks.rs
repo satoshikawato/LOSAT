@@ -12,7 +12,7 @@
 //! `LOSAT_TIMING`, that the block path ran (a search per block, more than the reference's) or did
 //! not (the same number), not only that the report is equal. `BATCH_SIZE` (NCBI's query batch
 //! size) makes small batches, so that a few queries make several batches and blocks. The same
-//! comparisons run with `-db` on a database of the subject proteome made with `losat makedb`.
+//! comparisons run with `-db` on a database of the subject proteome made with `losat makeblastdb`.
 //!
 //! The searches run four of the fixture's 101 queries (`queries`), except the default test's:
 //! blocks of 50,000 letters need all of them. The block plan reads no other size whose outcome the
@@ -284,24 +284,24 @@ fn the_default_searches_in_blocks_of_50000_letters() {
     );
 }
 
-/// A protein database of the subject proteome, made with `losat makedb` in a directory of the
+/// A protein database of the subject proteome, made with `losat makeblastdb` in a directory of the
 /// test (`tag` names it); returns the database name.
 fn subject_database(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("losat-bpqblock-db-{tag}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let name = dir.join("MejoMJNV");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
         .args(["-dbtype", "prot"])
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     name

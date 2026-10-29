@@ -55,6 +55,12 @@
 //!   overflow; a walk would need a best near 2^31 (some 195 M residues of positive diagonal) for a
 //!   -128 and a -32768 step to wrap differently, where the reference (and NCBI's `Int4`) overflows
 //!   too.
+//! * Other matrices (`-matrix`, SC7b). `two_hit_in` runs the same word loop and walks on a byte
+//!   table of another matrix (`matrix_walk_table`, built once per search from the scores the
+//!   reference walks read, `TbxScore::score`), for the calls `two_hit` covers. The arguments above
+//!   hold with -127..=`MAX_MATRIX_SCORE` (63) in place of -127..=11: a word's sum of a -128 and two
+//!   scores of at most 63 stays at or below 0, as with -32768. The eight other matrices of NCBI's
+//!   tables score -17..=17. The sentinel walks (below) and wasm32's fixed table stay BLOSUM62's.
 //!
 //! The table walks act on every target (the former switch `LOSAT_X_TBXUNGAP` graduated on
 //! 2026-10-26). Until line W of plan v4 measured them (item W7), wasm32 kept the 16-residue v128
@@ -107,7 +113,7 @@ use std::sync::OnceLock;
 
 /// The seven values of `extend_hit_two_hit`: (q_start, q_end, s_start, s_end, score,
 /// right_extended, s_last_off).
-pub(super) type TwoHit = (usize, usize, usize, usize, i32, bool, usize);
+pub(crate) type TwoHit = (usize, usize, usize, usize, i32, bool, usize);
 
 /// `q << 8 | s` for every two bytes.
 const TABLE_LEN: usize = 1 << 16;
@@ -117,6 +123,9 @@ const MAX_X_DROP: i32 = 127;
 const WORD: usize = 3;
 /// The largest matrix score the word-loop argument allows (module comment).
 const MAX_WORD_SCORE: i32 = 11;
+/// The largest score of another matrix's table (`matrix_walk_table`): the word loop's sums of a
+/// -128 and two scores stay at or below 0 while a score is at most 64, as those of -32768 do.
+const MAX_MATRIX_SCORE: i32 = 63;
 
 type Table = [i8; TABLE_LEN];
 
@@ -143,14 +152,15 @@ struct State {
     table: Option<&'static Table>,
 }
 
-/// `tab[i]`. wasm32 reads `FIXED_TABLE` (where `tab` points) at its static address.
+/// `tab[i]`. With `FIXED` (BLOSUM62's table), wasm32 reads `FIXED_TABLE` (where `tab` points)
+/// at its static address.
 ///
 /// SAFETY: `i < TABLE_LEN`.
 // NCBI reference: aa_ungapped.c:846-921 `matrix[q[i]][s[i]]` (the table of `build_table`).
 #[inline(always)]
-unsafe fn score_at(tab: &Table, i: usize) -> i32 {
+unsafe fn score_at<const FIXED: bool>(tab: &Table, i: usize) -> i32 {
     #[cfg(target_arch = "wasm32")]
-    let tab: &Table = &*FIXED_TABLE.0.get();
+    let tab: &Table = if FIXED { &*FIXED_TABLE.0.get() } else { tab };
     *tab.get_unchecked(i) as i32
 }
 
@@ -184,13 +194,19 @@ fn left_walk_parts(w: LeftWalk) -> (i32, usize) {
 // NCBI reference: aa_ungapped.c:846-921 `matrix[q[i]][s[i]]`; the scores are those of the function
 // the reference walks call.
 fn build_table() -> Option<Box<Table>> {
+    table_of(get_score, MAX_WORD_SCORE)
+}
+
+/// The table of the scores `score(q, s)` of every two bytes, `None` if a score other than
+/// `BLAST_SCORE_MIN` is outside -127..=`max`.
+fn table_of(score: impl Fn(u8, u8) -> i32, max: i32) -> Option<Box<Table>> {
     let mut t: Box<Table> = vec![0i8; TABLE_LEN].into_boxed_slice().try_into().ok()?;
     for q in 0..=255u8 {
         for s in 0..=255u8 {
-            let v = get_score(q, s);
+            let v = score(q, s);
             t[(q as usize) << 8 | s as usize] = if v == BLAST_SCORE_MIN {
                 -128
-            } else if (-127..=MAX_WORD_SCORE).contains(&v) {
+            } else if (-127..=max).contains(&v) {
                 v as i8
             } else {
                 return None;
@@ -198,6 +214,18 @@ fn build_table() -> Option<Box<Table>> {
         }
     }
     Some(t)
+}
+
+/// The byte table of a matrix other than BLOSUM62 (`two_hit_in`), built once per search.
+pub(crate) struct MatrixWalkTable(Box<Table>);
+
+/// The byte table of the scores `score(q, s)` of a matrix other than BLOSUM62, `None` (the
+/// reference walks run) if a score other than `BLAST_SCORE_MIN` is outside
+/// -127..=`MAX_MATRIX_SCORE`.
+// NCBI reference: aa_ungapped.c:846-921 `matrix[q[i]][s[i]]`; the scores are those the reference
+// walks read (`TbxScore::score` of the search's matrix).
+pub(crate) fn matrix_walk_table(score: impl Fn(u8, u8) -> i32) -> Option<MatrixWalkTable> {
+    table_of(score, MAX_MATRIX_SCORE).map(MatrixWalkTable)
 }
 
 static STATE: OnceLock<State> = OnceLock::new();
@@ -228,7 +256,13 @@ fn state() -> &'static State {
 // `n` positions before the pointers, so one counter runs the loop and the length is
 // `n - (the index of the best step)`.
 #[inline(never)]
-unsafe fn walk_left(tab: &Table, qp: *const u8, sp: *const u8, n: usize, x_drop: i32) -> LeftWalk {
+unsafe fn walk_left<const FIXED: bool>(
+    tab: &Table,
+    qp: *const u8,
+    sp: *const u8,
+    n: usize,
+    x_drop: i32,
+) -> LeftWalk {
     let q_lo = qp.sub(n);
     let s_lo = sp.sub(n);
     let mut score = 0i32;
@@ -240,7 +274,7 @@ unsafe fn walk_left(tab: &Table, qp: *const u8, sp: *const u8, n: usize, x_drop:
         let qc = *q_lo.add(at);
         let sc = *s_lo.add(at);
         // SAFETY: q << 8 | s < TABLE_LEN for any two bytes.
-        score += score_at(tab, (qc as usize) << 8 | sc as usize);
+        score += score_at::<FIXED>(tab, (qc as usize) << 8 | sc as usize);
         if score > best {
             best = score;
             best_at = at;
@@ -260,7 +294,7 @@ unsafe fn walk_left(tab: &Table, qp: *const u8, sp: *const u8, n: usize, x_drop:
 // NCBI reference: aa_ungapped.c:846-866 (module comment). Inlined on wasm32 (module comment).
 #[cfg_attr(not(target_arch = "wasm32"), inline(never))]
 #[cfg_attr(target_arch = "wasm32", inline(always))]
-unsafe fn walk_right(
+unsafe fn walk_right<const FIXED: bool>(
     tab: &Table,
     qp: *const u8,
     sp: *const u8,
@@ -276,7 +310,7 @@ unsafe fn walk_right(
         let qc = *qp.add(taken);
         let sc = *sp.add(taken);
         // SAFETY: as in `walk_left`.
-        score += score_at(tab, (qc as usize) << 8 | sc as usize);
+        score += score_at::<FIXED>(tab, (qc as usize) << 8 | sc as usize);
         taken += 1;
         if score > best {
             best = score;
@@ -339,7 +373,7 @@ pub(super) fn two_hit(
     // SAFETY: q_r <= q_seq.len() and s_r <= s_seq.len() (the word fits); the left walk reads the
     // min(q_r, s_r) positions before them, the right walk the room left after them in both.
     let (left_score, left_disp) = left_walk_parts(unsafe {
-        walk_left(
+        walk_left::<true>(
             tab,
             q_seq.as_ptr().add(q_r),
             s_seq.as_ptr().add(s_r),
@@ -353,7 +387,7 @@ pub(super) fn two_hit(
         let n = (q_seq.len() - q_r).min(s_seq.len() - s_r);
         // SAFETY: see above.
         let (best, len, end) = unsafe {
-            walk_right(
+            walk_right::<true>(
                 tab,
                 q_seq.as_ptr().add(q_r),
                 s_seq.as_ptr().add(s_r),
@@ -376,6 +410,122 @@ pub(super) fn two_hit(
         reached_first_hit,
         s_last_off,
     ))
+}
+
+/// `two_hit` with the byte table `t` of another matrix: `extend_hit_two_hit_reference` with that
+/// matrix's scores, or `None` when the reference has to run.
+// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
+#[inline(never)]
+pub(crate) fn two_hit_in(
+    t: &MatrixWalkTable,
+    q_seq: &[u8],
+    s_seq: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    x_drop: i32,
+) -> Option<TwoHit> {
+    if !fits(q_seq, s_seq, s_right_off, q_right_off, x_drop) {
+        return None;
+    }
+    Some(two_hit_on(
+        &t.0,
+        q_seq,
+        s_seq,
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        x_drop,
+    ))
+}
+
+/// Whether the table walks cover the call: an X-drop in 1..=127 and a word that fits (the test of
+/// `two_hit`).
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+#[inline(always)]
+fn fits(q_seq: &[u8], s_seq: &[u8], s_right_off: usize, q_right_off: usize, x_drop: i32) -> bool {
+    (1..=MAX_X_DROP).contains(&x_drop)
+        && q_right_off < q_seq.len()
+        && q_seq.len() - q_right_off >= WORD
+        && s_right_off < s_seq.len()
+        && s_seq.len() - s_right_off >= WORD
+}
+
+/// The word loop and the two walks of `two_hit` (the same statements) on another matrix's table
+/// `tab`. `two_hit` keeps its own copy, so that BLOSUM62's machine code stays as it was; the tests
+/// compare both with the reference walks.
+// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
+#[inline(always)]
+fn two_hit_on(
+    tab: &Table,
+    q_seq: &[u8],
+    s_seq: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    x_drop: i32,
+) -> TwoHit {
+    // The best end of the word at R (two_hit.rs, the `k_size` loop).
+    let mut score = 0i32;
+    let mut seed_score = 0i32;
+    let mut right_d = 0usize;
+    for i in 0..WORD {
+        // SAFETY: the word fits in both sequences (tested above).
+        let (qc, sc) = unsafe {
+            (
+                *q_seq.get_unchecked(q_right_off + i),
+                *s_seq.get_unchecked(s_right_off + i),
+            )
+        };
+        score += tab[(qc as usize) << 8 | sc as usize] as i32;
+        if score > seed_score {
+            seed_score = score;
+            right_d = i + 1;
+        }
+    }
+    let q_r = q_right_off + right_d;
+    let s_r = s_right_off + right_d;
+
+    // SAFETY: q_r <= q_seq.len() and s_r <= s_seq.len() (the word fits); the left walk reads the
+    // min(q_r, s_r) positions before them, the right walk the room left after them in both.
+    let (left_score, left_disp) = left_walk_parts(unsafe {
+        walk_left::<false>(
+            tab,
+            q_seq.as_ptr().add(q_r),
+            s_seq.as_ptr().add(s_r),
+            q_r.min(s_r),
+            x_drop,
+        )
+    });
+
+    let reached_first_hit = left_disp >= s_r.saturating_sub(s_left_off);
+    let (right_score, right_disp, s_last_off) = if reached_first_hit {
+        let n = (q_seq.len() - q_r).min(s_seq.len() - s_r);
+        // SAFETY: see above.
+        let (best, len, end) = unsafe {
+            walk_right::<false>(
+                tab,
+                q_seq.as_ptr().add(q_r),
+                s_seq.as_ptr().add(s_r),
+                n,
+                x_drop,
+                left_score,
+            )
+        };
+        (best, len, s_r + end)
+    } else {
+        (0, 0, s_r)
+    };
+
+    (
+        q_r - left_disp,
+        q_r + right_disp,
+        s_r - left_disp,
+        s_r + right_disp,
+        left_score.max(right_score),
+        reached_first_hit,
+        s_last_off,
+    )
 }
 
 /// Longest subject frame of the sentinel walks (`[0, frame.., 0]` bytes): no score wraps (module
@@ -712,6 +862,114 @@ mod tests {
                     "q={q} s={s}"
                 );
             }
+        }
+    }
+
+    /// The eight matrices other than BLOSUM62 (SC7b).
+    const OTHER_MATRICES: [crate::config::ScoringMatrix; 8] = {
+        use crate::config::ScoringMatrix::*;
+        [
+            Blosum45, Blosum50, Blosum80, Blosum90, Pam30, Pam70, Pam250, Identity,
+        ]
+    };
+
+    // No NCBI counterpart. Every other matrix fits a byte table, and every cell is the score the
+    // reference walks read (`TbxScore::score`), with BLAST_SCORE_MIN as -128.
+    #[test]
+    fn the_tables_of_the_other_matrices_hold_their_scores() {
+        use crate::algorithm::tblastx::scoring::{MatrixScores, TbxScore};
+        for matrix in OTHER_MATRICES {
+            let scores = MatrixScores::new(matrix);
+            let sc = scores.scorer();
+            let t = matrix_walk_table(|a, b| sc.score(a, b)).expect("the matrix fits");
+            for q in 0..=255u8 {
+                for s in 0..=255u8 {
+                    let v = sc.score(q, s);
+                    let want = if v == BLAST_SCORE_MIN { -128 } else { v };
+                    assert_eq!(
+                        t.0[(q as usize) << 8 | s as usize] as i32,
+                        want,
+                        "{matrix:?} {q} {s}"
+                    );
+                }
+            }
+        }
+        // A score above MAX_MATRIX_SCORE (or below -127) leaves the calls to the reference.
+        assert!(matrix_walk_table(|a, b| if a == 3 && b == 3 { 64 } else { 1 }).is_none());
+        assert!(matrix_walk_table(|a, b| if a == 3 && b == 3 { -128 } else { 1 }).is_none());
+    }
+
+    // No NCBI counterpart (two LOSAT paths). The table walks of each other matrix give the
+    // reference walks' values with that matrix: random and related sequences, ties of two-letter
+    // alphabets, a gap or sentinel inside, codes 28..=255, X-drops up to 127; and the calls
+    // `two_hit` leaves to the reference are left too.
+    #[test]
+    fn matrix_two_hit_equals_the_reference_with_every_other_matrix() {
+        use crate::algorithm::tblastx::scoring::{MatrixScores, TbxScore};
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        for matrix in OTHER_MATRICES {
+            let scores = MatrixScores::new(matrix);
+            let sc = scores.scorer();
+            let t = matrix_walk_table(|a, b| sc.score(a, b)).expect("the matrix fits");
+            let mut compared = 0u64;
+            let mut check = |q: &[u8], s: &[u8], rng: &mut Rng, calls: usize, dmax: i32| {
+                if q.len() < WORD || s.len() < WORD {
+                    return;
+                }
+                for _ in 0..calls {
+                    let d = 1 + rng.below(dmax as u64) as i32;
+                    let qr = rng.below((q.len() - WORD + 1) as u64) as usize;
+                    let sr = rng.below((s.len() - WORD + 1) as u64) as usize;
+                    let sl = match rng.below(16) {
+                        0 => sr + 1 + rng.below(3) as usize,
+                        1 => usize::MAX - rng.below(3) as usize,
+                        _ => sr.saturating_sub(rng.below(60) as usize),
+                    };
+                    let expect = extend_hit_two_hit_reference(sc, q, s, sl, sr, qr, d, false);
+                    let got =
+                        two_hit_in(&t, q, s, sl, sr, qr, d).expect("the table walks handle it");
+                    assert_eq!(got, expect, "{matrix:?} sl={sl} sr={sr} qr={qr} d={d}");
+                    assert_eq!(sc.table_two_hit(q, s, sl, sr, qr, d), Some(expect));
+                    compared += 1;
+                }
+            };
+            for round in 0..120 {
+                let len = match round % 4 {
+                    0 => WORD + rng.below(40) as usize,
+                    1 => 20 + rng.below(120) as usize,
+                    2 => 100 + rng.below(600) as usize,
+                    _ => 600 + rng.below(2000) as usize,
+                };
+                let q = random_seq(&mut rng, len, 1, 28);
+                let rate = 2 + rng.below(12);
+                let s_related = mutate(&mut rng, &q, rate);
+                let extra = rng.below(30) as usize;
+                let s_random = random_seq(&mut rng, len + extra, 1, 28);
+                let dmax = [4, 16, 40, 127][(round / 4 % 4) as usize];
+                check(&q, &s_related, &mut rng, 40, dmax);
+                check(&q, &s_random, &mut rng, 40, dmax);
+            }
+            for (a, b) in [(1u8, 2u8), (4, 5), (19, 25), (5, 40), (27, 255)] {
+                for _ in 0..60 {
+                    let len = WORD + rng.below(200) as usize;
+                    let pick = |rng: &mut Rng| if rng.below(2) == 0 { a } else { b };
+                    let q: Vec<u8> = (0..len).map(|_| pick(&mut rng)).collect();
+                    let mut s: Vec<u8> = (0..len + rng.below(10) as usize)
+                        .map(|_| pick(&mut rng))
+                        .collect();
+                    let d = 1 + rng.below(20) as i32;
+                    check(&q, &s, &mut rng, 10, d);
+                    let at = rng.below(s.len() as u64) as usize;
+                    s[at] = 0;
+                    check(&q, &s, &mut rng, 10, 127);
+                }
+            }
+            assert!(compared > 15_000, "{matrix:?} {compared}");
+            let q = vec![5u8; 50];
+            assert!(two_hit_in(&t, &q, &q, 10, 20, 20, 0).is_none());
+            assert!(two_hit_in(&t, &q, &q, 10, 20, 20, 128).is_none());
+            assert!(two_hit_in(&t, &q, &q, 10, 20, 48, 16).is_none());
+            assert!(two_hit_in(&t, &q, &q, 10, 48, 20, 16).is_none());
         }
     }
 

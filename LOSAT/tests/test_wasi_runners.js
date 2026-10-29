@@ -989,8 +989,7 @@ test("a descriptor that the main thread opened reads on a thread worker (-num_th
 // A command whose main thread creates `file` (path_open on the preopened "/" with create and
 // truncate, for writing) and writes "main\n" to it, whose one thread writes "thread\n" with that
 // descriptor (fd_write), and whose main thread then writes "main again\n", closes it and exits with
-// the thread's errno: the writes of blastp-fast's query blocks (LOSAT_X_BPQSLOTS), which the pool
-// thread that completes the order makes to the -out file another thread created.
+// the thread's errno: a write from a thread other than the one that opened -out.
 function descriptorWriter(file) {
   const types = vector([
     [0x60, 1, 0x7f, 0],                          // proc_exit(i32)

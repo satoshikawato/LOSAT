@@ -8,8 +8,7 @@
 //! (`BATCH_SIZE`), the searches without the switch and with it give the same exit status,
 //! standard output (or `-out` file) and standard error, and the `[X_STATS] RPTSTREAM` line (the arm
 //! with `LOSAT_X_STATS`; its lines are taken out of the comparison) shows that the loop wrote the
-//! batches. The same holds with LOSAT_X_QBATCHPAR slots searching the batches ahead while the
-//! loop writes, with `-query_loc`, `-subject_loc` and `-lcase_masking`, with `-max_target_seqs`,
+//! batches. The same holds with `-out` files, with `-query_loc`, `-subject_loc` and `-lcase_masking`, with `-max_target_seqs`,
 //! `-max_hsps` and `-subject_besthit`, with the warnings of the reader and of invalid queries,
 //! on the error paths that come after the reports of earlier batches (a reader error, a batch of
 //! queries without letters), and with `-db`. Where the switch must not act (LOSAT's refusal of a
@@ -33,7 +32,6 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
-    ("LOSAT_X_QBATCHPAR", "0"),
     ("LOSAT_X_QDUSTPAR", "0"),
     ("LOSAT_X_QPREPPAR", "0"),
     ("LOSAT_X_RPTSTREAM", "0"),
@@ -41,9 +39,6 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
 
 const SWITCH: (&str, &str) = ("LOSAT_X_RPTSTREAM", "1");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
-const QBATCHPAR: (&str, &str) = ("LOSAT_X_QBATCHPAR", "1");
-/// Two slots whatever QBATCHPAR's own choice of the layout (its tuning variable), so that slots run.
-const TWO_SLOTS: (&str, &str) = ("LOSAT_X_QBATCHPARSLOTS", "2");
 const TASKS: [&str; 3] = ["megablast", "blastn", "dc-megablast"];
 
 fn fasta(name: &str) -> PathBuf {
@@ -200,8 +195,8 @@ fn blastn(args: &[&str], threads: u32, switches: &[(&str, &str)], out: Option<&P
 }
 
 /// The `[X_STATS]` lines taken out of `run`'s standard error: the numbers of the line
-/// `[X_STATS] RPTSTREAM batches=B queries=Q off=O ...`, (B, O), and the lines.
-fn take_stats_lines(run: &mut Run) -> ((u64, String), String) {
+/// `[X_STATS] RPTSTREAM batches=B queries=Q off=O ...`, (B, O).
+fn take_stats_lines(run: &mut Run) -> (u64, String) {
     let text = String::from_utf8_lossy(&run.stderr).into_owned();
     let lines: Vec<&str> = text
         .split_inclusive('\n')
@@ -216,24 +211,25 @@ fn take_stats_lines(run: &mut Run) -> ((u64, String), String) {
             .to_string()
     };
     let numbers = (field("batches=").parse().unwrap(), field("off="));
-    let (stats, rest): (Vec<&str>, Vec<&str>) = text
+    let rest: Vec<&str> = text
         .split_inclusive('\n')
-        .partition(|line| line.starts_with("[X_STATS] "));
+        .filter(|line| !line.starts_with("[X_STATS] "))
+        .collect();
     run.stderr = rest.concat().into_bytes();
-    (numbers, stats.concat())
+    numbers
 }
 
 /// The run without the switch and with it (with `extra` switches in both), and with it and
 /// `LOSAT_X_STATS`: the same status, report and standard error (the counters' lines taken out of
-/// the last). Returns the off run, the counters (batches written by the loop, why the switch did
-/// not act: `none` when it did) and the `[X_STATS]` lines of the last run.
-fn same_two_and_stats(
+/// the last). Returns the off run and the counters (batches written by the loop, why the switch
+/// did not act: `none` when it did).
+fn same_two(
     what: &str,
     args: &[&str],
     threads: u32,
     extra: &[(&str, &str)],
     out: Option<&Path>,
-) -> (Run, (u64, String), String) {
+) -> (Run, (u64, String)) {
     let off = blastn(args, threads, extra, out);
     let mut with = extra.to_vec();
     with.push(SWITCH);
@@ -244,23 +240,11 @@ fn same_two_and_stats(
     );
     with.push(STATS);
     let mut counted = blastn(args, threads, &with, out);
-    let (numbers, stats) = take_stats_lines(&mut counted);
+    let numbers = take_stats_lines(&mut counted);
     assert!(
         counted == off,
         "{what} threads {threads}: on with statistics differs\n{counted:?}\n{off:?}"
     );
-    (off, numbers, stats)
-}
-
-/// `same_two_and_stats` without the `[X_STATS]` lines.
-fn same_two(
-    what: &str,
-    args: &[&str],
-    threads: u32,
-    extra: &[(&str, &str)],
-    out: Option<&Path>,
-) -> (Run, (u64, String)) {
-    let (off, numbers, _) = same_two_and_stats(what, args, threads, extra, out);
     (off, numbers)
 }
 
@@ -301,59 +285,32 @@ fn every_task_format_and_thread_count_gives_the_off_bytes() {
     }
 }
 
-/// `-out` files, and LOSAT_X_QBATCHPAR's slots (which search the batches ahead while the loop
-/// writes; two slots of two threads, `LOSAT_X_QBATCHPARSLOTS=2`, whatever layout QBATCHPAR's own
-/// rule would choose for this input): the off bytes; the slots did search batches. Each task
-/// into an `-out` file with one format and with the slots with another, so that each format goes
-/// once into each (every task and format at 1 and 4 threads:
+/// `-out` files: the off bytes. Each task into an `-out` file with one format, so that each format
+/// goes once into a file (every task and format at 1 and 4 threads:
 /// `every_task_format_and_thread_count_gives_the_off_bytes`).
 #[test]
-fn out_files_and_qbatchpar_slots_give_the_off_bytes() {
-    let dir = TempDir::new("slots");
+fn out_files_give_the_off_bytes() {
+    let dir = TempDir::new("out");
     let query = queries(&dir, "q.fa", b"");
     let subject = fasta("LC738868.fasta");
     let out = dir.path("report.txt");
-    for (task, out_format, slots_format) in [
-        ("megablast", "0", "7"),
-        ("blastn", "6", "0"),
-        ("dc-megablast", "7", "6"),
-    ] {
-        let args = |outfmt| {
-            [
-                "-task",
-                task,
-                "-query",
-                query.to_str().unwrap(),
-                "-subject",
-                subject.to_str().unwrap(),
-                "-outfmt",
-                outfmt,
-            ]
-        };
+    for (task, out_format) in [("megablast", "0"), ("blastn", "6"), ("dc-megablast", "7")] {
+        let args = [
+            "-task",
+            task,
+            "-query",
+            query.to_str().unwrap(),
+            "-subject",
+            subject.to_str().unwrap(),
+            "-outfmt",
+            out_format,
+        ];
         let what = format!("{task} outfmt {out_format} -out");
-        let (off, (batches, reason)) = same_two(&what, &args(out_format), 4, &[], Some(&out));
+        let (off, (batches, reason)) = same_two(&what, &args, 4, &[], Some(&out));
         assert!(
             !off.report.is_empty() && reason == "none" && batches >= 8,
             "{what}"
         );
-        let what = format!("{task} outfmt {slots_format} QBATCHPAR");
-        let (off, (batches, reason), stats) =
-            same_two_and_stats(&what, &args(slots_format), 4, &[QBATCHPAR, TWO_SLOTS], None);
-        assert!(
-            !off.report.is_empty() && reason == "none" && batches >= 8,
-            "{what}"
-        );
-        // The slots searched batches ahead of the loop (the run with the counters).
-        let precomputed: u64 = stats
-            .lines()
-            .find(|line| line.starts_with("[X_STATS] QBATCHPAR "))
-            .and_then(|line| {
-                line.split_whitespace()
-                    .find_map(|word| word.strip_prefix("precomputed="))
-            })
-            .and_then(|value| value.parse().ok())
-            .unwrap_or_else(|| panic!("{what}: {stats}"));
-        assert!(precomputed > 0, "{what}: {stats}");
     }
 }
 

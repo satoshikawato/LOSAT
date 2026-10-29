@@ -403,6 +403,9 @@ pub(super) struct XQuerySide {
     frames_in_progress: std::sync::Mutex<()>,
     lookup:
         std::sync::OnceLock<std::sync::Arc<crate::algorithm::tblastx::lookup::BlastAaLookupTable>>,
+    /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the buffers of the units of the batch's plans without
+    /// residues.
+    unit_residues: XUnitResiduesPool,
 }
 
 // No NCBI counterpart: the methods below create the shared query-side state and build its frames
@@ -414,6 +417,7 @@ impl XQuerySide {
             frames: OnceLock::new(),
             frames_in_progress: std::sync::Mutex::new(()),
             lookup: OnceLock::new(),
+            unit_residues: XUnitResiduesPool::new(),
         }
     }
 
@@ -473,33 +477,66 @@ thread_local! {
 //             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
 // ```
 // NCBI's units read the subject's translation buffer; a unit of a plan without residues translates
-// the part it reads into a buffer its thread keeps (up to a chunk of 5,000,000 residues and the
-// margin, about 5 MB, until the thread ends).
-thread_local! {
-    /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): this thread's buffer for the residues of a unit of a plan
-    /// without residues (`x_packed_lean_plan`), taken by the unit and put back when it ends. A unit
-    /// that finds it empty (the thread's first, or one run while another holds it) makes a new one.
-    static X_UNIT_RESIDUES: std::cell::Cell<Vec<u8>> = const { std::cell::Cell::new(Vec::new()) };
+// the part it reads into a buffer of its query batch's preliminary stage (up to a chunk of
+// 5,000,000 residues and the margin, about 5 MB), freed at the end of that stage.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the idle buffers for the residues of the units of plans
+/// without residues (`x_packed_lean_plan`) of one query batch (`XQuerySide`), shared by its
+/// threads: a unit takes one (or a new empty one) and gives it back when it ends, and they are
+/// freed with the batch's query-side state at the end of its preliminary stage. Before, each
+/// thread kept its buffer until it ended, so the buffers of every thread that had run such a unit
+/// were still there at the peak, which comes after the units (16 threads: 16 x 4.77 MiB).
+pub(super) struct XUnitResiduesPool {
+    idle: std::sync::Mutex<Vec<Vec<u8>>>,
 }
 
-// No NCBI counterpart: the hold of a unit on its thread's buffer (above); it computes no value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): a unit's hold on `X_UNIT_RESIDUES`, given back when the unit
-/// ends, also when it fails. The hold is a take of the cell, so a unit the thread runs while it
-/// waits (the pool's jobs) never meets a borrowed buffer.
-struct XUnitResidues(Vec<u8>);
+// No NCBI counterpart: the pool above; it computes no value NCBI computes.
+impl XUnitResiduesPool {
+    fn new() -> Self {
+        Self {
+            idle: std::sync::Mutex::new(Vec::new()),
+        }
+    }
 
-impl XUnitResidues {
-    fn take() -> Self {
-        Self(X_UNIT_RESIDUES.take())
+    fn idle(&self) -> std::sync::MutexGuard<'_, Vec<Vec<u8>>> {
+        self.idle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// A buffer for one unit: an idle one, or a new empty one.
+    fn take(&self) -> XUnitResidues<'_> {
+        let residues = self.idle().pop();
+        if residues.is_none() {
+            super::x_subject_translate::x_count_unit_buffers(1, 0);
+        }
+        XUnitResidues(self, residues.unwrap_or_default())
     }
 }
 
-impl Drop for XUnitResidues {
+impl Drop for XUnitResiduesPool {
     fn drop(&mut self) {
-        let residues = std::mem::take(&mut self.0);
-        // A thread that is ending keeps nothing.
-        let _ = X_UNIT_RESIDUES.try_with(|cell| cell.set(residues));
+        let idle = self
+            .idle
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !idle.is_empty() {
+            super::x_subject_translate::x_count_unit_buffers(0, idle.len() as u64);
+        }
+    }
+}
+
+// No NCBI counterpart: the hold of a unit on a buffer of the pool (above); it computes no value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): a unit's buffer, given back to the pool when the unit ends,
+/// also when it fails. A buffer only grows (`x_unit_residues`), so it is filled with zeros once.
+struct XUnitResidues<'a>(&'a XUnitResiduesPool, Vec<u8>);
+
+impl Drop for XUnitResidues<'_> {
+    fn drop(&mut self) {
+        let residues = std::mem::take(&mut self.1);
+        if residues.capacity() > 0 {
+            self.0.idle().push(residues);
+        }
     }
 }
 
@@ -650,22 +687,22 @@ fn x_preliminary_protein_hsps_by_unit(
         //             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
         // ```
         // EXPERIMENT (LOSAT_X_TBNUNITXLATE): the frame from the chunk's first residue on: the
-        // plan's, or for a plan without residues those the unit reads, translated into this
-        // thread's buffer.
+        // plan's, or for a plan without residues those the unit reads, translated into a buffer
+        // of the query batch (`XUnitResiduesPool`).
         let mut x_held = None;
         let subject_residues: &[u8] = if frame.aa_seq.is_empty() {
             let XPrelimSubject::Nt(SubjectNt::Packed(store)) = subject else {
                 bail!("TBLASTN: a plan without residues of a subject that is not packed");
             };
-            let held = x_held.insert(XUnitResidues::take());
+            let held = x_held.insert(x_query_side.unit_residues.take());
             let range = super::x_subject_translate::x_unit_residues(
                 store,
                 db_gencode,
                 frame,
                 chunk,
-                &mut held.0,
+                &mut held.1,
             )?;
-            &held.0[range]
+            &held.1[range]
         } else {
             &frame.aa_seq[1 + chunk.offset..]
         };
@@ -2361,6 +2398,35 @@ mod tests {
     use crate::stats::spouge::lookup_protein_gumbel_params;
     use crate::stats::tables::{lookup_protein_params_gapped, lookup_protein_params_ungapped};
     use std::fs;
+
+    // No NCBI counterpart: the pool of the units' buffers of a query batch (`XUnitResiduesPool`).
+    #[test]
+    fn x_unit_residues_pool_lends_its_idle_buffers_until_it_is_dropped() {
+        let pool = XUnitResiduesPool::new();
+        let mut first = pool.take();
+        assert_eq!(
+            first.1.capacity(),
+            0,
+            "an empty pool lends a new empty buffer"
+        );
+        first.1.resize(10, 7);
+        let mut second = pool.take();
+        assert_eq!(second.1.capacity(), 0, "a buffer in use is not lent");
+        second.1.resize(20, 8);
+        drop(first);
+        drop(second);
+        assert_eq!(pool.idle().len(), 2, "given back at the units' end");
+        let unit = pool.take();
+        assert_eq!(unit.1, vec![8; 20], "an idle buffer, as it was left");
+        drop(unit);
+        let (a, b) = (pool.take(), pool.take());
+        let fresh = pool.take();
+        assert_eq!(fresh.1.capacity(), 0, "both idle buffers are lent");
+        drop(fresh);
+        assert!(pool.idle().is_empty(), "an empty buffer is not kept");
+        drop((a, b));
+        assert_eq!(pool.idle().len(), 2);
+    }
 
     // NCBI c++/src/algo/blast/core/blast_hits.c:2268-2323,2455-2537:
     // s_QueryOffsetCompareHSPs returns zero when score and both endpoints

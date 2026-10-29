@@ -12,8 +12,7 @@
 //! x_mb_lookup_once` equals `fresh=` where every first chunk is dense enough, and the builds
 //! without the switch); no line with
 //! `LOSAT_X_MBLUTKEEP=0`, kept builds with `LOSAT_X_MBLUTONCE=0` and `LOSAT_X_MBFILL=0` (the
-//! original fill loops); and no table is kept while `LOSAT_X_QBATCHPAR`'s slots may search
-//! batches. That the bytes equal NCBI's is the business of the blastn fixtures.
+//! original fill loops). That the bytes equal NCBI's is the business of the blastn fixtures.
 //!
 //! The query file holds four genomes of 292-306 kb (LC738868 306,008 letters, LC738869 300,002,
 //! LC738870 294,144, LC738873 291,934) and `BATCH_SIZE=4000` puts each in a batch of its own (a
@@ -27,10 +26,8 @@
 //! (9,478-9,920 positions, below 12,000) give blastn's two-stage tables (a lookup word of 8, built
 //! in `ascending_cells` order), which go through the keep too. More searches: LC738868 followed by
 //! four 100 kb pieces of LC738869 (tables of 4^11 cells: they use the start of the kept 4^12
-//! table, no second table is allocated), LC738868 split into query chunks by `CHUNK_SIZE` (the
-//! chunks' tables go through the keep), and 16 pieces of 20 kb of LC738868 in batches of one with
-//! two slots and corrupted predictions (`LOSAT_X_QBATCHPARMISS`), where the slots stop partway and
-//! the loop keeps its table from then on. The subject is LC738868.
+//! table, no second table is allocated), and LC738868 split into query chunks by `CHUNK_SIZE` (the
+//! chunks' tables go through the keep). The subject is LC738868.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -43,13 +40,10 @@ const FILL_OFF: (&str, &str) = ("LOSAT_X_MBFILL", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 const BATCH: (&str, &str) = ("BATCH_SIZE", "4000");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
-const QBATCHPAR: (&str, &str) = ("LOSAT_X_QBATCHPAR", "1");
-const SLOTS2: (&str, &str) = ("LOSAT_X_QBATCHPARSLOTS", "2");
 
 const BUILD: &str = "[TIMING] x_mb_lookup_build: ";
 const ONCE: &str = "[TIMING] x_mb_lookup_once: ";
 const KEEP: &str = "[TIMING] x_mb_lut_keep: ";
-const QBATCHPAR_LINE: &str = "[X_STATS] QBATCHPAR ";
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -219,16 +213,6 @@ fn check(task: &str, query: &Path) {
         assert!(report == reference, "{task} threads {threads}");
         assert_eq!(field(&stderr, KEEP, "kept="), kept, "{task}: {stderr}");
     }
-
-    // With two slots searching the batches after the first, the loop keeps no table: it searches
-    // the first batch while the slots may still start, and none after.
-    let (report, stderr) = blastn(task, query, 4, &[BATCH, TIMING, STATS, QBATCHPAR, SLOTS2]);
-    assert!(report == reference, "{task} with slots");
-    assert!(
-        field(&stderr, QBATCHPAR_LINE, "precomputed=") > 0,
-        "{task}: the slots searched no batch:\n{stderr}"
-    );
-    assert!(!stderr.contains(KEEP), "{task}: {stderr}");
 }
 
 #[test]
@@ -338,48 +322,4 @@ fn csr_and_chain_builds_share_the_kept_table() {
 fn the_chunks_of_a_split_batch_use_the_kept_table() {
     let query = fasta("LC738868.fasta");
     check_counts("megablast", &query, &[("CHUNK_SIZE", "100000")], 2, 1);
-}
-
-// 16 pieces of 20 kb of LC738868 in batches of one, two slots, every second prediction corrupted:
-// the slots stop partway (`off=` other than `none`, some batches taken from them), and the loop's
-// own searches after that keep its table.
-#[test]
-fn the_loop_keeps_its_table_once_the_slots_stop() {
-    let genome = letters("LC738868.fasta");
-    let records: Vec<(String, &str)> = (0..16)
-        .map(|i| {
-            (
-                format!("LC738868_{i}"),
-                &genome[i * 19_000..i * 19_000 + 20_000],
-            )
-        })
-        .collect();
-    let query = query_file("pieces", &records);
-    let env = [
-        ("BATCH_SIZE", "1"),
-        QBATCHPAR,
-        SLOTS2,
-        ("LOSAT_X_QBATCHPARMISS", "2"),
-    ];
-    let (reference, _) = blastn("megablast", &query, 4, &[OFF, ("BATCH_SIZE", "1")]);
-    let (report, stderr) = blastn(
-        "megablast",
-        &query,
-        4,
-        &[&env[..], &[TIMING, STATS]].concat(),
-    );
-    assert!(report == reference, "the report differs");
-    assert!(
-        field(&stderr, QBATCHPAR_LINE, "precomputed=") > 0,
-        "{stderr}"
-    );
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with(QBATCHPAR_LINE))
-        .unwrap();
-    assert!(
-        !line.ends_with(" off=none"),
-        "the slots never stopped: {line}"
-    );
-    assert!(field(&stderr, KEEP, "kept=") > 0, "{stderr}");
 }

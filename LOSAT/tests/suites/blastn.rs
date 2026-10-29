@@ -15,14 +15,10 @@ mod blastn_db_search;
 mod blastn_db_stream;
 #[path = "../blastn_dc_seed_lean.rs"]
 mod blastn_dc_seed_lean;
-#[path = "../blastn_dc_two_slots.rs"]
-mod blastn_dc_two_slots;
 #[path = "../blastn_diag_lv.rs"]
 mod blastn_diag_lv;
 #[path = "../blastn_disc_lookup_par.rs"]
 mod blastn_disc_lookup_par;
-#[path = "../blastn_eight_slots.rs"]
-mod blastn_eight_slots;
 #[path = "../blastn_few_subj.rs"]
 mod blastn_few_subj;
 #[path = "../blastn_greedy_row_fuse.rs"]
@@ -47,8 +43,6 @@ mod blastn_pairpar_fold;
 mod blastn_pairpar_merge;
 #[path = "../blastn_pairpar_na.rs"]
 mod blastn_pairpar_na;
-#[path = "../blastn_qbatchpar.rs"]
-mod blastn_qbatchpar;
 #[path = "../blastn_qctx_sentinel.rs"]
 mod blastn_qctx_sentinel;
 #[path = "../blastn_qgroup_par.rs"]

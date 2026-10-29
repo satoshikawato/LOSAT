@@ -624,13 +624,6 @@ unsafe fn candidates_avx2(
     list(&index[..words], presence, cand)
 }
 
-/// Whether three hits for each of the `left` candidates fit after `totalhits` (then no candidate
-/// of up to `AA_HITS_PER_CELL` hits can stop the scan).
-#[inline(always)]
-fn room_for_rest(totalhits: i32, left: usize, array_size: i32) -> bool {
-    totalhits as i64 + (AA_HITS_PER_CELL * left) as i64 <= array_size as i64
-}
-
 /// The plain-loop copy stage for the candidates `cand[..n]` of the block that starts at
 /// `block_first` (`copy_block`).
 ///
@@ -712,10 +705,12 @@ unsafe fn copy_avx2(
 // ```
 /// The copy stage for the candidates `cand[first..n]` of the block that starts at `block_first`
 /// (NCBI's statements above, in NCBI's order): the new total, and the candidate (its place in
-/// `cand`) whose word has no room in the offset array, if one has none. While three hits for every candidate left fit, a cell of up to `AA_HITS_PER_CELL` hits is
-/// written without NCBI's test (after it they still fit); a larger cell takes the test, and the
-/// room is computed again after it. A candidate met without that room takes the test whatever its
-/// size. `AVX2` = the AVX2 writes (`write`).
+/// `cand`) whose word has no room in the offset array, if one has none. The candidates that fit
+/// whatever their cells of up to `AA_HITS_PER_CELL` hits (the room left over `AA_HITS_PER_CELL`,
+/// at most those left) are taken as one run: a cell of up to `AA_HITS_PER_CELL` hits is written
+/// without NCBI's test, a larger cell takes the test and ends the run (the room is computed again
+/// after it). With less room than `AA_HITS_PER_CELL` hits each candidate takes the test. `AVX2` =
+/// the AVX2 writes (`write`).
 ///
 /// # Safety
 /// The candidates' indexes are those of backbone cells of `table`; `dest` has `array_size +
@@ -737,26 +732,29 @@ unsafe fn copy_block<const AVX2: bool>(
     let index = index.as_ptr();
     let mut i = first;
     while i < n {
-        if room_for_rest(totalhits, n - i, array_size) {
-            while i < n {
+        // The candidates that fit whatever their cells of up to AA_HITS_PER_CELL hits.
+        let sure = ((array_size - totalhits) as usize / AA_HITS_PER_CELL).min(n - i);
+        if sure > 0 {
+            let end = i + sure;
+            while i < end {
                 let k = *cand.add(i) as usize;
                 let cell = table.backbone.add(*index.add(k) as usize);
                 let numhits = (*cell).num_used;
                 let s_off = (block_first + k) as u32;
-                i += 1;
                 if numhits as usize <= AA_HITS_PER_CELL {
                     write::<AVX2>(table, dest.add(totalhits as usize), cell, s_off);
                     totalhits += numhits;
+                    i += 1;
                 } else {
                     // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:100,118-123
                     if numhits > array_size - totalhits {
-                        return (totalhits, Some(i - 1));
+                        return (totalhits, Some(i));
                     }
                     write::<AVX2>(table, dest.add(totalhits as usize), cell, s_off);
                     totalhits += numhits;
-                    if !room_for_rest(totalhits, n - i, array_size) {
-                        break;
-                    }
+                    i += 1;
+                    // The room is computed again after a larger cell.
+                    break;
                 }
             }
         } else {

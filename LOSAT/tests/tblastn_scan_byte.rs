@@ -145,12 +145,14 @@ fn avx2() -> bool {
 const OFF: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "0");
 const PLAIN: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "2");
 const SPARSE: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "3");
+const RESUME_OFF: (&str, &str) = ("LOSAT_X_TBNSCANRESUME", "0");
 
 // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (above). Each search gives the
 // report of the scan before the switch with the switch on (the default; =2, the plain loops), at
 // one and four threads; the lines say which scan ran, and at one thread every scan took the same
-// number of calls. The search of all proteins took more calls than units: the offset
-// array filled.
+// number of calls (with the offset array of the scan before: `LOSAT_X_TBNSCANRESUME=0`, whose
+// default is compared in `the_offset_array_size_changes_only_the_scan_calls`). The search of all
+// proteins took more calls than units: the offset array filled.
 #[test]
 fn the_report_and_the_scan_calls_are_those_of_the_scan_before() {
     for (query, many) in queries().iter().zip([false, true]) {
@@ -169,7 +171,7 @@ fn the_report_and_the_scan_calls_are_those_of_the_scan_before() {
         // The default scans this way where the CPU has AVX2 (with the AVX2 forms), with the
         // plain loops for the sparse table of one protein without AVX2 (`=3` on any CPU), as before
         // elsewhere; `=2` takes the plain loops on any CPU.
-        let (report, stderr) = tblastn(query, 1, &[]);
+        let (report, stderr) = tblastn(query, 1, &[RESUME_OFF]);
         assert!(
             report == expected,
             "{query:?}: the default changed the report"
@@ -208,10 +210,10 @@ fn the_report_and_the_scan_calls_are_those_of_the_scan_before() {
             );
             assert_eq!(earlier_scans(&stderr), Some([units, calls]), "{query:?}");
         }
-        let (report, stderr) = tblastn(query, 1, &[SPARSE]);
+        let (report, stderr) = tblastn(query, 1, &[SPARSE, RESUME_OFF]);
         assert!(report == expected, "{query:?}: =3 changed the report");
         plain_sparse(&stderr, "=3");
-        let (report, stderr) = tblastn(query, 1, &[PLAIN]);
+        let (report, stderr) = tblastn(query, 1, &[PLAIN, RESUME_OFF]);
         assert!(report == expected, "{query:?}: =2 changed the report");
         let (counts, ran_avx2) = byte_scans(&stderr).expect("a TBNSCANBYTE line with =2");
         assert_eq!(counts, [units, calls], "{query:?}: =2");
@@ -235,7 +237,6 @@ fn the_report_and_the_scan_calls_are_those_of_the_scan_before() {
 }
 
 const PAIRCAP_OFF: (&str, &str) = ("LOSAT_X_TBNPAIRCAP", "0");
-const RESUME_OFF: (&str, &str) = ("LOSAT_X_TBNSCANRESUME", "0");
 
 /// The scan calls of whichever scan line `stderr` holds.
 fn scan_calls(stderr: &str) -> u64 {
@@ -271,7 +272,10 @@ fn the_offset_array_size_changes_only_the_scan_calls() {
         "{cap} scan calls with LOSAT_X_TBNPAIRCAP, {off} without: the array did not get smaller"
     );
     let (report, stderr) = tblastn(query, 1, &[]);
-    assert!(report == expected, "LOSAT_X_TBNSCANRESUME changed the report");
+    assert!(
+        report == expected,
+        "LOSAT_X_TBNSCANRESUME changed the report"
+    );
     let on = scan_calls(&stderr);
     // Without the scan on presence bytes (aarch64) the array keeps LOSAT_X_TBNPAIRCAP's size.
     if byte_scans(&stderr).is_some() {

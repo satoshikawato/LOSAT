@@ -8121,6 +8121,28 @@ fn ungapped_subject_stage(
     });
 }
 
+/// A database sequence of the preliminary stage with its BLASTNA letters, which an ungapped
+/// (`-ungapped`) search re-evaluates its HSPs on (`ungapped_subject_stage`); `unpacked` holds them.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2645-2668
+/// ```c
+///       	seq_arg.encoding = eBlastEncodingNucleotide;
+///       	BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
+///       	BlastSeqSrcGetSequence(seq_src, &seq_arg)
+/// ```
+fn unpacked_database_subject<'b>(
+    database: &database::BlastnDatabase,
+    ordinal: u32,
+    subject: BlastnSubjectRef<'b>,
+    unpacked: &'b mut Vec<u8>,
+) -> Result<BlastnSubjectRef<'b>> {
+    *unpacked = database.blastna_of(ordinal)?;
+    Ok(BlastnSubjectRef {
+        blastna: Some(unpacked.as_slice()),
+        ..subject
+    })
+}
+
 /// LOSAT's refusal of a word cutoff whose arithmetic NCBI does in a way that overflows (memory
 /// "no NCBI UB / overflow"): a context of 2^30 letters or more, or a search space beyond `Int8`.
 fn ungapped_cutoff_limit_error(limit: ungapped::CutoffLimit) -> anyhow::Error {
@@ -18299,6 +18321,10 @@ fn search_query_batch<const UNGAPPED: bool>(
                     prelim_hitlist_size,
                     args.culling_limit_value(),
                 );
+                // The first error of reading a database sequence again for the ungapped
+                // re-evaluation (`BlastnDatabase::blastna_of`); an ungapped search only.
+                let x_ungapped_error: std::sync::Mutex<Option<anyhow::Error>> =
+                    std::sync::Mutex::new(None);
                 if any_valid_context {
                     database::search_blocks(
                         database,
@@ -18311,6 +18337,26 @@ fn search_query_batch<const UNGAPPED: bool>(
                             let (gap_scratch, subject_scratch) = state;
                             let mut subject_hits: Option<Vec<BlastnHsp>> = None;
                             let mut prelim_hits: Vec<PrelimHit> = Vec::new();
+                            let mut x_unpacked: Vec<u8> = Vec::new();
+                            let subject = if UNGAPPED {
+                                match unpacked_database_subject(
+                                    database,
+                                    ordinal,
+                                    subject,
+                                    &mut x_unpacked,
+                                ) {
+                                    Ok(subject) => subject,
+                                    Err(error) => {
+                                        x_ungapped_error
+                                            .lock()
+                                            .expect("the error cell is not poisoned")
+                                            .get_or_insert(error);
+                                        return None;
+                                    }
+                                }
+                            } else {
+                                subject
+                            };
                             process_subject(
                                 ordinal as usize,
                                 subject,
@@ -18334,6 +18380,21 @@ fn search_query_batch<const UNGAPPED: bool>(
                             &shown,
                         )
                     })?;
+                    if UNGAPPED {
+                        let error = x_ungapped_error
+                            .lock()
+                            .expect("the error cell is not poisoned")
+                            .take();
+                        if let Some(error) = error {
+                            return Err(database_search_error(
+                                error,
+                                first_batch,
+                                reborrow_outputs(&mut outputs),
+                                megablast,
+                                &shown,
+                            ));
+                        }
+                    }
                 }
                 writer.finish()
             }
@@ -18372,24 +18433,15 @@ fn search_query_batch<const UNGAPPED: bool>(
                             let (gap_scratch, subject_scratch) = state;
                             let mut subject_hits: Option<Vec<BlastnHsp>> = None;
                             let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2645-2668
-                            // ```c
-                            //       	seq_arg.encoding = eBlastEncodingNucleotide;
-                            //       	BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
-                            //       	BlastSeqSrcGetSequence(seq_src, &seq_arg)
-                            // ```
-                            // An ungapped (`-ungapped`) search gets the database sequence again,
-                            // unpacked, for the re-evaluation of its HSPs (`ungapped_subject_stage`).
-                            let x_unpacked: Vec<u8>;
+                            let mut x_unpacked: Vec<u8> = Vec::new();
                             let subject = if UNGAPPED {
-                                match database.blastna_of(ordinal) {
-                                    Ok(blastna) => {
-                                        x_unpacked = blastna;
-                                        BlastnSubjectRef {
-                                            blastna: Some(x_unpacked.as_slice()),
-                                            ..subject
-                                        }
-                                    }
+                                match unpacked_database_subject(
+                                    database,
+                                    ordinal,
+                                    subject,
+                                    &mut x_unpacked,
+                                ) {
+                                    Ok(subject) => subject,
                                     Err(error) => {
                                         x_ungapped_error
                                             .lock()

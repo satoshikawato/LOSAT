@@ -285,6 +285,7 @@ mod tests {
     /// `testReevaluateWithAmbiguitiesUngappedNucl` (blasthits_unit_test.cpp:500-600): the HSP
     /// 0..20 on 0..20 (score 20) of a 1/-2 search with a word cutoff of 3 is cut to 6..20 on
     /// 6..20 with score 11, and not deleted.
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:500-585 testReevaluateWithAmbiguitiesUngappedNucl
     #[test]
     fn ncbi_test_reevaluate_with_ambiguities_ungapped_nucl() {
         let matrix = build_blastna_matrix(1, -2);

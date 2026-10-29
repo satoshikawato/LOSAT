@@ -386,3 +386,17 @@ Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTD
   NCBI's 256-slot taxonomy cache of a volume (`CSeqDBVol::m_TaxCache`), so NCBI writes the offset error again after a fetch
   of 150, as often as its order of fetches makes it (twice for the row's query, once for the same query with a version 4
   database or an absolute `BLASTDB`); LOSAT refuses the run. `tm_cache151` (151 instead of 150) is the control: once.
+
+## Ungapped nucleotide databases (line NP, O4a-1)
+
+`ungapped_abr` (the 33 genes of `LOSAT/tests/fixtures/blastn_regression/inputs/culling_abricate_genes.fa`, as `ungapped_abr.fna`) is built like
+the mlst databases (parsed Seq-ids and a hash index), `ungapped_ambrun` (the subject `ambrun_s.fa`, a stretch with 30 `N` and one `R` inside a match)
+without; rows `db.blastn.ungapped*` (`blastn -ungapped`). Run from `LOSAT/`:
+
+    makeblastdb -in tests/db_search/ungapped_abr.fna -dbtype nucl -out tests/db_search/ungapped_abr \
+        -parse_seqids -hash_index -title PubMLST -blastdb_version 4
+    makeblastdb -in tests/db_search/ungapped_ambrun.fna -dbtype nucl -out tests/db_search/ungapped_ambrun \
+        -title "ambiguity run" -blastdb_version 4
+    rm tests/db_search/ungapped_abr.njs tests/db_search/ungapped_ambrun.njs
+
+The rows `db.blastn.ungapped_rej.*` (outfmt 8, 11, 17 with `-ungapped`) are refusals until O4a-2.

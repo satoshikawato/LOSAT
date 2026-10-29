@@ -216,7 +216,7 @@ fn os(args: &[OsString]) -> Vec<&OsStr> {
     args.iter().map(OsString::as_os_str).collect()
 }
 
-/// A protein database of the subject proteome, made with `losat makedb` in a directory of the
+/// A protein database of the subject proteome, made with `losat makeblastdb` in a directory of the
 /// test (`tag` names it); returns the database name.
 fn subject_database(tag: &str) -> PathBuf {
     let dir =
@@ -224,17 +224,17 @@ fn subject_database(tag: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).unwrap();
     let name = dir.join("MejoMJNV");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
         .args(["-dbtype", "prot"])
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     name
@@ -946,17 +946,17 @@ fn a_database_title_outside_the_printable_range_leaves_the_search_of_all_queries
         std::fs::write(&fasta, text).unwrap();
         let db = dir.join(name.replace(' ', "_"));
         let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-            .arg("makedb")
+            .arg("makeblastdb")
             .arg("-in")
             .arg(&fasta)
             .args(["-dbtype", "prot"])
             .arg("-out")
             .arg(&db)
             .output()
-            .expect("run LOSAT makedb");
+            .expect("run LOSAT makeblastdb");
         assert!(
             output.status.success(),
-            "makedb: {}",
+            "makeblastdb: {}",
             String::from_utf8_lossy(&output.stderr)
         );
         let header = db.with_extension("phr");
@@ -1000,17 +1000,17 @@ fn a_database_name_outside_us_ascii_leaves_the_search_of_all_queries() {
     std::fs::create_dir_all(&named).unwrap();
     let db = named.join("MejoMJNV");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
         .args(["-dbtype", "prot"])
         .arg("-out")
         .arg(&db)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run LOSAT makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let query = queries(&dir);
@@ -1178,17 +1178,17 @@ fn a_punctuation_database_title_stops_outfmt_6_blocks_but_not_the_others() {
     );
     let db = dir.join("punct");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&source)
         .args(["-dbtype", "prot"])
         .arg("-out")
         .arg(&db)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run LOSAT makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let subject = [OsStr::new("-db"), db.as_os_str()];

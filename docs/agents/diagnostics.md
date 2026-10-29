@@ -4615,7 +4615,9 @@ Scheduling (each value computed by one thread with the original function; order 
   with two or more batches the switch acts only where none can come after the first batch, and a subject
   set's tabular ids, outfmt 0 titles and `-lcase_masking` masks are then made once; with one batch (the
   first batch takes every query record) nothing is checked or made ahead (no refusal can follow its
-  batch). Otherwise the reports stay after the loop, and `off=` names why: `outputs` (hit records, a format
+  batch). Otherwise the reports stay after the loop, and `off=` names why: `custom_tabular` (a tabular
+  field list or delimiter, or outfmt 10 or 20: `BlastnOutputFormat::CustomTabular`, whose refusals of
+  taxonomy names and stored data come in its one report call), `outputs` (hit records, a format
   observer, a file sink, or two or more formats, which the library API allows on one stream and the batch
   writes would interleave: the Web adapter; the command line and ABI v1 are streamed), `debug` (`-verbose`,
   `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, `LOSAT_DEBUG_COORDS[_START]`, the blastn trace,

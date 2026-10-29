@@ -43,6 +43,12 @@ fn main() -> Result<()> {
     if startup_trace {
         eprintln!("[startup] enter main");
     }
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` is read
+    // before the program's arguments, `cli::ncbi_version_request`).
+    if let Some(text) = LOSAT::cli::ncbi_version_request(std::env::args_os()) {
+        print!("{text}");
+        return Ok(());
+    }
     // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
     let cli: Cli = match LOSAT::cli::try_parse_from(std::env::args_os()) {
         Ok(cli) => cli,

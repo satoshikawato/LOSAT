@@ -2,7 +2,7 @@
 # dbsearch-20261012 session 14, DB-6 small tier (DESIGN_db6.md). Question: LOSAT -db (default = strict set) against
 # NCBI BLAST+ 2.17.0 -db at 1 / 8 / 16 threads: median wall time and min-max of 3 timed runs after 1 warmup (order of
 # the two tools alternates by round), max RSS, and SHA-256 of every output against NCBI -num_threads 1. Database
-# builds (makeblastdb default and -blastdb_version 4, losat makedb) timed the same way, apart from the searches.
+# builds (makeblastdb default and -blastdb_version 4, losat makeblastdb) timed the same way, apart from the searches.
 # Owner 2026-10-17 08:30: a TIMED run needs only its own physical cores and their HT siblings idle; every run records
 # how many other CPUs of the node were busy (> 50 %) at its start and end, and a timed run where that rose by 3 or more
 # is recorded as disturbed (run label "<r>d<try>") and repeated (up to 2 more tries; the last is kept as it is).
@@ -82,7 +82,7 @@ mkdb_runs() {  # name dbtype fasta ext(p|n)
       case $tool in
         ncbi5) numactl --physcpubind=$first --membind=$MEMNODE $TIME $o.time $NB/makeblastdb -in $fa -dbtype $dbt -out $d/$name > $o.log 2>&1;;
         ncbi4) numactl --physcpubind=$first --membind=$MEMNODE $TIME $o.time $NB/makeblastdb -in $fa -dbtype $dbt -out $d/$name -blastdb_version 4 > $o.log 2>&1;;
-        losat) numactl --physcpubind=$first --membind=$MEMNODE $TIME $o.time $BIN makedb -in $fa -dbtype $dbt -out $d/$name > $o.log 2>&1;;
+        losat) numactl --physcpubind=$first --membind=$MEMNODE $TIME $o.time $BIN makeblastdb -in $fa -dbtype $dbt -out $d/$name > $o.log 2>&1;;
       esac
       rc=$?
       b1=$($CB count 0.5 $MEMNODE $MINE)

@@ -244,20 +244,20 @@ fn the_switch_does_not_act_without_the_subject_block_search() {
         (false, false),
         "the search of all queries made stored IDs"
     );
-    // A database made with `losat makedb`; its block search reads the definition lines per block.
+    // A database made with `losat makeblastdb`; its block search reads the definition lines per block.
     let name = dir.join("MejoMJNV");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
         .args(["-dbtype", "prot"])
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let db = [OsStr::new("-db"), name.as_os_str()];

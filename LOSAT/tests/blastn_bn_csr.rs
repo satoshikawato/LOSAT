@@ -67,21 +67,21 @@ fn letters(path: &Path) -> String {
         .collect()
 }
 
-/// A database of `subject` made with `losat makedb` in `dir`.
+/// A database of `subject` made with `losat makeblastdb` in `dir`.
 fn database(dir: &TestDir, subject: &Path, name: &str) -> PathBuf {
     let db = dir.path(name);
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(subject)
         .args(["-dbtype", "nucl"])
         .arg("-out")
         .arg(&db)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run LOSAT makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     db

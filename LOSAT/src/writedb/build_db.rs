@@ -7,6 +7,7 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
+use super::deflines;
 use super::fasta_source::{FastaBioseqSource, Warn};
 use super::platform::Platform;
 use super::time::LocalTime;
@@ -20,6 +21,8 @@ pub struct BuildDatabase<'a> {
     log: &'a mut dyn Write,
     output_db: WriteDb,
     output_dbname: String,
+    /// `m_ParseIDs` (`-parse_seqids`).
+    parse_ids: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:852-927
@@ -689,9 +692,15 @@ impl<'a> BuildDatabase<'a> {
     // {
     //     m_LogFile << "Keep MBits: " << (keep_mbits ? "T" : "F") << endl;
     // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1094
+    // ```c++
+    //       m_ParseIDs     (((indexing & CWriteDB::eFullIndex) != 0 ? true : false)),
+    // ```
     /// The constructor, then `SetMembBits(no_bits, true)` as makeblastdb
     /// calls it. `now` is the time of the build, `version` the format version
-    /// (`dbver`), `platform` the platform whose makeblastdb the files follow.
+    /// (`dbver`), `platform` the platform whose makeblastdb the files follow,
+    /// `parse_ids` `-parse_seqids` (`eFullIndex`).
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         dbname: &str,
         title: &str,
@@ -700,6 +709,7 @@ impl<'a> BuildDatabase<'a> {
         now: &LocalTime,
         version: DbVersion,
         platform: Platform,
+        parse_ids: bool,
     ) -> Result<Self, WriteDbError> {
         create_directories(dbname)?;
         let output_dbname = create_absolute_path(dbname);
@@ -746,12 +756,14 @@ impl<'a> BuildDatabase<'a> {
             1000 * 1000 * 1000,
             version,
             platform,
+            parse_ids,
         );
         Ok(Self {
             is_protein,
             log,
             output_db,
             output_dbname,
+            parse_ids,
         })
     }
 
@@ -836,14 +848,24 @@ impl<'a> BuildDatabase<'a> {
         let mut found = false;
         let start = std::time::Instant::now();
         let mut count = 0u64;
-        while let Some(bioseq) = source.next_bioseq(warn).map_err(|error| {
+        while let Some(mut bioseq) = source.next_bioseq(warn).map_err(|error| {
             if error.out_of_memory {
                 WriteDbError::OutOfMemory
             } else {
                 WriteDbError::Creation(error.message)
             }
         })? {
-            let bioseq_id = format!("lcl|{}", bioseq.local_id);
+            let bioseq_id = bioseq.first_id_fasta();
+            if let Some(parsed) = bioseq.parsed.as_mut() {
+                if let Some(gi) = deflines::large_gi_to_skip(&parsed.ids, &mut *warn) {
+                    let _ = writeln!(
+                        self.log,
+                        "Ignoring gi '{gi}' as it has value larger then 4294967295"
+                    );
+                    continue;
+                }
+                deflines::localize_other_molecule(&mut parsed.ids, self.is_protein, &mut *warn);
+            }
             if bioseq.is_aa != self.is_protein {
                 continue;
             }
@@ -855,10 +877,34 @@ impl<'a> BuildDatabase<'a> {
             }
             let mut added = false;
             if bioseq.length != 0 {
-                self.output_db.extract_bioseq_deflines(&bioseq);
-                if bioseq.seq_data.is_some() {
-                    self.output_db.add_sequence(bioseq)?;
-                    added = true;
+                if self.parse_ids {
+                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475,497
+                    // ```c++
+                    //     CRef<CBlast_def_line_set> headers =
+                    //         CWriteDB::ExtractBioseqDeflines(*bs, m_ParseIDs, m_LongIDs,
+                    //                 m_ScanBioseq4CFastaReaderUsrObjct);
+                    //
+                    //     x_EditHeaders(headers);
+                    //     ...
+                    //     m_OutputDb->SetDeflines(*headers);
+                    // ```
+                    // `x_EditHeaders` sets the taxids (`FixTaxId`); its other edits do
+                    // nothing for makeblastdb's FASTA input (no GIs removed, no
+                    // membership bits or leaf taxids given).
+                    let mut headers = deflines::extract_bioseq_deflines(&bioseq, &mut *warn);
+                    self.output_db.post_extracted_deflines(&headers);
+                    deflines::fix_tax_id(&mut headers, 0);
+                    if bioseq.seq_data.is_some() {
+                        self.output_db.add_sequence(bioseq)?;
+                        self.output_db.set_deflines(headers);
+                        added = true;
+                    }
+                } else {
+                    self.output_db.extract_bioseq_deflines(&bioseq);
+                    if bioseq.seq_data.is_some() {
+                        self.output_db.add_sequence(bioseq)?;
+                        added = true;
+                    }
                 }
             }
             // The serializer posts its diagnostics while the sequence is
@@ -913,7 +959,8 @@ impl<'a> BuildDatabase<'a> {
         fasta_file: R,
         warn: Warn<'_>,
     ) -> Result<(), WriteDbError> {
-        let mut source = FastaBioseqSource::new(fasta_file, self.is_protein);
+        let mut source =
+            FastaBioseqSource::with_parse_ids(fasta_file, self.is_protein, self.parse_ids);
         let result = match self.add_sequences(&mut source, &mut *warn) {
             Ok(true) => Ok(()),
             Ok(false) => Err(WriteDbError::Creation("No sequences added".to_string())),

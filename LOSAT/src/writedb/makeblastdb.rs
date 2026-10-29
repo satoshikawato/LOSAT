@@ -97,6 +97,12 @@ pub struct MakedbArgs {
     /// File to which the program log should be redirected
     #[arg(long, value_name = "File_Name")]
     pub logfile: Option<String>,
+    /// `-parse_seqids`, set by the library only: the command line refuses the option
+    /// (`UNSUPPORTED_OPTIONS`) until the whole database is written with it (ISAM, `.pog`,
+    /// the duplicate check and the version 5 keys come in the later steps of the line);
+    /// with it the header files hold the parsed Seq-ids (makedb-v5 S3a).
+    #[arg(skip)]
+    pub parse_seqids: bool,
 }
 
 /// The options of makeblastdb 2.17.0 that `losat makeblastdb` refuses
@@ -691,7 +697,16 @@ fn build_database_with_log(
             "this platform has no clock for the database's date",
         ));
     };
-    let mut db = BuildDatabase::new(dbname, title, is_protein, out, now, version, platform)?;
+    let mut db = BuildDatabase::new(
+        dbname,
+        title,
+        is_protein,
+        out,
+        now,
+        version,
+        platform,
+        args.parse_seqids,
+    )?;
     let _ = writeln!(
         db.log(),
         "Maximum file size: {}",

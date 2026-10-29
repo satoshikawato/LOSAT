@@ -13,6 +13,7 @@
 //! sequence of the other molecule, stops at a length above 2,147,483,647, and ignores a
 //! sequence of length 0 or without sequence data.
 
+mod defline_ids;
 mod line_reader;
 mod pack;
 mod reader;
@@ -20,9 +21,12 @@ mod reader;
 mod tests;
 mod title;
 
+pub(crate) use defline_ids::post_seq_id_warning;
+pub(crate) use title::fasta_reader_fasta;
+
 use std::io::Read;
 
-use super::bioseq::{Bioseq, SeqData};
+use super::bioseq::{Bioseq, ParsedIds, SeqData};
 use reader::{DeltaSeq, FastaReader, ReadError, SeqInst};
 
 /// An error that ends the reading: the message makeblastdb prints after
@@ -107,8 +111,15 @@ impl<R: Read> FastaBioseqSource<R> {
     /// ```
     /// The flags are those of `reader`.
     pub fn new(input: R, is_protein: bool) -> Self {
+        Self::with_parse_ids(input, is_protein, false)
+    }
+
+    /// `CFastaBioseqSource(fasta_file, is_protein, parse_ids, long_ids = false)`: with
+    /// `parse_ids` (`-parse_seqids`) the reader parses the ids of each definition line
+    /// (`fRequireID | fParseRawID`) and the Bioseq carries them (`Bioseq::parsed`).
+    pub fn with_parse_ids(input: R, is_protein: bool, parse_ids: bool) -> Self {
         Self {
-            reader: Some(FastaReader::new(input, is_protein)),
+            reader: Some(FastaReader::new(input, is_protein, parse_ids)),
         }
     }
 
@@ -224,17 +235,29 @@ impl<R: Read> FastaBioseqSource<R> {
                 });
             }
         };
-        let title = match extract_title(&record.defline_field, record.title_descr) {
-            Ok(title) => title,
-            Err(message) => {
-                self.reader = None;
-                return Err(SourceError {
-                    message: message.to_string(),
-                    out_of_memory: false,
-                });
+        let is_aa = reader.is_protein();
+        // With `-parse_seqids` the definition lines depend on the ids that
+        // `AddSequences` edits first: the writer builds them (`writedb::deflines`).
+        let (title, parsed) = if reader.parses_ids() {
+            let parsed = ParsedIds {
+                ids: record.ids,
+                hist_old_id: record.hist_old_id,
+                defline_field: record.defline_field,
+                title_descr: record.title_descr,
+            };
+            (Vec::new(), Some(parsed))
+        } else {
+            match extract_title(&record.defline_field, record.title_descr) {
+                Ok(title) => (title, None),
+                Err(message) => {
+                    self.reader = None;
+                    return Err(SourceError {
+                        message: message.to_string(),
+                        out_of_memory: false,
+                    });
+                }
             }
         };
-        let is_aa = reader.is_protein();
         let Ok((length, seq_data)) = fix_bioseq_deltas(record.inst) else {
             self.reader = None;
             return Err(SourceError::out_of_memory());
@@ -245,6 +268,7 @@ impl<R: Read> FastaBioseqSource<R> {
             is_aa,
             length,
             seq_data,
+            parsed,
         }))
     }
 }

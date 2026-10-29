@@ -162,6 +162,7 @@ fn protein_bioseqs(path: &Path) -> Vec<Bioseq> {
             length: residues.len() as u64,
             // The reader hands over capital letters.
             seq_data: Some(SeqData::Ncbieaa(residues.to_ascii_uppercase())),
+            parsed: None,
         })
         .collect()
 }
@@ -206,6 +207,7 @@ fn the_writer_reproduces_makeblastdb_s_protein_volumes() {
             max_file_size,
             version,
             LINUX,
+            false,
         );
         for bioseq in protein_bioseqs(&fixtures.join("prot.faa")) {
             db.extract_bioseq_deflines(&bioseq);
@@ -239,6 +241,7 @@ fn the_platform_reaches_the_index_header_and_the_lmdb_files() {
             3_000_000_000,
             DbVersion::V5,
             platform,
+            false,
         );
         for bioseq in protein_bioseqs(&fixtures.join("prot.faa")) {
             db.extract_bioseq_deflines(&bioseq);
@@ -306,6 +309,7 @@ fn build_version(
             &time_of(date),
             version,
             LINUX,
+            false,
         )?;
         db.set_max_file_size(max_file_size);
         let mut warn = |line: &[u8]| {
@@ -512,6 +516,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             blastdb_version: 4,
             max_file_sz: case.max_file_sz.unwrap_or("3GB").to_string(),
             logfile: None,
+            parse_seqids: false,
         };
         // A run that writes no database stores no date; any time will do.
         let now = time_of(if case.date.is_empty() {
@@ -591,6 +596,7 @@ fn makedb(input: &str, out: &str, max_file_sz: &str, stdin: &[u8]) -> (i32, Stri
         blastdb_version: 4,
         max_file_sz: max_file_sz.to_string(),
         logfile: None,
+        parse_seqids: false,
     };
     let now = time_of("Oct 12, 2026  9:00 PM");
     let (mut log, mut messages) = (Vec::new(), Vec::new());
@@ -1000,6 +1006,7 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
         1,
         DbVersion::V4,
         LINUX,
+        false,
     );
     for i in 0..1001 {
         let bioseq = Bioseq {
@@ -1008,6 +1015,7 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
             is_aa: true,
             length: 2,
             seq_data: Some(SeqData::Ncbieaa(b"MK".to_vec())),
+            parsed: None,
         };
         db.extract_bioseq_deflines(&bioseq);
         db.add_sequence(bioseq).unwrap();
@@ -1311,6 +1319,48 @@ fn s2_gate() {
         for (k, run) in fields.enumerate() {
             let words: Vec<String> = parse_json_words(run);
             let args = parse_makedb_words(&words);
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let status = run_with(
+                &args,
+                Some(&now),
+                LINUX,
+                &mut std::io::empty(),
+                &mut out,
+                &mut err,
+            );
+            std::fs::write(dir.join(format!("so{k}.txt")), out).unwrap();
+            std::fs::write(dir.join(format!("se{k}.txt")), err).unwrap();
+            std::fs::write(dir.join(format!("rc{k}.txt")), status.to_string()).unwrap();
+        }
+    }
+}
+
+/// The driver of the S3a gate of the makedb-v5 line
+/// (`makedb-v5-20261029/scripts/s3a_gate.py`): as `s2_gate`, for the manifest named by
+/// `LOSAT_S3A_GATE_MANIFEST`, but the word `-parse_seqids`, which the command line
+/// refuses, sets `MakedbArgs::parse_seqids` instead (the library-only path of S3a).
+#[test]
+#[ignore = "driver of an external gate (LOSAT_S3A_GATE_MANIFEST)"]
+fn s3a_gate() {
+    let manifest = std::env::var("LOSAT_S3A_GATE_MANIFEST").expect("LOSAT_S3A_GATE_MANIFEST");
+    for line in std::fs::read_to_string(manifest).unwrap().lines() {
+        let mut fields = line.split('\t');
+        let dir = PathBuf::from(fields.next().unwrap());
+        let date = fields.next().unwrap();
+        let now = time_of(if date.is_empty() {
+            "Oct 12, 2026  9:00 PM"
+        } else {
+            date
+        });
+        for (k, run) in fields.enumerate() {
+            let words: Vec<String> = parse_json_words(run);
+            let parse_seqids = words.iter().any(|word| word == "-parse_seqids");
+            let words: Vec<String> = words
+                .into_iter()
+                .filter(|word| word != "-parse_seqids")
+                .collect();
+            let mut args = parse_makedb_words(&words);
+            args.parse_seqids = parse_seqids;
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let status = run_with(
                 &args,

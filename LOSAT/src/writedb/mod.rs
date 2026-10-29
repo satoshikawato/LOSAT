@@ -11,13 +11,17 @@
 //! (`.pdb` / `.ndb` with the volume tables, `.ptf` / `.ntf` with the tax ids)
 //! and the tax id lookup files (`.pot` / `.not`, `.pto` / `.nto`).
 //!
-//! Not written: parsed Seq-ids and their ISAM files (`-parse_seqids`), the
-//! hash index, mask data, and tax ids other than 0 (`-taxid`, `-taxid_map`).
+//! Not written: parsed Seq-ids and their ISAM files (`-parse_seqids`; the
+//! library writes the header files with parsed Seq-ids, `MakedbArgs::parse_seqids`,
+//! and the command line refuses the option until the ISAM files, `.pog`, the
+//! duplicate check and the version 5 keys are written), the hash index, mask
+//! data, and tax ids other than 0 (`-taxid`, `-taxid_map`).
 
 pub mod bioseq;
 pub mod build_db;
 pub mod convert;
 pub mod data_size;
+pub mod deflines;
 pub mod fasta_source;
 pub mod files;
 pub mod format_guess;

@@ -10,13 +10,14 @@ use super::bioseq::Bioseq;
 use super::convert::{seq_data_to_binary, BinarySequence};
 pub use super::files::DbVersion;
 use super::files::OffsetArrays;
-use super::header::{defline_set, BadTitleChar};
+use super::header::{defline_set, encode_defline_set, BadChar, BadTitleChar};
 use super::lmdb::{
     lmdb_file_name, lmdb_map_size_from_env, LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
 };
 use super::platform::Platform;
 use super::volume::Volume;
 use super::WriteDbError;
+use crate::seqid::{DeflineSet, ParsedSeqId};
 
 /// `CWriteDB_Impl` for a database without parsed Seq-ids, of format version 4
 /// or 5.
@@ -43,6 +44,14 @@ pub struct WriteDb {
     lmdb_oid: u32,
     /// The platform whose makeblastdb the files follow.
     platform: Platform,
+    /// `m_ParseIDs` (`-parse_seqids`).
+    parse_ids: bool,
+    /// `m_Deflines` of the kept sequence (`SetDeflines`, with `-parse_seqids`).
+    pending_deflines: Option<DeflineSet>,
+    /// `m_Ids` of the sequence published last: the ids of all its definition lines
+    /// (`x_CookIds`), which NCBI's volume checks for duplicates and indexes (makedb-v5
+    /// S3b) and the version 5 LMDB maps to its OID (S3c).
+    ids: Vec<ParsedSeqId>,
 }
 
 impl std::fmt::Debug for WriteDb {
@@ -55,6 +64,7 @@ impl std::fmt::Debug for WriteDb {
             .field("closed", &self.closed)
             .field("lmdb_oid", &self.lmdb_oid)
             .field("platform", &self.platform)
+            .field("parse_ids", &self.parse_ids)
             .finish_non_exhaustive()
     }
 }
@@ -85,7 +95,8 @@ impl std::fmt::Debug for WriteDb {
 // #endif
 // ```
 // makeblastdb prints, for each byte of a title that a VisibleString cannot
-// hold and each time the definition line is serialized:
+// hold and each time the definition line is serialized (`post_bad_chars`: of any
+// string of a parsed definition line, under the path of its member):
 // "Error: (803.7) [makeblastdb] Blast-def-line-set.E.title", "Bad char [0xC3]
 // in string at byte 21" and the title.
 fn post_bad_title_chars(diagnostics: &mut Vec<u8>, title: &[u8], bad: &[BadTitleChar]) {
@@ -103,11 +114,32 @@ fn post_bad_title_chars(diagnostics: &mut Vec<u8>, title: &[u8], bad: &[BadTitle
     }
 }
 
+/// `post_bad_title_chars` for the strings of definition lines with parsed Seq-ids:
+/// "Error: (803.7) [makeblastdb] Blast-def-line-set.E.seqid.E.local.str", "Bad char
+/// [0xE9] in string at byte 38" and the string (makeblastdb 2.17.0, survey B fixture
+/// p23_nonascii; the member paths of the other alternatives from the S3a probes).
+fn post_bad_chars(diagnostics: &mut Vec<u8>, bad: &[BadChar]) {
+    for bad_char in bad {
+        diagnostics.extend_from_slice(
+            format!(
+                "Error: (803.7) [makeblastdb] {}\nBad char [0x{:X}] in string at byte {}\n",
+                bad_char.path, bad_char.byte, bad_char.stream_offset
+            )
+            .as_bytes(),
+        );
+        diagnostics.extend_from_slice(&bad_char.string);
+        diagnostics.push(b'\n');
+    }
+}
+
 impl WriteDb {
     /// `CWriteDB(dbname, seqtype, title, ..., dbver, ...)` followed by
     /// `SetMaxFileSize`. `date` is the creation date of the index files, in
     /// the form of `current_date`'s argument; `platform` the platform whose
-    /// makeblastdb the files follow ([`Platform::host`] for a build).
+    /// makeblastdb the files follow ([`Platform::host`] for a build);
+    /// `parse_ids` is `parse_ids` (`-parse_seqids`): the definition lines are
+    /// given by `set_deflines` and written as they are.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         dbname: &str,
         protein: bool,
@@ -116,6 +148,7 @@ impl WriteDb {
         max_file_size: u64,
         version: DbVersion,
         platform: Platform,
+        parse_ids: bool,
     ) -> Self {
         Self {
             dbname: dbname.to_string(),
@@ -132,6 +165,9 @@ impl WriteDb {
             taxdb: None,
             lmdb_oid: 0,
             platform,
+            parse_ids,
+            pending_deflines: None,
+            ids: Vec::new(),
         }
     }
 
@@ -176,6 +212,33 @@ impl WriteDb {
         post_bad_title_chars(&mut self.diagnostics, &bioseq.title, &bad);
     }
 
+    /// The serialization of `ExtractBioseqDeflines` with `-parse_seqids`: the
+    /// diagnostics of the definition lines it built (`writedb::deflines`), before
+    /// `FixTaxId` gives them a taxid.
+    pub fn post_extracted_deflines(&mut self, deflines: &DeflineSet) {
+        let mut bad = Vec::new();
+        encode_defline_set(deflines, &mut bad);
+        post_bad_chars(&mut self.diagnostics, &bad);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1516-1519
+    // ```c++
+    // void CWriteDB_Impl::SetDeflines(const CBlast_def_line_set & deflines)
+    // {
+    //     m_Deflines.Reset(& deflines);
+    // }
+    // ```
+    /// `SetDeflines`: the definition lines of the sequence added last.
+    pub fn set_deflines(&mut self, deflines: DeflineSet) {
+        self.pending_deflines = Some(deflines);
+    }
+
+    /// `m_Ids` of the sequence published last (with `-parse_seqids`): the ids of all
+    /// its definition lines in order.
+    pub fn published_ids(&self) -> &[ParsedSeqId] {
+        &self.ids
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:158-180
     // ```c++
     // void CWriteDB_Impl::AddSequence(const CBioseq & bs)
@@ -206,6 +269,7 @@ impl WriteDb {
     /// keeps this one.
     pub fn add_sequence(&mut self, bioseq: Bioseq) -> Result<(), WriteDbError> {
         self.publish()?;
+        self.pending_deflines = None;
         if bioseq.is_aa != self.protein {
             let name = |protein: bool| if protein { "protein" } else { "nucleotide" };
             return Err(WriteDbError::Creation(format!(
@@ -227,6 +291,51 @@ impl WriteDb {
     //         OID = (m_Volume ) ? m_Volume->GetOID() : 0;
     //     }
     // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:779-781,887-893,925-952
+    // ```c++
+    //     if (! bin_hdr.empty() && OID<0) {
+    //         return;
+    //     }
+    //     ...
+    //     if (bin_hdr.empty() || OID>=0) {
+    //         // Compress the deflines to binary.
+    //
+    //         CNcbiOstrstream oss;
+    //         oss << MSerial_AsnBinary << *deflines;
+    //         bin_hdr = CNcbiOstrstreamToString(oss);
+    //     }
+    // ...
+    // void CWriteDB_Impl::x_CookIds()
+    // {
+    //     if (! m_Ids.empty()) {
+    //         return;
+    //     }
+    //     ...
+    //     ITERATE(list< CRef<CBlast_def_line> >, iter, m_Deflines->Get()) {
+    //         const list< CRef<CSeq_id> > & ids = (**iter).GetSeqid();
+    //         ...
+    //         ITERATE (list<CRef<CSeq_id> >, it, ids) {
+    //             m_Ids.push_back(*it);
+    //         }
+    //     }
+    // }
+    // ```
+    // With `-parse_seqids` (OID -1) the definition lines given by `SetDeflines` are
+    // serialized once; a second `x_CookHeader` for a new volume returns at once.
+    /// `x_CookHeader` and `x_CookIds` with `-parse_seqids`.
+    fn cook_parsed_header(&mut self) -> Vec<u8> {
+        let deflines = self.pending_deflines.take().unwrap_or_default();
+        let mut bad = Vec::new();
+        let binhdr = encode_defline_set(&deflines, &mut bad);
+        post_bad_chars(&mut self.diagnostics, &bad);
+        self.ids = deflines
+            .deflines
+            .into_iter()
+            .flat_map(|defline| defline.ids)
+            .collect();
+        binhdr
+    }
+
     /// `x_CookHeader`: the header record with the number the sequence gets
     /// in the current volume.
     fn cook_header(&mut self, title: &[u8]) -> Vec<u8> {
@@ -339,7 +448,11 @@ impl WriteDb {
         if self.version == DbVersion::V5 && self.lmdb.is_none() {
             self.open_lmdb_files()?;
         }
-        let mut binhdr = self.cook_header(&bioseq.title);
+        let mut binhdr = if self.parse_ids {
+            self.cook_parsed_header()
+        } else {
+            self.cook_header(&bioseq.title)
+        };
         let binary = self.cook_sequence(&bioseq)?;
 
         let mut done = false;
@@ -369,7 +482,9 @@ impl WriteDb {
                 self.platform.sizeof_long,
                 arrays,
             )?);
-            binhdr = self.cook_header(&bioseq.title);
+            if !self.parse_ids {
+                binhdr = self.cook_header(&bioseq.title);
+            }
             let volume = self.volumes.last_mut().expect("a volume was pushed");
             done = volume.write_sequence(&binary.seq, &binary.ambig, &binhdr)?;
             if done {
@@ -500,7 +615,7 @@ impl WriteDb {
         seq_data_to_binary(seq_data, bioseq.length as u32).map_err(|_| {
             WriteDbError::Creation(format!(
                 "Unable to process sequence for entry [{}].",
-                bioseq.local_id
+                bioseq.first_id_string()
             ))
         })
     }

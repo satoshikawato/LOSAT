@@ -449,10 +449,12 @@ pub(super) fn build(
 
 /// No NCBI counterpart (scheduling only): a spin barrier for the `n` threads of one
 /// `rayon::broadcast` (`x_disc_lookup_par::csr`): the last of the `n` arrivals resets the count
-/// and bumps the generation, the others wait until it changes (spinning, then yielding the CPU
-/// on native targets; WebAssembly only spins). A thread that panics between barriers (`Poison`,
-/// unwinding builds only: the release profile aborts) makes the waiting threads panic instead of
-/// waiting for it forever.
+/// and bumps the generation, the others wait until it changes (spinning, then yielding the CPU,
+/// as the other claim loops of the pool do on every target: a thread of the barrier that is
+/// preempted, on a WebAssembly host by the engine's background compile threads, would otherwise
+/// leave the rest of the `n` threads spinning through its timeslice). A thread that panics
+/// between barriers (`Poison`, unwinding builds only: the release profile aborts) makes the
+/// waiting threads panic instead of waiting for it forever.
 pub(super) struct SpinBarrier {
     n: usize,
     count: AtomicUsize,
@@ -494,7 +496,7 @@ impl SpinBarrier {
             if self.poisoned.load(Ordering::Acquire) {
                 panic!("DCCSR: another thread of the table's build panicked");
             }
-            if cfg!(target_arch = "wasm32") || spins < 1 << 16 {
+            if spins < 1 << 16 {
                 std::hint::spin_loop();
                 spins += 1;
             } else {

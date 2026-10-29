@@ -352,7 +352,7 @@ unsafe fn x_hits_bf_run<C: XCells>(
     end
 }
 
-impl XPairPar {
+impl<M: TbxScore> XPairPar<M> {
     // EXPERIMENT (LOSAT_X_TBXHITBF): dispatch of the units without probes (`run_unit`,
     // `run_unit_compact`) by the switch and `fits`. EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the
     // branch-free loop's units by `x_unit_sent`, between the two instances of `scan_unit_bf`, so
@@ -871,6 +871,7 @@ mod tests {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc: Blosum62Score,
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),

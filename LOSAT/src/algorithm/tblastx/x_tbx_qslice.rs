@@ -410,7 +410,7 @@ pub(super) fn lut_shadow_compare(direct: Option<&[XSliced]>, reference: Option<&
     }
 }
 
-impl XPairPar {
+impl<M: TbxScore> XPairPar<M> {
     // EXPERIMENT (LOSAT_X_TBXQSLICE): `run_subject_unit_fns` for a batch with a cut group. The rules
     // of LOSAT_X_TBXPREFETCH and LOSAT_X_TBXEXTBATCH read each unit's window (module doc). No NCBI
     // counterpart: dispatch only.
@@ -613,6 +613,7 @@ impl XPairPar {
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
             s_len: inp.s_len,
+            sc: self.sc,
         };
         let mut b = XPendBatch::new(BATCH);
 
@@ -687,7 +688,7 @@ impl XPairPar {
                                 wordsize,
                                 |cell, query_offset, subject_offset| {
                                     if B {
-                                        x_tbx_extbatch::x_hit_batched::<S, SENT>(
+                                        x_tbx_extbatch::x_hit_batched::<S, _, SENT>(
                                             diag_ptr,
                                             cell,
                                             query_offset,
@@ -697,7 +698,7 @@ impl XPairPar {
                                             init_hsps,
                                         );
                                     } else {
-                                        x_hit::<S, XNoProbe, SENT>(
+                                        x_hit::<S, XNoProbe, _, SENT>(
                                             &mut *diag_ptr.add(cell),
                                             query_offset,
                                             subject_offset,
@@ -740,7 +741,7 @@ impl XPairPar {
                             // and subject_offset < s_len, so diag_coord < width =
                             // scratch.diag.len(); every candidate's cell is such a cell.
                             unsafe {
-                                x_tbx_extbatch::x_hit_batched::<S, SENT>(
+                                x_tbx_extbatch::x_hit_batched::<S, _, SENT>(
                                     diag_ptr,
                                     diag_coord,
                                     query_offset,
@@ -753,7 +754,7 @@ impl XPairPar {
                         } else {
                             // SAFETY: as above.
                             let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
-                            x_hit::<S, XNoProbe, SENT>(
+                            x_hit::<S, XNoProbe, _, SENT>(
                                 diag_entry,
                                 query_offset,
                                 subject_offset,
@@ -769,7 +770,12 @@ impl XPairPar {
         if B && b.pending() > 0 {
             // SAFETY: the candidates' cells are cells of this unit's table.
             unsafe {
-                x_tbx_extbatch::flush::<S, SENT>(&mut b, scratch.diag.as_mut_ptr(), &h, init_hsps)
+                x_tbx_extbatch::flush::<S, _, SENT>(
+                    &mut b,
+                    scratch.diag.as_mut_ptr(),
+                    &h,
+                    init_hsps,
+                )
             };
         }
     }
@@ -1032,6 +1038,7 @@ mod tests {
                 groups,
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc: Blosum62Score,
                 sliced: Some(direct),
                 mask_rule: None,
                 extents: Vec::new(),

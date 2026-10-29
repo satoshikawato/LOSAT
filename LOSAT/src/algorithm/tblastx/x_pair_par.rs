@@ -788,7 +788,7 @@ const X_GATE_N1_LETTERS: i32 = 5_000;
 const X_GATE_MIN_THRESHOLD: i32 = 13;
 
 /// The per-batch inputs of `XPairPar::prepare`.
-pub(super) struct XBatch<'a> {
+pub(super) struct XBatch<'a, M: TbxScore = Blosum62Score> {
     pub lookup: &'a BlastAaLookupTable,
     pub contexts: &'a [QueryContext],
     pub query_length: i32,
@@ -804,6 +804,8 @@ pub(super) struct XBatch<'a> {
     pub threads: usize,
     /// The lookup threshold, as the build site reads it (`XLutEarly::threshold`).
     pub threshold: i32,
+    /// The search's matrix (`-matrix`; no data for BLOSUM62's instance).
+    pub sc: M,
 }
 
 /// What the unit path does with a batch (`decide`).
@@ -979,7 +981,7 @@ fn units_gain(g: &XGates<'_>) -> bool {
 }
 
 /// The inputs of `lut_build`: what the lookup build site of the batch has (RI:2311).
-pub(super) struct XLutEarly<'a> {
+pub(super) struct XLutEarly<'a, M: TbxScore = Blosum62Score> {
     pub query_frames: &'a [Vec<QueryFrame>],
     /// The lookup threshold (`lookup->threshold`).
     pub threshold: i32,
@@ -991,6 +993,9 @@ pub(super) struct XLutEarly<'a> {
     pub requested_parallel: bool,
     pub use_serial_scan_chunks: bool,
     pub pool: &'a crate::utils::threading::SearchPool<'a>,
+    /// The search's matrix (`-matrix`; no data for BLOSUM62's instance): the groups' tables hold
+    /// its neighbour words.
+    pub sc: M,
 }
 
 /// The direct groups of a batch, made at the lookup build site and handed to `prepare`.
@@ -1066,7 +1071,7 @@ fn early_chunk_switches(
 // (`XPairLutQuery::x_prepare`), a gate or the guard (`decide`), or a lookup location outside one
 // group.
 /// The direct groups of the batch, or None (the reference builder runs).
-pub(super) fn lut_build(e: XLutEarly<'_>) -> Option<XLutBatch> {
+pub(super) fn lut_build<M: TbxScore>(e: XLutEarly<'_, M>) -> Option<XLutBatch> {
     let t0 = timing().then(Instant::now);
     let built = lut_direct(&e);
     add_ns(&NS_LUT_DIRECT, t0);
@@ -1095,9 +1100,14 @@ pub(super) fn lut_build(e: XLutEarly<'_>) -> Option<XLutBatch> {
 // The early decision: the inputs of `decide` from the prepared query, by the expressions RI uses
 // after the lookup build (RI:2502-2510 `query_length`, `check_diag_table_window`,
 // `diag_array_size`), then the groups and the stub.
-fn lut_direct(e: &XLutEarly<'_>) -> Option<XLutBatch> {
-    // The reference query preparation (contexts, concatenated query, lookup locations).
-    let q = XPairLutQuery::x_prepare(e.query_frames, e.threshold, true)?;
+fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
+    // The reference query preparation (contexts, concatenated query, lookup locations), with
+    // another matrix's scores that of `build_ncbi_lookup_for_profile` (SC7b).
+    let q = if M::BLOSUM62 {
+        XPairLutQuery::x_prepare(e.query_frames, e.threshold, true)?
+    } else {
+        XPairLutQuery::x_prepare_for(e.query_frames, e.threshold, true, e.sc.matrix())?
+    };
     let contexts = q.contexts();
     let query_length: i32 = contexts
         .last()
@@ -1488,7 +1498,7 @@ fn x_unit_width(group: &XGroup, chunk: &SubjectChunk) -> usize {
 }
 
 /// The read-only values of the per-hit body (`x_hit`).
-struct XHitCtx<'a> {
+struct XHitCtx<'a, M: TbxScore = Blosum62Score> {
     diag_offset: i32,
     window: i32,
     wordsize: i32,
@@ -1504,6 +1514,9 @@ struct XHitCtx<'a> {
     s_frame: i8,
     s_idx: usize,
     s_len: usize,
+    /// The search's matrix (`-matrix`; no data for BLOSUM62's instance): another matrix's
+    /// extensions take its table walks (`extend_hit_two_hit_with`).
+    sc: M,
 }
 
 /// Which branch of the two-hit test a hit took (tests read it; the unit loop ignores it).
@@ -1775,7 +1788,7 @@ impl<'a, 'b> XExpand<'a, 'b> {
 }
 
 /// The unit path of one batch: the sub-lookups of its context groups.
-pub(super) struct XPairPar {
+pub(super) struct XPairPar<M: TbxScore = Blosum62Score> {
     /// The groups' tables. Empty when LOSAT_X_TBXQSLICE cuts a group of the batch (`sliced`).
     groups: Vec<XGroup>,
     /// PAIRLUT: the groups were built directly and the batch's table is a stub without
@@ -1792,10 +1805,13 @@ pub(super) struct XPairPar {
     extents: Vec<usize>,
     /// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the batch's extensions may take the walks the
     /// sentinels stop (`x_tbx_sent_contexts`); a unit takes them where its chunk is the whole frame.
+    /// Never for another matrix (the sentinel walks hold BLOSUM62's scores).
     sent: bool,
+    /// The search's matrix (`-matrix`; no data for BLOSUM62's instance).
+    sc: M,
 }
 
-impl XPairPar {
+impl<M: TbxScore> XPairPar<M> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:337-360
     // ```c
     // for (i = 0; i < lookup->backbone_size; i++) {
@@ -1811,7 +1827,7 @@ impl XPairPar {
     // (`lut_build`). None means the reference loop runs for every subject of the batch.
     /// The unit path for this batch, or None (a gate, the guard or the cost rule sends it to the
     /// reference loop).
-    pub(super) fn prepare(b: XBatch<'_>) -> Option<Self> {
+    pub(super) fn prepare(b: XBatch<'_, M>) -> Option<Self> {
         let decision = decide(&XGates {
             contexts: b.contexts,
             query_length: b.query_length,
@@ -1925,7 +1941,8 @@ impl XPairPar {
         };
         debug_assert!(extents.is_empty() || extents.len() == groups.len());
         // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): checked once for the batch's contexts.
-        let sent = x_tbx_sent_contexts(b.contexts.iter().map(|c| c.aa_seq.as_slice()));
+        let sent =
+            M::BLOSUM62 && x_tbx_sent_contexts(b.contexts.iter().map(|c| c.aa_seq.as_slice()));
         Some(Self {
             groups,
             stub,
@@ -1933,6 +1950,7 @@ impl XPairPar {
             mask_rule,
             extents,
             sent,
+            sc: b.sc,
         })
     }
 
@@ -2701,6 +2719,7 @@ impl XPairPar {
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
             s_len: inp.s_len,
+            sc: self.sc,
         };
 
         let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
@@ -2723,7 +2742,7 @@ impl XPairPar {
             // [C] while (scan_range[1] <= scan_range[2])
             while scan_range[1] <= scan_range[2] {
                 // One batch per call (`x_unit_batch`: its own function on wasm32 only).
-                if !x_unit_batch::<S, P, C, PF, BF, SENT>(
+                if !x_unit_batch::<S, P, C, _, PF, BF, SENT>(
                     group,
                     subject,
                     &seq_ranges,
@@ -2770,6 +2789,7 @@ fn x_unit_batch<
     S: XInitSink,
     P: XProbe,
     C: XCells,
+    M: TbxScore,
     const PF: bool,
     const BF: bool,
     const SENT: bool,
@@ -2782,7 +2802,7 @@ fn x_unit_batch<
     scratch: &mut XScratch,
     cells: C,
     width: usize,
-    h: &XHitCtx<'_>,
+    h: &XHitCtx<'_, M>,
     init_hsps: &mut S,
     probe: &mut P,
 ) -> bool {
@@ -2821,7 +2841,7 @@ fn x_unit_batch<
                 h.window,
                 h.wordsize,
                 |cell, query_offset, subject_offset| {
-                    x_hit::<S, P, SENT>(
+                    x_hit::<S, P, _, SENT>(
                         &mut *diag_ptr.add(cell),
                         query_offset,
                         subject_offset,
@@ -2868,7 +2888,7 @@ fn x_unit_batch<
         // a masked one is at most the mask, width - 1.
         let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
         probe.at(diag_coord, subject_offset);
-        let outcome = x_hit::<S, P, SENT>(
+        let outcome = x_hit::<S, P, _, SENT>(
             diag_entry,
             query_offset,
             subject_offset,
@@ -2971,11 +2991,11 @@ fn x_unit_batch<
 /// The two-hit test and extension of one hit on its cell (`SENT`: LOSAT_X_TBXUNGAPSENT, the
 /// extension of `extend_hit_two_hit_sent`).
 #[inline(always)]
-fn x_hit<S: XInitSink, P: XProbe, const SENT: bool>(
+fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: bool>(
     diag_entry: &mut DiagStruct,
     query_offset: u32,
     subject_offset: u32,
-    h: &XHitCtx<'_>,
+    h: &XHitCtx<'_, M>,
     init_hsps: &mut S,
     probe: &mut P,
 ) -> XHit {
@@ -3039,31 +3059,45 @@ fn x_hit<S: XInitSink, P: XProbe, const SENT: bool>(
         // (x_unit_probe.rs; `XNoProbe` does nothing). No NCBI counterpart.
         let mark = probe.ext_begin();
         // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): with `SENT` the walks the sentinels stop.
-        let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) = if !SENT {
-            extend_hit_two_hit(
-                query,
-                h.subject,
-                (last_hit + wordsize) as usize,
-                subject_offset as usize,
-                q_raw,
-                x_dropoff,
-                false,
-            )
-        } else {
-            // SAFETY: `SENT` runs on the units `x_unit_sent` accepts (`scan_unit_cells`): the
-            // batch's contexts passed `x_tbx_sent_contexts` (XPairPar::sent), and `h.subject_sent`
-            // is the buffer of a frame `x_tbx_sent_subject` accepted.
-            unsafe {
-                extend_hit_two_hit_sent(
-                    query_full,
-                    h.subject_sent,
+        // Another matrix's extension takes its table walks (`extend_hit_two_hit_with`; the
+        // sentinel walks hold BLOSUM62's scores, and its units never take them, `prepare`).
+        let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
+            if !M::BLOSUM62 {
+                extend_hit_two_hit_with(
+                    h.sc,
+                    query,
+                    h.subject,
                     (last_hit + wordsize) as usize,
                     subject_offset as usize,
                     q_raw,
                     x_dropoff,
+                    false,
                 )
-            }
-        };
+            } else if !SENT {
+                extend_hit_two_hit(
+                    query,
+                    h.subject,
+                    (last_hit + wordsize) as usize,
+                    subject_offset as usize,
+                    q_raw,
+                    x_dropoff,
+                    false,
+                )
+            } else {
+                // SAFETY: `SENT` runs on the units `x_unit_sent` accepts (`scan_unit_cells`): the
+                // batch's contexts passed `x_tbx_sent_contexts` (XPairPar::sent), and `h.subject_sent`
+                // is the buffer of a frame `x_tbx_sent_subject` accepted.
+                unsafe {
+                    extend_hit_two_hit_sent(
+                        query_full,
+                        h.subject_sent,
+                        (last_hit + wordsize) as usize,
+                        subject_offset as usize,
+                        q_raw,
+                        x_dropoff,
+                    )
+                }
+            };
         probe.ext_end(
             mark,
             query,
@@ -3506,6 +3540,7 @@ mod tests {
                     s_frame: s_frame.frame,
                     s_idx: 0,
                     s_len: 999,
+                    sc: Blosum62Score,
                 };
                 let seq_ranges = [(0, subject.len() as i32)];
                 let mut scan_range = [0, 0, subject.len() as i32 - wordsize];
@@ -3527,7 +3562,7 @@ mod tests {
                         {
                             aliased += 1;
                         }
-                        let outcome = x_hit::<_, _, false>(
+                        let outcome = x_hit::<_, _, _, false>(
                             &mut diag_array[cell],
                             pair.q_off,
                             pair.s_off,
@@ -3594,6 +3629,7 @@ mod tests {
             groups: build_groups(&lookup, &contexts),
             stub: false,
             sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+            sc: Blosum62Score,
             sliced: None,
             mask_rule: None,
             extents: Vec::new(),
@@ -3984,6 +4020,7 @@ mod tests {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc: Blosum62Score,
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
@@ -4118,6 +4155,7 @@ mod tests {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc: Blosum62Score,
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
@@ -4127,6 +4165,7 @@ mod tests {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc: Blosum62Score,
                 sliced: None,
                 mask_rule: Some(XMaskRule {
                     max_cells: usize::MAX,
@@ -4142,6 +4181,7 @@ mod tests {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc: Blosum62Score,
                 sliced: None,
                 mask_rule: pp.mask_rule,
                 extents: pp
@@ -5108,6 +5148,7 @@ mod tests {
                     groups: build_groups(&lookup, &contexts),
                     stub: false,
                     sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                    sc: Blosum62Score,
                     sliced: None,
                     mask_rule: None,
                     extents: Vec::new(),
@@ -5257,7 +5298,7 @@ mod tests {
         sorted_compact
             .iter_mut()
             .for_each(|records| records.x_sort_in(&mut scratch));
-        let today = XPairPar::merge_subject_listed(
+        let today = XPairPar::<Blosum62Score>::merge_subject_listed(
             XSubjectUnits {
                 frame_chunks: frame_chunks.clone(),
                 units: units.clone(),
@@ -5265,7 +5306,7 @@ mod tests {
             },
             &inp,
         );
-        let with_switch = XPairPar::merge_subject_listed(
+        let with_switch = XPairPar::<Blosum62Score>::merge_subject_listed(
             XSubjectUnits {
                 frame_chunks: frame_chunks.clone(),
                 units: units.clone(),
@@ -5626,6 +5667,7 @@ mod tests {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc: Blosum62Score,
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
@@ -5707,7 +5749,7 @@ mod tests {
         }
         assert!(today.diag.capacity() < x_mapped_len::<DiagStruct>(0));
         assert!(today.records.capacity() < x_mapped_len::<XUnitHsp>(0));
-        let today_hits = XPairPar::merge_subject_listed(
+        let today_hits = XPairPar::<Blosum62Score>::merge_subject_listed(
             XSubjectUnits {
                 frame_chunks: frame_chunks.clone(),
                 units: units.clone(),
@@ -5715,7 +5757,7 @@ mod tests {
             },
             &inp,
         );
-        let mapped_hits = XPairPar::merge_subject_listed(
+        let mapped_hits = XPairPar::<Blosum62Score>::merge_subject_listed(
             XSubjectUnits {
                 frame_chunks,
                 units,

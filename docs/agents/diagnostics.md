@@ -5472,6 +5472,22 @@ Scheduling (each value computed by one thread with the original function; order 
   report at one and four threads with both switches, `=0` and neither). The units of the branch-free scan
   (`x_scan_bf.rs`: aarch64, and tables that are not sparse without AVX2) keep `LOSAT_X_TBNPAIRCAP`'s size. Where:
   the units that take TBNSCANBYTE's scan (platform).
+  Measured 2026-10-29 on the workstation (2x Xeon Gold 6338; base dev d6208db9; every output of a case the same bytes
+  in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16 CPUs for
+  every run, medians of 8 rounds in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): the 595 proteins of
+  AP027131 x AP027133 (`-db_gencode 4`) `-subject` at 1 / 16 / 32 / 40 / 48 threads 19 / 55 / 72 / 80 / 88 -> 18 / 53
+  / 69 / 76 / 84 MiB (NCBI `-subject` runs one thread: 81), `-db` at 48 101 -> 94 (NCBI 115); `dmel_b4.faa` x
+  zebrafish cDNAs (`-db`, `-evalue 1e-5 -max_target_seqs 5`) at 16 / 32 / 40 / 48 66 / 101 / 116 / 133 -> 62 / 90 /
+  102 / 117 (NCBI 137 / 149 / 156 / 162); lower in 79 of the 80 pairs; `=0` in the same binary x0.990-1.008 of the
+  base. The `dmel_b4.faa` case takes 3.08 M scan calls instead of 1.40 M (1.39 M units): at one thread x1.0019 of the
+  instructions (about 380 per extra stop, the calls of the scan and of the two-hit loop), AP027131 `-subject` x1.0003;
+  blastx (`BXSCANBYTE`, AP027131 x AP027133 proteins and 800 fly cDNAs x yeast proteins `-subject`) x1.00000. Time
+  (node 1, cores warmed 3 s before each run, arms alternating in order, `perf stat`; the PR's binary against the base,
+  and `=0` in the PR's binary): `dmel_b4.faa` at 1 / 8 / 16 / 32 threads x0.9962 / x0.9974 / x0.9958 / x0.9991 (7 of
+  8, 11, 11 and 7 of 12 faster), `=0` x0.9919 / x0.9915 / x0.9920 / x0.9910; AP027131 `-subject` at 1 / 16 / 32
+  x0.9986 / x1.0014 / x0.9985 (10, 4, 6 of 12 faster), `=0` x0.9974 / x0.9972 / x0.9999. Against `=0` in the same
+  binary the switch costs x1.004-1.008 on `dmel_b4.faa` (the extra stops), which the binary's layout hides against
+  the base.
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

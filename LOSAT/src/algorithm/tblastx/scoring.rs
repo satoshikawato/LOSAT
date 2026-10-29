@@ -95,9 +95,9 @@ impl TbxScore for Blosum62Score {
 pub(crate) struct MatrixScores {
     matrix: ScoringMatrix,
     scores: Box<[i32; BLASTAA_SIZE * BLASTAA_SIZE]>,
-    /// The byte table of the two-hit walks (`TbxScore::table_two_hit`); `None` if a score does
-    /// not fit it.
-    walk: Option<MatrixWalkTable>,
+    /// The byte table of the two-hit walks (`TbxScore::table_two_hit`), a static of the matrix;
+    /// `None` if a score does not fit it.
+    walk: Option<&'static MatrixWalkTable>,
 }
 
 impl MatrixScores {
@@ -108,7 +108,7 @@ impl MatrixScores {
                 scores[a * BLASTAA_SIZE + b] = protein_score(matrix, a as u8, b as u8);
             }
         }
-        let walk = matrix_walk_table(|a, b| {
+        let walk = matrix_walk_table(matrix, |a, b| {
             MatrixScore {
                 matrix,
                 scores: &scores,
@@ -128,7 +128,7 @@ impl MatrixScores {
         MatrixScore {
             matrix: self.matrix,
             scores: &self.scores,
-            walk: self.walk.as_ref(),
+            walk: self.walk,
         }
     }
 }
@@ -138,7 +138,7 @@ impl MatrixScores {
 pub(crate) struct MatrixScore<'a> {
     matrix: ScoringMatrix,
     scores: &'a [i32; BLASTAA_SIZE * BLASTAA_SIZE],
-    walk: Option<&'a MatrixWalkTable>,
+    walk: Option<&'static MatrixWalkTable>,
 }
 
 impl TbxScore for MatrixScore<'_> {

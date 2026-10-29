@@ -51,6 +51,11 @@ fn run(args: &[&str], threads: &str) -> Output {
 
 /// LOSAT with `stdin` on a pipe (written, then closed).
 fn run_with_stdin(args: &[&str], threads: &str, stdin: &[u8]) -> Output {
+    run_with_env(args, threads, stdin, &[])
+}
+
+/// `run_with_stdin` with the variables `envs` set for the run.
+fn run_with_env(args: &[&str], threads: &str, stdin: &[u8], envs: &[(&str, &Path)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let name_text = name.to_string_lossy();
@@ -65,6 +70,9 @@ fn run_with_stdin(args: &[&str], threads: &str, stdin: &[u8]) -> Output {
         "LOSAT_BLASTX_WORKER_LOG",
         std::env::temp_dir().join("losat_tblastx_matrix_worker.log"),
     );
+    for (name, value) in envs {
+        command.env(name, value);
+    }
     let mut child = command
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .arg("tblastx")
@@ -251,4 +259,87 @@ fn a_name_read_as_identity_without_its_statistics_is_refused() {
         &["-query", "-", "-subject", SUBJECT, "-matrix", "IDENTITYX"],
         0,
     );
+}
+
+/// The runs of LOSAT_X_PAIRPAR's own side that `LOSAT_X_REACH` recorded in `dir` (the second
+/// column of its rows).
+fn units_reached(dir: &Path) -> u64 {
+    let mut runs = 0;
+    for entry in fs::read_dir(dir).expect("reach directory") {
+        let text = fs::read_to_string(entry.expect("reach file").path()).expect("reach file");
+        for row in text.lines() {
+            let fields: Vec<&str> = row.split('\t').collect();
+            if fields.first() == Some(&"LOSAT_X_PAIRPAR") {
+                runs += fields[1].parse::<u64>().expect("reach count");
+            }
+        }
+    }
+    runs
+}
+
+/// Series SCT, SC7b: another matrix's search takes the unit path (PAIRLUT's group tables with its
+/// neighbour words, PAIRPAR's units, the table walks of TBXUNGAP with its byte table) and prints
+/// what the reference frame loop prints. A query of 3 kb (6,000 letters, above the one-thread gate
+/// of 5,000) against 20 kb of the related genome: at one thread with the units (`LOSAT_X_REACH`
+/// records LOSAT_X_PAIRPAR's own side) and without them (`LOSAT_X_PAIRPARN1=0`, the reference
+/// frame loop), and at four threads (the units of the one subject).
+#[test]
+fn another_matrix_takes_the_unit_path_with_the_reference_output() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let dir =
+        std::env::temp_dir().join(format!("losat_tblastx_matrix_units_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("temporary directory");
+    let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
+    let head =
+        |path: &str, bytes: usize| fs::read(root.join(path)).expect("FASTA")[..bytes].to_vec();
+    fs::write(
+        &query,
+        head("tests/fasta/truncated/AP027131_50k.fasta", 3100),
+    )
+    .expect("query");
+    fs::write(
+        &subject,
+        head("tests/fasta/truncated/AP027133_50k.fasta", 20400),
+    )
+    .expect("subject");
+    let (query, subject) = (query.to_str().unwrap(), subject.to_str().unwrap());
+    let off = Path::new("0");
+    for matrix in [
+        "BLOSUM45", "BLOSUM50", "BLOSUM80", "BLOSUM90", "PAM30", "PAM70", "PAM250", "IDENTITY",
+    ] {
+        let args = [
+            "-query", query, "-subject", subject, "-matrix", matrix, "-outfmt", "6",
+        ];
+        let reach = dir.join(format!("reach_{matrix}"));
+        fs::create_dir_all(&reach).expect("reach directory");
+        let units = run_with_env(&args, "1", b"", &[("LOSAT_X_REACH", &reach)]);
+        assert!(units_reached(&reach) > 0, "{matrix}: the units did not run");
+        let reach_off = dir.join(format!("reach_{matrix}_off"));
+        fs::create_dir_all(&reach_off).expect("reach directory");
+        let reference = run_with_env(
+            &args,
+            "1",
+            b"",
+            &[("LOSAT_X_PAIRPARN1", off), ("LOSAT_X_REACH", &reach_off)],
+        );
+        assert_eq!(units_reached(&reach_off), 0, "{matrix}: the units ran");
+        let four = run(&args, "4");
+        for output in [&units, &reference, &four] {
+            assert_eq!(output.status.code(), Some(0), "{matrix}");
+            assert!(output.stderr.is_empty(), "{matrix}");
+        }
+        assert!(!reference.stdout.is_empty(), "{matrix}: no hits");
+        assert_eq!(
+            String::from_utf8_lossy(&units.stdout),
+            String::from_utf8_lossy(&reference.stdout),
+            "{matrix} n1"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&four.stdout),
+            String::from_utf8_lossy(&reference.stdout),
+            "{matrix} n4"
+        );
+    }
+    let _ = fs::remove_dir_all(&dir);
 }

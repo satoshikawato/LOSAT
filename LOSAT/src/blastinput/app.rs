@@ -337,17 +337,17 @@ impl Program {
         self == Program::Blastn
     }
 
-    /// Whether LOSAT's program writes custom tabular field lists (BLASTX checks its fields
-    /// itself; BLASTN and BLASTP write them with `report::tabular`).
+    /// Whether LOSAT's program writes custom tabular field lists (BLASTN, BLASTP and BLASTX
+    /// write them with `report::tabular`).
     pub fn custom_fields(self) -> bool {
-        self == Program::Blastx || self.shared_tabular()
+        self.shared_tabular()
     }
 
     /// Whether the program writes its tabular reports with a field list or a delimiter, and
     /// outfmt 10 and 20, through the shared `report::tabular` (every field, `delim=`): BLASTN
-    /// (line CLI C2, PR 1) and BLASTP, with psiblast, which runs BLASTP's engine (PR 3).
+    /// (line CLI C2, PR 1), BLASTP, with psiblast, which runs BLASTP's engine, and BLASTX (PR 3).
     pub fn shared_tabular(self) -> bool {
-        matches!(self, Program::Blastn | Program::Blastp)
+        matches!(self, Program::Blastn | Program::Blastp | Program::Blastx)
     }
 
     /// Whether LOSAT's program writes the format: the one table of the formats of every
@@ -1140,8 +1140,8 @@ mod tests {
     // (OF5a), BLASTX (OF5b part 1), TBLASTN (OF5b part 2) and TBLASTX (OF5b part 3): every program;
     // 13 and 14 in BLASTP and BLASTN (OF5c part 1), BLASTX, TBLASTN and TBLASTX (part 2): every
     // program writes 0, 5 to 9 and 12 to 16.
-    // 17 (SAM) in BLASTN alone (OF6); 10 and 20 in BLASTN with the shared tabular writer (line
-    // CLI C2, PR 1).
+    // 17 (SAM) in BLASTN alone (OF6); 10 and 20 in BLASTN, BLASTP and BLASTX with the shared
+    // tabular writer (line CLI C2, PR 1 and 3).
     #[test]
     fn every_program_writes_its_formats_only() {
         for program in PROGRAMS {
@@ -1152,10 +1152,12 @@ mod tests {
                 .collect();
             // 11 (the BLAST archive): every program (OF8a parts 1 and 2: BLASTN, BLASTP; OF8b
             // parts 1 to 3: BLASTX, TBLASTN, TBLASTX).
-            // 10 and 20 with the shared tabular writer (line CLI C2: BLASTN, BLASTP).
+            // 10 and 20 with the shared tabular writer (line CLI C2: BLASTN, BLASTP, BLASTX).
             let expected: &[i32] = match program {
                 Program::Blastn => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20],
-                Program::Blastp => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20],
+                Program::Blastp | Program::Blastx => {
+                    &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20]
+                }
                 _ => &[0, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16],
             };
             assert_eq!(written, expected, "{program:?}");
@@ -1174,7 +1176,7 @@ mod tests {
         );
         assert_eq!(
             PROGRAMS.map(Program::shared_tabular),
-            [true, true, false, false, false]
+            [true, true, true, false, false]
         );
     }
 

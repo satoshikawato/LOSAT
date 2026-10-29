@@ -992,21 +992,15 @@ enum Outfmt {
 
 const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 const CUSTOM: &[&str] = &["blastn", "blastp", "blastx"];
-/// The programs that check their own field lists and take no delimiter (line CLI C2 moves BLASTX
-/// to the shared tabular writer in its PR 3, after BLASTP).
-const OWN_FIELDS: &[&str] = &["blastx"];
 /// The programs that write field lists, delimiters and outfmt 10 and 20 with the shared tabular
-/// writer (line CLI C2: BLASTN in PR 1, BLASTP in PR 3).
-const SHARED: &[&str] = &["blastn", "blastp"];
-const NOT_SHARED: &[&str] = &["blastx", "tblastn", "tblastx"];
+/// writer (line CLI C2: BLASTN in PR 1, BLASTP and BLASTX in PR 3).
+const SHARED: &[&str] = &["blastn", "blastp", "blastx"];
+const NOT_SHARED: &[&str] = &["tblastn", "tblastx"];
 const NO_CUSTOM: &[&str] = &["tblastn", "tblastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
 const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
     "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {P}",
-);
-const DELIMITER: Outfmt = Outfmt::Losat(
-    "a custom delimiter (delim=) in the output format is not supported by LOSAT's {P}",
 );
 const OUT_OF_RANGE: Outfmt = Outfmt::Ncbi(255, "Error: Formatting choice is out of range\n");
 const INVALID_DELIMITER: Outfmt = Outfmt::Ncbi(
@@ -1035,8 +1029,8 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "0 delim=,", None, Writes(Pairwise)),
         (ALL, "6 delim=", None, Writes(Tabular)),
         (ALL, "7 delim= ", None, Writes(TabularWithComments)),
-        // Custom fields (BLASTX checks its own list; BLASTN and BLASTP write every field and a
-        // delimiter with the shared tabular writer, line CLI C2) and delimiters.
+        // Custom fields (BLASTN, BLASTP and BLASTX write every field and a delimiter with the
+        // shared tabular writer, line CLI C2) and delimiters.
         (CUSTOM, "6 std", None, Writes(Tabular)),
         (CUSTOM, "07 std", None, Writes(TabularWithComments)),
         (CUSTOM, "6 qseqid sseqid pident length", None, Writes(Tabular)),
@@ -1046,8 +1040,6 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (NO_CUSTOM, "7  qaccver", None, CUSTOM_SPEC),
         (NO_CUSTOM, "6 delim=,", None, CUSTOM_SPEC),
         (NO_CUSTOM, "6 delimiter=;", None, CUSTOM_SPEC),
-        (OWN_FIELDS, "6 delim=, std", None, DELIMITER),
-        (OWN_FIELDS, "6 delim=;", None, DELIMITER),
         (SHARED, "7  qaccver", None, Writes(TabularWithComments)),
         (SHARED, "6 delim=,", None, Writes(Tabular)),
         (SHARED, "6 delimiter=;", None, Writes(Tabular)),
@@ -1091,8 +1083,8 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (NOT_SHARED, "10", None, UNSUPPORTED),
         (ALL, "18", None, UNSUPPORTED),
         (NOT_SHARED, "20", None, UNSUPPORTED),
-        // Line CLI C2: BLASTN (PR 1) and BLASTP (PR 3) write 10 and 20 with the shared tabular
-        // writer.
+        // Line CLI C2: BLASTN (PR 1), BLASTP and BLASTX (PR 3) write 10 and 20 with the shared
+        // tabular writer.
         (SHARED, "10", None, Writes(CommaSeparatedValues)),
         (SHARED, "10 delim=; qseqid sseqid", None, Writes(CommaSeparatedValues)),
         (SHARED, "20", None, Writes(CommaSeparatedValuesWithHeader)),

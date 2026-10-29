@@ -8845,20 +8845,42 @@ fn run_in_pool(
         warnings[start].extend(batch_title_warnings);
         // The batch's search, on the whole pool. EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps
         // its megablast table from batch to batch.
-        let searched = search_query_batch::<false>(
-            &args,
-            batch_records.batch_queries(),
-            source,
-            Some((&mut *outputs, &output_formats)),
-            parallel_pool,
-            batching,
-            input_start == 0,
-            BatchStage::Search {
-                query_offsets: &query_offsets[start..end],
-                query_masks: window_masker_masks.as_deref(),
-            },
-            x_lut_keep.as_ref(),
-        );
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:929
+        // ```c
+        //     opt.SetGappedMode(!args[kArgUngapped]);
+        // ```
+        // The instance of the batch search is chosen here, once for the batch.
+        let searched = if args.ungapped {
+            search_query_batch::<true>(
+                &args,
+                batch_records.batch_queries(),
+                source,
+                Some((&mut *outputs, &output_formats)),
+                parallel_pool,
+                batching,
+                input_start == 0,
+                BatchStage::Search {
+                    query_offsets: &query_offsets[start..end],
+                    query_masks: window_masker_masks.as_deref(),
+                },
+                x_lut_keep.as_ref(),
+            )
+        } else {
+            search_query_batch::<false>(
+                &args,
+                batch_records.batch_queries(),
+                source,
+                Some((&mut *outputs, &output_formats)),
+                parallel_pool,
+                batching,
+                input_start == 0,
+                BatchStage::Search {
+                    query_offsets: &query_offsets[start..end],
+                    query_masks: window_masker_masks.as_deref(),
+                },
+                x_lut_keep.as_ref(),
+            )
+        };
         let batch = match searched {
             Ok(batch) => batch,
             Err(error) => match error.downcast::<ErrorAfterInvalidBatches>() {

@@ -81,6 +81,8 @@ AB = f"-query {I}/culling_abricate_query.fa -subject {I}/culling_abricate_genes.
 # O4a (blastn -ungapped): the inputs of generate_ungapped_inputs (the t2 pair, rep, B and A are the ones above).
 T2 = f"-query {I}/t2_query.fa -subject {I}/t2_subject.fa"
 AMB = f"-query {I}/ambrun_q.fa -subject {I}/ambrun_s.fa"
+RE = f"-query {I}/re_q.fa -subject {I}/re_s.fa"
+EDLU = f"-query {R}/edl_ungapped_q.fa -subject tests/fasta/EDL933.fna"
 MX = f"-query {I}/mix_q.fa -subject {I}/mix_s.fa"
 SM = f"-query {I}/strand_mixed_query.fa -subject {I}/s60k.fa"
 MLST = f"-query {I}/culling_abricate_query.fa -subject {I}/culling_abricate_genes.fa -ungapped -dust no" \
@@ -496,8 +498,11 @@ def _ungapped_cases():
     tasks = (("mb", ""), ("bn", "-task blastn "), ("dc", "-task dc-megablast "), ("short", "-task blastn-short "))
     cases = []
     for key, task in tasks:
-        for name, inputs in (("t2", T2), ("p", P), ("mq", B), ("amb", A), ("ambrun", AMB)):
-            cases.append((f"ungapped.{key}.{name}", f"{inputs} {task}-ungapped -outfmt 6", ""))
+        for name, inputs in (("t2", T2), ("p", P), ("mq", B), ("amb", A), ("ambrun", AMB), ("reeval", RE)):
+            # blastn-short with the 60 kb subject and many queries has hundreds of thousands of HSPs at the
+            # default E-value (2 MB of output); 1e-3 keeps the batch and the many hits of a short query.
+            small = " -evalue 1e-3" if (key, name) == ("short", "mq") else ""
+            cases.append((f"ungapped.{key}.{name}", f"{inputs} {task}-ungapped{small} -outfmt 6", ""))
     for key, task in tasks[:2]:
         for name, option in (("cl1", "-culling_limit 1"), ("cl2", "-culling_limit 2"), ("mh1", "-max_hsps 1"),
                              ("qcov50", "-qcov_hsp_perc 50"), ("plus", "-strand plus"), ("minus", "-strand minus"),
@@ -510,6 +515,15 @@ def _ungapped_cases():
         cases.append((f"ungapped.{key}.t2_fmt0", f"{T2} {task}-ungapped -outfmt 0", ""))
         cases.append((f"ungapped.{key}.mq_fmt7", f"{B} {task}-ungapped -outfmt 7", ""))
         cases.append((f"ungapped.{key}.mq_c2000", f"{B} {task}-ungapped -outfmt 6", "", "CHUNK_SIZE=2000"))
+    # Ties (review M1): a query X + revcomp(X) has plus and minus HSPs of the same score and range; the
+    # order of those comes from the initial hits' sort by score (na_ungapped.c:1691-1692).
+    cases.append(("ungapped.mb.pal", f"{PL} -ungapped -outfmt 6", ""))
+    cases.append(("ungapped.dc.pal", f"{PL} -task dc-megablast -ungapped -outfmt 6", ""))
+    # A subject above 5 Mb is searched in chunks that are joined without a gap (review S3): a 600 bp piece of
+    # EDL933 at 4,999,701 with a one base deletion and a mismatch, against the whole EDL933 (5,528,445 bp);
+    # the HSP crosses the chunk border at 5,000,000 (made at run time, prepare_runtime_inputs).
+    for key, task in (("mb", ""), ("bn", "-task blastn "), ("dc", "-task dc-megablast ")):
+        cases.append((f"ungapped.{key}.edl", f"{EDLU} {task}-ungapped -outfmt 6", ""))
     cases.append(("ungapped.mb.mix_qloc", f"{MX} -ungapped -query_loc 150-750 -outfmt 6", ""))
     cases.append(("ungapped.mb.mix_sloc", f"{MX} -ungapped -subject_loc 50-700 -outfmt 6", ""))
     for name, reward, penalty in (("1_6", 1, -6), ("3_1", 3, -1), ("2_7", 2, -7), ("5_4", 5, -4),
@@ -751,6 +765,15 @@ def prepare_runtime_inputs() -> None:
     expected = ">edl933_2m EDL933 1-2000000\n" + genome("EDL933.fna")[:2_000_000] + "\n"
     if not path.exists() or path.read_text() != expected:
         path.write_text(expected)
+    # The query of the ungapped.*.edl cases: EDL933 4,999,701-5,000,300 without the base at 4,999,821 and
+    # with a transition at the 401st base of what is left.
+    window = genome("EDL933.fna")[4_999_700:5_000_300]
+    piece = window[:120] + window[121:]
+    piece = piece[:400] + {"A": "G", "G": "A", "C": "T", "T": "C"}[piece[400]] + piece[401:]
+    path = RUNTIME / "edl_ungapped_q.fa"
+    expected = ">edlq EDL933 4999701-5000300 with a deletion and a mismatch\n" + piece + "\n"
+    if not path.exists() or path.read_text() != expected:
+        path.write_text(expected)
 
 
 def sha256(data: bytes) -> str:
@@ -782,11 +805,13 @@ def command_freeze(args) -> int:
     rows = []
     kept = {}
     if args.only:
-        # Only the cases whose id starts with the prefix are run again; the other rows and files stay.
+        # Only the cases whose id starts with the prefix (or one of the comma-separated prefixes) are run again;
+        # the other rows and files stay.
         kept = {row["case_id"]: row for row in read_manifest()}
     for case_id, argv, extra, case_env, oracle_env in CASES:
-        if args.only and not case_id.startswith(args.only):
-            rows.append(kept[case_id])
+        if args.only and not case_id.startswith(tuple(args.only.split(","))):
+            if case_id in kept:
+                rows.append(kept[case_id])
             continue
         result = run_case(oracle, [], case_id, ORACLE_ARGV.get(case_id, argv), oracle_env or case_env)
         (FIXTURES / f"{case_id}.out").write_bytes(result.stdout)
@@ -845,7 +870,7 @@ def check_one(losat: str, row: dict[str, str], threads: int | None = None) -> tu
 def command_check(args) -> int:
     prepare_runtime_inputs()
     losat = str(Path(args.losat).resolve())
-    rows = [row for row in read_manifest() if not args.only or row["case_id"].startswith(args.only)]
+    rows = [row for row in read_manifest() if not args.only or row["case_id"].startswith(tuple(args.only.split(",")))]
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         results = list(pool.map(lambda row: check_one(losat, row, args.threads), rows))
     lines = [f"{case_id}\t{verdict}" for case_id, verdict in results]

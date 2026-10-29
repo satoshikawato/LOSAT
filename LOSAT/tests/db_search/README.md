@@ -391,12 +391,15 @@ Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTD
 
 `ungapped_abr` (the 33 genes of `LOSAT/tests/fixtures/blastn_regression/inputs/culling_abricate_genes.fa`, as `ungapped_abr.fna`) is built like
 the mlst databases (parsed Seq-ids and a hash index), `ungapped_ambrun` (the subject `ambrun_s.fa`, a stretch with 30 `N` and one `R` inside a match)
-without; rows `db.blastn.ungapped*` (`blastn -ungapped`). Run from `LOSAT/`:
+without, `ungapped_re` (the six subjects of `re_s.fa`: N every other base, a run of N, IUPAC codes, a minus-strand copy) without; rows
+`db.blastn.ungapped*` (`blastn -ungapped`). Run from `LOSAT/`:
 
     makeblastdb -in tests/db_search/ungapped_abr.fna -dbtype nucl -out tests/db_search/ungapped_abr \
         -parse_seqids -hash_index -title PubMLST -blastdb_version 4
     makeblastdb -in tests/db_search/ungapped_ambrun.fna -dbtype nucl -out tests/db_search/ungapped_ambrun \
         -title "ambiguity run" -blastdb_version 4
-    rm tests/db_search/ungapped_abr.njs tests/db_search/ungapped_ambrun.njs
+    makeblastdb -in tests/db_search/ungapped_re.fna -dbtype nucl -out tests/db_search/ungapped_re \
+        -title "ungapped re-evaluation" -blastdb_version 4
+    rm tests/db_search/ungapped_abr.njs tests/db_search/ungapped_ambrun.njs tests/db_search/ungapped_re.njs
 
 The rows `db.blastn.ungapped_rej.*` (outfmt 8, 11, 17 with `-ungapped`) are refusals until O4a-2.

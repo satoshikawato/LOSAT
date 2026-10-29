@@ -10,7 +10,7 @@ use super::build_db::BuildDatabase;
 use super::makeblastdb::{run_with, MakedbArgs};
 use super::platform::Platform;
 use super::time::LocalTime;
-use super::writer::{DbVersion, WriteDb};
+use super::writer::{DbVersion, Indices, WriteDb};
 use crate::seqdb::SeqType;
 
 mod makeblastdb_app_cases;
@@ -207,7 +207,7 @@ fn the_writer_reproduces_makeblastdb_s_protein_volumes() {
             max_file_size,
             version,
             LINUX,
-            false,
+            Indices::default(),
         );
         for bioseq in protein_bioseqs(&fixtures.join("prot.faa")) {
             db.extract_bioseq_deflines(&bioseq);
@@ -241,7 +241,7 @@ fn the_platform_reaches_the_index_header_and_the_lmdb_files() {
             3_000_000_000,
             DbVersion::V5,
             platform,
-            false,
+            Indices::default(),
         );
         for bioseq in protein_bioseqs(&fixtures.join("prot.faa")) {
             db.extract_bioseq_deflines(&bioseq);
@@ -309,7 +309,7 @@ fn build_version(
             &time_of(date),
             version,
             LINUX,
-            false,
+            Indices::default(),
         )?;
         db.set_max_file_size(max_file_size);
         let mut warn = |line: &[u8]| {
@@ -517,6 +517,9 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             max_file_sz: case.max_file_sz.unwrap_or("3GB").to_string(),
             logfile: None,
             parse_seqids: false,
+            hash_index: false,
+            taxid: None,
+            taxid_map: None,
         };
         // A run that writes no database stores no date; any time will do.
         let now = time_of(if case.date.is_empty() {
@@ -597,6 +600,9 @@ fn makedb(input: &str, out: &str, max_file_sz: &str, stdin: &[u8]) -> (i32, Stri
         max_file_sz: max_file_sz.to_string(),
         logfile: None,
         parse_seqids: false,
+        hash_index: false,
+        taxid: None,
+        taxid_map: None,
     };
     let now = time_of("Oct 12, 2026  9:00 PM");
     let (mut log, mut messages) = (Vec::new(), Vec::new());
@@ -1006,7 +1012,7 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
         1,
         DbVersion::V4,
         LINUX,
-        false,
+        Indices::default(),
     );
     for i in 0..1001 {
         let bioseq = Bioseq {
@@ -1370,6 +1376,75 @@ fn s3a_gate() {
                 &mut out,
                 &mut err,
             );
+            std::fs::write(dir.join(format!("so{k}.txt")), out).unwrap();
+            std::fs::write(dir.join(format!("se{k}.txt")), err).unwrap();
+            std::fs::write(dir.join(format!("rc{k}.txt")), status.to_string()).unwrap();
+        }
+    }
+}
+
+/// The driver of the S3b gate of the makedb-v5 line
+/// (`makedb-v5-20261029/scripts/s3b_gate.py`): as `s3a_gate`, for the manifest named by
+/// `LOSAT_S3B_GATE_MANIFEST`. The words go through LOSAT's command line parser (a parser
+/// error is written as `main` writes it, with its exit code) except the two that the
+/// command line refuses until S3c: `-parse_seqids` sets `MakedbArgs::parse_seqids` and
+/// `-taxid_map <file>` sets `MakedbArgs::taxid_map`.
+#[test]
+#[ignore = "driver of an external gate (LOSAT_S3B_GATE_MANIFEST)"]
+fn s3b_gate() {
+    use crate::cli::{Cli, Commands};
+    let manifest = std::env::var("LOSAT_S3B_GATE_MANIFEST").expect("LOSAT_S3B_GATE_MANIFEST");
+    for line in std::fs::read_to_string(manifest).unwrap().lines() {
+        let mut fields = line.split('\t');
+        let dir = PathBuf::from(fields.next().unwrap());
+        let date = fields.next().unwrap();
+        let now = time_of(if date.is_empty() {
+            "Oct 12, 2026  9:00 PM"
+        } else {
+            date
+        });
+        for (k, run) in fields.enumerate() {
+            let words: Vec<String> = parse_json_words(run);
+            let mut parse_seqids = false;
+            let mut taxid_map = None;
+            let mut rest = Vec::new();
+            let mut it = words.into_iter();
+            while let Some(word) = it.next() {
+                match word.as_str() {
+                    "-parse_seqids" => parse_seqids = true,
+                    "-taxid_map" => taxid_map = it.next(),
+                    _ => rest.push(word),
+                }
+            }
+            let mut argv = vec!["losat".to_string(), "makeblastdb".to_string()];
+            argv.extend(rest);
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let status = match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+                Ok(cli) => {
+                    let Commands::Makedb(mut args) = cli.command else {
+                        unreachable!("a makeblastdb command line");
+                    };
+                    args.parse_seqids = parse_seqids;
+                    args.taxid_map = taxid_map;
+                    run_with(
+                        &args,
+                        Some(&now),
+                        LINUX,
+                        &mut std::io::empty(),
+                        &mut out,
+                        &mut err,
+                    )
+                }
+                Err(error) => {
+                    let message = crate::cli::render_message(&error);
+                    if error.use_stderr() {
+                        err.extend_from_slice(message.as_bytes());
+                    } else {
+                        out.extend_from_slice(message.as_bytes());
+                    }
+                    error.exit_code()
+                }
+            };
             std::fs::write(dir.join(format!("so{k}.txt")), out).unwrap();
             std::fs::write(dir.join(format!("se{k}.txt")), err).unwrap();
             std::fs::write(dir.join(format!("rc{k}.txt")), status.to_string()).unwrap();

@@ -174,15 +174,21 @@ fn makedb_takes_makeblastdb_s_option_names() {
     assert!(makedb(&["-in", "x.faa", "-dbtype", "protein"]).is_err());
     assert!(makedb(&["-in", "x.faa", "-dbtype", "prot", "-blastdb_version", "3"]).is_err());
 
+    assert!(!defaults.hash_index);
+    assert_eq!(defaults.taxid, None);
+
+    // `-hash_index` and `-taxid` (makeblastdb.cpp:249-251, 315-318: a flag, and an integer
+    // of at least 0 that excludes `-taxid_map`).
+    let given = args(makedb(&["-dbtype", "prot", "-hash_index", "-taxid", "9606"]).unwrap());
+    assert!(given.hash_index);
+    assert_eq!(given.taxid, Some(9606));
+    assert!(makedb(&["-dbtype", "prot", "-taxid", "-1"]).is_err());
+    assert!(makedb(&["-dbtype", "prot", "-taxid", "abc"]).is_err());
+
     // The options of makeblastdb that LOSAT does not implement are named (`-h` and
-    // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
-    for option in [
-        "-parse_seqids",
-        "-hash_index",
-        "-mask_data",
-        "-taxid",
-        "-taxid_map",
-    ] {
+    // `-version` are served: `makeblastdb_is_a_name_of_makedb`; `-parse_seqids` and
+    // `-taxid_map`, which requires it, come with the version 5 keys).
+    for option in ["-parse_seqids", "-mask_data", "-taxid_map"] {
         let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
         assert!(
             err.to_string().contains(&format!(

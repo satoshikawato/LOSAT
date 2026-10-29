@@ -10,8 +10,9 @@ use std::path::Path;
 use super::deflines;
 use super::fasta_source::{FastaBioseqSource, Warn};
 use super::platform::Platform;
+use super::taxid_set::TaxIdSet;
 use super::time::LocalTime;
-use super::writer::{DbVersion, WriteDb};
+use super::writer::{DbVersion, Indices, WriteDb};
 use super::WriteDbError;
 use crate::seqdb::{SeqDbError, SeqType};
 
@@ -23,6 +24,8 @@ pub struct BuildDatabase<'a> {
     output_dbname: String,
     /// `m_ParseIDs` (`-parse_seqids`).
     parse_ids: bool,
+    /// `m_Taxids` (`SetTaxids`).
+    taxids: TaxIdSet,
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:852-927
@@ -699,7 +702,8 @@ impl<'a> BuildDatabase<'a> {
     /// The constructor, then `SetMembBits(no_bits, true)` as makeblastdb
     /// calls it. `now` is the time of the build, `version` the format version
     /// (`dbver`), `platform` the platform whose makeblastdb the files follow,
-    /// `parse_ids` `-parse_seqids` (`eFullIndex`).
+    /// `indices` `indexing` (`eFullIndex` for `-parse_seqids`, `eAddHash` for
+    /// `-hash_index`).
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         dbname: &str,
@@ -709,7 +713,7 @@ impl<'a> BuildDatabase<'a> {
         now: &LocalTime,
         version: DbVersion,
         platform: Platform,
-        parse_ids: bool,
+        indices: Indices,
     ) -> Result<Self, WriteDbError> {
         create_directories(dbname)?;
         let output_dbname = create_absolute_path(dbname);
@@ -756,15 +760,41 @@ impl<'a> BuildDatabase<'a> {
             1000 * 1000 * 1000,
             version,
             platform,
-            parse_ids,
+            indices,
         );
         Ok(Self {
             is_protein,
             log,
             output_db,
             output_dbname,
-            parse_ids,
+            parse_ids: indices.full,
+            taxids: TaxIdSet::default(),
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1216-1219
+    // ```c++
+    // void CBuildDatabase::SetTaxids(CTaxIdSet & taxids)
+    // {
+    //     m_Taxids.Reset(& taxids);
+    // }
+    // ```
+    /// `SetTaxids`: the taxids of `-taxid` or `-taxid_map`.
+    pub fn set_taxids(&mut self, taxids: TaxIdSet) {
+        self.taxids = taxids;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1211-1213
+    // ```c++
+    //     if (!m_Taxids->HasEverFixedId()) {
+    //         ERR_POST(Error << "No sequences matched any of the taxids provided.");
+    //     }
+    // ```
+    /// The message of `~CBuildDatabase` about the taxids: `Some` when `-taxid_map` matched no
+    /// sequence.
+    pub fn taxid_message(&self) -> Option<&'static str> {
+        (!self.taxids.has_ever_fixed_id())
+            .then_some("Error: [makeblastdb] No sequences matched any of the taxids provided.")
     }
 
     /// `GetOutputDbName`: the absolute name of the database.
@@ -893,16 +923,19 @@ impl<'a> BuildDatabase<'a> {
                     // membership bits or leaf taxids given).
                     let mut headers = deflines::extract_bioseq_deflines(&bioseq, &mut *warn);
                     self.output_db.post_extracted_deflines(&headers);
-                    deflines::fix_tax_id(&mut headers, 0);
+                    self.taxids.fix_tax_id(&mut headers);
                     if bioseq.seq_data.is_some() {
                         self.output_db.add_sequence(bioseq)?;
                         self.output_db.set_deflines(headers);
                         added = true;
                     }
                 } else {
+                    // The definition line without `-parse_seqids` gets the global taxid
+                    // of `-taxid` (or 0); `-taxid_map` requires `-parse_seqids`.
                     self.output_db.extract_bioseq_deflines(&bioseq);
                     if bioseq.seq_data.is_some() {
                         self.output_db.add_sequence(bioseq)?;
+                        self.output_db.set_taxid(self.taxids.global_taxid());
                         added = true;
                     }
                 }

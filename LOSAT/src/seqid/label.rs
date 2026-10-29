@@ -397,6 +397,31 @@ fn patent_fasta(id: &PatentSeqId, out: &mut Vec<u8>) {
 /// `.version` when asked and stored, the number of a `gi`, `db:tag` of a `general` id,
 /// `mol_chain` of a `pdb` id, `country number_seqid` of a patent.
 pub fn content(id: &ParsedSeqId, with_version: bool, out: &mut Vec<u8>) {
+    label_content(id, with_version, false, out);
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/multisource_util.cpp:157-160
+// ```c++
+// void GetSeqIdKey(const objects::CSeq_id & id, string & key)
+// {
+//     id.GetLabel(& key, CSeq_id::eContent, CSeq_id::fLabel_GeneralDbIsContent);
+// }
+// ```
+/// `GetLabel(eContent, fLabel_GeneralDbIsContent)` (makeblastdb's `GetSeqIdKey`, the keys of
+/// `-taxid_map`): `content` without the version, and only the tag of a `general` id (its
+/// database is part of the type, not of the content).
+pub fn content_general_db_is_content(id: &ParsedSeqId, out: &mut Vec<u8>) {
+    label_content(id, false, true, out);
+}
+
+/// `x_GetLabel_Content` with the flags `fLabel_Version` (`with_version`) and
+/// `fLabel_GeneralDbIsContent` (`general_db_is_content`).
+fn label_content(
+    id: &ParsedSeqId,
+    with_version: bool,
+    general_db_is_content: bool,
+    out: &mut Vec<u8>,
+) {
     if let Some(text) = id.textseq() {
         let start = out.len();
         if let Some(accession) = &text.accession {
@@ -417,8 +442,10 @@ pub fn content(id: &ParsedSeqId, with_version: bool, out: &mut Vec<u8>) {
         ParsedSeqId::Gibbsq(value) | ParsedSeqId::Gibbmt(value) => number(out, value),
         ParsedSeqId::Giim(giim) => number(out, giim.id),
         ParsedSeqId::General(dbtag) => {
-            out.extend_from_slice(&dbtag.db);
-            out.push(b':');
+            if !general_db_is_content {
+                out.extend_from_slice(&dbtag.db);
+                out.push(b':');
+            }
             object_id(&dbtag.tag, out);
         }
         ParsedSeqId::Patent(patent) => {
@@ -447,6 +474,261 @@ pub fn content(id: &ParsedSeqId, with_version: bool, out: &mut Vec<u8>) {
         }
         _ => unreachable!("Textseq-id alternatives are handled above"),
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1890-1917
+// ```c++
+// static inline
+// void x_GetLabel_Type(const CSeq_id& id, string* label,
+//                      CSeq_id::TLabelFlags flags)
+// {
+//     unsigned choice = id.Which();
+//     ...
+//     switch (choice) {
+//     case CSeq_id::e_General:
+//         // we may encode 'gnl' or the database name as requested
+//         if (flags & CSeq_id::fLabel_GeneralDbIsContent) {
+//             *label += id.GetGeneral().GetDb();
+//         } else {
+//             *label += "gnl";
+//         }
+//         break;
+//
+//     case CSeq_id::e_Patent:
+//         *label += "pat";
+//         break;
+//
+//     default:
+//         *label += s_TextId[choice];
+//         break;
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2059-2083
+// ```c++
+//     case eBoth:
+//         x_GetLabel_Type(*this, label, flags);
+//         *label += "|";
+//         if (flags & fLabel_UpperCase) {
+//             NStr::ToUpper(*label);
+//             ...
+//             string primary_id;
+//             list<string> secondary_id_list;
+//             primary_id = ComposeOSLT(&secondary_id_list, fAllowLocalId);
+//             if (!primary_id.empty())
+//                 *label += primary_id;
+//             else if (secondary_id_list.size() > 0)
+//                 *label += *secondary_id_list.begin();
+//             if (flags & fLabel_Version) {
+//                 const CTextseq_id* tsid = GetTextseq_Id();
+//                 if (tsid && tsid->IsSetVersion())
+//                     *label += "." + NStr::IntToString(tsid->GetVersion());
+//             }
+//         } else {
+// ```
+// Without `fLabel_GeneralDbIsContent` the type of a `general` id is "gnl" and of a patent
+// "pat", which are the FASTA tags; `s_TextId` names a swissprot id "sp" whatever its release.
+/// `GetLabel(eDefault, fLabel_Default | fLabel_UpperCase)` (`eDefault` is `eBoth`,
+/// `fLabel_Default` is `fLabel_Version`): the label of CWriteDB_Volume's duplicate check,
+/// `REF|NP_000549.1`, `SP|P69905`, `LCL|ABC`, `GNL|DB|TAG`, `PDB|1ABC|a`, `GI|123`,
+/// `PAT|US|1234567|1`.
+pub fn both_upper_version(id: &ParsedSeqId, out: &mut Vec<u8>) {
+    let start = out.len();
+    out.extend_from_slice(FASTA_TAGS[usize::from(id.alternative())]);
+    out.push(b'|');
+    out[start..].make_ascii_uppercase();
+    compose_oslt_label(id, out);
+    if let Some(version) = id.textseq().and_then(|text| text.version) {
+        out.push(b'.');
+        number(out, version);
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:3416-3546
+// ```c++
+// string CSeq_id::ComposeOSLT(list<string>* secondary_id_list,
+//                             TComposeOSLTFlags parse_flags) const
+// {
+//     string primary_id;
+//     string secondary_id;
+//     E_Choice seqid_type = Which();
+//     bool mixed_case = false;
+//
+//     switch (seqid_type) {
+//     case e_Giim:
+//         primary_id = NStr::IntToString(GetGiim().GetId());
+//         secondary_id = primary_id;
+//         break;
+//     case e_Gibbsq:
+//         primary_id = NStr::IntToString(GetGibbsq());
+//         secondary_id = primary_id;
+//         break;
+//     case e_Gibbmt:
+//         primary_id = NStr::IntToString(GetGibbmt());
+//         secondary_id = primary_id;
+//         break;
+//     case e_Pir:
+//     case e_Prf:
+//     {
+//         ...
+//         const CTextseq_id* tsid = GetTextseq_Id();
+//         if (tsid->CanGetName())
+//             primary_id = tsid->GetName();
+//         else if (tsid->CanGetAccession())
+//             primary_id = tsid->GetAccession();
+//         break;
+//     }
+//     case e_Patent:
+//         if (secondary_id_list) {
+//             ...
+//             const CId_pat& pat = GetPatent().GetCit();
+//             secondary_id = pat.GetCountry() + "|" +
+//                 (pat.GetId().IsNumber() ?
+//                  pat.GetId().GetNumber() : pat.GetId().GetApp_number()) + "|" +
+//                 NStr::IntToString(GetPatent().GetSeqid());
+//         }
+//         break;
+//     case e_Pdb:
+//     {
+//         const CPDB_seq_id& pdb = GetPdb();
+//         primary_id = pdb.GetMol().Get();
+//         ...
+//         NStr::ToUpper(primary_id);
+//         if (pdb.IsSetChain_id()) {
+//             primary_id += "|" + pdb.GetChain_id();
+//         } else if (pdb.IsSetChain() && pdb.GetChain() != ' ') {
+//             primary_id += "|" + string(1, (char)pdb.GetChain());
+//         }
+//         mixed_case = true;
+//         break;
+//     }
+//     case e_General:
+//     {
+//         // General ids are always secondary!
+//         if (secondary_id_list) {
+//             const CObject_id& dbtag = GetGeneral().GetTag();
+//             string suffix =
+//                 (dbtag.IsId() ? NStr::IntToString(dbtag.GetId()) : dbtag.GetStr());
+//             if (!suffix.empty())
+//                 secondary_id = GetGeneral().GetDb() + "|" + suffix;
+//         }
+//         break;
+//     }
+//     case e_Gi:
+//         // GIs are always secondary
+//         if (secondary_id_list) {
+//             secondary_id = NStr::NumericToString(GetGi());
+//         }
+//         break;
+//     case CSeq_id::e_Local:
+//     {
+//         if ((parse_flags & fAllowLocalId) != 0 && secondary_id_list) {
+//             const CObject_id& oid = GetLocal();
+//             if (oid.IsId()) {
+//                 secondary_id = NStr::IntToString(oid.GetId());
+//             } else if (oid.IsStr()) {
+//                 secondary_id = oid.GetStr();
+//             }
+//         }
+//         break;
+//     }
+//     default:
+//     {
+//         ...
+//         const CTextseq_id* tsid = GetTextseq_Id();
+//         if (tsid) {
+//             if (tsid->CanGetAccession())
+//                 primary_id = tsid->GetAccession();
+//             if ( secondary_id_list ) {
+//                 if (seqid_type == e_Gpipe
+//                     &&  (parse_flags & fGpipeAddSecondary) != 0
+//                     &&  !primary_id.empty()) {
+//                     ...
+//                 }
+//                 else if (tsid->CanGetName() && !tsid->GetName().empty()) {
+//                     secondary_id = tsid->GetName();
+//                 }
+//             }
+//         }
+//         break;
+//     }
+//     }
+//
+//     if (!mixed_case)
+//         NStr::ToUpper(primary_id);
+//     if (secondary_id_list && !secondary_id.empty()) {
+//         NStr::ToUpper(secondary_id);
+//         secondary_id_list->emplace_back(secondary_id);
+//     }
+//     return primary_id;
+// }
+// ```
+// `GetLabel` asks with a secondary list and `fAllowLocalId` (no `fGpipeAddSecondary`), and
+// takes the primary id, or the secondary one when the primary is empty: so the label part is
+// the primary id when there is one, else the (only) secondary id, both upper-cased (ASCII,
+// `NStr::ToUpper` in the C locale) except the chain of a pdb id.
+/// The part of `both_upper_version` that `ComposeOSLT` gives.
+fn compose_oslt_label(id: &ParsedSeqId, out: &mut Vec<u8>) {
+    let start = out.len();
+    let mut upper_from = start;
+    match id {
+        ParsedSeqId::Giim(giim) => number(out, giim.id),
+        ParsedSeqId::Gibbsq(value) | ParsedSeqId::Gibbmt(value) => number(out, value),
+        ParsedSeqId::Pir(text) | ParsedSeqId::Prf(text) => {
+            if let Some(name) = text.name.as_ref().or(text.accession.as_ref()) {
+                out.extend_from_slice(name);
+            }
+        }
+        ParsedSeqId::Patent(patent) => {
+            out.extend_from_slice(&patent.cit.country);
+            out.push(b'|');
+            match &patent.cit.id {
+                PatentNumber::Number(number) | PatentNumber::AppNumber(number) => {
+                    out.extend_from_slice(number)
+                }
+            }
+            out.push(b'|');
+            number(out, patent.seqid);
+        }
+        ParsedSeqId::Pdb(pdb) => {
+            out.extend_from_slice(&pdb.mol);
+            out[start..].make_ascii_uppercase();
+            if let Some(chain_id) = &pdb.chain_id {
+                out.push(b'|');
+                out.extend_from_slice(chain_id);
+            } else if let Some(chain) = pdb.chain.filter(|&chain| chain != i32::from(b' ')) {
+                out.push(b'|');
+                out.push(chain as u8);
+            }
+            // `mixed_case`: the chain keeps its case.
+            upper_from = out.len();
+        }
+        ParsedSeqId::General(dbtag) => {
+            let suffix_start = out.len();
+            out.extend_from_slice(&dbtag.db);
+            out.push(b'|');
+            let tag_start = out.len();
+            object_id(&dbtag.tag, out);
+            if out.len() == tag_start {
+                // An empty suffix gives no secondary id.
+                out.truncate(suffix_start);
+            }
+        }
+        ParsedSeqId::Gi(gi) => number(out, gi),
+        ParsedSeqId::Local(tag) => object_id(tag, out),
+        _ => {
+            let text = id.textseq().expect("a Textseq-id alternative");
+            match &text.accession {
+                Some(accession) if !accession.is_empty() => out.extend_from_slice(accession),
+                // The primary id is empty: the name, when there is one, is the secondary id.
+                _ => {
+                    if let Some(name) = &text.name {
+                        out.extend_from_slice(name);
+                    }
+                }
+            }
+        }
+    }
+    out[upper_from..].make_ascii_uppercase();
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:907-930

@@ -13,7 +13,7 @@
 //! sequence of the other molecule, stops at a length above 2,147,483,647, and ignores a
 //! sequence of length 0 or without sequence data.
 
-mod defline_ids;
+pub(crate) mod defline_ids;
 mod line_reader;
 mod pack;
 mod reader;

@@ -237,14 +237,14 @@ fn write_visible_string(out: &mut Vec<u8>, text: &[u8], bad: &mut Vec<BadTitleCh
 //     }
 // }
 // ```
-// Without `-taxid` and `-taxid_map` the best taxid is 0
-// (taxid_set.cpp:84-90, 123-128: the unset global id is returned as it is
-// unless the definition line has one).
+// Without `-taxid` the best taxid is 0 (taxid_set.cpp:84-90, 123-128: the unset global id
+// is returned as it is unless the definition line has one); with it, the global taxid
+// (`TaxIdSet::best_taxid`). `-taxid_map` requires `-parse_seqids`.
 /// The header record of the sequence number `oid` of its volume: the
-/// definition line with `title`, `gnl|BL_ORD_ID|oid` and taxid 0. Bytes of
+/// definition line with `title`, `gnl|BL_ORD_ID|oid` and `taxid`. Bytes of
 /// the title that a VisibleString cannot hold are written as `#` and
 /// appended to `bad`.
-pub fn defline_set(title: &[u8], oid: u32, bad: &mut Vec<BadTitleChar>) -> Vec<u8> {
+pub fn defline_set(title: &[u8], oid: u32, taxid: i32, bad: &mut Vec<BadTitleChar>) -> Vec<u8> {
     let mut out = Vec::with_capacity(64 + title.len());
     // Blast-def-line-set ::= SEQUENCE OF Blast-def-line
     open(&mut out, TAG_SEQUENCE);
@@ -276,7 +276,7 @@ pub fn defline_set(title: &[u8], oid: u32, bad: &mut Vec<BadTitleChar>) -> Vec<u
     close(&mut out);
     // taxid INTEGER OPTIONAL
     open(&mut out, TAG_CONTEXT_CONSTRUCTED | DEFLINE_TAXID);
-    write_int4(&mut out, 0);
+    write_int4(&mut out, taxid);
     close(&mut out);
     close(&mut out);
     close(&mut out);
@@ -587,15 +587,15 @@ mod tests {
     fn the_record_of_a_short_title() {
         let mut bad = Vec::new();
         assert_eq!(
-            hex(&defline_set(b"a one", 0, &mut bad)),
+            hex(&defline_set(b"a one", 0, 0, &mut bad)),
             "30803080a0801a0561206f6e650000a1803080aa803080a0801a09424c5f4f52445f49440000a180a080020100000000000000000000000000a280020100000000000000"
         );
         assert_eq!(
-            hex(&defline_set(b"c three", 1, &mut bad)),
+            hex(&defline_set(b"c three", 1, 0, &mut bad)),
             "30803080a0801a07632074687265650000a1803080aa803080a0801a09424c5f4f52445f49440000a180a080020101000000000000000000000000a280020100000000000000"
         );
         assert_eq!(
-            hex(&defline_set(b"", 0, &mut bad)),
+            hex(&defline_set(b"", 0, 0, &mut bad)),
             "30803080a0801a000000a1803080aa803080a0801a09424c5f4f52445f49440000a180a080020100000000000000000000000000a280020100000000000000"
         );
         assert!(bad.is_empty());
@@ -604,7 +604,12 @@ mod tests {
     #[test]
     fn bytes_outside_the_visible_range_become_number_signs() {
         let mut bad = Vec::new();
-        let record = defline_set(b"a   tab  ctl \xc3\xa9 utf8 \x80hi \x7f del", 0, &mut bad);
+        let record = defline_set(
+            b"a   tab  ctl \xc3\xa9 utf8 \x80hi \x7f del",
+            0,
+            0,
+            &mut bad,
+        );
         assert_eq!(
             hex(&record),
             "30803080a0801a1e61202020746162202063746c20232320757466382023686920232064656c0000a1803080aa803080a0801a09424c5f4f52445f49440000a180a080020100000000000000000000000000a280020100000000000000"
@@ -652,7 +657,7 @@ mod tests {
             (&b""[..], 70_000),
             (&b"t"[..], i32::MAX as u32),
         ] {
-            let record = defline_set(title, oid, &mut Vec::new());
+            let record = defline_set(title, oid, 0, &mut Vec::new());
             let deflines = crate::seqdb::header::decode_defline_set(&record, path).unwrap();
             assert_eq!(deflines.len(), 1);
             assert_eq!(deflines[0].title, title);

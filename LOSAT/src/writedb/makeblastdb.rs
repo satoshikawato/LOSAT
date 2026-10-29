@@ -11,8 +11,9 @@ use super::data_size::{string_to_uint8_data_size, uint8_to_string_data_size};
 use super::format_guess::appears_fasta;
 use super::metadata::{db_files_metadata, last_updated, write_metadata_file, DbMetadata};
 use super::platform::Platform;
+use super::taxid_set::{TaxIdMapError, TaxIdSet};
 use super::time::LocalTime;
-use super::writer::{build_lmdb_file_name, DbVersion};
+use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::seqdb::{SeqDb, SeqDbError, SeqType};
 
@@ -97,6 +98,17 @@ pub struct MakedbArgs {
     /// File to which the program log should be redirected
     #[arg(long, value_name = "File_Name")]
     pub logfile: Option<String>,
+    /// Create index of sequence hash values.
+    #[arg(long)]
+    pub hash_index: bool,
+    /// Taxonomy ID to assign to all sequences
+    #[arg(long, value_name = "TaxID", value_parser = clap::value_parser!(i32).range(0..))]
+    pub taxid: Option<i32>,
+    /// `-taxid_map`, set by the library only: makeblastdb requires `-parse_seqids` with it
+    /// (`SetDependency("taxid_map", eRequires, "parse_seqids")`), so the command line takes
+    /// it with `-parse_seqids` (makedb-v5 S3c).
+    #[arg(skip)]
+    pub taxid_map: Option<String>,
     /// `-parse_seqids`, set by the library only: the command line refuses the option
     /// (`UNSUPPORTED_OPTIONS`) until the whole database is written with it (ISAM, `.pog`,
     /// the duplicate check and the version 5 keys come in the later steps of the line);
@@ -107,10 +119,9 @@ pub struct MakedbArgs {
 
 /// The options of makeblastdb 2.17.0 that `losat makeblastdb` refuses
 /// (makeblastdb.cpp:246-333). `-h` and `-version` are served (`crate::cli`);
-/// `-logfile` is read.
-pub const UNSUPPORTED_OPTIONS: [&str; 12] = [
+/// `-logfile`, `-hash_index` and `-taxid` are read.
+pub const UNSUPPORTED_OPTIONS: [&str; 10] = [
     "parse_seqids",
-    "hash_index",
     "randomize",
     "mask_data",
     "mask_id",
@@ -118,7 +129,6 @@ pub const UNSUPPORTED_OPTIONS: [&str; 12] = [
     "gi_mask",
     "gi_mask_name",
     "metadata_output_prefix",
-    "taxid",
     "taxid_map",
     "oid_masks",
 ];
@@ -215,7 +225,11 @@ impl MakedbError {
             ) => 255,
             MakedbError::Build(WriteDbError::OutOfMemory) => 4,
             MakedbError::Database(_) => 2,
-            MakedbError::Build(WriteDbError::Creation(_) | WriteDbError::Options(_))
+            MakedbError::Build(
+                WriteDbError::Creation(_)
+                | WriteDbError::CreationBytes(_)
+                | WriteDbError::Options(_),
+            )
             | MakedbError::Unsupported(_)
             | MakedbError::Argument(_) => 1,
         }
@@ -406,7 +420,82 @@ fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
             args.blastdb_version
         )));
     };
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:318-327
+    // ```c++
+    //     arg_desc->SetConstraint("taxid", new CArgAllowValuesGreaterThanOrEqual(0));
+    //     arg_desc->SetDependency("taxid", CArgDescriptions::eExcludes, "taxid_map");
+    //
+    //     arg_desc->AddOptionalKey("taxid_map", "TaxIDMapFile",
+    //              "Text file mapping sequence IDs to taxonomy IDs.\n"
+    //              "Format:<SequenceId> <TaxonomyId><newline>",
+    //              CArgDescriptions::eInputFile);
+    //     arg_desc->SetDependency("taxid_map", CArgDescriptions::eRequires, "parse_seqids");
+    // ```
+    // The parser checks these on the command line (`-taxid` has its range there); the
+    // library-only `-taxid_map` is checked here with the parser's sentences.
+    if args.taxid_map.is_some() {
+        if !args.parse_seqids {
+            return Err(MakedbError::Argument(
+                "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
+                 `taxid_map'"
+                    .to_string(),
+            ));
+        }
+        if args.taxid.is_some() {
+            return Err(MakedbError::Argument(
+                "Argument \"taxid\". Incompatible with argument:  `taxid_map'".to_string(),
+            ));
+        }
+    }
     Ok(version)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1278-1287
+// ```c++
+//     if (args["taxid"].HasValue()) {
+//         _ASSERT( !args["taxid_map"].HasValue() );
+//         CRef<CTaxIdSet> taxids(new CTaxIdSet(TAX_ID_FROM(int, args["taxid"].AsInteger())));
+//         m_DB->SetTaxids(*taxids);
+//     } else if (args["taxid_map"].HasValue()) {
+//         _ASSERT( !args["taxid"].HasValue() );
+//         CRef<CTaxIdSet> taxids(new CTaxIdSet());
+//         taxids->SetMappingFromFile(args["taxid_map"].AsInputFile());
+//         m_DB->SetTaxids(*taxids);
+//     }
+// ```
+// `AsInputFile` opens the file here: one that cannot be opened is the parser's error
+// "File is not accessible" (makeblastdb 2.17.0: "Command line argument error: Argument
+// "taxid_map". File is not accessible:  `<name>'", exit status 1, after the head of the
+// log). A number the map cannot convert ends makeblastdb with its exception report
+// (`CATCH_ALL`, "Error: ", exit status 255; the build tree in its path is the official
+// release's, makedb-v5 DECISIONS 29).
+/// The taxids of `-taxid` or `-taxid_map` (`SetTaxids`), read where makeblastdb reads them.
+fn read_taxids(args: &MakedbArgs, err: &mut dyn Write) -> Result<Option<TaxIdSet>, MakedbError> {
+    if let Some(taxid) = args.taxid {
+        return Ok(Some(TaxIdSet::with_global(taxid)));
+    }
+    let Some(name) = args.taxid_map.as_deref() else {
+        return Ok(None);
+    };
+    let file = std::fs::File::open(name).map_err(|_| {
+        MakedbError::Argument(format!(
+            "Argument \"taxid_map\". File is not accessible:  `{name}'"
+        ))
+    })?;
+    let mut taxids = TaxIdSet::default();
+    let mut warn = warn_to(err);
+    taxids
+        .set_mapping_from_file(&mut std::io::BufReader::new(file), &mut |warning| {
+            super::fasta_source::defline_ids::post_seq_id_warning(warning, &mut warn)
+        })
+        .map_err(|error| match error {
+            TaxIdMapError::Exception(report) => MakedbError::Build(WriteDbError::Other(report)),
+            TaxIdMapError::BlankLine(line) => unsupported(format!(
+                "line {line} of the -taxid_map file {name} holds only white space, which \
+                 makeblastdb 2.17.0 cannot read (it crashes)"
+            )),
+        })?;
+    Ok(Some(taxids))
 }
 
 /// The value of `-max_file_sz`, read before the build touches a file.
@@ -577,11 +666,20 @@ pub fn build_database(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
-    build_database_with_log(args, now, platform, stdin, out, err, None)
+    let mut end_message = None;
+    let result =
+        build_database_with_log(args, now, platform, stdin, out, err, None, &mut end_message);
+    if let Some(message) = end_message {
+        let _ = writeln!(err, "{message}");
+    }
+    result
 }
 
 /// [`build_database`]; `logfile_error` is the error of a `-logfile` that could
-/// not be opened, raised where makeblastdb opens the file.
+/// not be opened, raised where makeblastdb opens the file. `end_message` gets the
+/// message of `~CBuildDatabase` (`-taxid_map` matched no sequence), which makeblastdb
+/// posts after everything else, the error of the build included.
+#[allow(clippy::too_many_arguments)]
 fn build_database_with_log(
     args: &MakedbArgs,
     now: Option<&LocalTime>,
@@ -590,6 +688,7 @@ fn build_database_with_log(
     out: &mut dyn Write,
     err: &mut dyn Write,
     logfile_error: Option<MakedbError>,
+    end_message: &mut Option<&'static str>,
 ) -> Result<(), MakedbError> {
     let version = check_arguments(args)?;
     let is_protein = args.dbtype == "prot";
@@ -705,7 +804,10 @@ fn build_database_with_log(
         now,
         version,
         platform,
-        args.parse_seqids,
+        Indices {
+            full: args.parse_seqids,
+            hash: args.hash_index,
+        },
     )?;
     let _ = writeln!(
         db.log(),
@@ -713,11 +815,32 @@ fn build_database_with_log(
         uint8_to_string_data_size(max_file_size)
     );
     db.set_max_file_size(max_file_size);
+    if let Some(taxids) = read_taxids(args, err)? {
+        db.set_taxids(taxids);
+    }
+    let result = add_input_and_close(
+        &mut db, &names, from_stdin, title, is_protein, now, stdin, err,
+    );
+    *end_message = db.taxid_message();
+    result
+}
 
+/// The rest of `x_BuildDatabase`: the input files, `EndBuild` and the metadata file.
+#[allow(clippy::too_many_arguments)]
+fn add_input_and_close(
+    db: &mut BuildDatabase<'_>,
+    names: &[&str],
+    from_stdin: bool,
+    title: &str,
+    is_protein: bool,
+    now: &LocalTime,
+    stdin: &mut dyn Read,
+    err: &mut dyn Write,
+) -> Result<(), MakedbError> {
     if from_stdin {
-        add_fasta(&mut db, stdin, err)?;
+        add_fasta(db, stdin, err)?;
     } else {
-        verify_input_files(&names, err)?;
+        verify_input_files(names, err)?;
         // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1030-1054
         // ```c++
         //              x_VerifyInputFilesType(names, input_fmt);
@@ -734,9 +857,9 @@ fn build_database_with_log(
         // `x_AddFasta`): its own FASTA reader (line numbers and local ids start
         // again), its own "Adding sequences" line, and "No sequences added" for a
         // file without a sequence.
-        for &name in &names {
+        for &name in names {
             match std::fs::File::open(name) {
-                Ok(mut file) => add_fasta(&mut db, &mut file, err)?,
+                Ok(mut file) => add_fasta(db, &mut file, err)?,
                 // A file that exists and cannot be opened. makeblastdb does
                 // not test the stream it opened: `AddFasta` skips a stream
                 // that is not good and adds nothing from it (a build of that
@@ -775,7 +898,7 @@ fn build_database_with_log(
         db.end_build(false, &mut warn)
     };
     if closed? {
-        open_new_database(&db, title, is_protein, now)?;
+        open_new_database(db, title, is_protein, now)?;
     }
     Ok(())
 }
@@ -878,7 +1001,8 @@ fn open_new_database(
     // 	}
     // ```
     // Without `-taxid` and `-taxid_map` every OID has tax id 0, so
-    // `number-of-taxids` is not set.
+    // `number-of-taxids` is not set. `GetDBTaxIds` reads the taxids of the tax id files,
+    // which are the ones the writer gave them (`WriteDb::db_tax_ids`).
     let dbname = match new_db.rfind(std::path::MAIN_SEPARATOR) {
         Some(off) => &new_db[off + 1..],
         None => new_db,
@@ -906,7 +1030,12 @@ fn open_new_database(
         number_of_sequences: totals.iter().map(|(_, oids, _)| i64::from(*oids)).sum(),
         last_updated: last_updated(now),
         number_of_volumes: located.volumes.len() as i32,
-        number_of_taxids: None,
+        number_of_taxids: (version == DbVersion::V5)
+            .then(|| output_db.db_tax_ids())
+            .filter(|tax_ids| {
+                tax_ids.len() > 1 || (tax_ids.len() == 1 && tax_ids.first() != Some(&0))
+            })
+            .map(|tax_ids| tax_ids.len() as i32),
         bytes_total,
         bytes_to_cache,
         files,
@@ -1052,9 +1181,20 @@ pub(crate) fn run_with(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
+    let mut end_message = None;
     let name = match args.logfile.as_deref() {
         None | Some("-") => {
-            return finish(build_database(args, now, platform, stdin, out, err), err)
+            let result = build_database_with_log(
+                args,
+                now,
+                platform,
+                stdin,
+                out,
+                err,
+                None,
+                &mut end_message,
+            );
+            return finish(result, end_message, err);
         }
         Some(name) => name,
     };
@@ -1073,39 +1213,71 @@ pub(crate) fn run_with(
     match opened {
         Some(file) if silent => {
             let mut log = &file;
-            finish(
-                build_database_with_log(args, now, platform, stdin, &mut log, diag, None),
+            let result = build_database_with_log(
+                args,
+                now,
+                platform,
+                stdin,
+                &mut log,
                 diag,
-            )
+                None,
+                &mut end_message,
+            );
+            finish(result, end_message, diag)
         }
         Some(file) => {
             let (mut log, mut diag) = (&file, &file);
-            finish(
-                build_database_with_log(args, now, platform, stdin, &mut log, &mut diag, None),
+            let result = build_database_with_log(
+                args,
+                now,
+                platform,
+                stdin,
+                &mut log,
                 &mut diag,
-            )
+                None,
+                &mut end_message,
+            );
+            finish(result, end_message, &mut diag)
         }
         None => {
             let error = MakedbError::Argument(format!(
                 "Argument \"logfile\". File is not accessible:  `{name}'"
             ));
-            finish(
-                build_database_with_log(args, now, platform, stdin, out, diag, Some(error)),
+            let result = build_database_with_log(
+                args,
+                now,
+                platform,
+                stdin,
+                out,
                 diag,
-            )
+                Some(error),
+                &mut end_message,
+            );
+            finish(result, end_message, diag)
         }
     }
 }
 
-/// The error message and the exit code of a build.
-fn finish(result: Result<(), MakedbError>, err: &mut dyn Write) -> i32 {
-    match result {
+/// The error message and the exit code of a build, then the message of
+/// `~CBuildDatabase` (`end_message`).
+fn finish(result: Result<(), MakedbError>, end_message: Option<&str>, err: &mut dyn Write) -> i32 {
+    let status = match result {
         Ok(()) => 0,
+        Err(MakedbError::Build(WriteDbError::CreationBytes(message))) => {
+            let _ = err.write_all(b"BLAST Database creation error: ");
+            let _ = err.write_all(&message);
+            let _ = err.write_all(b"\n");
+            1
+        }
         Err(error) => {
             let _ = writeln!(err, "{error}");
             error.exit_code()
         }
+    };
+    if let Some(message) = end_message {
+        let _ = writeln!(err, "{message}");
     }
+    status
 }
 
 #[cfg(test)]

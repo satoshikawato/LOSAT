@@ -490,48 +490,6 @@ pub fn extract_bioseq_deflines(bioseq: &Bioseq, warn: Warn<'_>) -> DeflineSet {
     }
 }
 
-/// `CTaxIdSet::FixTaxId(deflines)` without `-taxid_map`: every definition line gets
-/// `global_taxid` (`-taxid`, 0 when not given), or keeps its own taxid when that is 0.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/taxid_set.cpp:82-90,120-136
-/// ```c++
-/// TTaxId CTaxIdSet::x_SelectBestTaxid(const objects::CBlast_def_line & defline)
-/// {
-///     TTaxId retval = m_GlobalTaxId;
-///
-///     if (retval != kTaxIdNotSet) {
-///         return retval;
-///     }
-///
-///     if ( !m_TaxIdMap.empty() ) {
-///     ...
-///     } else if (defline.IsSetTaxid()) {
-///         retval = defline.GetTaxid();
-///     }
-///
-///     return retval;
-/// }
-///
-/// void
-/// CTaxIdSet::FixTaxId(CRef<objects::CBlast_def_line_set> deflines)
-/// {
-///     NON_CONST_ITERATE(CBlast_def_line_set::Tdata, itr, deflines->Set()) {
-///         (*itr)->SetTaxid(x_SelectBestTaxid(**itr));
-///     }
-/// }
-/// ```
-/// (`kTaxIdNotSet` is 0. The map, `-taxid_map`, is not ported yet.)
-pub fn fix_tax_id(deflines: &mut DeflineSet, global_taxid: i32) {
-    for defline in &mut deflines.deflines {
-        let taxid = if global_taxid != 0 {
-            global_taxid
-        } else {
-            defline.taxid.unwrap_or(0)
-        };
-        defline.taxid = Some(taxid);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3,9 +3,10 @@
 //! them to the shared writer: the values of a FASTA subject or a database sequence that its rows
 //! show, the taxonomy of the reported database sequences, whether `taxdb.bti` is on NCBI's search
 //! path for a `-subject` search, and LOSAT's refusal of a name of the taxonomy database
-//! (DECISIONS 3 of line CLI C2). For the programs whose subjects are nucleotide sequences;
-//! `program` names the program in LOSAT's refusals. TBLASTN uses it (line CLI C2, PR 2); BLASTN
-//! keeps the copy that PR 1 wrote in `algorithm::blastn::tabular` until the two are joined.
+//! (DECISIONS 3 of line CLI C2), and outfmt 20's line of the field names. For the programs whose
+//! subjects are nucleotide sequences; `program` names the program in LOSAT's refusals. TBLASTN and
+//! TBLASTX use it (line CLI C2, PR 2); BLASTN keeps the copy that PR 1 wrote in
+//! `algorithm::blastn::tabular` until the two are joined.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-851
 //! ```c++
@@ -25,6 +26,7 @@
 //! ```
 
 use std::borrow::Cow;
+use std::io::Write;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -32,7 +34,8 @@ use anyhow::Result;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::tabular::{
-    DeflineIds, TabularField, TabularSpec, TabularSubject, TabularTaxonomy,
+    taxdb_warning_line, DeflineIds, TabularField, TabularKind, TabularSpec, TabularSubject,
+    TabularTaxonomy, TabularWriter,
 };
 use crate::seqdb::SeqDb;
 
@@ -369,4 +372,48 @@ pub(crate) fn tabular_taxonomy(
         };
     }
     Ok(taxonomy)
+}
+
+/// Writes outfmt 20's line of the field names (`PrintProlog`, before NCBI reads the first query
+/// batch), after the taxonomy database's warning of the formatter that NCBI makes for it when the
+/// field list checks it and `taxdb.bti` is not found (`x_CheckTaxDB`); nothing for the other
+/// kinds. `program` is the program's name in the warning (lower case), `program_version` the
+/// report's (`TBLASTN 2.17.0+`). A run that finds the taxonomy database writes no warning, so
+/// LOSAT's refusals (made before) come before the line.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357
+/// ```c++
+///     if (m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
+///         const CBlastTabularInfo::EFieldDelimiter kDelim = CBlastTabularInfo::eComma;
+///         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
+///         if(!m_CustomDelim.empty()) {
+///             tabinfo.SetCustomDelim(m_CustomDelim);
+///         }
+///         tabinfo.PrintFieldSpecs();
+///         return;
+///     }
+/// ```
+pub(crate) fn write_tabular_prolog(
+    spec: &TabularSpec,
+    taxdb_found: bool,
+    program: &str,
+    program_version: &str,
+    writer: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+) -> Result<()> {
+    if spec.kind != TabularKind::CsvWithHeader {
+        return Ok(());
+    }
+    if spec.checks_taxdb() && !taxdb_found {
+        writer.flush()?;
+        diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
+        diagnostics.flush()?;
+    }
+    TabularWriter {
+        spec,
+        program_version,
+        matrix: None,
+    }
+    .prolog(writer)?;
+    Ok(())
 }

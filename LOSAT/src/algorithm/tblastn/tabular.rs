@@ -125,23 +125,14 @@ pub(super) fn tabular_spec(outfmt: &str) -> Option<TabularSpec> {
     )
 }
 
-/// Writes outfmt 20's line of the field names (`PrintProlog`, before NCBI reads the first query
-/// batch), after the taxonomy database's warning of the formatter that NCBI makes for it when the
-/// field list checks it and `taxdb.bti` is not found (`x_CheckTaxDB`); nothing for the other
-/// kinds. A run that finds the taxonomy database writes no warning, so LOSAT's refusals (made
-/// before) come before the line.
+/// Writes outfmt 20's line of the field names and its formatter's warning
+/// (`common::tabular::write_tabular_prolog`); nothing for the other kinds.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357
 /// ```c++
 ///     if (m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
-///         const CBlastTabularInfo::EFieldDelimiter kDelim = CBlastTabularInfo::eComma;
-///         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
-///         if(!m_CustomDelim.empty()) {
-///             tabinfo.SetCustomDelim(m_CustomDelim);
-///         }
+///     ...
 ///         tabinfo.PrintFieldSpecs();
-///         return;
-///     }
 /// ```
 pub(super) fn write_tabular_prolog(
     spec: &TabularSpec,
@@ -149,21 +140,14 @@ pub(super) fn write_tabular_prolog(
     writer: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
-    if spec.kind != TabularKind::CsvWithHeader {
-        return Ok(());
-    }
-    if spec.checks_taxdb() && !taxdb_found {
-        writer.flush()?;
-        diagnostics.write_all(taxdb_warning_line("tblastn").as_bytes())?;
-        diagnostics.flush()?;
-    }
-    TabularWriter {
+    crate::algorithm::common::tabular::write_tabular_prolog(
         spec,
-        program_version: PROGRAM_VERSION,
-        matrix: None,
-    }
-    .prolog(writer)?;
-    Ok(())
+        taxdb_found,
+        "tblastn",
+        PROGRAM_VERSION,
+        writer,
+        diagnostics,
+    )
 }
 
 /// The subjects of the report's rows in report order (subject index or rank of each hit list

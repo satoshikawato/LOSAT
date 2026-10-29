@@ -35,6 +35,10 @@ pub(crate) mod scoring;
 pub mod stage_dump;
 pub(crate) mod subjects;
 pub mod sum_stats_linking;
+// NCBI c++/src/algo/blast/format/blast_format.cpp:770-834 (`CBlastTabularInfo`): the tabular
+// reports with a field list or a delimiter and outfmt 10 and 20, once per run, from the final hit
+// list (`report::tabular`).
+mod tabular;
 pub mod tracing;
 pub mod translation;
 mod ungapped_hit_sort;

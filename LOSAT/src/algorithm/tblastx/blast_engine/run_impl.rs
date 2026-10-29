@@ -3672,12 +3672,10 @@ fn search_query_batch<S: TbxScore>(
     // BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
     //                           query, lookup_segments, 0);
     // ```
-    // The tables of TBXLUT, PAIRLUT and PAIRPAR hold BLOSUM62's scores: another matrix's
-    // search builds NCBI's lookup table with its scores (`build_ncbi_lookup_for_profile`) and
-    // runs the frame loop.
-    let mut x_pair_lut_batch = if !S::BLOSUM62 {
-        None
-    } else {
+    // PAIRLUT builds the group tables with the search's matrix (SC7b; `XLutEarly::sc`). The
+    // batch's table of TBXLUT holds BLOSUM62's scores: another matrix's search without the
+    // stub builds NCBI's lookup table with its scores (`build_ncbi_lookup_for_profile`).
+    let mut x_pair_lut_batch = {
         x_pair_par::lut_build(x_pair_par::XLutEarly {
             query_frames: &query_frames,
             threshold: crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
@@ -3691,6 +3689,7 @@ fn search_query_batch<S: TbxScore>(
             requested_parallel,
             use_serial_scan_chunks,
             pool: parallel_pool,
+            sc,
         })
     };
     let x_pair_lut_stub = x_pair_lut_batch
@@ -3703,9 +3702,19 @@ fn search_query_batch<S: TbxScore>(
     // from the chain builder (`build_ncbi_lookup`) or filled in place from per-cell counts; the
     // same table.
     let (lookup, contexts) = match x_pair_lut_stub {
-        Some(stub) => {
+        Some(stub) if S::BLOSUM62 => {
             crate::algorithm::tblastx::lookup::x_tbxlut_reach_stub();
             stub
+        }
+        Some((lookup, mut contexts)) => {
+            crate::algorithm::tblastx::lookup::x_tbxlut_reach_stub();
+            // Another matrix's contexts (SC7b): the alpha and beta of its ungapped row, as in the
+            // reference branch below (`blast_setup.c:812-822`).
+            for ctx in contexts.iter_mut().filter(|ctx| ctx.is_valid) {
+                ctx.karlin_params.alpha = ungapped_params_for_xdrop.alpha;
+                ctx.karlin_params.beta = ungapped_params_for_xdrop.beta;
+            }
+            (lookup, contexts)
         }
         None if !S::BLOSUM62 => {
             // NCBI reference: c++/src/algo/blast/core/blast_setup.c:812-822 (the alpha and beta
@@ -4000,9 +4009,7 @@ fn search_query_batch<S: TbxScore>(
     // The guards compare the subject lengths (and, without LOSAT_X_TBXBAND, the context lengths)
     // with the slack of this table (size above minus query_length); the per-context tables use the
     // layout above.
-    let x_pair_par_batch = if !S::BLOSUM62 {
-        None
-    } else {
+    let x_pair_par_batch = {
         x_pair_par::XPairPar::prepare(x_pair_par::XBatch {
             lookup: &lookup,
             contexts: &contexts,
@@ -4020,6 +4027,7 @@ fn search_query_batch<S: TbxScore>(
             // LOSAT_X_PAIRPARGATE: the thread count and threshold dispatch point 0 decided with.
             threads: parallel_pool.threads(),
             threshold: crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
+            sc,
         })
     };
     // The reference frame loop scans the batch's table (LOSAT_X_TBXSCANBF's choice above).
@@ -4520,11 +4528,7 @@ fn search_query_batch<S: TbxScore>(
         let x_units_stage = x_seed_batch.units.enter(s_idx);
         let lookup_ref: &crate::algorithm::tblastx::lookup::BlastAaLookupTable =
             x_seed_stage.tables();
-        let x_pair_par_ref: Option<&x_pair_par::XPairPar> = if !S::BLOSUM62 {
-            None
-        } else {
-            x_units_stage.tables().as_ref()
-        };
+        let x_pair_par_ref: Option<&x_pair_par::XPairPar<S>> = x_units_stage.tables().as_ref();
         // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
         // return word_length * 3 + 2;
         // if (subject->length < min_subj_seq_length) { ... continue; }
@@ -4701,7 +4705,7 @@ fn search_query_batch<S: TbxScore>(
                 x_lap.lap(XStage::Units);
                 x_units_stage.end();
                 x_lap.lap(XStage::UnitsRelease);
-                let x_hits = x_pair_par::XPairPar::merge_subject(x_units, &x_subject);
+                let x_hits = x_pair_par::XPairPar::<S>::merge_subject(x_units, &x_subject);
                 x_lap.lap(XStage::Merge);
                 combined_ungapped_hits = x_hits;
                 &[]

@@ -189,12 +189,28 @@ impl XPendBatch {
 /// SAFETY: `c.cell` is below the length of the table `diag_ptr` points into; with `SENT`, the unit
 /// is one `x_unit_sent` accepts.
 #[inline(always)]
-unsafe fn resolve<const SENT: bool>(c: &mut XCand, diag_ptr: *mut DiagStruct, h: &XHitCtx<'_>) {
+unsafe fn resolve<M: TbxScore, const SENT: bool>(
+    c: &mut XCand,
+    diag_ptr: *mut DiagStruct,
+    h: &XHitCtx<'_, M>,
+) {
     // SAFETY: the context index was returned by `get_context_idx` (below num_contexts).
     let ctx = unsafe { h.contexts.get_unchecked(c.ctx_idx as usize) };
     let query_full = &ctx.aa_seq;
-    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): as in `x_hit`.
-    let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) = if !SENT {
+    // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): as in `x_hit`; another matrix's extension as in `x_hit`.
+    let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) = if !M::BLOSUM62
+    {
+        extend_hit_two_hit_with(
+            h.sc,
+            &query_full[1..query_full.len() - 1],
+            h.subject,
+            c.s_left as usize,
+            c.s_right as usize,
+            c.q_raw as usize,
+            c.x_drop,
+            false,
+        )
+    } else if !SENT {
         extend_hit_two_hit(
             &query_full[1..query_full.len() - 1],
             h.subject,
@@ -240,10 +256,10 @@ unsafe fn resolve<const SENT: bool>(c: &mut XCand, diag_ptr: *mut DiagStruct, h:
 ///
 /// SAFETY: as `resolve`.
 #[inline(always)]
-unsafe fn apply(
+unsafe fn apply<M: TbxScore>(
     c: &mut XCand,
     diag_ptr: *mut DiagStruct,
-    h: &XHitCtx<'_>,
+    h: &XHitCtx<'_, M>,
     (hsp_q_u, hsp_qe_u, hsp_s_u, score, right_extend, s_last_off_u): (
         usize,
         usize,
@@ -276,11 +292,11 @@ unsafe fn apply(
 /// SAFETY: as `resolve`.
 #[cold]
 #[inline(never)]
-unsafe fn resolve_early<const SENT: bool>(
+unsafe fn resolve_early<M: TbxScore, const SENT: bool>(
     b: &mut XPendBatch,
     slot: usize,
     diag_ptr: *mut DiagStruct,
-    h: &XHitCtx<'_>,
+    h: &XHitCtx<'_, M>,
 ) {
     debug_assert!(
         slot < b.n && !b.c[slot].done,
@@ -288,7 +304,7 @@ unsafe fn resolve_early<const SENT: bool>(
     );
     b.early += 1;
     // SAFETY: the caller's bound; the slot holds the candidate that wrote the mark.
-    unsafe { resolve::<SENT>(b.c.get_unchecked_mut(slot), diag_ptr, h) };
+    unsafe { resolve::<_, SENT>(b.c.get_unchecked_mut(slot), diag_ptr, h) };
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:599-602
@@ -305,16 +321,16 @@ unsafe fn resolve_early<const SENT: bool>(
 ///
 /// SAFETY: every candidate's cell is below the length of the table `diag_ptr` points into.
 #[inline(never)]
-pub(super) unsafe fn flush<S: XInitSink, const SENT: bool>(
+pub(super) unsafe fn flush<S: XInitSink, M: TbxScore, const SENT: bool>(
     b: &mut XPendBatch,
     diag_ptr: *mut DiagStruct,
-    h: &XHitCtx<'_>,
+    h: &XHitCtx<'_, M>,
     init_hsps: &mut S,
 ) {
     for c in &mut b.c[..b.n] {
         if !c.done {
             // SAFETY: the caller's bound.
-            unsafe { resolve::<SENT>(c, diag_ptr, h) };
+            unsafe { resolve::<_, SENT>(c, diag_ptr, h) };
         }
         // SAFETY: ctx_idx < contexts.len() == cutoff_scores.len().
         let cutoff = unsafe { *h.cutoff_scores.get_unchecked(c.ctx_idx as usize) };
@@ -353,12 +369,12 @@ pub(super) unsafe fn flush<S: XInitSink, const SENT: bool>(
 /// SAFETY: `cell` and the cell of every candidate of `b` are below the length of the table
 /// `diag_ptr` points into.
 #[inline(always)]
-pub(super) unsafe fn x_hit_batched<S: XInitSink, const SENT: bool>(
+pub(super) unsafe fn x_hit_batched<S: XInitSink, M: TbxScore, const SENT: bool>(
     diag_ptr: *mut DiagStruct,
     cell: usize,
     query_offset: u32,
     subject_offset: u32,
-    h: &XHitCtx<'_>,
+    h: &XHitCtx<'_, M>,
     b: &mut XPendBatch,
     init_hsps: &mut S,
 ) {
@@ -376,7 +392,7 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink, const SENT: bool>(
             if last_hit < BATCH as u32 {
                 // The pending mark of slot `last_hit` (module doc).
                 // SAFETY: the caller's bounds.
-                unsafe { resolve_early::<SENT>(b, last_hit as usize, diag_ptr, h) };
+                unsafe { resolve_early::<_, SENT>(b, last_hit as usize, diag_ptr, h) };
                 continue;
             }
             // [C] if ((Int4)(subject_offset + diag_offset) < diag_array[diag_coord].last_hit)
@@ -457,13 +473,13 @@ pub(super) unsafe fn x_hit_batched<S: XInitSink, const SENT: bool>(
         b.cands += 1;
         if b.n == b.len {
             // SAFETY: the caller's bounds.
-            unsafe { flush::<S, SENT>(b, diag_ptr, h, init_hsps) };
+            unsafe { flush::<S, _, SENT>(b, diag_ptr, h, init_hsps) };
         }
         return;
     }
 }
 
-impl XPairPar {
+impl<M: TbxScore> XPairPar<M> {
     // EXPERIMENT (LOSAT_X_TBXEXTBATCH): `run_unit` with the batched extensions (module doc).
     /// The saved init HSPs of one unit, in its scan order.
     #[inline(never)]
@@ -645,6 +661,7 @@ impl XPairPar {
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
             s_len: inp.s_len,
+            sc: self.sc,
         };
         let mut b = XPendBatch {
             c: [XCand::default(); BATCH],
@@ -699,7 +716,7 @@ impl XPairPar {
                             window,
                             wordsize,
                             |cell, query_offset, subject_offset| {
-                                x_hit_batched::<S, SENT>(
+                                x_hit_batched::<S, _, SENT>(
                                     diag_ptr,
                                     cell,
                                     query_offset,
@@ -735,7 +752,7 @@ impl XPairPar {
                     // SAFETY: diag_coord < width = scratch.diag.len() (as in `scan_unit`), and
                     // every candidate's cell is such a cell of this unit.
                     unsafe {
-                        x_hit_batched::<S, SENT>(
+                        x_hit_batched::<S, _, SENT>(
                             diag_ptr,
                             diag_coord,
                             query_offset,
@@ -750,7 +767,7 @@ impl XPairPar {
         }
         if b.n > 0 {
             // SAFETY: the candidates' cells are cells of this unit's table.
-            unsafe { flush::<S, SENT>(&mut b, scratch.diag.as_mut_ptr(), &h, init_hsps) };
+            unsafe { flush::<S, _, SENT>(&mut b, scratch.diag.as_mut_ptr(), &h, init_hsps) };
         }
         (b.cands, b.early)
     }
@@ -856,6 +873,7 @@ mod tests {
                 groups: build_groups(&lookup, &contexts),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc: Blosum62Score,
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
@@ -1026,6 +1044,7 @@ mod tests {
                 s_frame: -1,
                 s_idx: 7,
                 s_len: 999,
+                sc: Blosum62Score,
             };
             let n = 1 + rng.below(BATCH as u64) as usize;
             let mut b = XPendBatch {
@@ -1094,12 +1113,12 @@ mod tests {
             for i in 0..n {
                 if rng.below(10) == 0 {
                     // SAFETY: the cell is below n = diag.len().
-                    unsafe { resolve::<false>(&mut b.c[i], diag.as_mut_ptr(), &h) };
+                    unsafe { resolve::<_, false>(&mut b.c[i], diag.as_mut_ptr(), &h) };
                 }
             }
             let mut got: Vec<InitHSP> = Vec::new();
             // SAFETY: every candidate's cell is below n = diag.len().
-            unsafe { flush::<_, false>(&mut b, diag.as_mut_ptr(), &h, &mut got) };
+            unsafe { flush::<_, _, false>(&mut b, diag.as_mut_ptr(), &h, &mut got) };
             assert_eq!(diag, expect_cells, "round {round}: cells");
             assert_eq!(got, expect_hsps, "round {round}: init HSPs");
             assert_eq!(b.n, 0);

@@ -167,7 +167,19 @@ impl XPairLutQuery {
         threshold: i32,
         check_ideal: bool,
     ) -> Option<Self> {
-        let matrix = ScoringMatrix::Blosum62;
+        Self::x_prepare_for(queries, threshold, check_ideal, ScoringMatrix::Blosum62)
+    }
+
+    /// `x_prepare` with the scores of `matrix` (another matrix's search, `-matrix`): the query
+    /// preparation of `build_ncbi_lookup_for_profile(queries, threshold, _, check_ideal, matrix,
+    /// LOOKUP_WORD_LENGTH)`.
+    #[inline(always)]
+    pub(crate) fn x_prepare_for(
+        queries: &[Vec<QueryFrame>],
+        threshold: i32,
+        check_ideal: bool,
+        matrix: ScoringMatrix,
+    ) -> Option<Self> {
         let word_length = LOOKUP_WORD_LENGTH;
         let alphabet_size = LOOKUP_ALPHABET_SIZE;
         let charsize = ilog2(alphabet_size) + 1;

@@ -438,6 +438,7 @@ export LOSAT_X_TBNPAIRCAP=1
 export LOSAT_X_TBNREAPIDX=1
 export LOSAT_X_TBNREDOLPT=1
 export LOSAT_X_TBNSCANBYTE=1
+export LOSAT_X_TBNSCANRESUME=1
 export LOSAT_X_TBNSTAGEDROP=1
 export LOSAT_X_TBNSTORE=1
 export LOSAT_X_TBNUNGAP=1
@@ -5455,6 +5456,22 @@ Scheduling (each value computed by one thread with the original function; order 
   threads x0.953 / x0.955 / x0.956 / x0.958 (8 of 8, 12 of 12 each faster; instructions x0.9987; `=0` x0.9992 /
   x1.0005 / x1.0002 / x0.9998); AP027131 `-subject` at 1 / 16 / 32 x0.991 / x0.995 / x0.990 (12, 7, 8 of 12 faster;
   `=0` x1.0001 / x1.0007 / x1.0000).
+- `LOSAT_X_TBNSCANRESUME=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-29;
+  `=0` turns it off; `tblastn/x_scan_byte.rs` `XScanHeld`, `x_scan_one_range_held`, `tblastn/search_seed.rs`
+  `x_scan_unit`, `OFFSET_ARRAY_SIZE`): a unit scanned on presence bytes (`LOSAT_X_TBNSCANBYTE`) keeps the block of
+  words where a scan call stops on a full offset array (the block's indexes and candidates and the candidate that did
+  not fit), and the next call of the same range copies on from that candidate instead of making the block's
+  candidates again; the offset array of such a unit then holds NCBI's 4,096 + the longest chain
+  (`lookup_wrap.c:264-266` `GetOffsetArraySize`) instead of `LOSAT_X_TBNPAIRCAP`'s 32,768 + it (never more than the
+  plan's size): 33 KiB instead of 257 KiB per running unit for the fly proteins of `dmel_b4.faa` (longest chain 108).
+  A stop then costs one call of the scan and of the two-hit loop, not a block of up to 256 words made again (which
+  took 1.0041 of the instructions at this size, `LOSAT_X_TBNPAIRCAP`). The pairs and the `s_range` of every call are
+  NCBI's at any size (unit tests `x_scan_byte_equals_ncbi_scan_on_random_subjects` and
+  `the_last_overflow_chain_is_copied_exactly`, both with and without the kept block, which count that every stop
+  resumed in its block; `tests/tblastn_scan_byte.rs` `the_offset_array_size_changes_only_the_scan_calls`: the same
+  report at one and four threads with both switches, `=0` and neither). The units of the branch-free scan
+  (`x_scan_bf.rs`: aarch64, and tables that are not sparse without AVX2) keep `LOSAT_X_TBNPAIRCAP`'s size. Where:
+  the units that take TBNSCANBYTE's scan (platform).
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

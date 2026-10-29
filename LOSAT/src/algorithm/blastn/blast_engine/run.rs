@@ -17360,8 +17360,12 @@ fn search_query_batch(
             // Since the list is sorted by score already, any HSP
             // contained by a previous HSP is guaranteed to have a
             // lower score, and may be purged.
-            let mut final_hits = Vec::with_capacity(local_hits.len());
-            for hit in local_hits {
+            // The kept HSPs stay in the list's own buffer, in order (`Vec::retain` visits each
+            // HSP once, in order, as NCBI's loop over `hsp_array`), rather than moving to a
+            // second list per subject (or per query, LOSAT_X_QGROUPPAR): one allocation and free
+            // less per list, the same HSPs in the same order.
+            let mut final_hits = local_hits;
+            final_hits.retain(|hit| {
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:537-550
                 // ```c
                 // query_start = query_context_offset;
@@ -17472,12 +17476,15 @@ fn search_query_batch(
                             final_tree_add_start,
                         );
                     }
-                    final_hits.push(hit);
-                } else if let Some(timing) = timing_ref {
-                    BlastnTiming::record_count(&timing.traceback_removed_final_tree_hsps, 1);
+                    true
+                } else {
+                    if let Some(timing) = timing_ref {
+                        BlastnTiming::record_count(&timing.traceback_removed_final_tree_hsps, 1);
+                    }
+                    // HSP is contained within another, skip (implicit delete)
+                    false
                 }
-                // else: HSP is contained within another, skip (implicit delete)
-            }
+            });
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:678-692
             // ```c

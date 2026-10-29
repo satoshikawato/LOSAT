@@ -5,6 +5,7 @@ use crate::algorithm::blastp::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
 };
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
+use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::XCompressedLookup;
 #[cfg(test)]
 use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, build_ncbi_lookup_for_profile};
 #[cfg(test)]
@@ -342,9 +343,119 @@ pub(super) fn translated_chunk_scan_ranges(
 // blast_engine.c:478-500, 804-841 calls WordFinder once per unit; the lookup table is read-only
 // there.
 pub(super) struct XScanPlan {
-    pub lookup: std::sync::Arc<crate::algorithm::tblastx::lookup::BlastAaLookupTable>,
+    pub lookup: XPlanLookup,
     pub subject: std::sync::Arc<XSubjectPlan>,
     pub pair_capacity: usize,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-108
+// ```c
+//        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+//                              &lookup_wrap->lut);
+// ...
+//    case eCompressedAaLookupTable:
+//       BlastCompressedAaLookupTableNew(query, lookup_segments,
+//                          (BlastCompressedAaLookupTable* *) &(lookup_wrap->lut),
+//                          lookup_options, sbp);
+// ```
+/// The lookup table of a scan plan: the standard table (`eAaLookupTable`), or the compressed
+/// table of word sizes 5 to 7 (`eCompressedAaLookupTable`, tblastn-fast).
+pub(super) enum XPlanLookup {
+    Aa(std::sync::Arc<crate::algorithm::tblastx::lookup::BlastAaLookupTable>),
+    Compressed(std::sync::Arc<XCompressedLookup>),
+}
+
+/// The compressed lookup table of a query set (word sizes 5 to 7), kept for all its subjects as
+/// `XQuerySide` keeps the standard table: the first subject that needs it builds it while the
+/// others wait. A refusal is returned to that subject and leaves nothing behind.
+#[derive(Default)]
+pub(super) struct XCompressedSide {
+    table: std::sync::OnceLock<std::sync::Arc<XCompressedLookup>>,
+    /// Held while `table` is being built (on the builder's thread alone: no pool task waits on
+    /// it while it runs others).
+    in_progress: std::sync::Mutex<()>,
+}
+
+// No NCBI counterpart: builds the table once for the subjects of a query batch, as NCBI builds it
+// once before them (blast_aux_priv.cpp:206-213); it does not change any value NCBI computes.
+impl XCompressedSide {
+    fn table(
+        &self,
+        build: impl FnOnce() -> Result<XCompressedLookup>,
+    ) -> Result<std::sync::Arc<XCompressedLookup>> {
+        if let Some(table) = self.table.get() {
+            return Ok(std::sync::Arc::clone(table));
+        }
+        let _in_progress = self
+            .in_progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(table) = self.table.get() {
+            return Ok(std::sync::Arc::clone(table));
+        }
+        let built = std::sync::Arc::new(build()?);
+        Ok(std::sync::Arc::clone(self.table.get_or_init(|| built)))
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:104-108
+// ```c
+//    case eCompressedAaLookupTable:
+//       BlastCompressedAaLookupTableNew(query, lookup_segments,
+//                          (BlastCompressedAaLookupTable* *) &(lookup_wrap->lut),
+//                          lookup_options, sbp);
+// ```
+/// The compressed lookup table of the query set (word sizes 5 to 7, `threshold` in its units,
+/// `stage_d_pipeline::lookup_threshold`): the masked query frames of the standard table
+/// (`x_scan_plan`), their concatenation and lookup segments as the standard table takes them (the
+/// coordinates of the word finder's query, `XBlosum62LookupQuery::without_karlin`), and
+/// blastp-fast's build of NCBI's one table of the query batch (`x_bp_build_compressed_lookup`: the
+/// flat table, or the reference one with `LOSAT_X_BPCLUT=0`) on this thread.
+fn x_build_compressed(
+    queries: &[&[u8]],
+    seg: Option<&SegParams>,
+    mask_lowercase: bool,
+    threshold: i32,
+    word_length: usize,
+) -> Result<XCompressedLookup> {
+    use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
+        x_bp_build_compressed_lookup, XFlatArgs,
+    };
+    let query_frames: Vec<_> = queries
+        .iter()
+        .map(|query| vec![encode_tblastn_lookup_query(query, seg, mask_lowercase)])
+        .collect();
+    let (query, locations, _) = crate::algorithm::tblastx::lookup::XBlosum62LookupQuery::new(false)
+        .without_karlin(&query_frames, word_length);
+    x_bp_build_compressed_lookup(
+        word_length,
+        threshold,
+        &query,
+        &locations,
+        &[0..locations.len()],
+        &crate::utils::threading::SearchPool::x_serial(),
+        XFlatArgs::default(),
+    )
+    .ok_or_else(|| {
+        anyhow::anyhow!(
+            "-word_size {word_length} (the compressed lookup table) is not supported by LOSAT's TBLASTN"
+        )
+    })?
+    .map_err(|()| {
+        anyhow::anyhow!(
+            "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's TBLASTN: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
+            f64::from(threshold) / 100.0,
+            word_length
+        )
+    })
+}
+
+/// The word length of a compressed table (`BlastCompressedAaLookupTable::word_length`).
+fn x_compressed_word_length(table: &XCompressedLookup) -> i32 {
+    match table {
+        XCompressedLookup::Reference(table) => table.word_length,
+        XCompressedLookup::Flat(table) => table.word_length,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
@@ -766,6 +877,8 @@ pub(super) fn x_scan_plan(
     x_lookup: &std::sync::OnceLock<
         std::sync::Arc<crate::algorithm::tblastx::lookup::BlastAaLookupTable>,
     >,
+    // Where the compressed table of this query set is kept (word sizes 5 to 7, `XQuerySide`).
+    x_compressed: &XCompressedSide,
     // The search's subject plans and this subject's index among them.
     x_subject: Option<(&XSubjectSide, usize)>,
 ) -> Result<Option<XScanPlan>> {
@@ -938,12 +1051,40 @@ pub(super) fn x_scan_plan(
     // ```
     // NCBI builds the lookup table once per query batch: the first subject builds it and the
     // others read it.
-    let lookup = std::sync::Arc::clone(x_lookup.get_or_init(x_build_lookup));
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:612-619
+    // ```c
+    // CBlastOptionsLocal::SetWordSize(int ws)
+    // {
+    //     m_LutOpts->word_size = ws;
+    //     if (m_LutOpts->lut_type == eCompressedAaLookupTable && ws <= 4)
+    // 	m_LutOpts->lut_type = eAaLookupTable;
+    //     else if (m_LutOpts->lut_type == eAaLookupTable && ws > 4)
+    // 	m_LutOpts->lut_type = eCompressedAaLookupTable;
+    // }
+    // ```
+    // Dispatch point: word sizes 5 to 7 take the compressed table (`x_build_compressed`).
+    let (lookup, longest_chain) = if word_length > 4 {
+        let table = x_compressed
+            .table(|| x_build_compressed(queries, seg, mask_lowercase, threshold, word_length))?;
+        let longest_chain = match &*table {
+            XCompressedLookup::Reference(table) => table.longest_chain,
+            XCompressedLookup::Flat(table) => table.longest_chain,
+        };
+        (XPlanLookup::Compressed(table), longest_chain)
+    } else {
+        let lookup = std::sync::Arc::clone(x_lookup.get_or_init(x_build_lookup));
+        let longest_chain = lookup.longest_chain;
+        (XPlanLookup::Aa(lookup), longest_chain)
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-270
     // ```c
     //    case eAaLookupTable:
     //       offset_array_size = OFFSET_ARRAY_SIZE +
     //          ((BlastAaLookupTable*)lookup->lut)->longest_chain;
+    //       break;
+    //    case eCompressedAaLookupTable:
+    //       offset_array_size = OFFSET_ARRAY_SIZE +
+    //          ((BlastCompressedAaLookupTable*)lookup->lut)->longest_chain;
     // ```
     // blast_engine.c:992,1040-1041 allocates each thread's offset array of that size and
     // aa_ungapped.c:504-505 passes it to scansub (OFFSET_ARRAY_SIZE 4096, lookup_wrap.h:119).
@@ -951,7 +1092,7 @@ pub(super) fn x_scan_plan(
     // reach the caller in the same order at any size. With `LOSAT_X_TBNPAIRCAP` the array has
     // NCBI's form with `X_PAIR_ROOM` for OFFSET_ARRAY_SIZE, never more entries than without it
     // (1024 x the longest chain, which a table whose longest chain is below 33 keeps).
-    let longest_chain = lookup.longest_chain.max(1) as usize;
+    let longest_chain = longest_chain.max(1) as usize;
     let pair_capacity = if x_pair_cap_on() {
         (X_PAIR_ROOM + longest_chain).min(longest_chain.saturating_mul(1024))
     } else {
@@ -991,16 +1132,23 @@ pub(super) fn x_scan_unit(
     pairs: &mut Vec<BlastOffsetPair>,
     mut on_pairs: impl FnMut(&[BlastOffsetPair]),
 ) {
-    let (_, _, ranges) = &plan.subject.units[unit];
     // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1018-1019
     // BlastChooseProteinScanSubject(lookup_wrap);
     // aux_struct->WordFinder = BlastAaWordFinder;
-    // The scan variant of the unit is chosen once per table, as NCBI picks one scansub.
+    // The scan variant of the unit is chosen once per table, as NCBI picks one scansub: the
+    // compressed table's (`x_scan_unit_compressed`), or one of the standard table's below.
+    let lookup = match &plan.lookup {
+        XPlanLookup::Aa(lookup) => lookup,
+        XPlanLookup::Compressed(table) => {
+            return x_scan_unit_compressed(table, plan, unit, subject, pairs, on_pairs);
+        }
+    };
+    let (_, _, ranges) = &plan.subject.units[unit];
     //
     // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the scan on presence bytes, for a table of tblastn's shape
     // (without AVX2 a sparse one); it writes up to X_SCAN_BYTE_SLACK entries after the capacity.
     let scan_byte = super::x_scan_byte::x_scan_byte();
-    let presence = super::x_scan_byte::x_presence(scan_byte, &plan.lookup);
+    let presence = super::x_scan_byte::x_presence(scan_byte, lookup);
     // The branch-free scan writes up to X_SCAN_BF_SLACK entries after the capacity.
     let pairs_len = if presence.is_some() {
         plan.pair_capacity + super::x_scan_byte::X_SCAN_BYTE_SLACK
@@ -1019,7 +1167,7 @@ pub(super) fn x_scan_unit(
         // scan_range[2] = subject->seq_ranges[0].right - wordsize;
         // if (scan_range[2] < scan_range[1])
         //     scan_range[2] = scan_range[1];
-        let mut end = right - plan.lookup.word_length as i32;
+        let mut end = right - lookup.word_length as i32;
         if range_index == 0 && end < left {
             end = left;
         }
@@ -1028,7 +1176,7 @@ pub(super) fn x_scan_unit(
             let hits = if let Some(presence) = &presence {
                 super::x_scan_byte::x_scan_one_range_byte(
                     scan_byte,
-                    &plan.lookup,
+                    lookup,
                     presence,
                     subject,
                     pairs,
@@ -1037,7 +1185,7 @@ pub(super) fn x_scan_unit(
                 )
             } else {
                 super::x_scan_bf::x_scan_one_range_bf(
-                    &plan.lookup,
+                    lookup,
                     subject,
                     pairs,
                     pair_capacity,
@@ -1052,6 +1200,66 @@ pub(super) fn x_scan_unit(
         super::x_scan_byte::x_count_unit(x_calls);
     } else if super::x_scan_bf::x_stats() {
         super::x_scan_bf::x_count_unit(x_calls);
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:487-500 and
+// c++/src/algo/blast/core/blast_aascan.c:564-568
+// ```c
+//     else {
+//         BlastCompressedAaLookupTable *lookup =
+//                         (BlastCompressedAaLookupTable *)(lookup_wrap->lut);
+//         scansub = (TAaScanSubjectFunction)(lookup->scansub_callback);
+//         wordsize = lookup->word_length;
+//     }
+//
+//     scan_range[0] = 0;
+//     scan_range[1] = subject->seq_ranges[0].left;
+//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
+//
+//     if (scan_range[2] < scan_range[1])
+//         scan_range[2] = scan_range[1];
+// ...
+//         lut->scansub_callback = (void *)s_BlastCompressedAaScanSubject;
+// ```
+/// `x_scan_unit` on the compressed table: the scansub calls of `s_BlastCompressedAaScanSubject`
+/// (the table's `scan_subject`, which writes no entry past `array_size`) with the table's word
+/// length, range by range as `x_scan_unit` makes them (`s_DetermineScanningOffsets` of a list of
+/// one range ends after it, and a call that stops at a full array resumes in it). Not inlined, so
+/// that the standard table's scan keeps its code.
+#[inline(never)]
+fn x_scan_unit_compressed(
+    table: &XCompressedLookup,
+    plan: &XScanPlan,
+    unit: usize,
+    subject: &[u8],
+    pairs: &mut Vec<BlastOffsetPair>,
+    mut on_pairs: impl FnMut(&[BlastOffsetPair]),
+) {
+    let (_, _, ranges) = &plan.subject.units[unit];
+    if pairs.len() < plan.pair_capacity {
+        pairs.resize(plan.pair_capacity, BlastOffsetPair::default());
+    }
+    let pair_capacity = plan.pair_capacity as i32;
+    let word_length = x_compressed_word_length(table);
+    for (range_index, &(left, right)) in ranges.iter().enumerate() {
+        let mut end = right - word_length;
+        if range_index == 0 && end < left {
+            end = left;
+        }
+        let range = [(left, right)];
+        let mut scan_range = [0, left, end];
+        while scan_range[1] <= scan_range[2] {
+            let hits = match table {
+                XCompressedLookup::Reference(table) => {
+                    table.scan_subject(subject, &range, pairs, pair_capacity, &mut scan_range)
+                }
+                XCompressedLookup::Flat(table) => {
+                    table.scan_subject(subject, &range, pairs, pair_capacity, &mut scan_range)
+                }
+            };
+            on_pairs(&pairs[..hits as usize]);
+        }
     }
 }
 
@@ -1278,6 +1486,7 @@ mod tests {
                     ScoringMatrix::Blosum62,
                     3,
                     &std::sync::OnceLock::new(),
+                    &Default::default(),
                     None,
                 )
                 .unwrap()
@@ -1434,6 +1643,7 @@ mod tests {
             ScoringMatrix::Blosum62,
             3,
             &std::sync::OnceLock::new(),
+            &Default::default(),
             None,
         )
         .unwrap()
@@ -1513,6 +1723,7 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 3,
                 &std::sync::OnceLock::new(),
+                &Default::default(),
                 None,
             )
             .unwrap()
@@ -2241,6 +2452,7 @@ mod tests {
                             ScoringMatrix::Blosum62,
                             3,
                             &std::sync::OnceLock::new(),
+                            &Default::default(),
                             Some((&side, 0)),
                         )
                         .unwrap()
@@ -2289,6 +2501,7 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 3,
                 &std::sync::OnceLock::new(),
+                &Default::default(),
                 side.map(|side| (side, 0)),
             )
             .unwrap()
@@ -2440,6 +2653,7 @@ mod tests {
             ScoringMatrix::Blosum62,
             3,
             &std::sync::OnceLock::new(),
+            &Default::default(),
             Some((&side, 0)),
         )
         .unwrap()
@@ -2471,6 +2685,7 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 3,
                 &std::sync::OnceLock::new(),
+                &Default::default(),
                 side.map(|side| (side, 0)),
             )
             .unwrap()
@@ -2501,6 +2716,279 @@ mod tests {
             assert!(!kept.frames[0].aa_seq.is_empty());
             assert_eq!(side.kept_bytes(), XSubjectSide::plan_bytes(&kept));
             assert_eq!(side.kept_bytes(), XSubjectSide::plan_bytes_of(length));
+        }
+    }
+
+    // A small deterministic generator (xorshift64) for the compressed scan tests.
+    struct XRng(u64);
+
+    impl XRng {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n as u64) as usize
+        }
+    }
+
+    /// The hits of cell `index` of a compressed table, in NCBI's scan order.
+    fn x_cell_hits(table: &XCompressedLookup, index: usize) -> Vec<i32> {
+        match table {
+            XCompressedLookup::Reference(table) => {
+                if table.backbone[index].num_used == 0 {
+                    Vec::new()
+                } else {
+                    table.query_offsets_in_scan_order(index)
+                }
+            }
+            XCompressedLookup::Flat(table) => table.cell(index).to_vec(),
+        }
+    }
+
+    /// The pairs of every unit of `plan`: what `x_scan_unit` hands to its caller, and what NCBI's
+    /// compressed scan finds (blast_aascan.c:264-409): at each offset of each range whose word has
+    /// a compressed letter at every position, the hits of the word's cell (index sum c_k A^k, the
+    /// index the scan's preshift forms), in order.
+    fn x_compressed_unit_pairs(plan: &XScanPlan) -> (Vec<(u32, u32)>, Vec<(u32, u32)>) {
+        let XPlanLookup::Compressed(table) = &plan.lookup else {
+            panic!("a compressed plan")
+        };
+        let (word, alphabet, scaled) = match &**table {
+            XCompressedLookup::Reference(t) => (
+                t.word_length,
+                t.compressed_alphabet_size,
+                t.scaled_compress_table_u8,
+            ),
+            XCompressedLookup::Flat(t) => (
+                t.word_length,
+                t.compressed_alphabet_size,
+                t.scaled_compress_table_u8,
+            ),
+        };
+        let top = alphabet.pow(word as u32 - 1);
+        let mut scanned = Vec::new();
+        let mut expected = Vec::new();
+        let mut pairs = Vec::new();
+        for (unit, (frame_index, chunk, ranges)) in plan.subject.units.iter().enumerate() {
+            let residues = &plan.subject.frames[*frame_index].aa_seq[1 + chunk.offset..];
+            x_scan_unit(plan, unit, residues, &mut pairs, |filled| {
+                scanned.extend(filled.iter().map(|pair| (pair.q_off, pair.s_off)));
+            });
+            for (range_index, &(left, right)) in ranges.iter().enumerate() {
+                let mut end = right - word;
+                if range_index == 0 && end < left {
+                    end = left;
+                }
+                for s in left..=end.max(left - 1) {
+                    let letters: Vec<i32> = (0..word)
+                        .map(|k| {
+                            let letter = residues.get((s + k) as usize).copied().unwrap_or(0);
+                            scaled[usize::from(letter)]
+                        })
+                        .collect();
+                    if letters.iter().any(|&c| c < 0) {
+                        continue;
+                    }
+                    let index: i32 = letters
+                        .iter()
+                        .enumerate()
+                        .map(|(k, &c)| c / top * alphabet.pow(k as u32))
+                        .sum();
+                    for hit in x_cell_hits(table, index as usize) {
+                        expected.push((hit as u32, s as u32));
+                    }
+                }
+            }
+        }
+        (scanned, expected)
+    }
+
+    fn x_random_protein(rng: &mut XRng, length: usize) -> Vec<u8> {
+        const LETTERS: &[u8] = b"ACDEFGHIKLMNPQRSTVWYACDEFGHIKLMNPQRSTVWYXBZU*";
+        (0..length)
+            .map(|_| LETTERS[rng.below(LETTERS.len())])
+            .collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:264-409 and
+    // c++/src/algo/blast/core/aa_ungapped.c:494-516
+    // ```c
+    //     while (s_DetermineScanningOffsets(subject, word_length, word_length, s_range)) {
+    // ...
+    //     while (scan_range[1] <= scan_range[2]) {
+    //         /* scan the subject sequence for hits */
+    //         hits = scansub(lookup_wrap, subject,
+    //                                   offset_pairs, array_size, scan_range);
+    // ```
+    // The unit scan of the compressed table (word sizes 5 to 7) finds the hits of NCBI's scan, in
+    // its order, with any offset array (one that holds only the longest cell resumes at every
+    // cell), on the flat table and, for word size 5, on the reference table, which is the flat
+    // one; a threshold of 100 puts only the exact words in the table.
+    #[test]
+    fn x_compressed_unit_scan_finds_ncbis_hits_in_order() {
+        use crate::algorithm::tblastx::lookup::compressed::try_build_blosum62_compressed_lookup;
+        use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
+            x_assert_same_compressed_table, x_try_build_flat_compressed_lookup, XFlatBuild,
+        };
+        let mut rng = XRng(0x9e37_79b9_7f4a_7c15);
+        let queries: Vec<Vec<u8>> = (0..3)
+            .map(|i| x_random_protein(&mut rng, 40 + 23 * i))
+            .collect();
+        let query_refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+        const BASES: &[u8] = b"ACGTACGTACGTACGTACGTN";
+        let mut subject: Vec<u8> = (0..2400).map(|_| BASES[rng.below(BASES.len())]).collect();
+        // Fragments of the queries, back-translated (one codon for each letter, `NNN` for the
+        // others) into the subject, forward and reverse-complemented, so that the exact words of
+        // a threshold of 100 have hits too.
+        let codon = |letter: u8| -> &'static [u8] {
+            match letter {
+                b'A' => b"GCT",
+                b'C' => b"TGT",
+                b'D' => b"GAT",
+                b'E' => b"GAA",
+                b'F' => b"TTT",
+                b'G' => b"GGT",
+                b'H' => b"CAT",
+                b'I' => b"ATT",
+                b'K' => b"AAA",
+                b'L' => b"CTG",
+                b'M' => b"ATG",
+                b'N' => b"AAT",
+                b'P' => b"CCG",
+                b'Q' => b"CAG",
+                b'R' => b"CGT",
+                b'S' => b"TCT",
+                b'T' => b"ACT",
+                b'V' => b"GTT",
+                b'W' => b"TGG",
+                b'Y' => b"TAT",
+                _ => b"NNN",
+            }
+        };
+        for (index, query) in queries.iter().enumerate() {
+            let mut fragment: Vec<u8> = query[5..35]
+                .iter()
+                .flat_map(|&l| codon(l).to_vec())
+                .collect();
+            if index == 1 {
+                fragment.reverse();
+                for base in &mut fragment {
+                    *base = match *base {
+                        b'A' => b'T',
+                        b'C' => b'G',
+                        b'G' => b'C',
+                        b'T' => b'A',
+                        other => other,
+                    };
+                }
+            }
+            let at = 300 + 700 * index;
+            subject.splice(at..at, fragment);
+        }
+        for (word, threshold) in [
+            (5usize, 1100),
+            (5, 2000),
+            (5, 10000),
+            (6, 2100),
+            (6, 10000),
+            (7, 2025),
+            (7, 10000),
+        ] {
+            let frames: Vec<_> = query_refs
+                .iter()
+                .map(|query| vec![encode_tblastn_lookup_query(query, None, false)])
+                .collect();
+            let (query, locations, _) =
+                crate::algorithm::tblastx::lookup::XBlosum62LookupQuery::new(false)
+                    .without_karlin(&frames, word);
+            let tables = [0..locations.len()];
+            let XFlatBuild::Table(flat) =
+                x_try_build_flat_compressed_lookup(word, threshold, &query, &locations, &tables)
+                    .unwrap()
+            else {
+                panic!("word {word} threshold {threshold}: no flat table")
+            };
+            if threshold == 10000 {
+                // Only the exact words: one hit per query offset whose word has compressed letters.
+                let hits: usize = (0..flat.starts.len() - 1).map(|i| flat.cell(i).len()).sum();
+                let words: usize = locations
+                    .iter()
+                    .map(|&(from, to)| {
+                        (from..=to - word as i32 + 1)
+                            .filter(|&o| {
+                                (0..word).all(|k| {
+                                    flat.scaled_compress_table_u8
+                                        [usize::from(query[(o as usize) + k])]
+                                        >= 0
+                                })
+                            })
+                            .count()
+                    })
+                    .sum();
+                assert_eq!(hits, words, "word {word}: exact words only");
+            }
+            // The side holds the flat table, so that the plan takes it whatever LOSAT_X_BPCLUT says.
+            let flat = std::sync::Arc::new(XCompressedLookup::Flat(flat));
+            let compressed = XCompressedSide::default();
+            assert!(compressed.table.set(std::sync::Arc::clone(&flat)).is_ok());
+            let mut plan = x_scan_plan(
+                &query_refs,
+                SubjectNt::Letters(&subject).into(),
+                1,
+                None,
+                threshold,
+                false,
+                ScoringMatrix::Blosum62,
+                word,
+                &std::sync::OnceLock::new(),
+                &compressed,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            let XPlanLookup::Compressed(planned) = &plan.lookup else {
+                panic!("word {word}: the plan of the compressed table")
+            };
+            assert!(std::sync::Arc::ptr_eq(planned, &flat));
+            let mut tables = vec![flat];
+            if word == 5 {
+                let reference = try_build_blosum62_compressed_lookup(
+                    word,
+                    threshold,
+                    &query,
+                    &locations,
+                    &[0..locations.len()],
+                )
+                .unwrap()
+                .unwrap();
+                let XCompressedLookup::Flat(flat) = &*tables[0] else {
+                    unreachable!()
+                };
+                x_assert_same_compressed_table(flat, &reference);
+                tables.push(std::sync::Arc::new(XCompressedLookup::Reference(reference)));
+            }
+            let planned_capacity = plan.pair_capacity;
+            let mut first = None;
+            for table in tables {
+                let longest = match &*table {
+                    XCompressedLookup::Reference(t) => t.longest_chain,
+                    XCompressedLookup::Flat(t) => t.longest_chain,
+                };
+                plan.lookup = XPlanLookup::Compressed(table);
+                for capacity in [planned_capacity, longest.max(1) as usize] {
+                    plan.pair_capacity = capacity;
+                    let (scanned, expected) = x_compressed_unit_pairs(&plan);
+                    assert_eq!(scanned, expected, "word {word} threshold {threshold}");
+                    assert!(
+                        !scanned.is_empty(),
+                        "word {word} threshold {threshold}: no hits"
+                    );
+                    match &first {
+                        None => first = Some(scanned),
+                        Some(first) => assert_eq!(&scanned, first, "word {word}"),
+                    }
+                }
+            }
         }
     }
 }

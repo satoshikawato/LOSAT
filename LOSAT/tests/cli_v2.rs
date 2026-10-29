@@ -494,33 +494,20 @@ fn defaults_and_task_overrides_remain_distinct() {
         .unwrap_err()
         .to_string()
         .contains("not supported by LOSAT's BLASTP"));
-    // The same for TBLASTN: tblastn-fast (the compressed lookup table) fails at the parse.
+    // TBLASTN takes both of its tasks (tblastn-fast: the compressed lookup table).
     parse("tblastn", &["-task", "tblastn"]).unwrap();
-    let error = parse("tblastn", &["-task", "tblastn-fast"]).unwrap_err();
-    assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
-    assert_eq!(error.exit_code(), 2);
-    let text = LOSAT::cli::render_message(&error);
-    assert!(
-        text.contains("invalid value 'tblastn-fast' for '-task <TASK>'")
-            && text.contains(
-                "-task tblastn-fast (word size 5 with the compressed lookup table) is not supported by LOSAT's TBLASTN"
-            ),
-        "{text}"
-    );
+    parse("tblastn", &["-task", "tblastn-fast"]).unwrap();
     // A task that is not an NCBI task keeps clap's list of the accepted names.
     for (program, other, listed) in [
         ("blastp", "blastp-x", "blastp-fast"),
-        ("tblastn", "tblastn-x", "tblastn"),
+        ("tblastn", "tblastn-x", "tblastn-fast"),
     ] {
         let text = LOSAT::cli::render_message(&parse(program, &["-task", other]).unwrap_err());
         assert!(
             text.contains("possible values") && text.contains(listed),
             "{text}"
         );
-        assert!(
-            !text.contains("-short") && !text.contains("tblastn-fast"),
-            "{text}"
-        );
+        assert!(!text.contains("-short"), "{text}");
     }
     // blast_args.cpp:3158-3163 (CArgAllowStringSet): the task names are case-sensitive.
     assert!(parse("blastp", &["-task", "BLASTP"]).is_err());

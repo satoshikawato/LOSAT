@@ -226,6 +226,24 @@ fn keys_take_twelve_bytes_and_the_id_once() {
 fn an_id_past_the_word_s_length_is_refused() {
     assert!(KeyValuePair::new(0, KV_MAX_LEN as usize, 0, false, true).is_ok());
     assert!(KeyValuePair::new(0, KV_MAX_LEN as usize + 1, 0, false, true).is_err());
+    let kv = KeyValuePair::new(4_000_000_000, 4_000_000, 2_147_483_647, true, false).unwrap();
+    assert_eq!(
+        (
+            kv.off(),
+            kv.len(),
+            kv.oid(),
+            kv.upper(),
+            kv.save_to_oid_list()
+        ),
+        (4_000_000_000, 4_000_000, 2_147_483_647, true, false)
+    );
+}
+
+// The 40 bits of the offset (an arena of 1 TiB) are reachable only where `usize` has 64 bits
+// (a 32-bit target, wasm32, cannot hold an arena past 4 GiB).
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn an_id_past_the_word_s_offset_is_refused() {
     assert!(KeyValuePair::new(KV_MAX_OFF as usize, 1, 0, false, true).is_ok());
     assert!(KeyValuePair::new(KV_MAX_OFF as usize + 1, 1, 0, false, true).is_err());
     let kv = KeyValuePair::new(123_456_789_012, 4_000_000, 2_147_483_647, true, false).unwrap();

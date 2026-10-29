@@ -8728,7 +8728,7 @@ fn run_in_pool(
         warnings[start].extend(batch_title_warnings);
         // The batch's search, on the whole pool. EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps
         // its megablast table from batch to batch.
-        let searched = search_query_batch(
+        let searched = search_query_batch::<false>(
             &args,
             batch_records.batch_queries(),
             source,
@@ -9730,7 +9730,7 @@ fn window_masker_rejection(
 /// diagonal table of the batch, as NCBI's `CLocalBlast` does for each batch that
 /// `run_in_pool` reads. `x_keep`: the batch loop's keep of LOSAT_X_MBLUTKEEP, which the batch's
 /// megablast table is built on and goes back to (`lookup::x_mb_lut_keep`).
-fn search_query_batch(
+fn search_query_batch<const UNGAPPED: bool>(
     args: &BlastnArgs,
     mut query_records: x_query_drop::BatchQueries<'_>,
     subjects: SubjectSource<'_>,
@@ -18163,7 +18163,7 @@ fn search_query_chunks(
             .collect();
         let part_masks = chunk_query_masks(args, &parts, restricted, parallel_pool)
             .map_err(|error| window_masker_rejection(args, &error))?;
-        let batch = search_query_batch(
+        let batch = search_query_batch::<false>(
             args,
             x_query_drop::BatchQueries::Shared(&parts),
             subjects,

@@ -68,6 +68,14 @@ pub struct WriteDb {
     db_tax_ids: BTreeSet<i32>,
     /// The index memory of the closed volume, for the next one.
     index_scratch: IndexScratch,
+    /// Version 5 with `-parse_seqids`: whether a sequence gave `m_Lmdbdb` keys, and the first
+    /// sequence after such a one whose ids were all GIs (its OID and the FASTA form of its
+    /// first id), until a sequence with keys follows.
+    lmdb_had_keys: bool,
+    gi_only_after_keys: Option<(u32, Vec<u8>)>,
+    /// The first sequence of GIs only between two sequences with keys: makeblastdb 2.17.0
+    /// aborts on it when it writes the `.pos` file (`WriteDb::close`).
+    gi_only_between_keys: Option<(u32, Vec<u8>)>,
 }
 
 impl std::fmt::Debug for WriteDb {
@@ -190,6 +198,9 @@ impl WriteDb {
             tax_ids: Vec::new(),
             db_tax_ids: BTreeSet::new(),
             index_scratch: IndexScratch::default(),
+            lmdb_had_keys: false,
+            gi_only_after_keys: None,
+            gi_only_between_keys: None,
         }
     }
 
@@ -609,10 +620,8 @@ impl WriteDb {
     // An OID is a 4-byte signed integer in NCBI's writer and in its LMDB files, so a database
     // has at most 2^31 sequences; NCBI's `m_LmdbOid++` overflows past that. LOSAT stops with
     // an error at the sequence that would get OID 2^31 (no NCBI overflow reproduced).
-    /// The tax ids of the sequence just written, under the next OID of the
-    /// database (version 5).
-    // The acc2oid keys of `-parse_seqids` (`m_Lmdbdb->InsertEntries(m_Ids, m_LmdbOid)`) go
-    // here, before the tax ids, with `self.ids` and `self.lmdb_oid` (makedb-v5 S3c).
+    /// The keys of the ids (`-parse_seqids`) and the tax ids of the sequence just written,
+    /// under the next OID of the database (version 5).
     fn insert_lmdb_entries(&mut self) -> Result<(), WriteDbError> {
         if let Some(taxdb) = self.taxdb.as_mut() {
             if self.lmdb_oid > i32::MAX as u32 {
@@ -620,6 +629,34 @@ impl WriteDb {
                     "a version 5 database holds at most {} sequences (an OID is an Int4)",
                     i32::MAX as u64 + 1
                 )));
+            }
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1169-1173
+            // ```c++
+            //         if (done  &&  (m_DbVersion == eBDB_Version5)  &&  m_Lmdbdb) {
+            //         	if (m_ParseIDs) {
+            //         		m_Lmdbdb->InsertEntries(m_Ids,m_LmdbOid);
+            //         	}
+            //             m_Taxdb->InsertEntries(m_TaxIds, m_LmdbOid);
+            // ```
+            if self.indices.full {
+                if let Some(lmdb) = self.lmdb.as_mut() {
+                    let keys = lmdb.insert_entries(&self.ids, self.lmdb_oid)?;
+                    // A sequence of GIs only between two sequences with keys stops
+                    // makeblastdb's `.pos` file (`close`): the first one is kept to name it.
+                    if keys > 0 {
+                        if self.gi_only_between_keys.is_none() {
+                            self.gi_only_between_keys = self.gi_only_after_keys.take();
+                        }
+                        self.gi_only_after_keys = None;
+                        self.lmdb_had_keys = true;
+                    } else if self.lmdb_had_keys && self.gi_only_after_keys.is_none() {
+                        let mut name = Vec::new();
+                        if let Some(id) = self.ids.first() {
+                            crate::seqid::label::fasta(id, &mut name);
+                        }
+                        self.gi_only_after_keys = Some((self.lmdb_oid, name));
+                    }
+                }
             }
             taxdb.insert_entries(&self.tax_ids, self.lmdb_oid);
             if self.tax_ids.is_empty() {
@@ -819,6 +856,9 @@ impl WriteDb {
                     .collect();
                 let vol_num_oids: Vec<u32> = self.volumes.iter().map(Volume::oid).collect();
                 lmdb.insert_volumes_info(&vol_names, &vol_num_oids)?;
+                if let Some((oid, name)) = self.gi_only_between_keys.take() {
+                    return Err(gi_only_between_keys_error(oid, &name));
+                }
                 lmdb.close()?;
                 if let Some(taxdb) = self.taxdb.take() {
                     taxdb.close()?;
@@ -959,6 +999,37 @@ impl WriteDb {
         self.lmdb = None;
         self.taxdb = None;
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:383-392
+// ```c++
+// 	for(unsigned int i = 0; i < m_list.size(); i++) {
+// 		if(i > 0 && m_list[i].oid != m_list[i-1].oid ) {
+// 			if((m_list[i].oid - m_list[i-1].oid) != 1) {
+// 		 		NCBI_THROW( CSeqDBException, eArgErr, "Input id list not in ascending oid order");
+// 			}
+// ```
+// A sequence whose ids are all GIs gives no element of `m_list` (`x_InsertEntry` returns
+// at a GI), so one between two sequences with other ids leaves a gap in the OIDs of the list.
+// `x_CreateOidToSeqidsLookupFile` runs in `~CWriteDB_LMDB`, where the exception ends
+// makeblastdb 2.17.0 with SIGABRT after the volumes are written (survey B p11_gionly_mid).
+// LOSAT refuses the database there with an error that names the sequence (makedb-v5
+// DECISIONS 10: no NCBI abort reproduced). GI-only sequences before the first sequence with
+// keys or after the last one leave no gap and are written as makeblastdb writes them.
+/// The refusal of a version 5 database with `-parse_seqids` in which the sequence of OID `oid`
+/// (first id `name`) has GIs only and lies between sequences with other ids.
+fn gi_only_between_keys_error(oid: u32, name: &[u8]) -> WriteDbError {
+    let mut message = b"Input id list not in ascending oid order: the sequence ".to_vec();
+    message.extend_from_slice(name);
+    message.extend_from_slice(
+        format!(
+            " (OID {oid}) has only GI ids and lies between sequences with other ids, which \
+             makeblastdb 2.17.0 cannot write into the .pos file of a version 5 database (it \
+             aborts); LOSAT refuses the database (-blastdb_version 4 writes it)"
+        )
+        .as_bytes(),
+    );
+    WriteDbError::CreationBytes(message)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:749-761

@@ -14,6 +14,7 @@ use super::mdb::{
 };
 use super::platform::LmdbPlatform;
 use super::WriteDbError;
+use crate::seqid::{label, ParsedSeqId};
 
 // The default map sizes (`DEFAULT_LMDB_MAP_SIZE`, `DEFAULT_TAXID_MAP_SIZE`) depend on the
 // platform: `super::platform::Platform`.
@@ -270,13 +271,169 @@ fn txn_batches(len: usize, max: u32) -> Result<Vec<(usize, usize)>, WriteDbError
     Ok(out)
 }
 
-/// One element of `CWriteDB_LMDB::m_list` (`SKeyValuePair`); the id is in `WriteDbLmdb::ids`.
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_lmdb.hpp:111-129
+// ```c++
+//     struct SKeyValuePair {
+//     	string id;
+//     	blastdb::TOid oid;
+//     	bool saveToOidList;
+//     	SKeyValuePair() : id(kEmptyStr), oid(kSeqDBEntryNotFound), saveToOidList(false) {}
+//     	static bool cmp_key(const SKeyValuePair & v, const SKeyValuePair & k) {
+//    			if(v.id == k.id) {
+// 				blastdb::TOid mask = 0xFF;
+//    				for(unsigned int i=0; i < sizeof(blastdb::TOid); i++) {
+//    					if( (v.oid & mask) != (k.oid & mask)) {
+//    						return (v.oid & mask) < (k.oid & mask);
+//    					}
+//    					mask =  mask << 8;
+//    				}
+//    			}
+//     	    return v.id < k.id;
+//     	}
+//     };
+//     vector<SKeyValuePair> m_list;
+// ```
+// NCBI's element is a `std::string` (32 bytes, its characters on the heap past 15 of them)
+// beside the OID and the flag: 40 bytes plus the heap block, about 72 bytes for an id of
+// 16-24 characters, kept for every key of the database until `~CWriteDB_LMDB`. LOSAT keeps
+// the same list in 12 bytes per element: the OID and one word that locates the id in one
+// byte arena (`WriteDbLmdb::ids`, the bytes of the ids one after another). The keys that
+// `x_InsertEntry` derives from one Seq-id share its bytes: the id without the version is the
+// start of the id with it, a PDB molecule the start of the molecule with its chain, and an
+// upper-case copy (`NStr::ToUpper`) is the same bytes with a flag. The order of the list and
+// every comparison are those of the strings (`id_cmp`).
+/// One element of `CWriteDB_LMDB::m_list` (`SKeyValuePair`): the OID and a word with the
+/// place of the id in `WriteDbLmdb::ids` (bits 0-39 the offset, bits 40-61 the length), bit
+/// 62 when the id is the upper-case copy of those bytes and bit 63 `saveToOidList`.
 #[derive(Clone, Copy, Debug)]
+#[repr(C, packed(4))]
 struct KeyValuePair {
-    off: u64,
-    len: u32,
+    word: u64,
     oid: u32,
-    save_to_oid_list: bool,
+}
+
+const _: () = assert!(std::mem::size_of::<KeyValuePair>() == 12);
+
+const KV_OFF_BITS: u32 = 40;
+const KV_MAX_OFF: u64 = (1 << KV_OFF_BITS) - 1;
+const KV_MAX_LEN: u64 = (1 << 22) - 1;
+const KV_UPPER: u64 = 1 << 62;
+const KV_SAVE: u64 = 1 << 63;
+
+impl KeyValuePair {
+    /// The element for `len` bytes of the arena at `off`; an id past what the word holds (an
+    /// arena of 1 TiB, an id of 4 MiB) is refused.
+    fn new(
+        off: usize,
+        len: usize,
+        oid: u32,
+        upper: bool,
+        save: bool,
+    ) -> Result<Self, WriteDbError> {
+        let (off, len) = (off as u64, len as u64);
+        if off > KV_MAX_OFF || len > KV_MAX_LEN {
+            return Err(WriteDbError::Other(format!(
+                "LOSAT's makeblastdb holds Seq-id keys of at most {KV_MAX_LEN} bytes and {} bytes \
+                 of keys in all (a key of {len} bytes at {off})",
+                KV_MAX_OFF + 1
+            )));
+        }
+        let mut word = off | len << KV_OFF_BITS;
+        if upper {
+            word |= KV_UPPER;
+        }
+        if save {
+            word |= KV_SAVE;
+        }
+        Ok(KeyValuePair { word, oid })
+    }
+
+    fn off(self) -> usize {
+        (self.word & KV_MAX_OFF) as usize
+    }
+
+    fn len(self) -> usize {
+        ((self.word >> KV_OFF_BITS) & KV_MAX_LEN) as usize
+    }
+
+    fn upper(self) -> bool {
+        self.word & KV_UPPER != 0
+    }
+
+    fn save_to_oid_list(self) -> bool {
+        self.word & KV_SAVE != 0
+    }
+
+    fn oid(self) -> u32 {
+        self.oid
+    }
+
+    /// The bytes of the id before the upper-case copy is made.
+    fn raw(self, ids: &[u8]) -> &[u8] {
+        &ids[self.off()..self.off() + self.len()]
+    }
+
+    /// The id (`SKeyValuePair::id`) into `out`.
+    fn id_into(self, ids: &[u8], out: &mut Vec<u8>) {
+        out.clear();
+        out.extend_from_slice(self.raw(ids));
+        if self.upper() {
+            out.make_ascii_uppercase();
+        }
+    }
+}
+
+/// `a.id` against `b.id` as `std::string` compares them (`char_traits<char>::compare`: the
+/// bytes as `unsigned char`, then the shorter first).
+fn id_cmp(ids: &[u8], a: KeyValuePair, b: KeyValuePair) -> std::cmp::Ordering {
+    let (x, y) = (a.raw(ids), b.raw(ids));
+    let (ua, ub) = (a.upper(), b.upper());
+    if !ua && !ub {
+        return x.cmp(y);
+    }
+    for (&p, &q) in x.iter().zip(y) {
+        let p = if ua { p.to_ascii_uppercase() } else { p };
+        let q = if ub { q.to_ascii_uppercase() } else { q };
+        if p != q {
+            return p.cmp(&q);
+        }
+    }
+    x.len().cmp(&y.len())
+}
+
+/// `SKeyValuePair::cmp_key`: by id, then by the bytes of the OID from the least significant
+/// one (an OID is below 2^31, so its top byte is not negative in NCBI's `int` mask).
+fn kv_cmp(ids: &[u8], a: KeyValuePair, b: KeyValuePair) -> std::cmp::Ordering {
+    id_cmp(ids, a, b).then_with(|| a.oid().to_le_bytes().cmp(&b.oid().to_le_bytes()))
+}
+
+// NCBI reference (598d8ae6): c++/include/util/lmdbxx/lmdb++.h:850-861
+// ```c++
+// static inline bool
+// lmdb::dbi_put(MDB_txn* const txn,
+//               const MDB_dbi dbi,
+//               const MDB_val* const key,
+//               const MDB_val* const data,
+//               const unsigned int flags = 0) {
+//   const int rc = ::mdb_put(txn, dbi, const_cast<MDB_val*>(key), const_cast<MDB_val*>(data), flags);
+//   if (rc != MDB_SUCCESS && rc != MDB_KEYEXIST) {
+//     error::raise("mdb_put", rc);
+//   }
+//   return (rc == MDB_SUCCESS);
+// }
+// ```
+// The error of a put in `x_CommitTransaction` (an id of more than 511 bytes, which LMDB refuses
+// with MDB_BAD_VALSIZE) is raised in `~CWriteDB_LMDB`, where it ends makeblastdb 2.17.0 with
+// SIGABRT after its `.pos` file (S3c x_key512). LOSAT ends with lmdb++'s text and the key it
+// could not put (makedb-v5 DECISIONS 10: no NCBI abort reproduced).
+/// lmdb++'s error of a put into `acc2oid`, with the key.
+fn acc2oid_put_error(func: &'static str, code: i32, key: &[u8]) -> WriteDbError {
+    WriteDbError::Other(format!(
+        "{} (the acc2oid key '{}', {} bytes; makeblastdb 2.17.0 aborts here)",
+        LmdbError::Mdb { func, code },
+        String::from_utf8_lossy(key),
+        key.len()
+    ))
 }
 
 /// `CWriteDB_LMDB`: the `.pdb`/`.ndb` file and the `.pos`/`.nos` file of a database.
@@ -286,8 +443,12 @@ pub(crate) struct WriteDbLmdb {
     max_entry_per_txn: u32,
     total_ids_length: usize,
     settings: LmdbEnvSettings,
+    /// The bytes of the ids of `list`.
     ids: Vec<u8>,
+    /// `m_list`.
     list: Vec<KeyValuePair>,
+    /// A key of the current Seq-id (`x_InsertEntry`) or of a put.
+    scratch: Vec<u8>,
 }
 
 impl WriteDbLmdb {
@@ -302,6 +463,8 @@ impl WriteDbLmdb {
     // 	m_list.reserve(m_ListCapacity);
     // 	char* max_entry_str = getenv("MAX_LMDB_TXN_ENTRY");
     // ```
+    // `m_list.reserve` (and `x_Resize`, which doubles the reserve) changes no output; LOSAT's
+    // list grows as it is filled.
     /// Create the LMDB file `dbname` (`<db>.pdb`/`<db>.ndb`) with the map size `map_size`
     /// on the platform `platform` (its page size and file length; makeblastdb's bytes there).
     pub(crate) fn new(
@@ -320,25 +483,217 @@ impl WriteDbLmdb {
             settings: settings.clone(),
             ids: Vec::new(),
             list: Vec::new(),
+            scratch: Vec::new(),
         })
     }
 
-    /// Add one `SKeyValuePair` to `m_list`, as `CWriteDB_LMDB::x_InsertEntry` makes them from
-    /// a Seq-id of OID `oid` (`writedb_lmdb.cpp:119-196`): the key string, and whether the id
-    /// goes into the `.pos` file (`saveToOidList`). Called in OID order.
-    pub(crate) fn insert_entry(&mut self, id: &[u8], oid: u32, save_to_oid_list: bool) {
-        let off = self.ids.len() as u64;
+    /// Add one `SKeyValuePair` to `m_list`: the key string, the OID and whether the id goes
+    /// into the `.pos` file (`saveToOidList`). Called in OID order. (`insert_entries` makes
+    /// the elements of the Seq-ids of a sequence; this one takes a key as it is, for the
+    /// tests that rebuild makeblastdb's lists from its files.)
+    pub(crate) fn insert_entry(
+        &mut self,
+        id: &[u8],
+        oid: u32,
+        save_to_oid_list: bool,
+    ) -> Result<(), WriteDbError> {
+        let off = self.ids.len();
         self.ids.extend_from_slice(id);
-        self.list.push(KeyValuePair {
-            off,
-            len: id.len() as u32,
-            oid,
-            save_to_oid_list,
-        });
+        self.push(off, id.len(), oid, false, save_to_oid_list)
     }
 
-    fn id(&self, kv: &KeyValuePair) -> &[u8] {
-        &self.ids[kv.off as usize..kv.off as usize + kv.len as usize]
+    fn push(
+        &mut self,
+        off: usize,
+        len: usize,
+        oid: u32,
+        upper: bool,
+        save: bool,
+    ) -> Result<(), WriteDbError> {
+        self.list
+            .push(KeyValuePair::new(off, len, oid, upper, save)?);
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:108-117
+    // ```c++
+    // int CWriteDB_LMDB::InsertEntries(const vector<CRef<CSeq_id>> & seqids, const blastdb::TOid oid)
+    // {
+    //     int count = 0;
+    //     ITERATE(vector<CRef<CSeq_id>>, itr, seqids) {
+    //        x_InsertEntry((*itr), oid);
+    //     	count++;
+    //     }
+    //     return count;
+    // }
+    // ```
+    /// `InsertEntries(m_Ids, oid)`: the keys of the Seq-ids of the sequence of OID `oid`.
+    /// Returns how many elements were added to `m_list` (0 when every id is a GI).
+    pub(crate) fn insert_entries(
+        &mut self,
+        seqids: &[ParsedSeqId],
+        oid: u32,
+    ) -> Result<usize, WriteDbError> {
+        let before = self.list.len();
+        for seqid in seqids {
+            self.insert_seq_id(seqid, oid)?;
+        }
+        Ok(self.list.len() - before)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:119-196
+    // ```c++
+    // void CWriteDB_LMDB::x_InsertEntry(const CRef<CSeq_id> &seqid, const blastdb::TOid oid)
+    // {
+    //     if(seqid->IsGi()) {
+    //     	return;
+    //     }
+    //
+    //     x_Resize();
+    //
+    //     if(seqid->IsPir() || seqid->IsPrf()) {
+    //     	SKeyValuePair kv_pir;
+    //     	kv_pir.id = seqid->AsFastaString();
+    //     	kv_pir.oid = oid;
+    //     	kv_pir.saveToOidList = true;
+    //     	m_list.push_back(kv_pir);
+    //     	return;
+    //     }
+    //
+    //     if(seqid->IsPdb()) {
+    //     	SKeyValuePair kv_pdb_mol;
+    //     	kv_pdb_mol.id = seqid->GetPdb().GetMol().Get();
+    //     	kv_pdb_mol.oid = oid;
+    //     	m_list.push_back(kv_pdb_mol);
+    //     	// mol code should be case insensitive but c++ tooklit
+    //     	// is not converting it all to uppercase now
+    //     	string id_upper = kv_pdb_mol.id;
+    //     	NStr::ToUpper(id_upper);
+    //     	if(kv_pdb_mol.id != id_upper) {
+    //     		SKeyValuePair kv_u;
+    //        		kv_u.id = id_upper;
+    //        		kv_u.oid = oid;
+    //        		m_list.push_back(kv_u);
+    //        	}
+    //     	SKeyValuePair kv;
+    //     	kv.id = seqid->GetSeqIdString(true);
+    //     	kv.oid = oid;
+    //     	kv.saveToOidList = true;
+    //     	m_list.push_back(kv);
+    //     	return;
+    //     }
+    //
+    //     if(seqid->GetTextseq_Id() != NULL) {
+    //     	SKeyValuePair kv;
+    //     	kv.id = seqid->GetSeqIdString(false);
+    //     	kv.oid = oid;
+    //     	string id_v = seqid->GetSeqIdString(true);
+    //     	if( kv.id != id_v) {
+    //     		m_list.push_back(kv);
+    //     		SKeyValuePair kv_v;
+    //     		kv_v.id = id_v;
+    //     		kv_v.oid = oid;
+    //     		kv_v.saveToOidList = true;
+    //     		m_list.push_back(kv_v);
+    //     	}
+    //     	else {
+    //     		kv.saveToOidList = true;
+    //     		m_list.push_back(kv);
+    //     	}
+    //    	}
+    //     else {
+    //     	SKeyValuePair kv;
+    //     	kv.id = seqid->GetSeqIdString(true);
+    //     	kv.oid = oid;
+    //     	kv.saveToOidList = true;
+    //     	m_list.push_back(kv);
+    //     	string id_upper = kv.id;
+    //     	NStr::ToUpper(id_upper);
+    //     	if(kv.id != id_upper) {
+    //     		SKeyValuePair kv_u;
+    //     		kv_u.id = id_upper;
+    //     		kv_u.oid = oid;
+    //     		m_list.push_back(kv_u);
+    //
+    //     	}
+    //
+    //     }
+    //     return;
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1949-1954
+    // ```c++
+    //         if ( !str.empty() ) {
+    //             if ( (flags & CSeq_id::fLabel_Version)  &&  tsid->IsSetVersion()) {
+    //                 str += "." + NStr::IntToString(tsid->GetVersion());
+    //             }
+    //         }
+    //         *label += str;
+    // ```
+    // `NStr::ToUpper` changes the letters a-z only (the C locale; the ids of the FASTA reader
+    // hold no byte past 0x7f, makedb-v5 DECISIONS 28), so a copy differs exactly when the id
+    // has such a letter. Each Seq-id's bytes are stored once (`KeyValuePair`): the id with the
+    // version is written and the id without it is its start (`GetSeqIdString(false)` is the
+    // start of `GetSeqIdString(true)`, above); a PDB molecule is the start of
+    // `GetSeqIdString(true)` (the molecule, then `_` and the chain: `label::content`). Where
+    // a start is not the shorter id, it is stored on its own.
+    /// `x_InsertEntry`: the elements of `m_list` of one Seq-id of OID `oid`.
+    fn insert_seq_id(&mut self, seqid: &ParsedSeqId, oid: u32) -> Result<(), WriteDbError> {
+        if matches!(seqid, ParsedSeqId::Gi(_)) {
+            return Ok(());
+        }
+        let off = self.ids.len();
+        match seqid {
+            ParsedSeqId::Pir(_) | ParsedSeqId::Prf(_) => {
+                label::fasta(seqid, &mut self.ids);
+                self.push(off, self.ids.len() - off, oid, false, true)
+            }
+            ParsedSeqId::Pdb(pdb) => {
+                label::content(seqid, true, &mut self.ids);
+                let full = self.ids.len() - off;
+                let mol = if self.ids[off..].starts_with(&pdb.mol) {
+                    off
+                } else {
+                    let at = self.ids.len();
+                    self.ids.extend_from_slice(&pdb.mol);
+                    at
+                };
+                let len = pdb.mol.len();
+                self.push(mol, len, oid, false, false)?;
+                if pdb.mol.iter().any(u8::is_ascii_lowercase) {
+                    self.push(mol, len, oid, true, false)?;
+                }
+                self.push(off, full, oid, false, true)
+            }
+            _ if seqid.textseq().is_some() => {
+                label::content(seqid, true, &mut self.ids);
+                let full = self.ids.len() - off;
+                self.scratch.clear();
+                label::content(seqid, false, &mut self.scratch);
+                if self.scratch[..] != self.ids[off..] {
+                    let without = if self.ids[off..].starts_with(&self.scratch) {
+                        off
+                    } else {
+                        let at = self.ids.len();
+                        self.ids.extend_from_slice(&self.scratch);
+                        at
+                    };
+                    self.push(without, self.scratch.len(), oid, false, false)?;
+                    self.push(off, full, oid, false, true)
+                } else {
+                    self.push(off, full, oid, false, true)
+                }
+            }
+            _ => {
+                label::content(seqid, true, &mut self.ids);
+                let len = self.ids.len() - off;
+                self.push(off, len, oid, false, true)?;
+                if self.ids[off..].iter().any(u8::is_ascii_lowercase) {
+                    self.push(off, len, oid, true, false)?;
+                }
+                Ok(())
+            }
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:74-94
@@ -556,16 +911,12 @@ impl WriteDbLmdb {
                 "LMDB_SPLIT_CHUNK_SIZE={chunk_size}: makeblastdb's split sort does not end"
             )));
         }
-        // SKeyValuePair::cmp_key (writedb_lmdb.hpp:116-127): `v.id < k.id` (std::string,
-        // bytewise), ties by the OID's bytes from the least significant one.
-        let ids = std::mem::take(&mut self.ids);
-        self.list.sort_unstable_by(|a, b| {
-            let ia = &ids[a.off as usize..a.off as usize + a.len as usize];
-            let ib = &ids[b.off as usize..b.off as usize + b.len as usize];
-            ia.cmp(ib)
-                .then_with(|| a.oid.to_le_bytes().cmp(&b.oid.to_le_bytes()))
-        });
-        self.ids = ids;
+        // SKeyValuePair::cmp_key (writedb_lmdb.hpp:116-127, `kv_cmp`): `v.id < k.id`
+        // (std::string, bytewise), ties by the OID's bytes from the least significant one.
+        // Elements equal under it are equal in every byte that reaches a file (their
+        // `saveToOidList` is read before the sort only), so an unstable sort gives NCBI's list.
+        let ids = &self.ids;
+        self.list.sort_unstable_by(|a, b| kv_cmp(ids, *a, *b));
         self.increase_env_map_size()?;
         for (i0, j) in txn_batches(self.list.len(), self.max_entry_per_txn)? {
             self.env.txn_begin().map_err(lmdb_error)?;
@@ -583,28 +934,45 @@ impl WriteDbLmdb {
             .env
             .dbi_open(ACC2OID_STR, MDB_CREATE | MDB_DUPSORT | MDB_DUPFIXED)
             .map_err(lmdb_error)?;
+        let mut key = std::mem::take(&mut self.scratch);
+        let r = self.put_batch(dbi, i0, j, &mut key);
+        self.scratch = key;
+        r?;
+        self.env.txn_commit().map_err(lmdb_error)
+    }
+
+    fn put_batch(
+        &mut self,
+        dbi: Dbi,
+        i0: usize,
+        j: usize,
+        key: &mut Vec<u8>,
+    ) -> Result<(), WriteDbError> {
         for i in i0..j {
             let kv = self.list[i];
             if i > 0 {
                 let prev = self.list[i - 1];
-                if self.id(&prev) == self.id(&kv) && prev.oid == kv.oid {
+                if id_cmp(&self.ids, prev, kv).is_eq() && prev.oid() == kv.oid() {
                     continue;
                 }
             }
-            let oid = kv.oid.to_le_bytes();
-            let (s, e) = (kv.off as usize, kv.off as usize + kv.len as usize);
-            let ok = self
-                .env
-                .put(dbi, c_str(&self.ids[s..e]), &oid, MDB_APPENDDUP)
-                .map_err(lmdb_error)?;
+            let oid = kv.oid().to_le_bytes();
+            kv.id_into(&self.ids, key);
+            let ok = match self.env.put(dbi, c_str(key), &oid, MDB_APPENDDUP) {
+                Ok(ok) => ok,
+                Err(LmdbError::Mdb { func, code }) => {
+                    return Err(acc2oid_put_error(func, code, key));
+                }
+                Err(e) => return Err(lmdb_error(e)),
+            };
             if !ok {
                 return Err(WriteDbError::Other(format!(
                     "acc2oid error for id {}",
-                    String::from_utf8_lossy(self.id(&kv))
+                    String::from_utf8_lossy(key)
                 )));
             }
         }
-        self.env.txn_commit().map_err(lmdb_error)
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:344-415
@@ -676,7 +1044,7 @@ impl WriteDbLmdb {
         if self.list.is_empty() {
             return Ok(());
         }
-        let total_num_oids = self.list.last().unwrap().oid as u64 + 1;
+        let total_num_oids = self.list.last().unwrap().oid() as u64 + 1;
         let filename = lmdb_file_name(&self.db, "os");
         let io = |source| WriteDbError::Io {
             path: filename.clone(),
@@ -689,27 +1057,33 @@ impl WriteDbLmdb {
             os.write_all(&0u64.to_le_bytes()).map_err(io)?;
         }
         let mut count = 0usize;
-        let mut tmp_ids: Vec<(u64, u32)> = Vec::new();
+        let mut tmp_ids: Vec<KeyValuePair> = Vec::new();
+        let mut id = Vec::new();
         for i in 0..self.list.len() {
             let kv = self.list[i];
-            if i > 0 && kv.oid != self.list[i - 1].oid {
-                if kv.oid.wrapping_sub(self.list[i - 1].oid) != 1 {
+            let prev_oid = if i > 0 {
+                self.list[i - 1].oid()
+            } else {
+                kv.oid()
+            };
+            if i > 0 && kv.oid() != prev_oid {
+                if kv.oid().wrapping_sub(prev_oid) != 1 {
                     os.flush().map_err(io)?;
                     return Err(WriteDbError::Other(
                         "Input id list not in ascending oid order".to_string(),
                     ));
                 }
-                offsets[count] = self.write_ids(&mut os, &mut tmp_ids).map_err(io)?;
+                offsets[count] = self.write_ids(&mut os, &mut tmp_ids, &mut id).map_err(io)?;
                 count += 1;
                 tmp_ids.clear();
             }
-            self.total_ids_length += kv.len as usize;
-            if !kv.save_to_oid_list {
+            self.total_ids_length += kv.len();
+            if !kv.save_to_oid_list() {
                 continue;
             }
-            tmp_ids.push((kv.off, kv.len));
+            tmp_ids.push(kv);
         }
-        offsets[count] = self.write_ids(&mut os, &mut tmp_ids).map_err(io)?;
+        offsets[count] = self.write_ids(&mut os, &mut tmp_ids, &mut id).map_err(io)?;
         os.seek(SeekFrom::Start(8)).map_err(io)?;
         let mut offset: u64 = 0;
         for o in &offsets {
@@ -719,12 +1093,18 @@ impl WriteDbLmdb {
         os.flush().map_err(io)
     }
 
-    fn write_ids(&self, os: &mut impl Write, ids: &mut [(u64, u32)]) -> std::io::Result<u32> {
-        let get = |&(off, len): &(u64, u32)| &self.ids[off as usize..off as usize + len as usize];
-        ids.sort_unstable_by(|a, b| get(a).cmp(get(b)));
+    /// `s_WirteIds`: the ids of one OID, sorted, each after its length; `id` is scratch.
+    fn write_ids(
+        &self,
+        os: &mut impl Write,
+        ids: &mut [KeyValuePair],
+        id: &mut Vec<u8>,
+    ) -> std::io::Result<u32> {
+        ids.sort_unstable_by(|a, b| id_cmp(&self.ids, *a, *b));
         let mut diff: u32 = 0;
         for e in ids.iter() {
-            let id = get(e);
+            e.id_into(&self.ids, id);
+            let id = &id[..];
             let id_len = id.len() as u32;
             if id_len >= 0xFF {
                 os.write_all(&[0xFF])?;
@@ -1116,3 +1496,7 @@ impl WriteDbTaxId {
 #[cfg(test)]
 #[path = "lmdb_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "lmdb_keys_tests.rs"]
+mod keys_tests;

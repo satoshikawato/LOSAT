@@ -17,6 +17,8 @@ mod makeblastdb_app_cases;
 use makeblastdb_app_cases::APP_CASES;
 mod makeblastdb_v5_cases;
 use makeblastdb_v5_cases::{Expected, V5Case, V5_CASES};
+mod makeblastdb_parse_cases;
+use makeblastdb_parse_cases::{ParseCase, PARSE_CASES};
 
 /// The platform of every expected file here: makeblastdb 2.17.0 on Linux x86-64. The tests
 /// write its files on whatever platform they run on (`Platform`).
@@ -1302,6 +1304,179 @@ fn an_input_file_that_cannot_be_opened_stops_the_build() {
     }
 }
 
+/// Runs a case of `makeblastdb_parse_cases.rs` through the parser and `run_with` in a directory
+/// of its own, its input written there: the exit status, the streams and every file are
+/// makeblastdb's (the date of the database is the recorded one).
+fn run_parse_case(case: &ParseCase) {
+    let name = case.name;
+    let tmp = TempDir::new(&format!("parse-{name}"));
+    let dir = tmp.0.to_string_lossy().into_owned();
+    std::fs::write(tmp.0.join("in.fa"), case.input).unwrap();
+    if let Some(taxmap) = case.taxmap {
+        std::fs::write(tmp.0.join("in.taxmap"), taxmap).unwrap();
+    }
+    let mut words = vec!["-in".to_string(), format!("{dir}/in.fa")];
+    words.extend(case.words.iter().map(|word| word.replace("{D}", &dir)));
+    let args = parse_makedb_words(&words);
+    let now = time_of(case.date);
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = run_with(
+        &args,
+        Some(&now),
+        LINUX,
+        &mut std::io::empty(),
+        &mut out,
+        &mut err,
+    );
+    let show = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    let (out, err) = (v5_markers(&out, &dir), v5_markers(&err, &dir));
+    assert!(err == case.stderr, "{name}: standard error\n{}", show(&err));
+    assert!(
+        out == case.stdout,
+        "{name}: standard output\n{}\nexpected\n{}",
+        show(&out),
+        show(case.stdout)
+    );
+    assert_eq!(status, case.status, "{name}: exit status");
+    let mut written: Vec<String> = std::fs::read_dir(&tmp.0)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|file| file != "in.fa" && file != "in.taxmap")
+        .collect();
+    written.sort();
+    let expected: Vec<&str> = case.files.iter().map(|(file, _)| *file).collect();
+    assert_eq!(written, expected, "{name}: files");
+    for (file, content) in case.files {
+        let actual = std::fs::read(tmp.0.join(file)).unwrap();
+        match content {
+            Expected::Bytes(bytes) => assert!(
+                actual == *bytes,
+                "{name}: {file}: {} bytes written, {} expected; first difference at byte {:?}",
+                actual.len(),
+                bytes.len(),
+                actual.iter().zip(*bytes).position(|(a, b)| a != b)
+            ),
+            Expected::Digest(len, digest) => assert_eq!(
+                (actual.len(), fnv1a(&actual)),
+                (*len, *digest),
+                "{name}: {file}: size and FNV-1a"
+            ),
+        }
+    }
+}
+
+/// Version 5 databases with `-parse_seqids` as makeblastdb 2.17.0 writes them (makedb-v5 S3c):
+/// the acc2oid keys of every kind of Seq-id (`x_InsertEntry`) and the `.pos` file, GI-only
+/// sequences before the first sequence with keys and after the last one (the `.pos` offsets
+/// start with the first such sequence's ids; N is the last one's OID + 1; no `.pos` without
+/// keys), ids of 250-509 bytes (the `0xFF` + Uint4 length form), several volumes (one `.pdb` and
+/// `.pos` with the database's OIDs), `-hash_index` and `-taxid_map` with them; the same ids in
+/// version 4.
+#[test]
+fn parse_seqids_databases_are_makeblastdb_s() {
+    assert_eq!(PARSE_CASES.len(), 9);
+    for case in PARSE_CASES {
+        run_parse_case(case);
+    }
+}
+
+/// One `losat makeblastdb -parse_seqids` run of `input` in a directory of its own, version 5:
+/// (exit status, standard output, standard error).
+fn parse_seqids_v5_run(label: &str, input: &str, extra: &[&str]) -> (i32, String, String) {
+    let tmp = TempDir::new(label);
+    let dir = tmp.0.to_string_lossy().into_owned();
+    std::fs::write(tmp.0.join("in.fa"), input).unwrap();
+    let mut words: Vec<String> = [
+        "-in",
+        &format!("{dir}/in.fa"),
+        "-dbtype",
+        "prot",
+        "-out",
+        &format!("{dir}/db"),
+        "-title",
+        "t",
+        "-parse_seqids",
+    ]
+    .iter()
+    .map(|word| word.to_string())
+    .collect();
+    words.extend(extra.iter().map(|word| word.to_string()));
+    let args = parse_makedb_words(&words);
+    let now = time_of("Oct 30, 2026  9:00 AM");
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = run_with(
+        &args,
+        Some(&now),
+        LINUX,
+        &mut std::io::empty(),
+        &mut out,
+        &mut err,
+    );
+    let show = |bytes: Vec<u8>| String::from_utf8_lossy(&v5_markers(&bytes, &dir)).into_owned();
+    (status, show(out), show(err))
+}
+
+// makeblastdb 2.17.0 aborts (SIGABRT) on these version 5 inputs with -parse_seqids (survey B
+// p11_gionly_mid, pd10_within_seq; S3c x_gi_gap, x_key512): LOSAT refuses them with exit status
+// 1 (makedb-v5 DECISIONS 10). A duplicate in the first sequence keeps makeblastdb's message,
+// which it prints before the abort; a GI-only sequence between sequences with keys is named; a
+// key of more than 511 bytes is LMDB's MDB_BAD_VALSIZE, named with the first such key of the
+// sorted list (the upper-case copy here).
+#[test]
+fn version_5_inputs_makeblastdb_aborts_on_are_refused() {
+    let seq = "MKTAYIAKQRQISFVKSHFSRQ";
+    let (status, out, err) = parse_seqids_v5_run(
+        "gap",
+        &format!(">ref|NP_600001.1| first\n{seq}\n>gi|42| gi only\n{seq}\n>ref|NP_600003.1| third\n{seq}\n"),
+        &[],
+    );
+    assert_eq!(status, 1, "{err}");
+    assert_eq!(
+        err,
+        "BLAST Database creation error: Input id list not in ascending oid order: the sequence \
+         gi|42 (OID 1) has only GI ids and lies between sequences with other ids, which \
+         makeblastdb 2.17.0 cannot write into the .pos file of a version 5 database (it \
+         aborts); LOSAT refuses the database (-blastdb_version 4 writes it)\n"
+    );
+    assert!(
+        out.ends_with("Adding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n"),
+        "{out}"
+    );
+    // makeblastdb's standard error up to its abort ("terminate called after throwing ...").
+    let (status, _, err) = parse_seqids_v5_run(
+        "dupfirst",
+        &format!(">ref|NP_1.1| a\x01ref|NP_1.1| b\n{seq}\n"),
+        &[],
+    );
+    assert_eq!(status, 1, "{err}");
+    assert_eq!(
+        err,
+        "BLAST Database creation error: Error: Duplicate seq_ids are found: \nREF|NP_1.1\n\n"
+    );
+    let long_db = format!("E512{}", "z".repeat(505));
+    let (status, _, err) = parse_seqids_v5_run(
+        "key512",
+        &format!(">ref|NP_000001.1| a\n{seq}\n>gnl|{long_db}|t1 b\n{seq}\n"),
+        &[],
+    );
+    assert_eq!(status, 1, "{err}");
+    assert!(
+        err.starts_with(
+            "BLAST Database creation error: mdb_put: MDB_BAD_VALSIZE: Unsupported size of \
+             key/DB name/data, or wrong DUPFIXED size (the acc2oid key 'E512ZZZ"
+        ) && err.ends_with(":T1', 512 bytes; makeblastdb 2.17.0 aborts here)\n"),
+        "{err}"
+    );
+    // A GI-only sequence before the first sequence with keys or after the last one is written
+    // (`parse_seqids_databases_are_makeblastdb_s`, P_gi_lead).
+    let (status, _, err) = parse_seqids_v5_run(
+        "lead",
+        &format!(">gi|1 a\n{seq}\n>lcl|x b\n{seq}\n>gi|2 c\n{seq}\n"),
+        &[],
+    );
+    assert_eq!((status, err.as_str()), (0, ""));
+}
+
 /// The driver of the makedb-v5 line's S2 gate
 /// (`makedb-v5-20261029/scripts/s2_gate.py`), not a test of its own: for each
 /// line of the manifest named by `LOSAT_S2_GATE_MANIFEST` (a directory, the
@@ -1383,12 +1558,10 @@ fn s3a_gate() {
     }
 }
 
-/// The driver of the S3b gate of the makedb-v5 line
-/// (`makedb-v5-20261029/scripts/s3b_gate.py`): as `s3a_gate`, for the manifest named by
-/// `LOSAT_S3B_GATE_MANIFEST`. The words go through LOSAT's command line parser (a parser
-/// error is written as `main` writes it, with its exit code) except the two that the
-/// command line refuses until S3c: `-parse_seqids` sets `MakedbArgs::parse_seqids` and
-/// `-taxid_map <file>` sets `MakedbArgs::taxid_map`.
+/// The driver of the S3b and S3c gates of the makedb-v5 line
+/// (`makedb-v5-20261029/scripts/s3b_gate.py`, `s3c_gate.py --lib`): as `s3a_gate`, for the
+/// manifest named by `LOSAT_S3B_GATE_MANIFEST`. The words go through LOSAT's command line
+/// parser (a parser error is written as `main` writes it, with its exit code).
 #[test]
 #[ignore = "driver of an external gate (LOSAT_S3B_GATE_MANIFEST)"]
 fn s3b_gate() {
@@ -1404,28 +1577,14 @@ fn s3b_gate() {
             date
         });
         for (k, run) in fields.enumerate() {
-            let words: Vec<String> = parse_json_words(run);
-            let mut parse_seqids = false;
-            let mut taxid_map = None;
-            let mut rest = Vec::new();
-            let mut it = words.into_iter();
-            while let Some(word) = it.next() {
-                match word.as_str() {
-                    "-parse_seqids" => parse_seqids = true,
-                    "-taxid_map" => taxid_map = it.next(),
-                    _ => rest.push(word),
-                }
-            }
             let mut argv = vec!["losat".to_string(), "makeblastdb".to_string()];
-            argv.extend(rest);
+            argv.extend(parse_json_words(run));
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let status = match crate::cli::try_parse_from::<Cli, _, _>(argv) {
                 Ok(cli) => {
-                    let Commands::Makedb(mut args) = cli.command else {
+                    let Commands::Makedb(args) = cli.command else {
                         unreachable!("a makeblastdb command line");
                     };
-                    args.parse_seqids = parse_seqids;
-                    args.taxid_map = taxid_map;
                     run_with(
                         &args,
                         Some(&now),

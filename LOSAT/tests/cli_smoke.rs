@@ -514,6 +514,169 @@ fn makeblastdb_writes_a_database_and_makedb_is_unknown() {
     );
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1203-1209
+// ```c++
+//     bool parse_seqids = x_ShouldParseSeqIds();
+//     bool hash_index = args["hash_index"];
+//     bool use_gi_mask = args["gi_mask"];
+//
+//     CWriteDB::TIndexType indexing = CWriteDB::eNoIndex;
+//     indexing |= (hash_index ? CWriteDB::eAddHash : 0);
+//     indexing |= (parse_seqids ? CWriteDB::eFullIndex : 0);
+// ```
+// `-parse_seqids`, `-hash_index` and `-taxid_map` on the command line: the id files of version 5
+// (`.pos`, `.pog`, the hash index) and of version 4 (`.psi`/`.psd`), the argument rules (exit
+// status 2 from LOSAT's parser), a version 5 input makeblastdb aborts on (exit status 1), and
+// `[BLAST] MAX_SEQID_LENGTH` refused with `-parse_seqids` (makedb-v5 DECISIONS 12). The bytes are
+// checked against makeblastdb in `writedb::tests::parse_seqids_databases_are_makeblastdb_s`.
+#[test]
+fn makeblastdb_parse_seqids_hash_index_and_taxid_map() {
+    let input = temp_path("mkdb_parse_in", "faa");
+    fs::write(
+        &input,
+        ">ref|NP_000001.1| first\nMKTAYIAKQRQISFVKSHFSRQ\n>lcl|second b\nLEERLGLIEVQAPILSRVGDGTQDN\n",
+    )
+    .unwrap();
+    let map = temp_path("mkdb_parse_map", "txt");
+    fs::write(&map, "NP_000001.1 9606\nsecond 10090\n").unwrap();
+    let base = temp_path("mkdb_parse", "db");
+    let (input_text, map_text, base_text) = (
+        input.to_str().unwrap(),
+        map.to_str().unwrap(),
+        base.to_str().unwrap(),
+    );
+    let remove = |extensions: &[&str]| {
+        for extension in extensions {
+            let _ = fs::remove_file(format!("{base_text}.{extension}"));
+        }
+    };
+    const V5: [&str; 12] = [
+        "pdb", "phd", "phi", "phr", "pin", "pjs", "pog", "pos", "pot", "psq", "ptf", "pto",
+    ];
+    let output = run_losat(&[
+        "makeblastdb",
+        "-in",
+        input_text,
+        "-dbtype",
+        "prot",
+        "-out",
+        base_text,
+        "-parse_seqids",
+        "-hash_index",
+        "-taxid_map",
+        map_text,
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    for extension in V5 {
+        let path = format!("{base_text}.{extension}");
+        assert!(!fs::read(&path).unwrap().is_empty(), ".{extension}");
+    }
+    let metadata = fs::read_to_string(format!("{base_text}.pjs")).unwrap();
+    assert!(metadata.contains("\"number-of-taxids\": 2"), "{metadata}");
+    remove(&V5);
+    let output = run_losat(&[
+        "makeblastdb",
+        "-in",
+        input_text,
+        "-dbtype",
+        "prot",
+        "-out",
+        base_text,
+        "-parse_seqids",
+        "-blastdb_version",
+        "4",
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    for extension in ["psi", "psd", "pog"] {
+        assert!(
+            std::path::Path::new(&format!("{base_text}.{extension}")).exists(),
+            ".{extension}"
+        );
+    }
+    remove(&["phr", "pin", "pjs", "pog", "psd", "psi", "psq"]);
+    // `-taxid_map` requires `-parse_seqids` and excludes `-taxid`: LOSAT's parser, exit 2.
+    for words in [
+        vec!["-taxid_map", map_text],
+        vec!["-parse_seqids", "-taxid_map", map_text, "-taxid", "1"],
+    ] {
+        let mut argv = vec![
+            "makeblastdb",
+            "-in",
+            input_text,
+            "-dbtype",
+            "prot",
+            "-out",
+            base_text,
+        ];
+        argv.extend(words.iter().copied());
+        let output = run_losat(&argv);
+        assert_eq!(output.status.code(), Some(2), "{words:?}: {output:?}");
+        assert!(!std::path::Path::new(&format!("{base_text}.psq")).exists());
+    }
+    // A GI-only sequence between sequences with other ids: makeblastdb 2.17.0 aborts on version 5.
+    fs::write(
+        &input,
+        ">ref|NP_1.1| a\nMKTAYIAKQR\n>gi|42 b\nMKTAYIAKQR\n>ref|NP_2.1| c\nMKTAYIAKQR\n",
+    )
+    .unwrap();
+    let output = run_losat(&[
+        "makeblastdb",
+        "-in",
+        input_text,
+        "-dbtype",
+        "prot",
+        "-out",
+        base_text,
+        "-parse_seqids",
+    ]);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).starts_with(
+        "BLAST Database creation error: Input id list not in ascending oid order: the sequence gi|42 (OID 1)"
+    ));
+    assert!(!std::path::Path::new(&format!("{base_text}.psq")).exists());
+    remove(&V5);
+    // `[BLAST] MAX_SEQID_LENGTH` is refused with `-parse_seqids` only.
+    let refused = clean_losat_command()
+        .env("NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH", "100")
+        .args([
+            "makeblastdb",
+            "-in",
+            input_text,
+            "-dbtype",
+            "prot",
+            "-out",
+            base_text,
+            "-parse_seqids",
+            "-blastdb_version",
+            "4",
+        ])
+        .output()
+        .unwrap();
+    assert!(!refused.status.success(), "{refused:?}");
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("[BLAST] MAX_SEQID_LENGTH (100)"),
+        "{refused:?}"
+    );
+    assert!(!std::path::Path::new(&format!("{base_text}.psq")).exists());
+    let accepted = clean_losat_command()
+        .env("NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH", "100")
+        .args([
+            "makeblastdb",
+            "-in",
+            input_text,
+            "-dbtype",
+            "prot",
+            "-out",
+            base_text,
+        ])
+        .output()
+        .unwrap();
+    assert!(accepted.status.success(), "{accepted:?}");
+    remove(&V5);
+    fs::remove_file(&input).unwrap();
+    fs::remove_file(&map).unwrap();
+}
+
 const MT_PROTEIN: &str = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVV";
 const MT_NUCLEOTIDE: &str = "ATGAAAACCGCCTATATTGCCAAACAGCGTCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGTCAGCTGGAAGAACGTCTGGGCCTGATTGAAGTGCAGGCCCCGATTCTGAGCCGTGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCCGAAAAAGCCGTGCAGGTGAAAGTGAAAGCCCTGCCGGATGCCCAGTTTGAAGTGGTG";
 

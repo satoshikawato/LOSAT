@@ -66,7 +66,33 @@ use crate::seqdb::{SeqDb, SeqDbError, SeqType};
 //                              CArgDescriptions::eOutputFile,
 //                              CArgDescriptions::fAppend);
 // ```
-// The options of makeblastdb that LOSAT does not support are not registered;
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:246-251
+// ```c++
+//     arg_desc->AddFlag("parse_seqids",
+//                       "Option to parse seqid for FASTA input if set, for all other input types seqids are parsed automatically", true);
+//
+//     arg_desc->AddFlag("hash_index",
+//                       "Create index of sequence hash values.",
+//                       true);
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:319-329
+// ```c++
+//     arg_desc->AddOptionalKey("taxid", "TaxID",
+//                              "Taxonomy ID to assign to all sequences",
+//                              CArgDescriptions::eInteger);
+//     arg_desc->SetConstraint("taxid", new CArgAllowValuesGreaterThanOrEqual(0));
+//     arg_desc->SetDependency("taxid", CArgDescriptions::eExcludes, "taxid_map");
+//
+//     arg_desc->AddOptionalKey("taxid_map", "TaxIDMapFile",
+//              "Text file mapping sequence IDs to taxonomy IDs.\n"
+//              "Format:<SequenceId> <TaxonomyId><newline>",
+//              CArgDescriptions::eInputFile);
+//     arg_desc->SetDependency("taxid_map", CArgDescriptions::eRequires, "parse_seqids");
+// ```
+// LOSAT's parser checks the range of `-taxid`, the exclusion and the requirement; its errors
+// are the parser's (exit status 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES) where NCBI's argument
+// reader prints its usage (exit status 1). `check_arguments` repeats the two dependencies for
+// the library. The options of makeblastdb that LOSAT does not support are not registered;
 // `crate::cli` names them in its error.
 /// Arguments of `losat makeblastdb`, under makeblastdb's names.
 #[derive(Args, Debug, Clone)]
@@ -102,26 +128,22 @@ pub struct MakedbArgs {
     #[arg(long)]
     pub hash_index: bool,
     /// Taxonomy ID to assign to all sequences
-    #[arg(long, value_name = "TaxID", value_parser = clap::value_parser!(i32).range(0..))]
+    #[arg(long, value_name = "TaxID", value_parser = clap::value_parser!(i32).range(0..),
+          conflicts_with = "taxid_map")]
     pub taxid: Option<i32>,
-    /// `-taxid_map`, set by the library only: makeblastdb requires `-parse_seqids` with it
-    /// (`SetDependency("taxid_map", eRequires, "parse_seqids")`), so the command line takes
-    /// it with `-parse_seqids` (makedb-v5 S3c).
-    #[arg(skip)]
+    /// Text file mapping sequence IDs to taxonomy IDs. Format:<SequenceId> <TaxonomyId><newline>
+    #[arg(long, value_name = "TaxIDMapFile", requires = "parse_seqids")]
     pub taxid_map: Option<String>,
-    /// `-parse_seqids`, set by the library only: the command line refuses the option
-    /// (`UNSUPPORTED_OPTIONS`) until the whole database is written with it (ISAM, `.pog`,
-    /// the duplicate check and the version 5 keys come in the later steps of the line);
-    /// with it the header files hold the parsed Seq-ids (makedb-v5 S3a).
-    #[arg(skip)]
+    /// Option to parse seqid for FASTA input if set, for all other input types seqids are
+    /// parsed automatically
+    #[arg(long)]
     pub parse_seqids: bool,
 }
 
 /// The options of makeblastdb 2.17.0 that `losat makeblastdb` refuses
 /// (makeblastdb.cpp:246-333). `-h` and `-version` are served (`crate::cli`);
-/// `-logfile`, `-hash_index` and `-taxid` are read.
-pub const UNSUPPORTED_OPTIONS: [&str; 10] = [
-    "parse_seqids",
+/// `-logfile`, `-parse_seqids`, `-hash_index`, `-taxid` and `-taxid_map` are read.
+pub const UNSUPPORTED_OPTIONS: [&str; 8] = [
     "randomize",
     "mask_data",
     "mask_id",
@@ -129,7 +151,6 @@ pub const UNSUPPORTED_OPTIONS: [&str; 10] = [
     "gi_mask",
     "gi_mask_name",
     "metadata_output_prefix",
-    "taxid_map",
     "oid_masks",
 ];
 
@@ -399,6 +420,47 @@ pub fn check_environment(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Re
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:739-747
+// ```c++
+//     CNcbiApplication* app = CNcbiApplication::Instance();
+//     if (app) {
+//         const CNcbiRegistry& registry = app->GetConfig();
+//         const string& value = registry.Get("BLAST", "MAX_SEQID_LENGTH");
+//         if (!value.empty()) {
+//             try { m_FastaReader->SetMaxIDLength(NStr::StringToUInt(value)); }
+//             catch (const exception&) {}  // Ignore errors
+//         }
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1211-1216
+// ```c++
+//     bool long_seqids = false;
+//     CNcbiApplication* app = CNcbiApplication::Instance();
+//     if (app) {
+//         const CNcbiRegistry& registry = app->GetConfig();
+//         long_seqids = (registry.Get("BLAST", "LONG_SEQID") == "1");
+//     }
+// ```
+// The registry's limit of a Seq-id's length changes which FASTA ids makeblastdb parses with
+// `-parse_seqids`; LOSAT's FASTA reader keeps NCBI's default limits (makedb-v5 DECISIONS 12),
+// so it refuses the entry with `-parse_seqids`. `[BLAST] LONG_SEQID` is refused for every
+// program by `check_ncbi_application_settings` (it is not one of the entries that change
+// nothing).
+/// Refuses `[BLAST] MAX_SEQID_LENGTH` (`max_seqid_length`, from
+/// `ApplicationSettings::max_seqid_length`) for a build with `-parse_seqids`.
+pub fn check_registry_settings(
+    args: &MakedbArgs,
+    max_seqid_length: Option<&str>,
+) -> Result<(), String> {
+    if let (true, Some(value)) = (args.parse_seqids, max_seqid_length) {
+        return Err(format!(
+            "the registry entry [BLAST] MAX_SEQID_LENGTH ({value}), which changes the Seq-ids \
+             NCBI makeblastdb parses with -parse_seqids, is not supported by LOSAT's makeblastdb"
+        ));
+    }
+    Ok(())
+}
+
 /// The checks of the arguments that LOSAT makes first: what LOSAT does not
 /// support, and the format version.
 fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
@@ -420,7 +482,7 @@ fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
             args.blastdb_version
         )));
     };
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:318-327
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:322-329
     // ```c++
     //     arg_desc->SetConstraint("taxid", new CArgAllowValuesGreaterThanOrEqual(0));
     //     arg_desc->SetDependency("taxid", CArgDescriptions::eExcludes, "taxid_map");
@@ -431,8 +493,8 @@ fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
     //              CArgDescriptions::eInputFile);
     //     arg_desc->SetDependency("taxid_map", CArgDescriptions::eRequires, "parse_seqids");
     // ```
-    // The parser checks these on the command line (`-taxid` has its range there); the
-    // library-only `-taxid_map` is checked here with the parser's sentences.
+    // The parser checks these on the command line (`-taxid` has its range there); a caller of
+    // the library that sets the fields is checked here with the parser's sentences.
     if args.taxid_map.is_some() {
         if !args.parse_seqids {
             return Err(MakedbError::Argument(
@@ -1283,6 +1345,47 @@ fn finish(result: Result<(), MakedbError>, end_message: Option<&str>, err: &mut 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // makedb-v5 DECISIONS 12: `[BLAST] MAX_SEQID_LENGTH` is refused with `-parse_seqids`
+    // (build_db.cpp:739-747, quoted at `check_registry_settings`), the library's argument
+    // rules are makeblastdb's (makeblastdb.cpp:322-329, quoted at `check_arguments`).
+    #[test]
+    fn registry_and_argument_rules_of_parse_seqids() {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Wrap {
+            #[command(flatten)]
+            args: MakedbArgs,
+        }
+        let parse = |words: &[&str]| {
+            let mut argv = vec!["makeblastdb"];
+            argv.extend(words);
+            Wrap::try_parse_from(argv).unwrap().args
+        };
+        let plain = parse(&["--dbtype", "prot"]);
+        let parsed = parse(&["--dbtype", "prot", "--parse_seqids"]);
+        assert_eq!(check_registry_settings(&plain, Some("100")), Ok(()));
+        assert_eq!(check_registry_settings(&parsed, None), Ok(()));
+        let error = check_registry_settings(&parsed, Some("100")).unwrap_err();
+        assert!(error.contains("[BLAST] MAX_SEQID_LENGTH (100)"), "{error}");
+        let mut map = parse(&["--dbtype", "prot"]);
+        map.taxid_map = Some("m.txt".to_string());
+        let error = check_arguments(&map).unwrap_err();
+        assert_eq!(error.exit_code(), 1);
+        assert_eq!(
+            error.to_string(),
+            "Command line argument error: Argument \"parse_seqids\". Must be specified, as it \
+             is required by argument:  `taxid_map'"
+        );
+        map.parse_seqids = true;
+        assert!(check_arguments(&map).is_ok());
+        map.taxid = Some(1);
+        assert_eq!(
+            check_arguments(&map).unwrap_err().to_string(),
+            "Command line argument error: Argument \"taxid\". Incompatible with argument:  \
+             `taxid_map'"
+        );
+    }
 
     #[test]
     fn input_names_split_at_spaces_and_quotes() {

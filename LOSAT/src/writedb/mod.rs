@@ -20,8 +20,14 @@ pub mod fasta_source;
 pub mod files;
 pub mod format_guess;
 pub mod header;
+// The LMDB files of version 5 (stage S1 of the makedb-v5 line); `makeblastdb` writes them
+// from stage S2 on.
+#[allow(dead_code)]
+pub(crate) mod lmdb;
 pub mod local_offset;
 pub mod makeblastdb;
+#[allow(dead_code)]
+pub(crate) mod mdb;
 pub mod time;
 pub mod volume;
 pub mod writer;

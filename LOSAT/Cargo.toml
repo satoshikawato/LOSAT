@@ -87,12 +87,12 @@ rustc-hash = "1.1"
 # Rust filesystem support for the native readable-byte hint; no BLAST behavior,
 # foreign algorithm, NCBI runtime/build dependency or libc-auxv feature.
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "=0.38.44", default-features = false, features = ["std"] }
+rustix = { version = "=0.38.44", default-features = false, features = ["std", "param"] }
 
 # Windows file-handle type (`GetFileType`, `GetConsoleMode`) for the stream-position test of
 # `IsIStreamEmpty` (`input_files::has_stream_position`); only the three features those need.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console"] }
+windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_SystemInformation"] }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }

@@ -68,12 +68,13 @@ the same output at every thread count.
 ### P2. Database format
 
 A LOSAT database is an NCBI BLAST database: the volume layout that makeblastdb writes.
-LOSAT reads format versions 4 and 5 directly and writes the version 4 layout with
-`losat makeblastdb`. There is no LOSAT-only format.
+LOSAT reads format versions 4 and 5 directly and writes both with `losat makeblastdb`
+(version 5 by default, as makeblastdb; `-blastdb_version 4` for the older layout). There is no LOSAT-only format.
 
 Reasons: the comparison oracle searches the very same files, so ordinal ids, the stored
 2-bit bases and the title are shared by construction; existing databases are usable as they
-are; the writer can be checked byte for byte against `makeblastdb -blastdb_version 4`.
+are; the writer can be checked byte for byte against `makeblastdb -blastdb_version 4` and
+`-blastdb_version 5`.
 
 ### P3. Command-line surface
 
@@ -131,11 +132,16 @@ in one `-db`, index files cut short, NCBI's threshold of open files and its warn
 
 ## What `losat makeblastdb` of stage DB-2 writes and rejects
 
-`losat makeblastdb -in FASTA -dbtype prot|nucl -out NAME [-title T] [-max_file_sz S]` writes the
-files of `makeblastdb -blastdb_version 4` without `-parse_seqids`: sequence files
+`losat makeblastdb -in FASTA[ FASTA...] -dbtype prot|nucl -out NAME [-title T] [-max_file_sz S]
+[-blastdb_version 4|5] [-logfile F]` writes the files of `makeblastdb` (format version 5 unless
+`-blastdb_version 4` is given) without `-parse_seqids`: sequence files
 (`.psq`, `.nsq`) and header files (`.phr`, `.nhr`) byte for byte, the index file (`.pin`,
-`.nin`) but for the creation date, and for several volumes the alias file (`.pal`, `.nal`)
-but for its date line. The FASTA file is read as makeblastdb reads it (its reader settings
+`.nin`) but for the creation date, for several volumes the alias file (`.pal`, `.nal`)
+but for its date line, and the JSON metadata file (`.pjs`, `.njs`) but for the date
+it records. Version 5 adds the LMDB
+files of the volumes (`.pdb`, `.ptf`, `.pot`, `.pto`; `.ndb`, `.ntf`, `.not`, `.nto`) with
+their pages byte for byte. Several input files can be named in `-in` (as makeblastdb
+splits the value), and `-logfile` redirects the log and the messages to a file (appended). The FASTA file is read as makeblastdb reads it (its reader settings
 differ from those of `-subject`). The log on the standard output and the messages on the
 standard error stream are makeblastdb's, in makeblastdb's order, and so is the exit status
 of a build and of makeblastdb's own errors (0; 1 for an input or option error; 2 when the
@@ -144,10 +150,8 @@ otherwise). The differences are listed below.
 
 | Not written or rejected | Why |
 | --- | --- |
-| The JSON metadata file (`.pjs`, `.njs`) | NCBI's search programs do not read it; their output is the same without it. A file of that name left by a replaced database is removed |
-| `-parse_seqids`, `-hash_index`, `-randomize`, `-mask_data`, `-mask_id`, `-mask_desc`, `-gi_mask`, `-gi_mask_name`, `-taxid`, `-taxid_map`, `-oid_masks`, `-metadata_output_prefix`, `-logfile`, `-version`, `-h` | parsed Seq-ids, masks and taxonomy are a second step (P4), the others are not implemented; each is an explicit error that names the option |
-| `-blastdb_version 5` | the LMDB file is not written; version 4 is the default of `losat makeblastdb` (makeblastdb's default is 5) |
-| `-input_type` other than `fasta`, several input files, compressed input (`.gz`, `.bz2`, `.zst`) | one uncompressed FASTA input; `-in -` reads the standard input |
+| `-parse_seqids`, `-hash_index`, `-randomize`, `-mask_data`, `-mask_id`, `-mask_desc`, `-gi_mask`, `-gi_mask_name`, `-taxid`, `-taxid_map`, `-oid_masks`, `-metadata_output_prefix` | parsed Seq-ids, `-hash_index` and taxonomy are the next step (P4), masks and the others are not implemented; each is an explicit error that names the option |
+| `-input_type` other than `fasta`, compressed input (`.gz`, `.bz2`, `.zst`) | uncompressed FASTA only; `-in -` reads the standard input |
 | NCBI settings that change makeblastdb's messages or stored titles (`DIAG_*`, `NCBI_CONFIG_*`, registry entries outside the accepted list, a non-empty `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS`) | as for the search programs: LOSAT refuses to run instead of giving a different result |
 | Replacing a database of the same name whose alias file the reader of stage DB-1 rejects | the files to remove are found by resolving the alias file; LOSAT stops before it removes anything |
 
@@ -168,6 +172,20 @@ Removal of an existing database and the paths of the output:
 - A volume that an existing alias file names and that is found only through `BLASTDB` or
   `.ncbirc` is not removed (`losat makeblastdb` does not use the search path of `-db`).
 - Directories that makeblastdb creates get mode 0755; LOSAT does the same on Unix only.
+
+Version 5 and the options added to the writer:
+
+- The `dbname` of the metadata file is the file name of the output path, which LOSAT takes
+  as one name (makeblastdb splits a path with a space and ends with exit status 2 before it
+  writes the file). A file `NAME.pjs` left by a replaced database of several volumes is
+  listed and counted, as in makeblastdb.
+- The totals of the metadata file come from the volumes the writer made; the volumes are
+  not opened afterwards (opening them would hold the index of every sequence in memory).
+- `-logfile` is read as makeblastdb's option, not wherever it stands in the command line
+  (makeblastdb's corelib also finds it as the value of another option).
+- Of several `-in` files, one that exists and cannot be opened is an error (exit status 255)
+  that removes what the earlier files added; makeblastdb skips it without a word. `-in ""`
+  (no name) is refused; makeblastdb reads an empty list.
 
 Errors that makeblastdb does not detect, or detects elsewhere:
 

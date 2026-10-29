@@ -1099,7 +1099,26 @@ pub(crate) fn x_lookup_table_for_profile(
         bounds,
         false,
     );
+    // Dispatch point (LOSAT_X_TBNLUTLEAN, in the strict set): the same table without chains, every
+    // temporary freed by the build (`x_lut_direct::x_build_lean`); where it declines (diagnostics
+    // mode, or a backbone index wider than 16 bits), and with `=0`, the chain builder.
+    let prepared = if x_tbn_lut_lean() {
+        match x_lut_direct::x_build_lean(prepared, threshold, matrix, word_length) {
+            Ok(table) => return table,
+            Err(prepared) => prepared,
+        }
+    } else {
+        prepared
+    };
     build_lookup_from_prepared(prepared, threshold, matrix, word_length).0
+}
+
+// No NCBI counterpart (memory only; the table is the one `build_lookup_from_prepared` builds):
+// LOSAT_X_TBNLUTLEAN, in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`).
+/// Whether TBLASTN builds its lookup tables with `x_lut_direct::x_build_lean`.
+fn x_tbn_lut_lean() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNLUTLEAN"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803

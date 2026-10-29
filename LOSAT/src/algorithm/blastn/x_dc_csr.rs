@@ -146,16 +146,36 @@ impl Csr {
         self
     }
 
-    /// The 1-based query offsets of the cell's chain, in its order.
+    /// The 1-based query offsets of the cell's chain, in its order. A packed head
+    /// (LOSAT_X_BNCSRPACK) answers through `x_packed` instead.
     #[inline(always)]
     pub fn run(&self, cell: usize) -> &[u32] {
-        if self.x_bits.is_empty() {
-            return &self.qs[self.offsets[cell] as usize..self.offsets[cell + 1] as usize];
-        }
-        // EXPERIMENT (LOSAT_X_BNCSRPACK): an empty cell has no element of the packed head.
-        match x_rank(&self.x_bits, cell) {
-            Some(r) => &self.qs[self.offsets[r] as usize..self.offsets[r + 1] as usize],
-            None => &[],
+        debug_assert!(
+            self.x_bits.is_empty(),
+            "BNCSRPACK: a packed head reads through x_packed"
+        );
+        &self.qs[self.offsets[cell] as usize..self.offsets[cell + 1] as usize]
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNCSRPACK): the reader of a packed head, or `None` for a head of one
+    /// element per cell. The contiguous table's scans choose the form here once per table, so
+    /// the scans of each form compile on their own (`XHead`), and those of a head of one element
+    /// per cell, every discontiguous table's among them, as without the switch.
+    #[inline(always)]
+    pub(crate) fn x_packed(&self) -> Option<XPacked<'_>> {
+        (!self.x_bits.is_empty()).then_some(XPacked {
+            bits: &self.x_bits,
+            offsets: &self.offsets,
+            qs: &self.qs,
+        })
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNCSRPACK): `run` of a head of either form, for the readers outside
+    /// the scans (the lookup's answers for one word, checks and tests).
+    pub(crate) fn x_run_any(&self, cell: usize) -> &[u32] {
+        match self.x_packed() {
+            Some(packed) => packed.run(cell),
+            None => self.run(cell),
         }
     }
 
@@ -178,6 +198,82 @@ impl Csr {
     #[inline(always)]
     fn qs(&self) -> &[u32] {
         &self.qs
+    }
+}
+
+/// No NCBI counterpart (layout only): EXPERIMENT (LOSAT_X_BNCSRPACK) the head of a CSR in one of
+/// its forms, chosen once per table (`Csr::x_packed`): `Csr` (one element per cell, `Csr::run`
+/// and `Ring`) or `XPacked`; a scan generic over it compiles once per form, and reads the head
+/// through a reference as without the switch.
+pub(crate) trait XHead {
+    /// The scans' FIFO of words over this form.
+    type Ring<'a, T: Copy + Default>: XRing<T>
+    where
+        Self: 'a;
+    /// The 1-based query offsets of the cell's chain, in its order.
+    fn run(&self, cell: usize) -> &[u32];
+    fn ring<T: Copy + Default>(&self) -> Self::Ring<'_, T>;
+}
+
+/// EXPERIMENT (LOSAT_X_BNCSRPACK): `Ring`'s `push` and `flush`, for a scan generic over `XHead`.
+pub(crate) trait XRing<T> {
+    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T));
+    fn flush(&mut self, emit: &mut impl FnMut(T));
+}
+
+impl XHead for Csr {
+    type Ring<'a, T: Copy + Default> = Ring<'a, T>;
+
+    #[inline(always)]
+    fn run(&self, cell: usize) -> &[u32] {
+        Csr::run(self, cell)
+    }
+
+    #[inline(always)]
+    fn ring<T: Copy + Default>(&self) -> Ring<'_, T> {
+        Ring::new(self)
+    }
+}
+
+/// No NCBI counterpart (layout only): EXPERIMENT (LOSAT_X_BNCSRPACK) the reader of a packed head
+/// (`Csr::x_packed`; the layout in `Csr`'s comment).
+#[derive(Clone, Copy)]
+pub(crate) struct XPacked<'a> {
+    bits: &'a [u64],
+    offsets: &'a [u32],
+    qs: &'a [u32],
+}
+
+impl<'a> XPacked<'a> {
+    /// `Csr::run` of a packed head: an empty cell has no element of it.
+    #[inline(always)]
+    pub(crate) fn run(self, cell: usize) -> &'a [u32] {
+        match x_rank(self.bits, cell) {
+            Some(r) => &self.qs[self.offsets[r] as usize..self.offsets[r + 1] as usize],
+            None => &[],
+        }
+    }
+}
+
+impl XHead for XPacked<'_> {
+    type Ring<'a, T: Copy + Default>
+        = XRingPacked<'a, T>
+    where
+        Self: 'a;
+
+    #[inline(always)]
+    fn run(&self, cell: usize) -> &[u32] {
+        XPacked::run(*self, cell)
+    }
+
+    #[inline(always)]
+    fn ring<T: Copy + Default>(&self) -> XRingPacked<'_, T> {
+        XRingPacked {
+            buf: [T::default(); RING],
+            ranks: [0; RING],
+            n: 0,
+            head: *self,
+        }
     }
 }
 
@@ -722,10 +818,6 @@ pub(crate) struct Ring<'a, T: Copy> {
     n: usize,
     offsets: &'a [u32],
     qs: &'a [u32],
-    /// EXPERIMENT (LOSAT_X_BNCSRPACK): the packed head's presence and ranks (empty for a head of
-    /// one element per cell), and the rank of each word in `buf`.
-    x_bits: &'a [u64],
-    x_ranks: [u32; RING],
 }
 
 impl<'a, T: Copy + Default> Ring<'a, T> {
@@ -735,8 +827,6 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
             n: 0,
             offsets: csr.offsets(),
             qs: csr.qs(),
-            x_bits: &csr.x_bits,
-            x_ranks: [0; RING],
         }
     }
 
@@ -746,9 +836,6 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
     #[inline(always)]
     pub(crate) fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) {
         const MASK: usize = RING - 1;
-        if !self.x_bits.is_empty() {
-            return self.x_push_packed(w, cell, emit);
-        }
         let offsets = self.offsets;
         prefetch(offsets.as_ptr().wrapping_add(cell(&w)));
         if self.n >= RING / 2 {
@@ -772,24 +859,55 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
         self.n += 1;
     }
 
-    /// EXPERIMENT (LOSAT_X_BNCSRPACK): `push` on a packed head. A word of an empty cell does not
-    /// enter (its run is empty: `emit` would read no offset of it); the others enter with their
-    /// rank, the head's element of their run prefetched, and the word `RING / 2` places back gets
-    /// the first and the last line of its run prefetched, as on a head of one element per cell.
+    /// The words still in the FIFO leave through `emit`, in order.
+    pub(crate) fn flush(&mut self, emit: &mut impl FnMut(T)) {
+        for m in self.n.saturating_sub(RING)..self.n {
+            emit(self.buf[m & (RING - 1)]);
+        }
+        self.n = 0;
+    }
+}
+
+impl<T: Copy + Default> XRing<T> for Ring<'_, T> {
     #[inline(always)]
-    fn x_push_packed(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) {
+    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) {
+        Ring::push(self, w, cell, emit)
+    }
+
+    #[inline(always)]
+    fn flush(&mut self, emit: &mut impl FnMut(T)) {
+        Ring::flush(self, emit)
+    }
+}
+
+/// No NCBI counterpart (scheduling only): EXPERIMENT (LOSAT_X_BNCSRPACK) `Ring` over a packed head
+/// (`XPacked`), with the rank of each word in `buf`.
+pub(crate) struct XRingPacked<'a, T: Copy> {
+    buf: [T; RING],
+    ranks: [u32; RING],
+    n: usize,
+    head: XPacked<'a>,
+}
+
+impl<T: Copy + Default> XRing<T> for XRingPacked<'_, T> {
+    /// `Ring::push` on a packed head. A word of an empty cell does not enter (its run is empty:
+    /// `emit` would read no offset of it); the others enter with their rank, the head's element of
+    /// their run prefetched, and the word `RING / 2` places back gets the first and the last line
+    /// of its run prefetched, as on a head of one element per cell.
+    #[inline(always)]
+    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) {
         const MASK: usize = RING - 1;
-        let Some(r) = x_rank(self.x_bits, cell(&w)) else {
+        let Some(r) = x_rank(self.head.bits, cell(&w)) else {
             return;
         };
-        let offsets = self.offsets;
+        let offsets = self.head.offsets;
         prefetch(offsets.as_ptr().wrapping_add(r));
         if self.n >= RING / 2 {
-            let k = self.x_ranks[(self.n - RING / 2) & MASK] as usize;
+            let k = self.ranks[(self.n - RING / 2) & MASK] as usize;
             let a = offsets[k] as usize;
             let b = offsets[k + 1] as usize;
-            let pa = self.qs.as_ptr().wrapping_add(a);
-            let pb = self.qs.as_ptr().wrapping_add(b.max(a + 1) - 1);
+            let pa = self.head.qs.as_ptr().wrapping_add(a);
+            let pb = self.head.qs.as_ptr().wrapping_add(b.max(a + 1) - 1);
             prefetch(pa);
             if (pa as usize >> 6) != (pb as usize >> 6) {
                 prefetch(pb);
@@ -800,12 +918,12 @@ impl<'a, T: Copy + Default> Ring<'a, T> {
             emit(self.buf[slot]);
         }
         self.buf[slot] = w;
-        self.x_ranks[slot] = r as u32;
+        self.ranks[slot] = r as u32;
         self.n += 1;
     }
 
-    /// The words still in the FIFO leave through `emit`, in order.
-    pub(crate) fn flush(&mut self, emit: &mut impl FnMut(T)) {
+    /// `Ring::flush`.
+    fn flush(&mut self, emit: &mut impl FnMut(T)) {
         for m in self.n.saturating_sub(RING)..self.n {
             emit(self.buf[m & (RING - 1)]);
         }
@@ -1171,7 +1289,7 @@ mod tests {
 
     // LOSAT_X_BNCSRPACK: the packed head of the table above (cells 0 and 2 non-empty, then 61 empty
     // cells, then cell 64 with one word) gives the same runs, and its ring emits the words of the
-    // non-empty cells, in order, and no other.
+    // non-empty cells, in order, and no other; a head of one element per cell has no packed reader.
     #[test]
     fn a_packed_head_gives_the_same_runs_and_the_ring_skips_empty_cells() {
         let bits = vec![0b101u64, 0, 1, 2];
@@ -1181,24 +1299,34 @@ mod tests {
             qs: vec![9, 3, 30, 20, 10, 77],
             x_keep: None,
         };
-        assert_eq!(csr.run(0), &[9, 3]);
-        assert!(csr.run(1).is_empty() && csr.run(63).is_empty());
-        assert_eq!(csr.run(2), &[30, 20, 10]);
-        assert_eq!(csr.run(64), &[77]);
-        assert!(csr.contains(2, 20) && !csr.contains(1, 20));
+        let packed = csr.x_packed().expect("a packed head");
+        assert_eq!(packed.run(0), &[9, 3]);
+        assert!(packed.run(1).is_empty() && packed.run(63).is_empty());
+        assert_eq!(packed.run(2), &[30, 20, 10]);
+        assert_eq!(packed.run(64), &[77]);
+        assert_eq!(csr.x_run_any(2), &[30, 20, 10]);
+        assert!(csr.x_run_any(1).is_empty());
         let cells = [0usize, 1, 2, 64, 5];
         for n in [0usize, 1, 15, 16, 17, 31, 32, 33, 100] {
-            let mut ring: Ring<'_, (u32, usize)> = Ring::new(&csr);
+            let mut ring: XRingPacked<'_, (u32, usize)> = packed.ring();
             let mut out = Vec::new();
             for i in 0..n {
                 ring.push((i as u32, cells[i % 5]), |w| w.1, &mut |w| out.push(w.0));
             }
             ring.flush(&mut |w| out.push(w.0));
             let want: Vec<u32> = (0..n as u32)
-                .filter(|&i| !csr.run(cells[i as usize % 5]).is_empty())
+                .filter(|&i| !packed.run(cells[i as usize % 5]).is_empty())
                 .collect();
             assert_eq!(out, want);
         }
+        let dense = Csr {
+            offsets: vec![0, 2, 2, 5],
+            x_bits: Vec::new(),
+            qs: vec![9, 3, 30, 20, 10],
+            x_keep: None,
+        };
+        assert!(dense.x_packed().is_none());
+        assert_eq!(dense.x_run_any(2), dense.run(2));
     }
 
     #[test]

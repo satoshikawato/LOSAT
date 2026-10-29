@@ -13737,71 +13737,84 @@ fn search_query_batch(
                         // before the next word), with the same pairs, and before that word's warning,
                         // so the debug output keeps its order. `on_word` keeps its two callers, so its
                         // code is the one without the switch.
-                        let mut x_on_word_csr =
-                            |(kmer_start, s_range, index): (usize, usize, u64)| {
-                                if offset_pairs_len >= OFFSET_ARRAY_SIZE {
-                                    process_offset_pairs(
-                                        offset_pairs,
-                                        &mut offset_pairs_len,
-                                        &mut scan_pause_ns,
-                                        true,
-                                    );
-                                }
-                                let run: &[u32] = csr.run(index as usize);
-                                if (debug_mode || blastn_debug) && run.len() > 1000 {
-                                    eprintln!(
-                                    "[WARN] Large matches_slice: len={} for kmer at position {}",
-                                    run.len(),
-                                    kmer_start
-                                );
-                                }
-                                for &q_off_1 in run {
-                                    if debug_enabled {
-                                        dbg_seeds_found += 1;
+                        // EXPERIMENT (LOSAT_X_BNCSRPACK): the form of the table's head is chosen
+                        // once (`x_dc_csr::XHead`), and `x_scan_csr!` expands to each form's scan,
+                        // so the scan of a head of one element per cell is the one without the
+                        // switch.
+                        macro_rules! x_scan_csr {
+                            ($head:expr) => {{
+                                use x_dc_csr::{XHead, XRing};
+                                let head = $head;
+                            let mut x_on_word_csr =
+                                |(kmer_start, s_range, index): (usize, usize, u64)| {
+                                    if offset_pairs_len >= OFFSET_ARRAY_SIZE {
+                                        process_offset_pairs(
+                                            offset_pairs,
+                                            &mut offset_pairs_len,
+                                            &mut scan_pause_ns,
+                                            true,
+                                        );
                                     }
-                                    offset_pairs[offset_pairs_len] = OffsetPair {
-                                        q_off: q_off_1 as usize - 1,
-                                        s_off: kmer_start,
-                                        s_range,
-                                    };
-                                    offset_pairs_len += 1;
-                                }
-                                if offset_pairs_len >= offset_array_size {
-                                    process_offset_pairs(
-                                        offset_pairs,
-                                        &mut offset_pairs_len,
-                                        &mut scan_pause_ns,
-                                        true,
+                                    let run: &[u32] = head.run(index as usize);
+                                    if (debug_mode || blastn_debug) && run.len() > 1000 {
+                                        eprintln!(
+                                        "[WARN] Large matches_slice: len={} for kmer at position {}",
+                                        run.len(),
+                                        kmer_start
                                     );
-                                }
-                            };
-                        let mut ring: x_dc_csr::Ring<'_, (usize, usize, u64)> =
-                            x_dc_csr::Ring::new(csr);
-                        let mb_scan_kind =
-                            select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
-                        scan_subject_kmers_with_ranges(
-                            search_seq_packed,
-                            s_len,
-                            word_length,
-                            lut_word_length,
-                            scan_step,
-                            &subject_seq_ranges,
-                            subject_masked,
-                            mb_scan_kind,
-                            |kmer_start, s_range, current_lut_kmer| {
-                                if debug_enabled {
-                                    dbg_total_s_positions += 1;
-                                }
-                                if two_stage.has_hits(current_lut_kmer) {
-                                    ring.push(
-                                        (kmer_start, s_range, current_lut_kmer),
-                                        |w| w.2 as usize,
-                                        &mut x_on_word_csr,
-                                    );
-                                }
-                            },
-                        );
-                        ring.flush(&mut x_on_word_csr);
+                                    }
+                                    for &q_off_1 in run {
+                                        if debug_enabled {
+                                            dbg_seeds_found += 1;
+                                        }
+                                        offset_pairs[offset_pairs_len] = OffsetPair {
+                                            q_off: q_off_1 as usize - 1,
+                                            s_off: kmer_start,
+                                            s_range,
+                                        };
+                                        offset_pairs_len += 1;
+                                    }
+                                    if offset_pairs_len >= offset_array_size {
+                                        process_offset_pairs(
+                                            offset_pairs,
+                                            &mut offset_pairs_len,
+                                            &mut scan_pause_ns,
+                                            true,
+                                        );
+                                    }
+                                };
+                            let mut ring = head.ring::<(usize, usize, u64)>();
+                            let mb_scan_kind =
+                                select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
+                            scan_subject_kmers_with_ranges(
+                                search_seq_packed,
+                                s_len,
+                                word_length,
+                                lut_word_length,
+                                scan_step,
+                                &subject_seq_ranges,
+                                subject_masked,
+                                mb_scan_kind,
+                                |kmer_start, s_range, current_lut_kmer| {
+                                    if debug_enabled {
+                                        dbg_total_s_positions += 1;
+                                    }
+                                    if two_stage.has_hits(current_lut_kmer) {
+                                        ring.push(
+                                            (kmer_start, s_range, current_lut_kmer),
+                                            |w| w.2 as usize,
+                                            &mut x_on_word_csr,
+                                        );
+                                    }
+                                },
+                            );
+                            ring.flush(&mut x_on_word_csr);
+                            }};
+                        }
+                        match csr.x_packed() {
+                            Some(packed) => x_scan_csr!(packed),
+                            None => x_scan_csr!(csr),
+                        }
                     } else {
                         let mb_scan_kind =
                             select_mb_scan_kind(lut_word_length, scan_step, subject_masked);

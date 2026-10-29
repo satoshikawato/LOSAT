@@ -72,7 +72,13 @@
 //! strands); word size 10 with its 4^10-cell table from 262,144 positions; word size 9 with its
 //! 4^9-cell table from 65,536 and its 4^8-cell table (reading order) from 16,384. Word sizes 12 and
 //! above build 4^11-cell tables only for fewer positions than that (NCBI moves to 4^12 cells
-//! first), so their tables keep the chains. The table is built on the search pool where the fill
+//! first), so their tables keep the chains. EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head (every
+//! table of the scope but the reading-order one) has no size rule. Its build writes one byte per
+//! cell and two words per 64 cells (5 MiB at 4^11 cells, in `qs` and its bits) where the chains
+//! take a table of four bytes per cell (16 MiB) and `next_pos`, and the batch loop's kept table
+//! then never holds chains: below the rule a query batch (the first or the last of a run, beside
+//! batches of the rule) built chains on the kept table, whose pages past those a packed head wrote
+//! were mapped there, at the end of the run. The table is built on the search pool where the fill
 //! would be (`x_mb_lookup_once::csr`), otherwise here (`serial`). Its `hashtable` and `next_pos`
 //! are then empty: the CSR replaces them (`offsets` has two elements more than `hashtable`, `qs`
 //! one element per word where `next_pos` has one per query position), so the table takes no more
@@ -82,8 +88,9 @@
 //! Every reader of the chains of a contiguous table goes through `MbLookupTable::x_csr`: the strip
 //! scan of PAIRPAR (`x_pair_seed.rs`, `scan_strip_csr`), the reference scan of `search_query_batch`
 //! (`run.rs`, its `x_on_word_csr`; the chains' `on_word` stays as it was), both reading their words
-//! with hits through `x_dc_csr::Ring`, and `for_each_hit`, `contains_hit` and `count_hits` where
-//! the table has no chains.
+//! with hits through `x_dc_csr::Ring` (with LOSAT_X_BNCSRPACK through the ring of the head's form,
+//! chosen once per table: `x_dc_csr::XHead`), and `for_each_hit`, `contains_hit` and `count_hits`
+//! where the table has no chains.
 //!
 //! With LOSAT_TIMING `main` prints `[TIMING] x_bn_csr: builds=<CSR tables> parallel=<on a pool>
 //! words=<their words>` (the build times are in `[TIMING] x_mb_lookup_build`).
@@ -170,10 +177,11 @@ pub(super) fn plan(words: &Words<'_>, cells: usize, db_word_counts: bool, debug:
     if !on() {
         return false;
     }
+    // EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head has no size rule (module comment).
     let csr = !db_word_counts
         && !debug
         && (MIN_LUT..=MAX_LUT).contains(&words.lut_word_length)
-        && wanted(positions(words), cells);
+        && (x_will_pack(words.ascending_cells) || wanted(positions(words), cells));
     crate::utils::xreach::x_reach!("LOSAT_X_BNCSR", csr);
     csr
 }
@@ -439,24 +447,14 @@ pub(super) fn x_serial_packed(
     assert!(cells % 2048 == 0 && pv_array_bts >= 5 && !words.ascending_cells);
     assert_eq!(helper_array.len(), cells >> 11);
     let blocks = cells >> 6;
-    // `qs` has room for every position the loop reads (each word ends at one); the counts take its
-    // first `cells` bytes when they fit (always for a table of the size rule, `wanted`), so the
-    // build frees nothing in the middle of a batch (a freed block there is trimmed and faulted in
-    // again; with threads each trim interrupts them all), else a vector of their own.
-    let mut qs: Vec<u32> = Vec::with_capacity(positions(words));
-    let mut own: Vec<u8> = if qs.capacity() * 4 >= cells {
-        Vec::new()
-    } else {
-        vec![0u8; cells]
-    };
-    let cb = if own.is_empty() {
-        let p = qs.as_mut_ptr() as *mut u8;
-        // SAFETY: `cells` bytes of the capacity, before the place pass writes any element.
-        unsafe { std::ptr::write_bytes(p, 0, cells) };
-        p
-    } else {
-        own.as_mut_ptr()
-    };
+    // `qs` has room for every position the loop reads (each word ends at one) and for the counts,
+    // which take its first `cells` bytes, so the build frees nothing in the middle of a batch (a
+    // freed block there is trimmed and faulted in again; with threads each trim interrupts them
+    // all).
+    let mut qs: Vec<u32> = Vec::with_capacity(positions(words).max(cells.div_ceil(4)));
+    let cb = qs.as_mut_ptr() as *mut u8;
+    // SAFETY: `cells` bytes of the capacity, before the place pass writes any element.
+    unsafe { std::ptr::write_bytes(cb, 0, cells) };
     let mut more = HashMap::new();
     const AHEAD: usize = 16;
     let mut ring = [0usize; AHEAD];
@@ -485,7 +483,7 @@ pub(super) fn x_serial_packed(
     // SAFETY: as above, and the ranks `0 .. present` of the capacity's `present + 1` elements.
     let ranked = unsafe { x_rank_counts8(bits.as_mut_ptr(), cb, &more, sb, 0, blocks, 0) };
     debug_assert_eq!(ranked, present);
-    drop((own, more));
+    drop(more);
     let n_words = seen;
     assert!(
         n_words <= u32::MAX as usize,
@@ -563,7 +561,7 @@ pub(super) fn x_assert_runs_are_the_chains(
             q = next_pos[q as usize];
         }
         words += chain.len();
-        let run = csr.run(cell);
+        let run = csr.x_run_any(cell);
         if run != chain.as_slice() {
             diffs.push(format!(
                 "cell {cell} run {:?} chain {:?}",
@@ -833,7 +831,8 @@ pub(super) mod tests {
                     let what = format!("lut {lut} packed {packed} n {n} len {len}");
                     if repeats {
                         // the cells of 255, 256 and more words
-                        let mut runs: Vec<usize> = (0..cells).map(|c| csr.run(c).len()).collect();
+                        let mut runs: Vec<usize> =
+                            (0..cells).map(|c| csr.x_run_any(c).len()).collect();
                         runs.sort_unstable();
                         assert!(runs.contains(&255) && runs.contains(&256), "{what}");
                         assert!(runs[cells - 1] >= 1200 - lut, "{what}");
@@ -974,7 +973,7 @@ pub(super) mod tests {
                     }
                     assert!(!lookup.contains_hit(cell as u64, 1 << 30), "{what}");
                     if let Some(csr) = lookup.x_mb_csr() {
-                        assert_eq!(csr.run(cell), chain.as_slice(), "{what} cell {cell}");
+                        assert_eq!(csr.x_run_any(cell), chain.as_slice(), "{what} cell {cell}");
                     }
                 }
             };

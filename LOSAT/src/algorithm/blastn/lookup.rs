@@ -1005,7 +1005,7 @@ impl MbLookupTable {
     fn x_csr_each(&self, index: u64, mut callback: impl FnMut(u32)) {
         debug_assert!(self.x_csr.is_some());
         if let Some(csr) = self.x_csr.as_ref() {
-            for &q_off_1 in csr.run(index as usize) {
+            for &q_off_1 in csr.x_run_any(index as usize) {
                 callback(q_off_1);
             }
         }
@@ -1122,7 +1122,7 @@ impl TwoStageLookup {
         let mut hashtable = vec![0u32; cells];
         let mut next_pos = vec![0u32; next_pos_len];
         for (cell, head) in hashtable.iter_mut().enumerate() {
-            let run = csr.run(cell);
+            let run = csr.x_run_any(cell);
             if let Some(&first) = run.first() {
                 *head = first;
                 for w in run.windows(2) {
@@ -1208,7 +1208,7 @@ impl TwoStageLookup {
     #[inline(never)]
     fn x_csr_contains(&self, lut_kmer: u64, q_off_1: u32) -> bool {
         if let Some(csr) = self.mb_lookup.x_csr.as_ref() {
-            return x_bn_csr::contains(csr.run(lut_kmer as usize), q_off_1);
+            return x_bn_csr::contains(csr.x_run_any(lut_kmer as usize), q_off_1);
         }
         debug_assert!(self.disc.as_ref().is_some_and(|d| d.x_csr.is_some()));
         self.disc
@@ -1222,7 +1222,7 @@ impl TwoStageLookup {
     #[inline(never)]
     fn x_csr_count(&self, lut_kmer: u64) -> usize {
         if let Some(csr) = self.mb_lookup.x_csr.as_ref() {
-            return csr.run(lut_kmer as usize).len();
+            return csr.x_run_any(lut_kmer as usize).len();
         }
         debug_assert!(self.disc.as_ref().is_some_and(|d| d.x_csr.is_some()));
         self.disc

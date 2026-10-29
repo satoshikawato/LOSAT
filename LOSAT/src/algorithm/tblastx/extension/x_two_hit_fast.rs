@@ -191,7 +191,9 @@ impl WalkTable for Table {
 
 /// The byte table of a matrix other than BLOSUM62 (`two_hit_in`): the score of `q` against `s` at
 /// `q << 5 | s` for the bytes below `MATRIX_LETTERS`. A byte of 32 or more, which no frame holds,
-/// reads a cell that is not its score.
+/// reads a cell that is not its score. Page-aligned: the cells of the letters (the first 1 KiB),
+/// the only ones written (`fill_matrix_table`), take one page of memory.
+#[repr(align(4096))]
 pub(crate) struct MatrixWalkTable([i8; MATRIX_TABLE_LEN]);
 
 impl WalkTable for MatrixWalkTable {

@@ -5613,7 +5613,15 @@ Scheduling (each value computed by one thread with the original function; order 
   buffer only grows (up to a chunk and the margin, about 5 MB; from 1 MiB on with a capacity glibc maps,
   `x_reserve_mapped`), and the batch's buffers are freed at the end of its preliminary stage. Before 2026-10-28
   (B11m) each thread kept its buffer until it ended, so the buffers of every thread that had run such a unit
-  were still there at the peak, which comes after the units (MEASURED_PENDING). The units' codons count in
+  were still there at the peak, which comes after the units. Measured 2026-10-29 on the workstation (node 1,
+  `--membind=1`, the pull request's binary against dev ddb8c7ad in the same run, 8 rounds with the order rotated, VmHWM
+  sampled every 2 ms; every output of a case the same bytes across arms): the fly genome with `dmel_b4.faa` (4
+  batches) at 16 threads max RSS 454 -> 381 MiB (-66 MiB per round, 8 of 8 lower; dev against itself -4), one batch
+  of 35 human proteins against the human genome at 16 threads 2,494 -> 2,441 MiB (-53, 7 of 8; dev against itself
+  -21), the zebrafish genome with `drer_b4.faa` (4 batches) at 32 threads 1,359 -> 1,319 MiB (-45, 8 of 8), the human
+  genome with `hsap_b4.faa` (4 batches) at 32 threads 4,743 -> 4,751 MiB (-40 per round, 5 of 8: no change beyond the
+  rounds' spread of -227 to +227); time x0.991 / 0.999 / 0.999 / 0.998 (dev against itself x0.995 / 1.001), minor
+  faults +5 % on the 4-batch human search (its buffers made once per batch). The units' codons count in
   `[X_STATS] TBNXLATESIMD`. Subjects with shorter frames keep the frames of their plans (those of 256 KiB or less reused
   by `TBNFRAMEREUSE`). With `LOSAT_X_STATS=1` `[X_STATS] TBNUNITXLATE plans= units= residues= buffers= freed=`
   counts the plans without residues, the units' residues, and the buffers made and freed (every buffer made is

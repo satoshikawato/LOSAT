@@ -396,6 +396,7 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "taxidlist"
             | "taxids"
             | "ungapped"
+            | "version"
             | "window_masker_taxid"
             | "window_size"
             | "xdrop_gap"
@@ -447,6 +448,7 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "subject_besthit"
             | "taxidlist"
             | "taxids"
+            | "version"
             | "xdrop_gap"
             | "xdrop_gap_final"
             | "xdrop_ungap"
@@ -661,9 +663,11 @@ where
 // ```
 // NCBI's application reads these words anywhere before `--`, also where another option
 // expects its value: `-out -version` prints the version, and `-out -dryrun` loses the
-// value of `-out`. LOSAT rejects each of them (decision D9) but `-version` (printed by
-// `ncbi_version_request`, which runs before this), so the first one found is rejected
-// there as it is in an option's place, rather than read as the value.
+// value of `-out`. LOSAT rejects each of them (decision D9), so the first one found is
+// rejected there as it is in an option's place, rather than read as the value. The command
+// line never brings `-version` here: `main` prints the version before parsing
+// (`ncbi_version_request`). The Web engine, which parses its options here and has no
+// version to print, refuses it.
 fn ncbi_preparsed_toolkit_word(tokens: &[OsString]) -> Option<&str> {
     for token in tokens {
         let text = token.to_str().unwrap_or("");
@@ -674,6 +678,7 @@ fn ncbi_preparsed_toolkit_word(tokens: &[OsString]) -> Option<&str> {
             text,
             "-logfile"
                 | "-conffile"
+                | "-version"
                 | "-version-full"
                 | "-version-full-xml"
                 | "-version-full-json"
@@ -757,6 +762,7 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "taxidlist"
             | "taxids"
             | "use_sw_tback"
+            | "version"
             | "xdrop_ungap"
     )
 }
@@ -805,6 +811,7 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "sum_stats"
             | "taxidlist"
             | "taxids"
+            | "version"
             | "xdrop_ungap"
     )
 }

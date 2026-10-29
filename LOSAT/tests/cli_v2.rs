@@ -758,7 +758,7 @@ fn numeric_values_are_validated_before_io() {
     };
     assert_eq!(args.gap_open, Some(0));
     // NCBI's other blastn tasks and options are rejected explicitly (AGENTS.md rule 2).
-    for extra in [&["-task", "rmblastn"][..], &["-ungapped"]] {
+    for extra in [&["-task", "rmblastn"][..], &["-ungapped"], &["-version"]] {
         let mut words = vec!["-outfmt", "6"];
         words.extend_from_slice(extra);
         let error = LOSAT::cli::render_message(&parse("blastn", &words).unwrap_err());
@@ -1259,6 +1259,7 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("blastp", &["-db_soft_mask", "21"]),
         ("blastp", &["-db_hard_mask", "21"]),
         ("blastp", &["-lcase_masking"]),
+        ("blastp", &["-version"]),
         ("blastp", &["-xdrop_gap_final", "30"]),
         ("blastn", &["-logfile", "log"]),
         ("blastp", &["-xmlhelp"]),
@@ -1605,8 +1606,10 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
 fn toolkit_words_in_an_option_value_are_rejected_as_options() {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001: the application reads
     // -version, -version-full*, -dryrun, -logfile and -conffile anywhere before `--`, also
-    // in an option's value (`-out -version` prints the version). LOSAT rejects all but
-    // -version (D9) in that place too, instead of writing a file named "-dryrun".
+    // in an option's value (`-out -version` prints the version). LOSAT rejects them (D9)
+    // in that place too, instead of writing a file named "-version". The parser refuses
+    // `-version` (the Web engine's); the command line prints it before parsing
+    // (`ncbi_version_request_reads_the_word_before_the_arguments`).
     for (program, upper) in [
         ("blastn", "BLASTN"),
         ("blastp", "BLASTP"),
@@ -1614,7 +1617,8 @@ fn toolkit_words_in_an_option_value_are_rejected_as_options() {
         ("tblastx", "TBLASTX"),
     ] {
         for words in [
-            &["-out", "-dryrun"][..],
+            &["-out", "-version"][..],
+            &["-out", "-dryrun"],
             &["-evalue", "-version-full"],
             &["-out", "-logfile"],
             &["-out", "-conffile=x.ini"],

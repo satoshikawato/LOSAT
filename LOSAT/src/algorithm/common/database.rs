@@ -759,6 +759,166 @@ pub(crate) fn tabular_subject_ids(
         .collect()
 }
 
+/// Why a report of some sequence of a database could be refused (`reports_may_refuse`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReportRefusal {
+    /// A header that does not read, or a sequence whose stored title, tabular id or parsed
+    /// Seq-ids the reports refuse.
+    Headers,
+    /// Two sequences whose Seq-align ids NCBI takes for one (`refuse_joined_hits`).
+    Joined,
+    /// A taxid that does not decode, or a lookup of the taxonomy database that could be refused,
+    /// where the batches' prefetch reads them (`prefetch_messages`).
+    Taxonomy,
+}
+
+// No NCBI counterpart: LOSAT's check whether one of its own refusals can come where a report of
+// the search names a sequence of the database; it changes no value NCBI computes.
+/// Whether a report that names any sequence of `db` could be refused by LOSAT, with the reports
+/// `shown`: every sequence's header is read as the reports read it (`read_header`) and checked as
+/// they check it (`check_reported_title`, `tabular_subject_id` for the tabular formats,
+/// `check_reported_parsed` with `taxdb_found` where outfmt 0 is shown, as `reported_subjects`
+/// asks). Where the reports join following hits (`shown.joined`), no two sequences with parsed
+/// Seq-ids may be joined (`refuse_joined_hits`): the sequences that share a key of their Seq-align
+/// ids (`db_subject::join_keys`; joined ones always share one) are read again and compared
+/// (`joined_in_reports`). With `prefetch` (the batches' prefetch of a search with `taxdb.bti` on
+/// the search path) the taxids that the prefetch looks up must read (a stored title's first one,
+/// every one of a sequence with parsed Seq-ids, as `prefetch_messages` reads them) and no lookup
+/// of them may be refused (`taxids_may_refuse`). A reader error is a refusal too. The headers are
+/// read in `pool`; nothing is written and no state of the run changes. `None`: no report of any
+/// sequence can be refused.
+pub(crate) fn reports_may_refuse(
+    db: &SeqDb,
+    shown: ParsedShown,
+    protein: bool,
+    taxdb_found: bool,
+    prefetch: bool,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    program: &str,
+) -> Option<ReportRefusal> {
+    /// What the pass keeps: the join keys with their sequence, and the prefetch's taxids.
+    #[derive(Default)]
+    struct Kept {
+        keys: Vec<(u64, u32)>,
+        taxids: Vec<i32>,
+    }
+    impl Kept {
+        fn join(mut self, mut other: Kept) -> std::result::Result<Kept, ReportRefusal> {
+            self.keys.append(&mut other.keys);
+            self.taxids.append(&mut other.taxids);
+            Ok(self)
+        }
+    }
+    let check = |mut kept: Kept, ordinal: u32| -> std::result::Result<Kept, ReportRefusal> {
+        match read_header(db, ordinal, 0, program) {
+            Ok(ReportedHeader::Stored(stored)) => {
+                check_reported_title(stored.replaced_bytes, ordinal, program)
+                    .map_err(|_| ReportRefusal::Headers)?;
+                if shown.tabular {
+                    tabular_subject_id(&stored.title, ordinal, protein, program)
+                        .map_err(|_| ReportRefusal::Headers)?;
+                }
+                if prefetch {
+                    let taxids = db
+                        .defline_taxids(ordinal)
+                        .map_err(|_| ReportRefusal::Taxonomy)?;
+                    kept.taxids
+                        .extend(taxids.first().copied().filter(|&taxid| taxid > 0));
+                }
+            }
+            Ok(ReportedHeader::Parsed(subject)) => {
+                check_reported_parsed(
+                    &subject,
+                    shown,
+                    protein,
+                    shown.pairwise && taxdb_found,
+                    ordinal,
+                    program,
+                )
+                .map_err(|_| ReportRefusal::Headers)?;
+                if shown.joined {
+                    let mut keys = Vec::new();
+                    crate::report::db_subject::join_keys(&subject, &mut keys);
+                    kept.keys.extend(keys.into_iter().map(|key| (key, ordinal)));
+                }
+                if prefetch {
+                    kept.taxids.extend(subject.volume_taxids());
+                }
+            }
+            Err(_) => return Err(ReportRefusal::Headers),
+        }
+        Ok(kept)
+    };
+    let all = || -> std::result::Result<Kept, ReportRefusal> {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        if pool.enabled() {
+            use rayon::prelude::*;
+            return pool.install(|| {
+                (0..db.num_seqs())
+                    .into_par_iter()
+                    .with_min_len(4096)
+                    .try_fold(Kept::default, check)
+                    .try_reduce(Kept::default, Kept::join)
+            });
+        }
+        let _ = pool;
+        (0..db.num_seqs()).try_fold(Kept::default(), check)
+    };
+    let mut kept = match all() {
+        Ok(kept) => kept,
+        Err(refusal) => return Some(refusal),
+    };
+    kept.keys.sort_unstable();
+    for shared_key in kept.keys.chunk_by(|a, b| a.0 == b.0) {
+        let mut ordinals: Vec<u32> = shared_key.iter().map(|&(_, ordinal)| ordinal).collect();
+        ordinals.dedup();
+        if ordinals.len() < 2 {
+            continue;
+        }
+        let mut subjects = Vec::with_capacity(ordinals.len());
+        for ordinal in ordinals {
+            match read_header(db, ordinal, 0, program) {
+                Ok(ReportedHeader::Parsed(subject)) => subjects.push(subject),
+                _ => return Some(ReportRefusal::Headers),
+            }
+        }
+        for (index, a) in subjects.iter().enumerate() {
+            if subjects[index + 1..]
+                .iter()
+                .any(|b| crate::report::db_subject::joined_in_reports(a, b))
+            {
+                return Some(ReportRefusal::Joined);
+            }
+        }
+    }
+    kept.taxids.sort_unstable();
+    kept.taxids.dedup();
+    (prefetch && taxids_may_refuse(db, &kept.taxids)).then_some(ReportRefusal::Taxonomy)
+}
+
+/// Whether the lookup of one of `taxids` in the taxonomy database on the search path of `db`
+/// could be refused, as the batches' prefetch looks them up (`prefetch_messages`); `false`
+/// without `taxdb.bti` there. Each one is looked up once with a taxonomy handle of its own
+/// (as `taxdb_may_refuse`'s database side does), so the run's handle and messages are as they
+/// would be without this call. The prefetch's refusal of NCBI's cache
+/// (`TaxdbRun::cache_collision`) comes at the run's first prefetch, before any report.
+fn taxids_may_refuse(db: &SeqDb, taxids: &[i32]) -> bool {
+    if !db.taxdb_found() {
+        return false;
+    }
+    let Some(search_path) = db.search_path() else {
+        return false;
+    };
+    let taxdb = crate::seqdb::taxdb::LazyTaxDb::new(search_path.clone());
+    let mut messages = Vec::new();
+    taxids
+        .iter()
+        .any(|&taxid| taxdb.names(taxid, &mut messages).is_err())
+}
+
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1865-1886
 // ```c++
 //         string message;

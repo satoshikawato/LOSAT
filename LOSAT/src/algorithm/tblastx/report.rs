@@ -1271,7 +1271,8 @@ pub(crate) fn write_outfmt7_query_header<W: Write>(
 }
 
 /// Writes the outfmt 6 or 7 rows of the final hit list (in its order); outfmt 7 adds the
-/// block header of every query and, after the last batch, the count of queries.
+/// block header of every query and, with the epilog (`Some` of the queries that earlier calls
+/// wrote, `report_stream`), the count of queries.
 ///
 /// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
 /// ```c
@@ -1295,7 +1296,7 @@ pub(crate) fn write_tabular<W: Write>(
     query_ids: &[Arc<[u8]>],
     subject_ids: &[Arc<[u8]>],
     unsearched: &[bool],
-    epilog: bool,
+    epilog: Option<usize>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> io::Result<()> {
@@ -1343,8 +1344,12 @@ pub(crate) fn write_tabular<W: Write>(
     //     m_Ostream << "# BLAST processed " << num_queries << " queries\n";
     // }
     // ```
-    if comments && epilog {
-        writeln!(writer, "# BLAST processed {} queries", query_titles.len())?;
+    if let (true, Some(queries_before)) = (comments, epilog) {
+        writeln!(
+            writer,
+            "# BLAST processed {} queries",
+            queries_before + query_titles.len()
+        )?;
     }
     Ok(())
 }

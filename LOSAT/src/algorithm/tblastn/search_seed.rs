@@ -712,8 +712,16 @@ fn x_own_plan(
 /// (`x_scan_byte.rs` builds that word's block of candidates again), which costs little per call
 /// but adds up at NCBI's size: dmel_b4.faa x zebrafish cDNAs (`-db`) at one thread took 1.0041 of
 /// the instructions with 4096 + the longest chain, 1.0016 with 8192 +, 1.0004 with 16384 + and
-/// 1.0001 with 32768 + (against 1024 x the longest chain; D14 s1 c1, 2026-10-26).
+/// 1.0001 with 32768 + (against 1024 x the longest chain; D14 s1 c1, 2026-10-26). With
+/// `LOSAT_X_TBNSCANRESUME` a stopped call keeps its block, and the units that take its scan have
+/// NCBI's size (`OFFSET_ARRAY_SIZE`).
 const X_PAIR_ROOM: usize = 8 * 4096;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.h:119
+// #define OFFSET_ARRAY_SIZE 4096
+/// NCBI's OFFSET_ARRAY_SIZE: the offset array of a unit scanned with `LOSAT_X_TBNSCANRESUME` holds
+/// this many entries more than the longest chain (GetOffsetArraySize, lookup_wrap.c:264-266).
+const OFFSET_ARRAY_SIZE: usize = 4096;
 
 // No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
 /// Whether a plan's offset array holds `X_PAIR_ROOM` + the longest chain entries (at most
@@ -1001,16 +1009,28 @@ pub(super) fn x_scan_unit(
     // (without AVX2 a sparse one); it writes up to X_SCAN_BYTE_SLACK entries after the capacity.
     let scan_byte = super::x_scan_byte::x_scan_byte();
     let presence = super::x_scan_byte::x_presence(scan_byte, &plan.lookup);
+    // EXPERIMENT (LOSAT_X_TBNSCANRESUME): a call of the scan on presence bytes that stops on a full
+    // offset array leaves its block in `held`, and the next call copies on from there instead of
+    // making the block's candidates again; the array then has NCBI's size (OFFSET_ARRAY_SIZE + the
+    // longest chain, lookup_wrap.c:264-266), never more entries than the plan's.
+    let resume = presence.is_some() && super::x_scan_byte::x_scan_resume();
+    let capacity = if resume {
+        let longest_chain = plan.lookup.longest_chain.max(1) as usize;
+        (OFFSET_ARRAY_SIZE + longest_chain).min(plan.pair_capacity)
+    } else {
+        plan.pair_capacity
+    };
     // The branch-free scan writes up to X_SCAN_BF_SLACK entries after the capacity.
     let pairs_len = if presence.is_some() {
-        plan.pair_capacity + super::x_scan_byte::X_SCAN_BYTE_SLACK
+        capacity + super::x_scan_byte::X_SCAN_BYTE_SLACK
     } else {
-        plan.pair_capacity + super::x_scan_bf::X_SCAN_BF_SLACK
+        capacity + super::x_scan_bf::X_SCAN_BF_SLACK
     };
     if pairs.len() < pairs_len {
         pairs.resize(pairs_len, BlastOffsetPair::default());
     }
-    let pair_capacity = plan.pair_capacity as i32;
+    let pair_capacity = capacity as i32;
+    let mut held = super::x_scan_byte::XScanHeld::new();
     // The scan calls of the unit, for LOSAT_X_STATS.
     let mut x_calls = 0u64;
     for (range_index, &(left, right)) in ranges.iter().enumerate() {
@@ -1026,15 +1046,28 @@ pub(super) fn x_scan_unit(
         let mut scan_range = [0, left, end];
         while scan_range[1] <= scan_range[2] {
             let hits = if let Some(presence) = &presence {
-                super::x_scan_byte::x_scan_one_range_byte(
-                    scan_byte,
-                    &plan.lookup,
-                    presence,
-                    subject,
-                    pairs,
-                    pair_capacity,
-                    &mut scan_range,
-                )
+                if resume {
+                    super::x_scan_byte::x_scan_one_range_held(
+                        scan_byte,
+                        &plan.lookup,
+                        presence,
+                        subject,
+                        pairs,
+                        pair_capacity,
+                        &mut scan_range,
+                        &mut held,
+                    )
+                } else {
+                    super::x_scan_byte::x_scan_one_range_byte(
+                        scan_byte,
+                        &plan.lookup,
+                        presence,
+                        subject,
+                        pairs,
+                        pair_capacity,
+                        &mut scan_range,
+                    )
+                }
             } else {
                 super::x_scan_bf::x_scan_one_range_bf(
                     &plan.lookup,

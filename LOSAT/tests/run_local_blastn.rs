@@ -319,8 +319,9 @@ fn unsupported_formats_fail_before_searching() {
         &inputs.subject.0,
         ReaderConfig::subject("BLASTN", false, true).with_defline(true),
     );
-    // NCBI ignores a custom specification with outfmt 0 (blast_args.cpp:2845-2851).
-    for outfmt in ["10", "6 qseqid", "abc"] {
+    // NCBI ignores a custom specification with outfmt 0 (blast_args.cpp:2845-2851); a delimiter
+    // that a field uses between its entries is NCBI's error (blast_args.cpp:2753-2792).
+    for outfmt in ["1", "6 delim=; qseqid staxids", "abc"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![
@@ -344,6 +345,48 @@ fn unsupported_formats_fail_before_searching() {
             valid.is_empty() && invalid.is_empty() && diagnostics.is_empty(),
             "nothing is written when a requested format is invalid"
         );
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
+// ```c++
+//     if (m_FormatType == CFormattingArgs::eTabular ||
+//         m_FormatType == CFormattingArgs::eTabularWithComments ||
+//         m_FormatType == CFormattingArgs::eCommaSeparatedValues ||
+//         m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
+// ```
+// The tabular reports with a field list or a delimiter, and outfmt 10 and 20 (line CLI C2), of
+// one search: each equals its run alone and the CLI run of that format, beside the default 6.
+#[test]
+fn custom_tabular_formats_of_one_search_match_the_cli_run_of_that_format() {
+    const CUSTOM: [&str; 5] = [
+        "6",
+        "7 std qcovs qcovus qcovhsp sstrand staxid slen",
+        "10 qseqid sseqid qseq sseq btop nident positive ppos",
+        "20 delim=| qseqid sallseqid sacc stitle frames qlen",
+        "6 delim=, std",
+    ];
+    let inputs = Inputs::new();
+    for extra in [
+        &[][..],
+        &["-task", "blastn"][..],
+        &["-num_threads", "2"][..],
+    ] {
+        let together = inputs.run(&CUSTOM, extra, false);
+        for (index, outfmt) in CUSTOM.iter().enumerate() {
+            assert!(!together.outputs[index].is_empty(), "outfmt {outfmt:?}");
+            let alone = inputs.run(&[outfmt], extra, false);
+            assert!(
+                together.outputs[index] == alone.outputs[0],
+                "run_local outfmt {outfmt:?} {extra:?}"
+            );
+            let (cli_output, cli_stderr) = inputs.cli(outfmt, extra);
+            assert!(
+                together.outputs[index] == cli_output,
+                "CLI outfmt {outfmt:?} {extra:?}"
+            );
+            assert_eq!(together.diagnostics, cli_stderr, "{outfmt:?} {extra:?}");
+        }
     }
 }
 

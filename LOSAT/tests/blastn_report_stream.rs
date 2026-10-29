@@ -678,4 +678,22 @@ fn where_the_switch_must_not_act_the_counters_name_why() {
         same_two("debug", &plain, 1, &[("LOSAT_DEBUG_COORDS", "1")], None);
     assert!(!off.report.is_empty());
     assert_eq!((batches, reason.as_str()), (0, "debug"));
+    // A tabular field list or delimiter, and outfmt 10 and 20 (line CLI C2): written after the
+    // loop, where the custom report's refusals come before its first byte.
+    for outfmt in [
+        "7 std qcovs qcovus sstrand",
+        "6 delim=, std",
+        "10",
+        "20 qseqid sseqid",
+    ] {
+        let mut custom = plain.to_vec();
+        custom[7] = outfmt;
+        let (off, (batches, reason)) = same_two(outfmt, &custom, 4, &[], None);
+        assert!(!off.report.is_empty(), "{outfmt}");
+        assert_eq!(
+            (batches, reason.as_str()),
+            (0, "custom_tabular"),
+            "{outfmt}"
+        );
+    }
 }

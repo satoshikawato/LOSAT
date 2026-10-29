@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use super::ber::decode_full_set;
 use super::defline_set::{
-    alignment_line_id, compare, description_id, seq_id_list, tabular_id, Sic, TabularId,
+    alignment_line_id, compare, description_id, match_keys, seq_id_list, tabular_id, Sic, TabularId,
 };
 use super::label::{bare, content, fasta, first_gi, format_label};
 use super::model::{
@@ -654,6 +654,95 @@ fn printings_of_forms_without_a_fixture() {
     assert_eq!(find_best(&ids, text_score), Some(&ti));
     assert_eq!(find_best(&ids[..1], text_score), Some(&trace));
     assert_eq!(find_best(&[], text_score), None);
+}
+
+// LOSAT's check that no two sequences of a database are taken for one (line DBID, ID4t fix 2b):
+// every pair of ids that `compare` finds the same shares a key of `match_keys`.
+#[test]
+fn ids_that_compare_the_same_share_a_match_key() {
+    let pdb = |mol: &str, chain: Option<i32>, chain_id: Option<&str>| {
+        ParsedSeqId::Pdb(PdbSeqId {
+            mol: mol.as_bytes().to_vec(),
+            chain,
+            rel: None,
+            chain_id: chain_id.map(|id| id.as_bytes().to_vec()),
+        })
+    };
+    let patent = |country: &str, number: PatentNumber, seqid: i32| {
+        ParsedSeqId::Patent(PatentSeqId {
+            seqid,
+            cit: IdPat {
+                country: country.as_bytes().to_vec(),
+                id: number,
+                doc_type: None,
+            },
+        })
+    };
+    let general = |db: &str, tag: ObjectId| {
+        ParsedSeqId::General(Dbtag {
+            db: db.as_bytes().to_vec(),
+            tag,
+        })
+    };
+    let ids = [
+        ParsedSeqId::Genbank(textseq(Some("AB000015"), None, Some(1))),
+        ParsedSeqId::Genbank(textseq(Some("AB000015"), None, Some(2))),
+        ParsedSeqId::Embl(textseq(Some("ab000015"), None, None)),
+        ParsedSeqId::Ddbj(textseq(Some("AB000016"), Some("LOCUS1"), None)),
+        ParsedSeqId::Tpg(textseq(None, Some("locus1"), Some(3))),
+        ParsedSeqId::Other(textseq(Some("NR_000001"), None, Some(1))),
+        ParsedSeqId::Other(textseq(Some("nr_000001"), None, None)),
+        ParsedSeqId::Swissprot(textseq(Some("P12345"), Some("NAME_HUMAN"), Some(1))),
+        ParsedSeqId::Pir(textseq(None, Some("name_human"), None)),
+        ParsedSeqId::Local(ObjectId::Str(b"5".to_vec())),
+        ParsedSeqId::Local(ObjectId::Id(5)),
+        ParsedSeqId::Local(ObjectId::Str(b"05".to_vec())),
+        ParsedSeqId::Local(ObjectId::Str(b"Ab".to_vec())),
+        ParsedSeqId::Local(ObjectId::Str(b"aB".to_vec())),
+        general("db", ObjectId::Id(1)),
+        general("DB", ObjectId::Str(b"1".to_vec())),
+        general("db", ObjectId::Str(b"Tag".to_vec())),
+        general("Db", ObjectId::Str(b"TAG".to_vec())),
+        pdb("1ABC", None, None),
+        pdb("1ABC", Some(65), Some("AA")),
+        pdb("1ABC", Some(66), None),
+        pdb("1abc", None, None),
+        patent("us", PatentNumber::Number(b"123a".to_vec()), 1),
+        patent("US", PatentNumber::Number(b"123A".to_vec()), 1),
+        patent("US", PatentNumber::AppNumber(b"123A".to_vec()), 1),
+        ParsedSeqId::Gi(7),
+        ParsedSeqId::Gibbsq(7),
+        ParsedSeqId::Gibbmt(7),
+        ParsedSeqId::Giim(GiimportId {
+            id: 7,
+            db: None,
+            release: None,
+        }),
+    ];
+    let keys: Vec<HashSet<u64>> = ids
+        .iter()
+        .map(|id| {
+            let mut keys = Vec::new();
+            match_keys(id, &mut keys);
+            assert!(!keys.is_empty(), "{id:?} has no key");
+            keys.into_iter().collect()
+        })
+        .collect();
+    let mut same = 0;
+    for (a, a_keys) in ids.iter().zip(&keys) {
+        for (b, b_keys) in ids.iter().zip(&keys) {
+            if compare(a, b) == Sic::Yes {
+                same += 1;
+                assert!(!a_keys.is_disjoint(b_keys), "{a:?} and {b:?} share no key");
+            }
+        }
+    }
+    // Pairs other than an id with itself are among them (versions, case, alternatives, chains).
+    assert!(same > ids.len() + 12, "{same}");
+    // Distinct values have distinct keys.
+    assert!(keys[0].is_disjoint(&keys[5]));
+    assert!(keys[18].is_disjoint(&keys[21]));
+    assert!(keys[25].is_disjoint(&keys[26]));
 }
 
 #[test]

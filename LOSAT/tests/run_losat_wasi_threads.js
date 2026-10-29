@@ -10,4 +10,10 @@ const { createThreadHost } = require("./wasi_thread_host");
     process.exitCode = host.start();
     await host.waitForWorkers();
   } finally { await host.close(); }
+  // Every thread worker has exited, the files are closed and the command's output was written
+  // synchronously (WASI fd_write): exit with the command's status now. Node's own end of the
+  // process (freeing the environment and the main isolate after the 'exit' event) took 5-10 ms
+  // more on the workstation and does nothing for the command. A failure above still ends the
+  // usual way, after its message.
+  process.exit();
 })().catch(err => { console.error(err); process.exitCode = 1; });

@@ -97,7 +97,7 @@ def main():
     runtime_files = {}
     # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
     # (*thread)->Run(); (*thread)->Join(&result);
-    runtime_names = ["run_losat_wasi_threads.js", "wasi_thread_host.js", "wasi_artifact.js", "wasi_shared_memory.js", "wasi_files.js"]
+    runtime_names = ["run_losat_wasi_threads.js", "wasi_thread_host.js", "wasi_thread_worker.js", "wasi_artifact.js", "wasi_shared_memory.js", "wasi_files.js"]
     if args.include_serial:
         runtime_names.append("run_losat_wasi.js")
     for name in runtime_names:

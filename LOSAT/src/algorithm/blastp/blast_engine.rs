@@ -27,7 +27,7 @@ use crate::algorithm::tblastx::constants::{
     GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
 };
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_bp_build_compressed_lookup, x_bpclut_on, XCompressedLookup, XFlatCompressedLookup,
+    x_bp_build_compressed_lookup, x_bpclut_on, XCompressedLookup, XFlatCompressedLookup, X_BLASTP,
 };
 use crate::algorithm::tblastx::lookup::compressed::BlastCompressedAaLookupTable;
 use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
@@ -2103,7 +2103,7 @@ fn blastp_for_each_offset_pair<F>(
         // cell's hits copied from its slice; lookup/x_clut_direct.rs).
         BlastpRuntimeLookup::CompressedFlat(lookup) => {
             while scan_range[1] <= scan_range[2] {
-                let hits = lookup.scan_subject(
+                let hits = lookup.scan_subject::<X_BLASTP>(
                     subject_sequence,
                     &seq_ranges,
                     offset_pairs,

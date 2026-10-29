@@ -14749,11 +14749,20 @@ fn search_query_batch<const UNGAPPED: bool>(
             // /* Sort by score: */
             // Blast_HSPListSortByScore(hsp_list);
             // ```
-            // An ungapped (`-ungapped`) search makes the HSP list of the chunk from the initial
-            // hits as they were saved (no sort by score, no gapped extension), sorts it by score
-            // (stable, as the oracle's qsort) and takes the subject chunk's offset (blast_engine.c
-            // :564-580), with no purge of common end points (a gapped search's step).
+            // An ungapped (`-ungapped`) search sorts the initial hits by score first, as a gapped
+            // search does (`BlastNaWordFinder` ends with `if (word_params->ungapped_extension)
+            // Blast_InitHitListSortByScore(init_hitlist)`, na_ungapped.c:1691-1692, and
+            // `ungapped_extension` is TRUE for every program but PHI: blast_parameters.c:189-192),
+            // with the same comparator (`score_compare_ungapped_hits` = `score_compare_match`:
+            // score descending, s_start, length descending, the concatenated query's q_start;
+            // stable, as the oracle's glibc qsort). The order of ties (a plus and a minus hit
+            // with the same score and context-relative ranges) then comes out as NCBI's, and
+            // `Blast_HSPListSortByScore` below keeps it. Then the HSP list of the chunk is made
+            // from those hits (no gapped extension), the subject chunk's offset is taken
+            // (blast_engine.c:564-580), and there is no purge of common end points (a gapped
+            // search's step).
             if UNGAPPED {
+                ungapped_hits.sort_by(score_compare_ungapped_hits);
                 good_init_extends.fetch_add(
                     ungapped_hits.len() as u64,
                     std::sync::atomic::Ordering::Relaxed,

@@ -129,7 +129,7 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 /// `coordination.rs` `task_defaults`). The reward and the penalty are NCBI's 16-bit values
 /// (`determine_scoring_params`). LOSAT's own limits are `check_losat_limits`.
 pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
-    check_scoring_options_with(args, &args.report_counts, false)
+    check_scoring_options_with(args, &args.report_counts, args.ungapped)
 }
 
 /// `check_scoring_options` with the hit list size of `counts` (the counts that
@@ -193,7 +193,7 @@ fn check_scoring_options_with(
 /// after NCBI's conversion). The limit on greedy gap costs follows the table check
 /// (`check_greedy_gap_costs`).
 pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
-    check_losat_limits_with(args, &args.report_counts, false)
+    check_losat_limits_with(args, &args.report_counts, args.ungapped)
 }
 
 /// `check_losat_limits` with the hit list size of `counts`, see `check_scoring_options_with`.
@@ -368,7 +368,7 @@ pub fn check_scoring(args: &BlastnArgs) -> anyhow::Result<()> {
 /// hit list size): the hit list size is the one that the run of these formats derives. A
 /// host that runs one search per hit list size checks each of them.
 pub fn check_scoring_for_formats(args: &BlastnArgs, outfmts: &[i32]) -> anyhow::Result<()> {
-    check_scoring_for_formats_with(args, outfmts, false)
+    check_scoring_for_formats_with(args, outfmts, args.ungapped)
 }
 
 /// `check_scoring_for_formats` for an ungapped (`-ungapped`) search when `ungapped`: NCBI

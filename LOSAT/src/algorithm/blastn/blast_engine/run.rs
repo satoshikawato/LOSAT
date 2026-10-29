@@ -5401,6 +5401,9 @@ struct BlastnReportInputs<'a> {
     zero_gap_extension_formula: bool,
     /// The two-hit window of the task, printed in the epilog when not 0.
     window_size: usize,
+    /// An ungapped (`-ungapped`) search: one Karlin block, no gap costs in the reports, and the
+    /// hit list of the end of the traceback is the preliminary one (`finish_query_hit_list`).
+    ungapped: bool,
     /// Per query context (the plus strand of query `q` is context `2 * q`); `None` for
     /// the contexts of an invalid query (not searched by NCBI) and of the strand that
     /// `-strand` does not search.
@@ -5547,6 +5550,7 @@ fn blastn_pairwise_report(
         gap_extend: report.gap_extend,
         zero_gap_extension_formula: report.zero_gap_extension_formula,
         window_size: report.window_size,
+        gapped: !report.ungapped,
         num_descriptions,
         num_alignments,
         unsearched,
@@ -5770,6 +5774,7 @@ fn finish_query_hit_list(
     query_cov_hsp_perc: f64,
     subject_besthit: bool,
     culling_limit: i32,
+    ungapped: bool,
 ) {
     // NCBI's culling pipe is the first thing the traceback does with the consolidated results
     // (`-culling_limit`; the mask level of 101, the default, is no step).
@@ -5785,7 +5790,7 @@ fn finish_query_hit_list(
             hit_list,
             query_len,
             culling_limit,
-            usize::try_from(get_prelim_hitlist_size(hitlist_size, false, true)).unwrap_or(0),
+            usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !ungapped)).unwrap_or(0),
         );
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:836-867
@@ -5989,6 +5994,7 @@ fn post_process_hits_and_write(
                 query_cov_hsp_perc,
                 subject_besthit,
                 report.culling_limit,
+                report.ungapped,
             );
             drop_hsps_of_score_zero(hit_list);
         }
@@ -6607,8 +6613,8 @@ fn post_process_hits_and_write(
                     format_warnings.as_mut(),
                 )?,
                 Some(kind) => {
-                    // The gap costs are written for a gapped search, which LOSAT's BLASTN
-                    // always is (it does not take `-ungapped`); `cbs` and the genetic codes
+                    // The gap costs are written for a gapped search (NCBI reads them from
+                    // the options when `GetGappedMode()`); `cbs` and the genetic codes
                     // are not those of a nucleotide search (blastxml2_format.cpp:531-546).
                     let params = crate::report::blast_xml2::Xml2Run {
                         target: if is_database {
@@ -6616,7 +6622,7 @@ fn post_process_hits_and_write(
                         } else {
                             crate::report::blast_xml2::Xml2Target::Subjects(subject_records.len())
                         },
-                        gapped: true,
+                        gapped: !report.ungapped,
                         cbs: 0,
                         query_gencode: None,
                         db_gencode: None,
@@ -7488,6 +7494,17 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         app::formatting_handler_check(&choice, Program::Blastn)?;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1397-1440
+        // (`BLASTUngappedHspListToSeqAlign`: a subject's Seq-align of Dense-diags, and
+        // objtools/align_format/sam.cpp:66-80 for SAM's one line per subject)
+        // O4a-1 writes the formats that need no Seq-align of Dense-diags: 8, 9, 11, 12 (the
+        // Seq-align formats) and 17 (SAM) of an ungapped search are refused (O4a-2).
+        if args.ungapped && matches!(choice.number, 8 | 9 | 11 | 12 | 17) {
+            anyhow::bail!(
+                "the output format {} with -ungapped (an ungapped search) is not supported by LOSAT's BLASTN",
+                choice.number
+            );
+        }
         outfmts.push(choice.number);
     }
     // The hit list size and the counts of the pairwise report, with the formatting
@@ -8952,6 +8969,7 @@ fn run_in_pool(
                         args.qcov_hsp_perc.unwrap_or(0.0),
                         args.subject_besthit,
                         args.culling_limit_value(),
+                        args.ungapped,
                     );
                 }
             }
@@ -9658,6 +9676,7 @@ fn write_reports_untimed(
         // ```
         zero_gap_extension_formula: matches!(args.task.as_str(), "megablast" | "blastn"),
         window_size: config.window_size,
+        ungapped: args.ungapped,
         context_karlin: results.context_karlin,
         num_descriptions: args.report_counts.num_descriptions,
         num_alignments: args.report_counts.num_alignments,

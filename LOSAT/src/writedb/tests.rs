@@ -436,7 +436,7 @@ fn replace_bytes(text: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
     out
 }
 
-/// `losat makedb` from its arguments to its exit status on the inputs of
+/// `losat makeblastdb` from its arguments to its exit status on the inputs of
 /// `makeblastdb_app_cases.rs`: the files, the log, the messages and the exit
 /// status are makeblastdb's.
 #[test]
@@ -517,7 +517,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
     }
 }
 
-/// One run of `losat makedb` for a protein database titled "t": the exit
+/// One run of `losat makeblastdb` for a protein database titled "t": the exit
 /// status, the log and the messages of the standard error stream.
 fn makedb(input: &str, out: &str, max_file_sz: &str, stdin: &[u8]) -> (i32, String, String) {
     let args = MakedbArgs {
@@ -967,30 +967,26 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
     assert_eq!(volumes[999..], ["db.00999", "db.1000"]);
 }
 
-/// The parsed `losat makedb` arguments of a makeblastdb command line (the
-/// words after the program's name), under the subcommand's current name.
+/// The parsed `losat makeblastdb` arguments of a makeblastdb command line (the
+/// words after the program's name).
 fn parse_makedb_words(words: &[String]) -> MakedbArgs {
     use crate::cli::{Cli, Commands};
-    let mut last_error = None;
-    for name in ["makeblastdb", "makedb"] {
-        let mut argv = vec!["losat".to_string(), name.to_string()];
-        argv.extend(words.iter().cloned());
-        match crate::cli::try_parse_from::<Cli, _, _>(argv) {
-            Ok(cli) => match cli.command {
-                Commands::Makedb(args) => return args,
-                _ => unreachable!("a makeblastdb command line"),
-            },
-            Err(error) => last_error = Some(error),
-        }
+    let mut argv = vec!["losat".to_string(), "makeblastdb".to_string()];
+    argv.extend(words.iter().cloned());
+    match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+        Ok(cli) => match cli.command {
+            Commands::Makedb(args) => args,
+            _ => unreachable!("a makeblastdb command line"),
+        },
+        Err(error) => panic!("{words:?}: {error}"),
     }
-    panic!("{words:?}: {}", last_error.unwrap());
 }
 
 /// The driver of the makedb-v5 line's S2 gate
 /// (`makedb-v5-20261029/scripts/s2_gate.py`), not a test of its own: for each
 /// line of the manifest named by `LOSAT_S2_GATE_MANIFEST` (a directory, the
 /// build date makeblastdb stored, then one JSON array of words per run) it runs
-/// `losat makedb` through `run_with` in that directory's terms, with that date,
+/// `losat makeblastdb` through `run_with` in that directory's terms, with that date,
 /// and writes `so<k>.txt`, `se<k>.txt` and `rc<k>.txt` there. The script
 /// compares every file with makeblastdb's.
 #[test]

@@ -1,4 +1,4 @@
-//! `losat makedb`: the application layer of makeblastdb
+//! `losat makeblastdb`: the application layer of makeblastdb
 //! (`c++/src/app/blastdb/makeblastdb.cpp`, `CMakeBlastDBApp`) for FASTA
 //! input and a database of format version 5 or 4 without parsed Seq-ids.
 
@@ -66,7 +66,7 @@ use crate::seqdb::{SeqDb, SeqDbError, SeqType};
 // ```
 // The options of makeblastdb that LOSAT does not support are not registered;
 // `crate::cli` names them in its error.
-/// Arguments of `losat makedb`, under makeblastdb's names.
+/// Arguments of `losat makeblastdb`, under makeblastdb's names.
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct MakedbArgs {
@@ -116,7 +116,7 @@ pub const UNSUPPORTED_OPTIONS: [&str; 12] = [
     "oid_masks",
 ];
 
-/// How `losat makedb` ends when it does not build a database, or cannot
+/// How `losat makeblastdb` ends when it does not build a database, or cannot
 /// open the one it built.
 #[derive(Debug)]
 pub enum MakedbError {
@@ -915,7 +915,7 @@ fn add_fasta(
 // destination (`2>&1`) in the order of the events. The standard output of
 // the Rust library is line buffered whatever it is connected to; the log
 // goes to it without another buffer.
-/// Runs `losat makedb` and returns the exit code.
+/// Runs `losat makeblastdb` and returns the exit code.
 pub fn run(args: &MakedbArgs) -> i32 {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();

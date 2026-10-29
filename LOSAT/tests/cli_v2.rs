@@ -192,7 +192,7 @@ fn makedb_takes_makeblastdb_s_option_names() {
         );
     }
 
-    // `-help` prints LOSAT's usage of makedb, under makeblastdb's option names.
+    // `-help` prints LOSAT's usage of makeblastdb, under makeblastdb's option names.
     for help in ["-help", "--help"] {
         let err = makedb(&[help]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
@@ -205,7 +205,7 @@ fn makedb_takes_makeblastdb_s_option_names() {
         );
     }
 
-    // The options of the search programs are unknown to makedb, and makedb's
+    // The options of the search programs are unknown to makeblastdb, and makeblastdb's
     // options are unknown to the search programs.
     assert!(makedb(&["-dbtype", "prot", "-evalue", "1"]).is_err());
     assert!(makedb(&["-dbtype", "prot", "-query", "q.fa"]).is_err());

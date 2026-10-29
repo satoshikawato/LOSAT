@@ -271,27 +271,32 @@ fn fill_matrix_table(t: &mut [i8; MATRIX_TABLE_LEN], score: impl Fn(u8, u8) -> i
     true
 }
 
-/// One matrix's table of `matrix_walk_table`: zero until its `once` writes the cells of the
-/// letters (the first 1 KiB).
+/// The state of one matrix's table of `matrix_walk_table` (`MATRIX_TABLES`).
 struct MatrixTableSlot {
+    /// Writes the table, at the first call for the matrix.
     once: Once,
     /// Whether the matrix's scores fit the table (`fill_matrix_table`), set inside `once`.
     fits: AtomicBool,
-    table: UnsafeCell<MatrixWalkTable>,
 }
-// SAFETY: `table` is written once, inside `once`, and read only through the references
-// `matrix_walk_table` hands out after `once` completed.
-unsafe impl Sync for MatrixTableSlot {}
 
-/// The tables of `matrix_walk_table`, one for each matrix. All zero, so they stay in .bss (a
-/// `OnceLock` of a table holds uninitialized bytes and lands in .data: 72 KiB of the binary).
-static MATRIX_TABLES: [MatrixTableSlot; ScoringMatrix::ALL.len()] = [const {
+/// The tables of `matrix_walk_table`, one for each matrix, zero until a slot's `once` writes the
+/// cells of the letters (the first 1 KiB). Apart from the slots: a `Once` does not start at zero,
+/// and a static with one (or a `OnceLock`, with its uninitialized bytes) lands in .data, 72 KiB
+/// of the binary; all zero, the tables stay in .bss.
+struct MatrixTables([UnsafeCell<MatrixWalkTable>; ScoringMatrix::ALL.len()]);
+// SAFETY: a table is written once, inside its slot's `once`, and read only through the references
+// `matrix_walk_table` hands out after that `once` completed.
+unsafe impl Sync for MatrixTables {}
+
+static MATRIX_SLOTS: [MatrixTableSlot; ScoringMatrix::ALL.len()] = [const {
     MatrixTableSlot {
         once: Once::new(),
         fits: AtomicBool::new(false),
-        table: UnsafeCell::new(MatrixWalkTable([0; MATRIX_TABLE_LEN])),
     }
 }; ScoringMatrix::ALL.len()];
+static MATRIX_TABLES: MatrixTables = MatrixTables(
+    [const { UnsafeCell::new(MatrixWalkTable([0; MATRIX_TABLE_LEN])) }; ScoringMatrix::ALL.len()],
+);
 
 /// The byte table of `matrix`, a matrix other than BLOSUM62 whose scores are `score(q, s)`: a
 /// static written at the first call for the matrix, or `None` (the reference walks run) if a score
@@ -302,19 +307,20 @@ pub(crate) fn matrix_walk_table(
     matrix: ScoringMatrix,
     score: impl Fn(u8, u8) -> i32,
 ) -> Option<&'static MatrixWalkTable> {
-    let slot = &MATRIX_TABLES[matrix as usize];
+    let slot = &MATRIX_SLOTS[matrix as usize];
+    let table = &MATRIX_TABLES.0[matrix as usize];
     slot.once.call_once(|| {
         // SAFETY: the only write to the table, inside `once`, before any reference to it
-        // (MatrixTableSlot).
-        let t = unsafe { &mut *slot.table.get() };
+        // (MatrixTables).
+        let t = unsafe { &mut *table.get() };
         let fits = fill_matrix_table(&mut t.0, score);
         // `once` orders this store before the loads that follow its completion.
         slot.fits.store(fits, Ordering::Relaxed);
     });
-    // SAFETY: `once` has completed, so nothing writes the table any more (MatrixTableSlot).
+    // SAFETY: `once` has completed, so nothing writes the table any more (MatrixTables).
     slot.fits
         .load(Ordering::Relaxed)
-        .then(|| unsafe { &*slot.table.get() })
+        .then(|| unsafe { &*table.get() })
 }
 
 static STATE: OnceLock<State> = OnceLock::new();

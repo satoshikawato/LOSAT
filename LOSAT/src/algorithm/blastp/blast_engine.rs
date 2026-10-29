@@ -76,6 +76,8 @@ mod x_subject_runs;
 // EXPERIMENT (LOSAT_X_BPSUBJMETA): the subjects' tabular IDs and titles of the block search made
 // once for all blocks (held by `x_query_blocks::XBlockSubjects`).
 pub(super) mod x_subject_meta;
+// `-comp_based_stats 0`: NCBI's ordinary traceback in place of the composition-based redo.
+mod traceback;
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{
@@ -2232,7 +2234,11 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} (NCBI BLAST+ 2.17.0 gives different reports for the same search)"
         );
     }
-    if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust {
+    // Mode 0 runs BLASTP's ordinary traceback (`traceback.rs`); psiblast's rounds keep mode 2.
+    if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust
+        && !(args.app == BlastpApp::Blastp
+            && args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats)
+    {
         bail!(
             "-comp_based_stats {} is not supported by LOSAT's {program}",
             args.comp_based_stats.to_ncbi_cli_string()
@@ -10054,6 +10060,29 @@ fn run_resolved_in_pool(
     // hits are freed, as the subject loop's scratches freed theirs.
     x_ih_pool::release();
     let kappa_redo_start = blastp_timing_start(timing_enabled);
+    // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
+    // preliminary list here, so the composition-based redo below finds none; its hit lists
+    // replace the redo's after it.
+    let ordinary_hit_lists =
+        if args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats {
+            x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
+            let ordinary = traceback::OrdinaryTraceback {
+                contexts: &contexts,
+                total_query_span,
+                subjects,
+                matrix: args.scoring.matrix,
+                gap_open: args.scoring.gap_open,
+                gap_extend: args.scoring.gap_extend,
+                x_drop_final: x_drop_gapped_final,
+                karlin: &gapped_params,
+                gumbel: &gapped_gumbel,
+                expect_value: args.evalue,
+                hitlist_size: args.traceback_hitlist_size(),
+            };
+            Some(ordinary.run(&mut preliminary_hit_lists, blastp_parallel_pool)?)
+        } else {
+            None
+        };
     // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2228-2236
     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
     // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
@@ -11093,6 +11122,9 @@ fn run_resolved_in_pool(
     }
     let mut hit_lists =
         fill_results_from_compo_heaps(args.traceback_hitlist_size(), &mut redone_matches);
+    if let Some(ordinary_hit_lists) = ordinary_hit_lists {
+        hit_lists = ordinary_hit_lists;
+    }
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(
             &timing.kappa_redo_ns,

@@ -76,7 +76,7 @@ const E_JCHAR: usize = 27;
 // ```
 const LAMBDA_RATIO_LOWER_BOUND: f64 = 0.5;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:37-47
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:38-47
 // ```c
 // /** 180 degrees in half a circle */
 // #define HALF_CIRCLE_DEGREES 180
@@ -3901,15 +3901,14 @@ mod tests {
         assert_eq!(rule, EMatrixAdjustRule::CompoScaleOldMatrix);
     }
 
-    // The cosine below is the rounding noise of a 2e-9 distance with glibc's log; another libm can
-    // round it inside [-1, 1].
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
     #[test]
     fn matrix_adjust_rule_collapsed_triangle_takes_relative_entropy() {
         // The query lies just past BLOSUM62's background on the line from the match, so the
         // background is between the two and the triangle of distances collapses: the cosine
         // rounds to -1.6. NCBI's acos is then NaN (the relative-entropy rule); a clamp to -1
-        // (180 degrees) would take the scaling rule.
+        // (180 degrees) would take the scaling rule. The -1.6 is the rounding of `a / temp` in
+        // the 2e-9 query distance (IEEE division, the same on every platform); a libm's log
+        // error there is about 1e-24, six orders below the squared distance.
         let mut subject = [0.8 / 19.0; COMPO_NUM_TRUE_AA];
         subject[11] = 0.2;
         let query: [f64; COMPO_NUM_TRUE_AA] =

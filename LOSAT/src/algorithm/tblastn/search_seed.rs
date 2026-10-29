@@ -446,6 +446,28 @@ fn x_build_compressed(
     })
 }
 
+/// The compressed table of a scan plan (`x_scan_plan`, word sizes 5 to 7) and its longest chain,
+/// built once for the query set (`XCompressedSide`). Cold and not inlined, so that the standard
+/// table's plan keeps its code.
+#[cold]
+#[inline(never)]
+fn x_compressed_plan_lookup(
+    x_compressed: &XCompressedSide,
+    queries: &[&[u8]],
+    seg: Option<&SegParams>,
+    mask_lowercase: bool,
+    threshold: i32,
+    word_length: usize,
+) -> Result<(XPlanLookup, i32)> {
+    let table = x_compressed
+        .table(|| x_build_compressed(queries, seg, mask_lowercase, threshold, word_length))?;
+    let longest_chain = match &*table {
+        XCompressedLookup::Reference(table) => table.longest_chain,
+        XCompressedLookup::Flat(table) => table.longest_chain,
+    };
+    Ok((XPlanLookup::Compressed(table), longest_chain))
+}
+
 /// The word length of a compressed table (`BlastCompressedAaLookupTable::word_length`).
 fn x_compressed_word_length(table: &XCompressedLookup) -> i32 {
     match table {
@@ -1060,13 +1082,14 @@ pub(super) fn x_scan_plan(
     // ```
     // Dispatch point: word sizes 5 to 7 take the compressed table (`x_build_compressed`).
     let (lookup, longest_chain) = if word_length > 4 {
-        let table = x_compressed
-            .table(|| x_build_compressed(queries, seg, mask_lowercase, threshold, word_length))?;
-        let longest_chain = match &*table {
-            XCompressedLookup::Reference(table) => table.longest_chain,
-            XCompressedLookup::Flat(table) => table.longest_chain,
-        };
-        (XPlanLookup::Compressed(table), longest_chain)
+        x_compressed_plan_lookup(
+            x_compressed,
+            queries,
+            seg,
+            mask_lowercase,
+            threshold,
+            word_length,
+        )?
     } else {
         let lookup = std::sync::Arc::clone(x_lookup.get_or_init(x_build_lookup));
         let longest_chain = lookup.longest_chain;
@@ -1132,11 +1155,36 @@ pub(super) fn x_scan_unit(
     // BlastChooseProteinScanSubject(lookup_wrap);
     // aux_struct->WordFinder = BlastAaWordFinder;
     // The scan variant of the unit is chosen once per table, as NCBI picks one scansub: the
-    // compressed table's (`x_scan_unit_compressed`), or one of the standard table's below.
+    // compressed table's (`x_scan_compressed_call`, range by range as below), or one of the
+    // standard table's below.
     let lookup = match &plan.lookup {
         XPlanLookup::Aa(lookup) => lookup,
         XPlanLookup::Compressed(table) => {
-            return x_scan_unit_compressed(table, plan, unit, subject, pairs, on_pairs);
+            let (_, _, ranges) = &plan.subject.units[unit];
+            if pairs.len() < plan.pair_capacity {
+                pairs.resize(plan.pair_capacity, BlastOffsetPair::default());
+            }
+            let pair_capacity = plan.pair_capacity as i32;
+            let word_length = x_compressed_word_length(table);
+            for (range_index, &(left, right)) in ranges.iter().enumerate() {
+                let mut end = right - word_length;
+                if range_index == 0 && end < left {
+                    end = left;
+                }
+                let mut scan_range = [0, left, end];
+                while scan_range[1] <= scan_range[2] {
+                    let hits = x_scan_compressed_call(
+                        table,
+                        subject,
+                        (left, right),
+                        pairs,
+                        pair_capacity,
+                        &mut scan_range,
+                    );
+                    on_pairs(&pairs[..hits as usize]);
+                }
+            }
+            return;
         }
     };
     let (_, _, ranges) = &plan.subject.units[unit];
@@ -1218,47 +1266,27 @@ pub(super) fn x_scan_unit(
 // ...
 //         lut->scansub_callback = (void *)s_BlastCompressedAaScanSubject;
 // ```
-/// `x_scan_unit` on the compressed table: the scansub calls of `s_BlastCompressedAaScanSubject`
-/// (the table's `scan_subject`, which writes no entry past `array_size`) with the table's word
-/// length, range by range as `x_scan_unit` makes them (`s_DetermineScanningOffsets` of a list of
-/// one range ends after it, and a call that stops at a full array resumes in it). Not inlined, so
-/// that the standard table's scan keeps its code.
+/// One scansub call of `s_BlastCompressedAaScanSubject` (the table's `scan_subject`, which writes
+/// no entry past `array_size`) on the range `(left, right)` from `scan_range`, for the compressed
+/// arm of `x_scan_unit` (`s_DetermineScanningOffsets` of a list of one range ends after it, and a
+/// call that stops at a full array resumes in it). Not inlined, and it takes no closure, so that
+/// the standard table's scan keeps its code.
 #[inline(never)]
-fn x_scan_unit_compressed(
+fn x_scan_compressed_call(
     table: &XCompressedLookup,
-    plan: &XScanPlan,
-    unit: usize,
     subject: &[u8],
-    pairs: &mut Vec<BlastOffsetPair>,
-    mut on_pairs: impl FnMut(&[BlastOffsetPair]),
-) {
-    let (_, _, ranges) = &plan.subject.units[unit];
-    if pairs.len() < plan.pair_capacity {
-        pairs.resize(plan.pair_capacity, BlastOffsetPair::default());
-    }
-    let pair_capacity = plan.pair_capacity as i32;
-    let word_length = x_compressed_word_length(table);
-    for (range_index, &(left, right)) in ranges.iter().enumerate() {
-        let mut end = right - word_length;
-        if range_index == 0 && end < left {
-            end = left;
+    (left, right): (i32, i32),
+    pairs: &mut [BlastOffsetPair],
+    pair_capacity: i32,
+    scan_range: &mut [i32; 3],
+) -> i32 {
+    let range = [(left, right)];
+    match table {
+        XCompressedLookup::Reference(table) => {
+            table.scan_subject(subject, &range, pairs, pair_capacity, scan_range)
         }
-        let range = [(left, right)];
-        let mut scan_range = [0, left, end];
-        while scan_range[1] <= scan_range[2] {
-            let hits = match table {
-                XCompressedLookup::Reference(table) => {
-                    table.scan_subject(subject, &range, pairs, pair_capacity, &mut scan_range)
-                }
-                XCompressedLookup::Flat(table) => table.scan_subject::<X_TBLASTN>(
-                    subject,
-                    &range,
-                    pairs,
-                    pair_capacity,
-                    &mut scan_range,
-                ),
-            };
-            on_pairs(&pairs[..hits as usize]);
+        XCompressedLookup::Flat(table) => {
+            table.scan_subject::<X_TBLASTN>(subject, &range, pairs, pair_capacity, scan_range)
         }
     }
 }

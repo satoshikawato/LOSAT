@@ -1217,10 +1217,18 @@ fn search_cli(
     // ```
     // `-db`: the database opens after the options are processed, before `Query is Empty!`
     // (`TblastxDatabase::open`).
+    // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the database
+    // arguments reads it (`s_GetTaxIDList`) before the database opens.
     let database = match args.database_name() {
-        Some(name) => Some(super::super::database::TblastxDatabase::open(
-            name, &settings,
-        )?),
+        Some(name) => {
+            let taxids = args.taxid_filter.resolve(&settings, outputs.diagnostics)?;
+            Some(super::super::database::TblastxDatabase::open_restricted(
+                name,
+                &settings,
+                taxids.as_ref(),
+                outputs.diagnostics,
+            )?)
+        }
         None => None,
     };
     // LOSAT's refusals of a database for the Seq-annot formats, before the search

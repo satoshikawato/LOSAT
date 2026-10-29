@@ -507,7 +507,15 @@ fn run_inner(
             let settings =
                 crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
                     .map_err(anyhow::Error::msg)?;
-            Some(BlastxDatabase::open(name, &settings)?)
+            // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the
+            // database arguments reads it (`s_GetTaxIDList`) before the database opens.
+            let taxids = args.taxid_filter.resolve(&settings, &mut stderr)?;
+            Some(BlastxDatabase::open_restricted(
+                name,
+                &settings,
+                taxids.as_ref(),
+                &mut stderr,
+            )?)
         }
         None => None,
     };

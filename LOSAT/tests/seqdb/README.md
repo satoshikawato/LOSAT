@@ -56,3 +56,6 @@ with Python's `sqlite3` from the schema text of NCBI's `taxonomy4blast.sqlite3` 
 `utf16`, `noindex`, `notable`, and `cycle` with a two-node parent cycle); their `.ref` files list, for every node,
 the count and FNV-1a digest of the descendants that NCBI's recursive query gave when run by SQLite (`notdb.bin` and
 `empty.bin` are not databases). `LOSAT_TEST_TAX_SQLITE` names the real file for the `#[ignore]` comparison.
+`lmdb/tx.{pin,psq,phr}` complete `tx` as a database (made from `tx.fa` with the taxid map `tx.map`; `tx_q.fa` holds
+one query per sequence): `src/seqdb/filter.rs` restricts it to each taxid set of `tx_oracle.txt` and compares the
+OIDs with NCBI's.

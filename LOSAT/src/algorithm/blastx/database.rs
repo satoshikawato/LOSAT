@@ -68,10 +68,22 @@ impl BlastxDatabase {
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        let db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
+        Self::open_restricted(name, settings, None, &mut std::io::sink())
+    }
+
+    /// `open` with the database restricted to the taxid list `list` of the command line
+    /// (`shared::restrict_database`, whose warning goes to `diagnostics`).
+    pub(crate) fn open_restricted(
+        name: &str,
+        settings: &ApplicationSettings,
+        list: Option<&crate::seqdb::TaxidList>,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<Self> {
+        let mut db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2a), unless a variable changes
         // NCBI's choice of its Seq-ids.
         let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
+        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -352,7 +364,9 @@ impl ReportedSubjects {
             }
             let encoded = subjects.read_encoded(oid)?;
             reported.records.push(FastaRecord {
-                internal_id: format!("gnl|BL_ORD_ID|{ordinal}"),
+                // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the
+                // OID (line DI-8).
+                internal_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
                 title: String::from_utf8_lossy(&title).into_owned(),
                 sequence: encoded
                     .iter()

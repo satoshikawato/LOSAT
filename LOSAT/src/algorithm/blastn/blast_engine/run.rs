@@ -5474,6 +5474,22 @@ struct BlastnReportInputs<'a> {
     tabular_taxdb_found: bool,
 }
 
+impl BlastnReportInputs<'_> {
+    /// The number of sequences the reports print: the database's own (with a taxid list, the
+    /// whole database's: `SeqDb::printed_num_seqs`), or the subject set's.
+    fn shown_num_seqs(&self) -> usize {
+        self.database
+            .map_or(self.db_num_seqs, |database| database.num_sequences as usize)
+    }
+
+    /// The total length the reports print (as `shown_num_seqs`).
+    fn shown_total_letters(&self) -> usize {
+        self.database.map_or(self.db_len_total, |database| {
+            usize::try_from(database.total_letters).unwrap_or(usize::MAX)
+        })
+    }
+}
+
 /// The per-query and run-level data of the pairwise report.
 // Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
 // shared post-processing makes every BLASTN run compile it in Wasm hosts.
@@ -5540,8 +5556,8 @@ fn blastn_pairwise_report(
         version: NCBI_BLASTN_VERSION.to_string(),
         megablast: report.megablast,
         database_name: subject_title.to_string(),
-        database_num_sequences: report.db_num_seqs,
-        database_total_letters: report.db_len_total,
+        database_num_sequences: report.shown_num_seqs(),
+        database_total_letters: report.shown_total_letters(),
         database: report.database.cloned(),
         reward: report.reward,
         penalty: report.penalty,
@@ -6582,12 +6598,12 @@ fn post_process_hits_and_write(
                     reward_penalty: Some((report.reward, report.penalty)),
                     filter: &filter,
                     db_num: if is_database {
-                        report.db_num_seqs as i32
+                        report.shown_num_seqs() as i32
                     } else {
                         0
                     },
                     db_len: if is_database {
-                        report.db_len_total as i64
+                        report.shown_total_letters() as i64
                     } else {
                         0
                     },
@@ -7252,8 +7268,18 @@ fn search_cli(
     // ```
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
+    // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the database
+    // arguments reads it (`s_GetTaxIDList`) before the database opens.
     let database = match args.database_name() {
-        Some(name) => Some(database::BlastnDatabase::open(name, &settings)?),
+        Some(name) => {
+            let taxids = args.taxid_filter.resolve(&settings, outputs.diagnostics)?;
+            Some(database::BlastnDatabase::open_restricted(
+                name,
+                &settings,
+                taxids.as_ref(),
+                outputs.diagnostics,
+            )?)
+        }
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104

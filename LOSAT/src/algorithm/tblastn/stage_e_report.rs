@@ -1072,7 +1072,7 @@ fn pairwise_hits(
                         0.0
                     },
                     length: payload.align_length,
-                    mismatch: payload.report_mismatches,
+                    mismatch: payload.report_mismatches as i64,
                     gapopen: payload.gap_opens,
                     q_start: usize::try_from(q_start)?,
                     q_end: usize::try_from(q_end)?,
@@ -1120,6 +1120,7 @@ fn pairwise_hits(
                     // NCBI core/link_hsps.c:1765-1810 sets the HSP
                     // linked count; showalign.cpp:3595-3598 prints sum_n.
                     sum_n: Some(linked.num),
+                    subject_stored_gaps: Vec::new(),
                 });
             }
         }

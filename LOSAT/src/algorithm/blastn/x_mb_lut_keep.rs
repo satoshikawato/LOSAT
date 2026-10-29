@@ -73,13 +73,9 @@
 //! the zeroing or by an earlier fill). Its writes are zeros over zeros, so the arrays are the same
 //! either way.
 //!
-//! Where. Only the batch loop of `run_in_pool` keeps a table, for the batches it searches itself
-//! (and the query chunks of a split batch), and only while no LOSAT_X_QBATCHPAR slot can run:
-//! after the driver turned off, or before the first batch is committed where no slot can start
-//! (`x_qbatch_par::Driver::may_speculate`: no `LOSAT_X_QBATCHPARSLOTS`, and a budget of 0 or one
-//! thread). A slot holds a whole batch while others run, and QBATCHPAR's budget counts one table
-//! per batch in flight, so a table kept between the loop's batches would add to the slots' peak.
-//! The tables of PAIRPAR's sub-lookups, the discontiguous tables of two templates and the tables
+//! Where. Only the batch loop of `run_in_pool` keeps a table, for the batches it searches (and the
+//! query chunks of a split batch). Until 2026-10-28 it kept none while the query-batch slots of
+//! LOSAT_X_QBATCHPAR (removed then) could run. The tables of PAIRPAR's sub-lookups, the discontiguous tables of two templates and the tables
 //! of the tests are not kept.
 //!
 //! Memory. Between two batches the loop holds the longest table built so far, and no build

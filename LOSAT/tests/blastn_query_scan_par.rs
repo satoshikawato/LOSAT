@@ -8,7 +8,7 @@
 //! path where its rule says so (`LOSAT_X_REACH`): LOSAT_X_QSTREAM reading the lengths first, two
 //! threads or more, a file of `LOSAT_X_QSCANPARMIN` bytes or more (0 here, so that a small file
 //! is cut), no `\r` and no reader error. The searches keep LOSAT_X_QSTREAM acting: small batches
-//! (`BATCH_SIZE`) and no LOSAT_X_QBATCHPAR slots (whose window would hold the whole file). Cases:
+//! (`BATCH_SIZE`). Cases:
 //! 240 pieces of two genomes (lower case, `N` runs, a line with digits that the reader warns
 //! about, records without letters and without ids) with dc-megablast and blastn against a subject
 //! file (`-subject`) at one, two and four threads and against a database (`-db`) at four; the same
@@ -25,8 +25,6 @@ const SWITCH: &str = "LOSAT_X_QSCANPAR";
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_QSCANPAR", "0");
 /// Every file is cut, whatever its size (tuning).
 const ANY_SIZE: (&str, &str) = ("LOSAT_X_QSCANPARMIN", "0");
-/// No slots: LOSAT_X_QSTREAM's rule keeps it off where they would read most of the file ahead.
-const NO_SLOTS: (&str, &str) = ("LOSAT_X_QBATCHPAR", "0");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -141,7 +139,7 @@ fn search(
         .args(["-outfmt", "6"])
         .args(["-num_threads", &threads.to_string()])
         .env("BATCH_SIZE", "20000")
-        .envs([NO_SLOTS, ANY_SIZE])
+        .env(ANY_SIZE.0, ANY_SIZE.1)
         .envs(vars.iter().copied())
         .output()
         .expect("run LOSAT");

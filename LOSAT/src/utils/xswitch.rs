@@ -148,16 +148,8 @@ use std::ops::RangeInclusive;
 /// pull request that added it (Owner 2026-10-17: speed-ups land default ON), after it was
 /// verified and timed with it on and off.
 /// `LOSAT_X_BNTABPAR` (BLASTN's outfmt 6 / 7 rows of a report formatted per query on the search's
-/// pool while no LOSAT_X_QBATCHPAR slot exists, `blastn/x_tab_par.rs`) joined the set in the pull
-/// request that added it, after it was verified and timed with it on and off.
-/// `LOSAT_X_DCTWOSLOTS` (BLASTN's dc-megablast takes two LOSAT_X_QBATCHPAR slots of half the
-/// threads where the slot model takes three or more and the two-slot rule holds,
-/// `blastn/blast_engine/x_qbatch_par.rs`) joined the set in the pull request that added it, after
-/// it was verified and timed with it on and off.
-/// `LOSAT_X_BNEIGHTSLOTS` (BLASTN's `-task blastn` runs the slot model's best layout of at most
-/// eight LOSAT_X_QBATCHPAR slots where the model takes more at 12 to 64 threads,
-/// `blastn/blast_engine/x_qbatch_par.rs`) joined the set in the pull request that added it, after
-/// it was verified and timed with it on and off.
+/// pool, `blastn/x_tab_par.rs`) joined the set in the pull request that added it, after it was
+/// verified and timed with it on and off.
 /// `LOSAT_X_BNCSR` (the chains of BLASTN's contiguous lookup tables of word sizes 9 to 11 laid out
 /// as CSR and scanned through a prefetch ring, `blastn/x_bn_csr.rs`) joined the set in the pull
 /// request that added it, after it was verified and timed with it on and off.
@@ -203,10 +195,10 @@ use std::ops::RangeInclusive;
 /// branch-free candidate loop, `blastx/x_seed_scan.rs`) graduated on 2026-10-26: it left
 /// `STRICT_SET` and the scan on the presence test was deleted (the compressed lookup table keeps
 /// its own scan, a rule of the table and not a switch).
-/// `LOSAT_X_QBATCHPAR` (BLASTN's query-batch slots, `blastn/blast_engine/x_qbatch_par.rs`) left
-/// the set on 2026-10-28 (Owner decision: at 16 threads the slots' max RSS rise exceeds their time
-/// saving; the slot code is to be removed). It is read there as a switch that is off unless its
-/// variable is `1`, and it has no `x_reach!` marks or row in `switch_reach_expected.tsv` any more.
+/// `LOSAT_X_QBATCHPAR` (BLASTN's query-batch slots) and the switches that acted only on the slots,
+/// `LOSAT_X_DCTWOSLOTS`, `LOSAT_X_BNEIGHTSLOTS` and `LOSAT_X_BNQSLOTS`, were removed on 2026-10-28
+/// with the slot code (Owner decision: at 16 threads the slots' max RSS rise exceeded their time
+/// saving); a run ignores their variables.
 /// `LOSAT_X_BPQSLOTS` (blastp-fast's query blocks searched two at a time on the pool,
 /// `blastp/x_query_slots.rs`) was removed on 2026-10-28 (Owner): at 16 threads it saved 7.0 % of
 /// the time and raised the max RSS by 9.1 %. It left `STRICT_SET` and its code was deleted; a run
@@ -216,14 +208,12 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNDBCUT",
     "LOSAT_X_BNDBSTREAM",
     "LOSAT_X_BNDCONE",
-    "LOSAT_X_BNEIGHTSLOTS",
     "LOSAT_X_BNFEWSUBJ",
     "LOSAT_X_BNHLGROW",
     "LOSAT_X_BNLUTDROP",
     "LOSAT_X_BNMAPPED",
     "LOSAT_X_BNQDROP",
     "LOSAT_X_BNQPACK",
-    "LOSAT_X_BNQSLOTS",
     "LOSAT_X_BNSEEDLISTS",
     "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
@@ -293,7 +283,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
     "LOSAT_X_DCSEEDLEAN",
-    "LOSAT_X_DCTWOSLOTS",
     "LOSAT_X_DIAGLV",
     "LOSAT_X_DIAGLV2",
     "LOSAT_X_DISCLUTPAR",

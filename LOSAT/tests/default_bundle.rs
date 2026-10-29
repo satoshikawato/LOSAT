@@ -175,9 +175,8 @@ fn pieces(label: &str) -> PathBuf {
     file
 }
 
-/// blastp-fast with `-subject` in blocks (three blocks of `LOSAT_X_BPQSLOTS`'s 33,333 letters for the
-/// 77,448 letters of the query proteome) and exact blastp with `-db` (two blocks of the default
-/// `LOSAT_X_BPQBLOCK`) at four threads.
+/// blastp-fast with `-subject` and exact blastp with `-db`, each in blocks (two blocks of the default
+/// `LOSAT_X_BPQBLOCK` for the 77,448 letters of the query proteome) at four threads.
 #[test]
 fn blastp_gives_one_report_with_the_switches_on_and_off() {
     let query = fixture("MeenMJNV.faa");
@@ -220,13 +219,13 @@ fn blastp_gives_one_report_with_the_switches_on_and_off() {
     one_report(&exact, &[], &[reach_db.var()], BLASTP);
     // The rows come from the default runs whose reports every `=0` arm above matched, so the
     // equalities compare these paths (a later change of scope or input would otherwise make
-    // them vacuous). BPQSLOTS: blastp-fast's blocks were searched two at a time. BPSUBJMETA:
-    // subject records were read by the metadata path. BPLKPAHEAD: the look-ahead build was chosen
-    // for exact blastp's blocks (blastp-fast's take BPQSLOTS, which builds nothing ahead).
-    for switch in ["LOSAT_X_BPQSLOTS", "LOSAT_X_BPSUBJMETA"] {
-        let sides = reach_fast.sides(switch);
-        assert!(sides.0, "{switch}: sides {sides:?}: its path did not run");
-    }
+    // them vacuous). BPSUBJMETA: subject records were read by the metadata path. BPLKPAHEAD: the
+    // look-ahead build was chosen for exact blastp's blocks.
+    let sides = reach_fast.sides("LOSAT_X_BPSUBJMETA");
+    assert!(
+        sides.0,
+        "LOSAT_X_BPSUBJMETA: sides {sides:?}: its path did not run"
+    );
     let sides = reach_db.sides("LOSAT_X_BPLKPAHEAD");
     assert!(
         sides.0,

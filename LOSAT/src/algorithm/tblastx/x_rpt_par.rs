@@ -15,7 +15,8 @@
 //! 1. The displayed identities (`report::set_displayed_identities`) run over chunks of the final
 //!    list on the pool, each chunk with the serial function.
 //! 2. The outfmt 0 rows (`report::pairwise_hits`, also the Web adapter's hit records) are an
-//!    indexed parallel map of `PairwiseRows::hit` over the final list, collected in its order.
+//!    indexed parallel map of `PairwiseRows::hit` over the final list, or over the HSPs of one
+//!    window of queries (`run_impl::write_tblastx_outputs`), collected in its order.
 //! 3. The outfmt 6 / 7 rows of a query (`report::write_tabular`) with more than `CHUNK` rows are
 //!    formatted into one buffer per chunk of `CHUNK` rows by the pool's threads, in windows of
 //!    `WINDOW_CHUNKS` chunks per thread; the loop's thread writes a window's buffers in order

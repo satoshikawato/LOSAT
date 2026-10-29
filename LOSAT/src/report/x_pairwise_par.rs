@@ -51,14 +51,15 @@
 //! at 16 threads) plus one piece (`PIECE_BYTES` plus one HSP) at a time, also for one large
 //! query; the groups of one window of queries.
 //!
-//! BLASTN's outfmt 0 makes its rows a window of queries at a time (line DBID, ID4f): the
-//! windows of `query_windows` over the queries' estimates (`query_estimate_of` of their HSPs'
-//! lengths, before any row is made) with `window_bytes` of its pool (one thread's budget without
-//! a pool, also with the switch off), each written (`write` of the window, `first_query` its
-//! first query) before the next window's rows are made, as NCBI formats one query's result set
-//! at a time (`PrintOneResultSet`). With the same budget a row window is one window of the
-//! parallel writer. Not where the caller's hit records or a format observer read every row (the
-//! Web adapter, `algorithm::blastn::blast_engine::run`).
+//! BLASTN's and TBLASTX's outfmt 0 make their rows a window of queries at a time (line DBID, ID4f
+//! and ID4t): the windows of `query_windows` over the queries' estimates (`query_estimate_of` of
+//! their HSPs' lengths, before any row is made) with `window_bytes` of the pool (one thread's
+//! budget without a pool, also with the switch off), each written (`write` of the window,
+//! `first_query` its first query) before the next window's rows are made, as NCBI formats one
+//! query's result set at a time (`PrintOneResultSet`). With the same budget a row window is one
+//! window of the parallel writer. Not where the caller's hit records or a format observer read
+//! every row (the Web adapter; `algorithm::blastn::blast_engine::run`,
+//! `algorithm::tblastx::blast_engine::run_impl::rows_up_front`).
 
 use std::collections::HashMap;
 use std::io::{self, Write};

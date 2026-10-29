@@ -1164,11 +1164,9 @@ pub(crate) struct TaxdbRun {
     collision: std::sync::OnceLock<Option<(std::path::PathBuf, String)>>,
 }
 
-/// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_may_write`]).
+/// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
 #[derive(Clone, Copy)]
 struct PrefetchTexts {
-    /// Whether a prefetch of the run can write a text or be refused by the taxonomy database.
-    may_write: bool,
     /// The positive taxid whose lookup writes the offset error (`TaxDb::offset_error_taxid`).
     offset_error_taxid: Option<i32>,
 }
@@ -1180,36 +1178,19 @@ impl TaxdbRun {
         *self.found.get_or_init(|| db.taxdb_found())
     }
 
-    /// Whether a prefetch of the run can write a text ([`prefetch_messages`]): `false` when
-    /// `taxdb.bti` is not on the search path, or when the taxonomy database opens without an
-    /// error and without texts of opening and no lookup writes the offset error
-    /// (`TaxDb::offset_error_taxid`); else `true`, also when the database cannot be opened or
-    /// read. When it is `false`, every prefetch text of the run is empty, whatever the order in
-    /// which its batches or blocks make their prefetches: the texts of opening and the offset
-    /// error are the only texts a lookup writes. Asked once for the run (a pass over no
-    /// sequence: the index's header, its last entry and one search), with a taxonomy handle of
-    /// its own, so that the run's handle still writes the texts of opening at the run's first
-    /// lookup.
-    pub(crate) fn prefetch_may_write(&self, db: &SeqDb) -> bool {
-        self.prefetch_texts(db).may_write
-    }
-
     /// [`PrefetchTexts`] of the run, read once.
     fn prefetch_texts(&self, db: &SeqDb) -> PrefetchTexts {
         *self.texts.get_or_init(|| {
             let refused = PrefetchTexts {
-                may_write: true,
                 offset_error_taxid: None,
             };
             if !self.found(db) {
                 return PrefetchTexts {
-                    may_write: false,
                     offset_error_taxid: None,
                 };
             }
             let Some(search_path) = db.search_path() else {
                 return PrefetchTexts {
-                    may_write: false,
                     offset_error_taxid: None,
                 };
             };
@@ -1222,7 +1203,6 @@ impl TaxdbRun {
             // `x_GetTaxonomy` looks a positive taxid up only.
             let taxid = taxid.filter(|&taxid| taxid > 0);
             PrefetchTexts {
-                may_write: !taxdb.open_messages().is_empty() || taxid.is_some(),
                 offset_error_taxid: taxid,
             }
         })
@@ -1272,7 +1252,7 @@ impl TaxdbRun {
     // with a version 4 database or an absolute `BLASTDB`), so LOSAT does not model it.
     /// LOSAT's refusal of a run whose prefetch NCBI would make write the offset error more than
     /// once in a volume: the taxonomy database has the offset error of a positive taxid `L`
-    /// ([`TaxdbRun::prefetch_may_write`]), and a volume of the database holds `L` and another
+    /// ([`TaxdbRun::prefetch_texts`]), and a volume of the database holds `L` and another
     /// positive taxid of the same cache slot (`T & 255 == L & 255`), in any definition line of any
     /// sequence, whether or not a search reports them. One pass over the headers
     /// ([`SeqDb::visit_defline_set_taxids`] in ranges of [`crate::seqdb::HEADER_RANGE_SEQS`]), made
@@ -2251,7 +2231,6 @@ mod taxdb_prepass_tests {
         let cwd = empty_cwd("cache_collision");
         let db = db_search("tm_cache150", Some(&variant("offset_last_past_end")), &cwd);
         let run = TaxdbRun::default();
-        assert!(run.prefetch_may_write(&db));
         assert!(run.prefetch_refused(&db));
         for ordinals in [&[][..], &[0], &[1, 2]] {
             let error = prefetch(&db, &run, ordinals).unwrap_err();
@@ -2277,32 +2256,6 @@ mod taxdb_prepass_tests {
         // The two volumes of tm_2vol hold 99990 alone.
         let db = db_search("tm_2vol", Some(&variant("offset_last_past_end")), &cwd);
         assert!(!TaxdbRun::default().prefetch_refused(&db));
-        std::fs::remove_dir_all(&cwd).unwrap();
-    }
-
-    /// `TaxdbRun::prefetch_may_write`: `true` where a lookup writes a text or the taxonomy
-    /// database cannot be read, so that a path whose batches look up in another order than the
-    /// batches' (blastp's slots) can be declined there only.
-    #[test]
-    fn the_prefetch_may_write_with_texts_of_opening_or_the_offset_error() {
-        let cwd = empty_cwd("prefetch_may_write");
-        for (taxdb, writes) in [
-            (None, false),
-            (Some("good"), false),
-            (Some("high_bytes_utf8"), false),
-            (Some("offset_mid_past_end"), false),
-            (Some("bad_magic"), true),
-            (Some("count_larger"), true),
-            (Some("offset_last_past_end"), true),
-            (Some("btd_truncated"), true),
-        ] {
-            let db = db_search("x16_taxid_99990", taxdb.map(variant).as_deref(), &cwd);
-            assert_eq!(
-                TaxdbRun::default().prefetch_may_write(&db),
-                writes,
-                "{taxdb:?}"
-            );
-        }
         std::fs::remove_dir_all(&cwd).unwrap();
     }
 

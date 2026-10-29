@@ -352,7 +352,6 @@ export LOSAT_X_BPQBLOCKSA=1
 export LOSAT_X_BPQBLOCKWEB=1
 export LOSAT_X_BPQBLOCKXML=1
 export LOSAT_X_BPQBLOCKXML2=1
-export LOSAT_X_BPQSLOTS=1
 export LOSAT_X_BPREDODBSUBJ=1
 export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
@@ -425,6 +424,7 @@ export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_SUMPMEMO=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNDBSTREAM=1
+export LOSAT_X_TBNDIAGPACK=1
 export LOSAT_X_TBNFLOWHELP=1
 export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNKEEPFEW=1
@@ -2775,39 +2775,12 @@ Rebuilding less:
   In a `run_local` call with several outputs, hit records or an observer (`LOSAT_X_BPQBLOCKWEB`), an outfmt 13 to 16
   output does not take blocks (the run-level frame and carry were verified for one CLI-style output only): the
   format is recorded for `LOSAT_X_REACH` and the search of all queries runs (Owner-delegated 2026-10-22).
-- `LOSAT_X_BPQSLOTS=1` (BLASTP with the compressed lookup table: `-task blastp-fast`, or a word size above 4; speed; in the strict set from the pull request that added it,
-  2026-10-27, on unless it is `0`; acts only in the block search of `LOSAT_X_BPQBLOCK`) two query blocks searched at
-  a time on the search's pool, each block's report and messages written in block order
-  (`blastp/x_query_slots.rs`, exactness argument in its header). The block loop runs one block at a time on the
-  whole pool, and each block's stages end in joins with serial parts between them: in the human x yeast blastp-fast
-  search at 16 threads (Species4 x Species6 `-subject`, 254 blocks of about 18 ms) about 1.8 of the 16 threads
-  waited all the time, and most block ends drained the pool (line R `REPORT_R17.md` §3.1). With the switch two
-  drivers on the pool each take the next block and search it with the block loop's call; a thread that waits in
-  one block's join takes the other block's tasks. One form (two blocks: the block and the next one, whose whole
-  search runs beside it where `LOSAT_X_BPLKPAHEAD` builds only its table), with blocks of `2 x LOSAT_X_BPQBLOCK / 3`
-  letters (33,333 by default), so that the two tables in flight and the build of the next hold the letters of
-  the block loop's block and its table built ahead (the build's transient vectors are as large as a table:
-  78 appends of 4 bytes per query letter). No table is built ahead; each block keeps its table to its end and
-  gives its vectors to the spare that a later block's build takes (`LOSAT_X_BPLKPFLAT`). No driver takes a block
-  before both have started (a driver left in a thread's deque could otherwise run nested inside a block's join and
-  wait for that block; found 2026-10-27 after the switch's pull request by the probe test
-  `probe_slots_many_searches_with_nested_blocks`). A driver takes a block
-  only while fewer than 4 blocks are searched or wait to be written, and the output is flushed after each
-  block, as the block loop flushes it. Where: a pool of more than one thread, one output that is not outfmt 11 (the archive carries state from
-  document to document) or 13 to 16 (`Xml2Carry`), no hit records and no observer, native and wasm32 with
-  `wasm-threads`; exact blastp's `AaLookupTable` keeps the block loop (its in-place builds share neighbour lists
-  that one build uses at a time). One thread runs the block loop unchanged. `LOSAT_TIMING`'s per-block lines of the two blocks come
-  interleaved. `LOSAT_X_STATS` prints `[X_STATS] BPQSLOTS searches=<n> blocks=<n>`. Reports identical; off =
-  `LOSAT_X_BPQSLOTS=0`. Evidence (workstation, dev 3a83c151 against the switch's pull request, 2026-10-27, v4-BPF
-  s7): 16 threads (node 1 CPUs 32-47, 3 alternating rounds, one output hash per case) Species4 x Species6 `-subject`
-  4.87 -> 4.56 s (x0.937; busy CPUs 13.3 -> 14.5), the first 3,000 Species4 proteins x Species6 `-subject` x0.945,
-  Species4 x Species6 `-db` 5.21 -> 4.87 s (x0.935), Species0 x Species3 `-db` 16.79 -> 15.16 s (x0.903); 8 threads
-  x0.969 / x0.983 / x0.966 / x0.941; one thread: instructions x1.0000. Instructions at 16 threads +1.8 % (the
-  smaller blocks scan the subjects more often). Max RSS (MiB, dev -> switch, NCBI 2.17.0): 16 threads 136 -> 156
-  (NCBI `-subject` 335), 110 -> 113 (166), 125 -> 141, 107 -> 165; 8 threads 131 -> 149, 99 -> 122, 121 -> 147,
-  97 -> 142; Species4 x Species6 `-db` at 2 / 4 threads 106 -> 134 / 117 -> 147 (NCBI 304 / 360). Three blocks of
-  50,000 letters were faster at 16 threads (x0.870 on the first case) but held 175 MiB on the 3,000 proteins, above
-  NCBI's 166; 16 one-thread blocks (x0.858) held 813 MiB.
+- `LOSAT_X_BPQSLOTS` (two query blocks of `-task blastp-fast` searched at a time on the pool, `blastp/x_query_slots.rs`) was
+  removed on 2026-10-28 (Owner): at 16 threads on the workstation it saved 7.0 % of the time and raised the max RSS by
+  9.1 % (136 -> 150 MiB), which breaks the rule that the rise in max RSS in percent must not exceed the time saved in
+  percent. A run ignores the variable and searches the blocks of `LOSAT_X_BPQBLOCK` one at a time, as it did with
+  `LOSAT_X_BPQSLOTS=0`; the reports are unchanged. The entry and its evidence are in the history of this file
+  (dev b1af130b).
 - `LOSAT_X_BPSTRIPEFILL=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added
   it, 2026-10-28, on unless it is `0`; acts wherever `LOSAT_X_BPLKPFLAT`'s one-latch build of the flat table of
   `LOSAT_X_BPCLUT` runs, so with more than one thread) builds each stripe of that table from one read of the query
@@ -5219,6 +5192,34 @@ Scheduling (each value computed by one thread with the original function; order 
   path of the base, read x1.0001 / x1.0055 / x1.0039 (the layout of the new binary), so that the switch against `=0`
   in one binary is x0.9986 / x0.9978 / x0.9900 (11 / 11 / 12 of 16 faster; instructions x1.00002); AP027131 `-subject`
   x0.9963 at 1 thread (8 of 8 faster) and x0.9986 at 16.
+- `LOSAT_X_TBNDIAGPACK=1` tblastn (memory and speed; in the strict set from the pull request that added it,
+  2026-10-29; `=0` turns it off; `tblastn/search_init.rs` `XDiagCells`, `x_packs`, `tblastn/x_tbn_hitbf.rs`
+  `XDiagCell`): the diagonal table of the two-hit word finder (one per running unit; the units a thread runs one
+  after another share it, `XUnitBuffers`) holds NCBI's `DiagStruct` in four bytes (`blast_extend.h:51-55`:
+  `last_hit` in bits 0-30, `flag` in bit 31) instead of eight-byte `(last_hit, flag)` pairs: 128 KiB instead of 256
+  KiB for a query batch of 20,000 letters. The values fit: `last_hit` starts at 0 and is set to `s + offset` or
+  `s_last_off - (wordsize - 1) + offset`, the offset runs from the window to below INT4_MAX / 4 + the window + the
+  longest unit (at most 5,000,000 residues), so with a window above the word size and at most 2^28 every value is
+  below 2^30 and not negative, inside NCBI's signed 31 bits too; another window keeps the pairs (LOSAT's TBLASTN
+  takes window 40 with word size 3 and 60 with 2, both packed). A flag-0 cell read as `i32` is then
+  its `last_hit` and a flag-1 cell is negative, so the branch-free loop (`x_hits_bf`) reads one word per hit. The
+  tables give the same init HSPs and the same values in every cell (unit tests
+  `x_hits_bf_on_packed_cells_equals_pair_cells`, and `x_pairs_bf_gives_the_hits_and_table_of_pairs` on both
+  layouts against `pairs` on pairs). Always: every tblastn search with the default window.
+  Measured 2026-10-29 on the workstation (2x Xeon Gold 6338; base dev 593fff35; every output of a case the same
+  bytes in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16
+  CPUs for every run, medians of 4 rounds in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): the 595 proteins
+  of AP027131 x AP027133 (`-db_gencode 4`) `-subject` at 16 / 32 / 40 / 48 threads 56 / 75 / 83 / 94 -> 55 / 72 / 80
+  / 88 MiB (NCBI `-subject` runs one thread: 81), `-db` at 48 104 -> 101 (NCBI 117); `dmel_b4.faa` x zebrafish cDNAs
+  (`-db`) at 16 / 32 / 40 / 48 69 / 103 / 120 / 138 -> 67 / 101 / 116 / 132 (NCBI 137 / 150 / 156 / 162); with `=0`
+  in the same binary 56 / 75 / 83 / 93, 105, 68 / 104 / 120 / 137 (the base's). At one thread (`perf stat` of a
+  probe build with the same cells, 3 runs each, node 0, untimed): AP027131 `-subject` instructions x0.99995, cycles
+  x0.989; the `dmel_b4.faa` case instructions x1.00004, cycles x0.946 (64.8 -> 61.2 s): half the table's bytes on
+  the random reads of the two-hit test. Time (node 1, cores warmed 3 s before each run, arms alternating in order,
+  `perf stat`; the PR's binary against the base, and `=0` in the PR's binary): `dmel_b4.faa` at 1 / 8 / 16 / 32
+  threads x0.953 / x0.955 / x0.956 / x0.958 (8 of 8, 12 of 12 each faster; instructions x0.9987; `=0` x0.9992 /
+  x1.0005 / x1.0002 / x0.9998); AP027131 `-subject` at 1 / 16 / 32 x0.991 / x0.995 / x0.990 (12, 7, 8 of 12 faster;
+  `=0` x1.0001 / x1.0007 / x1.0000).
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

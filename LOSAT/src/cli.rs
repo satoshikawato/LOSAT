@@ -65,7 +65,8 @@ pub enum Commands {
     //                   "Application to create BLAST databases, version "
     //                   + CBlastVersion().Print());
     // ```
-    /// Create a BLAST database from a FASTA file (makeblastdb, format version 4)
+    /// makeblastdb: create a BLAST database from a FASTA file, format version 4
+    #[command(visible_alias = "makeblastdb")]
     Makedb(crate::writedb::makeblastdb::MakedbArgs),
 }
 
@@ -139,6 +140,16 @@ where
         }
         if matches!(text, "-help" | "--help") {
             translated.push("--help".into());
+            continue;
+        }
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:76-77
+        // ```c++
+        // static const char* s_AutoHelp     = "h";
+        // static const char* s_AutoHelpFull = "help";
+        // ```
+        // `-h` is the short usage of every NCBI program (rc 0); clap's `-h` is its short help.
+        if text == "-h" {
+            translated.push("-h".into());
             continue;
         }
         if text == "--version" && std::ptr::eq(scope, &command) {
@@ -335,13 +346,11 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "export_search_strategy"
             | "filtering_db"
             | "gilist"
-            | "h"
             | "html"
             | "import_search_strategy"
             | "index_name"
             | "line_length"
             | "min_raw_gapped_score"
-            | "mt_mode"
             | "negative_gilist"
             | "negative_seqidlist"
             | "negative_taxidlist"
@@ -360,8 +369,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "taxidlist"
             | "taxids"
             | "ungapped"
-            | "use_index"
-            | "version"
             | "window_masker_taxid"
             | "window_size"
             | "xdrop_gap"
@@ -392,13 +399,11 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "entrez_query"
             | "export_search_strategy"
             | "gilist"
-            | "h"
             | "html"
             | "import_search_strategy"
             | "ipglist"
             | "lcase_masking"
             | "line_length"
-            | "mt_mode"
             | "negative_gilist"
             | "negative_ipglist"
             | "negative_seqidlist"
@@ -415,7 +420,6 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "subject_besthit"
             | "taxidlist"
             | "taxids"
-            | "version"
             | "xdrop_gap"
             | "xdrop_gap_final"
             | "xdrop_ungap"
@@ -456,8 +460,7 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
             | "save_each_pssm"
             | "save_pssm_after_last_round"
             | "sum_stats"
-    ) || (is_unported_blastp_arg(name)
-        && !matches!(name, "db_hard_mask" | "db_soft_mask" | "mt_mode"))
+    ) || (is_unported_blastp_arg(name) && !matches!(name, "db_hard_mask" | "db_soft_mask"))
 }
 
 fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
@@ -545,6 +548,61 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     )
 }
 
+/// The text `-version` prints for `argv` (`losat <program> ... -version ...`), or `None` when
+/// `argv` has no such request.
+///
+/// NCBI's application reads `-version` before its arguments (`ncbi_preparsed_toolkit_word`,
+/// ncbiapp.cpp:926-1001): anywhere before `--`, in an option's value place too
+/// (`blastn -out -version` prints the version), and also when other arguments are invalid.
+/// The text is the two lines of `fVersionInfo | fPackageShort`:
+/// the program name and version, then the package. NCBI's second line names its own
+/// package and build date; LOSAT's names LOSAT and the BLAST+ release its output follows.
+/// `makedb` and `makeblastdb` print `makeblastdb` as NCBI's program does. `main` prints the
+/// text on stdout and exits 0, before any argument is parsed. The top level `losat --version`
+/// is clap's and is not read here.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-977
+/// ```c++
+///             } else if ( NStr::strcmp(argv[i], s_ArgVersion) == 0 ) {
+///                 delete[] v;
+///                 // Print VERSION
+///                 cout << GetFullVersion().Print( appname, CVersionAPI::fVersionInfo | CVersionAPI::fPackageShort );
+///                 diag_context.DiscardMessages();
+///                 return 0;
+/// ```
+pub fn ncbi_version_request<I, S>(argv: I) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    let tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+    let command = Cli::command();
+    let program = command.find_subcommand(tokens.get(1)?.to_str()?)?;
+    let name = match program.get_name() {
+        "blastn" => "blastn",
+        "blastp" => "blastp",
+        "blastx" => "blastx",
+        "tblastn" => "tblastn",
+        "tblastx" => "tblastx",
+        "psiblast" => "psiblast",
+        "makedb" => "makeblastdb",
+        _ => return None,
+    };
+    for token in &tokens[2..] {
+        match token.to_str().unwrap_or("") {
+            "--" => return None,
+            "-version" => {
+                return Some(format!(
+                    "{name}: 2.17.0+\n Package: LOSAT {}, output compatible with blast 2.17.0\n",
+                    env!("CARGO_PKG_VERSION")
+                ));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001
 // ```c++
 //         for (int i = 1;  i < argc;  i++) {
@@ -576,8 +634,9 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
 // ```
 // NCBI's application reads these words anywhere before `--`, also where another option
 // expects its value: `-out -version` prints the version, and `-out -dryrun` loses the
-// value of `-out`. LOSAT rejects each of them (decision D9), so the first one found is
-// rejected there as it is in an option's place, rather than read as the value.
+// value of `-out`. LOSAT rejects each of them (decision D9) but `-version` (printed by
+// `ncbi_version_request`, which runs before this), so the first one found is rejected
+// there as it is in an option's place, rather than read as the value.
 fn ncbi_preparsed_toolkit_word(tokens: &[OsString]) -> Option<&str> {
     for token in tokens {
         let text = token.to_str().unwrap_or("");
@@ -588,7 +647,6 @@ fn ncbi_preparsed_toolkit_word(tokens: &[OsString]) -> Option<&str> {
             text,
             "-logfile"
                 | "-conffile"
-                | "-version"
                 | "-version-full"
                 | "-version-full-xml"
                 | "-version-full-json"
@@ -652,12 +710,10 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "entrez_query"
             | "export_search_strategy"
             | "gilist"
-            | "h"
             | "html"
             | "import_search_strategy"
             | "in_pssm"
             | "line_length"
-            | "mt_mode"
             | "negative_gilist"
             | "negative_seqidlist"
             | "negative_taxidlist"
@@ -674,7 +730,6 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "taxidlist"
             | "taxids"
             | "use_sw_tback"
-            | "version"
             | "xdrop_ungap"
     )
 }
@@ -701,7 +756,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "entrez_query"
             | "export_search_strategy"
             | "gilist"
-            | "h"
             | "html"
             | "import_search_strategy"
             | "lcase_masking"
@@ -724,7 +778,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "sum_stats"
             | "taxidlist"
             | "taxids"
-            | "version"
             | "xdrop_ungap"
     )
 }
@@ -771,7 +824,6 @@ fn is_unported_blastx_arg(name: &str) -> bool {
             | "xdrop_gap"
             | "xdrop_gap_final"
             | "parse_deflines"
-            | "mt_mode"
             | "remote"
             | "use_sw_tback"
     )

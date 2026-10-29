@@ -88,17 +88,9 @@ pub struct MakedbArgs {
     pub max_file_sz: String,
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:76-77
-// ```c++
-// static const char* s_AutoHelp     = "h";
-// static const char* s_AutoHelpFull = "help";
-// ```
-/// The options of makeblastdb 2.17.0 that `losat makedb` refuses
-/// (makeblastdb.cpp:246-333), and `-h`, the short usage that the NCBI C++
-/// Toolkit gives every program (`-help` prints LOSAT's own usage, as for the
-/// search programs).
-pub const UNSUPPORTED_OPTIONS: [&str; 15] = [
-    "h",
+/// The options of makeblastdb 2.17.0 that `losat makedb` (`losat makeblastdb`) refuses
+/// (makeblastdb.cpp:246-333). `-h` and `-version` are served (`crate::cli`).
+pub const UNSUPPORTED_OPTIONS: [&str; 13] = [
     "parse_seqids",
     "hash_index",
     "randomize",
@@ -112,7 +104,6 @@ pub const UNSUPPORTED_OPTIONS: [&str; 15] = [
     "taxid",
     "taxid_map",
     "oid_masks",
-    "version",
 ];
 
 /// How `losat makedb` ends when it does not build a database, or cannot

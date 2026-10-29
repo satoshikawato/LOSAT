@@ -197,16 +197,18 @@ losat tblastn \
 
 The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including ID 32 under the documented product decision. Its certified output and target claims apply to the [declared fixtures and options](docs/release/v0.2.0.md). PSI-TBLASTN and composition modes 1/3 are unsupported (so is `-task tblastn-fast`); database searches (`-db`) are described in section 6.
 
-### 5. Writing a BLAST Database (makedb)
+### 5. Writing a BLAST Database (makeblastdb)
 ```bash
-losat makedb \
+losat makeblastdb \
   -in proteins.faa \
   -dbtype prot \
   -out proteins_db \
   -title "my proteins"
 ```
 
-`losat makedb` writes the sequence, header and index files of `makeblastdb -blastdb_version 4` (without `-parse_seqids`), and the alias file of a database in several volumes: the sequence and header files are the same bytes, and the index file differs only in its creation date. The JSON metadata file (`.pjs`, `.njs`) is not written. `-max_file_sz` splits the database into volumes as makeblastdb does. NCBI BLAST+ programs and LOSAT's BLASTP, BLASTN, TBLASTN, BLASTX and TBLASTX search such a database with `-db` (section 6); the makeblastdb options LOSAT does not implement (`-parse_seqids`, masks, taxonomy, `-blastdb_version 5`) are rejected by name.
+`losat makeblastdb` (also named `losat makedb`) writes the sequence, header and index files of `makeblastdb -blastdb_version 4` (without `-parse_seqids`), and the alias file of a database in several volumes: the sequence and header files are the same bytes, and the index file differs only in its creation date. The JSON metadata file (`.pjs`, `.njs`) is not written. `-max_file_sz` splits the database into volumes as makeblastdb does. NCBI BLAST+ programs and LOSAT's BLASTP, BLASTN, TBLASTN, BLASTX and TBLASTX search such a database with `-db` (section 6); the makeblastdb options LOSAT does not implement (`-parse_seqids`, masks, taxonomy, `-blastdb_version 5`) are rejected by name.
+
+Every program answers `-version` as NCBI BLAST+ does (`blastn: 2.17.0+`, then a `Package:` line that names LOSAT) and `-h` with a short usage, both with exit code 0. `-mt_mode 0|1|2` (with `-num_threads`, as in NCBI) is accepted by BLASTN, BLASTP, BLASTX and TBLASTN and does not change the output, which is always that of NCBI `-num_threads 1`: NCBI's `-mt_mode 1` writes the end of an outfmt 0 report or each XML document once per batch of queries, which LOSAT does not reproduce. BLASTN accepts `-use_index false` (NCBI's default); `-use_index true` is rejected.
 
 ### 6. Searching a BLAST Database (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX)
 ```bash

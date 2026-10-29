@@ -371,3 +371,265 @@ fn normal_tblastx_run_keeps_stderr_clean_without_debug_env() {
         "tblastx smoke input should produce at least one hit"
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-977
+// ```c++
+//             } else if ( NStr::strcmp(argv[i], s_ArgVersion) == 0 ) {
+//                 delete[] v;
+//                 // Print VERSION
+//                 cout << GetFullVersion().Print( appname, CVersionAPI::fVersionInfo | CVersionAPI::fPackageShort );
+//                 diag_context.DiscardMessages();
+//                 return 0;
+// ```
+// NCBI reads `-version` before any other argument: anywhere before `--`, in the value place
+// of another option, and next to arguments that are invalid.
+#[test]
+fn ncbi_version_is_two_lines_for_every_program() {
+    let package = format!(
+        " Package: LOSAT {}, output compatible with blast 2.17.0\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    for (name, printed) in [
+        ("blastn", "blastn"),
+        ("blastp", "blastp"),
+        ("blastx", "blastx"),
+        ("tblastn", "tblastn"),
+        ("tblastx", "tblastx"),
+        ("psiblast", "psiblast"),
+        ("makedb", "makeblastdb"),
+        ("makeblastdb", "makeblastdb"),
+    ] {
+        let expected = format!("{printed}: 2.17.0+\n{package}");
+        for words in [
+            vec![name, "-version"],
+            vec![name, "-out", "-version"],
+            vec![name, "-no_such_option", "-version"],
+            vec![name, "-evalue", "x", "-version", "-bogus"],
+        ] {
+            let output = run_losat(&words);
+            assert!(output.status.success(), "{words:?}: {:?}", output.status);
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                expected,
+                "{words:?}"
+            );
+            assert!(output.stderr.is_empty(), "{words:?}");
+        }
+        // After `--` the word is a positional argument, which no program has.
+        let output = run_losat(&[name, "--", "-version"]);
+        assert!(!output.status.success(), "{name} -- -version");
+    }
+    // The top level `--version` is clap's.
+    let output = run_losat(&["--version"]);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        format!("losat {}", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:76-77
+// ```c++
+// static const char* s_AutoHelp     = "h";
+// static const char* s_AutoHelpFull = "help";
+// ```
+#[test]
+fn short_help_h_succeeds_for_every_program() {
+    for name in [
+        "blastn",
+        "blastp",
+        "blastx",
+        "tblastn",
+        "tblastx",
+        "psiblast",
+        "makedb",
+        "makeblastdb",
+    ] {
+        for words in [vec![name, "-h"]] {
+            let output = run_losat(&words);
+            assert!(output.status.success(), "{words:?}: {:?}", output.status);
+            assert!(output.stderr.is_empty(), "{words:?}");
+            let text = String::from_utf8_lossy(&output.stdout);
+            assert!(text.contains("Usage:"), "{words:?}: {text}");
+            assert!(!text.contains("error:"), "{words:?}: {text}");
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
+// ```c++
+//     arg_desc->SetUsageContext(GetArguments().GetProgramBasename(),
+//                   "Application to create BLAST databases, version "
+//                   + CBlastVersion().Print());
+// ```
+// `losat makeblastdb` is `losat makedb`: the same files from the same input.
+#[test]
+fn makeblastdb_writes_the_files_makedb_writes() {
+    let input = temp_path("mkdb_in", "faa");
+    fs::write(
+        &input,
+        ">a first\nMKTAYIAKQRQISFVKSHFSRQ\n>b second\nLEERLGLIEVQAPILSRVGDGTQDN\n",
+    )
+    .unwrap();
+    let input_text = input.to_str().unwrap();
+    let mut outputs = Vec::new();
+    for name in ["makedb", "makeblastdb"] {
+        let base = temp_path(name, "db");
+        let base_text = base.to_str().unwrap();
+        let output = run_losat(&[
+            name, "-in", input_text, "-dbtype", "prot", "-out", base_text,
+        ]);
+        assert!(output.status.success(), "{name}: {:?}", output);
+        // The log names the database's own path; compare it with the path removed.
+        // The log also holds the time and the seconds of the run.
+        let log = String::from_utf8_lossy(&output.stdout)
+            .replace(base_text, "<db>")
+            .lines()
+            .filter(|line| !line.contains("current time") && !line.contains(" seconds"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut files = Vec::new();
+        for extension in ["phr", "psq", "pin"] {
+            let path = format!("{base_text}.{extension}");
+            files.push((extension, fs::read(&path).unwrap()));
+            fs::remove_file(path).unwrap();
+        }
+        outputs.push((log.replace(input_text, "<in>"), files));
+    }
+    fs::remove_file(&input).unwrap();
+    assert_eq!(outputs[0].0, outputs[1].0);
+    for ((extension, first), (_, second)) in outputs[0].1.iter().zip(&outputs[1].1) {
+        // The index file holds the creation date (README, section 5).
+        if *extension == "pin" {
+            assert_eq!(first.len(), second.len());
+        } else {
+            assert_eq!(first, second, ".{extension}");
+        }
+    }
+    // `-help` works under both names, and the top level lists makeblastdb.
+    for name in ["makedb", "makeblastdb"] {
+        let output = run_losat(&[name, "-help"]);
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("-dbtype <molecule_type>"));
+    }
+    let top = String::from_utf8_lossy(&run_losat(&["-help"]).stdout).into_owned();
+    assert!(top.contains("makeblastdb"), "{top}");
+}
+
+const MT_PROTEIN: &str = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVV";
+const MT_NUCLEOTIDE: &str = "ATGAAAACCGCCTATATTGCCAAACAGCGTCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGTCAGCTGGAAGAACGTCTGGGCCTGATTGAAGTGCAGGCCCCGATTCTGAGCCGTGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCCGAAAAAGCCGTGCAGGTGAAAGTGAAAGCCCTGCCGGATGCCCAGTTTGAAGTGGTG";
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3176-3181
+// ```c++
+//     	arg_desc.SetConstraint(kArgMTMode,
+//                                new CArgAllowValuesBetween(0, 2, true));
+//     	arg_desc.SetDependency(kArgMTMode,
+//                                CArgDescriptions::eRequires,
+//                                kArgNumThreads);
+// ```
+// `-mt_mode` has no effect on LOSAT's output (CLI DECISIONS 5).
+#[test]
+fn mt_mode_does_not_change_the_output() {
+    let protein = temp_path("mt_protein", "faa");
+    let nucleotide = temp_path("mt_nucleotide", "fna");
+    fs::write(&protein, format!(">p\n{MT_PROTEIN}\n")).unwrap();
+    fs::write(&nucleotide, format!(">n\n{MT_NUCLEOTIDE}\n")).unwrap();
+    let (protein, nucleotide) = (protein.to_str().unwrap(), nucleotide.to_str().unwrap());
+    for (program, query, subject) in [
+        ("blastn", nucleotide, nucleotide),
+        ("blastp", protein, protein),
+        ("blastx", nucleotide, protein),
+        ("tblastn", protein, nucleotide),
+    ] {
+        let base = [
+            program, "-query", query, "-subject", subject, "-outfmt", "6",
+        ];
+        let run = |words: &[&str]| {
+            let mut command = clean_losat_command();
+            // A build with the diagnostics feature needs this log for two or more threads.
+            if cfg!(feature = "diagnostics") {
+                command.env("LOSAT_BLASTX_WORKER_LOG", temp_path("mt_worker", "log"));
+            }
+            command.args(words).output().expect("run LOSAT")
+        };
+        let plain = run(&base);
+        assert!(plain.status.success(), "{program}: {:?}", plain);
+        assert!(!plain.stdout.is_empty(), "{program}");
+        for mode in ["0", "1", "2"] {
+            let mut words = base.to_vec();
+            words.extend(["-mt_mode", mode, "-num_threads", "2"]);
+            let output = run(&words);
+            assert!(output.status.success(), "{program} {mode}: {:?}", output);
+            assert_eq!(output.stdout, plain.stdout, "{program} -mt_mode {mode}");
+        }
+        // Out of range, and without `-num_threads`: argument errors.
+        for extra in [
+            &["-mt_mode", "3", "-num_threads", "2"][..],
+            &["-mt_mode", "-1", "-num_threads", "2"],
+            &["-mt_mode", "1"],
+        ] {
+            let mut words = base.to_vec();
+            words.extend(extra);
+            let output = run(&words);
+            assert!(!output.status.success(), "{program} {extra:?}");
+            assert!(output.stdout.is_empty(), "{program} {extra:?}");
+        }
+    }
+    // NCBI's tblastx and psiblast have no -mt_mode.
+    for program in ["tblastx", "psiblast"] {
+        let output = run_losat(&[
+            program,
+            "-query",
+            protein,
+            "-subject",
+            protein,
+            "-mt_mode",
+            "1",
+            "-num_threads",
+            "2",
+        ]);
+        assert!(!output.status.success(), "{program}");
+    }
+    fs::remove_file(protein).unwrap();
+    fs::remove_file(nucleotide).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3354-3358
+// ```c++
+//     arg_desc.AddDefaultKey(
+//             kArgUseIndex, "boolean",
+//             "Use MegaBLAST database index",
+//             CArgDescriptions::eBoolean, NStr::BoolToString(kDfltArgUseIndex));
+// ```
+#[test]
+fn use_index_false_is_accepted_and_true_is_refused() {
+    let nucleotide = temp_path("use_index", "fna");
+    fs::write(&nucleotide, format!(">n\n{MT_NUCLEOTIDE}\n")).unwrap();
+    let nucleotide = nucleotide.to_str().unwrap();
+    let base = [
+        "blastn", "-query", nucleotide, "-subject", nucleotide, "-outfmt", "6",
+    ];
+    let plain = run_losat(&base);
+    assert!(plain.status.success() && !plain.stdout.is_empty());
+    for value in ["false", "FALSE", "f", "no", "0"] {
+        let mut words = base.to_vec();
+        words.extend(["-use_index", value]);
+        let output = run_losat(&words);
+        assert!(output.status.success(), "-use_index {value}: {:?}", output);
+        assert_eq!(output.stdout, plain.stdout, "-use_index {value}");
+    }
+    for value in ["true", "t", "1", "maybe"] {
+        let mut words = base.to_vec();
+        words.extend(["-use_index", value]);
+        let output = run_losat(&words);
+        assert!(!output.status.success(), "-use_index {value}");
+        assert!(output.stdout.is_empty(), "-use_index {value}");
+    }
+    let mut words = base.to_vec();
+    words.extend(["-use_index", "true"]);
+    let error = String::from_utf8_lossy(&run_losat(&words).stderr).into_owned();
+    assert!(
+        error.contains("-use_index true (the megablast index) is not supported by LOSAT's BLASTN"),
+        "{error}"
+    );
+    fs::remove_file(nucleotide).unwrap();
+}

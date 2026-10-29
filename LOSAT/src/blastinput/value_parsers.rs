@@ -937,6 +937,44 @@ pub fn ncbi_boolean(value: &str) -> Result<bool, String> {
         .ok_or_else(|| format!("Argument cannot be converted: `{value}'"))
 }
 
+/// A `-mt_mode` value: an integer from 0 to 2 (`CArgAllowValuesBetween(0, 2, true)`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3176-3177
+/// ```c++
+///     	arg_desc.SetConstraint(kArgMTMode,
+///                                new CArgAllowValuesBetween(0, 2, true));
+/// ```
+pub fn ncbi_mt_mode(value: &str) -> Result<u8, String> {
+    let mode = ncbi_integer_at_least(value, 0)?;
+    u8::try_from(mode)
+        .ok()
+        .filter(|mode| *mode <= 2)
+        .ok_or_else(|| "Illegal value: expected an integer from 0 to 2".to_string())
+}
+
+/// A BLASTN `-use_index` value: a Boolean (`ncbi_boolean`), of which only `false` is served.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3382-3395
+/// ```c++
+///     if( args.Exist( kArgUseIndex ) &&
+///         !(args.Exist( kArgSubject ) && args[kArgSubject])) {
+///         bool use_index   = true;
+///         bool force_index = false;
+///         bool old_style_index = false;
+///         if( args[kArgUseIndex] ) {
+///             if( args[kArgUseIndex].AsBoolean() ) force_index = true;
+///             else use_index = false;
+///         }
+/// ```
+pub fn blastn_use_index(value: &str) -> Result<bool, String> {
+    if ncbi_boolean(value)? {
+        return Err(
+            "-use_index true (the megablast index) is not supported by LOSAT's BLASTN".into(),
+        );
+    }
+    Ok(false)
+}
+
 /// A protein `-word_size` (`CArgAllowValuesGreaterThanOrEqual(2)` for a protein query).
 ///
 /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170

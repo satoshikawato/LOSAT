@@ -363,7 +363,10 @@ from their Seq-ids), `ids/nrefuse_v5` from `ids/nrefuse.fna` (`lcl|777` before `
 formatters do not find again) and the two volumes `ids/njoined_a` and `ids/njoined_b` of the alias
 `ids/njoined.nal` (`gb|AF000040|` and `gb|AF000040.1|`, whose hits NCBI's XML and outfmt 0 join). Queries:
 `LOSAT/tests/seqid/fasta/qnucl.fa` (BLASTN, TBLASTX) and `qprot.fa` (TBLASTN); the second query of each has
-no hit. TBLASTN and TBLASTX run with `-max_hsps 1` to keep the frozen files small.
+no hit. TBLASTN and TBLASTX run with `-max_hsps 1` to keep the frozen files small. `ids/nambig_v4` (from
+`ids/nambig.fna`: a record with ambiguity data) has no row; the unit test of blastn's report stream reads it.
+Rows `db.id.blastn.stream.q25.*` (line DBID, blastn's report stream of these databases): the 25 records of
+`ids/nucl.fna` as queries in batches of `BATCH_SIZE=1500`, each batch with hits.
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 

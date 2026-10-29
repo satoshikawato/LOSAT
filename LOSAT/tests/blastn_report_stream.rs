@@ -595,6 +595,132 @@ fn a_database_search_where_the_switch_must_not_act() {
     }
 }
 
+/// Databases with parsed Seq-ids (line DBID; `tests/db_search/ids`, `make_ids.py`), with the 25
+/// records of `nucl.fna` (variants of one sequence: every query hits every sequence) as queries
+/// in batches of four (`BATCH_SIZE=1500`): the off bytes, written batch by batch where no report
+/// of a sequence can be refused (`database::x_streaming_refusal` with
+/// `common::database::reports_may_refuse`), and after the loop where one can: two sequences that
+/// outfmt 0 joins (`njoined`, `off=joined`; the tabular formats do not join them), a sequence
+/// that NCBI's formatters do not find (`nrefuse_v5`, `off=titles`), with `taxdb.bti` found an
+/// outfmt 0 title that NCBI makes from the taxonomy database (`off=titles`) and a taxonomy record
+/// that LOSAT refuses where the prefetch reads it (`btd_empty`, `off=taxonomy`). A taxonomy
+/// database with a wrong magic number writes its messages with each batch's reports. Then eight
+/// queries without hits come first, so that only the third and later batches report a sequence:
+/// the refusals still come before every report (outfmt 7 writes each query's comment lines and
+/// outfmt 0 its section, hits or not).
+#[test]
+fn a_database_with_parsed_seqids_gives_the_off_bytes() {
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let ids = |name: &str| {
+        tests
+            .join("db_search/ids")
+            .join(name)
+            .to_str()
+            .unwrap()
+            .to_string()
+    };
+    let taxdb = |variant: &str| {
+        tests
+            .join("seqdb/taxdb")
+            .join(variant)
+            .to_str()
+            .unwrap()
+            .to_string()
+    };
+    let query = ids("nucl.fna");
+    let (bad_magic, btd_empty) = (taxdb("bad_magic"), taxdb("btd_empty"));
+    for (db, outfmt, blastdb, threads, expected) in [
+        ("nucl_v5", "0", None, 1, "none"),
+        ("nucl_v5", "6", None, 4, "none"),
+        ("nucl_v5", "17", None, 1, "none"),
+        ("nucl_v5", "8", None, 4, "none"),
+        ("nucl_v5", "11", None, 1, "none"),
+        ("nucl_v4", "0", None, 4, "none"),
+        ("nucl_v5", "7", Some(&bad_magic), 4, "none"),
+        ("nucl_v5", "0", Some(&bad_magic), 1, "titles"),
+        ("nucl_v5", "7", Some(&btd_empty), 1, "taxonomy"),
+        ("njoined", "6", None, 4, "none"),
+        ("njoined", "0", None, 1, "joined"),
+        ("nrefuse_v5", "6", None, 4, "titles"),
+    ] {
+        let path = ids(db);
+        let args = [
+            "-task",
+            "megablast",
+            "-query",
+            &query,
+            "-db",
+            &path,
+            "-outfmt",
+            outfmt,
+            "-max_target_seqs",
+            "3",
+        ];
+        let mut extra = vec![("BATCH_SIZE", "1500")];
+        if let Some(dir) = blastdb {
+            extra.push(("BLASTDB", dir.as_str()));
+        }
+        let what = format!("{db} outfmt {outfmt} {blastdb:?}");
+        let (off, (batches, reason)) = same_two(&what, &args, threads, &extra, None);
+        assert_eq!(reason, expected, "{what}");
+        if expected == "none" {
+            assert_eq!(off.status, Some(0), "{what}");
+            assert!(batches >= 6 && off.report.len() > 1000, "{what}");
+        } else {
+            assert_eq!(batches, 0, "{what}");
+        }
+    }
+    // Eight queries of 488 random letters (no hits) before the 25 records.
+    let dir = TempDir::new("parsedlate");
+    let mut text = Vec::new();
+    let mut state: u64 = 0x2545_f491_4f6c_dd1d;
+    for at in 0..8 {
+        let letters: Vec<u8> = (0..488)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                b"ACGT"[(state >> 62) as usize]
+            })
+            .collect();
+        record(&mut text, format!("nohit{at}").as_bytes(), &letters);
+    }
+    text.extend(std::fs::read(&query).unwrap());
+    let late = dir.path("late.fa");
+    std::fs::write(&late, text).unwrap();
+    let late = late.to_str().unwrap();
+    for (db, outfmt, threads, expected) in [
+        ("nucl_v5", "7", 4, "none"),
+        ("nrefuse_v5", "7", 1, "titles"),
+        ("njoined", "0", 4, "joined"),
+    ] {
+        let path = ids(db);
+        let args = [
+            "-task",
+            "megablast",
+            "-query",
+            late,
+            "-db",
+            &path,
+            "-outfmt",
+            outfmt,
+            "-max_target_seqs",
+            "3",
+        ];
+        let what = format!("{db} outfmt {outfmt}, queries without hits first");
+        let (off, (batches, reason)) =
+            same_two(&what, &args, threads, &[("BATCH_SIZE", "1500")], None);
+        assert_eq!(reason, expected, "{what}");
+        if expected == "none" {
+            assert_eq!(off.status, Some(0), "{what}");
+            assert!(batches >= 8, "{what}");
+        } else {
+            assert_ne!(off.status, Some(0), "{what}: the refusal");
+            assert_eq!(batches, 0, "{what}");
+        }
+    }
+}
+
 /// Where the switch must not act, it does not, and the bytes are the off path's: a subject whose
 /// tabular id LOSAT refuses (`Subject_` and a byte in no encoding NCBI recognises), which a later
 /// batch reaches (without the switch the refusal comes before every report; written batch by

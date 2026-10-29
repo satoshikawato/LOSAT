@@ -39,11 +39,12 @@
 //! fewer than four query batches, or a plan over the limit of kept plans, `XSubjectSide::keeps`)
 //! gets a plan without residues (`x_packed_lean_plan`;
 //! `LOSAT_X_TBNUNITXLATE`, in the strict set: on unless it is `0`): its frames have their lengths
-//! only, and each (frame, chunk) unit translates the residues it reads into a buffer of its thread
-//! (`x_unit_residues`), one strand of one phase from the packed bytes, by the same tables and loops
-//! (32 codons with AVX2, else eight from one word; counted in `[X_STATS] TBNXLATESIMD`). With
-//! `LOSAT_X_STATS` set, `main` prints `[X_STATS] TBNUNITXLATE plans= units= residues=` when a plan
-//! without residues was made.
+//! only, and each (frame, chunk) unit translates the residues it reads into a buffer the threads
+//! of a query batch share (`x_unit_residues`; `search_gapped::XUnitResiduesPool`, freed at the
+//! end of the batch's preliminary stage), one strand of one phase from the packed bytes, by the
+//! same tables and loops (32 codons with AVX2, else eight from one word; counted in `[X_STATS]
+//! TBNXLATESIMD`). With `LOSAT_X_STATS` set, `main` prints `[X_STATS] TBNUNITXLATE plans= units=
+//! residues= buffers= freed=` when a plan without residues was made.
 
 use super::search_seed::{translated_chunk_scan_ranges, TranslatedChunk, XSubjectPlan};
 use crate::algorithm::tblastx::constants::SENTINEL_BYTE;
@@ -63,8 +64,8 @@ static PACKED_CODONS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 
 // No NCBI counterpart: counters for LOSAT_X_STATS; they do not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the plans without residues, the units that translated their
-/// residues and those residues (with LOSAT_X_STATS).
-static UNIT_RESIDUES: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+/// residues, those residues, the units' buffers made and those freed (with LOSAT_X_STATS).
+static UNIT_RESIDUES: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
 
 // No NCBI counterpart: reads LOSAT_X_STATS once; it does not change any value NCBI computes.
 fn x_stats() -> bool {
@@ -83,11 +84,13 @@ pub fn print_summary() {
         if vector + scalar > 0 {
             eprintln!("[X_STATS] TBNXLATESIMD codons_vector={vector} codons_scalar={scalar}");
         }
-        let [plans, units, residues] = UNIT_RESIDUES
+        let [plans, units, residues, buffers, freed] = UNIT_RESIDUES
             .each_ref()
             .map(|count| count.load(Ordering::Relaxed));
         if plans > 0 {
-            eprintln!("[X_STATS] TBNUNITXLATE plans={plans} units={units} residues={residues}");
+            eprintln!(
+                "[X_STATS] TBNUNITXLATE plans={plans} units={units} residues={residues} buffers={buffers} freed={freed}"
+            );
         }
     }
 }
@@ -1130,6 +1133,16 @@ fn x_unit_range(aa_len: usize, chunk: TranslatedChunk) -> (usize, usize) {
     (from, (aa_len + 2).min(from + chunk.length + X_UNIT_MARGIN))
 }
 
+// No NCBI counterpart: counters for LOSAT_X_STATS; they do not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNUNITXLATE): counts `made` buffers for the units' residues and `freed`
+/// ones (`search_gapped::XUnitResiduesPool`), with LOSAT_X_STATS.
+pub(super) fn x_count_unit_buffers(made: u64, freed: u64) {
+    if x_stats() {
+        UNIT_RESIDUES[3].fetch_add(made, Ordering::Relaxed);
+        UNIT_RESIDUES[4].fetch_add(freed, Ordering::Relaxed);
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812
 // ```c
 //             subject->sequence = translation_buffer + frame_offsets[context] + 1;
@@ -1179,7 +1192,8 @@ pub(super) fn x_unit_residues(
 /// frame `frame` of `store` (`aa_len` residues), made into `buffer` by one strand of one phase;
 /// returns the range of `buffer` that holds them, the codons read and those the vector loop read.
 /// `simd`: the vector loop where the CPU has it. The buffer only grows (its other bytes are left
-/// as they are), so a thread's buffer is filled with zeros once.
+/// as they are), so a buffer is filled with zeros once; from 1 MiB on its capacity is one glibc
+/// maps (`utils::x_mapped::x_reserve_mapped`), so that its pages are returned when it is freed.
 #[allow(clippy::too_many_arguments)]
 fn x_frame_residues(
     store: &crate::sequence::packed_subject::PackedNucleotide,
@@ -1226,6 +1240,7 @@ fn x_frame_residues(
         .len()
         .min(byte + (first_base % 4 + 3 * count).div_ceil(4) + 32);
     if buffer.len() < count + 2 {
+        crate::utils::x_mapped::x_reserve_mapped(buffer, count + 2 - buffer.len());
         buffer.resize(count + 2, 0);
     }
     let bytes = &packed[byte..end];

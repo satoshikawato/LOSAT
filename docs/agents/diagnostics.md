@@ -5636,13 +5636,13 @@ Scheduling (each value computed by one thread with the original function; order 
   the branch-free scans of blastp / blastx / tblastx join the set once each shows no loss).
 - `LOSAT_X_TBNUNITXLATE=1` tblastn (speed and memory; in the strict set from the pull request that added it,
   2026-10-23; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_packed_lean_plan`, `x_unit_residues`,
-  `tblastn/search_gapped.rs` `X_UNIT_RESIDUES`): the plan of a packed subject (every `-db` sequence, `-subject`
+  `tblastn/search_gapped.rs` `XUnitResiduesPool`): the plan of a packed subject (every `-db` sequence, `-subject`
   with `TBNSTORE`) whose first frame has 1 MiB or more (3,145,722 bases) and which is made for its use alone
   (a search that keeps no plan of it: fewer than 4 query batches, or, since 2026-10-28, a plan that the 256 MiB
   of kept plans of `TBNSSIDE` refuses and every batch makes per use; `XSubjectSide::keeps`) has no residues: its
   frames have their lengths and its units
   their chunks, and each (frame, chunk) unit translates the residues it reads, from the chunk's first to 4,096
-  past its last (or the frame's end sentinel), into a buffer its thread keeps, from the packed bytes of its
+  past its last (or the frame's end sentinel), into a buffer the threads share, from the packed bytes of its
   phase and strand with the tables and loops of `TBNXLATESIMD` (32 codons with AVX2, else eight from one word).
   Before, the thread that took a chromosome translated its six frames (up to 83 MB each on the human genome)
   before the chromosome's units started, glibc mapped them fresh and unmapped them after the subject
@@ -5651,12 +5651,25 @@ Scheduling (each value computed by one thread with the original function; order 
   tests `x_one_strand_of_a_phase_is_that_strand_of_both`, `x_frame_residues_of_a_range_are_the_frames`,
   `x_lean_plans_are_the_plans_without_residues`, `x_units_of_a_frame_of_three_chunks_read_the_frames_residues`;
   `long_packed_subject_chunk_wordfinder_hsps_match_ncbi`, NCBI's initial HSPs of a subject of two chunks per
-  frame; `tests/tblastn_unit_xlate.rs`). The buffer is taken from the thread for the unit and given back after
-  it, so a unit the thread runs while it waits (`TBNFLOWHELP`) makes its own; it only grows, and a thread keeps
-  it (up to a chunk and the margin, about 5 MB) until it ends. The units' codons count in `[X_STATS]
-  TBNXLATESIMD`. Subjects with shorter frames keep the frames of their plans (those of 256 KiB or less reused
-  by `TBNFRAMEREUSE`). With `LOSAT_X_STATS=1` `[X_STATS] TBNUNITXLATE plans= units= residues=` counts
-  the plans without residues and the units' residues. Measured 2026-10-23/24 on the workstation (physical cores
+  frame; `tests/tblastn_unit_xlate.rs`). The unit takes an idle buffer of its query batch's pool
+  (`search_gapped.rs` `XUnitResiduesPool`, part of the batch's query-side state with its lookup table), or a new
+  one, and gives it back after it, so a unit the thread runs while it waits (`TBNFLOWHELP`) takes another; a
+  buffer only grows (up to a chunk and the margin, about 5 MB; from 1 MiB on with a capacity glibc maps,
+  `x_reserve_mapped`), and the batch's buffers are freed at the end of its preliminary stage. Before 2026-10-28
+  (B11m) each thread kept its buffer until it ended, so the buffers of every thread that had run such a unit
+  were still there at the peak, which comes after the units. Measured 2026-10-29 on the workstation (node 1,
+  `--membind=1`, the pull request's binary against dev ddb8c7ad in the same run, 8 rounds with the order rotated, VmHWM
+  sampled every 2 ms; every output of a case the same bytes across arms): the fly genome with `dmel_b4.faa` (4
+  batches) at 16 threads max RSS 454 -> 381 MiB (-66 MiB per round, 8 of 8 lower; dev against itself -4), one batch
+  of 35 human proteins against the human genome at 16 threads 2,494 -> 2,441 MiB (-53, 7 of 8; dev against itself
+  -21), the zebrafish genome with `drer_b4.faa` (4 batches) at 32 threads 1,359 -> 1,319 MiB (-45, 8 of 8), the human
+  genome with `hsap_b4.faa` (4 batches) at 32 threads 4,743 -> 4,751 MiB (-40 per round, 5 of 8: no change beyond the
+  rounds' spread of -227 to +227); time x0.991 / 0.999 / 0.999 / 0.998 (dev against itself x0.995 / 1.001), minor
+  faults +5 % on the 4-batch human search (its buffers made once per batch). The units' codons count in
+  `[X_STATS] TBNXLATESIMD`. Subjects with shorter frames keep the frames of their plans (those of 256 KiB or less reused
+  by `TBNFRAMEREUSE`). With `LOSAT_X_STATS=1` `[X_STATS] TBNUNITXLATE plans= units= residues= buffers= freed=`
+  counts the plans without residues, the units' residues, and the buffers made and freed (every buffer made is
+  freed at the end of its batch's preliminary stage). Measured 2026-10-23/24 on the workstation (physical cores
   of node 1 with their HT siblings idle, `--membind=1`, cores warmed 3 s before each run, pairs with the order
   alternated, `perf stat` walls; node 0 busy, load 13-54), the pull request's binary against its base, one protein
   against a genome (`-db -evalue 1e-5 -max_target_seqs 5`), every output of a case the same bytes across arms (the

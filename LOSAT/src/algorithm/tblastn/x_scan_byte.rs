@@ -32,6 +32,14 @@
 //! `s_range` values of every call are NCBI's (the words after the stop were looked at but not
 //! used; the next call looks at them again, as with the branch-free scan).
 //!
+//! EXPERIMENT (LOSAT_X_TBNSCANRESUME): the unit path keeps the block where a call stops (its
+//! indexes, its candidates and the word that did not fit, `XScanHeld`), and the next call of the
+//! same range copies on from that candidate instead of making the block's candidates again
+//! (`x_scan_one_range_held`; the copy loop is the one above). A stop then costs a call, not a
+//! block of words, and the unit path gives the offset array NCBI's size, 4096 + the longest chain
+//! (`search_seed.rs` `x_scan_unit`; `lookup_wrap.c:264-266`; at most the plan's size), instead of
+//! `LOSAT_X_TBNPAIRCAP`'s 32768 + it. The pairs and the `s_range` of every call are still NCBI's.
+//!
 //! The offset array must have `X_SCAN_BYTE_SLACK` entries after `array_size`; the entries past the
 //! returned count are not part of the result. `presence` depends on the lookup table only; each
 //! thread builds it once per table (`presence_bytes`).
@@ -292,6 +300,35 @@ pub(crate) fn x_scan_one_range_byte(
     array_size: i32,
     s_range: &mut [i32; 3],
 ) -> i32 {
+    x_scan_one_range_held(
+        mode,
+        lookup,
+        presence,
+        subject,
+        offset_pairs,
+        array_size,
+        s_range,
+        &mut XScanHeld::new(),
+    )
+}
+
+// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (see `x_scan_bf.rs`).
+/// EXPERIMENT (LOSAT_X_TBNSCANRESUME): `x_scan_one_range_byte` that keeps in `held` the block of a
+/// call that stops on a full offset array, and copies the rest of it when the next call is that
+/// call's resumption (the same subject and `s_range[2]`, `s_range[1]` the word that did not fit).
+/// Same result and `s_range` as NCBI's scan. A new `held` holds nothing.
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+pub(crate) fn x_scan_one_range_held(
+    mode: XScanByte,
+    lookup: &BlastAaLookupTable,
+    presence: &[u8],
+    subject: &[u8],
+    offset_pairs: &mut [BlastOffsetPair],
+    array_size: i32,
+    s_range: &mut [i32; 3],
+    held: &mut XScanHeld,
+) -> i32 {
     match mode {
         XScanByte::On { .. } | XScanByte::Sparse => scan(
             mode == XScanByte::On { avx2: true },
@@ -301,12 +338,54 @@ pub(crate) fn x_scan_one_range_byte(
             offset_pairs,
             array_size,
             s_range,
+            held,
         ),
         XScanByte::Off => unreachable!("x_scan_one_range_byte with the switch off"),
     }
 }
 
-/// The scan of one call (module text), with the AVX2 forms when `avx2`.
+/// EXPERIMENT (LOSAT_X_TBNSCANRESUME): the block of the scan call that stopped on a full offset
+/// array, for its resumption (`x_scan_one_range_held`): the indexes and candidates of the block,
+/// the first candidate not copied, and the call that resumes it.
+pub(crate) struct XScanHeld {
+    index: [u16; X_BLOCK],
+    cand: [MaybeUninit<u16>; X_BLOCK],
+    /// The block's candidates (`cand[..n]`); a block is held while `next < n`.
+    n: usize,
+    /// The first candidate not copied.
+    next: usize,
+    /// The subject offset of the block's first word.
+    block_first: usize,
+    /// The resuming call: the subject's address and length, `s_range[1]` and `s_range[2]`.
+    at: (usize, usize, i32, i32),
+}
+
+impl XScanHeld {
+    /// One that holds nothing.
+    pub(crate) fn new() -> Self {
+        XScanHeld {
+            index: [0; X_BLOCK],
+            cand: [MaybeUninit::uninit(); X_BLOCK],
+            n: 0,
+            next: 0,
+            block_first: 0,
+            at: (0, 0, 0, 0),
+        }
+    }
+}
+
+// No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNSCANRESUME): whether the unit path's scan on presence bytes resumes a
+/// stopped call in its block (`x_scan_one_range_held`) and takes NCBI's offset-array size
+/// (`x_scan_unit`). In the strict set: on unless `LOSAT_X_TBNSCANRESUME=0`; read once.
+pub(super) fn x_scan_resume() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNSCANRESUME"))
+}
+
+/// The scan of one call (module text), with the AVX2 forms when `avx2`; the block where it stops is
+/// kept in `held`, and copied on from there when this call resumes it.
+#[allow(clippy::too_many_arguments)]
 fn scan(
     avx2: bool,
     lookup: &BlastAaLookupTable,
@@ -315,6 +394,7 @@ fn scan(
     offset_pairs: &mut [BlastOffsetPair],
     array_size: i32,
     s_range: &mut [i32; 3],
+    held: &mut XScanHeld,
 ) -> i32 {
     if s_range[1] > s_range[2] {
         return 0;
@@ -338,6 +418,7 @@ fn scan(
     // the end of the slice (`x_scan_unit` sets its end to its left edge, aa_ungapped.c:500-501)
     // reads one byte past it: that call takes NCBI's loop, as without this switch.
     if s_last + 2 >= subject.len() {
+        held.n = 0;
         return s_blast_aa_scan_subject_one_range(
             lookup,
             subject,
@@ -352,55 +433,32 @@ fn scan(
         overflow_len: lookup.overflow.len(),
     };
     let dest = offset_pairs.as_mut_ptr();
-    let mut index = [0u16; X_BLOCK];
-    let mut cand = [MaybeUninit::<u16>::uninit(); X_BLOCK];
     let mut totalhits: i32 = 0;
     let mut block_first = s_first;
+    // The held block, from its first candidate not copied, when this call resumes the one that
+    // stopped in it (its first candidate is the word at `s_range[1]`).
+    let subject_at = (subject.as_ptr() as usize, subject.len());
+    let mut first = 0;
+    if held.next < held.n && held.at == (subject_at.0, subject_at.1, s_range[1], s_range[2]) {
+        first = held.next;
+        block_first = held.block_first;
+    }
     while block_first <= s_last {
         let block_last = s_last.min(block_first + X_BLOCK - 1);
-        let letters = &subject[block_first..block_last + 3];
+        if first == 0 {
+            let letters = &subject[block_first..block_last + 3];
+            held.n = candidates_any(avx2, letters, presence, &mut held.index, &mut held.cand);
+        }
         // SAFETY: `presence` has an entry for every 15-bit index and is 1 only at indexes of the
         // backbone (`build_presence`), so every candidate's cell is inside it; `dest` has
         // `array_size + X_SCAN_BYTE_SLACK` entries; AVX2 only when the caller detected it.
-        #[cfg(target_arch = "x86_64")]
         let (total, stop) = unsafe {
-            if avx2 {
-                let n = candidates_avx2(letters, presence, &mut index, &mut cand);
-                copy_avx2(
-                    &table,
-                    dest,
-                    &index,
-                    &cand,
-                    n,
-                    block_first,
-                    totalhits,
-                    array_size,
-                )
-            } else {
-                let n = candidates(letters, presence, &mut index, &mut cand);
-                copy(
-                    &table,
-                    dest,
-                    &index,
-                    &cand,
-                    n,
-                    block_first,
-                    totalhits,
-                    array_size,
-                )
-            }
-        };
-        // SAFETY: as above.
-        #[cfg(not(target_arch = "x86_64"))]
-        let (total, stop) = unsafe {
-            let _ = avx2;
-            let n = candidates(letters, presence, &mut index, &mut cand);
-            copy(
+            copy_any(
+                avx2,
                 &table,
                 dest,
-                &index,
-                &cand,
-                n,
+                held,
+                first,
                 block_first,
                 totalhits,
                 array_size,
@@ -409,14 +467,86 @@ fn scan(
         if let Some(s_off) = stop {
             // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:118-123
             s_range[1] = s_off as i32;
+            // The word's place among the block's candidates (which ascend), for the next call.
+            // SAFETY: `cand[..n]` was written by the candidate stage.
+            let cand =
+                unsafe { &*(&held.cand[..held.n] as *const [MaybeUninit<u16>] as *const [u16]) };
+            held.next = cand.partition_point(|&k| (k as usize) < s_off as usize - block_first);
+            held.block_first = block_first;
+            held.at = (subject_at.0, subject_at.1, s_range[1], s_range[2]);
             return total;
         }
         totalhits = total;
+        first = 0;
         block_first = block_last + 1;
     }
+    held.n = 0;
     // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:125-127
     s_range[1] = (s_last + 1) as i32;
     totalhits
+}
+
+/// The candidate stage of a block (`candidates`, or `candidates_avx2` when `avx2`).
+#[inline(always)]
+fn candidates_any(
+    avx2: bool,
+    letters: &[u8],
+    presence: &[u8],
+    index: &mut [u16; X_BLOCK],
+    cand: &mut [MaybeUninit<u16>; X_BLOCK],
+) -> usize {
+    #[cfg(target_arch = "x86_64")]
+    if avx2 {
+        // SAFETY: AVX2 only when the caller detected it.
+        return unsafe { candidates_avx2(letters, presence, index, cand) };
+    }
+    let _ = avx2;
+    candidates(letters, presence, index, cand)
+}
+
+/// The copy stage of `held`'s block from its candidate `first` (`copy`, or `copy_avx2` when
+/// `avx2`).
+///
+/// # Safety
+/// As `copy_block`; AVX2 must be there when `avx2`.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+unsafe fn copy_any(
+    avx2: bool,
+    table: &Table,
+    dest: *mut BlastOffsetPair,
+    held: &XScanHeld,
+    first: usize,
+    block_first: usize,
+    totalhits: i32,
+    array_size: i32,
+) -> (i32, Option<u32>) {
+    #[cfg(target_arch = "x86_64")]
+    if avx2 {
+        return copy_avx2(
+            table,
+            dest,
+            &held.index,
+            &held.cand,
+            held.n,
+            first,
+            block_first,
+            totalhits,
+            array_size,
+        );
+    }
+    let _ = avx2;
+    copy(
+        table,
+        dest,
+        &held.index,
+        &held.cand,
+        held.n,
+        first,
+        block_first,
+        totalhits,
+        array_size,
+    )
 }
 
 /// The lookup table's backbone and overflow, for the copy stage.
@@ -524,6 +654,7 @@ unsafe fn copy(
     index: &[u16; X_BLOCK],
     cand: &[MaybeUninit<u16>; X_BLOCK],
     n: usize,
+    first: usize,
     block_first: usize,
     totalhits: i32,
     array_size: i32,
@@ -534,6 +665,7 @@ unsafe fn copy(
         index,
         cand,
         n,
+        first,
         block_first,
         totalhits,
         array_size,
@@ -554,6 +686,7 @@ unsafe fn copy_avx2(
     index: &[u16; X_BLOCK],
     cand: &[MaybeUninit<u16>; X_BLOCK],
     n: usize,
+    first: usize,
     block_first: usize,
     totalhits: i32,
     array_size: i32,
@@ -564,6 +697,7 @@ unsafe fn copy_avx2(
         index,
         cand,
         n,
+        first,
         block_first,
         totalhits,
         array_size,
@@ -586,10 +720,9 @@ unsafe fn copy_avx2(
 //             return totalhits;
 //         }
 // ```
-/// The copy stage for the candidates `cand[..n]` of the block that starts at `block_first` (NCBI's
-/// statements above, in NCBI's order): the new
-/// total, and the subject offset of the word at which the offset array has no room, if one has
-/// none. While three hits for every candidate left fit, a cell of up to `AA_HITS_PER_CELL` hits is
+/// The copy stage for the candidates `cand[first..n]` of the block that starts at `block_first`
+/// (NCBI's statements above, in NCBI's order): the new total, and the subject offset of the word
+/// at which the offset array has no room, if one has none. While three hits for every candidate left fit, a cell of up to `AA_HITS_PER_CELL` hits is
 /// written without NCBI's test (after it they still fit); a larger cell takes the test, and the
 /// room is computed again after it. A candidate met without that room takes the test whatever its
 /// size. `AVX2` = the AVX2 writes (`write`).
@@ -605,13 +738,14 @@ unsafe fn copy_block<const AVX2: bool>(
     index: &[u16; X_BLOCK],
     cand: &[MaybeUninit<u16>; X_BLOCK],
     n: usize,
+    first: usize,
     block_first: usize,
     mut totalhits: i32,
     array_size: i32,
 ) -> (i32, Option<u32>) {
     let cand = cand.as_ptr().cast::<u16>();
     let index = index.as_ptr();
-    let mut i = 0usize;
+    let mut i = first;
     while i < n {
         if room_for_rest(totalhits, n - i, array_size) {
             while i < n {
@@ -821,7 +955,10 @@ mod tests {
     }
 
     /// The scan calls of one range as `x_scan_unit` makes them: (offset pairs, s_range[1]) after
-    /// each call; `avx2` = `None` for NCBI's loop.
+    /// each call; `avx2` = `None` for NCBI's loop. `RESUMED` counts the calls that resume the
+    /// block held by the call before: a block is held and was kept for this call's subject and
+    /// `s_range` (`resume`: one `XScanHeld` for the range, as `LOSAT_X_TBNSCANRESUME` keeps it;
+    /// else a new one per call).
     fn calls(
         lookup: &BlastAaLookupTable,
         presence: &[u8],
@@ -830,6 +967,24 @@ mod tests {
         array_size: usize,
         avx2: Option<bool>,
     ) -> Vec<(Vec<(u32, u32)>, i32)> {
+        calls_held(lookup, presence, subject, range, array_size, avx2, false)
+    }
+
+    thread_local! {
+        static RESUMED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// `calls`, with one `XScanHeld` for the range when `resume`.
+    fn calls_held(
+        lookup: &BlastAaLookupTable,
+        presence: &[u8],
+        subject: &[u8],
+        range: (i32, i32),
+        array_size: usize,
+        avx2: Option<bool>,
+        resume: bool,
+    ) -> Vec<(Vec<(u32, u32)>, i32)> {
+        let mut held = XScanHeld::new();
         // Guard entries after the slack: no form may write past `array_size + X_SCAN_BYTE_SLACK`.
         let guard = BlastOffsetPair {
             q_off: 0xdead_beef,
@@ -842,15 +997,26 @@ mod tests {
         let mut out = Vec::new();
         while scan_range[1] <= scan_range[2] {
             let hits = match avx2 {
-                Some(avx2) => scan(
-                    avx2,
-                    lookup,
-                    presence,
-                    subject,
-                    &mut pairs,
-                    array_size as i32,
-                    &mut scan_range,
-                ),
+                Some(avx2) => {
+                    let at = (subject.as_ptr() as usize, subject.len());
+                    if !resume {
+                        held = XScanHeld::new();
+                    } else if held.next < held.n
+                        && held.at == (at.0, at.1, scan_range[1], scan_range[2])
+                    {
+                        RESUMED.with(|r| r.set(r.get() + 1));
+                    }
+                    scan(
+                        avx2,
+                        lookup,
+                        presence,
+                        subject,
+                        &mut pairs,
+                        array_size as i32,
+                        &mut scan_range,
+                        &mut held,
+                    )
+                }
                 None => s_blast_aa_scan_subject_one_range(
                     lookup,
                     subject,
@@ -882,6 +1048,7 @@ mod tests {
     // `AA_HITS_PER_CELL` hits, every letter value of ncbistdaa, and block ends at every alignment.
     #[test]
     fn x_scan_byte_equals_ncbi_scan_on_random_subjects() {
+        RESUMED.with(|r| r.set(0));
         let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
         let forms: Vec<bool> = if avx2_detected() {
             vec![false, true]
@@ -933,21 +1100,37 @@ mod tests {
                 ] {
                     let want = calls(&lookup, &presence, &subject, range, array_size, None);
                     for &avx2 in &forms {
-                        let got =
-                            calls(&lookup, &presence, &subject, range, array_size, Some(avx2));
-                        assert_eq!(
-                            got, want,
-                            "case {case} range {range:?} array_size {array_size} avx2 {avx2}"
-                        );
+                        for resume in [false, true] {
+                            let got = calls_held(
+                                &lookup,
+                                &presence,
+                                &subject,
+                                range,
+                                array_size,
+                                Some(avx2),
+                                resume,
+                            );
+                            assert_eq!(
+                                got, want,
+                                "case {case} range {range:?} array_size {array_size} avx2 {avx2} \
+                                 resume {resume}"
+                            );
+                        }
                     }
                     compared += want.iter().map(|(pairs, _)| pairs.len()).sum::<usize>();
                     stops += want.len().saturating_sub(1);
                 }
             }
         }
-        // The cases above must reach the capacity stop, many hits and cells of the overflow.
+        // The cases above must reach the capacity stop (each one resumed in its block with
+        // `resume`), many hits and cells of the overflow.
         assert!(compared > 100_000, "{compared} pairs compared");
         assert!(stops > 100, "{stops} capacity stops");
+        assert_eq!(
+            RESUMED.with(|r| r.get()),
+            stops * forms.len(),
+            "every stop resumed in its block"
+        );
         assert!(big_cells > 0, "no cell past {AA_HITS_PER_CELL} hits");
     }
 
@@ -1080,8 +1263,21 @@ mod tests {
                     forms.push(true);
                 }
                 for avx2 in forms {
-                    let got = calls(&lookup, &presence, &subject, range, array_size, Some(avx2));
-                    assert_eq!(got, want, "case {case} array_size {array_size} avx2 {avx2}");
+                    for resume in [false, true] {
+                        let got = calls_held(
+                            &lookup,
+                            &presence,
+                            &subject,
+                            range,
+                            array_size,
+                            Some(avx2),
+                            resume,
+                        );
+                        assert_eq!(
+                            got, want,
+                            "case {case} array_size {array_size} avx2 {avx2} resume {resume}"
+                        );
+                    }
                 }
             }
         }

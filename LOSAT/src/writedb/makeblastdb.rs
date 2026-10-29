@@ -88,17 +88,9 @@ pub struct MakedbArgs {
     pub max_file_sz: String,
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:76-77
-// ```c++
-// static const char* s_AutoHelp     = "h";
-// static const char* s_AutoHelpFull = "help";
-// ```
-/// The options of makeblastdb 2.17.0 that `losat makedb` refuses
-/// (makeblastdb.cpp:246-333), and `-h`, the short usage that the NCBI C++
-/// Toolkit gives every program (`-help` prints LOSAT's own usage, as for the
-/// search programs).
-pub const UNSUPPORTED_OPTIONS: [&str; 15] = [
-    "h",
+/// The options of makeblastdb 2.17.0 that `losat makedb` (`losat makeblastdb`) refuses
+/// (makeblastdb.cpp:246-333). `-h` and `-version` are served (`crate::cli`).
+pub const UNSUPPORTED_OPTIONS: [&str; 13] = [
     "parse_seqids",
     "hash_index",
     "randomize",
@@ -112,7 +104,6 @@ pub const UNSUPPORTED_OPTIONS: [&str; 15] = [
     "taxid",
     "taxid_map",
     "oid_masks",
-    "version",
 ];
 
 /// How `losat makedb` ends when it does not build a database, or cannot
@@ -208,7 +199,7 @@ impl std::fmt::Display for MakedbError {
         match self {
             MakedbError::Build(error) => error.fmt(f),
             MakedbError::Database(error) => write!(f, "BLAST Database error: {error}"),
-            MakedbError::Unsupported(message) => write!(f, "losat makedb: {message}"),
+            MakedbError::Unsupported(message) => write!(f, "losat makeblastdb: {message}"),
         }
     }
 }
@@ -359,7 +350,7 @@ pub fn check_environment(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Re
     if env(DONT_SCAN).is_some_and(|value| !value.is_empty()) {
         return Err(format!(
             "the environment variable {DONT_SCAN}, with which NCBI makeblastdb stores other \
-             titles for some FASTA definition lines, is not supported by LOSAT's makedb"
+             titles for some FASTA definition lines, is not supported by LOSAT's makeblastdb"
         ));
     }
     Ok(())
@@ -527,7 +518,7 @@ pub fn build_database(
     let names = split_quoted(&args.input);
     let [name] = names.as_slice() else {
         return Err(unsupported(
-            "-in names several input files (or none); losat makedb reads one FASTA file",
+            "-in names several input files (or none); losat makeblastdb reads one FASTA file",
         ));
     };
     let name = *name;
@@ -551,7 +542,7 @@ pub fn build_database(
             .any(|ext| lower.ends_with(ext))
     {
         return Err(unsupported(format!(
-            "{name}: makeblastdb reads a file of this name as compressed; losat makedb reads \
+            "{name}: makeblastdb reads a file of this name as compressed; losat makeblastdb reads \
              uncompressed FASTA only"
         )));
     }

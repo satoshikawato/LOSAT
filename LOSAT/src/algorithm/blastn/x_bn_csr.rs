@@ -72,7 +72,14 @@
 //! strands); word size 10 with its 4^10-cell table from 262,144 positions; word size 9 with its
 //! 4^9-cell table from 65,536 and its 4^8-cell table (reading order) from 16,384. Word sizes 12 and
 //! above build 4^11-cell tables only for fewer positions than that (NCBI moves to 4^12 cells
-//! first), so their tables keep the chains. The table is built on the search pool where the fill
+//! first), so their tables keep the chains. EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head (every
+//! table of the scope but the reading-order one) has no size rule, so these tables (and megablast's
+//! of 4^11 cells or fewer, for small query batches) are packed too. Its build writes one byte per
+//! cell and two words per 64 cells (5 MiB at 4^11 cells, in `qs` and its bits) where the chains
+//! take a table of four bytes per cell (16 MiB) and `next_pos`, and the batch loop's kept table
+//! then never holds chains: below the rule a query batch (the first or the last of a run, beside
+//! batches of the rule) built chains on the kept table, whose pages past those a packed head wrote
+//! were mapped there, at the end of the run. The table is built on the search pool where the fill
 //! would be (`x_mb_lookup_once::csr`), otherwise here (`serial`). Its `hashtable` and `next_pos`
 //! are then empty: the CSR replaces them (`offsets` has two elements more than `hashtable`, `qs`
 //! one element per word where `next_pos` has one per query position), so the table takes no more
@@ -82,15 +89,20 @@
 //! Every reader of the chains of a contiguous table goes through `MbLookupTable::x_csr`: the strip
 //! scan of PAIRPAR (`x_pair_seed.rs`, `scan_strip_csr`), the reference scan of `search_query_batch`
 //! (`run.rs`, its `x_on_word_csr`; the chains' `on_word` stays as it was), both reading their words
-//! with hits through `x_dc_csr::Ring`, and `for_each_hit`, `contains_hit` and `count_hits` where
-//! the table has no chains.
+//! with hits through `x_dc_csr::Ring` (with LOSAT_X_BNCSRPACK through the ring of the head's form,
+//! chosen once per table: `x_dc_csr::XHead`), and `for_each_hit`, `contains_hit` and `count_hits`
+//! where the table has no chains.
 //!
 //! With LOSAT_TIMING `main` prints `[TIMING] x_bn_csr: builds=<CSR tables> parallel=<on a pool>
 //! words=<their words>` (the build times are in `[TIMING] x_mb_lookup_build`).
 
-use super::x_dc_csr::{assemble, prefetch, sum_cells, Csr};
+use super::x_dc_csr::{
+    assemble, prefetch, sum_cells, x_assemble_packed, x_count8, x_presence8, x_rank,
+    x_rank_counts8, x_sum_packed, Csr,
+};
 use super::x_mb_lookup_par::Words;
 use super::{build_unmasked_ranges, PvArrayType, BLAST2NA_MASK};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
@@ -100,6 +112,38 @@ use std::sync::OnceLock;
 pub(super) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNCSR"))
+}
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNCSRPACK, in the strict set: on unless it is `0`) the
+/// head of a CSR table whose chains list their words newest first (every table of `plan` but the
+/// reading-order one of 4^8 cells) is packed: two words per 64 cells (their presence bits and the
+/// number of non-empty cells before them) and one offset per non-empty cell and one more, instead
+/// of one offset per cell. A table of 4^11 cells has 4,194,305 offsets (16 MiB), of which a query
+/// batch of about 1 Mb of `-task blastn` fills 1.2-1.6 M; the packed head is 1 MiB of bits and
+/// ranks and 4.6-6.1 MiB of offsets. The build counts the words into one byte per cell (4 MiB, in
+/// the capacity of the run list before the place pass writes it; `x_count8`), takes the presence
+/// bits and ranks from the bytes and sums the non-empty cells instead of 16 MiB, with two passes
+/// over the words as the unpacked build. A scan reads a word's bits (1 MiB) and, for a non-empty
+/// cell, its two offsets; a word of an empty cell, whose presence-vector bit is set for 8 cells of
+/// a 4^11 table, is dropped there instead of reading the 16 MiB array. The runs, their order and
+/// the presence vector and helper counters are those of the unpacked head (`x_sum_packed`), so
+/// every value read from the table is the same.
+pub(super) fn x_pack_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNCSRPACK"))
+}
+
+/// No NCBI counterpart: whether a CSR of this order will be packed (LOSAT_X_BNCSRPACK; newest
+/// first only), without a reach record.
+pub(super) fn x_will_pack(ascending_cells: bool) -> bool {
+    !ascending_cells && x_pack_on()
+}
+
+/// No NCBI counterpart: whether a CSR of this order is packed (LOSAT_X_BNCSRPACK; newest first only).
+pub(super) fn x_packed(ascending_cells: bool) -> bool {
+    let packed = x_will_pack(ascending_cells);
+    crate::utils::xreach::x_reach!("LOSAT_X_BNCSRPACK", packed);
+    packed
 }
 
 // No NCBI counterpart: counters of the summary line.
@@ -134,10 +178,11 @@ pub(super) fn plan(words: &Words<'_>, cells: usize, db_word_counts: bool, debug:
     if !on() {
         return false;
     }
+    // EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head has no size rule (module comment).
     let csr = !db_word_counts
         && !debug
         && (MIN_LUT..=MAX_LUT).contains(&words.lut_word_length)
-        && wanted(positions(words), cells);
+        && (x_will_pack(words.ascending_cells) || wanted(positions(words), cells));
     crate::utils::xreach::x_reach!("LOSAT_X_BNCSR", csr);
     csr
 }
@@ -279,6 +324,38 @@ pub(super) fn serial(
     assert!(cells % 2048 == 0 && pv_array_bts >= 5);
     assert_eq!(helper_array.len(), cells >> 11);
     let ascending = words.ascending_cells;
+    if x_packed(ascending) {
+        return x_serial_packed(
+            words,
+            cells,
+            pv_array,
+            pv_array_bts,
+            helper_array,
+            x_offsets,
+        );
+    }
+    x_serial_unpacked(
+        words,
+        cells,
+        pv_array,
+        pv_array_bts,
+        helper_array,
+        x_offsets,
+    )
+}
+
+/// `serial` with one offset per cell (either order).
+pub(super) fn x_serial_unpacked(
+    words: &Words<'_>,
+    cells: usize,
+    pv_array: &mut [PvArrayType],
+    pv_array_bts: usize,
+    helper_array: &mut [u32],
+    x_offsets: Vec<u32>,
+) -> Csr {
+    assert!(cells % 2048 == 0 && pv_array_bts >= 5);
+    assert_eq!(helper_array.len(), cells >> 11);
+    let ascending = words.ascending_cells;
     // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
     let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 2);
     let ob = offsets.as_mut_ptr();
@@ -354,6 +431,101 @@ pub(super) fn serial(
     unsafe { assemble(offsets, qs, cells, n_words) }
 }
 
+/// EXPERIMENT (LOSAT_X_BNCSRPACK): `serial` with a packed head (newest first): the count pass into
+/// one byte per cell (`x_count8`, each word's byte prefetched and counted 16 words later), the
+/// presence bits of the non-zero counts (`x_presence8`), the ranks of the blocks and the counts by
+/// rank (`x_rank_counts8`; the bytes are in `qs`'s capacity, which the place pass writes then), the
+/// sum pass (`x_sum_packed`, with the presence bits and helper counters), and the place pass, as
+/// `x_serial_unpacked` does on the offsets of all cells: two passes over the words, as there.
+pub(super) fn x_serial_packed(
+    words: &Words<'_>,
+    cells: usize,
+    pv_array: &mut [PvArrayType],
+    pv_array_bts: usize,
+    helper_array: &mut [u32],
+    x_offsets: Vec<u32>,
+) -> Csr {
+    assert!(cells % 2048 == 0 && pv_array_bts >= 5 && !words.ascending_cells);
+    assert_eq!(helper_array.len(), cells >> 11);
+    let blocks = cells >> 6;
+    // `qs` has room for every position the loop reads (each word ends at one) and for the counts,
+    // which take its first `cells` bytes, so the build frees nothing in the middle of a batch (a
+    // freed block there is trimmed and faulted in again; with threads each trim interrupts them
+    // all).
+    let mut qs: Vec<u32> = Vec::with_capacity(positions(words).max(cells.div_ceil(4)));
+    let cb = qs.as_mut_ptr() as *mut u8;
+    // SAFETY: `cells` bytes of the capacity, before the place pass writes any element.
+    unsafe { std::ptr::write_bytes(cb, 0, cells) };
+    let mut more = HashMap::new();
+    const AHEAD: usize = 16;
+    let mut ring = [0usize; AHEAD];
+    let mut seen = 0usize;
+    each_word(words, |cell, _| {
+        debug_assert!(cell < cells);
+        prefetch(cb.wrapping_add(cell));
+        let slot = seen % AHEAD;
+        if seen >= AHEAD {
+            // SAFETY: `ring[slot] < cells`, a byte of the counts; one thread.
+            unsafe { x_count8(cb, &mut more, ring[slot]) };
+        }
+        ring[slot] = cell;
+        seen += 1;
+    });
+    for i in seen.saturating_sub(AHEAD)..seen {
+        // SAFETY: as above.
+        unsafe { x_count8(cb, &mut more, ring[i % AHEAD]) };
+    }
+    let mut bits = vec![0u64; 2 * blocks];
+    // SAFETY: `blocks` blocks of 64 cells: the `cells` bytes of the counts, the `2 blocks` words of
+    // `bits`.
+    let present = unsafe { x_presence8(bits.as_mut_ptr(), cb, 0, blocks) };
+    // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
+    let mut starts = super::x_dc_csr::x_offsets_buffer(x_offsets, present + 1);
+    let sb = starts.as_mut_ptr();
+    // SAFETY: as above, and the ranks `0 .. present` of the capacity's `present + 1` elements.
+    let ranked = unsafe { x_rank_counts8(bits.as_mut_ptr(), cb, &more, sb, 0, blocks, 0) };
+    debug_assert_eq!(ranked, present);
+    drop(more);
+    let n_words = seen;
+    assert!(
+        n_words <= u32::MAX as usize,
+        "BNCSR: more words than u32 offsets"
+    );
+    // SAFETY: the counts of all non-empty cells are this build's; the presence vector and the
+    // counters are of the fill's lengths.
+    let total = unsafe {
+        x_sum_packed(
+            pv_array.as_mut_ptr(),
+            pv_array.len(),
+            helper_array.as_mut_ptr(),
+            &bits,
+            sb,
+            0,
+            0,
+            blocks,
+            pv_array_bts,
+        )
+    };
+    debug_assert_eq!(total as usize, n_words);
+    debug_assert!(qs.capacity() >= n_words);
+    let qb = qs.as_mut_ptr();
+    // SAFETY: `present < present + 1`; `starts[present]` is no cell's end.
+    unsafe { *sb.add(present) = total };
+    each_word(words, |cell, q_off_1| {
+        let r = x_rank(&bits, cell).expect("BNCSRPACK: a word of an empty cell");
+        // SAFETY: `r < present`, `starts[r]` is the end of the cell's non-empty run (>= 1), so the
+        // place `e < n_words` is in the capacity.
+        unsafe {
+            let e = *sb.add(r) - 1;
+            *sb.add(r) = e;
+            *qb.add(e as usize) = q_off_1;
+        }
+    });
+    // SAFETY: `starts[..present + 1]` was written in full; the runs partition `0 .. n_words`, and
+    // the place pass wrote each place once.
+    unsafe { x_assemble_packed(starts, bits, qs, present, n_words) }
+}
+
 /// No NCBI counterpart: whether `run` (a cell's run, sorted: increasing in reading order,
 /// decreasing newest first; the offsets of a cell are distinct) holds `q_off_1`.
 #[inline]
@@ -391,7 +563,7 @@ pub(super) fn x_assert_runs_are_the_chains(
             q = next_pos[q as usize];
         }
         words += chain.len();
-        let run = csr.run(cell);
+        let run = csr.x_run_any(cell);
         if run != chain.as_slice() {
             diffs.push(format!(
                 "cell {cell} run {:?} chain {:?}",
@@ -475,6 +647,28 @@ pub(super) mod tests {
                 kmer_mask: (1u64 << (2 * lut_word_length)) - 1,
                 ascending_cells,
             }
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNCSRPACK): `case` with four more queries whose words fill a few cells
+    /// with more words than a byte counts: 1,200 letters A (one cell), 800 letters ACAC... (two
+    /// cells), and one letter repeated so that its cell gets exactly 255 (T) or 256 (G) words of a
+    /// table of `lut` letters.
+    pub(crate) fn x_with_repeats(case: &mut Case, lut: usize) {
+        let mut at = match (case.offsets.last(), case.queries.last()) {
+            (Some(&o), Some(q)) => o + q.len() as i32 + 1,
+            _ => 0,
+        };
+        for seq in [
+            vec![0u8; 1200],
+            (0..800).map(|i| (i % 2) as u8).collect(),
+            vec![3u8; 255 + lut - 1],
+            vec![2u8; 256 + lut - 1],
+        ] {
+            case.offsets.push(at);
+            at += seq.len() as i32 + 1;
+            case.queries.push(seq);
+            case.masks.push(Vec::new());
         }
     }
 
@@ -602,6 +796,64 @@ pub(super) mod tests {
         }
     }
 
+    // LOSAT_X_BNCSRPACK: the packed head and the head of one offset per cell list the loop's chains
+    // (newest first), with the fill's presence vector, counters and longest chain, whatever the
+    // switch reads; many queries make tables with most cells non-empty.
+    #[test]
+    fn the_packed_head_lists_the_chains_too() {
+        let mut rng = Lcg(0xB4C5_0002);
+        for lut in MIN_LUT..=MAX_LUT {
+            for (n, len, repeats) in [
+                (1, 6, false),
+                (3, 300, false),
+                (5, 6000, false),
+                (40, 3000, false),
+                (2, 500, true),
+            ] {
+                let mut case = random_case(&mut rng, n, len);
+                if repeats {
+                    x_with_repeats(&mut case, lut);
+                }
+                let refs = case.refs();
+                let word_length = lut + rng.below(6) as usize;
+                let words = case.words(&refs, word_length, lut, false);
+                let cells = 1usize << (2 * lut);
+                let (pv_len, bts) = pv_params(&case, lut);
+                let (hashtable, next_pos, fill_pv, fill_helper) =
+                    chains(&case, &words, cells, pv_len, bts);
+                for packed in [false, true] {
+                    let mut pv = vec![0 as PvArrayType; pv_len];
+                    let mut helper = vec![0u32; cells >> 11];
+                    let build = if packed {
+                        x_serial_packed
+                    } else {
+                        x_serial_unpacked
+                    };
+                    let csr = build(&words, cells, &mut pv, bts, &mut helper, Vec::new());
+                    let what = format!("lut {lut} packed {packed} n {n} len {len}");
+                    if repeats {
+                        // the cells of 255, 256 and more words
+                        let mut runs: Vec<usize> =
+                            (0..cells).map(|c| csr.x_run_any(c).len()).collect();
+                        runs.sort_unstable();
+                        assert!(runs.contains(&255) && runs.contains(&256), "{what}");
+                        assert!(runs[cells - 1] >= 1200 - lut, "{what}");
+                    }
+                    x_assert_runs_are_the_chains(
+                        &csr,
+                        &pv,
+                        &helper,
+                        &hashtable,
+                        &next_pos,
+                        &fill_pv,
+                        &fill_helper,
+                        &what,
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn contains_searches_runs_of_either_order() {
         for (run, q, want) in [
@@ -664,12 +916,11 @@ pub(super) mod tests {
                 false,
                 false
             ));
-            assert!(!plan(
-                &big.words(&refs, 11, 11, false),
-                1 << 22,
-                false,
-                false
-            ));
+            // below the rule: chains, unless the head is packed (LOSAT_X_BNCSRPACK has no rule)
+            assert_eq!(
+                plan(&big.words(&refs, 11, 11, false), 1 << 22, false, false),
+                x_will_pack(false)
+            );
         }
     }
 
@@ -723,7 +974,7 @@ pub(super) mod tests {
                     }
                     assert!(!lookup.contains_hit(cell as u64, 1 << 30), "{what}");
                     if let Some(csr) = lookup.x_mb_csr() {
-                        assert_eq!(csr.run(cell), chain.as_slice(), "{what} cell {cell}");
+                        assert_eq!(csr.x_run_any(cell), chain.as_slice(), "{what} cell {cell}");
                     }
                 }
             };

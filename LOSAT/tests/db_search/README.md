@@ -68,6 +68,7 @@ of `tests/fasta/LC738875.fasta` and `AP027202.fasta`, two related viruses, mutat
   `c_amb`, 4 % substitutions), `q_d_minus` (reverse complement of `d_mut_15pct` bases, 12 % substitutions),
   `q_e_p` (1600 bases of `e_p2k`, 20 % substitutions) and `q_nohit` (900 random bases).
 - `nslice_nohit.fna`: `q_nohit` alone.
+- `nslice_qa.fna`: `q_a` alone (one query, for `-query_loc` and `-subject_loc`; rows `db.tab.bn.qloc.6`, `tab.bn.loc.6`).
 - `nnophr.nin` and `nnophr.nsq` are copies of `LOSAT/tests/seqdb/db/nucl_v4.nin` and `.nsq`: the nucleotide
   database without its header file (NCBI's `blastn` fails with exit 2 when it opens the header file).
 

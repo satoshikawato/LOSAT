@@ -2381,7 +2381,7 @@ mod tests {
                 .collect()
         }
 
-        /// The generated database written by `losat makedb` into a new directory of the test
+        /// The generated database written by `losat makeblastdb` into a new directory of the test
         /// (`label`), with volumes of at most `max_file_sz` bytes; returns the directory and the
         /// database name.
         fn generated_database(label: &str, max_file_sz: &str) -> (PathBuf, String) {
@@ -2430,7 +2430,7 @@ mod tests {
                 &mut log,
                 &mut messages,
             )
-            .unwrap_or_else(|error| panic!("makedb: {error}"));
+            .unwrap_or_else(|error| panic!("makeblastdb: {error}"));
             (dir, name)
         }
 

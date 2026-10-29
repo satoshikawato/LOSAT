@@ -7,6 +7,8 @@
 //! depend on it, and that the default took the CSR where its rule says so: `LOSAT_X_REACH` shows
 //! the switch's own side, and `LOSAT_TIMING`'s `[TIMING] x_bn_csr: builds= parallel=` line counts
 //! the CSR tables and those built on the search pool (all of them at four threads, none at one).
+//! The packed head of a newest-first table (`LOSAT_X_BNCSRPACK`, strict set) is on in the default
+//! too: its `=0` gives the same report, and the reading-order table never takes it.
 //! Two tables: `-task blastn` (word size 11) with a query of 1.27 Mb (a 4^11-cell table, newest
 //! first, above the rule), and `-word_size 9` with a query of 9,800 letters (the 4^8-cell table
 //! that stands for NCBI's small table, in reading order, above the rule), each against a subject
@@ -20,6 +22,9 @@ mod reach_support;
 
 const SWITCH: &str = "LOSAT_X_BNCSR";
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_BNCSR", "0");
+/// The packed head of a newest-first CSR table (`LOSAT_X_BNCSRPACK`, strict set).
+const PACK: &str = "LOSAT_X_BNCSRPACK";
+const PACK_OFF: (&str, &str) = ("LOSAT_X_BNCSRPACK", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 
 fn fasta(name: &str) -> PathBuf {
@@ -62,21 +67,21 @@ fn letters(path: &Path) -> String {
         .collect()
 }
 
-/// A database of `subject` made with `losat makedb` in `dir`.
+/// A database of `subject` made with `losat makeblastdb` in `dir`.
 fn database(dir: &TestDir, subject: &Path, name: &str) -> PathBuf {
     let db = dir.path(name);
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(subject)
         .args(["-dbtype", "nucl"])
         .arg("-out")
         .arg(&db)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run LOSAT makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     db
@@ -137,10 +142,12 @@ fn csr_builds(stderr: &str) -> Option<(u64, u64)> {
 }
 
 /// For `query` and `extra` against `subject` as a file and as a database: the report with the
-/// switch off at one thread, then off, by default and by default with `LOSAT_TIMING` at 1 and 4
-/// threads, all the same bytes; the default takes the switch's side (`LOSAT_X_REACH`), builds every
-/// CSR table on the pool at four threads and on the search thread at one, and writes nothing else.
-fn check(dir: &TestDir, query: &Path, subject: &Path, extra: &[&str]) {
+/// switch off at one thread, then off, by default, by default with `LOSAT_TIMING` and with the
+/// packed head off (`LOSAT_X_BNCSRPACK=0`) at 1 and 4 threads, all the same bytes; the default takes
+/// the switch's side (`LOSAT_X_REACH`), and the packed head's when `packed` (a newest-first table)
+/// or its reference side (the reading-order table), builds every CSR table on the pool at four
+/// threads and on the search thread at one, and writes nothing else.
+fn check(dir: &TestDir, query: &Path, subject: &Path, extra: &[&str], packed: bool) {
     let db = database(dir, subject, "subject_db");
     for subjects in [("-subject", subject), ("-db", db.as_path())] {
         let what = format!("{extra:?} {}", subjects.0);
@@ -158,6 +165,17 @@ fn check(dir: &TestDir, query: &Path, subject: &Path, extra: &[&str]) {
                 reach.sides(SWITCH).0,
                 "{what} threads {threads}: no table laid out as CSR"
             );
+            assert_eq!(
+                reach.sides(PACK),
+                (packed, !packed),
+                "{what} threads {threads}: packed heads"
+            );
+            let (report, stderr) = search(query, subjects, extra, threads, &[PACK_OFF]);
+            assert!(
+                report == expected,
+                "{what} threads {threads}: packed head off differs"
+            );
+            assert_eq!(stderr, expected_stderr, "{what} threads {threads} pack off");
             let (report, stderr) = search(query, subjects, extra, threads, &[TIMING]);
             assert!(
                 report == expected,
@@ -204,7 +222,7 @@ fn blastn_word_11_large_query_batch() {
         format!(">ap132_60k\n{}\n", &genome[100_000..160_000]),
     )
     .expect("write the subject");
-    check(&dir, &query, &subject, &["-task", "blastn"]);
+    check(&dir, &query, &subject, &["-task", "blastn"], true);
 }
 
 // The 4^8-cell table of `-word_size 9` that stands for NCBI's small table (reading order): 9,800
@@ -225,5 +243,6 @@ fn blastn_word_9_reading_order_table() {
         &query,
         &fasta("LC738868.fasta"),
         &["-task", "blastn", "-word_size", "9"],
+        false,
     );
 }

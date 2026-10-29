@@ -129,6 +129,51 @@ const MATCHES: &[(&str, &[&str], i32)] = &[
         &["-db", "db/p5", "-info", "-line_length", "2147483648"],
         1,
     ),
+    // `-logfile -`: the diagnostics on stderr, no file; `-logfile ""` and `/dev/null`: none.
+    ("C01", &["-db", "db/nosuch", "-info", "-logfile", "-"], 2),
+    (
+        "C02",
+        &["-db", "db/p5", "-info", "-foo", "-logfile", "-"],
+        1,
+    ),
+    ("C03", &["-db", "db/nosuch", "-info", "-logfile", ""], 2),
+    (
+        "C04",
+        &["-db", "db/p5", "-info", "-foo", "-logfile", "/dev/null"],
+        1,
+    ),
+    (
+        "C19",
+        &["-db", "db/nosuch", "-info", "-logfile=", "-foo"],
+        1,
+    ),
+    ("C05", &["-db", "db/p5", "-info", "-help-full"], 0),
+    ("C07", &["-db", "db/p5", "-info", "-version=1"], 1),
+    ("C08", &["-db", "db/p5", "-info", "-foo.bar"], 1),
+    ("C09", &["-db", "db/p5", "-info-file"], 0),
+    ("C10", &["-db-file", "db/p5", "-info"], 0),
+    (
+        "C11",
+        &["-db", "db/p5", "-info", "-line_length", "\u{3042}"],
+        1,
+    ),
+    ("C12", &["-db", "db/p5", "-info", "-line_length", "1\n2"], 1),
+    ("C13", &["-db", "db/p5", "-info", "---x"], 1),
+    ("C14", &["-db", "db/p5", "-info", "-=x"], 1),
+    ("C15", &["-db", "db/p5", "-info", "--x"], 1),
+    (
+        "C18",
+        &[
+            "-db",
+            "db/p5",
+            "-info",
+            "-dbtype",
+            "prot",
+            "-dbtype-file",
+            "nucl",
+        ],
+        1,
+    ),
 ];
 
 #[test]
@@ -148,6 +193,8 @@ fn info_and_argument_errors_are_ncbi_s_bytes() {
         );
         assert_eq!(code, status, "{id} {words:?}: exit status");
     }
+    // `-logfile -` is stderr, not a file named `-` in the current directory.
+    assert!(!tests_dir().join("blastdbcmd/-").exists());
 }
 
 // NCBI opens `-out` before the database (B43: the file is there and empty after the database
@@ -206,6 +253,7 @@ const REFUSALS: &[(&str, &[&str])] = &[
     ("B20", &["-db", "db/p5", "-info", "-version-full"]),
     ("B21", &["-db", "db/p5", "-info", "-conffile", "x.ini"]),
     ("B22", &["-db", "db/p5", "-info", "-dryrun"]),
+    ("C06", &["-db", "db/p5", "-info", "-xmlhelp"]),
     ("B40", &["-db", "db/p5"]),
 ];
 

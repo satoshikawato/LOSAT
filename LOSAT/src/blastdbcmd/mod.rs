@@ -29,10 +29,14 @@ const PROGRAM: &str = "BLASTDBCMD";
 /// argument errors print.
 const HELP: &str = include_str!("help.txt");
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp (CArgDescriptions::PrintUsage,
-// short form)
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
 // ```c++
-//         arg << "Use '-help' to print detailed descriptions of command line arguments";
+//     if (detailed) {
+//         x.AddDetails(arr);
+//     } else {
+//         arr.push_back(kEmptyStr);
+//         arr.push_back("Use '-help' to print detailed descriptions of command line arguments");
+//     }
 // ```
 /// The text of `blastdbcmd -h`: the usage and the description, then NCBI's pointer to `-help`.
 fn short_usage() -> String {
@@ -56,23 +60,73 @@ pub fn run(words: &[OsString]) -> i32 {
     status
 }
 
-/// Where NCBI's diagnostics go: the file of `-logfile`, else stderr.
+/// Where NCBI's diagnostics go (`SetLogFile` of the `-logfile` value).
+enum DiagTarget {
+    /// The standard stream `cerr`: no `-logfile`, `-logfile -`, or a file that cannot be
+    /// opened.
+    Stderr,
+    /// The file of `-logfile`, appended to.
+    File(File),
+    /// Nowhere: `-logfile ""` and `-logfile /dev/null` (a stream handler without a stream).
+    Discard,
+}
+
 struct Diag<'a> {
-    file: Option<File>,
+    target: DiagTarget,
     stderr: &'a mut dyn Write,
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7570-7608
+// ```c++
+//     // Check if a non-existing dir is specified
+//     if ( !s_IsSpecialLogName(file_name) ) {
+//         string dir = CFile(file_name).GetDir();
+//         if ( !dir.empty()  &&  !CDir(dir).Exists() ) {
+//             return false;
+//         }
+//     }
+//     ...
+//         // Check special filenames
+//         if ( file_name.empty()  ||  file_name == "/dev/null" ) {
+//             // no output
+//             SetDiagStream(0, quick_flush, 0, 0, kLogName_None);
+//         }
+//         else if (file_name == "-") {
+//             // output to stderr
+//             SetDiagStream(&NcbiCerr, quick_flush, 0, 0, kLogName_Stderr);
+//         }
+//         else {
+//             // output to file
+//             unique_ptr<CFileDiagHandler> fhandler(new CFileDiagHandler());
+//             if ( !fhandler->SetLogFile(file_name, eDiagFile_All, quick_flush) ) {
+//                 ERR_POST_X(9, Info << "Failed to initialize log: " << file_name);
+//                 return false;
+//             }
+// ```
+/// The target of the `-logfile` value `name` (a file NCBI fails to open leaves `cerr`).
+fn diag_target(name: Option<&str>) -> DiagTarget {
+    match name {
+        None | Some("-") => DiagTarget::Stderr,
+        Some("" | "/dev/null") => DiagTarget::Discard,
+        Some(name) => match OpenOptions::new().create(true).append(true).open(name) {
+            Ok(file) => DiagTarget::File(file),
+            Err(_) => DiagTarget::Stderr,
+        },
+    }
 }
 
 impl Diag<'_> {
     /// Posts one diagnostic line (`LOG_POST`, `ERR_POST`).
     fn post(&mut self, line: &str) {
-        match &mut self.file {
-            Some(file) => {
+        match &mut self.target {
+            DiagTarget::File(file) => {
                 let _ = writeln!(file, "{line}");
             }
-            None => {
+            DiagTarget::Stderr => {
                 let _ = writeln!(self.stderr, "{line}");
                 let _ = self.stderr.flush();
             }
+            DiagTarget::Discard => {}
         }
     }
 
@@ -306,8 +360,7 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         return 1;
     };
     let mut diag = Diag {
-        file: log_file(&words)
-            .and_then(|name| OpenOptions::new().create(true).append(true).open(name).ok()),
+        target: diag_target(log_file(&words)),
         stderr: err,
     };
     let (words, dryrun) = match preparse(&words) {
@@ -339,7 +392,7 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
             // `eNoValue` (which prints no usage) is not raised by this reader. The diagnostics
             // of a `-logfile` go to a stream that is not `cerr`: NCBI then says where they are.
             let _ = diag.stderr.write_all(short_usage().as_bytes());
-            if diag.file.is_some() {
+            if !matches!(diag.target, DiagTarget::Stderr) {
                 let _ = writeln!(
                     diag.stderr,
                     "Error in command-line arguments. See error logs for more details."
@@ -372,7 +425,7 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         Ok(value) => value.as_deref(),
         Err(reason) => return diag.refuse(&refusal(reason)),
     };
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1180-1181
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1179-1180
     // ```c++
     //     try {
     //         CNcbiOstream& out = args["out"].AsOutputFile();
@@ -420,6 +473,13 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         Ok(opened) => opened,
         Err(error) => return database_error(&mut diag, error),
     };
+    // NCBI prints the date bytes of the index file; the reader keeps them as text
+    // (`SeqDb::date`), with U+FFFD for bytes that are not UTF-8.
+    if db.date().contains('\u{fffd}') {
+        return diag.refuse(&refusal(&format!(
+            "{name}: the date of the database is not UTF-8 text"
+        )));
+    }
     let mut text = Vec::new();
     write_info(&mut text, &db, &volumes);
     // NCBI's stream ignores a failed write (no exception is enabled on it), so does this.
@@ -576,16 +636,18 @@ fn database_error(diag: &mut Diag, error: SeqDbError) -> i32 {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp (NStr::IntToString with
-// fWithCommas)
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1841-1850
 // ```c++
-//             if (flags & NStr::fWithCommas) {
-//                 if (cnt == 3) {
-//                     *--pos = ',';
-//                     cnt = 0;
-//                 }
-//                 cnt++;
+//     if ((flags & NStr::fWithCommas)) {
+//         int cnt = -1;
+//         do {
+//             if (++cnt == 3) {
+//                 *--pos = ',';
+//                 cnt = 0;
 //             }
+//             *--pos = '0' + value % 10;
+//             value /= 10;
+//         } while (value);
 // ```
 /// `n` in decimal with a comma between groups of three digits (`NStr::fWithCommas`).
 fn with_commas(n: u64) -> String {

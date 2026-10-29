@@ -70,7 +70,7 @@ const fn key(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:901-918
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:901-919
 // ```c++
 // void CBlastDBCmdApp::Init()
 // {
@@ -96,14 +96,35 @@ const fn key(
 //     AddFlag(s_AutoHelpFull,
 //             "Print USAGE, DESCRIPTION and ARGUMENTS;"
 //             " ignore all other parameters");
+//     AddFlag(s_AutoHelpShowAll,
+//             "Print USAGE, DESCRIPTION and ARGUMENTS, including hidden ones;"
+//             " ignore all other parameters");
+//     AddFlag(s_AutoHelpXml,
+//             "Print USAGE, DESCRIPTION and ARGUMENTS in XML format;"
+//             " ignore all other parameters");
 // ```
-/// The arguments in the order NCBI describes them (`m_KeyFlagArgs`): the two help flags of
-/// `CArgDescriptions`, those of `CBlastDBCmdApp::Init` (blastdbcmd.cpp:901-1167), then the
-/// standard `-logfile` and `-version` (`-help-full`, `-xmlhelp`, `-conffile`, `-version-full`
-/// and `-dryrun` are hidden, so the reader does not know them).
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1213-1218
+// ```c++
+//         if ( !m_DisableArgDesc ) {
+//             for(CArgDescriptions* desc : m_ArgDesc->GetAllDescriptions()) {
+//                 desc->AddDefaultFileArguments(m_DefaultConfig);
+//             }
+//         }
+//         m_Args.reset(arg_desc->CreateArgs(GetArguments()));
+// ```
+/// The arguments in the order NCBI describes them (`m_KeyFlagArgs`) when it reads a command
+/// line: the four help flags of `CArgDescriptions`, those of `CBlastDBCmdApp::Init`
+/// (blastdbcmd.cpp:901-1167), then `-logfile` and `-conffile` (`AddDefaultFileArguments`).
+/// `HideStdArgs` takes effect later (`x_AddDefaultArgs`, after a help or an argument error,
+/// before the usage is printed): `-help-full` and `-xmlhelp` are known to the reader (probe C05,
+/// C06), and
+/// `-version` (which NCBI's application takes before the reader, `blastdbcmd::preparse`) is
+/// not.
 const DESCS: &[Desc] = &[
     flag("h"),
     flag("help"),
+    flag("help-full"),
+    flag("xmlhelp"),
     key("db", Kind::Text, Some("nr"), None),
     key(
         "dbtype",
@@ -149,7 +170,7 @@ const DESCS: &[Desc] = &[
     flag("exact_length"),
     flag("long_seqids"),
     key("logfile", Kind::Text, None, None),
-    flag("version"),
+    key("conffile", Kind::Text, None, None),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,7 +179,7 @@ enum Dep {
     Excludes,
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:957-966
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:955-961
 // ```c++
 //     arg_desc->AddFlag("info", "Print BLAST database information", true);
 //     // All other options to this program should be here
@@ -220,7 +241,7 @@ const METADATA_EXCLUSIONS: &[&str] = &[
     "no_taxid_expansion",
 ];
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:996-1004
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:994-998
 // ```c++
 //     const char* tax_info_exclusions[]  = { "info", "entry", "entry_batch", "strand",
 //         "target_only", "ctrl_a", "get_dups", "pig", "range",
@@ -248,7 +269,7 @@ const TAX_INFO_EXCLUSIONS: &[&str] = &[
     "no_taxid_expansion",
 ];
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1118-1121
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1111-1113
 // ```c++
 //     const char* exclusions_discovery[]  = { "entry", "entry_batch", "outfmt",
 //         "strand", "target_only", "ctrl_a", "get_dups", "pig", "range", kArgDb.c_str(),
@@ -377,7 +398,7 @@ fn invalid(code: &'static str, message: String) -> ArgsError {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:93-97
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99
 // ```c++
 // string s_ArgExptMsg(const string& name, const string& what, const string& attr)
 // {
@@ -585,7 +606,54 @@ fn create_arg(
     name: &str,
     arg2: Option<&String>,
 ) -> Result<(&'static Desc, Option<String>, bool), ArgsError> {
-    let Some(desc) = DESCS.iter().find(|desc| desc.name == name) else {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:921-929
+    // ```c++
+    // CArgDesc::CArgDesc(const string& name, const string& comment, CArgDescriptions::TFlags flags)
+    //     : m_Name(name), m_Comment(comment), m_Flags(flags)
+    // {
+    //     if ( !CArgDescriptions::VerifyName(m_Name) ) {
+    //         NCBI_THROW(CArgException,eInvalidArg,
+    //             "Invalid argument name: " + m_Name);
+    //     }
+    // ```
+    // The lookup of `name` (`x_Find`) makes a `CArgDesc_NameOnly` of it, so a name that is no
+    // argument name fails there.
+    if !is_argument_name(name) {
+        return Err(invalid(
+            "eInvalidArg",
+            format!("Invalid argument name: {name}"),
+        ));
+    }
+    let find = |name: &str| DESCS.iter().find(|desc| desc.name == name);
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2975-2989
+    // ```c++
+    //     size_t dash = name.rfind('-');
+    //     if (it == m_Args.end() && dash != NPOS && dash != 0) {
+    //         string test(name.substr(0, dash));
+    //         string suffix(name.substr(dash+1));
+    //         if (NStr::strcasecmp(suffix.c_str(), "file") == 0 ||
+    //             NStr::strcasecmp(suffix.c_str(), "verbatim") == 0)
+    //         {
+    //             try {
+    //                 it = x_Find(test);
+    //             } catch (const CArgException&) {
+    //                 it = m_Args.end();
+    //             }
+    //             if (it != m_Args.end()) {
+    // ```
+    // The confidential arguments read their value from a file (`-name-file`); blastdbcmd has
+    // none, but the lookup of the name before the dash stays: `-info-file` is `-info`, and
+    // `-db-file NAME` is `-db NAME` (the separator is looked for after the whole name).
+    let desc = find(name).or_else(|| {
+        let dash = name.rfind('-').filter(|&dash| dash != 0)?;
+        let suffix = &name[dash + 1..];
+        if suffix.eq_ignore_ascii_case("file") || suffix.eq_ignore_ascii_case("verbatim") {
+            find(&name[..dash])
+        } else {
+            None
+        }
+    });
+    let Some(desc) = desc else {
         if name.is_empty() {
             // `n_plain` is `kMax_UInt` here: the positional arguments have not started.
             return Err(invalid(
@@ -600,7 +668,7 @@ fn create_arg(
     };
     let eq_separator = arg1.as_bytes().get(name.len() + 1) == Some(&b'=');
     if desc.kind == Kind::Flag {
-        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2840-2847
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2840-2852
         // ```c++
         // void CArgDescriptions::x_CheckAutoHelp(const string& arg) const
         // {
@@ -610,10 +678,23 @@ fn create_arg(
         //         }
         //     } else if (arg.compare(string("-") + s_AutoHelpFull) == 0) {
         //         NCBI_THROW(CArgHelpException,eHelpFull,kEmptyStr);
+        //     } else if (arg.compare(string("-") + s_AutoHelpXml) == 0) {
+        //         NCBI_THROW(CArgHelpException,eHelpXml,kEmptyStr);
+        //     } else if (arg.compare(string("-") + s_AutoHelpShowAll) == 0) {
+        //         NCBI_THROW(CArgHelpException,eHelpShowAll,kEmptyStr);
+        //     }
         // ```
         match arg1 {
             "-h" => return Err(ArgsError::Usage),
-            "-help" => return Err(ArgsError::Help),
+            // `-help-full` adds the hidden arguments, of which blastdbcmd has none: the text is
+            // that of `-help` (probe C05).
+            "-help" | "-help-full" => return Err(ArgsError::Help),
+            // The help in XML.
+            "-xmlhelp" => {
+                return Err(ArgsError::Refused(format!(
+                    "the NCBI BLAST+ option {arg1} is not supported by LOSAT's BLASTDBCMD"
+                )))
+            }
             _ => {}
         }
         if eq_separator {
@@ -631,6 +712,52 @@ fn create_arg(
     };
     process_value(desc, &value)?;
     Ok((desc, Some(value), used))
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3338-3365
+// ```c++
+// bool CArgDescriptions::VerifyName(const string& name, bool extended)
+// {
+//     if ( name.empty() )
+//         return true;
+//
+//     string::const_iterator it = name.begin();
+//     if (extended  &&  *it == '#') {
+//         ...
+//     } else {
+//         if (name[0] == '-') {
+//             // Prohibit names like '-' or '--foo'.
+//             // The second char must be present and may not be '-'.
+//             if (name.length() == 1  ||  name[1] == '-') {
+//                 return false;
+//             }
+//         }
+//         for ( ;  it != name.end();  ++it) {
+//             if ( !s_IsArgNameChar((unsigned char)(*it)) )
+//                 return false;
+//         }
+//     }
+//
+//     return true;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1786-1789
+// ```c++
+// inline bool s_IsArgNameChar(char c)
+// {
+//     return isalnum(c)  ||  c == '_'  ||  c == '-';
+// }
+// ```
+/// `CArgDescriptions::VerifyName(name)`: whether `name` can be an argument's name (ASCII letters
+/// and digits, `_` and `-`, not `-` alone or starting with `--`; the empty name can).
+fn is_argument_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    if bytes.first() == Some(&b'-') && matches!(bytes.get(1), None | Some(b'-')) {
+        return false;
+    }
+    bytes
+        .iter()
+        .all(|&byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1228-1262
@@ -722,7 +849,12 @@ fn process_value(desc: &Desc, value: &str) -> Result<(), ArgsError> {
 fn integer_value(name: &str, value: &str) -> Result<i64, ArgsError> {
     let number = match string_to_int8(value) {
         Ok(number) => number,
-        Err(_) if value.len() >= 2 && value[..2].eq_ignore_ascii_case("0x") => {
+        Err(_)
+            if value
+                .as_bytes()
+                .get(..2)
+                .is_some_and(|head| head.eq_ignore_ascii_case(b"0x")) =>
+        {
             return Err(ArgsError::Refused(format!(
                 "the hexadecimal value '{value}' of -{name} is not supported by LOSAT's BLASTDBCMD"
             )));
@@ -843,10 +975,8 @@ fn string_to_int8(value: &str) -> Result<i64, String> {
     Ok(if sign { n.wrapping_neg() } else { n })
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp (s_PrintableString, eLanguage_C,
-// mode 0)
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3743-3810
 // ```c++
-//         switch (c) {
 //         case '\a':
 //             if (lang == eLanguage_C)
 //                 c = 'a';
@@ -888,6 +1018,8 @@ fn string_to_int8(value: &str) -> Result<i64, String> {
 //                 reduce = (i == str.size() - 1  ||
 //                           str[i + 1] < '0' || '7' < str[i + 1] ? true : false);
 // ```
+// `PrintableString(str)` has the mode 0 (`fNewLine_Quote`): a line feed becomes `\n`, the
+// branch of `c == '\n'` is that of `fNewLine_Passthru`.
 /// `NStr::PrintableString(str)`: C escapes for the quotes, the backslash, the control
 /// characters and `??` (trigraphs), and octal for the other bytes that are not printable
 /// ASCII, in as few digits as the next byte allows.
@@ -902,7 +1034,7 @@ fn printable_string(text: &str) -> String {
             b'\r' => Some("\\r".to_string()),
             b'\t' => Some("\\t".to_string()),
             0x0b => Some("\\v".to_string()),
-            b'\n' => Some("\\n\\\n".to_string()),
+            b'\n' => Some("\\n".to_string()),
             b'\\' | b'\'' | b'"' => Some(format!("\\{}", byte as char)),
             b'?' if (i > 0 && bytes[i - 1] == b'?') || bytes.get(i + 1) == Some(&b'?') => {
                 Some("\\?".to_string())
@@ -1197,6 +1329,53 @@ mod tests {
             ArgsError::Help
         );
         assert_eq!(messages(&["-h=1"]).1, ["Invalid argument: -h=1"]);
+        // Known to NCBI's reader: its help with the hidden arguments (none), its XML help.
+        assert_eq!(
+            parse(&words(&["-info", "-help-full"])).unwrap_err(),
+            ArgsError::Help
+        );
+        assert!(matches!(
+            parse(&words(&["-info", "-xmlhelp"])),
+            Err(ArgsError::Refused(_))
+        ));
+        // `-version` is taken before the reader; the reader does not know it.
+        assert_eq!(
+            messages(&["-version=1"]).1,
+            ["Unknown argument: \"version\""]
+        );
+    }
+
+    #[test]
+    fn names_are_checked_and_looked_up_as_ncbi_does() {
+        let cases: &[(&[&str], &str)] = &[
+            (&["-info", "-foo.bar"], "Invalid argument name: foo.bar"),
+            (&["-info", "-db.x=1"], "Invalid argument name: db.x"),
+            (&["-info", "---x"], "Invalid argument name: --x"),
+            (&["-info", "-\u{e9}"], "Invalid argument name: \u{e9}"),
+            (&["-info", "--x"], "Unknown argument: \"-x\""),
+            (
+                &["-info", "-=x"],
+                "Unexpected extra argument, at position # 4294967295",
+            ),
+            (&["-info", "-x-file"], "Unknown argument: \"x-file\""),
+        ];
+        for &(line, message) in cases {
+            assert_eq!(
+                messages(line),
+                ("eInvalidArg", vec![message.to_string()]),
+                "{line:?}"
+            );
+        }
+        // `-NAME-file` and `-NAME-verbatim` are the argument NAME.
+        let args = parse(&words(&["-db-file", "db/p5", "-info-FILE"])).unwrap();
+        assert_eq!(args.value("db"), Some("db/p5"));
+        assert!(args.given("info"));
+        let args = parse(&words(&["-db-verbatim=db/p5", "-info"])).unwrap();
+        assert_eq!(args.value("db"), Some("db/p5"));
+        assert_eq!(
+            messages(&["-info", "-info-file"]).1,
+            ["Argument with this name is defined already: info"]
+        );
     }
 
     #[test]
@@ -1224,12 +1403,25 @@ mod tests {
             integer_value("line_length", "0x10"),
             Err(ArgsError::Refused(_))
         ));
+        // A value that starts with a character of several bytes.
+        assert_eq!(
+            string_to_int8("\u{3042}").unwrap_err(),
+            "Cannot convert string '\\343\\201\\202' to Int8 (m_Pos = 0)"
+        );
+        assert!(matches!(
+            integer_value("ipg", "\u{3042}"),
+            Err(ArgsError::Invalid {
+                code: "eConvert",
+                ..
+            })
+        ));
     }
 
     #[test]
     fn printable_string_escapes_as_ncbi() {
         assert_eq!(printable_string("a'b\"c\\d"), "a\\'b\\\"c\\\\d");
         assert_eq!(printable_string("x\ty"), "x\\ty");
+        assert_eq!(printable_string("1\n2"), "1\\n2");
         assert_eq!(printable_string("a??b?c"), "a\\?\\?b?c");
         assert_eq!(printable_string("\u{1}9"), "\\19");
         assert_eq!(printable_string("\u{1}1"), "\\0011");

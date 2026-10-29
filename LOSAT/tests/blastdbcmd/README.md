@@ -2,7 +2,8 @@
 
 What NCBI BLAST+ 2.17.0 blastdbcmd printed for `-info`, its argument errors, `-out` and
 `-logfile`, for the tests in `LOSAT/tests/blastdbcmd_info.rs`. Frozen on 2026-10-29 by line BDC's
-probe on the workstation (cases `I01`-`I38` and `B01`-`B61`; NCBI was not run on this tree).
+probe on the workstation (cases `I01`-`I38`, `B01`-`B61` and `C01`-`C20`; NCBI was not run on
+this tree).
 
 - `db/`: databases of that probe. `p5` (version 5, `-parse_seqids`) and `p4` (version 4) are
   proteins with every Seq-id type, `n5n` a version 5 nucleotide database without parsed ids,

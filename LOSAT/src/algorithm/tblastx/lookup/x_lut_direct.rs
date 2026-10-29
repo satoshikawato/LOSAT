@@ -1721,9 +1721,27 @@ pub(super) fn x_build_lean(
             longest_chain = count as i32;
         }
     }
-    let mut backbone: Vec<BackboneCell> = vec![BackboneCell::default(); backbone_size];
+    // PROBE (D14 s4b, LOSAT_PROBE_TBNLUTMAP=1): the table's backbone and overflow at a capacity
+    // glibc maps and returns when the table is dropped (`x_unthresholded_capacity`).
+    let (mut backbone, mut overflow): (Vec<BackboneCell>, Vec<i32>) = if x_probe_lut_map() {
+        let mut backbone = Vec::with_capacity(crate::utils::x_mapped::x_unthresholded_capacity(
+            backbone_size,
+            std::mem::size_of::<BackboneCell>(),
+        ));
+        backbone.resize(backbone_size, BackboneCell::default());
+        let mut overflow = Vec::with_capacity(crate::utils::x_mapped::x_unthresholded_capacity(
+            overflow_size,
+            std::mem::size_of::<i32>(),
+        ));
+        overflow.resize(overflow_size, 0);
+        (backbone, overflow)
+    } else {
+        (
+            vec![BackboneCell::default(); backbone_size],
+            vec![0; overflow_size],
+        )
+    };
     let mut pv: Vec<u32> = vec![0u32; pv_size];
-    let mut overflow: Vec<i32> = vec![0; overflow_size];
     let mut overflow_cursor = 0usize;
     for (idx, slot) in counts.iter_mut().enumerate() {
         let count = *slot as usize;
@@ -1774,6 +1792,12 @@ pub(super) fn x_build_lean(
         threshold,
         row_max,
     })
+}
+
+// PROBE (D14 s4b): whether the lean table's vectors are mapped.
+fn x_probe_lut_map() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_PROBE_TBNLUTMAP").is_some())
 }
 
 // No NCBI counterpart: spins of `x_claimed`'s caller before it yields while it waits for parts.

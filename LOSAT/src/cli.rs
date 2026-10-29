@@ -19,11 +19,32 @@ use crate::algorithm::{blastn, blastp, blastx, psiblast, tblastn, tblastx};
 // const string kArgNumThreads("num_threads");
 // ```
 // LOSAT retains its program subcommand; search parameter names are NCBI names.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3815-3826
+// ```c++
+// string& CArgDescriptions::PrintUsage(string& str, bool detailed) const
+// {
+//     CPrintUsage x(*this);
+//     list<string> arr;
+//
+//     // SYNOPSIS
+//     arr.push_back("USAGE");
+//     x.AddSynopsis(arr, m_UsageName, "    ");
+//
+//     // DESCRIPTION
+//     arr.push_back(kEmptyStr);
+//     x.AddDescription(arr, detailed);
+// ```
+// `-help` and `-h` open with NCBI's two headings, `USAGE` and `DESCRIPTION`: tools that call
+// BLAST+ look for them (BRIG takes a `blastn -help` that prints `USAGE` as BLAST+ found).
+// The options follow in clap's layout.
+const NCBI_HELP_TEMPLATE: &str = "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\n{all-args}";
+
 #[derive(Parser, Debug)]
 #[command(
     name = "losat",
     version,
-    about = "Pure-Rust pairwise alignment with NCBI-verified fixtures and genetic-code exceptions"
+    about = "Pure-Rust pairwise alignment with NCBI-verified fixtures and genetic-code exceptions",
+    help_template = NCBI_HELP_TEMPLATE
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -39,16 +60,21 @@ pub enum Commands {
     //                                   "Translated Query-Protein Subject BLAST"));
     // ```
     /// Translated nucleotide query vs protein subject (local blastx)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastx(blastx::BlastxArgs),
     /// Pairwise nucleotide alignment (megablast [default], blastn)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastn(blastn::BlastnArgs),
     /// Pairwise protein alignment (blastp)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastp(blastp::BlastpArgs),
     /// Pairwise 6-frame translated nucleotide alignment (tblastx)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Tblastx(tblastx::TblastxArgs),
     // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52:
     // static const string kProgram("tblastn"); SetTask("tblastn");
     /// Protein query vs translated nucleotide subject (local tblastn)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Tblastn(tblastn::TblastnArgs),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
     // ```c++
@@ -58,6 +84,7 @@ pub enum Commands {
     //                                           "Position-Specific Iterated BLAST"));
     // ```
     /// Position-Specific Iterated BLAST (psiblast; its first round)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Psiblast(psiblast::PsiblastArgs),
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
     // ```c++
@@ -66,7 +93,7 @@ pub enum Commands {
     //                   + CBlastVersion().Print());
     // ```
     /// makeblastdb: create a BLAST database from a FASTA file, format version 4
-    #[command(name = "makeblastdb")]
+    #[command(name = "makeblastdb", help_template = NCBI_HELP_TEMPLATE)]
     Makedb(crate::writedb::makeblastdb::MakedbArgs),
 }
 

@@ -78,8 +78,8 @@ fn cli_help_and_version_are_available_without_inputs() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert!(
-            String::from_utf8_lossy(&output.stdout).contains("Usage:"),
-            "{args:?} help should include clap usage text"
+            String::from_utf8_lossy(&output.stdout).contains("USAGE\n"),
+            "{args:?} help should open with NCBI's USAGE heading"
         );
     }
 
@@ -447,7 +447,8 @@ fn short_help_h_succeeds_for_every_program() {
             assert!(output.status.success(), "{words:?}: {:?}", output.status);
             assert!(output.stderr.is_empty(), "{words:?}");
             let text = String::from_utf8_lossy(&output.stdout);
-            assert!(text.contains("Usage:"), "{words:?}: {text}");
+            assert!(text.starts_with("USAGE\n"), "{words:?}: {text}");
+            assert!(text.contains("\nDESCRIPTION\n"), "{words:?}: {text}");
             assert!(!text.contains("error:"), "{words:?}: {text}");
         }
     }

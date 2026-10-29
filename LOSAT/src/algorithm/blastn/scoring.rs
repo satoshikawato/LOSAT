@@ -4,7 +4,7 @@
 use super::args::BlastnArgs;
 use super::coordination::determine_scoring_params;
 use super::ncbi_cutoffs::NCBIMATH_LN2;
-use super::pairwise::query_ungapped_karlin_blastna;
+use super::pairwise::{query_ungapped_karlin_blastna_in, UngappedKarlinScratch};
 use crate::blastinput::report_counts::{run_report_counts, ReportCounts};
 use crate::cli::NativeError;
 use crate::config::NuclScoringSpec;
@@ -415,12 +415,13 @@ pub(crate) fn context_ungapped_blocks<'a>(
 ) -> Vec<Option<KarlinParams>> {
     // Twin: the closure body below is copied in `parallel_blocks` of
     // blast_engine/x_query_prep_par.rs (LOSAT_X_QPREPPAR); change it there too.
+    let mut scratch = UngappedKarlinScratch::default();
     contexts
         .map(|context| {
             if context.is_empty() {
                 None
             } else {
-                query_ungapped_karlin_blastna(context, spec.reward, spec.penalty)
+                query_ungapped_karlin_blastna_in(context, spec.reward, spec.penalty, &mut scratch)
             }
         })
         .collect()

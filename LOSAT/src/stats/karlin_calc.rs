@@ -251,7 +251,37 @@ pub fn score_freq_profile_from_probabilities(
     probabilities: &[(i32, f64)],
 ) -> ScoreFreqProfile {
     let mut sfp = ScoreFreqProfile::new(score_min, score_max);
+    score_freq_profile_fill(&mut sfp, score_min, score_max, probabilities);
+    sfp
+}
 
+/// `score_freq_profile_from_probabilities` into a profile kept by the caller, whose `sprob`
+/// buffer is reused (no allocation once it has room for the range). The same values: the
+/// profile is first put in `ScoreFreqProfile::new(score_min, score_max)`'s state. No NCBI
+/// counterpart (allocation only).
+pub fn score_freq_profile_from_probabilities_into(
+    sfp: &mut ScoreFreqProfile,
+    score_min: i32,
+    score_max: i32,
+    probabilities: &[(i32, f64)],
+) {
+    sfp.sprob.clear();
+    sfp.sprob.resize((score_max - score_min + 1) as usize, 0.0);
+    sfp.obs_min = 0;
+    sfp.obs_max = 0;
+    sfp.score_avg = 0.0;
+    sfp.score_min = score_min;
+    score_freq_profile_fill(sfp, score_min, score_max, probabilities);
+}
+
+/// The body of `score_freq_profile_from_probabilities`, on a profile in
+/// `ScoreFreqProfile::new(score_min, score_max)`'s state.
+fn score_freq_profile_fill(
+    sfp: &mut ScoreFreqProfile,
+    score_min: i32,
+    score_max: i32,
+    probabilities: &[(i32, f64)],
+) {
     for &(score, prob) in probabilities {
         if score < score_min || score > score_max || prob <= 0.0 {
             continue;
@@ -285,7 +315,6 @@ pub fn score_freq_profile_from_probabilities(
     sfp.obs_min = if obs_min == i32::MAX { 0 } else { obs_min };
     sfp.obs_max = if obs_max == i32::MIN { 0 } else { obs_max };
     sfp.score_avg = score_avg;
-    sfp
 }
 
 /// Compute score frequency profile from two amino acid compositions
@@ -628,7 +657,12 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
 // how the convolution `innerSum` values are produced, not which values or the order of the
 // additions in each of them; the scalar loop below it runs where `first != 0` and for the
 // lowest positions of each pass.
-fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Result<f64, String> {
+fn compute_k_from_lambda_h(
+    sfp: &ScoreFreqProfile,
+    lambda: f64,
+    h: f64,
+    scratch: &mut KarlinScratch,
+) -> Result<f64, String> {
     if lambda <= 0.0 || h <= 0.0 {
         return Err("Lambda and H must be positive".to_string());
     }
@@ -642,7 +676,8 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
     blast_score_chk(low, high)?;
 
     let mut range = high - low;
-    let mut prob_array_start_low = Vec::with_capacity((range + 1) as usize);
+    let prob_array_start_low = &mut scratch.prob;
+    prob_array_start_low.clear();
     for i in 0..=range {
         prob_array_start_low.push(sfp.get_prob(low + i));
     }
@@ -684,7 +719,9 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
     let sumlimit = BLAST_KARLIN_K_SUMLIMIT_DEFAULT;
     let iterlimit = BLAST_KARLIN_K_ITER_MAX;
     let array_len = (iterlimit as usize) * (range as usize) + 1;
-    let mut alignment_score_probabilities = vec![0.0; array_len];
+    let alignment_score_probabilities = &mut scratch.alignment;
+    alignment_score_probabilities.clear();
+    alignment_score_probabilities.resize(array_len, 0.0);
     let mut outer_sum = 0.0;
     let mut low_alignment_score = 0;
     let mut high_alignment_score = 0;
@@ -807,6 +844,25 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
 /// # Returns
 /// Karlin parameters (Lambda, K, H) or error
 pub fn compute_karlin_params_ungapped(sfp: &ScoreFreqProfile) -> Result<KarlinParams, String> {
+    compute_karlin_params_ungapped_in(sfp, &mut KarlinScratch::default())
+}
+
+/// The buffers of `compute_karlin_params_ungapped_in` (the score probabilities from the lowest
+/// score and the alignment-score probabilities of K's sum), kept by a caller that computes many
+/// blocks so that a block does not allocate them again. Nothing is carried from one block to
+/// the next: each computation sets them first. No NCBI counterpart (allocation only).
+#[derive(Default)]
+pub struct KarlinScratch {
+    prob: Vec<f64>,
+    alignment: Vec<f64>,
+}
+
+/// `compute_karlin_params_ungapped` with the caller's buffers (`KarlinScratch`); the same
+/// values.
+pub fn compute_karlin_params_ungapped_in(
+    sfp: &ScoreFreqProfile,
+    scratch: &mut KarlinScratch,
+) -> Result<KarlinParams, String> {
     // Calculate Lambda
     let lambda = compute_lambda_nr(sfp, BLAST_KARLIN_LAMBDA0_DEFAULT)?;
 
@@ -814,7 +870,7 @@ pub fn compute_karlin_params_ungapped(sfp: &ScoreFreqProfile) -> Result<KarlinPa
     let h = compute_h_from_lambda(sfp, lambda)?;
 
     // Calculate K
-    let k = compute_k_from_lambda_h(sfp, lambda, h)?;
+    let k = compute_k_from_lambda_h(sfp, lambda, h, scratch)?;
 
     // Alpha and beta are not computed for ungapped (use defaults or lookup)
     // For ungapped, these are typically not used in E-value calculation

@@ -75,7 +75,7 @@ use std::sync::OnceLock;
 
 use crate::algorithm::blastn::coordination::QueryLetters;
 use crate::algorithm::blastn::lookup::encode_reverse_complement_blastna_into;
-use crate::algorithm::blastn::pairwise::query_ungapped_karlin_blastna;
+use crate::algorithm::blastn::pairwise::{query_ungapped_karlin_blastna_in, UngappedKarlinScratch};
 use crate::algorithm::blastn::scoring::context_ungapped_blocks;
 use crate::config::NuclScoringSpec;
 use crate::core::blast_encoding::encode_iupac_to_blastna_into;
@@ -249,14 +249,16 @@ fn parallel_blocks<P: Fn() + Sync>(
     pool.install(|| {
         contexts
             .par_iter()
-            .map(|context| {
+            // The buffers of the blocks (`UngappedKarlinScratch`) are made once per job of the
+            // iterator, not once per context.
+            .map_init(UngappedKarlinScratch::default, |scratch, context| {
                 probe();
                 // A copy of the body of `context_ungapped_blocks` (scoring.rs): a change of the
                 // serial function must be made here too.
                 if context.is_empty() {
                     None
                 } else {
-                    query_ungapped_karlin_blastna(context, reward, penalty)
+                    query_ungapped_karlin_blastna_in(context, reward, penalty, scratch)
                 }
             })
             .collect()

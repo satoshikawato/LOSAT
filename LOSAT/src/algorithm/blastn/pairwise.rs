@@ -10,7 +10,8 @@ use crate::common::GapEditOp;
 use crate::core::blast_encoding::encode_iupac_to_blastna;
 use crate::report::pairwise::PairwiseHit;
 use crate::stats::{
-    compute_karlin_params_ungapped, score_freq_profile_from_probabilities, KarlinParams,
+    compute_karlin_params_ungapped_in, score_freq_profile_from_probabilities_into, KarlinParams,
+    KarlinScratch, ScoreFreqProfile,
 };
 use crate::utils::dust::MaskedInterval;
 
@@ -600,10 +601,45 @@ pub(crate) fn query_ungapped_karlin(
 
 /// `query_ungapped_karlin` of a context already in BLASTNA (the search holds its contexts
 /// only in that encoding).
+#[cfg(test)]
 pub(crate) fn query_ungapped_karlin_blastna(
     blastna: &[u8],
     reward: i32,
     penalty: i32,
+) -> Option<KarlinParams> {
+    query_ungapped_karlin_blastna_in(
+        blastna,
+        reward,
+        penalty,
+        &mut UngappedKarlinScratch::default(),
+    )
+}
+
+/// The buffers of `query_ungapped_karlin_blastna_in` (the score frequencies and K's sums), kept
+/// by a caller that computes the blocks of many contexts, so that a context does not allocate
+/// them again: with many threads computing contexts at once, allocations per context take
+/// turns at the allocator (a WASI build's allocator has one lock). No NCBI counterpart
+/// (allocation only).
+pub(crate) struct UngappedKarlinScratch {
+    sfp: ScoreFreqProfile,
+    karlin: KarlinScratch,
+}
+
+impl Default for UngappedKarlinScratch {
+    fn default() -> Self {
+        Self {
+            sfp: ScoreFreqProfile::new(0, 0),
+            karlin: KarlinScratch::default(),
+        }
+    }
+}
+
+/// `query_ungapped_karlin_blastna` with the caller's buffers; the same block.
+pub(crate) fn query_ungapped_karlin_blastna_in(
+    blastna: &[u8],
+    reward: i32,
+    penalty: i32,
+    scratch: &mut UngappedKarlinScratch,
 ) -> Option<KarlinParams> {
     const BLASTNA_N: usize = 14;
     const BLASTNA_GAP: usize = 15;
@@ -630,12 +666,13 @@ pub(crate) fn query_ungapped_karlin_blastna(
             num_probabilities += 1;
         }
     }
-    let sfp = score_freq_profile_from_probabilities(
+    score_freq_profile_from_probabilities_into(
+        &mut scratch.sfp,
         penalty.min(reward),
         reward.max(penalty),
         &probabilities[..num_probabilities],
     );
-    compute_karlin_params_ungapped(&sfp).ok()
+    compute_karlin_params_ungapped_in(&scratch.sfp, &mut scratch.karlin).ok()
 }
 
 #[cfg(test)]

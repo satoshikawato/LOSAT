@@ -113,7 +113,9 @@ use super::get_score;
 use super::two_hit::extend_hit_two_hit_reference;
 use crate::config::ScoringMatrix;
 use crate::utils::matrix::BLAST_SCORE_MIN;
-use std::sync::OnceLock;
+use std::cell::UnsafeCell;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Once, OnceLock};
 
 /// The seven values of `extend_hit_two_hit`: (q_start, q_end, s_start, s_end, score,
 /// right_extended, s_last_off).
@@ -255,24 +257,44 @@ fn table_byte(v: i32, max: i32) -> Option<i8> {
     }
 }
 
-/// Another matrix's table of the scores `score(q, s)`, `None` if a score of the bytes below
-/// `MATRIX_LETTERS` other than `BLAST_SCORE_MIN` is outside -127..=`MAX_MATRIX_SCORE`.
-fn matrix_table_of(score: impl Fn(u8, u8) -> i32) -> Option<MatrixWalkTable> {
-    let mut t = MatrixWalkTable([0; MATRIX_TABLE_LEN]);
+/// Writes the scores `score(q, s)` of the bytes below `MATRIX_LETTERS` into another matrix's
+/// table `t`; `false` if one other than `BLAST_SCORE_MIN` is outside -127..=`MAX_MATRIX_SCORE`.
+fn fill_matrix_table(t: &mut [i8; MATRIX_TABLE_LEN], score: impl Fn(u8, u8) -> i32) -> bool {
     for q in 0..MATRIX_LETTERS as u8 {
         for s in 0..MATRIX_LETTERS as u8 {
-            t.0[(q as usize) << 5 | s as usize] = table_byte(score(q, s), MAX_MATRIX_SCORE)?;
+            match table_byte(score(q, s), MAX_MATRIX_SCORE) {
+                Some(v) => t[(q as usize) << 5 | s as usize] = v,
+                None => return false,
+            }
         }
     }
-    Some(t)
+    true
 }
 
-/// The tables of `matrix_walk_table`, one for each matrix.
-static MATRIX_TABLES: [OnceLock<Option<MatrixWalkTable>>; ScoringMatrix::ALL.len()] =
-    [const { OnceLock::new() }; ScoringMatrix::ALL.len()];
+/// One matrix's table of `matrix_walk_table`: zero until its `once` writes the cells of the
+/// letters (the first 1 KiB).
+struct MatrixTableSlot {
+    once: Once,
+    /// Whether the matrix's scores fit the table (`fill_matrix_table`), set inside `once`.
+    fits: AtomicBool,
+    table: UnsafeCell<MatrixWalkTable>,
+}
+// SAFETY: `table` is written once, inside `once`, and read only through the references
+// `matrix_walk_table` hands out after `once` completed.
+unsafe impl Sync for MatrixTableSlot {}
+
+/// The tables of `matrix_walk_table`, one for each matrix. All zero, so they stay in .bss (a
+/// `OnceLock` of a table holds uninitialized bytes and lands in .data: 72 KiB of the binary).
+static MATRIX_TABLES: [MatrixTableSlot; ScoringMatrix::ALL.len()] = [const {
+    MatrixTableSlot {
+        once: Once::new(),
+        fits: AtomicBool::new(false),
+        table: UnsafeCell::new(MatrixWalkTable([0; MATRIX_TABLE_LEN])),
+    }
+}; ScoringMatrix::ALL.len()];
 
 /// The byte table of `matrix`, a matrix other than BLOSUM62 whose scores are `score(q, s)`: a
-/// static built at the first call for the matrix, or `None` (the reference walks run) if a score
+/// static written at the first call for the matrix, or `None` (the reference walks run) if a score
 /// other than `BLAST_SCORE_MIN` is outside -127..=`MAX_MATRIX_SCORE`.
 // NCBI reference: aa_ungapped.c:846-921 `matrix[q[i]][s[i]]`; the scores are those the reference
 // walks read (`TbxScore::score` of the search's matrix).
@@ -280,9 +302,19 @@ pub(crate) fn matrix_walk_table(
     matrix: ScoringMatrix,
     score: impl Fn(u8, u8) -> i32,
 ) -> Option<&'static MatrixWalkTable> {
-    MATRIX_TABLES[matrix as usize]
-        .get_or_init(|| matrix_table_of(score))
-        .as_ref()
+    let slot = &MATRIX_TABLES[matrix as usize];
+    slot.once.call_once(|| {
+        // SAFETY: the only write to the table, inside `once`, before any reference to it
+        // (MatrixTableSlot).
+        let t = unsafe { &mut *slot.table.get() };
+        let fits = fill_matrix_table(&mut t.0, score);
+        // `once` orders this store before the loads that follow its completion.
+        slot.fits.store(fits, Ordering::Relaxed);
+    });
+    // SAFETY: `once` has completed, so nothing writes the table any more (MatrixTableSlot).
+    slot.fits
+        .load(Ordering::Relaxed)
+        .then(|| unsafe { &*slot.table.get() })
 }
 
 static STATE: OnceLock<State> = OnceLock::new();
@@ -949,8 +981,17 @@ mod tests {
             assert!(std::ptr::eq(t, again.expect("the matrix fits")));
         }
         // A score above MAX_MATRIX_SCORE (or below -127) leaves the calls to the reference.
-        assert!(matrix_table_of(|a, b| if a == 3 && b == 3 { 64 } else { 1 }).is_none());
-        assert!(matrix_table_of(|a, b| if a == 31 && b == 31 { -128 } else { 1 }).is_none());
+        let mut t = [0i8; MATRIX_TABLE_LEN];
+        assert!(!fill_matrix_table(&mut t, |a, b| if a == 3 && b == 3 {
+            64
+        } else {
+            1
+        }));
+        assert!(!fill_matrix_table(&mut t, |a, b| if a == 31 && b == 31 {
+            -128
+        } else {
+            1
+        }));
     }
 
     // No NCBI counterpart (two LOSAT paths). The table walks of each other matrix give the

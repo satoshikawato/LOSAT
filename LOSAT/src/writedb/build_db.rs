@@ -8,8 +8,9 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use super::fasta_source::{FastaBioseqSource, Warn};
+use super::platform::Platform;
 use super::time::LocalTime;
-use super::writer::WriteDb;
+use super::writer::{DbVersion, WriteDb};
 use super::WriteDbError;
 use crate::seqdb::{SeqDbError, SeqType};
 
@@ -496,7 +497,7 @@ fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
 // ```
 /// `SeqDB_GetFileExtensions(is_protein, extn, eBDB_Version4)` without the
 /// letter of the molecule.
-const VOLUME_EXTENSIONS: [&str; 20] = [
+pub(crate) const VOLUME_EXTENSIONS: [&str; 20] = [
     "al", "in", "hr", "sq", "ni", "nd", "si", "sd", "pi", "pd", "js", "aa", "ab", "ac", "og", "hi",
     "hd", "ti", "td", "xm",
 ];
@@ -689,13 +690,16 @@ impl<'a> BuildDatabase<'a> {
     //     m_LogFile << "Keep MBits: " << (keep_mbits ? "T" : "F") << endl;
     // ```
     /// The constructor, then `SetMembBits(no_bits, true)` as makeblastdb
-    /// calls it. `now` is the time of the build.
+    /// calls it. `now` is the time of the build, `version` the format version
+    /// (`dbver`), `platform` the platform whose makeblastdb the files follow.
     pub fn new(
         dbname: &str,
         title: &str,
         is_protein: bool,
         log: &'a mut dyn Write,
         now: &LocalTime,
+        version: DbVersion,
+        platform: Platform,
     ) -> Result<Self, WriteDbError> {
         create_directories(dbname)?;
         let output_dbname = create_absolute_path(dbname);
@@ -715,15 +719,33 @@ impl<'a> BuildDatabase<'a> {
             );
         }
         let _ = writeln!(log, "Keep MBits: T");
-        // The limit of 1000*1000*1000 that the constructor sets
-        // (build_db.cpp:1200) is replaced by makeblastdb before a sequence
-        // is added.
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1119-1132
+        // ```c++
+        //     m_OutputDb.Reset(new CWriteDB(output_dbname,
+        //                                   seqtype,
+        //                                   title,
+        //                                   indexing,
+        //                                   m_ParseIDs,
+        //                                   m_LongIDs,
+        //                                   use_gi_mask,
+        //                                   dbver,
+        //                                   limit_defline,
+        //                                   oid_masks));
+        //
+        //     // Standard 1 GB limit
+        //
+        //     m_OutputDb->SetMaxFileSize(1000*1000*1000);
+        // ```
+        // The limit of 1000*1000*1000 that the constructor sets is replaced
+        // by makeblastdb before a sequence is added.
         let output_db = WriteDb::new(
             &output_dbname,
             is_protein,
             title.as_bytes(),
             now.index_date().as_bytes(),
             1000 * 1000 * 1000,
+            version,
+            platform,
         );
         Ok(Self {
             is_protein,
@@ -741,6 +763,11 @@ impl<'a> BuildDatabase<'a> {
     /// The log stream (`m_LogFile`).
     pub fn log(&mut self) -> &mut dyn Write {
         self.log
+    }
+
+    /// The database being written (`m_OutputDb`).
+    pub fn output_db(&self) -> &WriteDb {
+        &self.output_db
     }
 
     /// `SetMaxFileSize`.

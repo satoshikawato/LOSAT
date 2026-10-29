@@ -149,7 +149,7 @@ fn a_database_search_gives_the_same_report_at_every_thread_count() {
         }
     }
     // The reports name the database: outfmt 7 by the `-db` value, outfmt 0 by its title
-    // (makedb's default title: the input file's name) and its numbers.
+    // (makeblastdb's default title: the input file's name) and its numbers.
     let comments = String::from_utf8(tblastx(&query, &["-db", &db], "7", 1)).unwrap();
     assert!(
         comments.contains(&format!("\n# Database: {db}\n")),

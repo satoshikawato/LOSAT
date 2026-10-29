@@ -909,7 +909,7 @@ fn a_database_title_outside_the_printable_range_leaves_the_search_of_all_queries
     );
     let rows = String::from_utf8(rows.stdout).unwrap();
     let (hit, _) = subject_first_hit_late(&query, &rows);
-    // `makedb` stores a byte outside ' ' ..= '~' as '#', so the title is made with four letters
+    // `makeblastdb` stores a byte outside ' ' ..= '~' as '#', so the title is made with four letters
     // that the test then replaces by a Latin-1 one in the header file (the same length).
     let subjects = std::fs::read_to_string(&fasta).unwrap();
     let defline = subjects
@@ -1170,7 +1170,7 @@ fn a_punctuation_database_title_stops_outfmt_6_blocks_but_not_the_others() {
         .find(|line| line.starts_with(&format!(">{hit} ")))
         .unwrap()
         .to_string();
-    // `makedb` stores the whole definition line as the title, so the title is `, ,` itself.
+    // `makeblastdb` stores the whole definition line as the title, so the title is `, ,` itself.
     let source = write_file(
         &dir,
         "subjects.faa",

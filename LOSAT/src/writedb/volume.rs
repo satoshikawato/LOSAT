@@ -2,7 +2,9 @@
 //! `c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp`).
 
 use super::convert::find_sequence_length;
-use super::files::{make_short_name, orig_num_digits, HeaderFile, IndexFile, SequenceFile};
+use super::files::{
+    make_short_name, orig_num_digits, DbVersion, HeaderFile, IndexFile, OffsetArrays, SequenceFile,
+};
 use super::WriteDbError;
 
 /// `CWriteDB_Volume` without ISAM indices, columns and OID masks.
@@ -44,6 +46,10 @@ impl Volume {
     //                                           max_file_size,
     //                                           max_letters));
     // ```
+    /// `arrays`: the offset arrays of the previous volume
+    /// (`take_offset_arrays`), or new ones for the first; `sizeof_long` the
+    /// platform's `sizeof(long)` (`Platform::sizeof_long`).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn create(
         dbname: &str,
         protein: bool,
@@ -51,13 +57,26 @@ impl Volume {
         date: &[u8],
         index: u32,
         max_file_size: u64,
+        version: DbVersion,
+        sizeof_long: u64,
+        arrays: OffsetArrays,
     ) -> Result<Self, WriteDbError> {
         // NCBI does not test whether the three files opened
         // (`WriteDbFile::create`). LOSAT stops at the first that cannot be
         // created, and this volume is then not one of the build's volumes,
         // whose files the failed build removes; so the files created here
         // before the failure are removed here.
-        let mut idx = IndexFile::create(dbname, protein, title, date, index, max_file_size)?;
+        let mut idx = IndexFile::create(
+            dbname,
+            protein,
+            title,
+            date,
+            index,
+            max_file_size,
+            version,
+            sizeof_long,
+            arrays,
+        )?;
         let mut hdr = match HeaderFile::create(dbname, protein, index, max_file_size) {
             Ok(hdr) => hdr,
             Err(error) => {
@@ -89,6 +108,11 @@ impl Volume {
     /// `GetOID`: the number the next sequence gets in this volume.
     pub(crate) fn oid(&self) -> u32 {
         self.oid
+    }
+
+    /// The residues or bases in this volume (`m_Letters` of its index file).
+    pub(crate) fn letters(&self) -> u64 {
+        self.idx.letters()
     }
 
     /// `GetVolumeName`: the path of the volume without extension.
@@ -199,6 +223,11 @@ impl Volume {
             self.seq.close()?;
         }
         Ok(())
+    }
+
+    /// The emptied offset arrays of the index file, after `close`.
+    pub(crate) fn take_offset_arrays(&mut self) -> OffsetArrays {
+        self.idx.take_offset_arrays()
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:378-384

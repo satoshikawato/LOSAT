@@ -759,6 +759,105 @@ pub(crate) fn tabular_subject_ids(
         .collect()
 }
 
+/// Why a report of some sequence of a database could be refused (`reports_may_refuse`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReportRefusal {
+    /// A header that does not read, or a sequence whose stored title, tabular id or parsed
+    /// Seq-ids the reports refuse.
+    Headers,
+    /// Two sequences whose Seq-align ids may be taken for one (`refuse_joined_hits`).
+    Joined,
+    /// A taxid that does not decode, or a lookup of the taxonomy database that could be refused,
+    /// where the batches' prefetch reads them (`prefetch_messages`).
+    Taxonomy,
+}
+
+// No NCBI counterpart: LOSAT's check whether one of its own refusals can come where a report of
+// the search names a sequence of the database; it changes no value NCBI computes.
+/// Whether a report that names any sequence of `db` could be refused by LOSAT, with the reports
+/// `shown`: every sequence's header is read as the reports read it (`read_header`) and checked as
+/// they check it (`check_reported_title`, `tabular_subject_id` for the tabular formats,
+/// `check_reported_parsed` with `taxdb_found` where outfmt 0 is shown, as `reported_subjects`
+/// asks), and with `prefetch` (the batches' prefetch of a search with `taxdb.bti` on the search
+/// path) every stored title's taxid decodes and no lookup of the taxonomy database can be refused
+/// (`taxdb_may_refuse`). Where the reports join following hits (`shown.joined`), no two sequences
+/// with parsed Seq-ids may share a key of their Seq-align ids (`db_subject::join_keys`; ids that
+/// `refuse_joined_hits` refuses share one). A reader error is a refusal too. The headers are
+/// read in `pool`; nothing is written and no state of the run changes. `None`: no report of any
+/// sequence can be refused.
+pub(crate) fn reports_may_refuse(
+    db: &SeqDb,
+    shown: ParsedShown,
+    protein: bool,
+    taxdb_found: bool,
+    prefetch: bool,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    program: &str,
+) -> Option<ReportRefusal> {
+    let check =
+        |mut keys: Vec<u64>, ordinal: u32| -> std::result::Result<Vec<u64>, ReportRefusal> {
+            match read_header(db, ordinal, 0, program) {
+                Ok(ReportedHeader::Stored(stored)) => {
+                    check_reported_title(stored.replaced_bytes, ordinal, program)
+                        .map_err(|_| ReportRefusal::Headers)?;
+                    if shown.tabular {
+                        tabular_subject_id(&stored.title, ordinal, protein, program)
+                            .map_err(|_| ReportRefusal::Headers)?;
+                    }
+                    if prefetch && db.defline_taxids(ordinal).is_err() {
+                        return Err(ReportRefusal::Taxonomy);
+                    }
+                }
+                Ok(ReportedHeader::Parsed(subject)) => {
+                    check_reported_parsed(
+                        &subject,
+                        shown,
+                        protein,
+                        shown.pairwise && taxdb_found,
+                        ordinal,
+                        program,
+                    )
+                    .map_err(|_| ReportRefusal::Headers)?;
+                    if shown.joined {
+                        crate::report::db_subject::join_keys(&subject, &mut keys);
+                    }
+                }
+                Err(_) => return Err(ReportRefusal::Headers),
+            }
+            Ok(keys)
+        };
+    let all = || -> std::result::Result<Vec<u64>, ReportRefusal> {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        if pool.enabled() {
+            use rayon::prelude::*;
+            return pool.install(|| {
+                (0..db.num_seqs())
+                    .into_par_iter()
+                    .with_min_len(4096)
+                    .try_fold(Vec::new, check)
+                    .try_reduce(Vec::new, |mut keys, mut more| {
+                        keys.append(&mut more);
+                        Ok(keys)
+                    })
+            });
+        }
+        let _ = pool;
+        (0..db.num_seqs()).try_fold(Vec::new(), check)
+    };
+    let mut keys = match all() {
+        Ok(keys) => keys,
+        Err(refusal) => return Some(refusal),
+    };
+    keys.sort_unstable();
+    if keys.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Some(ReportRefusal::Joined);
+    }
+    (prefetch && taxdb_may_refuse(db, false)).then_some(ReportRefusal::Taxonomy)
+}
+
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1865-1886
 // ```c++
 //         string message;

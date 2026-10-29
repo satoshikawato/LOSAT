@@ -190,6 +190,15 @@ pub enum CutoffLimit {
     SearchSpace,
 }
 
+/// Whether `2 * context length` fits an `Int4`, as NCBI's `query_length * 2` in the word cutoff
+/// needs; a longer context (1 Gb or more) is refused ([`CutoffLimit::QueryLength`]), before any
+/// output (`x_rpt_stream::check` asks it of every query of the search).
+pub fn cutoff_context_length_supported(context_length: usize) -> bool {
+    context_length
+        .checked_mul(2)
+        .is_some_and(|n| i32::try_from(n).is_ok())
+}
+
 /// The ungapped word cutoff of one valid context: `new_cutoff` of
 /// `BlastInitialWordParametersUpdate` for an ungapped blastn search.
 ///
@@ -220,10 +229,10 @@ pub fn word_cutoff_score(
     kbp_std: &KarlinParams,
     cutoff_score_max: i32,
 ) -> Result<i32, CutoffLimit> {
-    let query_length = context_length
-        .checked_mul(2)
-        .filter(|n| i32::try_from(*n).is_ok())
-        .ok_or(CutoffLimit::QueryLength)? as u64;
+    if !cutoff_context_length_supported(context_length) {
+        return Err(CutoffLimit::QueryLength);
+    }
+    let query_length = context_length as u64 * 2;
     let search_space = query_length
         .min(avg_subject_length)
         .checked_mul(avg_subject_length)
@@ -283,8 +292,10 @@ mod tests {
     ];
 
     /// `testReevaluateWithAmbiguitiesUngappedNucl` (blasthits_unit_test.cpp:500-600): the HSP
-    /// 0..20 on 0..20 (score 20) of a 1/-2 search with a word cutoff of 3 is cut to 6..20 on
-    /// 6..20 with score 11, and not deleted.
+    /// 0..20 on 0..20 (score 20) of a 1/-2 search is cut to 6..20 on 6..20 with score 11, and not
+    /// deleted. NCBI's test sets `word_params->cutoff_score_min = 3`; the re-evaluation reads
+    /// `word_params->cutoffs[context].cutoff_score` (blast_hits.c:687), not that one, so the 3
+    /// below is only the test's argument: the expected values are the same for a cutoff of 4 to 11.
     // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:500-585 testReevaluateWithAmbiguitiesUngappedNucl
     #[test]
     fn ncbi_test_reevaluate_with_ambiguities_ungapped_nucl() {
@@ -449,6 +460,10 @@ mod tests {
             Err(CutoffLimit::QueryLength)
         );
         assert!(word_cutoff_score((1 << 30) - 1, 1000, &kbp, i32::MAX).is_ok());
+        // The check the streaming of reports asks of every query before the first output.
+        assert!(cutoff_context_length_supported((1 << 30) - 1));
+        assert!(!cutoff_context_length_supported(1 << 30));
+        assert!(!cutoff_context_length_supported(usize::MAX));
         // min(avg, 2q) * avg > i64::MAX (not reachable with NCBI's 32-bit averages; the function
         // takes the average as a u64).
         assert_eq!(

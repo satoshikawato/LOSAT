@@ -7501,7 +7501,7 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
         // Seq-align formats) and 17 (SAM) of an ungapped search are refused (O4a-2).
         if args.ungapped && matches!(choice.number, 8 | 9 | 11 | 12 | 17) {
             anyhow::bail!(
-                "the output format {} with -ungapped (an ungapped search) is not supported by LOSAT's BLASTN",
+                "output format {} with -ungapped (an ungapped search) is not supported by LOSAT's BLASTN",
                 choice.number
             );
         }

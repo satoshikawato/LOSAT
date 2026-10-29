@@ -47,20 +47,20 @@ fn temp_dir(tag: &str) -> PathBuf {
     dir
 }
 
-/// The database of `fasta_file` made by `losat makedb` in `dir` under `name`, in volumes of at
+/// The database of `fasta_file` made by `losat makeblastdb` in `dir` under `name`, in volumes of at
 /// most `max_file_sz` bytes.
 fn makedb(dir: &Path, fasta_file: &Path, name: &str, max_file_sz: &str) -> String {
     let db = dir.join(name).to_str().unwrap().to_string();
     let output = losat(&[])
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fasta_file)
         .args(["-dbtype", "nucl", "-out", &db, "-max_file_sz", max_file_sz])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run LOSAT makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     db

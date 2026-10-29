@@ -116,19 +116,19 @@ fn inputs_from(
     (query, set)
 }
 
-/// The set's `losat makedb` database.
+/// The set's `losat makeblastdb` database.
 fn database(dir: &Path, set: &Path) -> String {
     let db = dir.join("set").to_str().unwrap().to_string();
     let output = losat()
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(set)
         .args(["-dbtype", "prot", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     db

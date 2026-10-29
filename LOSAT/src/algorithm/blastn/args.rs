@@ -406,6 +406,12 @@ pub struct BlastnArgs {
     /// gives the counts files it holds under their names.
     #[arg(skip)]
     pub window_masker_counts: Option<std::sync::Arc<dyn crate::utils::winmask::CountsSource>>,
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// by the command line before the search where a tabular field list shows a name of the
+    /// taxonomy database (`algorithm::blastn::tabular`); `None` elsewhere (`run_local`'s callers
+    /// give no search path: not found). Not a public option.
+    #[arg(skip)]
+    pub tabular_taxdb: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
     // ```c++
     //         arg_desc.AddDefaultKey(kArgStrand, "strand",

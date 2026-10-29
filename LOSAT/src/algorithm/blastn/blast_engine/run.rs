@@ -5469,6 +5469,9 @@ struct BlastnReportInputs<'a> {
     /// Whether both strands of each query are searched (`-strand both`).
     both_strands: bool,
     minus_strand: bool,
+    /// Whether `taxdb.bti` is on NCBI's search path, for the custom tabular reports
+    /// (`ShownSubjects::tabular_taxdb_found`).
+    tabular_taxdb_found: bool,
 }
 
 /// The per-query and run-level data of the pairwise report.
@@ -6215,11 +6218,16 @@ fn post_process_hits_and_write(
             .map(|observer| FormatProbe::new(observer, format_index));
         // The taxonomy database's messages of XML2 and JSON go to the diagnostics at every
         // format.
+        // So do those of the formatters of a tabular field list that shows a taxonomy name
+        // (`x_CheckTaxDB`, `algorithm::blastn::tabular`).
         let mut format_warnings = (warning_lines.is_some()
             || matches!(
                 output_format,
                 BlastnOutputFormat::Xml2(_) | BlastnOutputFormat::Archive
-            ))
+            )
+            || output_format
+                .tabular_spec()
+                .is_some_and(|spec| spec.checks_taxdb()))
         .then(|| crate::report::query_warnings::QueryWarnings {
             before: warning_lines.take().unwrap_or(&[]),
             sink: &mut *outputs.diagnostics,
@@ -6631,6 +6639,23 @@ fn post_process_hits_and_write(
                     )?;
                 }
             }
+        } else if let Some(spec) = output_format.tabular_spec() {
+            // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
+            // (`algorithm::blastn::tabular`); never the default 6 and 7 below.
+            write_custom_tabular(
+                spec,
+                report,
+                &hit_lists,
+                query_ids,
+                query_titles,
+                query_lengths,
+                subject_title,
+                &subject_ids,
+                &unsearched,
+                &mut writer,
+                format_warnings.as_mut(),
+                probe.as_mut(),
+            )?;
         } else {
             crate::algorithm::blastn::x_tab_par::write_output(
                 report.x_tab_pool,
@@ -6692,6 +6717,100 @@ fn post_process_hits_and_write(
         );
     }
     Ok(())
+}
+
+/// The custom tabular report of the queries of `hit_lists` (`algorithm::blastn::tabular`): the
+/// subjects' values as the report shows them (a database's stored lengths and, where a field
+/// shows them, its taxids), outfmt 20's header line with the run's first report and outfmt 7's
+/// last line with the epilog. Kept out of line: only a field list reaches it.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-846
+/// ```c++
+///        		const CBioseq_Handle& subject_bh =
+///                 scope.GetBioseqHandle(align.GetSeq_id(1));
+///             if(setSubjectId) {
+///             	SetSubjectId(subject_bh);
+///             }
+///             m_SubjectLength = subject_bh.GetBioseqLength();
+///
+///             if(setSubjectIds || setSubjectTaxInfo || setSubjectTitle || setSubjectTaxInfoAll) {
+///             	CRef<CBlast_def_line_set> bdlRef =
+///             			CSeqDB::ExtractBlastDefline(subject_bh);
+/// ```
+/// `slen` is the length of the subject's Bioseq: the whole record with `-subject_loc`, as the
+/// outfmt 0 `Length=` line.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn write_custom_tabular(
+    spec: &crate::report::tabular::TabularSpec,
+    report: &BlastnReportInputs<'_>,
+    hit_lists: &[Option<BlastnHitList>],
+    query_ids: &[Arc<[u8]>],
+    query_titles: &[Arc<[u8]>],
+    query_lengths: &[usize],
+    subject_title: &str,
+    subject_ids: &[Arc<[u8]>],
+    unsearched: &[bool],
+    writer: &mut dyn std::io::Write,
+    warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
+    probe: Option<&mut FormatProbe<'_>>,
+) -> Result<()> {
+    use super::super::tabular::{write_blastn_tabular, BlastnTabular, TabularSubjects};
+    let needs = spec.needs();
+    let record_length = |s_idx: usize| {
+        report
+            .ranges
+            .subjects
+            .placements
+            .length(s_idx, report.subjects.len(s_idx))
+    };
+    let (lengths, taxonomy) = match (report.database_ordinals, report.database_reader) {
+        (Some(ordinals), Some(database)) => (
+            if spec.has(crate::report::tabular::TabularField::SubjectLength) {
+                database.sam_lengths(ordinals)?
+            } else {
+                Vec::new()
+            },
+            if needs.taxonomy {
+                database.tabular_taxonomy(ordinals, report.database_parsed, hit_lists)?
+            } else {
+                Vec::new()
+            },
+        ),
+        _ => (Vec::new(), Vec::new()),
+    };
+    let subjects = match report.database_ordinals {
+        Some(ordinals) if report.database_reader.is_some() => TabularSubjects::Database {
+            ids: subject_ids,
+            ordinals,
+            records: report.subjects.records(),
+            parsed: report.database_parsed,
+            lengths: &lengths,
+            taxonomy: &taxonomy,
+        },
+        _ => TabularSubjects::Records {
+            ids: subject_ids,
+            length: &record_length,
+        },
+    };
+    let tab = BlastnTabular {
+        spec,
+        queries: report.queries,
+        query_ids,
+        query_titles,
+        searched_lengths: query_lengths,
+        range_length: report.ranges.queries.range_length,
+        database: subject_title,
+        subjects,
+        letters: report.subjects,
+        unsearched,
+        prolog: report.queries_before == 0,
+        epilog: report
+            .epilog
+            .then_some(report.queries_before + hit_lists.len()),
+        taxdb_found: report.tabular_taxdb_found,
+    };
+    write_blastn_tabular(&tab, hit_lists, writer, warnings, probe)
 }
 
 /// `settings` are the NCBI application settings that LOSAT reproduces
@@ -7137,6 +7256,27 @@ fn search_cli(
         Some(name) => Some(database::BlastnDatabase::open(name, &settings)?),
         None => None,
     };
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
+    // ```c++
+    // void CBlastTabularInfo::x_CheckTaxDB()
+    // {
+    //    	if( x_IsFieldRequested(eSubjectSciNames) ||
+    //     ...
+    //    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
+    // ```
+    // A tabular field list that shows a name of the taxonomy database asks whether `taxdb.bti`
+    // is on the search path: its formatters warn without it (the plural names), and LOSAT
+    // refuses a name of a subject with a taxid with it (`algorithm::blastn::tabular`).
+    if output_formats
+        .iter()
+        .filter_map(|format| format.tabular_spec())
+        .any(|spec| spec.needs().taxonomy_names)
+    {
+        args.tabular_taxdb = Some(match database.as_ref() {
+            Some(database) => database.taxdb_found(),
+            None => super::super::tabular::subject_taxdb_found(&settings)?,
+        });
+    }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
     if let Some(database) = database.as_ref() {
@@ -7422,7 +7562,7 @@ fn cli_output_formats(
 ) -> Result<Vec<BlastnOutputFormat>> {
     let choice = app::parse_formatting_string(outfmt)?;
     app::report_format(&choice, Program::Blastn, out)?
-        .map(|format| BlastnOutputFormat::of(format, &choice.spec))
+        .map(|format| BlastnOutputFormat::of(format, &choice))
         .into_iter()
         .collect()
 }
@@ -7438,7 +7578,7 @@ fn parse_output_formats<'a>(
         .map(|outfmt| {
             let choice = app::parse_formatting_string(outfmt)?;
             match app::report_format(&choice, Program::Blastn, None)? {
-                Some(format) => BlastnOutputFormat::of(format, &choice.spec),
+                Some(format) => BlastnOutputFormat::of(format, &choice),
                 None => {
                     app::formatting_handler_check(&choice, Program::Blastn)?;
                     app::xinclude_check(&choice)?;
@@ -8072,6 +8212,9 @@ struct ShownSubjects {
     num_seqs: usize,
     total_letters: usize,
     database: Option<PairwiseDatabase>,
+    /// Whether `taxdb.bti` is on NCBI's search path, for the custom tabular reports
+    /// (`BlastnArgs::tabular_taxdb`; not found where it was not asked).
+    tabular_taxdb_found: bool,
 }
 
 impl ShownSubjects {
@@ -8086,12 +8229,14 @@ impl ShownSubjects {
                 num_seqs: metadata.db_num_seqs,
                 total_letters: metadata.db_len_total,
                 database: None,
+                tabular_taxdb_found: args.tabular_taxdb.unwrap_or(false),
             },
             SubjectSource::Database(database) => ShownSubjects {
                 name: database.name().to_string(),
                 num_seqs: metadata.db_num_seqs,
                 total_letters: metadata.db_len_total,
                 database: Some(database.pairwise_database()),
+                tabular_taxdb_found: args.tabular_taxdb.unwrap_or(false),
             },
         }
     }
@@ -9212,10 +9357,18 @@ fn prolog_before_search(sink: &OutputSink<'_>) -> bool {
 /// LOSAT's refusals of what NCBI could write (a title outside US-ASCII, DECISIONS 20) come
 /// after the search and before the first byte, so the start is written with the first report, or
 /// by the path of an NCBI error that stops the run before one.
+///
+/// Outfmt 20's line of the field names comes with the first report too (or from
+/// `write_pairwise_prologs` for a run that stops before one), after LOSAT's refusals of the
+/// custom tabular report; the taxonomy database's warning of its formatter, which a run that
+/// can refuse never writes, comes before the search (`tabular::write_tabular_prolog_warning`).
 fn prolog_with_report(format: &FormatOutput<'_>, output_format: BlastnOutputFormat) -> bool {
     match output_format {
         BlastnOutputFormat::Pairwise => !prolog_before_search(&format.sink),
         BlastnOutputFormat::Xml2(_) => true,
+        BlastnOutputFormat::CustomTabular(spec) => {
+            spec.kind == crate::report::tabular::TabularKind::CsvWithHeader
+        }
         _ => false,
     }
 }
@@ -9231,9 +9384,29 @@ fn write_pairwise_prologs(
     before_search: bool,
 ) -> Result<()> {
     for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357
+        // ```c++
+        //     if (m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
+        //         const CBlastTabularInfo::EFieldDelimiter kDelim = CBlastTabularInfo::eComma;
+        //         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
+        //     ...
+        //         tabinfo.PrintFieldSpecs();
+        // ```
+        // Outfmt 20: the warning of its formatter before the search, the line of the field
+        // names with the first report or here before an NCBI error (`prolog_with_report`).
+        if let (Some(spec), true) = (output_format.tabular_spec(), before_search) {
+            super::super::tabular::write_tabular_prolog_warning(
+                spec,
+                shown.tabular_taxdb_found,
+                &mut *outputs.diagnostics,
+            )?;
+        }
         let writes_prolog = match output_format {
             BlastnOutputFormat::Pairwise => prolog_before_search(&format.sink) == before_search,
             BlastnOutputFormat::Xml2(_) => !before_search,
+            BlastnOutputFormat::CustomTabular(_) => {
+                !before_search && prolog_with_report(format, output_format)
+            }
             _ => false,
         };
         if writes_prolog {
@@ -9243,7 +9416,8 @@ fn write_pairwise_prologs(
     Ok(())
 }
 
-/// Writes and flushes the prolog of one sink, for the formats that have one (outfmt 0, 15, 16).
+/// Writes and flushes the prolog of one sink, for the formats that have one (outfmt 0, 15, 16,
+/// 20).
 fn write_format_prolog(
     format: &mut FormatOutput<'_>,
     output_format: BlastnOutputFormat,
@@ -9266,6 +9440,13 @@ fn write_format_prolog(
         let mut writer = format.sink.open()?;
         writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
         writer.flush()?;
+    } else if let Some(spec) = output_format.tabular_spec() {
+        // Outfmt 20's line of the field names (nothing for the other tabular kinds).
+        if spec.kind == crate::report::tabular::TabularKind::CsvWithHeader {
+            let mut writer = format.sink.open()?;
+            super::super::tabular::write_tabular_prolog(spec, &mut writer)?;
+            writer.flush()?;
+        }
     }
     Ok(())
 }
@@ -9472,7 +9653,11 @@ fn write_reports_untimed(
                 || output_formats.contains(&BlastnOutputFormat::Pairwise)
                 || output_formats
                     .iter()
-                    .any(|format| format.is_structured_xml());
+                    .any(|format| format.is_structured_xml())
+                || output_formats
+                    .iter()
+                    .filter_map(|format| format.tabular_spec())
+                    .any(|spec| spec.needs().rows);
             let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
             let shown = crate::algorithm::common::database::ParsedShown {
                 tabular: output_formats.iter().any(|format| format.is_tabular()),
@@ -9604,6 +9789,7 @@ fn write_reports_untimed(
         batch_spans: results.batches,
         both_strands: args.strand == "both",
         minus_strand: QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
+        tabular_taxdb_found: subjects.shown.tabular_taxdb_found,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:482-496
     // ```c++
@@ -19387,7 +19573,7 @@ mod tests {
                 "{outfmt}"
             );
         }
-        for outfmt in ["10"] {
+        for outfmt in ["1", "18"] {
             assert_eq!(
                 cli_output_formats(outfmt, file).unwrap_err().to_string(),
                 format!("output format {outfmt} is not supported by LOSAT's BLASTN")
@@ -19411,10 +19597,32 @@ mod tests {
             cli_output_formats("0 qaccver", None).unwrap(),
             [BlastnOutputFormat::Pairwise]
         );
+        // A field list, a delimiter, and outfmt 10 and 20 are the custom tabular report (line CLI
+        // C2); the default 6 and 7 (`std` with a tab) keep their own writers.
+        let custom = |outfmt: &str| match cli_output_formats(outfmt, None).unwrap().as_slice() {
+            [BlastnOutputFormat::CustomTabular(spec)] => (*spec).clone(),
+            other => panic!("{outfmt}: {other:?}"),
+        };
         assert_eq!(
-            cli_output_formats("7 qaccver", None).unwrap_err().to_string(),
-            "a custom output format specification (fields or a delimiter) is not supported by LOSAT's BLASTN"
+            custom("7 qaccver").fields,
+            [crate::report::tabular::TabularField::QueryAccessionVersion]
         );
+        assert_eq!(custom("6 delim=, std").delimiter, ",");
+        assert_eq!(
+            custom("20").kind,
+            crate::report::tabular::TabularKind::CsvWithHeader
+        );
+        assert_eq!(
+            cli_output_formats("6 std", None).unwrap(),
+            [BlastnOutputFormat::Tabular]
+        );
+        // A tab given as `delim=` keeps the default writer; NCBI takes `delim=\t` as written, a
+        // backslash and a `t`.
+        assert_eq!(
+            cli_output_formats("7 delim=\t std", None).unwrap(),
+            [BlastnOutputFormat::TabularWithComments]
+        );
+        assert_eq!(custom(r"7 delim=\t").delimiter, r"\t");
         assert_eq!(
             native(cli_output_formats("22", None).unwrap_err()),
             (

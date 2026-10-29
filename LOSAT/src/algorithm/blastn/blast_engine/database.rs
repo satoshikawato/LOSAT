@@ -184,19 +184,24 @@ impl BlastnDatabase {
     //       	/* Get the unpacked sequence */
     //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
     // ```
-    /// The letters of database sequence `ordinal` in BLASTNA, without the sentinel bytes: the
-    /// subject that an ungapped (`-ungapped`) search re-evaluates its HSPs on in the
-    /// preliminary stage (NCBI gets the sequence again, unpacked). A read error is the
-    /// preliminary search's.
-    pub(super) fn blastna_of(&self, ordinal: u32) -> Result<Vec<u8>> {
+    /// Calls `use_letters` with the letters of database sequence `ordinal` in BLASTNA, without
+    /// the sentinel bytes: the subject that an ungapped (`-ungapped`) search re-evaluates its
+    /// HSPs on in the preliminary stage (NCBI gets the sequence again, unpacked, for a sequence
+    /// whose HSP list is not empty). The letters stay in the kernel's buffer with its sentinel
+    /// bytes (no copy). A read error is the preliminary search's.
+    pub(super) fn with_blastna<T>(
+        &self,
+        ordinal: u32,
+        use_letters: impl FnOnce(&[u8]) -> T,
+    ) -> Result<T> {
         let block = x_read_sequence(&self.db, ordinal).map_err(search_read_error)?;
         let length = block.nucleotide_len(0).map_err(search_read_error)?;
         let blastna = x_blastna(&block).map_err(search_read_error)?;
-        // The kernel's BLASTNA has no sentinel bytes.
-        let letters = blastna[1..=length].to_vec();
+        // The kernel's BLASTNA has a sentinel byte at each end.
+        let result = use_letters(&blastna[1..=length]);
         x_done_bytes(blastna);
         x_done_block(block);
-        Ok(letters)
+        Ok(result)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:185

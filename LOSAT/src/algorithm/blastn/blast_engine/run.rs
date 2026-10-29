@@ -8041,8 +8041,9 @@ enum Subjects<'a> {
 /// preliminary e-value and by query coverage): the HSPs are re-evaluated with the ambiguity
 /// codes of the subject (`s_blastna`, whole, without sentinel bytes), the ones below the
 /// word cutoff of their context or the `-perc_identity` are deleted, the list is sorted by
-/// score again, and the ones above the e-value (`evalue_of`) or below the query coverage
-/// are deleted.
+/// score again, and the ones above the e-value (`evalue_of`) are deleted. The reap by the
+/// query coverage (`-qcov_hsp_perc`) follows it, where the subject's HSPs are given to the
+/// collector (`ungapped_reap_query_coverage`).
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2609-2737
 /// ```c
@@ -8071,10 +8072,8 @@ fn ungapped_subject_stage(
     score_matrix: &[i32; 256],
     word_cutoffs: &[i32],
     percent_identity: f64,
-    context_length: impl Fn(usize) -> usize,
     evalue_of: impl Fn(&PrelimHit) -> f64,
     evalue_threshold: f64,
-    query_cov_hsp_perc: f64,
 ) {
     hits.retain_mut(|hit| {
         let context_idx = hit.context_idx as usize;
@@ -8112,6 +8111,22 @@ fn ungapped_subject_stage(
         hit.prelim_evalue = evalue_of(hit);
         hsp_survives_evalue_reap(hit.prelim_evalue, evalue_threshold)
     });
+}
+
+/// The last step of the preliminary stage's finish of a subject's HSP list in an ungapped
+/// (`-ungapped`) search: the HSPs below `-qcov_hsp_perc` percent of their query are deleted
+/// (`Blast_HSPListReapByQueryCoverage`). It does not depend on the subject, so the collector's
+/// caller makes it, where the subject's HSPs are given over.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1482-1541
+/// ```c
+///             Blast_HSPListReapByQueryCoverage(hsp_list,hit_params->options, query_info, program_number);
+/// ```
+fn ungapped_reap_query_coverage(
+    hits: &mut Vec<PrelimHit>,
+    query_cov_hsp_perc: f64,
+    context_length: impl Fn(usize) -> usize,
+) {
     reap_by_query_coverage(hits, query_cov_hsp_perc, |hit| {
         (
             hit.prelim_qs as i64,
@@ -8119,28 +8134,6 @@ fn ungapped_subject_stage(
             context_length(hit.context_idx as usize) as i64,
         )
     });
-}
-
-/// A database sequence of the preliminary stage with its BLASTNA letters, which an ungapped
-/// (`-ungapped`) search re-evaluates its HSPs on (`ungapped_subject_stage`); `unpacked` holds them.
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2645-2668
-/// ```c
-///       	seq_arg.encoding = eBlastEncodingNucleotide;
-///       	BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
-///       	BlastSeqSrcGetSequence(seq_src, &seq_arg)
-/// ```
-fn unpacked_database_subject<'b>(
-    database: &database::BlastnDatabase,
-    ordinal: u32,
-    subject: BlastnSubjectRef<'b>,
-    unpacked: &'b mut Vec<u8>,
-) -> Result<BlastnSubjectRef<'b>> {
-    *unpacked = database.blastna_of(ordinal)?;
-    Ok(BlastnSubjectRef {
-        blastna: Some(unpacked.as_slice()),
-        ..subject
-    })
 }
 
 /// LOSAT's refusal of a word cutoff whose arithmetic NCBI does in a way that overflows (memory
@@ -15993,51 +15986,51 @@ fn search_query_batch<const UNGAPPED: bool>(
                 //       	BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
                 //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
                 // ```
-                // The subject again, unpacked (BLASTNA, without sentinel bytes).
+                // The subject again, unpacked (BLASTNA, without sentinel bytes). A database
+                // sequence has none here: the preliminary search's caller reads it again, for
+                // the sequences that keep an HSP, and finishes the list itself
+                // (`x_ungapped_database_stage`, lazily as NCBI does).
                 let mut x_subject_vec: Vec<u8>;
-                let s_blastna: &[u8] = match (subject.blastna, subject.store, subject.letters) {
-                    (Some(blastna), _, _) => blastna,
-                    (None, Some(store), _) => {
-                        x_subject_vec = Vec::new();
-                        x_blastna_into(store, &mut x_subject_vec);
-                        x_subject_vec.as_slice()
-                    }
-                    (None, None, Some(letters)) => {
-                        x_subject_vec = encode_iupac_to_blastna(letters);
-                        x_subject_vec.as_slice()
-                    }
-                    // A database sequence comes with its BLASTNA letters (`BlastnDatabase::blastna_of`,
-                    // read by the preliminary stage's caller).
-                    (None, None, None) => {
-                        unreachable!(
-                            "a subject reaches the ungapped re-evaluation with its letters"
-                        )
-                    }
-                };
-                ungapped_subject_stage(
-                    &mut combined_prelim_hits,
-                    s_blastna,
-                    encoded_queries_blastna.as_slice(),
-                    &score_matrix,
-                    cutoff_scores,
-                    args.percent_identity_value(),
-                    |context_idx| query_contexts[context_idx].len,
-                    |prelim| {
-                        let eff_searchsp = query_eff_searchsp
-                            .get(prelim.context_idx as usize)
-                            .copied()
-                            .unwrap_or(0);
-                        calculate_blastn_context_statistics(
-                            prelim.prelim_score,
-                            &search_karlin_ref[prelim.context_idx as usize].gapped,
-                            eff_searchsp,
-                            round_down_evalue_score,
-                        )
-                        .1
-                    },
-                    evalue_threshold,
-                    args.qcov_hsp_perc.unwrap_or(0.0),
-                );
+                let s_blastna: Option<&[u8]> =
+                    match (subject.blastna, subject.store, subject.letters) {
+                        (Some(blastna), _, _) => Some(blastna),
+                        (None, Some(store), _) => {
+                            x_subject_vec = Vec::new();
+                            x_blastna_into(store, &mut x_subject_vec);
+                            Some(x_subject_vec.as_slice())
+                        }
+                        (None, None, Some(letters)) => {
+                            x_subject_vec = encode_iupac_to_blastna(letters);
+                            Some(x_subject_vec.as_slice())
+                        }
+                        (None, None, None) => None,
+                    };
+                if let Some(s_blastna) = s_blastna {
+                    // (`percent_identity` and the cutoffs are the values the traceback below
+                    // reads already; the query coverage is reaped by the collector's caller.)
+                    ungapped_subject_stage(
+                        &mut combined_prelim_hits,
+                        s_blastna,
+                        encoded_queries_blastna.as_slice(),
+                        &score_matrix,
+                        cutoff_scores,
+                        percent_identity,
+                        |prelim| {
+                            let eff_searchsp = query_eff_searchsp
+                                .get(prelim.context_idx as usize)
+                                .copied()
+                                .unwrap_or(0);
+                            calculate_blastn_context_statistics(
+                                prelim.prelim_score,
+                                &search_karlin_ref[prelim.context_idx as usize].gapped,
+                                eff_searchsp,
+                                round_down_evalue_score,
+                            )
+                            .1
+                        },
+                        evalue_threshold,
+                    );
+                }
             }
         }
 
@@ -18295,6 +18288,91 @@ fn search_query_batch<const UNGAPPED: bool>(
             SubjectScratch::new(queries_ref.len(), offset_array_size, window_size),
         )
     };
+    // An ungapped (`-ungapped`) search only (the other instance never calls them): the steps of
+    // NCBI's preliminary stage that finish a subject's HSP list and that `process_subject` leaves
+    // to its caller. The reap by the query coverage is made as the HSPs are given to the
+    // collector (it takes nothing of the subject). A database sequence is read again, unpacked
+    // (BLASTNA), when its HSP list is not empty only, and re-evaluated there.
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1482
+    // ```c
+    //           if (hsp_list && hsp_list->hspcnt > 0) {
+    //              ...  Blast_HSPListReevaluateUngapped(hsp_list, query, subject, ...
+    // ```
+    let x_ungapped_query_coverage = |hits: &mut Vec<PrelimHit>| {
+        ungapped_reap_query_coverage(hits, args.qcov_hsp_perc.unwrap_or(0.0), |context_idx| {
+            query_contexts_ref[context_idx].len
+        });
+    };
+    let x_ungapped_database_stage =
+        |database: &database::BlastnDatabase, ordinal: u32, hits: &mut Vec<PrelimHit>| {
+            if hits.is_empty() {
+                return Ok(());
+            }
+            database.with_blastna(ordinal, |s_blastna| {
+                ungapped_subject_stage(
+                    hits,
+                    s_blastna,
+                    encoded_queries_blastna.as_slice(),
+                    &score_matrix,
+                    &x_batch_cutoffs.0,
+                    percent_identity,
+                    |prelim| {
+                        let eff_searchsp = query_eff_searchsp_ref
+                            .get(prelim.context_idx as usize)
+                            .copied()
+                            .unwrap_or(0);
+                        calculate_blastn_context_statistics(
+                            prelim.prelim_score,
+                            &search_karlin_ref[prelim.context_idx as usize].gapped,
+                            eff_searchsp,
+                            round_down_evalue_score,
+                        )
+                        .1
+                    },
+                    evalue_threshold,
+                );
+                x_ungapped_query_coverage(hits);
+            })
+        };
+    // The callback of the database's preliminary pass in an ungapped search: the search of the
+    // sequence as for a default search, then the finish of its HSP list when it has HSPs left
+    // (`x_ungapped_database_stage`). A read error goes to the cell `$error` (the one of the
+    // smallest ordinal stays) and the sequence has no HSPs. The default search has its own
+    // callback (a different closure, so that the default instance of this function holds no
+    // capture of this one).
+    macro_rules! ungapped_database_callback {
+        ($database:expr, $error:expr) => {
+            |state: &mut (GapAlignScratch, SubjectScratch),
+             ordinal: u32,
+             subject: BlastnSubjectRef<'_>| {
+                let (gap_scratch, subject_scratch) = state;
+                let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                let mut prelim_hits: Vec<PrelimHit> = Vec::new();
+                process_subject(
+                    ordinal as usize,
+                    subject,
+                    gap_scratch,
+                    subject_scratch,
+                    Some(&lookup_tables),
+                    None,
+                    &mut subject_hits,
+                    &mut prelim_hits,
+                );
+                if let Err(error) = x_ungapped_database_stage($database, ordinal, &mut prelim_hits)
+                {
+                    let mut first = $error.lock().expect("the error cell is not poisoned");
+                    if first
+                        .as_ref()
+                        .is_none_or(|(smallest, _)| ordinal < *smallest)
+                    {
+                        *first = Some((ordinal, error));
+                    }
+                    return None;
+                }
+                (!prelim_hits.is_empty()).then_some(prelim_hits)
+            }
+        };
+    }
     let prelim_lists = match split_prelim_lists {
         Some(lists) => lists,
         None => match subjects {
@@ -18317,9 +18395,16 @@ fn search_query_batch<const UNGAPPED: bool>(
                     prelim_hitlist_size,
                     args.culling_limit_value(),
                 );
-                search_subjects(None, Some(&lookup_tables), &mut |oid, _, prelim| {
-                    writer.add(oid, prelim)
-                });
+                if UNGAPPED {
+                    search_subjects(None, Some(&lookup_tables), &mut |oid, _, mut prelim| {
+                        x_ungapped_query_coverage(&mut prelim);
+                        writer.add(oid, prelim)
+                    });
+                } else {
+                    search_subjects(None, Some(&lookup_tables), &mut |oid, _, prelim| {
+                        writer.add(oid, prelim)
+                    });
+                }
                 writer.finish()
             }
             SubjectSource::Database(database) if args.culling_limit_value() > 0 => {
@@ -18330,57 +18415,61 @@ fn search_query_batch<const UNGAPPED: bool>(
                     prelim_hitlist_size,
                     args.culling_limit_value(),
                 );
-                // The first error of reading a database sequence again for the ungapped
-                // re-evaluation (`BlastnDatabase::blastna_of`); an ungapped search only.
-                let x_ungapped_error: std::sync::Mutex<Option<anyhow::Error>> =
-                    std::sync::Mutex::new(None);
+                let mut add = |ordinal: u32, prelim_hits: Vec<PrelimHit>| {
+                    writer.add(ordinal as usize, prelim_hits)
+                };
                 if any_valid_context {
-                    database::search_blocks(
-                        database,
-                        parallel_pool,
-                        use_parallel,
-                        &new_scratch,
-                        &|state: &mut (GapAlignScratch, SubjectScratch),
-                          ordinal: u32,
-                          subject: BlastnSubjectRef<'_>| {
-                            let (gap_scratch, subject_scratch) = state;
-                            let mut subject_hits: Option<Vec<BlastnHsp>> = None;
-                            let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                            let mut x_unpacked: Vec<u8> = Vec::new();
-                            let subject = if UNGAPPED {
-                                match unpacked_database_subject(
-                                    database,
-                                    ordinal,
+                    let searched = if UNGAPPED {
+                        // The first error of reading a database sequence again for the
+                        // ungapped re-evaluation (`BlastnDatabase::with_blastna`).
+                        let x_ungapped_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> =
+                            std::sync::Mutex::new(None);
+                        database::search_blocks(
+                            database,
+                            parallel_pool,
+                            use_parallel,
+                            &new_scratch,
+                            &ungapped_database_callback!(database, x_ungapped_error),
+                            &mut add,
+                        )
+                        .and_then(|()| {
+                            match x_ungapped_error
+                                .lock()
+                                .expect("the error cell is not poisoned")
+                                .take()
+                            {
+                                Some((_, error)) => Err(error),
+                                None => Ok(()),
+                            }
+                        })
+                    } else {
+                        database::search_blocks(
+                            database,
+                            parallel_pool,
+                            use_parallel,
+                            &new_scratch,
+                            &|state: &mut (GapAlignScratch, SubjectScratch),
+                              ordinal: u32,
+                              subject: BlastnSubjectRef<'_>| {
+                                let (gap_scratch, subject_scratch) = state;
+                                let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                                let mut prelim_hits: Vec<PrelimHit> = Vec::new();
+                                process_subject(
+                                    ordinal as usize,
                                     subject,
-                                    &mut x_unpacked,
-                                ) {
-                                    Ok(subject) => subject,
-                                    Err(error) => {
-                                        x_ungapped_error
-                                            .lock()
-                                            .expect("the error cell is not poisoned")
-                                            .get_or_insert(error);
-                                        return None;
-                                    }
-                                }
-                            } else {
-                                subject
-                            };
-                            process_subject(
-                                ordinal as usize,
-                                subject,
-                                gap_scratch,
-                                subject_scratch,
-                                Some(&lookup_tables),
-                                None,
-                                &mut subject_hits,
-                                &mut prelim_hits,
-                            );
-                            (!prelim_hits.is_empty()).then_some(prelim_hits)
-                        },
-                        &mut |ordinal, prelim_hits| writer.add(ordinal as usize, prelim_hits),
-                    )
-                    .map_err(|error| {
+                                    gap_scratch,
+                                    subject_scratch,
+                                    Some(&lookup_tables),
+                                    None,
+                                    &mut subject_hits,
+                                    &mut prelim_hits,
+                                );
+                                (!prelim_hits.is_empty()).then_some(prelim_hits)
+                            },
+                            &mut add,
+                        )
+                    };
+                    searched.map_err(|error| {
                         database_search_error(
                             error,
                             first_batch,
@@ -18389,39 +18478,27 @@ fn search_query_batch<const UNGAPPED: bool>(
                             &shown,
                         )
                     })?;
-                    if UNGAPPED {
-                        let error = x_ungapped_error
-                            .lock()
-                            .expect("the error cell is not poisoned")
-                            .take();
-                        if let Some(error) = error {
-                            return Err(database_search_error(
-                                error,
-                                first_batch,
-                                reborrow_outputs(&mut outputs),
-                                megablast,
-                                &shown,
-                            ));
-                        }
-                    }
                 }
                 writer.finish()
             }
             SubjectSource::Prepared(_) => {
                 let mut collector = PrelimHitCollector::new(queries_ref.len(), prelim_hitlist_size);
-                search_subjects(None, Some(&lookup_tables), &mut |oid, _, prelim| {
-                    collector.add(oid, prelim)
-                });
+                if UNGAPPED {
+                    search_subjects(None, Some(&lookup_tables), &mut |oid, _, mut prelim| {
+                        x_ungapped_query_coverage(&mut prelim);
+                        collector.add(oid, prelim)
+                    });
+                } else {
+                    search_subjects(None, Some(&lookup_tables), &mut |oid, _, prelim| {
+                        collector.add(oid, prelim)
+                    });
+                }
                 collector.hit_lists
             }
             SubjectSource::Database(database) => {
                 // The subjects come one at a time in the order of their ordinal ids
                 // (`database::search_blocks`), as the subject set's come in OID order.
                 let mut collector = PrelimHitCollector::new(queries_ref.len(), prelim_hitlist_size);
-                // The first error of reading a database sequence again for the ungapped
-                // re-evaluation (`BlastnDatabase::blastna_of`); an ungapped search only.
-                let x_ungapped_error: std::sync::Mutex<Option<anyhow::Error>> =
-                    std::sync::Mutex::new(None);
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
                 // ```c
                 //     int status = m_PrelimSearch->CheckInternalData();
@@ -18430,53 +18507,61 @@ fn search_query_batch<const UNGAPPED: bool>(
                 //          // Search was not run, but we send back an empty CSearchResultSet.
                 // ```
                 // With no valid context NCBI does not search, and reads no sequence.
+                let mut add = |ordinal: u32, prelim_hits: Vec<PrelimHit>| {
+                    collector.add(ordinal as usize, prelim_hits)
+                };
                 if any_valid_context {
-                    database::search_blocks(
-                        database,
-                        parallel_pool,
-                        use_parallel,
-                        &new_scratch,
-                        &|state: &mut (GapAlignScratch, SubjectScratch),
-                          ordinal: u32,
-                          subject: BlastnSubjectRef<'_>| {
-                            let (gap_scratch, subject_scratch) = state;
-                            let mut subject_hits: Option<Vec<BlastnHsp>> = None;
-                            let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                            let mut x_unpacked: Vec<u8> = Vec::new();
-                            let subject = if UNGAPPED {
-                                match unpacked_database_subject(
-                                    database,
-                                    ordinal,
+                    let searched = if UNGAPPED {
+                        // The first error of reading a database sequence again for the
+                        // ungapped re-evaluation (`BlastnDatabase::with_blastna`).
+                        let x_ungapped_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> =
+                            std::sync::Mutex::new(None);
+                        database::search_blocks(
+                            database,
+                            parallel_pool,
+                            use_parallel,
+                            &new_scratch,
+                            &ungapped_database_callback!(database, x_ungapped_error),
+                            &mut add,
+                        )
+                        .and_then(|()| {
+                            match x_ungapped_error
+                                .lock()
+                                .expect("the error cell is not poisoned")
+                                .take()
+                            {
+                                Some((_, error)) => Err(error),
+                                None => Ok(()),
+                            }
+                        })
+                    } else {
+                        database::search_blocks(
+                            database,
+                            parallel_pool,
+                            use_parallel,
+                            &new_scratch,
+                            &|state: &mut (GapAlignScratch, SubjectScratch),
+                              ordinal: u32,
+                              subject: BlastnSubjectRef<'_>| {
+                                let (gap_scratch, subject_scratch) = state;
+                                let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                                let mut prelim_hits: Vec<PrelimHit> = Vec::new();
+                                process_subject(
+                                    ordinal as usize,
                                     subject,
-                                    &mut x_unpacked,
-                                ) {
-                                    Ok(subject) => subject,
-                                    Err(error) => {
-                                        x_ungapped_error
-                                            .lock()
-                                            .expect("the error cell is not poisoned")
-                                            .get_or_insert(error);
-                                        return None;
-                                    }
-                                }
-                            } else {
-                                subject
-                            };
-                            process_subject(
-                                ordinal as usize,
-                                subject,
-                                gap_scratch,
-                                subject_scratch,
-                                Some(&lookup_tables),
-                                None,
-                                &mut subject_hits,
-                                &mut prelim_hits,
-                            );
-                            (!prelim_hits.is_empty()).then_some(prelim_hits)
-                        },
-                        &mut |ordinal, prelim_hits| collector.add(ordinal as usize, prelim_hits),
-                    )
-                    .map_err(|error| {
+                                    gap_scratch,
+                                    subject_scratch,
+                                    Some(&lookup_tables),
+                                    None,
+                                    &mut subject_hits,
+                                    &mut prelim_hits,
+                                );
+                                (!prelim_hits.is_empty()).then_some(prelim_hits)
+                            },
+                            &mut add,
+                        )
+                    };
+                    searched.map_err(|error| {
                         database_search_error(
                             error,
                             first_batch,
@@ -18485,21 +18570,6 @@ fn search_query_batch<const UNGAPPED: bool>(
                             &shown,
                         )
                     })?;
-                    if UNGAPPED {
-                        let error = x_ungapped_error
-                            .lock()
-                            .expect("the error cell is not poisoned")
-                            .take();
-                        if let Some(error) = error {
-                            return Err(database_search_error(
-                                error,
-                                first_batch,
-                                reborrow_outputs(&mut outputs),
-                                megablast,
-                                &shown,
-                            ));
-                        }
-                    }
                 }
                 collector.hit_lists
             }

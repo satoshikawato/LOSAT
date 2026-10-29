@@ -633,7 +633,8 @@ def generate_culling_inputs() -> None:
 
 def generate_qctx_inputs() -> None:
     """Inputs added for M-32 (the qctx.* cases): ends of the pieces of LC738874 that
-    LOSAT/tests/blastn_qbatchpar.rs searches (piece k starts at 8000 k, 1500 + 373 k % 2400 long)."""
+    LOSAT/tests/blastn_qbatchpar.rs searched (removed on 2026-10-28 with the QBATCHPAR slots;
+    piece k starts at 8000 k, 1500 + 373 k % 2400 long)."""
     lc738874 = genome("LC738874.fasta")
     for name, start, end in (("qctx_assert", 82_530, 82_830), ("qctx_rerun", 82_770, 82_830),
                              ("qctx_piece8", 64_000, 66_084), ("qctx_pairpar", 72_530, 82_830)):

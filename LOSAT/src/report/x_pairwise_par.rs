@@ -45,8 +45,7 @@
 //! Off (the serial writer, `write_serial`): the switch off (`LOSAT_X_PAIRWISEPAR=0`);
 //! no pool or one of one thread (`-num_threads 1`,
 //! builds without the `parallel` feature, Wasm without threads); a format observer (the text
-//! only); the callers' own conditions (BLASTN: while threads of LOSAT_X_QBATCHPAR slots exist,
-//! from their start to the end of the speculation, whose pools would share the CPUs).
+//! only); a caller that gives no pool.
 //!
 //! Memory: formatted text of at most `WINDOW_BYTES_PER_THREAD` x threads estimated bytes (16 MiB
 //! at 16 threads) plus one piece (`PIECE_BYTES` plus one HSP) at a time, also for one large

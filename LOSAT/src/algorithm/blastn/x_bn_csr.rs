@@ -461,6 +461,7 @@ pub(super) fn x_serial_packed(
     let mut ring = [0usize; AHEAD];
     let mut seen = 0usize;
     each_word(words, |cell, _| {
+        debug_assert!(cell < cells);
         prefetch(cb.wrapping_add(cell));
         let slot = seen % AHEAD;
         if seen >= AHEAD {

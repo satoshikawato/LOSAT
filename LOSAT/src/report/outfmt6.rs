@@ -229,8 +229,67 @@ fn format_scientific_ncbi(value: f64, precision: usize) -> String {
 /// }
 /// ```
 fn write_scientific_ncbi<W: Write>(writer: &mut W, value: f64, precision: usize) -> io::Result<()> {
-    let formatted = format_scientific_ncbi(value, precision);
-    writer.write_all(formatted.as_bytes())
+    // The bytes of `format_scientific_ncbi`, formatted in a buffer on the stack: the tabular
+    // reports call this once per hit, often on many threads at once, and a String per hit takes
+    // turns at the allocator (a WASI build's has one lock). No NCBI counterpart (allocation
+    // only).
+    let mut buf = StackText::new();
+    if std::fmt::Write::write_fmt(&mut buf, format_args!("{:.*e}", precision, value)).is_err() {
+        let formatted = format_scientific_ncbi(value, precision);
+        return writer.write_all(formatted.as_bytes());
+    }
+    let raw = buf.bytes();
+    // As `format_scientific_ncbi`: the exponent's `E` as `e`, a `+` before an unsigned exponent
+    // and at least two exponent digits.
+    let Some(exp_pos) = raw.iter().position(|&b| b == b'e' || b == b'E') else {
+        return writer.write_all(raw);
+    };
+    writer.write_all(&raw[..exp_pos])?;
+    writer.write_all(b"e")?;
+    let exp_start = exp_pos + 1;
+    if exp_start >= raw.len() {
+        return Ok(());
+    }
+    let (sign, digits) = match raw[exp_start] {
+        b'+' | b'-' => (&raw[exp_start..=exp_start], &raw[exp_start + 1..]),
+        _ => (&b"+"[..], &raw[exp_start..]),
+    };
+    writer.write_all(sign)?;
+    if digits.len() < 2 {
+        writer.write_all(b"0")?;
+    }
+    writer.write_all(digits)
+}
+
+/// No NCBI counterpart (allocation only): the text of one formatted number, on the stack
+/// (`write_scientific_ncbi`); a write past its 64 bytes fails, and the caller formats a String
+/// instead.
+struct StackText {
+    buf: [u8; 64],
+    len: usize,
+}
+
+impl StackText {
+    fn new() -> Self {
+        Self {
+            buf: [0; 64],
+            len: 0,
+        }
+    }
+
+    fn bytes(&self) -> &[u8] {
+        &self.buf[..self.len]
+    }
+}
+
+impl std::fmt::Write for StackText {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        let end = self.len + s.len();
+        let dst = self.buf.get_mut(self.len..end).ok_or(std::fmt::Error)?;
+        dst.copy_from_slice(s.as_bytes());
+        self.len = end;
+        Ok(())
+    }
 }
 
 /// Format E-value exactly as NCBI BLAST does (base GetScoreString logic).
@@ -349,12 +408,20 @@ pub fn format_percent_identity_ncbi(
     alignment_length: usize,
     precision: usize,
 ) -> String {
-    let perc_ident = if alignment_length > 0 {
+    format!(
+        "{:.prec$}",
+        percent_identity_ncbi(num_ident, alignment_length),
+        prec = precision
+    )
+}
+
+/// The value `format_percent_identity_ncbi` formats.
+fn percent_identity_ncbi(num_ident: usize, alignment_length: usize) -> f64 {
+    if alignment_length > 0 {
         (num_ident as f64 / alignment_length as f64) * 100.0
     } else {
         0.0
-    };
-    format!("{:.prec$}", perc_ident, prec = precision)
+    }
 }
 
 /// Write E-value exactly as NCBI BLAST does (base GetScoreString logic).
@@ -598,12 +665,20 @@ pub fn write_hit_fields_bytes<W: Write>(
     //     (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
     // m_Ostream << NStr::DoubleToString(perc_ident, 3);
     // ```
-    let identity_fmt = if config.ncbi_evalue_format {
-        format_percent_identity_ncbi(num_ident, length, config.identity_decimals)
+    // The identity written as `format_percent_identity_ncbi` (or `{:.prec$}`) formats it, without
+    // a String per hit (see `write_scientific_ncbi`).
+    let identity = if config.ncbi_evalue_format {
+        percent_identity_ncbi(num_ident, length)
     } else {
-        format!("{:.prec$}", identity, prec = config.identity_decimals)
+        identity
     };
-    write!(writer, "{}{}", delim, identity_fmt)?;
+    write!(
+        writer,
+        "{}{:.prec$}",
+        delim,
+        identity,
+        prec = config.identity_decimals
+    )?;
     write!(writer, "{}{}", delim, length)?;
     write!(writer, "{}{}", delim, mismatch)?;
     write!(writer, "{}{}", delim, gapopen)?;
@@ -1367,6 +1442,37 @@ mod tests {
     // ==========================================================================
     // Legacy tests
     // ==========================================================================
+
+    #[test]
+    fn written_scientific_values_are_the_formatted_ones() {
+        let values = [
+            1.0e-5,
+            3.2e-100,
+            1.234e-300,
+            5.0e-324,
+            1.0e5,
+            123456.0,
+            9.99e-10,
+            0.000899,
+            f64::MAX,
+            f64::MIN_POSITIVE,
+            -1.0e-5,
+            0.0,
+            f64::NAN,
+            f64::INFINITY,
+        ];
+        for &v in &values {
+            for precision in [0, 1, 2, 3, 17, 60] {
+                let mut out = Vec::new();
+                write_scientific_ncbi(&mut out, v, precision).unwrap();
+                assert_eq!(
+                    String::from_utf8(out).unwrap(),
+                    format_scientific_ncbi(v, precision),
+                    "{v:e} at precision {precision}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn test_format_percent_identity_ncbi_divides_before_scaling() {

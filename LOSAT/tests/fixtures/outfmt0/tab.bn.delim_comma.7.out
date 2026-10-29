@@ -1,0 +1,30 @@
+# BLASTN 2.17.0+
+# Query: q_a 1500 of a
+# Database: User specified sequence set (Input: tests/db_search/nslice.fna)
+# Fields: query id, subject id, evalue
+# 3 hits found
+q_a,a_l6k,0.0
+q_a,a_mut_8pct,0.0
+q_a,b_p6k,0.0
+# BLASTN 2.17.0+
+# Query: q_c_amb 1400 across the ambiguity codes, 4 percent substitutions
+# Database: User specified sequence set (Input: tests/db_search/nslice.fna)
+# Fields: query id, subject id, evalue
+# 2 hits found
+q_c_amb,c_amb,0.0
+q_c_amb,c_amb,0.0
+# BLASTN 2.17.0+
+# Query: q_d_minus reverse complement of d, 12 percent substitutions
+# Database: User specified sequence set (Input: tests/db_search/nslice.fna)
+# Fields: query id, subject id, evalue
+# 1 hits found
+q_d_minus,d_mut_15pct,0.0
+# BLASTN 2.17.0+
+# Query: q_e_p diverged
+# Database: User specified sequence set (Input: tests/db_search/nslice.fna)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: q_nohit random
+# Database: User specified sequence set (Input: tests/db_search/nslice.fna)
+# 0 hits found
+# BLAST processed 5 queries

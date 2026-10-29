@@ -201,11 +201,10 @@
 //! which `run.rs` `search_query_batch` calls for a query batch (and for each query chunk of a
 //! split batch). That function runs inside the search's pool: `utils::threading::with_search_pool`
 //! builds a pool of `-num_threads` threads when there are two or more and runs the whole search
-//! with `ThreadPool::install` on the pool's slot zero (`-subject` and `-db` alike); a
-//! LOSAT_X_QBATCHPAR slot of `m >= 2` threads searches its batch the same way on a private pool
-//! of `m` threads (`with_search_pool` again). With `-num_threads 1`, in a QBATCHPAR slot of one
-//! thread, in a build without the `parallel` feature or WebAssembly without `wasm-threads`, the
-//! calling thread is no rayon worker (or there is no pool) and the original loop runs.
+//! with `ThreadPool::install` on the pool's slot zero (`-subject` and `-db` alike). With
+//! `-num_threads 1`, in a build without the `parallel` feature or WebAssembly without
+//! `wasm-threads`, the calling thread is no rayon worker (or there is no pool) and the original
+//! loop runs.
 //! `rayon::current_thread_index` reads a thread-local and starts no pool, and
 //! `rayon::current_num_threads` is only asked on a worker, where it is the size of that worker's
 //! pool, so rayon's global pool is never started or used (the command line never builds it; a
@@ -226,8 +225,7 @@
 //!
 //! With LOSAT_TIMING (any switch state) `main` prints `[TIMING] disc_lookup_build: <s>s
 //! (builds=<n> parallel=<n on a pool>)` when at least one table was built: `<s>` is the sum of
-//! the wall times of every build of the process (allocation, fill and longest chain); with
-//! LOSAT_X_QBATCHPAR it includes the slots' builds, which run concurrently. A second line,
+//! the wall times of every build of the process (allocation, fill and longest chain). A second line,
 //! `[TIMING] disc_lookup_split: alloc= loop= pool_fill= chain= chunks= read_wall= read_max=
 //! read_sum= read_late= update_... link_... buckets_peak= x_prefault_wall= x_prefault_max=
 //! x_prefault_sum= x_prefault_late= x_prefault_rounds= x_prefault_touches=`, splits the same

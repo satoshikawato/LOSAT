@@ -299,6 +299,32 @@ pub struct BlastxArgs {
     // ```
     #[arg(long, default_value_t = 1, value_parser = positive, help = "Number of threads (CPUs); serial WASI accepts only 1")]
     pub num_threads: i32,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3169-3181
+    // ```c++
+    //     if (m_MTMode >= 0) {
+    //     	arg_desc.AddDefaultKey(kArgMTMode, "int_value",
+    //                                "Multi-thread mode to use in BLAST search:\n "
+    //                                "0 auto split by database or queries \n "
+    //                                "1 split by queries\n "
+    //                                "2 split by database",
+    //                                CArgDescriptions::eInteger,
+    //                                NStr::IntToString(0));
+    //     	arg_desc.SetConstraint(kArgMTMode,
+    //                                new CArgAllowValuesBetween(0, 2, true));
+    //     	arg_desc.SetDependency(kArgMTMode,
+    //                                CArgDescriptions::eRequires,
+    //                                kArgNumThreads);
+    //     }
+    // ```
+    /// `-mt_mode` is read and has no effect: LOSAT's output is the same at every thread count
+    /// and for every value, and equals NCBI's `-num_threads 1` output (Owner 2026-10-13;
+    /// CLI DECISIONS 5). NCBI's `-mt_mode 1` (and `0` when it chooses to split by queries)
+    /// runs the queries in batches and writes the end of an outfmt 0 report or each XML
+    /// document per batch (`blastn_app.cpp:134-170`, `blastx_app.cpp` `x_RunMTBySplitQuery`);
+    /// that framing is not reproduced. The value must be 0 to 2 and `-num_threads` must be
+    /// given with it, as in NCBI (clap's `requires` ignores a default value).
+    #[arg(long, value_name = "int_value", value_parser = crate::blastinput::value_parsers::ncbi_mt_mode, requires = "num_threads", help = "Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output does not depend on it)")]
+    pub mt_mode: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
     // ```c++
     //     arg_desc.AddDefaultKey(kArgCompBasedStats, "compo", legend,

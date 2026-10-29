@@ -58,7 +58,7 @@ fn letters(path: &Path) -> String {
 /// The queries in `dir`: five records from LC738874 (2,000 letters each, the third without
 /// letters, the fourth 50 `N`s, which has no valid context), so `BATCH_SIZE=3000` makes two
 /// batches with the two invalid queries in the second; and a database of LC738868 made with
-/// `losat makedb`.
+/// `losat makeblastdb`.
 fn inputs(dir: &TestDir) -> (PathBuf, PathBuf) {
     let genome = letters(&fasta("LC738874.fasta"));
     let query = dir.0.join("queries.fna");
@@ -75,17 +75,17 @@ fn inputs(dir: &TestDir) -> (PathBuf, PathBuf) {
     .expect("write the queries");
     let db = dir.0.join("lc738868");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fasta("LC738868.fasta"))
         .args(["-dbtype", "nucl"])
         .arg("-out")
         .arg(&db)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run LOSAT makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     (query, db)
@@ -332,114 +332,6 @@ fn a_batch_of_query_chunks_drops_its_letters_after_them() {
         assert_eq!(off_messages, messages, "{what} {SWITCH_OFF:?}");
         assert_eq!(counts, None, "{what} {SWITCH_OFF:?}");
     }
-}
-
-// A query on standard input has no file size for LOSAT_X_QBATCHPAR's default budget, but
-// `LOSAT_X_QBATCHPARSLOTS` sets the slots anyway: the slots may then search the batches of a
-// `-subject` search at four threads. With `LOSAT_X_BNQSLOTS` (default) the records still go into
-// the store: the slots copy the batches ahead of the loop out of it and get the batch the loop
-// lends them, the loop's first batch (no slot searches it) drops its letters (the line), and the
-// slots searched batches (`precomputed=` of the `[X_STATS] QBATCHPAR` line); with
-// `LOSAT_X_BNQSLOTS=0` the records stay where the slots read them (no line). Every arm ends with
-// the report of `LOSAT_X_BNQDROP=0`. (A slot that never got the records of a batch the loop had
-// taken out of the store was queued again for ever: the run has a deadline.)
-#[test]
-fn standard_input_with_slots_lends_the_batches() {
-    use std::io::{Read, Write};
-    use std::process::Stdio;
-    let genome = letters(&fasta("LC738874.fasta"));
-    let queries: String = (0..4)
-        .map(|index| {
-            format!(
-                ">s{index}\n{}\n",
-                &genome[2_000 * index..2_000 * (index + 1)]
-            )
-        })
-        .collect();
-    let subject = fasta("LC738868.fasta");
-    let run = |switches: &[(&str, &str)]| {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
-        for (name, _) in std::env::vars_os() {
-            if (name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
-                || name == "BATCH_SIZE"
-            {
-                command.env_remove(name);
-            }
-        }
-        let mut child = command
-            .args(["blastn", "-task", "blastn", "-query", "-", "-subject"])
-            .arg(&subject)
-            .args(["-outfmt", "6", "-num_threads", "4"])
-            .envs([
-                ("BATCH_SIZE", "2000"),
-                ("LOSAT_X_QBATCHPAR", "1"),
-                ("LOSAT_X_QBATCHPARSLOTS", "2"),
-                ("LOSAT_X_STATS", "1"),
-                TIMING,
-            ])
-            .envs(switches.iter().copied())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("run LOSAT");
-        let mut stdin = child.stdin.take().expect("standard input");
-        let text = queries.clone();
-        let writer = std::thread::spawn(move || stdin.write_all(text.as_bytes()));
-        let mut stdout = child.stdout.take().expect("standard output");
-        let reader = std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            stdout.read_to_end(&mut bytes).map(|_| bytes)
-        });
-        let mut stderr = child.stderr.take().expect("standard error");
-        let errors = std::thread::spawn(move || {
-            let mut text = String::new();
-            stderr.read_to_string(&mut text).map(|_| text)
-        });
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-        let status = loop {
-            if let Some(status) = child.try_wait().expect("wait for LOSAT") {
-                break status;
-            }
-            if std::time::Instant::now() > deadline {
-                let _ = child.kill();
-                panic!("{switches:?}: the search did not end within 120 s");
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        };
-        writer.join().expect("writer").expect("write the queries");
-        let report = reader.join().expect("reader").expect("read the report");
-        let messages = errors.join().expect("reader").expect("read standard error");
-        assert!(status.success(), "{switches:?}: {messages}");
-        (report, messages)
-    };
-    let precomputed = |messages: &str| -> u64 {
-        messages
-            .lines()
-            .find_map(|line| line.strip_prefix("[X_STATS] QBATCHPAR "))
-            .and_then(|line| {
-                line.split(' ')
-                    .find_map(|field| field.strip_prefix("precomputed="))
-            })
-            .and_then(|count| count.parse().ok())
-            .expect("a QBATCHPAR line")
-    };
-    let (default, messages) = run(&[]);
-    assert!(!default.is_empty(), "no report");
-    assert!(
-        timing_counts(&messages, "x_bn_q_drop").is_some_and(|[batches, _, _]| batches >= 1),
-        "the store did not act where the slots run: {messages}"
-    );
-    assert!(precomputed(&messages) >= 1, "no slot searched: {messages}");
-    let off = ("LOSAT_X_BNQSLOTS", "0");
-    let (report, messages) = run(&[off]);
-    assert_eq!(report, default, "{off:?}");
-    assert!(
-        !messages.contains("x_bn_q_drop"),
-        "{off:?}: letters dropped where the slots may read them: {messages}"
-    );
-    let (report, _) = run(&[SWITCH_OFF]);
-    assert_eq!(report, default, "{SWITCH_OFF:?}");
 }
 
 // The letters of the records read before the search packed as they are read (`LOSAT_X_BNQPACK`,

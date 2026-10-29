@@ -82,8 +82,9 @@ pub(super) fn run_web_pair(
         BlastnOutputFormat::Pairwise => anyhow::bail!("unsupported BLASTN output format: 0"),
         BlastnOutputFormat::Tabular => "6".to_string(),
         BlastnOutputFormat::TabularWithComments => "7".to_string(),
-        // `v1_output_format` reads 0, 6 and 7 only.
+        // `v1_output_format` reads 0, 6 and 7 only (no field list).
         BlastnOutputFormat::Seqalign(_)
+        | BlastnOutputFormat::CustomTabular(_)
         | BlastnOutputFormat::Xml
         | BlastnOutputFormat::Xml2(_)
         | BlastnOutputFormat::Archive

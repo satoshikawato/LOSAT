@@ -82,19 +82,19 @@ fn inputs(dir: &Path) -> (PathBuf, PathBuf) {
     (query, set)
 }
 
-/// The database of `fasta_file` made by `losat makedb` in `dir` under `name`.
+/// The database of `fasta_file` made by `losat makeblastdb` in `dir` under `name`.
 fn makedb(dir: &Path, fasta_file: &Path, name: &str) -> String {
     let db = dir.join(name).to_str().unwrap().to_string();
     let output = losat()
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fasta_file)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     db

@@ -29,10 +29,9 @@
 //!
 //! With the switch on, and a LOSAT search pool of two or more threads current, both steps are
 //! ordered parallel maps run with `SearchPool::install`, so on the pool of the search that calls
-//! them: the whole search pool, or the private pool of a LOSAT_X_QBATCHPAR slot with two or more
-//! threads. Rayon's global pool is never used (`SearchPool::install` runs the work on the pool the
-//! search owns). A search without a pool (one thread, a slot of one thread, a build without the
-//! `parallel` feature, WebAssembly without `wasm-threads`) runs today's serial code, and so does
+//! them. Rayon's global pool is never used (`SearchPool::install` runs the work on the pool the
+//! search owns). A search without a pool (one thread, a build without the `parallel` feature,
+//! WebAssembly without `wasm-threads`) runs today's serial code, and so does
 //! a batch of fewer than two queries (encoding) or two contexts (Karlin blocks).
 //!
 //! - Encoding: the buffer holds the contexts of each query between its first and last context.
@@ -60,15 +59,14 @@
 //! cases stay in `search_query_batch`, in the same order.
 //!
 //! Programs that reach it: only BLASTN (megablast, dc-megablast, blastn, blastn-short), through
-//! `search_query_batch` (every query batch, in the loop or in a LOSAT_X_QBATCHPAR slot; the `-db`
-//! search of BLASTN uses the same function). BLASTP, BLASTX, TBLASTN and TBLASTX do not call it.
+//! `search_query_batch` (every query batch of the loop; the `-db` search of BLASTN uses the same
+//! function). BLASTP, BLASTX, TBLASTN and TBLASTX do not call it.
 //!
 //! With `LOSAT_X_STATS`, `main` prints
 //! `[X_STATS] QPREPPAR encode_s= karlin_s= fallbacks=`, the summed wall times of the two steps over
-//! every batch (so with LOSAT_X_QBATCHPAR they include the slots' batches, which run concurrently,
-//! and those the loop discards) and the number of batches with two or more queries on a pool whose
-//! spans were not in query order and disjoint, which the serial function encoded (a fallback; the
-//! layout of `search_query_batch` never causes one), with or without the switch.
+//! every batch and the number of batches with two or more queries on a pool whose spans were not
+//! in query order and disjoint, which the serial function encoded (a fallback; the layout of
+//! `search_query_batch` never causes one), with or without the switch.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -962,11 +960,11 @@ mod tests {
         .unwrap();
     }
 
-    /// A LOSAT_X_QBATCHPAR-like slot: a plain thread with a private pool of 2 while the outer pool
+    /// A pool other than the search's: a plain thread with a private pool of 2 while the outer pool
     /// of 4 exists, and the steps called from inside a parallel loop of the outer pool (nested).
     #[cfg(feature = "parallel")]
     #[test]
-    fn slot_pool_and_nested_calls() {
+    fn private_pool_and_nested_calls() {
         use rayon::prelude::*;
         use std::sync::atomic::AtomicUsize;
         let mut rng = Rng(0x0123_4567_89ab_cdef);
@@ -979,8 +977,8 @@ mod tests {
         let want_blocks = serial_blocks(&contexts, &spec);
         with_search_pool(4, "blastn", |outer| {
             std::thread::scope(|scope| {
-                let slot_thread = scope.spawn(|| {
-                    with_search_pool(2, "blastn", |slot| {
+                let private_thread = scope.spawn(|| {
+                    with_search_pool(2, "blastn", |private| {
                         let wrong = AtomicUsize::new(0);
                         let probe = || {
                             if rayon::current_num_threads() != 2 {
@@ -988,9 +986,9 @@ mod tests {
                             }
                         };
                         let got =
-                            buffer_with_probe(&letters[..], &offsets, total, slot, true, &probe);
+                            buffer_with_probe(&letters[..], &offsets, total, private, true, &probe);
                         assert_eq!(got, want);
-                        let got = blocks_with_probe(&contexts, &spec, slot, true, &probe);
+                        let got = blocks_with_probe(&contexts, &spec, private, true, &probe);
                         assert!(got.iter().zip(&want_blocks).all(|(a, b)| same_bits(a, b)));
                         assert_eq!(wrong.load(Ordering::SeqCst), 0);
                         Ok(())
@@ -1005,7 +1003,7 @@ mod tests {
                         assert!(got.iter().zip(&want_blocks).all(|(a, b)| same_bits(a, b)));
                     })
                 });
-                slot_thread.join().unwrap();
+                private_thread.join().unwrap();
             });
             Ok(())
         })

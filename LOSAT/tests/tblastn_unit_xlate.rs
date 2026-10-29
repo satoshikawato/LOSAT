@@ -17,14 +17,14 @@
 //! made for its use alone (the search keeps no plan of it: fewer than four query batches, or a
 //! plan over the 256 MiB of kept plans, `XSubjectSide::keeps`) has
 //! no residues, and each unit translates those of its chunk (and
-//! a margin) into a buffer of its thread, so the report does not depend on the switch. It is on
+//! a margin) into a buffer of its query batch, so the report does not depend on the switch. It is on
 //! by default and off with `LOSAT_X_TBNUNITXLATE=0`. This test compares the reports and reads
-//! the `[X_STATS] TBNUNITXLATE plans= units= residues=` line.
+//! the `[X_STATS] TBNUNITXLATE plans= units= residues= buffers= freed=` line.
 //!
 //! The query is the first protein of `tests/fasta/PemoMJNVA.faa`; the subjects are eleven copies
 //! of `tests/fasta/MelaMJNV.fasta`, forward and reverse complement in turn (one long subject),
 //! and the genome once more (a short one, whose plan keeps its frames). A `-db` search of the
-//! same subjects (`losat makedb`) reads the long one before its plan when it reads each database
+//! same subjects (`losat makeblastdb`) reads the long one before its plan when it reads each database
 //! sequence where it is searched (`LOSAT_X_TBNDBSTREAM`), and translates it in its units as the
 //! search on the copy of the database (`LOSAT_X_TBNDBSTREAM=0`) does.
 
@@ -153,6 +153,18 @@ fn stats(stderr: &str) -> Option<[u64; 3]> {
     )
 }
 
+/// The units' buffers made and freed: every buffer made is freed at the end of the query batch's
+/// preliminary stage, and one thread makes one for the batch.
+fn assert_buffers_freed(stderr: &str, threads: usize, what: &str) {
+    let [made, freed] = fields(stderr, "[X_STATS] TBNUNITXLATE ", ["buffers", "freed"])
+        .unwrap_or_else(|| panic!("{what}: no TBNUNITXLATE line"));
+    assert!(made >= 1, "{what}: no buffer made");
+    assert_eq!(freed, made, "{what}: buffers left in the pool");
+    if threads == 1 {
+        assert_eq!(made, 1, "{what}: one thread, one buffer");
+    }
+}
+
 /// The residues the six units of a subject of `length` bases with one chunk per frame read: each
 /// frame's residues and its end sentinel.
 fn unit_residues(length: usize) -> u64 {
@@ -187,28 +199,29 @@ fn the_report_does_not_depend_on_where_the_units_read_their_residues() {
             Some([1, 6, unit_residues(long)]),
             "{threads} threads"
         );
+        assert_buffers_freed(&stderr, threads, &format!("{threads} threads"));
     }
     let (report, _) = tblastn(4, &[OFF]);
     assert!(report == expected, "four threads with =0");
 }
 
-/// The database of the subject file (`losat makedb`, one volume), made once per test process.
+/// The database of the subject file (`losat makeblastdb`, one volume), made once per test process.
 fn database() -> &'static PathBuf {
     static DB: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     DB.get_or_init(|| {
         let (_, subject, _) = inputs();
         let db = subject.with_file_name(format!("db{}", std::process::id()));
         let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-            .arg("makedb")
+            .arg("makeblastdb")
             .arg("-in")
             .arg(subject)
             .args(["-dbtype", "nucl", "-out"])
             .arg(&db)
             .output()
-            .expect("run LOSAT makedb");
+            .expect("run LOSAT makeblastdb");
         assert!(
             output.status.success(),
-            "makedb: {}",
+            "makeblastdb: {}",
             String::from_utf8_lossy(&output.stderr)
         );
         db
@@ -240,6 +253,7 @@ fn a_database_search_translates_in_its_units_with_and_without_the_copy() {
                 Some([1, 6, unit_residues(long)]),
                 "{threads} threads {read:?}"
             );
+            assert_buffers_freed(&stderr, threads, &format!("{threads} threads {read:?}"));
         }
     }
 }

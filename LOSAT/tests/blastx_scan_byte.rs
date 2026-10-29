@@ -124,16 +124,16 @@ impl Inputs {
         write_fasta(&subject, &proteins);
         let db = dir.join("db");
         let made = losat(&[])
-            .arg("makedb")
+            .arg("makeblastdb")
             .arg("-in")
             .arg(&subject)
             .args(["-dbtype", "prot", "-out"])
             .arg(&db)
             .output()
-            .expect("run losat makedb");
+            .expect("run losat makeblastdb");
         assert!(
             made.status.success(),
-            "makedb: {}",
+            "makeblastdb: {}",
             String::from_utf8_lossy(&made.stderr)
         );
         Inputs {

@@ -21,10 +21,9 @@
 //!         formatter.PrintEpilog(opt);
 //! ```
 //!
-//! With the switch on, the loop writes a batch's reports right after it has taken the batch (in
-//! batch order: a LOSAT_X_QBATCHPAR slot's result is taken under the loop's own key, in order,
-//! as before), finished its lists (`-db`: `finish_query_hit_list`, the titles, the HSPs of score
-//! 0) and given its gie to the mixer and the slots. It calls the same report code
+//! With the switch on, the loop writes a batch's reports right after it has searched the batch (in
+//! batch order), finished its lists (`-db`: `finish_query_hit_list`, the titles, the HSPs of score
+//! 0) and given its gie to the mixer. It calls the same report code
 //! (`write_reports`) with the batch's queries, their final lists numbered from 0 (as the batch
 //! made them), their warnings, lengths, masks, Karlin-Altschul blocks and search spaces, and the
 //! batch's part of the query ranges; after the loop it calls it once more with no query and the
@@ -86,12 +85,14 @@
 //!   so with the switch a block comes after the warnings of the batches before it (the same
 //!   lines in another order).
 //!
-//! Off (the reports after the loop, as without the switch): the switch off; outputs other
+//! Off (the reports after the loop, as without the switch): the switch off; a tabular report
+//! with a field list or a delimiter, and outfmt 10 and 20 (`Off::CustomTabular`: its refusals of
+//! taxonomy names and of the stored data it reads are made in its report call); outputs other
 //! than one format of the command line's kind (the hit records and the format observer of the Web
 //! adapter, whose HSP numbers count over the whole search; file sinks, which are created when
 //! their report is written; two or more formats, which the library API allows on one stream,
 //! where the off path writes each format for all queries and the batch writes would interleave
-//! them); `-verbose` and the debug output (`x_debug_output`, the list LOSAT_X_QBATCHPAR uses); and
+//! them); `-verbose` and the debug output (`x_debug_output`); and
 //! the refusals above. The command line (`-out` file or standard output) and ABI v1 are streamed.
 //!
 //! The taxonomy database (DBID item T): NCBI prefetches the subjects that each batch reports
@@ -120,12 +121,6 @@
 //! sequence that a batch reported (`database::DatabaseTitles`, at most the database's sequences
 //! and at most the queries times the hit list size), which the next batches read instead of
 //! reading the definition line again.
-//!
-//! LOSAT_X_QBATCHPAR: the writes happen while the slots search the batches ahead (they write
-//! nothing; the batch loop alone writes), which is the point for the many-batch searches. The
-//! error paths still stop every slot before they write. A slot's panic, which ends a release
-//! build at once, then ends it after the reports of the batches taken so far, possibly in the
-//! middle of one (what its buffered writer had flushed).
 //!
 //! With `LOSAT_X_STATS` and the switch,
 //! `[X_STATS] RPTSTREAM batches= queries= off= one_batch= check_s=` (batches: the batches whose
@@ -191,6 +186,10 @@ pub(super) enum Off {
     /// A lookup of the taxonomy database that could be refused, where the batches' prefetch
     /// reads it (outfmt 0, 6, 7 and 17 with `taxdb.bti` on the search path).
     Taxonomy,
+    /// A tabular report with a field list or a delimiter, or outfmt 10 or 20
+    /// (`BlastnOutputFormat::CustomTabular`), which is written after the loop (the module doc
+    /// has the reason).
+    CustomTabular,
 }
 
 impl Off {
@@ -207,6 +206,7 @@ impl Off {
             Off::Titles => "titles",
             Off::Ambiguity => "ambiguity",
             Off::Taxonomy => "taxonomy",
+            Off::CustomTabular => "custom_tabular",
         }
     }
 }
@@ -461,6 +461,18 @@ fn check(
         .any(|format| format.is_structured_xml())
     {
         return Err(Off::Xml);
+    }
+    // The custom tabular reports (line CLI C2, PR 1): their writer refuses a name of the
+    // taxonomy database for a subject with a taxid (DECISIONS 3) and reads the taxids and
+    // definition lines of the reported sequences, which a later batch's report call would do
+    // after the first batch's rows were written; and outfmt 20's header line comes with the
+    // first report. They keep the one report call after the search, where every refusal comes
+    // before the first byte, and never take the streamed path of the default 6 and 7.
+    if output_formats
+        .iter()
+        .any(|format| format.tabular_spec().is_some())
+    {
+        return Err(Off::CustomTabular);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
     // ```c++

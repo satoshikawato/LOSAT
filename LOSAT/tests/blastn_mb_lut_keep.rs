@@ -12,8 +12,7 @@
 //! x_mb_lookup_once` equals `fresh=` where every first chunk is dense enough, and the builds
 //! without the switch); no line with
 //! `LOSAT_X_MBLUTKEEP=0`, kept builds with `LOSAT_X_MBLUTONCE=0` and `LOSAT_X_MBFILL=0` (the
-//! original fill loops); and no table is kept while `LOSAT_X_QBATCHPAR`'s slots may search
-//! batches. That the bytes equal NCBI's is the business of the blastn fixtures.
+//! original fill loops). That the bytes equal NCBI's is the business of the blastn fixtures.
 //!
 //! The query file holds four genomes of 292-306 kb (LC738868 306,008 letters, LC738869 300,002,
 //! LC738870 294,144, LC738873 291,934) and `BATCH_SIZE=4000` puts each in a batch of its own (a
@@ -27,10 +26,8 @@
 //! (9,478-9,920 positions, below 12,000) give blastn's two-stage tables (a lookup word of 8, built
 //! in `ascending_cells` order), which go through the keep too. More searches: LC738868 followed by
 //! four 100 kb pieces of LC738869 (tables of 4^11 cells: they use the start of the kept 4^12
-//! table, no second table is allocated), LC738868 split into query chunks by `CHUNK_SIZE` (the
-//! chunks' tables go through the keep), and 16 pieces of 20 kb of LC738868 in batches of one with
-//! two slots and corrupted predictions (`LOSAT_X_QBATCHPARMISS`), where the slots stop partway and
-//! the loop keeps its table from then on. The subject is LC738868.
+//! table, no second table is allocated), and LC738868 split into query chunks by `CHUNK_SIZE` (the
+//! chunks' tables go through the keep). The subject is LC738868.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -43,13 +40,12 @@ const FILL_OFF: (&str, &str) = ("LOSAT_X_MBFILL", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 const BATCH: (&str, &str) = ("BATCH_SIZE", "4000");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
-const QBATCHPAR: (&str, &str) = ("LOSAT_X_QBATCHPAR", "1");
-const SLOTS2: (&str, &str) = ("LOSAT_X_QBATCHPARSLOTS", "2");
 
 const BUILD: &str = "[TIMING] x_mb_lookup_build: ";
 const ONCE: &str = "[TIMING] x_mb_lookup_once: ";
 const KEEP: &str = "[TIMING] x_mb_lut_keep: ";
-const QBATCHPAR_LINE: &str = "[X_STATS] QBATCHPAR ";
+const PACK_ON: (&str, &str) = ("LOSAT_X_BNCSRPACK", "1");
+const CSR_BUILDS: &str = "[TIMING] x_bn_csr: ";
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -139,6 +135,9 @@ fn blastn(task: &str, query: &Path, threads: u32, switches: &[(&str, &str)]) -> 
             std::env::temp_dir().join(format!("losat_mblutkeep_worker_{}.log", std::process::id())),
         );
     }
+    // LOSAT_X_BNCSRPACK lays out every contiguous table of 4^8 to 4^11 cells as CSR, with no
+    // chains to fill: `-task blastn`'s tables keep the chains these tests are about with it off.
+    command.env("LOSAT_X_BNCSRPACK", "0");
     let output = command
         .arg("blastn")
         .args(["-task", task])
@@ -216,16 +215,6 @@ fn check(task: &str, query: &Path) {
         assert!(report == reference, "{task} threads {threads}");
         assert_eq!(field(&stderr, KEEP, "kept="), kept, "{task}: {stderr}");
     }
-
-    // With two slots searching the batches after the first, the loop keeps no table: it searches
-    // the first batch while the slots may still start, and none after.
-    let (report, stderr) = blastn(task, query, 4, &[BATCH, TIMING, STATS, QBATCHPAR, SLOTS2]);
-    assert!(report == reference, "{task} with slots");
-    assert!(
-        field(&stderr, QBATCHPAR_LINE, "precomputed=") > 0,
-        "{task}: the slots searched no batch:\n{stderr}"
-    );
-    assert!(!stderr.contains(KEEP), "{task}: {stderr}");
 }
 
 #[test]
@@ -299,6 +288,43 @@ fn shorter_tables_are_the_start_of_the_kept_table() {
     check_counts("megablast", &query, &[BATCH], 4, 1);
 }
 
+// With LOSAT_X_BNCSRPACK on (the helper turns it off) the pieces' tables of 4^11 cells above are
+// packed CSR (no size rule): after the genome's chains their `offsets` take the kept table of 4^12
+// cells (`csr=`); pieces first, the first one takes the zeroed table that a fresh packed build
+// hands the keep (`lookup.rs`), the others take it from the keep, and the genome's chains find it
+// too small. The report equals the one with the keep off.
+#[test]
+fn packed_tables_share_the_kept_table_with_chains() {
+    let (long, short) = (letters("LC738868.fasta"), letters("LC738869.fasta"));
+    let pieces: Vec<(String, &str)> = (0..4)
+        .map(|i| {
+            (
+                format!("LC738869_{i}"),
+                &short[i * 65_000..i * 65_000 + 100_000],
+            )
+        })
+        .collect();
+    let genome = ("LC738868".to_string(), long.as_str());
+    for (name, genome_first, fresh, csr) in
+        [("packed_after", true, 1, 4), ("packed_first", false, 2, 3)]
+    {
+        let mut records = pieces.clone();
+        if genome_first {
+            records.insert(0, genome.clone());
+        } else {
+            records.push(genome.clone());
+        }
+        let query = query_file(name, &records);
+        let stderr = check_counts("megablast", &query, &[BATCH, PACK_ON], 0, fresh);
+        assert_eq!(field(&stderr, KEEP, "csr="), csr, "{name}:\n{stderr}");
+        assert_eq!(
+            field(&stderr, CSR_BUILDS, "builds="),
+            4,
+            "{name}:\n{stderr}"
+        );
+    }
+}
+
 // dc-megablast (discontiguous tables of 4^11 cells) and blastn (megablast tables of 4^11 cells) of
 // four records in batches of one: LC738868 and LC738869 joined into one record, LC738870, LC738873
 // and LC738871 joined, LC738875. A joined record has at least a quarter as many positions as
@@ -335,48 +361,4 @@ fn csr_and_chain_builds_share_the_kept_table() {
 fn the_chunks_of_a_split_batch_use_the_kept_table() {
     let query = fasta("LC738868.fasta");
     check_counts("megablast", &query, &[("CHUNK_SIZE", "100000")], 2, 1);
-}
-
-// 16 pieces of 20 kb of LC738868 in batches of one, two slots, every second prediction corrupted:
-// the slots stop partway (`off=` other than `none`, some batches taken from them), and the loop's
-// own searches after that keep its table.
-#[test]
-fn the_loop_keeps_its_table_once_the_slots_stop() {
-    let genome = letters("LC738868.fasta");
-    let records: Vec<(String, &str)> = (0..16)
-        .map(|i| {
-            (
-                format!("LC738868_{i}"),
-                &genome[i * 19_000..i * 19_000 + 20_000],
-            )
-        })
-        .collect();
-    let query = query_file("pieces", &records);
-    let env = [
-        ("BATCH_SIZE", "1"),
-        QBATCHPAR,
-        SLOTS2,
-        ("LOSAT_X_QBATCHPARMISS", "2"),
-    ];
-    let (reference, _) = blastn("megablast", &query, 4, &[OFF, ("BATCH_SIZE", "1")]);
-    let (report, stderr) = blastn(
-        "megablast",
-        &query,
-        4,
-        &[&env[..], &[TIMING, STATS]].concat(),
-    );
-    assert!(report == reference, "the report differs");
-    assert!(
-        field(&stderr, QBATCHPAR_LINE, "precomputed=") > 0,
-        "{stderr}"
-    );
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with(QBATCHPAR_LINE))
-        .unwrap();
-    assert!(
-        !line.ends_with(" off=none"),
-        "the slots never stopped: {line}"
-    );
-    assert!(field(&stderr, KEEP, "kept=") > 0, "{stderr}");
 }

@@ -43,6 +43,19 @@ fn main() -> Result<()> {
     if startup_trace {
         eprintln!("[startup] enter main");
     }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1295-1298
+    // ```c++
+    // int main(int argc, const char* argv[] /*, const char* envp[]*/)
+    // {
+    //     return CBlastDBCmdApp().AppMain(argc, argv);
+    // }
+    // ```
+    // `losat blastdbcmd` reads its command line with NCBI's argument reader
+    // (`blastdbcmd::args`), not clap's: the words after `blastdbcmd` go to it as they are.
+    let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if argv.get(1).is_some_and(|word| word == "blastdbcmd") {
+        std::process::exit(LOSAT::blastdbcmd::run(&argv[2..]));
+    }
     // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
     let cli: Cli = match LOSAT::cli::try_parse_from(std::env::args_os()) {
         Ok(cli) => cli,

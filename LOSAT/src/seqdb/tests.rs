@@ -1675,7 +1675,7 @@ fn check_search_path_row(
             let db = opened.unwrap_or_else(|e| panic!("{id}: NCBI opens it, LOSAT: {e:?}"));
             assert_eq!(String::from_utf8_lossy(db.title()), *title, "{id}: title");
             assert_eq!(db.num_seqs().to_string(), *sequences, "{id}: sequences");
-            let listed = super::alias::test_info_volumes(name, SeqType::Protein, search).unwrap();
+            let listed = super::alias::info_volumes(name, SeqType::Protein, search).unwrap();
             let expected: Vec<String> = volumes.split(" | ").map(place).collect();
             assert_eq!(listed, expected, "{id}: volumes");
         }

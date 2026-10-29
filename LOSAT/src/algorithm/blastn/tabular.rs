@@ -289,15 +289,7 @@ pub(crate) fn write_tabular_prolog_warning(
 pub(crate) fn subject_taxdb_found(
     settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<bool> {
-    let registry = match &settings.blastdb {
-        Ok(value) => value.as_deref(),
-        Err(reason) => {
-            anyhow::bail!("{reason}; this is not supported by LOSAT's {PROGRAM}")
-        }
-    };
-    let path = crate::seqdb::SearchPath::from_environment(registry)
-        .map_err(|error| crate::algorithm::common::database::database_error(error, PROGRAM))?;
-    Ok(path.resolve_file("taxdb.bti").is_some())
+    crate::algorithm::common::database::subject_taxdb_found(settings, PROGRAM)
 }
 
 /// Writes the report of every query of `hit_lists` (indexed by query) to `writer`, each query's

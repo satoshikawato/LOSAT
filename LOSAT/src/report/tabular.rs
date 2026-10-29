@@ -29,7 +29,7 @@
 use std::io::{self, Write};
 
 use crate::blastinput::app::{FormatChoice, ReportFormat};
-use crate::report::blast_xml::matrix::FormattingMatrix;
+use crate::config::ScoringMatrix;
 use crate::report::outfmt6::{
     format_bitscore_ncbi, format_evalue_ncbi_tabular, format_percent_identity_ncbi,
     write_outfmt7_query_line,
@@ -761,8 +761,20 @@ pub struct TabularWriter<'a> {
     pub spec: &'a TabularSpec,
     /// The `# BLASTN 2.17.0+` line's program and version.
     pub program_version: &'a str,
-    /// The positive pairs of a protein search (`None` for BLASTN: positives are identities).
-    pub matrix: Option<&'a FormattingMatrix>,
+    /// The matrix of a protein search's positives (`None` for BLASTN: positives are
+    /// identities): the formatter's `m_ScoringMatrix`, which `CBlastFormat` makes with
+    /// `GetAsciiProteinMatrix` (outfmt 0's matrix, `utils::matrix::protein_display_score`), not
+    /// the XML's `CBlastFormattingMatrix`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:183
+    /// ```c++
+    ///     CAlignFormatUtil::GetAsciiProteinMatrix(m_MatrixName, m_ScoringMatrix);
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:828-830
+    /// ```c++
+    ///                     tabinfo.SetFields(s, *m_Scope, &m_ScoringMatrix);
+    /// ```
+    pub matrix: Option<ScoringMatrix>,
 }
 
 impl TabularWriter<'_> {
@@ -791,10 +803,35 @@ impl TabularWriter<'_> {
         database: &[u8],
         num_hits: Option<usize>,
     ) -> io::Result<()> {
+        self.round_query_header(out, None, query_title, database, num_hits)
+    }
+
+    /// `query_header` of a report of psiblast's round `iteration` (`Some`), whose lines carry the
+    /// round after the program's.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1294-1298
+    /// ```c++
+    ///     m_Ostream << "# ";
+    ///     m_Ostream << program_version << "\n";
+    ///
+    ///     if (iteration != numeric_limits<unsigned int>::max())
+    ///         m_Ostream << "# Iteration: " << iteration << "\n";
+    /// ```
+    pub fn round_query_header(
+        &self,
+        out: &mut dyn Write,
+        iteration: Option<u32>,
+        query_title: &[u8],
+        database: &[u8],
+        num_hits: Option<usize>,
+    ) -> io::Result<()> {
         if self.spec.kind != TabularKind::Commented {
             return Ok(());
         }
         writeln!(out, "# {}", self.program_version)?;
+        if let Some(iteration) = iteration {
+            writeln!(out, "# Iteration: {iteration}")?;
+        }
         write_outfmt7_query_line(out, query_title)?;
         out.write_all(b"# Database: ")?;
         out.write_all(database)?;
@@ -841,7 +878,9 @@ impl TabularWriter<'_> {
                     if q == s {
                         ident += 1;
                         positive += 1;
-                    } else if self.matrix.is_some_and(|matrix| matrix.positive(q, s)) {
+                    } else if self.matrix.is_some_and(|matrix| {
+                        crate::utils::matrix::protein_display_score(matrix, q, s) > 0
+                    }) {
                         positive += 1;
                     }
                 }
@@ -1532,6 +1571,100 @@ mod tests {
         assert_eq!(
             String::from_utf8(names.row_messages(&spec, &last)).unwrap(),
             "Error: [blastn] offset\nError: [blastn] offset\n"
+        );
+    }
+
+    // NCBI tabular.cpp:900-908 (the frames only with a field of `SetCounts`' block, `num_ident >
+    // 0` for `nident`), tabular.cpp:1003-1021 (the positives of the rows by the formatter's
+    // matrix, `GetAsciiProteinMatrix`: U and C count as C-C, a J pair not, `*` with `*` is 1)
+    // and tabular.cpp:1293-1298 (psiblast's round).
+    #[test]
+    fn protein_rows_frames_and_rounds_are_ncbis() {
+        let spec = |format: ReportFormat, fields: &str| {
+            TabularSpec::of(
+                format,
+                &FormatChoice {
+                    number: 6,
+                    spec: fields.to_string(),
+                    delimiter: String::new(),
+                },
+            )
+            .unwrap()
+        };
+        let taxonomy = TabularTaxonomy::default();
+        let subject = TabularSubject {
+            id: b"s",
+            accession: b"s",
+            accession_version: b"s",
+            gi: 0,
+            all_ids: &[],
+            length: 10,
+            titles: None,
+            taxonomy: &taxonomy,
+            names: None,
+            nucleotide: false,
+            qcovs: -1,
+            qcovus: -1,
+        };
+        let row = |spec: &TabularSpec, num_ident: usize, rows: Option<(&[u8], &[u8])>| {
+            let writer = TabularWriter {
+                spec,
+                program_version: "BLASTP 2.17.0+",
+                matrix: Some(ScoringMatrix::Blosum62),
+            };
+            let hsp = TabularHsp {
+                q_start: 1,
+                q_end: 6,
+                s_start: 1,
+                s_end: 6,
+                evalue: 1e-5,
+                bit_score: 20.0,
+                score: 10,
+                length: 6,
+                gap_opens: 0,
+                gaps: 0,
+                num_ident,
+                q_frame: 1,
+                s_frame: 1,
+                rows,
+                qcovhsp: 100,
+            };
+            let mut out = Vec::new();
+            writer.row(
+                &mut out,
+                &TabularQuery {
+                    id: b"q",
+                    length: 6,
+                },
+                &subject,
+                &hsp,
+            );
+            String::from_utf8(out).unwrap()
+        };
+        let frames = spec(ReportFormat::Tabular, "qseqid frames sframe");
+        assert_eq!(row(&frames, 3, None), "q\t0/0\t0\n");
+        let counted = spec(ReportFormat::Tabular, "nident frames sframe");
+        assert_eq!(row(&counted, 0, None), "0\t0/0\t0\n");
+        assert_eq!(row(&counted, 3, None), "3\t1/1\t1\n");
+        let positives = spec(ReportFormat::Tabular, "nident positive mismatch sstrand");
+        assert_eq!(
+            row(&positives, 1, Some((b"UCJ*KA", b"CUJ*IA"))),
+            "3\t5\t3\tN/A\n"
+        );
+        assert_eq!(row(&positives, 1, Some((b"UJ", b"UI"))), "1\t1\t5\tN/A\n");
+        let commented = spec(ReportFormat::TabularWithComments, "qseqid");
+        let writer = TabularWriter {
+            spec: &commented,
+            program_version: "PSIBLAST 2.17.0+",
+            matrix: Some(ScoringMatrix::Blosum62),
+        };
+        let mut out = Vec::new();
+        writer
+            .round_query_header(&mut out, Some(1), b"q1 title", b"db", Some(0))
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "# PSIBLAST 2.17.0+\n# Iteration: 1\n# Query: q1 title\n# Database: db\n# 0 hits found\n"
         );
     }
 

@@ -337,16 +337,17 @@ impl Program {
         self == Program::Blastn
     }
 
-    /// Whether LOSAT's program writes custom tabular field lists (BLASTP and BLASTX check
-    /// their fields themselves; the others write them with `report::tabular`).
+    /// Whether LOSAT's program writes custom tabular field lists (BLASTX checks its fields
+    /// itself; BLASTN and BLASTP write them with `report::tabular`).
     pub fn custom_fields(self) -> bool {
-        matches!(self, Program::Blastp | Program::Blastx) || self.shared_tabular()
+        self == Program::Blastx || self.shared_tabular()
     }
 
     /// Whether the program writes its tabular reports with a field list or a delimiter, and
-    /// outfmt 10 and 20, through the shared `report::tabular` (every field, `delim=`).
+    /// outfmt 10 and 20, through the shared `report::tabular` (every field, `delim=`): BLASTN
+    /// (line CLI C2, PR 1) and BLASTP, with psiblast, which runs BLASTP's engine (PR 3).
     pub fn shared_tabular(self) -> bool {
-        self == Program::Blastn
+        matches!(self, Program::Blastn | Program::Blastp)
     }
 
     /// Whether LOSAT's program writes the format: the one table of the formats of every
@@ -1151,10 +1152,11 @@ mod tests {
                 .collect();
             // 11 (the BLAST archive): every program (OF8a parts 1 and 2: BLASTN, BLASTP; OF8b
             // parts 1 to 3: BLASTX, TBLASTN, TBLASTX).
-            let expected: &[i32] = if program == Program::Blastn {
-                &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20]
-            } else {
-                &[0, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16]
+            // 10 and 20 with the shared tabular writer (line CLI C2: BLASTN, BLASTP).
+            let expected: &[i32] = match program {
+                Program::Blastn => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20],
+                Program::Blastp => &[0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20],
+                _ => &[0, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16],
             };
             assert_eq!(written, expected, "{program:?}");
         }
@@ -1172,7 +1174,7 @@ mod tests {
         );
         assert_eq!(
             PROGRAMS.map(Program::shared_tabular),
-            [true, false, false, false, false]
+            [true, true, false, false, false]
         );
     }
 

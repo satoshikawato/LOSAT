@@ -1099,7 +1099,29 @@ pub(crate) fn x_lookup_table_for_profile(
         bounds,
         false,
     );
+    // PROBE (D14 s4, LOSAT_PROBE_TBNLUT): `lean` = x_build_lean, `direct` = x_build_direct.
+    let prepared = match x_probe_tbn_lut() {
+        1 => match x_lut_direct::x_build_lean(prepared, threshold, matrix, word_length) {
+            Ok(table) => return table,
+            Err(prepared) => prepared,
+        },
+        2 => match x_lut_direct::x_build_direct(prepared, threshold, matrix, word_length) {
+            Ok(table) => return table,
+            Err(prepared) => prepared,
+        },
+        _ => prepared,
+    };
     build_lookup_from_prepared(prepared, threshold, matrix, word_length).0
+}
+
+// PROBE (D14 s4): which builder TBLASTN's table takes.
+fn x_probe_tbn_lut() -> u8 {
+    static ON: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| match std::env::var("LOSAT_PROBE_TBNLUT").as_deref() {
+        Ok("lean") => 1,
+        Ok("direct") => 2,
+        _ => 0,
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803

@@ -713,6 +713,137 @@
           <bl2seq>
             <Search>
               <query-id>Query_2</query-id>
+              <query-title>nohit a query without hits</query-title>
+              <query-len>12</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>0</hsp-len>
+                  <eff-space>800856</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+          <subjects>Subject_2</subjects>
+          <subjects>Subject_3</subjects>
+          <subjects>Subject_4</subjects>
+          <subjects>Subject_5</subjects>
+          <subjects>Subject_6</subjects>
+          <subjects>Subject_7</subjects>
+          <subjects>Subject_8</subjects>
+          <subjects>Subject_9</subjects>
+          <subjects>Subject_10</subjects>
+          <subjects>Subject_11</subjects>
+          <subjects>Subject_12</subjects>
+          <subjects>Subject_13</subjects>
+          <subjects>Subject_14</subjects>
+          <subjects>Subject_15</subjects>
+          <subjects>Subject_16</subjects>
+          <subjects>Subject_17</subjects>
+          <subjects>Subject_18</subjects>
+          <subjects>Subject_19</subjects>
+          <subjects>Subject_20</subjects>
+          <subjects>Subject_21</subjects>
+          <subjects>Subject_22</subjects>
+          <subjects>Subject_23</subjects>
+          <subjects>Subject_24</subjects>
+          <subjects>Subject_25</subjects>
+          <subjects>Subject_26</subjects>
+          <subjects>Subject_27</subjects>
+          <subjects>Subject_28</subjects>
+          <subjects>Subject_29</subjects>
+          <subjects>Subject_30</subjects>
+          <subjects>Subject_31</subjects>
+          <subjects>Subject_32</subjects>
+          <subjects>Subject_33</subjects>
+          <subjects>Subject_34</subjects>
+          <subjects>Subject_35</subjects>
+          <subjects>Subject_36</subjects>
+          <subjects>Subject_37</subjects>
+          <subjects>Subject_38</subjects>
+          <subjects>Subject_39</subjects>
+          <subjects>Subject_40</subjects>
+          <subjects>Subject_41</subjects>
+          <subjects>Subject_42</subjects>
+          <subjects>Subject_43</subjects>
+          <subjects>Subject_44</subjects>
+          <subjects>Subject_45</subjects>
+          <subjects>Subject_46</subjects>
+          <subjects>Subject_47</subjects>
+          <subjects>Subject_48</subjects>
+          <subjects>Subject_49</subjects>
+          <subjects>Subject_50</subjects>
+          <subjects>Subject_51</subjects>
+          <subjects>Subject_52</subjects>
+          <subjects>Subject_53</subjects>
+          <subjects>Subject_54</subjects>
+          <subjects>Subject_55</subjects>
+          <subjects>Subject_56</subjects>
+          <subjects>Subject_57</subjects>
+          <subjects>Subject_58</subjects>
+          <subjects>Subject_59</subjects>
+          <subjects>Subject_60</subjects>
+          <subjects>Subject_61</subjects>
+          <subjects>Subject_62</subjects>
+          <subjects>Subject_63</subjects>
+          <subjects>Subject_64</subjects>
+          <subjects>Subject_65</subjects>
+          <subjects>Subject_66</subjects>
+          <subjects>Subject_67</subjects>
+          <subjects>Subject_68</subjects>
+          <subjects>Subject_69</subjects>
+          <subjects>Subject_70</subjects>
+          <subjects>Subject_71</subjects>
+          <subjects>Subject_72</subjects>
+          <subjects>Subject_73</subjects>
+          <subjects>Subject_74</subjects>
+          <subjects>Subject_75</subjects>
+          <subjects>Subject_76</subjects>
+          <subjects>Subject_77</subjects>
+          <subjects>Subject_78</subjects>
+          <subjects>Subject_79</subjects>
+          <subjects>Subject_80</subjects>
+          <subjects>Subject_81</subjects>
+          <subjects>Subject_82</subjects>
+          <subjects>Subject_83</subjects>
+          <subjects>Subject_84</subjects>
+          <subjects>Subject_85</subjects>
+          <subjects>Subject_86</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_3</query-id>
               <query-title>BDT63075.1 wsv226-like protein [Sicyonia whispovirus]</query-title>
               <query-len>1142</query-len>
               <hits>
@@ -988,7 +1119,7 @@
         <Results>
           <bl2seq>
             <Search>
-              <query-id>Query_3</query-id>
+              <query-id>Query_4</query-id>
               <query-title>BDT63076.1 hypothetical protein [Sicyonia whispovirus]</query-title>
               <query-len>109</query-len>
               <hits>

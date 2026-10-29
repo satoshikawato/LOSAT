@@ -756,6 +756,25 @@ Lambda      K        H        a         alpha    sigma
 Effective search space used: 49819040
 
 
+Query= nohit a query without hits
+
+Length=12
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.343    0.153     1.14    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 800856
+
+
 Query= BDT63075.1 wsv226-like protein [Sicyonia whispovirus]
 
 Length=1142

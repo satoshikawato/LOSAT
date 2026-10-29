@@ -67,6 +67,10 @@ BDT63074.1	BDT63538.1	26.471	34	25	0	719	752	745	778	5.7	23.1
 BDT63074.1	BDT63570.1	17.391	69	57	0	767	835	363	431	7.5	22.7
 BDT63074.1	BDT63569.1	46.667	15	8	0	802	816	678	692	9.9	22.3
 # BLASTP 2.17.0+
+# Query: nohit a query without hits
+# Database: User specified sequence set (Input: tests/fasta/PajaWSV.faa)
+# 0 hits found
+# BLASTP 2.17.0+
 # Query: BDT63075.1 wsv226-like protein [Sicyonia whispovirus]
 # Database: User specified sequence set (Input: tests/fasta/PajaWSV.faa)
 # Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
@@ -88,4 +92,4 @@ BDT63076.1	BDT63521.1	34.783	23	15	0	5	27	33	55	4.4	19.6
 BDT63076.1	BDT63519.1	36.364	22	14	0	42	63	972	993	4.9	19.6
 BDT63076.1	BDT63508.1	31.579	19	13	0	16	34	962	980	6.6	19.2
 BDT63076.1	BDT63579.1	36.842	19	12	0	10	28	1641	1659	6.8	19.2
-# BLAST processed 3 queries
+# BLAST processed 4 queries

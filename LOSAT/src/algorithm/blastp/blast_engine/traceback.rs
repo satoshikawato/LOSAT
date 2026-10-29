@@ -11,11 +11,13 @@
 //!         BlastSeqSrcGetSeqArg seq_arg;
 //! ```
 //!
-//! NCBI runs the lists of an OID batch in parallel threads (`blast_traceback.c:1505-1518`), each
-//! with its own results that are merged after the loop (`blast_traceback_mt_priv.c:139-185`).
+//! NCBI's threads take the OID batches of lists in turn (`blast_traceback.c:1505-1518`), each
+//! thread with its own results that are merged after the loop (`blast_traceback_mt_priv.c:139-185`).
 //! A list's traceback reads nothing another list writes, and the hit lists' order
 //! (`s_EvalueCompareHSPLists`: e-value, score, OID) is total, so LOSAT inserts every list into one
-//! hit list per query as NCBI's one thread does, at every thread count.
+//! hit list per query as NCBI's one thread does, at every thread count (NCBI's merge of the
+//! threads' capped results can keep more lists for `-culling_limit` and `-qcov_hsp_perc` with
+//! several threads; LOSAT's output is that of NCBI's `-num_threads 1`).
 use anyhow::Result;
 
 use super::super::gapalign::{
@@ -23,6 +25,7 @@ use super::super::gapalign::{
     GapAlignScratch,
 };
 use super::super::hsp::{reap_hsplist_by_evalue, BlastpHitList, BlastpHsp, BlastpHspList};
+use super::super::x_prelim_compact::XPrelimHsp;
 use super::super::x_redo_subjects::XRedoSubjects;
 // The preliminary stage's helpers that this module calls are inlined everywhere or have other
 // callers; it does not call `preliminary_hit_from_local_match_hsp`,
@@ -60,7 +63,9 @@ pub(super) struct OrdinaryTraceback<'a> {
 }
 
 impl OrdinaryTraceback<'_> {
-    /// The final hit list of each query from the preliminary lists, which it takes.
+    /// The final hit list of each query from the preliminary lists, which it takes: a query's
+    /// lists are full (`preliminary_hit_lists`) or compact (`compact_hit_lists`, which the
+    /// traceback reads without expanding them).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1690-1699
     /// ```c
@@ -78,22 +83,36 @@ impl OrdinaryTraceback<'_> {
     pub(super) fn run(
         &self,
         preliminary_hit_lists: &mut [Option<BlastpHitList>],
+        compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Result<Vec<Option<BlastpHitList>>> {
         // (query index, the list of one subject)
-        let work: Vec<(usize, BlastpHspList)> = preliminary_hit_lists
+        let mut work: Vec<(usize, PrelimList)> = Vec::new();
+        for (q_idx, (full, compact)) in preliminary_hit_lists
             .iter_mut()
+            .zip(compact_hit_lists.iter_mut())
             .enumerate()
-            .filter_map(|(q_idx, hit_list)| Some((q_idx, hit_list.take()?)))
-            .flat_map(|(q_idx, hit_list)| {
+        {
+            if let Some(hit_list) = compact.take() {
                 let count = hit_list.hsplist_count;
-                hit_list
-                    .hsplist_array
-                    .into_iter()
-                    .take(count)
-                    .map(move |hsp_list| (q_idx, hsp_list))
-            })
-            .collect();
+                work.extend(
+                    hit_list
+                        .hsplist_array
+                        .into_iter()
+                        .take(count)
+                        .map(|list| (q_idx, PrelimList::Compact(list))),
+                );
+            } else if let Some(hit_list) = full.take() {
+                let count = hit_list.hsplist_count;
+                work.extend(
+                    hit_list
+                        .hsplist_array
+                        .into_iter()
+                        .take(count)
+                        .map(|list| (q_idx, PrelimList::Full(list))),
+                );
+            }
+        }
         let traced = self.trace_lists(work, pool)?;
         let mut hit_lists: Vec<Option<BlastpHitList>> = std::iter::repeat_with(|| None)
             .take(preliminary_hit_lists.len())
@@ -112,7 +131,7 @@ impl OrdinaryTraceback<'_> {
     /// traceback ends, as NCBI frees each one it has read.
     fn trace_lists(
         &self,
-        work: Vec<(usize, BlastpHspList)>,
+        work: Vec<(usize, PrelimList)>,
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> Result<Vec<(usize, Option<BlastpHspList>)>> {
         #[cfg(all(
@@ -124,7 +143,7 @@ impl OrdinaryTraceback<'_> {
             return pool.install(|| {
                 work.into_par_iter()
                     .map_init(GapAlignScratch::new, |scratch, (q_idx, list)| {
-                        Ok((q_idx, self.trace_list(q_idx, &list, scratch)?))
+                        Ok((q_idx, list.trace(self, q_idx, scratch)?))
                     })
                     .collect()
             });
@@ -132,7 +151,7 @@ impl OrdinaryTraceback<'_> {
         let _ = pool;
         let mut scratch = GapAlignScratch::new();
         work.into_iter()
-            .map(|(q_idx, list)| Ok((q_idx, self.trace_list(q_idx, &list, &mut scratch)?)))
+            .map(|(q_idx, list)| Ok((q_idx, list.trace(self, q_idx, &mut scratch)?)))
             .collect()
     }
 
@@ -152,22 +171,20 @@ impl OrdinaryTraceback<'_> {
     fn trace_list(
         &self,
         q_idx: usize,
-        list: &BlastpHspList,
+        oid: u32,
+        query_index: u32,
+        hsps: impl Iterator<Item = BlastpPreliminaryHsp>,
         scratch: &mut GapAlignScratch,
     ) -> Result<Option<BlastpHspList>> {
-        if list.hsps.is_empty() {
-            return Ok(None);
-        }
         let ctx = &self.contexts[q_idx];
         let query = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
         let query_nomask = query_nomask_sequence(ctx);
-        let subject_read = self.subjects.read(list.oid)?;
+        let subject_read = self.subjects.read(oid)?;
         let subject = subject_read.residues();
         let mut tree =
             BlastIntervalTree::new(0, self.total_query_span, 0, subject.len() as i32 + 1);
         let mut traced: Vec<Traced> = Vec::new();
-        for local_hsp in &list.hsps {
-            let mut hsp = preliminary_hsp(local_hsp);
+        for mut hsp in hsps {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:402-405
             // ```c
             //       if (program_number == eBlastTypeRpsBlast ||
@@ -307,8 +324,8 @@ impl OrdinaryTraceback<'_> {
         traced.sort_by(|a, b| preliminary_score_compare(&a.hsp, &b.hsp));
         tree.reset();
         let mut hsp_list = BlastpHspList {
-            oid: list.oid,
-            query_index: list.query_index,
+            oid,
+            query_index,
             hsps: Vec::with_capacity(traced.len()),
             best_evalue: f64::MAX,
         };
@@ -384,6 +401,38 @@ impl OrdinaryTraceback<'_> {
         for hsp in &mut hsp_list.hsps {
             hsp.bit_score =
                 (hsp.raw_score as f64 * self.karlin.lambda - log_k) / std::f64::consts::LN_2;
+        }
+    }
+}
+
+/// A preliminary list of one query and one subject, full or compact.
+enum PrelimList {
+    Full(BlastpHspList),
+    Compact(BlastpHspList<XPrelimHsp>),
+}
+
+impl PrelimList {
+    fn trace(
+        self,
+        traceback: &OrdinaryTraceback<'_>,
+        q_idx: usize,
+        scratch: &mut GapAlignScratch,
+    ) -> Result<Option<BlastpHspList>> {
+        match self {
+            Self::Full(list) => traceback.trace_list(
+                q_idx,
+                list.oid,
+                list.query_index,
+                list.hsps.iter().map(preliminary_hsp),
+                scratch,
+            ),
+            Self::Compact(list) => traceback.trace_list(
+                q_idx,
+                list.oid,
+                list.query_index,
+                list.hsps.iter().map(|hsp| hsp.hsp),
+                scratch,
+            ),
         }
     }
 }
@@ -579,6 +628,12 @@ fn op_length(op: &GapEditOp) -> usize {
 ///     }
 ///     return FALSE;
 /// ```
+///
+/// The windows read 11 letters from the HSP's starts and ends. An HSP shorter than that in the
+/// subject (only longer in the query, through gaps) would make NCBI read outside the HSP and
+/// possibly outside the subject; BLASTP's preliminary gapped starts are never both 0 (the start
+/// is the middle of a window), so this is not reached, and a window outside a sequence gives no
+/// start instead of reading there.
 fn get_offsets_for_gapped_alignment(
     query: &[u8],
     subject: &[u8],
@@ -593,17 +648,21 @@ fn get_offsets_for_gapped_alignment(
     if q_length <= HSP_MAX_WINDOW {
         return Some((q_start + q_length / 2, s_start + q_length / 2));
     }
-    let score_at =
-        |q: i32, s: i32| blastp_standard_score(matrix, query[q as usize], subject[s as usize]);
-    let mut score: i32 = (0..HSP_MAX_WINDOW)
-        .map(|i| score_at(q_start + i, s_start + i))
-        .sum();
+    let score_at = |q: i32, s: i32| -> Option<i32> {
+        let q = query.get(usize::try_from(q).ok()?)?;
+        let s = subject.get(usize::try_from(s).ok()?)?;
+        Some(blastp_standard_score(matrix, *q, *s))
+    };
+    let mut score = 0;
+    for i in 0..HSP_MAX_WINDOW {
+        score += score_at(q_start + i, s_start + i)?;
+    }
     let mut max_score = score;
     let mut max_offset = q_start + HSP_MAX_WINDOW - 1;
     for index in q_start + HSP_MAX_WINDOW..q_start + q_length.min(s_length) {
         let s_index = index - q_start + s_start;
-        score -= score_at(index - HSP_MAX_WINDOW, s_index - HSP_MAX_WINDOW);
-        score += score_at(index, s_index);
+        score -= score_at(index - HSP_MAX_WINDOW, s_index - HSP_MAX_WINDOW)?;
+        score += score_at(index, s_index)?;
         if score > max_score {
             max_score = score;
             max_offset = index;
@@ -612,14 +671,13 @@ fn get_offsets_for_gapped_alignment(
     if max_score > 0 {
         return Some((max_offset, max_offset - q_start + s_start));
     }
-    let end_score: i32 = (0..HSP_MAX_WINDOW)
-        .map(|i| {
-            score_at(
-                q_start + q_length - HSP_MAX_WINDOW + i,
-                s_start + s_length - HSP_MAX_WINDOW + i,
-            )
-        })
-        .sum();
+    let mut end_score = 0;
+    for i in 0..HSP_MAX_WINDOW {
+        end_score += score_at(
+            q_start + q_length - HSP_MAX_WINDOW + i,
+            s_start + s_length - HSP_MAX_WINDOW + i,
+        )?;
+    }
     (end_score > 0).then_some((
         hsp.query_end - HSP_MAX_WINDOW / 2,
         hsp.subject_end - HSP_MAX_WINDOW / 2,

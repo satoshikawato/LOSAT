@@ -455,6 +455,7 @@ fn each_query_batch_is_reported_where_no_refusal_can_follow() {
         let off = stderr
             .lines()
             .find_map(|line| line.strip_prefix("[X_STATS] TBXRPTSTREAM off="))
+            .and_then(|rest| rest.split(' ').next())
             .unwrap_or("")
             .to_string();
         (off, output)

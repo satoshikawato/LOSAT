@@ -2681,6 +2681,7 @@ fn run_in_pool(
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:203-209
     // The loop writes each batch's reports when it takes the batch where no refusal of LOSAT's
     // can come after the first batch (`report_stream`); otherwise after the loop.
+    let x_check = Instant::now();
     let stream = report_stream::check(
         &args,
         outputs,
@@ -2695,8 +2696,9 @@ fn run_in_pool(
     // counterpart.
     if std::env::var_os("LOSAT_X_STATS").is_some() {
         eprintln!(
-            "[X_STATS] TBXRPTSTREAM off={}",
-            stream.map_or_else(report_stream::Off::name, |()| "none")
+            "[X_STATS] TBXRPTSTREAM off={} check_s={:.6}",
+            stream.map_or_else(report_stream::Off::name, |()| "none"),
+            x_check.elapsed().as_secs_f64()
         );
     }
     let stream = stream.is_ok();

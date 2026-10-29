@@ -84,8 +84,9 @@
 //! outfmt 0, which refuses a reported subject's title (`check_shown_subject_titles`); the
 //! debugging output; and the refusals above.
 //!
-//! Diagnostics: with `LOSAT_X_STATS`, `[X_STATS] TBXRPTSTREAM off=` before the search (`none` when
-//! the loop writes each batch's reports, else the reason, `Off::name`).
+//! Diagnostics: with `LOSAT_X_STATS`, `[X_STATS] TBXRPTSTREAM off= check_s=` before the search
+//! (`off`: `none` when the loop writes each batch's reports, else the reason, `Off::name`;
+//! `check_s`: the seconds of `check`, the database's headers included).
 //!
 //! Memory: a batch's lists, statistics and warnings are dropped after its write. Kept for the
 //! whole search, as without the stream: one (empty) warnings slot per query, and with `-db` the

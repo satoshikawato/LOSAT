@@ -162,7 +162,7 @@ LOSAT_X_TBXKMERGE	tblastx	conditional	required	required	only where PAIRPAR unit 
 LOSAT_X_TBXLUT	tblastx	conditional	required	required	only batches that run the reference frame loop (short queries via PAIRPARGATE, guard); diagnostics keeps chains
 LOSAT_X_TBXMASKSEEK	tblastx	always			scan of a frame's SEG masks in an outfmt 0 row (and a Web hit record) starts at the first mask range that reaches the row
 LOSAT_X_TBXNEXT	tblastx	conditional	required	required	2+ threads and more than one subject (native; threaded Wasm since 2026-10-20)
-LOSAT_X_TBXPIPE	tblastx	conditional	required	required	2+ threads native, 2+ query batches, HSP limit 4,194,304; not with debug output
+LOSAT_X_TBXPIPE	tblastx	conditional	required	required	2+ threads (native; threaded Wasm since 2026-10-29), 2+ query batches, HSP limit 4,194,304; not with debug output
 LOSAT_X_TBXPREFETCH	tblastx	conditional	gap	required	x86-64 only; only units whose diagonal table >= 1,536 KiB (value in KiB); new gap: needs a unit table >= 1,536 KiB (query ~400 kb), x86-64
 LOSAT_X_TBXQFRAMES	tblastx	conditional	required	required	2+ threads, 2+ frames in batch, not -seg no
 LOSAT_X_TBXQSLICE	tblastx	conditional	gap	required	x86-64 only; group span longer than 131,072 letters and span x threads >= 6 Mi letters; new gap: needs a group span > 131,072 letters and span x threads >= 6 Mi, x86-64

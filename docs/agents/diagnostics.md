@@ -2569,7 +2569,8 @@ Rebuilding less:
   one thread the frame loop for batches under 5,000 letters, `LOSAT_X_PAIRPARN1`, the units above; the units at
   4 threads).
 - `LOSAT_X_TBXPIPE=1` (TBLASTX, speed; in the strict set since 2026-10-19, on by default; acts only with
-  two or more threads in a native build and two or more query batches, and
+  two or more threads in a native build or, since 2026-10-29, a threaded WebAssembly build (`wasm-threads`)
+  and two or more query batches, and
   not with debugging output (`LOSAT_DEBUG*`, `LOSAT_TRACE_HSP` (diagnostic build), `LOSAT_DIAGNOSTICS`,
   `LOSAT_WASI_THREADS_DEBUG`, the stage dumps (diagnostic build)); in a default build any `LOSAT_DEBUG*`
   variable still keeps the pipe off (prefix scan in `x_pipe_wanted`), while the other diagnostic-build
@@ -2590,8 +2591,11 @@ Rebuilding less:
   call runs any job of the pool (rayon), so a linking call on the pool could wait inside another batch's
   whole subject chain and hold its own batch's end back (16 threads below: 9.54 s instead of 8.59 s). The
   last batch, and a batch over the limit, links on the pool as before. A
-  batch's `LOSAT_TIMING` block is printed when the loop takes the batch. `LOSAT_X_STATS=1` prints
-  `[X_STATS] TBXPIPE planned= taken= early= loop= waited= key_mismatch= max_held_hsps=`.
+  batch's `LOSAT_TIMING` block is printed when the loop takes the batch. While the loop waits for a batch
+  that started early it runs the pool's jobs, and when there is none it waits on the batch's condition
+  variable for at most 50 us (the same code in native and threaded WebAssembly builds: a timed
+  `memory.atomic.wait32` there; `std::thread::sleep` panics under the browser's WASI shim).
+  `LOSAT_X_STATS=1` prints `[X_STATS] TBXPIPE planned= taken= early= loop= waited= key_mismatch= max_held_hsps=`.
   On the workstation (16 CPUs of one socket, medians of alternating runs, reports equal), the three
   batches above took 8.59 s with it and 10.51 s without at 16 threads (peak memory 558 / 559 MiB), 14.00 /
   15.60 s at 8 (456 / 434 MiB) and 24.69 / 26.02 s at 4 (365 / 327 MiB); two batches (AP027131+AP027132 x

@@ -62,6 +62,21 @@ def fixtures(directory):
     # TBLASTN subjects: the coding sequence, a nucleotide prefix and a short piece of the coding sequence.
     records["tblastn-subjects"] = [records["blastx-query"][0], seq[:900], records["blastx-query"][0][:120]]
     (directory / "tblastn-subjects.fasta").write_text("".join(f">seq{i}\n{value}\n" for i, value in enumerate(records["tblastn-subjects"])))
+    # NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-178
+    # ```c++
+    #         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+    #
+    #             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    # ```
+    # TBLASTX query batches: three records longer than its batch size (10,002 letters) are three
+    # batches, which the batch pipe (LOSAT_X_TBXPIPE) overlaps at two threads or more.
+    def letters(name):
+        return "".join(line.strip() for line in (TESTS / "fasta" / name).read_text().splitlines() if not line.startswith(">"))
+    mela, pemo = letters("MelaMJNV.fasta"), letters("PemoMJNVA.fasta")
+    records["tbx-batches"] = [mela[i * 60_000:i * 60_000 + 10_500] for i in range(3)]
+    records["tbx-batch-subjects"] = [pemo[:15_000], pemo[150_000:165_000]]
+    for name in ["tbx-batches", "tbx-batch-subjects"]:
+        (directory / f"{name}.fasta").write_text("".join(f">{name}_{i}\n{value}\n" for i, value in enumerate(records[name])))
     return {name: directory / f"{name}.fasta" for name in records}
 
 
@@ -154,6 +169,29 @@ def main():
                 assert data == reference, f"raw output differs: {label}/{kind}-n{n}"
                 validate_thread_evidence(log, n, "native" if kind == "native-serial" else kind)
         print(label, "raw parity + thread contract PASS", flush=True)
+    # NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:193-195
+    # ```c++
+    #                 results = lcl_blast.Run();
+    # ```
+    # The batch pipe (LOSAT/src/algorithm/tblastx/x_batch_pipe.rs) starts the next query batch at the
+    # seed-stage end of the one before; its result is the batch's own at every thread count. The
+    # pipe is off with debugging output (LOSAT_WASI_THREADS_DEBUG), so these runs go without it and
+    # show the pipe's starts in its [X_STATS] line instead of the thread contract.
+    batches = ["-query", inputs["tbx-batches"], "-subject", inputs["tbx-batch-subjects"], "-outfmt", "6", "-out", "{out}"]
+    oracle = str(args.oracle_dir.resolve() / "tblastx") if args.oracle_dir else "tblastx"
+    reference, _ = execute("tblastx-batches/oracle", [oracle, *batches, "-num_threads", "1"], timeout=300)
+    assert reference, "tblastx-batches: the oracle reports no hit"
+    for kind in (kind for kind in ["native", "threaded"] if kind in prefixes):
+        for n in [1, 2, 4, 8, 16]:
+            data, log = execute(f"tblastx-batches/{kind}-n{n}", [*prefixes[kind], "tblastx", *batches, "-num_threads", str(n)],
+                                {"LOSAT_X_STATS": "1"}, timeout=300)
+            assert data == reference, f"raw output differs: tblastx-batches/{kind}-n{n}"
+            pipe = [line for line in log.splitlines() if line.startswith("[X_STATS] TBXPIPE ")]
+            if n == 1:
+                assert not pipe, f"tblastx-batches/{kind}-n1: {pipe}"
+            else:
+                assert len(pipe) == 1 and " planned=3 taken=3 early=2 " in pipe[0], f"tblastx-batches/{kind}-n{n}: {pipe}"
+    print("tblastx-batches raw parity + batch pipe PASS", flush=True)
     # NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:114-127
     # ```c++
     # CMemoryFile* CSeqDBAtlas::GetMemoryFile(const string& fileName)

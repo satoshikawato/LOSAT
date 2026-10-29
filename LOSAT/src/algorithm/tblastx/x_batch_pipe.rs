@@ -35,9 +35,15 @@
 //!    if the admission rule lets it. That search is a job of the loop's scope
 //!    (`rayon::in_place_scope`) and runs on the pool like any other.
 //! 3. The loop takes a started batch's result from its slot. Until the slot is filled the loop's
-//!    thread runs the pool's jobs (`rayon::yield_now`), and sleeps 50 us when there is none, so
-//!    no thread waits for a condition outside rayon's latches and no job waits at all (plan v4
-//!    §5: a waiting helper that a nested wait runs deadlocks).
+//!    thread runs the pool's jobs (`rayon::yield_now`); when there is none it waits on the slot's
+//!    condition variable, which the search notifies when it fills the slot, for at most 50 us
+//!    (`IDLE_WAIT`), and then looks for a job again. Only the loop waits, so no job waits at all
+//!    (plan v4 §5: a waiting helper that a nested wait runs deadlocks). The wait is the same in
+//!    native and threaded WebAssembly builds: there a timed wait of a condition variable is a
+//!    `memory.atomic.wait32` with a timeout, which both WASI hosts allow on the pool's threads
+//!    (rayon's idle threads wait the same way; the loop runs on the pool's thread 0, the thread
+//!    that starts the others), whereas `std::thread::sleep` is a `poll_oneoff` that panics under
+//!    the browser's WASI shim.
 //! 4. Admission: a subject holds its HSP list from its seed-stage end until it returns (its chain
 //!    links it, re-evaluates it and converts it). The next batch starts early only while the
 //!    subjects past their seed stage hold at most `HSP_LIMIT` HSPs (4 Mi: 352 MiB of 88-byte
@@ -77,10 +83,10 @@
 //! admission count. No thread-local scratch of TBLASTX is borrowed across a rayon wait (the link
 //! kernels make no rayon call; the subject buffers are taken and put back).
 //!
-//! Off (the loop as before): the switch off; a build without `parallel`, or wasm32 (the loop is
-//! kept there); one thread, or a loop not on a thread of its pool; fewer than two planned
-//! batches; any debugging output of the search (`LOSAT_DEBUG*`, the HSP trace, the diagnostics,
-//! the stage dumps), whose lines would interleave.
+//! Off (the loop as before): the switch off; a build without `parallel`, or a wasm32 build without
+//! `wasm-threads` (the loop is kept there); one thread, or a loop not on a thread of its pool;
+//! fewer than two planned batches; any debugging output of the search (`LOSAT_DEBUG*`, the HSP
+//! trace, the diagnostics, the stage dumps), whose lines would interleave.
 //!
 //! Diagnostics: with `LOSAT_X_STATS`, `[X_STATS] TBXPIPE planned= taken= early= loop= waited=
 //! key_mismatch= max_held_hsps=` at the end of the search (early: started at the batch before's
@@ -88,9 +94,12 @@
 //! waited for the slot).
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-use std::sync::Mutex;
 use std::sync::OnceLock;
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+use std::sync::{Condvar, Mutex};
 
 use anyhow::Result;
 
@@ -102,12 +111,18 @@ pub(super) fn on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXPIPE"))
 }
 
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 /// The HSPs the batches past their seed-stage end may hold when the next batch starts early
 /// (module header, item 4).
 const HSP_LIMIT: u64 = 1 << 22;
 
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 // No NCBI counterpart: a tuning and test override of `HSP_LIMIT` (`LOSAT_X_TBXPIPEHSPS=<n>`).
 fn hsp_limit() -> u64 {
     static LIMIT: OnceLock<u64> = OnceLock::new();
@@ -247,20 +262,81 @@ impl Drop for XSeedGuard<'_> {
     }
 }
 
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 // No NCBI counterpart: see `XPipe::closer`.
 /// Stops the early starts when dropped: when the loop returns, and when it unwinds.
 pub(super) struct XPipeCloser<'a>(&'a AtomicBool);
 
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 impl Drop for XPipeCloser<'_> {
     fn drop(&mut self) {
         self.0.store(true, Ordering::SeqCst);
     }
 }
 
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+// No NCBI counterpart: see `XPipe::wait`.
+/// The longest wait of the loop for a slot before it looks for a pool job again (module header,
+/// item 3).
+const IDLE_WAIT: std::time::Duration = std::time::Duration::from_micros(50);
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+// No NCBI counterpart: see `XPipe::wait`.
+/// The slot of one batch started early: its search's result or panic, and the signal that it
+/// was filled.
+struct XSlot<R> {
+    value: Mutex<Option<std::thread::Result<Result<R>>>>,
+    filled: Condvar,
+}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+impl<R> Default for XSlot<R> {
+    fn default() -> Self {
+        Self {
+            value: Mutex::new(None),
+            filled: Condvar::new(),
+        }
+    }
+}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+impl<R> XSlot<R> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<std::thread::Result<Result<R>>>> {
+        self.value
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Fills the slot and wakes the loop if it waits for it.
+    fn fill(&self, result: std::thread::Result<Result<R>>) {
+        *self.lock() = Some(result);
+        self.filled.notify_all();
+    }
+}
+
 /// What the pipe counts (`[X_STATS] TBXPIPE`).
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 #[derive(Default)]
 struct Counts {
     taken: AtomicU64,
@@ -274,7 +350,10 @@ struct Counts {
 pub(super) type XSearch<'s, R> =
     dyn Fn(std::ops::Range<usize>, Option<&XSeedEnd<'_>>) -> Result<R> + Sync + 's;
 
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 // No NCBI counterpart: see the module header.
 /// The planned batches of one search, their slots, and the admission count.
 pub(super) struct XPipe<'s, R> {
@@ -282,15 +361,18 @@ pub(super) struct XPipe<'s, R> {
     subjects: usize,
     search: &'s XSearch<'s, R>,
     started: Vec<AtomicBool>,
-    /// A batch's result, or the panic of its search (`run_early`).
-    slots: Vec<Mutex<Option<std::thread::Result<Result<R>>>>>,
+    /// A batch's result, or the panic of its search (`seed_ended`).
+    slots: Vec<XSlot<R>>,
     next: AtomicUsize,
     stop: AtomicBool,
     held: XHeld,
     counts: Counts,
 }
 
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 impl<'s, R: Send> XPipe<'s, R> {
     /// The pipe of `plan` (the batches' query ranges, in the loop's order) over `subjects`
     /// subjects; `None` when the plan has fewer than two batches.
@@ -318,7 +400,7 @@ impl<'s, R: Send> XPipe<'s, R> {
             subjects,
             search,
             started: (0..n).map(|_| AtomicBool::new(false)).collect(),
-            slots: (0..n).map(|_| Mutex::new(None)).collect(),
+            slots: (0..n).map(|_| XSlot::default()).collect(),
             next: AtomicUsize::new(0),
             stop: AtomicBool::new(false),
             held: XHeld::with_limit(limit),
@@ -358,24 +440,32 @@ impl<'s, R: Send> XPipe<'s, R> {
     }
 
     /// The slot of batch `i`, once its search has filled it; the thread runs the pool's jobs
-    /// meanwhile. A panic of that search is raised again here.
+    /// meanwhile (module header, item 3). A panic of that search is raised again here.
     fn wait(&self, i: usize) -> Result<R> {
+        let slot = &self.slots[i];
         let mut waited = false;
         loop {
-            if let Some(result) = self.slots[i]
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take()
-            {
+            let mut value = slot.lock();
+            if let Some(result) = value.take() {
                 if waited {
                     self.counts.waited.fetch_add(1, Ordering::Relaxed);
                 }
                 return result.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
             }
             waited = true;
-            match rayon::yield_now() {
-                Some(rayon::Yield::Executed) => {}
-                _ => std::thread::sleep(std::time::Duration::from_micros(50)),
+            drop(value);
+            if let Some(rayon::Yield::Executed) = rayon::yield_now() {
+                continue;
+            }
+            // No job of the pool to run: wait for the slot, and look for a job again after
+            // `IDLE_WAIT` (a job may have come meanwhile).
+            let value = slot.lock();
+            if value.is_none() {
+                drop(
+                    slot.filled
+                        .wait_timeout(value, IDLE_WAIT)
+                        .unwrap_or_else(std::sync::PoisonError::into_inner),
+                );
             }
         }
     }
@@ -416,9 +506,7 @@ impl<'s, R: Send> XPipe<'s, R> {
             if result.is_err() {
                 self.stop.store(true, Ordering::SeqCst);
             }
-            *self.slots[next]
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result);
+            self.slots[next].fill(result);
         });
     }
 
@@ -442,7 +530,11 @@ impl<'s, R: Send> XPipe<'s, R> {
     }
 }
 
-#[cfg(all(test, feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;

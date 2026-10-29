@@ -96,7 +96,10 @@ mod x_subject_next;
 // (tblastx_app.cpp:176-195), and each batch's result is the same whenever it is searched.
 #[path = "../x_batch_pipe.rs"]
 #[cfg_attr(
-    not(all(feature = "parallel", not(target_arch = "wasm32"))),
+    not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )),
     allow(dead_code)
 )]
 mod x_batch_pipe;
@@ -2630,7 +2633,10 @@ fn run_in_pool(
     // EXPERIMENT (LOSAT_X_TBXPIPE), dispatch: the batches the loop below will search, planned
     // before it (`x_pipe_plan`), when the pipe may run (`x_pipe_wanted`); `None` keeps the loop's
     // own searches.
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     let x_plan = x_pipe_wanted(parallel_pool)
         .then(|| x_pipe_plan(input, &reading, batch_size, query_records));
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:193-195
@@ -2685,7 +2691,10 @@ fn run_in_pool(
             take,
         )
     };
-    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     if let Some(plan) = x_plan {
         if let Some(pipe) = x_batch_pipe::XPipe::new(plan, search_subjects.count(), search) {
             let result = rayon::in_place_scope(|scope| {
@@ -2703,7 +2712,10 @@ fn run_in_pool(
 
 // EXPERIMENT (LOSAT_X_TBXPIPE): whether the pipe may run in this search (tblastx/x_batch_pipe.rs,
 // "Off"). No NCBI counterpart.
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 fn x_pipe_wanted(parallel_pool: &crate::utils::threading::SearchPool<'_>) -> bool {
     if !x_batch_pipe::on() {
         return false;
@@ -2732,7 +2744,10 @@ fn x_pipe_wanted(parallel_pool: &crate::utils::threading::SearchPool<'_>) -> boo
 // with one without letters). The check of the query splitter's environment concerns the first
 // batch only, which the loop starts itself after it. No NCBI counterpart (scheduling only; the
 // statements are the loop's, see there).
-#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 fn x_pipe_plan(
     input: &QueryInput,
     reading: &QueryReading,

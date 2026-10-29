@@ -1116,11 +1116,61 @@ fn x_target_list(
     out.into_boxed_slice()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-563,580-582,600-604 (cited
+// at `x_record_neighbors`). The statements of `x_record_neighbors`, for `x_build_lean` only (so that
+// the other programs' builders keep their code).
+#[allow(clippy::too_many_arguments)]
+fn x_lean_neighbors(
+    query_word: &[u8],
+    subject_word: &mut [u8; 32],
+    alphabet_size: usize,
+    wordsize: usize,
+    charsize: usize,
+    row_max: &[i32],
+    threshold: i32,
+    matrix: ScoringMatrix,
+    score: i32,
+    current_pos: usize,
+    out: &mut Vec<u16>,
+) {
+    let query_residue = query_word[current_pos] as usize;
+    let score = score - row_max[query_residue];
+    if current_pos == wordsize - 1 {
+        for residue in 0..alphabet_size {
+            let residue_score = lookup_matrix_score(matrix, query_residue, residue);
+            if score + residue_score >= threshold {
+                subject_word[current_pos] = residue as u8;
+                out.push(x_word_index(subject_word, wordsize, charsize));
+            }
+        }
+        return;
+    }
+    for residue in 0..alphabet_size {
+        let residue_score = lookup_matrix_score(matrix, query_residue, residue);
+        if score + residue_score >= threshold {
+            subject_word[current_pos] = residue as u8;
+            x_lean_neighbors(
+                query_word,
+                subject_word,
+                alphabet_size,
+                wordsize,
+                charsize,
+                row_max,
+                threshold,
+                matrix,
+                score + residue_score,
+                current_pos + 1,
+                out,
+            );
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:490-496,504-509,539-543
 // (cited at `x_target_list`). The statements of `x_target_list`, appending T(s) to `out` instead of
 // returning a list of its own (`x_build_lean`).
 #[allow(clippy::too_many_arguments)]
-fn x_push_target_list(
+fn x_lean_target_list(
     query_word: &[u8],
     alphabet_size: usize,
     wordsize: usize,
@@ -1145,7 +1195,7 @@ fn x_push_target_list(
             max_score += row_max[*residue as usize];
         }
         let mut subject_word = [0u8; 32];
-        x_record_neighbors(
+        x_lean_neighbors(
             query_word,
             &mut subject_word,
             alphabet_size,
@@ -1557,7 +1607,8 @@ fn x_build_direct_in<C: XVec>(
 // same order (the module comment's identity argument), so the table is the reference table.
 /// The table `build_lookup_from_prepared` returns, built without chains and without a neighbour
 /// memo, every temporary freed by the build (TBLASTN). `Err(prepared)` where `x_build_direct`
-/// declines (diagnostics mode, or a backbone index wider than 16 bits).
+/// declines (diagnostics mode, whose prints read the chains, or a backbone index wider than 16 bits,
+/// which no table of LOSAT's TBLASTN has: word size 3, or 2 with BLOSUM45).
 #[inline(never)]
 pub(super) fn x_build_lean(
     prepared: PreparedLookupQuery,
@@ -1641,7 +1692,7 @@ pub(super) fn x_build_lean(
         let from = targets.len();
         // blast_aalookup.c:490: w = query + offset_list[2];
         let first = usize::try_from(offsets[start]).expect("NCBI BLAST query offset must fit");
-        x_push_target_list(
+        x_lean_target_list(
             &concat_query[first..],
             alphabet_size,
             word_length,
@@ -2625,8 +2676,10 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 (cited at
     // `x_build_direct`). TBLASTN's lean build (`x_build_lean`) gives the reference table for every
-    // threshold, mask, matrix and word length the in-place builders take, and declines a backbone
-    // index wider than 16 bits (word length 4), where the reference builder runs.
+    // threshold, mask and matrix at word lengths 2 and 3 (LOSAT's TBLASTN: BLOSUM62 word size 3
+    // threshold 13, BLOSUM45 word size 2 threshold 16), with the overflow array reached at each
+    // setting, and for a query set without any word; it declines word length 4 (20-bit backbone
+    // indexes), where the reference builder runs.
     #[test]
     fn lean_table_equals_reference_for_thresholds_masks_matrices_and_word_lengths() {
         let mut seed = 11u64;
@@ -2643,23 +2696,52 @@ mod tests {
             ],
             vec![frame(residues(&mut seed, 1200), vec![], 1)],
         ];
-        let prepared_w = |matrix: ScoringMatrix, word_length: usize| {
-            let bounds = if matrix == ScoringMatrix::Blosum62 {
-                (-4, 11)
-            } else {
-                matrix_score_bounds(matrix)
+        // No word at word length 3: frames shorter than the word, and one masked whole.
+        let wordless = vec![vec![
+            frame(residues(&mut seed, 2), vec![], 1),
+            frame(residues(&mut seed, 40), vec![(0, 39)], 2),
+            frame(Vec::new(), vec![], 3),
+        ]];
+        let prepared_w =
+            |queries: &[Vec<QueryFrame>], matrix: ScoringMatrix, word_length: usize| {
+                let bounds = if matrix == ScoringMatrix::Blosum62 {
+                    (-4, 11)
+                } else {
+                    matrix_score_bounds(matrix)
+                };
+                prepare_lookup_query(
+                    queries,
+                    ideal_karlin_params_for_matrix(matrix, bounds),
+                    &compute_std_aa_composition(),
+                    word_length,
+                    false,
+                    matrix,
+                    bounds,
+                )
             };
-            prepare_lookup_query(
-                &queries,
-                ideal_karlin_params_for_matrix(matrix, bounds),
-                &compute_std_aa_composition(),
-                word_length,
-                false,
+        let same = |queries: &[Vec<QueryFrame>],
+                    matrix: ScoringMatrix,
+                    word_length: usize,
+                    threshold: i32| {
+            let reference = build_lookup_from_prepared(
+                prepared_w(queries, matrix, word_length),
+                threshold,
                 matrix,
-                bounds,
+                word_length,
             )
+            .0;
+            let lean = match x_build_lean(
+                prepared_w(queries, matrix, word_length),
+                threshold,
+                matrix,
+                word_length,
+            ) {
+                Ok(table) => table,
+                Err(_) => panic!("the lean builder declined word length {word_length}"),
+            };
+            x_assert_same_table(&lean, &reference);
+            reference
         };
-        let mut overflow_seen = false;
         for (matrix, word_length, thresholds) in [
             (
                 ScoringMatrix::Blosum62,
@@ -2667,33 +2749,25 @@ mod tests {
                 &[0, 1, 11, 12, 13, 19, 30, 1000][..],
             ),
             (ScoringMatrix::Blosum62, 2, &[0, 8, 11, 13][..]),
+            (ScoringMatrix::Blosum45, 2, &[16][..]),
             (ScoringMatrix::Blosum45, 3, &[13, 14][..]),
             (ScoringMatrix::Pam30, 3, &[11][..]),
         ] {
+            let mut overflow_seen = false;
             for &threshold in thresholds {
-                let reference = build_lookup_from_prepared(
-                    prepared_w(matrix, word_length),
-                    threshold,
-                    matrix,
-                    word_length,
-                )
-                .0;
-                let lean = match x_build_lean(
-                    prepared_w(matrix, word_length),
-                    threshold,
-                    matrix,
-                    word_length,
-                ) {
-                    Ok(table) => table,
-                    Err(_) => panic!("the lean builder declined word length {word_length}"),
-                };
-                x_assert_same_table(&lean, &reference);
-                overflow_seen |= !reference.overflow.is_empty();
+                overflow_seen |= !same(&queries, matrix, word_length, threshold)
+                    .overflow
+                    .is_empty();
             }
+            assert!(
+                overflow_seen,
+                "{matrix:?} word length {word_length} must reach the overflow array"
+            );
         }
-        assert!(overflow_seen, "the fixture must reach the overflow array");
+        let empty = same(&wordless, ScoringMatrix::Blosum62, 3, 13);
+        assert!(empty.pv.iter().all(|&bits| bits == 0) && empty.overflow.is_empty());
         assert!(x_build_lean(
-            prepared_w(ScoringMatrix::Blosum62, 4),
+            prepared_w(&queries, ScoringMatrix::Blosum62, 4),
             13,
             ScoringMatrix::Blosum62,
             4

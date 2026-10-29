@@ -87,6 +87,9 @@ pub use x_scan_bf::print_summary as x_scan_bf_print_summary;
 // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use x_scan_byte::print_summary as x_scan_byte_print_summary;
+// LOSAT_X_TBNLUTLEAN: the summary line `main` prints at exit (the tables TBLASTN built lean or with
+// chains). No NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub use crate::algorithm::tblastx::lookup::x_tbn_lut_print_summary as x_lut_lean_print_summary;
 // The summary line of the linking lookup that `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use stage_d_linking::x_link_ctx_print_summary;

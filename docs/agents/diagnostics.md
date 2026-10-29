@@ -5335,25 +5335,39 @@ Scheduling (each value computed by one thread with the original function; order 
   `x_lookup_table_for_profile`): a query batch's lookup table is built with the passes of the in-place builder of
   BLASTX, BLASTP and TBLASTX (`x_build_direct`: count, layout, fill, no chains) with every temporary freed by the
   build: the exact backbone as a counting sort of the query's words, the neighbour lists of its words made once into
-  one vector (no memo kept by the thread), and the per-cell counts reused as the fill cursors. The chain builder kept the exact and thin backbones' cells (446 KiB each), their
-  chains' slabs (about 1.4 MiB) and the counts next to the new table, 3.4 MiB at once for a batch of 18,000 letters;
-  the lean build peaks at about 1.5 MiB. TBLASTN builds each batch's table on the thread of the batch's first
-  subject, the batches side by side, and a thread's glibc arena keeps the high water of what it allocated, so the
-  difference stayed in each building thread's arena under what its search allocated later. The table is the chain
-  builder's (unit test `lean_table_equals_reference_for_thresholds_masks_matrices_and_word_lengths`: BLOSUM62 word
-  lengths 2 and 3, BLOSUM45 at 2 and 3, PAM30, thresholds 0-1000, masks, the overflow array and a query set without
-  words; `tests/tblastn_lut_lean.rs`: the same report as `=0` with BLOSUM62 word size 3 and BLOSUM45 word size 2, at
-  one and four threads, every table lean by default and with chains with `=0`, read from
-  `[X_STATS] TBNLUTLEAN lean= chain=` with `LOSAT_X_STATS`). Always: every TBLASTN lookup table (LOSAT's TBLASTN
-  takes word size 3, and 2 with BLOSUM45) outside diagnostics mode, whose prints read the chains; a table of 4 or
-  more letters a word (backbone indexes over 16 bits, which the CLI refuses) would take the chain builder, as the
-  in-place builders decline it.
-  Measured 2026-10-29 on the workstation (2x Xeon Gold 6338; probe on #615's head, every output of a case the same
-  bytes in every arm): the 595 proteins of AP027131 x AP027133 (`-db_gencode 4`) `-subject` at 48 threads, peak
-  `RssAnon` (10 ms samples, node 0, untimed) 75.1-76.3 -> 69.1-69.6 MiB in 3 runs each; under a malloc recorder the
-  10 building threads' arenas no longer reach their high water in the build (summed high water of the 48 arenas
-  79.2 -> 70.0 MiB). The BLASTX builder with its thread's memo (`x_build_direct`) left the peak as it was (76.3-76.8).
-  At one thread x0.9981 of the instructions (AP027131 `-subject`) and x0.99996 (`dmel_b4.faa` x zebrafish cDNAs `-db`).
+  one vector (no memo kept by the thread), and the per-cell counts reused as the fill cursors. The table's backbone
+  and overflow are mapped (on 64-bit glibc a capacity above its mmap ceiling, `utils/x_mapped.rs`
+  `x_unthresholded_capacity`; only the pages written are resident; elsewhere the capacity `Vec` gives), so that a
+  batch's table goes back when its search ends.
+  The chain builder kept the exact and thin backbones' cells (446 KiB each), their chains' slabs (about 1.4 MiB) and
+  the counts next to the new table, 3.4 MiB at once for a batch of 18,000 letters; the lean build peaks at about
+  1.5 MiB. TBLASTN builds each batch's table on the thread of the batch's first subject, and a thread's glibc arena
+  keeps the high water of what it allocated: with the batches searched side by side (`-subject`) the difference
+  stayed in each building thread's arena under what its search allocated later. With the batches searched one after
+  the other (`-db`) glibc trimmed the chain builder's large free top with the table at the batch's end; the lean
+  build's smaller one is not trimmed, and a table left in the arena kept the peak 1-3 % above the chain builder's
+  until the table was mapped.
+  The table is the chain builder's (unit test `lean_table_equals_reference_for_thresholds_masks_matrices_and_word_lengths`:
+  BLOSUM62 word lengths 2 and 3, BLOSUM45 at 2 and 3, PAM30, thresholds 0-1000, masks, the overflow array and a query
+  set without words; `tests/tblastn_lut_lean.rs`: the same report as `=0` with BLOSUM62 word size 3 and BLOSUM45 word
+  size 2, at one and four threads, every table lean by default and with chains with `=0`, read from
+  `[X_STATS] TBNLUTLEAN lean= chain=` with `LOSAT_X_STATS`). Always: every TBLASTN lookup table (LOSAT's TBLASTN takes
+  word size 3, and 2 with BLOSUM45) outside diagnostics mode, whose prints read the chains; a table of 4 or more
+  letters a word (backbone indexes over 16 bits, which the CLI refuses) would take the chain builder, as the in-place
+  builders decline it.
+  Measured 2026-10-30 on the workstation (2x Xeon Gold 6338; base dev a2ee6ff3; every output of a case the same
+  bytes in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16
+  CPUs for every run, medians in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): the 595 proteins of AP027131
+  x AP027133 (`-db_gencode 4`) `-subject` at 1 / 16 / 32 / 40 / 48 threads 17 / 53 / 68 / 76 / 83 -> 17 / 45 / 60 /
+  67 / 75 MiB (8 rounds, lower in every pair; NCBI `-subject` runs one thread: 81), `-db` at 48 95 -> 93 (NCBI 115);
+  `dmel_b4.faa` x zebrafish cDNAs (`-db`, `-evalue 1e-5 -max_target_seqs 5`) at 16 / 32 / 40 / 48 62 / 90 / 102 / 116
+  -> 61 / 90 / 101 / 116 (x0.985 / x0.994 / x0.997 / x0.994, 16 rounds, lower in 8 / 12 / 9 / 11 of the pairs; NCBI
+  128 / 139 / 145 / 151); `=0` in the same binary x0.994-1.012 of the base. At one thread x0.9957 of the instructions
+  (AP027131 `-subject`) and x0.9998 (`dmel_b4.faa`); BLASTX, BLASTP and TBLASTX x1.00000 (their code is the same).
+  Time (node 1, cores warmed 3 s before each run, arms alternating in order; the PR's binary against the base, and
+  `=0` in the PR's binary): AP027131 `-subject` at 1 / 16 / 32 threads x0.9949 / x0.9986 / x0.9840 (11, 7, 10 of 12
+  faster), against `=0` x0.9937 / x0.9957 / x0.9844; `dmel_b4.faa` at 1 / 8 / 16 / 32 x0.9986 / x0.9963 / x0.9965 /
+  x0.9946 (6 of 8, 11, 9, 11 of 12 faster), against `=0` x0.9989 / x0.9987 / x0.9984 / x0.9919.
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

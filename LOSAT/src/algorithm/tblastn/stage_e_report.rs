@@ -1212,7 +1212,7 @@ fn write_pairwise(
         matrix_name: matrix_name.to_string(),
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
-        word_threshold: f64::from(scoring.threshold),
+        word_threshold: scoring.threshold,
         window_size: scoring.window,
         gapped_karlin: lookup_protein_params(&spec),
         gumbel,

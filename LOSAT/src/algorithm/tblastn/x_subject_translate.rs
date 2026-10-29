@@ -1738,6 +1738,7 @@ mod tests {
                             ScoringMatrix::Blosum62,
                             3,
                             &lookup,
+                            &Default::default(),
                             None,
                         )
                         .unwrap();
@@ -1818,6 +1819,7 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 3,
                 &lookup,
+                &Default::default(),
                 None,
             )
             .unwrap()
@@ -1953,6 +1955,7 @@ mod tests {
                         ScoringMatrix::Blosum62,
                         3,
                         &lookup,
+                        &Default::default(),
                         None,
                     )
                     .unwrap();
@@ -1980,6 +1983,7 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 3,
                 &lookup,
+                &Default::default(),
                 None,
             )
         };

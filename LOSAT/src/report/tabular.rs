@@ -643,6 +643,14 @@ impl TabularNames {
         Ok(names)
     }
 
+    /// These lookups with `texts`, the texts of an open of the database by the rows before them
+    /// (an earlier query batch's), written before the texts of their own open.
+    pub fn opened_before(mut self, mut texts: Vec<String>) -> Self {
+        texts.append(&mut self.open);
+        self.open = texts;
+        self
+    }
+
     /// What the lookup of `taxid` found (`None`: not found, or not looked up).
     fn get(&self, taxid: i32) -> Option<&crate::seqdb::taxdb::TaxNames> {
         self.answers

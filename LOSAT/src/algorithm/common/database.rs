@@ -1322,6 +1322,9 @@ pub(crate) struct TaxdbRun {
     /// The refusal of a run whose prefetch NCBI's cache makes write the offset error more than
     /// once, as a reader's refusal ([`TaxdbRun::cache_collision`]).
     collision: std::sync::OnceLock<Option<(std::path::PathBuf, String)>>,
+    /// The texts of opening the database when the rows of a tabular report opened it, kept for
+    /// those rows ([`TaxdbRun::open_for_rows`], [`tabular_names`]).
+    rows_open: std::sync::Mutex<Vec<String>>,
 }
 
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
@@ -1451,6 +1454,30 @@ impl TaxdbRun {
     /// drops.
     pub(crate) fn prefetch_refused(&self, db: &SeqDb) -> bool {
         self.cache_collision(db).is_some()
+    }
+
+    /// The open of the database by the rows of a query batch whose report looks names up, made
+    /// after the batch's prefetch ([`prefetch_messages`]) and before the next batch's: NCBI writes
+    /// a batch's rows before it fetches the next batch, and a plural name looks taxid 0 up, which
+    /// the prefetch does not, so the run's first lookup can be such a row's. The texts of opening,
+    /// when this call opens the database, are kept for the rows ([`tabular_names`]). Nothing
+    /// without `taxdb.bti` on the search path.
+    pub(crate) fn open_for_rows(&self, db: &SeqDb, program: &str) -> Result<()> {
+        if !self.found(db) {
+            return Ok(());
+        }
+        let Some(search_path) = db.search_path() else {
+            return Ok(());
+        };
+        let texts = self
+            .taxdb(search_path)
+            .open()
+            .map_err(|error| taxdb_error(error, program))?;
+        self.rows_open
+            .lock()
+            .expect("the texts of opening")
+            .extend(texts);
+        Ok(())
     }
 
     /// The run's taxonomy database, a handle that opens it at its first name asked for.
@@ -1715,14 +1742,16 @@ pub(crate) fn tabular_names<'t>(
     let Some(search_path) = db.search_path() else {
         return Ok(None);
     };
-    crate::report::tabular::TabularNames::look_up(
+    let names = crate::report::tabular::TabularNames::look_up(
         spec,
         &run.taxdb(search_path),
         taxonomies,
         program,
     )
-    .map(Some)
-    .map_err(|error| taxdb_error(error, program))
+    .map_err(|error| taxdb_error(error, program))?;
+    // The texts of opening of an open by the rows of an earlier batch ([`TaxdbRun::open_for_rows`]).
+    let opened = std::mem::take(&mut *run.rows_open.lock().expect("the texts of opening"));
+    Ok(Some(names.opened_before(opened)))
 }
 
 /// NCBI's messages about the taxonomy database when a query batch prefetches the subjects it

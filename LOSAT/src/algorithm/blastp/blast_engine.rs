@@ -10872,9 +10872,24 @@ fn run_resolved_in_pool(
                 .is_some_and(|outfmt| outfmt.prefetches_subjects())
             && database.taxdb_found()
         {
+            // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
+            // too, which the prefetch does not: the rows of a batch with hits may open the
+            // taxonomy database before a later batch's prefetch (`TaxdbRun::open_for_rows`).
+            let plural_names = matches!(
+                format_plans.first(),
+                Some(BlastpReport::CustomTabular(spec)) if spec.checks_taxdb()
+            );
             for batch in &query_batches {
-                let messages =
-                    titles.prefetch_messages(database, &hit_lists[batch.searched.clone()])?;
+                let lists = &hit_lists[batch.searched.clone()];
+                let messages = titles.prefetch_messages(database, lists)?;
+                if plural_names
+                    && lists
+                        .iter()
+                        .flatten()
+                        .any(|hit_list| hit_list.hsplist_count > 0)
+                {
+                    database.open_for_tabular_rows(args.app.name())?;
+                }
                 if messages.is_empty() {
                     continue;
                 }

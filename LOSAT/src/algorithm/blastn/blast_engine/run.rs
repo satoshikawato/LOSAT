@@ -9089,7 +9089,26 @@ fn run_in_pool(
                 .is_some_and(|format| format.prefetches_subjects())
                 && database.taxdb_found()
             {
-                match database.prefetch_messages(&titles, &batch_hit_lists) {
+                // A custom tabular report with a plural name looks every taxid of its rows up,
+                // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
+                // the taxonomy database before a later batch's prefetch
+                // (`TaxdbRun::open_for_rows`).
+                let rows_open = matches!(
+                    output_formats.first(),
+                    Some(BlastnOutputFormat::CustomTabular(spec)) if spec.checks_taxdb()
+                ) && batch_hit_lists
+                    .iter()
+                    .flatten()
+                    .any(|hit_list| !hit_list.hsplist_array.is_empty());
+                let prefetch = database
+                    .prefetch_messages(&titles, &batch_hit_lists)
+                    .and_then(|messages| {
+                        if rows_open {
+                            database.open_for_tabular_rows()?;
+                        }
+                        Ok(messages)
+                    });
+                match prefetch {
                     Ok(messages) => warnings[start].extend(messages),
                     Err(error) => {
                         let written = if stream.acting() { start } else { 0 };

@@ -206,6 +206,11 @@ impl BlastpDatabase {
     ) -> Result<Option<crate::report::tabular::TabularNames>> {
         shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, program)
     }
+
+    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
+    pub(super) fn open_for_tabular_rows(&self, program: &str) -> Result<()> {
+        self.taxdb.open_for_rows(&self.db, program)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:821-848

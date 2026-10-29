@@ -246,6 +246,11 @@ impl BlastnDatabase {
         shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
     }
 
+    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
+    pub(super) fn open_for_tabular_rows(&self) -> Result<()> {
+        self.taxdb.open_for_rows(&self.db, PROGRAM)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:222-234
     // ```c++
     //             vect.GetSeqData(tgt_rg.GetFrom(), tgt_rg.GetToOpen(), seq_data);

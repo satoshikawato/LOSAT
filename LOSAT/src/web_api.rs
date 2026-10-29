@@ -281,6 +281,8 @@ fn parse_blastn_args(
         window_masker_db: None,
         window_masker: None,
         window_masker_counts: None,
+        // ABI v1 writes no tabular field list.
+        tabular_taxdb: None,
         strand: "both".to_string(),
         // The frozen web ABI v1 (plan TD-1) has no ranges.
         query_loc: None,

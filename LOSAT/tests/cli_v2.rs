@@ -990,13 +990,19 @@ enum Outfmt {
     /// NCBI's error after the input and output files are opened (its formatting handler or the
     /// XInclude check): the message of "BLAST query/options error: ...".
     NcbiLater(&'static str),
+    /// A format LOSAT writes whose custom specification NCBI's formatting handler then rejects
+    /// (`s_ValidateCustomDelim`): the message of "BLAST query/options error: ...".
+    WritesThenNcbi(LOSAT::blastinput::app::ReportFormat, &'static str),
     /// LOSAT's rejection before the inputs are read; `{P}` is the program's name.
     Losat(&'static str),
 }
 
 const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
-const CUSTOM: &[&str] = &["blastp", "blastx"];
-const NO_CUSTOM: &[&str] = &["blastn", "tblastn", "tblastx"];
+const CUSTOM: &[&str] = &["blastn", "blastp", "blastx"];
+/// The programs that check their own field lists and take no delimiter (line CLI C2 moves them to
+/// the shared tabular writer in its PR 3).
+const OWN_FIELDS: &[&str] = &["blastp", "blastx"];
+const NO_CUSTOM: &[&str] = &["tblastn", "tblastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
 const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
@@ -1032,7 +1038,8 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "0 delim=,", None, Writes(Pairwise)),
         (ALL, "6 delim=", None, Writes(Tabular)),
         (ALL, "7 delim= ", None, Writes(TabularWithComments)),
-        // Custom fields (BLASTP and BLASTX check their own lists) and delimiters.
+        // Custom fields (BLASTP and BLASTX check their own lists; BLASTN writes every field and
+        // a delimiter with the shared tabular writer, line CLI C2) and delimiters.
         (CUSTOM, "6 std", None, Writes(Tabular)),
         (CUSTOM, "07 std", None, Writes(TabularWithComments)),
         (CUSTOM, "6 qseqid sseqid pident length", None, Writes(Tabular)),
@@ -1042,8 +1049,20 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (NO_CUSTOM, "7  qaccver", None, CUSTOM_SPEC),
         (NO_CUSTOM, "6 delim=,", None, CUSTOM_SPEC),
         (NO_CUSTOM, "6 delimiter=;", None, CUSTOM_SPEC),
-        (CUSTOM, "6 delim=, std", None, DELIMITER),
-        (CUSTOM, "6 delim=;", None, DELIMITER),
+        (OWN_FIELDS, "6 delim=, std", None, DELIMITER),
+        (OWN_FIELDS, "6 delim=;", None, DELIMITER),
+        (&["blastn"], "7  qaccver", None, Writes(TabularWithComments)),
+        (&["blastn"], "6 delim=,", None, Writes(Tabular)),
+        (&["blastn"], "6 delimiter=;", None, Writes(Tabular)),
+        (&["blastn"], "6 delim=, std", None, Writes(Tabular)),
+        (&["blastn"], "7 delim=| qseqid sseqid", None, Writes(TabularWithComments)),
+        (&["blastn"], "6 delim=; qseqid", None, Writes(Tabular)),
+        // NCBI's check of a custom delimiter against the fields that separate their entries with
+        // it, searched as text (blast_args.cpp:2753-2792).
+        (&["blastn"], "6 delim=; qseqid staxids", None, WritesThenNcbi(Tabular, "Your custom record separator (;) is also used by the format specifier (staxids) to separate multiple entries. Please use a different record separator (delim keyword).")),
+        (&["blastn"], "6 delim=; qseqid xstaxidsx", None, WritesThenNcbi(Tabular, "Your custom record separator (;) is also used by the format specifier (staxids) to separate multiple entries. Please use a different record separator (delim keyword).")),
+        (&["blastn"], "7 delim=/ frames", None, WritesThenNcbi(TabularWithComments, "Your custom record separator (/) is also used by the format specifier (frames) to separate multiple entries. Please use a different record separator (delim keyword).")),
+        (&["blastn"], "10 delim=<> salltitles", None, WritesThenNcbi(CommaSeparatedValues, "Your custom record separator (<>) is also used by the format specifier (salltitles) to separate multiple entries. Please use a different record separator (delim keyword).")),
         // NCBI's errors when it reads the value (the delimiter is read before the number).
         (ALL, "abc", None, Ncbi(1, "BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
         (ALL, "0x6", None, Ncbi(1, "BLAST query/options error: '0x6' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
@@ -1072,9 +1091,14 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "2", None, UNSUPPORTED),
         (ALL, "3", None, UNSUPPORTED),
         (ALL, "4", None, UNSUPPORTED),
-        (ALL, "10", None, UNSUPPORTED),
+        (NOT_BLASTN, "10", None, UNSUPPORTED),
         (ALL, "18", None, UNSUPPORTED),
-        (ALL, "20", None, UNSUPPORTED),
+        (NOT_BLASTN, "20", None, UNSUPPORTED),
+        // Line CLI C2 (PR 1): BLASTN writes 10 and 20 with the shared tabular writer.
+        (&["blastn"], "10", None, Writes(CommaSeparatedValues)),
+        (&["blastn"], "10 delim=; qseqid sseqid", None, Writes(CommaSeparatedValues)),
+        (&["blastn"], "20", None, Writes(CommaSeparatedValuesWithHeader)),
+        (&["blastn"], " 20 qseqid sseqid qcovus ", None, Writes(CommaSeparatedValuesWithHeader)),
         // Line OF track S (structured formats): 8 and 12 in every program (OF3b), 9 (OF3c), 5 in
         // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in every program (BLASTP and BLASTN: OF5a; BLASTX, TBLASTN and TBLASTX: OF5b), NCBI dropping a custom specification
         // (blast_args.cpp:2844-2851); the others not yet.
@@ -1164,6 +1188,18 @@ fn output_formats_follow_the_format_table() {
                     let error = formatting_handler_check(&choice, program)
                         .and_then(|()| xinclude_check(&choice))
                         .unwrap_err();
+                    assert_eq!(
+                        native(error),
+                        (
+                            1,
+                            format!("BLAST query/options error: {message}\nPlease refer to the BLAST+ user manual.\n")
+                        ),
+                        "{case}"
+                    );
+                }
+                Outfmt::WritesThenNcbi(format, message) => {
+                    assert_eq!(report.unwrap(), Some(format), "{case}");
+                    let error = formatting_handler_check(&choice, program).unwrap_err();
                     assert_eq!(
                         native(error),
                         (

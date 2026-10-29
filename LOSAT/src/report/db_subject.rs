@@ -331,6 +331,56 @@ impl ParsedSubject {
         ])
     }
 
+    /// The tabular `sgi`: the first GI of the subject Bioseq's ids (`FindGi`; `seq_id_list` only
+    /// replaces ids that are no GI), 0 for none.
+    pub fn tabular_gi(&self) -> i64 {
+        self.target().gi()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:544-556
+    // ```c++
+    //     if (bdlRef.NotEmpty() && bdlRef->CanGet() && bdlRef->IsSet() && !bdlRef->Get().empty()){
+    //         vector< CConstRef<CSeq_id> > original_seqids;
+    //
+    //         ITERATE(CBlast_def_line_set::Tdata, itr, bdlRef->Get()) {
+    //             original_seqids.clear();
+    //             ITERATE(CBlast_def_line::TSeqid, id, (*itr)->GetSeqid()) {
+    //                 original_seqids.push_back(*id);
+    //             }
+    //             list<CRef<objects::CSeq_id> > next_seqid_list;
+    //             // Next call replaces BL_ORD_ID if found.
+    //             CShowBlastDefline::GetSeqIdList(bh,original_seqids,next_seqid_list);
+    //             m_SubjectIds.push_back(next_seqid_list);
+    //         }
+    // ```
+    /// The tabular ids of every definition line (`x_SetSubjectIds`: `sallseqid`, `sallgi`,
+    /// `sallacc`), in the stored order: each line's ids after `seq_id_list` with the first word
+    /// of the subject Bioseq's title, as `tabular_ids` makes them. `Err` as `tabular_ids`'.
+    pub fn all_tabular_ids(
+        &self,
+        protein: bool,
+    ) -> Result<Vec<super::tabular::DeflineIds>, &'static str> {
+        let word = self.title_word(protein)?;
+        Ok(self
+            .set
+            .deflines
+            .iter()
+            .map(|defline| {
+                let ids = seq_id_list(&defline.ids, &word);
+                let field = |kind| {
+                    let mut out = Vec::new();
+                    tabular_id(&ids, kind, &mut out);
+                    out
+                };
+                super::tabular::DeflineIds {
+                    id: field(TabularId::Full),
+                    gi: defline.gi(),
+                    accession: field(TabularId::Accession),
+                }
+            })
+            .collect())
+    }
+
     /// The title of the first definition line, empty for none (`stitle`; the writers show an
     /// empty one as `N/A`).
     pub fn first_title(&self) -> &[u8] {

@@ -1603,8 +1603,10 @@ fn x_build_direct_in<C: XVec>(
 // source order, into one vector (no memo outlives the build), the count pass runs as each list is
 // made, and the counts become the cells' fill cursors once the layout has read them (a cell of
 // more than AA_HITS_PER_CELL entries starts at its overflow cursor, any other at 0 in its own
-// entries; `num_used` tells the two apart). The appends are those of `x_build_direct_in`, in the
-// same order (the module comment's identity argument), so the table is the reference table.
+// entries; `num_used` tells the two apart). The table's backbone and overflow are mapped on
+// 64-bit glibc (`x_unthresholded_capacity`), so that a batch's table goes back when its search
+// ends. The appends are those of `x_build_direct_in`, in the same order (the module comment's
+// identity argument), so the table is the reference table.
 /// The table `build_lookup_from_prepared` returns, built without chains and without a neighbour
 /// memo, every temporary freed by the build (TBLASTN). `Err(prepared)` where `x_build_direct`
 /// declines (diagnostics mode, whose prints read the chains, or a backbone index wider than 16 bits,
@@ -1721,9 +1723,23 @@ pub(super) fn x_build_lean(
             longest_chain = count as i32;
         }
     }
-    let mut backbone: Vec<BackboneCell> = vec![BackboneCell::default(); backbone_size];
+    // The table lives as long as its query batch; its backbone and overflow are given a capacity
+    // that glibc maps whatever their size and that leaves its mmap threshold as it is
+    // (`x_unthresholded_capacity`; the capacity is what `Vec` would give elsewhere), so that their
+    // pages go back when the batch's search drops the table instead of staying in the building
+    // thread's arena, where the batches searched one after the other (`-db`) left a table's worth.
+    // Only the cells and entries written below are touched.
+    let mut backbone: Vec<BackboneCell> =
+        Vec::with_capacity(crate::utils::x_mapped::x_unthresholded_capacity(
+            backbone_size,
+            std::mem::size_of::<BackboneCell>(),
+        ));
+    backbone.resize(backbone_size, BackboneCell::default());
     let mut pv: Vec<u32> = vec![0u32; pv_size];
-    let mut overflow: Vec<i32> = vec![0; overflow_size];
+    let mut overflow: Vec<i32> = Vec::with_capacity(
+        crate::utils::x_mapped::x_unthresholded_capacity(overflow_size, std::mem::size_of::<i32>()),
+    );
+    overflow.resize(overflow_size, 0);
     let mut overflow_cursor = 0usize;
     for (idx, slot) in counts.iter_mut().enumerate() {
         let count = *slot as usize;

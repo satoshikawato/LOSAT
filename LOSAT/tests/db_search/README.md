@@ -117,6 +117,25 @@ Run from `LOSAT/`:
         -title "slices of a genetic code 4 genome" -blastdb_version 4
     rm tests/db_search/tslice.njs tests/db_search/tgc4.njs
 
+TBLASTN tblastn-fast inputs (rows `tfast.*` of `outfmt0_manifest.tsv` and `db.tfast.*`, line DI4: AMRFinderPlus runs
+`tblastn -subject GENOME -query AMRProt.fa -task tblastn-fast -word_size 5 -window_size 15 -threshold 100 ...`),
+written by `make_tfast_amr_inputs.py` from the nucleotide sequences of ABRicate's `ncbi` database (NCBI's AMR
+reference genes, `db/ncbi/sequences`; the accessions are in the files):
+
+- `tfast_amr.fna`: two contigs of seeded random spacer DNA with ten AMR genes: forward (TEM-1, CTX-M-15, Sul1,
+  Tet(A)), reverse-complemented (KPC-2, NDM-1, QnrS1), with about 5 % substituted bases (OXA-48 forward, Erm(B)
+  reverse-complemented), the first 60 % of VanA, and a run of 40 N. The database `tfast_amr` is these contigs.
+- `tfast_amr_q.faa`: thirteen proteins (translations): TEM-116 and CTX-M-14 (other alleles of the families in the
+  contigs), the eight others in the contigs, and SHV-12 (related to TEM), OXA-1 and APH(3')-Ia (not in them).
+
+Run from `LOSAT/`:
+
+    python3 tests/db_search/make_tfast_amr_inputs.py ABRICATE/db/ncbi/sequences tests/db_search
+    mv tests/db_search/tfast_amr_s.fna tests/db_search/tfast_amr.fna
+    makeblastdb -in tests/db_search/tfast_amr.fna -dbtype nucl -out tests/db_search/tfast_amr \
+        -title "synthetic contigs with AMR genes" -blastdb_version 4
+    rm tests/db_search/tfast_amr.njs
+
 Translated-query inputs (BLASTX rows, `db.blastx.*`), written by `make_blastx_inputs.py` (run from `LOSAT/`;
 slices of `tests/fasta/MelaMJNV.fasta`, proteins of `tests/fasta/PemoMJNVA.faa`; the decoy proteins and the query
 without hits come from seeded generators):

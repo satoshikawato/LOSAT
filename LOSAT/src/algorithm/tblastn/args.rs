@@ -7,9 +7,6 @@ use std::path::PathBuf;
 
 use crate::blastinput::value_parsers::*;
 
-/// The message for `-task tblastn-fast`, which the search entrance printed
-/// (`search_settings`) and which is now printed when the arguments are parsed.
-const TBLASTN_FAST_UNSUPPORTED: &str = "-task tblastn-fast (word size 5 with the compressed lookup table) is not supported by LOSAT's TBLASTN";
 use crate::utils::genetic_code::GeneticCode;
 
 use super::stage_d_pipeline::LocalStageDScoring;
@@ -82,17 +79,15 @@ pub struct TblastnArgs {
     // (`stage_d_pipeline::SubjectSetNumbers`).
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
-    // `tblastn-fast` (the compressed lookup table) is an NCBI task that LOSAT's TBLASTN does
-    // not implement: it fails when the arguments are parsed, as the search entrance did
-    // (`search_settings`).
-    #[arg(long, default_value = "tblastn", value_parser = task_parser(&["tblastn"], &[("tblastn-fast", TBLASTN_FAST_UNSUPPORTED)]))]
+    // `tblastn-fast`: word size 5, the compressed lookup table and threshold 20 (`resolve`).
+    #[arg(long, default_value = "tblastn", value_parser = task_parser(&["tblastn", "tblastn-fast"], &[]))]
     pub task: String,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
     // An omitted value keeps the default of the task (10).
     #[arg(long, value_parser = tblastn_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
-    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3]")]
+    #[arg(long, value_parser = protein_word_size, help = "Word size for wordfinder algorithm [default: 3; 5 for tblastn-fast]")]
     pub word_size: Option<i32>,
     // NCBI blast_args.cpp:258-273: when omitted, each cost keeps the selected matrix's
     // BLAST_MATRIX_BEST value.
@@ -116,7 +111,7 @@ pub struct TblastnArgs {
     pub max_intron_length: Option<i32>,
     #[arg(long, help = "Scoring matrix name [default: BLOSUM62]")]
     pub matrix: Option<String>,
-    #[arg(long, value_parser = tblastn_threshold_value, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7]")]
+    #[arg(long, value_parser = tblastn_threshold_value, help = "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for tblastn-fast]")]
     pub threshold: Option<f64>,
     // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:220-229,280-286:
     // arg_desc.AddOptionalKey(kArgGappedXDropoff, "float_value", ...);
@@ -636,11 +631,19 @@ impl TblastnArgs {
 /// LOSAT's TBLASTN does not implement are rejected, and the others select the search.
 pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
     use crate::blastinput::app::CompositionMode;
-    // NCBI's compressed lookup table (blast_aalookup.c, word size 5 and more or
-    // tblastn-fast, which fails at the parse) is not implemented by LOSAT's TBLASTN.
-    if args.compressed_lookup {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4886-4896
+    // ```c
+    //     lambda = RPSfindUngappedLambda(sbp->name);
+    // ...
+    //     std_freqs = _PSIMatrixFrequencyRatiosNew(sbp->name);
+    // ```
+    // NCBI's compressed lookup table (word sizes 5 to 7, tblastn-fast) scores its words with
+    // a matrix made from the search matrix's frequency ratios; LOSAT's table is BLOSUM62's
+    // (`tblastx/lookup/compressed.rs`, as blastp-fast's).
+    if args.compressed_lookup && !args.matrix_name.eq_ignore_ascii_case("BLOSUM62") {
         anyhow::bail!(
-            "-word_size {} (the compressed lookup table) is not supported by LOSAT's TBLASTN",
+            "-matrix {} with the compressed lookup table (-word_size {}) is not supported by LOSAT's TBLASTN",
+            args.matrix_name,
             args.word_size
         );
     }
@@ -723,12 +726,24 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     let matrix: Option<ScoringMatrix> = args.matrix_name.parse().ok();
     let threshold = args.threshold;
     let window = args.window_size;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137 and
+    // c++/src/algo/blast/core/aa_ungapped.c:214-224
+    // ```c
+    //         Boolean multiple_hits = (word_params->options->window_size > 0);
+    // ...
+    //     if (ewp->diag_table->multiple_hits) {
+    //         status = s_BlastAaWordFinder_TwoHit(subject, query,
+    // ...
+    //     } else {
+    //         status = s_BlastAaWordFinder_OneHit(subject, query,
+    // ```
+    // BLOSUM62 takes the standard table of word size 3 or the compressed one of word sizes 5 to
+    // 7 with any threshold, and the two-hit word finder (a window above 0).
     let profile_supported = (matrix == Some(ScoringMatrix::Blosum62)
-        && args.word_size == 3
+        && matches!(args.word_size, 3 | 5..=7)
         && args.gap_open == 11
         && args.gap_extend == 1
-        && threshold == 13.0
-        && window == 40)
+        && window > 0)
         || (matrix == Some(ScoringMatrix::Blosum45)
             && !composition_mode2
             && args.word_size == 2
@@ -738,7 +753,7 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
             && window == 60);
     let Some(matrix) = matrix.filter(|_| profile_supported) else {
         anyhow::bail!(
-            "the matrix {} with gap costs {}/{}, word size {}, threshold {} and window size {} (composition mode {}) is not supported by LOSAT's TBLASTN; it implements BLOSUM62 11/1 with word size 3, threshold 13 and window size 40, and BLOSUM45 14/2 with word size 2, threshold 16, window size 60 and -comp_based_stats 0",
+            "the matrix {} with gap costs {}/{}, word size {}, threshold {} and window size {} (composition mode {}) is not supported by LOSAT's TBLASTN; it implements BLOSUM62 11/1 with word size 3, 5, 6 or 7 and a window size above 0, and BLOSUM45 14/2 with word size 2, threshold 16, window size 60 and -comp_based_stats 0",
             args.matrix_name,
             args.gap_open,
             args.gap_extend,
@@ -755,7 +770,7 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
             gap_open: args.gap_open,
             gap_extend: args.gap_extend,
             word_size: args.word_size as usize,
-            threshold: threshold as i32,
+            threshold,
             window,
             gap_xdrop_bits: args.xdrop_gap,
             final_xdrop_bits: args.xdrop_gap_final,
@@ -925,13 +940,15 @@ mod tests {
         assert_eq!((resolved.gap_open, resolved.gap_extend), (9, 1));
         for extra in [
             &["-matrix", "PAM30"][..],
-            &["-word_size", "5"],
+            &["-word_size", "2"],
+            &["-word_size", "4"],
             &["-ungapped", "-comp_based_stats", "F"],
             &["-max_intron_length", "100"],
             &["-comp_based_stats", "1"],
             &["-comp_based_stats", "3"],
             &["-window_size", "0"],
-            &["-threshold", "13.5"],
+            &["-word_size", "5", "-window_size", "0"],
+            &["-matrix", "BLOSUM45", "-word_size", "3"],
             &["-max_target_seqs", "1073741799"],
             &["-comp_based_stats", "0", "-max_target_seqs", "2147483598"],
         ] {
@@ -940,17 +957,48 @@ mod tests {
                 "{extra:?}"
             );
         }
-        // `-task tblastn-fast` stops at the command line (`TBLASTN_FAST_UNSUPPORTED`), so the
-        // task is set by hand: the NCBI defaults of the task, and the compressed lookup
-        // table that `check_options` refuses.
-        let mut fast = parse(&[]).unwrap();
-        fast.task = "tblastn-fast".into();
+        // The compressed lookup table is BLOSUM62's.
+        assert!(limit(&["-task", "tblastn-fast", "-matrix", "BLOSUM80"])
+            .contains("-matrix BLOSUM80 with the compressed lookup table (-word_size 5) is not supported by LOSAT's TBLASTN"));
+        // NCBI api/blast_options_handle.cpp:436-447: tblastn-fast sets word size 5, the
+        // compressed lookup table and BLAST_WORD_THRESHOLD_BLASTP_FAST (20); with BLOSUM62 11/1
+        // the table of word size 3, 5, 6 or 7 takes any threshold and window size above 0.
+        let fast = parse(&["-task", "tblastn-fast"]).unwrap();
         let resolved = fast.resolve().unwrap();
-        assert_eq!((resolved.word_size, resolved.threshold), (5, 20.0));
-        assert!(check_options(&fast)
-            .unwrap_err()
-            .to_string()
-            .contains("not supported by LOSAT's TBLASTN"));
+        assert_eq!(
+            (
+                resolved.word_size,
+                resolved.compressed_lookup,
+                resolved.threshold
+            ),
+            (5, true, 20.0)
+        );
+        check_options(&fast).unwrap();
+        for extra in [
+            &[
+                "-task",
+                "tblastn-fast",
+                "-word_size",
+                "5",
+                "-window_size",
+                "15",
+                "-threshold",
+                "100",
+            ][..],
+            &["-word_size", "6"],
+            &["-word_size", "7", "-threshold", "15"],
+            &["-task", "tblastn-fast", "-word_size", "3"],
+            &["-word_size", "3", "-window_size", "15", "-threshold", "100"],
+            &["-threshold", "13.5", "-window_size", "1"],
+        ] {
+            check_options(&parse(extra).unwrap()).unwrap();
+        }
+        let settings =
+            search_settings(&parse(&["-word_size", "7"]).unwrap().resolve().unwrap()).unwrap();
+        assert_eq!(
+            (settings.scoring.word_size, settings.scoring.threshold),
+            (7, 20.25)
+        );
         // NCBI blast_args.cpp:834-892: the first character chooses the mode (any other is
         // mode 0); a `u` asks for unified P-values only for blastp.
         for value in ["bogus", "0", "F", "2u", "D", "t"] {

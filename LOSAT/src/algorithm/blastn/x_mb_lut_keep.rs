@@ -361,7 +361,9 @@ mod tests {
     // whole-search tests cover): every build equals the same build on a fresh table, every build
     // of no more cells than the kept table takes it (filled by earlier builds), and the elements
     // past the start that builds wrote stay 0. With LOSAT_X_MB24 the newest-first tables of 4^12
-    // cells take the words of their 3-byte heads, fewer than 4^12.
+    // cells take the words of their 3-byte heads, fewer than 4^12. With LOSAT_X_BNCSRPACK a
+    // newest-first table of 4^8 to 4^11 cells is CSR at any size, so those tables are built in
+    // reading order here, which keeps their chains (the switch off builds them newest first too).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -383,7 +385,8 @@ mod tests {
                     let lut = LUTS[case % LUTS.len()];
                     let word_length = word_length.max(lut);
                     let refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
-                    let ascending = case % 3 == 1;
+                    let ascending = case % 3 == 1
+                        || (super::super::x_bn_csr::x_will_pack(false) && (8..=11).contains(&lut));
                     let fresh = build_mb_lookup(
                         &refs,
                         &offsets,

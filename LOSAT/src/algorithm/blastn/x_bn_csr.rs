@@ -915,12 +915,11 @@ pub(super) mod tests {
                 false,
                 false
             ));
-            assert!(!plan(
-                &big.words(&refs, 11, 11, false),
-                1 << 22,
-                false,
-                false
-            ));
+            // below the rule: chains, unless the head is packed (LOSAT_X_BNCSRPACK has no rule)
+            assert_eq!(
+                plan(&big.words(&refs, 11, 11, false), 1 << 22, false, false),
+                x_will_pack(false)
+            );
         }
     }
 

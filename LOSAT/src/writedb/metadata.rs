@@ -16,7 +16,9 @@ pub(crate) struct DbMetadata {
     pub db_version: u32,
     pub description: Vec<u8>,
     pub number_of_letters: u64,
-    pub number_of_sequences: i32,
+    /// `Int8` (blastdb.def: `number-of-sequences._type = Int8`), the count of every volume;
+    /// NCBI fills it from an `int` (`GetDBMetaData`), which LOSAT does not narrow.
+    pub number_of_sequences: i64,
     pub last_updated: String,
     pub number_of_volumes: i32,
     /// Set for version 5 when the database has a tax id other than 0 (`-taxid`,
@@ -159,7 +161,7 @@ impl DbMetadata {
     //     m_ExpectValue = true;
     // }
     // ```
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1318-1328
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1310-1318
     // ```c++
     //         ofstream out(metadata_filename.c_str());
     //         unique_ptr<CObjectOStreamJson> json_out(new CObjectOStreamJson(out, eNoOwnership));
@@ -407,7 +409,7 @@ pub(crate) fn last_updated(now: &super::time::LocalTime) -> String {
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1314-1318
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1306-1310
 // ```c++
 //     	CRef<CBlast_db_metadata> m = sdb.GetDBMetaData(output_prefix);
 //     	string extn (kEmptyStr);

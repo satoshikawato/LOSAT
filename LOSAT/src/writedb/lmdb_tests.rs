@@ -8,8 +8,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::{
     lmdb_file_name, max_entry_per_txn, string_to_int, string_to_uint, string_to_uint8, txn_batches,
-    LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId, DEFAULT_LMDB_MAP_SIZE, DEFAULT_TAXID_MAP_SIZE,
+    LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
 };
+use crate::writedb::platform::{LmdbPlatform, Platform};
+
+/// The platform of the expected files (makeblastdb 2.17.0 on Linux x86-64: pages of 4096 bytes,
+/// map sizes 700000000 and 300000000, files not grown to the map), whatever platform the tests
+/// run on.
+const LINUX: Platform = Platform::LINUX_X86_64;
 
 /// A directory of this test run, removed when the value is dropped.
 struct TempDir(PathBuf);
@@ -66,10 +72,11 @@ fn write(c: &Content, dir: &Path) -> Result<(), crate::writedb::WriteDbError> {
     let (m1, m2) = if c.map_size > 0 {
         (c.map_size, c.map_size)
     } else {
-        (DEFAULT_LMDB_MAP_SIZE, DEFAULT_TAXID_MAP_SIZE)
+        (LINUX.default_lmdb_map_size, LINUX.default_taxid_map_size)
     };
-    let mut lmdb = WriteDbLmdb::new(&pdb, m1, 4096, &settings)?;
-    let mut tax = WriteDbTaxId::new(&ptf, m2, 4096, &settings)?;
+    let platform = LmdbPlatform::LINUX_X86_64;
+    let mut lmdb = WriteDbLmdb::new(&pdb, m1, &platform, &settings)?;
+    let mut tax = WriteDbTaxId::new(&ptf, m2, &platform, &settings)?;
     for (oid, (entries, taxids)) in c.oids.iter().enumerate() {
         for (id, save) in entries {
             lmdb.insert_entry(id, oid as u32, *save);
@@ -729,19 +736,24 @@ fn parse_manifest(text: &str) -> (String, Content, Vec<(String, PathBuf)>) {
 }
 
 /// The gate: `LOSAT_S1_GATE_MANIFEST` names the manifests of `s1_gate.py`; one line per
-/// fixture and file goes to `LOSAT_S1_GATE_RESULT` (and to the standard output).
+/// fixture and file goes to `LOSAT_S1_GATE_RESULT` (and to the standard output). A run without
+/// the variable, or with an empty manifest directory, fails instead of passing with nothing
+/// compared.
 #[test]
-#[ignore]
+#[ignore = "driver of an external gate (LOSAT_S1_GATE_MANIFEST)"]
 fn s1_gate() {
-    let Some(mdir) = std::env::var_os("LOSAT_S1_GATE_MANIFEST") else {
-        return;
-    };
+    let mdir = std::env::var_os("LOSAT_S1_GATE_MANIFEST").expect("LOSAT_S1_GATE_MANIFEST");
     let mut files: Vec<PathBuf> = std::fs::read_dir(&mdir)
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| p.extension().is_some_and(|e| e == "txt"))
         .collect();
     files.sort();
+    assert!(
+        !files.is_empty(),
+        "no manifest in {}",
+        mdir.to_string_lossy()
+    );
     let mut lines = Vec::new();
     for f in files {
         let (name, c, oracle) = parse_manifest(&std::fs::read_to_string(&f).unwrap());
@@ -776,5 +788,6 @@ fn s1_gate() {
         std::fs::write(r, lines.join("\n") + "\n").unwrap();
     }
     let bad = lines.iter().filter(|l| !l.ends_with(" equal")).count();
+    assert!(!lines.is_empty(), "no file was compared");
     assert_eq!(bad, 0, "{bad} files differ");
 }

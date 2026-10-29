@@ -13,9 +13,8 @@ use super::files::OffsetArrays;
 use super::header::{defline_set, BadTitleChar};
 use super::lmdb::{
     lmdb_file_name, lmdb_map_size_from_env, LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
-    DEFAULT_LMDB_MAP_SIZE, DEFAULT_TAXID_MAP_SIZE,
 };
-use super::mdb::os_page_size;
+use super::platform::Platform;
 use super::volume::Volume;
 use super::WriteDbError;
 
@@ -42,6 +41,8 @@ pub struct WriteDb {
     taxdb: Option<WriteDbTaxId>,
     /// `m_LmdbOid`: the OID of the next sequence over all volumes.
     lmdb_oid: u32,
+    /// The platform whose makeblastdb the files follow.
+    platform: Platform,
 }
 
 impl std::fmt::Debug for WriteDb {
@@ -53,6 +54,7 @@ impl std::fmt::Debug for WriteDb {
             .field("volumes", &self.volumes.len())
             .field("closed", &self.closed)
             .field("lmdb_oid", &self.lmdb_oid)
+            .field("platform", &self.platform)
             .finish_non_exhaustive()
     }
 }
@@ -104,7 +106,8 @@ fn post_bad_title_chars(diagnostics: &mut Vec<u8>, title: &[u8], bad: &[BadTitle
 impl WriteDb {
     /// `CWriteDB(dbname, seqtype, title, ..., dbver, ...)` followed by
     /// `SetMaxFileSize`. `date` is the creation date of the index files, in
-    /// the form of `current_date`'s argument.
+    /// the form of `current_date`'s argument; `platform` the platform whose
+    /// makeblastdb the files follow ([`Platform::host`] for a build).
     pub fn new(
         dbname: &str,
         protein: bool,
@@ -112,6 +115,7 @@ impl WriteDb {
         date: &[u8],
         max_file_size: u64,
         version: DbVersion,
+        platform: Platform,
     ) -> Self {
         Self {
             dbname: dbname.to_string(),
@@ -127,6 +131,7 @@ impl WriteDb {
             lmdb: None,
             taxdb: None,
             lmdb_oid: 0,
+            platform,
         }
     }
 
@@ -341,7 +346,7 @@ impl WriteDb {
         if let Some(volume) = self.volumes.last_mut() {
             done = volume.write_sequence(&binary.seq, &binary.ambig, &binhdr)?;
             if done {
-                self.insert_lmdb_entries();
+                self.insert_lmdb_entries()?;
             }
         }
         if !done {
@@ -361,13 +366,14 @@ impl WriteDb {
                 index,
                 self.max_file_size,
                 self.version,
+                self.platform.sizeof_long,
                 arrays,
             )?);
             binhdr = self.cook_header(&bioseq.title);
             let volume = self.volumes.last_mut().expect("a volume was pushed");
             done = volume.write_sequence(&binary.seq, &binary.ambig, &binhdr)?;
             if done {
-                self.insert_lmdb_entries();
+                self.insert_lmdb_entries()?;
             }
             if !done {
                 return Err(WriteDbError::Creation(
@@ -378,13 +384,31 @@ impl WriteDb {
         Ok(())
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.hpp:655
+    // ```c++
+    //     int m_LmdbOid;
+    // ```
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdbcommon.hpp:58
+    // ```c++
+    // typedef Int4 TOid;
+    // ```
+    // An OID is a 4-byte signed integer in NCBI's writer and in its LMDB files, so a database
+    // has at most 2^31 sequences; NCBI's `m_LmdbOid++` overflows past that. LOSAT stops with
+    // an error at the sequence that would get OID 2^31 (no NCBI overflow reproduced).
     /// The tax ids of the sequence just written, under the next OID of the
     /// database (version 5).
-    fn insert_lmdb_entries(&mut self) {
+    fn insert_lmdb_entries(&mut self) -> Result<(), WriteDbError> {
         if let Some(taxdb) = self.taxdb.as_mut() {
+            if self.lmdb_oid > i32::MAX as u32 {
+                return Err(WriteDbError::Other(format!(
+                    "a version 5 database holds at most {} sequences (an OID is an Int4)",
+                    i32::MAX as u64 + 1
+                )));
+            }
             taxdb.insert_entries(&[], self.lmdb_oid);
             self.lmdb_oid += 1;
         }
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1136-1154
@@ -409,31 +433,34 @@ impl WriteDb {
     //         }
     //     }
     // ```
-    // The page size of LMDB is the operating system's (DECISIONS 8 of the
-    // makedb-v5 line, `os_page_size`).
+    // The page size of LMDB, its default map sizes and the length of its files on Windows are
+    // the platform's (DECISIONS 8 of the makedb-v5 line, `Platform`).
     /// Creates the LMDB files of a version 5 database (`<db>.pdb` and
     /// `<db>.ptf`, or `.ndb` and `.ntf`) at its first published sequence.
     fn open_lmdb_files(&mut self) -> Result<(), WriteDbError> {
         let lmdb_fname_w_path = build_lmdb_file_name(&self.dbname, self.protein);
         let map_size = lmdb_map_size_from_env()?;
         let settings = LmdbEnvSettings::from_env();
-        let page_size = os_page_size();
+        let platform = self.platform.lmdb()?;
         let (lmdb_map, tax_map) = if map_size > 0 {
             (map_size, map_size)
         } else {
-            (DEFAULT_LMDB_MAP_SIZE, DEFAULT_TAXID_MAP_SIZE)
+            (
+                self.platform.default_lmdb_map_size,
+                self.platform.default_taxid_map_size,
+            )
         };
         let lmdb = WriteDbLmdb::new(
             std::path::Path::new(&lmdb_fname_w_path),
             lmdb_map,
-            page_size,
+            &platform,
             &settings,
         )?;
         self.lmdb = Some(lmdb);
         let taxdb = WriteDbTaxId::new(
             &lmdb_file_name(std::path::Path::new(&lmdb_fname_w_path), "tf"),
             tax_map,
-            page_size,
+            &platform,
             &settings,
         )?;
         self.taxdb = Some(taxdb);

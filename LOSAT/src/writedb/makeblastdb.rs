@@ -10,6 +10,7 @@ use super::build_db::BuildDatabase;
 use super::data_size::{string_to_uint8_data_size, uint8_to_string_data_size};
 use super::format_guess::appears_fasta;
 use super::metadata::{db_files_metadata, last_updated, write_metadata_file, DbMetadata};
+use super::platform::Platform;
 use super::time::LocalTime;
 use super::writer::{build_lmdb_file_name, DbVersion};
 use super::WriteDbError;
@@ -560,15 +561,17 @@ fn verify_input_files(names: &[&str], err: &mut dyn Write) -> Result<(), MakedbE
 /// `CMakeBlastDBApp::x_BuildDatabase`. The log goes to `out` (makeblastdb's
 /// standard output, or the file of `-logfile`), warnings and diagnostics to
 /// `err`; `stdin` is read when `-in` is `-`. `now` is the local time for the
-/// database's date (`None` where the platform has no clock).
+/// database's date (`None` where the platform has no clock), `platform` the
+/// platform whose makeblastdb the files follow ([`Platform::host`] for a build).
 pub fn build_database(
     args: &MakedbArgs,
     now: Option<&LocalTime>,
+    platform: Platform,
     stdin: &mut dyn Read,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
-    build_database_with_log(args, now, stdin, out, err, None)
+    build_database_with_log(args, now, platform, stdin, out, err, None)
 }
 
 /// [`build_database`]; `logfile_error` is the error of a `-logfile` that could
@@ -576,6 +579,7 @@ pub fn build_database(
 fn build_database_with_log(
     args: &MakedbArgs,
     now: Option<&LocalTime>,
+    platform: Platform,
     stdin: &mut dyn Read,
     out: &mut dyn Write,
     err: &mut dyn Write,
@@ -687,7 +691,7 @@ fn build_database_with_log(
             "this platform has no clock for the database's date",
         ));
     };
-    let mut db = BuildDatabase::new(dbname, title, is_protein, out, now, version)?;
+    let mut db = BuildDatabase::new(dbname, title, is_protein, out, now, version, platform)?;
     let _ = writeln!(
         db.log(),
         "Maximum file size: {}",
@@ -877,10 +881,14 @@ fn open_new_database(
         db_version: version.number(),
         description: located.title,
         number_of_letters: totals.iter().map(|(_, _, letters)| letters).sum(),
-        number_of_sequences: totals
-            .iter()
-            .map(|(_, oids, _)| u64::from(*oids))
-            .sum::<u64>() as i32,
+        // NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.def:11-12
+        // ```
+        // number-of-letters._type = Uint8
+        // number-of-sequences._type = Int8
+        // ```
+        // NCBI's `GetDBMetaData` counts in an `int num_seqs` (seqdb.cpp:1707), which a
+        // database of more than 2^31 - 1 sequences would overflow; LOSAT sums in `Int8`.
+        number_of_sequences: totals.iter().map(|(_, oids, _)| i64::from(*oids)).sum(),
         last_updated: last_updated(now),
         number_of_volumes: located.volumes.len() as i32,
         number_of_taxids: None,
@@ -923,7 +931,14 @@ pub fn run(args: &MakedbArgs) -> i32 {
     let mut out = stdout.lock();
     let mut err = stderr.lock();
     let now = LocalTime::now();
-    let status = run_with(args, now.as_ref(), &mut stdin.lock(), &mut out, &mut err);
+    let status = run_with(
+        args,
+        now.as_ref(),
+        Platform::host(),
+        &mut stdin.lock(),
+        &mut out,
+        &mut err,
+    );
     let _ = out.flush();
     status
 }
@@ -962,50 +977,106 @@ pub fn run(args: &MakedbArgs) -> i32 {
 //         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
 //                    "File is not accessible", m_Path));
 // ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7593-7601 (SetLogFile)
+// ```c++
+//         // Check special filenames
+//         if ( file_name.empty()  ||  file_name == "/dev/null" ) {
+//             // no output
+//             SetDiagStream(0, quick_flush, 0, 0, kLogName_None);
+//         }
+//         else if (file_name == "-") {
+//             // output to stderr
+//             SetDiagStream(&NcbiCerr, quick_flush, 0, 0, kLogName_Stderr);
+//         }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:776-792 (CArg_OutputFile::x_Open)
+// ```c++
+//     if (AsString() == "-") {
+// #if defined(NCBI_OS_MSWIN)
+//         NcbiSys_setmode(NcbiSys_fileno(stdout), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+// #endif
+//         m_Ios = &cout;
+//     } else if ( !AsString().empty() ) {
+//         if (!fstrm) {
+//             fstrm = new CNcbiOfstream;
+//         }
+//         if (fstrm) {
+//             if (x_CreatePath(m_CurrentFlags)) {
+//                 fstrm->open(AsString().c_str(),IOS_BASE::out | mode);
+//             }
+//             if ( !fstrm->is_open() ) {
+//                 delete fstrm;
+//                 fstrm = NULL;
+// ```
 // With `-logfile F` makeblastdb sends its diagnostics (warnings, errors and the
 // final error message) to F from the start, and its log to F as well
 // (`AsOutputFile` with `fAppend`, makeblastdb.cpp:1199-1201): both append, in the
-// order they are written, and nothing goes to the standard streams (makeblastdb
-// 2.17.0: `-logfile /dev/null` prints nothing; two runs append to one file). A
-// file that cannot be opened leaves the diagnostics on the standard error stream,
-// and the build stops where makeblastdb opens the log, after the checks of the
-// database name and the title, with "Command line argument error: Argument
-// "logfile". File is not accessible:  `F'" and exit status 1. LOSAT opens the file
-// once and writes both streams through the one handle. It reads `-logfile` as an
-// option of makeblastdb only, not anywhere in the command line as NCBI's
-// application does (for example as the value of `-title`).
-/// One run with the given time and streams: the build, then the error
+// order they are written, and nothing goes to the standard streams (two runs
+// append to one file). A file that cannot be opened leaves the diagnostics on the
+// standard error stream, and the build stops where makeblastdb opens the log,
+// after the checks of the database name and the title, with "Command line
+// argument error: Argument "logfile". File is not accessible:  `F'" and exit
+// status 1. LOSAT opens the file once and writes both streams through the one
+// handle. Three names are special. `-` keeps the diagnostics on the standard
+// error stream and opens the standard output for the log: makeblastdb runs as
+// without `-logfile`. `/dev/null` (that name, on every platform) and the empty
+// name discard the diagnostics; the log then goes to the file `/dev/null`, and
+// the empty name is no file, so its build stops with the error above, which is a
+// diagnostic and so is not shown (makeblastdb 2.17.0: `-logfile ""` prints
+// nothing, exit status 1). LOSAT reads `-logfile` as an option of makeblastdb
+// only, not anywhere in the command line as NCBI's application does (for example
+// as the value of `-title`).
+/// One run with the given time, platform and streams: the build, then the error
 /// message and the exit code of a failed build. With `-logfile` the log and the
-/// messages go to that file instead of `out` and `err`.
+/// messages go where makeblastdb sends them instead of `out` and `err`.
 pub(crate) fn run_with(
     args: &MakedbArgs,
     now: Option<&LocalTime>,
+    platform: Platform,
     stdin: &mut dyn Read,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
-    let Some(name) = args.logfile.as_deref() else {
-        return finish(build_database(args, now, stdin, out, err), err);
+    let name = match args.logfile.as_deref() {
+        None | Some("-") => {
+            return finish(build_database(args, now, platform, stdin, out, err), err)
+        }
+        Some(name) => name,
     };
-    match std::fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(name)
-    {
-        Ok(file) => {
+    let silent = name.is_empty() || name == "/dev/null";
+    let opened = if name.is_empty() {
+        None
+    } else {
+        std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(name)
+            .ok()
+    };
+    let mut discard = std::io::sink();
+    let diag: &mut dyn Write = if silent { &mut discard } else { err };
+    match opened {
+        Some(file) if silent => {
+            let mut log = &file;
+            finish(
+                build_database_with_log(args, now, platform, stdin, &mut log, diag, None),
+                diag,
+            )
+        }
+        Some(file) => {
             let (mut log, mut diag) = (&file, &file);
             finish(
-                build_database_with_log(args, now, stdin, &mut log, &mut diag, None),
+                build_database_with_log(args, now, platform, stdin, &mut log, &mut diag, None),
                 &mut diag,
             )
         }
-        Err(_) => {
+        None => {
             let error = MakedbError::Argument(format!(
                 "Argument \"logfile\". File is not accessible:  `{name}'"
             ));
             finish(
-                build_database_with_log(args, now, stdin, out, err, Some(error)),
-                err,
+                build_database_with_log(args, now, platform, stdin, out, diag, Some(error)),
+                diag,
             )
         }
     }

@@ -31,6 +31,7 @@ pub mod makeblastdb;
 #[allow(dead_code)]
 pub(crate) mod mdb;
 pub(crate) mod metadata;
+pub mod platform;
 pub mod time;
 pub mod volume;
 pub mod writer;
@@ -40,6 +41,7 @@ mod tests;
 
 use std::path::PathBuf;
 
+pub use platform::Platform;
 pub use writer::WriteDb;
 
 /// Error of the database writer.

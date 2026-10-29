@@ -12,26 +12,11 @@ use std::path::{Path, PathBuf};
 use super::mdb::{
     Dbi, Env, LmdbError, MDB_APPENDDUP, MDB_CREATE, MDB_DUPFIXED, MDB_DUPSORT, MDB_INTEGERKEY,
 };
+use super::platform::LmdbPlatform;
 use super::WriteDbError;
 
-// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_lmdb.hpp:51-57
-// ```c++
-// #ifdef NCBI_OS_MSWIN
-// #define DEFAULT_LMDB_MAP_SIZE 500000
-// #define DEFAULT_TAXID_MAP_SIZE 500000
-// #else
-// #define DEFAULT_LMDB_MAP_SIZE 700000000
-// #define DEFAULT_TAXID_MAP_SIZE 300000000
-// #endif
-// ```
-#[cfg(windows)]
-pub(crate) const DEFAULT_LMDB_MAP_SIZE: u64 = 500_000;
-#[cfg(windows)]
-pub(crate) const DEFAULT_TAXID_MAP_SIZE: u64 = 500_000;
-#[cfg(not(windows))]
-pub(crate) const DEFAULT_LMDB_MAP_SIZE: u64 = 700_000_000;
-#[cfg(not(windows))]
-pub(crate) const DEFAULT_TAXID_MAP_SIZE: u64 = 300_000_000;
+// The default map sizes (`DEFAULT_LMDB_MAP_SIZE`, `DEFAULT_TAXID_MAP_SIZE`) depend on the
+// platform: `super::platform::Platform`.
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:46-48
 // ```c++
@@ -318,15 +303,14 @@ impl WriteDbLmdb {
     // 	char* max_entry_str = getenv("MAX_LMDB_TXN_ENTRY");
     // ```
     /// Create the LMDB file `dbname` (`<db>.pdb`/`<db>.ndb`) with the map size `map_size`
-    /// and the page size `page_size` ([`super::mdb::os_page_size`] for makeblastdb's bytes on
-    /// this platform).
+    /// on the platform `platform` (its page size and file length; makeblastdb's bytes there).
     pub(crate) fn new(
         dbname: &Path,
         map_size: u64,
-        page_size: usize,
+        platform: &LmdbPlatform,
         settings: &LmdbEnvSettings,
     ) -> Result<Self, WriteDbError> {
-        let env = Env::create(dbname, map_size, page_size).map_err(lmdb_error)?;
+        let env = Env::create(dbname, map_size, platform).map_err(lmdb_error)?;
         let max_entry_per_txn = max_entry_per_txn(settings)?;
         Ok(WriteDbLmdb {
             db: dbname.to_path_buf(),
@@ -429,16 +413,16 @@ impl WriteDbLmdb {
         self.env.txn_commit().map_err(lmdb_error)
     }
 
-    /// `set_mapsize` when `total_pages_needed + last_page_num > max_num_pages`.
-    fn grow_map(&mut self, total_pages_needed: usize) -> Result<(), WriteDbError> {
-        let page_size = self.env.psize();
-        let last_page_num = self.env.last_pgno() as usize;
-        let max_num_pages = self.env.mapsize() as usize / page_size;
+    /// `set_mapsize` when `total_pages_needed + last_page_num > max_num_pages`. NCBI's
+    /// `size_t` arithmetic is done in `u64` on every platform (a 32-bit `usize` would cut
+    /// it); a size the platform cannot map is refused by `Env::set_mapsize`.
+    fn grow_map(&mut self, total_pages_needed: u64) -> Result<(), WriteDbError> {
+        let page_size = self.env.psize() as u64;
+        let last_page_num = self.env.last_pgno();
+        let max_num_pages = self.env.mapsize() / page_size;
         if total_pages_needed + last_page_num > max_num_pages {
             let new_map_size = (total_pages_needed + last_page_num) * page_size;
-            self.env
-                .set_mapsize(new_map_size as u64)
-                .map_err(lmdb_error)?;
+            self.env.set_mapsize(new_map_size).map_err(lmdb_error)?;
         }
         Ok(())
     }
@@ -464,10 +448,10 @@ impl WriteDbLmdb {
     // 		m_Env.set_mapsize(newMapSize);
     // ```
     fn increase_env_map_size_volumes(&mut self, vol_names: &[String]) -> Result<(), WriteDbError> {
-        let front = vol_names.first().map_or(0, |n| n.len());
-        let vol_name_size = (front + 24) * vol_names.len();
-        let vol_info_size = 24 * vol_names.len();
-        let page_max_size = self.env.psize() - 16;
+        let front = vol_names.first().map_or(0, |n| n.len()) as u64;
+        let vol_name_size = (front + 24) * vol_names.len() as u64;
+        let vol_info_size = 24 * vol_names.len() as u64;
+        let page_max_size = self.env.psize() as u64 - 16;
         let leaf_pages_needed = vol_name_size / page_max_size + vol_info_size / page_max_size + 2;
         self.grow_map(3 + 2 + leaf_pages_needed)
     }
@@ -483,9 +467,9 @@ impl WriteDbLmdb {
     // 	size_t total_pages_needed = leaf_pages_needed + branch_pages_needed + dup_pages;
     // ```
     fn increase_env_map_size(&mut self) -> Result<(), WriteDbError> {
-        let size = self.total_ids_length + self.list.len() * 16;
-        let avg_id_length = self.total_ids_length / self.list.len();
-        let page_max_size = self.env.psize() - 16;
+        let size = self.total_ids_length as u64 + self.list.len() as u64 * 16;
+        let avg_id_length = self.total_ids_length as u64 / self.list.len() as u64;
+        let page_max_size = self.env.psize() as u64 - 16;
         let leaf_pages_needed = size / page_max_size + 1;
         let dup_pages = if leaf_pages_needed > 200 { 14 } else { 7 };
         let branch_pages_needed = (avg_id_length + 16) * leaf_pages_needed / page_max_size + 1;
@@ -798,14 +782,14 @@ impl WriteDbTaxId {
     // 	if (max_entry_str) {
     // 		m_MaxEntryPerTxn = NStr::StringToInt(max_entry_str);
     // ```
-    /// Create the LMDB file `dbname` (`<db>.ptf`/`<db>.ntf`).
+    /// Create the LMDB file `dbname` (`<db>.ptf`/`<db>.ntf`) on the platform `platform`.
     pub(crate) fn new(
         dbname: &Path,
         map_size: u64,
-        page_size: usize,
+        platform: &LmdbPlatform,
         settings: &LmdbEnvSettings,
     ) -> Result<Self, WriteDbError> {
-        let env = Env::create(dbname, map_size, page_size).map_err(lmdb_error)?;
+        let env = Env::create(dbname, map_size, platform).map_err(lmdb_error)?;
         let max_entry_per_txn = max_entry_per_txn(settings)?;
         Ok(WriteDbTaxId {
             db: dbname.to_path_buf(),
@@ -1059,19 +1043,18 @@ impl WriteDbTaxId {
     // ```
     fn commit_transaction(&mut self) -> Result<(), WriteDbError> {
         self.taxid2offsets.sort_unstable();
-        let size = self.taxid2offsets.len() * 32;
-        let page_size = self.env.psize();
+        // NCBI's `size_t` arithmetic in `u64`, as in `WriteDbLmdb::grow_map`.
+        let size = self.taxid2offsets.len() as u64 * 32;
+        let page_size = self.env.psize() as u64;
         let page_max_size = page_size - 16;
-        let last_page_num = self.env.last_pgno() as usize;
-        let max_num_pages = self.env.mapsize() as usize / page_size;
+        let last_page_num = self.env.last_pgno();
+        let max_num_pages = self.env.mapsize() / page_size;
         let leaf_pages_needed = size / page_max_size + 1;
         let branch_pages_needed = 24 * leaf_pages_needed / page_max_size + 1;
         let total_pages_needed = leaf_pages_needed + branch_pages_needed + 4;
         if total_pages_needed + last_page_num > max_num_pages {
             let new_map_size = (total_pages_needed + last_page_num) * page_size;
-            self.env
-                .set_mapsize(new_map_size as u64)
-                .map_err(lmdb_error)?;
+            self.env.set_mapsize(new_map_size).map_err(lmdb_error)?;
         }
         for (i0, j) in txn_batches(self.taxid2offsets.len(), self.max_entry_per_txn)? {
             self.env.txn_begin().map_err(lmdb_error)?;

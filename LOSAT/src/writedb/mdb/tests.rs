@@ -8,6 +8,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use super::page::*;
 use super::*;
 
+/// makeblastdb's platform of the expected sizes (Linux x86-64: pages of 4096 bytes, the file not
+/// grown to the map), whatever platform the tests run on.
+const LINUX: LmdbPlatform = LmdbPlatform::LINUX_X86_64;
+
 /// A file path of this test run, removed (with its directory) when the value is dropped.
 struct TempFile(PathBuf);
 
@@ -34,7 +38,7 @@ impl Drop for TempFile {
 #[test]
 fn a_new_environment_is_two_meta_pages() {
     let f = TempFile::new("meta");
-    let env = Env::create(&f.0, 700_000_000, 4096).unwrap();
+    let env = Env::create(&f.0, 700_000_000, &LINUX).unwrap();
     env.close().unwrap();
     let b = std::fs::read(&f.0).unwrap();
     assert_eq!(b.len(), 8192);
@@ -58,7 +62,7 @@ fn a_new_environment_is_two_meta_pages() {
 #[test]
 fn keys_over_511_bytes_fail_as_in_makeblastdb() {
     let f = TempFile::new("valsize");
-    let mut env = Env::create(&f.0, 700_000_000, 4096).unwrap();
+    let mut env = Env::create(&f.0, 700_000_000, &LINUX).unwrap();
     env.txn_begin().unwrap();
     let dbi = env
         .dbi_open("acc2oid", MDB_CREATE | MDB_DUPSORT | MDB_DUPFIXED)
@@ -84,7 +88,7 @@ fn keys_over_511_bytes_fail_as_in_makeblastdb() {
 fn a_full_map_fails_where_lmdb_fails() {
     let f = TempFile::new("mapfull");
     // 5 pages: the metas (0, 1), the main leaf (2), volinfo's leaf (3); page 4 is refused.
-    let mut env = Env::create(&f.0, 5 * 4096, 4096).unwrap();
+    let mut env = Env::create(&f.0, 5 * 4096, &LINUX).unwrap();
     env.txn_begin().unwrap();
     let volinfo = env
         .dbi_open("volinfo", MDB_CREATE | MDB_INTEGERKEY)
@@ -123,7 +127,7 @@ fn a_full_map_fails_where_lmdb_fails() {
 #[test]
 fn an_existing_dup_is_keyexist() {
     let f = TempFile::new("keyexist");
-    let mut env = Env::create(&f.0, 700_000_000, 4096).unwrap();
+    let mut env = Env::create(&f.0, 700_000_000, &LINUX).unwrap();
     env.txn_begin().unwrap();
     let dbi = env
         .dbi_open("acc2oid", MDB_CREATE | MDB_DUPSORT | MDB_DUPFIXED)
@@ -178,10 +182,77 @@ fn page_copy_keeps_the_middle_of_the_destination() {
     assert!(dst[psize - unused..].iter().all(|&b| b == 0x55));
 }
 
+// LMDB takes the operating system's page size up to MAX_PAGESIZE (mdb.c:4400-4402): a 64 KiB
+// page (arm64, powerpc64) gives pages of 32768 bytes.
 #[test]
-fn page_size_is_the_os_page_size_up_to_32768() {
-    let p = os_page_size();
-    assert!(p.is_power_of_two() && (4096..=MAX_PAGESIZE).contains(&p));
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    assert_eq!(p, 4096);
+fn the_page_size_is_the_os_page_size_up_to_32768() {
+    for (os, psize) in [(4096, 4096), (16384, 16384), (65536, 32768)] {
+        let f = TempFile::new("psize");
+        let platform = LmdbPlatform {
+            os_page_size: os,
+            ..LINUX
+        };
+        let env = Env::create(&f.0, 700_000_000, &platform).unwrap();
+        assert_eq!(env.psize(), psize);
+        env.close().unwrap();
+        let b = std::fs::read(&f.0).unwrap();
+        assert_eq!(b.len(), 2 * psize);
+        assert_eq!(get_u32(&b[psize..], 40), psize as u32);
+    }
+}
+
+// On Windows LMDB sets the length of the data file to the map size each time it maps the file
+// (mdb.c:3979-4003): at the open and at every `mdb_env_set_mapsize`. The pages are those of
+// Linux; only the length differs (not checked against a makeblastdb.exe).
+#[test]
+fn on_windows_the_file_is_as_long_as_the_map() {
+    let windows = LmdbPlatform {
+        file_length_is_map_size: true,
+        ..LINUX
+    };
+    let (fw, fl) = (TempFile::new("winmap"), TempFile::new("linmap"));
+    for (f, platform) in [(&fw, windows), (&fl, LINUX)] {
+        let mut env = Env::create(&f.0, 500_000, &platform).unwrap();
+        env.txn_begin().unwrap();
+        let volinfo = env
+            .dbi_open("volinfo", MDB_CREATE | MDB_INTEGERKEY)
+            .unwrap();
+        assert!(env
+            .put(volinfo, &0u32.to_le_bytes(), &1i32.to_le_bytes(), 0)
+            .unwrap());
+        env.txn_commit().unwrap();
+        env.set_mapsize(600_000).unwrap();
+        env.close().unwrap();
+    }
+    let (w, l) = (std::fs::read(&fw.0).unwrap(), std::fs::read(&fl.0).unwrap());
+    assert_eq!(w.len(), 600_000);
+    assert_eq!(&w[..l.len()], &l[..]);
+    assert!(w[l.len()..].iter().all(|&b| b == 0));
+}
+
+// A map size that the platform's `size_t` cannot hold (a 32-bit platform) is refused as the map
+// of that size would be (ENOMEM), at the open and at `mdb_env_set_mapsize`, instead of being
+// cut to 32 bits by NCBI's `Uint8` -> `size_t` conversion.
+#[test]
+fn a_map_larger_than_size_t_is_refused() {
+    let small = LmdbPlatform {
+        max_map_size: u64::from(u32::MAX),
+        ..LINUX
+    };
+    let f = TempFile::new("bigmap");
+    let Err(e) = Env::create(&f.0, 1 << 32, &small) else {
+        panic!("a map of 4 GiB on a 32-bit platform");
+    };
+    assert_eq!(e.to_string(), "mdb_env_open: Cannot allocate memory");
+    let mut env = Env::create(&f.0, u64::from(u32::MAX), &small).unwrap();
+    let e = env.set_mapsize(1 << 33).unwrap_err();
+    assert_eq!(e.to_string(), "mdb_env_set_mapsize: Cannot allocate memory");
+    env.close().unwrap();
+    // A 64-bit `size_t` holds it; the size is kept in full (no cut to 32 bits).
+    let mut env = Env::create(&f.0, 1 << 32, &LINUX).unwrap();
+    env.set_mapsize(5 << 32).unwrap();
+    assert_eq!(env.mapsize(), 5 << 32);
+    env.close().unwrap();
+    let b = std::fs::read(&f.0).unwrap();
+    assert_eq!(get_u64(&b, 32), 1 << 32);
 }

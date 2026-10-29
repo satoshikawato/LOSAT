@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use super::fasta_source::{FastaBioseqSource, Warn};
+use super::platform::Platform;
 use super::time::LocalTime;
 use super::writer::{DbVersion, WriteDb};
 use super::WriteDbError;
@@ -690,7 +691,7 @@ impl<'a> BuildDatabase<'a> {
     // ```
     /// The constructor, then `SetMembBits(no_bits, true)` as makeblastdb
     /// calls it. `now` is the time of the build, `version` the format version
-    /// (`dbver`).
+    /// (`dbver`), `platform` the platform whose makeblastdb the files follow.
     pub fn new(
         dbname: &str,
         title: &str,
@@ -698,6 +699,7 @@ impl<'a> BuildDatabase<'a> {
         log: &'a mut dyn Write,
         now: &LocalTime,
         version: DbVersion,
+        platform: Platform,
     ) -> Result<Self, WriteDbError> {
         create_directories(dbname)?;
         let output_dbname = create_absolute_path(dbname);
@@ -743,6 +745,7 @@ impl<'a> BuildDatabase<'a> {
             now.index_date().as_bytes(),
             1000 * 1000 * 1000,
             version,
+            platform,
         );
         Ok(Self {
             is_protein,

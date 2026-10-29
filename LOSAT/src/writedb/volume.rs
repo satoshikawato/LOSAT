@@ -3,8 +3,7 @@
 
 use super::convert::find_sequence_length;
 use super::files::{
-    make_short_name, orig_num_digits, DbVersion, HeaderFile, IndexFile, OffsetArrays,
-    SequenceFile,
+    make_short_name, orig_num_digits, DbVersion, HeaderFile, IndexFile, OffsetArrays, SequenceFile,
 };
 use super::WriteDbError;
 
@@ -48,7 +47,8 @@ impl Volume {
     //                                           max_letters));
     // ```
     /// `arrays`: the offset arrays of the previous volume
-    /// (`take_offset_arrays`), or new ones for the first.
+    /// (`take_offset_arrays`), or new ones for the first; `sizeof_long` the
+    /// platform's `sizeof(long)` (`Platform::sizeof_long`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn create(
         dbname: &str,
@@ -58,6 +58,7 @@ impl Volume {
         index: u32,
         max_file_size: u64,
         version: DbVersion,
+        sizeof_long: u64,
         arrays: OffsetArrays,
     ) -> Result<Self, WriteDbError> {
         // NCBI does not test whether the three files opened
@@ -73,6 +74,7 @@ impl Volume {
             index,
             max_file_size,
             version,
+            sizeof_long,
             arrays,
         )?;
         let mut hdr = match HeaderFile::create(dbname, protein, index, max_file_size) {

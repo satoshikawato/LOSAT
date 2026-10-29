@@ -29,6 +29,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
+use super::platform::LmdbPlatform;
 use midl::*;
 use page::*;
 
@@ -62,9 +63,12 @@ pub(crate) const MDB_APPEND: u32 = 0x20000;
 pub(crate) const MDB_APPENDDUP: u32 = 0x40000;
 pub(crate) const MDB_MULTIPLE: u32 = 0x80000;
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/lmdb.h:287 and mdb.c:1316-1319
+// NCBI reference (598d8ae6): c++/src/util/lmdb/lmdb.h:287
 // ```c
 // #define MDB_NOSUBDIR	0x4000
+// ```
+// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:1266
+// ```c
 // #define	MDB_ENV_ACTIVE	0x20000000U
 // ```
 const MDB_NOSUBDIR: u32 = 0x4000;
@@ -95,6 +99,7 @@ const MDB_BAD_VALSIZE: i32 = -30781;
 const MDB_LAST_ERRCODE: i32 = -30780;
 const EINVAL: i32 = 22;
 const EIO: i32 = 5;
+const ENOMEM: i32 = 12;
 /// Not an LMDB code: a path of mdb.c that makeblastdb does not reach and that is not
 /// ported; the name of the path is in `Env::unreachable`.
 const MDB_UNREACHABLE: i32 = -1_000_000;
@@ -218,35 +223,6 @@ const MDB_PS_LAST: u32 = 8;
 const MDB_SPLIT_REPLACE: u32 = MDB_APPENDDUP;
 const MDB_NOSPILL: u32 = 0x8000;
 
-/// The page size LMDB takes for a new environment: the operating system's page size
-/// (`GET_PAGESIZE`), at most `MAX_PAGESIZE` (DECISIONS 8 of the makedb-v5 line).
-// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:395-397, 3969, 4400-4402
-// ```c
-// #define	GET_PAGESIZE(x)	((x) = sysconf(_SC_PAGE_SIZE))
-// 	GET_PAGESIZE(e->me_os_psize);
-// 		env->me_psize = env->me_os_psize;
-// 		if (env->me_psize > MAX_PAGESIZE)
-// 			env->me_psize = MAX_PAGESIZE;
-// ```
-// On Windows (`mdb.c:383-384`) `GET_PAGESIZE` is `GetSystemInfo(&si); (x) = si.dwPageSize`.
-// wasm32 has no operating-system page; LOSAT takes 4096, the size of the platforms the Web
-// app's users mostly build on (DECISIONS 8).
-pub(crate) fn os_page_size() -> usize {
-    #[cfg(unix)]
-    let os = rustix::param::page_size();
-    #[cfg(windows)]
-    let os = {
-        use windows_sys::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
-        // SAFETY: GetSystemInfo fills the SYSTEM_INFO it is given and cannot fail.
-        let mut si: SYSTEM_INFO = unsafe { std::mem::zeroed() };
-        unsafe { GetSystemInfo(&mut si) };
-        si.dwPageSize as usize
-    };
-    #[cfg(not(any(unix, windows)))]
-    let os = 4096usize;
-    os.min(MAX_PAGESIZE)
-}
-
 /// An error of the LMDB writer.
 #[derive(Debug)]
 pub(crate) enum LmdbError {
@@ -270,6 +246,10 @@ impl LmdbError {
         }
         if (MDB_KEYEXIST..=MDB_LAST_ERRCODE).contains(&code) {
             return MDB_ERRSTR[(code - MDB_KEYEXIST) as usize].to_string();
+        }
+        // glibc's `strerror(ENOMEM)`, the same on every platform.
+        if code == ENOMEM {
+            return "Cannot allocate memory".to_string();
         }
         std::io::Error::from_raw_os_error(code).to_string()
     }
@@ -471,6 +451,10 @@ pub(crate) struct Env {
     wbuf: Vec<u8>,
     io_error: Option<std::io::Error>,
     unreachable: &'static str,
+    /// LMDB sets the length of the data file to the map size (Windows, `mdb_env_map`).
+    file_length_is_map_size: bool,
+    /// The largest map size the platform's `size_t` holds.
+    max_map_size: u64,
 }
 
 /// A database handle (`MDB_dbi`).
@@ -496,13 +480,49 @@ impl Env {
     // ```
     /// `CBlastLMDBManager::CBlastEnv` for writing: `mdb_env_create`,
     /// `mdb_env_set_maxdbs(3)`, `mdb_env_set_mapsize(map_size)` unless `map_size` is 0, and
-    /// `mdb_env_open(path, MDB_NOSUBDIR, 0664)` on a new file. `psize` is the page size LMDB
-    /// takes from the operating system ([`os_page_size`]); tests pass 4096.
-    pub(crate) fn create(path: &Path, map_size: u64, psize: usize) -> Result<Env, LmdbError> {
+    /// `mdb_env_open(path, MDB_NOSUBDIR, 0664)` on a new file, on the platform `platform`
+    /// (its page size, the file's length on Windows, its `size_t`; [`super::platform`]).
+    pub(crate) fn create(
+        path: &Path,
+        map_size: u64,
+        platform: &LmdbPlatform,
+    ) -> Result<Env, LmdbError> {
         let io = |source| LmdbError::Io {
             path: path.to_path_buf(),
             source,
         };
+        // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:3969,4400-4402
+        // ```c
+        // 	GET_PAGESIZE(e->me_os_psize);
+        // 		env->me_psize = env->me_os_psize;
+        // 		if (env->me_psize > MAX_PAGESIZE)
+        // 			env->me_psize = MAX_PAGESIZE;
+        // ```
+        let psize = platform.os_page_size.min(MAX_PAGESIZE);
+        // NCBI reference (598d8ae6): c++/include/util/lmdbxx/lmdb++.h:1355-1358
+        // ```c++
+        //   env& set_mapsize(const std::size_t size) {
+        //     lmdb::env_set_mapsize(handle(), size);
+        //     return *this;
+        //   }
+        // ```
+        // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:4025-4029 (mdb_env_map)
+        // ```c
+        // 	env->me_map = mmap(addr, env->me_mapsize, prot, MAP_SHARED,
+        // 		env->me_fd, 0);
+        // 	if (env->me_map == MAP_FAILED) {
+        // 		env->me_map = NULL;
+        // 		return ErrCode();
+        // ```
+        // The map size (`Uint8` in NCBI's layer) reaches LMDB as a `size_t`. A size the
+        // platform's `size_t` cannot hold (a 32-bit platform) would be cut by that conversion;
+        // LOSAT refuses it with the error the map of such a size gets (`ENOMEM`) instead.
+        if map_size > platform.max_map_size {
+            return Err(LmdbError::Mdb {
+                func: "mdb_env_open",
+                code: ENOMEM,
+            });
+        }
         // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:3951-3972, 4094-4101
         // ```c
         // 	e->me_maxreaders = DEFAULT_READERS;
@@ -564,6 +584,8 @@ impl Env {
             wbuf: Vec::new(),
             io_error: None,
             unreachable: "",
+            file_length_is_map_size: platform.file_length_is_map_size,
+            max_map_size: platform.max_map_size,
         };
         // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:4060-4091 (mdb_env_set_mapsize)
         // ```c
@@ -744,6 +766,13 @@ impl Env {
                 code: EINVAL,
             });
         }
+        // A size the platform's `size_t` cannot hold, as in `create`.
+        if size > self.max_map_size {
+            return Err(LmdbError::Mdb {
+                func: "mdb_env_set_mapsize",
+                code: ENOMEM,
+            });
+        }
         let meta = *self.pick_meta();
         let mut size = if size == 0 { meta.mapsize } else { size };
         let minsize = (meta.last_pg + 1) * self.psize as u64;
@@ -783,12 +812,11 @@ impl Env {
     // and when `mdb_env_set_mapsize` maps it again with a new size (mdb.c:4083-4087). The
     // pages are written inside that length, so a file of makeblastdb on Windows is as long
     // as the last map size (500000 bytes by default, `DEFAULT_LMDB_MAP_SIZE`). Elsewhere
-    // the file is not extended (`MDB_WRITEMAP` is not set). Not checked against a
-    // makeblastdb.exe.
+    // the file is not extended (`MDB_WRITEMAP` is not set). Which applies is the platform's
+    // (`LmdbPlatform::file_length_is_map_size`). Not checked against a makeblastdb.exe.
     /// The length `mdb_env_map` gives the data file: the map size on Windows.
     fn map_file_size(&mut self) -> std::io::Result<()> {
-        #[cfg(windows)]
-        {
+        if self.file_length_is_map_size {
             self.file.set_len(self.mapsize)?;
         }
         Ok(())
@@ -1707,7 +1735,10 @@ impl Env {
     // ```
     // LMDB's lock file holds only the reader table and the process id; LOSAT does not
     // create it, and removes one left at the path so that the files are as makeblastdb
-    // leaves them.
+    // leaves them. One consequence: an output name of 247 to 251 bytes, whose
+    // `NAME.pdb-lock` passes the file-name limit of 255 bytes, stops makeblastdb in
+    // `mdb_env_open` ("File name too long", exit status 2, no volume) while LOSAT builds a
+    // valid database (PD-LOSAT-DATABASE-SEARCH, makedb-v5 PR1 review N1).
     pub(crate) fn close(mut self) -> Result<(), LmdbError> {
         self.txn_abort();
         let flushed = self.file.flush();

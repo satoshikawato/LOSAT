@@ -80,7 +80,7 @@ pub(super) fn cmp_u64(x: u64, y: u64) -> i32 {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/midl.h:156-161 (mdb_midl_xappend)
+// NCBI reference (598d8ae6): c++/src/util/lmdb/midl.h:76-79 (mdb_midl_xappend)
 // ```c
 // #define mdb_midl_xappend(idl, id) do { \
 //		MDB_ID *xidl = (idl), xlen = ++(xidl[0]); \
@@ -95,7 +95,7 @@ pub(super) fn midl_xappend(ids: &mut Vec<u64>, id: u64) {
     ids[n] = id;
 }
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/midl.c:142-155 (mdb_midl_append)
+// NCBI reference (598d8ae6): c++/src/util/lmdb/midl.c:157-169 (mdb_midl_append)
 // ```c
 // int mdb_midl_append( MDB_IDL *idp, MDB_ID id )
 // {
@@ -137,7 +137,7 @@ pub(super) fn midl_append_range(ids: &mut Vec<u64>, mut id: u64, n: usize) {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/util/lmdb/midl.c:189-203 (mdb_midl_xmerge)
+// NCBI reference (598d8ae6): c++/src/util/lmdb/midl.c:201-213 (mdb_midl_xmerge)
 // ```c
 // void mdb_midl_xmerge( MDB_IDL idl, MDB_IDL merge )
 // {

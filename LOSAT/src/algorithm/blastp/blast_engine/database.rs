@@ -2427,6 +2427,7 @@ mod tests {
             crate::writedb::makeblastdb::build_database(
                 &args,
                 Some(&now),
+                crate::writedb::Platform::host(),
                 &mut fasta.as_slice(),
                 &mut log,
                 &mut messages,

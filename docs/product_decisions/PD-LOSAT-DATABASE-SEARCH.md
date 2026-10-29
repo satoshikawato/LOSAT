@@ -138,15 +138,31 @@ in one `-db`, index files cut short, NCBI's threshold of open files and its warn
 (`.psq`, `.nsq`) and header files (`.phr`, `.nhr`) byte for byte, the index file (`.pin`,
 `.nin`) but for the creation date, for several volumes the alias file (`.pal`, `.nal`)
 but for its date line, and the JSON metadata file (`.pjs`, `.njs`) but for the date
-it records. Version 5 adds the LMDB
-files of the volumes (`.pdb`, `.ptf`, `.pot`, `.pto`; `.ndb`, `.ntf`, `.not`, `.nto`) with
-their pages byte for byte. Several input files can be named in `-in` (as makeblastdb
-splits the value), and `-logfile` redirects the log and the messages to a file (appended). The FASTA file is read as makeblastdb reads it (its reader settings
+it records. Version 5 adds, once for the whole database, the two LMDB files (`.pdb` with
+the volume tables and `.ptf` with the tax ids; `.ndb`, `.ntf`) and the two tax-id lookup
+files (`.pot`, `.pto`; `.not`, `.nto`), page for page. Several input files can be named in
+`-in` (as makeblastdb splits the value), and `-logfile` redirects the log and the messages
+to a file (appended); as in makeblastdb, `-logfile -` keeps them on the standard streams,
+and `-logfile /dev/null` and `-logfile ""` discard the messages (the empty name then ends
+the build with exit status 1, silently). The FASTA file is read as makeblastdb reads it (its reader settings
 differ from those of `-subject`). The log on the standard output and the messages on the
 standard error stream are makeblastdb's, in makeblastdb's order, and so is the exit status
 of a build and of makeblastdb's own errors (0; 1 for an input or option error; 2 when the
 finished database does not resolve; 4 when a sequence does not fit in memory; 255
 otherwise). The differences are listed below.
+
+Platforms. The expected files of the tests and gates are makeblastdb 2.17.0's on Linux
+x86-64. Where NCBI's source asks the platform, LOSAT asks it too and does what that source
+does there (`LOSAT/src/writedb/platform.rs`): the page size of the LMDB files
+(`GET_PAGESIZE`: 4 KiB on Linux x86-64 and Windows x64, 16 KiB on macOS on Apple silicon,
+the kernel's on Linux arm64, at most 32 KiB), their default map sizes (Windows: 500000 bytes
+for both files, elsewhere 700000000 and 300000000), the length of an LMDB file on Windows
+(LMDB sets it to the map size), and `sizeof(long)` in the header size of an index file (8 on
+Linux and macOS, 4 on Windows), which moves the padding of the date and the cut of a volume
+under `-max_file_sz`. The Web app's builds (wasm32) write what makeblastdb writes on Linux
+x86-64. The output on Windows and macOS has not been compared with a makeblastdb run on those
+platforms; the tests there check LOSAT's platform choice and, on the Linux x86-64 settings,
+the same bytes as on Linux.
 
 | Not written or rejected | Why |
 | --- | --- |
@@ -186,6 +202,12 @@ Version 5 and the options added to the writer:
 - Of several `-in` files, one that exists and cannot be opened is an error (exit status 255)
   that removes what the earlier files added; makeblastdb skips it without a word. `-in ""`
   (no name) is refused; makeblastdb reads an empty list.
+- LMDB's lock files (`NAME.pdb-lock`, `NAME.ptf-lock`) are not created (they change no byte
+  of a database; one left at the path is removed, makeblastdb's final state). So an output
+  name of 247 to 251 bytes, whose `NAME.pdb-lock` passes the file-name limit of 255 bytes,
+  stops makeblastdb ("BLAST Database error: LMDB runtime error: mdb_env_open: File name too
+  long", exit status 2, no volume written) while LOSAT builds the database (exit status 0;
+  every file is valid and its own name fits).
 
 Errors that makeblastdb does not detect, or detects elsewhere:
 
@@ -211,6 +233,11 @@ Errors that makeblastdb does not detect, or detects elsewhere:
 Undefined behaviour of NCBI that is not reproduced:
 
 - A volume file past 4 GiB is an error (makeblastdb's 32-bit offsets wrap).
+- A version 5 database of more than 2^31 sequences is an error at the sequence that would get
+  OID 2^31 (makeblastdb's `int` OID overflows). The number of sequences in the metadata file
+  is an `Int8`, the type of the field, summed without NCBI's `int`.
+- A map size that the platform's `size_t` cannot hold (a 32-bit build) is refused with LMDB's
+  error for a map it cannot make (`Cannot allocate memory`), not cut to 32 bits.
 - A sequence longer than 2,147,483,647 residues is refused with NCBI's message, also where
   makeblastdb's 32-bit length wraps and it stores a short sequence. A nucleotide sequence of
   exactly 2,147,483,647 bases with ambiguity is written in full (makeblastdb's size

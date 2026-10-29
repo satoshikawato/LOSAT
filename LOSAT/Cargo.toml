@@ -84,10 +84,20 @@ rustc-hash = "1.1"
 #     x_FillBuffer((size_t) m_Sb->in_avail());
 #     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
 # ```
-# Rust filesystem support for the native readable-byte hint; no BLAST behavior,
-# foreign algorithm, NCBI runtime/build dependency or libc-auxv feature.
+# NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:395,3969
+# ```c
+# #define	GET_PAGESIZE(x)	((x) = sysconf(_SC_PAGE_SIZE))
+# 	GET_PAGESIZE(e->me_os_psize);
+# ```
+# Rust system calls for the native readable-byte hint (`io`), and for the page size
+# of the LMDB files of version 5 (`writedb::platform::host_page_size`): `param`
+# (rustix's `sysconf(_SC_PAGESIZE)` on macOS and the BSDs) and `mm` (the kernel's
+# alignment through `mmap` and `mprotect` on Linux, which needs neither /proc nor
+# the C library). No BLAST behavior, foreign algorithm, NCBI runtime/build
+# dependency or libc-auxv feature (the pure-Rust runtime boundary,
+# tests/check_pure_rust_runtime_boundary.py, allows no direct libc call).
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "=0.38.44", default-features = false, features = ["std", "param"] }
+rustix = { version = "=0.38.44", default-features = false, features = ["std", "param", "mm"] }
 
 # Windows file-handle type (`GetFileType`, `GetConsoleMode`) for the stream-position test of
 # `IsIStreamEmpty` (`input_files::has_stream_position`); only the three features those need.

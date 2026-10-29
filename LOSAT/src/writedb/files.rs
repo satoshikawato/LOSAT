@@ -340,6 +340,8 @@ pub(crate) struct IndexFile {
     index: u32,
     /// `x_MakeLmdbName()` for version 5, empty for version 4.
     lmdb_name: Vec<u8>,
+    /// The platform's `sizeof(long)` in `x_Overhead`.
+    sizeof_long: u64,
     oids: u32,
     data_size: u64,
     letters: u64,
@@ -366,17 +368,27 @@ pub(crate) struct IndexFile {
 //             + 2 * sizeof(int) + T.size() + D.size();
 // }
 // ```
-// `sizeof(long)` is 8 on the reference platform (Linux x86-64). The version 5
-// form counts the volume number and the length of the LMDB name as two more
-// `int`s.
-fn overhead(version: DbVersion, title: &[u8], lmdb_name: &[u8], date: &[u8]) -> u64 {
+// `sizeof(int)` is 4 and `sizeof(long)` the platform's (`Platform::sizeof_long`):
+// 8 on Linux and macOS (LP64), 4 on Windows (LLP64), so the padding of the
+// date and the room the header takes from `-max_file_sz` follow the platform
+// whose makeblastdb is reproduced. The version 5 form counts the volume number
+// and the length of the LMDB name as two more `int`s.
+fn overhead(
+    version: DbVersion,
+    sizeof_long: u64,
+    title: &[u8],
+    lmdb_name: &[u8],
+    date: &[u8],
+) -> u64 {
     match version {
-        DbVersion::V4 => (4 * 4 + 8 + 2 * 4 + title.len() + date.len()) as u64,
-        DbVersion::V5 => (5 * 4 + 8 + 3 * 4 + title.len() + lmdb_name.len() + date.len()) as u64,
+        DbVersion::V4 => 4 * 4 + sizeof_long + 2 * 4 + (title.len() + date.len()) as u64,
+        DbVersion::V5 => {
+            5 * 4 + sizeof_long + 3 * 4 + (title.len() + lmdb_name.len() + date.len()) as u64
+        }
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:432-442
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:438-448
 // ```c++
 // /// Form name of lmdb database file.
 // const string CWriteDB_IndexFile::x_MakeLmdbName()
@@ -437,6 +449,7 @@ impl IndexFile {
         index: u32,
         max_file_size: u64,
         version: DbVersion,
+        sizeof_long: u64,
         arrays: OffsetArrays,
     ) -> Result<Self, WriteDbError> {
         let file = WriteDbFile::create(
@@ -466,8 +479,9 @@ impl IndexFile {
             date: date.to_vec(),
             version,
             index,
-            data_size: overhead(version, title, &lmdb_name, date).div_ceil(8) * 8,
+            data_size: overhead(version, sizeof_long, title, &lmdb_name, date).div_ceil(8) * 8,
             lmdb_name,
+            sizeof_long,
             oids: 0,
             letters: 0,
             max_length: 0,
@@ -620,7 +634,15 @@ impl IndexFile {
     // 127 MiB of arrays and 127 MiB of copy; makedb-v5 survey/MEM_RCA.md).
     pub(crate) fn close(&mut self) -> Result<(), WriteDbError> {
         let mut pad_date = self.date.clone();
-        while overhead(self.version, &self.title, &self.lmdb_name, &pad_date) & 0x7 != 0 {
+        while overhead(
+            self.version,
+            self.sizeof_long,
+            &self.title,
+            &self.lmdb_name,
+            &pad_date,
+        ) & 0x7
+            != 0
+        {
             pad_date.push(0);
         }
         let mut out =

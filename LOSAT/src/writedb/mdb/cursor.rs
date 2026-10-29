@@ -295,7 +295,7 @@ impl Env {
         self.cursors[x].pg[0] = pg0;
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:1222-1230 (XCURSOR_REFRESH)
+    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:1243-1250 (XCURSOR_REFRESH)
     // ```c
     // #define XCURSOR_REFRESH(mc, top, mp) do { \
     // 	MDB_page *xr_pg = (mp); \
@@ -2635,7 +2635,7 @@ impl Env {
     // 		return MDB_SUCCESS;
     // 	}
     // ```
-    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:609-617
+    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:858-859,863
     // ```c
     // #define PAGEFILL(env, p) (1000L * ((env)->me_psize - PAGEHDRSZ - SIZELEFT(p)) / \
     //				((env)->me_psize - PAGEHDRSZ))

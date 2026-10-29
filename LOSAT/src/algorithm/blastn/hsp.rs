@@ -30,6 +30,11 @@ pub enum BlastnOutputFormat {
     Pairwise,
     Tabular,
     TabularWithComments,
+    /// The tabular reports with a field list or a delimiter (outfmt 6 and 7 other than the
+    /// default `std` fields with a tab) and outfmt 10 and 20 (`report::tabular`, through
+    /// `algorithm::blastn::tabular`). The default outfmt 6 and 7 keep `Tabular` and
+    /// `TabularWithComments`, whose writers this report never enters.
+    CustomTabular(&'static crate::report::tabular::TabularSpec),
     /// The Seq-annot of Seq-aligns of each query: outfmt 8 (ASN.1 text) or 12 (JSON)
     /// (`report::serial::write_query`, through `algorithm::blastn::seqalign`).
     Seqalign(crate::report::serial::SerialFormat),
@@ -73,12 +78,32 @@ impl BlastnOutputFormat {
     ///         eJsonSeqalign,
     /// ```
     ///
-    /// `spec` is the custom specification of the choice (`FormatChoice::spec`), which only
-    /// SAM reads here (`SQ`, `SR`).
-    pub(crate) fn of(format: ReportFormat, spec: &str) -> anyhow::Result<Self> {
+    /// `choice` is the format choice: SAM reads its custom specification (`SQ`, `SR`), and the
+    /// tabular formats with a field list or a delimiter, and outfmt 10 and 20, are the custom
+    /// tabular report (`report::tabular::TabularSpec::of`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
+    /// ```c++
+    ///     if (m_FormatType == CFormattingArgs::eTabular ||
+    ///         m_FormatType == CFormattingArgs::eTabularWithComments ||
+    ///         m_FormatType == CFormattingArgs::eCommaSeparatedValues ||
+    ///         m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
+    ///     ...
+    ///         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
+    ///         if(!m_CustomDelim.empty()) {
+    ///             tabinfo.SetCustomDelim(m_CustomDelim);
+    ///         }
+    /// ```
+    pub(crate) fn of(
+        format: ReportFormat,
+        choice: &crate::blastinput::app::FormatChoice,
+    ) -> anyhow::Result<Self> {
+        if let Some(spec) = crate::report::tabular::TabularSpec::of(format, choice) {
+            return Ok(BlastnOutputFormat::CustomTabular(spec.intern()));
+        }
         match format {
             ReportFormat::Sam => Ok(BlastnOutputFormat::Sam(crate::report::sam::SamSpec::parse(
-                spec,
+                &choice.spec,
             ))),
             ReportFormat::Pairwise => Ok(BlastnOutputFormat::Pairwise),
             ReportFormat::Tabular => Ok(BlastnOutputFormat::Tabular),
@@ -157,6 +182,14 @@ impl BlastnOutputFormat {
             BlastnOutputFormat::Xml => Some(5),
             BlastnOutputFormat::Tabular => Some(6),
             BlastnOutputFormat::TabularWithComments => Some(7),
+            // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and 20):
+            // they read the subjects as 6 and 7 do, and show no taxonomy name that the prefetch
+            // would look up (`report::tabular` writes `N/A`; a name of the taxonomy database is
+            // LOSAT's refusal, `algorithm::blastn::tabular`).
+            BlastnOutputFormat::CustomTabular(spec) => Some(match spec.kind {
+                crate::report::tabular::TabularKind::Commented => 7,
+                _ => 6,
+            }),
             BlastnOutputFormat::Sam(_) => Some(17),
             // The Seq-annots and the archive fetch nothing; XML2 and JSON write the messages
             // at each `Hit` (`TaxdbPrinter`).
@@ -166,24 +199,36 @@ impl BlastnOutputFormat {
         })
     }
 
-    /// Whether the format is one of the tabular formats (outfmt 6 and 7), which read the
+    /// Whether the format is one of the tabular formats (outfmt 6, 7, 10 and 20), which read the
     /// tabular subject IDs.
     pub(crate) fn is_tabular(self) -> bool {
         matches!(
             self,
-            BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments
+            BlastnOutputFormat::Tabular
+                | BlastnOutputFormat::TabularWithComments
+                | BlastnOutputFormat::CustomTabular(_)
         )
+    }
+
+    /// The field list of the custom tabular report (`CustomTabular`).
+    pub(crate) fn tabular_spec(self) -> Option<&'static crate::report::tabular::TabularSpec> {
+        match self {
+            BlastnOutputFormat::CustomTabular(spec) => Some(spec),
+            _ => None,
+        }
     }
 
     /// Whether the report reads the queries' letters (EXPERIMENT, LOSAT_X_BNQDROP's rule): the
     /// HSP rows of outfmt 0 and of the XML / JSON documents, the archive's Bioseqs and DUST, and
-    /// SAM's SEQ where the query is the target (`SQ SR`). The tabular formats (BLASTN takes no
-    /// custom columns), the Seq-aligns and the other SAM documents show none.
+    /// SAM's SEQ where the query is the target (`SQ SR`). The default tabular formats, the
+    /// Seq-aligns and the other SAM documents show none; a custom tabular report shows them
+    /// where its fields need the alignment rows (`TabularNeeds::rows`).
     pub(crate) fn reads_query_letters(self) -> bool {
         match self {
             BlastnOutputFormat::Tabular
             | BlastnOutputFormat::TabularWithComments
             | BlastnOutputFormat::Seqalign(_) => false,
+            BlastnOutputFormat::CustomTabular(spec) => spec.needs().rows,
             BlastnOutputFormat::Sam(spec) => spec.sequence && spec.subject_as_reference,
             BlastnOutputFormat::Pairwise
             | BlastnOutputFormat::Xml
@@ -239,7 +284,7 @@ fn write_blastn_outfmt7_header<W: Write>(
     writeln!(writer, "# {num_hits} hits found")
 }
 
-fn blastn_hsp_count(hit_list: Option<&BlastnHitList>) -> usize {
+pub(crate) fn blastn_hsp_count(hit_list: Option<&BlastnHitList>) -> usize {
     hit_list
         .map(|list| {
             list.hsplist_array

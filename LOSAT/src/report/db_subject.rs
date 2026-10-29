@@ -697,6 +697,14 @@ pub fn joined_in_reports(a: &ParsedSubject, b: &ParsedSubject) -> bool {
     compare(&a.alignment_id, &b.alignment_id) == Sic::Yes
 }
 
+// No NCBI counterpart: LOSAT's check that no two sequences of a database are joined
+// (`common::database::reports_may_refuse`).
+/// Adds to `keys` the keys of the Seq-align id of `subject` (`defline_set::match_keys`): two
+/// subjects that the reports join (`joined_in_reports`) share one.
+pub fn join_keys(subject: &ParsedSubject, keys: &mut Vec<u64>) {
+    crate::seqid::defline_set::match_keys(&subject.alignment_id, keys);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

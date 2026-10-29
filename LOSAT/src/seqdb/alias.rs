@@ -1745,7 +1745,7 @@ pub(super) fn resolve_one_name(
 //     }
 // }
 // ```
-fn collect_alias_files(node: &AliasNode, out: &mut std::collections::BTreeSet<String>) {
+pub(super) fn collect_alias_files(node: &AliasNode, out: &mut std::collections::BTreeSet<String>) {
     if let Some(name) = &node.this_name {
         out.insert(name.clone());
     }

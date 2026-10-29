@@ -8,12 +8,19 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use super::bioseq::{Bioseq, SeqData};
 use super::build_db::BuildDatabase;
 use super::makeblastdb::{run_with, MakedbArgs};
+use super::platform::Platform;
 use super::time::LocalTime;
-use super::writer::WriteDb;
+use super::writer::{DbVersion, WriteDb};
 use crate::seqdb::SeqType;
 
 mod makeblastdb_app_cases;
 use makeblastdb_app_cases::APP_CASES;
+mod makeblastdb_v5_cases;
+use makeblastdb_v5_cases::{Expected, V5Case, V5_CASES};
+
+/// The platform of every expected file here: makeblastdb 2.17.0 on Linux x86-64. The tests
+/// write its files on whatever platform they run on (`Platform`).
+const LINUX: Platform = Platform::LINUX_X86_64;
 
 fn seqdb_fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb")
@@ -90,10 +97,22 @@ fn files_named(dir: &Path, prefix: &str) -> Vec<String> {
     names
 }
 
-/// Every file `out_dir/name.*` equals the fixture's file of the same
-/// extension, and the fixture has no other file LOSAT writes.
+/// The files of a database that the fixtures of `LOSAT/tests/seqdb` keep: the
+/// index, sequence, header and alias files and the LMDB file of version 5
+/// (`make_fixtures.py`, `KEEP`).
+fn kept_by_fixtures(file: &str) -> bool {
+    ["in", "sq", "hr", "al", "db"]
+        .iter()
+        .any(|ext| file.ends_with(&format!(".p{ext}")) || file.ends_with(&format!(".n{ext}")))
+}
+
+/// Every file `out_dir/name.*` that the fixtures keep equals the fixture's
+/// file of the same extension, and the fixture has no other such file.
 fn assert_same_database(out_dir: &Path, name: &str, fixture_dir: &Path, fixture: &str) {
-    let written = files_named(out_dir, &format!("{name}."));
+    let written: Vec<String> = files_named(out_dir, &format!("{name}."))
+        .into_iter()
+        .filter(|file| kept_by_fixtures(file))
+        .collect();
     assert!(!written.is_empty(), "no file {name}.* was written");
     let suffix = |file: &str, stem: &str| file[stem.len()..].to_string();
     for file in &written {
@@ -109,14 +128,9 @@ fn assert_same_database(out_dir: &Path, name: &str, fixture_dir: &Path, fixture:
             actual.iter().zip(&expected).position(|(a, b)| a != b)
         );
     }
-    let losat_writes = |file: &String| {
-        ["in", "sq", "hr", "al"]
-            .iter()
-            .any(|ext| file.ends_with(&format!(".p{ext}")) || file.ends_with(&format!(".n{ext}")))
-    };
     let expected: Vec<String> = files_named(fixture_dir, &format!("{fixture}."))
         .iter()
-        .filter(|file| losat_writes(file))
+        .filter(|file| kept_by_fixtures(file))
         .map(|file| suffix(file, fixture))
         .collect();
     let actual: Vec<String> = written.iter().map(|file| suffix(file, name)).collect();
@@ -153,7 +167,8 @@ fn protein_bioseqs(path: &Path) -> Vec<Bioseq> {
 }
 
 /// The writer alone, from sequences built by hand: the single-volume and the
-/// six-volume protein databases of `LOSAT/tests/seqdb`.
+/// six-volume protein databases of `LOSAT/tests/seqdb` (version 4) and the
+/// single-volume one of version 5 with its LMDB file.
 #[test]
 fn the_writer_reproduces_makeblastdb_s_protein_volumes() {
     let fixtures = seqdb_fixtures();
@@ -163,10 +178,24 @@ fn the_writer_reproduces_makeblastdb_s_protein_volumes() {
             "prot_v4.pin",
             "LOSAT seqdb fixture, protein, version 4",
             3_000_000_000u64,
+            DbVersion::V4,
         ),
-        ("prot_mv", "prot_mv.00.pin", "protein in volumes", 300),
+        (
+            "prot_mv",
+            "prot_mv.00.pin",
+            "protein in volumes",
+            300,
+            DbVersion::V4,
+        ),
+        (
+            "prot_v5",
+            "prot_v5.pin",
+            "prot.faa",
+            3_000_000_000u64,
+            DbVersion::V5,
+        ),
     ];
-    for (fixture, index_file, title, max_file_size) in cases {
+    for (fixture, index_file, title, max_file_size, version) in cases {
         let date = stored_date(&fixtures.join("db").join(index_file), SeqType::Protein);
         let tmp = TempDir::new(fixture);
         let mut db = WriteDb::new(
@@ -175,6 +204,8 @@ fn the_writer_reproduces_makeblastdb_s_protein_volumes() {
             title.as_bytes(),
             date.as_bytes(),
             max_file_size,
+            version,
+            LINUX,
         );
         for bioseq in protein_bioseqs(&fixtures.join("prot.faa")) {
             db.extract_bioseq_deflines(&bioseq);
@@ -188,6 +219,52 @@ fn the_writer_reproduces_makeblastdb_s_protein_volumes() {
     }
 }
 
+/// The platform reaches the files where NCBI's source asks it (`Platform`): with Windows' values
+/// (a 4-byte `long`, map sizes of 500000 bytes, LMDB files as long as the map) the date in the
+/// index file has 4 NUL bytes more or fewer, and the two LMDB files are 500000 bytes long; the
+/// sequence and header files are Linux's. What makeblastdb.exe writes was not compared.
+#[test]
+fn the_platform_reaches_the_index_header_and_the_lmdb_files() {
+    use super::platform::{ncbi_platform, NcbiOs, PageSize};
+    let fixtures = seqdb_fixtures();
+    let windows = ncbi_platform(NcbiOs::Windows, PageSize::Fixed(4096), 4, u64::MAX);
+    let mut built = Vec::new();
+    for platform in [LINUX, windows] {
+        let tmp = TempDir::new("platform");
+        let mut db = WriteDb::new(
+            &tmp.base("db"),
+            true,
+            b"prot.faa",
+            b"Oct 12, 2026  9:00 PM",
+            3_000_000_000,
+            DbVersion::V5,
+            platform,
+        );
+        for bioseq in protein_bioseqs(&fixtures.join("prot.faa")) {
+            db.extract_bioseq_deflines(&bioseq);
+            db.add_sequence(bioseq).unwrap();
+        }
+        db.close().unwrap();
+        let read = |ext: &str| std::fs::read(tmp.0.join(format!("db.{ext}"))).unwrap();
+        built.push([
+            read("pin"),
+            read("psq"),
+            read("phr"),
+            read("pdb"),
+            read("ptf"),
+        ]);
+    }
+    let [linux, windows] = [&built[0], &built[1]];
+    assert_eq!(linux[0].len().abs_diff(windows[0].len()), 4, ".pin");
+    assert_eq!(
+        (&linux[1], &linux[2]),
+        (&windows[1], &windows[2]),
+        ".psq, .phr"
+    );
+    assert_eq!((linux[3].len(), linux[4].len()), (20480, 16384));
+    assert_eq!((windows[3].len(), windows[4].len()), (500_000, 500_000));
+}
+
 /// One build through `BuildDatabase` with the FASTA source: the result, the
 /// log, and the messages for the standard error stream.
 fn build(
@@ -198,10 +275,38 @@ fn build(
     date: &str,
     out_base: &str,
 ) -> (Result<(), super::WriteDbError>, String, Vec<u8>) {
+    build_version(
+        fasta,
+        is_protein,
+        title,
+        max_file_size,
+        date,
+        out_base,
+        DbVersion::V4,
+    )
+}
+
+fn build_version(
+    fasta: &Path,
+    is_protein: bool,
+    title: &str,
+    max_file_size: u64,
+    date: &str,
+    out_base: &str,
+    version: DbVersion,
+) -> (Result<(), super::WriteDbError>, String, Vec<u8>) {
     let mut log = Vec::new();
     let mut messages = Vec::new();
     let result = (|| {
-        let mut db = BuildDatabase::new(out_base, title, is_protein, &mut log, &time_of(date))?;
+        let mut db = BuildDatabase::new(
+            out_base,
+            title,
+            is_protein,
+            &mut log,
+            &time_of(date),
+            version,
+            LINUX,
+        )?;
         db.set_max_file_size(max_file_size);
         let mut warn = |line: &[u8]| {
             messages.extend_from_slice(line);
@@ -213,8 +318,8 @@ fn build(
     (result, String::from_utf8_lossy(&log).into_owned(), messages)
 }
 
-/// The databases of `LOSAT/tests/seqdb` that makeblastdb wrote in format
-/// version 4, from their FASTA files.
+/// The databases of `LOSAT/tests/seqdb` that makeblastdb wrote without parsed
+/// Seq-ids, in format versions 4 and 5, from their FASTA files.
 #[test]
 fn fasta_files_become_makeblastdb_s_databases() {
     let fixtures = seqdb_fixtures();
@@ -226,6 +331,7 @@ fn fasta_files_become_makeblastdb_s_databases() {
             "prot_v4.pin",
             "LOSAT seqdb fixture, protein, version 4",
             3_000_000_000u64,
+            DbVersion::V4,
         ),
         (
             "nucl_v4",
@@ -234,6 +340,7 @@ fn fasta_files_become_makeblastdb_s_databases() {
             "nucl_v4.nin",
             "LOSAT seqdb fixture, nucleotide, version 4",
             3_000_000_000,
+            DbVersion::V4,
         ),
         (
             "prot_mv",
@@ -242,9 +349,37 @@ fn fasta_files_become_makeblastdb_s_databases() {
             "prot_mv.00.pin",
             "protein in volumes",
             300,
+            DbVersion::V4,
+        ),
+        (
+            "prot_v5",
+            "prot.faa",
+            true,
+            "prot_v5.pin",
+            "prot.faa",
+            3_000_000_000,
+            DbVersion::V5,
+        ),
+        (
+            "nucl_v5",
+            "nucl.fna",
+            false,
+            "nucl_v5.nin",
+            "nucl.fna",
+            3_000_000_000,
+            DbVersion::V5,
+        ),
+        (
+            "nucl_mv",
+            "nucl.fna",
+            false,
+            "nucl_mv.00.nin",
+            "nucleotide in volumes",
+            300,
+            DbVersion::V5,
         ),
     ];
-    for (fixture, fasta, is_protein, index_file, title, max_file_size) in cases {
+    for (fixture, fasta, is_protein, index_file, title, max_file_size, version) in cases {
         let seqtype = if is_protein {
             SeqType::Protein
         } else {
@@ -252,13 +387,14 @@ fn fasta_files_become_makeblastdb_s_databases() {
         };
         let date = stored_date(&fixtures.join("db").join(index_file), seqtype);
         let tmp = TempDir::new(fixture);
-        let (result, log, messages) = build(
+        let (result, log, messages) = build_version(
             &fixtures.join(fasta),
             is_protein,
             title,
             max_file_size,
             &date,
             &tmp.base(fixture),
+            version,
         );
         result.unwrap();
         assert!(
@@ -355,7 +491,7 @@ fn replace_bytes(text: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
     out
 }
 
-/// `losat makedb` from its arguments to its exit status on the inputs of
+/// `losat makeblastdb` from its arguments to its exit status on the inputs of
 /// `makeblastdb_app_cases.rs`: the files, the log, the messages and the exit
 /// status are makeblastdb's.
 #[test]
@@ -375,6 +511,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             out: Some(base.clone()),
             blastdb_version: 4,
             max_file_sz: case.max_file_sz.unwrap_or("3GB").to_string(),
+            logfile: None,
         };
         // A run that writes no database stores no date; any time will do.
         let now = time_of(if case.date.is_empty() {
@@ -383,7 +520,14 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             case.date
         });
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let status = run_with(&args, Some(&now), &mut std::io::empty(), &mut out, &mut err);
+        let status = run_with(
+            &args,
+            Some(&now),
+            LINUX,
+            &mut std::io::empty(),
+            &mut out,
+            &mut err,
+        );
         let name = case.name;
         let show = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
         let err = replace_bytes(&err, input.as_bytes(), b"<IN>");
@@ -402,7 +546,20 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             show(case.stdout)
         );
         assert_eq!(status, case.status, "{name}: exit status");
-        let written = files_named(&out_dir, "db.");
+        // The recorded files are those of the volumes; makeblastdb also
+        // writes the metadata file after every build that made a volume.
+        let mut written = files_named(&out_dir, "db.");
+        let metadata = written
+            .iter()
+            .position(|file| file == "db.pjs" || file == "db.njs");
+        assert_eq!(
+            metadata.is_some(),
+            case.status == 0 && !case.files.is_empty(),
+            "{name}: metadata file"
+        );
+        if let Some(at) = metadata {
+            written.remove(at);
+        }
         let expected: Vec<String> = case
             .files
             .iter()
@@ -422,7 +579,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
     }
 }
 
-/// One run of `losat makedb` for a protein database titled "t": the exit
+/// One run of `losat makeblastdb` for a protein database titled "t": the exit
 /// status, the log and the messages of the standard error stream.
 fn makedb(input: &str, out: &str, max_file_sz: &str, stdin: &[u8]) -> (i32, String, String) {
     let args = MakedbArgs {
@@ -433,11 +590,19 @@ fn makedb(input: &str, out: &str, max_file_sz: &str, stdin: &[u8]) -> (i32, Stri
         out: Some(out.to_string()),
         blastdb_version: 4,
         max_file_sz: max_file_sz.to_string(),
+        logfile: None,
     };
     let now = time_of("Oct 12, 2026  9:00 PM");
     let (mut log, mut messages) = (Vec::new(), Vec::new());
     let mut stdin = stdin;
-    let status = run_with(&args, Some(&now), &mut stdin, &mut log, &mut messages);
+    let status = run_with(
+        &args,
+        Some(&now),
+        LINUX,
+        &mut stdin,
+        &mut log,
+        &mut messages,
+    );
     (
         status,
         String::from_utf8_lossy(&log).into_owned(),
@@ -530,29 +695,56 @@ fn a_database_in_a_directory_with_a_space_is_replaced() {
     }
 }
 
-/// makeblastdb overwrites `NAME.pjs` after every build. LOSAT writes no JSON
-/// file, so the one of the database it replaced must not stay (the removal
-/// of the old database takes `NAME.pjs` only when the old database has one
-/// volume). A JSON file of the other molecule type is not this database's.
+/// The `files` of a metadata file.
+fn metadata_files(path: &Path) -> Vec<String> {
+    let text = std::fs::read_to_string(path).unwrap();
+    let list = &text[text.find("\"files\": [").unwrap()..];
+    list.lines()
+        .skip(1)
+        .take_while(|line| !line.trim_start().starts_with(']'))
+        .map(|line| {
+            line.trim()
+                .trim_end_matches(',')
+                .trim_matches('"')
+                .to_string()
+        })
+        .collect()
+}
+
+/// makeblastdb writes `NAME.pjs` after every build. The removal of the old
+/// database takes `NAME.pjs` only when the old database has one volume, so
+/// the file of a database of several volumes is still there when the new one
+/// is listed: makeblastdb 2.17.0 (`-max_file_sz 300`, then a single volume)
+/// lists `db.pjs` among the new database's files. A JSON file of the other
+/// molecule type is not this database's and stays.
 #[test]
-fn the_json_file_of_a_replaced_database_is_removed() {
+fn the_json_file_lists_the_files_of_the_database() {
     let fasta = prot_fasta();
     for second_size in ["3GB", "400"] {
         let tmp = TempDir::new("json");
         let base = tmp.base("db");
         let (status, _, messages) = makedb(&fasta, &base, "300", b"");
         assert_eq!((status, messages.as_str()), (0, ""));
-        assert_eq!(files_named(&tmp.0, "db.").len(), 6 * 3 + 1);
-        std::fs::write(tmp.0.join("db.pjs"), b"{}").unwrap();
+        assert_eq!(files_named(&tmp.0, "db.").len(), 6 * 3 + 2);
+        let mut volumes: Vec<String> = files_named(&tmp.0, "db.");
+        volumes.retain(|file| file != "db.pjs");
+        assert_eq!(metadata_files(&tmp.0.join("db.pjs")), volumes);
         std::fs::write(tmp.0.join("db.njs"), b"{}").unwrap();
 
         let (status, _, messages) = makedb(&fasta, &base, second_size, b"");
         assert_eq!((status, messages.as_str()), (0, ""), "{second_size}");
         let files = files_named(&tmp.0, "db.");
-        assert!(!files.iter().any(|file| file == "db.pjs"), "{files:?}");
         assert!(files.iter().any(|file| file == "db.njs"), "{files:?}");
         if second_size == "3GB" {
-            assert_eq!(files, ["db.njs", "db.phr", "db.pin", "db.psq"]);
+            assert_eq!(files, ["db.njs", "db.phr", "db.pin", "db.pjs", "db.psq"]);
+            assert_eq!(
+                metadata_files(&tmp.0.join("db.pjs")),
+                ["db.phr", "db.pin", "db.pjs", "db.psq"]
+            );
+        } else {
+            let mut volumes = files.clone();
+            volumes.retain(|file| file != "db.pjs" && file != "db.njs");
+            assert_eq!(metadata_files(&tmp.0.join("db.pjs")), volumes);
         }
     }
 }
@@ -637,7 +829,7 @@ fn the_standard_input_gives_the_database_of_the_file() {
             "{log:?}"
         );
         let files = files_named(&from_file, "db.");
-        assert_eq!(files.len(), if max_file_sz == "300" { 19 } else { 3 });
+        assert_eq!(files.len(), if max_file_sz == "300" { 20 } else { 4 });
         assert_eq!(files_named(&from_stdin, "db."), files);
         for file in &files {
             assert!(
@@ -662,7 +854,7 @@ fn a_late_error_removes_the_volumes_already_written() {
     std::fs::write(&fasta, &input).unwrap();
     let (status, _, _) = makedb(&fasta, &tmp.base("db"), "300", b"");
     assert_eq!(status, 0);
-    assert_eq!(files_named(&tmp.0, "db.").len(), 6 * 3 + 1);
+    assert_eq!(files_named(&tmp.0, "db.").len(), 6 * 3 + 2);
     for file in files_named(&tmp.0, "db.") {
         std::fs::remove_file(tmp.0.join(file)).unwrap();
     }
@@ -744,14 +936,17 @@ fn directories_of_the_output_name() {
     assert_eq!((status, messages.as_str()), (0, ""));
     assert_eq!(
         files_named(&tmp.0, "sub"),
-        ["sub.phr", "sub.pin", "sub.psq"]
+        ["sub.phr", "sub.pin", "sub.pjs", "sub.psq"]
     );
 
     let nested = tmp.0.join("a").join("b");
     let out = nested.join("db").to_string_lossy().into_owned();
     let (status, _, messages) = makedb(&fasta, &out, "3GB", b"");
     assert_eq!((status, messages.as_str()), (0, ""));
-    assert_eq!(files_named(&nested, "db."), ["db.phr", "db.pin", "db.psq"]);
+    assert_eq!(
+        files_named(&nested, "db."),
+        ["db.phr", "db.pin", "db.pjs", "db.psq"]
+    );
     #[cfg(unix)]
     {
         // The directories get the mode rwxr-xr-x whatever the umask.
@@ -797,7 +992,15 @@ fn directories_of_the_output_name() {
 #[test]
 fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
     let tmp = TempDir::new("volumes");
-    let mut db = WriteDb::new(&tmp.base("db"), true, b"t", b"Oct 12, 2026  9:00 PM", 1);
+    let mut db = WriteDb::new(
+        &tmp.base("db"),
+        true,
+        b"t",
+        b"Oct 12, 2026  9:00 PM",
+        1,
+        DbVersion::V4,
+        LINUX,
+    );
     for i in 0..1001 {
         let bioseq = Bioseq {
             local_id: (i + 1).to_string(),
@@ -832,4 +1035,328 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
     assert_eq!(volumes[..2], ["db.0000", "db.0001"]);
     assert_eq!(volumes[99..101], ["db.0099", "db.00100"]);
     assert_eq!(volumes[999..], ["db.00999", "db.1000"]);
+}
+
+/// The parsed `losat makeblastdb` arguments of a makeblastdb command line (the
+/// words after the program's name).
+fn parse_makedb_words(words: &[String]) -> MakedbArgs {
+    use crate::cli::{Cli, Commands};
+    let mut argv = vec!["losat".to_string(), "makeblastdb".to_string()];
+    argv.extend(words.iter().cloned());
+    match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+        Ok(cli) => match cli.command {
+            Commands::Makedb(args) => args,
+            _ => unreachable!("a makeblastdb command line"),
+        },
+        Err(error) => panic!("{words:?}: {error}"),
+    }
+}
+
+/// FNV-1a, 64 bits.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in bytes {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    h
+}
+
+/// A stream or log of a run with the markers of `makeblastdb_v5_cases.rs`: the output
+/// directory `dir` as `<D>`, the build time as `<T>`, the seconds of the timed line as `<S>`.
+/// On Windows the directory's `\` are written as `/`, as in the recorded Linux runs.
+fn v5_markers(bytes: &[u8], dir: &str) -> Vec<u8> {
+    let mut text = replace_bytes(bytes, dir.as_bytes(), b"<D>");
+    if cfg!(windows) {
+        text = replace_bytes(&text, b"\\", b"/");
+        text = replace_bytes(&text, dir.replace('\\', "/").as_bytes(), b"<D>");
+    }
+    let lines: Vec<Vec<u8>> = text
+        .split(|&b| b == b'\n')
+        .map(|line| {
+            let line_text = String::from_utf8_lossy(line);
+            const BUILDING: &str = "Building a new DB, current time: ";
+            if line_text.starts_with(BUILDING) {
+                format!("{BUILDING}<T>").into_bytes()
+            } else if let (Some(at), true) = (
+                line_text.find(" sequences in "),
+                line_text.ends_with(" seconds."),
+            ) {
+                format!("{} sequences in <S> seconds.", &line_text[..at]).into_bytes()
+            } else {
+                line.to_vec()
+            }
+        })
+        .collect();
+    lines.join(&b'\n')
+}
+
+/// Replays a case of `makeblastdb_v5_cases.rs` through the parser and `run_with` in a directory
+/// of its own: every run's exit status and streams, the log file and every file are
+/// makeblastdb's (the date of the database is the recorded one).
+fn run_v5_case(case: &V5Case) {
+    let name = case.name;
+    let tmp = TempDir::new(&format!("v5-{name}"));
+    let dir = tmp.0.to_string_lossy().into_owned();
+    let now = time_of(if case.date.is_empty() {
+        "Oct 12, 2026  9:00 PM"
+    } else {
+        case.date
+    });
+    let show = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    for (k, run) in case.runs.iter().enumerate() {
+        let words: Vec<String> = run
+            .words
+            .iter()
+            .map(|word| match word.replace("{D}", &dir) {
+                // makeblastdb's null device on Windows is `NUL`; `/dev/null` names it on Unix.
+                null if cfg!(windows) && null == "/dev/null" => "NUL".to_string(),
+                word => word,
+            })
+            .collect();
+        let args = parse_makedb_words(&words);
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let status = run_with(
+            &args,
+            Some(&now),
+            LINUX,
+            &mut std::io::empty(),
+            &mut out,
+            &mut err,
+        );
+        let (out, err) = (v5_markers(&out, &dir), v5_markers(&err, &dir));
+        assert!(
+            err == run.stderr,
+            "{name} run {k}: standard error\n{}\nexpected\n{}",
+            show(&err),
+            show(run.stderr)
+        );
+        assert!(
+            out == run.stdout,
+            "{name} run {k}: standard output\n{}\nexpected\n{}",
+            show(&out),
+            show(run.stdout)
+        );
+        assert_eq!(status, run.status, "{name} run {k}: exit status");
+    }
+    let log = std::fs::read(tmp.0.join("mk.log"))
+        .ok()
+        .map(|log| v5_markers(&log, &dir));
+    assert!(
+        log.as_deref() == case.log,
+        "{name}: log file\n{:?}\nexpected\n{:?}",
+        log.as_deref().map(show),
+        case.log.map(show)
+    );
+    let mut written: Vec<String> = std::fs::read_dir(&tmp.0)
+        .unwrap()
+        .map(|entry| entry.unwrap())
+        .filter(|entry| entry.file_type().unwrap().is_file())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|file| file != "mk.log")
+        .collect();
+    written.sort();
+    let expected: Vec<&str> = case.files.iter().map(|(file, _)| *file).collect();
+    assert_eq!(written, expected, "{name}: files");
+    for (file, content) in case.files {
+        let actual = std::fs::read(tmp.0.join(file)).unwrap();
+        match content {
+            Expected::Bytes(bytes) => assert!(
+                actual == *bytes,
+                "{name}: {file}: {} bytes written, {} expected; first difference at byte {:?}",
+                actual.len(),
+                bytes.len(),
+                actual.iter().zip(*bytes).position(|(a, b)| a != b)
+            ),
+            Expected::Digest(len, digest) => assert_eq!(
+                (actual.len(), fnv1a(&actual)),
+                (*len, *digest),
+                "{name}: {file}: size and FNV-1a"
+            ),
+        }
+    }
+}
+
+fn run_v5_cases(prefix: &str) {
+    let cases: Vec<&V5Case> = V5_CASES
+        .iter()
+        .filter(|case| case.name.starts_with(prefix))
+        .collect();
+    assert!(!cases.is_empty(), "no case {prefix}*");
+    for case in cases {
+        run_v5_case(case);
+    }
+}
+
+/// `-logfile` as makeblastdb 2.17.0 has it: a new file and two runs appending to one (the log
+/// and the messages, nothing on the standard streams), `/dev/null` (`NUL` on Windows), `-` (the
+/// standard streams, as without `-logfile`), a warning and an error that go to the file, the
+/// empty name (exit status 1, nothing shown) and a file in a missing directory.
+#[test]
+fn logfile_runs_as_makeblastdb() {
+    run_v5_cases("L_");
+}
+
+/// Several files in one `-in` as makeblastdb 2.17.0 has them: the default title is the whole
+/// value, a quoted name, a record without data in the second file, a missing and an empty
+/// second file.
+#[test]
+fn several_input_files_run_as_makeblastdb() {
+    run_v5_cases("M_");
+}
+
+/// The metadata file of version 5 (every field and the list of files, the LMDB and lookup
+/// files included) for protein and nucleotide databases of one volume and of several.
+#[test]
+fn the_metadata_files_of_version_5_are_makeblastdb_s() {
+    run_v5_cases("J_");
+}
+
+/// One of several `-in` files that exists and cannot be opened: LOSAT stops the build with
+/// exit status 255 and removes what the earlier files added, as for a late error (makeblastdb
+/// reads nothing from it and goes on; PD-LOSAT-DATABASE-SEARCH, DECISIONS 20 of the makedb-v5
+/// line).
+#[cfg(unix)]
+#[test]
+fn an_input_file_that_cannot_be_opened_stops_the_build() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new("unreadable");
+    let locked = tmp.base("locked.fa");
+    std::fs::write(&locked, b">l\nMKV\n").unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::File::open(&locked).is_ok() {
+        // A user who reads every file (root): there is no file that cannot be opened.
+        return;
+    }
+    let base = tmp.base("db");
+    for version in ["4", "5"] {
+        let words: Vec<String> = [
+            "-in",
+            &format!("tests/writedb_v5/a.fa {locked}"),
+            "-dbtype",
+            "prot",
+            "-out",
+            &base,
+            "-title",
+            "t",
+            "-blastdb_version",
+            version,
+        ]
+        .iter()
+        .map(|word| word.to_string())
+        .collect();
+        let args = parse_makedb_words(&words);
+        let now = time_of("Oct 12, 2026  9:00 PM");
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let status = run_with(
+            &args,
+            Some(&now),
+            LINUX,
+            &mut std::io::empty(),
+            &mut out,
+            &mut err,
+        );
+        let err = String::from_utf8_lossy(&err).into_owned();
+        let out = String::from_utf8_lossy(&out).into_owned();
+        assert_eq!(status, 255, "v{version}: {err}");
+        assert!(
+            err.starts_with(&format!(
+                "Warning: [makeblastdb] \nInput file {locked} does NOT appear to be FASTA \
+                 (processing anyway).\n"
+            )),
+            "v{version}: {err}"
+        );
+        assert!(
+            err.ends_with("\n") && err.contains(&format!("\nError: {locked}: ")),
+            "v{version}: {err}"
+        );
+        // The first file was read into the database before the second failed.
+        assert!(
+            out.contains("Adding sequences from FASTA; added 2 sequences in "),
+            "v{version}: {out}"
+        );
+        // The volumes and the LMDB file are removed. Of version 5 the tax-id lookup files and
+        // the `.ptf` stay, as after makeblastdb's own late errors (`ListFiles` names the `.pdb`
+        // only; the late-error cases E_late and E_late1 of the makedb-v5 S2 gate).
+        let left: Vec<String> = files_named(&tmp.0, "db.");
+        let expected: &[&str] = if version == "4" {
+            &[]
+        } else {
+            &["db.pot", "db.ptf", "db.pto"]
+        };
+        assert_eq!(left, expected, "v{version}");
+    }
+}
+
+/// The driver of the makedb-v5 line's S2 gate
+/// (`makedb-v5-20261029/scripts/s2_gate.py`), not a test of its own: for each
+/// line of the manifest named by `LOSAT_S2_GATE_MANIFEST` (a directory, the
+/// build date makeblastdb stored, then one JSON array of words per run) it runs
+/// `losat makeblastdb` through `run_with` in that directory's terms, with that date,
+/// and writes `so<k>.txt`, `se<k>.txt` and `rc<k>.txt` there. The script
+/// compares every file with makeblastdb's.
+#[test]
+#[ignore = "driver of an external gate (LOSAT_S2_GATE_MANIFEST)"]
+fn s2_gate() {
+    let manifest = std::env::var("LOSAT_S2_GATE_MANIFEST").expect("LOSAT_S2_GATE_MANIFEST");
+    for line in std::fs::read_to_string(manifest).unwrap().lines() {
+        let mut fields = line.split('\t');
+        let dir = PathBuf::from(fields.next().unwrap());
+        let date = fields.next().unwrap();
+        let now = time_of(if date.is_empty() {
+            "Oct 12, 2026  9:00 PM"
+        } else {
+            date
+        });
+        for (k, run) in fields.enumerate() {
+            let words: Vec<String> = parse_json_words(run);
+            let args = parse_makedb_words(&words);
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let status = run_with(
+                &args,
+                Some(&now),
+                LINUX,
+                &mut std::io::empty(),
+                &mut out,
+                &mut err,
+            );
+            std::fs::write(dir.join(format!("so{k}.txt")), out).unwrap();
+            std::fs::write(dir.join(format!("se{k}.txt")), err).unwrap();
+            std::fs::write(dir.join(format!("rc{k}.txt")), status.to_string()).unwrap();
+        }
+    }
+}
+
+/// A JSON array of strings as the gate script writes it (`json.dumps` with
+/// `ensure_ascii`: the escapes `\"`, `\\`, `\uXXXX` and the one-letter ones).
+fn parse_json_words(text: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut chars = text
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .chars();
+    let mut current: Option<String> = None;
+    while let Some(c) = chars.next() {
+        match (&mut current, c) {
+            (None, '"') => current = Some(String::new()),
+            (None, _) => {}
+            (Some(word), '"') => {
+                words.push(std::mem::take(word));
+                current = None;
+            }
+            (Some(word), '\\') => match chars.next().unwrap() {
+                'n' => word.push('\n'),
+                't' => word.push('\t'),
+                'r' => word.push('\r'),
+                'u' => {
+                    let hex: String = chars.by_ref().take(4).collect();
+                    word.push(char::from_u32(u32::from_str_radix(&hex, 16).unwrap()).unwrap());
+                }
+                other => word.push(other),
+            },
+            (Some(word), c) => word.push(c),
+        }
+    }
+    words
 }

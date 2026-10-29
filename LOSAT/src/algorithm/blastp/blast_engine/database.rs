@@ -2413,6 +2413,7 @@ mod tests {
                 out: Some(name.clone()),
                 blastdb_version: 4,
                 max_file_sz: max_file_sz.to_string(),
+                logfile: None,
             };
             let now = crate::writedb::time::LocalTime {
                 year: 2026,
@@ -2426,6 +2427,7 @@ mod tests {
             crate::writedb::makeblastdb::build_database(
                 &args,
                 Some(&now),
+                crate::writedb::Platform::host(),
                 &mut fasta.as_slice(),
                 &mut log,
                 &mut messages,

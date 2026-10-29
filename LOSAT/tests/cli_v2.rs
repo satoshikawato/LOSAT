@@ -159,14 +159,15 @@ fn makedb_takes_makeblastdb_s_option_names() {
     assert_eq!(given.title.as_deref(), Some("a title"));
     assert_eq!(given.max_file_sz, "1GB");
 
-    // makeblastdb's defaults, but for the format version: LOSAT writes version 4.
+    // makeblastdb's defaults.
     let defaults = args(makedb(&["-dbtype", "nucl"]).unwrap());
     assert_eq!(defaults.input, "-");
     assert_eq!(defaults.input_type, "fasta");
     assert_eq!(defaults.out, None);
     assert_eq!(defaults.title, None);
     assert_eq!(defaults.max_file_sz, "3GB");
-    assert_eq!(defaults.blastdb_version, 4);
+    assert_eq!(defaults.blastdb_version, 5);
+    assert_eq!(defaults.logfile, None);
 
     // `-dbtype` is mandatory and takes makeblastdb's two values.
     assert!(makedb(&["-in", "x.faa"]).is_err());
@@ -181,7 +182,6 @@ fn makedb_takes_makeblastdb_s_option_names() {
         "-mask_data",
         "-taxid",
         "-taxid_map",
-        "-logfile",
     ] {
         let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
         assert!(
@@ -192,7 +192,7 @@ fn makedb_takes_makeblastdb_s_option_names() {
         );
     }
 
-    // `-help` prints LOSAT's usage of makedb, under makeblastdb's option names.
+    // `-help` prints LOSAT's usage of makeblastdb, under makeblastdb's option names.
     for help in ["-help", "--help"] {
         let err = makedb(&[help]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
@@ -205,7 +205,7 @@ fn makedb_takes_makeblastdb_s_option_names() {
         );
     }
 
-    // The options of the search programs are unknown to makedb, and makedb's
+    // The options of the search programs are unknown to makeblastdb, and makeblastdb's
     // options are unknown to the search programs.
     assert!(makedb(&["-dbtype", "prot", "-evalue", "1"]).is_err());
     assert!(makedb(&["-dbtype", "prot", "-query", "q.fa"]).is_err());

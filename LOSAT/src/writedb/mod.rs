@@ -1,16 +1,18 @@
-//! Writer of NCBI BLAST databases (the version 4 volume layout that
-//! `makeblastdb -blastdb_version 4` writes) and the `losat makedb` command.
+//! Writer of NCBI BLAST databases (format version 5, makeblastdb's default,
+//! and version 4) and the `losat makeblastdb` command.
 //!
 //! NCBI's writer is `c++/src/objtools/blast/seqdb_writer/` (CWriteDB,
 //! CBuildDatabase) under the application `c++/src/app/blastdb/makeblastdb.cpp`.
-//! The files written are the ones `crate::seqdb` reads: the index file
-//! (`.pin` / `.nin`), the sequence file (`.psq` / `.nsq`), the header file
-//! (`.phr` / `.nhr`), and an alias file (`.pal` / `.nal`) when the database
-//! has more than one volume.
+//! The files written are those makeblastdb writes for a FASTA input without
+//! parsed Seq-ids: the index file (`.pin` / `.nin`), the sequence file
+//! (`.psq` / `.nsq`), the header file (`.phr` / `.nhr`), an alias file
+//! (`.pal` / `.nal`) when the database has more than one volume, the JSON
+//! metadata file (`.pjs` / `.njs`), and for version 5 the LMDB files
+//! (`.pdb` / `.ndb` with the volume tables, `.ptf` / `.ntf` with the tax ids)
+//! and the tax id lookup files (`.pot` / `.not`, `.pto` / `.nto`).
 //!
-//! Not written: parsed Seq-ids and their ISAM files (`-parse_seqids`), mask
-//! data, taxonomy data, the LMDB files of version 5, and the JSON metadata
-//! file (`.pjs` / `.njs`).
+//! Not written: parsed Seq-ids and their ISAM files (`-parse_seqids`), the
+//! hash index, mask data, and tax ids other than 0 (`-taxid`, `-taxid_map`).
 
 pub mod bioseq;
 pub mod build_db;
@@ -20,8 +22,16 @@ pub mod fasta_source;
 pub mod files;
 pub mod format_guess;
 pub mod header;
+// The LMDB files of version 5. Parts that only `-parse_seqids` and the tax id options
+// reach are not called yet.
+#[allow(dead_code)]
+pub(crate) mod lmdb;
 pub mod local_offset;
 pub mod makeblastdb;
+#[allow(dead_code)]
+pub(crate) mod mdb;
+pub(crate) mod metadata;
+pub mod platform;
 pub mod time;
 pub mod volume;
 pub mod writer;
@@ -31,6 +41,7 @@ mod tests;
 
 use std::path::PathBuf;
 
+pub use platform::Platform;
 pub use writer::WriteDb;
 
 /// Error of the database writer.

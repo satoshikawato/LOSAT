@@ -174,7 +174,7 @@ fn the_report_and_the_scan_calls_are_those_of_the_scan_before() {
         let (report, stderr) = tblastn(query, 1, &[RESUME_OFF]);
         assert!(
             report == expected,
-            "{query:?}: the default changed the report"
+            "{query:?}: the default (LOSAT_X_TBNSCANRESUME=0) changed the report"
         );
         let plain_sparse = |stderr: &str, what: &str| {
             if many {
@@ -277,7 +277,8 @@ fn the_offset_array_size_changes_only_the_scan_calls() {
         "LOSAT_X_TBNSCANRESUME changed the report"
     );
     let on = scan_calls(&stderr);
-    // Without the scan on presence bytes (aarch64) the array keeps LOSAT_X_TBNPAIRCAP's size.
+    // Without the scan on presence bytes (aarch64; x86-64 without AVX2, where this table is not
+    // sparse) the array keeps LOSAT_X_TBNPAIRCAP's size.
     if byte_scans(&stderr).is_some() {
         assert!(
             on > cap,

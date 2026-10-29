@@ -5467,8 +5467,8 @@ Scheduling (each value computed by one thread with the original function; order 
   A stop then costs one call of the scan and of the two-hit loop, not a block of up to 256 words made again (which
   took 1.0041 of the instructions at this size, `LOSAT_X_TBNPAIRCAP`). The pairs and the `s_range` of every call are
   NCBI's at any size (unit tests `x_scan_byte_equals_ncbi_scan_on_random_subjects` and
-  `the_last_overflow_chain_is_copied_exactly`, both with and without the kept block, which count that every stop
-  resumed in its block; `tests/tblastn_scan_byte.rs` `the_offset_array_size_changes_only_the_scan_calls`: the same
+  `the_last_overflow_chain_is_copied_exactly`, both with and without the kept block; the first counts that the call
+  after every stop finds its block kept for it; `tests/tblastn_scan_byte.rs` `the_offset_array_size_changes_only_the_scan_calls`: the same
   report at one and four threads with both switches, `=0` and neither). The units of the branch-free scan
   (`x_scan_bf.rs`: aarch64, and tables that are not sparse without AVX2) keep `LOSAT_X_TBNPAIRCAP`'s size. Where:
   the units that take TBNSCANBYTE's scan (platform).

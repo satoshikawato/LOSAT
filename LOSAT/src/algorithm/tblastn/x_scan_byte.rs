@@ -37,8 +37,8 @@
 //! same range copies on from that candidate instead of making the block's candidates again
 //! (`x_scan_one_range_held`; the copy loop is the one above). A stop then costs a call, not a
 //! block of words, and the unit path gives the offset array NCBI's size, 4096 + the longest chain
-//! (`search_seed.rs` `x_scan_unit`; `lookup_wrap.c:264-266`), instead of `LOSAT_X_TBNPAIRCAP`'s
-//! 32768 + it. The pairs and the `s_range` of every call are still NCBI's.
+//! (`search_seed.rs` `x_scan_unit`; `lookup_wrap.c:264-266`; at most the plan's size), instead of
+//! `LOSAT_X_TBNPAIRCAP`'s 32768 + it. The pairs and the `s_range` of every call are still NCBI's.
 //!
 //! The offset array must have `X_SCAN_BYTE_SLACK` entries after `array_size`; the entries past the
 //! returned count are not part of the result. `presence` depends on the lookup table only; each
@@ -955,9 +955,10 @@ mod tests {
     }
 
     /// The scan calls of one range as `x_scan_unit` makes them: (offset pairs, s_range[1]) after
-    /// each call; `avx2` = `None` for NCBI's loop. `RESUMED` counts the calls that copied on in
-    /// the block held by the call before (`resume`: one `XScanHeld` for the range, as
-    /// `LOSAT_X_TBNSCANRESUME` keeps it; else a new one per call).
+    /// each call; `avx2` = `None` for NCBI's loop. `RESUMED` counts the calls that resume the
+    /// block held by the call before: a block is held and was kept for this call's subject and
+    /// `s_range` (`resume`: one `XScanHeld` for the range, as `LOSAT_X_TBNSCANRESUME` keeps it;
+    /// else a new one per call).
     fn calls(
         lookup: &BlastAaLookupTable,
         presence: &[u8],
@@ -997,9 +998,12 @@ mod tests {
         while scan_range[1] <= scan_range[2] {
             let hits = match avx2 {
                 Some(avx2) => {
+                    let at = (subject.as_ptr() as usize, subject.len());
                     if !resume {
                         held = XScanHeld::new();
-                    } else if held.next < held.n {
+                    } else if held.next < held.n
+                        && held.at == (at.0, at.1, scan_range[1], scan_range[2])
+                    {
                         RESUMED.with(|r| r.set(r.get() + 1));
                     }
                     scan(
@@ -1044,6 +1048,7 @@ mod tests {
     // `AA_HITS_PER_CELL` hits, every letter value of ncbistdaa, and block ends at every alignment.
     #[test]
     fn x_scan_byte_equals_ncbi_scan_on_random_subjects() {
+        RESUMED.with(|r| r.set(0));
         let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
         let forms: Vec<bool> = if avx2_detected() {
             vec![false, true]

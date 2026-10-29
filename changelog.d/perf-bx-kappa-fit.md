@@ -1,1 +1,1 @@
-- `blastx` at many threads makes no more composition-redo states at a query batch's end than the batch has matches, instead of one per thread: CHANGELOG_PENDING (`LOSAT_X_BXKAPPAFIT`; `=0` restores one per thread). Reports are unchanged.
+- `blastx` at many threads makes no more composition-redo states at a query batch's end than the batch has matches, instead of one per thread: 800 fly cDNAs x 200 yeast proteins `-subject` peaks at 84 MiB instead of 99 at 32 threads and 116 instead of 163 at 64 (`LOSAT_X_BXKAPPAFIT`; `=0` restores one per thread). Reports are unchanged.

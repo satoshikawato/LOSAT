@@ -6779,6 +6779,10 @@ fn write_custom_tabular(
         ),
         _ => (Vec::new(), Vec::new()),
     };
+    let names = match report.database_reader {
+        Some(database) => database.tabular_names(spec, &taxonomy)?,
+        None => None,
+    };
     let subjects = match report.database_ordinals {
         Some(ordinals) if report.database_reader.is_some() => TabularSubjects::Database {
             ids: subject_ids,
@@ -6809,6 +6813,7 @@ fn write_custom_tabular(
             .epilog
             .then_some(report.queries_before + hit_lists.len()),
         taxdb_found: report.tabular_taxdb_found,
+        names: names.as_ref(),
     };
     write_blastn_tabular(&tab, hit_lists, writer, warnings, probe)
 }

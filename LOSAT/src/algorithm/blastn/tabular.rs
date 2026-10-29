@@ -53,8 +53,8 @@ use crate::report::db_subject::ParsedSubject;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
     coverage_percent, hsp_coverage, taxdb_warning_line, union_length, DeflineIds, TabularField,
-    TabularHsp, TabularKind, TabularQuery, TabularSpec, TabularSubject, TabularTaxonomy,
-    TabularWriter,
+    TabularHsp, TabularKind, TabularNames, TabularQuery, TabularSpec, TabularSubject,
+    TabularTaxonomy, TabularWriter,
 };
 
 const PROGRAM: &str = "BLASTN";
@@ -84,6 +84,8 @@ pub(crate) struct BlastnTabular<'a> {
     pub epilog: Option<usize>,
     /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath`).
     pub taxdb_found: bool,
+    /// The names of the taxonomy database that the rows look up (`None`: every lookup fails).
+    pub names: Option<&'a TabularNames>,
 }
 
 /// The subjects as the report shows them, by subject index (a subject set) or rank (the
@@ -224,108 +226,6 @@ impl<'a> TabularSubjects<'a> {
             }
         }
     }
-
-    /// The ordinal id of reported sequence `rank` (`None` for a subject set).
-    fn ordinal(&self, rank: usize) -> Option<u32> {
-        match self {
-            TabularSubjects::Records { .. } => None,
-            TabularSubjects::Database { ordinals, .. } => ordinals.get(rank).copied(),
-        }
-    }
-
-    /// The taxonomy of reported sequence `rank`, when it was read.
-    fn taxonomy(&self, rank: usize) -> Option<&TabularTaxonomy> {
-        match self {
-            TabularSubjects::Records { .. } => None,
-            TabularSubjects::Database { taxonomy, .. } => taxonomy.get(rank),
-        }
-    }
-}
-
-/// LOSAT's refusal of a name of the taxonomy database (DECISIONS 3 of line CLI C2): with
-/// `taxdb.bti` on the search path NCBI looks up the names of a subject's taxid, which LOSAT's
-/// tabular report does not port yet (the XML2 formats' reader writes NCBI's messages in another
-/// order). Without a taxid nothing is looked up and the names are `N/A`, as without the
-/// taxonomy database. Made before any byte of the report.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:605-615
-/// ```c++
-///     if(m_SubjectTaxId == ZERO_TAX_ID)
-///             return;
-///
-///     if( x_IsFieldRequested(eSubjectSciName) ||
-///         x_IsFieldRequested(eSubjectCommonName) ||
-///         x_IsFieldRequested(eSubjectBlastName) ||
-///         x_IsFieldRequested(eSubjectSuperKingdom)) {
-///
-///         try {
-///         	SSeqDBTaxInfo taxinfo;
-///             CSeqDB::GetTaxInfo(m_SubjectTaxId, taxinfo);
-/// ```
-fn check_taxonomy_names(
-    tab: &BlastnTabular<'_>,
-    hit_lists: &[Option<BlastnHitList>],
-) -> Result<()> {
-    if !tab.taxdb_found || !tab.spec.needs().taxonomy_names {
-        return Ok(());
-    }
-    let singular = [
-        TabularField::SubjectSciName,
-        TabularField::SubjectCommonName,
-        TabularField::SubjectBlastName,
-        TabularField::SubjectSuperKingdom,
-    ];
-    let field = tab
-        .spec
-        .fields
-        .iter()
-        .find(|field| {
-            singular.contains(field)
-                || matches!(
-                    field,
-                    TabularField::SubjectSciNames
-                        | TabularField::SubjectCommonNames
-                        | TabularField::SubjectBlastNames
-                        | TabularField::SubjectSuperKingdoms
-                )
-        })
-        .copied()
-        .expect("a taxonomy name is among the fields");
-    let singular_asked = tab.spec.fields.iter().any(|field| singular.contains(field));
-    let plural_asked = tab.spec.checks_taxdb();
-    for hsp_list in hit_lists
-        .iter()
-        .flatten()
-        .flat_map(|hit_list| &hit_list.hsplist_array)
-    {
-        let Some(first) = hsp_list.hsps.first() else {
-            continue;
-        };
-        let rank = first.s_idx as usize;
-        let Some(taxonomy) = tab.subjects.taxonomy(rank) else {
-            continue;
-        };
-        let looked_up = (singular_asked && taxonomy.taxid != 0)
-            || (plural_asked && taxonomy.taxids.iter().any(|&taxid| taxid != 0));
-        if looked_up {
-            let taxid = if taxonomy.taxid != 0 {
-                taxonomy.taxid
-            } else {
-                taxonomy
-                    .taxids
-                    .iter()
-                    .copied()
-                    .find(|&taxid| taxid != 0)
-                    .unwrap_or(0)
-            };
-            anyhow::bail!(
-                "the -outfmt field {} of database sequence {} (taxid {taxid}) reads the names of the taxonomy database (taxdb.bti on the BLAST database search path), which is not supported by LOSAT's {PROGRAM}",
-                field.name(),
-                tab.subjects.ordinal(rank).unwrap_or_default(),
-            );
-        }
-    }
-    Ok(())
 }
 
 /// Writes outfmt 20's line of the field names (`PrintProlog`; nothing for the other kinds).
@@ -411,7 +311,6 @@ pub(crate) fn write_blastn_tabular(
     mut warnings: Option<&mut QueryWarnings<'_>>,
     mut probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
-    check_taxonomy_names(tab, hit_lists)?;
     let spec = tab.spec;
     let needs = spec.needs();
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
@@ -545,11 +444,24 @@ pub(crate) fn write_blastn_tabular(
                 length: values.length,
                 titles: values.titles.as_deref(),
                 taxonomy: &values.taxonomy,
+                names: tab.names,
                 nucleotide: true,
                 qcovs,
                 qcovus,
             };
             for hsp in &hsp_list.hsps {
+                // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
+                // `x_SetTaxInfo`) follow the rows before it.
+                if let (Some(names), Some(warnings)) = (tab.names, warnings.as_deref_mut()) {
+                    let text = names.row_messages(spec, &values.taxonomy);
+                    if !text.is_empty() {
+                        writer.write_all(&buf)?;
+                        buf.clear();
+                        writer.flush()?;
+                        warnings.sink.write_all(&text)?;
+                        warnings.sink.flush()?;
+                    }
+                }
                 if needs.rows {
                     xml_rows_into(
                         hsp,

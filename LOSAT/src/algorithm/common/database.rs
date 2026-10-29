@@ -1673,6 +1673,34 @@ pub(crate) fn read_reported_taxonomy(
     Ok((taxids, taxonomy, parsed_taxonomy, notes))
 }
 
+/// The names of the taxonomy database that the rows of a tabular report with a name field look
+/// up (`report::tabular::TabularNames`) for its subjects `taxonomies`, through the run's
+/// database; `None` without a name field or without `taxdb.bti` on the search path (every lookup
+/// fails, silently). A taxonomy database that LOSAT cannot read as NCBI does is refused as in
+/// [`read_reported_taxonomy`], before any byte of the report.
+pub(crate) fn tabular_names<'t>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    spec: &crate::report::tabular::TabularSpec,
+    taxonomies: impl IntoIterator<Item = &'t crate::report::tabular::TabularTaxonomy>,
+    program: &str,
+) -> Result<Option<crate::report::tabular::TabularNames>> {
+    if !spec.needs().taxonomy_names || !run.found(db) {
+        return Ok(None);
+    }
+    let Some(search_path) = db.search_path() else {
+        return Ok(None);
+    };
+    crate::report::tabular::TabularNames::look_up(
+        spec,
+        &run.taxdb(search_path),
+        taxonomies,
+        program,
+    )
+    .map(Some)
+    .map_err(|error| taxdb_error(error, program))
+}
+
 /// NCBI's messages about the taxonomy database when a query batch prefetches the subjects it
 /// reports, for the formats that read the subject Bioseqs but show no taxonomy (outfmt 0, 5, 6,
 /// 7 and 17): the texts of opening it and of the lookup that a volume makes the first time it

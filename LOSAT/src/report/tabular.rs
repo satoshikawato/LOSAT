@@ -462,6 +462,16 @@ impl TabularSpec {
         ])
     }
 
+    /// Whether a singular name is among the fields (`x_SetTaxInfo` looks `staxid` up).
+    pub fn has_singular_names(&self) -> bool {
+        self.has_any(&[
+            SubjectSciName,
+            SubjectCommonName,
+            SubjectBlastName,
+            SubjectSuperKingdom,
+        ])
+    }
+
     /// `x_IsCsv`: the names are quoted when the delimiter is a comma.
     fn is_csv(&self) -> bool {
         self.delimiter == ","
@@ -556,6 +566,125 @@ impl TabularTaxonomy {
     }
 }
 
+/// The names of the taxonomy database that a report's rows look up (`x_SetTaxInfoAll`, then
+/// `x_SetTaxInfo`: `CSeqDB::GetTaxInfo` of each taxid of `staxids` for the plural names, of
+/// `staxid` for the singular ones), asked once per taxid before the report's first byte, so that
+/// a lookup the reader refuses comes before it, with the texts that NCBI writes to standard error
+/// at each lookup. `None` in a report (`TabularSubject::names`) is a run without `taxdb.bti` on
+/// the search path, or one that looks nothing up: every lookup fails, as NCBI's does without the
+/// database.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:669-695
+/// ```c++
+///             for(; itr !=  m_SubjectTaxIds.end(); ++itr) {
+///             	try {
+///                     SSeqDBTaxInfo taxinfo;
+///                     CSeqDB::GetTaxInfo(*itr, taxinfo);
+///                     m_SubjectSciNames.push_back(taxinfo.scientific_name);
+///                     m_SubjectCommonNames.push_back(taxinfo.common_name);
+///                     if(s_IsValidName(taxinfo.blast_name))
+///                             m_SubjectBlastNames.insert(taxinfo.blast_name);
+///
+///                     if(s_IsValidName(taxinfo.s_kingdom))
+///                             m_SubjectSuperKingdoms.insert(taxinfo.s_kingdom);
+///
+///             	} catch (const CException&) {
+/// ```
+#[derive(Debug)]
+pub struct TabularNames {
+    /// The program's name in lower case, as NCBI's messages show it.
+    program: String,
+    /// The texts of opening the database, when the lookups of the report opened it: NCBI writes
+    /// them at the first lookup of the process.
+    open: Vec<String>,
+    opened: std::cell::Cell<bool>,
+    /// What `GetTaxInfo` returned for each taxid (`None` when it threw), and the texts of its
+    /// lookup, which every lookup of the taxid writes.
+    answers: std::collections::HashMap<i32, (Option<crate::seqdb::taxdb::TaxNames>, Vec<String>)>,
+}
+
+impl TabularNames {
+    /// The lookups of the rows of the subjects `taxonomies` (in any order, repeats allowed) for
+    /// the fields of `spec`, through `taxdb`; `program` names the messages' program. An open or a
+    /// lookup that the reader refuses (`SeqDbError::Unsupported`) is the error.
+    pub fn look_up<'t>(
+        spec: &TabularSpec,
+        taxdb: &crate::seqdb::taxdb::LazyTaxDb,
+        taxonomies: impl IntoIterator<Item = &'t TabularTaxonomy>,
+        program: &str,
+    ) -> Result<Self, crate::seqdb::SeqDbError> {
+        let mut names = TabularNames {
+            program: program.to_ascii_lowercase(),
+            open: Vec::new(),
+            opened: std::cell::Cell::new(false),
+            answers: Default::default(),
+        };
+        let (plural, singular) = (spec.checks_taxdb(), spec.has_singular_names());
+        let mut asked: Vec<i32> = Vec::new();
+        for taxonomy in taxonomies {
+            if plural {
+                asked.extend(&taxonomy.taxids);
+            }
+            if singular && taxonomy.taxid != 0 {
+                asked.push(taxonomy.taxid);
+            }
+        }
+        if asked.is_empty() {
+            return Ok(names);
+        }
+        names.open = taxdb.open()?;
+        for taxid in asked {
+            if let std::collections::hash_map::Entry::Vacant(entry) = names.answers.entry(taxid) {
+                let mut messages = Vec::new();
+                let found = taxdb.names(taxid, &mut messages)?;
+                entry.insert((found, messages));
+            }
+        }
+        Ok(names)
+    }
+
+    /// What the lookup of `taxid` found (`None`: not found, or not looked up).
+    fn get(&self, taxid: i32) -> Option<&crate::seqdb::taxdb::TaxNames> {
+        self.answers
+            .get(&taxid)
+            .and_then(|(found, _)| found.as_ref())
+    }
+
+    /// The standard-error lines of the lookups of one row of a subject of `taxonomy`, in NCBI's
+    /// order (the plural names' lookups, then the singular names'), the texts of opening before
+    /// the first lookup of the report that has them.
+    pub fn row_messages(&self, spec: &TabularSpec, taxonomy: &TabularTaxonomy) -> Vec<u8> {
+        let mut lookups: Vec<i32> = Vec::new();
+        if spec.checks_taxdb() {
+            lookups.extend(&taxonomy.taxids);
+        }
+        if spec.has_singular_names() && taxonomy.taxid != 0 {
+            lookups.push(taxonomy.taxid);
+        }
+        let mut text = Vec::new();
+        let mut push = |line: &str| {
+            text.extend_from_slice(
+                crate::seqdb::taxdb::err_post_line(&self.program, line).as_bytes(),
+            );
+            text.push(b'\n');
+        };
+        if !lookups.is_empty() && !self.opened.replace(true) {
+            self.open.iter().for_each(|line| push(line));
+        }
+        for taxid in lookups {
+            if let Some((_, messages)) = self.answers.get(&taxid) {
+                messages.iter().for_each(|line| push(line));
+            }
+        }
+        text
+    }
+}
+
+/// `s_IsValidName`: a blast name or super kingdom of `-` or `unclassified` is not shown.
+fn valid_name(name: &[u8]) -> bool {
+    name != b"-" && name != b"unclassified"
+}
+
 /// A subject of the report.
 #[derive(Clone, Copy, Debug)]
 pub struct TabularSubject<'a> {
@@ -574,6 +703,8 @@ pub struct TabularSubject<'a> {
     /// `N/A`.
     pub titles: Option<&'a [&'a [u8]]>,
     pub taxonomy: &'a TabularTaxonomy,
+    /// The names of the taxonomy database (`None`: every lookup fails).
+    pub names: Option<&'a TabularNames>,
     /// Whether the subject is a nucleotide sequence (`sstrand` is `plus` / `minus`, else `N/A`).
     pub nucleotide: bool,
     /// `qcovs` and `qcovus` of the subject's HSPs; -1 for `N/A`.
@@ -759,6 +890,7 @@ impl TabularWriter<'_> {
                 (0, 0)
             }
         };
+        let names = RowNames::of(spec, subject);
         for (i, field) in spec.fields.iter().enumerate() {
             if i > 0 {
                 out.extend_from_slice(spec.delimiter.as_bytes());
@@ -846,24 +978,9 @@ impl TabularWriter<'_> {
                         push_num(out, *taxid);
                     }
                 }
-                // No name of the taxonomy database is known (a program refuses a report that
-                // would read one, DECISIONS 3): every lookup fails. With `staxids` among the
-                // fields NCBI then fills the scientific and common names with `N/A`: the singular
-                // ones for a non-zero `staxid`, the plural ones once per taxid of `staxids`
-                // (`x_SetTaxInfo`, `x_SetTaxInfoAll`); a filled singular name and the plural
-                // names (blast names too) are quoted in a CSV, an empty singular name and the
-                // super kingdoms are not.
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:626-633
-                // ```c++
-                //         } catch (const CException&) {
-                //         	//only put fillers in if we are going to show tax id
-                //             // the fillers are put in so that the name list would
-                //             // match the taxid list
-                //             if(x_IsFieldRequested(eSubjectTaxIds) ) {
-                //             	m_SubjectSciName = NA;
-                //                 m_SubjectCommonName = NA;
-                //             }
-                // ```
+                // The names of `RowNames`: an empty singular name is `N/A`, an empty list of
+                // plural names `N/A`; the scientific, common and blast names are quoted in a CSV
+                // (`NStr::Quote`, so `N/A` too and an empty name not), the super kingdoms never.
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:337-359
                 // ```c++
                 // void CBlastTabularInfo::x_PrintSubjectSciName()
@@ -890,32 +1007,38 @@ impl TabularWriter<'_> {
                 //     const string output = CNcbiOstrstreamToString(oss);
                 //     m_Ostream << (x_IsCsv() ? NStr::Quote(output) : output);
                 // ```
-                SubjectSciName | SubjectCommonName => {
-                    if subject.taxonomy.taxid != 0 && spec.has(SubjectTaxIds) && csv {
-                        write_quoted(out, NA);
-                    } else {
-                        out.extend_from_slice(NA);
-                    }
-                }
-                SubjectSciNames | SubjectCommonNames | SubjectBlastNames => {
-                    let fillers = match field {
-                        SubjectBlastNames => 0,
-                        _ if spec.has(SubjectTaxIds) => subject.taxonomy.taxids.len(),
-                        _ => 0,
+                SubjectSciName | SubjectCommonName | SubjectBlastName | SubjectSuperKingdom => {
+                    let name = match field {
+                        SubjectSciName => names.sci,
+                        SubjectCommonName => names.common,
+                        SubjectBlastName => names.blast,
+                        _ => names.kingdom,
                     };
-                    let mut names = NA.to_vec();
-                    for _ in 1..fillers {
-                        names.push(b';');
-                        names.extend_from_slice(NA);
-                    }
-                    if csv {
-                        write_quoted(out, &names);
+                    if name.is_empty() {
+                        out.extend_from_slice(NA);
+                    } else if csv && *field != SubjectSuperKingdom {
+                        write_quoted(out, name);
                     } else {
-                        out.extend_from_slice(&names);
+                        out.extend_from_slice(name);
                     }
                 }
-                SubjectBlastName | SubjectSuperKingdom | SubjectSuperKingdoms => {
-                    out.extend_from_slice(NA)
+                SubjectSciNames | SubjectCommonNames | SubjectBlastNames | SubjectSuperKingdoms => {
+                    let list = match field {
+                        SubjectSciNames => &names.scis,
+                        SubjectCommonNames => &names.commons,
+                        SubjectBlastNames => &names.blasts,
+                        _ => &names.kingdoms,
+                    };
+                    let joined = if list.is_empty() {
+                        NA.to_vec()
+                    } else {
+                        list.join(&b';')
+                    };
+                    if csv && *field != SubjectSuperKingdoms {
+                        write_quoted(out, &joined);
+                    } else {
+                        out.extend_from_slice(&joined);
+                    }
                 }
                 SubjectTitle => match subject.titles.and_then(|titles| titles.first()) {
                     Some(title) if !title.is_empty() => out.extend_from_slice(title),
@@ -952,6 +1075,104 @@ impl TabularWriter<'_> {
             }
         }
         out.push(b'\n');
+    }
+}
+
+/// The taxonomy names of one row (`x_SetTaxInfoAll` and `x_SetTaxInfo`, after `x_ResetFields`):
+/// empty unless a field shows them. A lookup that fails (no taxonomy database, a taxid it does not
+/// know) leaves the names empty, except that with `staxids` among the fields NCBI fills the
+/// scientific and common names with `N/A` so that their list matches the taxids.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:612-633
+/// ```c++
+///         try {
+///         	SSeqDBTaxInfo taxinfo;
+///             CSeqDB::GetTaxInfo(m_SubjectTaxId, taxinfo);
+///             m_SubjectSciName = taxinfo.scientific_name;
+///             m_SubjectCommonName = taxinfo.common_name;
+///             if(s_IsValidName(taxinfo.blast_name)) {
+///             	m_SubjectBlastName = taxinfo.blast_name;
+///             }
+///
+///             if(s_IsValidName(taxinfo.s_kingdom)) {
+///             	m_SubjectSuperKingdom = taxinfo.s_kingdom;
+///             }
+///
+///         } catch (const CException&) {
+///         	//only put fillers in if we are going to show tax id
+///             // the fillers are put in so that the name list would
+///             // match the taxid list
+///             if(x_IsFieldRequested(eSubjectTaxIds) ) {
+///             	m_SubjectSciName = NA;
+///                 m_SubjectCommonName = NA;
+///             }
+///         }
+/// ```
+#[derive(Default)]
+struct RowNames<'a> {
+    sci: &'a [u8],
+    common: &'a [u8],
+    blast: &'a [u8],
+    kingdom: &'a [u8],
+    /// The plural names: by taxid of `staxids` (scientific, common), and the sorted sets of the
+    /// blast names and super kingdoms (`set<string>`).
+    scis: Vec<&'a [u8]>,
+    commons: Vec<&'a [u8]>,
+    blasts: Vec<&'a [u8]>,
+    kingdoms: Vec<&'a [u8]>,
+}
+
+impl<'a> RowNames<'a> {
+    fn of(spec: &TabularSpec, subject: &TabularSubject<'a>) -> Self {
+        let mut names = RowNames::default();
+        let lookup = |taxid: i32| subject.names.and_then(|names| names.get(taxid));
+        let fillers = spec.has(SubjectTaxIds);
+        if spec.checks_taxdb() {
+            for &taxid in &subject.taxonomy.taxids {
+                match lookup(taxid) {
+                    Some(found) => {
+                        names.scis.push(&found.scientific_name);
+                        names.commons.push(&found.common_name);
+                        if valid_name(&found.blast_name) {
+                            names.blasts.push(&found.blast_name);
+                        }
+                        if valid_name(&found.super_kingdom) {
+                            names.kingdoms.push(&found.super_kingdom);
+                        }
+                    }
+                    None if fillers => {
+                        names.scis.push(NA);
+                        names.commons.push(NA);
+                    }
+                    None => {}
+                }
+            }
+            for set in [&mut names.blasts, &mut names.kingdoms] {
+                set.sort_unstable();
+                set.dedup();
+            }
+        }
+        let taxid = subject.taxonomy.taxid;
+        if spec.has_singular_names() && taxid != 0 {
+            match lookup(taxid) {
+                Some(found) => {
+                    names.sci = &found.scientific_name;
+                    names.common = &found.common_name;
+                    if valid_name(&found.blast_name) {
+                        names.blast = &found.blast_name;
+                    }
+                    if valid_name(&found.super_kingdom) {
+                        names.kingdom = &found.super_kingdom;
+                    }
+                }
+                None if fillers => {
+                    names.sci = NA;
+                    names.common = NA;
+                }
+                None => {}
+            }
+        }
+        names
     }
 }
 
@@ -1126,7 +1347,10 @@ mod tests {
     // plural ones once per taxid).
     #[test]
     fn taxonomy_names_get_ncbis_fillers() {
-        let row = |format: ReportFormat, fields: &str, taxonomy: &TabularTaxonomy| {
+        let row = |format: ReportFormat,
+                   fields: &str,
+                   taxonomy: &TabularTaxonomy,
+                   names: Option<&TabularNames>| {
             let choice = FormatChoice {
                 number: 10,
                 spec: fields.to_string(),
@@ -1147,6 +1371,7 @@ mod tests {
                 length: 10,
                 titles: None,
                 taxonomy,
+                names,
                 nucleotide: true,
                 qcovs: -1,
                 qcovus: -1,
@@ -1190,16 +1415,22 @@ mod tests {
             row(
                 ReportFormat::CommaSeparatedValues,
                 &format!("{fields} staxids"),
-                &two
+                &two,
+                None
             ),
             "\"N/A\",\"N/A\",N/A,N/A,\"N/A;N/A\",\"N/A;N/A\",\"N/A\",N/A,9606;10090\n"
         );
         assert_eq!(
-            row(ReportFormat::Tabular, &format!("{fields} staxids"), &two),
+            row(
+                ReportFormat::Tabular,
+                &format!("{fields} staxids"),
+                &two,
+                None
+            ),
             "N/A\tN/A\tN/A\tN/A\tN/A;N/A\tN/A;N/A\tN/A\tN/A\t9606;10090\n"
         );
         assert_eq!(
-            row(ReportFormat::CommaSeparatedValues, fields, &two),
+            row(ReportFormat::CommaSeparatedValues, fields, &two, None),
             "N/A,N/A,N/A,N/A,\"N/A\",\"N/A\",\"N/A\",N/A\n"
         );
         let none = TabularTaxonomy {
@@ -1210,9 +1441,97 @@ mod tests {
             row(
                 ReportFormat::CommaSeparatedValues,
                 "ssciname sscinames staxid staxids",
-                &none
+                &none,
+                None
             ),
             "N/A,\"N/A\",N/A,0\n"
+        );
+        // NCBI tabular.cpp:612-624 and 669-680 with the names found (RESULTS.md §3 of line OF
+        // taxdb): the plural blast names and super kingdoms are sorted sets, `-` and
+        // `unclassified` are dropped, an empty common name stays empty in the plural list and is
+        // `N/A` alone; a taxid not found gets the fillers.
+        let entry = |taxid, sci: &str, common: &str, blast: &str, kingdom: &str| {
+            let names = crate::seqdb::taxdb::TaxNames {
+                taxid,
+                scientific_name: sci.into(),
+                common_name: common.into(),
+                blast_name: blast.into(),
+                super_kingdom: kingdom.into(),
+            };
+            (taxid, (Some(names), Vec::new()))
+        };
+        let found = TabularNames {
+            program: "blastp".into(),
+            open: Vec::new(),
+            opened: std::cell::Cell::new(false),
+            answers: [
+                entry(9606, "Homo sapiens", "human", "primates", "Eukaryota"),
+                entry(7777, "Quote \"x\", y; z", "", "-", "Eukaryota"),
+                entry(32630, "synthetic construct", "", "unclassified", "-"),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let three = TabularTaxonomy {
+            taxid: 9606,
+            taxids: vec![7777, 9606, 10090, 32630],
+        };
+        assert_eq!(
+            row(
+                ReportFormat::CommaSeparatedValues,
+                &format!("{fields} staxids"),
+                &three,
+                Some(&found)
+            ),
+            "\"Homo sapiens\",\"human\",\"primates\",Eukaryota,\"Quote \\\"x\\\", y; z;Homo sapiens;N/A;synthetic construct\",\";human;N/A;\",\"primates\",Eukaryota,7777;9606;10090;32630\n"
+        );
+        let quote = TabularTaxonomy {
+            taxid: 7777,
+            taxids: vec![7777],
+        };
+        assert_eq!(
+            row(ReportFormat::Tabular, fields, &quote, Some(&found)),
+            "Quote \"x\", y; z\tN/A\tN/A\tEukaryota\tQuote \"x\", y; z\t\tN/A\tEukaryota\n"
+        );
+    }
+
+    // NCBI writes the texts of opening at the first lookup of the report, and a lookup's own
+    // texts at each lookup: the plural names' lookups before the singular one's.
+    #[test]
+    fn row_messages_follow_the_lookups() {
+        let spec = TabularSpec::of(
+            ReportFormat::Tabular,
+            &FormatChoice {
+                number: 6,
+                spec: "ssciname sscinames".to_string(),
+                delimiter: String::new(),
+            },
+        )
+        .unwrap();
+        let names = TabularNames {
+            program: "blastn".into(),
+            open: vec!["open".into()],
+            opened: std::cell::Cell::new(false),
+            answers: [
+                (99990, (None, vec!["offset".into()])),
+                (9606, (None, Vec::new())),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let none = TabularTaxonomy::default();
+        assert!(names.row_messages(&spec, &none).is_empty());
+        let last = TabularTaxonomy {
+            taxid: 99990,
+            taxids: vec![9606, 99990],
+        };
+        assert_eq!(
+            String::from_utf8(names.row_messages(&spec, &last)).unwrap(),
+            "Error: [blastn] open\nError: [blastn] offset\nError: [blastn] offset\n"
+        );
+        assert_eq!(
+            String::from_utf8(names.row_messages(&spec, &last)).unwrap(),
+            "Error: [blastn] offset\nError: [blastn] offset\n"
         );
     }
 

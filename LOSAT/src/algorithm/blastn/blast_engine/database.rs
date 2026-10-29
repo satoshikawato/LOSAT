@@ -236,6 +236,16 @@ impl BlastnDatabase {
         Ok(taxonomy)
     }
 
+    /// The names of the taxonomy database that the rows of `spec` look up for the subjects
+    /// `taxonomy` (`shared::tabular_names`).
+    pub(super) fn tabular_names(
+        &self,
+        spec: &crate::report::tabular::TabularSpec,
+        taxonomy: &[crate::report::tabular::TabularTaxonomy],
+    ) -> Result<Option<crate::report::tabular::TabularNames>> {
+        shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:222-234
     // ```c++
     //             vect.GetSeqData(tgt_rg.GetFrom(), tgt_rg.GetToOpen(), seq_data);

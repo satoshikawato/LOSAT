@@ -38,6 +38,9 @@ pub mod date;
 pub mod file;
 pub mod header;
 pub mod index;
+pub mod lmdb_read;
+pub mod tax_files;
+pub mod tax_sqlite;
 pub mod taxdb;
 pub mod volume;
 

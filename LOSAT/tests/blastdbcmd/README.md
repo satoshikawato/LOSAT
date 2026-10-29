@@ -7,7 +7,7 @@ this tree).
 
 - `db/`: databases of that probe. `p5` (version 5, `-parse_seqids`) and `p4` (version 4) are
   proteins with every Seq-id type, `n5n` a version 5 nucleotide database without parsed ids,
-  `nL` a version 4 nucleotide database written by `losat makedb`, `pm5` a protein database
+  `nL` a version 4 nucleotide database written by LOSAT (`losat makedb`, now `losat makeblastdb`), `pm5` a protein database
   with the seg masks of `makeblastdb -mask_data` (column files `.paa .pab .pac`), `palias` an
   alias file of `p5` and `pm5` (blastdb_aliastool). Kept: the files LOSAT reads and the LMDB
   file of each version 5 database, which must exist.

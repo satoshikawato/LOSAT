@@ -197,13 +197,13 @@ fn a_database_search_gives_the_same_bytes() {
     std::fs::write(dir.path("set.fna"), set).unwrap();
     let db = dir.path("set").to_str().unwrap().to_string();
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(dir.path("set.fna"))
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
-    assert!(output.status.success(), "makedb");
+        .expect("run losat makeblastdb");
+    assert!(output.status.success(), "makeblastdb");
     check(&query, ["-db", &db], "dc-megablast", &[4], true);
 }
 

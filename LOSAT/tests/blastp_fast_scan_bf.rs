@@ -87,16 +87,16 @@ impl Inputs {
         std::fs::write(&subject, records("AP027133.faa", 0, 150)).unwrap();
         let db = dir.join("db");
         let made = losat(&[], &dir.join("worker.log"))
-            .arg("makedb")
+            .arg("makeblastdb")
             .arg("-in")
             .arg(&subject)
             .args(["-dbtype", "prot", "-out"])
             .arg(&db)
             .output()
-            .expect("run LOSAT makedb");
+            .expect("run LOSAT makeblastdb");
         assert!(
             made.status.success(),
-            "makedb: {}",
+            "makeblastdb: {}",
             String::from_utf8_lossy(&made.stderr)
         );
         Inputs {

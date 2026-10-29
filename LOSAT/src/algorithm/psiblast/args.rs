@@ -333,6 +333,8 @@ impl PsiblastArgs {
             threshold: self.threshold,
             word_size: self.word_size,
             num_threads: self.num_threads,
+            // psiblast has no `-mt_mode` (`cli.rs` `is_unported_psiblast_arg`).
+            mt_mode: None,
             out: self.out,
             max_target_seqs: self.max_target_seqs,
             num_descriptions: self.num_descriptions,

@@ -1004,6 +1004,7 @@ mod tests {
             threshold: None,
             word_size: None,
             num_threads: 1,
+            mt_mode: None,
             out: None,
             max_target_seqs: None,
             num_descriptions: None,

@@ -793,7 +793,7 @@ pub(crate) fn tabular_subject_ids(
 //   <the stored title>
 // as often as the formatter reads the definition line: twice per subject for the
 // default outfmt 6, three times for `6 sseqid stitle`, five times for outfmt 0. The
-// number of readings is the formatter's, not ported; makeblastdb and `losat makedb`
+// number of readings is the formatter's, not ported; makeblastdb and `losat makeblastdb`
 // store `#` for such a byte, so only a header file written otherwise holds one.
 /// LOSAT's rejection of the reported database sequence `ordinal` (one with rows in the
 /// final hit lists) whose stored title held a byte outside ' ' ..= '~' (`replaced_bytes`,

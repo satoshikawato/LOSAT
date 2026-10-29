@@ -21,10 +21,9 @@
 //!         formatter.PrintEpilog(opt);
 //! ```
 //!
-//! With the switch on, the loop writes a batch's reports right after it has taken the batch (in
-//! batch order: a LOSAT_X_QBATCHPAR slot's result is taken under the loop's own key, in order,
-//! as before), finished its lists (`-db`: `finish_query_hit_list`, the titles, the HSPs of score
-//! 0) and given its gie to the mixer and the slots. It calls the same report code
+//! With the switch on, the loop writes a batch's reports right after it has searched the batch (in
+//! batch order), finished its lists (`-db`: `finish_query_hit_list`, the titles, the HSPs of score
+//! 0) and given its gie to the mixer. It calls the same report code
 //! (`write_reports`) with the batch's queries, their final lists numbered from 0 (as the batch
 //! made them), their warnings, lengths, masks, Karlin-Altschul blocks and search spaces, and the
 //! batch's part of the query ranges; after the loop it calls it once more with no query and the
@@ -91,7 +90,7 @@
 //! adapter, whose HSP numbers count over the whole search; file sinks, which are created when
 //! their report is written; two or more formats, which the library API allows on one stream,
 //! where the off path writes each format for all queries and the batch writes would interleave
-//! them); `-verbose` and the debug output (`x_debug_output`, the list LOSAT_X_QBATCHPAR uses); and
+//! them); `-verbose` and the debug output (`x_debug_output`); and
 //! the refusals above. The command line (`-out` file or standard output) and ABI v1 are streamed.
 //!
 //! The taxonomy database (DBID item T): NCBI prefetches the subjects that each batch reports
@@ -120,12 +119,6 @@
 //! sequence that a batch reported (`database::DatabaseTitles`, at most the database's sequences
 //! and at most the queries times the hit list size), which the next batches read instead of
 //! reading the definition line again.
-//!
-//! LOSAT_X_QBATCHPAR: the writes happen while the slots search the batches ahead (they write
-//! nothing; the batch loop alone writes), which is the point for the many-batch searches. The
-//! error paths still stop every slot before they write. A slot's panic, which ends a release
-//! build at once, then ends it after the reports of the batches taken so far, possibly in the
-//! middle of one (what its buffered writer had flushed).
 //!
 //! With `LOSAT_X_STATS` and the switch,
 //! `[X_STATS] RPTSTREAM batches= queries= off= one_batch= check_s=` (batches: the batches whose

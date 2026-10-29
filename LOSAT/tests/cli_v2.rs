@@ -159,14 +159,15 @@ fn makedb_takes_makeblastdb_s_option_names() {
     assert_eq!(given.title.as_deref(), Some("a title"));
     assert_eq!(given.max_file_sz, "1GB");
 
-    // makeblastdb's defaults, but for the format version: LOSAT writes version 4.
+    // makeblastdb's defaults.
     let defaults = args(makedb(&["-dbtype", "nucl"]).unwrap());
     assert_eq!(defaults.input, "-");
     assert_eq!(defaults.input_type, "fasta");
     assert_eq!(defaults.out, None);
     assert_eq!(defaults.title, None);
     assert_eq!(defaults.max_file_sz, "3GB");
-    assert_eq!(defaults.blastdb_version, 4);
+    assert_eq!(defaults.blastdb_version, 5);
+    assert_eq!(defaults.logfile, None);
 
     // `-dbtype` is mandatory and takes makeblastdb's two values.
     assert!(makedb(&["-in", "x.faa"]).is_err());
@@ -182,7 +183,6 @@ fn makedb_takes_makeblastdb_s_option_names() {
         "-mask_data",
         "-taxid",
         "-taxid_map",
-        "-logfile",
         "-h",
     ] {
         let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();

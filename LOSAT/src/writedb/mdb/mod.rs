@@ -620,6 +620,7 @@ impl Env {
         }
         meta.mapsize = env.mapsize;
         env.init_meta(&meta).map_err(io)?;
+        env.map_file_size().map_err(io)?;
         env.maxfree_1pg = ((psize - PAGEHDRSZ) / 8) as i64 - 1;
         env.nodemax = (((psize - PAGEHDRSZ) / MDB_MINKEYS) & !1) - 2;
         env.maxpg = env.mapsize / psize as u64;
@@ -750,7 +751,46 @@ impl Env {
             size = minsize;
         }
         self.mapsize = size;
+        self.map_file_size().map_err(|source| LmdbError::Io {
+            path: self.path.clone(),
+            source,
+        })?;
         self.maxpg = self.mapsize / self.psize as u64;
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:3979-4003 (mdb_env_map)
+    // ```c
+    // #ifdef _WIN32
+    // 	...
+    // 	} else {
+    // 		msize = env->me_mapsize;
+    // 		sizelo = msize & 0xffffffff;
+    // 		sizehi = msize >> 16 >> 16; /* only needed on Win64 */
+    //
+    // 		/* Windows won't create mappings for zero length files.
+    // 		 * and won't map more than the file size.
+    // 		 * Just set the maxsize right now.
+    // 		 */
+    // 		if (!(flags & MDB_WRITEMAP) && (SetFilePointer(env->me_fd, sizelo, &sizehi, 0) != (DWORD)sizelo
+    // 			|| !SetEndOfFile(env->me_fd)
+    // 			|| SetFilePointer(env->me_fd, 0, NULL, 0) != 0))
+    // 			return ErrCode();
+    // 	}
+    // ```
+    // On Windows LMDB sets the length of the data file to the map size whenever it maps the
+    // file: when the environment opens (after the meta pages are written, mdb.c:4421-4436)
+    // and when `mdb_env_set_mapsize` maps it again with a new size (mdb.c:4083-4087). The
+    // pages are written inside that length, so a file of makeblastdb on Windows is as long
+    // as the last map size (500000 bytes by default, `DEFAULT_LMDB_MAP_SIZE`). Elsewhere
+    // the file is not extended (`MDB_WRITEMAP` is not set). Not checked against a
+    // makeblastdb.exe.
+    /// The length `mdb_env_map` gives the data file: the map size on Windows.
+    fn map_file_size(&mut self) -> std::io::Result<()> {
+        #[cfg(windows)]
+        {
+            self.file.set_len(self.mapsize)?;
+        }
         Ok(())
     }
 

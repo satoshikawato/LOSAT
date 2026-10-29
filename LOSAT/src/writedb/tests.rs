@@ -9,7 +9,7 @@ use super::bioseq::{Bioseq, SeqData};
 use super::build_db::BuildDatabase;
 use super::makeblastdb::{run_with, MakedbArgs};
 use super::time::LocalTime;
-use super::writer::WriteDb;
+use super::writer::{DbVersion, WriteDb};
 use crate::seqdb::SeqType;
 
 mod makeblastdb_app_cases;
@@ -90,10 +90,22 @@ fn files_named(dir: &Path, prefix: &str) -> Vec<String> {
     names
 }
 
-/// Every file `out_dir/name.*` equals the fixture's file of the same
-/// extension, and the fixture has no other file LOSAT writes.
+/// The files of a database that the fixtures of `LOSAT/tests/seqdb` keep: the
+/// index, sequence, header and alias files and the LMDB file of version 5
+/// (`make_fixtures.py`, `KEEP`).
+fn kept_by_fixtures(file: &str) -> bool {
+    ["in", "sq", "hr", "al", "db"]
+        .iter()
+        .any(|ext| file.ends_with(&format!(".p{ext}")) || file.ends_with(&format!(".n{ext}")))
+}
+
+/// Every file `out_dir/name.*` that the fixtures keep equals the fixture's
+/// file of the same extension, and the fixture has no other such file.
 fn assert_same_database(out_dir: &Path, name: &str, fixture_dir: &Path, fixture: &str) {
-    let written = files_named(out_dir, &format!("{name}."));
+    let written: Vec<String> = files_named(out_dir, &format!("{name}."))
+        .into_iter()
+        .filter(|file| kept_by_fixtures(file))
+        .collect();
     assert!(!written.is_empty(), "no file {name}.* was written");
     let suffix = |file: &str, stem: &str| file[stem.len()..].to_string();
     for file in &written {
@@ -109,14 +121,9 @@ fn assert_same_database(out_dir: &Path, name: &str, fixture_dir: &Path, fixture:
             actual.iter().zip(&expected).position(|(a, b)| a != b)
         );
     }
-    let losat_writes = |file: &String| {
-        ["in", "sq", "hr", "al"]
-            .iter()
-            .any(|ext| file.ends_with(&format!(".p{ext}")) || file.ends_with(&format!(".n{ext}")))
-    };
     let expected: Vec<String> = files_named(fixture_dir, &format!("{fixture}."))
         .iter()
-        .filter(|file| losat_writes(file))
+        .filter(|file| kept_by_fixtures(file))
         .map(|file| suffix(file, fixture))
         .collect();
     let actual: Vec<String> = written.iter().map(|file| suffix(file, name)).collect();
@@ -153,7 +160,8 @@ fn protein_bioseqs(path: &Path) -> Vec<Bioseq> {
 }
 
 /// The writer alone, from sequences built by hand: the single-volume and the
-/// six-volume protein databases of `LOSAT/tests/seqdb`.
+/// six-volume protein databases of `LOSAT/tests/seqdb` (version 4) and the
+/// single-volume one of version 5 with its LMDB file.
 #[test]
 fn the_writer_reproduces_makeblastdb_s_protein_volumes() {
     let fixtures = seqdb_fixtures();
@@ -163,10 +171,24 @@ fn the_writer_reproduces_makeblastdb_s_protein_volumes() {
             "prot_v4.pin",
             "LOSAT seqdb fixture, protein, version 4",
             3_000_000_000u64,
+            DbVersion::V4,
         ),
-        ("prot_mv", "prot_mv.00.pin", "protein in volumes", 300),
+        (
+            "prot_mv",
+            "prot_mv.00.pin",
+            "protein in volumes",
+            300,
+            DbVersion::V4,
+        ),
+        (
+            "prot_v5",
+            "prot_v5.pin",
+            "prot.faa",
+            3_000_000_000u64,
+            DbVersion::V5,
+        ),
     ];
-    for (fixture, index_file, title, max_file_size) in cases {
+    for (fixture, index_file, title, max_file_size, version) in cases {
         let date = stored_date(&fixtures.join("db").join(index_file), SeqType::Protein);
         let tmp = TempDir::new(fixture);
         let mut db = WriteDb::new(
@@ -175,6 +197,7 @@ fn the_writer_reproduces_makeblastdb_s_protein_volumes() {
             title.as_bytes(),
             date.as_bytes(),
             max_file_size,
+            version,
         );
         for bioseq in protein_bioseqs(&fixtures.join("prot.faa")) {
             db.extract_bioseq_deflines(&bioseq);
@@ -198,10 +221,37 @@ fn build(
     date: &str,
     out_base: &str,
 ) -> (Result<(), super::WriteDbError>, String, Vec<u8>) {
+    build_version(
+        fasta,
+        is_protein,
+        title,
+        max_file_size,
+        date,
+        out_base,
+        DbVersion::V4,
+    )
+}
+
+fn build_version(
+    fasta: &Path,
+    is_protein: bool,
+    title: &str,
+    max_file_size: u64,
+    date: &str,
+    out_base: &str,
+    version: DbVersion,
+) -> (Result<(), super::WriteDbError>, String, Vec<u8>) {
     let mut log = Vec::new();
     let mut messages = Vec::new();
     let result = (|| {
-        let mut db = BuildDatabase::new(out_base, title, is_protein, &mut log, &time_of(date))?;
+        let mut db = BuildDatabase::new(
+            out_base,
+            title,
+            is_protein,
+            &mut log,
+            &time_of(date),
+            version,
+        )?;
         db.set_max_file_size(max_file_size);
         let mut warn = |line: &[u8]| {
             messages.extend_from_slice(line);
@@ -213,8 +263,8 @@ fn build(
     (result, String::from_utf8_lossy(&log).into_owned(), messages)
 }
 
-/// The databases of `LOSAT/tests/seqdb` that makeblastdb wrote in format
-/// version 4, from their FASTA files.
+/// The databases of `LOSAT/tests/seqdb` that makeblastdb wrote without parsed
+/// Seq-ids, in format versions 4 and 5, from their FASTA files.
 #[test]
 fn fasta_files_become_makeblastdb_s_databases() {
     let fixtures = seqdb_fixtures();
@@ -226,6 +276,7 @@ fn fasta_files_become_makeblastdb_s_databases() {
             "prot_v4.pin",
             "LOSAT seqdb fixture, protein, version 4",
             3_000_000_000u64,
+            DbVersion::V4,
         ),
         (
             "nucl_v4",
@@ -234,6 +285,7 @@ fn fasta_files_become_makeblastdb_s_databases() {
             "nucl_v4.nin",
             "LOSAT seqdb fixture, nucleotide, version 4",
             3_000_000_000,
+            DbVersion::V4,
         ),
         (
             "prot_mv",
@@ -242,9 +294,37 @@ fn fasta_files_become_makeblastdb_s_databases() {
             "prot_mv.00.pin",
             "protein in volumes",
             300,
+            DbVersion::V4,
+        ),
+        (
+            "prot_v5",
+            "prot.faa",
+            true,
+            "prot_v5.pin",
+            "prot.faa",
+            3_000_000_000,
+            DbVersion::V5,
+        ),
+        (
+            "nucl_v5",
+            "nucl.fna",
+            false,
+            "nucl_v5.nin",
+            "nucl.fna",
+            3_000_000_000,
+            DbVersion::V5,
+        ),
+        (
+            "nucl_mv",
+            "nucl.fna",
+            false,
+            "nucl_mv.00.nin",
+            "nucleotide in volumes",
+            300,
+            DbVersion::V5,
         ),
     ];
-    for (fixture, fasta, is_protein, index_file, title, max_file_size) in cases {
+    for (fixture, fasta, is_protein, index_file, title, max_file_size, version) in cases {
         let seqtype = if is_protein {
             SeqType::Protein
         } else {
@@ -252,13 +332,14 @@ fn fasta_files_become_makeblastdb_s_databases() {
         };
         let date = stored_date(&fixtures.join("db").join(index_file), seqtype);
         let tmp = TempDir::new(fixture);
-        let (result, log, messages) = build(
+        let (result, log, messages) = build_version(
             &fixtures.join(fasta),
             is_protein,
             title,
             max_file_size,
             &date,
             &tmp.base(fixture),
+            version,
         );
         result.unwrap();
         assert!(
@@ -375,6 +456,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             out: Some(base.clone()),
             blastdb_version: 4,
             max_file_sz: case.max_file_sz.unwrap_or("3GB").to_string(),
+            logfile: None,
         };
         // A run that writes no database stores no date; any time will do.
         let now = time_of(if case.date.is_empty() {
@@ -402,7 +484,20 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             show(case.stdout)
         );
         assert_eq!(status, case.status, "{name}: exit status");
-        let written = files_named(&out_dir, "db.");
+        // The recorded files are those of the volumes; makeblastdb also
+        // writes the metadata file after every build that made a volume.
+        let mut written = files_named(&out_dir, "db.");
+        let metadata = written
+            .iter()
+            .position(|file| file == "db.pjs" || file == "db.njs");
+        assert_eq!(
+            metadata.is_some(),
+            case.status == 0 && !case.files.is_empty(),
+            "{name}: metadata file"
+        );
+        if let Some(at) = metadata {
+            written.remove(at);
+        }
         let expected: Vec<String> = case
             .files
             .iter()
@@ -433,6 +528,7 @@ fn makedb(input: &str, out: &str, max_file_sz: &str, stdin: &[u8]) -> (i32, Stri
         out: Some(out.to_string()),
         blastdb_version: 4,
         max_file_sz: max_file_sz.to_string(),
+        logfile: None,
     };
     let now = time_of("Oct 12, 2026  9:00 PM");
     let (mut log, mut messages) = (Vec::new(), Vec::new());
@@ -530,29 +626,56 @@ fn a_database_in_a_directory_with_a_space_is_replaced() {
     }
 }
 
-/// makeblastdb overwrites `NAME.pjs` after every build. LOSAT writes no JSON
-/// file, so the one of the database it replaced must not stay (the removal
-/// of the old database takes `NAME.pjs` only when the old database has one
-/// volume). A JSON file of the other molecule type is not this database's.
+/// The `files` of a metadata file.
+fn metadata_files(path: &Path) -> Vec<String> {
+    let text = std::fs::read_to_string(path).unwrap();
+    let list = &text[text.find("\"files\": [").unwrap()..];
+    list.lines()
+        .skip(1)
+        .take_while(|line| !line.trim_start().starts_with(']'))
+        .map(|line| {
+            line.trim()
+                .trim_end_matches(',')
+                .trim_matches('"')
+                .to_string()
+        })
+        .collect()
+}
+
+/// makeblastdb writes `NAME.pjs` after every build. The removal of the old
+/// database takes `NAME.pjs` only when the old database has one volume, so
+/// the file of a database of several volumes is still there when the new one
+/// is listed: makeblastdb 2.17.0 (`-max_file_sz 300`, then a single volume)
+/// lists `db.pjs` among the new database's files. A JSON file of the other
+/// molecule type is not this database's and stays.
 #[test]
-fn the_json_file_of_a_replaced_database_is_removed() {
+fn the_json_file_lists_the_files_of_the_database() {
     let fasta = prot_fasta();
     for second_size in ["3GB", "400"] {
         let tmp = TempDir::new("json");
         let base = tmp.base("db");
         let (status, _, messages) = makedb(&fasta, &base, "300", b"");
         assert_eq!((status, messages.as_str()), (0, ""));
-        assert_eq!(files_named(&tmp.0, "db.").len(), 6 * 3 + 1);
-        std::fs::write(tmp.0.join("db.pjs"), b"{}").unwrap();
+        assert_eq!(files_named(&tmp.0, "db.").len(), 6 * 3 + 2);
+        let mut volumes: Vec<String> = files_named(&tmp.0, "db.");
+        volumes.retain(|file| file != "db.pjs");
+        assert_eq!(metadata_files(&tmp.0.join("db.pjs")), volumes);
         std::fs::write(tmp.0.join("db.njs"), b"{}").unwrap();
 
         let (status, _, messages) = makedb(&fasta, &base, second_size, b"");
         assert_eq!((status, messages.as_str()), (0, ""), "{second_size}");
         let files = files_named(&tmp.0, "db.");
-        assert!(!files.iter().any(|file| file == "db.pjs"), "{files:?}");
         assert!(files.iter().any(|file| file == "db.njs"), "{files:?}");
         if second_size == "3GB" {
-            assert_eq!(files, ["db.njs", "db.phr", "db.pin", "db.psq"]);
+            assert_eq!(files, ["db.njs", "db.phr", "db.pin", "db.pjs", "db.psq"]);
+            assert_eq!(
+                metadata_files(&tmp.0.join("db.pjs")),
+                ["db.phr", "db.pin", "db.pjs", "db.psq"]
+            );
+        } else {
+            let mut volumes = files.clone();
+            volumes.retain(|file| file != "db.pjs" && file != "db.njs");
+            assert_eq!(metadata_files(&tmp.0.join("db.pjs")), volumes);
         }
     }
 }
@@ -637,7 +760,7 @@ fn the_standard_input_gives_the_database_of_the_file() {
             "{log:?}"
         );
         let files = files_named(&from_file, "db.");
-        assert_eq!(files.len(), if max_file_sz == "300" { 19 } else { 3 });
+        assert_eq!(files.len(), if max_file_sz == "300" { 20 } else { 4 });
         assert_eq!(files_named(&from_stdin, "db."), files);
         for file in &files {
             assert!(
@@ -662,7 +785,7 @@ fn a_late_error_removes_the_volumes_already_written() {
     std::fs::write(&fasta, &input).unwrap();
     let (status, _, _) = makedb(&fasta, &tmp.base("db"), "300", b"");
     assert_eq!(status, 0);
-    assert_eq!(files_named(&tmp.0, "db.").len(), 6 * 3 + 1);
+    assert_eq!(files_named(&tmp.0, "db.").len(), 6 * 3 + 2);
     for file in files_named(&tmp.0, "db.") {
         std::fs::remove_file(tmp.0.join(file)).unwrap();
     }
@@ -744,14 +867,17 @@ fn directories_of_the_output_name() {
     assert_eq!((status, messages.as_str()), (0, ""));
     assert_eq!(
         files_named(&tmp.0, "sub"),
-        ["sub.phr", "sub.pin", "sub.psq"]
+        ["sub.phr", "sub.pin", "sub.pjs", "sub.psq"]
     );
 
     let nested = tmp.0.join("a").join("b");
     let out = nested.join("db").to_string_lossy().into_owned();
     let (status, _, messages) = makedb(&fasta, &out, "3GB", b"");
     assert_eq!((status, messages.as_str()), (0, ""));
-    assert_eq!(files_named(&nested, "db."), ["db.phr", "db.pin", "db.psq"]);
+    assert_eq!(
+        files_named(&nested, "db."),
+        ["db.phr", "db.pin", "db.pjs", "db.psq"]
+    );
     #[cfg(unix)]
     {
         // The directories get the mode rwxr-xr-x whatever the umask.
@@ -797,7 +923,14 @@ fn directories_of_the_output_name() {
 #[test]
 fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
     let tmp = TempDir::new("volumes");
-    let mut db = WriteDb::new(&tmp.base("db"), true, b"t", b"Oct 12, 2026  9:00 PM", 1);
+    let mut db = WriteDb::new(
+        &tmp.base("db"),
+        true,
+        b"t",
+        b"Oct 12, 2026  9:00 PM",
+        1,
+        DbVersion::V4,
+    );
     for i in 0..1001 {
         let bioseq = Bioseq {
             local_id: (i + 1).to_string(),
@@ -832,4 +965,89 @@ fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
     assert_eq!(volumes[..2], ["db.0000", "db.0001"]);
     assert_eq!(volumes[99..101], ["db.0099", "db.00100"]);
     assert_eq!(volumes[999..], ["db.00999", "db.1000"]);
+}
+
+/// The parsed `losat makedb` arguments of a makeblastdb command line (the
+/// words after the program's name), under the subcommand's current name.
+fn parse_makedb_words(words: &[String]) -> MakedbArgs {
+    use crate::cli::{Cli, Commands};
+    let mut last_error = None;
+    for name in ["makeblastdb", "makedb"] {
+        let mut argv = vec!["losat".to_string(), name.to_string()];
+        argv.extend(words.iter().cloned());
+        match crate::cli::try_parse_from::<Cli, _, _>(argv) {
+            Ok(cli) => match cli.command {
+                Commands::Makedb(args) => return args,
+                _ => unreachable!("a makeblastdb command line"),
+            },
+            Err(error) => last_error = Some(error),
+        }
+    }
+    panic!("{words:?}: {}", last_error.unwrap());
+}
+
+/// The driver of the makedb-v5 line's S2 gate
+/// (`makedb-v5-20261029/scripts/s2_gate.py`), not a test of its own: for each
+/// line of the manifest named by `LOSAT_S2_GATE_MANIFEST` (a directory, the
+/// build date makeblastdb stored, then one JSON array of words per run) it runs
+/// `losat makedb` through `run_with` in that directory's terms, with that date,
+/// and writes `so<k>.txt`, `se<k>.txt` and `rc<k>.txt` there. The script
+/// compares every file with makeblastdb's.
+#[test]
+#[ignore = "driver of an external gate (LOSAT_S2_GATE_MANIFEST)"]
+fn s2_gate() {
+    let manifest = std::env::var("LOSAT_S2_GATE_MANIFEST").expect("LOSAT_S2_GATE_MANIFEST");
+    for line in std::fs::read_to_string(manifest).unwrap().lines() {
+        let mut fields = line.split('\t');
+        let dir = PathBuf::from(fields.next().unwrap());
+        let date = fields.next().unwrap();
+        let now = time_of(if date.is_empty() {
+            "Oct 12, 2026  9:00 PM"
+        } else {
+            date
+        });
+        for (k, run) in fields.enumerate() {
+            let words: Vec<String> = parse_json_words(run);
+            let args = parse_makedb_words(&words);
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let status = run_with(&args, Some(&now), &mut std::io::empty(), &mut out, &mut err);
+            std::fs::write(dir.join(format!("so{k}.txt")), out).unwrap();
+            std::fs::write(dir.join(format!("se{k}.txt")), err).unwrap();
+            std::fs::write(dir.join(format!("rc{k}.txt")), status.to_string()).unwrap();
+        }
+    }
+}
+
+/// A JSON array of strings as the gate script writes it (`json.dumps` with
+/// `ensure_ascii`: the escapes `\"`, `\\`, `\uXXXX` and the one-letter ones).
+fn parse_json_words(text: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut chars = text
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .chars();
+    let mut current: Option<String> = None;
+    while let Some(c) = chars.next() {
+        match (&mut current, c) {
+            (None, '"') => current = Some(String::new()),
+            (None, _) => {}
+            (Some(word), '"') => {
+                words.push(std::mem::take(word));
+                current = None;
+            }
+            (Some(word), '\\') => match chars.next().unwrap() {
+                'n' => word.push('\n'),
+                't' => word.push('\t'),
+                'r' => word.push('\r'),
+                'u' => {
+                    let hex: String = chars.by_ref().take(4).collect();
+                    word.push(char::from_u32(u32::from_str_radix(&hex, 16).unwrap()).unwrap());
+                }
+                other => word.push(other),
+            },
+            (Some(word), c) => word.push(c),
+        }
+    }
+    words
 }

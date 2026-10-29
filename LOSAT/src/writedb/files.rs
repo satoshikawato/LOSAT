@@ -277,6 +277,35 @@ pub(crate) fn orig_num_digits(index: u32) -> u32 {
     }
 }
 
+/// `EBlastDbVersion`: the format version of the database being written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DbVersion {
+    /// `eBDB_Version4`: the volumes only.
+    V4,
+    /// `eBDB_Version5`: the volumes, whose index files name the LMDB file, and the LMDB
+    /// files of the database (`super::lmdb`).
+    V5,
+}
+
+impl DbVersion {
+    /// The version of `-blastdb_version` (makeblastdb allows 4 and 5 only).
+    pub fn from_number(version: i32) -> Option<Self> {
+        match version {
+            4 => Some(DbVersion::V4),
+            5 => Some(DbVersion::V5),
+            _ => None,
+        }
+    }
+
+    /// `(int) m_Version`: the number written as the format version of an index file.
+    pub fn number(self) -> u32 {
+        match self {
+            DbVersion::V4 => 4,
+            DbVersion::V5 => 5,
+        }
+    }
+}
+
 /// `CWriteDB_IndexFile`: the index file, kept in memory until the volume is
 /// closed.
 #[derive(Debug)]
@@ -285,6 +314,12 @@ pub(crate) struct IndexFile {
     protein: bool,
     title: Vec<u8>,
     date: Vec<u8>,
+    /// `m_Version`.
+    version: DbVersion,
+    /// `m_Index`: the number of the volume, written into a version 5 index file.
+    index: u32,
+    /// `x_MakeLmdbName()` for version 5, empty for version 4.
+    lmdb_name: Vec<u8>,
     oids: u32,
     data_size: u64,
     letters: u64,
@@ -294,8 +329,16 @@ pub(crate) struct IndexFile {
     amb: Vec<u32>,
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:355-360
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:346-360
 // ```c++
+// int CWriteDB_IndexFile::x_Overhead(const string & T,
+//                                    const string & lmdbName,
+//                                    const string & D)
+// {
+//     return 5 * sizeof(int) + sizeof(long)
+//             + 3 * sizeof(int) + T.size() + lmdbName.size() + D.size();
+// }
+//
 // int CWriteDB_IndexFile::x_Overhead(const string & T,
 //                                    const string & D)
 // {
@@ -303,9 +346,42 @@ pub(crate) struct IndexFile {
 //             + 2 * sizeof(int) + T.size() + D.size();
 // }
 // ```
-// `sizeof(long)` is 8 on the reference platform (Linux x86-64).
-fn overhead(title: &[u8], date: &[u8]) -> u64 {
-    (4 * 4 + 8 + 2 * 4 + title.len() + date.len()) as u64
+// `sizeof(long)` is 8 on the reference platform (Linux x86-64). The version 5
+// form counts the volume number and the length of the LMDB name as two more
+// `int`s.
+fn overhead(version: DbVersion, title: &[u8], lmdb_name: &[u8], date: &[u8]) -> u64 {
+    match version {
+        DbVersion::V4 => (4 * 4 + 8 + 2 * 4 + title.len() + date.len()) as u64,
+        DbVersion::V5 => (5 * 4 + 8 + 3 * 4 + title.len() + lmdb_name.len() + date.len()) as u64,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:432-442
+// ```c++
+// /// Form name of lmdb database file.
+// const string CWriteDB_IndexFile::x_MakeLmdbName()
+// {
+//     string suffix = (m_Protein ? ".pdb" : ".ndb");
+//     size_t last_slash = m_BaseName.find_last_of(CFile::GetPathSeparator());
+//     if (last_slash == m_BaseName.npos) {
+//         return m_BaseName + suffix;
+//     } else {
+//         return m_BaseName.substr(last_slash + 1) + suffix;
+//     }
+// }
+// ```
+// `m_BaseName` is the database name without the number of the volume, and
+// `CFile::GetPathSeparator()` is the separator of the platform ('/', or '\\'
+// on Windows).
+/// `x_MakeLmdbName`: the file name of the database's LMDB file, without its
+/// directory.
+pub(crate) fn make_lmdb_name(base_name: &str, protein: bool) -> String {
+    let suffix = if protein { ".pdb" } else { ".ndb" };
+    let name = match base_name.rfind(std::path::MAIN_SEPARATOR) {
+        Some(last_slash) => &base_name[last_slash + 1..],
+        None => base_name,
+    };
+    format!("{name}{suffix}")
 }
 
 impl IndexFile {
@@ -328,6 +404,8 @@ impl IndexFile {
     //     m_Hdr.push_back(0);
     //     m_Seq.push_back(1);
     // ```
+    // `m_DataSize` starts at the header's size, so the LMDB name of version 5
+    // takes room from the limit of `-max_file_sz` (`can_fit`).
     pub(crate) fn create(
         dbname: &str,
         protein: bool,
@@ -335,6 +413,7 @@ impl IndexFile {
         date: &[u8],
         index: u32,
         max_file_size: u64,
+        version: DbVersion,
     ) -> Result<Self, WriteDbError> {
         let file = WriteDbFile::create(
             dbname,
@@ -342,19 +421,36 @@ impl IndexFile {
             index,
             max_file_size,
         )?;
+        let lmdb_name = match version {
+            DbVersion::V4 => Vec::new(),
+            DbVersion::V5 => make_lmdb_name(dbname, protein).into_bytes(),
+        };
         Ok(Self {
             file,
             protein,
             title: title.to_vec(),
             date: date.to_vec(),
+            version,
+            index,
+            data_size: overhead(version, title, &lmdb_name, date).div_ceil(8) * 8,
+            lmdb_name,
             oids: 0,
-            data_size: overhead(title, date).div_ceil(8) * 8,
             letters: 0,
             max_length: 0,
             hdr: vec![0],
             seq: vec![1],
             amb: Vec::new(),
         })
+    }
+
+    /// `m_OIDs`: the number of sequences in the volume.
+    pub(crate) fn oids(&self) -> u32 {
+        self.oids
+    }
+
+    /// `m_Letters`: the residues or bases of the volume.
+    pub(crate) fn letters(&self) -> u64 {
+        self.letters
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:228-236
@@ -487,21 +583,32 @@ impl IndexFile {
     //         s_WriteInt4(F, m_Seq.back());
     //     }
     // ```
-    /// `x_Flush` (format version 4) and `Close`.
+    /// `x_Flush` and `Close`.
     pub(crate) fn close(&mut self) -> Result<(), WriteDbError> {
         let mut pad_date = self.date.clone();
-        while overhead(&self.title, &pad_date) & 0x7 != 0 {
+        while overhead(self.version, &self.title, &self.lmdb_name, &pad_date) & 0x7 != 0 {
             pad_date.push(0);
         }
         let mut out = Vec::with_capacity(
-            32 + self.title.len() + pad_date.len() + 4 * (self.hdr.len() * 3 + 1),
+            40 + self.title.len()
+                + self.lmdb_name.len()
+                + pad_date.len()
+                + 4 * (self.hdr.len() * 3 + 1),
         );
         let write_int4 =
             |out: &mut Vec<u8>, value: u32| out.extend_from_slice(&value.to_be_bytes());
-        write_int4(&mut out, 4);
+        write_int4(&mut out, self.version.number());
         write_int4(&mut out, u32::from(self.protein));
-        write_int4(&mut out, self.title.len() as u32);
-        out.extend_from_slice(&self.title);
+        if !self.lmdb_name.is_empty() {
+            write_int4(&mut out, self.index);
+            write_int4(&mut out, self.title.len() as u32);
+            out.extend_from_slice(&self.title);
+            write_int4(&mut out, self.lmdb_name.len() as u32);
+            out.extend_from_slice(&self.lmdb_name);
+        } else {
+            write_int4(&mut out, self.title.len() as u32);
+            out.extend_from_slice(&self.title);
+        }
         write_int4(&mut out, pad_date.len() as u32);
         out.extend_from_slice(&pad_date);
         write_int4(&mut out, self.oids);

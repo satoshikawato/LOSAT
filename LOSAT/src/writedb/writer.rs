@@ -66,8 +66,6 @@ pub struct WriteDb {
     tax_ids: Vec<i32>,
     /// Every taxid given to `m_Taxdb` (version 5): `GetDBTaxIds` of the new database.
     db_tax_ids: BTreeSet<i32>,
-    /// The index memory of the closed volume, for the next one.
-    index_scratch: IndexScratch,
     /// Version 5 with `-parse_seqids`: whether a sequence gave `m_Lmdbdb` keys, and the first
     /// sequence after such a one whose ids were all GIs (its OID and the FASTA form of its
     /// first id), until a sequence with keys follows.
@@ -197,7 +195,6 @@ impl WriteDb {
             ids: Vec::new(),
             tax_ids: Vec::new(),
             db_tax_ids: BTreeSet::new(),
-            index_scratch: IndexScratch::default(),
             lmdb_had_keys: false,
             gi_only_after_keys: None,
             gi_only_between_keys: None,
@@ -281,13 +278,6 @@ impl WriteDb {
     /// The taxids of the database (version 5; `GetDBTaxIds` of the new database), each once.
     pub fn db_tax_ids(&self) -> &BTreeSet<i32> {
         &self.db_tax_ids
-    }
-
-    /// `m_Ids` of the sequence published last (with `-parse_seqids`: the ids of all its
-    /// definition lines in order; with `-hash_index` alone: its `gnl|BL_ORD_ID`), until the
-    /// next `add_sequence` resets it (`x_ResetSequenceData`).
-    pub fn published_ids(&self) -> &[ParsedSeqId] {
-        &self.ids
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:158-180
@@ -574,10 +564,11 @@ impl WriteDb {
             // The new volume's index file takes the arrays of the closed one
             // (`OffsetArrays`), its indices their memory (`IndexScratch`).
             let mut arrays = OffsetArrays::default();
+            let mut scratch = IndexScratch::default();
             if let Some(volume) = self.volumes.last_mut() {
                 volume.close()?;
                 arrays = volume.take_offset_arrays();
-                self.index_scratch = volume.take_index_scratch();
+                scratch = volume.take_index_scratch();
             }
             self.volumes.push(Volume::create(
                 &self.dbname,
@@ -590,7 +581,7 @@ impl WriteDb {
                 self.platform.sizeof_long,
                 arrays,
                 self.indices,
-                std::mem::take(&mut self.index_scratch),
+                scratch,
             )?);
             if !self.indices.full {
                 binhdr = self.cook_header(&bioseq.title);
@@ -835,7 +826,6 @@ impl WriteDb {
         self.volumes[count - 1].close()?;
         drop(self.volumes[count - 1].take_offset_arrays());
         drop(self.volumes[count - 1].take_index_scratch());
-        drop(std::mem::take(&mut self.index_scratch));
         if count == 1 {
             self.volumes[0].rename_single()?;
         } else if count > 100 {

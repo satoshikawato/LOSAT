@@ -182,3 +182,80 @@ fn deflines_take_the_taxid_of_their_first_matching_id() {
     // An empty map matches "everything" (`m_TaxIdMap.empty()`).
     assert!(map("").unwrap().has_ever_fixed_id());
 }
+
+/// A map file whose reading fails after `data` (a directory, EIO): `read` gives the bytes, then
+/// the error.
+struct FailingReader {
+    data: &'static [u8],
+}
+
+impl std::io::Read for FailingReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.data.is_empty() {
+            return Err(std::io::Error::other("read error"));
+        }
+        let n = buf.len().min(self.data.len());
+        buf[..n].copy_from_slice(&self.data[..n]);
+        self.data = &self.data[n..];
+        Ok(n)
+    }
+}
+
+/// A read error ends the reading (`while (f && !f.eof())`, taxid_set.cpp:47): the entries read
+/// so far stay, the line read up to the error is taken, no error is reported; an error at the
+/// start is an empty map (makeblastdb 2.17.0 with a directory as `-taxid_map`: exit status 0,
+/// no message; review B S2).
+#[test]
+fn a_read_error_keeps_the_map_read_so_far() {
+    let read = |data: &'static [u8]| {
+        let mut set = TaxIdSet::default();
+        let mut reader = std::io::BufReader::with_capacity(4, FailingReader { data });
+        set.set_mapping_from_file(&mut reader, &mut |_| {}).unwrap();
+        set
+    };
+    let set = read(b"");
+    assert!(set.map.is_empty());
+    assert!(set.has_ever_fixed_id());
+    let set = read(b"NP_000001.1 9606\nlowerid 10090\nP12345 5");
+    assert_eq!(set.map.get(b"NP_000001"), Some(9606));
+    assert_eq!(set.map.get(b"lowerid"), Some(10090));
+    assert_eq!(set.map.get(b"P12345"), Some(5));
+    assert!(!set.has_ever_fixed_id());
+    // A directory, as std::fs opens it on Linux.
+    #[cfg(target_os = "linux")]
+    {
+        let dir = std::env::temp_dir();
+        let file = std::fs::File::open(&dir).unwrap();
+        let mut set = TaxIdSet::default();
+        set.set_mapping_from_file(&mut std::io::BufReader::new(file), &mut |_| {})
+            .unwrap();
+        assert!(set.map.is_empty());
+    }
+}
+
+/// The map in the arena (review B S5): the last line of a key wins, a key is found by its bytes
+/// only, and a UniRef50-like map takes less than 50 bytes per entry with its table.
+#[test]
+fn the_map_keeps_the_last_taxid_of_a_key_in_little_memory() {
+    let set = map("A 1\nB 2\nA 3\n").unwrap();
+    assert_eq!(set.map.get(b"A"), Some(3));
+    assert_eq!(set.map.get(b"B"), Some(2));
+    assert_eq!(set.map.get(b"a"), None);
+    assert_eq!(set.map.len(), 2);
+    let mut text = String::new();
+    let n = 200_000u32;
+    for i in 0..n {
+        text.push_str(&format!("UniRef50_A{i:09} {}\n", i % 5000));
+    }
+    let set = map(&text).unwrap();
+    assert_eq!(set.map.len(), n as usize);
+    for i in (0..n).step_by(997) {
+        assert_eq!(
+            set.map.get(format!("UniRef50_A{i:09}").as_bytes()),
+            Some((i % 5000) as i32)
+        );
+    }
+    // 19-byte keys: the bytes, one length byte, the 4-byte value and the slots.
+    let per_entry = set.map.heap_bytes() as f64 / f64::from(n);
+    assert!(per_entry < 50.0, "{per_entry} bytes per entry");
+}

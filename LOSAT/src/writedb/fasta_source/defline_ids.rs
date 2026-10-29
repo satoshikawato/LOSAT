@@ -20,7 +20,7 @@ use crate::seqid::parse::{
 /// Seq_id.cpp: `NCBI_ERRCODE_X` 1306 and the subcode; the application's name after the
 /// severity).
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2676-2678
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2676-2679
 /// ```c++
 ///                 if ((flags & fParse_PartialOK) != 0) {
 ///                     ERR_POST_X(7, Warning << e.what());
@@ -40,7 +40,7 @@ pub(crate) fn post_seq_id_warning(warning: SeqIdWarning, warn: Warn<'_>) {
 /// `CFastaDeflineReader::ParseRange(s, start, end)`: the length of the range suffix of
 /// the id token (`:<from>-<to>` or `:c<from>-<to>`), 0 for none, with its ends.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:230-269
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:229-273
 /// ```c++
 /// TSeqPos CFastaDeflineReader::ParseRange(
 ///     const CTempString& s,
@@ -151,7 +151,7 @@ fn error(message: String) -> ParseError {
 /// makeblastdb's flags: the ids of the token, checked. `protein` is `fAssumeProt` (else
 /// `fAssumeNuc`).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:333-394
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:333-404
 /// ```c++
 /// void CFastaDeflineReader::x_ProcessIDs(
 ///     const CTempString& id_string,
@@ -226,7 +226,7 @@ fn error(message: String) -> ParseError {
 ///     f_id_check(ids, info, pMessageListener);
 /// }
 /// ```
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:85-101
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:85,101-104
 /// ```c++
 /// static void s_PostWarning(ILineErrorListener* pMessageListener,
 ///     ...
@@ -314,7 +314,7 @@ pub(super) fn process_ids(
 ///     }
 /// }
 /// ```
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/seqid_validate.cpp:216-237
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/seqid_validate.cpp:215-237
 /// ```c++
 /// bool CFastaIdValidate::IsValidLocalID(const CSeq_id& id) const
 /// {
@@ -340,6 +340,10 @@ pub(super) fn process_ids(
 ///     return !(CSeq_id::CheckLocalID(checkString)&CSeq_id::fInvalidChar);
 /// }
 /// ```
+/// The ids come from the first-parse token, which ends at the first byte of 0x20 or below
+/// or of 0x80 or more (decision 28), so the first byte is never one that
+/// `CSeq_id_find_pred` rejects for being a control or non-ASCII byte; only ` >[]|"` can
+/// decide here.
 fn validate_ids(
     ids: &[ParsedSeqId],
     protein: bool,
@@ -370,7 +374,7 @@ fn validate_ids(
 
 /// `s_GetIDLengthErrorString(length, idType, maxAllowedLength, lineNum)`.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/seqid_validate.cpp:155-166
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/seqid_validate.cpp:154-166
 /// ```c++
 /// static string s_GetIDLengthErrorString(size_t length,
 ///         const string& idType,

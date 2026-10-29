@@ -229,7 +229,11 @@ fn main() -> Result<()> {
                     .map_err(anyhow::Error::msg)?;
             LOSAT::writedb::makeblastdb::check_registry_settings(
                 &args,
-                settings.max_seqid_length.as_deref(),
+                settings
+                    .max_seqid_length
+                    .as_ref()
+                    .map(Option::as_deref)
+                    .map_err(String::as_str),
             )
             .map_err(anyhow::Error::msg)?;
             // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1134-1136

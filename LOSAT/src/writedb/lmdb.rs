@@ -491,6 +491,7 @@ impl WriteDbLmdb {
     /// into the `.pos` file (`saveToOidList`). Called in OID order. (`insert_entries` makes
     /// the elements of the Seq-ids of a sequence; this one takes a key as it is, for the
     /// tests that rebuild makeblastdb's lists from its files.)
+    #[cfg(test)]
     pub(crate) fn insert_entry(
         &mut self,
         id: &[u8],

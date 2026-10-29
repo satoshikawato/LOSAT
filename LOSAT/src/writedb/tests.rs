@@ -19,6 +19,8 @@ mod makeblastdb_v5_cases;
 use makeblastdb_v5_cases::{Expected, V5Case, V5_CASES};
 mod makeblastdb_parse_cases;
 use makeblastdb_parse_cases::{ParseCase, PARSE_CASES};
+mod makeblastdb_fix_cases;
+use makeblastdb_fix_cases::{FixCase, FIX_CASES};
 
 /// The platform of every expected file here: makeblastdb 2.17.0 on Linux x86-64. The tests
 /// write its files on whatever platform they run on (`Platform`).
@@ -1377,6 +1379,111 @@ fn parse_seqids_databases_are_makeblastdb_s() {
     assert_eq!(PARSE_CASES.len(), 9);
     for case in PARSE_CASES {
         run_parse_case(case);
+    }
+}
+
+/// A stream with the build tree of an `NCBI C++ Exception` report masked (makedb-v5 DECISIONS
+/// 29: LOSAT names the official release's tree, the conda makeblastdb its own).
+fn build_tree_masked(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut rest = bytes;
+    const HEAD: &[u8] = b"    T0 \"";
+    while let Some(at) = rest.windows(HEAD.len()).position(|w| w == HEAD) {
+        out.extend_from_slice(&rest[..at + HEAD.len()]);
+        rest = &rest[at + HEAD.len()..];
+        if let Some(src) = rest.windows(5).position(|w| w == b"/src/") {
+            out.extend_from_slice(b"<BUILD>");
+            rest = &rest[src..];
+        }
+    }
+    out.extend_from_slice(rest);
+    out
+}
+
+/// Runs a case of `makeblastdb_fix_cases.rs` through the parser and `run_with` in a directory of
+/// its own, with its input file, standard input and directory: the exit status and the streams
+/// are makeblastdb's, and after a successful run every file (the date of the database is the
+/// recorded one; the files left by a failed run are not compared, makedb-v5 DECISIONS 11).
+fn run_fix_case(case: &FixCase) {
+    let name = case.name;
+    let tmp = TempDir::new(&format!("fix-{name}"));
+    let dir = tmp.0.to_string_lossy().into_owned();
+    std::fs::write(tmp.0.join("in.fa"), case.input).unwrap();
+    if case.mapdir {
+        std::fs::create_dir(tmp.0.join("mapdir")).unwrap();
+    }
+    let words: Vec<String> = case
+        .words
+        .iter()
+        .map(|word| word.replace("{D}", &dir))
+        .collect();
+    let args = parse_makedb_words(&words);
+    let now = time_of(if case.date.is_empty() {
+        "Oct 30, 2026  9:00 PM"
+    } else {
+        case.date
+    });
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let mut stdin = case.stdin;
+    let status = run_with(&args, Some(&now), LINUX, &mut stdin, &mut out, &mut err);
+    let show = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    let err = build_tree_masked(&v5_markers(&err, &dir));
+    let out = v5_markers(&out, &dir);
+    assert!(
+        err == build_tree_masked(case.stderr),
+        "{name}: standard error\n{}\nexpected\n{}",
+        show(&err),
+        show(case.stderr)
+    );
+    assert!(
+        out == case.stdout,
+        "{name}: standard output\n{}\nexpected\n{}",
+        show(&out),
+        show(case.stdout)
+    );
+    assert_eq!(status, case.status, "{name}: exit status");
+    if case.status != 0 {
+        return;
+    }
+    let mut written: Vec<String> = std::fs::read_dir(&tmp.0)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|file| file != "in.fa" && file != "mapdir")
+        .collect();
+    written.sort();
+    let expected: Vec<&str> = case.files.iter().map(|(file, _)| *file).collect();
+    assert_eq!(written, expected, "{name}: files");
+    for (file, content) in case.files {
+        let actual = std::fs::read(tmp.0.join(file)).unwrap();
+        match content {
+            Expected::Bytes(bytes) => assert!(
+                actual == *bytes,
+                "{name}: {file}: {} bytes written, {} expected; first difference at byte {:?}",
+                actual.len(),
+                bytes.len(),
+                actual.iter().zip(*bytes).position(|(a, b)| a != b)
+            ),
+            Expected::Digest(len, digest) => assert_eq!(
+                (actual.len(), fnv1a(&actual)),
+                (*len, *digest),
+                "{name}: {file}: size and FNV-1a"
+            ),
+        }
+    }
+}
+
+/// Plain FASTA ids with a control byte or a byte from 0x80 up are not valid local ids in the
+/// second parse (`CSeq_id_find_pred`, Seq_id.cpp:77-86): the definition lines keep the first
+/// parse's ids, so the database files, the messages and the duplicate check are makeblastdb's
+/// (makedb-v5 PR2 review A1), version 4 and 5, protein and nucleotide, next to ids with `|`
+/// that keep such bytes and ISAM keys that hold `\x02`. `-taxid_map -` reads the standard
+/// input, also with `-in -` (the map takes all of it); a directory as the map is an empty map;
+/// `-taxid_map ""` is "File is not accessible" without a name (review B S1, S2, N1).
+#[test]
+fn review_fix_cases_are_makeblastdb_s() {
+    assert_eq!(FIX_CASES.len(), 14);
+    for case in FIX_CASES {
+        run_fix_case(case);
     }
 }
 

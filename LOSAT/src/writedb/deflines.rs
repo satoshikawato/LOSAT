@@ -45,7 +45,7 @@ fn of_other_molecule(id: &ParsedSeqId, is_protein: bool, warn: Warn<'_>) -> bool
 /// id that is neither local nor a GI and whose accession is of the other molecule
 /// becomes the local id of its label.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:842-856
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:840-856
 /// ```c++
 ///             if (!m_LongIDs) {
 ///
@@ -128,7 +128,7 @@ pub fn large_gi_to_skip(ids: &[ParsedSeqId], warn: Warn<'_>) -> Option<i64> {
 /// the raw definition line between ^A; `None` where NCBI's parse throws a
 /// `CSeqIdException` (which `x_ExtractDeflines` catches) or finds no definition line.
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1766-1767,1807-1880
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1766-1767,1807-1880,1896-1900
 /// ```c++
 ///     if (fasta.empty())
 ///         return;
@@ -442,7 +442,7 @@ fn use_fasta_reader_deflines(parsed: &ParsedIds, deflines: &DeflineSet) -> bool 
 ///                    "Error: No deflines provided.");
 ///     }
 /// ```
-/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:606-614,650-656,694-695,716-719
+/// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:606-614,648,658-662,694,715-719
 /// ```c++
 ///     ITERATE(list< CRef< CSeqdesc > >, iter, bioseq.GetDescr().Get()) {
 ///         const CSeqdesc & desc = **iter;

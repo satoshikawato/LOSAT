@@ -356,3 +356,179 @@ fn string_index_memory_per_sequence() {
     // to it (one entry chunk and one tail chunk being filled).
     assert_eq!(per_sequence, 60.0);
 }
+
+/// A small generator of test keys (xorshift64*).
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    }
+
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n
+    }
+}
+
+/// NCBI's order of string records (`CWriteDB_PackedSemiTree`): the first 6 bytes as signed
+/// `char` (NUL-padded), then the rest from byte 6 as `strcmp` (the records hold no NUL).
+fn ncbi_record_order(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
+    let head = |r: &[u8]| -> [i8; 6] {
+        let mut h = [0i8; 6];
+        for (i, slot) in h.iter_mut().enumerate() {
+            *slot = r.get(i).map_or(0, |&c| c as i8);
+        }
+        h
+    };
+    head(a)
+        .cmp(&head(b))
+        .then_with(|| a[a.len().min(6)..].cmp(&b[b.len().min(6)..]))
+}
+
+/// Random keys over a few long shared starts, short keys, keys with `\x02` where another key
+/// ends, bytes from 0x80 up in the first 6 bytes, and OIDs of 1 to 6 digits (several per key),
+/// more than one entry chunk: the `.psd` records are NCBI's order of the records, built and
+/// sorted here (review B S3/S4: the comparison without building records and the merge of the
+/// sorted chunks).
+#[test]
+fn records_keep_ncbi_s_order_through_the_chunk_merge() {
+    let dir = Dir::new("merge");
+    let mut isam = acc_isam(&dir);
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    let starts: [&[u8]; 6] = [
+        b"uniref50_",
+        b"lcl|uniref50_",
+        b"abcdefghij",
+        b"q\xe9",
+        b"",
+        b"xp_0115",
+    ];
+    let tails: [&[u8]; 8] = [b"", b"a", b"\x02", b"\x02!", b"\x02z", b"!", b"0", b"zz"];
+    let mut expected: Vec<Vec<u8>> = Vec::new();
+    let n = 150_000u32;
+    let mut oid = 0u32;
+    for i in 0..n {
+        if rng.below(3) != 0 {
+            oid += 1 + rng.below(40) as u32;
+        }
+        let mut key = starts[rng.below(starts.len() as u64) as usize].to_vec();
+        for _ in 0..rng.below(4) {
+            key.push(b"abc"[rng.below(3) as usize]);
+        }
+        key.extend_from_slice(tails[rng.below(tails.len() as u64) as usize]);
+        if key.is_empty() || i % 1000 == 0 {
+            key.push(b'k');
+        }
+        isam.add_string_data(oid, &key).unwrap();
+        let mut record = key.clone();
+        record.push(KEY_DELIM);
+        record.extend_from_slice(oid.to_string().as_bytes());
+        record.push(RECORD_DELIM);
+        expected.push(record);
+    }
+    assert!(isam.count > ENTRY_CHUNK, "{} entries", isam.count);
+    isam.close().unwrap();
+    expected.sort_by(|a, b| ncbi_record_order(a, b));
+    expected.dedup();
+    let list: Vec<&[u8]> = expected.iter().map(|r| &r[..r.len() - 1]).collect();
+    assert_eq!(dir.read("db.00.psd"), records(&list));
+}
+
+/// The comparison without records is the order of the records, entry by entry, on every pair of
+/// a set of keys built to share their first 8 bytes (equal keys, keys that start other keys, a
+/// `\x02` or a byte below it where the shorter key ends, keys of fewer than 8 bytes).
+#[test]
+fn entries_compare_as_their_records() {
+    let dir = Dir::new("cmp");
+    let mut isam = acc_isam(&dir);
+    let keys: [&[u8]; 14] = [
+        b"abcdefgh",
+        b"abcdefghi",
+        b"abcdefghij",
+        b"abcdefgh\x02",
+        b"abcdefgh\x02!",
+        b"abcdefgh\x020",
+        b"abcdefgh\x029",
+        b"abcdefgh\x01",
+        b"abcdefgh\xff",
+        b"abcd",
+        b"abcd\x021",
+        b"abcd\x0212",
+        b"ab",
+        b"abcdefg",
+    ];
+    let oids = [0u32, 1, 2, 9, 10, 11, 99, 100, 123_456, 1_234_567];
+    for (k, key) in keys.iter().enumerate() {
+        for &oid in &oids {
+            // One key per OID here, so that no record is dropped as a repeat of its OID.
+            isam.insert_record(oid * 100 + k as u32, key).unwrap();
+        }
+    }
+    let mut entries: Vec<Entry> = isam.entries.iter().flatten().copied().collect();
+    entries.truncate(isam.count);
+    let record = |e: &Entry| {
+        let mut out = Vec::new();
+        isam.record(e, &mut out);
+        out
+    };
+    for x in &entries {
+        for y in &entries {
+            assert_eq!(
+                isam.cmp_entries(x, y),
+                ncbi_record_order(&record(x), &record(y)),
+                "{:?} {:?}",
+                String::from_utf8_lossy(&record(x)),
+                String::from_utf8_lossy(&record(y))
+            );
+        }
+    }
+}
+
+/// After `close` the chunks stay, emptied, and the next volume's index made from them writes
+/// what a new one writes (review B S4: the entries are sorted where they are and reused).
+#[test]
+fn the_next_volume_reuses_the_chunks() {
+    let fill = |isam: &mut StringIsam, base: u32| {
+        for oid in 0..70_000u32 {
+            isam.add_ids(
+                oid,
+                &[local(format!("UniRef50_B{:09}", oid * 7 + base).as_bytes())],
+            )
+            .unwrap();
+        }
+    };
+    let first = Dir::new("reuse1");
+    let mut isam = acc_isam(&first);
+    fill(&mut isam, 0);
+    isam.close().unwrap();
+    let scratch = isam.take_scratch();
+    assert!(
+        scratch.entries.len() >= 3,
+        "{} entry chunks",
+        scratch.entries.len()
+    );
+    assert!(scratch.entries.iter().all(Vec::is_empty));
+    assert!(scratch.entries.iter().all(|c| c.capacity() == ENTRY_CHUNK));
+    assert!(!scratch.tails.is_empty() && scratch.tails.iter().all(Vec::is_empty));
+    let second = Dir::new("reuse2");
+    let mut reused = StringIsam::new(
+        IsamType::Acc,
+        &second.base(),
+        true,
+        0,
+        3_000_000_000,
+        scratch,
+    );
+    fill(&mut reused, 3);
+    reused.close().unwrap();
+    let fresh = Dir::new("reuse3");
+    let mut isam = acc_isam(&fresh);
+    fill(&mut isam, 3);
+    isam.close().unwrap();
+    for file in ["db.00.psd", "db.00.psi"] {
+        assert!(second.read(file) == fresh.read(file), "{file}");
+    }
+}

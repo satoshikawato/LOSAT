@@ -147,7 +147,11 @@ version 4 the string and GI indexes (`.psi`/`.psd`, `.pni`/`.pnd`), of both vers
 file (`.pog`), of version 5 the accession keys in the LMDB file (`acc2oid` of `.pdb`) and the
 OID-to-ids file (`.pos`). `-hash_index` adds the sequence hash index (`.phi`/`.phd`, `.pog`),
 `-taxid` and `-taxid_map` (which needs `-parse_seqids`) the tax ids of the definition lines and of
-the version 5 tax-id files. Several input files can be named in
+the version 5 tax-id files. As in makeblastdb, `-taxid_map -` reads the map from the standard
+input (before the FASTA input, so with `-in -` the map takes all of it), a map file whose reading
+fails (a directory) keeps the lines read before the failure without a message, and a plain FASTA
+id with a control byte or a byte from 0x80 up is not a valid local id: the definition line keeps
+the id up to that byte. Several input files can be named in
 `-in` (as makeblastdb splits the value), and `-logfile` redirects the log and the messages
 to a file (appended); as in makeblastdb, `-logfile -` keeps them on the standard streams,
 and `-logfile /dev/null` and `-logfile ""` discard the messages (the empty name then ends
@@ -174,7 +178,7 @@ the same bytes as on Linux.
 | Not written or rejected | Why |
 | --- | --- |
 | `-randomize`, `-mask_data`, `-mask_id`, `-mask_desc`, `-gi_mask`, `-gi_mask_name`, `-oid_masks`, `-metadata_output_prefix` | not implemented; each is an explicit error that names the option |
-| `[BLAST] MAX_SEQID_LENGTH` (registry or `NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH`) with `-parse_seqids`; `[BLAST] LONG_SEQID` | they change which FASTA ids makeblastdb parses; LOSAT keeps NCBI's defaults and refuses to run |
+| `[BLAST] MAX_SEQID_LENGTH` (registry or `NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH`) with `-parse_seqids`, when makeblastdb uses the value (the first layer that has the entry gives a number `NStr::StringToUInt` converts, not 0; an empty, unconvertible or 0 value is ignored by makeblastdb and accepted by LOSAT); `[BLAST] LONG_SEQID` | they change which FASTA ids makeblastdb parses; LOSAT keeps NCBI's defaults and refuses to run |
 | `-input_type` other than `fasta`, compressed input (`.gz`, `.bz2`, `.zst`) | uncompressed FASTA only; `-in -` reads the standard input |
 | NCBI settings that change makeblastdb's messages or stored titles (`DIAG_*`, `NCBI_CONFIG_*`, registry entries outside the accepted list, a non-empty `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS`) | as for the search programs: LOSAT refuses to run instead of giving a different result |
 | Replacing a database of the same name whose alias file the reader of stage DB-1 rejects | the files to remove are found by resolving the alias file; LOSAT stops before it removes anything |

@@ -9,8 +9,10 @@
 //! about the record's bytes + 8 per record. Here a record is a 16-byte entry (its first 8
 //! bytes as an ordered integer, its OID, the position of the rest of its key) and the key's
 //! bytes past the first 8 in an arena of 1 MiB chunks; the `\x02<oid>\n` end of a record is
-//! not stored, it follows from the OID. The entries are kept in chunks of 64 Ki and moved
-//! into one vector for the sort when the volume closes.
+//! not stored, it follows from the OID. The entries are kept in chunks of 64 Ki; when the
+//! volume closes each chunk is sorted in place and the chunks are merged while the records
+//! are written, so no second copy of the entries is made. The chunks (entries and tails)
+//! are kept, emptied, for the next volume.
 
 use rustc_hash::FxHashSet;
 
@@ -392,6 +394,119 @@ fn push_decimal(out: &mut Vec<u8>, value: i64) {
     out.extend_from_slice(&digits[at..]);
 }
 
+/// The decimal digits of `value` (`sprintf("%d")` of an OID) in `buf`.
+fn decimal(value: u32, buf: &mut [u8; 10]) -> &[u8] {
+    let mut n = value;
+    let mut at = buf.len();
+    loop {
+        at -= 1;
+        buf[at] = b'0' + (n % 10) as u8;
+        n /= 10;
+        if n == 0 {
+            break;
+        }
+    }
+    &buf[at..]
+}
+
+/// The order of the record ends `<x>\n` and `<y>\n` of two OIDs: their digits as `strcmp`
+/// compares them (`\n` sorts before every digit, so a shorter number that starts the other
+/// sorts first, as with slices).
+fn cmp_decimal(x: u32, y: u32) -> std::cmp::Ordering {
+    let (mut bx, mut by) = ([0u8; 10], [0u8; 10]);
+    decimal(x, &mut bx).cmp(decimal(y, &mut by))
+}
+
+/// The merge of sorted chunks of entries (a binary heap of the chunks' next entries, the
+/// least on top).
+struct Merge<'a> {
+    chunks: &'a [Vec<Entry>],
+    /// (chunk, position of its next entry).
+    heap: Vec<(u32, u32)>,
+}
+
+impl<'a> Merge<'a> {
+    fn new(
+        chunks: &'a [Vec<Entry>],
+        mut cmp: impl FnMut(&Entry, &Entry) -> std::cmp::Ordering,
+    ) -> Self {
+        let mut merge = Self {
+            chunks,
+            heap: Vec::with_capacity(chunks.len()),
+        };
+        for (index, chunk) in chunks.iter().enumerate() {
+            if !chunk.is_empty() {
+                let cursor = (index as u32, 0);
+                let mut at = merge.heap.len();
+                merge.heap.push(cursor);
+                while at > 0 {
+                    let parent = (at - 1) / 2;
+                    if cmp(merge.entry(cursor), merge.entry(merge.heap[parent])).is_lt() {
+                        merge.heap[at] = merge.heap[parent];
+                        at = parent;
+                    } else {
+                        break;
+                    }
+                }
+                merge.heap[at] = cursor;
+            }
+        }
+        merge
+    }
+
+    fn entry(&self, (chunk, pos): (u32, u32)) -> &'a Entry {
+        &self.chunks[chunk as usize][pos as usize]
+    }
+
+    /// The least entry left, or `None` at the end.
+    fn next(
+        &mut self,
+        mut cmp: impl FnMut(&Entry, &Entry) -> std::cmp::Ordering,
+    ) -> Option<&'a Entry> {
+        let &(chunk, pos) = self.heap.first()?;
+        let least = self.entry((chunk, pos));
+        // The chunk's next entry, or the heap's last cursor, goes in from the top: the hole
+        // sinks along the lesser children to a leaf, then the cursor rises to its place.
+        let cursor = if (pos as usize) + 1 < self.chunks[chunk as usize].len() {
+            (chunk, pos + 1)
+        } else {
+            let last = self.heap.pop().expect("not empty");
+            if self.heap.is_empty() {
+                return Some(least);
+            }
+            last
+        };
+        let len = self.heap.len();
+        let mut hole = 0;
+        loop {
+            let left = 2 * hole + 1;
+            if left >= len {
+                break;
+            }
+            let child = if left + 1 < len
+                && cmp(self.entry(self.heap[left + 1]), self.entry(self.heap[left])).is_lt()
+            {
+                left + 1
+            } else {
+                left
+            };
+            self.heap[hole] = self.heap[child];
+            hole = child;
+        }
+        while hole > 0 {
+            let parent = (hole - 1) / 2;
+            if cmp(self.entry(cursor), self.entry(self.heap[parent])).is_lt() {
+                self.heap[hole] = self.heap[parent];
+                hole = parent;
+            } else {
+                break;
+            }
+        }
+        self.heap[hole] = cursor;
+        Some(least)
+    }
+}
+
 /// The keys of the current OID (`m_OidStringData`, records of one OID differ only in their
 /// key): a scan for a few keys, a hash set for many.
 #[derive(Debug, Default)]
@@ -456,8 +571,8 @@ pub(crate) struct StringIsam {
     key: Vec<u8>,
 }
 
-/// What a string index keeps between volumes: its entry and tail chunks (emptied), so that
-/// the next volume grows into memory the allocator already gave.
+/// What a string index keeps between volumes: its entry and tail chunks (emptied at the
+/// close), so that the next volume grows into memory the allocator already gave.
 #[derive(Debug, Default)]
 pub(crate) struct StringIsamScratch {
     entries: Vec<Vec<Entry>>,
@@ -936,6 +1051,76 @@ impl StringIsam {
         Ok(())
     }
 
+    /// The length of the key of `entry` and its bytes past the first 8 (empty for a key of
+    /// at most 8 bytes, which lies in the prefix).
+    fn key_tail(&self, entry: &Entry) -> (usize, &[u8]) {
+        if entry[2] >= SHORT_KEY {
+            return ((entry[2] - SHORT_KEY) as usize, &[]);
+        }
+        let pos = entry[2];
+        let chunk = &self.tails[(pos >> TAIL_CHUNK_BITS) as usize];
+        let mut at = (pos as usize) & (TAIL_CHUNK - 1);
+        let mut key_len = usize::from(chunk[at] & 0x7f);
+        if chunk[at] & 0x80 != 0 {
+            at += 1;
+            key_len |= usize::from(chunk[at]) << 7;
+        }
+        at += 1;
+        (key_len, &chunk[at..at + key_len - 8])
+    }
+
+    /// NCBI's order of two records (`key\x02<oid>\n`, the order described at
+    /// `record_prefix`), without building them: the 8-byte prefixes, then for equal ones the
+    /// key bytes past the first 8 as they are stored, and the OIDs' decimal digits only for
+    /// equal keys. Two records with equal first 8 bytes compare from byte 8 as they compare
+    /// in full, so the comparison may run over the whole keys. A key that is a proper start
+    /// of the other continues with `\x02`; when the other key holds `\x02` at that place
+    /// (an id with `|` may), the records are built and compared.
+    fn cmp_entries(&self, x: &Entry, y: &Entry) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        let px = (u64::from(x[0]) << 32) | u64::from(x[1]);
+        let py = (u64::from(y[0]) << 32) | u64::from(y[1]);
+        match px.cmp(&py) {
+            Ordering::Equal => {}
+            order => return order,
+        }
+        let (lx, tx) = self.key_tail(x);
+        let (ly, ty) = self.key_tail(y);
+        if lx == ly && lx <= 8 {
+            // The same key, wholly in the equal prefixes.
+            return cmp_decimal(x[3], y[3]);
+        }
+        if lx >= 8 && ly >= 8 {
+            // The first 8 key bytes are the equal prefixes.
+            let n = tx.len().min(ty.len());
+            match tx[..n].cmp(&ty[..n]) {
+                Ordering::Equal => {}
+                order => return order,
+            }
+            if tx.len() == ty.len() {
+                return cmp_decimal(x[3], y[3]);
+            }
+            // `\x02` of the shorter record against the longer key's next byte.
+            let (next, shorter) = if tx.len() < ty.len() {
+                (ty[n], Ordering::Less)
+            } else {
+                (tx[n], Ordering::Greater)
+            };
+            if next != KEY_DELIM {
+                return if next > KEY_DELIM {
+                    shorter
+                } else {
+                    shorter.reverse()
+                };
+            }
+        }
+        // A key that holds `\x02` where the other one ends: compare the records.
+        let (mut a, mut b) = (Vec::new(), Vec::new());
+        self.record(x, &mut a);
+        self.record(y, &mut b);
+        a.cmp(&b)
+    }
+
     /// The full record of `entry` (`key\x02<oid>\n`) into `out`.
     fn record(&self, entry: &Entry, out: &mut Vec<u8>) {
         out.clear();
@@ -1065,23 +1250,14 @@ impl StringIsam {
                 64,
                 MAX_STRING_LINE,
             )?;
-            // The entries in one vector for the sort; each chunk is freed once moved.
-            let mut sorted: Vec<Entry> = Vec::with_capacity(self.count);
-            for chunk in &mut self.entries {
-                sorted.extend_from_slice(chunk);
-                *chunk = Vec::new();
+            // Each chunk sorted in place, then the chunks merged while the records are
+            // written (`m_StringSort.Sort()` and the walk of `x_FlushStringIndex`): no
+            // second copy of the entries.
+            let chunks = (self.count + ENTRY_CHUNK - 1) / ENTRY_CHUNK;
+            let mut entries = std::mem::take(&mut self.entries);
+            for chunk in &mut entries[..chunks] {
+                chunk.sort_unstable_by(|x, y| self.cmp_entries(x, y));
             }
-            self.entries.clear();
-            let (mut a, mut b) = (Vec::with_capacity(300), Vec::with_capacity(300));
-            sorted.sort_unstable_by(|x, y| {
-                let px = (u64::from(x[0]) << 32) | u64::from(x[1]);
-                let py = (u64::from(y[0]) << 32) | u64::from(y[1]);
-                px.cmp(&py).then_with(|| {
-                    self.record(x, &mut a);
-                    self.record(y, &mut b);
-                    a[a.len().min(8)..].cmp(&b[b.len().min(8)..])
-                })
-            });
             let nsamples = divide_round_up(num_terms, 64);
             let mut key_buffer: Vec<u8> = Vec::new();
             let mut key_off: Vec<i32> = Vec::with_capacity(nsamples.max(0) as usize + 1);
@@ -1089,7 +1265,8 @@ impl StringIsam {
             let mut output_count: u32 = 0;
             let mut element = Vec::with_capacity(300);
             let mut prev_elem: Vec<u8> = vec![0];
-            for entry in &sorted {
+            let mut merge = Merge::new(&entries[..chunks], |x, y| self.cmp_entries(x, y));
+            while let Some(entry) = merge.next(|x, y| self.cmp_entries(x, y)) {
                 self.record(entry, &mut element);
                 if prev_elem == element {
                     continue;
@@ -1104,7 +1281,8 @@ impl StringIsam {
                 data_pos = self.files.data.write(&element)?;
                 std::mem::swap(&mut prev_elem, &mut element);
             }
-            drop(sorted);
+            entries.iter_mut().for_each(Vec::clear);
+            self.entries = entries;
             self.files.index.write_int4(data_pos as i32)?;
             key_off.push(key_buffer.len() as i32);
             let key_off_start = KEY_OFFSET + (nsamples + 1) * 8;
@@ -1115,8 +1293,10 @@ impl StringIsam {
             }
             self.files.index.write(&key_buffer)?;
         }
-        // `x_Free`.
+        // `x_Free`: the records are dropped; the chunks stay for the next volume.
         self.count = 0;
+        self.tails.iter_mut().for_each(Vec::clear);
+        self.tail_current = 0;
         self.files.close()
     }
 

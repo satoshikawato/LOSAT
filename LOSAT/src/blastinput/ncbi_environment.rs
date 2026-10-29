@@ -443,12 +443,16 @@ pub struct ApplicationSettings {
     /// a database has to refuse to run then (`algorithm::common::database::
     /// check_seqids`), since the ids of the other searches are local or ordinal.
     pub seq_id_rank_variable: Option<&'static str>,
-    /// The registry entry `[BLAST] MAX_SEQID_LENGTH` when a layer sets it to a value that is
-    /// not empty (the environment, then the program's `.ini` file, then `.ncbirc`). The entry
-    /// changes no output of a search (`HARMLESS_ENTRIES`); makeblastdb gives it to its FASTA
+    /// The value of the registry entry `[BLAST] MAX_SEQID_LENGTH` in the first layer that has
+    /// the entry (the environment, then the program's `.ini` file, then `.ncbirc`), an empty
+    /// value too: `registry.Get` answers from that layer, and an empty value there hides the
+    /// layers below (makeblastdb 2.17.0 with an empty `NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH`
+    /// or an empty `makeblastdb.ini` entry ignores a `.ncbirc` value). `Err` holds why LOSAT
+    /// does not read a file's value as NCBI stores it. The entry changes no output of a
+    /// search (`HARMLESS_ENTRIES`); makeblastdb gives a value it can convert to its FASTA
     /// reader as the limit of a Seq-id's length, which `losat makeblastdb -parse_seqids`
     /// refuses (`writedb::makeblastdb::check_registry_settings`).
-    pub max_seqid_length: Option<String>,
+    pub max_seqid_length: Result<Option<String>, String>,
 }
 
 /// The parameters that move the GIs to the end of NCBI's rank of Seq-ids (the Seq-align id of a
@@ -492,7 +496,7 @@ impl Default for ApplicationSettings {
             data_loaders: true,
             blastdb: Ok(None),
             seq_id_rank_variable: None,
-            max_seqid_length: None,
+            max_seqid_length: Ok(None),
         }
     }
 }
@@ -726,8 +730,8 @@ fn file_blast_entry(
         })
 }
 
-/// A registry file's `[BLAST] MAX_SEQID_LENGTH` when its value is not empty (a value LOSAT
-/// cannot read as NCBI stores it counts as set).
+/// A registry file's `[BLAST] MAX_SEQID_LENGTH` when the file has the entry (an empty value
+/// too; `Err` for a value LOSAT cannot read as NCBI stores it).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:739-747
 /// ```c++
@@ -741,11 +745,11 @@ fn file_blast_entry(
 ///         }
 ///     }
 /// ```
-fn max_seqid_length_entry(path: &Path, entries: &[(String, String, String)]) -> Option<String> {
-    match file_blast_entry(path, entries, "MAX_SEQID_LENGTH") {
-        Ok(value) => value.filter(|value| !value.is_empty()),
-        Err(reason) => Some(reason),
-    }
+fn max_seqid_length_entry(
+    path: &Path,
+    entries: &[(String, String, String)],
+) -> Option<Result<String, String>> {
+    file_blast_entry(path, entries, "MAX_SEQID_LENGTH").transpose()
 }
 
 /// The registry entry `[BLAST] BLASTDB` from the layers of the application's registry,
@@ -902,8 +906,7 @@ fn application_settings(
     let mut ini_data_loaders = None;
     let mut ini_blastdb = Ok(None);
     let mut max_seqid_length = env("NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH")
-        .map(|value| value.to_string_lossy().into_owned())
-        .filter(|value| !value.is_empty());
+        .map(|value| Ok(value.to_string_lossy().into_owned()));
     if let Some(path) = find_registry(&search_path, &format!("{program}.ini")) {
         let entries = check_registry_file(&path)?;
         if entries.iter().any(|(section, name, _)| {
@@ -947,7 +950,7 @@ fn application_settings(
         seq_id_rank_variable: SEQ_ID_RANK_VARIABLES
             .into_iter()
             .find(|name| env(name).is_some()),
-        max_seqid_length,
+        max_seqid_length: max_seqid_length.transpose(),
     })
 }
 
@@ -1203,8 +1206,10 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:739-747 (the
     // registry's `[BLAST] MAX_SEQID_LENGTH`, used when it is not empty): the value of the first
-    // layer that sets it (the environment, the program's .ini, .ncbirc), for makeblastdb to
-    // refuse with -parse_seqids; the entry stays harmless for the other programs.
+    // layer that has the entry (the environment, the program's .ini, .ncbirc; an empty value
+    // hides the layers below, as makeblastdb 2.17.0 reads them: pr2/fix/n4probe), for
+    // makeblastdb to refuse with -parse_seqids when NCBI acts on it; the entry stays harmless
+    // for the other programs.
     #[test]
     fn max_seqid_length_is_reported_from_every_layer() {
         let dir = std::env::temp_dir().join(format!(
@@ -1232,21 +1237,31 @@ mod tests {
             )
             .map(|settings| settings.max_seqid_length)
         };
-        assert_eq!(settings(&[]), Ok(None));
+        let value = |v: &str| Ok(Ok(Some(v.to_string())));
+        assert_eq!(settings(&[]), Ok(Ok(None)));
         assert_eq!(
             settings(&[("NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH", "60")]),
-            Ok(Some("60".to_string()))
+            value("60")
         );
         assert_eq!(
             settings(&[("NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH", "")]),
-            Ok(None)
+            value("")
         );
         std::fs::write(&ncbirc, "[BLAST]\nMAX_SEQID_LENGTH = 70\n").unwrap();
-        assert_eq!(settings(&[]), Ok(Some("70".to_string())));
+        assert_eq!(settings(&[]), value("70"));
+        // An empty environment value hides the files' values.
+        assert_eq!(
+            settings(&[("NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH", "")]),
+            value("")
+        );
         std::fs::write(&ini, "[BLAST]\nMAX_SEQID_LENGTH = 80\n").unwrap();
-        assert_eq!(settings(&[]), Ok(Some("80".to_string())));
+        assert_eq!(settings(&[]), value("80"));
         std::fs::write(&ini, "[BLAST]\nMAX_SEQID_LENGTH =\n").unwrap();
-        assert_eq!(settings(&[]), Ok(Some("70".to_string())));
+        assert_eq!(settings(&[]), value(""));
+        std::fs::write(&ini, "[BLAST]\nMAX_SEQID_LENGTH = 1\\2\n").unwrap();
+        assert!(matches!(settings(&[]), Ok(Err(_))));
+        std::fs::write(&ini, "[BLAST]\nBLASTDB = /tmp\n").unwrap();
+        assert_eq!(settings(&[]), value("70"));
         std::fs::write(&ncbirc, "[BLAST]\nLONG_SEQID = 1\n").unwrap();
         assert!(settings(&[]).is_err());
         std::fs::remove_file(&ini).unwrap();

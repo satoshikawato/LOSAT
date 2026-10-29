@@ -18,6 +18,7 @@
 mod acc_info;
 
 use std::collections::BTreeMap;
+use std::ops::Bound;
 use std::sync::OnceLock;
 
 pub use acc_info::*;
@@ -136,7 +137,7 @@ impl BitRanges {
 
 /// `SAccGuide::SSubMap`: the rules of one format (`<letters>+<digits>`).
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:891-911
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:889-911
 /// ```c++
 ///     typedef map<string, TAccInfo>   TPrefixes;
 ///     typedef pair<string, TAccInfo>  TPair;
@@ -175,7 +176,7 @@ pub struct AccGuide {
 
 /// `SAccGuide::SHints`: the state that `AddRule` keeps from one line to the next.
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:913-945
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:907-945
 /// ```c++
 ///     struct SHints {
 ///         SHints()
@@ -275,7 +276,7 @@ const BV_SIZES: [u32; 10] = [
 
 /// `SAccGuide::s_Key(letters, digits)`.
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:962-963
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:952-953
 /// ```c++
 ///     static TFormatCode s_Key(unsigned short letters, unsigned short digits)
 ///         { return TFormatCode(letters) << 16 | digits; }
@@ -299,7 +300,7 @@ fn bit_number(digits: &[u8]) -> u32 {
 /// `SAccGuide::x_SplitSpecial(acc, fmt)`: the length of the prefix that keys the special
 /// and the number that is its bit.
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1599-1629
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1596-1629
 /// ```c++
 /// bm::bvector_size_type SAccGuide::x_SplitSpecial(CTempString& acc,
 ///                                                 TFormatCode fmt)
@@ -541,8 +542,10 @@ impl AccGuide {
                     }
                 }
             }
-            if let Some((_, (first, value))) =
-                submap.big_specials.range(acc_or_pfx.to_vec()..).next()
+            if let Some((_, (first, value))) = submap
+                .big_specials
+                .range::<[u8], _>((Bound::Included(acc_or_pfx), Bound::Unbounded))
+                .next()
             {
                 if acc_or_pfx >= first.as_slice() {
                     if let Some(key_used) = key_used {
@@ -562,7 +565,7 @@ impl AccGuide {
 
     /// `SHints::FindAccInfo(name)`.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:981-996
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:974-989
     /// ```c++
     /// inline
     /// SAccGuide::TAccInfo SAccGuide::SHints::FindAccInfo(CTempString name)
@@ -595,7 +598,7 @@ impl AccGuide {
 
     /// `SHints::FindSpecial(guide, fmt, acc_or_range)`.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:998-1010
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:991-1010
     /// ```c++
     /// inline
     /// SAccGuide::TAccInfo SAccGuide::SHints::FindSpecial(const SAccGuide& guide,
@@ -781,7 +784,7 @@ impl AccGuide {
     /// `SAccGuide::AddRule(rule, hints)` for the lines of `rules.txt`; `ranges` gives the
     /// tokens of each `:` line of a `special2` block.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1030-1051
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1030-1053
     /// ```c++
     /// void SAccGuide::AddRule(const CTempString& rule, SHints& hints)
     /// {
@@ -836,7 +839,7 @@ impl AccGuide {
         } else if tokens.len() >= 2 && first == b":" {
             self.add_special2_ranges(&tokens[1..], hints);
         } else if tokens.len() == 3 && first.eq_ignore_ascii_case(b"gnl") {
-            // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1320-1328,1345-1347
+            // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1324-1329,1349-1351
             // ```c++
             //     } else if (tokens.size() == 3 && NStr::EqualNocase(tokens[0], "gnl")) {
             //         hints.special2_submap = nullptr;
@@ -878,7 +881,7 @@ impl AccGuide {
 
     /// The `<letters>+<digits> <prefix> <type> [*]` line of `AddRule`.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1052-1064,1102-1131
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1054-1066,1102-1131
     /// ```c++
     ///     } else if ((pos = tokens[0].find('+')) != NPOS
     ///                &&  (tokens.size() == 3
@@ -951,7 +954,7 @@ impl AccGuide {
 
     /// The `special <acc>[-<acc>] <type>` line of `AddRule`.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1132-1149,1193-1210
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1133-1154,1193-1209
     /// ```c++
     ///     } else if (tokens.size() == 3 && NStr::EqualNocase(tokens[0], "special")) {
     ///         hints.special2_submap = nullptr;
@@ -1035,7 +1038,7 @@ impl AccGuide {
     /// The `special2 <letters>+<digits> <type>` line of `AddRule`, which starts a block of
     /// range lines.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1213-1247
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1210-1247
     /// ```c++
     ///     } else if (tokens.size() >= 3
     ///                &&  NStr::EqualNocase(tokens[0], "special2")) {
@@ -1115,7 +1118,7 @@ impl AccGuide {
     /// The `: <range> ...` lines of a `special2` block: each range replaces the last digits
     /// of the block's running accession.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1297-1319
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1292-1323
     /// ```c++
     ///     } else if (tokens.size() >= 2  &&  tokens[0] == ":") {
     ///         ...
@@ -1304,7 +1307,7 @@ impl<'a> RangeLines<'a> {
 
 /// The guide, read at its first use (`s_Guide`, a `CSafeStatic` made at the first call).
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1631-1634
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1627-1632
 /// ```c++
 /// static CRef<SAccGuide>* s_CreateGuide(void)
 /// {
@@ -1365,13 +1368,22 @@ pub fn identify_accession(acc: &[u8], flags: u32, warn: &mut dyn FnMut(SeqIdWarn
             (dot, true)
         }
     };
-    let main = acc[..main_size].to_ascii_uppercase();
-    x_identify_accession(&main, flags, has_version, warn)
+    const MAIN_ACC_BUF_SIZE: usize = 32;
+    if main_size <= MAIN_ACC_BUF_SIZE {
+        let mut main_acc_buf = [0u8; MAIN_ACC_BUF_SIZE];
+        let main_acc = &mut main_acc_buf[..main_size];
+        main_acc.copy_from_slice(&acc[..main_size]);
+        main_acc.make_ascii_uppercase();
+        x_identify_accession(main_acc, flags, has_version, warn)
+    } else {
+        let main = acc[..main_size].to_ascii_uppercase();
+        x_identify_accession(&main, flags, has_version, warn)
+    }
 }
 
 /// `CSeq_id::x_IdentifyAccession(main_acc, flags, has_version)`.
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1665-1769
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1665-1772
 /// ```c++
 /// CSeq_id::EAccessionInfo
 /// CSeq_id::x_IdentifyAccession(const CTempString& main_acc, TParseFlags flags,
@@ -1397,7 +1409,7 @@ pub fn identify_accession(acc: &[u8], flags: u32, warn: &mut dyn FnMut(SeqIdWarn
 ///                     // Conventionally delimited
 ///                     return eAcc_pdb;
 ///                 } else switch (main_size) {
-///                 /* (cases 7, 6 and 5 commented out) */
+///                 ...
 ///                 case 4:
 ///                     return eAcc_pdb;
 ///                 }
@@ -1463,6 +1475,7 @@ pub fn identify_accession(acc: &[u8], flags: u32, warn: &mut dyn FnMut(SeqIdWarn
 ///         ai = EAccessionInfo(ai & ~fAcc_specials);
 ///     }
 /// ```
+/// In NCBI, cases 7, 6 and 5 of this `switch` are commented out, so only case 4 is live.
 /// `strchr` also finds the terminating NUL (a NUL at index 4 is a delimiter). The value is
 /// never a fallback (see the module), so the fallback branch (Seq_id.cpp:1770-1792) is not
 /// ported.

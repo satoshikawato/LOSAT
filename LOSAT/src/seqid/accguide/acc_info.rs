@@ -145,7 +145,7 @@ pub const GI: u32 = acc(SEQID_GI, OTHER, SEQ);
 /// `sc_AccInfoArray`: the names of the values, in its order (case-insensitive, for a
 /// binary search).
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:645-651,856-861
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:645-651,856-864
 /// ```c++
 /// typedef SStaticPair<const char*, CSeq_id::EAccessionInfo> TAccInfoMapEntry;
 /// // used for binary searching; must be in order.

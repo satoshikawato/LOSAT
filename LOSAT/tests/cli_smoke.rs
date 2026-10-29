@@ -673,6 +673,107 @@ fn makeblastdb_parse_seqids_hash_index_and_taxid_map() {
         .unwrap();
     assert!(accepted.status.success(), "{accepted:?}");
     remove(&V5);
+    // A value makeblastdb ignores (StringToUInt cannot convert it, or 0) is accepted with
+    // -parse_seqids (review B N4; makeblastdb 2.17.0: pr2/fix/n4probe).
+    for ignored in ["abc", "0", ""] {
+        let accepted = clean_losat_command()
+            .env("NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH", ignored)
+            .args([
+                "makeblastdb",
+                "-in",
+                input_text,
+                "-dbtype",
+                "prot",
+                "-out",
+                base_text,
+                "-parse_seqids",
+                "-blastdb_version",
+                "4",
+            ])
+            .output()
+            .unwrap();
+        assert!(accepted.status.success(), "{ignored:?}: {accepted:?}");
+        remove(&V5);
+    }
+    // `-taxid_map -` reads the map from the standard input (CArg_InputFile maps `-` to cin;
+    // review B S1).
+    fs::write(
+        &input,
+        ">ref|NP_000001.1| first\nMKTAYIAKQRQISFVKSHFSRQ\n>lcl|second b\nLEERLGLIEVQAPILSRVGDGTQDN\n",
+    )
+    .unwrap();
+    let mut child = clean_losat_command()
+        .args([
+            "makeblastdb",
+            "-in",
+            input_text,
+            "-dbtype",
+            "prot",
+            "-out",
+            base_text,
+            "-parse_seqids",
+            "-taxid_map",
+            "-",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Write as _;
+        let mut stdin = child.stdin.take().unwrap();
+        stdin
+            .write_all(b"NP_000001.1 9606\nsecond 10090\n")
+            .unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let metadata = fs::read_to_string(format!("{base_text}.pjs")).unwrap();
+    assert!(metadata.contains("\"number-of-taxids\": 2"), "{metadata}");
+    remove(&V5);
+    // `-taxid_map ""`: "File is not accessible" without a name part (s_ArgExptMsg; review B
+    // N1), exit status 1. A directory is read as an empty map (a read error ends the reading;
+    // review B S2).
+    let output = run_losat(&[
+        "makeblastdb",
+        "-in",
+        input_text,
+        "-dbtype",
+        "prot",
+        "-out",
+        base_text,
+        "-parse_seqids",
+        "-taxid_map",
+        "",
+    ]);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "Command line argument error: Argument \"taxid_map\". File is not accessible\n"
+    );
+    remove(&V5);
+    #[cfg(target_os = "linux")]
+    {
+        let directory = std::env::temp_dir();
+        let output = run_losat(&[
+            "makeblastdb",
+            "-in",
+            input_text,
+            "-dbtype",
+            "prot",
+            "-out",
+            base_text,
+            "-parse_seqids",
+            "-taxid_map",
+            directory.to_str().unwrap(),
+        ]);
+        assert!(output.status.success(), "{output:?}");
+        assert!(output.stderr.is_empty(), "{output:?}");
+        let metadata = fs::read_to_string(format!("{base_text}.pjs")).unwrap();
+        assert!(!metadata.contains("number-of-taxids"), "{metadata}");
+        remove(&V5);
+    }
     fs::remove_file(&input).unwrap();
     fs::remove_file(&map).unwrap();
 }

@@ -2,7 +2,7 @@
 //! (`c++/src/app/blastdb/makeblastdb.cpp`, `CMakeBlastDBApp`) for FASTA
 //! input and a database of format version 5 or 4 without parsed Seq-ids.
 
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 
 use clap::Args;
 
@@ -441,24 +441,125 @@ pub fn check_environment(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Re
 //         long_seqids = (registry.Get("BLAST", "LONG_SEQID") == "1");
 //     }
 // ```
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:485-491,647-653
+// ```c++
+// void CFastaReader::SetMaxIDLength(Uint4 max_len)
+// {
+//     CFastaDeflineReader::s_MaxLocalIDLength =
+//     CFastaDeflineReader::s_MaxGeneralTagLength =
+//     CFastaDeflineReader::s_MaxAccessionLength = m_MaxIDLength = max_len;
+//     m_bModifiedMaxIdLength=true;
+// }
+// ...
+// void CFastaReader::x_SetDeflineParseInfo(SDefLineParseInfo& info)
+// {
+//     info.fBaseFlags = m_iFlags;
+//     info.fFastaFlags = GetFlags();
+//     info.maxIdLength = m_bModifiedMaxIdLength ?
+//                        m_MaxIDLength :
+//                        0;
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:430-434
+// ```c++
+//     if (info.maxIdLength) {
+//         s_IdValidate.SetMaxLocalIDLength(info.maxIdLength);
+//         s_IdValidate.SetMaxGeneralTagLength(info.maxIdLength);
+//         s_IdValidate.SetMaxAccessionLength(info.maxIdLength);
+//     }
+// ```
 // The registry's limit of a Seq-id's length changes which FASTA ids makeblastdb parses with
-// `-parse_seqids`; LOSAT's FASTA reader keeps NCBI's default limits (makedb-v5 DECISIONS 12),
-// so it refuses the entry with `-parse_seqids`. `[BLAST] LONG_SEQID` is refused for every
-// program by `check_ncbi_application_settings` (it is not one of the entries that change
-// nothing).
+// `-parse_seqids` when `NStr::StringToUInt` converts the value and the value is not 0 (0 is
+// the reader's "not set"; the static `s_Max*` copies are read nowhere). A value it cannot
+// convert is ignored (`catch`), as is an empty one. LOSAT's FASTA reader keeps NCBI's default
+// limits (makedb-v5 DECISIONS 12), so it refuses the entry with `-parse_seqids` exactly when
+// makeblastdb would use it. `[BLAST] LONG_SEQID` is refused for every program by
+// `check_ncbi_application_settings` (it is not one of the entries that change nothing).
 /// Refuses `[BLAST] MAX_SEQID_LENGTH` (`max_seqid_length`, from
-/// `ApplicationSettings::max_seqid_length`) for a build with `-parse_seqids`.
+/// `ApplicationSettings::max_seqid_length`: the value of the first layer that has the entry,
+/// `Err` for a file value LOSAT cannot read) for a build with `-parse_seqids` when makeblastdb
+/// would use the value.
 pub fn check_registry_settings(
     args: &MakedbArgs,
-    max_seqid_length: Option<&str>,
+    max_seqid_length: Result<Option<&str>, &str>,
 ) -> Result<(), String> {
-    if let (true, Some(value)) = (args.parse_seqids, max_seqid_length) {
-        return Err(format!(
+    if !args.parse_seqids {
+        return Ok(());
+    }
+    match max_seqid_length {
+        Err(reason) => Err(format!(
+            "{reason} ([BLAST] MAX_SEQID_LENGTH changes the Seq-ids NCBI makeblastdb parses \
+             with -parse_seqids)"
+        )),
+        Ok(Some(value)) if string_to_uint(value).is_some_and(|limit| limit != 0) => Err(format!(
             "the registry entry [BLAST] MAX_SEQID_LENGTH ({value}), which changes the Seq-ids \
              NCBI makeblastdb parses with -parse_seqids, is not supported by LOSAT's makeblastdb"
-        ));
+        )),
+        Ok(_) => Ok(()),
     }
-    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:646-656
+// ```c++
+// unsigned int
+// NStr::StringToUInt(const CTempString str, TStringToNumFlags flags, int base)
+// {
+//     S2N_CONVERT_GUARD_EX(flags);
+//     Uint8 value = StringToUInt8(str, flags, base);
+//     if ( value > kMax_UInt ) {
+//         S2N_CONVERT_ERROR(unsigned int, "overflow", ERANGE, 0);
+//     }
+//     return (unsigned int) value;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:884-918
+// ```c++
+//     if ( base == 10  &&  (flags & slow_flags) == 0 ) {
+//         // fast conversion
+//
+//         // Current position in the string
+//         CTempString::const_iterator ptr = str.begin(), end = str.end();
+//
+//         // Determine sign
+//         if ( ptr != end && *ptr == '+' ) {
+//             ++ptr;
+//         }
+//         if ( ptr == end ) {
+//             S2N_CONVERT_ERROR(Uint8, kEmptyStr, EINVAL, ptr-str.begin());
+//         }
+//
+//         // Begin conversion
+//         Uint8 n = 0;
+//
+//         const Uint8 limdiv = kMax_UI8/10;
+//         const int   limoff = int(kMax_UI8 % 10);
+//
+//         do {
+//             char ch = *ptr;
+//             int  delta = ch - '0';
+//             if ( unsigned(delta) >= 10 ) {
+//                 S2N_CONVERT_ERROR(Uint8, kEmptyStr, EINVAL, ptr-str.begin());
+//             }
+//             // Overflow check
+//             if ( n >= limdiv && (n > limdiv || delta > limoff) ) {
+//                 S2N_CONVERT_ERROR(Uint8, kEmptyStr, ERANGE, ptr-str.begin());
+//             }
+//             n = n*10+delta;
+//         } while ( ++ptr != end );
+//
+//         return n;
+//     }
+// ```
+/// `NStr::StringToUInt(value)` with no flags: `None` where it throws.
+fn string_to_uint(value: &str) -> Option<u32> {
+    let digits = value.strip_prefix('+').unwrap_or(value);
+    if digits.is_empty() || !digits.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let mut n: u64 = 0;
+    for c in digits.bytes() {
+        n = n.checked_mul(10)?.checked_add(u64::from(c - b'0'))?;
+    }
+    u32::try_from(n).ok()
 }
 
 /// The checks of the arguments that LOSAT makes first: what LOSAT does not
@@ -531,23 +632,87 @@ fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
 // log). A number the map cannot convert ends makeblastdb with its exception report
 // (`CATCH_ALL`, "Error: ", exit status 255; the build tree in its path is the official
 // release's, makedb-v5 DECISIONS 29).
-/// The taxids of `-taxid` or `-taxid_map` (`SetTaxids`), read where makeblastdb reads them.
-fn read_taxids(args: &MakedbArgs, err: &mut dyn Write) -> Result<Option<TaxIdSet>, MakedbError> {
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-737
+// ```c++
+//     if (AsString() == "-") {
+// #if defined(NCBI_OS_MSWIN)
+//         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+// #endif
+//         m_Ios  = &cin;
+//     } else if ( !AsString().empty() ) {
+//         if (!fstrm) {
+//             fstrm = new CNcbiIfstream;
+//         }
+//         if (fstrm) {
+//             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
+//             if ( !fstrm->is_open() ) {
+//                 delete fstrm;
+//                 fstrm = NULL;
+//             } else {
+//                 m_DeleteFlag = true;
+//             }
+//         }
+//         m_Ios = fstrm;
+//     }
+//     CArg_Ios::x_Open(flags);
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-621,95-99
+// ```c++
+// void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
+// {
+//     if ( !m_Ios ) {
+//         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
+//             "File is not accessible",AsString()));
+//     }
+// }
+// string s_ArgExptMsg(const string& name, const string& what, const string& attr)
+// {
+//     return string("Argument \"") + (name.empty() ? s_ExtraName : name) +
+//         "\". " + what + (attr.empty() ? attr : ":  `" + attr + "'");
+// }
+// ```
+// `-` is the standard input: the map is read before the FASTA input, so with `-in -` as well
+// the map takes all of it and the FASTA reader finds none ("No volumes were created.", as
+// makeblastdb). The empty name opens nothing and its message has no name part.
+/// The taxids of `-taxid` or `-taxid_map` (`SetTaxids`), read where makeblastdb reads them;
+/// `stdin` is read for `-taxid_map -`, and the second value is then `Some(failed)`: whether
+/// the standard input has failed (its state when `-in -` reads it next).
+fn read_taxids(
+    args: &MakedbArgs,
+    stdin: &mut dyn Read,
+    err: &mut dyn Write,
+) -> Result<(Option<TaxIdSet>, Option<bool>), MakedbError> {
     if let Some(taxid) = args.taxid {
-        return Ok(Some(TaxIdSet::with_global(taxid)));
+        return Ok((Some(TaxIdSet::with_global(taxid)), None));
     }
     let Some(name) = args.taxid_map.as_deref() else {
-        return Ok(None);
+        return Ok((None, None));
     };
-    let file = std::fs::File::open(name).map_err(|_| {
+    let not_accessible = || {
+        let attr = if name.is_empty() {
+            String::new()
+        } else {
+            format!(":  `{name}'")
+        };
         MakedbError::Argument(format!(
-            "Argument \"taxid_map\". File is not accessible:  `{name}'"
+            "Argument \"taxid_map\". File is not accessible{attr}"
         ))
-    })?;
+    };
+    let mut file;
+    let mut standard_input;
+    let reader: &mut dyn BufRead = if name == "-" {
+        standard_input = std::io::BufReader::new(stdin);
+        &mut standard_input
+    } else if name.is_empty() {
+        return Err(not_accessible());
+    } else {
+        file = std::io::BufReader::new(std::fs::File::open(name).map_err(|_| not_accessible())?);
+        &mut file
+    };
     let mut taxids = TaxIdSet::default();
     let mut warn = warn_to(err);
-    taxids
-        .set_mapping_from_file(&mut std::io::BufReader::new(file), &mut |warning| {
+    let failed = taxids
+        .set_mapping_from_file(reader, &mut |warning| {
             super::fasta_source::defline_ids::post_seq_id_warning(warning, &mut warn)
         })
         .map_err(|error| match error {
@@ -557,7 +722,7 @@ fn read_taxids(args: &MakedbArgs, err: &mut dyn Write) -> Result<Option<TaxIdSet
                  makeblastdb 2.17.0 cannot read (it crashes)"
             )),
         })?;
-    Ok(Some(taxids))
+    Ok((Some(taxids), (name == "-").then_some(failed)))
 }
 
 /// The value of `-max_file_sz`, read before the build touches a file.
@@ -877,30 +1042,97 @@ fn build_database_with_log(
         uint8_to_string_data_size(max_file_size)
     );
     db.set_max_file_size(max_file_size);
-    if let Some(taxids) = read_taxids(args, err)? {
+    let (taxids, stdin_map) = read_taxids(args, stdin, err)?;
+    if let Some(taxids) = taxids {
         db.set_taxids(taxids);
     }
     let result = add_input_and_close(
-        &mut db, &names, from_stdin, title, is_protein, now, stdin, err,
+        &mut db,
+        &names,
+        from_stdin.then_some(stdin_map),
+        title,
+        is_protein,
+        now,
+        stdin,
+        err,
     );
     *end_message = db.taxid_message();
     result
 }
 
 /// The rest of `x_BuildDatabase`: the input files, `EndBuild` and the metadata file.
+/// `from_stdin` is `Some(map)` for `-in -`, `map` being `Some(failed)` when `-taxid_map -`
+/// read the standard input first (`failed`: whether it left the stream failed).
 #[allow(clippy::too_many_arguments)]
 fn add_input_and_close(
     db: &mut BuildDatabase<'_>,
     names: &[&str],
-    from_stdin: bool,
+    from_stdin: Option<Option<bool>>,
     title: &str,
     is_protein: bool,
     now: &LocalTime,
     stdin: &mut dyn Read,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
-    if from_stdin {
-        add_fasta(db, stdin, err)?;
+    if let Some(stdin_map) = from_stdin {
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1398-1420
+        // ```c++
+        // bool CBuildDatabase::AddFasta(CNcbiIstream & fasta_file)
+        // {
+        //     // Add any fasta sequences as well.
+        //     bool success = true;
+        //
+        //     if (fasta_file) {
+        //         CFastaBioseqSource fbs(fasta_file,
+        // ...
+        //     }
+        //     return success;
+        // }
+        // ```
+        // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:619-636
+        // ```c++
+        // bool CBufferedLineReader::x_ReadBuffer()
+        // {
+        //     _ASSERT(m_Reader);
+        //
+        //     if ( m_Eof ) {
+        //         return false;
+        //     }
+        //
+        //     m_InputPos += CT_OFF_TYPE(m_End - m_Buffer.get());
+        //     m_Pos = m_End = m_Buffer.get();
+        //     for (bool flag = true; flag; ) {
+        //         size_t size;
+        //         ERW_Result result =
+        //             m_Reader->Read(m_Buffer.get(), m_BufferSize, &size);
+        //         switch (result) {
+        //         case eRW_NotImplemented:
+        //         case eRW_Error:
+        //             NCBI_THROW(CIOException, eRead, "Read error");
+        // ```
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+        // ```c++
+        //     catch (const CIOException& e) {                                         \
+        //         if (e.GetErrCode() == CIOException::eFlush) {                       \
+        //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
+        //             exit_code = BLAST_OUTPUT_ERROR;                                 \
+        //         }                                                                   \
+        //     }                                                                       \
+        // ```
+        // After `-taxid_map -` has read the standard input to its end (a read that found
+        // nothing) or to an error, `cin` has failed: makeblastdb adds nothing from it and
+        // reports no error ("No volumes were created.", exit status 0). A map whose last
+        // line has no line feed leaves `cin` at its end with only `eofbit` set: the line
+        // reader of `CFastaBioseqSource`, made before `AddFasta`'s `try`, cannot read it and
+        // throws `CIOException::eRead`, which `CATCH_ALL` swallows: the build stops there,
+        // without `EndBuild` and without a message, exit status 0 (makeblastdb 2.17.0, case
+        // T_map_only_stdin_noeol; a deterministic NCBI result, reproduced).
+        match stdin_map {
+            None => add_fasta(db, stdin, err)?,
+            Some(false) => return Ok(()),
+            // A failed stream: `AddFasta` skips it.
+            Some(true) => {}
+        }
     } else {
         verify_input_files(names, err)?;
         // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1030-1054
@@ -1364,10 +1596,40 @@ mod tests {
         };
         let plain = parse(&["--dbtype", "prot"]);
         let parsed = parse(&["--dbtype", "prot", "--parse_seqids"]);
-        assert_eq!(check_registry_settings(&plain, Some("100")), Ok(()));
-        assert_eq!(check_registry_settings(&parsed, None), Ok(()));
-        let error = check_registry_settings(&parsed, Some("100")).unwrap_err();
+        assert_eq!(check_registry_settings(&plain, Ok(Some("100"))), Ok(()));
+        assert_eq!(check_registry_settings(&plain, Err("unread")), Ok(()));
+        assert_eq!(check_registry_settings(&parsed, Ok(None)), Ok(()));
+        let error = check_registry_settings(&parsed, Ok(Some("100"))).unwrap_err();
         assert!(error.contains("[BLAST] MAX_SEQID_LENGTH (100)"), "{error}");
+        // The values makeblastdb uses (StringToUInt converts them, not 0) are refused; the
+        // ones it ignores are accepted (makeblastdb 2.17.0: pr2/fix/n4probe).
+        for used in ["5", "+5", "05", "4294967295"] {
+            assert!(
+                check_registry_settings(&parsed, Ok(Some(used))).is_err(),
+                "{used}"
+            );
+        }
+        for ignored in [
+            "",
+            "0",
+            "+0",
+            "abc",
+            " 5",
+            "5 ",
+            "-5",
+            "+",
+            "4294967296",
+            "5x",
+        ] {
+            assert_eq!(
+                check_registry_settings(&parsed, Ok(Some(ignored))),
+                Ok(()),
+                "{ignored:?}"
+            );
+        }
+        let error =
+            check_registry_settings(&parsed, Err("the registry file x sets ...")).unwrap_err();
+        assert!(error.starts_with("the registry file x sets ..."), "{error}");
         let mut map = parse(&["--dbtype", "prot"]);
         map.taxid_map = Some("m.txt".to_string());
         let error = check_arguments(&map).unwrap_err();

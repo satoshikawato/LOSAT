@@ -4,22 +4,22 @@
 
 use std::io::BufRead;
 
-use rustc_hash::FxHashMap;
-
 use crate::seqid::accguide::{parse_flags, SeqIdWarning};
 use crate::seqid::parse::{is_space, seq_id_from_text, truncate_spaces};
 use crate::seqid::{label, BlastDefline, DeflineSet, ParsedSeqId};
 use crate::utils::winmask::NCBI_BUILD_ROOT;
 
 use super::data_size::printable_string;
+use super::id_set::KeyMap;
 
 /// `CTaxIdSet`.
 #[derive(Debug, Clone)]
 pub struct TaxIdSet {
     /// `m_GlobalTaxId` (`-taxid`); 0 is `kTaxIdNotSet`.
     global_taxid: i32,
-    /// `m_TaxIdMap` (`-taxid_map`).
-    map: FxHashMap<Vec<u8>, i32>,
+    /// `m_TaxIdMap` (`-taxid_map`): the keys in an arena (`KeyMap`, about the key's bytes +
+    /// 16 to 26 bytes per entry; a `map<string, TTaxId>` node and string in NCBI).
+    map: KeyMap,
     /// `m_Matched`.
     matched: bool,
 }
@@ -55,7 +55,7 @@ fn string_exception(line: u32, function: &str, message: String, pos: usize) -> S
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:798-871
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:798-873
 // ```c++
 // Int8 NStr::StringToInt8(const CTempString str, TStringToNumFlags flags, int base)
 // {
@@ -377,7 +377,7 @@ impl TaxIdSet {
     pub fn with_global(global_taxid: i32) -> Self {
         Self {
             global_taxid,
-            map: FxHashMap::default(),
+            map: KeyMap::default(),
             matched: true,
         }
     }
@@ -447,26 +447,67 @@ impl TaxIdSet {
     // ignored, as is a line of one token or of more than two. A line of white space only
     // leaves no token, and `tokens.front()` reads past an empty vector (makeblastdb 2.17.0
     // crashes); LOSAT refuses the file there.
+    // A read error (a directory opened as the file, EIO) sets the stream's badbit: the line
+    // read up to it is still taken (the loop's body does not test the stream), then the loop
+    // ends and the map keeps what it has, with no message (makeblastdb 2.17.0 with a
+    // directory as `-taxid_map`: an empty map, exit status 0). `read_until` keeps the bytes
+    // read before its error in `line` as `NcbiGetline` keeps them in `s`.
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:153-176
+    // ```c++
+    //     do {
+    //         CT_INT_TYPE nextc = is.get();
+    //         if (CT_EQ_INT_TYPE(nextc, CT_EOF)
+    //             ||  CT_EQ_INT_TYPE(nextc, CT_TO_INT_TYPE(delim))) {
+    //             ++size;
+    //             break;
+    //         }
+    //         if ( !is.unget() )
+    //             break;
+    //         ...
+    //         is.get(buf, n < sizeof(buf) ? n : sizeof(buf), delim);
+    //         n = (size_t) is.gcount();
+    //         str.append(buf, n);
+    //         size += n;
+    //         _ASSERT(size == str.length());
+    //     } while ( is.good() );
+    // #endif
+    //
+    //     if (is.rdstate() == NcbiEofbit  &&  str.empty())
+    //         is.setstate(NcbiFailbit);
+    // ```
+    // The stream's state at the end matters when it is the standard input that `-in -` reads
+    // next (`AddFasta` reads only a stream that has not failed): a read that finds nothing
+    // (the end after a line feed) or an error fails it; a last line without a line feed ends
+    // at the end of the stream with only `eofbit` set, and the loop stops there.
     /// `SetMappingFromFile`: the map of a `-taxid_map` file. `warn` takes the warnings of
-    /// the Seq-id parser.
+    /// the Seq-id parser. `Ok(true)` when the stream has failed at the end (`!f`).
     pub fn set_mapping_from_file(
         &mut self,
         file: &mut dyn BufRead,
         warn: &mut dyn FnMut(SeqIdWarning),
-    ) -> Result<(), TaxIdMapError> {
+    ) -> Result<bool, TaxIdMapError> {
         let mut line = Vec::new();
         let mut number = 0usize;
-        loop {
+        let mut failed = false;
+        let mut at_end = false;
+        while !failed && !at_end {
             line.clear();
-            let read = file
-                .read_until(b'\n', &mut line)
-                .map_err(|error| TaxIdMapError::Exception(error.to_string()))?;
+            let read = match file.read_until(b'\n', &mut line) {
+                Ok(read) => read,
+                Err(_) => {
+                    failed = true;
+                    line.len()
+                }
+            };
             if read == 0 {
+                failed = true;
                 break;
             }
             number += 1;
             if line.last() == Some(&b'\n') {
                 line.pop();
+            } else {
+                at_end = true;
             }
             if line.is_empty() {
                 continue;
@@ -481,11 +522,11 @@ impl TaxIdSet {
             if !gi_str.is_empty() && !tx_str.is_empty() {
                 let taxid = string_to_taxid(tx_str).map_err(TaxIdMapError::Exception)?;
                 let key = accession_to_key(gi_str, warn).map_err(TaxIdMapError::Exception)?;
-                self.map.insert(key, taxid);
+                self.map.set(&key, taxid);
             }
         }
         self.matched = self.global_taxid != 0 || self.map.is_empty();
-        Ok(())
+        Ok(failed)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/taxid_set.cpp:84-128
@@ -563,12 +604,12 @@ impl TaxIdSet {
             if key.is_empty() {
                 continue;
             }
-            if let Some(&taxid) = self.map.get(&key) {
+            if let Some(taxid) = self.map.get(&key) {
                 self.matched = true;
                 return taxid;
             }
             if let Some(dot) = key.iter().position(|&c| c == b'.') {
-                if let Some(&taxid) = self.map.get(&key[..dot]) {
+                if let Some(taxid) = self.map.get(&key[..dot]) {
                     self.matched = true;
                     return taxid;
                 }

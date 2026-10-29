@@ -908,7 +908,7 @@ impl<'a> BuildDatabase<'a> {
             let mut added = false;
             if bioseq.length != 0 {
                 if self.parse_ids {
-                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475,497
+                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-477,497
                     // ```c++
                     //     CRef<CBlast_def_line_set> headers =
                     //         CWriteDB::ExtractBioseqDeflines(*bs, m_ParseIDs, m_LongIDs,

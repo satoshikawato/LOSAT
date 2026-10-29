@@ -285,10 +285,12 @@ pub fn str_or_id(s: &[u8]) -> ObjectId {
 ///     { "tpg",          CSeq_id::e_Tpg },
 ///     { "tr",           CSeq_id::e_Swissprot }
 /// };
+/// typedef CStaticPairArrayMap<CTempString, CSeq_id::E_Choice,
+///                             PNocase_Generic<CTempString> > TChoiceMap;
 /// ...
 /// CSeq_id::E_Choice CSeq_id::WhichInverseSeqId(const CTempString& SeqIdCode)
 /// {
-///     TChoiceMapEntry::const_iterator it = sc_ChoiceMap.find(SeqIdCode);
+///     TChoiceMap::const_iterator it = sc_ChoiceMap.find(SeqIdCode);
 ///     if (it == sc_ChoiceMap.end()) {
 ///         return e_not_set;
 ///     } else {
@@ -330,7 +332,7 @@ pub fn which_inverse_seq_id(code: &[u8]) -> u32 {
 
 /// `s_TextId[type]`: the FASTA tag of a type.
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:572-596
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:572-597
 /// ```c++
 /// static const char* const s_TextId[CSeq_id::e_MaxChoice+1] =
 /// {   // FASTA_LONG formats
@@ -652,7 +654,7 @@ fn set_numeric(choice: u32, the_id: i32) -> Result<ParsedSeqId, SeqIdError> {
 
 /// `CSeq_id::Set(the_type, acc, name, version, release)`; `None` for `e_not_set`.
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2899-3036
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2898-3036
 /// ```c++
 /// CSeq_id& CSeq_id::Set(E_Choice           the_type,
 ///                       const CTempString& acc_in,
@@ -948,7 +950,8 @@ fn split_bars(s: &[u8]) -> std::collections::VecDeque<&[u8]> {
 }
 
 /// `CSeq_id::CheckLocalID(s)` as `IsValidLocalID` reads it: not blank, at most
-/// `kMaxLocalIDLength` (50) bytes, none of ` >[]|"`.
+/// `kMaxLocalIDLength` (50) bytes, no byte that `CSeq_id_find_pred` finds (a control
+/// byte, a byte from 0x80 up, or one of ` >[]|"`; [`has_invalid_local_char`]).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2576-2601
 /// ```c++
@@ -982,9 +985,27 @@ pub fn is_valid_local_id(s: &[u8]) -> bool {
     !is_blank(s) && s.len() <= MAX_LOCAL_ID_LENGTH && !has_invalid_local_char(s)
 }
 
-/// `CheckLocalID(s) & fInvalidChar`.
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:77-86
+// ```c++
+// struct CSeq_id_find_pred
+// {
+//     const char* kSymbols;
+//     bool operator()(const char ch)
+//     {
+//         if (ch<32 || ch>127) // non-ASCII is not allowed
+//             return true;
+//         return strchr(kSymbols, ch) != 0;
+//     }
+// };
+// ```
+// `char` is signed on the reference platform (x86-64), so every byte from 0x80 up is
+// below 32 there; with an unsigned `char` it is above 127. Either way a control byte
+// (below 0x20) and a byte of 0x80 or more are illegal; 0x7F is not. `strchr` also finds
+// the terminating NUL, which the `ch<32` test has already taken.
+/// `CheckLocalID(s) & fInvalidChar`: a byte below 0x20, from 0x80 up, or one of ` >[]|"`.
 pub fn has_invalid_local_char(s: &[u8]) -> bool {
-    s.iter().any(|c| b" >[]|\"".contains(c))
+    s.iter()
+        .any(|&c| !(0x20..0x80).contains(&c) || b" >[]|\"".contains(&c))
 }
 
 /// `CSeq_id::kMaxLocalIDLength`, `kMaxGeneralTagLength`, `kMaxAccessionLength`.
@@ -1270,7 +1291,12 @@ pub fn seq_id_from_text(
         let mut pieces = split_bars(the_id);
         let tv = identify_type_variant(choice, pieces.pop_front().unwrap_or_default());
         let (id, _) = x_init(&mut pieces, choice, tv)?;
-        if pieces.iter().any(|piece| !piece.is_empty()) {
+        // One warning for each non-empty piece left (`ITERATE` without `break`); no caller
+        // in makeblastdb passes `fParse_PartialOK` here (ParseIDs adds `fParse_NoFASTA`).
+        for piece in &pieces {
+            if piece.is_empty() {
+                continue;
+            }
             if flags & PARTIAL_OK != 0 {
                 warn(SeqIdWarning {
                     subcode: 10,
@@ -1295,7 +1321,7 @@ pub fn seq_id_from_text(
 /// `CSeq_id::x_Init(fasta_pieces, type, tv)`: the id of the type from the next pieces,
 /// and the type that the piece left first announces (`e_not_set` for none).
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2699-2840
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2698-2840
 /// ```c++
 /// CSeq_id::E_Choice CSeq_id::x_Init(list<CTempString>& fasta_pieces,
 ///                                   E_Choice type, ETypeVariant tv)
@@ -1549,7 +1575,7 @@ fn x_init(
 /// unset (`None`) after a skipped piece is kept, as NCBI keeps it. `warn` gets the
 /// exceptions that `fParse_PartialOK` turns into warnings (subcode 7, the `what` text).
 ///
-/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2614-2696
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2613-2696
 /// ```c++
 /// SIZE_TYPE CSeq_id::ParseIDs(CBioseq::TId& ids, const CTempString& s,
 ///                             TParseFlags flags)

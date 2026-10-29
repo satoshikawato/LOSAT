@@ -476,7 +476,7 @@ fn label_content(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1890-1917
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1890-1920
 // ```c++
 // static inline
 // void x_GetLabel_Type(const CSeq_id& id, string* label,
@@ -503,7 +503,7 @@ fn label_content(
 //         break;
 //     }
 // ```
-// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2059-2083
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2059-2084
 // ```c++
 //     case eBoth:
 //         x_GetLabel_Type(*this, label, flags);
@@ -543,7 +543,7 @@ pub fn both_upper_version(id: &ParsedSeqId, out: &mut Vec<u8>) {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:3416-3546
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:3416-3550
 // ```c++
 // string CSeq_id::ComposeOSLT(list<string>* secondary_id_list,
 //                             TComposeOSLTFlags parse_flags) const

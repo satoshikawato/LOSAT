@@ -255,6 +255,67 @@ fn bare_ids_of_the_second_parse() {
     assert!(parse_ids(b"ref|NP_1.x|gi|5|", SECOND_TAGGED, &mut no_warning()).is_err());
 }
 
+// CSeq_id_find_pred (Seq_id.cpp:77-86): a control byte or a byte from 0x80 up makes a local
+// id invalid, 0x7F does not; a bare id of the second parse with one is then "Malformatted ID"
+// (makeblastdb keeps the first parse's ids; review A1, pr2/review/A/out2/q010, a1/dup.fa).
+#[test]
+fn control_and_non_ascii_bytes_make_a_local_id_invalid() {
+    assert!(!is_valid_local_id(b"a\x02b"));
+    assert!(!is_valid_local_id(b"a\x1fb"));
+    assert!(!is_valid_local_id(b"ab\xc3\xa9"));
+    assert!(!is_valid_local_id(b"abc\xe9def"));
+    assert!(!is_valid_local_id(b"M\xc3\xbcller_a"));
+    assert!(!is_valid_local_id(b"\x80"));
+    assert!(!is_valid_local_id(b"\xff"));
+    assert!(is_valid_local_id(b"a\x7fb"));
+    assert!(is_valid_local_id(b"a!b~"));
+    for c in 0u8..=255 {
+        let illegal = c < 0x20 || c >= 0x80 || b" >[]|\"".contains(&c);
+        assert_eq!(has_invalid_local_char(&[b'a', c]), illegal, "byte {c:#x}");
+    }
+    for bare in [&b"a\x02b"[..], b"ab\xc3\xa9", b"M\xc3\xbcller_b"] {
+        let error = seq_id_from_text(bare, SECOND_BARE, &mut no_warning()).unwrap_err();
+        assert!(
+            error.message.starts_with("Malformatted ID "),
+            "{}",
+            error.message
+        );
+    }
+    assert_eq!(
+        seq_id_from_text(b"a\x7fb", SECOND_BARE, &mut no_warning()).unwrap(),
+        ParsedSeqId::Local(ObjectId::Str(b"a\x7fb".to_vec()))
+    );
+    // fParse_AnyLocal (ParseFastaIds of an id with '|') does not check the bytes.
+    assert_eq!(
+        parse_ids(b"lcl|a\x02b", SECOND_TAGGED, &mut no_warning()).unwrap(),
+        vec![Some(ParsedSeqId::Local(ObjectId::Str(b"a\x02b".to_vec())))]
+    );
+}
+
+// Seq_id.cpp:2534-2545: one "Ignoring extra parts" warning for each non-empty piece left
+// with fParse_PartialOK (review A4); without it the first one throws.
+#[test]
+fn every_extra_piece_is_warned_about() {
+    let mut warnings = Vec::new();
+    let id = seq_id_from_text(
+        b"ref|NP_000001.1|NAME|y||z|",
+        PARTIAL_OK | RAW_TEXT,
+        &mut |w| warnings.push(w),
+    )
+    .unwrap();
+    assert!(matches!(id, ParsedSeqId::Other(_)), "{id:?}");
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(warnings.iter().all(|w| w.subcode == 10
+        && w.message
+            == "Ignoring extra parts (synonyms?) in FASTA-style ID ref|NP_000001.1|NAME|y||z|"));
+    let error =
+        seq_id_from_text(b"ref|NP_000001.1|NAME|y||z|", RAW_TEXT, &mut no_warning()).unwrap_err();
+    assert_eq!(
+        error.message,
+        "FASTA-style ID ref|NP_000001.1|NAME|y||z| has too many parts."
+    );
+}
+
 #[test]
 fn numbers_parse_as_ncbi_s() {
     assert_eq!(string_to_non_negative_int(b"+12"), 12);

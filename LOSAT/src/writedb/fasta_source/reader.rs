@@ -775,7 +775,7 @@ impl RecordState {
                 .unwrap_or(len - 1);
             let mut title_start = start;
             if self.parse_ids {
-                // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:181-204
+                // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:181-207
                 // ```c++
                 //     else
                 //     {

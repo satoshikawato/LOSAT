@@ -209,7 +209,9 @@ pub(super) struct LocalStageDScoring {
     pub gap_open: i32,
     pub gap_extend: i32,
     pub word_size: usize,
-    pub threshold: i32,
+    /// The word threshold as the options hold it (`-threshold`); the lookup table reads it in its
+    /// own units (`lookup_threshold`).
+    pub threshold: f64,
     pub window: i32,
     pub gap_xdrop_bits: f64,
     pub final_xdrop_bits: f64,
@@ -222,7 +224,7 @@ impl Default for LocalStageDScoring {
             gap_open: 11,
             gap_extend: 1,
             word_size: 3,
-            threshold: 13,
+            threshold: 13.0,
             window: 40,
             gap_xdrop_bits: 15.0,
             final_xdrop_bits: 25.0,
@@ -2019,6 +2021,21 @@ impl ContextCutoffArrays {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:245 and 1292
+// ```c
+//     lookup->threshold = (Int4)opt->threshold;
+// ...
+//     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
+// ```
+/// The word threshold in the units of the lookup table: the standard table's (word sizes up to
+/// 4), or the compressed table's, scaled by `kMatrixScale` 100 (word sizes 5 to 7, the only ones
+/// that take it: `SetWordSize`, blast_options_local_priv.hpp:612-619), converted as the x86-64
+/// build does (`INT_MIN` for a value beyond Int4 or not a number).
+pub(super) fn lookup_threshold(word_size: usize, threshold: f64) -> i32 {
+    let scale = if word_size > 4 { 100.0 } else { 1.0 };
+    crate::core::blast_util::ncbi_int4_from_double(scale * threshold)
+}
+
 // NCBI c++/src/algo/blast/core/blast_parameters.c:302-383,455-463:
 // BlastInitialWordParametersNew(...); BlastExtensionParametersNew(...);
 // The word and extension parameters of the preliminary stage of a query set.
@@ -2031,7 +2048,7 @@ fn preliminary_profile<'a>(
     PreliminaryProfile {
         seg: profile.seg,
         soft_masking: profile.soft_masking,
-        threshold: scoring.threshold,
+        threshold: lookup_threshold(scoring.word_size, scoring.threshold),
         window: scoring.window,
         word_xdrop: &cutoffs.word_xdrop,
         word_cutoff: &cutoffs.word_cutoff,
@@ -2307,10 +2324,20 @@ fn query_set_setup(
         inputs.scoring.word_size,
     ) {
         Some(contexts) => contexts,
+        // The compressed table (word sizes 5 to 7, BLOSUM62 only: `args::search_settings`) is not
+        // the standard table that the diagnostics count; the contexts are the same.
+        None if inputs.scoring.word_size > 4 => {
+            crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size(
+                &working_frames,
+                inputs.scoring.word_size,
+                false,
+            )
+            .2
+        }
         None => {
             build_ncbi_lookup_for_profile(
                 &working_frames,
-                inputs.scoring.threshold,
+                lookup_threshold(inputs.scoring.word_size, inputs.scoring.threshold),
                 inputs.ungapped,
                 false,
                 inputs.scoring.matrix,
@@ -4603,7 +4630,7 @@ mod tests {
                 gap_open: 14,
                 gap_extend: 2,
                 word_size: 2,
-                threshold: 16,
+                threshold: 16.0,
                 window: 60,
                 gap_xdrop_bits: 15.0,
                 final_xdrop_bits: 25.0,

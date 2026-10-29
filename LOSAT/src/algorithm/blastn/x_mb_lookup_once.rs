@@ -97,12 +97,10 @@
 //! regions, about P x 0.5 MiB up to 16 threads (2.0 MiB at 4, 8.0 MiB at 16) and 8.0 MiB at 16 to
 //! 64 threads (8.3 MiB with the rows at 255) for a query of 2^19 positions or more; it does not
 //! grow. That is per fill, not per process: fills that run at the same time each hold their own
-//! arena, and with LOSAT_X_QBATCHPAR each slot of `m >= 2` threads that fills a table while others
-//! do holds about m x 0.5 MiB, so the slots (whose threads add up to n) hold about n x 0.5 MiB at
-//! once, what one fill of n <= 16 threads holds (`x_qbatch_par::batch_estimate_bytes` does not
-//! count it). Until 2026-10-18 the chunk was 2^19 positions at every P, and k slots held about k x
-//! 8 MiB: megablast of three E. coli genomes (15.9 Mb) against LC738868 at 16 threads, 3 slots of
-//! 5 threads, max RSS +25 MiB against the loop's fill (v4-D session 4, ws window w1). On Linux with
+//! arena. Until 2026-10-18 the chunk was 2^19 positions at every P, and the k query-batch slots of
+//! LOSAT_X_QBATCHPAR (removed on 2026-10-28) held about k x 8 MiB: megablast of three E. coli
+//! genomes (15.9 Mb) against LC738868 at 16 threads, 3 slots of 5 threads, max RSS +25 MiB against
+//! the loop's fill (v4-D session 4, ws window w1). On Linux with
 //! glibc its capacity is at least 32 MiB + 4 KiB (`x_mb_lookup_par::lines_capacity`, the rule of
 //! `x_frame_capacity` in `tblastn/x_subject_translate.rs`), so glibc maps it and unmaps it when it
 //! is freed at the end of the fill without moving its mmap threshold, and only the touched part is
@@ -116,8 +114,7 @@
 //! needed.
 //!
 //! The pool. As PAIRPAR's fill (`x_mb_lookup_par::parts`): a LOSAT search pool of two
-//! threads or more (a LOSAT_X_QBATCHPAR slot of `m >= 2` threads fills on its own pool with P = m),
-//! no database word counts, no `BLEMIR_DEBUG`. Without the `parallel`
+//! threads or more, no database word counts, no `BLEMIR_DEBUG`. Without the `parallel`
 //! feature, or on wasm32 without `wasm-threads`, the loop runs; with `wasm-threads` the scopes run
 //! on the search pool, which this module never builds (memory losat-wasm-threads-main-only).
 //!
@@ -208,11 +205,9 @@ const CHUNK_POSITIONS_PER_PART: usize = 1 << 15;
 
 /// No NCBI counterpart (scheduling only): the positions per chunk of a fill of `parts` workers,
 /// `min(2^19, parts << 15)`: the arena (16 bytes a position) is about `parts x 0.5 MiB` up to 16
-/// workers, so the fills that run at the same time on the slots of LOSAT_X_QBATCHPAR (whose threads
-/// add up to the pool's, n) hold together about n x 0.5 MiB, what one fill on the whole pool holds
-/// for n <= 16 (beyond, one fill stops at 8 MiB while the slots' fills add up: 8 slots of 8 threads
-/// at 64 threads about 32 MiB). The chunk size changes no element of the tables (the module
-/// documentation).
+/// workers and stops at 8 MiB beyond (the size was chosen for the query-batch slots of
+/// LOSAT_X_QBATCHPAR, removed on 2026-10-28, whose fills ran at the same time). The chunk size
+/// changes no element of the tables (the module documentation).
 fn chunk_positions(parts: usize) -> usize {
     CHUNK_POSITIONS.min(parts.clamp(1, 255) * CHUNK_POSITIONS_PER_PART)
 }
@@ -1297,9 +1292,8 @@ impl Fill<'_, '_, '_> {
 /// `fill` runs them, started its last job about 0.15 ms late each time on the workstation for the
 /// discontiguous tables; v4-R R16). The barrier waits for every thread of the pool, so it needs
 /// them free while the table is built: `build_mb_lookup` runs on the search thread before its
-/// batch is scanned (`build_lookup_tables`, called by `search_query_batch`, which a
-/// LOSAT_X_QBATCHPAR slot runs on a pool of its own), with nothing else queued on its pool, and
-/// the broadcast's jobs wait for nothing but each other.
+/// batch is scanned (`build_lookup_tables`, called by `search_query_batch`), with nothing else
+/// queued on its pool, and the broadcast's jobs wait for nothing but each other.
 ///
 /// Memory: the arena of `fill` (16 bytes a position of one chunk, `Shape`), not one list of the
 /// whole query's words (8 bytes a word: 15 MiB more than the chains' fill at 8 threads for the

@@ -103,14 +103,12 @@
 //! that is freed after all (one too small for a fill, or one whose fill found the lock taken at its
 //! end) never moves the threshold; the lines no fill wrote are never touched and not resident. What
 //! the process keeps, for `n` threads and `s` the largest per-worker size of its tables: resident,
-//! at most `n x s` from the fills on the whole pool plus, with `LOSAT_X_QBATCHPAR`, `m x s` for each
-//! slot of `m` threads that filled a table while another fill ran (the slots' threads add up to
-//! `n`, so below `2 n x s` in all), and a fill that finds the lock taken can add one more kept
-//! buffer; address space, 32 MiB + 4 KiB per kept buffer (`n x s` when that is larger: 255 threads
-//! at 160 KiB). At 64 threads and 160 KiB that is 10 MiB resident in one mapping of 32 MiB + 4 KiB,
-//! and with four slots of 16 threads 17.5 MiB resident in four. Elsewhere (macOS, Windows, musl,
-//! wasm32) the buffer has the fill's size and is freed at the end of the fill: those allocators
-//! return large blocks themselves, and there is no threshold to keep low.
+//! at most `n x s` from the fills on the whole pool, and a fill that finds the lock taken can add
+//! one more kept buffer; address space, 32 MiB + 4 KiB per kept buffer (`n x s` when that is
+//! larger: 255 threads at 160 KiB). At 64 threads and 160 KiB that is 10 MiB resident in one
+//! mapping of 32 MiB + 4 KiB. Elsewhere (macOS, Windows, musl, wasm32) the buffer has the fill's
+//! size and is freed at the end of the fill: those allocators return large blocks themselves, and
+//! there is no threshold to keep low.
 //!
 //! EXPERIMENT (LOSAT_X_MBLUTONCE; in the strict set since 2026-10-18: on unless it is `0`): `fill`
 //! hands the table to the read-once fill of `x_mb_lookup_once.rs` (its first dispatch), in which

@@ -874,9 +874,7 @@ fn collect_lowercase_masks_for_records<L: QueryLetters + ?Sized>(
 
 /// The letters of a query batch's records for the readers that set the batch up (WindowMasker,
 /// DUST, the lower-case masks, the encoding), one record at a time. No NCBI counterpart (how
-/// LOSAT holds the letters). EXPERIMENT (LOSAT_X_BNQSLOTS): a slot's copy out of the query store
-/// keeps its records' letters packed and makes a record's letters for the one reader that asks
-/// (`blast_engine::x_query_drop::Letters`), so no reader holds the batch's letters at once.
+/// LOSAT holds the letters).
 pub(crate) trait QueryLetters: Sync {
     /// The number of records.
     fn count(&self) -> usize;

@@ -1917,16 +1917,108 @@ unsafe fn steps_pass(
             unsafe { read_lean_row(c, c.sets[k % 2], s0, s1) };
         }
         if k >= 1 {
-            let set = c.sets[(k - 1) % 2];
-            for a in 0..parts {
-                // SAFETY: column `t` of set `(k - 1) % 2` is this owner's during step `k`.
-                let es = unsafe { set.at(a, t) };
-                for j in 0..es.len() {
-                    op(es[j], es.get(j + 16).map(|e| e.value));
-                }
-            }
+            // SAFETY: column `t` of set `(k - 1) % 2` is this owner's during step `k`.
+            unsafe { own_column(c.sets[(k - 1) % 2], t, parts, &mut op) };
         }
         c.bar.wait();
+    }
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): the owner's work of one step of
+/// `steps_pass`: `op` on each entry of column `t` of `set` (bucket `(0, t)` to `(parts - 1, t)`,
+/// each in order), with the cell of the entry 16 places after it in its bucket (if any). Its
+/// own function, called once per step, not inlined into the pass: the pass runs as one call
+/// per thread and table (the broadcast's job), so a WebAssembly engine that compiles a
+/// function first with a baseline compiler and tiers it up only for its next calls (V8:
+/// Liftoff, then TurboFan; no replacement of a running call) would run the whole first
+/// table's owner work in baseline code; called per step, the tiered-up code takes over within
+/// the table. The same work in the same order.
+/// SAFETY: column `t` of `set` is this owner's (`steps_pass`).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[inline(never)]
+unsafe fn own_column(
+    set: SharedBuckets,
+    t: usize,
+    parts: usize,
+    op: &mut impl FnMut(Entry, Option<u32>),
+) {
+    for a in 0..parts {
+        // SAFETY: column `t` of `set` is this owner's.
+        let es = unsafe { set.at(a, t) };
+        for j in 0..es.len() {
+            op(es[j], es.get(j + 16).map(|e| e.value));
+        }
+    }
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): `x_dc_csr::sum_cells` over the owner's
+/// cells `c0 .. c1` as calls over pieces of `SUM_PIECE_CELLS` cells (or `2^pv_array_bts`, if
+/// larger) on their boundaries, each starting from the running sum the piece before returned.
+/// A boundary is a multiple of 2048 and of `2^pv_array_bts` cells, where `sum_cells` has written
+/// its presence-vector word and counter and starts the next ones from nothing, so the pieces
+/// write what one call over the range writes. One call per piece rather than one per owner and
+/// table for the reason of `own_column` (the tiered-up code takes over within the first table).
+/// SAFETY: `sum_cells`'s, for `c0 .. c1` (the owner's cells: `c0` a multiple of 2048 and of
+/// `2^pv_array_bts`).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+unsafe fn sum_cells_in_pieces(
+    pv: Shared<PvArrayType>,
+    helper: Shared<u32>,
+    ob: Shared<u32>,
+    base: u32,
+    c0: usize,
+    c1: usize,
+    pv_array_bts: usize,
+) -> u32 {
+    let piece = SUM_PIECE_CELLS.max(1 << pv_array_bts);
+    let mut end = base;
+    let mut g0 = c0;
+    while g0 < c1 {
+        let g1 = c1.min((g0 / piece + 1) * piece);
+        // SAFETY: `g0 .. g1` lies in the owner's cells; `g0` is `c0` or a multiple of `piece`.
+        end = unsafe { sum_piece(pv, helper, ob, end, g0, g1, pv_array_bts) };
+        g0 = g1;
+    }
+    end
+}
+
+/// The cells of a piece of the sum pass (`sum_cells_in_pieces`): 64 Ki cells, a multiple of 2048.
+const SUM_PIECE_CELLS: usize = 1 << 16;
+
+/// One piece of `sum_cells_in_pieces`.
+/// SAFETY: `sum_cells`'s for `g0 .. g1`.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[inline(never)]
+unsafe fn sum_piece(
+    pv: Shared<PvArrayType>,
+    helper: Shared<u32>,
+    ob: Shared<u32>,
+    base: u32,
+    g0: usize,
+    g1: usize,
+    pv_array_bts: usize,
+) -> u32 {
+    // SAFETY: the caller's.
+    unsafe {
+        super::x_dc_csr::sum_cells(
+            pv.ptr,
+            pv.len,
+            helper.ptr,
+            ob.ptr,
+            base,
+            g0,
+            g1,
+            pv_array_bts,
+        )
     }
 }
 
@@ -1956,7 +2048,7 @@ fn csr_on_pool_steps(
     chunk: usize,
     x_offsets: Vec<u32>,
 ) -> super::x_dc_csr::Csr {
-    use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier};
+    use super::x_dc_csr::{assemble, prefetch, Poison, SpinBarrier};
     let chunk = chunk.max(1);
     let (block_shift, mut owner) = plan(cells, pv_array_bts, parts);
     debug_assert!(
@@ -2051,16 +2143,7 @@ fn csr_on_pool_steps(
             bar.wait();
             let base: u64 = (0..t).map(|p| own_w.get(p)).sum();
             if c0 < c1 {
-                sum_cells(
-                    pv.ptr,
-                    pv.len,
-                    helper.ptr,
-                    ob.ptr,
-                    base as u32,
-                    c0,
-                    c1,
-                    pv_array_bts,
-                );
+                sum_cells_in_pieces(pv, helper, ob, base as u32, c0, c1, pv_array_bts);
             }
             steps_pass(&c, &span, |e, ahead| {
                 if let Some(cell) = ahead {

@@ -73,7 +73,8 @@
 //! 4^9-cell table from 65,536 and its 4^8-cell table (reading order) from 16,384. Word sizes 12 and
 //! above build 4^11-cell tables only for fewer positions than that (NCBI moves to 4^12 cells
 //! first), so their tables keep the chains. EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head (every
-//! table of the scope but the reading-order one) has no size rule. Its build writes one byte per
+//! table of the scope but the reading-order one) has no size rule, so these tables (and megablast's
+//! of 4^11 cells or fewer, for small query batches) are packed too. Its build writes one byte per
 //! cell and two words per 64 cells (5 MiB at 4^11 cells, in `qs` and its bits) where the chains
 //! take a table of four bytes per cell (16 MiB) and `next_pos`, and the batch loop's kept table
 //! then never holds chains: below the rule a query batch (the first or the last of a run, beside

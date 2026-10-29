@@ -53,7 +53,7 @@ use anyhow::Result;
 
 use super::args::TblastxMatrix;
 use super::blast_engine::{TblastxHsp, TblastxReportRun};
-use crate::algorithm::common::tabular::{check_taxonomy_names, TabularSubjects};
+use crate::algorithm::common::tabular::{check_taxonomy_names, TabularSubjects, COUNTS_BLOCK};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::config::ScoringMatrix;
 use crate::report::blast_xml::hsp::translation_frame;
@@ -68,39 +68,6 @@ use crate::utils::genetic_code::GeneticCode;
 const PROGRAM: &str = "TBLASTX";
 /// The `# TBLASTX 2.17.0+` line of outfmt 7 (`NStr::ToUpper(m_Program) + " " + version`).
 const PROGRAM_VERSION: &str = "TBLASTX 2.17.0+";
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908
-// ```c++
-//     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
-//         x_IsFieldRequested(eSubjectStart) || x_IsFieldRequested(eSubjectEnd) ||
-//         x_IsFieldRequested(eAlignmentLength) || x_IsFieldRequested(eGaps) ||
-//         x_IsFieldRequested(eGapOpenings) || x_IsFieldRequested(eQuerySeq) ||
-//         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
-//         x_IsFieldRequested(ePositives) || x_IsFieldRequested(eMismatches) ||
-//         x_IsFieldRequested(ePercentPositives) || x_IsFieldRequested(ePercentIdentical) ||
-//         x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eBTOP) ||
-//         x_IsFieldRequested(eSubjectStrand)) {
-// ```
-/// The fields that enter `SetFields`' block of the coordinates, the rows and the counts
-/// (`SetCounts`), besides `nident` with a positive engine count (`num_ident` of the Seq-align).
-const COUNTS_BLOCK: [TabularField; 16] = [
-    TabularField::QueryStart,
-    TabularField::QueryEnd,
-    TabularField::SubjectStart,
-    TabularField::SubjectEnd,
-    TabularField::AlignmentLength,
-    TabularField::Gaps,
-    TabularField::GapOpenings,
-    TabularField::QuerySeq,
-    TabularField::SubjectSeq,
-    TabularField::Positives,
-    TabularField::Mismatches,
-    TabularField::PercentPositives,
-    TabularField::PercentIdentical,
-    TabularField::QueryFrame,
-    TabularField::Btop,
-    TabularField::SubjectStrand,
-];
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:970-986
 // ```c++

@@ -49,7 +49,7 @@ use super::stage_e_report::{
     aligned_sequences_into, record_coordinates, ReportRanges, ShownSubjects,
 };
 use super::x_subject_store::SubjectLetters;
-use crate::algorithm::common::tabular::{check_taxonomy_names, TabularSubjects};
+use crate::algorithm::common::tabular::{check_taxonomy_names, TabularSubjects, COUNTS_BLOCK};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::config::ScoringMatrix;
@@ -177,6 +177,7 @@ pub(super) fn write_tblastn_tabular(
     );
     let spec = tab.spec;
     let needs = spec.needs();
+    let counts_block = spec.fields.iter().any(|field| COUNTS_BLOCK.contains(field));
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
     // ```c++
     //        		const CBioseq_Handle& subject_bh =
@@ -373,14 +374,16 @@ pub(super) fn write_tblastn_tabular(
                 //         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
                 // ```
                 // `num_ident` there is the Seq-align's `num_ident` score (the engine's identities,
-                // `payload.num_ident`), which can differ from the report's identities: the
-                // shared writer decides with `TabularHsp::num_ident`, which it counts again from
-                // the rows when they are given. Where the two disagree on being 0 and `nident` is
-                // shown, the rows are read and `num_ident` is the engine's.
+                // `payload.num_ident`), which can differ from the report's identities. With
+                // `nident` and no other field of the block, NCBI counts the identities only
+                // when the engine's are positive and prints 0 otherwise. The shared writer
+                // decides with `TabularHsp::num_ident` and counts again from the rows when
+                // they are given: where the engine's identities are positive and the report's
+                // are 0, the rows are read and `num_ident` is the engine's.
                 let engine_ident = usize::try_from(payload.num_ident).unwrap_or(0);
+                let nident_alone = spec.has(TabularField::NumIdentical) && !counts_block;
                 let rows_read = needs.rows
-                    || (spec.has(TabularField::NumIdentical)
-                        && (engine_ident > 0) != (payload.report_num_ident > 0));
+                    || (nident_alone && engine_ident > 0 && payload.report_num_ident == 0);
                 if rows_read {
                     let translation = translation
                         .get_or_insert_with(|| TargetTranslation::of(tab.letters.nt(oid), &code));
@@ -446,7 +449,7 @@ pub(super) fn write_tblastn_tabular(
                     length: payload.align_length,
                     gap_opens: payload.gap_opens,
                     gaps: payload.gap_letters,
-                    num_ident: if rows_read {
+                    num_ident: if rows_read || (nident_alone && engine_ident == 0) {
                         engine_ident
                     } else {
                         payload.report_num_ident

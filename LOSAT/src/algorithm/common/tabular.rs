@@ -39,6 +39,39 @@ use crate::report::tabular::{
 };
 use crate::seqdb::SeqDb;
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908
+// ```c++
+//     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
+//         x_IsFieldRequested(eSubjectStart) || x_IsFieldRequested(eSubjectEnd) ||
+//         x_IsFieldRequested(eAlignmentLength) || x_IsFieldRequested(eGaps) ||
+//         x_IsFieldRequested(eGapOpenings) || x_IsFieldRequested(eQuerySeq) ||
+//         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
+//         x_IsFieldRequested(ePositives) || x_IsFieldRequested(eMismatches) ||
+//         x_IsFieldRequested(ePercentPositives) || x_IsFieldRequested(ePercentIdentical) ||
+//         x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eBTOP) ||
+//         x_IsFieldRequested(eSubjectStrand)) {
+// ```
+/// The fields that enter `SetFields`' block of the coordinates, the rows and the counts
+/// (`SetCounts`), besides `nident` with a positive engine count (`num_ident` of the Seq-align).
+pub(crate) const COUNTS_BLOCK: [TabularField; 16] = [
+    TabularField::QueryStart,
+    TabularField::QueryEnd,
+    TabularField::SubjectStart,
+    TabularField::SubjectEnd,
+    TabularField::AlignmentLength,
+    TabularField::Gaps,
+    TabularField::GapOpenings,
+    TabularField::QuerySeq,
+    TabularField::SubjectSeq,
+    TabularField::Positives,
+    TabularField::Mismatches,
+    TabularField::PercentPositives,
+    TabularField::PercentIdentical,
+    TabularField::QueryFrame,
+    TabularField::Btop,
+    TabularField::SubjectStrand,
+];
+
 /// The subjects as the report shows them, by subject index (a subject set) or rank (the
 /// reported sequences of a database).
 pub(crate) enum TabularSubjects<'a> {

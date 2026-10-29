@@ -23,10 +23,12 @@
 //! into pieces (`Piece`) of at most `PIECE_ROWS` rows of one query, the first piece of each query
 //! with its outfmt 7 header (a query without rows is one piece of no row); the pieces are taken in
 //! windows of at least `ROWS_PER_THREAD` rows per thread of the pool (a piece of no row counts as
-//! one), and the pool formats each piece of a window into a buffer of its own with
+//! one), and the pool formats each run of consecutive pieces of a window (`runs`: up to
+//! `PIECE_ROWS` rows, a piece of no row counting as one) into a buffer of its own with
 //! `write_query_header` and `write_hsp_rows`, the two parts of the serial function of one query
-//! (`write_query_rows`); the calling thread then writes the window's buffers in order, each
-//! query's warnings (`QueryWarnings`) before its first piece, before the next window is formatted.
+//! (`write_query_rows`), noting where each piece's bytes end; the calling thread then writes the
+//! window's pieces in order from their runs' buffers, each query's warnings (`QueryWarnings`)
+//! before its first piece, before the next window is formatted.
 //! The last line (`write_tabular_epilog`) stays on the calling thread.
 //!
 //! Why the bytes are those of the serial writer: the pieces of a query, in order, are its header
@@ -264,13 +266,12 @@ fn write_on_pool<W: Write>(
         hsp: 0,
         header: true,
     };
-    let format = |piece: &Piece| -> io::Result<Vec<u8>> {
+    // A piece's bytes, appended to `buffer`.
+    let format = |piece: &Piece, buffer: &mut Vec<u8>| -> io::Result<()> {
         let hit_list = hit_lists[piece.q_idx].as_ref();
-        let title = query_titles.get(piece.q_idx).map_or(0, |title| title.len());
-        let mut buffer = Vec::with_capacity(piece.bytes + if piece.header { title } else { 0 });
         if piece.header {
             write_query_header(
-                &mut buffer,
+                &mut *buffer,
                 piece.q_idx,
                 hit_list,
                 output_format,
@@ -287,7 +288,7 @@ fn write_on_pool<W: Write>(
             let hsps = &lists[list].hsps;
             let take = (hsps.len() - hsp).min(rows);
             write_hsp_rows(
-                &mut buffer,
+                &mut *buffer,
                 &hsps[hsp..hsp + take],
                 query_ids,
                 subject_ids,
@@ -299,7 +300,29 @@ fn write_on_pool<W: Write>(
             list += 1;
             hsp = 0;
         }
-        Ok(buffer)
+        Ok(())
+    };
+    // The bytes of a run of consecutive pieces of a window (`runs`) in one buffer, with the end of
+    // each piece's bytes in it.
+    let format_run = |pieces: &[Piece]| -> io::Result<(Vec<u8>, Vec<usize>)> {
+        let bytes = pieces
+            .iter()
+            .map(|piece| {
+                piece.bytes
+                    + if piece.header {
+                        query_titles.get(piece.q_idx).map_or(0, |title| title.len())
+                    } else {
+                        0
+                    }
+            })
+            .sum();
+        let mut buffer = Vec::with_capacity(bytes);
+        let mut ends = Vec::with_capacity(pieces.len());
+        for piece in pieces {
+            format(piece, &mut buffer)?;
+            ends.push(buffer.len());
+        }
+        Ok((buffer, ends))
     };
     loop {
         let mut window = Vec::new();
@@ -316,44 +339,74 @@ fn write_on_pool<W: Write>(
         if window.is_empty() {
             break;
         }
-        let buffers = map(pool, &window, &format);
-        for (piece, buffer) in window.iter().zip(buffers) {
-            if piece.header {
-                if let Some(warnings) = warnings.as_deref_mut() {
-                    warnings.before_query(piece.q_idx, &mut *writer)?;
+        let runs = runs(&window);
+        let buffers = map(pool, &runs, &|run: &std::ops::Range<usize>| {
+            format_run(&window[run.clone()])
+        });
+        for (run, formatted) in runs.iter().zip(buffers) {
+            let (buffer, ends) = formatted?;
+            let mut start = 0;
+            for (piece, &end) in window[run.clone()].iter().zip(&ends) {
+                if piece.header {
+                    if let Some(warnings) = warnings.as_deref_mut() {
+                        warnings.before_query(piece.q_idx, &mut *writer)?;
+                    }
                 }
+                writer.write_all(&buffer[start..end])?;
+                start = end;
             }
-            writer.write_all(&buffer?)?;
         }
     }
     write_tabular_epilog(writer, output_format, epilog)
 }
 
-/// `f` of every piece of `pieces`, in order, on `pool`.
+/// The runs of consecutive pieces of a window that are formatted into one buffer each: a run
+/// closes once it has `PIECE_ROWS` rows (a piece of no row counts as one, as in a window), so a
+/// query of many rows keeps its pieces of `PIECE_ROWS` rows, one per run, and the pieces of queries
+/// of a few rows (short reads: one or two rows each) share a buffer instead of taking one each: a
+/// buffer is one heap allocation made by the thread that formats it and freed by the writing
+/// thread.
+fn runs(window: &[Piece]) -> Vec<std::ops::Range<usize>> {
+    let mut runs = Vec::new();
+    let (mut start, mut rows) = (0, 0);
+    for (index, piece) in window.iter().enumerate() {
+        rows += piece.rows.max(1);
+        if rows >= PIECE_ROWS {
+            runs.push(start..index + 1);
+            (start, rows) = (index + 1, 0);
+        }
+    }
+    if start < window.len() {
+        runs.push(start..window.len());
+    }
+    runs
+}
+
+/// `f` of every item of `items`, in order, on `pool`.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn map<R: Send>(
+fn map<T: Sync, R: Send>(
     pool: &SearchPool<'_>,
-    pieces: &[Piece],
-    f: &(impl Fn(&Piece) -> R + Sync),
+    items: &[T],
+    f: &(impl Fn(&T) -> R + Sync),
 ) -> Vec<R> {
-    pool.install(|| pieces.par_iter().map(f).collect())
+    pool.install(|| items.par_iter().map(f).collect())
 }
 
-/// `f` of every piece of `pieces`, in order (builds without threads, where `pool` gives `None`
+/// `f` of every item of `items`, in order (builds without threads, where `pool` gives `None`
 /// and this is never called).
 #[cfg(not(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 )))]
-fn map<R: Send>(
+fn map<T: Sync, R: Send>(
     _pool: &SearchPool<'_>,
-    pieces: &[Piece],
-    f: &(impl Fn(&Piece) -> R + Sync),
+    items: &[T],
+    f: &(impl Fn(&T) -> R + Sync),
 ) -> Vec<R> {
-    pieces.iter().map(f).collect()
+    items.iter().map(f).collect()
 }
 
 #[cfg(all(
@@ -697,6 +750,32 @@ mod tests {
             list: 0,
             hsp: 0,
             header: true,
+        }
+    }
+
+    #[test]
+    fn runs_cover_every_piece_once_in_order_and_close_at_piece_rows() {
+        let mut rng = Rng(0x7a11);
+        for (queries, max_rows) in [(0usize, 0u64), (30, 0), (2000, 2), (40, 7), (12, 1500)] {
+            let case = case(&mut rng, queries, max_rows);
+            let window: Vec<Piece> = pieces(&case, 0).collect();
+            let runs = runs(&window);
+            let mut next = 0;
+            for (index, run) in runs.iter().enumerate() {
+                assert_eq!(run.start, next, "{queries} {max_rows}");
+                assert!(run.start < run.end);
+                let rows = |run: std::ops::Range<usize>| -> usize {
+                    window[run].iter().map(|piece| piece.rows.max(1)).sum()
+                };
+                // A run closes at the first piece that brings it to `PIECE_ROWS` rows; only the
+                // last run may have fewer.
+                assert!(rows(run.start..run.end - 1) < PIECE_ROWS);
+                if index + 1 < runs.len() {
+                    assert!(rows(run.clone()) >= PIECE_ROWS);
+                }
+                next = run.end;
+            }
+            assert_eq!(next, window.len());
         }
     }
 

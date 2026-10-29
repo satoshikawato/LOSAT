@@ -313,7 +313,7 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const guardIndexFile = (dir, stat) =>
   path.join(dir, `index-${stat.dev}-${stat.ino}-${stat.size}-${stat.mtimeNs}-${stat.ctimeNs}.json`);
 
-// After a run that found or wrote the entry of this input (`stat`, from before its read).
+// After a run that found or wrote the entry of this input (`stat`, taken after its read).
 function writeGuardIndex(stat, inputSha256) {
   try {
     const dir = guardCacheDir();

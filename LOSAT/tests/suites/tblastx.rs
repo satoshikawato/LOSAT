@@ -13,6 +13,8 @@ mod tblastx_batch_pipe;
 mod tblastx_db_search;
 #[path = "../tblastx_extbatch.rs"]
 mod tblastx_extbatch;
+#[path = "../tblastx_few_groups.rs"]
+mod tblastx_few_groups;
 #[path = "../tblastx_hitbf.rs"]
 mod tblastx_hitbf;
 #[path = "../tblastx_kmerge.rs"]
@@ -25,8 +27,6 @@ mod tblastx_link_slices;
 mod tblastx_link_sort;
 #[path = "../tblastx_matrix.rs"]
 mod tblastx_matrix;
-#[path = "../tblastx_n1_groups.rs"]
-mod tblastx_n1_groups;
 #[path = "../tblastx_prefetch.rs"]
 mod tblastx_prefetch;
 #[path = "../tblastx_qslice.rs"]

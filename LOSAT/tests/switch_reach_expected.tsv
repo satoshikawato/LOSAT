@@ -164,11 +164,11 @@ LOSAT_X_TBNUNITXLATE	tblastn	conditional	gap	required	a packed subject whose pla
 LOSAT_X_TBNXLATESIMD	tblastn	platform			AVX2 vector loop only on x86 AVX2; packed subjects (-db and -subject)
 LOSAT_X_TBXBAND	tblastx	conditional	required	gap	only batches the old guard rejected (query/subject chunk lengths near table sizes); memory rule x_band_fits; ref gap: needs a batch the old guard rejects with a subject chunk longer than the table (short query x multi-Mb subject)
 LOSAT_X_TBXEXTBATCH	tblastx	conditional	gap	required	x86-64 only; only units with query-group span >=256 Ki letters (query ~>0.8 Mb); window >= wordsize+16; new gap: needs a query-group span >= 256 Ki letters (query ~0.8 Mb), x86-64
+LOSAT_X_TBXFEWGROUPS	tblastx	conditional	required	gap	fewer groups than six contexts need where the pool has units enough; at 2+ threads also a query of 5,000+ letters taking the units; ref gap: a query above about 65 kb below six wanted groups (fast fixtures are shorter; tests/tblastx_few_groups.rs reaches it)
 LOSAT_X_TBXHITBF	tblastx	conditional	required	required	only units of the PAIRPAR unit path (gated by size) with 1<=wordsize<window; not under LOSAT_TIMING/STATS
 LOSAT_X_TBXKMERGE	tblastx	conditional	required	required	only where PAIRPAR unit path runs (gated by query size)
 LOSAT_X_TBXLUT	tblastx	conditional	required	required	only batches that run the reference frame loop (short queries via PAIRPARGATE, guard); diagnostics keeps chains
 LOSAT_X_TBXMASKSEEK	tblastx	always			scan of a frame's SEG masks in an outfmt 0 row (and a Web hit record) starts at the first mask range that reaches the row
-LOSAT_X_TBXN1GROUPS	tblastx	conditional	required	gap	one thread and more than one context in a batch of the unit path; ref gap: a query above about 65 kb at one thread (fast fixtures are shorter; tests/tblastx_n1_groups.rs reaches it)
 LOSAT_X_TBXNEXT	tblastx	conditional	required	required	2+ threads and more than one subject (native; threaded Wasm since 2026-10-20)
 LOSAT_X_TBXPIPE	tblastx	conditional	required	required	2+ threads native, 2+ query batches, HSP limit 4,194,304; not with debug output
 LOSAT_X_TBXPREFETCH	tblastx	conditional	gap	required	x86-64 only; only units whose diagonal table >= 1,536 KiB (value in KiB); new gap: needs a unit table >= 1,536 KiB (query ~400 kb), x86-64

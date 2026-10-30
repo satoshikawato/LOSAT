@@ -1,12 +1,12 @@
-//! TBLASTX's unit path at one thread with one group of contexts (`LOSAT_X_TBXN1GROUPS`,
-//! `src/algorithm/tblastx/x_pair_par.rs`, `group_starts`) on whole searches.
+//! TBLASTX's unit path with the groups of contexts the pool needs (`LOSAT_X_TBXFEWGROUPS`,
+//! `src/algorithm/tblastx/x_pair_par.rs`, `x_groups_wanted`, `group_starts`) on whole searches.
 //!
 //! No NCBI counterpart: the groups are how LOSAT schedules a batch's contexts, and NCBI scans them
 //! as one concatenated query. The switch is in the strict set (on unless it is `0`), so the
 //! property under test is that the report does not depend on it: at one thread with one group
-//! (at most 2^17 letters in the batch), at one thread with the six groups (a longer batch), and
-//! against four threads, which always keep their groups. That reports equal NCBI's is the business
-//! of the TBLASTX fixtures. `LOSAT_X_REACH` shows which side each run took.
+//! (at most 2^17 letters in the batch), at one thread with the six groups (a longer batch), at four
+//! threads with two groups. That reports equal NCBI's is the business of the TBLASTX fixtures.
+//! `LOSAT_X_REACH` shows which side each run took.
 //!
 //! The query is cut from AP027131, the subject from the related AP027133 (genetic code 4 for
 //! both). `LOSAT_X_PAIRPARGATE=0` sends the batch to the units whatever its length.
@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-const SWITCH: &str = "LOSAT_X_TBXN1GROUPS";
-const OFF: (&str, &str) = ("LOSAT_X_TBXN1GROUPS", "0");
+const SWITCH: &str = "LOSAT_X_TBXFEWGROUPS";
+const OFF: (&str, &str) = ("LOSAT_X_TBXFEWGROUPS", "0");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -28,7 +28,7 @@ fn fixture(name: &str) -> PathBuf {
 fn temp_path(tag: &str) -> PathBuf {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     std::env::temp_dir().join(format!(
-        "losat_tblastx_n1_groups_{}_{}_{tag}",
+        "losat_tblastx_few_groups_{}_{}_{tag}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ))
@@ -138,8 +138,8 @@ fn tblastx(
     (output.stdout, sides)
 }
 
-/// A batch of 12 kb takes one group at one thread, with the report of `=0` and of four threads,
-/// which records nothing; with another matrix too (its tables and walks are per group).
+/// A batch of 12 kb takes fewer groups at one and four threads, with the report of `=0`; with
+/// another matrix too (its tables and walks are per group).
 #[test]
 fn one_group_gives_the_report_of_the_six() {
     let inputs = Inputs::new(12_000, 12_000);
@@ -158,8 +158,8 @@ fn one_group_gives_the_report_of_the_six() {
         assert_eq!(report, expected, "{args:?}: four threads");
         assert_eq!(
             sides,
-            (false, false),
-            "{args:?}: four threads record nothing"
+            (true, false),
+            "{args:?}: the side that four threads took"
         );
     }
 }

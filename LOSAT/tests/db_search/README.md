@@ -434,6 +434,10 @@ programs. `taxfilter/` holds the inputs and what `make_taxfilter.py MAKEBLASTDB 
   maps and all their ancestors, in a new file with the source's schema text. NCBI reads the table `TaxidInfo` and its index
   only, so a taxid's descendants within the databases are those of the whole file. The rows reach it by `BLASTDB=tests/db_search/taxfilter`;
   the `nosql` rows leave it out of reach (NCBI's warning, no restriction).
+- `root/taxonomy4blast.sqlite3`: the same file without the rows of 7227 (fly) and 8237 (tuna). The rows `db.tf.bp.root.6` and
+  `db.tf.tbn.root.6` freeze NCBI's `-taxids 131567` (the root's only child there) with it, and `tests/db_taxid_root.rs`
+  checks that LOSAT's `-taxids 1` writes those bytes (taxid 1 is its own parent: NCBI's expansion of it does not end;
+  DI-8 DECISIONS 10).
 - `q.faa` (HBA_HUMAN) and `q.fna` (human HBA1 cDNA): the queries. `tl_crlf.txt` (40674 and 8782 with CRLF line ends, an
   empty line and blanks) and `tl_neg.txt` (9443): the taxid lists.
 

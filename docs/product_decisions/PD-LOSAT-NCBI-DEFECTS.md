@@ -1,11 +1,12 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.4
+- Version: 1.5
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
-  1.4 2026-10-22 (exception 4, the culling limit near `INT4_MAX`, NCBI parity line O3b)
+  1.4 2026-10-22 (exception 4, the culling limit near `INT4_MAX`, NCBI parity line O3b);
+  1.5 2026-10-30 (exception 5, the expansion of a taxid whose ancestors form a cycle, line DI-8a)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -158,6 +159,26 @@ line `DECISIONS.md` 17), under the rule of 2026-10-10 that LOSAT does not reprod
    2147483646 and 2147483647 (BLASTN and TBLASTX fixtures `culling.near_int4_max_*` of
    `LOSAT/tests/{blastn,tblastx}_regression_fixtures.py`, whose oracle runs 2147483644 for
    the last two, `ORACLE_ARGV`). Every other limit gives NCBI's bytes.
+
+## Approved exception (`-taxids` and the other taxid lists with `-db`, version 1.5)
+
+Version 1.5, decided under the maintainer's standing delegation on 2026-10-29 after the
+maintainer asked whether such a list could be filtered instead of refused (line DI-8
+`DECISIONS.md` 10, replacing its decision 9 to refuse it); its PR (DI-8a) asks the
+maintainer to accept it.
+
+5. **A taxid whose ancestors form a cycle in `taxonomy4blast.sqlite3`.** The root, taxid 1,
+   is its own parent in NCBI's file, and NCBI expands a taxid of a list to its descendants
+   with `WITH RECURSIVE ... UNION ALL` (`tax4blastsqlite.cpp`, `GetLeafNodeTaxids`), which
+   does not end for a start whose descendants reach the cycle: NCBI 2.17.0's `blastp -db
+   swissprot -taxids 1` writes nothing in 120 s. LOSAT visits each taxid once
+   (`TaxonomySqlite::descendants`), so the root expands to every taxid of the file and the
+   search ends; the other taxids expand as in NCBI. Evidence: with
+   `LOSAT/tests/db_search/taxfilter/root/taxonomy4blast.sqlite3` (whose root has the one
+   child 131567), LOSAT's `-taxids 1` writes NCBI's bytes of `-taxids 131567`
+   (`LOSAT/tests/db_taxid_root.rs`, rows `db.tf.bp.root.6` and `db.tf.tbn.root.6` of
+   `LOSAT/tests/db_search_manifest.tsv`, BLASTP and TBLASTN) and fewer than the whole
+   database, whose two taxids outside the file are not descendants.
 
 ## Reproduced as NCBI (rule 2)
 

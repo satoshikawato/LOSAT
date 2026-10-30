@@ -206,7 +206,7 @@ fn the_units_at_a_time_do_not_change_the_report() {
         (true, false)
     );
     let one = dir.join("one.faa");
-    let proteins = std::fs::read_to_string(&subject).unwrap();
+    let proteins = std::fs::read_to_string(subject).unwrap();
     let second = proteins[1..].find('>').unwrap() + 1;
     std::fs::write(&one, &proteins[..second]).unwrap();
     assert_eq!(

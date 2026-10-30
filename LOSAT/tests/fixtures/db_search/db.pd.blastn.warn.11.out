@@ -1,0 +1,455 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              other {
+                accession "NM_000042",
+                version 1
+              }
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">NM_000042.1 a"
+                  }
+                }
+              },
+              title "a"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na '3C33CFD30EBCFBC5CCFCFCEFCECCECF4F04F47C1C6FE5A
+0334C71C17D43FC2CF722AC45CED8E010EEFCF6933F242C8702F81E04C12C5F8213DFCF680BA80
+FAD9EACFFDF7FF7347070E28FD'H
+            }
+          },
+          seq {
+            id {
+              local str "plain2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">plain2 b"
+                  }
+                }
+              },
+              title "b"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na '3C33CFD30EBCFBC5CCFCFCEFCECCECF4F04F47C1C6FE5A
+0334C71C17D43FC2CF722AC45CED8E010EEFCF6933F242C8702F81E04C12C5F8213DFCF680BA80
+FAD9EACFFDF7FF7347070E28FD'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/nslice",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 7814985
+        }
+      },
+      program-options {
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 0,
+                  to 66,
+                  id other {
+                    accession "NM_000042",
+                    version 1
+                  }
+                },
+                {
+                  from 0,
+                  to 66,
+                  id other {
+                    accession "NM_000042",
+                    version 1
+                  }
+                }
+              }
+            },
+            frame plus1
+          }
+        },
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 0,
+                  to 66,
+                  id local str "plain2"
+                },
+                {
+                  from 0,
+                  to 66,
+                  id local str "plain2"
+                }
+              }
+            },
+            frame plus1
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 300
+          },
+          {
+            id str "blast_score",
+            value int 300
+          },
+          {
+            id str "e_value",
+            value real { 611793600155036, 10, -175 }
+          },
+          {
+            id str "bit_score",
+            value real { 55511518993508, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 300
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            other {
+              accession "NM_000042",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          starts {
+            0,
+            2000
+          },
+          lens {
+            300
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 225
+          },
+          {
+            id str "blast_score",
+            value int 225
+          },
+          {
+            id str "e_value",
+            value real { 301214027001246, 10, -133 }
+          },
+          {
+            id str "bit_score",
+            value real { 416616466009739, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 276
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 5,
+          ids {
+            other {
+              accession "NM_000042",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          starts {
+            0,
+            2001,
+            -1,
+            2108,
+            107,
+            2109,
+            111,
+            -1,
+            112,
+            2113
+          },
+          lens {
+            107,
+            1,
+            4,
+            1,
+            188
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 300
+          },
+          {
+            id str "blast_score",
+            value int 300
+          },
+          {
+            id str "e_value",
+            value real { 611793600155036, 10, -175 }
+          },
+          {
+            id str "bit_score",
+            value real { 55511518993508, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 300
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "plain2",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          starts {
+            0,
+            2000
+          },
+          lens {
+            300
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 225
+          },
+          {
+            id str "blast_score",
+            value int 225
+          },
+          {
+            id str "e_value",
+            value real { 301214027001246, 10, -133 }
+          },
+          {
+            id str "bit_score",
+            value real { 416616466009739, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 276
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 5,
+          ids {
+            local str "plain2",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          starts {
+            0,
+            2001,
+            -1,
+            2108,
+            107,
+            2109,
+            111,
+            -1,
+            112,
+            2113
+          },
+          lens {
+            107,
+            1,
+            4,
+            1,
+            188
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 66,
+              id other {
+                accession "NM_000042",
+                version 1
+              }
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 66,
+              id local str "plain2"
+            }
+          }
+        },
+        frame plus1
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 7814985",
+      "Effective search space used: 7814985",
+      "Length adjustment: 15"
+    }
+  },
+  messages {
+    {
+      code 1,
+      message "FASTA-Reader: Ignoring invalid nucleotide residues at
+ position(s): On line 2: 51"
+    },
+    {
+      code 1,
+      message "FASTA-Reader: Ignoring invalid residues at position(s): On line
+ 4: 51"
+    }
+  }
+}

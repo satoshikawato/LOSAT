@@ -50,6 +50,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         taxid_filter: Default::default(),
         dbsize: None,
         show_gis: false,
+        parse_deflines: false,
         searchsp: None,
         evalue: 10.0,
         threshold: None,

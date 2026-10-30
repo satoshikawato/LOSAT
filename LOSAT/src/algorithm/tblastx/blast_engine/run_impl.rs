@@ -1403,11 +1403,17 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
+    crate::blastinput::fasta_reader::believed::refuse_with_subject(
+        args.parse_deflines,
+        args.subject.is_some(),
+        "TBLASTX",
+    )?;
     let mut query_source = FastaInputSource::from_argument(
         &args.query,
         query_file,
         ReaderConfig::query("TBLASTX", false, settings.data_loaders)
-            .with_defline(args.archive.is_some()),
+            .with_defline(args.archive.is_some())
+            .with_parse_deflines(args.parse_deflines),
     );
     if !shared_standard_input && query_source.stream_is_empty() {
         outputs
@@ -2124,7 +2130,9 @@ fn write_tblastx_outputs(
         None => tblastx_database_name(args),
     };
     // The `Query=` and `# Query:` text of each query: its title bytes.
-    let query_titles: Vec<&[u8]> = run.queries.iter().map(|query| query.title()).collect();
+    let query_lines: Vec<std::borrow::Cow<'_, [u8]>> =
+        run.queries.iter().map(|query| query.query_line()).collect();
+    let query_titles: Vec<&[u8]> = query_lines.iter().map(|line| line.as_ref()).collect();
     let unsearched: Vec<bool> = run.searched.iter().map(|&searched| !searched).collect();
     // The warnings of each query are written before its report, once, with the first format
     // (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the

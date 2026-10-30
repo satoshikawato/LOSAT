@@ -44,6 +44,29 @@ pub struct ParsedSubject {
     show_gis: bool,
 }
 
+/// `AdjustSeqIdType` with `eGetId_ForceAcc` (`ParsedSubject::sam_id`) of a Bioseq with the ids
+/// `ids` and the Seq-align id `alignment_id`.
+pub fn forced_accession<'a>(
+    alignment_id: &'a ParsedSeqId,
+    ids: &'a [ParsedSeqId],
+) -> &'a ParsedSeqId {
+    let acc_ver =
+        |id: &crate::seqid::model::TextseqId| id.accession.is_some() && id.version.is_some();
+    if alignment_id.textseq().is_some_and(acc_ver) {
+        return alignment_id;
+    }
+    let mut found = None;
+    for id in ids {
+        if let Some(text) = id.textseq() {
+            found = Some(id);
+            if acc_ver(text) {
+                break;
+            }
+        }
+    }
+    found.unwrap_or(alignment_id)
+}
+
 /// One `HitDescr` of the XML2 and JSON formats (`s_SeqAlignToXMLHit`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HitDescription {
@@ -183,21 +206,7 @@ impl ParsedSubject {
     /// with a version, else the first such id of the subject Bioseq (its gis passed over), else
     /// its last Textseq-id, else the Seq-align id.
     pub fn sam_id(&self) -> &ParsedSeqId {
-        let acc_ver =
-            |id: &crate::seqid::model::TextseqId| id.accession.is_some() && id.version.is_some();
-        if self.alignment_id.textseq().is_some_and(acc_ver) {
-            return &self.alignment_id;
-        }
-        let mut found = None;
-        for id in &self.target().ids {
-            if let Some(text) = id.textseq() {
-                found = Some(id);
-                if acc_ver(text) {
-                    break;
-                }
-            }
-        }
-        found.unwrap_or(&self.alignment_id)
+        forced_accession(&self.alignment_id, &self.target().ids)
     }
 
     /// The definition lines.
@@ -598,7 +607,7 @@ fn refseq_source_accession(accession: &[u8]) -> bool {
 }
 
 /// `BioseqIds` of the Seq-ids `ids` of a Bioseq.
-fn bioseq_ids(ids: &[ParsedSeqId]) -> BioseqIds {
+pub(crate) fn bioseq_ids(ids: &[ParsedSeqId]) -> BioseqIds {
     let mut flags = BioseqIds::default();
     for id in ids {
         match id {
@@ -716,6 +725,12 @@ pub fn joined_in_reports(a: &ParsedSubject, b: &ParsedSubject) -> bool {
 /// subjects that the reports join (`joined_in_reports`) share one.
 pub fn join_keys(subject: &ParsedSubject, keys: &mut Vec<u64>) {
     crate::seqid::defline_set::match_keys(&subject.alignment_id, keys);
+}
+
+/// The keys of the Seq-align id of `subject` as NCBI's scope finds it
+/// (`defline_set::scope_keys`).
+pub fn scope_keys(subject: &ParsedSubject, keys: &mut Vec<u64>) {
+    crate::seqid::defline_set::scope_keys(&subject.alignment_id, keys);
 }
 
 #[cfg(test)]

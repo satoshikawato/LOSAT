@@ -546,7 +546,7 @@ fn write_tabular(
             //                                             kTabularFormat, rid);
             // ```
             // The title's bytes (`write_outfmt7_query_line`).
-            crate::report::outfmt6::write_outfmt7_query_line(writer, query.title())?;
+            crate::report::outfmt6::write_outfmt7_query_line(writer, &query.query_line())?;
             writeln!(writer, "# Database: {}", shown.name())?;
             if hit_count > 0 {
                 writeln!(writer, "# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score")?;
@@ -1260,7 +1260,7 @@ fn write_pairwise(
         .collect();
     let query_titles: Vec<Arc<[u8]>> = query_records
         .iter()
-        .map(|record| Arc::from(record.title()))
+        .map(|record| Arc::from(record.query_line().as_ref()))
         .collect();
     let subject_titles: Vec<Arc<[u8]>> = subject_records
         .iter()

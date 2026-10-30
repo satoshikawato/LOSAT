@@ -254,6 +254,7 @@ fn parse_blastn_args(
         taxid_filter: Default::default(),
         dbsize: None,
         show_gis: false,
+        parse_deflines: false,
         searchsp: None,
         task: "megablast".to_string(),
         template_type: None,
@@ -397,6 +398,7 @@ fn parse_tblastx_args(
         taxid_filter: Default::default(),
         dbsize: None,
         show_gis: false,
+        parse_deflines: false,
         searchsp: None,
         evalue: 10.0,
         // The frozen web ABI v1 (plan TD-1) has no -threshold, -matrix or -window_size: BLOSUM62's
@@ -562,6 +564,7 @@ fn parse_blastp_args(
         taxid_filter: Default::default(),
         dbsize: None,
         show_gis: false,
+        parse_deflines: false,
         searchsp: None,
         task: "blastp".to_string(),
         evalue: None,

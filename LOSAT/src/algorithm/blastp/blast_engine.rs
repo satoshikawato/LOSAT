@@ -5090,11 +5090,17 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
+    crate::blastinput::fasta_reader::believed::refuse_with_subject(
+        args.parse_deflines,
+        args.subject.is_some(),
+        args.app.name(),
+    )?;
     let mut query_source = FastaInputSource::from_argument(
         &args.query,
         query_file,
         ReaderConfig::query(args.app.name(), true, settings.data_loaders)
-            .with_defline(args.archive.is_some()),
+            .with_defline(args.archive.is_some())
+            .with_parse_deflines(args.parse_deflines),
     );
     if !shared_standard_input && query_source.stream_is_empty() {
         // psiblast_app.cpp:461-464 is the same test, with psiblast's prefix.
@@ -7508,7 +7514,7 @@ fn run_resolved_in_pool(
         .collect();
     let query_titles: Vec<Arc<[u8]>> = query_records
         .iter()
-        .map(|record| Arc::from(record.title()))
+        .map(|record| Arc::from(record.query_line().as_ref()))
         .collect();
     let query_lengths: Vec<usize> = query_records
         .iter()
@@ -11819,6 +11825,7 @@ fn run_resolved_in_pool(
                     iteration: (args.app == BlastpApp::Psiblast).then_some(1),
                     matrix: args.scoring.matrix,
                     query_ids: &query_ids,
+                    query_records,
                     query_titles: &query_titles,
                     searched_lengths: &query_lengths,
                     range_length: ranges.query_input.range_length,
@@ -12149,6 +12156,7 @@ mod tests {
             taxid_filter: Default::default(),
             dbsize: None,
             show_gis: false,
+            parse_deflines: false,
             searchsp: None,
             task: "blastp".to_string(),
             evalue: None,

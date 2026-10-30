@@ -57,6 +57,9 @@
 //! counting sort of that function's loop, `x_counted_sources`), and every other field of the table
 //! is computed by the reference expressions. In diagnostics mode the reference builder runs (its
 //! prints read the chains).
+//!
+//! TBLASTN's tables (LOSAT_X_TBNLUTLEAN) take the same passes in `x_build_lean`, which keeps no memo
+//! and frees every temporary with the build.
 
 use super::*;
 use std::cell::RefCell;
@@ -1113,6 +1116,101 @@ fn x_target_list(
     out.into_boxed_slice()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-563,580-582,600-604 (cited
+// at `x_record_neighbors`). The statements of `x_record_neighbors`, for `x_build_lean` only (so that
+// the other programs' builders keep their code).
+#[allow(clippy::too_many_arguments)]
+fn x_lean_neighbors(
+    query_word: &[u8],
+    subject_word: &mut [u8; 32],
+    alphabet_size: usize,
+    wordsize: usize,
+    charsize: usize,
+    row_max: &[i32],
+    threshold: i32,
+    matrix: ScoringMatrix,
+    score: i32,
+    current_pos: usize,
+    out: &mut Vec<u16>,
+) {
+    let query_residue = query_word[current_pos] as usize;
+    let score = score - row_max[query_residue];
+    if current_pos == wordsize - 1 {
+        for residue in 0..alphabet_size {
+            let residue_score = lookup_matrix_score(matrix, query_residue, residue);
+            if score + residue_score >= threshold {
+                subject_word[current_pos] = residue as u8;
+                out.push(x_word_index(subject_word, wordsize, charsize));
+            }
+        }
+        return;
+    }
+    for residue in 0..alphabet_size {
+        let residue_score = lookup_matrix_score(matrix, query_residue, residue);
+        if score + residue_score >= threshold {
+            subject_word[current_pos] = residue as u8;
+            x_lean_neighbors(
+                query_word,
+                subject_word,
+                alphabet_size,
+                wordsize,
+                charsize,
+                row_max,
+                threshold,
+                matrix,
+                score + residue_score,
+                current_pos + 1,
+                out,
+            );
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:490-496,504-509,539-543
+// (cited at `x_target_list`). The statements of `x_target_list`, appending T(s) to `out` instead of
+// returning a list of its own (`x_build_lean`).
+#[allow(clippy::too_many_arguments)]
+fn x_lean_target_list(
+    query_word: &[u8],
+    alphabet_size: usize,
+    wordsize: usize,
+    charsize: usize,
+    row_max: &[i32],
+    threshold: i32,
+    matrix: ScoringMatrix,
+    out: &mut Vec<u16>,
+) {
+    let mut self_score =
+        lookup_matrix_score(matrix, query_word[0] as usize, query_word[0] as usize);
+    for residue in query_word.iter().take(wordsize).skip(1) {
+        let residue = *residue as usize;
+        self_score += lookup_matrix_score(matrix, residue, residue);
+    }
+    if threshold == 0 || self_score < threshold {
+        out.push(x_word_index(query_word, wordsize, charsize));
+    }
+    if threshold != 0 {
+        let mut max_score = row_max[query_word[0] as usize];
+        for residue in query_word.iter().take(wordsize).skip(1) {
+            max_score += row_max[*residue as usize];
+        }
+        let mut subject_word = [0u8; 32];
+        x_lean_neighbors(
+            query_word,
+            &mut subject_word,
+            alphabet_size,
+            wordsize,
+            charsize,
+            row_max,
+            threshold,
+            matrix,
+            max_score,
+            0,
+            out,
+        );
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469
 // ```c
 //     exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
@@ -1492,6 +1590,208 @@ fn x_build_direct_in<C: XVec>(
     }))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 and 283-358 (cited
+// at `x_build_direct`): the appends of s_AddWordHits for s ascending, then BlastAaLookupFinalize's
+// layout. No NCBI counterpart for the form (memory only): the passes of `x_build_direct_in` with
+// every temporary freed by the build. TBLASTN builds the table of each query batch on the thread
+// of the batch's first subject, the batches side by side; a thread's glibc arena keeps the high
+// water of what the thread allocated, so the reference build's chains, exact backbone and cell
+// vectors (3.4 MiB for 18,000 query letters) stayed in each building thread's arena under what
+// its search allocated later. Here the exact backbone is the counting sort of
+// `x_for_each_exact_word`'s words (as `x_counted_sources`: the sources in ascending cell order,
+// each one's offsets in chain order), the lists T(s) of the present sources are made once, in
+// source order, into one vector (no memo outlives the build), the count pass runs as each list is
+// made, and the counts become the cells' fill cursors once the layout has read them (a cell of
+// more than AA_HITS_PER_CELL entries starts at its overflow cursor, any other at 0 in its own
+// entries; `num_used` tells the two apart). The table's backbone and overflow are mapped on
+// 64-bit glibc (`x_unthresholded_capacity`), so that a batch's table goes back when its search
+// ends. The appends are those of `x_build_direct_in`, in the same order (the module comment's
+// identity argument), so the table is the reference table.
+/// The table `build_lookup_from_prepared` returns, built without chains and without a neighbour
+/// memo, every temporary freed by the build (TBLASTN). `Err(prepared)` where `x_build_direct`
+/// declines (diagnostics mode, whose prints read the chains, or a backbone index wider than 16 bits,
+/// which no table of LOSAT's TBLASTN has: word size 3, or 2 with BLOSUM45).
+#[inline(never)]
+pub(super) fn x_build_lean(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
+    let alphabet_size = LOOKUP_ALPHABET_SIZE;
+    let charsize = ilog2(alphabet_size) + 1;
+    if diagnostics_enabled() || word_length * charsize > 16 || word_length > 32 {
+        return Err(prepared);
+    }
+    let mask = compute_mask(word_length, charsize);
+    let backbone_size = compute_backbone_size(word_length, alphabet_size, charsize);
+    let PreparedLookupQuery {
+        concat_query,
+        lookup_locations,
+        frame_bases,
+        contexts,
+        skipped_seg_mask: _,
+    } = prepared;
+    // Same expression as build_lookup_from_prepared (BLAST_SequenceBlk length).
+    let query_length = contexts
+        .last()
+        .map(|ctx| ctx.frame_base + ctx.aa_len as i32)
+        .unwrap_or(0);
+    // Same expression as build_lookup_from_prepared (blast_aalookup.c:438-444).
+    let row_max: Vec<i32> = (0..alphabet_size)
+        .map(|i| {
+            (0..alphabet_size)
+                .map(|j| lookup_matrix_score(matrix, i, j))
+                .max()
+                .unwrap_or(i32::MIN)
+        })
+        .collect();
+
+    // The exact backbone (blast_aalookup.c:448-456): source i's offsets, in chain order, are
+    // `offsets[starts[i]..starts[i + 1]]`, the sources in ascending cell order.
+    let mut counts: Vec<u32> = vec![0; backbone_size];
+    let mut words = 0usize;
+    x_for_each_exact_word(
+        &concat_query,
+        &lookup_locations,
+        word_length,
+        charsize,
+        |idx, _| {
+            counts[idx] += 1;
+            words += 1;
+        },
+    );
+    let mut starts: Vec<u32> = Vec::new();
+    let mut running = 0u32;
+    for slot in counts.iter_mut() {
+        if *slot != 0 {
+            starts.push(running);
+            running += std::mem::replace(slot, running);
+        }
+    }
+    starts.push(running);
+    let mut offsets = vec![0i32; words];
+    x_for_each_exact_word(
+        &concat_query,
+        &lookup_locations,
+        word_length,
+        charsize,
+        |idx, offset| {
+            offsets[counts[idx] as usize] =
+                i32::try_from(offset).expect("NCBI BLAST query offset must fit Int4");
+            counts[idx] += 1;
+        },
+    );
+
+    // T(s) of each source, made once (`targets[ends[i - 1]..ends[i]]`), and the count pass:
+    // count[w] = number of appends the reference makes to cell w.
+    counts.fill(0);
+    let sources = starts.len() - 1;
+    let mut targets: Vec<u16> = Vec::new();
+    let mut ends: Vec<u32> = Vec::with_capacity(sources);
+    for i in 0..sources {
+        let (start, end) = (starts[i] as usize, starts[i + 1] as usize);
+        let from = targets.len();
+        // blast_aalookup.c:490: w = query + offset_list[2];
+        let first = usize::try_from(offsets[start]).expect("NCBI BLAST query offset must fit");
+        x_lean_target_list(
+            &concat_query[first..],
+            alphabet_size,
+            word_length,
+            charsize,
+            &row_max,
+            threshold,
+            matrix,
+            &mut targets,
+        );
+        let k = (end - start) as u32;
+        for &w in &targets[from..] {
+            counts[w as usize] += k;
+        }
+        ends.push(targets.len() as u32);
+    }
+
+    // Layout: BlastAaLookupFinalize's rule applied to the counts, which become the fill cursors.
+    let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
+    let mut overflow_size = 0usize;
+    let mut longest_chain: i32 = 0;
+    for &count in &counts {
+        if count as usize > AA_HITS_PER_CELL {
+            overflow_size += count as usize;
+        }
+        if (count as i32) > longest_chain {
+            longest_chain = count as i32;
+        }
+    }
+    // The table lives as long as its query batch; its backbone and overflow are given a capacity
+    // that glibc maps whatever their size and that leaves its mmap threshold as it is
+    // (`x_unthresholded_capacity`; the capacity is what `Vec` would give elsewhere), so that their
+    // pages go back when the batch's search drops the table instead of staying in the building
+    // thread's arena, where the batches searched one after the other (`-db`) left a table's worth.
+    // Only the cells and entries written below are touched.
+    let mut backbone: Vec<BackboneCell> =
+        Vec::with_capacity(crate::utils::x_mapped::x_unthresholded_capacity(
+            backbone_size,
+            std::mem::size_of::<BackboneCell>(),
+        ));
+    backbone.resize(backbone_size, BackboneCell::default());
+    let mut pv: Vec<u32> = vec![0u32; pv_size];
+    let mut overflow: Vec<i32> = Vec::with_capacity(
+        crate::utils::x_mapped::x_unthresholded_capacity(overflow_size, std::mem::size_of::<i32>()),
+    );
+    overflow.resize(overflow_size, 0);
+    let mut overflow_cursor = 0usize;
+    for (idx, slot) in counts.iter_mut().enumerate() {
+        let count = *slot as usize;
+        if count == 0 {
+            continue;
+        }
+        pv_set(&mut pv, idx);
+        backbone[idx].num_used = count as i32;
+        if count > AA_HITS_PER_CELL {
+            backbone[idx].entries[0] = overflow_cursor as i32;
+            *slot = overflow_cursor as u32;
+            overflow_cursor += count;
+        } else {
+            *slot = 0;
+        }
+    }
+
+    // Fill pass: the reference's appends, in the reference's order.
+    let mut from = 0usize;
+    for i in 0..sources {
+        let source = &offsets[starts[i] as usize..starts[i + 1] as usize];
+        let to = ends[i] as usize;
+        for &w in &targets[from..to] {
+            let w = w as usize;
+            let at = counts[w] as usize;
+            if backbone[w].num_used as usize <= AA_HITS_PER_CELL {
+                backbone[w].entries[at..at + source.len()].copy_from_slice(source);
+            } else {
+                overflow[at..at + source.len()].copy_from_slice(source);
+            }
+            counts[w] += source.len() as u32;
+        }
+        from = to;
+    }
+
+    Ok(BlastAaLookupTable {
+        backbone,
+        overflow,
+        pv,
+        frame_bases,
+        num_contexts: contexts.len(),
+        query_length,
+        word_length: word_length as i32,
+        alphabet_size: alphabet_size as i32,
+        charsize: charsize as i32,
+        mask: mask as i32,
+        longest_chain,
+        threshold,
+        row_max,
+    })
+}
+
 // No NCBI counterpart: spins of `x_claimed`'s caller before it yields while it waits for parts.
 #[cfg(all(
     feature = "parallel",
@@ -1711,12 +2011,8 @@ impl XDisjointOut {
 // The same loop with the same tests; where it calls BlastLookupAddWordHit, `visit` gets the
 // word's backbone index (blast_lookup.c:46 ComputeTableIndex, the shifts of
 // `blast_lookup_add_word_hit`) and the query offset the call appends.
-/// EXPERIMENT (LOSAT_X_BXBUILDPAR): `visit(index, offset)` for each word the exact backbone's
-/// build adds, in the order it adds them.
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
+/// EXPERIMENT (LOSAT_X_BXBUILDPAR, and TBLASTN's `x_build_lean`): `visit(index, offset)` for each
+/// word the exact backbone's build adds, in the order it adds them.
 fn x_for_each_exact_word(
     query: &[u8],
     locations: &[(i32, i32)],
@@ -2392,6 +2688,107 @@ mod tests {
         same(&other, 12, ScoringMatrix::Blosum45);
         same(&queries, 11, ScoringMatrix::Pam30);
         same(&queries, 12, ScoringMatrix::Blosum62);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 (cited at
+    // `x_build_direct`). TBLASTN's lean build (`x_build_lean`) gives the reference table for every
+    // threshold, mask and matrix at word lengths 2 and 3 (LOSAT's TBLASTN: BLOSUM62 word size 3
+    // threshold 13, BLOSUM45 word size 2 threshold 16), with the overflow array reached at each
+    // setting, and for a query set without any word; it declines word length 4 (20-bit backbone
+    // indexes), where the reference builder runs.
+    #[test]
+    fn lean_table_equals_reference_for_thresholds_masks_matrices_and_word_lengths() {
+        let mut seed = 11u64;
+        let mut low_complexity = vec![1u8; 300];
+        low_complexity.extend(residues(&mut seed, 40));
+        let queries = vec![
+            vec![
+                frame(residues(&mut seed, 700), vec![(10, 30), (400, 401)], 1),
+                frame(residues(&mut seed, 2), vec![], 2),
+                frame(residues(&mut seed, 3), vec![], 3),
+                frame(low_complexity, vec![(250, 299)], -1),
+                frame(residues(&mut seed, 650), vec![(0, 0)], -2),
+                frame(Vec::new(), vec![], -3),
+            ],
+            vec![frame(residues(&mut seed, 1200), vec![], 1)],
+        ];
+        // No word at word length 3: frames shorter than the word, and one masked whole.
+        let wordless = vec![vec![
+            frame(residues(&mut seed, 2), vec![], 1),
+            frame(residues(&mut seed, 40), vec![(0, 39)], 2),
+            frame(Vec::new(), vec![], 3),
+        ]];
+        let prepared_w =
+            |queries: &[Vec<QueryFrame>], matrix: ScoringMatrix, word_length: usize| {
+                let bounds = if matrix == ScoringMatrix::Blosum62 {
+                    (-4, 11)
+                } else {
+                    matrix_score_bounds(matrix)
+                };
+                prepare_lookup_query(
+                    queries,
+                    ideal_karlin_params_for_matrix(matrix, bounds),
+                    &compute_std_aa_composition(),
+                    word_length,
+                    false,
+                    matrix,
+                    bounds,
+                )
+            };
+        let same = |queries: &[Vec<QueryFrame>],
+                    matrix: ScoringMatrix,
+                    word_length: usize,
+                    threshold: i32| {
+            let reference = build_lookup_from_prepared(
+                prepared_w(queries, matrix, word_length),
+                threshold,
+                matrix,
+                word_length,
+            )
+            .0;
+            let lean = match x_build_lean(
+                prepared_w(queries, matrix, word_length),
+                threshold,
+                matrix,
+                word_length,
+            ) {
+                Ok(table) => table,
+                Err(_) => panic!("the lean builder declined word length {word_length}"),
+            };
+            x_assert_same_table(&lean, &reference);
+            reference
+        };
+        for (matrix, word_length, thresholds) in [
+            (
+                ScoringMatrix::Blosum62,
+                3,
+                &[0, 1, 11, 12, 13, 19, 30, 1000][..],
+            ),
+            (ScoringMatrix::Blosum62, 2, &[0, 8, 11, 13][..]),
+            (ScoringMatrix::Blosum45, 2, &[16][..]),
+            (ScoringMatrix::Blosum45, 3, &[13, 14][..]),
+            (ScoringMatrix::Pam30, 3, &[11][..]),
+        ] {
+            let mut overflow_seen = false;
+            for &threshold in thresholds {
+                overflow_seen |= !same(&queries, matrix, word_length, threshold)
+                    .overflow
+                    .is_empty();
+            }
+            assert!(
+                overflow_seen,
+                "{matrix:?} word length {word_length} must reach the overflow array"
+            );
+        }
+        let empty = same(&wordless, ScoringMatrix::Blosum62, 3, 13);
+        assert!(empty.pv.iter().all(|&bits| bits == 0) && empty.overflow.is_empty());
+        assert!(x_build_lean(
+            prepared_w(&queries, ScoringMatrix::Blosum62, 4),
+            13,
+            ScoringMatrix::Blosum62,
+            4
+        )
+        .is_err());
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:338-343

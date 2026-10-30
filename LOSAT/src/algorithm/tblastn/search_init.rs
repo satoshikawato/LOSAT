@@ -1249,6 +1249,7 @@ mod tests {
             ScoringMatrix::Blosum62,
             3,
             &std::sync::OnceLock::new(),
+            &Default::default(),
             None,
         )
         .unwrap()
@@ -1313,6 +1314,7 @@ mod tests {
             ScoringMatrix::Blosum62,
             3,
             &std::sync::OnceLock::new(),
+            &Default::default(),
             None,
         )
         .unwrap()
@@ -1415,6 +1417,7 @@ mod tests {
             ScoringMatrix::Blosum62,
             3,
             &std::sync::OnceLock::new(),
+            &Default::default(),
             None,
         )
         .unwrap()

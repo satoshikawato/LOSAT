@@ -54,6 +54,8 @@ pub enum SeqData {
     Other,
 }
 
+use crate::seqid::ParsedSeqId;
+
 /// One sequence of the input as `CBuildDatabase::AddSequences` sees it after
 /// `s_FixBioseqDeltas`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,4 +77,54 @@ pub struct Bioseq {
     /// `Seq-inst.seq-data` after `s_FixBioseqDeltas`; `None` when the
     /// Seq-inst has no `seq-data` (`!CanGetSeq_data()`).
     pub seq_data: Option<SeqData>,
+    /// With `-parse_seqids`: the parsed ids and what `ExtractBioseqDeflines` reads; the
+    /// definition lines are built from them (`deflines`), and `local_id` and `title` are
+    /// not used.
+    pub parsed: Option<ParsedIds>,
+}
+
+/// The parts of a Bioseq of `CFastaReader` with `fRequireID | fParseRawID` that the
+/// writer reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedIds {
+    /// `CBioseq::GetId()`: the ids of the first parse (`CFastaDeflineReader`), or the
+    /// generated `lcl|N` of an id with a range; `CBuildDatabase::AddSequences` edits them.
+    pub ids: Vec<ParsedSeqId>,
+    /// The id that a range replaced: the other row of the Seq-hist alignment
+    /// (`CFastaReader::xCreateAlignment`), which `CBioseq::GetNonLocalId` reads.
+    pub hist_old_id: Option<ParsedSeqId>,
+    /// The `DefLine` field of the `CFastaReader` user object.
+    pub defline_field: Vec<u8>,
+    /// The title descriptor (`x_ApplyMods`).
+    pub title_descr: Option<Vec<u8>>,
+}
+
+impl Bioseq {
+    /// `GetId().front()->GetSeqIdString(false)`.
+    pub fn first_id_string(&self) -> String {
+        match self.parsed.as_ref().and_then(|parsed| parsed.ids.first()) {
+            Some(id) => {
+                let mut out = Vec::new();
+                crate::seqid::label::content(id, false, &mut out);
+                String::from_utf8_lossy(&out).into_owned()
+            }
+            None => self.local_id.clone(),
+        }
+    }
+
+    /// `GetId().front()->AsFastaString()` ("Unknown" for none), as
+    /// `CBuildDatabase::AddSequences` names the sequence in its messages.
+    pub fn first_id_fasta(&self) -> String {
+        match &self.parsed {
+            Some(parsed) => match parsed.ids.first() {
+                Some(id) => {
+                    let mut out = Vec::new();
+                    crate::seqid::label::fasta(id, &mut out);
+                    String::from_utf8_lossy(&out).into_owned()
+                }
+                None => "Unknown".to_string(),
+            },
+            None => format!("lcl|{}", self.local_id),
+        }
+    }
 }

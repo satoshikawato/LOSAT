@@ -79,7 +79,7 @@ fn write(c: &Content, dir: &Path) -> Result<(), crate::writedb::WriteDbError> {
     let mut tax = WriteDbTaxId::new(&ptf, m2, &platform, &settings)?;
     for (oid, (entries, taxids)) in c.oids.iter().enumerate() {
         for (id, save) in entries {
-            lmdb.insert_entry(id, oid as u32, *save);
+            lmdb.insert_entry(id, oid as u32, *save)?;
         }
         tax.insert_entries(taxids, oid as u32);
     }

@@ -338,6 +338,7 @@ export LOSAT_X_BPFSEED=1
 export LOSAT_X_BPFSTAGE=1
 export LOSAT_X_BPGAP=1
 export LOSAT_X_BPGAP16=1
+export LOSAT_X_BPGAPBAND=1
 export LOSAT_X_BPHITBF=1
 export LOSAT_X_BPIHPOOL=1
 export LOSAT_X_BPLISTEDLEAN=1
@@ -5669,6 +5670,48 @@ Scheduling (each value computed by one thread with the original function; order 
   Blast0_6 the restricted rows went from 20.1 to 13.3 G cycles (11.6 % of dev's cycles in `perf
   record`). With `=0` the instruction counts equal dev's (x1.00006) at x1.002-1.003 of its time. Max
   RSS within the spread of repeated runs of one binary.
+- `LOSAT_X_BPGAPBAND=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-gap-band,
+  v4-D12 s23-s25, `DECISIONS` 66-70): on unless it is `0`; acts only where `LOSAT_X_BPGAP` runs its vector rows) the
+  restricted gapped alignment's arrays (`XRestrictedScratch` in `blastp/x_restricted_gap.rs`: the score rows `h`, the
+  column gaps `e10`, the column letters `col`, and the 16-bit rows' `h16` and `e16`) hold the cells the band reaches
+  instead of the subject letters left or right of the seed (`len2`). NCBI starts `dp_mem` at `num_extra_cells + 100`
+  cells, `num_extra_cells = x_dropoff / gap_extend + 3` (`blast_gapalign.c:1040-1051`), and in the row loop grows it to
+  `MAX(last_b_index + num_extra_cells + 100, 2 * dp_mem_alloc)` (`1261-1269`). The scratch sized and filled its
+  arrays for `len2` and never shrank them, so each thread kept arrays for the longest subject it had aligned, about
+  15.4 bytes per letter (UniRef50 q100 at 32 threads: 16.3 MiB held, 26.6 MiB of capacity; sized by the furthest cell
+  each scratch's band reached, 0.7 MiB). With the switch `restricted_fast` starts the arrays at `ahead + 100` cells,
+  `ahead` = `(x_dropoff + 2 * max) / gap_extend + 3 + ROW_AHEAD` (`max` the largest matrix entry: a row's band
+  extension starts from a score at most `best_score + 2 * max`; `ROW_AHEAD` = 47 cells the rows read past `b_size`;
+  `len2` without a gap extension cost, as NCBI's `N + 3`), and gives `col` `held - ahead` letters (`band_col`):
+  `fill_col` returns false past them, so the rows stop (None) before a row's band passes the cells held; the arrays
+  then double (NCBI's `2 * dp_mem_alloc`, up to `len2 + ahead + 2 + TAIL` cells, where the rows copy every letter) and
+  the rows run again from row 0, as the 16-bit rows do when they hand over to the 32-bit rows (3,000 human proteins x
+  `BlastDBSpecies6`: 77 stops in 1.54 M alignments). `col`'s length depends on the arrays only; with `=0`, or without a
+  gap extension cost, the arrays hold `len2` cells and `col` only grows, as before. The row functions are those of
+  the build before the switch: growing the arrays inside the row loop (a comparison per row, or in the letter-copy
+  block) changed the register allocation of the 16-bit rows, +2.0 to +3.0 % of their instructions with the switch on
+  or off; this form reads x1.00029 of the dev base's instructions there and x1.00030 in OrthoFinder Blast0_6
+  (callgrind, one thread). The cells the rows read and write, and every value, are those of the arrays of `len2`
+  (lib tests `x_bpgapband_reused_scratch_matches_reference`, `x_bpgapband_arrays_hold_the_band_not_the_subject`, and
+  every restricted-alignment test of `check()` also with the switch on, on a scratch of its own;
+  `tests/blastp_restricted_gapped.rs` `restricted_gapped_alignments_match_ncbi_with_and_without_the_switch` compares
+  NCBI BLAST+ 2.17.0's rows with `=0` too).
+  Evidence 2026-10-29/30 (v4-D12 s24-s25, workstation, head d78bb8a8 on dev 593fff35; arms default, `=0`, and the
+  dev base built the same way, 8 rounds rotated, peak RssAnon from 2 ms samples; every report identical across
+  arms): UniRef50 q100 `-evalue 0.001` at 32 threads (node 1, membind 1) 141.2 [139.3-143.5] MiB against the dev
+  base 161.2 [159.0-162.7] and `=0` 161.6 [156.8-162.4] (17.9-22.0 MiB lower in 8 of 8 rounds; wall x1.0027
+  [0.9955-1.0138] of the dev base, `=0` x1.0000 [0.9969-1.0042], in runs not warmed beside the sampler); q100
+  against a third of UniRef50 at 16 threads (two runs side by side, 12 slots) 67.8 [59.0-86.5] against 69.6
+  [63.2-77.8] and `=0` 66.2 [63.3-72.2] (1.0-5.6 MiB lower than the dev base in the same slot, 4 of 4; this
+  case's peak spreads by +-16 MiB between slots, the arrays are 0.1 MiB of it); 3,000 human x `BlastDBSpecies6`
+  at 16 threads 37.4 [37.1-37.5] against 38.2 [38.1-38.6] and `=0` 38.3 (8 of 8 lower); one thread (node 0)
+  human 12.9 against 13.0, OrthoFinder Blast0_6 19.2 against 19.2 MiB. Time: one thread (`perf stat` `:u`, node
+  0, CPUs 18-19) instructions x1.0003 of the dev base in both cases (callgrind: x1.00029 and x1.00030, the
+  16-bit rows +0.02 %), cycles human x0.9932 (7 of 8 rounds below 1; `=0` x0.9978), Blast0_6 x0.9405 with `=0`
+  x0.9423, the binary's placement (both arms of the branch 139.1 G cycles, the dev base 146.5-148.3 G in three
+  runs), not a gain of the switch; 16 threads (node 1 CPUs 32-47 warmed 3 s, 8 rounds) Swiss-Prot q100
+  instructions x1.0000, cycles x1.0006 (`=0` x1.0012), wall x1.0008 (`=0` x1.0000); human instructions x1.0003,
+  cycles x1.0012 (`=0` x1.0031), wall x1.0015 (`=0` x0.9985).
 - PAIRPAR, TBLASTX half (graduated 2026-10-22; no variable, no `LOSAT_X_PAIRPARSHADOW`; class
   conditional, the name stays in `GRADUATED` for the reach table; it was in the strict set; the
   blastn half is above) TBLASTX seed stage (scan, two-hit test, ungapped extension) of each subject

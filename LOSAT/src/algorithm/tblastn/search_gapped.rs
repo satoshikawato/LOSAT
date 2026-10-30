@@ -403,6 +403,8 @@ pub(super) struct XQuerySide {
     frames_in_progress: std::sync::Mutex<()>,
     lookup:
         std::sync::OnceLock<std::sync::Arc<crate::algorithm::tblastx::lookup::BlastAaLookupTable>>,
+    /// The compressed table of word sizes 5 to 7 (tblastn-fast), in place of `lookup`.
+    compressed: super::search_seed::XCompressedSide,
     /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the buffers of the units of the batch's plans without
     /// residues.
     unit_residues: XUnitResiduesPool,
@@ -417,6 +419,7 @@ impl XQuerySide {
             frames: OnceLock::new(),
             frames_in_progress: std::sync::Mutex::new(()),
             lookup: OnceLock::new(),
+            compressed: Default::default(),
             unit_residues: XUnitResiduesPool::new(),
         }
     }
@@ -641,6 +644,7 @@ fn x_preliminary_protein_hsps_by_unit(
         profile.matrix,
         profile.word_size,
         &x_query_side.lookup,
+        &x_query_side.compressed,
         x_subject,
     )?
     else {

@@ -25,7 +25,7 @@ pub struct DataSizeError {
 /// which is what `CS2N_Guard::Message` uses on the input string.
 /// Ported branches: `s_PrintableString` with `mode == 0`, `lang == eLanguage_C`
 /// (so `fNewLine_Passthru`, `fNonAscii_Quote`, `fPrintable_Full` and `eLanguage_Javascript` are not ported).
-fn printable_string(str_: &[u8]) -> String {
+pub(crate) fn printable_string(str_: &[u8]) -> String {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3736-3742
     // ```c++
     //     unique_ptr<CNcbiOstrstream> out;

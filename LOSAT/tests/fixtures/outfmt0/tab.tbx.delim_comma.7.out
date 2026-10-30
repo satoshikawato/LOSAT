@@ -1,0 +1,110 @@
+# TBLASTX 2.17.0+
+# Query: q_v_b LvMJNV 37801-38600
+# Database: User specified sequence set (Input: tests/db_search/xslice.fna)
+# Fields: query id, subject id, evalue
+# 51 hits found
+q_v_b,v_slice,1.38e-161
+q_v_b,v_slice,1.38e-161
+q_v_b,v_slice,9.60e-154
+q_v_b,v_slice,9.60e-154
+q_v_b,v_slice,1.84e-150
+q_v_b,v_slice,1.84e-150
+q_v_b,v_slice,1.84e-150
+q_v_b,v_slice,1.13e-124
+q_v_b,v_slice,1.13e-124
+q_v_b,v_slice,1.13e-124
+q_v_b,v_slice,1.13e-124
+q_v_b,v_slice,3.42e-102
+q_v_b,v_slice,3.42e-102
+q_v_b,v_slice,5.01e-94
+q_v_b,v_slice,5.01e-94
+q_v_b,v_slice,5.01e-94
+q_v_b,v_slice,0.61
+q_v_b,v_slice,1.1
+q_v_b,v_slice,1.6
+q_v_b,v_slice,2.2
+q_v_b,v_slice,3.0
+q_v_b,v_slice,3.0
+q_v_b,v_slice,4.1
+q_v_b,v_slice,5.6
+q_v_b,v_slice,5.6
+q_v_b,v_slice,5.6
+q_v_b,v_mut_8pct,0.17
+q_v_b,v_mut_8pct,2.2
+q_v_b,v_mut_8pct,4.1
+q_v_b,m_minus,1.6
+q_v_b,m_minus,2.2
+q_v_b,m_minus,5.6
+q_v_b,m_plus,1.6
+q_v_b,m_plus,1.8
+q_v_b,m_plus,1.8
+q_v_b,m_plus,3.0
+q_v_b,m_plus,3.0
+q_v_b,m_plus,4.1
+q_v_b,m_plus,4.1
+q_v_b,m_plus,5.6
+q_v_b,m_plus,5.6
+q_v_b,m_plus,7.7
+q_v_b,m_plus,7.7
+q_v_b,m_plus,7.7
+q_v_b,m_plus,7.7
+q_v_b,m_plus,7.7
+q_v_b,m_plus,7.7
+q_v_b,m_plus,7.7
+q_v_b,m_plus,7.7
+q_v_b,v_far_22pct,5.6
+q_v_b,v_far_22pct,5.6
+# TBLASTX 2.17.0+
+# Query: q_p_minus PemoMJNVA 32001-33500
+# Database: User specified sequence set (Input: tests/db_search/xslice.fna)
+# Fields: query id, subject id, evalue
+# 44 hits found
+q_p_minus,m_minus,0.0
+q_p_minus,m_minus,0.0
+q_p_minus,m_minus,0.0
+q_p_minus,m_minus,0.0
+q_p_minus,m_minus,0.0
+q_p_minus,m_minus,0.0
+q_p_minus,m_minus,1.37e-100
+q_p_minus,m_minus,1.37e-100
+q_p_minus,m_minus,1.37e-100
+q_p_minus,m_minus,1.37e-100
+q_p_minus,m_minus,1.37e-100
+q_p_minus,m_minus,1.37e-100
+q_p_minus,m_minus,8.69e-62
+q_p_minus,m_minus,8.69e-62
+q_p_minus,m_minus,8.69e-62
+q_p_minus,m_minus,8.69e-62
+q_p_minus,m_minus,8.69e-62
+q_p_minus,m_minus,8.69e-62
+q_p_minus,m_minus,2.74e-51
+q_p_minus,m_minus,2.74e-51
+q_p_minus,m_minus,2.74e-51
+q_p_minus,m_minus,2.74e-51
+q_p_minus,m_minus,2.74e-51
+q_p_minus,m_minus,5.54e-34
+q_p_minus,m_minus,5.54e-34
+q_p_minus,m_minus,5.54e-34
+q_p_minus,m_minus,5.54e-34
+q_p_minus,m_minus,5.54e-34
+q_p_minus,m_minus,5.54e-34
+q_p_minus,m_minus,1.02e-32
+q_p_minus,m_minus,1.02e-32
+q_p_minus,m_minus,1.02e-32
+q_p_minus,m_minus,1.02e-32
+q_p_minus,m_minus,1.02e-32
+q_p_minus,m_minus,1.6
+q_p_minus,v_far_22pct,0.34
+q_p_minus,v_far_22pct,0.34
+q_p_minus,v_far_22pct,4.3
+q_p_minus,v_far_22pct,4.3
+q_p_minus,v_far_22pct,8.0
+q_p_minus,v_mut_8pct,2.3
+q_p_minus,v_mut_8pct,4.3
+q_p_minus,m_plus,3.1
+q_p_minus,m_plus,5.8
+# TBLASTX 2.17.0+
+# Query: q_nohit random 45 bases
+# Database: User specified sequence set (Input: tests/db_search/xslice.fna)
+# 0 hits found
+# BLAST processed 3 queries

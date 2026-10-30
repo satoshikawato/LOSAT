@@ -353,23 +353,6 @@ mod tests {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1262
-    // ```c
-    //    mb_lt->hashtable = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
-    // ```
-    // Random queries (ambiguity codes, masks, both cell orders) of tables of 4^4 to 4^12 cells in
-    // a row through one keep, one after another and on pools of 2 and 5 threads (the pool fill
-    // with the `resident` flag; these queries are too short for the prefault round, which the
-    // whole-search tests cover): every build equals the same build on a fresh table, every build
-    // of no more cells than the kept table takes it (filled by earlier builds), and the elements
-    // past the start that builds wrote stay 0. With LOSAT_X_MB24 the newest-first tables of 4^12
-    // cells take the words of their 3-byte heads, fewer than 4^12. With LOSAT_X_BNCSRPACK a
-    // newest-first table of 4^8 to 4^11 cells is CSR at any size, so those tables are built in
-    // reading order here, which keeps their chains (the switch off builds them newest first too).
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
     // LOSAT_X_MBCSR: the batches of a search can take either side of its size rule at 4^12 cells, so
     // a chains build can follow a CSR build on one keep; it is the fresh build.
     #[test]
@@ -413,6 +396,23 @@ mod tests {
         assert_same(&built, &fresh, 1 << 24, next_pos_len, "chains after a CSR");
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1262
+    // ```c
+    //    mb_lt->hashtable = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
+    // ```
+    // Random queries (ambiguity codes, masks, both cell orders) of tables of 4^4 to 4^12 cells in
+    // a row through one keep, one after another and on pools of 2 and 5 threads (the pool fill
+    // with the `resident` flag; these queries are too short for the prefault round, which the
+    // whole-search tests cover): every build equals the same build on a fresh table, every build
+    // of no more cells than the kept table takes it (filled by earlier builds), and the elements
+    // past the start that builds wrote stay 0. With LOSAT_X_MB24 the newest-first tables of 4^12
+    // cells take the words of their 3-byte heads, fewer than 4^12. With LOSAT_X_BNCSRPACK a
+    // newest-first table of 4^8 to 4^11 cells is CSR at any size, so those tables are built in
+    // reading order here, which keeps their chains (the switch off builds them newest first too).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     #[test]
     fn builds_on_a_kept_table_are_the_fresh_builds() {
         const LUTS: [usize; 8] = [11, 8, 11, 11, 4, 12, 9, 12];

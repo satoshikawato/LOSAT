@@ -1192,136 +1192,49 @@ mod tests {
         }
     }
 
-    /// Reference results from the real file with NCBI's exact query (python3 and its `sqlite3`).
-    /// `pick N SEED` prints N random taxids (half internal nodes, half leaves); `desc T...` prints
-    /// `T: sorted descendants` per taxid; `tree1` prints the nodes reachable from taxid 1.
-    const REAL_REF_PY: &str = r#"
-import random, sqlite3, sys
-QUERY = """
-WITH RECURSIVE descendants_from(taxid, parent) AS
-    (SELECT ?1, NULL
-     UNION ALL
-     SELECT T.taxid, T.parent
-       FROM descendants_from D, TaxidInfo T
-       WHERE D.taxid = T.parent)
-SELECT taxid from descendants_from;
-"""
-def get_int(v):
-    return ((v + (1 << 31)) % (1 << 32)) - (1 << 31)
-db, mode = sys.argv[1], sys.argv[2]
-con = sqlite3.connect("file:%s?mode=ro" % db, uri=True)
-if mode == "pick":
-    n, seed = int(sys.argv[3]), int(sys.argv[4])
-    rnd = random.Random(seed)
-    rows = con.execute("SELECT taxid FROM TaxidInfo").fetchall()
-    parents = {r[0] for r in con.execute("SELECT DISTINCT parent FROM TaxidInfo WHERE parent IS NOT NULL")}
-    inner = [r[0] for r in rows if r[0] in parents and r[0] != 1 and r[0] < 2**31]
-    leaves = [r[0] for r in rows if r[0] not in parents and r[0] < 2**31]
-    pick = rnd.sample(inner, n // 2) + rnd.sample(leaves, n - n // 2)
-    print(" ".join(map(str, pick)))
-elif mode == "tree1":
-    kids = {}
-    for t, p in con.execute("SELECT taxid, parent FROM TaxidInfo WHERE parent IS NOT NULL"):
-        kids.setdefault(p, []).append(t)
-    seen, todo = {1}, [1]
-    while todo:
-        for k in kids.get(todo.pop(), []):
-            if k not in seen:
-                seen.add(k)
-                todo.append(k)
-    print(" ".join(map(str, sorted(get_int(t) for t in seen if get_int(t) != 1))))
-else:
-    for a in sys.argv[3:]:
-        t = int(a)
-        if t <= 0:
-            print("%d:" % t)
-            continue
-        d = sorted(g for g in (get_int(r[0]) for r in con.execute(QUERY, (t,))) if g != t)
-        print("%d: %s" % (t, " ".join(map(str, d))))
-"#;
-
-    fn py(args: &[&str]) -> String {
-        let out = std::process::Command::new("python3")
-            .arg("-I")
-            .arg("-c")
-            .arg(REAL_REF_PY)
-            .args(args)
-            .output()
-            .expect("python3");
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        String::from_utf8(out.stdout).unwrap()
-    }
-
     /// Needs the real NCBI file: `LOSAT_TEST_TAX_SQLITE=/path/to/taxonomy4blast.sqlite3` (3.4 million
-    /// rows) and python3 with `sqlite3`. Compares 212 taxids with SQLite running NCBI's query, and
-    /// taxid 1 (whose NCBI query never ends) with a walk of the whole tree in Python.
+    /// rows) and `LOSAT_TEST_TAX_SQLITE_EXPECTED`, the file that `tests/seqdb/tax_sqlite_ref.py`
+    /// writes from it with Python's `sqlite3`: a line `T: sorted descendants` for 212 taxids (NCBI's
+    /// query run by SQLite) and for taxid 1, whose NCBI query never ends (a walk of the whole tree).
     #[test]
-    #[ignore = "needs LOSAT_TEST_TAX_SQLITE (the real taxonomy4blast.sqlite3) and python3"]
+    #[ignore = "needs LOSAT_TEST_TAX_SQLITE (the real taxonomy4blast.sqlite3) and LOSAT_TEST_TAX_SQLITE_EXPECTED"]
     fn real_file_equals_sqlite3() {
         let path = std::env::var("LOSAT_TEST_TAX_SQLITE").expect("LOSAT_TEST_TAX_SQLITE");
+        let expected = std::env::var("LOSAT_TEST_TAX_SQLITE_EXPECTED")
+            .expect("LOSAT_TEST_TAX_SQLITE_EXPECTED");
         let t0 = std::time::Instant::now();
         let f = std::fs::File::open(&path).unwrap();
         let file = FileSrc(f.try_clone().unwrap(), f.metadata().unwrap().len());
         let db = TaxonomySqlite::open_named(&file, &path).unwrap();
         println!("real file: {} bytes, open {:?}", file.1, t0.elapsed());
-        let mut ids: Vec<i32> = vec![
-            0, -5, 2, 561, 562, 543, 1224, 9606, 40674, 7742, 10090, 99999999,
-        ];
-        for s in py(&[&path, "pick", "200", "20261029"]).split_whitespace() {
-            ids.push(s.parse().unwrap());
-        }
-        // root: SQLite never finishes; LOSAT returns the whole tree
-        let mut tree: Vec<i32> = db.descendants(1).unwrap();
-        tree.sort_unstable();
-        let want: Vec<i32> = py(&[&path, "tree1"])
-            .split_whitespace()
-            .map(|s| s.parse().unwrap())
-            .collect();
-        assert_eq!(tree, want, "taxid 1");
-        println!("taxid 1: {} descendants", tree.len());
-        // the python reference for all of them in one run
-        let args: Vec<String> = ids
-            .iter()
-            .filter(|&&t| t > 0)
-            .map(|t| t.to_string())
-            .collect();
-        let mut a: Vec<&str> = vec![&path, "desc"];
-        a.extend(args.iter().map(|s| s.as_str()));
-        let refs = py(&a);
-        let mut want: HashMap<i32, Vec<i32>> = HashMap::new();
+        let refs = std::fs::read_to_string(&expected).unwrap();
+        let mut total = 0usize;
+        let mut count = 0usize;
         for line in refs.lines() {
             let (t, rest) = line.split_once(':').unwrap();
-            want.insert(
-                t.parse().unwrap(),
-                rest.split_whitespace()
-                    .map(|s| s.parse().unwrap())
-                    .collect(),
-            );
-        }
-        let mut total = 0usize;
-        for &t in &ids {
+            let t: i32 = t.parse().unwrap();
+            let want: Vec<i32> = rest
+                .split_whitespace()
+                .map(|s| s.parse().unwrap())
+                .collect();
             let t1 = std::time::Instant::now();
+            // root: SQLite never finishes; LOSAT returns the whole tree
             let mut got = db
                 .descendants(t)
                 .unwrap_or_else(|e| panic!("taxid {}: {}", t, e));
             let el = t1.elapsed();
             got.sort_unstable();
-            let empty = Vec::new();
-            let w = want.get(&t).unwrap_or(&empty);
-            assert_eq!(&got, w, "taxid {}", t);
+            assert_eq!(got, want, "taxid {}", t);
             total += got.len();
-            if got.len() > 20000 || [9606, 561, 10090].contains(&t) {
+            count += 1;
+            if got.len() > 20000 || [1, 9606, 561, 10090].contains(&t) {
                 println!("taxid {:>8}: {:>8} descendants in {:?}", t, got.len(), el);
             }
         }
+        assert_eq!(count, 213, "{expected}: lines");
         println!(
             "{} taxids equal to sqlite3 ({} descendants in all)",
-            ids.len(),
-            total
+            count, total
         );
     }
 }

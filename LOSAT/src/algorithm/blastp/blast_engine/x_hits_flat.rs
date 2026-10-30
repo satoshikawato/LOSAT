@@ -21,8 +21,7 @@
 //! (`BlastpSubjectScratch::preliminary_hits_by_query`, cleared, never shrunk), each as long as
 //! the most HSPs that query had in any one subject of the thread: the search held, per thread,
 //! the sum over the queries of each query's largest list. With 100 UniRef50 queries against
-//! UniRef50 at 32 threads that was 14 MiB of capacity, of which no subject used more than a few
-//! KiB (v4-D12 `DECISIONS` 71).
+//! UniRef50 at 32 threads that was 14 MiB of capacity (v4-D12 `DECISIONS` 71).
 //!
 //! With the switch on, a stable counting sort puts the positions of the subject's HSPs in query
 //! order ([`order_by_query`]); the HSPs of each query are read in place from the subject's list,

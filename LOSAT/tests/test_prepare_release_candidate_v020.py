@@ -197,6 +197,7 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(
             contract["public_cli"]["rejected_tasks"], ["blastp-short"]
         )
+        self.assertEqual(contract["public_cli"]["blastx_tasks"], ["blastx", "blastx-fast"])
         self.assertEqual(contract["public_cli"]["tblastn_tasks"], ["tblastn", "tblastn-fast"])
         for case in contract["smoke"]:
             self.assertNotIn("blastp-short", case["arguments"])

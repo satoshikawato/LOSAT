@@ -250,6 +250,8 @@ fn parse_blastn_args(
         subject: Some(subject),
         // The frozen web ABI v1 (plan TD-1) has no database search.
         db: None,
+        // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
+        taxid_filter: Default::default(),
         dbsize: None,
         show_gis: false,
         searchsp: None,
@@ -384,6 +386,8 @@ fn parse_tblastx_args(
         subject: Some(subject),
         // A database search is not part of LOSAT Web yet (DB-7).
         db: None,
+        // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
+        taxid_filter: Default::default(),
         dbsize: None,
         show_gis: false,
         searchsp: None,
@@ -546,6 +550,8 @@ fn parse_blastp_args(
         subject: Some(subject),
         // The frozen web ABI v1 (plan TD-1) searches subject records, not a database.
         db: None,
+        // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
+        taxid_filter: Default::default(),
         dbsize: None,
         show_gis: false,
         searchsp: None,

@@ -998,6 +998,7 @@ mod tests {
             query: PathBuf::from("query.faa"),
             subject: Some(PathBuf::from("subject.faa")),
             db: None,
+            taxid_filter: Default::default(),
             dbsize: None,
             show_gis: false,
             searchsp: None,

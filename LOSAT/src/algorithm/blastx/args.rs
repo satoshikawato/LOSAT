@@ -42,7 +42,8 @@ pub struct BlastxArgs {
     //                      "Input file name",
     //                      CArgDescriptions::eInputFile, kDfltArgQuery);
     // ```
-    #[arg(long, value_name = "PATH")]
+    // The default `-` is standard input (`input_files::open_input`).
+    #[arg(long, value_name = "PATH", default_value = "-")]
     pub query: PathBuf,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2366
     // ```c++
@@ -809,13 +810,12 @@ impl BlastxArgs {
         choice: &crate::blastinput::app::FormatChoice,
     ) -> Result<ResolvedOptions> {
         let outfmt = u8::try_from(choice.number)?;
-        if self.query.as_os_str() == "-"
-            || self
-                .subject
-                .as_deref()
-                .is_some_and(|subject| subject.as_os_str() == "-")
+        if self
+            .subject
+            .as_deref()
+            .is_some_and(|subject| subject.as_os_str() == "-")
         {
-            bail!("unsupported BLASTX stdin query/subject");
+            bail!("unsupported BLASTX stdin subject");
         }
         if self.matrix.as_deref().is_some_and(|m| m != "BLOSUM62") {
             bail!("unsupported BLASTX matrix: use BLOSUM62");

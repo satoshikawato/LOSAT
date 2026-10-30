@@ -1,0 +1,168 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nucleotide slices of two shrimp viruses
+           5 sequences; 33,385 total letters
+
+
+
+Query= Query_1 t
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block       103     1e-29
+m_minus MelaMJNV 59001-62000 with ambiguity codes                     18.9    1.9  
+v_slice LvMJNV 21001-39000 with ambiguity codes                       18.5    2.9  
+
+
+>m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block
+Length=8000
+
+ Score = 103 bits (256),  Expect = 1e-29, Method: Compositional matrix adjust.
+ Identities = 49/55 (89%), Positives = 53/55 (96%), Gaps = 0/55 (0%)
+ Frame = +3
+
+Query  1     MASLGLLSTLRGILQGKRNADIENLISKLHYRVTTTTVFCFCLLVTTNTLVGDPI  55
+             MASLGLLSTLRGILQGKRNADIEN++SKLHYRVTTT +F FCL+VTTNTLVGDPI
+Sbjct  933   MASLGLLSTLRGILQGKRNADIENIMSKLHYRVTTTVLFSFCLIVTTNTLVGDPI  1097
+
+
+ Score = 85.9 bits (211),  Expect = 1e-23, Method: Compositional matrix adjust.
+ Identities = 42/98 (43%), Positives = 52/98 (53%), Gaps = 33/98 (34%)
+ Frame = +1
+
+Query  56    SCVYDSGHPKLNDKVVNTYCWIHTTFTLPNRPYRDMSAIS--------------------  95
+             SC+ D  +PKL+DKV+NTYCWIHTTFT+PNR Y++   +S                    
+Sbjct  1243  SCIVDRTNPKLSDKVINTYCWIHTTFTIPNRIYKERGKLSFTFIFLCIYKTFDVFYFAVV  1422
+
+Query  96    -------------SPGIGTHNLSDPVTYHAYYQWVPFM  120
+                           PGI  +N  D +TYHAYYQWVPFM
+Sbjct  1423  YIIFVLFLILDTHFPGISNYNRVDTITYHAYYQWVPFM  1536
+
+
+>m_minus MelaMJNV 59001-62000 with ambiguity codes
+Length=3000
+
+ Score = 18.9 bits (37),  Expect = 1.9, Method: Composition-based stats.
+ Identities = 14/50 (28%), Positives = 22/50 (44%), Gaps = 10/50 (20%)
+ Frame = -2
+
+Query  19    NADIENLISKLHYRVTTTTVFCFCLLVTTNTLVG--------DPISCVYD  60
+             N  IE++ SK  Y +    VF  CL +  +            D ++CVY+
+Sbjct  1679  NKIIEDIXSK--YIIPLKDVFHICLHIKAHLKCARSIKSTWYDNVTCVYE  1536
+
+
+>v_slice LvMJNV 21001-39000 with ambiguity codes
+Length=18000
+
+ Score = 18.5 bits (36),  Expect = 2.9, Method: Composition-based stats.
+ Identities = 13/25 (52%), Positives = 15/25 (60%), Gaps = 4/25 (16%)
+ Frame = +1
+
+Query  22     IENLISKLHYRVTTTTVF--CFCLL  44
+              IEN++SK  Y V    VF  CF LL
+Sbjct  14698  IENILSK--YIVPLRDVFHMCFHLL  14766
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.137    0.443    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 829008
+
+
+Query= Query_2 u
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block       103     1e-29
+m_minus MelaMJNV 59001-62000 with ambiguity codes                     18.9    1.9  
+v_slice LvMJNV 21001-39000 with ambiguity codes                       18.5    2.9  
+
+
+>m_plus MelaMJNV 36001-44000 with ambiguity codes and an N block
+Length=8000
+
+ Score = 103 bits (256),  Expect = 1e-29, Method: Compositional matrix adjust.
+ Identities = 49/55 (89%), Positives = 53/55 (96%), Gaps = 0/55 (0%)
+ Frame = +3
+
+Query  1     MASLGLLSTLRGILQGKRNADIENLISKLHYRVTTTTVFCFCLLVTTNTLVGDPI  55
+             MASLGLLSTLRGILQGKRNADIEN++SKLHYRVTTT +F FCL+VTTNTLVGDPI
+Sbjct  933   MASLGLLSTLRGILQGKRNADIENIMSKLHYRVTTTVLFSFCLIVTTNTLVGDPI  1097
+
+
+ Score = 85.9 bits (211),  Expect = 1e-23, Method: Compositional matrix adjust.
+ Identities = 42/98 (43%), Positives = 52/98 (53%), Gaps = 33/98 (34%)
+ Frame = +1
+
+Query  56    SCVYDSGHPKLNDKVVNTYCWIHTTFTLPNRPYRDMSAIS--------------------  95
+             SC+ D  +PKL+DKV+NTYCWIHTTFT+PNR Y++   +S                    
+Sbjct  1243  SCIVDRTNPKLSDKVINTYCWIHTTFTIPNRIYKERGKLSFTFIFLCIYKTFDVFYFAVV  1422
+
+Query  96    -------------SPGIGTHNLSDPVTYHAYYQWVPFM  120
+                           PGI  +N  D +TYHAYYQWVPFM
+Sbjct  1423  YIIFVLFLILDTHFPGISNYNRVDTITYHAYYQWVPFM  1536
+
+
+>m_minus MelaMJNV 59001-62000 with ambiguity codes
+Length=3000
+
+ Score = 18.9 bits (37),  Expect = 1.9, Method: Composition-based stats.
+ Identities = 14/50 (28%), Positives = 22/50 (44%), Gaps = 10/50 (20%)
+ Frame = -2
+
+Query  19    NADIENLISKLHYRVTTTTVFCFCLLVTTNTLVG--------DPISCVYD  60
+             N  IE++ SK  Y +    VF  CL +  +            D ++CVY+
+Sbjct  1679  NKIIEDIXSK--YIIPLKDVFHICLHIKAHLKCARSIKSTWYDNVTCVYE  1536
+
+
+>v_slice LvMJNV 21001-39000 with ambiguity codes
+Length=18000
+
+ Score = 18.5 bits (36),  Expect = 2.9, Method: Composition-based stats.
+ Identities = 13/25 (52%), Positives = 15/25 (60%), Gaps = 4/25 (16%)
+ Frame = +1
+
+Query  22     IENLISKLHYRVTTTTVF--CFCLL  44
+              IEN++SK  Y V    VF  CF LL
+Sbjct  14698  IENILSK--YIVPLRDVFHMCFHLL  14766
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.137    0.443    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 829008
+
+
+  Database: nucleotide slices of two shrimp viruses
+    Posted date:  Oct 15, 2026  10:35 PM
+  Number of letters in database: 33,385
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

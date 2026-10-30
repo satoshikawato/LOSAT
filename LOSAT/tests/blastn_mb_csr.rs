@@ -5,9 +5,9 @@
 //! It chooses between two LOSAT layouts of the same chains, so the property under test is that the
 //! report does not depend on it, and that its size rule picks the side it says: `LOSAT_X_REACH`
 //! shows the switch's sides. 200 kb of Sakai (both strands 400,000 positions, a 4^12-cell table)
-//! against MG1655 (4.6 Mb) is above the rule of 8 letters per position; all of Sakai (11 M
-//! positions) against the same subject is below it. Each against a subject file (`-subject`) and
-//! a database (`-db`), at one and four threads.
+//! against five copies of MG1655 (23 Mb) is above the rule of 8 letters per position and one per
+//! cell (19.9 M); all of Sakai (11 M positions) against the same subjects is below it. Each against
+//! a subject file (`-subject`) and a database (`-db`), at one and four threads.
 //! That those bytes equal NCBI's is the business of the fixture suites.
 
 use std::path::{Path, PathBuf};
@@ -111,7 +111,10 @@ fn search(
 }
 
 fn check(dir: &TestDir, query: &Path, taken: bool) {
-    let subject = fasta("MG1655.fna");
+    let subject = dir.path("mg1655_x5.fna");
+    let genome = letters(&fasta("MG1655.fna"));
+    let records: String = (0..5).map(|i| format!(">mg{i}\n{genome}\n")).collect();
+    std::fs::write(&subject, records).expect("write the subjects");
     let db = database(dir, &subject);
     for subjects in [("-subject", subject.as_path()), ("-db", db.as_path())] {
         let what = format!("{} taken {taken}", subjects.0);

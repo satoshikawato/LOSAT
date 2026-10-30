@@ -3409,11 +3409,11 @@ Scheduling (each value computed by one thread with the original function; order 
   thread count; speed and memory; in the strict set from the pull request that added it, 2026-10-30 (perf/mb-csr12):
   on unless it is `0`) lays those tables out as CSR with a packed head (`blastn/x_bn_csr.rs`, `x_in_scope`), as
   `LOSAT_X_BNCSR` and `LOSAT_X_BNCSRPACK` do for 4^8 to 4^11 cells, when the subjects' letters are at least 8 times the
-  positions of the word loop (`X_MB12_LETTERS_PER_POSITION`). The scan then reads a word's presence bits and its run
+  positions of the word loop plus the cells (`X_MB12_LETTERS_PER_POSITION`). The scan then reads a word's presence bits and its run
   through the prefetch ring instead of one miss per head and per chain element on `next_pos`, which took 45 % of the
   cycles of draft200 x one volume of ref_prok_rep_genomes (4 Gnt) at one thread. The rule keeps the chains' cheaper
   fill for small subjects: without it Sakai x MG1655 was ×1.34 and draft200 x an 8.7 MB database ×1.69 (the CSR's build
-  costs 13-22 ns more per position, its scan saves about 3.2 ns per subject letter). v4-R R11 measured only a 5 Mb
+  costs 13-22 ns more per position and about 40 ms per build, its scan saves about 3.2 ns per subject letter). v4-R R11 measured only a 5 Mb
   subject and found no gain. Evidence (ws, one core of node 0, three rounds, the same reports): draft200 x that volume
   ×0.72 of `=0` with max RSS ×0.90, 235 contigs x 1.5 Gnt of plasmids ×0.74 with ×0.86, Meles x 129 Mb of nt ×0.81 with
   ×0.92; below the rule the same as `=0`. `LOSAT/tests/blastn_mb_csr.rs` checks both sides of the rule on whole

@@ -158,7 +158,8 @@ use std::ops::RangeInclusive;
 /// joined the set in the pull request that added it, after it was verified and timed with it on
 /// and off.
 /// `LOSAT_X_MBCSR` (megablast's tables of 4^12 cells laid out as packed CSR and scanned through the
-/// prefetch ring when the search scans at least 8 subject letters per position of the word loop,
+/// prefetch ring when the search scans at least 8 subject letters per position of the word loop
+/// and one per cell,
 /// `blastn/x_bn_csr.rs`) joined the set in the pull request that added it, after it was verified
 /// and timed with it on and off.
 /// `LOSAT_X_MBHITPF` (BLASTN's loop over the offset pairs prefetches the query line of the hit 16

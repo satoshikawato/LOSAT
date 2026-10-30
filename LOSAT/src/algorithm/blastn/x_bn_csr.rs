@@ -174,8 +174,8 @@ const MAX_LUT: usize = 11;
 
 /// No NCBI counterpart: EXPERIMENT (LOSAT_X_MBCSR, in the strict set: on unless it is `0`) megablast's
 /// tables of 4^12 cells are laid out as CSR too, with a packed head, when the search scans at least
-/// `X_MB12_LETTERS_PER_POSITION` subject letters per position of the word loop. It chooses between
-/// two LOSAT layouts of the same chains and changes no value NCBI computes.
+/// `X_MB12_LETTERS_PER_POSITION` subject letters per position of the word loop and one per cell. It
+/// chooses between two LOSAT layouts of the same chains and changes no value NCBI computes.
 pub(super) fn x_mb12_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBCSR"))
@@ -184,13 +184,16 @@ pub(super) fn x_mb12_on() -> bool {
 /// No NCBI counterpart: LOSAT_X_MBCSR's size rule. At one thread on the workstation the CSR's build
 /// costs 13-22 ns more per position of the word loop than the chains' fill, and its scan saves
 /// about 3.2 ns per subject letter (draft200 x one 4 Gnt volume of ref_prok_rep_genomes, x0.72;
-/// 1.5 Gnt of plasmids, x0.74), so the two meet at about 6 letters per position.
+/// 1.5 Gnt of plasmids, x0.74), so the two meet at about 6 letters per position. A build also costs
+/// about 40 ms whatever its positions (its cells, and the batch loop's kept table it frees: draft200's
+/// batch of 832,276 positions x an 8.7 MB database, x1.06 without this term), the gain of 12.5 M
+/// letters; the rule asks for one letter per cell, 16.8 M.
 const X_MB12_LETTERS_PER_POSITION: u64 = 8;
 
 /// No NCBI counterpart: whether a table of `lut_word_length` is in the scope (`MIN_LUT`, `MAX_LUT`;
 /// LOSAT_X_MBCSR: 12 too, when its head is packed and the search scans enough letters).
 /// `scan_letters`: the letters of the search's subjects, `None` when the caller does not say.
-fn x_in_scope(words: &Words<'_>, scan_letters: Option<u64>) -> bool {
+fn x_in_scope(words: &Words<'_>, cells: usize, scan_letters: Option<u64>) -> bool {
     if (MIN_LUT..=MAX_LUT).contains(&words.lut_word_length) {
         return true;
     }
@@ -198,7 +201,10 @@ fn x_in_scope(words: &Words<'_>, scan_letters: Option<u64>) -> bool {
         return false;
     }
     let taken = scan_letters.is_some_and(|letters| {
-        letters >= (positions(words) as u64).saturating_mul(X_MB12_LETTERS_PER_POSITION)
+        letters
+            >= (positions(words) as u64)
+                .saturating_mul(X_MB12_LETTERS_PER_POSITION)
+                .saturating_add(cells as u64)
     });
     crate::utils::xreach::x_reach!("LOSAT_X_MBCSR", taken);
     taken
@@ -220,7 +226,7 @@ pub(super) fn plan(
     // EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head has no size rule (module comment).
     let csr = !db_word_counts
         && !debug
-        && x_in_scope(words, scan_letters)
+        && x_in_scope(words, cells, scan_letters)
         && (x_will_pack(words.ascending_cells) || wanted(positions(words), cells));
     crate::utils::xreach::x_reach!("LOSAT_X_BNCSR", csr);
     csr
@@ -980,7 +986,8 @@ pub(super) mod tests {
                 false,
                 None
             ));
-            // LOSAT_X_MBCSR: 4^12 cells with a search of at least 8 letters per position.
+            // LOSAT_X_MBCSR: 4^12 cells with a search of at least 8 letters per position and one
+            // per cell.
             let positions = big.refs()[0].len() as u64;
             assert_eq!(
                 plan(
@@ -988,7 +995,7 @@ pub(super) mod tests {
                     1 << 24,
                     false,
                     false,
-                    Some(positions * X_MB12_LETTERS_PER_POSITION)
+                    Some(positions * X_MB12_LETTERS_PER_POSITION + (1 << 24))
                 ),
                 x_will_pack(false) && x_mb12_on()
             );
@@ -997,7 +1004,7 @@ pub(super) mod tests {
                 1 << 24,
                 false,
                 false,
-                Some(positions * X_MB12_LETTERS_PER_POSITION - 1)
+                Some(positions * X_MB12_LETTERS_PER_POSITION + (1 << 24) - 1)
             ));
             // below the rule: chains, unless the head is packed (LOSAT_X_BNCSRPACK has no rule)
             assert_eq!(

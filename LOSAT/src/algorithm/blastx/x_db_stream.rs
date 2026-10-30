@@ -94,6 +94,9 @@ pub(crate) struct XStreamDb<'a> {
     /// The residues of the longest sequence (from the check).
     longest: usize,
     block_bytes: u64,
+    /// EXPERIMENT (LOSAT_X_BXTASKRES): the subject flow's task bounds by tasks' `k`, made once
+    /// (`x_task_starts`).
+    x_task_starts: std::sync::Mutex<Vec<(usize, std::sync::Arc<[u32]>)>>,
 }
 
 impl<'a> XStreamDb<'a> {
@@ -111,6 +114,7 @@ impl<'a> XStreamDb<'a> {
             total_length: db.total_length(),
             longest,
             block_bytes,
+            x_task_starts: std::sync::Mutex::new(Vec::new()),
         }
     }
 
@@ -162,6 +166,34 @@ impl<'a> XStreamDb<'a> {
         let first = u32::try_from(oid)?;
         let end = first.saturating_add(LENGTH_WINDOW as u32);
         self.db.x_protein_lengths(first, end).map_err(read_error)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXTASKRES): `read_lengths`, for the bounds of the subject flow's tasks
+    /// (`x_subject_flow::XTasks`).
+    #[cfg(feature = "parallel")]
+    pub(crate) fn x_lengths_from(&self, oid: usize) -> Result<Vec<u32>> {
+        self.read_lengths(oid)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BXTASKRES): the subject flow's task bounds for tasks of `k` subjects:
+    /// those made before in this run, or `make`'s (kept unless it gives `None`). A flow that asks
+    /// while another makes them waits for them.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn x_task_starts(
+        &self,
+        k: usize,
+        make: impl FnOnce() -> Option<std::sync::Arc<[u32]>>,
+    ) -> Option<std::sync::Arc<[u32]>> {
+        let mut held = self
+            .x_task_starts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((_, starts)) = held.iter().find(|(held_k, _)| *held_k == k) {
+            return Some(starts.clone());
+        }
+        let starts = make()?;
+        held.push((k, starts.clone()));
+        Some(starts)
     }
 
     /// The residues of `oid` (`SeqDb::read_sequence`), for the stages after the preliminary

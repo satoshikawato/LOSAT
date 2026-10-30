@@ -5,11 +5,13 @@ const crypto = require("node:crypto");
 const os = require("node:os");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
-const { inspectArtifact, unsignedWasiImports, createSharedMemory } = require("./wasi_artifact");
+const { inspectArtifact, prepareArtifact, unsignedWasiImports, createSharedMemory } = require("./wasi_artifact");
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Keep the parallel command's memory operations valid across V8 isolates.
 const { guardSharedMemory } = require("./wasi_shared_memory");
+// The table of the files the command opens (wasi_files.js).
+const { sharedFileTable, sharedFileImports, sharedFileViews } = require("./wasi_files");
 
 const DEBUG = process.env.LOSAT_WASI_THREADS_DEBUG === "1";
 const WORKER_START_TIMEOUT_MS = parsePositiveIntEnv(
@@ -88,6 +90,19 @@ function prespawnCount(argv) {
     throw new Error(`LOSAT_WASI_PRESPAWN must be auto or an integer from 0 to ${PRESPAWN_MAX}`);
   }
   return count;
+}
+
+// LOSAT_WASI_PRESPAWN=auto only: when a spawn finds no standby worker left, the workers of the
+// next set of threads boot together, as many as the -num_threads that argv requests. That is
+// the most one set asks for: a pool whose threads are all new (LOSAT/src/utils/threading.rs
+// x_spawn_search_pool), as blastn's query-batch slots start after the search's pool, k pools
+// of m threads with k x m = -num_threads. One new worker per spawn instead, each spawn waits
+// for its own worker's boot (16 one after another, about 40 ms each, for the slots of a
+// 16-thread search on the workstation). Unused workers are terminated at close, as the first
+// set's. 0 (a new worker per spawn, as before) for a number of workers and without standby.
+function refillCount(argv) {
+  if ((process.env.LOSAT_WASI_PRESPAWN ?? "auto") !== "auto" || !prespawnCount(argv)) return 0;
+  return requestedThreads(argv);
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
@@ -385,167 +400,6 @@ function blockingStdioWrite(fdWrite) {
   };
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:114-127
-// ```c++
-// CMemoryFile* CSeqDBAtlas::GetMemoryFile(const string& fileName)
-// {
-//     std::lock_guard<std::mutex> guard(m_FileMemMapMutex);
-//     auto it = m_FileMemMap.find(fileName);
-//     ...
-//     CAtlasMappedFile* file(new CAtlasMappedFile(fileName));
-//     m_FileMemMap[fileName].reset(file);
-// ```
-// NCBI opens a database file once for the process, and every thread reads it there. LOSAT does
-// the same with one descriptor (LOSAT/src/seqdb/file.rs: a seek and a read under a lock), so a
-// descriptor must name the same open file on every thread, as in the native process's table.
-// Node's WASI keeps its table in the instance (uvwasi), and each thread worker has its own, so a
-// descriptor that one thread opened was EBADF on the others (-db with 2 or more threads,
-// 2026-10-26). In a command that may run more than one thread, the host therefore opens itself
-// (Node's fs, whose descriptors belong to the process) each regular file that path_open opens
-// from the preopened "/" for reading only (no open or descriptor flags, no write right), enters
-// it in a table that every thread shares (the OS descriptor, the file position and the rights)
-// and gives the guest SHARED_FD_BASE + its slot; each thread then reads, seeks, stats and closes
-// such a descriptor itself, through the table. Every other open (for writing, a directory, a
-// FIFO, one that fails, with uvwasi's errno) stays with the calling thread's uvwasi as before.
-// (One I/O worker that ran the file functions of every thread was tried first: each call waited
-// until that worker was scheduled on the 16 busy CPUs, and BLASTN at 16 threads took 22.6 s
-// instead of 9.3 s on ws, 2026-10-27.)
-const SHARED_FD_BASE = 0x40000000, SHARED_FDS = 1024;
-const WASI_EBADF = 8, WASI_EINVAL = 28, WASI_EIO = 29, WASI_ENOTSUP = 58, WASI_ENOTCAPABLE = 76;
-const WASI_ERRNO = { EACCES: 2, EBADF: WASI_EBADF, EINVAL: WASI_EINVAL, EIO: WASI_EIO, EISDIR: 31, ENOENT: 44, EOVERFLOW: 61 };
-const RIGHT_FD_WRITE = 1n << 6n, LOOKUP_SYMLINK_FOLLOW = 1, FILETYPE_REGULAR_FILE = 4, PREOPEN_ROOT_FD = 3;
-// The table: per slot the OS descriptor (-1 free, -2 being entered), the position, the rights.
-const sharedFileViews = table => ({ os: new Int32Array(table, 0, SHARED_FDS),
-  position: new BigInt64Array(table, 4 * SHARED_FDS, SHARED_FDS),
-  rights: new BigUint64Array(table, 12 * SHARED_FDS, 2 * SHARED_FDS) });
-function sharedFileTable() {
-  const table = new SharedArrayBuffer(28 * SHARED_FDS);
-  sharedFileViews(table).os.fill(-1);
-  return table;
-}
-
-// The file functions of one thread with the shared table in front of its own uvwasi functions
-// (`local`, which take the guest's signed i32 values themselves).
-function sharedFileImports(table, memory, local) {
-  const { os, position, rights } = sharedFileViews(table);
-  const slotOf = fd => (fd >>> 0) - SHARED_FD_BASE;
-  const shared = fd => slotOf(fd) >= 0 && slotOf(fd) < SHARED_FDS;
-  // The guest's memory as this isolate sees it; memory.grow(0) updates the view when the guest
-  // grew the memory on another thread (see the start of a thread below).
-  const buffer = end => {
-    if (end > memory.buffer.byteLength) memory.grow(0);
-    return memory.buffer;
-  };
-  const view = (pointer, length) => new DataView(buffer(pointer + length), pointer, length);
-  const read = (descriptor, iovs, count, at) => {
-    let total = 0n;
-    const vectors = view(iovs, 8 * count);
-    for (let i = 0; i < count; i++) {
-      const pointer = vectors.getUint32(8 * i, true), length = vectors.getUint32(8 * i + 4, true);
-      if (length === 0) continue;
-      const got = fs.readSync(descriptor, new Uint8Array(buffer(pointer + length), pointer, length), 0, length, at + total);
-      total += BigInt(got);
-      if (got < length) break;
-    }
-    return total;
-  };
-  const imports = {};
-  // Any function given a shared descriptor where that is not one of the files: no right to it.
-  for (const [name, call] of Object.entries(local)) {
-    if (!/^(fd|path|sock)_/.test(name)) continue;
-    const fds = { path_symlink: [2], path_rename: [0, 3], path_link: [0, 4], fd_renumber: [0, 1] }[name] || [0];
-    imports[name] = (...args) => (fds.some(i => shared(args[i])) ? WASI_ENOTCAPABLE : call(...args));
-  }
-  const own = (name, op) => {
-    const call = imports[name];
-    imports[name] = (fd, ...args) => {
-      if (!shared(fd)) return call(fd, ...args);
-      const slot = slotOf(fd), descriptor = Atomics.load(os, slot);
-      if (descriptor < 0) return WASI_EBADF;
-      try {
-        return op(slot, descriptor, ...args.map(arg => (typeof arg === "number" ? arg >>> 0 : arg))) ?? 0;
-      } catch (err) {
-        return WASI_ERRNO[err && err.code] ?? WASI_EIO;
-      }
-    };
-  };
-  own("fd_read", (slot, descriptor, iovs, count, nread) => {
-    const got = read(descriptor, iovs, count, Atomics.load(position, slot));
-    Atomics.add(position, slot, got);
-    view(nread, 4).setUint32(0, Number(got), true);
-  });
-  own("fd_pread", (slot, descriptor, iovs, count, offset, nread) => {
-    view(nread, 4).setUint32(0, Number(read(descriptor, iovs, count, BigInt.asUintN(64, offset))), true);
-  });
-  own("fd_seek", (slot, descriptor, offset, whence, result) => {
-    const from = [0n, Atomics.load(position, slot), fs.fstatSync(descriptor, { bigint: true }).size][whence];
-    if (from === undefined || from + offset < 0n) return WASI_EINVAL;
-    Atomics.store(position, slot, from + offset);
-    view(result, 8).setBigUint64(0, from + offset, true);
-  });
-  own("fd_tell", (slot, descriptor, result) => { view(result, 8).setBigUint64(0, Atomics.load(position, slot), true); });
-  own("fd_close", (slot) => {
-    const descriptor = Atomics.exchange(os, slot, -1);
-    if (descriptor < 0) return WASI_EBADF;
-    fs.closeSync(descriptor);
-  });
-  own("fd_filestat_get", (slot, descriptor, result) => {
-    const stat = fs.fstatSync(descriptor, { bigint: true }), out = view(result, 64);
-    for (const [at, value] of [[0, stat.dev], [8, stat.ino], [16, 0n], [24, stat.nlink], [32, stat.size],
-      [40, stat.atimeNs], [48, stat.mtimeNs], [56, stat.ctimeNs]]) out.setBigUint64(at, value, true);
-    out.setUint8(16, FILETYPE_REGULAR_FILE);
-  });
-  own("fd_fdstat_get", (slot, descriptor, result) => {
-    const out = view(result, 24);
-    out.setBigUint64(0, 0n, true);
-    out.setUint8(0, FILETYPE_REGULAR_FILE);
-    out.setBigUint64(8, rights[2 * slot], true);
-    out.setBigUint64(16, rights[2 * slot + 1], true);
-  });
-  own("fd_fdstat_set_rights", (slot, descriptor, base, inheriting) => {
-    [base, inheriting] = [BigInt.asUintN(64, base), BigInt.asUintN(64, inheriting)];
-    if ((base & ~rights[2 * slot]) || (inheriting & ~rights[2 * slot + 1])) return WASI_ENOTCAPABLE;
-    [rights[2 * slot], rights[2 * slot + 1]] = [base, inheriting];
-  });
-  own("fd_fdstat_set_flags", (slot, descriptor, flags) => (flags === 0 ? 0 : WASI_ENOTSUP));
-  own("fd_advise", () => 0);
-  own("fd_sync", (slot, descriptor) => { fs.fsyncSync(descriptor); });
-  own("fd_datasync", (slot, descriptor) => { fs.fdatasyncSync(descriptor); });
-  own("fd_prestat_get", () => WASI_EBADF);
-  own("fd_prestat_dir_name", () => WASI_EBADF);
-  const pathOpen = imports.path_open;
-  imports.path_open = (...args) => {
-    const [dirfd, dirflags, path, pathLength, oflags] = args.slice(0, 5).map(arg => arg >>> 0);
-    const [base, inheriting, fdflags, opened] = [BigInt.asUintN(64, args[5]), BigInt.asUintN(64, args[6]), args[7] >>> 0, args[8] >>> 0];
-    if (dirfd !== PREOPEN_ROOT_FD || oflags !== 0 || fdflags !== 0 || (base & RIGHT_FD_WRITE)) return pathOpen(...args);
-    let descriptor = -1;
-    try {
-      const host = "/" + Buffer.from(buffer(path + pathLength), path, pathLength).toString();
-      const follow = (dirflags & LOOKUP_SYMLINK_FOLLOW) !== 0;
-      // Not opened unless it is a regular file now (opening a FIFO waits for its writer).
-      const stat = (follow ? fs.statSync : fs.lstatSync)(host, { throwIfNoEntry: false });
-      if (!stat || !stat.isFile()) return pathOpen(...args);
-      descriptor = fs.openSync(host, fs.constants.O_RDONLY | (follow ? 0 : fs.constants.O_NOFOLLOW));
-      if (!fs.fstatSync(descriptor).isFile()) throw new Error("not a regular file");
-    } catch {
-      if (descriptor >= 0) fs.closeSync(descriptor);
-      return pathOpen(...args);
-    }
-    for (let slot = 0; slot < SHARED_FDS; slot++) {
-      if (Atomics.load(os, slot) !== -1 || Atomics.compareExchange(os, slot, -1, -2) !== -1) continue;
-      Atomics.store(position, slot, 0n);
-      [rights[2 * slot], rights[2 * slot + 1]] = [base, inheriting];
-      Atomics.store(os, slot, descriptor);
-      view(opened, 4).setUint32(0, SHARED_FD_BASE + slot, true);
-      return 0;
-    }
-    // A full table: the thread's own uvwasi opens it, as before.
-    fs.closeSync(descriptor);
-    return pathOpen(...args);
-  };
-  return imports;
-}
-
 function createImports(wasi, memory, spawnThread, extra, files) {
   const wasiImport = unsignedWasiImports(wasi.wasiImport);
   const local = { ...wasiImport, fd_write: blockingStdioWrite(wasiImport.fd_write) };
@@ -589,7 +443,35 @@ async function terminateWorkers(workers) {
 // Host-owned lifecycle records count attempts, ready confirmations, and real exit
 // events separately. Test-only failure injection never changes search behavior.
 async function createThreadHost(wasmPath, kind, argv = [], options = {}) {
-  return (await prepareThreadHost(wasmPath, kind)).create(argv, options);
+  // LOSAT_WASI_PRESPAWN: a command's standby workers start booting here, while the module is
+  // read, guarded and compiled, and get the module and the memory once they exist (`early`).
+  // Booting one is most of a thread's start (Node's worker bootstrap: 0.1-0.3 s for 15 workers at
+  // once), so they no longer start only after the compile.
+  const early = kind === "threaded-command" && !recycleWorkers(kind)
+    ? bootEarlyWorkers(prespawnCount(argv), options.fault) : [];
+  try {
+    return await (await prepareThreadHost(wasmPath, kind)).create(argv, early.length ? { ...options, early } : options);
+  } catch (err) {
+    await terminateWorkers(new Set(early.map(slot => slot.worker)));
+    throw err;
+  }
+}
+
+// LOSAT_WASI_PRESPAWN (createThreadHost): `count` standby workers created before the module is
+// compiled; each boots and waits for its `init` message from prespawnWorkers. Fewer when a worker
+// cannot be created (prespawnWorkers creates the rest as before).
+function bootEarlyWorkers(count, fault) {
+  const early = [];
+  for (let index = 0; index < count; index++) {
+    const control = new SharedArrayBuffer(4 * START_WORDS);
+    let worker;
+    try {
+      worker = new Worker(__filename, { workerData: { control, standby: index, early: true, fault: fault || null } });
+    } catch { break; }
+    worker.unref();
+    early.push({ worker, control });
+  }
+  return early;
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -601,12 +483,23 @@ async function createThreadHost(wasmPath, kind, argv = [], options = {}) {
 async function prepareThreadHost(wasmPath, kind) {
   const start = performance.now();
   const bytes = fs.readFileSync(wasmPath);
-  const identity = inspectArtifact(bytes, kind);
+  // One compile: the identity (imports, exports) is read from the guarded module, whose imports
+  // and exports are the input's (the guard rewrites only memory.fill and memory.copy), instead of
+  // compiling the input too (about 40 ms for the 9 MB command). An input that cannot be guarded
+  // or compiled is inspected first, so that an artifact of another kind is refused as before.
+  const inputSha256 = sha256(bytes);
   const inspected = performance.now();
-  const guarded = guardSharedMemoryCached(bytes, identity.sha256);
-  const guardedAt = performance.now();
-  const module = await WebAssembly.compile(guarded.bytes);
-  const timings = { validation_including_raw_compile_seconds: (inspected-start)/1000, guard_seconds: (guardedAt-inspected)/1000,
+  let guarded, module, guardedAt;
+  try {
+    guarded = guardSharedMemoryCached(bytes, inputSha256);
+    guardedAt = performance.now();
+    module = await WebAssembly.compile(guarded.bytes);
+  } catch (err) {
+    inspectArtifact(bytes, kind);
+    throw err;
+  }
+  const identity = prepareArtifact(bytes, kind, module, inputSha256).identity;
+  const timings = { read_and_hash_seconds: (inspected-start)/1000, guard_seconds: (guardedAt-inspected)/1000,
     guarded_compile_seconds: (performance.now()-guardedAt)/1000 };
   debug(`shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies`);
   return { identity, timings, create: (argv = [], options = {}) =>
@@ -615,15 +508,15 @@ async function prepareThreadHost(wasmPath, kind) {
 
 async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) {
   const args = [wasmPath, ...argv];
-  const prespawn = prespawnCount(argv), recycle = recycleWorkers(kind);
-  // The table of the files that every thread reads (sharedFileImports), in a command that
-  // requests 2 or more threads.
-  const files = kind === "threaded-command" && requestedThreads(argv) >= 2 ? sharedFileTable() : null;
+  const prespawn = prespawnCount(argv), recycle = recycleWorkers(kind), refill = recycle ? 0 : refillCount(argv);
+  // The table of the files that every thread reads and writes (sharedFileImports), in a command
+  // at every thread count (a reactor opens no files).
+  const files = kind === "threaded-command" ? sharedFileTable() : null;
   const workers = new Set(), exits = new Map(), events = [], standby = [];
   // LOSAT_WASI_RECYCLE: the workers that run one guest thread after another, the guest threads
   // they run now (tids), and how each of those threads' exit promise is resolved.
   const recycled = [], running = new Set(), returned = new Map();
-  let nextTid = 1, attempt = 0, nextSlot = 0, mainMemory, closing = false, failure = null;
+  let nextTid = 1, attempt = 0, nextSlot = 0, nextStandby = 0, mainMemory, closing = false, failure = null;
   const event = (type, fields = {}) => {
     const record = { event: type, at_ms: performance.now(), ...fields }; events.push(record);
     if (DEBUG) fs.writeSync(2, `[losat-wasi-event] ${JSON.stringify(record)}\n`);
@@ -727,6 +620,8 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   const spawnThread = (startArg) => {
     attempt++; const tid = nextTid++; event("spawn_attempt", { tid, attempt });
     if (options.rejectSpawn && options.rejectSpawn(attempt)) { event("spawn_rejected", { tid }); return -1; }
+    // refillCount: the next set boots together; this spawn takes the first of it.
+    if (!standby.length && refill) { event("standby_refill", { tid, count: refill }); prespawnWorkers(refill); }
     if (standby.length) return startStandby(standby.shift(), tid, startArg);
     if (recycle) {
       const waiting = claimRecycled();
@@ -760,10 +655,12 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   // ```
   // LOSAT_WASI_PRESPAWN: boot the workers together, before the guest asks for them. Each
   // instantiates the module with the shared memory and waits for its start order; spawnThread
-  // hands them out in order and creates new workers when none is left. A standby worker never
-  // keeps the process alive (unref until taken), and close() terminates the unused ones.
+  // hands them out in order and, when none is left, boots the next set (refillCount) or creates
+  // a new worker per spawn. A standby worker never keeps the process alive (unref until taken),
+  // and close() terminates the unused ones.
   const prespawnWorkers = (count) => {
-    for (let index = 0; index < count; index++) {
+    for (let n = 0; n < count; n++) {
+      const index = nextStandby++;
       if (recycle) {
         // A recycled worker that waits from the start; spawnThread takes it like the others.
         try { recycledWorker({ standby: index }).worker.unref(); }
@@ -771,11 +668,18 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
         event("standby_spawned", { standby: index });
         continue;
       }
-      const control = new SharedArrayBuffer(4 * START_WORDS);
+      // An early worker (createThreadHost) has booted meanwhile and gets what it instantiates now.
+      const early = options.early ? options.early[index] : undefined;
+      const control = early ? early.control : new SharedArrayBuffer(4 * START_WORDS);
       let worker;
       try {
-        worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
-          control, files, standby: index, fault: options.fault || null } });
+        if (early) {
+          worker = early.worker;
+          worker.postMessage({ module, wasmPath, args, memory: mainMemory, files });
+        } else {
+          worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
+            control, files, standby: index, fault: options.fault || null } });
+        }
       } catch (err) { event("standby_rejected", { standby: index, error: String(err) }); return; }
       worker.unref();
       const slot = { index, worker, control, tid: null };
@@ -832,7 +736,10 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
 module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir };
 
 if (!isMainThread) {
-  const { module: workerModule, wasmPath, args, memory, control, files, fault, standby, recycle } = workerData;
+  const { control, fault, standby, recycle, early } = workerData;
+  // An early worker (createThreadHost) boots before the module and the memory exist and gets
+  // them in one message (`init`) from prespawnWorkers.
+  let { module: workerModule, wasmPath, args, memory, files } = workerData;
   // A standby worker (LOSAT_WASI_PRESPAWN) learns its tid and startArg from its start order,
   // and so does a recycled worker (LOSAT_WASI_RECYCLE) for every thread after its first.
   let { startArg, tid } = workerData;
@@ -854,6 +761,10 @@ if (!isMainThread) {
       debug(`worker boot ${name}`);
       if (fault === "startup-timeout") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
       if (fault === "startup-error") throw new Error("injected worker startup error");
+      if (early) {
+        ({ module: workerModule, wasmPath, args, memory, files } =
+          await new Promise(resolve => parentPort.once("message", resolve)));
+      }
       const module = workerModule || await compileThreadedModule(wasmPath);
       const spawnThread = () => -1;
       const view = new Int32Array(control);

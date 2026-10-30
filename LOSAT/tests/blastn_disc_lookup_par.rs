@@ -9,9 +9,8 @@
 //! lengths 16, 18 and 21 and word sizes 11 and 12, with `-subject` and with `-db`, at 1 and 4
 //! threads, the searches with the switch off (`=0`), by default and with it set to 1 give the same
 //! bytes. `LOSAT_X_REACH` shows that the pool built the tables at 4 threads and not at 1. The same
-//! holds with `LOSAT_X_PAIRPARDISC`, in
-//! `LOSAT_X_QBATCHPAR` slots (private pools of two threads), for split query chunks
-//! (`CHUNK_SIZE`), and for megablast with a template (`-word_size 11 -template_type ...`);
+//! holds with `LOSAT_X_PAIRPARDISC`, with several query batches (`BATCH_SIZE`), for split query
+//! chunks (`CHUNK_SIZE`), and for megablast with a template (`-word_size 11 -template_type ...`);
 //! megablast without a template never builds this table. One search fills its table in several
 //! chunks of the pool fill (a query of 0.66 Mb, both strands), with one template and with two.
 //! That the parts run on several workers of the pool is checked by the unit test
@@ -39,7 +38,6 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
-    ("LOSAT_X_QBATCHPAR", "0"),
     ("LOSAT_X_QDUSTPAR", "0"),
     ("LOSAT_X_QPREPPAR", "0"),
     ("LOSAT_X_RPTSTREAM", "0"),
@@ -131,7 +129,7 @@ fn queries() -> Temp {
     Temp(path)
 }
 
-/// The database made by `losat makedb` from LC738868, LC738869 and LC738870 (in a directory of
+/// The database made by `losat makeblastdb` from LC738868, LC738869 and LC738870 (in a directory of
 /// this test, removed when dropped), and its name.
 fn database() -> (Temp, String) {
     let dir = Temp(temp_path("db"));
@@ -144,15 +142,15 @@ fn database() -> (Temp, String) {
     std::fs::write(&set, bytes).unwrap();
     let db = dir.0.join("set").to_str().unwrap().to_string();
     let output = losat()
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&set)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     (dir, db)
@@ -364,50 +362,38 @@ fn dc_megablast_with_pairpardisc() {
     );
 }
 
-// The batches searched in LOSAT_X_QBATCHPAR slots (2 slots of 2 threads, each with a private
-// pool, batches of 10,000 letters): the slots' tables are built on their pools, and the report is
-// the same. Then a batch split into query chunks (`CHUNK_SIZE`), each chunk with its own table.
+// Several batches (batches of 10,000 letters), each batch's table built on the pool, and the
+// report is the same. Then a batch split into query chunks (`CHUNK_SIZE`), each chunk with its own
+// table.
 #[test]
-fn qbatchpar_slots_and_split_chunks() {
+fn several_batches_and_split_chunks() {
     let queries = queries();
     let s = subject();
     let subject = args(&s);
     let extra = ["-task", "dc-megablast"];
-    for (env, slots) in [
-        (
-            &[("BATCH_SIZE", "10000")][..],
-            &[("LOSAT_X_QBATCHPAR", "1"), ("LOSAT_X_QBATCHPARSLOTS", "2")][..],
-        ),
-        (
-            &[("BATCH_SIZE", "1000000"), ("CHUNK_SIZE", "7000")][..],
-            &[][..],
-        ),
+    for env in [
+        &[("BATCH_SIZE", "10000")][..],
+        &[("BATCH_SIZE", "1000000"), ("CHUNK_SIZE", "7000")][..],
     ] {
         let (expected, expected_stderr) = blastn(&queries, &subject, &extra, 1, env);
         assert!(!expected.is_empty(), "{env:?}: no hits");
-        let (report, stderr) = blastn(
-            &queries,
-            &subject,
-            &extra,
-            4,
-            &joined(&[env, slots, &[OFF]]),
-        );
-        assert!(report == expected, "{env:?} {slots:?}: off differs");
+        let (report, stderr) = blastn(&queries, &subject, &extra, 4, &joined(&[env, &[OFF]]));
+        assert!(report == expected, "{env:?}: off differs");
         assert_eq!(stderr, expected_stderr, "{env:?}");
         for on in [&[][..], &[SWITCH][..]] {
-            let reach = reach_support::Reach::new("disclutpar-slots");
+            let reach = reach_support::Reach::new("disclutpar-batches");
             let (report, stderr) = blastn(
                 &queries,
                 &subject,
                 &extra,
                 4,
-                &joined(&[env, slots, on, &[reach.var()]]),
+                &joined(&[env, on, &[reach.var()]]),
             );
-            assert!(report == expected, "{env:?} {slots:?} {on:?}: on differs");
+            assert!(report == expected, "{env:?} {on:?}: on differs");
             assert_eq!(stderr, expected_stderr, "{env:?}");
             assert!(
                 reach.sides("LOSAT_X_DISCLUTPAR").0,
-                "{env:?} {slots:?} {on:?}: no table was built on a pool"
+                "{env:?} {on:?}: no table was built on a pool"
             );
         }
     }

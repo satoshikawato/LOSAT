@@ -308,7 +308,7 @@ fn a_failed_write_ends_the_search_as_without_the_switch() {
     assert_eq!(on.stdout, off.stdout);
 }
 
-/// A protein database of MejoMJNV (losat makedb), made once.
+/// A protein database of MejoMJNV (losat makeblastdb), made once.
 fn protein_database() -> &'static Path {
     static DATABASE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     DATABASE.get_or_init(|| {
@@ -316,15 +316,15 @@ fn protein_database() -> &'static Path {
         std::fs::create_dir_all(&dir).expect("temporary directory");
         let name = dir.join("MejoMJNV");
         let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-            .arg("makedb")
+            .arg("makeblastdb")
             .arg("-in")
             .arg(manifest("tests/fasta/MejoMJNV.faa"))
             .args(["-dbtype", "prot"])
             .arg("-out")
             .arg(&name)
             .output()
-            .expect("run losat makedb");
-        assert!(output.status.success(), "makedb: {}", stderr(&output));
+            .expect("run losat makeblastdb");
+        assert!(output.status.success(), "makeblastdb: {}", stderr(&output));
         name
     })
 }

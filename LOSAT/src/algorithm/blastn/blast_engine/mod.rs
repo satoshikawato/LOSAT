@@ -406,7 +406,7 @@ pub fn filter_hsps(
         output_hits.push(Hit {
             identity: hit.identity,
             length: hit.length,
-            mismatch: hit.mismatch,
+            mismatch: hit.mismatch as i64,
             gapopen: hit.gapopen,
             q_start: hit.q_start,
             q_end: hit.q_end,

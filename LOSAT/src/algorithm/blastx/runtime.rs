@@ -313,6 +313,22 @@ struct XKappaWorker(KappaState);
 #[cfg(feature = "parallel")]
 unsafe impl Send for XKappaWorker {}
 
+// No NCBI counterpart (NCBI keeps one record per thread for the whole search): how many redo
+// workers a batch end makes. EXPERIMENT (LOSAT_X_BXKAPPAFIT, in the strict set: on unless `=0`):
+// no more than its matches, since one speculative batch then holds every match and each match
+// takes the worker of its position; `=0`: one per pool thread. A worker's state does not change a
+// match's result (`x_speculate_match`: a result that read a predecessor's matrix is redone in
+// stream order).
+#[cfg(feature = "parallel")]
+fn x_kappa_workers(threads: usize, matches: usize) -> usize {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXKAPPAFIT")) {
+        return threads;
+    }
+    crate::utils::xreach::x_reach!("LOSAT_X_BXKAPPAFIT", matches < threads);
+    threads.min(matches)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1234
 // ```c
 //                 if (compo_adjust_mode != eNoCompositionBasedStats &&
@@ -1071,7 +1087,7 @@ impl PreliminarySink for Runtime<'_> {
             // /** The core of the BLAST search: comparison between the (concatenated)
             // ```
             let reap_cutoff = self.options.evalue
-                * if self.options.composition > 0 {
+                * if self.options.composition > 0 && !self.options.old_fsc {
                     5.0
                 } else {
                     1.0
@@ -1771,7 +1787,7 @@ impl PreliminarySink for Runtime<'_> {
                     && rayon::current_num_threads() > 1
                     && matches.len() > 1
             }) {
-                (0..rayon::current_num_threads())
+                (0..x_kappa_workers(rayon::current_num_threads(), matches.len()))
                     .map(|_| {
                         Ok(std::sync::Mutex::new(XKappaWorker(state.x_for_thread(
                             batch,
@@ -1783,8 +1799,9 @@ impl PreliminarySink for Runtime<'_> {
             } else {
                 Vec::new()
             };
-            // `x_workers` has one entry per pool thread (none outside a pool; asking
-            // Rayon for the thread count there would start its global pool).
+            // `x_workers` has one entry per pool thread, or one per match where there are fewer
+            // matches (`x_kappa_workers`); none outside a pool (asking Rayon for the thread count
+            // there would start its global pool).
             // No NCBI counterpart: size of one speculative batch (scheduling only); it does not
             // change any value NCBI computes.
             #[cfg(feature = "parallel")]
@@ -1830,14 +1847,22 @@ impl PreliminarySink for Runtime<'_> {
                     let full = &full;
                     let workers = &x_workers;
                     let x_t = super::x_timing::lap();
+                    // One worker per thread: the thread's own. One per match (fewer matches than
+                    // threads, so this batch holds them all): the match's own.
+                    let per_thread = workers.len() == rayon::current_num_threads();
                     speculated = batch_lists
                         .par_iter()
                         .zip(wanted.par_iter())
-                        .map(|(list, &wanted)| {
+                        .enumerate()
+                        .map(|(position, (list, &wanted))| {
                             if !wanted {
                                 return None;
                             }
-                            let slot = rayon::current_thread_index().unwrap_or(0) % workers.len();
+                            let slot = if per_thread {
+                                rayon::current_thread_index().unwrap_or(0) % workers.len()
+                            } else {
+                                position % workers.len()
+                            };
                             let mut guard = workers[slot].lock().expect("BLASTX redo worker state");
                             x_speculate_match(
                                 &mut guard.0,

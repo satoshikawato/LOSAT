@@ -167,6 +167,10 @@ pub struct GapAlignScratch {
     trace_rows: Vec<Vec<u8>>,
     trace_offsets: Vec<usize>,
     trace_rows_used: usize,
+    // No NCBI counterpart: empty vectors that the SIMD kernel's traceback fills with one
+    // direction's operations (`x_ops_vec`). `extend_gapped_heuristic_with_traceback` copies the two
+    // directions into the HSP's own list and gives them back here. Reuse only.
+    x_spare_ops: Vec<Vec<GapEditOp>>,
 }
 
 impl GapAlignScratch {
@@ -193,7 +197,25 @@ impl GapAlignScratch {
             trace_rows,
             trace_offsets,
             trace_rows_used: 0,
+            x_spare_ops: Vec::new(),
         }
+    }
+
+    /// No NCBI counterpart: the SIMD kernel's operations (`fast.ops`) as edit operations, in a
+    /// spare vector of this scratch when one is left (`x_spare_ops`), reversed when `reverse`.
+    fn x_ops_vec(&mut self, reverse: bool) -> Vec<GapEditOp> {
+        let mut edit_ops = self.x_spare_ops.pop().unwrap_or_default();
+        edit_ops.clear();
+        edit_ops.extend(
+            self.fast
+                .ops
+                .iter()
+                .map(|&(op, n)| script_op_to_gap_edit_op(op, n)),
+        );
+        if reverse {
+            edit_ops.reverse();
+        }
+        edit_ops
     }
 }
 
@@ -2283,13 +2305,7 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
                 (0, 0, 0, 0, 0, 0, 0, Vec::new())
             } else {
                 // The forward half is recorded end -> start and then reversed.
-                let mut edit_ops: Vec<GapEditOp> = gap_scratch
-                    .fast
-                    .ops
-                    .iter()
-                    .map(|&(op, n)| script_op_to_gap_edit_op(op, n))
-                    .collect();
-                edit_ops.reverse();
+                let edit_ops = gap_scratch.x_ops_vec(true);
                 let (matches, mismatches, gap_opens, gap_letters) =
                     stats_from_edit_ops(q_seq, s_seq, 0, 0, &edit_ops);
                 (
@@ -3053,12 +3069,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
                 (0, 0, 0, 0, 0, 0, 0, Vec::new())
             } else {
                 // The reverse half is already in forward order as recorded.
-                let edit_ops: Vec<GapEditOp> = gap_scratch
-                    .fast
-                    .ops
-                    .iter()
-                    .map(|&(op, n)| script_op_to_gap_edit_op(op, n))
-                    .collect();
+                let edit_ops = gap_scratch.x_ops_vec(false);
                 let q_sub = &q_seq[..len1.min(q_seq.len())];
                 let s_sub = &s_seq[..len2.min(s_seq.len())];
                 let (matches, mismatches, gap_opens, gap_letters) =
@@ -3758,10 +3769,12 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
     // right traceback ops into it, avoiding the old left copy plus right slice copy.
     let left_edit_op_count = left_edit_ops.len();
     let right_edit_op_count = right_edit_ops.len();
-    let mut combined_edit_ops = left_edit_ops;
+    // The HSP's list is made once with room for both halves; the halves' vectors go back to the
+    // scratch (`x_spare_ops`).
+    let mut combined_edit_ops = Vec::with_capacity(left_edit_op_count + right_edit_op_count);
+    combined_edit_ops.extend_from_slice(&left_edit_ops);
     if !right_edit_ops.is_empty() {
-        combined_edit_ops.reserve(right_edit_ops.len());
-        let mut right_iter = right_edit_ops.into_iter();
+        let mut right_iter = right_edit_ops.iter().copied();
         if let Some(first_right) = right_iter.next() {
             if let Some(last) = combined_edit_ops.last_mut() {
                 if same_gap_edit_op_type(*last, first_right) {
@@ -3774,6 +3787,11 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
             }
         }
         combined_edit_ops.extend(right_iter);
+    }
+    for spare in [left_edit_ops, right_edit_ops] {
+        if spare.capacity() > 0 && gap_scratch.x_spare_ops.len() < 2 {
+            gap_scratch.x_spare_ops.push(spare);
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4683-4712

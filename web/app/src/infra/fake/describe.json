@@ -24,8 +24,52 @@
     "takes_value": true
    },
    {
+    "flag": "-taxids",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxids",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxidlist",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-no_taxid_expansion",
+    "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-dbsize",
     "help": "Effective length of the database",
+    "takes_value": true
+   },
+   {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
     "takes_value": true
    },
    {
@@ -159,6 +203,49 @@
     "flag": "-culling_limit",
     "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
     "takes_value": true
+   },
+   {
+    "flag": "-ungapped",
+    "help": "Perform ungapped alignment only",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions (default: 20 for blastn, dc-megablast and blastn-short; megablast uses the ungapped cutoff score)",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap",
+    "help": "X-dropoff value (in bits) for preliminary gapped extensions (default: 25 for megablast, 30 for the other tasks)",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap_final",
+    "help": "X-dropoff value (in bits) for final gapped alignment (default: 100)",
+    "takes_value": true
+   },
+   {
+    "flag": "-no_greedy",
+    "help": "Use non-greedy dynamic programming extension",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-window_size",
+    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm (default: 40 for dc-megablast, 0 for the other tasks)",
+    "takes_value": true
+   },
+   {
+    "flag": "-off_diagonal_range",
+    "help": "Number of off-diagonals to search for the 2nd hit, use 0 to turn off (default: 0)",
+    "takes_value": true
    }
   ]
  },
@@ -187,8 +274,52 @@
     "takes_value": true
    },
    {
+    "flag": "-taxids",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxids",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxidlist",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-no_taxid_expansion",
+    "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-dbsize",
     "help": "Effective length of the database",
+    "takes_value": true
+   },
+   {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
     "takes_value": true
    },
    {
@@ -337,8 +468,52 @@
     "takes_value": true
    },
    {
+    "flag": "-taxids",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxids",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxidlist",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-no_taxid_expansion",
+    "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-dbsize",
     "help": "Effective length of the database",
+    "takes_value": true
+   },
+   {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
     "takes_value": true
    },
    {
@@ -347,7 +522,8 @@
     "takes_value": true,
     "default": "tblastn",
     "choices": [
-     "tblastn"
+     "tblastn",
+     "tblastn-fast"
     ]
    },
    {
@@ -357,7 +533,7 @@
    },
    {
     "flag": "-word_size",
-    "help": "Word size for wordfinder algorithm [default: 3]",
+    "help": "Word size for wordfinder algorithm [default: 3; 5 for tblastn-fast]",
     "takes_value": true
    },
    {
@@ -388,7 +564,7 @@
    },
    {
     "flag": "-threshold",
-    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7]",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for tblastn-fast]",
     "takes_value": true
    },
    {
@@ -541,8 +717,52 @@
     "takes_value": true
    },
    {
+    "flag": "-taxids",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxids",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxidlist",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-no_taxid_expansion",
+    "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-dbsize",
     "help": "Effective length of the database",
+    "takes_value": true
+   },
+   {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
     "takes_value": true
    },
    {

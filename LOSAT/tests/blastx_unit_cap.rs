@@ -7,7 +7,8 @@
 //! the cap: `LOSAT_X_BXCAPFILL`), their lookup tables built on the threads the cap leaves them
 //! (`LOSAT_X_BXBUILDPAR`), and the fused loop's context table made once per lookup table
 //! (`LOSAT_X_BXCTXONCE`; `src/algorithm/blastx/x_bx_mem.rs`, `src/algorithm/tblastx/lookup/x_lut_direct.rs`,
-//! `src/algorithm/blastx/x_seed_diag.rs`).
+//! `src/algorithm/blastx/x_seed_diag.rs`), and a batch end making no more composition-redo workers
+//! than it has matches (`LOSAT_X_BXKAPPAFIT`, `src/algorithm/blastx/runtime.rs`).
 //!
 //! They are in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). They change which
 //! thread computes what, and the vectors the tables are built on, not what is computed, so the
@@ -116,19 +117,19 @@ fn inputs_from(
     (query, set)
 }
 
-/// The set's `losat makedb` database.
+/// The set's `losat makeblastdb` database.
 fn database(dir: &Path, set: &Path) -> String {
     let db = dir.join("set").to_str().unwrap().to_string();
     let output = losat()
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(set)
         .args(["-dbtype", "prot", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     db
@@ -192,6 +193,7 @@ const ALL_OFF: &[(&str, &str)] = &[
     ("LOSAT_X_BXCAPFILL", "0"),
     ("LOSAT_X_BXCTXONCE", "0"),
     ("LOSAT_X_BXDIAGKEEP", "0"),
+    ("LOSAT_X_BXKAPPAFIT", "0"),
     ("LOSAT_X_BXPOOLN1", "0"),
     ("LOSAT_X_BXUNITCAP", "0"),
 ];
@@ -215,6 +217,7 @@ fn several_query_batches_give_the_report_without_the_switches() {
         &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXDIAGKEEP", "0")][..],
         &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXBUILDPAR", "0")][..],
         &[("LOSAT_X_BXUNITCAP", "3"), ("LOSAT_X_BXCTXONCE", "0")][..],
+        &[("LOSAT_X_BXUNITCAP", "2"), ("LOSAT_X_BXKAPPAFIT", "0")][..],
     ] {
         assert!(
             blastx(&query, &args, 4, env) == reference,
@@ -419,5 +422,50 @@ fn queries_give_the_report_without_pool_n1() {
             );
         }
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn few_subjects_give_the_report_without_kappa_fit() {
+    // Eight pieces against 3, 10 and 40 proteins: batch ends with fewer matches than threads (each
+    // match on a redo worker of its own) and with as many or more (one per thread). The report
+    // equals the search with LOSAT_X_BXKAPPAFIT=0 and with all the switches off.
+    let dir = temp_dir("kappa-fit");
+    for proteins in [3, 10, 40] {
+        let (query, few) = inputs_from(&dir, 0, 8, 4_000, proteins);
+        let args = ["-subject", few.to_str().unwrap(), "-outfmt", "6"];
+        let reference = blastx(&query, &args, 4, ALL_OFF);
+        assert!(
+            reference.iter().filter(|&&b| b == b'\n').count() > 2,
+            "{proteins}: too few hits to test"
+        );
+        for threads in [2, 4, 8] {
+            for env in [&[][..], &[("LOSAT_X_BXKAPPAFIT", "0")][..]] {
+                assert!(
+                    blastx(&query, &args, threads, env) == reference,
+                    "{proteins} proteins, {threads} threads, {env:?}: report differs"
+                );
+            }
+        }
+    }
+    // 3 proteins at 8 threads: a batch end has fewer matches than threads (own side); 40 at 2
+    // threads: as many or more (reference side). Off, neither is recorded.
+    let (query, few) = inputs_from(&dir, 0, 8, 4_000, 3);
+    let args = ["-subject", few.to_str().unwrap(), "-outfmt", "6"];
+    assert!(sides(&dir, &query, &args, 8, &[], "LOSAT_X_BXKAPPAFIT").0);
+    assert_eq!(
+        sides(
+            &dir,
+            &query,
+            &args,
+            8,
+            &[("LOSAT_X_BXKAPPAFIT", "0")],
+            "LOSAT_X_BXKAPPAFIT"
+        ),
+        (false, false)
+    );
+    let (query, set) = inputs_from(&dir, 0, 8, 4_000, 40);
+    let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+    assert!(sides(&dir, &query, &args, 2, &[], "LOSAT_X_BXKAPPAFIT").1);
     let _ = std::fs::remove_dir_all(&dir);
 }

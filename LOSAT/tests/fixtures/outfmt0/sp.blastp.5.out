@@ -1,0 +1,1490 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<!DOCTYPE BlastOutput PUBLIC "-//NCBI//NCBI BlastOutput/EN" "http://www.ncbi.nlm.nih.gov/dtd/NCBI_BlastOutput.dtd">
+<BlastOutput>
+  <BlastOutput_program>blastp</BlastOutput_program>
+  <BlastOutput_version>BLASTP 2.17.0+</BlastOutput_version>
+  <BlastOutput_reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</BlastOutput_reference>
+  <BlastOutput_db></BlastOutput_db>
+  <BlastOutput_query-ID>Query_1</BlastOutput_query-ID>
+  <BlastOutput_query-def>BDT62524.1 hypothetical protein [Metapenaeus ensis majanivirus]</BlastOutput_query-def>
+  <BlastOutput_query-len>370</BlastOutput_query-len>
+  <BlastOutput_param>
+    <Parameters>
+      <Parameters_matrix>BLOSUM62</Parameters_matrix>
+      <Parameters_expect>10</Parameters_expect>
+      <Parameters_gap-open>11</Parameters_gap-open>
+      <Parameters_gap-extend>1</Parameters_gap-extend>
+      <Parameters_filter>F</Parameters_filter>
+    </Parameters>
+  </BlastOutput_param>
+<BlastOutput_iterations>
+<Iteration>
+  <Iteration_iter-num>1</Iteration_iter-num>
+  <Iteration_query-ID>Query_1</Iteration_query-ID>
+  <Iteration_query-def>BDT62524.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>370</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>55</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>2</Iteration_iter-num>
+  <Iteration_query-ID>Query_2</Iteration_query-ID>
+  <Iteration_query-def>BDT62525.1 wsv465-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>377</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>55</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>3</Iteration_iter-num>
+  <Iteration_query-ID>Query_3</Iteration_query-ID>
+  <Iteration_query-def>BDT62529.1 innexin [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>386</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT61857.1</Hit_id>
+  <Hit_def>BDT61857.1 innexin [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_1</Hit_accession>
+  <Hit_len>378</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>344.739</Hsp_bit-score>
+      <Hsp_score>883</Hsp_score>
+      <Hsp_evalue>8.49767e-96</Hsp_evalue>
+      <Hsp_query-from>1</Hsp_query-from>
+      <Hsp_query-to>353</Hsp_query-to>
+      <Hsp_hit-from>1</Hsp_hit-from>
+      <Hsp_hit-to>354</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>168</Hsp_identity>
+      <Hsp_positive>246</Hsp_positive>
+      <Hsp_gaps>9</Hsp_gaps>
+      <Hsp_align-len>358</Hsp_align-len>
+      <Hsp_qseq>MIPISVLANLRSLFKGKNSEVDINSKIFKLQYRTTTTILFCLCLLITTNSLVGNPISCLYDSSISYLKEDTVNTYCWIYSTFTIPRYYSHQYQASVAHPGVGTYNSKTDDVKLYHTYYQWVPFILFFQALMFYSPHWLWKIWEGGKVQSTIAGLSVPIKSNQERQKVTLGLIEYLRASHRHHDYYAKKYLFCEFLSILNCILNILLLNKFLNGMFLDYGNKVLAYYQN-DNVTTINPMTIVFPKVTKCSVPLYGASGSKEIKDLLCILALNNFNDKIFLFMWFWLIILSVLNTLNFIYHVLIFVIPHTRKIY----LNRIAKDLQTSNFFNQVGDSFFLYLVKKNVDTLTFDYLFSNL</Hsp_qseq>
+      <Hsp_hseq>MASLGLLSTLRGILQGKRN-ADIENLISKLHYRVTTTTVFCFCLLVTTNTLVGDPISCVYDSGHPKLNDKVVNTYCWIHTTFTLPNR-PYRDMSAISSPGIGTHN--LSDPVTYHAYYQWVPFMLFIQGLLFYAPHYIWKTWEGGRMQSITADLSVPILNKEDQRKRVNQLADYLQNSLWNNNTYALKYLFCQCLSLVNCIVNMVLMNKFLNGKFLTYGADVFSYSEAVDQESRTDPMIEVFPRVTKCSMSMFGSSGTLQKHDFLCVLAVNVINEKIYLAMWLWFILLISLSILVFFFHLAVFAVPVIRRLYLVYLLGSGDKARIVARTFNQMGDVFLLYLLKKNVECQSLNLLLTEL</Hsp_hseq>
+      <Hsp_midline>M  + +L+ LR + +GK +  DI + I KL YR TTT +FC CLL+TTN+LVG+PISC+YDS    L +  VNTYCWI++TFT+P    ++  ++++ PG+GT+N    D   YH YYQWVPF+LF Q L+FY+PH++WK WEGG++QS  A LSVPI + ++++K    L +YL+ S  +++ YA KYLFC+ LS++NCI+N++L+NKFLNG FL YG  V +Y +  D  +  +PM  VFP+VTKCS+ ++G+SG+ +  D LC+LA+N  N+KI+L MW W I+L  L+ L F +H+ +F +P  R++Y    L    K    +  FNQ+GD F LYL+KKNV+  + + L + L</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>55</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>4</Iteration_iter-num>
+  <Iteration_query-ID>Query_4</Iteration_query-ID>
+  <Iteration_query-def>BDT62536.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>295</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>53</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>5</Iteration_iter-num>
+  <Iteration_query-ID>Query_5</Iteration_query-ID>
+  <Iteration_query-def>BDT62539.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>341</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>54</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>6</Iteration_iter-num>
+  <Iteration_query-ID>Query_6</Iteration_query-ID>
+  <Iteration_query-def>BDT62541.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>534</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>58</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>7</Iteration_iter-num>
+  <Iteration_query-ID>Query_7</Iteration_query-ID>
+  <Iteration_query-def>BDT62542.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>516</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>57</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>8</Iteration_iter-num>
+  <Iteration_query-ID>Query_8</Iteration_query-ID>
+  <Iteration_query-def>BDT62543.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>543</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>58</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>9</Iteration_iter-num>
+  <Iteration_query-ID>Query_9</Iteration_query-ID>
+  <Iteration_query-def>BDT62544.1 wsv192-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>351</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>54</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>10</Iteration_iter-num>
+  <Iteration_query-ID>Query_10</Iteration_query-ID>
+  <Iteration_query-def>BDT62555.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>432</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT61962.1</Hit_id>
+  <Hit_def>BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_33</Hit_accession>
+  <Hit_len>577</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>88.1965</Hsp_bit-score>
+      <Hsp_score>217</Hsp_score>
+      <Hsp_evalue>1.57135e-18</Hsp_evalue>
+      <Hsp_query-from>25</Hsp_query-from>
+      <Hsp_query-to>323</Hsp_query-to>
+      <Hsp_hit-from>47</Hsp_hit-from>
+      <Hsp_hit-to>371</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>83</Hsp_identity>
+      <Hsp_positive>145</Hsp_positive>
+      <Hsp_gaps>62</Hsp_gaps>
+      <Hsp_align-len>343</Hsp_align-len>
+      <Hsp_qseq>YEDYRRYTFTINTLSWQYKDWIDSSKKDALAKIGYYLSGYKWAPQLTCCFCNGNVESEWNLQDKNWSKNKTKIPIHLCLREKDLRERDGMVTNISLEYSPIDSYI--CGDVVPDCPNPSFNKQNIQ-----------DNGILPYTF-KYKEYNKLEDRIKTFYTNGWNEINSTQTPEDMAKAGFIYKGENDKVTCYQCGQSIYRWDDKDNDPWHEHAKHASHCQHVYIRKGGDFINNIKK--------------------------SLCGIHVIHEHEVDELIKINTVKYILDMNIFQQPD-IIRQLVKKQIQVTGQPFFTLNDILSPLFTDM---HKRTADN</Hsp_qseq>
+      <Hsp_hseq>YEEKRLGTF----IDWPH-EWL---KPSELAADGFYY--LRKDDHCACIFCRGIVGA-WEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQGNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPECRGSPDETGLYQHSGPKRSDFTTLDSRLKS-YVEGWPILGLHA--RDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDI-PWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTASTTIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGY---PSCIVRACLKDRVEQTGEPYFVIEPCLEDVIHRMSVTENRVADN</Hsp_hseq>
+      <Hsp_midline>YE+ R  TF    + W + +W+   K   LA  G+Y    +      C FC G V + W   D    +++   P    +R +       +  NI      + + +  CG    +     F+ +++            + G+  ++  K  ++  L+ R+K+ Y  GW  +       D+A+AGF Y G +D V C+ CG+ +  W   D  PW EHA+    C+ V + KG D+IN +++                          S   +  + E E+D L+ ++ VK +L+M     P  I+R  +K +++ TG+P+F +   L  +   M     R ADN</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>BDT61876.1</Hit_id>
+  <Hit_def>BDT61876.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_10</Hit_accession>
+  <Hit_len>181</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>66.6254</Hsp_bit-score>
+      <Hsp_score>161</Hsp_score>
+      <Hsp_evalue>4.04111e-12</Hsp_evalue>
+      <Hsp_query-from>159</Hsp_query-from>
+      <Hsp_query-to>245</Hsp_query-to>
+      <Hsp_hit-from>80</Hsp_hit-from>
+      <Hsp_hit-to>162</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>32</Hsp_identity>
+      <Hsp_positive>52</Hsp_positive>
+      <Hsp_gaps>4</Hsp_gaps>
+      <Hsp_align-len>87</Hsp_align-len>
+      <Hsp_qseq>YKEYNKLEDRIKTFYTNGWNEINSTQTPEDMAKAGFIYKGENDKVTCYQCGQSIYRWDDKDNDPWHEHAKHASHCQHVYIRKGGDFI</Hsp_qseq>
+      <Hsp_hseq>HQEYVMHQRRLETF---RWWPKETAQSPHKLAEAGFVSSGLGDTVYCFHCGVYLEQW-EKNDMPWKEHAKWSPRCRYVKMVKGDKFI</Hsp_hseq>
+      <Hsp_midline>++EY   + R++TF    W    + Q+P  +A+AGF+  G  D V C+ CG  + +W +K++ PW EHAK +  C++V + KG  FI</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>BDT61964.1</Hit_id>
+  <Hit_def>BDT61964.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_35</Hit_accession>
+  <Hit_len>719</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>66.2402</Hsp_bit-score>
+      <Hsp_score>160</Hsp_score>
+      <Hsp_evalue>5.14738e-12</Hsp_evalue>
+      <Hsp_query-from>162</Hsp_query-from>
+      <Hsp_query-to>302</Hsp_query-to>
+      <Hsp_hit-from>251</Hsp_hit-from>
+      <Hsp_hit-to>396</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>43</Hsp_identity>
+      <Hsp_positive>77</Hsp_positive>
+      <Hsp_gaps>17</Hsp_gaps>
+      <Hsp_align-len>152</Hsp_align-len>
+      <Hsp_qseq>YNKLEDRIKTFYTNGWNEINSTQTPEDMAKAGFIYKGENDKVTCYQCGQSIYRWDDKDNDPWHEHAKHASHCQHVYIRKGGDFINNIKKSLCGIHV----------IHEHEVDELIKINTVKYILDMNIFQQPDI-IRQLVKKQIQVTGQPF</Hsp_qseq>
+      <Hsp_hseq>YKTTQSRLESFL--NWPH-RHRQKIEALVEAGFYYLGISDHVQCFHCGACLRNWEE-DDDPWRVHAEWYPECYYVQLKKGKEFIDKVRLEVSRIPMWRHSSSTSQDTSEHDWNILLGLDYTKRLILVQGF--PVVAVRDALCEQILQTGIPF</Hsp_hseq>
+      <Hsp_midline>Y   + R+++F    W      Q  E + +AGF Y G +D V C+ CG  +  W++ D+DPW  HA+    C +V ++KG +FI+ ++  +  I +            EH+ + L+ ++  K ++ +  F  P + +R  + +QI  TG PF</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>26.5646</Hsp_bit-score>
+      <Hsp_score>57</Hsp_score>
+      <Hsp_evalue>5.2086</Hsp_evalue>
+      <Hsp_query-from>140</Hsp_query-from>
+      <Hsp_query-to>252</Hsp_query-to>
+      <Hsp_hit-from>99</Hsp_hit-from>
+      <Hsp_hit-to>210</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>27</Hsp_identity>
+      <Hsp_positive>46</Hsp_positive>
+      <Hsp_gaps>7</Hsp_gaps>
+      <Hsp_align-len>116</Hsp_align-len>
+      <Hsp_qseq>PSFNKQNIQDNGILPYTFKYKEYNKLEDRIKTFYTNGWNEINSTQTPEDMAKAGFIYKGENDKVTCYQCGQSIYRWDDKDNDPWHEHAKHASHCQHVYIRKGGDF---INNIKKSL</Hsp_qseq>
+      <Hsp_hseq>PPLPRSKIFENRFDPATGLPADLRYEIKRLETFI--DWP--NKVVQAKDLAAAGFFYTRDTTCCICFSCHKYMNFSYDKPIVIRDMHLKKSPNCKFAQGKSVGNIPIRMSNILNSI</Hsp_hseq>
+      <Hsp_midline>P   +  I +N   P T    +      R++TF    W   N     +D+A AGF Y  +     C+ C + +    DK       H K + +C+    +  G+    ++NI  S+</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>4</Hit_num>
+  <Hit_id>BDT61963.1</Hit_id>
+  <Hit_def>BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_34</Hit_accession>
+  <Hit_len>728</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>58.5362</Hsp_bit-score>
+      <Hsp_score>140</Hsp_score>
+      <Hsp_evalue>1.09135e-09</Hsp_evalue>
+      <Hsp_query-from>186</Hsp_query-from>
+      <Hsp_query-to>370</Hsp_query-to>
+      <Hsp_hit-from>292</Hsp_hit-from>
+      <Hsp_hit-to>473</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>52</Hsp_identity>
+      <Hsp_positive>88</Hsp_positive>
+      <Hsp_gaps>21</Hsp_gaps>
+      <Hsp_align-len>194</Hsp_align-len>
+      <Hsp_qseq>PEDMAKAGFIYKGENDKVTCYQCGQSIYRWDDKDNDPWHEHAKHASHCQHVYIRKGGDFINNI---------KKSLCGIHVIHEHEVDELIKINTVKYILDMNIFQQPDIIRQLVKKQIQVTGQPFFTLNDILSPLFTDMHKRTADNTYSGGYYDYNLHEFIDDKSLKKYLRNSDIVQYVLKFLPNRQVIDFLN</Hsp_qseq>
+      <Hsp_hseq>PKKLIAAGFFYSGYGDHVNCFHCGVGIRNW-EKGDDPWTQHAMWNPECHYVRTLMGQTFIDTAKTVKNVLFRKPTRERTYSVTDEDWNAVMGLDITKDLL-ISLFPVA-AVRDCVREQILVHKIPFITKHEGL------YYVREKIAAY--GNMDITLAKKISRMS-TEYIQNYHAVYSVMYFLMDLKRIFIMN</Hsp_hseq>
+      <Hsp_midline>P+ +  AGF Y G  D V C+ CG  I  W +K +DPW +HA     C +V    G  FI+           K +    + + + + + ++ ++  K +L +++F     +R  V++QI V   PF T ++ L       + R     Y  G  D  L + I   S  +Y++N   V  V+ FL + + I  +N</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>28.8758</Hsp_bit-score>
+      <Hsp_score>63</Hsp_score>
+      <Hsp_evalue>1.06716</Hsp_evalue>
+      <Hsp_query-from>168</Hsp_query-from>
+      <Hsp_query-to>236</Hsp_query-to>
+      <Hsp_hit-from>112</Hsp_hit-from>
+      <Hsp_hit-to>174</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>21</Hsp_identity>
+      <Hsp_positive>31</Hsp_positive>
+      <Hsp_gaps>12</Hsp_gaps>
+      <Hsp_align-len>72</Hsp_align-len>
+      <Hsp_qseq>RIKTFYTNGWNEINSTQTPEDMAKAGFIYKGENDKVTCYQCGQSIYRWDDKDNDPWHEH---AKHASHCQHV</Hsp_qseq>
+      <Hsp_hseq>RLETFIDWPLGEVIEAR---DLAAAGFFYSRRNVECICFCCKVRI------SFKPCTRHGCCARHASTSQYI</Hsp_hseq>
+      <Hsp_midline>R++TF      E+   +   D+A AGF Y   N +  C+ C   I         P   H   A+HAS  Q++</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>5</Hit_num>
+  <Hit_id>BDT61959.1</Hit_id>
+  <Hit_def>BDT61959.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_30</Hit_accession>
+  <Hit_len>261</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>52.7582</Hsp_bit-score>
+      <Hsp_score>125</Hsp_score>
+      <Hsp_evalue>6.03864e-08</Hsp_evalue>
+      <Hsp_query-from>189</Hsp_query-from>
+      <Hsp_query-to>312</Hsp_query-to>
+      <Hsp_hit-from>142</Hsp_hit-from>
+      <Hsp_hit-to>252</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>38</Hsp_identity>
+      <Hsp_positive>59</Hsp_positive>
+      <Hsp_gaps>15</Hsp_gaps>
+      <Hsp_align-len>125</Hsp_align-len>
+      <Hsp_qseq>MAKAGFIYKGENDKVTCYQCGQSIYRWDDKDNDPWHEHAKHASHCQHVYIRKGGDFINNIKKSLCGIHVIHEHEVDELIKINTVKYILDMNIFQQPD-IIRQLVKKQIQVTGQPFFTLNDILSPL</Hsp_qseq>
+      <Hsp_hseq>MAESGFYFTGELDAVRCFSCQIDIYGWQHND-DPISVHAQWSPDCEYIQAIVDDNFIDSVR----------DKRYDTLIDPNVYQTLKDCGI---PDYIIRHAHRKHIIQSGELFTDAVQCLSVI</Hsp_hseq>
+      <Hsp_midline>MA++GF + GE D V C+ C   IY W   D DP   HA+ +  C+++      +FI++++          +   D LI  N  + + D  I   PD IIR   +K I  +G+ F      LS +</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>56</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>11</Iteration_iter-num>
+  <Iteration_query-ID>Query_11</Iteration_query-ID>
+  <Iteration_query-def>BDT62556.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>465</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT61962.1</Hit_id>
+  <Hit_def>BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_33</Hit_accession>
+  <Hit_len>577</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>96.2857</Hsp_bit-score>
+      <Hsp_score>238</Hsp_score>
+      <Hsp_evalue>4.72299e-21</Hsp_evalue>
+      <Hsp_query-from>158</Hsp_query-from>
+      <Hsp_query-to>385</Hsp_query-to>
+      <Hsp_hit-from>186</Hsp_hit-from>
+      <Hsp_hit-to>435</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>71</Hsp_identity>
+      <Hsp_positive>121</Hsp_positive>
+      <Hsp_gaps>34</Hsp_gaps>
+      <Hsp_align-len>256</Hsp_align-len>
+      <Hsp_qseq>NYGSYEKRLDSFIKNGWSNINLNQDPKDMAEAGFVFEYQDNDEVWCFYCQRTIYKWDSKCDPWYEHAKHVPYCRYVCTIKSPDFVKQVQQE-----TTCGTFI--------------------VHEYELDKLMELSIIQHAILYFKPH-FVRKVLKKRIEKKAEPFFSVQKCINAV--KETIKENSQDEEIIKKNVKETTIGLKESDMSNVVVVVASESDIGSSEKETNDDLKETNIESKEDEITLAQKRENNSFF</Hsp_qseq>
+      <Hsp_hseq>DFTTLDSRLKSYVE-GWPILGLHA--RDLAEAGF-FYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTASTTIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGYPSCIVRACLKDRVEQTGEPYFVIEPCLEDVIHRMSVTENRVADNCSESTEREPSYG--GTDISSSIFQQQAPIFPSTSETMGNRVASIQSLPSESTEVELLSQQQQVSIL</Hsp_hseq>
+      <Hsp_midline>++ + + RL S+++ GW  + L+   +D+AEAGF F    +D V CF+C + +  W S   PW EHA+  P CR+V   K  D++ +VQQE      T  T I                    V E ELD LM L +++  +    P   VR  LK R+E+  EP+F ++ C+  V  + ++ EN   +   +   +E + G   +D+S+ +    +     +SE   N      ++ S+  E+ L  +++  S  </Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>45.8246</Hsp_bit-score>
+      <Hsp_score>107</Hsp_score>
+      <Hsp_evalue>8.7223e-06</Hsp_evalue>
+      <Hsp_query-from>156</Hsp_query-from>
+      <Hsp_query-to>233</Hsp_query-to>
+      <Hsp_hit-from>44</Hsp_hit-from>
+      <Hsp_hit-to>114</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>26</Hsp_identity>
+      <Hsp_positive>40</Hsp_positive>
+      <Hsp_gaps>7</Hsp_gaps>
+      <Hsp_align-len>78</Hsp_align-len>
+      <Hsp_qseq>CLNYGSYEKRLDSFIKNGWSNINLNQDPKDMAEAGFVFEYQDNDEVWCFYCQRTIYKWDSKCDPWYEHAKHVPYCRYV</Hsp_qseq>
+      <Hsp_hseq>CLRY--EEKRLGTFID--WPHEWLK--PSELAADGFYYLRKD-DHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFI</Hsp_hseq>
+      <Hsp_midline>CL Y   EKRL +FI   W +  L   P ++A  GF +  +D D   C +C+  +  W+    P  EH +H P+C ++</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>3</Hsp_num>
+      <Hsp_bit-score>27.335</Hsp_bit-score>
+      <Hsp_score>59</Hsp_score>
+      <Hsp_evalue>2.9288</Hsp_evalue>
+      <Hsp_query-from>413</Hsp_query-from>
+      <Hsp_query-to>449</Hsp_query-to>
+      <Hsp_hit-from>530</Hsp_hit-from>
+      <Hsp_hit-to>568</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>13</Hsp_identity>
+      <Hsp_positive>21</Hsp_positive>
+      <Hsp_gaps>2</Hsp_gaps>
+      <Hsp_align-len>39</Hsp_align-len>
+      <Hsp_qseq>CKDCLQDKIDLLFFPCRHW-GCGNCTLPI-HCLDCNIEI</Hsp_qseq>
+      <Hsp_hseq>CKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQCPICRRDI</Hsp_hseq>
+      <Hsp_midline>CK C+  +I ++F PC H   C +C + +  C  C  +I</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>BDT61964.1</Hit_id>
+  <Hit_def>BDT61964.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_35</Hit_accession>
+  <Hit_len>719</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>65.0846</Hsp_bit-score>
+      <Hsp_score>157</Hsp_score>
+      <Hsp_evalue>1.16601e-11</Hsp_evalue>
+      <Hsp_query-from>87</Hsp_query-from>
+      <Hsp_query-to>312</Hsp_query-to>
+      <Hsp_hit-from>179</Hsp_hit-from>
+      <Hsp_hit-to>411</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>64</Hsp_identity>
+      <Hsp_positive>106</Hsp_positive>
+      <Hsp_gaps>19</Hsp_gaps>
+      <Hsp_align-len>239</Hsp_align-len>
+      <Hsp_qseq>DSSAEKNHKCK-GKKFEMKNIPIELCQILRSIQNRDRICSNVCKQSEVKVSHSSNL-LSNLGIEEGSPVNRCLNYGSYEKRLDSFIKNGWSNINLNQDPKDMAEAGFVFEYQDNDEVWCFYCQRTIYKWDSKCDPWYEHAKHVPYCRYVCTIKSPDFVKQVQQETTCGTFIVH---------EYELDKLMELSIIQHAILY--FKPHFVRKVLKKRIEKKAEPFFSVQKCINAVKETIK</Hsp_qseq>
+      <Hsp_hseq>DMHLKKSPNCKFAQGKSVGNIPIRMSNILNSIVNQKRVAVTSATATATATATVDQEDLIKTRYEYAGPLHDY--YKTTQSRLESFL--NWPHRH-RQKIEALVEAGFYY-LGISDHVQCFHCGACLRNWEEDDDPWRVHAEWYPECYYVQLKKGKEFIDKVRLEVSRIPMWRHSSSTSQDTSEHDWNILLGLDYTKRLILVQGFPVVAVRDALCEQILQTGIPFSREVDCTSAVRKKIE</Hsp_hseq>
+      <Hsp_midline>D   +K+  CK  +   + NIPI +  IL SI N+ R+       +    +      L     E   P++    Y + + RL+SF+   W + +  Q  + + EAGF +    +D V CF+C   +  W+   DPW  HA+  P C YV   K  +F+ +V+ E +      H         E++ + L+ L   +  IL   F    VR  L ++I +   PF     C +AV++ I+</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>BDT61876.1</Hit_id>
+  <Hit_def>BDT61876.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_10</Hit_accession>
+  <Hit_len>181</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>60.077</Hsp_bit-score>
+      <Hsp_score>144</Hsp_score>
+      <Hsp_evalue>3.84601e-10</Hsp_evalue>
+      <Hsp_query-from>159</Hsp_query-from>
+      <Hsp_query-to>242</Hsp_query-to>
+      <Hsp_hit-from>83</Hsp_hit-from>
+      <Hsp_hit-to>162</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>32</Hsp_identity>
+      <Hsp_positive>45</Hsp_positive>
+      <Hsp_gaps>4</Hsp_gaps>
+      <Hsp_align-len>84</Hsp_align-len>
+      <Hsp_qseq>YGSYEKRLDSFIKNGWSNINLNQDPKDMAEAGFVFEYQDNDEVWCFYCQRTIYKWDSKCDPWYEHAKHVPYCRYVCTIKSPDFV</Hsp_qseq>
+      <Hsp_hseq>YVMHQRRLETF---RWWPKETAQSPHKLAEAGFV-SSGLGDTVYCFHCGVYLEQWEKNDMPWKEHAKWSPRCRYVKMVKGDKFI</Hsp_hseq>
+      <Hsp_midline>Y  +++RL++F    W      Q P  +AEAGFV      D V+CF+C   + +W+    PW EHAK  P CRYV  +K   F+</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>4</Hit_num>
+  <Hit_id>BDT61963.1</Hit_id>
+  <Hit_def>BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_34</Hit_accession>
+  <Hit_len>728</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>59.6918</Hsp_bit-score>
+      <Hsp_score>143</Hsp_score>
+      <Hsp_evalue>5.28091e-10</Hsp_evalue>
+      <Hsp_query-from>138</Hsp_query-from>
+      <Hsp_query-to>329</Hsp_query-to>
+      <Hsp_hit-from>251</Hsp_hit-from>
+      <Hsp_hit-to>447</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>54</Hsp_identity>
+      <Hsp_positive>90</Hsp_positive>
+      <Hsp_gaps>33</Hsp_gaps>
+      <Hsp_align-len>211</Hsp_align-len>
+      <Hsp_qseq>SSNLLSNLGIEEGS---------PVNRCLNYGSYEKRLDSFIKNGWSNINLNQDPKDMAEAGFVFEYQDNDEVWCFYCQRTIYKWDSKCDPWYEHAKHVPYCRYVCTIKSPDFVKQV--------QQETTCGTFIVHEYELDKLMELSIIQHAILYFKP-HFVRKVLKKRIEKKAEPFFSVQKCINAVKETIKE-NSQDEEIIKKNVKETT</Hsp_qseq>
+      <Hsp_hseq>AGNILSEMGIESYSGPEHENFVTPISRKYTYDDWP----------LGDIML---PKKLIAAGFFYSGY-GDHVNCFHCGVGIRNWEKGDDPWTQHAMWNPECHYVRTLMGQTFIDTAKTVKNVLFRKPTRERTYSVTDEDWNAVMGLDITKDLLISLFPVAAVRDCVREQILVHKIPFITKHEGLYYVREKIAAYGNMDITLAKKISRMST</Hsp_hseq>
+      <Hsp_midline>+ N+LS +GIE  S         P++R   Y  +             +I L   PK +  AGF +     D V CF+C   I  W+   DPW +HA   P C YV T+    F+           ++ T   T+ V + + + +M L I +  ++   P   VR  ++++I     PF +  + +  V+E I    + D  + KK  + +T</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>30.0314</Hsp_bit-score>
+      <Hsp_score>66</Hsp_score>
+      <Hsp_evalue>0.516382</Hsp_evalue>
+      <Hsp_query-from>413</Hsp_query-from>
+      <Hsp_query-to>456</Hsp_query-to>
+      <Hsp_hit-from>682</Hsp_hit-from>
+      <Hsp_hit-to>727</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>16</Hsp_identity>
+      <Hsp_positive>22</Hsp_positive>
+      <Hsp_gaps>2</Hsp_gaps>
+      <Hsp_align-len>46</Hsp_align-len>
+      <Hsp_qseq>CKDCLQDKIDLLFFPCRHWG-CGNCTLP-IHCLDCNIEITAYTKPF</Hsp_qseq>
+      <Hsp_hseq>CKICLNSCVKTVTLPCRHMSCCGNCIVTQTKCPICRKKIKYTLEPY</Hsp_hseq>
+      <Hsp_midline>CK CL   +  +  PCRH   CGNC +    C  C  +I    +P+</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>5</Hit_num>
+  <Hit_id>BDT61959.1</Hit_id>
+  <Hit_def>BDT61959.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_30</Hit_accession>
+  <Hit_len>261</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>50.8322</Hsp_bit-score>
+      <Hsp_score>120</Hsp_score>
+      <Hsp_evalue>2.47363e-07</Hsp_evalue>
+      <Hsp_query-from>159</Hsp_query-from>
+      <Hsp_query-to>309</Hsp_query-to>
+      <Hsp_hit-from>119</Hsp_hit-from>
+      <Hsp_hit-to>254</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>43</Hsp_identity>
+      <Hsp_positive>69</Hsp_positive>
+      <Hsp_gaps>21</Hsp_gaps>
+      <Hsp_align-len>154</Hsp_align-len>
+      <Hsp_qseq>YGSYEKRLDSF--IKNGWSNINLNQDPKDMAEAGFVFEYQDNDEVWCFYCQRTIYKWDSKCDPWYEHAKHVPYCRYVCTIKSPDFVKQVQQETTCGTFIVHEYELDKLMELSIIQHAILYFKP-HFVRKVLKKRIEKKAEPFFSVQKCINAVKE</Hsp_qseq>
+      <Hsp_hseq>YKTPKKRFLSFTNFPNRYCNVN------RMAESGFYFT-GELDAVRCFSCQIDIYGWQHNDDPISVHAQWSPDCEYIQAIVDDNFIDSVRDK-----------RYDTLIDPNVYQTLKDCGIPDYIIRHAHRKHIIQSGELFTDAVQCLSVIEK</Hsp_hseq>
+      <Hsp_midline>Y + +KR  SF    N + N+N       MAE+GF F   + D V CF CQ  IY W    DP   HA+  P C Y+  I   +F+  V+ +             D L++ ++ Q       P + +R   +K I +  E F    +C++ +++</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>57</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>12</Iteration_iter-num>
+  <Iteration_query-ID>Query_12</Iteration_query-ID>
+  <Iteration_query-def>BDT62557.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>438</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT61964.1</Hit_id>
+  <Hit_def>BDT61964.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_35</Hit_accession>
+  <Hit_len>719</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>83.9593</Hsp_bit-score>
+      <Hsp_score>206</Hsp_score>
+      <Hsp_evalue>2.6811e-17</Hsp_evalue>
+      <Hsp_query-from>252</Hsp_query-from>
+      <Hsp_query-to>370</Hsp_query-to>
+      <Hsp_hit-from>243</Hsp_hit-from>
+      <Hsp_hit-to>363</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>40</Hsp_identity>
+      <Hsp_positive>66</Hsp_positive>
+      <Hsp_gaps>2</Hsp_gaps>
+      <Hsp_align-len>121</Hsp_align-len>
+      <Hsp_qseq>HVDPIHEKFVSQEERLNSLSKWP-GNQNVVAKVAEAGFFYTGKQDLVTCFYCDGSIYNWNKYSDPWYEHAAHFPHCFHILITKGNEYINRV-LQLSYIRKLECLKYTSEQIYNEIVNVLLN</Hsp_qseq>
+      <Hsp_hseq>YAGPLHDYYKTTQSRLESFLNWPHRHRQKIEALVEAGFYYLGISDHVQCFHCGACLRNWEEDDDPWRVHAEWYPECYYVQLKKGKEFIDKVRLEVSRIPMWRHSSSTSQDTSEHDWNILLG</Hsp_hseq>
+      <Hsp_midline>+  P+H+ + + + RL S   WP  ++  +  + EAGF+Y G  D V CF+C   + NW +  DPW  HA  +P C+++ + KG E+I++V L++S I        TS+       N+LL </Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>70.0922</Hsp_bit-score>
+      <Hsp_score>170</Hsp_score>
+      <Hsp_evalue>3.65503e-13</Hsp_evalue>
+      <Hsp_query-from>35</Hsp_query-from>
+      <Hsp_query-to>131</Hsp_query-to>
+      <Hsp_hit-from>246</Hsp_hit-from>
+      <Hsp_hit-to>333</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>36</Hsp_identity>
+      <Hsp_positive>50</Hsp_positive>
+      <Hsp_gaps>11</Hsp_gaps>
+      <Hsp_align-len>98</Hsp_align-len>
+      <Hsp_qseq>PMYENIVGQDRRLLTFYLFKWPKR-TNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYVAIHKGYTYIKSV</Hsp_qseq>
+      <Hsp_hseq>PLHDYYKTTQSRLESF--LNWPHRHRQKIEA--------LVEAGFYYLGISDHVQCFHCGACLRNWEEDDDPWRVHAEWYPECYYVQLKKGKEFIDKV</Hsp_hseq>
+      <Hsp_midline>P+++       RL +F    WP R    IE         +  AGF+Y G++D V CF+CG  + NWE   DPW  HA  +P C+YV + KG  +I  V</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>3</Hsp_num>
+      <Hsp_bit-score>31.5722</Hsp_bit-score>
+      <Hsp_score>70</Hsp_score>
+      <Hsp_evalue>0.161914</Hsp_evalue>
+      <Hsp_query-from>265</Hsp_query-from>
+      <Hsp_query-to>302</Hsp_query-to>
+      <Hsp_hit-from>126</Hsp_hit-from>
+      <Hsp_hit-to>163</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>18</Hsp_identity>
+      <Hsp_positive>22</Hsp_positive>
+      <Hsp_gaps>2</Hsp_gaps>
+      <Hsp_align-len>39</Hsp_align-len>
+      <Hsp_qseq>ERLNSLSKWPGNQNVVAK-VAEAGFFYTGKQDLVTCFYC</Hsp_qseq>
+      <Hsp_hseq>KRLETFIDWP-NKVVQAKDLAAAGFFYTRDTTCCICFSC</Hsp_hseq>
+      <Hsp_midline>+RL +   WP N+ V AK +A AGFFYT       CF C</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>4</Hsp_num>
+      <Hsp_bit-score>28.8758</Hsp_bit-score>
+      <Hsp_score>63</Hsp_score>
+      <Hsp_evalue>0.895636</Hsp_evalue>
+      <Hsp_query-from>45</Hsp_query-from>
+      <Hsp_query-to>92</Hsp_query-to>
+      <Hsp_hit-from>126</Hsp_hit-from>
+      <Hsp_hit-to>163</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>17</Hsp_identity>
+      <Hsp_positive>23</Hsp_positive>
+      <Hsp_gaps>10</Hsp_gaps>
+      <Hsp_align-len>48</Hsp_align-len>
+      <Hsp_qseq>RRLLTFYLFKWPKRTNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYC</Hsp_qseq>
+      <Hsp_hseq>KRLETF--IDWPNKV--------VQAKDLAAAGFFYTRDTTCCICFSC</Hsp_hseq>
+      <Hsp_midline>+RL TF    WP +         +   ++A AGFFYT  T   +CF C</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>BDT61962.1</Hit_id>
+  <Hit_def>BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_33</Hit_accession>
+  <Hit_len>577</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>82.0333</Hsp_bit-score>
+      <Hsp_score>201</Hsp_score>
+      <Hsp_evalue>1.01035e-16</Hsp_evalue>
+      <Hsp_query-from>247</Hsp_query-from>
+      <Hsp_query-to>343</Hsp_query-to>
+      <Hsp_hit-from>174</Hsp_hit-from>
+      <Hsp_hit-to>271</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>41</Hsp_identity>
+      <Hsp_positive>52</Hsp_positive>
+      <Hsp_gaps>1</Hsp_gaps>
+      <Hsp_align-len>98</Hsp_align-len>
+      <Hsp_qseq>TKLKRHVDPIHEKFVSQEERLNS-LSKWPGNQNVVAKVAEAGFFYTGKQDLVTCFYCDGSIYNWNKYSDPWYEHAAHFPHCFHILITKGNEYINRVLQ</Hsp_qseq>
+      <Hsp_hseq>TGLYQHSGPKRSDFTTLDSRLKSYVEGWPILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQ</Hsp_hseq>
+      <Hsp_midline>T L +H  P    F + + RL S +  WP        +AEAGFFY G  D V CF+C   + NW     PW EHA  +P C  +L+TKG +YIN V Q</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>72.0182</Hsp_bit-score>
+      <Hsp_score>175</Hsp_score>
+      <Hsp_evalue>9.94494e-14</Hsp_evalue>
+      <Hsp_query-from>33</Hsp_query-from>
+      <Hsp_query-to>133</Hsp_query-to>
+      <Hsp_hit-from>180</Hsp_hit-from>
+      <Hsp_hit-to>271</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>40</Hsp_identity>
+      <Hsp_positive>53</Hsp_positive>
+      <Hsp_gaps>9</Hsp_gaps>
+      <Hsp_align-len>101</Hsp_align-len>
+      <Hsp_qseq>TTPMYENIVGQDRRLLTFYLFKWPKRTNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYVAIHKGYTYIKSVLQ</Hsp_qseq>
+      <Hsp_hseq>SGPKRSDFTTLDSRLKS-YVEGWP-----ILG---LHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQ</Hsp_hseq>
+      <Hsp_midline>+ P   +    D RL + Y+  WP     I G   L   ++A AGFFY GL+D V CF+CG  + NW  +  PW EHA  +P C +V + KG  YI  V Q</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>3</Hsp_num>
+      <Hsp_bit-score>57.3806</Hsp_bit-score>
+      <Hsp_score>137</Hsp_score>
+      <Hsp_evalue>2.84895e-09</Hsp_evalue>
+      <Hsp_query-from>263</Hsp_query-from>
+      <Hsp_query-to>326</Hsp_query-to>
+      <Hsp_hit-from>48</Hsp_hit-from>
+      <Hsp_hit-to>111</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>24</Hsp_identity>
+      <Hsp_positive>33</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>64</Hsp_align-len>
+      <Hsp_qseq>QEERLNSLSKWPGNQNVVAKVAEAGFFYTGKQDLVTCFYCDGSIYNWNKYSDPWYEHAAHFPHC</Hsp_qseq>
+      <Hsp_hseq>EEKRLGTFIDWPHEWLKPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHC</Hsp_hseq>
+      <Hsp_midline>+E+RL +   WP      +++A  GF+Y  K D   C +C G +  W K   P  EH  HFPHC</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>4</Hsp_num>
+      <Hsp_bit-score>55.4546</Hsp_bit-score>
+      <Hsp_score>132</Hsp_score>
+      <Hsp_evalue>9.39434e-09</Hsp_evalue>
+      <Hsp_query-from>385</Hsp_query-from>
+      <Hsp_query-to>437</Hsp_query-to>
+      <Hsp_hit-from>526</Hsp_hit-from>
+      <Hsp_hit-to>576</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>21</Hsp_identity>
+      <Hsp_positive>35</Hsp_positive>
+      <Hsp_gaps>2</Hsp_gaps>
+      <Hsp_align-len>53</Hsp_align-len>
+      <Hsp_qseq>DDKTMKCKICFKNNVEIVLQPCTHMVTCTKCTINLKKCPTCNQTIHIIQKPII</Hsp_qseq>
+      <Hsp_hseq>EDRT--CKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQCPICRRDIKHVCRAIV</Hsp_hseq>
+      <Hsp_midline>+D+T  CK+C  + + IV  PC+HMVTC  C ++L++CP C + I  + + I+</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>5</Hsp_num>
+      <Hsp_bit-score>51.9878</Hsp_bit-score>
+      <Hsp_score>123</Hsp_score>
+      <Hsp_evalue>1.13851e-07</Hsp_evalue>
+      <Hsp_query-from>37</Hsp_query-from>
+      <Hsp_query-to>119</Hsp_query-to>
+      <Hsp_hit-from>42</Hsp_hit-from>
+      <Hsp_hit-to>114</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>26</Hsp_identity>
+      <Hsp_positive>41</Hsp_positive>
+      <Hsp_gaps>10</Hsp_gaps>
+      <Hsp_align-len>83</Hsp_align-len>
+      <Hsp_qseq>YENIVGQDRRLLTFYLFKWPKRTNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYV</Hsp_qseq>
+      <Hsp_hseq>YDCLRYEEKRLGTF--IDWP--------HEWLKPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFI</Hsp_hseq>
+      <Hsp_midline>Y+ +  +++RL TF    WP        +  L P E+A  GF+Y    D   C +C G +  WE+   P  EH  +FP+C ++</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>6</Hsp_num>
+      <Hsp_bit-score>41.9726</Hsp_bit-score>
+      <Hsp_score>97</Hsp_score>
+      <Hsp_evalue>0.000104828</Hsp_evalue>
+      <Hsp_query-from>221</Hsp_query-from>
+      <Hsp_query-to>251</Hsp_query-to>
+      <Hsp_hit-from>530</Hsp_hit-from>
+      <Hsp_hit-to>560</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>14</Hsp_identity>
+      <Hsp_positive>21</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>31</Hsp_align-len>
+      <Hsp_qseq>CKICFENNIAFIFSPCYHMVACMQCITKLKR</Hsp_qseq>
+      <Hsp_hseq>CKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQ</Hsp_hseq>
+      <Hsp_midline>CK+C ++ IA +F PC HMV C+ C   L++</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>BDT61963.1</Hit_id>
+  <Hit_def>BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_34</Hit_accession>
+  <Hit_len>728</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>75.0998</Hsp_bit-score>
+      <Hsp_score>183</Hsp_score>
+      <Hsp_evalue>1.34254e-14</Hsp_evalue>
+      <Hsp_query-from>43</Hsp_query-from>
+      <Hsp_query-to>423</Hsp_query-to>
+      <Hsp_hit-from>109</Hsp_hit-from>
+      <Hsp_hit-to>413</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>90</Hsp_identity>
+      <Hsp_positive>141</Hsp_positive>
+      <Hsp_gaps>78</Hsp_gaps>
+      <Hsp_align-len>382</Hsp_align-len>
+      <Hsp_qseq>QDRRLLTFYLFKWPKRTNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYVAIHKGYTYIKSVLQLDFLRKQMVLKKKTAKEIVDLFKSELENNHISYMPFIPTSQNDDDKLTCLANLHHEMINKHDLPLSKFLLKTNENDTKIDDNSSNIKCKICFENNIAFIFSPCYHMVACMQCITKLKRHVDPIHEKFVSQEERLNSLSKWP-GNQNVVAKVAEAGFFYTGKQDLVTCFYCDGSIYNWNKYSDPWYEHAAHFPHCFHILITKGNEYINRVLQLSYIRKLECLKYTSEQIYNEIVNVLLNDLTSHIPHYTDDKDDDKTMKCKICFKNNVEIVLQPCTHMVTCTKCTINLKKCP</Hsp_qseq>
+      <Hsp_hseq>ETKRLETF--IDWPL-GEVIEAR------DLAAAGFFYSRRNVECICFCCKVRIS-----FKPCTRHGC-------CARHASTSQYITEKHLNSAYCDFAMEKVTGNVPIRI------NKIISKI--IGHQETDNEKNSCGNNEGRSRGASGEEDGGDS--RESENDSSSRISAGNILSEMGIES------------------------YSGPEHENFVTPISRKYTYDDWPLGDIMLPKKLIAAGFFYSGYGDHVNCFHCGVGIRNWEKGDDPWTQHAMWNPECHYVRTLMGQTFIDTA--------------------KTVKNVLFRKPTRERTYSVTDEDWNAVMGLDI--TKDLLISLFPVAAVRDCVREQILVHKIP</Hsp_hseq>
+      <Hsp_midline>+ +RL TF    WP    VIE        ++A AGFFY+    + +CF C   IS     + P   H          A H   +   +   L+       ++K T    + +      N  IS +  I   + D++K +C  N         +        + +END+    ++ NI  ++  E+                        +  P HE FV+   R  +   WP G+  +  K+  AGFFY+G  D V CF+C   I NW K  DPW +HA   P C ++    G  +I+                        + NVL    T    +   D+D +  M   I    ++ I L P   +  C +  I + K P</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>69.707</Hsp_bit-score>
+      <Hsp_score>169</Hsp_score>
+      <Hsp_evalue>4.93562e-13</Hsp_evalue>
+      <Hsp_query-from>33</Hsp_query-from>
+      <Hsp_query-to>150</Hsp_query-to>
+      <Hsp_hit-from>264</Hsp_hit-from>
+      <Hsp_hit-to>368</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>40</Hsp_identity>
+      <Hsp_positive>59</Hsp_positive>
+      <Hsp_gaps>13</Hsp_gaps>
+      <Hsp_align-len>118</Hsp_align-len>
+      <Hsp_qseq>TTPMYENIVGQDRRLLTFYLFKWPKRTNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYVAIHKGYTYIKSVLQLDFLRKQMVLKKKTAKE</Hsp_qseq>
+      <Hsp_hseq>SGPEHENFVTPISRKYTYD--DWPLGDIML-------PKKLIAAGFFYSGYGDHVNCFHCGVGIRNWEKGDDPWTQHAMWNPECHYVRTLMGQTFIDTAKTV----KNVLFRKPTRER</Hsp_hseq>
+      <Hsp_midline>+ P +EN V    R  T+    WP    ++       P ++  AGFFY+G  D V CF+CG  I NWE+  DPW +HA+  P C YV    G T+I +   +    K ++ +K T + </Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>3</Hsp_num>
+      <Hsp_bit-score>43.8986</Hsp_bit-score>
+      <Hsp_score>102</Hsp_score>
+      <Hsp_evalue>3.45567e-05</Hsp_evalue>
+      <Hsp_query-from>373</Hsp_query-from>
+      <Hsp_query-to>435</Hsp_query-to>
+      <Hsp_hit-from>665</Hsp_hit-from>
+      <Hsp_hit-to>726</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>22</Hsp_identity>
+      <Hsp_positive>30</Hsp_positive>
+      <Hsp_gaps>1</Hsp_gaps>
+      <Hsp_align-len>63</Hsp_align-len>
+      <Hsp_qseq>TSHIPHYTDDKDDDKTMKCKICFKNNVEIVLQPCTHMVTCTKCTINLKKCPTCNQTIHIIQKP</Hsp_qseq>
+      <Hsp_hseq>SSEIKEAPDSVIGDRYL-CKICLNSCVKTVTLPCRHMSCCGNCIVTQTKCPICRKKIKYTLEP</Hsp_hseq>
+      <Hsp_midline>+S I    D    D+ + CKIC  + V+ V  PC HM  C  C +   KCP C + I    +P</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>4</Hsp_num>
+      <Hsp_bit-score>29.261</Hsp_bit-score>
+      <Hsp_score>64</Hsp_score>
+      <Hsp_evalue>0.783706</Hsp_evalue>
+      <Hsp_query-from>221</Hsp_query-from>
+      <Hsp_query-to>246</Hsp_query-to>
+      <Hsp_hit-from>682</Hsp_hit-from>
+      <Hsp_hit-to>707</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>11</Hsp_identity>
+      <Hsp_positive>14</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>26</Hsp_align-len>
+      <Hsp_qseq>CKICFENNIAFIFSPCYHMVACMQCI</Hsp_qseq>
+      <Hsp_hseq>CKICLNSCVKTVTLPCRHMSCCGNCI</Hsp_hseq>
+      <Hsp_midline>CKIC  + +  +  PC HM  C  CI</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>4</Hit_num>
+  <Hit_id>BDT61876.1</Hit_id>
+  <Hit_def>BDT61876.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_10</Hit_accession>
+  <Hit_len>181</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>70.8626</Hsp_bit-score>
+      <Hsp_score>172</Hsp_score>
+      <Hsp_evalue>2.2155e-13</Hsp_evalue>
+      <Hsp_query-from>254</Hsp_query-from>
+      <Hsp_query-to>340</Hsp_query-to>
+      <Hsp_hit-from>77</Hsp_hit-from>
+      <Hsp_hit-to>164</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>33</Hsp_identity>
+      <Hsp_positive>49</Hsp_positive>
+      <Hsp_gaps>1</Hsp_gaps>
+      <Hsp_align-len>88</Hsp_align-len>
+      <Hsp_qseq>DPIHEKFVSQEERLNSLSKWPG-NQNVVAKVAEAGFFYTGKQDLVTCFYCDGSIYNWNKYSDPWYEHAAHFPHCFHILITKGNEYINR</Hsp_qseq>
+      <Hsp_hseq>NPIHQEYVMHQRRLETFRWWPKETAQSPHKLAEAGFVSSGLGDTVYCFHCGVYLEQWEKNDMPWKEHAKWSPRCRYVKMVKGDKFIIR</Hsp_hseq>
+      <Hsp_midline>+PIH+++V  + RL +   WP        K+AEAGF  +G  D V CF+C   +  W K   PW EHA   P C ++ + KG+++I R</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>69.3218</Hsp_bit-score>
+      <Hsp_score>168</Hsp_score>
+      <Hsp_evalue>6.44612e-13</Hsp_evalue>
+      <Hsp_query-from>35</Hsp_query-from>
+      <Hsp_query-to>135</Hsp_query-to>
+      <Hsp_hit-from>78</Hsp_hit-from>
+      <Hsp_hit-to>169</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>40</Hsp_identity>
+      <Hsp_positive>52</Hsp_positive>
+      <Hsp_gaps>9</Hsp_gaps>
+      <Hsp_align-len>101</Hsp_align-len>
+      <Hsp_qseq>PMYENIVGQDRRLLTFYLFKWPKRTNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYVAIHKGYTYIKSVLQLD</Hsp_qseq>
+      <Hsp_hseq>PIHQEYVMHQRRLETFRW--WPKET-------AQSPHKLAEAGFVSSGLGDTVYCFHCGVYLEQWEKNDMPWKEHAKWSPRCRYVKMVKGDKFIIRWGPLD</Hsp_hseq>
+      <Hsp_midline>P+++  V   RRL TF    WPK T         +P ++A AGF  +GL D V CF+CG  +  WE+   PW EHA   P C YV + KG  +I     LD</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>5</Hit_num>
+  <Hit_id>BDT61959.1</Hit_id>
+  <Hit_def>BDT61959.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_30</Hit_accession>
+  <Hit_len>261</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>58.151</Hsp_bit-score>
+      <Hsp_score>139</Hsp_score>
+      <Hsp_evalue>1.61539e-09</Hsp_evalue>
+      <Hsp_query-from>250</Hsp_query-from>
+      <Hsp_query-to>346</Hsp_query-to>
+      <Hsp_hit-from>109</Hsp_hit-from>
+      <Hsp_hit-to>205</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>30</Hsp_identity>
+      <Hsp_positive>47</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>97</Hsp_align-len>
+      <Hsp_qseq>KRHVDPIHEKFVSQEERLNSLSKWPGNQNVVAKVAEAGFFYTGKQDLVTCFYCDGSIYNWNKYSDPWYEHAAHFPHCFHILITKGNEYINRVLQLSY</Hsp_qseq>
+      <Hsp_hseq>KRYAKRTRTLYKTPKKRFLSFTNFPNRYCNVNRMAESGFYFTGELDAVRCFSCQIDIYGWQHNDDPISVHAQWSPDCEYIQAIVDDNFIDSVRDKRY</Hsp_hseq>
+      <Hsp_midline>KR+       + + ++R  S + +P     V ++AE+GF++TG+ D V CF C   IY W    DP   HA   P C +I     + +I+ V    Y</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>43.5134</Hsp_bit-score>
+      <Hsp_score>101</Hsp_score>
+      <Hsp_evalue>3.66352e-05</Hsp_evalue>
+      <Hsp_query-from>52</Hsp_query-from>
+      <Hsp_query-to>131</Hsp_query-to>
+      <Hsp_hit-from>118</Hsp_hit-from>
+      <Hsp_hit-to>200</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>30</Hsp_identity>
+      <Hsp_positive>39</Hsp_positive>
+      <Hsp_gaps>7</Hsp_gaps>
+      <Hsp_align-len>85</Hsp_align-len>
+      <Hsp_qseq>LFKWPKR-----TNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYVAIHKGYTYIKSV</Hsp_qseq>
+      <Hsp_hseq>LYKTPKKRFLSFTNFPNRYCNVN--RMAESGFYFTGELDAVRCFSCQIDIYGWQHNDDPISVHAQWSPDCEYIQAIVDDNFIDSV</Hsp_hseq>
+      <Hsp_midline>L+K PK+     TN    Y  +    MA +GF++TG  D V CF C   I  W+   DP   HA   P C Y+       +I SV</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>56</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>13</Iteration_iter-num>
+  <Iteration_query-ID>Query_13</Iteration_query-ID>
+  <Iteration_query-def>BDT62560.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>343</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>54</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>14</Iteration_iter-num>
+  <Iteration_query-ID>Query_14</Iteration_query-ID>
+  <Iteration_query-def>BDT62561.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>329</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>54</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>15</Iteration_iter-num>
+  <Iteration_query-ID>Query_15</Iteration_query-ID>
+  <Iteration_query-def>BDT62562.1 wsv306-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>408</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT61939.1</Hit_id>
+  <Hit_def>BDT61939.1 wsv306-like protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_24</Hit_accession>
+  <Hit_len>426</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>402.134</Hsp_bit-score>
+      <Hsp_score>1032</Hsp_score>
+      <Hsp_evalue>4.44773e-113</Hsp_evalue>
+      <Hsp_query-from>27</Hsp_query-from>
+      <Hsp_query-to>408</Hsp_query-to>
+      <Hsp_hit-from>5</Hsp_hit-from>
+      <Hsp_hit-to>425</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>203</Hsp_identity>
+      <Hsp_positive>266</Hsp_positive>
+      <Hsp_gaps>43</Hsp_gaps>
+      <Hsp_align-len>423</Hsp_align-len>
+      <Hsp_qseq>HYKPNCATVNIFCTSDKDCHLQCSSAVHYANSHDTGIDKEQQDSSTIIINLCNLLTNQCEPNMIQKGYYDMAINDLKKLSQMEKFLPKAMWDYIKINDGKRFIVARARFYENLSFHLKEGTLLDAAIQRIINEHKKNNKRNYSNKLQQIN----IVDDD----------------------NDNISMDLYVKQLFGRTAKPSSSQDIILTRDLEHDKKRGEYCTLI-------------ATNTAAAAATAATIKSPSKPNDKIVAFNNQYPLQFHCNEEMNAGIMMAAYQDNDGNILPICVCTYPYYLTGPTCKHRTYNRVVDYELWEKTGYADFLTDPFNDYKKANRICKSKTINTTAVFDERDGCFYCQPLAAHFAQSLQMRGPYEPALILDKDYIDSLNVN--QSFKINIDYLDLLNKFY</Hsp_qseq>
+      <Hsp_hseq>HIKPNCSAVDIFCTDDRDCHVQCGSSALSVSSHT--IIPEKDDYSVVTIYLCNKSTKRCEPNTVLKGFYDMAMHDLKGLLKRKSTLSRGLHSYLQMYDGKYFILARARFYESLSLHLHDNENLEMAIRNIRSEHQRKRRTYLYEKIKYLEHEGAVTDKDEVKKMMDWLSTPALTSQNPIAENTTITMDVYKQQLFGHRMPHPPRDTTVLTRAEEYDDRRGEYVQNVTAVLPRQHDRHRRGEHLLKPTTTTTTLERHEELSSNLQTKSPSRELQFHCNEEMGAGIMMAAFRDGDGIILPVCICTHPLYLTGPTCKHRTYDSVIDYELWEKSGIPEFLTDPFNDYTKANDICKRTTLNTTAVFDEREGVFRCQPLAAHIGQSLQFRGPYEPALILDRDYIDTFNANHQQGFKINVDYIDLLGKFW</Hsp_hseq>
+      <Hsp_midline>H KPNC+ V+IFCT D+DCH+QC S+    +SH   I  E+ D S + I LCN  T +CEPN + KG+YDMA++DLK L + +  L + +  Y+++ DGK FI+ARARFYE+LS HL +   L+ AI+ I +EH++  +     K++ +     + D D                      N  I+MD+Y +QLFG           +LTR  E+D +RGEY   +               +      T  T++   + +  +   +    LQFHCNEEM AGIMMAA++D DG ILP+C+CT+P YLTGPTCKHRTY+ V+DYELWEK+G  +FLTDPFNDY KAN ICK  T+NTTAVFDER+G F CQPLAAH  QSLQ RGPYEPALILD+DYID+ N N  Q FKIN+DY+DLL KF+</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>56</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>16</Iteration_iter-num>
+  <Iteration_query-ID>Query_16</Iteration_query-ID>
+  <Iteration_query-def>BDT62564.1 wsv310-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>371</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>55</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>17</Iteration_iter-num>
+  <Iteration_query-ID>Query_17</Iteration_query-ID>
+  <Iteration_query-def>BDT62569.1 wsv282-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>480</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>57</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>18</Iteration_iter-num>
+  <Iteration_query-ID>Query_18</Iteration_query-ID>
+  <Iteration_query-def>BDT62575.1 wsv137-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>421</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>56</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>19</Iteration_iter-num>
+  <Iteration_query-ID>Query_19</Iteration_query-ID>
+  <Iteration_query-def>BDT62587.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>282</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>53</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>20</Iteration_iter-num>
+  <Iteration_query-ID>Query_20</Iteration_query-ID>
+  <Iteration_query-def>BDT62588.1 wsv267-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>320</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>54</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>21</Iteration_iter-num>
+  <Iteration_query-ID>Query_21</Iteration_query-ID>
+  <Iteration_query-def>BDT62589.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>292</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>53</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>22</Iteration_iter-num>
+  <Iteration_query-ID>Query_22</Iteration_query-ID>
+  <Iteration_query-def>BDT62590.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>324</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>54</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>23</Iteration_iter-num>
+  <Iteration_query-ID>Query_23</Iteration_query-ID>
+  <Iteration_query-def>BDT62593.1 SARAF-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>355</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>54</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>24</Iteration_iter-num>
+  <Iteration_query-ID>Query_24</Iteration_query-ID>
+  <Iteration_query-def>BDT62596.1 wsv161-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>430</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>56</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>25</Iteration_iter-num>
+  <Iteration_query-ID>Query_25</Iteration_query-ID>
+  <Iteration_query-def>BDT62597.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>339</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>54</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>26</Iteration_iter-num>
+  <Iteration_query-ID>Query_26</Iteration_query-ID>
+  <Iteration_query-def>BDT62598.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>335</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT61945.1</Hit_id>
+  <Hit_def>BDT61945.1 hypothetical protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_25</Hit_accession>
+  <Hit_len>251</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>35.039</Hsp_bit-score>
+      <Hsp_score>79</Hsp_score>
+      <Hsp_evalue>0.0142825</Hsp_evalue>
+      <Hsp_query-from>283</Hsp_query-from>
+      <Hsp_query-to>307</Hsp_query-to>
+      <Hsp_hit-from>219</Hsp_hit-from>
+      <Hsp_hit-to>243</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>12</Hsp_identity>
+      <Hsp_positive>18</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>25</Hsp_align-len>
+      <Hsp_qseq>QKQNCIHCIYNVFERLVSCFEFIIK</Hsp_qseq>
+      <Hsp_hseq>ERTDCHKCLIHVFNRLVDCFELLIK</Hsp_hseq>
+      <Hsp_midline>++ +C  C+ +VF RLV CFE +IK</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>54</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>27</Iteration_iter-num>
+  <Iteration_query-ID>Query_27</Iteration_query-ID>
+  <Iteration_query-def>BDT62599.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>424</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>56</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>28</Iteration_iter-num>
+  <Iteration_query-ID>Query_28</Iteration_query-ID>
+  <Iteration_query-def>BDT62606.1 wsv131-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>480</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT61963.1</Hit_id>
+  <Hit_def>BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>Subject_34</Hit_accession>
+  <Hit_len>728</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>28.1054</Hsp_bit-score>
+      <Hsp_score>61</Hsp_score>
+      <Hsp_evalue>1.89784</Hsp_evalue>
+      <Hsp_query-from>360</Hsp_query-from>
+      <Hsp_query-to>400</Hsp_query-to>
+      <Hsp_hit-from>206</Hsp_hit-from>
+      <Hsp_hit-to>246</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>11</Hsp_identity>
+      <Hsp_positive>23</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>41</Hsp_align-len>
+      <Hsp_qseq>LMKNKKIDNDDNSNGNNNNNDNNNSKNNDNNNNDDNSNNNS</Hsp_qseq>
+      <Hsp_hseq>IIGHQETDNEKNSCGNNEGRSRGASGEEDGGDSRESENDSS</Hsp_hseq>
+      <Hsp_midline>++ +++ DN+ NS GNN       S   D  ++ ++ N++S</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>57</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>29</Iteration_iter-num>
+  <Iteration_query-ID>Query_29</Iteration_query-ID>
+  <Iteration_query-def>BDT62609.1 wsv415-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>518</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>57</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>30</Iteration_iter-num>
+  <Iteration_query-ID>Query_30</Iteration_query-ID>
+  <Iteration_query-def>BDT62611.1 hypothetical protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>441</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>56</Statistics_hsp-len>
+      <Statistics_eff-space>500000000</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+</BlastOutput_iterations>
+</BlastOutput>
+

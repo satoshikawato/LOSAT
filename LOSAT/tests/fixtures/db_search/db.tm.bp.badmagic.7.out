@@ -1,0 +1,25 @@
+# BLASTP 2.17.0+
+# Query: qp1 query protein one
+# Database: tests/db_search/x16_taxid
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+qp1	st2	100.000	135	0	0	6	140	1	135	4.50e-105	283
+qp1	st1	100.000	130	0	0	1	130	1	130	1.17e-100	272
+# BLASTP 2.17.0+
+# Query: qp3 ACDEFGHIKLMNPQRSTVWYACDEFGHIKLMNPQRSTVWYACDEFGHIKLMNPQRSTVWY
+# Database: tests/db_search/x16_taxid
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+qp3	st2	100.000	120	0	0	1	120	1	120	7.24e-93	251
+qp3	st1	100.000	120	0	0	1	120	6	125	2.61e-92	250
+# BLASTP 2.17.0+
+# Query: qp2 unrelated protein (no hits expected)
+# Database: tests/db_search/x16_taxid
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+qp2	st1	33.333	9	6	0	24	32	1	9	1.7	12.3
+qp2	st1	57.143	7	3	0	33	39	35	41	1.8	12.3
+qp2	st1	29.545	44	21	3	4	42	45	83	3.9	11.5
+qp2	st2	66.667	6	2	0	33	38	30	35	1.7	12.3
+qp2	st2	29.545	44	21	3	4	42	40	78	2.8	11.9
+# BLAST processed 3 queries

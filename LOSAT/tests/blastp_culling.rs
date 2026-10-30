@@ -80,16 +80,16 @@ impl Db {
         std::fs::create_dir_all(&dir).unwrap();
         let name = dir.join("many");
         let made = losat(&[])
-            .arg("makedb")
+            .arg("makeblastdb")
             .arg("-in")
             .arg(fixture("e2e_many_subject.faa"))
             .args(["-dbtype", "prot", "-out"])
             .arg(&name)
             .output()
-            .expect("run LOSAT makedb");
+            .expect("run LOSAT makeblastdb");
         assert!(
             made.status.success(),
-            "makedb: {}",
+            "makeblastdb: {}",
             String::from_utf8_lossy(&made.stderr)
         );
         Db { dir, name }

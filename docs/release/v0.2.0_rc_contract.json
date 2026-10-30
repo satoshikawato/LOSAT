@@ -353,7 +353,8 @@
       "blastp-fast"
     ],
     "blastx_tasks": [
-      "blastx"
+      "blastx",
+      "blastx-fast"
     ],
     "tblastn_tasks": [
       "tblastn",

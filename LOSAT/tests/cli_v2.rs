@@ -611,9 +611,50 @@ fn defaults_and_task_overrides_remain_distinct() {
     // TBLASTN takes both of its tasks (tblastn-fast: the compressed lookup table).
     parse("tblastn", &["-task", "tblastn"]).unwrap();
     parse("tblastn", &["-task", "tblastn-fast"]).unwrap();
+    // NCBI api/blast_options_handle.cpp:429-433: blastx-fast is word size 5 (the compressed
+    // lookup table, lookup type 4) with threshold 20; -word_size 5 sets its own threshold over
+    // the task's, -word_size 3 keeps the task's on the standard table
+    // (blast_args.cpp:291-297, blast_options_local_priv.hpp:612-619).
+    for (extra, word_size, threshold, lookup_type) in [
+        (&["-task", "blastx"][..], 3, 12.0, 3),
+        (&["-task", "blastx-fast"][..], 5, 20.0, 4),
+        (&["-word_size", "5"][..], 5, 19.3, 4),
+        (&["-task", "blastx-fast", "-word_size", "5"][..], 5, 19.3, 4),
+        (&["-task", "blastx-fast", "-word_size", "3"][..], 3, 20.0, 3),
+        (
+            &["-task", "blastx-fast", "-threshold", "15"][..],
+            5,
+            15.0,
+            4,
+        ),
+        (
+            &[
+                "-task",
+                "blastx-fast",
+                "-word_size",
+                "3",
+                "-threshold",
+                "14",
+            ][..],
+            3,
+            14.0,
+            3,
+        ),
+    ] {
+        let Commands::Blastx(a) = parse("blastx", extra).unwrap().command else {
+            panic!()
+        };
+        let resolved = a.resolve().unwrap();
+        assert_eq!(
+            (resolved.word_size, resolved.threshold, resolved.lookup_type),
+            (word_size, threshold, lookup_type),
+            "{extra:?}"
+        );
+    }
     // A task that is not an NCBI task keeps clap's list of the accepted names.
     for (program, other, listed) in [
         ("blastp", "blastp-x", "blastp-fast"),
+        ("blastx", "blastx-x", "blastx-fast"),
         ("tblastn", "tblastn-x", "tblastn-fast"),
     ] {
         let text = LOSAT::cli::render_message(&parse(program, &["-task", other]).unwrap_err());

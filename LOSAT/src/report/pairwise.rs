@@ -186,7 +186,8 @@ pub struct BlastpPairwiseReport {
     pub word_threshold: f64,
     pub window_size: i32,
     pub gapped_karlin: KarlinParams,
-    pub gumbel: BlastGumbelBlk,
+    /// None with `-searchsp` (`PrintKAParameters` without `gbp`).
+    pub gumbel: Option<BlastGumbelBlk>,
     /// Subjects in the description table and with alignments, per query (NCBI's
     /// `m_NumDescriptions` and `m_NumAlignments`).
     pub num_descriptions: usize,
@@ -1888,10 +1889,19 @@ fn write_blastp_query_footer_spacing<W: Write>(
     writer: &mut W,
     ungapped_karlin: KarlinParams,
     gapped_karlin: KarlinParams,
-    gumbel: BlastGumbelBlk,
+    gumbel: Option<BlastGumbelBlk>,
     effective_search_space: i64,
     trailing: bool,
 ) -> io::Result<()> {
+    let Some(gumbel) = gumbel else {
+        return write_nucleotide_query_footer_spacing(
+            writer,
+            Some((ungapped_karlin, gapped_karlin)),
+            true,
+            effective_search_space,
+            trailing,
+        );
+    };
     writeln!(writer)?;
     writeln!(writer, "Lambda      K        H        a         alpha")?;
     write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;

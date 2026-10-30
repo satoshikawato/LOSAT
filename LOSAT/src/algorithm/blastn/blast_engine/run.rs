@@ -3998,6 +3998,18 @@ fn x_bnstream() -> bool {
 /// No NCBI counterpart: the subjects per thread of the window of `LOSAT_X_BNSTREAM`.
 const X_BNSTREAM_SUBJECTS_PER_THREAD: usize = 64;
 
+/// EXPERIMENT (LOSAT_X_BNHITGROUP, a strict-set switch: on unless it is `0`): a subject's HSPs
+/// grouped by query with a stable sort of the HSPs, instead of a list per query of the batch,
+/// each visited: that cost a 24-byte cell per query for every subject with an HSP, on the thread
+/// that takes the subjects in OID order (reads 1e6 x 16S, 33,000 queries per batch x 28,036
+/// subjects: 53 % of the cycles at 8 threads). The hit lists are the same.
+// No NCBI counterpart: reads the switch once; it does not change any value NCBI computes. NCBI
+// visits every query per subject (hspfilter_collector.c, above); AGENTS.md rule 9 allows less work.
+fn x_bnhitgroup() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNHITGROUP"))
+}
+
 /// The preliminary hit lists of a batch filled one subject at a time, in OID order
 /// (`collect_prelim_hit_lists`), so that only the HSP lists the hit lists keep stay in memory
 /// instead of those of every subject.
@@ -4017,8 +4029,34 @@ impl PrelimHitCollector {
     }
 
     /// The HSPs of subject `oid`; the subjects must come in OID order.
-    fn add(&mut self, oid: usize, hits: Vec<PrelimHit>) {
+    fn add(&mut self, oid: usize, mut hits: Vec<PrelimHit>) {
         if hits.is_empty() {
+            return;
+        }
+        if x_bnhitgroup() {
+            // The lists of one subject go to the hit lists of their queries, and a query's hit
+            // list does not read another's, so that the queries may come in any order. The sort
+            // is stable: the HSPs of a query keep their order.
+            if !hits.is_sorted_by_key(|hit| hit.query_idx) {
+                hits.sort_by_key(|hit| hit.query_idx);
+            }
+            while let Some(last) = hits.last() {
+                let query = last.query_idx;
+                let start = hits.partition_point(|hit| hit.query_idx < query);
+                let hsps = if start == 0 {
+                    std::mem::take(&mut hits)
+                } else {
+                    hits.split_off(start)
+                };
+                let prelim_hitlist_size = self.prelim_hitlist_size;
+                self.hit_lists[query as usize]
+                    .get_or_insert_with(|| HitList::new(prelim_hitlist_size))
+                    .update(PrelimHspList {
+                        oid: oid as u32,
+                        hsps,
+                        best_evalue: 0.0,
+                    });
+            }
             return;
         }
         let mut per_query: Vec<Vec<PrelimHit>> = vec![Vec::new(); self.hit_lists.len()];

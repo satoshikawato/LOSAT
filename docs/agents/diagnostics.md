@@ -315,6 +315,7 @@ export LOSAT_X_BNDBCUT=1
 export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNDCONE=1
 export LOSAT_X_BNFEWSUBJ=1
+export LOSAT_X_BNHITGROUP=1
 export LOSAT_X_BNHLGROW=1
 export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
@@ -3523,6 +3524,24 @@ Scheduling (each value computed by one thread with the original function; order 
   not act (dc-megablast, blastn and megablast of the 31,168 cDNAs, blastn of 5,000: x1.001-1.023, cycles x1.001-1.002,
   the same peaks); with `-db` the loop keeps (dc-megablast of the 31,168 cDNAs at 16 threads `RssAnon` 138 -> 131 MiB,
   x0.993; blastn of 5,000 88 -> 87, x0.994).
+- `LOSAT_X_BNHITGROUP=1` (BLASTN, speed, every task, `-subject` and `-db`; in the strict set from the pull request that
+  added it (feature/manyq-reads): on unless it is `0`) the preliminary stage's collector (`blastn/blast_engine/run.rs`
+  `PrelimHitCollector::x_add_grouped`) keeps one list per query, made at the first subject with an HSP, and visits only
+  the queries of a subject's HSPs. `=0` runs `add_per_query`, which made those lists anew for every subject with an HSP
+  and visited them all, as NCBI's `hsp_list_array` (`hspfilter_collector.c:116-161`): a 24-byte cell and a visit per
+  query x subject, on the thread that takes the subjects in OID order. With reads against a database of many subjects
+  (1e6 x 150 nt x 16S, 28,036 subjects, about 33,000 queries per batch) that was 53 % of the cycles at 8 threads and held
+  the search's wall time. A query's hit list does not read another's and the HSPs of a query keep their order, so that the
+  lists are the same (lib test `grouped_hit_lists_equal_the_lists_per_query`; `tests/blastn_hit_group.rs` compares reports
+  with `=0`: `-subject` and `-db`, 1 and 4 threads, blastn-short and megablast).
+  Evidence 2026-10-30 (workstation; dev 5ce40a9e0 / 13f17367e / that head with `=0` in one window, sampled VmHWM, one sha
+  per case): megablast of ENA DRR1003646 reads against 16S `-db` at 16 threads, 1e6 reads 37.47 -> 5.34 s (x0.146; NCBI
+  12.76 s in the same window) with VmHWM x0.9997 (537.8 -> 536.4 MiB; NCBI 5,132), 1e5 x0.174 and x1.008, 1e4 x0.520 and
+  x0.999; at one thread 1e6 x0.466, instructions:u x0.359. No gain and no loss where a batch holds few queries per subject:
+  QIIME-form amplicons 1e5 at 16 threads x0.996 (518.7 -> 516.6 s, one pair), VmHWM x0.9995; cDNAs against 3 Mb
+  (blastn, megablast, dc-megablast, `-subject`) and one query against a genome at one thread instructions:u x0.99997-1.00003.
+  The one control with a VmHWM above dev past 0.5 %: 5,000 cDNAs, blastn at 16 threads x1.010 (`=0` x1.007, the binary's placement);
+  16 pairs with `MALLOC_MMAP_THRESHOLD_=131072` x0.9997.
 - `LOSAT_X_BNHLGROW=1` (BLASTN, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
   added it (perf/bn-hl-grow): on unless it is `0`) a hit list's array (`blastn/hsp.rs` `HitList`, the preliminary
   stage's lists per query and the final ones) is no longer reserved to NCBI's array size when a list comes

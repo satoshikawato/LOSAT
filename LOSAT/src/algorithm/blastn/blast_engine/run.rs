@@ -4012,12 +4012,29 @@ fn x_bnstream() -> bool {
 /// No NCBI counterpart: the subjects per thread of the window of `LOSAT_X_BNSTREAM`.
 const X_BNSTREAM_SUBJECTS_PER_THREAD: usize = 64;
 
+/// EXPERIMENT (LOSAT_X_BNHITGROUP, a strict-set switch: on unless it is `0`): a subject's HSPs
+/// go to lists kept by the collector and only the queries of those HSPs are visited, instead of a
+/// new list per query of the batch, each visited: that cost a 24-byte cell and a visit per query
+/// for every subject with an HSP, on the thread that takes the subjects in OID order (reads 1e6 x
+/// 16S, 33,000 queries per batch x 28,036 subjects: 53 % of the cycles at 8 threads). The hit
+/// lists are the same.
+// No NCBI counterpart: reads the switch once; it does not change any value NCBI computes. NCBI
+// visits every query per subject (hspfilter_collector.c, above); AGENTS.md rule 9 allows less work.
+fn x_bnhitgroup() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNHITGROUP"))
+}
+
 /// The preliminary hit lists of a batch filled one subject at a time, in OID order
 /// (`collect_prelim_hit_lists`), so that only the HSP lists the hit lists keep stay in memory
 /// instead of those of every subject.
 struct PrelimHitCollector {
     hit_lists: PrelimHitLists,
     prelim_hitlist_size: usize,
+    /// LOSAT_X_BNHITGROUP: one empty list per query from the first subject with an HSP, and the
+    /// queries of the subject being added.
+    x_slots: Vec<Vec<PrelimHit>>,
+    x_touched: Vec<u32>,
 }
 
 impl PrelimHitCollector {
@@ -4027,6 +4044,8 @@ impl PrelimHitCollector {
         Self {
             hit_lists,
             prelim_hitlist_size,
+            x_slots: Vec::new(),
+            x_touched: Vec::new(),
         }
     }
 
@@ -4035,23 +4054,59 @@ impl PrelimHitCollector {
         if hits.is_empty() {
             return;
         }
+        if x_bnhitgroup() {
+            self.x_add_grouped(oid, hits);
+        } else {
+            self.add_per_query(oid, hits);
+        }
+    }
+
+    /// `LOSAT_X_BNHITGROUP=0`: a list per query of the batch, as NCBI's `hsp_list_array`.
+    fn add_per_query(&mut self, oid: usize, hits: Vec<PrelimHit>) {
         let mut per_query: Vec<Vec<PrelimHit>> = vec![Vec::new(); self.hit_lists.len()];
         for hit in hits {
             per_query[hit.query_idx as usize].push(hit);
         }
         for (query, hsps) in per_query.into_iter().enumerate() {
-            if hsps.is_empty() {
-                continue;
+            if !hsps.is_empty() {
+                self.update(query, oid, hsps);
             }
-            let prelim_hitlist_size = self.prelim_hitlist_size;
-            self.hit_lists[query]
-                .get_or_insert_with(|| HitList::new(prelim_hitlist_size))
-                .update(PrelimHspList {
-                    oid: oid as u32,
-                    hsps,
-                    best_evalue: 0.0,
-                });
         }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNHITGROUP): the same lists, made in the collector's slots: only the
+    /// queries of the subject's HSPs are visited. A query's hit list does not read another's, so
+    /// that the queries may come in the order of their first HSPs; the HSPs of a query keep their
+    /// order. A slot gives its list away, so that the lists grow as those of `add_per_query`.
+    fn x_add_grouped(&mut self, oid: usize, hits: Vec<PrelimHit>) {
+        if self.x_slots.is_empty() {
+            self.x_slots.resize_with(self.hit_lists.len(), Vec::new);
+        }
+        let mut touched = std::mem::take(&mut self.x_touched);
+        for hit in hits {
+            let slot = &mut self.x_slots[hit.query_idx as usize];
+            if slot.is_empty() {
+                touched.push(hit.query_idx);
+            }
+            slot.push(hit);
+        }
+        for &query in &touched {
+            let hsps = std::mem::take(&mut self.x_slots[query as usize]);
+            self.update(query as usize, oid, hsps);
+        }
+        touched.clear();
+        self.x_touched = touched;
+    }
+
+    fn update(&mut self, query: usize, oid: usize, hsps: Vec<PrelimHit>) {
+        let prelim_hitlist_size = self.prelim_hitlist_size;
+        self.hit_lists[query]
+            .get_or_insert_with(|| HitList::new(prelim_hitlist_size))
+            .update(PrelimHspList {
+                oid: oid as u32,
+                hsps,
+                best_evalue: 0.0,
+            });
     }
 }
 
@@ -20202,6 +20257,50 @@ mod tests {
         let mut query1 = hit_lists[1].take().unwrap();
         query1.sort_by_evalue();
         assert_eq!(prelim_scores(&query1), vec![(0, vec![90])]);
+    }
+
+    // `LOSAT_X_BNHITGROUP`: the lists made from a subject's HSPs alone equal the lists made with
+    // one list per query of the batch, in every hit list, with the HSPs of a list in their order
+    // (each HSP has its own score). Queries in random order, in runs and all in one query.
+    #[test]
+    fn grouped_hit_lists_equal_the_lists_per_query() {
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = move |below: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % below
+        };
+        for round in 0..200u64 {
+            let num_queries = 1 + next(40) as usize;
+            let size = 1 + next(5) as usize;
+            let mut per_query = PrelimHitCollector::new(num_queries, size);
+            let mut grouped = PrelimHitCollector::new(num_queries, size);
+            let mut score = 0;
+            for oid in 0..30 {
+                let count = next(25);
+                let run = 1 + next(4);
+                let mut hits = Vec::new();
+                for i in 0..count {
+                    let query = match round % 3 {
+                        0 => next(num_queries as u64),
+                        1 => (i / run).min(num_queries as u64 - 1),
+                        _ => num_queries as u64 - 1,
+                    };
+                    score += 1;
+                    hits.push(query_prelim_hit(query as u32, score));
+                }
+                if hits.is_empty() {
+                    continue;
+                }
+                per_query.add_per_query(oid, hits.clone());
+                grouped.x_add_grouped(oid, hits);
+            }
+            for (a, b) in per_query.hit_lists.iter().zip(&grouped.hit_lists) {
+                assert_eq!(a.as_ref().map(prelim_scores), b.as_ref().map(prelim_scores));
+                assert_eq!(a.is_some(), b.is_some());
+            }
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2163-2210

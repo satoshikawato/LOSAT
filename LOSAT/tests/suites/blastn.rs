@@ -23,6 +23,8 @@ mod blastn_disc_lookup_par;
 mod blastn_few_subj;
 #[path = "../blastn_greedy_row_fuse.rs"]
 mod blastn_greedy_row_fuse;
+#[path = "../blastn_hit_group.rs"]
+mod blastn_hit_group;
 #[path = "../blastn_hl_grow.rs"]
 mod blastn_hl_grow;
 #[path = "../blastn_lut_drop.rs"]

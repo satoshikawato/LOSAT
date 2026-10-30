@@ -93,6 +93,19 @@ fn ideal_karlin_params_for_matrix(matrix: ScoringMatrix, bounds: (i32, i32)) -> 
         .expect("standard protein matrix ideal Karlin parameters must be computable")
 }
 
+/// The ideal Karlin block of `matrix` (`kbp_ideal`) with the score range that the profile
+/// lookup's query preparation gives it (`x_lookup_table_for_profile`): BLOSUM62's -4..11, the
+/// range of the matrix's scores otherwise. TBLASTN's composition redo takes its ungapped lambda
+/// (`stage_d_kappa_params.rs`).
+pub(crate) fn ideal_karlin_params_of(matrix: ScoringMatrix) -> KarlinParams {
+    let bounds = if matrix == ScoringMatrix::Blosum62 {
+        (-4, 11)
+    } else {
+        matrix_score_bounds(matrix)
+    };
+    ideal_karlin_params_for_matrix(matrix, bounds)
+}
+
 /// NCBI AaLookupBackboneCell - EXACT port
 #[repr(C)]
 #[derive(Clone, Copy)]

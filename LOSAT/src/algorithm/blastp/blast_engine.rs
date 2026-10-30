@@ -4980,14 +4980,16 @@ fn search_cli(
     let database = match resolved.db.as_deref() {
         Some(name) => {
             let taxids = args.taxid_filter.resolve(&settings, outputs.diagnostics)?;
-            Some(database::BlastpDatabase::open_restricted(
-                name,
-                &settings,
-                args.app == BlastpApp::Blastp,
-                taxids.as_ref(),
-                outputs.diagnostics,
-            )?
-            .showing_gis(args.show_gis))
+            Some(
+                database::BlastpDatabase::open_restricted(
+                    name,
+                    &settings,
+                    args.app == BlastpApp::Blastp,
+                    taxids.as_ref(),
+                    outputs.diagnostics,
+                )?
+                .showing_gis(args.show_gis),
+            )
         }
         None => None,
     };

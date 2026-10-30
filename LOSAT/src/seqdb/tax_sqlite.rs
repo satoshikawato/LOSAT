@@ -1187,8 +1187,7 @@ mod tests {
             self.1
         }
         fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), String> {
-            std::os::unix::fs::FileExt::read_exact_at(&self.0, buf, offset)
-                .map_err(|e| e.to_string())
+            ReadAt::read_exact_at(&self.0, buf, offset)
         }
     }
 

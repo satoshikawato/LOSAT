@@ -84,6 +84,14 @@ impl ReadAt for std::fs::File {
         std::os::unix::fs::FileExt::read_exact_at(self, buf, offset)
             .map_err(|e| format!("read of {} bytes at offset {}: {e}", buf.len(), offset))
     }
+    #[cfg(not(any(unix, windows)))]
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), String> {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut f = self;
+        f.seek(SeekFrom::Start(offset))
+            .and_then(|_| f.read_exact(buf))
+            .map_err(|e| format!("read of {} bytes at offset {}: {e}", buf.len(), offset))
+    }
     #[cfg(windows)]
     fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), String> {
         let mut done = 0usize;

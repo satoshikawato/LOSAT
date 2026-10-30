@@ -441,13 +441,15 @@ fn search_cli(
     let database = match args.database_name() {
         Some(name) => {
             let taxids = args.taxid_filter.resolve(&settings, outputs.diagnostics)?;
-            Some(super::database::TblastnDatabase::open_restricted(
-                name,
-                &settings,
-                taxids.as_ref(),
-                outputs.diagnostics,
-            )?
-            .showing_gis(args.show_gis))
+            Some(
+                super::database::TblastnDatabase::open_restricted(
+                    name,
+                    &settings,
+                    taxids.as_ref(),
+                    outputs.diagnostics,
+                )?
+                .showing_gis(args.show_gis),
+            )
         }
         None => None,
     };

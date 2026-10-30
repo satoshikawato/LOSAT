@@ -9050,6 +9050,7 @@ fn run_in_pool(
             return Err(crate::cli::NativeError { exit: 3, message }.into());
         }
         warnings[start].extend(batch_title_warnings);
+        check_batch_window(&args, batch_records.batch_queries().records())?;
         // The batch's search, on the whole pool. EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps
         // its megablast table from batch to batch.
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:929
@@ -10138,6 +10139,29 @@ fn window_masker_rejection(
 /// diagonal table of the batch, as NCBI's `CLocalBlast` does for each batch that
 /// `run_in_pool` reads. `x_keep`: the batch loop's keep of LOSAT_X_MBLUTKEEP, which the batch's
 /// megablast table is built on and goes back to (`lookup::x_mb_lut_keep`).
+/// `blastinput::app::check_diag_table_window` for a query batch (DI-6, `-window_size`), before
+/// `search_query_batch`, whose code a check inside would change (its inlining; the default
+/// search's code must stay the same). The concatenated length is that of the batch's contexts
+/// (`search_query_batch`): each searched strand of a query with letters takes its letters and
+/// a sentinel, and the searched block leaves out the last sentinel.
+#[inline(never)]
+fn check_batch_window(args: &BlastnArgs, records: &[FastaRecord]) -> Result<()> {
+    let window = super::super::coordination::determine_window_size(args);
+    let (plus_on, minus_on) = QueryStrand::from_option(&args.strand).searched();
+    let strands = usize::from(plus_on) + usize::from(minus_on);
+    let rooms: usize = records
+        .iter()
+        .map(|record| record.sequence.len())
+        .filter(|&length| length > 0)
+        .map(|length| strands * (length + 1))
+        .sum();
+    crate::blastinput::app::check_diag_table_window(
+        i32::try_from(rooms.saturating_sub(1)).unwrap_or(i32::MAX),
+        i32::try_from(window).unwrap_or(i32::MAX),
+        "BLASTN",
+    )
+}
+
 fn search_query_batch<const UNGAPPED: bool>(
     args: &BlastnArgs,
     mut query_records: x_query_drop::BatchQueries<'_>,
@@ -10786,7 +10810,8 @@ fn search_query_batch<const UNGAPPED: bool>(
     //             s_BlastDiagTableNew(query_length, multiple_hits,
     //                               word_params->options->window_size);
     // ```
-    // The two-hit window of the task (`configure_task`).
+    // The two-hit window of the task or of `-window_size` (`configure_task`; a window whose sum
+    // with the query would pass 2^30 is refused before this search, `check_batch_window`).
     let window_size = config.window_size;
     let diag_array_length = {
         let mut diag_array_length = 1usize;
@@ -11554,17 +11579,17 @@ fn search_query_batch<const UNGAPPED: bool>(
     // SetMBInitialWordOptionsDefaults() { SetWindowSize(BLAST_WINDOW_SIZE_NUCL); }
     // NCBI reference: c++/src/algo/blast/api/disc_nucl_options.cpp:66-73
     // SetMBInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
-    // Traditional megablast retains the zero-initialized X-drop option. Its
-    // raw X-drop is the subject's word cutoff in ParametersUpdate below.
+    // Traditional megablast retains the zero-initialized X-drop option (0 bits, so 0 here):
+    // its raw X-drop is the subject's word cutoff in ParametersUpdate below. `-xdrop_ungap`
+    // replaces the task's bits (`configure_task`).
+    let x_drop_ungapped_bits = config.x_drop_ungapped;
     let x_dropoff_init: Vec<i32> = search_karlin
         .iter()
         .map(|blocks| {
-            if megablast {
+            if x_drop_ungapped_bits == 0.0 {
                 0
             } else {
-                ((super::super::constants::X_DROP_UNGAPPED as f64 * NCBIMATH_LN2)
-                    / blocks.ungapped.lambda)
-                    .ceil() as i32
+                ((x_drop_ungapped_bits * NCBIMATH_LN2) / blocks.ungapped.lambda).ceil() as i32
             }
         })
         .collect();

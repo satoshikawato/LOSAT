@@ -1745,7 +1745,7 @@ pub(super) fn resolve_one_name(
 //     }
 // }
 // ```
-fn collect_alias_files(node: &AliasNode, out: &mut std::collections::BTreeSet<String>) {
+pub(super) fn collect_alias_files(node: &AliasNode, out: &mut std::collections::BTreeSet<String>) {
     if let Some(name) = &node.this_name {
         out.insert(name.clone());
     }
@@ -2048,8 +2048,7 @@ pub(super) fn test_read_values(bytes: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
 // alias tree and the alias files of the third. The tests compare it with what
 // NCBI printed.
 /// What `blastdbcmd -info` lists under "Volumes:" for the database `dbname`.
-#[cfg(test)]
-pub(super) fn test_info_volumes(
+pub(super) fn info_volumes(
     dbname: &str,
     seqtype: SeqType,
     search: &SearchPath,

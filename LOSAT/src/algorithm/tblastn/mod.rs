@@ -64,6 +64,10 @@ mod x_oid_flow;
 mod stage_e_report;
 // TBLASTN's BLAST XML (outfmt 5), once per run, from the final hit lists.
 mod blast_xml;
+// NCBI c++/src/algo/blast/format/blast_format.cpp:770-834 (`CBlastTabularInfo`): the tabular
+// reports with a field list or a delimiter and outfmt 10 and 20, once per run, from the final hit
+// lists (`report::tabular`).
+mod tabular;
 // NCBI c++/src/app/blast/tblastn_app.cpp:295 (`WriteArchive`): TBLASTN's BLAST archive (outfmt 11),
 // one Blast4-archive per query batch.
 mod archive;

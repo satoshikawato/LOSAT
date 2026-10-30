@@ -356,14 +356,14 @@
       "blastx"
     ],
     "tblastn_tasks": [
-      "tblastn"
+      "tblastn",
+      "tblastn-fast"
     ],
     "tblastx_tasks": [
       "tblastx"
     ],
     "rejected_tasks": [
-      "blastp-short",
-      "tblastn-fast"
+      "blastp-short"
     ]
   },
   "smoke": [

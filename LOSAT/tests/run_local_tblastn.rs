@@ -21,7 +21,22 @@ use LOSAT::api::local_blast::{run_local_tblastn, FormatOutput, OutputSink, Repor
 use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 10] = ["0", "6", "7", "8", "9", "12", "5", "15", "16", "11"];
+/// The last three are the custom tabular reports of the shared writer (line CLI C2, PR 2).
+const FORMATS: [&str; 13] = [
+    "0",
+    "6",
+    "7",
+    "8",
+    "9",
+    "12",
+    "5",
+    "15",
+    "16",
+    "11",
+    "10 delim=| std qseq sseq sframe",
+    "7 std qseq sseq btop positive ppos frames qcovs qcovhsp",
+    "20 qseqid sseqid evalue sstrand",
+];
 /// The formats of the saved NCBI outputs (`docs/evidence/tlosan_stage_g/`).
 const SAVED_FORMATS: [&str; 3] = ["0", "6", "7"];
 
@@ -320,6 +335,11 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     for extra in [&[][..], &["-max_target_seqs", "1"][..]] {
         let result = inputs.run(&FORMATS, extra, true);
         assert_observer_ranges(&result, [0, 1, 2], &format!("tblastn {extra:?}"));
+        // One row per HSP in the custom tabular report too (outfmt 10, no comment lines).
+        assert_eq!(
+            run_local_support::assert_tabular_ranges(&result, 10, None, "tblastn outfmt 10"),
+            result.hits.len()
+        );
         // A translated HSP section ends with the blank line of x_DisplayAlnvecInfo.
         for &(hsp, start, end) in &result.ranges[0] {
             assert!(
@@ -344,8 +364,9 @@ fn unsupported_formats_fail_before_searching() {
     let subjects = subjects(&inputs.subject);
     let (query_name, subject_name) = inputs.names();
     // NCBI blast_args.cpp:2845-2851: a custom specification of outfmt 0 is ignored, so
-    // "0 qseqid" is outfmt 0; LOSAT's TBLASTN writes no custom tabular fields or delimiter.
-    for outfmt in ["2", "6 qseq sseq", "6 delim=,"] {
+    // "0 qseqid" is outfmt 0. A delimiter that a field separates its entries with is NCBI's
+    // error (blast_args.cpp:2753-2792, `s_ValidateCustomDelim`).
+    for outfmt in ["2", "18", "6 delim=; qseqid staxids"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![

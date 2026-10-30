@@ -393,6 +393,12 @@ fn parse_escapes(str: &[u8]) -> Result<Vec<u8>, &'static str> {
     Ok(out)
 }
 
+/// The `fasta` string of `x_GetFastaReaderDeflines`: the `DefLine` field with `\t` replaced
+/// by three spaces, then its escapes read (`fasta_reader_title` quotes the lines).
+pub(crate) fn fasta_reader_fasta(defline_field: &[u8]) -> Result<Vec<u8>, &'static str> {
+    parse_escapes(&replace(defline_field, b"\\t", TAB_REPLACEMENT))
+}
+
 /// `TAB_REPLACEMENT`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1714
@@ -448,8 +454,7 @@ const TAB_REPLACEMENT: &[u8] = b"   ";
 /// wrote, followed by a letter, a quote, `?`, a backslash or octal digits, or it is the
 /// backslash left of a replaced `\\t`, followed by a space.
 pub(super) fn fasta_reader_title(defline_field: &[u8]) -> Result<Option<Vec<u8>>, &'static str> {
-    let fasta = replace(defline_field, b"\\t", TAB_REPLACEMENT);
-    let fasta = parse_escapes(&fasta)?;
+    let fasta = fasta_reader_fasta(defline_field)?;
     if fasta.is_empty() {
         return Ok(None);
     }

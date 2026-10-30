@@ -89,6 +89,26 @@ impl TblastxDatabase {
         self.taxdb.found(&self.db)
     }
 
+    /// Whether a report that names any sequence of the database could be refused by LOSAT
+    /// (`common::database::reports_may_refuse`, with the reports `shown` and the batches'
+    /// prefetch `prefetch`), read in `pool`.
+    pub(crate) fn reports_may_refuse(
+        &self,
+        shown: ParsedShown,
+        prefetch: bool,
+        pool: &crate::utils::threading::SearchPool<'_>,
+    ) -> Option<shared::ReportRefusal> {
+        shared::reports_may_refuse(
+            &self.db,
+            shown,
+            false,
+            self.taxdb_found(),
+            prefetch,
+            pool,
+            PROGRAM,
+        )
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:164-168,183-187
     // ```c++
     // s_SeqDbGetNumSeqs(void* seqdb_handle, void*)
@@ -139,6 +159,32 @@ impl TblastxDatabase {
             parsed_taxonomy,
             notes,
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
+    // ```c++
+    //             	CRef<CBlast_def_line_set> bdlRef =
+    //             			CSeqDB::ExtractBlastDefline(subject_bh);
+    //     ...
+    //             	if(setSubjectTaxInfoAll) {
+    //             		x_SetTaxInfoAll(subject_bh, bdlRef);
+    //             	}
+    // ```
+    /// The taxonomy of the tabular fields (`staxid`, `staxids`) of every reported sequence, by
+    /// rank (every rank is made from a hit, `reported_subjects`;
+    /// `algorithm::common::tabular::tabular_taxonomy`). A header that does not decode is
+    /// refused before the report.
+    pub(crate) fn tabular_taxonomy(
+        &self,
+        reported: &ReportedSubjects,
+    ) -> Result<Vec<crate::report::tabular::TabularTaxonomy>> {
+        crate::algorithm::common::tabular::tabular_taxonomy(
+            &self.db,
+            &reported.ordinals,
+            &reported.parsed,
+            0..reported.ordinals.len(),
+            PROGRAM,
+        )
     }
 
     /// The database's sequences by ordinal id (`common::database::read_nucleotide_stores`).
@@ -459,5 +505,54 @@ mod tests {
         assert!(!database.taxdb_found());
         assert_eq!(text(&database, &[0, 1]), "");
         std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    // Line DBID, ID4t fix 2b: the loop writes each query batch's reports when it takes the batch
+    // only where no report of any sequence of the database can be refused (`report_stream`): a
+    // sequence that NCBI's formatters do not find by its Seq-align id (nrefuse_v5) refuses the
+    // tabular formats and outfmt 0, and two sequences whose Seq-align ids match (njoined, in two
+    // volumes) refuse outfmt 0 only, read on one thread and on four.
+    #[test]
+    fn a_report_of_any_sequence_that_could_be_refused_is_found() {
+        let open = |name: &str| {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/ids")
+                .join(name);
+            TblastxDatabase::open(path.to_str().unwrap(), &ApplicationSettings::default())
+                .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+        };
+        let tabular = ParsedShown {
+            tabular: true,
+            ..ParsedShown::default()
+        };
+        let pairwise = ParsedShown {
+            pairwise: true,
+            joined: true,
+            ..ParsedShown::default()
+        };
+        let answers = |pool: &crate::utils::threading::SearchPool<'_>| {
+            ["nucl_v5", "nucl_v4", "nrefuse_v5", "njoined"].map(|name| {
+                let database = open(name);
+                (
+                    database.reports_may_refuse(tabular, false, pool),
+                    database.reports_may_refuse(pairwise, false, pool),
+                )
+            })
+        };
+        use shared::ReportRefusal::{Headers, Joined};
+        let serial = answers(&crate::utils::threading::SearchPool::x_serial());
+        assert_eq!(
+            serial,
+            [
+                (None, None),
+                (None, None),
+                (Some(Headers), Some(Headers)),
+                (None, Some(Joined)),
+            ]
+        );
+        let parallel =
+            crate::utils::threading::with_search_pool(4, "TBLASTX", |pool| Ok(answers(pool)))
+                .unwrap();
+        assert_eq!(serial, parallel);
     }
 }

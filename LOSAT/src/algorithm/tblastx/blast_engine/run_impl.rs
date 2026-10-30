@@ -100,6 +100,10 @@ mod x_subject_next;
     allow(dead_code)
 )]
 mod x_batch_pipe;
+// The reports of each query batch written when the batch loop takes it (line DBID, ID4t fix 2b;
+// see tblastx/report_stream.rs). A child module of this file, as x_batch_pipe is.
+#[path = "../report_stream.rs"]
+mod report_stream;
 use x_search_timing::XStage;
 // Diagnostic (LOSAT_TIMING): the stage times of the two linking calls, two more `[TIMING]`
 // lines after those (see tblastx/x_link_timing.rs).
@@ -799,8 +803,14 @@ pub fn run(
     let out_file = open_out_file(&args)?;
     let out_path = args.out.clone();
     let pairwise = format == Some(crate::blastinput::app::ReportFormat::Pairwise);
-    // LOSAT's reports read the format number that NCBI reads.
-    let outfmt = choice.normalized();
+    // LOSAT's reports read the format number that NCBI reads: the number and the custom fields,
+    // or the value as given when it has a delimiter, which `normalized` drops and the custom
+    // tabular report reads (`report::output_format`, which parses it again as NCBI does).
+    let outfmt = if choice.delimiter.is_empty() {
+        choice.normalized()
+    } else {
+        args.outfmt.clone()
+    };
     let mut stream = cli_report_stream(out_file);
     let result = {
         let mut outputs =
@@ -1219,6 +1229,28 @@ fn search_cli(
         )?),
         None => None,
     };
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
+    // ```c++
+    // void CBlastTabularInfo::x_CheckTaxDB()
+    // {
+    //    	if( x_IsFieldRequested(eSubjectSciNames) ||
+    //     ...
+    //    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
+    // ```
+    // A tabular field list that shows a name of the taxonomy database asks whether `taxdb.bti`
+    // is on the search path: its formatters warn without it (the plural names), and LOSAT
+    // refuses a name of a subject with a taxid with it (`tabular`), as BLASTN and TBLASTN.
+    if outputs.formats.iter().any(|format| {
+        matches!(
+            report::output_format(format.outfmt),
+            report::TblastxOutputFormat::CustomTabular(spec) if spec.needs().taxonomy_names
+        )
+    }) {
+        args.tabular_taxdb = Some(match database.as_ref() {
+            Some(database) => database.taxdb_found(),
+            None => crate::algorithm::common::tabular::subject_taxdb_found(&settings, "TBLASTX")?,
+        });
+    }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
     if let Some(database) = database.as_ref() {
@@ -1376,13 +1408,21 @@ pub(crate) fn run_local_with(
     // `run_local`); `search` checks the formats again.
     check_report_formats(outputs, None)?;
     // No NCBI counterpart: ABI v1 is frozen (plan TD-1; line OF, outfmt-20261019 DECISIONS
-    // 10): it adds no format, so it refuses the Seq-annot formats (outfmt 8, 9, 12) with the
-    // message that `check_report_formats` gave them before TBLASTX wrote them.
+    // 10): it adds no format, so it refuses the Seq-annot formats (outfmt 8, 9, 12), and outfmt
+    // 10 and 20 and a custom specification (fields or a delimiter) of the tabular formats (line
+    // CLI C2, PR 2), with the messages that `check_report_formats` gave them before TBLASTX wrote
+    // them. (Its `-outfmt` reader takes 6 alone, `tblastx_v1_outfmt`.)
     if v1.is_some() {
         for format in &outputs.formats {
-            let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
-            if matches!(number, 8 | 9 | 11 | 12) {
+            let choice = crate::blastinput::app::parse_formatting_string(format.outfmt)?;
+            let number = choice.number;
+            if matches!(number, 8 | 9 | 10 | 11 | 12 | 20) {
                 anyhow::bail!("output format {number} is not supported by LOSAT's TBLASTX");
+            }
+            if choice.custom() {
+                anyhow::bail!(
+                    "a custom output format specification (fields or a delimiter) is not supported by LOSAT's TBLASTX"
+                );
             }
         }
     }
@@ -1441,6 +1481,13 @@ pub(crate) fn run_local_with(
 ///
 /// `out` is the run's `-out`: outfmt 13 and 14 write side files next to it, and fail on standard
 /// output (`xinclude_check_for`). `run_local` has no output file.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2887
+/// ```c++
+///     s_ValidateCustomDelim(m_CustomOutputFormatSpec,m_CustomDelim);
+/// ```
+/// The formatting handler checks the custom delimiter of each format that LOSAT writes too
+/// (`formatting_handler_check`; the command line's comes before, in `check_ncbi_options`).
 fn check_report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
     use crate::blastinput::app;
     for format in &outputs.formats {
@@ -1448,6 +1495,8 @@ fn check_report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Pat
         if app::report_format(&choice, app::Program::Tblastx, out)?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastx)?;
             app::xinclude_check_for(&choice, out)?;
+        } else {
+            app::formatting_handler_check(&choice, app::Program::Tblastx)?;
         }
     }
     Ok(())
@@ -1744,12 +1793,19 @@ pub(crate) struct TblastxReportRun<'a> {
     pub ranges: &'a QueryRuns<'a>,
     /// Whether the reports end with the epilog (not when the search stops at a batch).
     pub epilog: bool,
+    /// The queries whose reports earlier calls wrote, which outfmt 7's epilog counts too
+    /// (NCBI's `m_QueriesFormatted`): the batches that the loop wrote when it took them
+    /// (`report_stream`); 0 otherwise.
+    pub queries_before: usize,
     /// The subject set's numbers (the BLAST XML computes a query's length adjustment again
     /// from them).
     pub numbers: &'a SubjectSetNumbers,
     /// `-db`, XML2 and JSON: the taxid of each reported sequence by rank and what the taxonomy
     /// database says about it (empty for the other formats).
     pub xml_taxa: &'a super::super::database::XmlTaxa,
+    /// `-db`, a custom tabular report that shows a taxonomy field: the taxonomy of each reported
+    /// sequence by rank (`TblastxDatabase::tabular_taxonomy`; empty otherwise).
+    pub tabular_taxonomy: &'a [crate::report::tabular::TabularTaxonomy],
     /// Whether ABI v1's rejection of outfmt 0 titles applies (`V1Checks`).
     pub v1_titles: bool,
     /// The queries of each batch searched, in order (the documents of the BLAST archive).
@@ -1996,8 +2052,14 @@ fn write_tblastx_outputs(
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
+        // So do the warnings of the formatters of a tabular field list that shows a taxonomy
+        // name (`x_CheckTaxDB`, `tabular`).
         let mut warnings = (warning_lines.is_some()
-            || matches!(output_format, report::TblastxOutputFormat::Xml2(_)))
+            || matches!(output_format, report::TblastxOutputFormat::Xml2(_))
+            || matches!(
+                output_format,
+                report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
+            ))
         .then(|| crate::report::query_warnings::QueryWarnings {
             before: warning_lines.take().unwrap_or(&[]),
             sink: &mut *outputs.diagnostics,
@@ -2268,6 +2330,24 @@ fn write_tblastx_outputs(
                 run,
                 warnings.as_mut(),
             )?,
+            // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
+            // (`tabular`); never the default 6 and 7 below.
+            report::TblastxOutputFormat::CustomTabular(spec) => {
+                super::super::tabular::write_tblastx_tabular(
+                    &super::super::tabular::TblastxTabular {
+                        spec,
+                        hits: &hits,
+                        run,
+                        query_titles: &query_titles,
+                        database: &database,
+                        subject_ids: &subject_ids,
+                        unsearched: &unsearched,
+                    },
+                    &mut writer,
+                    warnings.as_mut(),
+                    probe.as_mut(),
+                )?
+            }
             report::TblastxOutputFormat::Tabular
             | report::TblastxOutputFormat::TabularWithComments => match run.x_pool {
                 // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows formatted on the pool; with the format
@@ -2283,7 +2363,7 @@ fn write_tblastx_outputs(
                         run.query_ids,
                         &subject_ids,
                         &unsearched,
-                        run.epilog,
+                        run.epilog.then_some(run.queries_before),
                         warnings.as_mut(),
                     )?
                 }
@@ -2296,7 +2376,7 @@ fn write_tblastx_outputs(
                     run.query_ids,
                     &subject_ids,
                     &unsearched,
-                    run.epilog,
+                    run.epilog.then_some(run.queries_before),
                     probe.as_mut(),
                     warnings.as_mut(),
                 )?,
@@ -2462,6 +2542,14 @@ fn report_counts<S: TbxScore>(
     (engine_counts, pairwise)
 }
 
+/// The subject ID of the tabular formats of the subject record `subject`, `None` where
+/// `tabular_subject_ids` refuses it.
+fn subject_tabular_id(subject: &FastaRecord) -> Option<Arc<[u8]>> {
+    crate::report::defline::tabular_subject_id(subject.local_id.as_bytes(), &subject.title, false)
+        .ok()
+        .map(Arc::from)
+}
+
 /// The subject ID of the tabular formats of every subject, by subject index
 /// (`report::defline::tabular_subject_id`: the title's first word, or the local ID, and
 /// for `lcl|Subject_...` the first word of `GenerateDefline`), as BLASTN's.
@@ -2484,18 +2572,7 @@ fn report_counts<S: TbxScore>(
 /// a subject explicitly before it writes any format; a subject without rows is never
 /// named.
 fn tabular_subject_ids(hits: &[TblastxHsp], subjects: &[FastaRecord]) -> Result<Vec<Arc<[u8]>>> {
-    let ids: Vec<Option<Arc<[u8]>>> = subjects
-        .iter()
-        .map(|subject| {
-            crate::report::defline::tabular_subject_id(
-                subject.local_id.as_bytes(),
-                &subject.title,
-                false,
-            )
-            .ok()
-            .map(Arc::from)
-        })
-        .collect();
+    let ids: Vec<Option<Arc<[u8]>>> = subjects.iter().map(subject_tabular_id).collect();
     for hsp in hits {
         let s_idx = hsp.hit.s_idx as usize;
         if ids.get(s_idx).is_some_and(Option::is_none) {
@@ -2556,8 +2633,10 @@ fn tabular_subject_ids(hits: &[TblastxHsp], subjects: &[FastaRecord]) -> Result<
 // and the smallest Lambda of the batch's contexts (blast_parameters.c:1023-1026), so the
 // batches change the HSPs of a run with several queries. NCBI writes the reports of a
 // batch after its search; LOSAT searches the batches one at a time and writes the reports
-// of all of them once (`write_tblastx_outputs`), so that what stops the run at a batch
-// comes after the reports of the batches before (without the epilog).
+// of each batch when the loop takes it where no refusal of LOSAT's can come after the first
+// batch (`report_stream`), else of all of them once after the loop (`write_tblastx_outputs`),
+// so that what stops the run at a batch comes after the reports of the batches before
+// (without the epilog).
 #[allow(clippy::too_many_arguments)]
 fn run_in_pool(
     args: TblastxArgs,
@@ -2590,6 +2669,7 @@ fn run_in_pool(
         titles: std::cell::RefCell::new(DatabaseTitles::new()),
         v1_titles,
         x_search_pool: parallel_pool,
+        queries_written: std::cell::Cell::new(0),
     };
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:176-178
     // ```c
@@ -2670,6 +2750,30 @@ fn run_in_pool(
             seed_end,
         ),
     };
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:203-209
+    // The loop writes each batch's reports when it takes the batch where no refusal of LOSAT's
+    // can come after the first batch (`report_stream`); otherwise after the loop.
+    let x_check = Instant::now();
+    let stream = report_stream::check(
+        &args,
+        outputs,
+        v1_titles,
+        query_runs,
+        subjects,
+        stores_error.is_some(),
+        batch_size,
+        parallel_pool,
+    );
+    // Diagnostic (LOSAT_X_STATS): whether the loop writes each batch's reports, or why not. No NCBI
+    // counterpart.
+    if std::env::var_os("LOSAT_X_STATS").is_some() {
+        eprintln!(
+            "[X_STATS] TBXRPTSTREAM off={} check_s={:.6}",
+            stream.map_or_else(report_stream::Off::name, |()| "none"),
+            x_check.elapsed().as_secs_f64()
+        );
+    }
+    let stream = stream.is_ok();
     // The loop's result of the batch of queries `start..end`: the search above, or with
     // LOSAT_X_TBXPIPE the pipe's (`XPipe::take`).
     let batch_loop = |take: &mut dyn FnMut(std::ops::Range<usize>) -> Result<TblastxBatch>| {
@@ -2682,6 +2786,7 @@ fn run_in_pool(
             outputs,
             batch_size,
             &reports,
+            stream,
             take,
         )
     };
@@ -2711,19 +2816,26 @@ fn x_pipe_wanted(parallel_pool: &crate::utils::threading::SearchPool<'_>) -> boo
     let wanted = parallel_pool.enabled()
         && parallel_pool.threads() > 1
         && rayon::current_thread_index().is_some()
-        && !std::env::vars_os().any(|(name, _)| {
-            name.to_str()
-                .is_some_and(|name| name.starts_with("LOSAT_DEBUG"))
-        })
-        && trace_hsp_target().is_none()
-        && !diagnostics_enabled()
-        && !crate::utils::threading::diagnostics_enabled()
-        && !stage_dump::enabled();
+        && !writes_debug_output();
     // The batches that start early are marked where they start (`XPipe::seed_ended`).
     if !wanted {
         crate::utils::xreach::x_reach!("LOSAT_X_TBXPIPE", false);
     }
     wanted
+}
+
+// No NCBI counterpart: LOSAT's debugging output, which keeps the batches searched one at a time
+// (LOSAT_X_TBXPIPE) and the reports after the batch loop (`report_stream`).
+/// Whether the search writes debugging output while it searches a batch (`LOSAT_DEBUG*`, the HSP
+/// trace, the diagnostics, the stage dumps).
+fn writes_debug_output() -> bool {
+    std::env::vars_os().any(|(name, _)| {
+        name.to_str()
+            .is_some_and(|name| name.starts_with("LOSAT_DEBUG"))
+    }) || trace_hsp_target().is_some()
+        || diagnostics_enabled()
+        || crate::utils::threading::diagnostics_enabled()
+        || stage_dump::enabled()
 }
 
 // EXPERIMENT (LOSAT_X_TBXPIPE): the batches `run_batch_loop` will search unless a search fails, in
@@ -2776,7 +2888,8 @@ fn x_pipe_plan(
 }
 
 /// The batch loop of `run_in_pool`: reads the batches, checks them, takes each one's search
-/// result from `take`, and writes the reports.
+/// result from `take`, and writes the reports: each batch's when the loop takes it with `stream`
+/// (`report_stream`), else all of them after the loop.
 #[allow(clippy::too_many_arguments)]
 fn run_batch_loop(
     args: &TblastxArgs,
@@ -2787,6 +2900,7 @@ fn run_batch_loop(
     outputs: &mut ReportOutputs<'_>,
     batch_size: u32,
     reports: &BatchReports<'_>,
+    stream: bool,
     take: &mut dyn FnMut(std::ops::Range<usize>) -> Result<TblastxBatch>,
 ) -> Result<()> {
     let query_records = query_runs.records;
@@ -3201,15 +3315,33 @@ fn run_batch_loop(
                 &messages,
             ));
         }
-        // The batch numbers its queries from 0.
-        done.hits.extend(batch.hits.into_iter().map(|mut hsp| {
-            hsp.hit.q_idx += start as u32;
-            hsp
-        }));
-        done.query_stats.extend(batch.queries);
-        done.searched
-            .extend(std::iter::repeat_n(batch.searched, end - start));
-        done.spans.push(start..end);
+        if stream {
+            // The batch's reports, written now, as NCBI's loop prints a batch's result sets
+            // (`report_stream`), from its lists numbered from its first query as it made them.
+            // Its lists and its queries' warnings are not kept.
+            debug_assert_eq!(reports.queries_written.get(), start);
+            let count = end - start;
+            let batch_done = SearchedBatches {
+                hits: batch.hits,
+                query_stats: batch.queries,
+                searched: vec![batch.searched; count],
+                spans: vec![0..count],
+            };
+            reports.write(outputs, batch_done, &warnings, false)?;
+            for query_warnings in &mut warnings[start..end] {
+                *query_warnings = Vec::new();
+            }
+        } else {
+            // The batch numbers its queries from 0.
+            done.hits.extend(batch.hits.into_iter().map(|mut hsp| {
+                hsp.hit.q_idx += start as u32;
+                hsp
+            }));
+            done.query_stats.extend(batch.queries);
+            done.searched
+                .extend(std::iter::repeat_n(batch.searched, end - start));
+            done.spans.push(start..end);
+        }
         input_start = input_end;
     }
     reports.write(outputs, done, &warnings, true)
@@ -3248,12 +3380,16 @@ struct BatchReports<'a> {
     /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the search's pool, for the report stage
     /// (`TblastxReportRun::x_pool`).
     x_search_pool: &'a crate::utils::threading::SearchPool<'a>,
+    /// The queries whose reports were written: those of the batches that the loop wrote when it
+    /// took them (`report_stream`), which the next call follows.
+    queries_written: std::cell::Cell<usize>,
 }
 
 impl BatchReports<'_> {
     /// Writes the reports of the queries of the batches searched (`done`), with NCBI's
-    /// epilog (`PrintEpilog`) when `epilog`. `warnings` are by query (at least those of
-    /// `done`).
+    /// epilog (`PrintEpilog`) when `epilog`. `done` numbers its queries from the first query
+    /// not yet written (`queries_written`: 0 unless the loop writes each batch's reports,
+    /// `report_stream`). `warnings` are by query (at least those of `done`).
     fn write(
         &self,
         outputs: &mut ReportOutputs<'_>,
@@ -3264,13 +3400,29 @@ impl BatchReports<'_> {
         // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); written
         // after the batches are searched. No NCBI counterpart.
         let t_output = crate::utils::xtiming::clock();
-        let reported = done.searched.len();
-        let queries = &self.query_runs.records[..reported];
+        let first = self.queries_written.get();
+        let reported = first..first + done.searched.len();
+        let queries = &self.query_runs.records[reported.clone()];
+        // The queries' input and ranges, numbered from `first` as `done` (`report_stream`).
+        let batch_input;
+        let batch_runs;
+        let ranges = if first == 0 {
+            self.query_runs
+        } else {
+            batch_input = report_stream::batch_input(self.query_runs.input, reported.clone());
+            batch_runs = QueryRuns {
+                input_records: self.query_runs.input_records,
+                records: queries,
+                input: &batch_input,
+                subject_placements: self.query_runs.subject_placements,
+            };
+            &batch_runs
+        };
         // The BLAST archive (outfmt 11) writes the Bioseq of every query of the batches NCBI
         // completes and, with `-subject`, of every subject in each archive: a title it cannot
         // write is refused before the first byte, exactly where NCBI would write that Bioseq.
         // NCBI writes none of them when no batch is completed (an error archive or nothing).
-        if self.args.archive.is_some() && reported > 0 {
+        if self.args.archive.is_some() && !reported.is_empty() {
             super::super::archive::check_titles(queries, "query")?;
             if let ShownSubjects::Fasta { records, .. } = self.subjects {
                 super::super::archive::check_titles(records, "subject")?;
@@ -3343,6 +3495,22 @@ impl BatchReports<'_> {
             }
             _ => Default::default(),
         };
+        // `-db`, a custom tabular report that shows `staxid`, `staxids` or a taxonomy name: the
+        // taxonomy of each reported sequence (a header that does not decode is refused before
+        // any byte, `tabular`).
+        let tabular_taxonomy = match (&self.subjects, &database) {
+            (ShownSubjects::Database { database, .. }, Some(shown))
+                if outputs.formats.iter().any(|format| {
+                    matches!(
+                        report::output_format(format.outfmt),
+                        report::TblastxOutputFormat::CustomTabular(spec) if spec.needs().taxonomy
+                    )
+                }) =>
+            {
+                database.tabular_taxonomy(shown.reported)?
+            }
+            _ => Vec::new(),
+        };
         let written = write_tblastx_outputs(
             hits,
             outputs,
@@ -3352,14 +3520,16 @@ impl BatchReports<'_> {
                 subjects,
                 subject_letters,
                 database,
-                query_ids: &self.query_ids[..reported],
+                query_ids: &self.query_ids[reported.clone()],
                 query_stats: &done.query_stats,
                 searched: &done.searched,
-                warnings: &warnings[..reported],
-                ranges: self.query_runs,
+                warnings: &warnings[reported.clone()],
+                ranges,
                 epilog,
+                queries_before: first,
                 numbers: self.numbers,
                 xml_taxa: &xml_taxa,
+                tabular_taxonomy: &tabular_taxonomy,
                 v1_titles: self.v1_titles,
                 archive_spans: &done.spans,
                 x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
@@ -3367,29 +3537,46 @@ impl BatchReports<'_> {
             },
         );
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
+        self.queries_written.set(reported.end);
         written
     }
 
     /// Writes what NCBI has written when a query batch fails, before its error: the reports
     /// of the batches before (`done`; without the epilog), or, for the first batch, the
     /// outfmt 0 prolog of the sinks that write it with the reports (the others wrote it
-    /// before the search, `write_pairwise_prologs`).
+    /// before the search, `write_pairwise_prologs`). Where the loop wrote the batches before
+    /// when it took them (`report_stream`), nothing remains.
     fn write_before_failed_batch(
         &self,
         outputs: &mut ReportOutputs<'_>,
         done: SearchedBatches,
         warnings: &[Vec<u8>],
     ) -> Result<()> {
-        if done.searched.is_empty() {
+        if self.queries_written.get() > 0 {
+            Ok(())
+        } else if done.searched.is_empty() {
             write_pairwise_prologs(outputs, self.args, self.subjects, false)?;
-            // The XML2 and JSON documents start with their prolog too.
+            // The XML2 and JSON documents start with their prolog too, and outfmt 20 with its line
+            // of the field names (and its formatter's warning, `tabular::write_tabular_prolog`).
             for format in outputs.formats.iter_mut() {
-                if let report::TblastxOutputFormat::Xml2(kind) =
-                    report::output_format(format.outfmt)
-                {
-                    let mut writer = format.sink.open()?;
-                    writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
-                    writer.flush()?;
+                match report::output_format(format.outfmt) {
+                    report::TblastxOutputFormat::Xml2(kind) => {
+                        let mut writer = format.sink.open()?;
+                        writer
+                            .write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+                        writer.flush()?;
+                    }
+                    report::TblastxOutputFormat::CustomTabular(spec) => {
+                        let mut writer = format.sink.open()?;
+                        super::super::tabular::write_tabular_prolog(
+                            spec,
+                            self.args.tabular_taxdb.unwrap_or(false),
+                            &mut writer,
+                            &mut *outputs.diagnostics,
+                        )?;
+                        writer.flush()?;
+                    }
+                    _ => {}
                 }
             }
             Ok(())
@@ -6856,7 +7043,7 @@ fn search_query_batch<S: TbxScore>(
                 let out_hit = Hit {
                     identity,
                     length: len,
-                    mismatch,
+                    mismatch: mismatch as i64,
                     gapopen: 0,
                     q_start,
                     q_end,

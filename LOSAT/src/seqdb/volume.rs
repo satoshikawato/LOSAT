@@ -1075,6 +1075,21 @@ const NCBINA8_TO_BLASTNA8: [u8; 16] = [15, 0, 1, 6, 2, 4, 9, 13, 3, 8, 5, 12, 7,
 /// `NCBI4NA_TO_IUPACNA` (c++/src/algo/blast/core/blast_encoding.c:80-83).
 const NCBI4NA_TO_IUPAC: [u8; 16] = *b"-ACMGRSVTWYHKDBN";
 
+/// The four bases of each stored 2-bit byte, from the high bits down, as IUPAC letters.
+const PACKED_TO_IUPAC: [[u8; 4]; 256] = {
+    let mut table = [[0u8; 4]; 256];
+    let mut byte = 0;
+    while byte < 256 {
+        let mut base = 0;
+        while base < 4 {
+            table[byte][base] = b"ACGT"[(byte >> (6 - 2 * base)) & 3];
+            base += 1;
+        }
+        byte += 1;
+    }
+    table
+};
+
 /// Sentinel byte NCBI puts before and after a BLASTNA sequence.
 pub const BLASTNA_SENTINEL: u8 = 15;
 
@@ -1412,6 +1427,42 @@ impl SequenceBlock {
     /// buffer NCBI's traceback gets): `len + 2` bytes.
     pub fn nucleotide_blastna(&self, i: usize) -> Result<Vec<u8>, SeqDbError> {
         self.nucleotide_blastna_in(i, false)
+    }
+
+    // No NCBI counterpart: the formatter's letters of a database sequence (`CSeqVector`) as
+    // `nucleotide_blastna` gives them, without the BLASTNA buffer in between.
+    /// The IUPAC letters of nucleotide `i`, the letters of [`Self::nucleotide_blastna`] without
+    /// its sentinels (the same runs in the same order, the same errors), made from each stored
+    /// byte's four bases at once.
+    pub fn nucleotide_iupac(&self, i: usize) -> Result<Vec<u8>, SeqDbError> {
+        let packed = self.nucleotide_packed(i);
+        let base_length = self.nucleotide_len(i)?;
+        if base_length < 1 {
+            return Err(self.format(i, "Error: could not get sequence or range."));
+        }
+        let mut letters = vec![0u8; base_length];
+        for (bases, &byte) in letters.chunks_mut(4).zip(packed) {
+            bases.copy_from_slice(&PACKED_TO_IUPAC[usize::from(byte)][..bases.len()]);
+        }
+        let region_end = base_length as i64;
+        for run in self.ambiguity_runs(i)? {
+            let mut position = i64::from(run.offset as i32);
+            let row_len = i64::from(run.length);
+            if position + row_len <= 0 {
+                continue;
+            }
+            if position >= region_end {
+                break;
+            }
+            let letter = NCBI4NA_TO_IUPAC[usize::from(run.ncbi4na & 0xF)];
+            for _ in 0..row_len {
+                if position >= 0 && position < region_end {
+                    letters[position as usize] = letter;
+                }
+                position += 1;
+            }
+        }
+        Ok(letters)
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `nucleotide_blastna` in a buffer taken from or sized

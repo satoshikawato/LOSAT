@@ -1096,8 +1096,7 @@ pub(super) struct ReportedSubjects {
 // ```
 // The formatter reads a database sequence from its Bioseq: the stored 2-bit data, or with
 // ambiguity codes their NCBI4na values (`x_GetAmbigSeq`'s letters before their mapping to
-// BLASTNA; `SequenceBlock::nucleotide_blastna` maps them, and `BLASTNA_TO_IUPACNA` gives
-// the same letter for a BLASTNA code as `NCBI4NA_TO_IUPACNA` for its NCBI4na value).
+// BLASTNA; `SequenceBlock::nucleotide_iupac` writes `NCBI4NA_TO_IUPACNA` of each).
 // Upper case: a database has no lowercase letters.
 /// The reported database sequences of `hit_lists` (the final hit lists of all query
 /// batches, after their HSPs of score 0 were dropped): the hit lists name them by rank
@@ -1168,13 +1167,7 @@ pub(super) fn reported_subjects(
         };
         let sequence = if letters {
             let block = x_read_sequence(&database.db, ordinal).map_err(database_error)?;
-            let length = block.nucleotide_len(0).map_err(database_error)?;
-            let blastna = x_blastna(&block).map_err(database_error)?;
-            let letters = blastna[1..=length]
-                .iter()
-                .map(|&code| BLASTNA_TO_IUPACNA[usize::from(code & 0xF)])
-                .collect();
-            x_done_bytes(blastna);
+            let letters = block.nucleotide_iupac(0).map_err(database_error)?;
             x_done_block(block);
             letters
         } else {

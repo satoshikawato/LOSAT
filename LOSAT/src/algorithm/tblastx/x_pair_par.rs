@@ -303,6 +303,24 @@ const OFFSET_ARRAY_SIZE: i32 = 4096;
 //     hits = scansub(lookup_wrap, subject,
 //                               offset_pairs, array_size, scan_range);
 // ```
+// No NCBI counterpart: how many units a batch takes at one thread (`group_starts`, scheduling only).
+/// LOSAT_X_TBXN1GROUPS: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
+fn n1_groups() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXN1GROUPS"))
+}
+
+/// TEMP (prototype): the widest group at one thread.
+fn x_n1_group_letters() -> usize {
+    static V: OnceLock<usize> = OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("LOSAT_TBX_N1GL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1 << 18)
+    })
+}
+
 // No NCBI counterpart: a LOSAT variable that chooses, per batch, between two LOSAT paths with the
 // same result (the unit path and the reference frame loop, module doc items 1-4); NCBI has one path.
 /// LOSAT_X_PAIRPARGATE: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
@@ -497,8 +515,8 @@ fn x_unit_mask_for(
 // No NCBI counterpart: the groups' query offsets as LOSAT_X_TBXQSLICE reads them (from the first
 // context of a group to the first of the next, the last one to the end of its last context).
 /// The number of query offsets each group of `contexts` extends over (`group_starts`).
-fn x_group_extents(contexts: &[QueryContext]) -> Vec<usize> {
-    x_tbx_qslice::x_group_spans(contexts, &group_starts(contexts))
+fn x_group_extents(contexts: &[QueryContext], threads: usize) -> Vec<usize> {
+    x_tbx_qslice::x_group_spans(contexts, &group_starts(contexts, threads))
         .into_iter()
         .map(|(a, b)| (b - a) as usize)
         .collect()
@@ -931,7 +949,8 @@ fn x_band_fits(longest_subject_chunk: usize, diag_array_size: i32) -> bool {
 /// LOSAT_X_TBXBAND with LOSAT_X_TBXUNITMASK: the switch is on and LOSAT_X_TBXQSLICE's rule cuts
 /// no group of the batch.
 fn x_band_masked(g: &XGates<'_>) -> bool {
-    g.unit_mask && !x_tbx_qslice::rule_cuts(g.contexts, &group_starts(g.contexts), g.threads)
+    g.unit_mask
+        && !x_tbx_qslice::rule_cuts(g.contexts, &group_starts(g.contexts, g.threads), g.threads)
 }
 
 // No NCBI counterpart: the lengths the guards compare, from the batch's contexts and subjects (a
@@ -1148,9 +1167,10 @@ fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
     }
     // EXPERIMENT (LOSAT_X_TBXQSLICE): the tables of the slices of the groups the switch cuts,
     // built directly as the groups are (x_tbx_qslice.rs).
-    let starts = group_starts(contexts);
-    let (groups, sliced) = match x_tbx_qslice::partition(contexts, &starts, e.pool.threads()) {
-        None => (lut_direct_groups(&q, e.pool, lut_on_pool())?, None),
+    let threads = e.pool.threads();
+    let starts = group_starts(contexts, threads);
+    let (groups, sliced) = match x_tbx_qslice::partition(contexts, &starts, threads) {
+        None => (lut_direct_groups(&q, threads, e.pool, lut_on_pool())?, None),
         Some(parts) => {
             let sliced =
                 x_tbx_qslice::lut_direct_sliced(&q, &starts, &parts, e.pool, lut_on_pool())?;
@@ -1194,10 +1214,11 @@ fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
 /// when a lookup location does not lie inside one group.
 fn lut_direct_groups(
     q: &XPairLutQuery,
+    threads: usize,
     pool: &crate::utils::threading::SearchPool<'_>,
     on_pool: bool,
 ) -> Option<Vec<XGroup>> {
-    let starts = group_starts(q.contexts());
+    let starts = group_starts(q.contexts(), threads);
     let locations = q.x_group_locations(&starts)?;
     Some(lut_direct_tables(q, &locations, pool, on_pool))
 }
@@ -1993,11 +2014,11 @@ impl<M: TbxScore> XPairPar<M> {
                 let t0 = timing().then(Instant::now);
                 // EXPERIMENT (LOSAT_X_TBXQSLICE): the slices filtered out of the batch's table, as
                 // the groups are; the whole groups only where no group is cut.
-                let starts = group_starts(b.contexts);
+                let starts = group_starts(b.contexts, b.threads);
                 let sliced = x_tbx_qslice::partition(b.contexts, &starts, b.threads)
                     .map(|parts| x_tbx_qslice::build_sliced(b.lookup, &parts));
                 let groups = if sliced.is_none() {
-                    build_groups(b.lookup, b.contexts)
+                    build_groups(b.lookup, b.contexts, b.threads)
                 } else {
                     Vec::new()
                 };
@@ -2027,7 +2048,11 @@ impl<M: TbxScore> XPairPar<M> {
         let mask_rule = unit_mask_kib()
             .filter(|_| {
                 let ungrouped = sliced.is_none()
-                    && !x_tbx_qslice::rule_cuts(b.contexts, &group_starts(b.contexts), b.threads);
+                    && !x_tbx_qslice::rule_cuts(
+                        b.contexts,
+                        &group_starts(b.contexts, b.threads),
+                        b.threads,
+                    );
                 // A batch with cut groups keeps the unmasked tables.
                 if !ungrouped {
                     crate::utils::xreach::x_reach!("LOSAT_X_TBXUNITMASK", false);
@@ -2040,7 +2065,7 @@ impl<M: TbxScore> XPairPar<M> {
                 band_cells: band.then_some(b.diag_array_size),
             });
         let extents = if mask_rule.is_some() {
-            x_group_extents(b.contexts)
+            x_group_extents(b.contexts, b.threads)
         } else {
             Vec::new()
         };
@@ -3256,21 +3281,42 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: bool>(
 
 // No NCBI counterpart: how the contexts are grouped into units (scheduling only; module doc).
 /// The first context of each group: one group per context up to `X_MAX_GROUPS` contexts, else
-/// `X_MAX_GROUPS` contiguous groups balanced by length.
-fn group_starts(contexts: &[QueryContext]) -> Vec<usize> {
+/// `X_MAX_GROUPS` contiguous groups balanced by length; with LOSAT_X_TBXN1GROUPS at one thread, the
+/// fewest such groups in which every group extends over at most `x_n1_group_letters()` letters.
+fn group_starts(contexts: &[QueryContext], threads: usize) -> Vec<usize> {
+    if threads <= 1 && n1_groups() {
+        for most in 1..X_MAX_GROUPS {
+            let starts = x_balanced_starts(contexts, most);
+            let widest = x_tbx_qslice::x_group_spans(contexts, &starts)
+                .into_iter()
+                .map(|(a, b)| (b - a) as usize)
+                .max()
+                .unwrap_or(0);
+            if widest <= x_n1_group_letters() {
+                return starts;
+            }
+        }
+    }
+    x_balanced_starts(contexts, X_MAX_GROUPS)
+}
+
+// No NCBI counterpart: the cut of `group_starts`.
+/// The first context of each of at most `most` contiguous groups: one per context up to `most`
+/// contexts, else balanced by length.
+fn x_balanced_starts(contexts: &[QueryContext], most: usize) -> Vec<usize> {
     let n = contexts.len();
-    if n <= X_MAX_GROUPS {
+    if n <= most {
         return (0..n).collect();
     }
     let total: usize = contexts.iter().map(|c| c.aa_len + 1).sum();
     let mut starts = vec![0usize];
     let mut cumulative = 0usize;
     for (c, ctx) in contexts.iter().enumerate() {
-        if c > 0 && cumulative * X_MAX_GROUPS >= starts.len() * total {
+        if starts.len() == most {
+            break;
+        }
+        if c > 0 && cumulative * most >= starts.len() * total {
             starts.push(c);
-            if starts.len() == X_MAX_GROUPS {
-                break;
-            }
         }
         cumulative += ctx.aa_len + 1;
     }
@@ -3309,8 +3355,12 @@ fn group_starts(contexts: &[QueryContext]) -> Vec<usize> {
 // One table per context group in the layout above: each backbone chain of the batch table
 // filtered to the group's contexts (`BSearchContextInfo` ranges of `frame_bases`), order kept;
 // pv bit, inline entries or overflow cursor (cells in index order), and longest_chain rebuilt.
-fn build_groups(lookup: &BlastAaLookupTable, contexts: &[QueryContext]) -> Vec<XGroup> {
-    let starts = group_starts(contexts);
+fn build_groups(
+    lookup: &BlastAaLookupTable,
+    contexts: &[QueryContext],
+    threads: usize,
+) -> Vec<XGroup> {
+    let starts = group_starts(contexts, threads);
     let bounds: Vec<i32> = starts.iter().map(|&c| lookup.frame_bases[c]).collect();
     build_tables(lookup, &bounds)
 }
@@ -3728,7 +3778,7 @@ mod tests {
         let cutoff_scores = vec![12; contexts.len()];
         let x_dropoff_per_context = vec![16; contexts.len()];
         let pp = XPairPar {
-            groups: build_groups(&lookup, &contexts),
+            groups: build_groups(&lookup, &contexts, 8),
             stub: false,
             sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
             sc: Blosum62Score,
@@ -3794,7 +3844,7 @@ mod tests {
             .map(|&f| frame(f, &random_residues(&mut rng, 300, &alphabet)))
             .collect();
         let (lookup, contexts) = lookup_for(&frames);
-        let groups = build_groups(&lookup, &contexts);
+        let groups = build_groups(&lookup, &contexts, 8);
         assert_eq!(groups.len(), 6);
         // The tables of 300-letter contexts are sparse: with LOSAT_X_TBXSCANBF they keep only
         // their cells with entries (`XGroup::new`), read here through `XGroup::hits`.
@@ -4125,7 +4175,7 @@ mod tests {
                 s_len: 999,
             };
             let pp = XPairPar {
-                groups: build_groups(&lookup, &contexts),
+                groups: build_groups(&lookup, &contexts, 8),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sc: Blosum62Score,
@@ -4260,7 +4310,7 @@ mod tests {
                 s_len: 999,
             };
             let plain = XPairPar {
-                groups: build_groups(&lookup, &contexts),
+                groups: build_groups(&lookup, &contexts, 8),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sc: Blosum62Score,
@@ -4270,7 +4320,7 @@ mod tests {
             };
             // Ratio 1: every unit whose unmasked table is at least the masked one's size.
             let pp = XPairPar {
-                groups: build_groups(&lookup, &contexts),
+                groups: build_groups(&lookup, &contexts, 8),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sc: Blosum62Score,
@@ -4280,13 +4330,13 @@ mod tests {
                     ratio: 1,
                     band_cells: None,
                 }),
-                extents: x_group_extents(&contexts),
+                extents: x_group_extents(&contexts, 8),
             };
             assert_eq!(pp.extents.len(), pp.groups.len());
             // Negative control: tables of half the masked size (below extent + window, against
             // the module doc's condition), where the units may differ.
             let control = XPairPar {
-                groups: build_groups(&lookup, &contexts),
+                groups: build_groups(&lookup, &contexts, 8),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sc: Blosum62Score,
@@ -4321,7 +4371,7 @@ mod tests {
                 // The masked table covers the group's extent plus the window (module doc).
                 assert!(mask as usize + 1 >= pp.extents[g] + window as usize);
                 exact_fits += usize::from(mask as usize + 1 == pp.extents[g] + window as usize);
-                wide_groups += usize::from(group_starts(&contexts).len() < contexts.len());
+                wide_groups += usize::from(group_starts(&contexts, 8).len() < contexts.len());
                 let mut want: Vec<InitHSP> = Vec::new();
                 plain.scan_unit_hits::<_, XNoProbe, false, false, false>(
                     &unit,
@@ -4545,7 +4595,7 @@ mod tests {
             .map(|(&len, f)| frame(f, &vec![aa("A")[0]; len]))
             .collect();
         let (_, contexts) = lookup_for(&frames);
-        let extents = x_group_extents(&contexts);
+        let extents = x_group_extents(&contexts, 8);
         assert_eq!(extents.len(), 3);
         assert_eq!(
             extents[0],
@@ -4633,10 +4683,10 @@ mod tests {
     ) -> (usize, usize) {
         let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
         let (full, contexts) = build_ncbi_lookup(queries, threshold, &params, true);
-        let reference = build_groups(&full, &contexts);
+        let reference = build_groups(&full, &contexts, 8);
         let q = XPairLutQuery::x_prepare(queries, threshold, true).expect("direct builder applies");
         // On the pool when the caller has one, else in order on this thread.
-        let direct = lut_direct_groups(&q, pool, true).expect("every location inside one group");
+        let direct = lut_direct_groups(&q, 8, pool, true).expect("every location inside one group");
         let stub = q.x_into_stub(direct.iter().map(|g| &g.lookup));
         let lut = XLutBatch {
             groups: direct,
@@ -4813,7 +4863,7 @@ mod tests {
         let q = XPairLutQuery::x_prepare(std::slice::from_ref(&frames), 13, true)
             .expect("direct builder applies");
         let groups =
-            lut_direct_groups(&q, &serial, false).expect("every location inside one group");
+            lut_direct_groups(&q, 8, &serial, false).expect("every location inside one group");
         for g in [1usize, 2, 3] {
             assert_eq!(groups[g].lookup.longest_chain, 0);
             assert_eq!((groups[g].q_min, groups[g].q_max), (0, 0));
@@ -5173,7 +5223,7 @@ mod tests {
         let batch = || {
             let q = XPairLutQuery::x_prepare(&queries, 11, true).expect("direct builder applies");
             let groups =
-                lut_direct_groups(&q, &serial, false).expect("every location inside one group");
+                lut_direct_groups(&q, 8, &serial, false).expect("every location inside one group");
             let stub = q.x_into_stub(groups.iter().map(|g| &g.lookup));
             XLutBatch {
                 groups,
@@ -5204,7 +5254,7 @@ mod tests {
             .collect();
         let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
         let (_lookup, contexts) = build_ncbi_lookup(&queries, 11, &params, true);
-        let starts = group_starts(&contexts);
+        let starts = group_starts(&contexts, 8);
         assert_eq!(starts.len(), X_MAX_GROUPS);
         assert_eq!(starts[0], 0);
         assert!(starts.windows(2).all(|w| w[0] < w[1]));
@@ -5254,7 +5304,7 @@ mod tests {
             }
             Self {
                 pp: XPairPar {
-                    groups: build_groups(&lookup, &contexts),
+                    groups: build_groups(&lookup, &contexts, 8),
                     stub: false,
                     sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                     sc: Blosum62Score,
@@ -5773,7 +5823,7 @@ mod tests {
         let shifted: String = block.chars().cycle().skip(200).take(s_len).collect();
         CompactCase {
             pp: XPairPar {
-                groups: build_groups(&lookup, &contexts),
+                groups: build_groups(&lookup, &contexts, 8),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sc: Blosum62Score,

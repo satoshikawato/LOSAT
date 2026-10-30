@@ -868,7 +868,7 @@ mod tests {
                 .map(|i| [7, 16, 30, 200][i % 4])
                 .collect();
             let pp = XPairPar {
-                groups: build_groups(&lookup, &contexts),
+                groups: build_groups(&lookup, &contexts, 8),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
                 sc: Blosum62Score,

@@ -3540,7 +3540,7 @@ Scheduling (each value computed by one thread with the original function; order 
   x0.999; at one thread 1e6 x0.466, instructions:u x0.359. No gain and no loss where a batch holds few queries per subject:
   QIIME-form amplicons 1e5 at 16 threads x0.996 (518.7 -> 516.6 s, one pair), VmHWM x0.9995; cDNAs against 3 Mb
   (blastn, megablast, dc-megablast, `-subject`) and one query against a genome at one thread instructions:u x0.99997-1.00003.
-  The one VmHWM above dev past 0.5 %: 5,000 cDNAs, blastn at 16 threads x1.010 (`=0` x1.007, the binary's placement);
+  The one control with a VmHWM above dev past 0.5 %: 5,000 cDNAs, blastn at 16 threads x1.010 (`=0` x1.007, the binary's placement);
   16 pairs with `MALLOC_MMAP_THRESHOLD_=131072` x0.9997.
 - `LOSAT_X_BNHLGROW=1` (BLASTN, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
   added it (perf/bn-hl-grow): on unless it is `0`) a hit list's array (`blastn/hsp.rs` `HitList`, the preliminary

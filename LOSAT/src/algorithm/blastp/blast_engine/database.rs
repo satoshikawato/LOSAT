@@ -189,6 +189,25 @@ impl BlastpDatabase {
         self.db.num_seqs()
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:145-150
+    // ```c++
+    // static Int4
+    // s_SeqDbGetMinLength(void* seqdb_handle, void*)
+    // {
+    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
+    //     return seqdb.GetMinLength();
+    // }
+    // ```
+    /// The shortest sequence length of the preliminary hit cutoff (`BlastSeqSrcGetMinSeqLen`,
+    /// `min_subject_length` of `BLAST_GapAlignSetUp`): `BLAST_SEQSRC_MINLENGTH` for a whole
+    /// database, the scanned shortest length with a list (line DI-8: `SeqDb::min_length`).
+    pub(super) fn cutoff_subject_length(&self) -> i32 {
+        match self.db.min_length() {
+            Some(shortest) => i32::try_from(shortest).unwrap_or(i32::MAX),
+            None => BLAST_SEQSRC_MINLENGTH,
+        }
+    }
+
     /// The total length (`CSeqDB::GetTotalLength`).
     pub(super) fn total_letters(&self) -> u64 {
         self.db.total_length()

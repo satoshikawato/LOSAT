@@ -1135,6 +1135,9 @@ pub(crate) struct StoredProteins {
     starts: Vec<usize>,
     /// The total length of the index files (`CSeqDB::GetTotalLength`).
     total_length: u64,
+    /// The scanned shortest length with a list (`SeqDb::min_length`, line DI-8), `None`
+    /// for a whole database.
+    min_length: Option<u32>,
 }
 
 impl StoredProteins {
@@ -1167,6 +1170,12 @@ impl StoredProteins {
     /// The total length of the index files.
     pub(crate) fn total_length(&self) -> u64 {
         self.total_length
+    }
+
+    /// The scanned shortest length with a list (`CSeqDB::GetMinLength`), `None` for a whole
+    /// database (which answers `BLAST_SEQSRC_MINLENGTH`).
+    pub(crate) fn min_length(&self) -> Option<u32> {
+        self.min_length
     }
 
     /// The length of the longest sequence (0 for an empty database).
@@ -1211,6 +1220,7 @@ pub(crate) fn read_protein_stores(db: &SeqDb, program: &str) -> Result<StoredPro
         bytes,
         starts,
         total_length: db.total_length(),
+        min_length: db.min_length(),
     })
 }
 

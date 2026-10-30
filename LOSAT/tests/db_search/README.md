@@ -463,6 +463,13 @@ Rows `db.sl.*`: `-seqidlist` and `-negative_seqidlist` with `-db`, five programs
   `sl_nucl.bsl` (the processed ids of the text lists: no warning), `sl_tfp_badlen.bsl` (a database length that is not
   tfp's: NCBI's `Seqidlist file db info does not match input db` warning, the list is used).
 
+The negative lists on `ids/prot_v5`, `ids/prot_v4`, `ids/nucl_v5` and `ids/nucl_v4` (rows `db.sl.bp.nforms.6`,
+`db.sl.bp.v4neg.6`, `db.sl.bp.v4gi.6`, `db.sl.bn.nforms.6`, `db.sl.bn.v4neg.6`) are `losat-rejection` rows: those databases
+hold sequences whose every definition line has only a gi or a ti, and a negative seqid list leaves such a sequence without a
+line (`CSeqDBNegativeList::FindId` matches no gi or ti): NCBI searches it and drops its hits from the report without notice,
+LOSAT refuses when the sequence is to be reported (`the seqid list keeps sequence N of the volume but none of its definition
+lines`, DI-8b DECISIONS 17). A positive list that selects such a sequence is refused before the search.
+
 A list file that is not on the search path (NCBI: `Error: NCBI C++ Exception: ... To be memory mapped the file must
 exist: ''`, exit 255, with the path of NCBI's build tree) is checked by `tests/cli_v2.rs`, not by a row.
 

@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::file::DbFile;
+use super::isam;
 use super::lmdb_read::Env;
 use super::seqidlist::{self, SeqidListFile};
 use super::{tax_files, SeqDb, SeqDbError, SeqType};
@@ -1685,7 +1686,9 @@ impl SeqDb {
     // the whole database, positive or negative (probe S17, S18, R08, R09 of
     // dropin-survey-20261029/DI8: 500 hits of 514 sequences, the statistics of the whole
     // database; a positive list with no id would clear every OID by the code above, which
-    // the run does not show). LOSAT does what the run shows: the warnings, no restriction.
+    // the run does not show). LOSAT does what the run shows: the warnings, every OID kept,
+    // and, as NCBI's `CSeqDBImpl` still scans the totals for a list (`x_ScanTotals`,
+    // approximate nucleotide lengths, the shortest length), the scanned totals.
     // The ids of a binary list are used as written (the alias tool wrote them as the
     // processing writes them). The lists the volumes keep for the filtered header read are
     // the processed ids.
@@ -1715,7 +1718,9 @@ impl SeqDb {
             })?;
             if ids.is_empty() {
                 warnings.push(ListWarning::Posted(EMPTY_LIST_WARNING.to_string()));
-                return Ok(());
+                let num_oids = self.volume_starts[self.volumes.len()];
+                let words = vec![u64::MAX; (num_oids as usize).div_ceil(64)];
+                return self.apply_filter(words, num_oids, None);
             }
             ids
         } else {
@@ -1802,6 +1807,111 @@ impl SeqDb {
         Ok(words)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:266-301
+    // ```c++
+    //     	if((user_list->GetNumSis() > 0) && !(lmdb_set.IsBlastDBVersion5())) {
+    //
+    //     		user_list->PreprocessIdsForISAMSiLookup();
+    //     	}
+    //
+    //         typedef SSeqDB_IndexCountPair TIndexCount;
+    //         vector<TIndexCount> OidsPerVolume;
+    //
+    //         // Build a list of volumes sorted by OID count.
+    //
+    //         for(int i = 0; i < volset.GetNumVols(); i++) {
+    //             const CSeqDBVolEntry * vol = volset.GetVolEntry(i);
+    //
+    //             TIndexCount vol_oids;
+    //             vol_oids.m_Index = i;
+    //             vol_oids.m_Count = vol->OIDEnd() - vol->OIDStart();
+    //
+    //             OidsPerVolume.push_back(vol_oids);
+    //         }
+    //
+    //         // The largest volumes should be used first, to minimize the
+    //         // number of failed GI->OID conversion attempts.  Searching input
+    //         // GIs against larger volumes first should eliminate most of the
+    //         // GIs by the time smaller volumes are searched, thus reducing the
+    //         // total number of lookups.
+    //
+    //         std::sort(OidsPerVolume.begin(), OidsPerVolume.end());
+    //
+    //         for(int i = 0; i < (int)OidsPerVolume.size(); i++) {
+    //             int vol_idx = OidsPerVolume[i].m_Index;
+    //
+    //             const CSeqDBVolEntry * vol = volset.GetVolEntry(vol_idx);
+    //
+    //             // Note: The implied ISAM lookups will sort by GI/TI.
+    //
+    //             vol->Vol()->IdsToOids(*m_UserList, locked);
+    //         }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:345-347
+    // ```c++
+    //     	if((m_NegativeList->GetNumSis() > 0) && !(lmdb_set.IsBlastDBVersion5())) {
+    //     		m_NegativeList->PreprocessIdsForISAMSiLookup();
+    //     	}
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:369-375
+    // ```c++
+    //         for(int i = 0; i < volset.GetNumVols(); i++) {
+    //             const CSeqDBVolEntry * vol = volset.GetVolEntry(i);
+    //
+    //             // Note: The implied ISAM lookups will sort by GI/TI.
+    //
+    //             vol->Vol()->IdsToOids(*m_NegativeList, locked);
+    //         }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2540-2550
+    // ```c++
+    //     if (ids.GetNumSis() && (GetLMDBFileName() == kEmptyStr)) {
+    //         x_OpenStrFile();
+    //         if (m_IsamStr.NotEmpty()) {
+    //             m_IsamStr->IdsToOids(m_VolStart, m_VolEnd, ids);
+    //             x_UnleaseStrFile();
+    //         } else {
+    //             NCBI_THROW(CSeqDBException,
+    //                        eArgErr,
+    //                        "SI list specified but no ISAM file found for SI in " + m_VolName);
+    //         }
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:375-402
+    // ```c++
+    // 	if((!is_v5 && nlist.GetNumSis() > 0) || nlist.GetNumGis() > 0 || nlist.GetNumTis() >  0) {
+    //
+    //     // Intersect the user GI list with the OID bit map.
+    //
+    //     // Iterate over the bitmap, clearing bits we find there but not in
+    //     // the bool vector.  For very dense OID bit maps, it might be
+    //     // faster to use two similarly implemented bitmaps and AND them
+    //     // together word-by-word.
+    //
+    //     int max = nlist.GetNumOids();
+    //
+    //     // Clear any OIDs after the included range.
+    //
+    //     if (max < m_NumOIDs) {
+    //         CSeqDB_BitSet new_range(0, max, CSeqDB_BitSet::eAllSet);
+    //         m_AllBits->IntersectWith(new_range, true);
+    //     }
+    //
+    //     // If a 'get next included oid' method was added to the negative
+    //     // list, the following loop could be made a bit faster.
+    //
+    //     for(int oid = 0; oid < max; oid++) {
+    //         if (! nlist.GetOidStatus(oid)) {
+    //             m_AllBits->ClearBit(oid);
+    //         }
+    //     }
+    // 	}
+    // ```
+    // A text list is not rewritten for a version 4 database (`s_VerifySeqidlist` returns
+    // false): every id, simplified and lower-cased, is a key of the string index; an id that
+    // devolves to a number (a gi) becomes the empty key, which no line has (probe R12, R13).
+    // An exception of `SeqDB_SimplifyAccession` (an id such as `sp||`) is not a database
+    // error in NCBI (`Error: <what>`, exit status 255); LOSAT refuses it with the text.
     /// [`SeqDb::restrict_seqids`] on a version 4 database: the string ISAM lookups of each
     /// volume (`CSeqDBVol::IdsToOids`), after `PreprocessIdsForISAMSiLookup`.
     fn restrict_seqids_v4(
@@ -1812,11 +1922,77 @@ impl SeqDb {
         if !list.file.info.is_v4 {
             return Err(SeqDbError::NotFound(BINARY_LIST_V4_ERROR.to_string()));
         }
-        Err(SeqDbError::Unsupported {
-            path: self.volumes[0].base().to_path_buf(),
-            message: "a seqid list on a version 4 database (string ISAM lookup) is not read yet"
-                .to_string(),
-        })
+        let protein = matches!(self.seqtype, SeqType::Protein);
+        let mut ids: Vec<Vec<u8>> = Vec::with_capacity(list.file.ids.len());
+        for id in &list.file.ids {
+            ids.push(isam::simplify_accession_for_isam(id).map_err(|error| {
+                SeqDbError::Unsupported {
+                    path: self.volumes[0].base().to_path_buf(),
+                    message: format!(
+                        "the id {} of the seqid list throws in NCBI's SeqDB_SimplifyAccession: {}",
+                        String::from_utf8_lossy(id),
+                        error.to_string().trim_end()
+                    ),
+                }
+            })?);
+        }
+        let string_isam = |at: usize| -> Result<isam::StringIsam, SeqDbError> {
+            let base = self.volumes[at].base();
+            let name = base.to_string_lossy();
+            if !isam::StringIsam::index_exists(&name, protein) {
+                return Err(SeqDbError::NotFound(format!(
+                    "SI list specified but no ISAM file found for SI in {name}"
+                )));
+            }
+            isam::StringIsam::open_volume(&name, protein)
+        };
+        let num_oids = self.volume_starts[self.volumes.len()];
+        let word_count = (num_oids as usize).div_ceil(64);
+        let words = if list.negative {
+            let mut out = isam::NegativeOids::new();
+            for at in 0..self.volumes.len() {
+                string_isam(at)?.negative_scan(
+                    self.volume_starts[at],
+                    self.volume_starts[at + 1],
+                    &mut ids,
+                    &mut out,
+                )?;
+            }
+            let mut words = vec![u64::MAX; word_count];
+            let max = out.num_oids().min(num_oids);
+            for oid in 0..num_oids {
+                if oid >= max || !out.get_oid_status(oid) {
+                    words[(oid / 64) as usize] &= !(1u64 << (oid % 64));
+                }
+            }
+            words
+        } else {
+            let mut entries: Vec<isam::SiOid> =
+                ids.iter().map(|id| isam::SiOid::new(id.clone())).collect();
+            let mut order: Vec<usize> = (0..self.volumes.len()).collect();
+            order.sort_by_key(|&at| std::cmp::Reverse(self.volumes[at].num_oids()));
+            for at in order {
+                string_isam(at)?.ids_to_oids(self.volume_starts[at], &mut entries)?;
+            }
+            let mut words = vec![0u64; word_count];
+            for oid in entries.iter().filter_map(|entry| entry.oid) {
+                if oid < num_oids {
+                    words[(oid / 64) as usize] |= 1u64 << (oid % 64);
+                }
+            }
+            words
+        };
+        ids.sort();
+        let rule = if list.negative {
+            DeflineRule::NegativeSeqids(ids)
+        } else {
+            DeflineRule::Seqids(ids)
+        };
+        self.apply_filter(words, num_oids, Some(rule))?;
+        if !list.negative {
+            self.check_lines_kept()?;
+        }
+        Ok(())
     }
 
     /// Makes `words` (bit `oid` set for an included OID) the database's OID set: the
@@ -1828,7 +2004,7 @@ impl SeqDb {
         rule: Option<DeflineRule>,
     ) -> Result<(), SeqDbError> {
         let filter = OidFilter::new(words, num_oids);
-        let (total_length, max_length) = self.scan_totals(&filter)?;
+        let (total_length, max_length, min_length) = self.scan_totals(&filter)?;
         if let Some(rule) = rule.map(Arc::new) {
             for volume in &mut self.volumes {
                 volume.set_defline_rule(Arc::clone(&rule));
@@ -1837,6 +2013,7 @@ impl SeqDb {
         self.num_seqs = filter.count();
         self.total_length = total_length;
         self.max_length = max_length;
+        self.min_length = min_length;
         self.filter = Some(Box::new(filter));
         Ok(())
     }
@@ -1895,9 +2072,10 @@ impl SeqDb {
     // A protein's length is exact (`GetSeqLengthProt`: the bytes up to the next sequence
     // less the NUL between them); a nucleotide's is approximate, from its bytes and the
     // volume-relative OID, not from the count in its last byte.
-    /// NCBI's totals of the included OIDs: the total length and the longest length.
-    fn scan_totals(&self, filter: &OidFilter) -> Result<(u64, u32), SeqDbError> {
-        let (mut total, mut longest) = (0u64, 0u32);
+    /// NCBI's totals of the included OIDs: the total length, the longest length and the
+    /// shortest (`INT4_MAX` when no OID is included, as `min_count` starts).
+    fn scan_totals(&self, filter: &OidFilter) -> Result<(u64, u32, u32), SeqDbError> {
+        let (mut total, mut longest, mut shortest) = (0u64, 0u32, i32::MAX as u32);
         for (at, volume) in self.volumes.iter().enumerate() {
             let start = self.volume_starts[at];
             let mut first = 0;
@@ -1924,11 +2102,12 @@ impl SeqDb {
                     let length = u32::try_from(length.max(0)).unwrap_or(u32::MAX);
                     total += u64::from(length);
                     longest = longest.max(length);
+                    shortest = shortest.min(length);
                 }
                 first = end;
             }
         }
-        Ok((total, longest))
+        Ok((total, longest, shortest))
     }
 }
 
@@ -2249,8 +2428,10 @@ mod tests {
                     ListWarning::Posted(EMPTY_LIST_WARNING.to_string())
                 ]
             );
-            assert!(!db.is_restricted());
+            assert!(db.is_restricted());
             assert_eq!(db.num_seqs(), whole);
+            assert_eq!(kept_ids(&db).len(), whole as usize);
+            assert!(db.min_length().is_some_and(|min| min > 0));
         }
     }
 

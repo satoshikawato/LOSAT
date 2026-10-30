@@ -7986,11 +7986,12 @@ fn run_resolved_in_pool(
     // ```
     // A database answers `BLAST_SEQSRC_MINLENGTH` (10) for its shortest sequence (an
     // index file stores none, and the alias key `MIN_SEQ_LENGTH` is rejected by the
-    // reader), whatever its sequences are; a FASTA subject set answers its real minimum,
+    // reader), whatever its sequences are, unless a list made NCBI scan its totals (then
+    // the scanned shortest length, line DI-8); a FASTA subject set answers its real minimum,
     // raised to 10.
     let cutoff_subject_length = match database {
         None => blastp_preliminary_cutoff_subject_length(&subjects),
-        Some(_) => database::BLAST_SEQSRC_MINLENGTH,
+        Some(database) => database.cutoff_subject_length(),
     };
     let hit_cutoff_scores: Vec<i32> = contexts
         .iter()

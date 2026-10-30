@@ -30,13 +30,20 @@ fn search(program: &str, db: &str, query: &str, words: &[&str]) -> (Vec<u8>, Vec
     }
     let output = command
         .current_dir(engine_dir())
-        .env("NCBI_CONFIG_PATH", engine_dir().join("tests/db_search/seqidlist"))
+        .env(
+            "NCBI_CONFIG_PATH",
+            engine_dir().join("tests/db_search/seqidlist"),
+        )
         .args([program, "-db", db, "-query", query])
         .args(words)
         .args(["-outfmt", "6", "-num_threads", "1"])
         .output()
         .unwrap();
-    (output.stdout, output.stderr, output.status.code().unwrap_or(-1))
+    (
+        output.stdout,
+        output.stderr,
+        output.status.code().unwrap_or(-1),
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:231-234
@@ -55,8 +62,14 @@ fn search(program: &str, db: &str, query: &str, words: &[&str]) -> (Vec<u8>, Vec
 fn a_list_file_off_the_search_path_is_ncbis_memory_map_error() {
     for program in ["blastp", "blastn"] {
         let (db, query) = match program {
-            "blastp" => ("tests/db_search/taxfilter/tfp", "tests/db_search/taxfilter/q.faa"),
-            _ => ("tests/db_search/taxfilter/tfn", "tests/db_search/taxfilter/q.fna"),
+            "blastp" => (
+                "tests/db_search/taxfilter/tfp",
+                "tests/db_search/taxfilter/q.faa",
+            ),
+            _ => (
+                "tests/db_search/taxfilter/tfn",
+                "tests/db_search/taxfilter/q.fna",
+            ),
         };
         let (out, err, rc) = search(
             program,
@@ -67,10 +80,13 @@ fn a_list_file_off_the_search_path_is_ncbis_memory_map_error() {
         let err = String::from_utf8_lossy(&err);
         assert_eq!(rc, 255, "{program}: {err}");
         assert!(out.is_empty(), "{program}");
-        assert!(err.starts_with("Error: NCBI C++ Exception:\n    T0 \""), "{program}: {err}");
+        assert!(
+            err.starts_with("Error: NCBI C++ Exception:\n    T0 \""),
+            "{program}: {err}"
+        );
         assert!(
             err.ends_with(
-                "/c++/src/corelib/ncbifile.cpp\", line 5754: Error: (CFileException::eMemoryMap) \
+                "/src/corelib/ncbifile.cpp\", line 5754: Error: (CFileException::eMemoryMap) \
                  ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory mapped the file must exist: \
                  ''\n\n"
             ),
@@ -80,9 +96,17 @@ fn a_list_file_off_the_search_path_is_ncbis_memory_map_error() {
             program,
             db,
             query,
-            &["-negative_seqidlist", "tests/db_search/seqidlist/missing.txt"],
+            &[
+                "-negative_seqidlist",
+                "tests/db_search/seqidlist/missing.txt",
+            ],
         );
-        assert_eq!(rc, 255, "{program} negative: {}", String::from_utf8_lossy(&err));
+        assert_eq!(
+            rc,
+            255,
+            "{program} negative: {}",
+            String::from_utf8_lossy(&err)
+        );
     }
 }
 

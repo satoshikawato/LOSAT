@@ -39,6 +39,7 @@ pub mod file;
 pub mod filter;
 pub mod header;
 pub mod index;
+pub mod isam;
 pub mod lmdb_read;
 pub mod seqidlist;
 pub mod tax_files;
@@ -448,6 +449,11 @@ pub struct SeqDb {
     /// values, or NCBI's scan of the OIDs of a taxid list.
     total_length: u64,
     max_length: u32,
+    /// The length of the shortest sequence a search sees: 0 without a list (NCBI's index
+    /// files store none, and its sequence sources then answer `BLAST_SEQSRC_MINLENGTH`), the
+    /// scanned shortest length of the included OIDs with one (`CSeqDBImpl::x_ScanTotals`,
+    /// approximate for nucleotides).
+    min_length: u32,
     /// The total length of the volumes, which the reports print (`printed_total_length`).
     whole_total_length: u64,
     /// The OIDs of a taxid list (`restrict_taxids`): ordinal id `i` is the `i`-th of them.
@@ -806,6 +812,7 @@ impl SeqDb {
             num_seqs: num_oids as u32,
             total_length,
             max_length,
+            min_length: 0,
             whole_total_length: total_length,
             filter: None,
             search_path: None,
@@ -906,9 +913,30 @@ impl SeqDb {
         self.total_length
     }
 
-    /// Length of the longest sequence (with a taxid list, of NCBI's scan as `total_length`).
+    /// Length of the longest sequence (with a list, of NCBI's scan as `total_length`).
     pub fn max_length(&self) -> u32 {
         self.max_length
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:128-136
+    // ```c++
+    //             m_NumSeqs     = x_GetNumSeqs();
+    //             m_TotalLength = x_GetTotalLength();
+    //             m_MaxLength   = x_GetMaxLength();
+    //             m_MinLength   = x_GetMinLength();
+    //
+    //             // Do not bother scanning the db... it would be slow
+    //             // FIXME: future implementation should probably have the
+    //             // shortest length encoded in index file...
+    //             if ( m_MinLength <= 0)  m_MinLength = BLAST_SEQSRC_MINLENGTH;
+    // ```
+    /// Length of the shortest sequence (`CSeqDB::GetMinLength`): `None` without a list
+    /// (NCBI then answers `BLAST_SEQSRC_MINLENGTH`, 10), with a list the scanned shortest
+    /// length of the included OIDs as `total_length` (`SeqDb::restrict`), which the
+    /// preliminary cutoff of the protein programs reads (`BLAST_GapAlignSetUp`,
+    /// `min_subject_length`).
+    pub fn min_length(&self) -> Option<u32> {
+        self.filter.as_ref().map(|_| self.min_length)
     }
 
     // NCBI's reports open the database again without the list (`CBlastFormatUtil::

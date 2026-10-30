@@ -123,6 +123,7 @@ impl TblastnDatabase {
         DatabaseNumbers {
             total_length: self.db.total_length(),
             num_seqs: u64::from(self.db.num_seqs()),
+            min_length: self.db.min_length(),
         }
     }
 

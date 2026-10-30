@@ -428,7 +428,7 @@ impl DbFilterArgs {
             .and_then(|file| std::fs::read(&file).ok())
             .ok_or_else(|| NativeError {
                 exit: 255,
-                message: format!("Error: {MISSING_SEQIDLIST_WHAT}\n"),
+                message: format!("Error: {}\n", missing_seqidlist_what()),
             })?;
         let mut cerr = Vec::new();
         let file = seqidlist::read_si_list(&bytes, &mut cerr).map_err(|text| NativeError {
@@ -457,9 +457,22 @@ impl DbFilterArgs {
 //         NCBI_THROW(CFileException, eMemoryMap,
 //                    "To be memory mapped the file must exist: '" + m_FileName +"'");
 // ```
+// NCBI 2.17.0 (the conda build) writes `Error: NCBI C++ Exception:\n    T0
+// "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/corelib/ncbifile.cpp", line 5754:
+// Error: (CFileException::eMemoryMap) ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory
+// mapped the file must exist: ''\n\n` (dropin-survey-20261029/DI8 probe S22); LOSAT names the
+// build tree of the official Linux x64 release (`NCBI_BUILD_ROOT`), as the Seq-id parser's
+// exceptions do.
 /// `e.what()` of the exception of a seqid list file that is not on the search path (the
-/// resolved name is empty).
-const MISSING_SEQIDLIST_WHAT: &str = "To be memory mapped the file must exist: ''";
+/// resolved name is empty): the report of the `CFileException`.
+fn missing_seqidlist_what() -> String {
+    format!(
+        "NCBI C++ Exception:\n    T0 \"{}/src/corelib/ncbifile.cpp\", line 5754: Error: \
+         (CFileException::eMemoryMap) ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory \
+         mapped the file must exist: ''\n",
+        crate::utils::winmask::NCBI_BUILD_ROOT
+    )
+}
 
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:152-172
 // ```c++

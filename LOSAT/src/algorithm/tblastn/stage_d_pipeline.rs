@@ -19,7 +19,9 @@ use super::search_gapped::{
     full_translation_traceback_with_matrix_and_events_with_mask_mode_owned, GappedHsp,
     PreliminaryProfile, TargetTranslation, TracebackOwnedHsp,
 };
-use super::stage_d_kappa_params::{local_extension_final_xdrop, local_kappa_redo_params};
+use super::stage_d_kappa_params::{
+    local_extension_final_xdrop, local_kappa_redo_params, use_matrix_workspace,
+};
 use super::stage_d_linking::{
     compare_preliminary_lists_for_kappa, link_preliminary_hsps, link_preliminary_hsps_on,
     reap_by_evalue, LinkedHsp, LinkedHspList,
@@ -1074,10 +1076,6 @@ fn run_local_search_with_pool(
         protein_scoring_supported(&spec),
         "unsupported TBLASTN protein scoring scheme"
     );
-    ensure!(
-        !composition_mode2 || scoring.matrix == ScoringMatrix::Blosum62,
-        "TBLASTN composition redo matrix is unimplemented"
-    );
     let gapped = lookup_protein_params(&spec);
     let ungapped = lookup_protein_params_ungapped(scoring.matrix);
     // NCBI c++/src/algo/blast/core/blast_stat.c:4091-4171;
@@ -1328,9 +1326,9 @@ fn run_local_search_with_pool(
         .as_ref()
         .context("TBLASTN composition Spouge state is missing")?;
     let redo_params = local_kappa_redo_params(
-        ScoringMatrix::Blosum62,
-        11,
-        1,
+        scoring.matrix,
+        scoring.gap_open,
+        scoring.gap_extend,
         &gapped_by_context,
         &valid_contexts,
         &parameters,
@@ -1364,6 +1362,9 @@ fn run_local_search_with_pool(
     let mut owned_lists = HashMap::new();
     let mut scratch = GapAlignScratch::new();
     let mut workspace = BlastCompositionWorkspace::new_blosum62();
+    if scoring.matrix != ScoringMatrix::Blosum62 {
+        use_matrix_workspace(&mut workspace, scoring.matrix)?;
+    }
     // Everything one (query, subject) match needs
     // between the early-termination test and the heap insertion, as a function of
     // the match alone.  NCBI c++/src/algo/blast/core/blast_kappa.c:3525-3736 keeps
@@ -1409,7 +1410,7 @@ fn run_local_search_with_pool(
             profile.genetic_code,
             redo_params,
             scaled.lambda,
-            ScoringMatrix::Blosum62,
+            scoring.matrix,
             scratch,
             workspace,
             &mut matrix_state,
@@ -1473,7 +1474,12 @@ fn run_local_search_with_pool(
                     .take()
                     .context("TBLASTN Kappa source owner reused")?;
                 let (ident, positives, length, mismatches, gap_opens, gap_letters) =
-                    postredo_converted_stats(&converted, &encoded[context], &mut target)?;
+                    postredo_converted_stats_with_matrix(
+                        &converted,
+                        &encoded[context],
+                        &mut target,
+                        scoring.matrix,
+                    )?;
                 // With the Seq-aligns requested, NCBI's engine positives: by the matrix of the
                 // match's last adjustment (`postredo_engine_positives`).
                 let positives = match matrix_state.as_ref().filter(|_| profile.engine_positives) {
@@ -1489,7 +1495,12 @@ fn run_local_search_with_pool(
                 // objtools/align_format/tabular.cpp:983-1021 recomputes the
                 // report counts from the original aligned query sequence.
                 let (report_ident, report_positives, _, report_mismatches, _, _) =
-                    postredo_converted_stats(&converted, &report_queries[context], &mut target)?;
+                    postredo_converted_stats_with_matrix(
+                        &converted,
+                        &report_queries[context],
+                        &mut target,
+                        scoring.matrix,
+                    )?;
                 Ok(KappaHspPayload {
                     bit_score: bits[index],
                     num_ident: i32::try_from(ident)?,
@@ -1578,9 +1589,9 @@ fn run_local_search_with_pool(
             let pool = pool.expect("parallel pool selected");
             let make_params = || {
                 local_kappa_redo_params(
-                    ScoringMatrix::Blosum62,
-                    11,
-                    1,
+                    scoring.matrix,
+                    scoring.gap_open,
+                    scoring.gap_extend,
                     &gapped_by_context,
                     &valid_contexts,
                     &parameters,
@@ -1599,11 +1610,15 @@ fn run_local_search_with_pool(
             };
             let states = (0..pool.threads())
                 .map(|_| {
-                    Ok(std::sync::Mutex::new(XRedoWorker {
+                    let mut worker = XRedoWorker {
                         params: make_params()?,
                         scratch: GapAlignScratch::new(),
                         workspace: BlastCompositionWorkspace::new_blosum62(),
-                    }))
+                    };
+                    if scoring.matrix != ScoringMatrix::Blosum62 {
+                        use_matrix_workspace(&mut worker.workspace, scoring.matrix)?;
+                    }
+                    Ok(std::sync::Mutex::new(worker))
                 })
                 .collect::<Result<Vec<_>>>()?;
             let batch_size = pool.threads().saturating_mul(32).max(64);

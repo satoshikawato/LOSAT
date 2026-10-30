@@ -8,7 +8,9 @@ use anyhow::{ensure, Context, Result};
 use super::stage_d_stats::LocalSubjectParameters;
 use crate::config::ScoringMatrix;
 use crate::core::blast_stat::compute_blosum62_ideal_karlin_params;
-use crate::core::composition_adjustment::adjust_scores::build_matrix_info;
+use crate::core::composition_adjustment::adjust_scores::{
+    build_matrix_info, BlastCompositionWorkspace,
+};
 use crate::core::composition_adjustment::redo_alignment::{
     BlastCompoAdjustMode, BlastCompoGappingParams, BlastRedoAlignParams,
 };
@@ -47,6 +49,30 @@ pub(super) fn local_extension_final_xdrop(
     ))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1316-1324
+// ```c
+// Blast_CompositionWorkspaceInit(Blast_CompositionWorkspace * NRrecord,
+//                                const char *matrixName)
+// {
+//     if (0 == Blast_GetJointProbsForMatrix(NRrecord->mat_b,
+//                                           NRrecord->first_standard_freq,
+//                                           NRrecord->second_standard_freq,
+//                                           matrixName)) {
+// ```
+/// Makes `workspace`, BLOSUM62's (`new_blosum62`), the composition workspace of `matrix` when the
+/// search matrix is another one: from its joint probabilities (`BlastCompositionWorkspace::new`;
+/// IDENTITY has none and is searched in mode 0, `args::search_settings`). Not inlined, so that the
+/// caller keeps BLOSUM62's workspace in place.
+#[cold]
+#[inline(never)]
+pub(super) fn use_matrix_workspace(
+    workspace: &mut BlastCompositionWorkspace,
+    matrix: ScoringMatrix,
+) -> Result<()> {
+    *workspace = BlastCompositionWorkspace::new(matrix)?;
+    Ok(())
+}
+
 #[allow(dead_code)] // The public local-subject path stays gated through Stage E.
 pub(super) fn local_kappa_redo_params(
     matrix: ScoringMatrix,
@@ -74,10 +100,6 @@ pub(super) fn local_kappa_redo_params(
     ensure!(
         gapped.len() == valid_contexts.len(),
         "TBLASTN Kappa context state mismatch"
-    );
-    ensure!(
-        matrix == ScoringMatrix::Blosum62,
-        "TBLASTN Kappa ideal score block is only ported for BLOSUM62"
     );
     ensure!(
         valid_contexts.iter().any(|&valid| valid),
@@ -127,10 +149,17 @@ pub(super) fn local_kappa_redo_params(
     // blast_kappa.c:2216-2231:
     // Blast_ScoreBlkKbpIdealCalc(sbp);
     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
-    let ideal = compute_blosum62_ideal_karlin_params()
-        .map_err(anyhow::Error::msg)
-        .context("TBLASTN Kappa ideal score block")?;
-    let matrix_info = build_matrix_info(matrix, ideal.lambda / scale)?;
+    // BLOSUM62's ideal block is computed once per process; another matrix's is computed as the
+    // lookup table's query preparation computes it (`ideal_karlin_params_of`).
+    let ideal_lambda = if matrix == ScoringMatrix::Blosum62 {
+        compute_blosum62_ideal_karlin_params()
+            .map_err(anyhow::Error::msg)
+            .context("TBLASTN Kappa ideal score block")?
+            .lambda
+    } else {
+        crate::algorithm::tblastx::lookup::ideal_karlin_params_of(matrix).lambda
+    };
+    let matrix_info = build_matrix_info(matrix, ideal_lambda / scale)?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2438-2479;
     // composition_adjustment/redo_alignment.c:1028-1043:
     // near_identical_cutoff = (1.74 * NCBIMATH_LN2) / kbp_gap[index]->Lambda;

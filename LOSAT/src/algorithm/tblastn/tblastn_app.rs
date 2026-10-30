@@ -859,8 +859,34 @@ fn search(
     };
     let SearchSettings {
         composition_mode2,
+        identity_cbs_reset,
         scoring,
     } = search_settings(&resolved)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_memento_priv.hpp:64-74
+    // ```c++
+    //     CBlastOptionsMemento(CBlastOptionsLocal* local_opts)
+    //     {
+    //         m_ProgramType = local_opts->GetProgramType();
+    //         m_QueryOpts = local_opts->m_QueryOpts;
+    // ...
+    //         m_ExtnOpts = local_opts->m_ExtnOpts;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:288
+    // ```c++
+    //                 CLocalBlast lcl_blast(query_factory, opt_handle, db_adapter);
+    // ```
+    // IDENTITY's reset (`search_settings`) writes through the memento's pointers into the options
+    // that every query batch reuses: the first batch resets the mode and warns its queries, and
+    // the later batches start in mode 0 without the warning. These are the searched queries of
+    // the first batch.
+    let identity_warned = if identity_cbs_reset {
+        query_input
+            .batches(batch_size)
+            .first()
+            .map_or(0, |batch| batch.searched.end)
+    } else {
+        0
+    };
     app::check_unsupported_environment("TBLASTN")?;
     app::check_old_fsc("TBLASTN")?;
     app::check_query_split_environment("TBLASTN", false)??;
@@ -1318,6 +1344,11 @@ fn search(
                 messages.extend(crate::report::query_warnings::replaced_o_message(
                     query.seq(),
                 ));
+                if index < identity_warned {
+                    messages.push(
+                        crate::report::query_warnings::IDENTITY_CBS_RESET_MESSAGE.to_string(),
+                    );
+                }
                 if query.seq().is_empty() {
                     messages.push(NO_DATA_MESSAGE.to_string());
                 } else if !valid {
@@ -1543,8 +1574,14 @@ fn search(
                 expect: resolved.evalue,
                 soft_masking: resolved.soft_masking,
                 gapped: resolved.gapped,
-                cbs: resolved.composition_mode as i32,
+                // IDENTITY's reset is NCBI's option of the search (`search_settings`).
+                cbs: if identity_cbs_reset {
+                    0
+                } else {
+                    resolved.composition_mode as i32
+                },
                 db_gencode: i32::from(resolved.db_gencode),
+                identity_warned,
             },
             xml_taxa,
             args.out.as_deref(),

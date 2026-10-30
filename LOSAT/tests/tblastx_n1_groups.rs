@@ -149,10 +149,18 @@ fn one_group_gives_the_report_of_the_six() {
         assert_eq!(sides, (false, false), "=0 records nothing");
         let (report, sides) = tblastx(&inputs, 1, &[], args);
         assert_eq!(report, expected, "{args:?}: one group");
-        assert_eq!(sides, (true, false), "{args:?}: the side that one thread took");
+        assert_eq!(
+            sides,
+            (true, false),
+            "{args:?}: the side that one thread took"
+        );
         let (report, sides) = tblastx(&inputs, 4, &[], args);
         assert_eq!(report, expected, "{args:?}: four threads");
-        assert_eq!(sides, (false, false), "{args:?}: four threads record nothing");
+        assert_eq!(
+            sides,
+            (false, false),
+            "{args:?}: four threads record nothing"
+        );
     }
 }
 

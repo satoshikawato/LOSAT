@@ -1006,7 +1006,7 @@ fn numeric_values_are_validated_before_io() {
                 .contains("Word-size must be less than or equal to 100"));
         }
     }
-    for program in ["blastp", "tblastx"] {
+    for program in ["blastn", "blastp", "tblastx"] {
         assert!(parse(program, &["-outfmt", "6", "-window_size", "2147483648"]).is_err());
         parse(program, &["-outfmt", "6", "-window_size", "0"]).unwrap();
     }

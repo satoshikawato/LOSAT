@@ -142,7 +142,8 @@ fn check_scoring_options_with(
 ) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     let word_size = super::coordination::determine_effective_word_size(args);
-    let greedy = args.task == "megablast";
+    // `-no_greedy` selects dynamic programming (blast_args.cpp:681-685).
+    let greedy = args.task == "megablast" && !args.no_greedy;
     let mb_lookup_options = matches!(args.task.as_str(), "megablast" | "dc-megablast");
     let (_, template_length) = super::coordination::determine_template(args);
     let matrix_only = spec.reward == 0 && spec.penalty == 0;
@@ -163,6 +164,20 @@ fn check_scoring_options_with(
         "Invalid discontiguous template parameters: word size must be either 11 or 12".to_string()
     } else if template_length > 0 && !mb_lookup_options {
         "Invalid lookup table type for discontiguous Mega BLAST".to_string()
+    } else if args.off_diagonal_range.is_some_and(|range| range != 0)
+        && super::coordination::determine_window_size(args) == 0
+    {
+        // NCBI reference: c++/src/algo/blast/core/blast_options.c:1583-1596
+        // (`BlastInitialWordOptionsValidate`, after the lookup table's checks and before the
+        // hit saving's)
+        // ```c
+        //    if (program_number == eBlastTypeBlastn &&
+        //        options->scan_range && !options->window_size)
+        //    {
+        //       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+        //                             "off_diagonal_range is only useful in 2-hit algorithm");
+        // ```
+        "off_diagonal_range is only useful in 2-hit algorithm".to_string()
     } else if counts.hitlist_size < 1 {
         // NCBI blast_options.c:1511-1517, `BlastHitSavingOptionsValidate`, whose hit list
         // check comes before the e-value's (the message of `ReportCounts::validate`, which
@@ -602,8 +617,8 @@ pub(crate) fn context_blocks_ungapped(
 /// batch. Without a valid context the batch is not searched.
 pub(crate) fn gap_x_dropoffs(
     context_karlin: &[Option<ContextKarlin>],
-    x_drop_gapped_bits: i32,
-    x_drop_final_bits: i32,
+    x_drop_gapped_bits: f64,
+    x_drop_final_bits: f64,
 ) -> (i32, i32) {
     let min_lambda = context_karlin
         .iter()
@@ -611,8 +626,8 @@ pub(crate) fn gap_x_dropoffs(
         .map(|blocks| blocks.gapped.lambda)
         .reduce(f64::min)
         .unwrap_or(KarlinParams::default().lambda);
-    let gapped = (x_drop_gapped_bits as f64 * NCBIMATH_LN2 / min_lambda) as i32;
-    let finale = (x_drop_final_bits as f64 * NCBIMATH_LN2 / min_lambda).max(gapped as f64) as i32;
+    let gapped = (x_drop_gapped_bits * NCBIMATH_LN2 / min_lambda) as i32;
+    let finale = (x_drop_final_bits * NCBIMATH_LN2 / min_lambda).max(gapped as f64) as i32;
     (gapped, finale)
 }
 
@@ -710,6 +725,53 @@ mod tests {
             "0"
         ])))
         .contains("Greedy extension must be used"));
+    }
+
+    // DI-6: `-no_greedy` makes megablast's gap costs 0/0 invalid (blast_options.c:1699-1711),
+    // and an off-diagonal range needs a window (blast_options.c:1583-1596), checked after the
+    // lookup table's options.
+    #[test]
+    fn no_greedy_and_off_diagonal_range_are_checked() {
+        assert!(message(check_scoring_options(&args(&["-no_greedy"])))
+            .contains("Greedy extension must be used"));
+        assert!(
+            check_scoring_options(&args(&["-no_greedy", "-gapopen", "5", "-gapextend", "2"]))
+                .is_ok()
+        );
+        assert!(check_scoring_options(&args(&["-task", "blastn", "-no_greedy"])).is_ok());
+        assert_eq!(
+            message(check_scoring_options(&args(&["-off_diagonal_range", "2"]))),
+            "BLAST query/options error: off_diagonal_range is only useful in 2-hit algorithm\nPlease refer to the BLAST+ user manual.\n"
+        );
+        assert!(check_scoring_options(&args(&["-off_diagonal_range", "0"])).is_ok());
+        assert!(
+            check_scoring_options(&args(&["-off_diagonal_range", "2", "-window_size", "40"]))
+                .is_ok()
+        );
+        assert!(check_scoring_options(&args(&[
+            "-task",
+            "dc-megablast",
+            "-off_diagonal_range",
+            "2"
+        ]))
+        .is_ok());
+        assert!(message(check_scoring_options(&args(&[
+            "-task",
+            "dc-megablast",
+            "-window_size",
+            "0",
+            "-off_diagonal_range",
+            "2"
+        ])))
+        .contains("off_diagonal_range is only useful"));
+        // The lookup table's check comes first.
+        assert!(message(check_scoring_options(&args(&[
+            "-off_diagonal_range",
+            "2",
+            "-word_size",
+            "101"
+        ])))
+        .contains("Word-size must be less than"));
     }
 
     #[test]

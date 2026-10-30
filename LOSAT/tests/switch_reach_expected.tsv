@@ -143,6 +143,7 @@ LOSAT_X_TBNFRAMEREUSE	tblastn	always			a dropped plan's frames are reused by the
 LOSAT_X_TBNKEEPFEW	tblastn	conditional	required	required	4+ query batches searched one after another: plans dropped unless they fit threads x longest plan; the ref side (plans kept: fit threads x longest plan, or batches side by side) is reached by db.sa.arch.tbn.batch1 and db.sa.arch.tbn.warnbatches
 LOSAT_X_TBNLINKCTX	tblastn	always			every linked list (preliminary and post-redo) is linked one query context at a time, side by side on the pool where the subject's units ran (the single subject of a search, or one longer than a chunk's budget); a list of one context is one call as before
 LOSAT_X_TBNLINKSETS	tblastn	always			sets of two or more are linking candidates only when the subject lookup meets one of their HSPs (rides on the graduated TBNLINKWIN lookup: heads whose window is longer than the lookup)
+LOSAT_X_TBNLUTLEAN	tblastn	always			every tblastn lookup table (word size 3, or 2 with BLOSUM45) outside diagnostics mode is built without chains, its temporaries freed by the build (diagnostics mode builds the chain table, whose chains its prints read)
 LOSAT_X_TBNOIDCHUNK	tblastn	conditional	required	required	2+ threads and several subjects
 LOSAT_X_TBNOIDNEXT	tblastn	conditional	required	required	2+ threads, several subjects, where the pool takes chunks of subjects
 LOSAT_X_TBNOIDUNITS	tblastn	conditional	required	required	2+ threads, several subjects, subject longer than chunk budget

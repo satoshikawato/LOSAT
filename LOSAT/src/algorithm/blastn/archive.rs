@@ -82,6 +82,12 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.window_masker_db = args.window_masker_db.clone();
     inputs.culling_limit = args.culling_limit;
     inputs.subject_besthit = args.subject_besthit;
+    // The X-drops and the window as given (CGenericSearchArgs and CWindowSizeArg set them
+    // only then, blast_args.cpp:280-286,487-489); the ungapped X-drop and the off-diagonal
+    // range are not recorded (`options.rs`).
+    inputs.xdrop_gap = args.xdrop_gap;
+    inputs.xdrop_gap_final = args.xdrop_gap_final;
+    inputs.window_size = args.window_size;
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)

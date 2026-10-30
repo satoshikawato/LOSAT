@@ -10747,8 +10747,14 @@ fn search_query_batch<const UNGAPPED: bool>(
     //             s_BlastDiagTableNew(query_length, multiple_hits,
     //                               word_params->options->window_size);
     // ```
-    // The two-hit window of the task (`configure_task`).
+    // The two-hit window of the task or of `-window_size` (`configure_task`). A window whose
+    // sum with the query passes 2^30 is refused as in the other programs (NCBI never ends).
     let window_size = config.window_size;
+    crate::blastinput::app::check_diag_table_window(
+        i32::try_from(query_concat_length).unwrap_or(i32::MAX),
+        i32::try_from(window_size).unwrap_or(i32::MAX),
+        "BLASTN",
+    )?;
     let diag_array_length = {
         let mut diag_array_length = 1usize;
         while diag_array_length < query_concat_length + window_size {
@@ -11514,18 +11520,13 @@ fn search_query_batch<const UNGAPPED: bool>(
     // SetMBInitialWordOptionsDefaults() { SetWindowSize(BLAST_WINDOW_SIZE_NUCL); }
     // NCBI reference: c++/src/algo/blast/api/disc_nucl_options.cpp:66-73
     // SetMBInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
-    // Traditional megablast retains the zero-initialized X-drop option. Its
-    // raw X-drop is the subject's word cutoff in ParametersUpdate below.
+    // Traditional megablast retains the zero-initialized X-drop option (0 bits, so 0 here):
+    // its raw X-drop is the subject's word cutoff in ParametersUpdate below. `-xdrop_ungap`
+    // replaces the task's bits (`configure_task`).
     let x_dropoff_init: Vec<i32> = search_karlin
         .iter()
         .map(|blocks| {
-            if megablast {
-                0
-            } else {
-                ((super::super::constants::X_DROP_UNGAPPED as f64 * NCBIMATH_LN2)
-                    / blocks.ungapped.lambda)
-                    .ceil() as i32
-            }
+            ((config.x_drop_ungapped * NCBIMATH_LN2) / blocks.ungapped.lambda).ceil() as i32
         })
         .collect();
     let x_dropoff_init_ref = &x_dropoff_init;

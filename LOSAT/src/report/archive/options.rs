@@ -118,6 +118,7 @@ impl OptionInputs {
             program,
             task: task.to_string(),
             dbsize: None,
+            searchsp: None,
             evalue: None,
             gapopen: None,
             gapextend: None,

@@ -233,8 +233,10 @@ def main():
     # Unported format routes must reject explicitly before starting any worker
     # (BLASTN names what it does not support since S07+: "not supported by LOSAT").
     # TBLASTX writes outfmt 0 and 7 since S08; they are compared with the oracle below.
-    for program, formats in [("blastn", ["6 qseqid sseqid"]),
-                             ("tblastx", ["6 qseqid sseqid"])]:
+    # Custom tabular fields are written since line CLI C2 (#614, PR 2, PR 3); the taxonomy
+    # report (outfmt 18) is still LOSAT's refusal in every program.
+    for program, formats in [("blastn", ["18"]),
+                             ("tblastx", ["18"])]:
         for index, fmt in enumerate(formats):
             for kind, prefix in prefixes.items():
                 n = 1 if kind in ["serial", "native-serial"] else 8

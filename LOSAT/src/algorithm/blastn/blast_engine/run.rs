@@ -6755,7 +6755,8 @@ fn write_custom_tabular(
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
     probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
-    use super::super::tabular::{write_blastn_tabular, BlastnTabular, TabularSubjects};
+    use super::super::tabular::{write_blastn_tabular, BlastnTabular};
+    use crate::algorithm::common::tabular::TabularSubjects;
     let needs = spec.needs();
     let record_length = |s_idx: usize| {
         report
@@ -6778,6 +6779,10 @@ fn write_custom_tabular(
             },
         ),
         _ => (Vec::new(), Vec::new()),
+    };
+    let names = match report.database_reader {
+        Some(database) => database.tabular_names(spec, &taxonomy)?,
+        None => None,
     };
     let subjects = match report.database_ordinals {
         Some(ordinals) if report.database_reader.is_some() => TabularSubjects::Database {
@@ -6809,6 +6814,7 @@ fn write_custom_tabular(
             .epilog
             .then_some(report.queries_before + hit_lists.len()),
         taxdb_found: report.tabular_taxdb_found,
+        names: names.as_ref(),
     };
     write_blastn_tabular(&tab, hit_lists, writer, warnings, probe)
 }
@@ -9084,7 +9090,26 @@ fn run_in_pool(
                 .is_some_and(|format| format.prefetches_subjects())
                 && database.taxdb_found()
             {
-                match database.prefetch_messages(&titles, &batch_hit_lists) {
+                // A custom tabular report with a plural name looks every taxid of its rows up,
+                // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
+                // the taxonomy database before a later batch's prefetch
+                // (`TaxdbRun::open_for_rows`).
+                let rows_open = matches!(
+                    output_formats.first(),
+                    Some(BlastnOutputFormat::CustomTabular(spec)) if spec.checks_taxdb()
+                ) && batch_hit_lists
+                    .iter()
+                    .flatten()
+                    .any(|hit_list| !hit_list.hsplist_array.is_empty());
+                let prefetch = database
+                    .prefetch_messages(&titles, &batch_hit_lists)
+                    .and_then(|messages| {
+                        if rows_open {
+                            database.open_for_tabular_rows()?;
+                        }
+                        Ok(messages)
+                    });
+                match prefetch {
                     Ok(messages) => warnings[start].extend(messages),
                     Err(error) => {
                         let written = if stream.acting() { start } else { 0 };

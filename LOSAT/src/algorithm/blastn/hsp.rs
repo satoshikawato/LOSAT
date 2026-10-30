@@ -183,9 +183,8 @@ impl BlastnOutputFormat {
             BlastnOutputFormat::Tabular => Some(6),
             BlastnOutputFormat::TabularWithComments => Some(7),
             // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and 20):
-            // they read the subjects as 6 and 7 do, and show no taxonomy name that the prefetch
-            // would look up (`report::tabular` writes `N/A`; a name of the taxonomy database is
-            // LOSAT's refusal, `algorithm::blastn::tabular`).
+            // they read the subjects as 6 and 7 do; the rows' own lookups of the taxonomy names
+            // come with the rows (`report::tabular::TabularNames`).
             BlastnOutputFormat::CustomTabular(spec) => Some(match spec.kind {
                 crate::report::tabular::TabularKind::Commented => 7,
                 _ => 6,

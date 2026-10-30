@@ -85,7 +85,7 @@ fn expected(name: &str) -> Vec<u8> {
 /// The frozen text with `{R}` and `{T}` placed. NCBI's files come from Linux; on Windows the
 /// paths in them are the ones NCBI's code makes there (`SeqDB_ConvertOSPath`: the separator of
 /// the platform; the search path is split at `;`), so the rest of each placed path is written
-/// with `\` and the `:` of the search path `[{R}::]` with `;`.
+/// with `\`, so is the name in `database [name]`, and the `:` of the search path `[{R}::]` is `;`.
 #[cfg(not(windows))]
 fn native_paths(text: String, tests: &Path) -> Vec<u8> {
     text.replace("{T}", tests.to_str().unwrap())
@@ -96,6 +96,21 @@ fn native_paths(text: String, tests: &Path) -> Vec<u8> {
 #[cfg(windows)]
 fn native_paths(text: String, tests: &Path) -> Vec<u8> {
     let text = text.replace("{R}::]", "{R};;]");
+    // The database name of "No alias or index file found for ... database [name]" goes through
+    // the same conversion (`SeqDB_ConvertOSPath`).
+    let mut converted = String::new();
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find("database [") {
+        let name_at = at + "database [".len();
+        converted.push_str(&rest[..name_at]);
+        let end = rest[name_at..]
+            .find(']')
+            .map_or(rest.len(), |n| name_at + n);
+        converted.push_str(&rest[name_at..end].replace('/', "\\"));
+        rest = &rest[end..];
+    }
+    converted.push_str(rest);
+    let text = converted;
     let mut out = String::new();
     let mut rest = text.as_str();
     while let Some(at) = rest.find('{') {

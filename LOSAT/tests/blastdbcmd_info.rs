@@ -213,6 +213,9 @@ const MATCHES: &[(&str, &[&str], i32)] = &[
     ("C07", &["-db", "db/p5", "-info", "-version=1"], 1),
     ("C08", &["-db", "db/p5", "-info", "-foo.bar"], 1),
     ("C09", &["-db", "db/p5", "-info-file"], 0),
+    // blastdbcmd without `-info` and without an entry: NCBI opens the database, then asks
+    // for the query type (`blastdbcmd_retrieve.rs` has the retrieval).
+    ("B40", &["-db", "db/p5"], 1),
     ("C10", &["-db-file", "db/p5", "-info"], 0),
     (
         "C11",
@@ -312,7 +315,7 @@ fn out_and_logfile_take_what_ncbi_writes_there() {
 
 /// The probe's cases that LOSAT's BLASTDBCMD does not serve (line BDC DECISIONS 6): the masks
 /// of `makeblastdb -mask_data` (I18 a masked volume, I21 an alias of one), several names in
-/// `-db` (I38), the toolkit words LOSAT refuses, blastdbcmd without `-info` (B40).
+/// `-db` (I38), the toolkit words LOSAT refuses.
 const REFUSALS: &[(&str, &[&str])] = &[
     ("I18", &["-db", "db/pm5", "-info"]),
     ("I21", &["-db", "db/palias", "-info"]),
@@ -321,7 +324,6 @@ const REFUSALS: &[(&str, &[&str])] = &[
     ("B21", &["-db", "db/p5", "-info", "-conffile", "x.ini"]),
     ("B22", &["-db", "db/p5", "-info", "-dryrun"]),
     ("C06", &["-db", "db/p5", "-info", "-xmlhelp"]),
-    ("B40", &["-db", "db/p5"]),
 ];
 
 #[test]

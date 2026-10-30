@@ -405,6 +405,7 @@ export LOSAT_X_GREEDYROWFUSE=1
 export LOSAT_X_MB24=1
 export LOSAT_X_MBCSR=1
 export LOSAT_X_MBFILL=1
+export LOSAT_X_MBHITPF=1
 export LOSAT_X_MBLUTKEEP=1
 export LOSAT_X_MBLUTONCE=1
 export LOSAT_X_MBLUTPREFAULT=1
@@ -3417,6 +3418,13 @@ Scheduling (each value computed by one thread with the original function; order 
   ×0.72 of `=0` with max RSS ×0.90, 235 contigs x 1.5 Gnt of plasmids ×0.74 with ×0.86, Meles x 129 Mb of nt ×0.81 with
   ×0.92; below the rule the same as `=0`. `LOSAT/tests/blastn_mb_csr.rs` checks both sides of the rule on whole
   searches.
+- `LOSAT_X_MBHITPF=1` (BLASTN, every task, the loop over the offset pairs of `search_query_batch`; speed; in the strict
+  set from the pull request that added it, 2026-10-30 (perf/mb-csr12): on unless it is `0`) prefetches the query line of
+  the hit 16 places on (`x_mb_hit_prefetch`, `X_HIT_AHEAD`). A hit's first extension reads the query at a place its
+  lookup cell chose, which took about 20 % of the cycles of draft200 x one volume of ref_prok_rep_genomes at one thread.
+  Evidence (ws, one core of node 0, four rounds, the same reports, max RSS equal): that case ×0.922, 235 contigs x
+  1.5 Gnt of plasmids ×0.942, Meles x 129 Mb of nt ×0.945, Sakai x MG1655 ×0.982. Prefetching the hit's diagonal cell as
+  well gave ×1.000 and was dropped.
 - `LOSAT_X_MBFILL=1` (BLASTN megablast and blastn, the one-thread fill of `build_mb_lookup`: the contiguous megablast
   table and the two-stage blastn table; speed; in the strict set from the pull request that added it, 2026-10-23; `=0`
   runs the queued loop `x_fill_mb_queued`) reads the words of the fill run by run

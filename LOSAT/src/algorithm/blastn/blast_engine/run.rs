@@ -3222,9 +3222,10 @@ fn x_bn_mapped() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNMAPPED"))
 }
 
-/// No NCBI counterpart: EXPERIMENT (LOSAT_X_MBHITPF) the first extension of a hit reads the query
-/// at a place the hit's cell chose, a cache miss for a query of megabases; the loop over the offset
-/// pairs prefetches the line of the hit `X_HIT_AHEAD` places on. It changes no value.
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_MBHITPF, in the strict set: on unless it is `0`) the
+/// first extension of a hit reads the query at a place the hit's cell chose, a cache miss for a
+/// query of megabases; the loop over the offset pairs prefetches the line of the hit `X_HIT_AHEAD`
+/// places on. It changes no value.
 fn x_mb_hit_prefetch() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBHITPF"))

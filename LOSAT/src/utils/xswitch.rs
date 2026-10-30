@@ -161,6 +161,9 @@ use std::ops::RangeInclusive;
 /// prefetch ring when the search scans at least 8 subject letters per position of the word loop,
 /// `blastn/x_bn_csr.rs`) joined the set in the pull request that added it, after it was verified
 /// and timed with it on and off.
+/// `LOSAT_X_MBHITPF` (BLASTN's loop over the offset pairs prefetches the query line of the hit 16
+/// places on, `blastn/blast_engine/run.rs`) joined the set in the pull request that added it, after
+/// it was verified and timed with it on and off.
 /// `LOSAT_X_QGROUPPAR` (BLASTN's preliminary gapped loop and traceback of a subject searched on one
 /// thread run per query on the pool, `blastn/blast_engine/x_qgroup_par.rs`) joined the set in the
 /// pull request that added it, after it was verified and timed with it on and off.

@@ -17,6 +17,8 @@ mod reach_support;
 
 const SWITCH: &str = "LOSAT_X_MBCSR";
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_MBCSR", "0");
+/// The query prefetch of the loop over the offset pairs (`LOSAT_X_MBHITPF`, strict set).
+const HIT_PREFETCH_OFF: (&str, &str) = ("LOSAT_X_MBHITPF", "0");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -123,6 +125,11 @@ fn check(dir: &TestDir, query: &Path, taken: bool) {
                 "{what} threads {threads}: default differs"
             );
             assert_eq!(stderr, expected_stderr, "{what} threads {threads}");
+            let (report, _) = search(query, subjects, threads, &[HIT_PREFETCH_OFF]);
+            assert!(
+                report == expected,
+                "{what} threads {threads}: hit prefetch off differs"
+            );
             assert_eq!(
                 reach.sides(SWITCH),
                 (taken, !taken),

@@ -14954,7 +14954,25 @@ fn search_query_batch<const UNGAPPED: bool>(
             // (blast_engine.c:564-580), and there is no purge of common end points (a gapped
             // search's step).
             if UNGAPPED {
-                ungapped_hits.sort_by(score_compare_ungapped_hits);
+                // The same sort as the gapped branch below (review 2 S5): with LOSAT_X_BNMAPPED
+                // (default ON) the scratch of the stable sort is a mapped buffer, not a plain
+                // `sort_by` scratch of up to 8 MB left in the thread's arena. The comparator and
+                // the stability are the same, so the order is `sort_by`'s. LOSAT_X_QGROUPPAR is
+                // not used for an ungapped search.
+                if x_bn_mapped() {
+                    x_bn_mapped_reach(
+                        ungapped_hits
+                            .len()
+                            .saturating_mul(std::mem::size_of::<UngappedHit>()),
+                    );
+                    crate::utils::x_mapped::x_sort_by_mapped(
+                        ungapped_hits,
+                        score_compare_ungapped_hits,
+                        &X_SORT,
+                    )
+                } else {
+                    ungapped_hits.sort_by(score_compare_ungapped_hits)
+                }
                 good_init_extends.fetch_add(
                     ungapped_hits.len() as u64,
                     std::sync::atomic::Ordering::Relaxed,

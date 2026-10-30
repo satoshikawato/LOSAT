@@ -3222,6 +3222,20 @@ fn x_bn_mapped() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNMAPPED"))
 }
 
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_MBHITPF, in the strict set: on unless it is `0`) the
+/// first extension of a hit reads the query at a place the hit's cell chose, a cache miss for a
+/// query of megabases; the loop over the offset pairs prefetches the line of the hit `X_HIT_AHEAD`
+/// places on. It changes no value.
+fn x_mb_hit_prefetch() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        let on = crate::utils::xswitch::on("LOSAT_X_MBHITPF");
+        crate::utils::xreach::x_reach!("LOSAT_X_MBHITPF", on);
+        on
+    })
+}
+const X_HIT_AHEAD: usize = 16;
+
 /// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNTBRANGE) the traceback of a database search decodes
 /// a sequence of at least `x_tb_range_min` bases in the ranges of its HSPs only, as NCBI's partial
 /// fetch does (`database::traceback_listed`).
@@ -5478,6 +5492,22 @@ struct BlastnReportInputs<'a> {
     tabular_taxdb_found: bool,
 }
 
+impl BlastnReportInputs<'_> {
+    /// The number of sequences the reports print: the database's own (with a taxid list, the
+    /// whole database's: `SeqDb::printed_num_seqs`), or the subject set's.
+    fn shown_num_seqs(&self) -> usize {
+        self.database
+            .map_or(self.db_num_seqs, |database| database.num_sequences as usize)
+    }
+
+    /// The total length the reports print (as `shown_num_seqs`).
+    fn shown_total_letters(&self) -> usize {
+        self.database.map_or(self.db_len_total, |database| {
+            usize::try_from(database.total_letters).unwrap_or(usize::MAX)
+        })
+    }
+}
+
 /// The per-query and run-level data of the pairwise report.
 // Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
 // shared post-processing makes every BLASTN run compile it in Wasm hosts.
@@ -5544,8 +5574,8 @@ fn blastn_pairwise_report(
         version: NCBI_BLASTN_VERSION.to_string(),
         megablast: report.megablast,
         database_name: subject_title.to_string(),
-        database_num_sequences: report.db_num_seqs,
-        database_total_letters: report.db_len_total,
+        database_num_sequences: report.shown_num_seqs(),
+        database_total_letters: report.shown_total_letters(),
         database: report.database.cloned(),
         reward: report.reward,
         penalty: report.penalty,
@@ -5584,12 +5614,13 @@ fn archive_first_context(
         });
     };
     let search_space = report.query_eff_searchsp[2 * first + report.first_context];
-    let (length_adjustment, _) = context_lengths(
+    let length_adjustment = compute_length_adjustment_ncbi(
         query_lengths[first] as i64,
         report.eff_db_length,
         report.db_num_seqs as i64,
         &blocks.gapped,
-    )?;
+    )
+    .length_adjustment;
     Ok(archive::FirstContext {
         karlin: Some(blocks),
         search_space,
@@ -5613,16 +5644,13 @@ fn blastn_xml_stats(
                 return Ok(crate::report::blast_xml::XmlStats::NONE);
             };
             let eff_space = report.query_eff_searchsp[2 * q_idx + report.first_context];
-            let (length_adjustment, searched_space) = context_lengths(
+            let length_adjustment = compute_length_adjustment_ncbi(
                 query_lengths[q_idx] as i64,
                 report.eff_db_length,
                 report.db_num_seqs as i64,
                 &blocks.gapped,
-            )?;
-            debug_assert_eq!(
-                searched_space, eff_space,
-                "the search's own effective space"
-            );
+            )
+            .length_adjustment;
             Ok(crate::report::blast_xml::XmlStats {
                 hsp_len: length_adjustment as i32,
                 eff_space,
@@ -6589,12 +6617,12 @@ fn post_process_hits_and_write(
                     reward_penalty: Some((report.reward, report.penalty)),
                     filter: &filter,
                     db_num: if is_database {
-                        report.db_num_seqs as i32
+                        report.shown_num_seqs() as i32
                     } else {
                         0
                     },
                     db_len: if is_database {
-                        report.db_len_total as i64
+                        report.shown_total_letters() as i64
                     } else {
                         0
                     },
@@ -7265,9 +7293,20 @@ fn search_cli(
     // ```
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
+    // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the database
+    // arguments reads it (`s_GetTaxIDList`) before the database opens.
     let database = match args.database_name() {
         Some(name) => {
-            Some(database::BlastnDatabase::open(name, &settings)?.showing_gis(args.show_gis))
+            let taxids = args.taxid_filter.resolve(&settings, outputs.diagnostics)?;
+            Some(
+                database::BlastnDatabase::open_restricted(
+                    name,
+                    &settings,
+                    taxids.as_ref(),
+                    outputs.diagnostics,
+                )?
+                .showing_gis(args.show_gis),
+            )
         }
         None => None,
     };
@@ -9011,6 +9050,7 @@ fn run_in_pool(
             return Err(crate::cli::NativeError { exit: 3, message }.into());
         }
         warnings[start].extend(batch_title_warnings);
+        check_batch_window(&args, batch_records.batch_queries().records())?;
         // The batch's search, on the whole pool. EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps
         // its megablast table from batch to batch.
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:929
@@ -10043,8 +10083,8 @@ fn reborrow_outputs<'o, 'r>(outputs: &'o mut BatchOutputs<'_, 'r>) -> BatchOutpu
 /// The length adjustment and the effective search space of a valid query context of `query_len`
 /// letters against a database of `db_len` letters in `db_num_seqs` sequences
 /// (`BLAST_CalcEffLengths`), with the context's gapped Karlin-Altschul block. The search space
-/// is the context's `eff_searchsp` (the search calls this for it; the XML report calls it again
-/// for the length adjustment, which the search does not keep).
+/// is the context's `eff_searchsp` when no `-searchsp` replaces it. The reports compute the
+/// length adjustment again, which the search does not keep.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-846
 /// ```c
@@ -10099,6 +10139,29 @@ fn window_masker_rejection(
 /// diagonal table of the batch, as NCBI's `CLocalBlast` does for each batch that
 /// `run_in_pool` reads. `x_keep`: the batch loop's keep of LOSAT_X_MBLUTKEEP, which the batch's
 /// megablast table is built on and goes back to (`lookup::x_mb_lut_keep`).
+/// `blastinput::app::check_diag_table_window` for a query batch (DI-6, `-window_size`), before
+/// `search_query_batch`, whose code a check inside would change (its inlining; the default
+/// search's code must stay the same). The concatenated length is that of the batch's contexts
+/// (`search_query_batch`): each searched strand of a query with letters takes its letters and
+/// a sentinel, and the searched block leaves out the last sentinel.
+#[inline(never)]
+fn check_batch_window(args: &BlastnArgs, records: &[FastaRecord]) -> Result<()> {
+    let window = super::super::coordination::determine_window_size(args);
+    let (plus_on, minus_on) = QueryStrand::from_option(&args.strand).searched();
+    let strands = usize::from(plus_on) + usize::from(minus_on);
+    let rooms: usize = records
+        .iter()
+        .map(|record| record.sequence.len())
+        .filter(|&length| length > 0)
+        .map(|length| strands * (length + 1))
+        .sum();
+    crate::blastinput::app::check_diag_table_window(
+        i32::try_from(rooms.saturating_sub(1)).unwrap_or(i32::MAX),
+        i32::try_from(window).unwrap_or(i32::MAX),
+        "BLASTN",
+    )
+}
+
 fn search_query_batch<const UNGAPPED: bool>(
     args: &BlastnArgs,
     mut query_records: x_query_drop::BatchQueries<'_>,
@@ -10747,7 +10810,8 @@ fn search_query_batch<const UNGAPPED: bool>(
     //             s_BlastDiagTableNew(query_length, multiple_hits,
     //                               word_params->options->window_size);
     // ```
-    // The two-hit window of the task (`configure_task`).
+    // The two-hit window of the task or of `-window_size` (`configure_task`; a window whose sum
+    // with the query would pass 2^30 is refused before this search, `check_batch_window`).
     let window_size = config.window_size;
     let diag_array_length = {
         let mut diag_array_length = 1usize;
@@ -11076,7 +11140,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         .enumerate()
         .map(|(index, ((ctx, blocks), &valid))| {
             let options_searchsp = match stage {
-                BatchStage::Search { .. } => 0,
+                BatchStage::Search { .. } => args.options_searchsp(),
                 BatchStage::ChunkPrelim {
                     batch_eff_searchsp, ..
                 } => batch_eff_searchsp[index],
@@ -11191,6 +11255,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             subject_packed_cache_ref,
             approx_table_entries,
             x_keep,
+            Some(subjects.metadata().db_len_total as u64),
         );
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
         tables
@@ -11514,17 +11579,17 @@ fn search_query_batch<const UNGAPPED: bool>(
     // SetMBInitialWordOptionsDefaults() { SetWindowSize(BLAST_WINDOW_SIZE_NUCL); }
     // NCBI reference: c++/src/algo/blast/api/disc_nucl_options.cpp:66-73
     // SetMBInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
-    // Traditional megablast retains the zero-initialized X-drop option. Its
-    // raw X-drop is the subject's word cutoff in ParametersUpdate below.
+    // Traditional megablast retains the zero-initialized X-drop option (0 bits, so 0 here):
+    // its raw X-drop is the subject's word cutoff in ParametersUpdate below. `-xdrop_ungap`
+    // replaces the task's bits (`configure_task`).
+    let x_drop_ungapped_bits = config.x_drop_ungapped;
     let x_dropoff_init: Vec<i32> = search_karlin
         .iter()
         .map(|blocks| {
-            if megablast {
+            if x_drop_ungapped_bits == 0.0 {
                 0
             } else {
-                ((super::super::constants::X_DROP_UNGAPPED as f64 * NCBIMATH_LN2)
-                    / blocks.ungapped.lambda)
-                    .ceil() as i32
+                ((x_drop_ungapped_bits * NCBIMATH_LN2) / blocks.ungapped.lambda).ceil() as i32
             }
         })
         .collect();
@@ -12397,6 +12462,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     // if (hitsfound == 0) continue;
                     // hits_extended += extend(offset_pairs, hitsfound, ...);
                     // ```
+                    let x_hit_prefetch = x_mb_hit_prefetch();
                     let mut process_offset_pairs =
                         |offset_pairs: &[OffsetPair],
                          offset_pairs_len: &mut usize,
@@ -12404,6 +12470,15 @@ fn search_query_batch<const UNGAPPED: bool>(
                          track_scan_pause: bool| {
                             let hitsfound = *offset_pairs_len;
                             for idx in 0..hitsfound {
+                                // EXPERIMENT (LOSAT_X_MBHITPF): the query's letters of a hit
+                                // `X_HIT_AHEAD` places on.
+                                if x_hit_prefetch && idx + X_HIT_AHEAD < hitsfound {
+                                    x_dc_csr::prefetch(
+                                        encoded_query_concat_blastna_with_sentinels
+                                            .as_ptr()
+                                            .wrapping_add(offset_pairs[idx + X_HIT_AHEAD].q_off),
+                                    );
+                                }
                                 let pair = offset_pairs[idx];
                                 let q_off0 = pair.q_off;
                                 let kmer_start = pair.s_off;

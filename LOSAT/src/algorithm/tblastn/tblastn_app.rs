@@ -436,10 +436,21 @@ fn search_cli(
     // ```
     // The database of `-db` is opened after the options are processed, before
     // `Query is Empty!` (as BLASTN's).
+    // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the database
+    // arguments reads it (`s_GetTaxIDList`) before the database opens.
     let database = match args.database_name() {
-        Some(name) => Some(
-            super::database::TblastnDatabase::open(name, &settings)?.showing_gis(args.show_gis),
-        ),
+        Some(name) => {
+            let taxids = args.taxid_filter.resolve(&settings, outputs.diagnostics)?;
+            Some(
+                super::database::TblastnDatabase::open_restricted(
+                    name,
+                    &settings,
+                    taxids.as_ref(),
+                    outputs.diagnostics,
+                )?
+                .showing_gis(args.show_gis),
+            )
+        }
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
@@ -919,6 +930,7 @@ fn search(
     let subject_set = SubjectSetNumbers {
         database: database.map(TblastnDatabase::numbers),
         dbsize: args.dbsize,
+        searchsp: args.searchsp,
     };
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
     // BLAST XML (5, and the XML2 documents of 16 and 15) cannot carry a database name outside

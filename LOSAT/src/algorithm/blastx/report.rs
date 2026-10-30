@@ -1656,8 +1656,10 @@ fn pairwise_metadata(
         word_threshold: 0.0,
         window_size: options.window_size,
         gapped_karlin: lookup_protein_params(&scoring),
-        gumbel: lookup_protein_gumbel_params(&scoring, total as i64)
-            .expect("pinned BLOSUM62 gap11/1 Gumbel block"),
+        gumbel: (!options.old_fsc).then(|| {
+            lookup_protein_gumbel_params(&scoring, total as i64)
+                .expect("pinned BLOSUM62 gap11/1 Gumbel block")
+        }),
         // BLASTX writes its own description table and alignments (`write_blastx_report`).
         num_descriptions: usize::MAX,
         num_alignments: usize::MAX,

@@ -401,7 +401,9 @@ export LOSAT_X_DPWINDOW=1
 export LOSAT_X_FOLDLEAN=1
 export LOSAT_X_GREEDYROWFUSE=1
 export LOSAT_X_MB24=1
+export LOSAT_X_MBCSR=1
 export LOSAT_X_MBFILL=1
+export LOSAT_X_MBHITPF=1
 export LOSAT_X_MBLUTKEEP=1
 export LOSAT_X_MBLUTONCE=1
 export LOSAT_X_MBLUTPREFAULT=1
@@ -3403,6 +3405,26 @@ Scheduling (each value computed by one thread with the original function; order 
   blastn of the cDNAs against MG1655 (no 3-byte table) wall x0.988. Wasm (the serial WASI command in Node 26.8.2, all arms'
   modules in one process, a fresh instance per search, 8 rounds; two node 0 cores): the linear memory of Sakai against
   MG1655 133.1 -> 106.4 MiB, x0.995 of the time, of the cDNAs 234.3 -> 208.8 MiB, x0.992.
+- `LOSAT_X_MBCSR=1` (BLASTN megablast, the contiguous tables of 4^12 cells with a packed head, `-subject` and `-db`, any
+  thread count, not on wasm32; speed and memory; in the strict set from the pull request that added it, 2026-10-30
+  (perf/mb-csr12): on unless it is `0`) lays those tables out as CSR with a packed head (`blastn/x_bn_csr.rs`, `x_in_scope`), as
+  `LOSAT_X_BNCSR` and `LOSAT_X_BNCSRPACK` do for 4^8 to 4^11 cells, when the subjects' letters are at least 8 times the
+  positions of the word loop plus the cells (`X_MB12_LETTERS_PER_POSITION`). The scan then reads a word's presence bits and its run
+  through the prefetch ring instead of one miss per head and per chain element on `next_pos`, which took 45 % of the
+  cycles of draft200 x one volume of ref_prok_rep_genomes (4 Gnt) at one thread. The rule keeps the chains' cheaper
+  fill for small subjects: without it Sakai x MG1655 was ×1.34 and draft200 x an 8.7 MB database ×1.69 (the CSR's build
+  costs 13-22 ns more per position and about 40 ms per build, its scan saves about 3.2 ns per subject letter). v4-R R11 measured only a 5 Mb
+  subject and found no gain. Evidence (ws, one core of node 0, three rounds, the same reports): draft200 x that volume
+  ×0.72 of `=0` with max RSS ×0.90, 235 contigs x 1.5 Gnt of plasmids ×0.74 with ×0.86, Meles x 129 Mb of nt ×0.81 with
+  ×0.92; below the rule the same as `=0`. `LOSAT/tests/blastn_mb_csr.rs` checks both sides of the rule on whole
+  searches.
+- `LOSAT_X_MBHITPF=1` (BLASTN, every task, x86_64, the loop over the offset pairs of `search_query_batch`, not the seed
+  stage of `LOSAT_X_PAIRPAR`; speed; in the strict set from the pull request that added it, 2026-10-30 (perf/mb-csr12): on unless it is `0`) prefetches the query line of
+  the hit 16 places on (`x_mb_hit_prefetch`, `X_HIT_AHEAD`). A hit's first extension reads the query at a place its
+  lookup cell chose, which took about 20 % of the cycles of draft200 x one volume of ref_prok_rep_genomes at one thread.
+  Evidence (ws, one core of node 0, four rounds, the same reports, max RSS equal): that case ×0.922, 235 contigs x
+  1.5 Gnt of plasmids ×0.942, Meles x 129 Mb of nt ×0.945, Sakai x MG1655 ×0.982. Prefetching the hit's diagonal cell as
+  well gave ×1.000 and was dropped.
 - `LOSAT_X_MBFILL=1` (BLASTN megablast and blastn, the one-thread fill of `build_mb_lookup`: the contiguous megablast
   table and the two-stage blastn table; speed; in the strict set from the pull request that added it, 2026-10-23; `=0`
   runs the queued loop `x_fill_mb_queued`) reads the words of the fill run by run
@@ -3991,7 +4013,7 @@ Scheduling (each value computed by one thread with the original function; order 
   word loop reads at least a quarter as many positions as the table has cells get it: with NCBI's choice of table, a
   query batch of 1,048,576 positions or more (about 524 kb, both strands) at word size 11, 262,144 at 10, 65,536
   (and 16,384 for the reading-order table of 4^8 cells) at 9; word sizes 12 and above build 4^11-cell tables only
-  below that size and keep their chains, and so do megablast's 4^12-cell tables. Such a table takes nothing from the
+  below that size and keep their chains, and so do megablast's 4^12-cell tables below `LOSAT_X_MBCSR`'s rule. Such a table takes nothing from the
   batch loop's keep (`LOSAT_X_MBLUTKEEP`): its `offsets` is allocated per build and freed with the table (before the
   traceback with `LOSAT_X_BNLUTDROP`), and a build laid out as CSR frees the table the keep holds. With a search pool
   of two threads or more (where PAIRPAR's fill would run) the table is built on the pool
@@ -4050,7 +4072,7 @@ Scheduling (each value computed by one thread with the original function; order 
   a chains build, also those no packed build wrote (`Keep::take`; its entry). The runs, their order, the presence
   vector and the counters are those of the unpacked head, so every value read from the table is the same. Not packed:
   the reading-order table (4^8, `ascending_cells`; it keeps the size rule), the discontiguous tables of
-  `LOSAT_X_DCCSR` and megablast's 4^12-cell chains. The CI fixtures do not reach the reading-order table (it needs
+  `LOSAT_X_DCCSR` and megablast's 4^12-cell chains (below `LOSAT_X_MBCSR`'s rule). The CI fixtures do not reach the reading-order table (it needs
   `-word_size 9` with a query batch of 16,384-21,000 positions), so its reach row is a gap. The tests of the chains'
   fill (`LOSAT/tests/blastn_mb_fill.rs`, `blastn_mb_lookup_once.rs`, `blastn_mb_lut_keep.rs`) run `-task blastn` with
   the switch off, which keeps the small tables' chains. Tests:

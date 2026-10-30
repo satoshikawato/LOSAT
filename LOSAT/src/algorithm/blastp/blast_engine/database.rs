@@ -144,7 +144,19 @@ impl BlastpDatabase {
         settings: &ApplicationSettings,
         parsed_seqids: bool,
     ) -> Result<Self> {
-        let db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
+        Self::open_restricted(name, settings, parsed_seqids, None, &mut std::io::sink())
+    }
+
+    /// `open` with the database restricted to the taxid list `list` of the command line
+    /// (`shared::restrict_database`, whose warning goes to `diagnostics`).
+    pub(super) fn open_restricted(
+        name: &str,
+        settings: &ApplicationSettings,
+        parsed_seqids: bool,
+        list: Option<&crate::seqdb::TaxidList>,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<Self> {
+        let mut db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
         // A database with parsed Seq-ids (line DBID, ID2a): BLASTP reads it; psiblast, whose
         // reports were not checked against NCBI's for one, refuses it as before.
         if parsed_seqids {
@@ -152,6 +164,7 @@ impl BlastpDatabase {
         } else {
             shared::refuse_parsed_seqids(&db, "PSIBLAST")?;
         }
+        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -179,6 +192,17 @@ impl BlastpDatabase {
     /// The total length (`CSeqDB::GetTotalLength`).
     pub(super) fn total_letters(&self) -> u64 {
         self.db.total_length()
+    }
+
+    /// The number of sequences the reports print: the whole database's, also with a taxid
+    /// list (`SeqDb::printed_num_seqs`).
+    pub(super) fn printed_num_sequences(&self) -> u32 {
+        self.db.printed_num_seqs()
+    }
+
+    /// The total length the reports print (`SeqDb::printed_total_length`).
+    pub(super) fn printed_total_letters(&self) -> u64 {
+        self.db.printed_total_length()
     }
 
     /// The total length as the engine holds it.
@@ -896,7 +920,9 @@ impl ListedSubjects {
             let (title, replaced) = title.unwrap_or_default();
             replaced_title_bytes.push(replaced);
             records.push(FastaRecord::new(
-                format!("gnl|BL_ORD_ID|{ordinal}"),
+                // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the
+                // OID (line DI-8).
+                format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
                 &title,
                 &letters,
             ));

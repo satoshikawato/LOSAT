@@ -1488,6 +1488,9 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
     if inputs.is_empty() {
         return;
     }
+    if x_probe_nlstore() {
+        return x_prefetch_batch(inputs);
+    }
     let mut outputs = vec![NewtonOutput::new(); inputs.len()];
     solve_batch(&inputs, &mut outputs);
     PREFETCHED.fetch_add(inputs.len() as u64, Ordering::Relaxed);
@@ -1504,6 +1507,94 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
             }));
         }
     });
+}
+
+// No NCBI counterpart (probe D14 s5, exp branch only): LOSAT_PROBE_NLSTORE=1 keeps each prefetched
+// batch as its input and output vectors (no box per result); it does not change any value NCBI computes.
+pub(crate) fn x_probe_nlstore() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_PROBE_NLSTORE").is_some_and(|v| v == "1"))
+}
+
+// No NCBI counterpart (probe): one prefetched batch; `taken` marks the results already taken.
+struct XBatch {
+    inputs: Vec<NewtonInput>,
+    outputs: Vec<NewtonOutput>,
+    taken: Vec<bool>,
+    left: usize,
+}
+
+// No NCBI counterpart (probe): per-thread batches computed ahead, oldest first; at most
+// `STORE_CAPACITY` results not taken (the oldest batch is dropped first).
+thread_local! {
+    static XBATCHES: RefCell<(VecDeque<XBatch>, usize)> = const { RefCell::new((VecDeque::new(), 0)) };
+}
+
+// No NCBI counterpart (probe): `prefetch` with the batch kept as it was solved.
+#[inline(never)]
+fn x_prefetch_batch(inputs: Vec<NewtonInput>) {
+    let mut outputs = vec![NewtonOutput::new(); inputs.len()];
+    solve_batch(&inputs, &mut outputs);
+    PREFETCHED.fetch_add(inputs.len() as u64, Ordering::Relaxed);
+    XBATCHES.with(|store| {
+        let mut store = store.borrow_mut();
+        let (batches, left) = &mut *store;
+        let n = inputs.len();
+        while *left + n > STORE_CAPACITY {
+            match batches.pop_front() {
+                Some(old) => *left -= old.left,
+                None => break,
+            }
+        }
+        *left += n;
+        batches.push_back(XBatch {
+            inputs,
+            outputs,
+            taken: vec![false; n],
+            left: n,
+        });
+    });
+}
+
+// No NCBI counterpart (probe): `take` from the kept batches (the first result not taken whose input
+// equals this one by bits); a batch is dropped when its last result is taken.
+#[inline(never)]
+fn x_take_batch(
+    x: &mut [f64],
+    q: &[f64],
+    row: &[f64; N],
+    col: &[f64; N],
+    relative_entropy: f64,
+) -> Option<i32> {
+    XBATCHES.with(|store| {
+        let mut store = store.borrow_mut();
+        let (batches, left) = &mut *store;
+        for b in 0..batches.len() {
+            let batch = &mut batches[b];
+            let found = (0..batch.inputs.len()).find(|&i| {
+                let input = &batch.inputs[i];
+                !batch.taken[i]
+                    && input.relative_entropy.to_bits() == relative_entropy.to_bits()
+                    && same_bits(&input.col, col)
+                    && same_bits(&input.row, row)
+                    && same_bits(&input.q, q)
+            });
+            if let Some(i) = found {
+                x.copy_from_slice(&batch.outputs[i].x);
+                let status = batch.outputs[i].status;
+                batch.taken[i] = true;
+                batch.left -= 1;
+                *left -= 1;
+                if batch.left == 0 {
+                    batches.remove(b);
+                }
+                HITS.fetch_add(1, Ordering::Relaxed);
+                return Some(status);
+            }
+        }
+        MISSES.fetch_add(1, Ordering::Relaxed);
+        None
+    })
 }
 
 // No NCBI counterpart: bitwise equality of two f64 slices.
@@ -1533,6 +1624,9 @@ pub(crate) fn take(
     col: &[f64; N],
     relative_entropy: f64,
 ) -> Option<i32> {
+    if x_probe_nlstore() {
+        return x_take_batch(x, q, row, col, relative_entropy);
+    }
     STORE.with(|store| {
         let mut store = store.borrow_mut();
         let position = store.iter().position(|entry| {

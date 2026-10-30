@@ -2638,7 +2638,11 @@ fn x_newton_lanes_prefetch_windows<'seq>(
     composition_workspace: &BlastCompositionWorkspace,
     ranges: &mut Vec<(XLaneRangeKey, BlastRedoRangeResult)>,
 ) -> usize {
-    let mut inputs = Vec::new();
+    let mut inputs = if super::x_newton_lanes::x_probe_nlstore() {
+        Vec::with_capacity(X_LANES_PREFETCH_INPUTS)
+    } else {
+        Vec::new()
+    };
     let mut window_index = first_window;
     while window_index < windows.len() && inputs.len() < X_LANES_PREFETCH_INPUTS {
         let window = &windows[window_index];

@@ -4029,53 +4029,58 @@ impl PrelimHitCollector {
     }
 
     /// The HSPs of subject `oid`; the subjects must come in OID order.
-    fn add(&mut self, oid: usize, mut hits: Vec<PrelimHit>) {
+    fn add(&mut self, oid: usize, hits: Vec<PrelimHit>) {
         if hits.is_empty() {
             return;
         }
         if x_bnhitgroup() {
-            // The lists of one subject go to the hit lists of their queries, and a query's hit
-            // list does not read another's, so that the queries may come in any order. The sort
-            // is stable: the HSPs of a query keep their order.
-            if !hits.is_sorted_by_key(|hit| hit.query_idx) {
-                hits.sort_by_key(|hit| hit.query_idx);
-            }
-            while let Some(last) = hits.last() {
-                let query = last.query_idx;
-                let start = hits.partition_point(|hit| hit.query_idx < query);
-                let hsps = if start == 0 {
-                    std::mem::take(&mut hits)
-                } else {
-                    hits.split_off(start)
-                };
-                let prelim_hitlist_size = self.prelim_hitlist_size;
-                self.hit_lists[query as usize]
-                    .get_or_insert_with(|| HitList::new(prelim_hitlist_size))
-                    .update(PrelimHspList {
-                        oid: oid as u32,
-                        hsps,
-                        best_evalue: 0.0,
-                    });
-            }
-            return;
+            self.x_add_grouped(oid, hits);
+        } else {
+            self.add_per_query(oid, hits);
         }
+    }
+
+    /// `LOSAT_X_BNHITGROUP=0`: a list per query of the batch, as NCBI's `hsp_list_array`.
+    fn add_per_query(&mut self, oid: usize, hits: Vec<PrelimHit>) {
         let mut per_query: Vec<Vec<PrelimHit>> = vec![Vec::new(); self.hit_lists.len()];
         for hit in hits {
             per_query[hit.query_idx as usize].push(hit);
         }
         for (query, hsps) in per_query.into_iter().enumerate() {
-            if hsps.is_empty() {
-                continue;
+            if !hsps.is_empty() {
+                self.update(query, oid, hsps);
             }
-            let prelim_hitlist_size = self.prelim_hitlist_size;
-            self.hit_lists[query]
-                .get_or_insert_with(|| HitList::new(prelim_hitlist_size))
-                .update(PrelimHspList {
-                    oid: oid as u32,
-                    hsps,
-                    best_evalue: 0.0,
-                });
         }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNHITGROUP): the same lists, made from the subject's HSPs alone. A
+    /// query's hit list does not read another's, so that the queries may come in any order; the
+    /// sort is stable, so that the HSPs of a query keep their order.
+    fn x_add_grouped(&mut self, oid: usize, mut hits: Vec<PrelimHit>) {
+        if !hits.is_sorted_by_key(|hit| hit.query_idx) {
+            hits.sort_by_key(|hit| hit.query_idx);
+        }
+        while let Some(last) = hits.last() {
+            let query = last.query_idx;
+            let start = hits.partition_point(|hit| hit.query_idx < query);
+            let hsps = if start == 0 {
+                std::mem::take(&mut hits)
+            } else {
+                hits.split_off(start)
+            };
+            self.update(query as usize, oid, hsps);
+        }
+    }
+
+    fn update(&mut self, query: usize, oid: usize, hsps: Vec<PrelimHit>) {
+        let prelim_hitlist_size = self.prelim_hitlist_size;
+        self.hit_lists[query]
+            .get_or_insert_with(|| HitList::new(prelim_hitlist_size))
+            .update(PrelimHspList {
+                oid: oid as u32,
+                hsps,
+                best_evalue: 0.0,
+            });
     }
 }
 
@@ -20163,6 +20168,50 @@ mod tests {
         let mut query1 = hit_lists[1].take().unwrap();
         query1.sort_by_evalue();
         assert_eq!(prelim_scores(&query1), vec![(0, vec![90])]);
+    }
+
+    // `LOSAT_X_BNHITGROUP`: the lists made from a subject's HSPs alone equal the lists made with
+    // one list per query of the batch, in every hit list, with the HSPs of a list in their order
+    // (each HSP has its own score). Queries in random order, in runs and all in one query.
+    #[test]
+    fn grouped_hit_lists_equal_the_lists_per_query() {
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = move |below: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % below
+        };
+        for round in 0..200u64 {
+            let num_queries = 1 + next(40) as usize;
+            let size = 1 + next(5) as usize;
+            let mut per_query = PrelimHitCollector::new(num_queries, size);
+            let mut grouped = PrelimHitCollector::new(num_queries, size);
+            let mut score = 0;
+            for oid in 0..30 {
+                let count = next(25);
+                let run = 1 + next(4);
+                let mut hits = Vec::new();
+                for i in 0..count {
+                    let query = match round % 3 {
+                        0 => next(num_queries as u64),
+                        1 => (i / run).min(num_queries as u64 - 1),
+                        _ => num_queries as u64 - 1,
+                    };
+                    score += 1;
+                    hits.push(query_prelim_hit(query as u32, score));
+                }
+                if hits.is_empty() {
+                    continue;
+                }
+                per_query.add_per_query(oid, hits.clone());
+                grouped.x_add_grouped(oid, hits);
+            }
+            for (a, b) in per_query.hit_lists.iter().zip(&grouped.hit_lists) {
+                assert_eq!(a.as_ref().map(prelim_scores), b.as_ref().map(prelim_scores));
+                assert_eq!(a.is_some(), b.is_some());
+            }
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2163-2210

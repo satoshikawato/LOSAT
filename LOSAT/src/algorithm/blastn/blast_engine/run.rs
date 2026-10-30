@@ -6755,7 +6755,8 @@ fn write_custom_tabular(
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
     probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
-    use super::super::tabular::{write_blastn_tabular, BlastnTabular, TabularSubjects};
+    use super::super::tabular::{write_blastn_tabular, BlastnTabular};
+    use crate::algorithm::common::tabular::TabularSubjects;
     let needs = spec.needs();
     let record_length = |s_idx: usize| {
         report

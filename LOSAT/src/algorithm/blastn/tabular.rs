@@ -46,6 +46,7 @@ use anyhow::{Context, Result};
 use super::hsp::{blastn_hsp_count, BlastnHitList, BlastnHsp, NCBI_BLASTN_VERSION};
 use super::pairwise::xml_rows_into;
 use super::x_subject_store::SubjectLetters;
+use crate::algorithm::common::tabular::TabularSubjects;
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::common::GapEditOp;
@@ -86,146 +87,6 @@ pub(crate) struct BlastnTabular<'a> {
     pub taxdb_found: bool,
     /// The names of the taxonomy database that the rows look up (`None`: every lookup fails).
     pub names: Option<&'a TabularNames>,
-}
-
-/// The subjects as the report shows them, by subject index (a subject set) or rank (the
-/// reported sequences of a database).
-pub(crate) enum TabularSubjects<'a> {
-    /// The records of `-subject`: the tabular id of each (`sseqid`, `sacc`, `saccver`; the
-    /// default report's) and the length of its record.
-    Records {
-        ids: &'a [Arc<[u8]>],
-        length: &'a dyn Fn(usize) -> usize,
-    },
-    /// The reported sequences of a database: their tabular ids, ordinal ids, records (with
-    /// the stored title of a sequence without parsed Seq-ids), parsed Seq-ids (empty when none
-    /// has them), lengths, and taxonomy (empty when no field shows it).
-    Database {
-        ids: &'a [Arc<[u8]>],
-        ordinals: &'a [u32],
-        records: &'a [FastaRecord],
-        parsed: &'a [Option<Arc<ParsedSubject>>],
-        lengths: &'a [usize],
-        taxonomy: &'a [TabularTaxonomy],
-    },
-}
-
-/// The values of one subject that its rows show (`TabularSubject` without the coverages).
-struct SubjectValues<'a> {
-    id: Cow<'a, [u8]>,
-    accession: Cow<'a, [u8]>,
-    accession_version: Cow<'a, [u8]>,
-    gi: i64,
-    all_ids: Vec<DeflineIds>,
-    titles: Option<Vec<&'a [u8]>>,
-    length: usize,
-    taxonomy: Cow<'a, TabularTaxonomy>,
-}
-
-impl<'a> TabularSubjects<'a> {
-    /// The values of subject `s_idx` that `needs` asks for.
-    fn values(&self, s_idx: usize, spec: &TabularSpec) -> Result<SubjectValues<'a>> {
-        let needs = spec.needs();
-        match *self {
-            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:577-582
-            // ```c++
-            //         list<CRef<objects::CSeq_id> > subject_id_list;
-            //         ITERATE(CBioseq_Handle::TId, itr, bh.GetId()) {
-            //             CRef<CSeq_id> next_id = s_ReplaceLocalId(bh, itr->GetSeqId(), m_ParseLocalIds);
-            //             subject_id_list.push_back(next_id);
-            //         }
-            //         m_SubjectIds.push_back(subject_id_list);
-            // ```
-            // A FASTA subject has no definition lines: its `sall*` are its own ids, its title
-            // and taxonomy are empty (`N/A`).
-            TabularSubjects::Records { ids, length } => {
-                let id: &[u8] = ids.get(s_idx).map_or(&b"unknown"[..], |id| id.as_ref());
-                Ok(SubjectValues {
-                    id: Cow::Borrowed(id),
-                    accession: Cow::Borrowed(id),
-                    accession_version: Cow::Borrowed(id),
-                    gi: 0,
-                    all_ids: Vec::new(),
-                    titles: None,
-                    length: if spec.has(TabularField::SubjectLength) {
-                        length(s_idx)
-                    } else {
-                        0
-                    },
-                    taxonomy: Cow::Owned(TabularTaxonomy::default()),
-                })
-            }
-            TabularSubjects::Database {
-                ids,
-                ordinals,
-                records,
-                parsed,
-                lengths,
-                taxonomy,
-            } => {
-                let length = lengths.get(s_idx).copied().unwrap_or_default();
-                let taxonomy = match taxonomy.get(s_idx) {
-                    Some(taxonomy) => Cow::Borrowed(taxonomy),
-                    None => Cow::Owned(TabularTaxonomy::default()),
-                };
-                match parsed.get(s_idx).and_then(Option::as_deref) {
-                    // A sequence with parsed Seq-ids: the ids of its Bioseq and of each
-                    // definition line, and the titles of its definition lines.
-                    Some(subject) => {
-                        let refused = |problem: &str| {
-                            crate::algorithm::common::database::parsed_refusal(
-                                ordinals.get(s_idx).copied().unwrap_or_default(),
-                                &format!("has {problem}"),
-                                PROGRAM,
-                            )
-                        };
-                        let [id, accession, accession_version] =
-                            subject.tabular_ids(false).map_err(refused)?;
-                        let all_ids = if needs.all_deflines {
-                            subject.all_tabular_ids(false).map_err(refused)?
-                        } else {
-                            Vec::new()
-                        };
-                        Ok(SubjectValues {
-                            id: Cow::Owned(id),
-                            accession: Cow::Owned(accession),
-                            accession_version: Cow::Owned(accession_version),
-                            gi: subject.tabular_gi(),
-                            all_ids,
-                            titles: Some(
-                                subject
-                                    .deflines()
-                                    .iter()
-                                    .map(|defline| defline.title.as_deref().unwrap_or_default())
-                                    .collect(),
-                            ),
-                            length,
-                            taxonomy,
-                        })
-                    }
-                    // A sequence without parsed Seq-ids: the first word of its stored title
-                    // (`gnl|BL_ORD_ID|n` replaced, `CShowBlastDefline::GetSeqIdList`) for every
-                    // id, and its one definition line's title.
-                    None => {
-                        let id: &[u8] = ids.get(s_idx).map_or(&b"unknown"[..], |id| id.as_ref());
-                        let title = records
-                            .get(s_idx)
-                            .map_or(&[][..], |record| record.title.as_slice());
-                        Ok(SubjectValues {
-                            id: Cow::Borrowed(id),
-                            accession: Cow::Borrowed(id),
-                            accession_version: Cow::Borrowed(id),
-                            gi: 0,
-                            all_ids: Vec::new(),
-                            titles: Some(vec![title]),
-                            length,
-                            taxonomy,
-                        })
-                    }
-                }
-            }
-        }
-    }
 }
 
 /// Writes outfmt 20's line of the field names (`PrintProlog`; nothing for the other kinds).
@@ -310,7 +171,7 @@ pub(crate) fn write_blastn_tabular(
     for hit_list in hit_lists.iter().flatten().filter(|_| needs.all_deflines) {
         for hsp_list in &hit_list.hsplist_array {
             if let Some(first) = hsp_list.hsps.first() {
-                tab.subjects.values(first.s_idx as usize, spec)?;
+                tab.subjects.values(first.s_idx as usize, spec, PROGRAM)?;
             }
         }
     }
@@ -394,7 +255,7 @@ pub(crate) fn write_blastn_tabular(
                 continue;
             };
             let s_idx = first.s_idx as usize;
-            let values = tab.subjects.values(s_idx, spec)?;
+            let values = tab.subjects.values(s_idx, spec, PROGRAM)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:595-605
             // ```c++
             //     CConstRef<CBioseq> query_bioseq = query_handle.GetCompleteBioseq();
@@ -427,25 +288,12 @@ pub(crate) fn write_blastn_tabular(
             } else {
                 -1
             };
-            let subject = TabularSubject {
-                id: &values.id,
-                accession: &values.accession,
-                accession_version: &values.accession_version,
-                gi: values.gi,
-                all_ids: &values.all_ids,
-                length: values.length,
-                titles: values.titles.as_deref(),
-                taxonomy: &values.taxonomy,
-                names: tab.names,
-                nucleotide: true,
-                qcovs,
-                qcovus,
-            };
+            let subject = values.nucleotide_subject(tab.names, qcovs, qcovus);
             for hsp in &hsp_list.hsps {
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
                 if let (Some(names), Some(warnings)) = (tab.names, warnings.as_deref_mut()) {
-                    let text = names.row_messages(spec, &values.taxonomy);
+                    let text = names.row_messages(spec, subject.taxonomy);
                     if !text.is_empty() {
                         writer.write_all(&buf)?;
                         buf.clear();

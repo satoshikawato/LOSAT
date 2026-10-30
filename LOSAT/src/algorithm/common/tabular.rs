@@ -1,11 +1,10 @@
 //! The subjects of the tabular reports with a field list (outfmt 6 and 7 other than the default
 //! `std` fields with a tab, outfmt 10 and 20; `report::tabular`), as the programs' adapters hand
 //! them to the shared writer: the values of a FASTA subject or a database sequence that its rows
-//! show, the taxonomy of the reported database sequences, whether `taxdb.bti` is on NCBI's search
-//! path for a `-subject` search, and outfmt 20's line of the field names. For the programs whose
-//! subjects are nucleotide sequences; `program` names the program in LOSAT's refusals. TBLASTN and
-//! TBLASTX use it (line CLI C2, PR 2); BLASTN keeps the copy that PR 1 wrote in
-//! `algorithm::blastn::tabular` until the two are joined.
+//! show, the taxonomy of the reported database sequences, and outfmt 20's line of the field names
+//! with its formatter's warning. For the programs whose subjects are nucleotide sequences;
+//! `program` names the program in LOSAT's refusals. BLASTN (line CLI C2, PR 1; its outfmt 20 line
+//! and warning are its own, DECISIONS 6), TBLASTN and TBLASTX (PR 2) use it.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-851
 //! ```c++
@@ -242,35 +241,6 @@ impl<'a> TabularSubjects<'a> {
             }
         }
     }
-}
-
-/// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search (`x_CheckTaxDB`'s
-/// `SeqDB_ResolveDbPath("taxdb.bti")`: the current directory, `BLASTDB` and the registry's
-/// `[BLAST] BLASTDB`, as a database is looked for, `seqdb::SearchPath`). A registry value that
-/// LOSAT does not read as NCBI is its refusal, as for `-db`.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
-/// ```c++
-/// void CBlastTabularInfo::x_CheckTaxDB()
-/// {
-///    	if( x_IsFieldRequested(eSubjectSciNames) ||
-///     ...
-///    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
-///    		if(resolved.empty())
-/// ```
-pub(crate) fn subject_taxdb_found(
-    settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
-    program: &str,
-) -> Result<bool> {
-    let registry = match &settings.blastdb {
-        Ok(value) => value.as_deref(),
-        Err(reason) => {
-            anyhow::bail!("{reason}; this is not supported by LOSAT's {program}")
-        }
-    };
-    let path = crate::seqdb::SearchPath::from_environment(registry)
-        .map_err(|error| crate::algorithm::common::database::database_error(error, program))?;
-    Ok(path.resolve_file("taxdb.bti").is_some())
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851

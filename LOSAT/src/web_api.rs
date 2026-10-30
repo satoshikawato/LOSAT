@@ -407,6 +407,7 @@ fn parse_tblastx_args(
         query_loc: None,
         subject_loc: None,
         archive: None,
+        tabular_taxdb: None,
     };
 
     let mut index = 0;

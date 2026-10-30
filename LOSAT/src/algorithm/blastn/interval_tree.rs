@@ -1957,12 +1957,10 @@ impl BlastIntervalTree {
     }
 
     // No NCBI counterpart: see `x_node_capacity`.
-    /// A tree with room for `nodes` nodes, `entries` listings and `cells` grid cells.
-    pub fn x_with_room(nodes: usize, entries: usize, cells: usize) -> Self {
+    /// A tree with room for `nodes` nodes.
+    pub fn x_with_node_room(nodes: usize) -> Self {
         let mut tree = Self::new(0, 1, 0, 1);
         tree.nodes.reserve_exact(nodes - tree.nodes.len());
-        tree.x.entries.reserve_exact(entries);
-        tree.x.head.reserve_exact(cells);
         tree
     }
 

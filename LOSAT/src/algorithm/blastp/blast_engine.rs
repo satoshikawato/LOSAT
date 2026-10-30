@@ -581,7 +581,7 @@ impl BlastpSubjectScratch {
             // tree = Blast_IntervalTreeInit(0, query->length+1,
             //                               0, subject->length+1);
             // ```
-            preliminary_interval_tree: x_tree_pool::own_tree(query_span),
+            preliminary_interval_tree: BlastIntervalTree::new(0, query_span, 0, 1),
         }
     }
 

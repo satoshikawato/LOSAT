@@ -344,7 +344,13 @@ impl Lookup {
                     &query,
                     &batch.lookup_segments,
                 )
-                .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?,
+                .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?
+                .map_err(|()| {
+                    anyhow::anyhow!(
+                        "-threshold {} with the compressed lookup table of -word_size 5 is not supported by LOSAT's BLASTX: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
+                        options.threshold
+                    )
+                })?,
             ));
         }
         ensure!(
@@ -384,7 +390,9 @@ impl Lookup {
                 query,
                 batch.lookup_segments.clone(),
                 contexts,
-                options.threshold as i32,
+                // `lookup->threshold = (Int4)opt->threshold` (blast_aalookup.c:241), converted as
+                // the x86-64 build does (`INT_MIN` past `Int4`).
+                crate::core::blast_util::ncbi_int4_from_double(options.threshold),
                 pooled,
                 parts,
             ),

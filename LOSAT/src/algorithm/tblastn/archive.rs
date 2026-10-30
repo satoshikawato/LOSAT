@@ -33,6 +33,7 @@ use super::TblastnArgs;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::value_parsers::SegSpec;
+use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
@@ -64,8 +65,20 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.max_hsps = args.max_hsps.map(|count| count as i32);
     inputs.culling_limit = args.culling_limit;
     inputs.sum_stats = args.sum_stats;
-    // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`).
-    inputs.threshold = args.threshold.map(|threshold| threshold as i32);
+    // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`), converted
+    // as the x86-64 build does (`INT_MIN` past `Int4`, as the lookup table takes it:
+    // `ncbi_int4_from_double`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
+    // ```c++
+    // CBlastOptions::SetWordThreshold(double w)
+    // {
+    //     ...
+    //     if (m_Remote) {
+    //         m_Remote->SetValue(eBlastOpt_WordThreshold, static_cast<int>(w));
+    //     }
+    // }
+    // ```
+    inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     inputs.window_size = args.window_size;
     inputs.ungapped = args.ungapped;
     inputs.soft_masking = args.soft_masking;
@@ -582,6 +595,37 @@ mod tests {
             }
         }
         Some(inputs)
+    }
+
+    // A `-threshold` past `Int4` (2147483648, 1e10, +inf, 1e999) is recorded as `INT_MIN`, as
+    // NCBI BLAST+ 2.17.0 converts it (the lookup table takes the same value). NCBI's build writes
+    // it as `-8` in the archive, from a signed overflow that LOSAT does not reproduce
+    // (`report/serial/asn_text.rs` `itoa_i32`).
+    #[test]
+    fn a_threshold_past_int4_is_recorded_as_int_min() {
+        let inputs =
+            |value: &str| inputs_of(&["-threshold", value]).unwrap_or_else(|| panic!("{value}"));
+        let listed = |threshold: &str| {
+            let case = CASES
+                .iter()
+                .find(|case| case.0 == "opt_thr_frac")
+                .expect("opt_thr_frac");
+            case.2.replace(
+                "WordThreshold=integer:11",
+                &format!("WordThreshold=integer:{threshold}"),
+            )
+        };
+        for value in ["2147483648", "1e10", "+inf", "1e999"] {
+            assert_eq!(
+                render(&algorithm_options(&inputs(value))),
+                listed("-2147483648"),
+                "{value}"
+            );
+        }
+        assert_eq!(
+            render(&algorithm_options(&inputs("2147483647.5"))),
+            listed("2147483647")
+        );
     }
 
     #[test]

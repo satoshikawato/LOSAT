@@ -688,7 +688,9 @@ impl DecimalI32 {
 ///         *--pos = '-';
 ///     }
 /// ```
-/// (`i32::MIN` does not occur: positions, lengths, counts and scores of BLAST.)
+/// `i32::MIN` is written as its digits. NCBI's `-n` overflows there and its build writes `-8`
+/// (the archive's `WordThreshold` of a `-threshold` past `Int4`, NCBI BLAST+ 2.17.0); LOSAT does
+/// not reproduce that overflow. Positions, lengths, counts and scores of BLAST do not reach it.
 pub(crate) fn itoa_i32(value: i32) -> DecimalI32 {
     let mut buffer = [0u8; 11];
     let mut pos = buffer.len();

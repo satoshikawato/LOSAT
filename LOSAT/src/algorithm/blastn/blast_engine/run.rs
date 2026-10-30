@@ -4064,6 +4064,9 @@ impl PrelimHitCollector {
             let query = last.query_idx;
             let start = hits.partition_point(|hit| hit.query_idx < query);
             let hsps = if start == 0 {
+                // The hit list keeps this list until the traceback: without the room of the
+                // groups cut off above it.
+                hits.shrink_to_fit();
                 std::mem::take(&mut hits)
             } else {
                 hits.split_off(start)

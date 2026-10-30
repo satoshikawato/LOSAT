@@ -1488,6 +1488,9 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
     if inputs.is_empty() {
         return;
     }
+    if x_probe_nlclear() {
+        x_clear_stores();
+    }
     if x_probe_nlstore() {
         return x_prefetch_batch(inputs);
     }
@@ -1514,6 +1517,25 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
 pub(crate) fn x_probe_nlstore() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("LOSAT_PROBE_NLSTORE").is_some_and(|v| v == "1"))
+}
+
+// No NCBI counterpart (probe D14 s5, exp branch only): LOSAT_PROBE_NLCLEAR=1 drops the results of
+// earlier batches not taken when a new batch is prefetched (their windows were walked already); it
+// does not change any value NCBI computes.
+pub(crate) fn x_probe_nlclear() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_PROBE_NLCLEAR").is_some_and(|v| v == "1"))
+}
+
+// No NCBI counterpart (probe): empties this thread's stores (both forms).
+#[inline(never)]
+fn x_clear_stores() {
+    STORE.with(|store| store.borrow_mut().clear());
+    XBATCHES.with(|store| {
+        let mut store = store.borrow_mut();
+        store.0.clear();
+        store.1 = 0;
+    });
 }
 
 // No NCBI counterpart (probe): one prefetched batch; `taken` marks the results already taken.

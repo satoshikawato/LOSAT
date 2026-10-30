@@ -406,6 +406,7 @@ export LOSAT_X_MBFILL=1
 export LOSAT_X_MBLUTKEEP=1
 export LOSAT_X_MBLUTONCE=1
 export LOSAT_X_MBLUTPREFAULT=1
+export LOSAT_X_NEWTONDROP=1
 export LOSAT_X_PAIRPARDISC=1
 export LOSAT_X_PAIRPARDISCARR=1
 export LOSAT_X_PAIRPARFOLD=1
@@ -5369,6 +5370,22 @@ Scheduling (each value computed by one thread with the original function; order 
   `=0` in the PR's binary): AP027131 `-subject` at 1 / 16 / 32 threads x0.9949 / x0.9986 / x0.9840 (11, 7, 10 of 12
   faster), against `=0` x0.9937 / x0.9957 / x0.9844; `dmel_b4.faa` at 1 / 8 / 16 / 32 x0.9986 / x0.9963 / x0.9965 /
   x0.9946 (6 of 8, 11, 9, 11 of 12 faster), against `=0` x0.9989 / x0.9987 / x0.9984 / x0.9919.
+- `LOSAT_X_NEWTONDROP=1` blastp, tblastn (memory; in the strict set from the pull request that added it, 2026-10-30;
+  `=0` turns it off; `core/composition_adjustment/x_newton_lanes.rs` `prefetch`): the Newton lanes (NEWTONLANES)
+  keep the results they solve ahead in a store of the thread (6.7 KiB a result: its input, matched by bits, and its
+  final iterate), and a result not taken stayed there until the store held 512. A prefetch comes after the windows
+  (TBLASTN: the coming windows of a match) or the matches (BLASTP: the next 16 matches of a query) of the thread's
+  earlier prefetches were walked, so their results not taken are not asked for again; with the switch a prefetch
+  drops them first. TBLASTN leaves such results for the HSPs its redo finds contained (their problems are solved
+  ahead with the others): 1,667 of the 50,620 results solved ahead for `dmel_b4.faa` x zebrafish cDNAs (`-db`),
+  about 11 MiB held at any thread count, and 44 of 40,738 for AP027131 x AP027133; BLASTP left none (WSSV x
+  PajaWSV, 3,000 SwissProt proteins x Species6 `-db`). A dropped result asked for after all would be solved by its
+  call with the same bits (`take` returns none), so the report cannot change; the results taken are the same
+  (`[X_STATS] NEWTONLANES prefetched= hits= misses=` equal with and without the switch; `[X_STATS] NEWTONDROP
+  dropped=` counts the results dropped). Unit test `x_newton_drop_empties_the_store_at_the_next_prefetch`;
+  `tests/tblastn_newton_drop.rs`: the same report as `=0` at one and four threads, the same counts of results solved
+  ahead and taken, some results dropped by default and none with `=0`. Always: every prefetch (where NEWTONLANES
+  runs).
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

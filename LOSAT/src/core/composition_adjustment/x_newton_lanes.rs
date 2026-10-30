@@ -114,6 +114,7 @@ static BUSY_LANE_ROUNDS: AtomicU64 = AtomicU64::new(0);
 static BATCHES8: AtomicU64 = AtomicU64::new(0);
 static ROUNDS8: AtomicU64 = AtomicU64::new(0);
 static TAIL_ROUNDS: AtomicU64 = AtomicU64::new(0);
+static DROPPED: AtomicU64 = AtomicU64::new(0);
 
 // No NCBI counterpart: prints the counters at exit; it does not change any value NCBI computes.
 pub(crate) fn print_stats() {
@@ -130,6 +131,12 @@ pub(crate) fn print_stats() {
             LANE_ROUNDS.load(Ordering::Relaxed),
             BUSY_LANE_ROUNDS.load(Ordering::Relaxed),
         );
+        if prefetched > 0 {
+            eprintln!(
+                "[X_STATS] NEWTONDROP dropped={}",
+                DROPPED.load(Ordering::Relaxed)
+            );
+        }
         if eight_lanes() {
             eprintln!(
                 "[X_STATS] NEWTONLANES8 batches8={} rounds8={} tail_rounds={}",
@@ -1485,6 +1492,18 @@ thread_local! {
 // for `take`; it does not change any value NCBI computes.
 /// Solves `inputs` and keeps the results in this thread's store.
 pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
+    // Dispatch point (LOSAT_X_NEWTONDROP, in the strict set): a call comes after the windows
+    // (TBLASTN) or the matches (BLASTP) of this thread's earlier calls were walked, so their results
+    // not taken are not asked for again; they are dropped before this batch is solved. With `=0`
+    // they stay until the store holds `STORE_CAPACITY` results. A dropped result asked for after all
+    // would be solved by the caller with the same bits (`take` returns `None`).
+    if x_newton_drop() {
+        STORE.with(|store| {
+            let mut store = store.borrow_mut();
+            DROPPED.fetch_add(store.len() as u64, Ordering::Relaxed);
+            store.clear();
+        });
+    }
     if inputs.is_empty() {
         return;
     }
@@ -1504,6 +1523,14 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
             }));
         }
     });
+}
+
+// No NCBI counterpart (memory only; the results kept are the ones `prefetch` solved):
+// LOSAT_X_NEWTONDROP, in the strict set (on unless `LOSAT_X_NEWTONDROP=0`).
+/// Whether `prefetch` drops the results of this thread's earlier calls that were not taken.
+fn x_newton_drop() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_NEWTONDROP"))
 }
 
 // No NCBI counterpart: bitwise equality of two f64 slices.
@@ -1910,6 +1937,47 @@ mod tests {
             assert!(same_bits(&x, &want[i].x));
             assert_eq!(take(&mut x, &p.q, &p.row, &p.col, p.relative_entropy), None);
         }
+    }
+
+    // No NCBI counterpart: LOSAT_X_NEWTONDROP; a prefetch drops this thread's results of earlier
+    // prefetches not taken (with `=0` they stay); it does not change any value NCBI computes.
+    #[test]
+    fn x_newton_drop_empties_the_store_at_the_next_prefetch() {
+        let problems = test_problems();
+        let want = expected(&problems[..8]);
+        let mut x = [0.0f64; NN];
+        let take_at = |x: &mut [f64; NN], i: usize| {
+            let p = &problems[i];
+            take(x, &p.q, &p.row, &p.col, p.relative_entropy)
+        };
+        prefetch(problems[..5].to_vec());
+        for i in [0usize, 2, 4] {
+            assert_eq!(take_at(&mut x, i), Some(want[i].status));
+        }
+        prefetch(problems[5..8].to_vec());
+        // problems 1 and 3 were not taken before the second prefetch
+        for i in [1usize, 3] {
+            let kept = take_at(&mut x, i);
+            if x_newton_drop() {
+                assert_eq!(kept, None, "problem {i} dropped");
+            } else {
+                assert_eq!(kept, Some(want[i].status), "problem {i} kept with =0");
+                assert!(same_bits(&x, &want[i].x));
+            }
+        }
+        for i in 5..8 {
+            assert_eq!(take_at(&mut x, i), Some(want[i].status));
+            assert!(same_bits(&x, &want[i].x));
+        }
+        // an empty prefetch drops what is left as well
+        prefetch(problems[..2].to_vec());
+        assert_eq!(take_at(&mut x, 0), Some(want[0].status));
+        prefetch(Vec::new());
+        assert_eq!(
+            take_at(&mut x, 1).is_none(),
+            x_newton_drop(),
+            "problem 1 after an empty prefetch"
+        );
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696

@@ -130,6 +130,16 @@ fn reached(dir: &Path, switch: &str) -> (bool, bool) {
 /// own: the report, the sides of `SWITCH` recorded, and whether the units of the branch-free hit
 /// loops ran (the new side of `LOSAT_X_TBXHITBF`, recorded only by the unit path).
 fn tblastx(inputs: &Inputs, threads: u32, env: &[(&str, &str)]) -> (Vec<u8>, (bool, bool), bool) {
+    tblastx_args(inputs, threads, env, &[])
+}
+
+/// `tblastx` with the further options `args`.
+fn tblastx_args(
+    inputs: &Inputs,
+    threads: u32,
+    env: &[(&str, &str)],
+    args: &[&str],
+) -> (Vec<u8>, (bool, bool), bool) {
     let dir = temp_path("reach");
     std::fs::create_dir_all(&dir).unwrap();
     let output = losat(env)
@@ -141,6 +151,7 @@ fn tblastx(inputs: &Inputs, threads: u32, env: &[(&str, &str)]) -> (Vec<u8>, (bo
         .arg(&inputs.subject)
         .args(["-query_gencode", "4", "-db_gencode", "4", "-outfmt", "6"])
         .args(["-num_threads", &threads.to_string()])
+        .args(args)
         .output()
         .expect("run LOSAT");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -174,6 +185,30 @@ fn reports_do_not_depend_on_the_sentinel_walks() {
     }
     let (report, _, _) = tblastx(&inputs, 1, &[OFF, REFERENCE_LOOP]);
     assert_eq!(report, expected, "reference frame loop, =0");
+}
+
+/// Another matrix's walks (its byte table, `two_hit_sent_in`): the same three paths give the report
+/// of `=0` and record only the switch's own side, for each matrix that TBLASTX takes.
+#[test]
+fn another_matrix_takes_the_sentinel_walks_with_the_same_report() {
+    let inputs = Inputs::new();
+    for matrix in [
+        "BLOSUM45", "BLOSUM50", "BLOSUM80", "BLOSUM90", "PAM30", "PAM70", "PAM250", "IDENTITY",
+    ] {
+        let args = ["-matrix", matrix];
+        let (expected, _, _) = tblastx_args(&inputs, 1, &[OFF], &args);
+        assert!(!expected.is_empty(), "{matrix}: no hits");
+        for (name, threads, env, unit) in [
+            ("unit path, 1 thread", 1, &[][..], true),
+            ("unit path, 4 threads", 4, &[][..], true),
+            ("reference frame loop", 1, &[REFERENCE_LOOP][..], false),
+        ] {
+            let (report, sides, unit_path) = tblastx_args(&inputs, threads, env, &args);
+            assert_eq!(report, expected, "{matrix}, {name}");
+            assert_eq!(sides, (true, false), "{matrix}, {name}: the walks that ran");
+            assert_eq!(unit_path, unit, "{matrix}, {name}: the path that ran");
+        }
+    }
 }
 
 /// Subject frames searched in chunks (`LOSAT_TBLASTX_TEST_CHUNK_SIZE`, read by debug builds): a

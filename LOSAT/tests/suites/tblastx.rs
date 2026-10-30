@@ -25,6 +25,8 @@ mod tblastx_link_slices;
 mod tblastx_link_sort;
 #[path = "../tblastx_matrix.rs"]
 mod tblastx_matrix;
+#[path = "../tblastx_n1_groups.rs"]
+mod tblastx_n1_groups;
 #[path = "../tblastx_prefetch.rs"]
 mod tblastx_prefetch;
 #[path = "../tblastx_qslice.rs"]

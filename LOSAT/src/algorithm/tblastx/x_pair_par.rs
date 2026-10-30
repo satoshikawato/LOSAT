@@ -3285,7 +3285,9 @@ fn group_starts(contexts: &[QueryContext], threads: usize) -> Vec<usize> {
     if threads <= 1 && n > 1 && n1_groups() {
         let letters =
             contexts[n - 1].frame_base + contexts[n - 1].aa_len as i32 - contexts[0].frame_base;
-        if letters as usize <= X_N1_ONE_GROUP_LETTERS {
+        let one = letters as usize <= X_N1_ONE_GROUP_LETTERS;
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXN1GROUPS", one);
+        if one {
             return vec![0];
         }
     }

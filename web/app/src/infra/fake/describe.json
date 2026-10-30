@@ -29,6 +29,11 @@
     "takes_value": true
    },
    {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
+   },
+   {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
     "takes_value": false,
@@ -211,6 +216,11 @@
     "takes_value": true
    },
    {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
+   },
+   {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
     "takes_value": false,
@@ -368,6 +378,11 @@
    {
     "flag": "-dbsize",
     "help": "Effective length of the database",
+    "takes_value": true
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
     "takes_value": true
    },
    {
@@ -583,6 +598,11 @@
    {
     "flag": "-dbsize",
     "help": "Effective length of the database",
+    "takes_value": true
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
     "takes_value": true
    },
    {

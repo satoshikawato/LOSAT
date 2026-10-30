@@ -1792,20 +1792,25 @@ fn evaluate_and_purge(
     // }
     // ```
     let eval_params = scaled_karlin_params(params, score_divisor);
-    for hsp in &mut hsp_list.hsps {
-        hsp.e_value = match gumbel_params {
-            Some(gumbel_params) => blast_spouge_stoe(
-                hsp.raw_score,
-                &eval_params,
-                gumbel_params,
-                query_workspace.query_length,
-                subject_length,
-            ),
-            None => {
-                query_workspace.redo_query_info.eff_search_space
-                    * (-eval_params.lambda * hsp.raw_score as f64 + eval_params.k.ln()).exp()
+    match gumbel_params {
+        Some(gumbel_params) => {
+            for hsp in &mut hsp_list.hsps {
+                hsp.e_value = blast_spouge_stoe(
+                    hsp.raw_score,
+                    &eval_params,
+                    gumbel_params,
+                    query_workspace.query_length,
+                    subject_length,
+                );
             }
-        };
+        }
+        None => {
+            let search_space = query_workspace.redo_query_info.eff_search_space;
+            for hsp in &mut hsp_list.hsps {
+                hsp.e_value = search_space
+                    * (-eval_params.lambda * hsp.raw_score as f64 + eval_params.k.ln()).exp();
+            }
+        }
     }
     update_best_evalue(hsp_list);
     if let Some(comp_p_value) = pvalue_for_this_pair.filter(|p| (0.0..=1.0).contains(p)) {

@@ -1470,25 +1470,27 @@ fn x_build_compact_preliminary_hsp_list<'h>(
     gumbel_params: Option<&BlastGumbelBlk>,
     search_space: f64,
 ) -> BlastpHspList<XPrelimHsp> {
-    let hsps: Vec<XPrelimHsp> = preliminary_hits
-        .map(|hit| XPrelimHsp {
-            hsp: *hit,
-            e_value: match gumbel_params {
-                Some(gumbel_params) => blast_spouge_stoe(
+    let hsps: Vec<XPrelimHsp> = match gumbel_params {
+        Some(gumbel_params) => preliminary_hits
+            .map(|hit| XPrelimHsp {
+                hsp: *hit,
+                e_value: blast_spouge_stoe(
                     hit.raw_score,
                     karlin_params,
                     gumbel_params,
                     query_length as i32,
                     subject_length as i32,
                 ),
-                None => {
-                    search_space
-                        * (-karlin_params.lambda * hit.raw_score as f64 + karlin_params.k.ln())
-                            .exp()
-                }
-            },
-        })
-        .collect();
+            })
+            .collect(),
+        None => preliminary_hits
+            .map(|hit| XPrelimHsp {
+                hsp: *hit,
+                e_value: search_space
+                    * (-karlin_params.lambda * hit.raw_score as f64 + karlin_params.k.ln()).exp(),
+            })
+            .collect(),
+    };
     let mut hsp_list = BlastpHspList {
         oid,
         query_index,

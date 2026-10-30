@@ -1203,8 +1203,10 @@ fn write_pairwise(
         ),
     };
     // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`).
-    let gumbel = lookup_protein_gumbel_params(&spec, subject_set.gumbel_db_length(total_nt as u64))
-        .context("TBLASTN pairwise Spouge parameters are unavailable")?;
+    let gumbel = subject_set.gumbel_block(&spec, total_nt as u64);
+    if gumbel.is_none() && subject_set.searchsp.is_none() {
+        anyhow::bail!("TBLASTN pairwise Spouge parameters are unavailable");
+    }
     let report = BlastpPairwiseReport {
         version: "2.17.0+".into(),
         database_name: shown.name(),

@@ -252,6 +252,7 @@ fn parse_blastn_args(
         db: None,
         dbsize: None,
         show_gis: false,
+        searchsp: None,
         task: "megablast".to_string(),
         template_type: None,
         template_length: None,
@@ -385,6 +386,7 @@ fn parse_tblastx_args(
         db: None,
         dbsize: None,
         show_gis: false,
+        searchsp: None,
         evalue: 10.0,
         // The frozen web ABI v1 (plan TD-1) has no -threshold, -matrix or -window_size: BLOSUM62's
         // suggestions, 13 and 40.
@@ -546,6 +548,7 @@ fn parse_blastp_args(
         db: None,
         dbsize: None,
         show_gis: false,
+        searchsp: None,
         task: "blastp".to_string(),
         evalue: None,
         threshold: None,

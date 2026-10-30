@@ -919,6 +919,7 @@ fn search(
     let subject_set = SubjectSetNumbers {
         database: database.map(TblastnDatabase::numbers),
         dbsize: args.dbsize,
+        searchsp: args.searchsp,
     };
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
     // BLAST XML (5, and the XML2 documents of 16 and 15) cannot carry a database name outside

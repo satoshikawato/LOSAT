@@ -115,7 +115,8 @@ pub(super) fn x_lists_by_query(
     oid: u32,
     subject_length: usize,
     karlin_params: &KarlinParams,
-    gumbel_params: &BlastGumbelBlk,
+    gumbel_params: Option<&BlastGumbelBlk>,
+    search_spaces: &[crate::stats::search_space::SearchSpace],
     prelim_evalue: f64,
     subject_result: &mut BlastpSubjectResult,
 ) {
@@ -134,6 +135,7 @@ pub(super) fn x_lists_by_query(
             subject_length,
             karlin_params,
             gumbel_params,
+            search_spaces[q_idx].effective_space,
         );
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:654-663
         // ```c

@@ -107,8 +107,9 @@
 //! Contexts of a multi-query batch are taken in at most `X_MAX_GROUPS` contiguous groups (one
 //! context per group for one query). A group is one unit: inside it the diagonals of its contexts
 //! share unit cells exactly as reference cells without aliasing, and items 1-4 apply to its
-//! boundaries. Units depend only on the inputs, never on the thread count; with one thread they
-//! run in order on the calling thread.
+//! boundaries. The groups depend on the inputs and, with LOSAT_X_TBXN1GROUPS, on whether the search
+//! has one thread (`group_starts`), which changes no output: a group boundary only decides where the
+//! concatenation above is cut; with one thread they run in order on the calling thread.
 //!
 //! `LOSAT_X_TBXBAND` (in the strict set: on unless `LOSAT_X_TBXBAND` is `0`)
 //! : `decide` does not apply `guard` (item 3) to a batch whose longest subject
@@ -310,16 +311,13 @@ fn n1_groups() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXN1GROUPS"))
 }
 
-/// TEMP (prototype): the widest group at one thread.
-fn x_n1_group_letters() -> usize {
-    static V: OnceLock<usize> = OnceLock::new();
-    *V.get_or_init(|| {
-        std::env::var("LOSAT_TBX_N1GL")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1 << 18)
-    })
-}
+/// No NCBI counterpart: LOSAT_X_TBXN1GROUPS takes one group at one thread up to this many letters of
+/// a batch (a nucleotide query of about 65 kb). At one thread the groups serve no parallelism, and
+/// each scans every subject frame and has its tables. Measured (workstation, one thread, 2026-10-31):
+/// 60 kb x 1 Mb x0.94; 40 x 40 phages of 43 kb x0.81; 50 kb x 4.6 Mb x0.87; 50 cDNAs x 1 Mb x0.77.
+/// Above it the group's diagonal table outgrows the cache: 100-300 kb queries x1.03-1.05 in one or
+/// three groups, x1.05-1.11 for 291 kb x 590 kb (BLOSUM45), so those batches keep their six groups.
+const X_N1_ONE_GROUP_LETTERS: usize = 1 << 17;
 
 // No NCBI counterpart: a LOSAT variable that chooses, per batch, between two LOSAT paths with the
 // same result (the unit path and the reference frame loop, module doc items 1-4); NCBI has one path.
@@ -1931,7 +1929,7 @@ pub(super) struct XPairPar<M: TbxScore = Blosum62Score> {
     extents: Vec<usize>,
     /// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the batch's extensions may take the walks the
     /// sentinels stop (`x_tbx_sent_contexts`); a unit takes them where its chunk is the whole frame.
-    /// Never for another matrix (the sentinel walks hold BLOSUM62's scores).
+    /// Another matrix's needs its byte table (`TbxScore::x_sent_walks`).
     sent: bool,
     /// The search's matrix (`-matrix`; no data for BLOSUM62's instance).
     sc: M,
@@ -2071,8 +2069,8 @@ impl<M: TbxScore> XPairPar<M> {
         };
         debug_assert!(extents.is_empty() || extents.len() == groups.len());
         // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): checked once for the batch's contexts.
-        let sent =
-            M::BLOSUM62 && x_tbx_sent_contexts(b.contexts.iter().map(|c| c.aa_seq.as_slice()));
+        let sent = b.sc.x_sent_walks()
+            && x_tbx_sent_contexts(b.contexts.iter().map(|c| c.aa_seq.as_slice()));
         Some(Self {
             groups,
             stub,
@@ -3187,10 +3185,9 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: bool>(
         // (x_unit_probe.rs; `XNoProbe` does nothing). No NCBI counterpart.
         let mark = probe.ext_begin();
         // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): with `SENT` the walks the sentinels stop.
-        // Another matrix's extension takes its table walks (`extend_hit_two_hit_with`; the
-        // sentinel walks hold BLOSUM62's scores, and its units never take them, `prepare`).
+        // Another matrix's extension takes its table walks (`extend_hit_two_hit_with`).
         let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
-            if !M::BLOSUM62 {
+            if !M::BLOSUM62 && !SENT {
                 extend_hit_two_hit_with(
                     h.sc,
                     query,
@@ -3216,7 +3213,7 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: bool>(
                 // batch's contexts passed `x_tbx_sent_contexts` (XPairPar::sent), and `h.subject_sent`
                 // is the buffer of a frame `x_tbx_sent_subject` accepted.
                 unsafe {
-                    extend_hit_two_hit_sent(
+                    h.sc.sent_two_hit(
                         query_full,
                         h.subject_sent,
                         (last_hit + wordsize) as usize,
@@ -3281,42 +3278,29 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: bool>(
 
 // No NCBI counterpart: how the contexts are grouped into units (scheduling only; module doc).
 /// The first context of each group: one group per context up to `X_MAX_GROUPS` contexts, else
-/// `X_MAX_GROUPS` contiguous groups balanced by length; with LOSAT_X_TBXN1GROUPS at one thread, the
-/// fewest such groups in which every group extends over at most `x_n1_group_letters()` letters.
+/// `X_MAX_GROUPS` contiguous groups balanced by length; with LOSAT_X_TBXN1GROUPS at one thread, one
+/// group for a batch that extends over at most `X_N1_ONE_GROUP_LETTERS` letters.
 fn group_starts(contexts: &[QueryContext], threads: usize) -> Vec<usize> {
-    if threads <= 1 && n1_groups() {
-        for most in 1..X_MAX_GROUPS {
-            let starts = x_balanced_starts(contexts, most);
-            let widest = x_tbx_qslice::x_group_spans(contexts, &starts)
-                .into_iter()
-                .map(|(a, b)| (b - a) as usize)
-                .max()
-                .unwrap_or(0);
-            if widest <= x_n1_group_letters() {
-                return starts;
-            }
+    let n = contexts.len();
+    if threads <= 1 && n > 1 && n1_groups() {
+        let letters =
+            contexts[n - 1].frame_base + contexts[n - 1].aa_len as i32 - contexts[0].frame_base;
+        if letters as usize <= X_N1_ONE_GROUP_LETTERS {
+            return vec![0];
         }
     }
-    x_balanced_starts(contexts, X_MAX_GROUPS)
-}
-
-// No NCBI counterpart: the cut of `group_starts`.
-/// The first context of each of at most `most` contiguous groups: one per context up to `most`
-/// contexts, else balanced by length.
-fn x_balanced_starts(contexts: &[QueryContext], most: usize) -> Vec<usize> {
-    let n = contexts.len();
-    if n <= most {
+    if n <= X_MAX_GROUPS {
         return (0..n).collect();
     }
     let total: usize = contexts.iter().map(|c| c.aa_len + 1).sum();
     let mut starts = vec![0usize];
     let mut cumulative = 0usize;
     for (c, ctx) in contexts.iter().enumerate() {
-        if starts.len() == most {
-            break;
-        }
-        if c > 0 && cumulative * most >= starts.len() * total {
+        if c > 0 && cumulative * X_MAX_GROUPS >= starts.len() * total {
             starts.push(c);
+            if starts.len() == X_MAX_GROUPS {
+                break;
+            }
         }
         cumulative += ctx.aa_len + 1;
     }

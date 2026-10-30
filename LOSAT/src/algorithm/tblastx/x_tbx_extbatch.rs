@@ -198,41 +198,41 @@ unsafe fn resolve<M: TbxScore, const SENT: bool>(
     let ctx = unsafe { h.contexts.get_unchecked(c.ctx_idx as usize) };
     let query_full = &ctx.aa_seq;
     // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): as in `x_hit`; another matrix's extension as in `x_hit`.
-    let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) = if !M::BLOSUM62
-    {
-        extend_hit_two_hit_with(
-            h.sc,
-            &query_full[1..query_full.len() - 1],
-            h.subject,
-            c.s_left as usize,
-            c.s_right as usize,
-            c.q_raw as usize,
-            c.x_drop,
-            false,
-        )
-    } else if !SENT {
-        extend_hit_two_hit(
-            &query_full[1..query_full.len() - 1],
-            h.subject,
-            c.s_left as usize,
-            c.s_right as usize,
-            c.q_raw as usize,
-            c.x_drop,
-            false,
-        )
-    } else {
-        // SAFETY: as in `x_hit` (the caller's).
-        unsafe {
-            extend_hit_two_hit_sent(
-                query_full,
-                h.subject_sent,
+    let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
+        if !M::BLOSUM62 && !SENT {
+            extend_hit_two_hit_with(
+                h.sc,
+                &query_full[1..query_full.len() - 1],
+                h.subject,
                 c.s_left as usize,
                 c.s_right as usize,
                 c.q_raw as usize,
                 c.x_drop,
+                false,
             )
-        }
-    };
+        } else if !SENT {
+            extend_hit_two_hit(
+                &query_full[1..query_full.len() - 1],
+                h.subject,
+                c.s_left as usize,
+                c.s_right as usize,
+                c.q_raw as usize,
+                c.x_drop,
+                false,
+            )
+        } else {
+            // SAFETY: as in `x_hit` (the caller's).
+            unsafe {
+                h.sc.sent_two_hit(
+                    query_full,
+                    h.subject_sent,
+                    c.s_left as usize,
+                    c.s_right as usize,
+                    c.q_raw as usize,
+                    c.x_drop,
+                )
+            }
+        };
     // SAFETY: the caller's bound.
     unsafe {
         apply(

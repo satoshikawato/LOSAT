@@ -4294,9 +4294,9 @@ fn search_query_batch<S: TbxScore>(
 
     let contexts_ref = &contexts;
     // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the reference frame loops' extensions may take the walks
-    // the sentinels stop (not with the debug output of `extend_hit_two_hit`). The sentinel walks
-    // hold BLOSUM62's byte table: another matrix takes `extend_hit_two_hit_with` with its scores.
-    let tbx_sent = S::BLOSUM62
+    // the sentinels stop (not with the debug output of `extend_hit_two_hit`); another matrix's
+    // need its byte table (`TbxScore::x_sent_walks`).
+    let tbx_sent = sc.x_sent_walks()
         && !extension_debug_enabled
         && x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice()));
 
@@ -5335,11 +5335,11 @@ fn search_query_batch<S: TbxScore>(
                                         extension_debug_enabled,
                                     )
                                 } else {
-                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent,
-                                    // BLOSUM62 only) and `x_tbx_sent_subject` accepted the chunk
+                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent)
+                                    // and `x_tbx_sent_subject` accepted the chunk
                                     // (`subject_sent`).
                                     unsafe {
-                                        extend_hit_two_hit_sent(
+                                        sc.sent_two_hit(
                                             query_full,
                                             subject_full,
                                             (last_hit + wordsize) as usize,
@@ -5850,11 +5850,11 @@ fn search_query_batch<S: TbxScore>(
                                         extension_debug_enabled,
                                     )
                                 } else {
-                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent,
-                                    // BLOSUM62 only) and `x_tbx_sent_subject` accepted the chunk
+                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent)
+                                    // and `x_tbx_sent_subject` accepted the chunk
                                     // (`subject_sent`).
                                     unsafe {
-                                        extend_hit_two_hit_sent(
+                                        sc.sent_two_hit(
                                             query_full,
                                             subject_full,
                                             (last_hit + wordsize) as usize,

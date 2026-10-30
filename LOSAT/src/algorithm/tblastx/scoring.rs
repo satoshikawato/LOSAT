@@ -19,7 +19,10 @@
 //! table with them (`build_ncbi_lookup_for_profile`), and both two-hit extensions take the table
 //! walks of TBXUNGAP with a byte table of the matrix ([`TbxScore::table_two_hit`]).
 
-use super::extension::{matrix_walk_table, two_hit_in, MatrixWalkTable, TwoHit};
+use super::extension::{
+    extend_hit_two_hit_sent, extend_hit_two_hit_with, matrix_walk_table, two_hit_in,
+    two_hit_sent_in, MatrixWalkTable, TwoHit,
+};
 use crate::config::ScoringMatrix;
 use crate::utils::matrix::{blosum62_score, protein_score, BLASTAA_SIZE};
 
@@ -39,6 +42,40 @@ pub(crate) trait TbxScore: Copy + Send + Sync {
 
     /// The matrix.
     fn matrix(self) -> ScoringMatrix;
+
+    /// Whether the matrix's extensions may take the walks that the sentinels stop
+    /// (LOSAT_X_TBXUNGAPSENT): its byte table exists and stops at a sentinel.
+    fn x_sent_walks(self) -> bool {
+        false
+    }
+
+    /// `extend_hit_two_hit_with(self, &q_full[1..q_full.len() - 1], &s_full[1..s_full.len() - 1],
+    /// .., false)` with the walks the sentinels stop.
+    ///
+    /// SAFETY: `self.x_sent_walks()`, `q_full` is a context buffer `sent_contexts` accepted and
+    /// `s_full` a frame buffer `sent_subject` accepted.
+    // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
+    #[inline(always)]
+    unsafe fn sent_two_hit(
+        self,
+        q_full: &[u8],
+        s_full: &[u8],
+        s_left_off: usize,
+        s_right_off: usize,
+        q_right_off: usize,
+        x_drop: i32,
+    ) -> TwoHit {
+        extend_hit_two_hit_with(
+            self,
+            &q_full[1..q_full.len() - 1],
+            &s_full[1..s_full.len() - 1],
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            x_drop,
+            false,
+        )
+    }
 
     /// `extend_hit_two_hit_reference(self, ..)` (debug output off) from the table walks of
     /// TBXUNGAP with the matrix's byte table, or `None` when the reference has to run. BLOSUM62's
@@ -73,6 +110,27 @@ impl TbxScore for Blosum62Score {
     #[inline(always)]
     fn matrix(self) -> ScoringMatrix {
         ScoringMatrix::Blosum62
+    }
+
+    #[inline(always)]
+    fn x_sent_walks(self) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    unsafe fn sent_two_hit(
+        self,
+        q_full: &[u8],
+        s_full: &[u8],
+        s_left_off: usize,
+        s_right_off: usize,
+        q_right_off: usize,
+        x_drop: i32,
+    ) -> TwoHit {
+        // SAFETY: the caller's.
+        unsafe {
+            extend_hit_two_hit_sent(q_full, s_full, s_left_off, s_right_off, q_right_off, x_drop)
+        }
     }
 }
 
@@ -160,6 +218,47 @@ impl TbxScore for MatrixScore<'_> {
     }
 
     #[inline(always)]
+    fn x_sent_walks(self) -> bool {
+        self.walk.is_some_and(MatrixWalkTable::x_sentinels_stop)
+    }
+
+    #[inline(always)]
+    unsafe fn sent_two_hit(
+        self,
+        q_full: &[u8],
+        s_full: &[u8],
+        s_left_off: usize,
+        s_right_off: usize,
+        q_right_off: usize,
+        x_drop: i32,
+    ) -> TwoHit {
+        // SAFETY: the caller's; `x_sent_walks` holds, so the table exists and stops at a sentinel.
+        let walks = unsafe {
+            two_hit_sent_in(
+                self.walk.unwrap_unchecked(),
+                q_full,
+                s_full,
+                s_left_off,
+                s_right_off,
+                q_right_off,
+                x_drop,
+            )
+        };
+        match walks {
+            Some(r) => r,
+            None => x_matrix_sent_refused(
+                self,
+                q_full,
+                s_full,
+                s_left_off,
+                s_right_off,
+                q_right_off,
+                x_drop,
+            ),
+        }
+    }
+
+    #[inline(always)]
     fn table_two_hit(
         self,
         q_seq: &[u8],
@@ -179,6 +278,32 @@ impl TbxScore for MatrixScore<'_> {
             x_drop,
         )
     }
+}
+
+/// The calls `MatrixScore::sent_two_hit` leaves to `extend_hit_two_hit_with` (an X-drop outside
+/// 1..=127, a word that does not fit), out of the callers' code.
+// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit`.
+#[cold]
+#[inline(never)]
+fn x_matrix_sent_refused(
+    sc: MatrixScore<'_>,
+    q_full: &[u8],
+    s_full: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    x_drop: i32,
+) -> TwoHit {
+    extend_hit_two_hit_with(
+        sc,
+        &q_full[1..q_full.len() - 1],
+        &s_full[1..s_full.len() - 1],
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        x_drop,
+        false,
+    )
 }
 
 /// A matrix other than BLOSUM62 in the reports' identities and positives

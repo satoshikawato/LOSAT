@@ -11189,6 +11189,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             subject_packed_cache_ref,
             approx_table_entries,
             x_keep,
+            Some(subjects.metadata().db_len_total as u64),
         );
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
         tables

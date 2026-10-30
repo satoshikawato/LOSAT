@@ -398,6 +398,7 @@ mod tests {
                         1_000_000,
                         ascending,
                         None,
+                        None,
                     );
                     let next_pos_len = queries
                         .iter()
@@ -433,6 +434,7 @@ mod tests {
                         1_000_000,
                         ascending,
                         Some(&keep),
+                        None,
                     );
                     let dirty = match before {
                         Some((len, dirty, written)) if len >= cells => {

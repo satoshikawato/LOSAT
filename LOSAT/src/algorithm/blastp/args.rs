@@ -674,6 +674,11 @@ pub struct ResolvedBlastpArgs {
     pub inclusion_ethresh: f64,
     /// `traceback_hitlist_size`, computed once (psiblast's reads `ADAPTIVE_CBS`).
     traceback_hitlist: usize,
+    /// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search whose custom tabular
+    /// report checks it (`x_CheckTaxDB`, `blast_engine.rs` `search_cli`); false otherwise, and
+    /// for `run_local`, which has no search path (C2 DECISIONS 7). A `-db` search asks its
+    /// database (`BlastpDatabase::taxdb_found`).
+    pub subject_taxdb_found: bool,
 }
 
 impl ResolvedBlastpArgs {
@@ -1071,6 +1076,7 @@ impl BlastpArgs {
                 .inclusion_ethresh
                 .unwrap_or(super::blast_engine::PSI_INCLUSION_ETHRESH),
             traceback_hitlist: 0,
+            subject_taxdb_found: false,
         };
         resolved.traceback_hitlist = resolved.compute_traceback_hitlist_size();
         Ok(resolved)

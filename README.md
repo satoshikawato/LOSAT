@@ -39,7 +39,7 @@ On certified pairwise profiles and fixtures, LOSAT is checked against declared N
 | **`tblastn`** | `tblastn` (default) | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
 | **`psiblast`** | the first round (`-num_iterations 1`, the default) | `0`, `6`, `7` | Position-Specific Iterated BLAST: the first round, blastp's search with psiblast's report (see [section 7](#7-psi-blast-psiblast-first-round)) |
 
-> **Not supported**: `-task blastp-short` and `-task tblastn-fast` are rejected at the command line with an error message.
+> **Not supported**: `-task blastp-short` is rejected at the command line with an error message.
 >
 > **Note**: Tabular output (`-outfmt 6` and `7`) writes the 12 standard BLAST fields:  
 > `qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore`.  
@@ -195,7 +195,7 @@ losat tblastn \
   -outfmt 6
 ```
 
-The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including ID 32 under the documented product decision. Its certified output and target claims apply to the [declared fixtures and options](docs/release/v0.2.0.md). PSI-TBLASTN and composition modes 1/3 are unsupported (so is `-task tblastn-fast`); database searches (`-db`) are described in section 6.
+The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including ID 32 under the documented product decision. Its certified output and target claims apply to the [declared fixtures and options](docs/release/v0.2.0.md). PSI-TBLASTN and composition modes 1/3 are unsupported; `-task tblastn-fast` and `-word_size 5`, `6` and `7` (NCBI's compressed-alphabet lookup table) run with BLOSUM62; database searches (`-db`) are described in section 6.
 
 ### 5. Writing a BLAST Database (makeblastdb)
 ```bash
@@ -206,7 +206,7 @@ losat makeblastdb \
   -title "my proteins"
 ```
 
-`losat makeblastdb` writes the files of `makeblastdb` (without `-parse_seqids`): the sequence, header and index files, the alias file of a database in several volumes, the JSON metadata file (`.pjs`, `.njs`) and, as in makeblastdb, the LMDB files of format version 5, which is the default (`-blastdb_version 4` writes the older layout). The sequence and header files are the same bytes, and the index and metadata files differ only in their creation date; this is checked against makeblastdb 2.17.0 on Linux x86-64 (on Windows and macOS LOSAT follows NCBI's source where it depends on the platform, untested against makeblastdb there). Several FASTA files can be named in `-in`, and `-logfile` redirects the log to a file. `-max_file_sz` splits the database into volumes as makeblastdb does. NCBI BLAST+ programs and LOSAT's BLASTP, BLASTN, TBLASTN, BLASTX and TBLASTX search such a database with `-db` (section 6); the makeblastdb options LOSAT does not implement yet (`-parse_seqids`, `-hash_index`, `-taxid`, `-taxid_map`, masks) are rejected by name.
+`losat makeblastdb` writes the files of `makeblastdb`: the sequence, header and index files, the alias file of a database in several volumes, the JSON metadata file (`.pjs`, `.njs`) and, as in makeblastdb, the LMDB files of format version 5, which is the default (`-blastdb_version 4` writes the older layout). The sequence and header files are the same bytes, and the index and metadata files differ only in their creation date; this is checked against makeblastdb 2.17.0 on Linux x86-64 (on Windows and macOS LOSAT follows NCBI's source where it depends on the platform, untested against makeblastdb there). Several FASTA files can be named in `-in`, and `-logfile` redirects the log to a file. `-max_file_sz` splits the database into volumes as makeblastdb does. `-parse_seqids` stores the Seq-ids of the definition lines and writes makeblastdb's id indexes (with version 5 the accession keys of the `.pdb` file and the `.pos` file), `-hash_index` the sequence hash index, and `-taxid` or `-taxid_map` the tax ids (`-taxid_map -` reads the map from the standard input). NCBI BLAST+ programs and LOSAT's BLASTP, BLASTN, TBLASTN, BLASTX and TBLASTX search such a database with `-db` (section 6); the makeblastdb options LOSAT does not implement (masks, `-randomize`, `-oid_masks`, `-metadata_output_prefix`) are rejected by name.
 
 Every program answers `-version` as NCBI BLAST+ does (`blastn: 2.17.0+`, then a `Package:` line that names LOSAT) and `-h` with a short usage, both with exit code 0; `-help` and `-h` open with NCBI's `USAGE` and `DESCRIPTION` headings. `-mt_mode 0|1|2` (with `-num_threads`, as in NCBI) is accepted by BLASTN, BLASTP, BLASTX and TBLASTN and does not change the output, which is always that of NCBI `-num_threads 1`: NCBI's `-mt_mode 1` writes the end of an outfmt 0 report or each XML document once per batch of queries, which LOSAT does not reproduce. BLASTN accepts `-use_index false` (NCBI's default); `-use_index true` is rejected.
 
@@ -257,7 +257,7 @@ losat psiblast \
 | `-query <file>` | File path | *(Required)* | Input query sequence file (FASTA) |
 | `-subject <file>` | File path | *(Required unless `-db`)* | Input subject sequence file (FASTA) |
 | `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX, PSIBLAST; section 6) |
-| `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp` or `blastp-fast` (for `blastp`); `blastx` (for `blastx`); `tblastn` (for `tblastn`). `blastp-short` and `tblastn-fast` are not supported |
+| `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp` or `blastp-fast` (for `blastp`); `blastx` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`). `blastp-short` is not supported |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
 | `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `11`=BLAST archive (every program), `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out` (every program), `15`=BLAST JSON and `16`=BLAST XML2 (every program), `17`=SAM (BLASTN only); custom tabular fields in BLASTP and BLASTX only |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |

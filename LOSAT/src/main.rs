@@ -224,8 +224,18 @@ fn main() -> Result<()> {
             // layer reads the same environment and registry files (`makeblastdb.ini`, then
             // `.ncbirc`) before `Run`, and LOSAT rejects the settings that change the output.
             // The data loaders the check reports are not used for a FASTA input.
-            LOSAT::blastinput::ncbi_environment::check_ncbi_application_settings("makeblastdb")
-                .map_err(anyhow::Error::msg)?;
+            let settings =
+                LOSAT::blastinput::ncbi_environment::check_ncbi_application_settings("makeblastdb")
+                    .map_err(anyhow::Error::msg)?;
+            LOSAT::writedb::makeblastdb::check_registry_settings(
+                &args,
+                settings
+                    .max_seqid_length
+                    .as_ref()
+                    .map(Option::as_deref)
+                    .map_err(String::as_str),
+            )
+            .map_err(anyhow::Error::msg)?;
             // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1134-1136
             // ```c++
             //     const string dont_scan_bioseq =
@@ -287,6 +297,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastn::x_subject_store_print_summary();
     LOSAT::algorithm::tblastn::x_scan_bf_print_summary();
     LOSAT::algorithm::tblastn::x_scan_byte_print_summary();
+    LOSAT::algorithm::tblastn::x_lut_lean_print_summary();
     LOSAT::algorithm::tblastn::x_link_window_print_summary();
     LOSAT::algorithm::tblastn::x_link_ctx_print_summary();
     LOSAT::algorithm::blastn::x_subject_store_print_summary();

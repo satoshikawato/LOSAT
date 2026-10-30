@@ -89,6 +89,21 @@ impl TblastxDatabase {
         self.taxdb.found(&self.db)
     }
 
+    /// The names of the taxonomy database that the rows of `spec` look up for the subjects
+    /// `taxonomy` (`shared::tabular_names`).
+    pub(crate) fn tabular_names(
+        &self,
+        spec: &crate::report::tabular::TabularSpec,
+        taxonomy: &[crate::report::tabular::TabularTaxonomy],
+    ) -> Result<Option<crate::report::tabular::TabularNames>> {
+        shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
+    }
+
+    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
+    pub(crate) fn open_for_tabular_rows(&self) -> Result<()> {
+        self.taxdb.open_for_rows(&self.db, PROGRAM)
+    }
+
     /// Whether a report that names any sequence of the database could be refused by LOSAT
     /// (`common::database::reports_may_refuse`, with the reports `shown` and the batches'
     /// prefetch `prefetch`), read in `pool`.
@@ -159,6 +174,32 @@ impl TblastxDatabase {
             parsed_taxonomy,
             notes,
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
+    // ```c++
+    //             	CRef<CBlast_def_line_set> bdlRef =
+    //             			CSeqDB::ExtractBlastDefline(subject_bh);
+    //     ...
+    //             	if(setSubjectTaxInfoAll) {
+    //             		x_SetTaxInfoAll(subject_bh, bdlRef);
+    //             	}
+    // ```
+    /// The taxonomy of the tabular fields (`staxid`, `staxids`) of every reported sequence, by
+    /// rank (every rank is made from a hit, `reported_subjects`;
+    /// `algorithm::common::tabular::tabular_taxonomy`). A header that does not decode is
+    /// refused before the report.
+    pub(crate) fn tabular_taxonomy(
+        &self,
+        reported: &ReportedSubjects,
+    ) -> Result<Vec<crate::report::tabular::TabularTaxonomy>> {
+        crate::algorithm::common::tabular::tabular_taxonomy(
+            &self.db,
+            &reported.ordinals,
+            &reported.parsed,
+            0..reported.ordinals.len(),
+            PROGRAM,
+        )
     }
 
     /// The database's sequences by ordinal id (`common::database::read_nucleotide_stores`).

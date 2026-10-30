@@ -1017,15 +1017,15 @@ const NCBISTDAA_GAP: u8 = 0;
 //                 i == AMINOACID_TO_NCBISTDAA['O'] ||
 //                 i == AMINOACID_TO_NCBISTDAA['-'] ||
 // ```
-// A stored gap character (0, which makeblastdb writes for `-` in a protein FASTA)
-// never aligns in NCBI (row and column 0 stay `BLAST_SCORE_MIN`) and NCBI's formatter
-// then counts it as a gap of the alignment; LOSAT's kernels read byte 0 as the end of a
-// sequence, so a sequence that holds one is rejected. A byte that is no NCBIstdaa
-// residue (28 or more) indexes NCBI's matrix past its rows and is rejected too.
+// A stored gap character (0, which makeblastdb writes for `-` in a protein FASTA) is a
+// residue that scores `BLAST_SCORE_MIN` against every letter (row and column 0), as LOSAT's
+// kernels score it: an ungapped extension stops at it and a gapped alignment goes round it
+// with a gap. A byte that is no NCBIstdaa residue (28 or more) indexes NCBI's matrix past
+// its rows and is rejected.
 /// LOSAT's refusal of the protein database sequence `ordinal` (`with_sentinels`: its
 /// residues with the byte before and the byte after them in the sequence file) when
-/// `program` cannot search it as NCBI does: a sequence not between two 0 bytes, one
-/// that holds the gap character, or one with a byte that is no NCBIstdaa residue.
+/// `program` cannot search it as NCBI does: a sequence not between two 0 bytes, or one
+/// with a byte that is no NCBIstdaa residue.
 pub(crate) fn check_protein_sequence(
     with_sentinels: &[u8],
     ordinal: u64,
@@ -1038,34 +1038,13 @@ pub(crate) fn check_protein_sequence(
         );
     }
     let residues = &with_sentinels[1..with_sentinels.len() - 1];
-    // Every residue must be a byte other than the gap and below BLASTAA_SIZE: with the gap byte
-    // 0 (asserted below), the residues 1..BLASTAA_SIZE, the bytes whose `residue - 1` (wrapping,
-    // so the gap becomes 255) is below BLASTAA_SIZE - 1. The largest such difference, taken over
-    // all bytes without an early exit, is a loop the compiler vectorizes; the early exit of
-    // `all` made it a loop over single bytes (LOSAT-only cost; NCBI checks nothing here).
-    const _: () = assert!(
-        NCBISTDAA_GAP == 0
-            && crate::utils::matrix::BLASTAA_SIZE > 1
-            && crate::utils::matrix::BLASTAA_SIZE <= 256
-    );
-    const FIRST: u8 = NCBISTDAA_GAP + 1;
-    const LETTERS: usize = crate::utils::matrix::BLASTAA_SIZE - FIRST as usize;
-    let largest = residues
-        .iter()
-        .map(|&residue| residue.wrapping_sub(FIRST))
-        .max()
-        .unwrap_or(0);
-    if usize::from(largest) < LETTERS {
+    // Every residue must be a byte below BLASTAA_SIZE. The largest byte, taken over all bytes
+    // without an early exit, is a loop the compiler vectorizes; the early exit of `all` made it a
+    // loop over single bytes (LOSAT-only cost; NCBI checks nothing here).
+    const _: () = assert!(crate::utils::matrix::BLASTAA_SIZE <= 256);
+    let largest = residues.iter().copied().max().unwrap_or(0);
+    if usize::from(largest) < crate::utils::matrix::BLASTAA_SIZE {
         return Ok(());
-    }
-    if let Some(position) = residues
-        .iter()
-        .position(|&residue| residue == NCBISTDAA_GAP)
-    {
-        bail!(
-            "database sequence {ordinal} holds a gap character ('-') at position {}; a protein database sequence with gap characters is not supported by LOSAT's {program} (NCBI BLAST+ never aligns the character and then counts it as a gap of the alignment)",
-            position + 1
-        );
     }
     if let Some(position) = residues
         .iter()
@@ -1222,16 +1201,16 @@ mod tests {
         check_protein_sequence(&stored(residues), 7, "blastx").map_err(|e| e.to_string())
     }
 
-    /// The check before the single pass (an `all` over the residues).
-    fn accepted_before(residues: &[u8]) -> bool {
+    /// The check as an `all` over the residues.
+    fn accepted_by_all(residues: &[u8]) -> bool {
         residues
             .iter()
-            .all(|&residue| residue != NCBISTDAA_GAP && usize::from(residue) < BLASTAA_SIZE)
+            .all(|&residue| usize::from(residue) < BLASTAA_SIZE)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1593 (quoted at
-    // `check_protein_sequence`): the gap byte and bytes past the matrix are what the check
-    // refuses. Not a port of an NCBI unit case.
+    // `check_protein_sequence`): the bytes past the matrix are what the check refuses; the gap
+    // byte is a residue of the matrix. Not a port of an NCBI unit case.
     #[test]
     fn the_check_accepts_the_letters_and_names_the_first_bad_byte() {
         let first = NCBISTDAA_GAP + 1;
@@ -1239,39 +1218,32 @@ mod tests {
         assert_eq!(check(&[]), Ok(()));
         assert_eq!(check(&[first]), Ok(()));
         assert_eq!(check(&[last]), Ok(()));
-        let letters: Vec<u8> = (0..1_000).map(|i| [first, last][i % 2]).collect();
+        assert_eq!(check(&[NCBISTDAA_GAP]), Ok(()));
+        let letters: Vec<u8> = (0..1_000)
+            .map(|i| [first, last, NCBISTDAA_GAP][i % 3])
+            .collect();
         assert_eq!(check(&letters), Ok(()));
-        // (byte, words of the refusal, the character after its position)
-        for (bad, says, after) in [
-            (NCBISTDAA_GAP, "gap character", ';'),
-            (BLASTAA_SIZE as u8, "no NCBIstdaa residue", ','),
-            (255, "no NCBIstdaa residue", ','),
-        ] {
+        for bad in [BLASTAA_SIZE as u8, 255] {
             for length in [1, 2, 31, 32, 33, 100, 1_000] {
                 for at in [0, length / 2, length - 1] {
                     let mut residues = letters[..length].to_vec();
                     residues[at] = bad;
                     let error = check(&residues).unwrap_err();
                     assert!(
-                        error.contains(says)
-                            && error.contains(&format!("position {}{after}", at + 1)),
+                        error.contains("no NCBIstdaa residue")
+                            && error.contains(&format!("position {},", at + 1)),
                         "byte {bad} at {at} of {length}: {error}"
                     );
                 }
             }
         }
-        // A gap before a byte past the matrix is reported as the gap, as before.
-        let mut residues = letters[..10].to_vec();
-        residues[7] = NCBISTDAA_GAP;
-        residues[3] = 200;
-        assert!(check(&residues).unwrap_err().contains("gap character"));
         // The sentinels.
         assert!(check_protein_sequence(&[1, first, 0], 7, "blastx").is_err());
         assert!(check_protein_sequence(&[0, first, 1], 7, "blastx").is_err());
     }
 
-    // Random residues around the letters' bounds: the single pass accepts exactly what the
-    // `all` accepted.
+    // Random residues around the letters' bounds: the single pass accepts exactly what an `all`
+    // accepts.
     #[test]
     fn the_check_accepts_what_the_check_before_it_accepted() {
         let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
@@ -1290,7 +1262,7 @@ mod tests {
             }
             assert_eq!(
                 check(&residues).is_ok(),
-                accepted_before(&residues),
+                accepted_by_all(&residues),
                 "{residues:?}"
             );
         }
@@ -1322,6 +1294,9 @@ pub(crate) struct TaxdbRun {
     /// The refusal of a run whose prefetch NCBI's cache makes write the offset error more than
     /// once, as a reader's refusal ([`TaxdbRun::cache_collision`]).
     collision: std::sync::OnceLock<Option<(std::path::PathBuf, String)>>,
+    /// The texts of opening the database when the rows of a tabular report opened it, kept for
+    /// those rows ([`TaxdbRun::open_for_rows`], [`tabular_names`]).
+    rows_open: std::sync::Mutex<Vec<String>>,
 }
 
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
@@ -1451,6 +1426,30 @@ impl TaxdbRun {
     /// drops.
     pub(crate) fn prefetch_refused(&self, db: &SeqDb) -> bool {
         self.cache_collision(db).is_some()
+    }
+
+    /// The open of the database by the rows of a query batch whose report looks names up, made
+    /// after the batch's prefetch ([`prefetch_messages`]) and before the next batch's: NCBI writes
+    /// a batch's rows before it fetches the next batch, and a plural name looks taxid 0 up, which
+    /// the prefetch does not, so the run's first lookup can be such a row's. The texts of opening,
+    /// when this call opens the database, are kept for the rows ([`tabular_names`]). Nothing
+    /// without `taxdb.bti` on the search path.
+    pub(crate) fn open_for_rows(&self, db: &SeqDb, program: &str) -> Result<()> {
+        if !self.found(db) {
+            return Ok(());
+        }
+        let Some(search_path) = db.search_path() else {
+            return Ok(());
+        };
+        let texts = self
+            .taxdb(search_path)
+            .open()
+            .map_err(|error| taxdb_error(error, program))?;
+        self.rows_open
+            .lock()
+            .expect("the texts of opening")
+            .extend(texts);
+        Ok(())
     }
 
     /// The run's taxonomy database, a handle that opens it at its first name asked for.
@@ -1671,6 +1670,60 @@ pub(crate) fn read_reported_taxonomy(
         parsed_taxonomy[rank] = answers;
     }
     Ok((taxids, taxonomy, parsed_taxonomy, notes))
+}
+
+/// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search (`x_CheckTaxDB`'s
+/// `SeqDB_ResolveDbPath("taxdb.bti")`: the current directory, `BLASTDB` and the registry's
+/// `[BLAST] BLASTDB`, as a database is looked for, `seqdb::SearchPath`). A registry value that
+/// LOSAT does not read as NCBI is its refusal, as for `-db`; `program` names it.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
+/// ```c++
+/// void CBlastTabularInfo::x_CheckTaxDB()
+/// {
+///    	if( x_IsFieldRequested(eSubjectSciNames) ||
+///     ...
+///    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
+///    		if(resolved.empty())
+/// ```
+pub(crate) fn subject_taxdb_found(settings: &ApplicationSettings, program: &str) -> Result<bool> {
+    let registry = match &settings.blastdb {
+        Ok(value) => value.as_deref(),
+        Err(reason) => bail!("{reason}; this is not supported by LOSAT's {program}"),
+    };
+    let path =
+        SearchPath::from_environment(registry).map_err(|error| database_error(error, program))?;
+    Ok(path.resolve_file("taxdb.bti").is_some())
+}
+
+/// The names of the taxonomy database that the rows of a tabular report with a name field look
+/// up (`report::tabular::TabularNames`) for its subjects `taxonomies`, through the run's
+/// database; `None` without a name field or without `taxdb.bti` on the search path (every lookup
+/// fails, silently). A taxonomy database that LOSAT cannot read as NCBI does is refused as in
+/// [`read_reported_taxonomy`], before any byte of the report.
+pub(crate) fn tabular_names<'t>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    spec: &crate::report::tabular::TabularSpec,
+    taxonomies: impl IntoIterator<Item = &'t crate::report::tabular::TabularTaxonomy>,
+    program: &str,
+) -> Result<Option<crate::report::tabular::TabularNames>> {
+    if !spec.needs().taxonomy_names || !run.found(db) {
+        return Ok(None);
+    }
+    let Some(search_path) = db.search_path() else {
+        return Ok(None);
+    };
+    let names = crate::report::tabular::TabularNames::look_up(
+        spec,
+        &run.taxdb(search_path),
+        taxonomies,
+        program,
+    )
+    .map_err(|error| taxdb_error(error, program))?;
+    // The texts of opening of an open by the rows of an earlier batch ([`TaxdbRun::open_for_rows`]).
+    let opened = std::mem::take(&mut *run.rows_open.lock().expect("the texts of opening"));
+    Ok(Some(names.opened_before(opened)))
 }
 
 /// NCBI's messages about the taxonomy database when a query batch prefetches the subjects it

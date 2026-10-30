@@ -93,6 +93,19 @@ fn ideal_karlin_params_for_matrix(matrix: ScoringMatrix, bounds: (i32, i32)) -> 
         .expect("standard protein matrix ideal Karlin parameters must be computable")
 }
 
+/// The ideal Karlin block of `matrix` (`kbp_ideal`) with the score range that the profile
+/// lookup's query preparation gives it (`x_lookup_table_for_profile`): BLOSUM62's -4..11, the
+/// range of the matrix's scores otherwise. TBLASTN's composition redo takes its ungapped lambda
+/// (`stage_d_kappa_params.rs`).
+pub(crate) fn ideal_karlin_params_of(matrix: ScoringMatrix) -> KarlinParams {
+    let bounds = if matrix == ScoringMatrix::Blosum62 {
+        (-4, 11)
+    } else {
+        matrix_score_bounds(matrix)
+    };
+    ideal_karlin_params_for_matrix(matrix, bounds)
+}
+
 /// NCBI AaLookupBackboneCell - EXACT port
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -1099,7 +1112,84 @@ pub(crate) fn x_lookup_table_for_profile(
         bounds,
         false,
     );
+    // Dispatch point (LOSAT_X_TBNLUTLEAN, in the strict set): the same table without chains, every
+    // temporary freed by the build (`x_lut_direct::x_build_lean`); in diagnostics mode, whose prints
+    // read the chains, and with `=0`, the chain builder.
+    let prepared = if x_tbn_lut_lean() {
+        match x_lut_direct::x_build_lean(prepared, threshold, matrix, word_length) {
+            Ok(table) => {
+                x_count_tbn_lut(0);
+                return table;
+            }
+            Err(prepared) => prepared,
+        }
+    } else {
+        prepared
+    };
+    x_count_tbn_lut(1);
     build_lookup_from_prepared(prepared, threshold, matrix, word_length).0
+}
+
+// No NCBI counterpart (memory only; the table is the one `build_lookup_from_prepared` builds):
+// LOSAT_X_TBNLUTLEAN, in the strict set (on unless `LOSAT_X_TBNLUTLEAN=0`).
+/// Whether TBLASTN builds its lookup tables with `x_lut_direct::x_build_lean`.
+fn x_tbn_lut_lean() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNLUTLEAN"))
+}
+
+// No NCBI counterpart: LOSAT_X_STATS counters; they do not change any value NCBI computes.
+/// TBLASTN tables built by `x_build_lean` (`[0]`) and by the chain builder (`[1]`).
+static X_TBN_LUT_BUILDS: [std::sync::atomic::AtomicU64; 2] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 2];
+
+/// Counts one TBLASTN table built by `x_build_lean` (`which` 0) or the chain builder (1) for the
+/// `[X_STATS] TBNLUTLEAN` line (`LOSAT_X_STATS` set).
+fn x_count_tbn_lut(which: usize) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("LOSAT_X_STATS").is_some()) {
+        X_TBN_LUT_BUILDS[which].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// The `[X_STATS] TBNLUTLEAN lean= chain=` line (printed by `main` at exit) with `LOSAT_X_STATS`,
+/// when TBLASTN built any table.
+// No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
+pub fn x_tbn_lut_print_summary() {
+    let [lean, chain] = X_TBN_LUT_BUILDS
+        .each_ref()
+        .map(|c| c.load(std::sync::atomic::Ordering::Relaxed));
+    if lean + chain > 0 {
+        eprintln!("[X_STATS] TBNLUTLEAN lean={lean} chain={chain}");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:104-108
+// ```c
+//    case eCompressedAaLookupTable:
+//       BlastCompressedAaLookupTableNew(query, lookup_segments,
+//                          (BlastCompressedAaLookupTable* *) &(lookup_wrap->lut),
+//                          lookup_options, sbp);
+// ```
+/// The concatenated query and the lookup segments that `x_lookup_table_for_profile` builds its
+/// table from (BLOSUM62, no Karlin blocks), for a table of another kind: TBLASTN's compressed
+/// table (`tblastn/search_seed.rs`).
+pub(crate) fn x_lookup_query_for_profile(
+    queries: &[Vec<QueryFrame>],
+    word_length: usize,
+) -> (Vec<u8>, Vec<(i32, i32)>) {
+    let bounds = (-4, 11);
+    let prepared = x_prepare_lookup_query(
+        queries,
+        ideal_karlin_params_for_matrix(ScoringMatrix::Blosum62, bounds),
+        &compute_std_aa_composition(),
+        word_length,
+        false,
+        ScoringMatrix::Blosum62,
+        bounds,
+        false,
+    );
+    (prepared.concat_query, prepared.lookup_locations)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803

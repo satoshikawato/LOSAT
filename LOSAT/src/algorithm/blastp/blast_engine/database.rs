@@ -194,6 +194,23 @@ impl BlastpDatabase {
     pub(super) fn pairwise_database(&self) -> PairwiseDatabase {
         shared::pairwise_database(&self.db, &self.name)
     }
+
+    /// The names of the taxonomy database that the rows of the custom tabular report `spec`
+    /// look up for the subjects `taxonomy` (`shared::tabular_names`, with the run's `TaxdbRun`);
+    /// `program` names NCBI's messages and LOSAT's refusals (`BLASTP`, `PSIBLAST`).
+    pub(super) fn tabular_names(
+        &self,
+        spec: &crate::report::tabular::TabularSpec,
+        taxonomy: &[crate::report::tabular::TabularTaxonomy],
+        program: &str,
+    ) -> Result<Option<crate::report::tabular::TabularNames>> {
+        shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, program)
+    }
+
+    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
+    pub(super) fn open_for_tabular_rows(&self, program: &str) -> Result<()> {
+        self.taxdb.open_for_rows(&self.db, program)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:821-848
@@ -309,27 +326,26 @@ pub(super) fn blastp_database_search_space(
 // row and column, so the preliminary stage, which reads scores only, reads it as X (21),
 // as the `-subject` encoder does (`encode_protein_sequence`, after
 // blast_setup_cxx.cpp:894-899); the redo and the reports read the stored letter
-// (`ListedSubjects`). A stored gap character (0, which
-// makeblastdb writes for `-` in a protein FASTA) never aligns in NCBI (row and column 0
-// stay `BLAST_SCORE_MIN`) and NCBI's formatter then counts it as a gap of the alignment;
-// LOSAT's kernels read byte 0 as the end of a sequence, so a sequence that holds one is
-// rejected. A byte that is no NCBIstdaa residue (28 or more) indexes NCBI's matrix past
-// its rows and is rejected too.
+// (`ListedSubjects`). A stored gap character (0, which makeblastdb writes for `-` in a
+// protein FASTA) is searched as the residue it is in NCBI: row and column 0 stay
+// `BLAST_SCORE_MIN`, so an ungapped extension stops at it and a gapped alignment goes
+// round it with a gap, and NCBI's reports show it as `-` (`recount_shown_identities`).
+// A byte that is no NCBIstdaa residue (28 or more) indexes NCBI's matrix past its rows
+// and is rejected.
 /// Prepares the block `block` (the sequences from the ordinal id `range.first_ordinal`)
 /// for the search: O is read as X, and a sequence that LOSAT cannot search as NCBI does
 /// is an error that names its ordinal id.
 fn prepare_search_block(block: &mut SequenceBlock) -> Result<()> {
     let sequences = block.len();
-    let (gaps, invalid) = read_o_as_x(block.protein_bytes_mut());
+    let invalid = read_o_as_x(block.protein_bytes_mut());
     // A well-formed block holds one sentinel byte before its first sequence and one
-    // after every sequence, and no other byte 0: with as many bytes 0 as sentinels, the
-    // sentinels in place leave none inside a sequence.
+    // after every sequence.
     let sentinels_in_place = (0..sequences).all(|i| {
         let with_sentinels = block.protein_with_sentinels(i);
         (i > 0 || with_sentinels[0] == NCBISTDAA_GAP)
             && with_sentinels[with_sentinels.len() - 1] == NCBISTDAA_GAP
     });
-    if gaps == sequences + 1 && !invalid && sentinels_in_place {
+    if !invalid && sentinels_in_place {
         return Ok(());
     }
     for i in 0..sequences {
@@ -340,38 +356,26 @@ fn prepare_search_block(block: &mut SequenceBlock) -> Result<()> {
 }
 
 // No NCBI counterpart: LOSAT's check of a block's bytes (`prepare_search_block`; O read as X is
-// NCBI's rule, quoted there). The bytes are taken in runs of 224 (7 x 32: at most 255, so that a
-// run's count of gap bytes fits a `u8`, and a whole number of vectors), every byte is written back
-// (O as X, any other byte unchanged), and the count and the flag are made with `u8` lanes, so the
-// compiler works on 16 bytes (32 with AVX2) at a time with no branch per byte. Counted in a `usize`
-// per byte, every byte was widened to a 64-bit counter on 64-bit targets, with a branch for the
-// write of each byte, and the loop took 38 % of the cycles of a one-thread blastp-fast `-db`
-// search (one 357-residue query against UniRef50 volume 00). The values are those of the
-// byte-by-byte loop.
-/// Reads O as X in `bytes`; returns the number of gap bytes, and whether a byte is no NCBIstdaa
-/// residue (28 or more).
-fn read_o_as_x(bytes: &mut [u8]) -> (usize, bool) {
+// NCBI's rule, quoted there). Every byte is written back (O as X, any other byte unchanged) and
+// the flag is made with `u8` lanes, so the compiler works on 16 bytes (32 with AVX2) at a time
+// with no branch per byte. With a branch for the write of each byte and a `usize` count of the
+// gap bytes, the loop took 38 % of the cycles of a one-thread blastp-fast `-db` search (one
+// 357-residue query against UniRef50 volume 00). The values are those of the byte-by-byte loop.
+/// Reads O as X in `bytes`; returns whether a byte is no NCBIstdaa residue (28 or more).
+fn read_o_as_x(bytes: &mut [u8]) -> bool {
     const _: () = assert!(BLASTAA_SIZE <= u8::MAX as usize);
     const BLASTAA_SIZE_U8: u8 = BLASTAA_SIZE as u8;
-    const RUN: usize = 224;
-    let mut gaps = 0usize;
     let mut invalid = 0u8;
-    for run in bytes.chunks_mut(RUN) {
-        let mut run_gaps = 0u8;
-        for residue in run.iter_mut() {
-            let byte = if *residue == NCBISTDAA_O {
-                ncbistdaa::X
-            } else {
-                *residue
-            };
-            *residue = byte;
-            // At most `RUN` (< 256) per run: the sum does not wrap.
-            run_gaps = run_gaps.wrapping_add(u8::from(byte == NCBISTDAA_GAP));
-            invalid |= u8::from(byte >= BLASTAA_SIZE_U8);
-        }
-        gaps += usize::from(run_gaps);
+    for residue in bytes.iter_mut() {
+        let byte = if *residue == NCBISTDAA_O {
+            ncbistdaa::X
+        } else {
+            *residue
+        };
+        *residue = byte;
+        invalid |= u8::from(byte >= BLASTAA_SIZE_U8);
     }
-    (gaps, invalid != 0)
+    invalid != 0
 }
 
 /// Reads the block `range` and prepares it for the search (`prepare_search_block`).
@@ -738,8 +742,8 @@ pub(super) struct ListedSubjects {
     /// empty without the switch).
     x_lengths: Vec<u32>,
     /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): whether a read of the redo or of the first Newton problems
-    /// found a pyrrolysine (O), by rank (`x_list`; empty without the switch).
-    x_has_o: Vec<std::sync::atomic::AtomicBool>,
+    /// found a pyrrolysine (O) or a gap character, by rank (`x_list`; empty without the switch).
+    x_recounted: Vec<std::sync::atomic::AtomicBool>,
 }
 
 impl ListedSubjects {
@@ -799,7 +803,7 @@ impl ListedSubjects {
             encoded,
             x_database: false,
             x_lengths: Vec::new(),
-            x_has_o: Vec::new(),
+            x_recounted: Vec::new(),
         })
     }
 
@@ -1191,6 +1195,49 @@ impl ListedTitles<'_> {
         Ok((ids, accessions))
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
+    // ```c++
+    //             	CRef<CBlast_def_line_set> bdlRef =
+    //             			CSeqDB::ExtractBlastDefline(subject_bh);
+    //             	if(setSubjectIds) {
+    //             		x_SetSubjectIds(subject_bh, bdlRef);
+    //             	}
+    //             	if(setSubjectTaxInfoAll) {
+    //             		x_SetTaxInfoAll(subject_bh, bdlRef);
+    //             	}
+    // ```
+    /// The taxonomy of the custom tabular fields (`staxid`, `staxids`;
+    /// `report::tabular::TabularTaxonomy::of_deflines`) of the reported subjects (those with
+    /// rows in `hit_lists`), by rank: from the definition lines of a subject with parsed Seq-ids,
+    /// else from its stored ones (`SeqDb::defline_set`, which keeps whether a line has a
+    /// `taxid`); the other ranks are left empty. A header that does not decode is refused before
+    /// the report, as BLASTN's (`BlastnDatabase::tabular_taxonomy`).
+    pub(super) fn tabular_taxonomy(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &[Option<BlastpHitList>],
+    ) -> Result<Vec<crate::report::tabular::TabularTaxonomy>> {
+        use crate::report::tabular::TabularTaxonomy;
+        let ranks = self.listed.ordinals.len();
+        let mut taxonomy = vec![TabularTaxonomy::default(); ranks];
+        for rank in Self::reported(hit_lists) {
+            if rank >= ranks {
+                continue;
+            }
+            taxonomy[rank] = match self.parsed_subject(rank) {
+                Some(subject) => TabularTaxonomy::of_deflines(subject.deflines()),
+                None => {
+                    let set = database
+                        .db
+                        .defline_set(self.listed.ordinals[rank])
+                        .map_err(database_error)?;
+                    TabularTaxonomy::of_deflines(&set.deflines)
+                }
+            };
+        }
+        Ok(taxonomy)
+    }
+
     /// The subject of rank `rank` when it has parsed Seq-ids.
     pub(super) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
         self.parsed.get(rank).and_then(Option::as_deref)
@@ -1241,7 +1288,7 @@ impl ListedTitles<'_> {
     }
 
     /// The `stitle` text of every listed subject, by rank: the stored title (an empty
-    /// one is written `N/A`, `blastp_subject_stitle`).
+    /// one is written `N/A` by the shared tabular writer, `report::tabular`).
     pub(super) fn stitles(&self) -> Vec<Arc<[u8]>> {
         match &self.shown {
             ListedShown::Records(records) => records
@@ -1608,21 +1655,19 @@ mod tests {
     }
 
     // The byte-by-byte loop that `read_o_as_x` replaces.
-    fn read_o_as_x_by_byte(bytes: &mut [u8]) -> (usize, bool) {
-        let mut gaps = 0usize;
+    fn read_o_as_x_by_byte(bytes: &mut [u8]) -> bool {
         let mut invalid = false;
         for residue in bytes {
             if *residue == NCBISTDAA_O {
                 *residue = ncbistdaa::X;
             }
-            gaps += usize::from(*residue == NCBISTDAA_GAP);
             invalid |= usize::from(*residue) >= BLASTAA_SIZE;
         }
-        (gaps, invalid)
+        invalid
     }
 
-    // Lengths across the runs of 224 bytes, gap bytes from none to all, O, the last residue
-    // (27), the first byte that is none (28) and 255: the bytes and both values are those of the
+    // Lengths across vectors of 16 and 32 bytes, gap bytes from none to all, O, the last residue
+    // (27), the first byte that is none (28) and 255: the bytes and the flag are those of the
     // byte-by-byte loop.
     #[test]
     fn read_o_as_x_gives_the_values_of_the_byte_by_byte_loop() {
@@ -1654,7 +1699,7 @@ mod tests {
                     let mut runs = bytes.clone();
                     let mut by_byte = bytes;
                     let expected = read_o_as_x_by_byte(&mut by_byte);
-                    flagged += usize::from(expected.1);
+                    flagged += usize::from(expected);
                     assert_eq!(
                         read_o_as_x(&mut runs),
                         expected,
@@ -1665,20 +1710,19 @@ mod tests {
             }
         }
         assert!(flagged > 20, "cases with a byte of 28 or more: {flagged}");
-        // Every byte a gap: a full run holds 224, the largest count of a run.
+        // Every byte a gap.
         let mut gaps = vec![NCBISTDAA_GAP; 1_000];
-        assert_eq!(read_o_as_x(&mut gaps), (1_000, false));
-        // A byte of 28 alone, first in the second run and last of the input; O at the end of
-        // the first run and first in the second.
+        assert!(!read_o_as_x(&mut gaps));
+        // A byte of 28 alone: second, after the first vectors, last of the input; O next to it.
         for (length, at) in [(2usize, 1usize), (300, 224), (511, 510)] {
             let mut bytes = vec![1u8; length];
             bytes[at] = 28;
-            assert_eq!(read_o_as_x(&mut bytes), (0, true), "28 at {at} of {length}");
+            assert!(read_o_as_x(&mut bytes), "28 at {at} of {length}");
         }
         let mut bytes = vec![1u8; 300];
         bytes[223] = NCBISTDAA_O;
         bytes[224] = NCBISTDAA_O;
-        assert_eq!(read_o_as_x(&mut bytes), (0, false));
+        assert!(!read_o_as_x(&mut bytes));
         assert_eq!((bytes[223], bytes[224]), (ncbistdaa::X, ncbistdaa::X));
     }
 
@@ -1955,10 +1999,11 @@ mod tests {
     }
 
     #[test]
-    fn a_search_block_with_a_gap_residue_or_a_foreign_byte_is_rejected() {
+    fn a_search_block_with_a_foreign_byte_is_rejected_and_one_with_a_gap_residue_is_not() {
         let database = open("prot_v4");
         let range = database.db.next_block(0, u64::MAX).unwrap();
-        // The gap character in sequence 3 (its third residue).
+        // The gap character in sequence 3 (its third residue), and as the whole of sequence 5:
+        // residues that NCBI searches (row and column 0 of the matrix).
         let mut block = database.db.read_block(range).unwrap();
         let at = block.protein_bytes_mut().len() - block.protein_bytes_mut().len(); // 0: the leading sentinel
         assert_eq!(block.protein_bytes_mut()[at], 0);
@@ -1967,12 +2012,12 @@ mod tests {
         };
         let position = offset_of(&block, 3) + 2;
         block.protein_bytes_mut()[position] = 0;
-        let error = prepare_search_block(&mut block).unwrap_err();
-        assert!(
-            format!("{error:#}")
-                .starts_with("database sequence 3 holds a gap character ('-') at position 3;"),
-            "{error:#}"
-        );
+        let fifth = offset_of(&block, 5);
+        let fifth_len = block.protein(5).len();
+        block.protein_bytes_mut()[fifth..fifth + fifth_len].fill(0);
+        prepare_search_block(&mut block).unwrap();
+        assert_eq!(block.protein(3)[2], 0);
+        assert!(block.protein(5).iter().all(|&residue| residue == 0));
         // A byte that is no NCBIstdaa residue in sequence 9.
         let mut block = database.db.read_block(range).unwrap();
         let position = offset_of(&block, 9);
@@ -2414,6 +2459,10 @@ mod tests {
                 blastdb_version: 4,
                 max_file_sz: max_file_sz.to_string(),
                 logfile: None,
+                parse_seqids: false,
+                hash_index: false,
+                taxid: None,
+                taxid_map: None,
             };
             let now = crate::writedb::time::LocalTime {
                 year: 2026,
@@ -2633,7 +2682,7 @@ mod tests {
 
         // A damaged database fails as with one thread at every thread count: a sequence file 500
         // bytes shorter than its index says (the byte range of the read names the block), and
-        // then also a gap byte in sequence 100 (a refusal of the search block that a smaller block
+        // then also a byte 28 in sequence 100 (a refusal of the search block that a smaller block
         // meets before the read that fails, while the one-thread order's 1 MiB block fails to read
         // first).
         #[test]
@@ -2647,9 +2696,9 @@ mod tests {
             let mut bytes = std::fs::read(&psq).unwrap();
             bytes.truncate(bytes.len() - 500);
             std::fs::write(&psq, &bytes).unwrap();
-            for gap in [false, true] {
-                if gap {
-                    bytes[sequence_100 + 1_000] = NCBISTDAA_GAP;
+            for foreign in [false, true] {
+                if foreign {
+                    bytes[sequence_100 + 1_000] = BLASTAA_SIZE as u8;
                     std::fs::write(&psq, &bytes).unwrap();
                 }
                 let database = open_path(&name);
@@ -2685,8 +2734,8 @@ mod tests {
                             "{threads} threads, {block_bytes}-byte blocks"
                         );
                     }
-                    if gap {
-                        assert!(own.contains("holds a gap character"), "{own}");
+                    if foreign {
+                        assert!(own.contains("is no NCBIstdaa residue"), "{own}");
                     }
                     assert_eq!(
                         error_text(search(&database, threads, 2, None)),

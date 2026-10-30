@@ -61,7 +61,8 @@ pub(crate) fn x_mapped_capacity(elements: usize, size: usize) -> usize {
     }
 }
 
-/// No NCBI counterpart (LOSAT_X_BPDBKEEP): the capacity, in elements of `size` bytes, of a buffer
+/// No NCBI counterpart (LOSAT_X_BPDBKEEP; LOSAT_X_TBNLUTLEAN, TBLASTN's lookup tables): the
+/// capacity, in elements of `size` bytes, of a buffer
 /// of `elements` that glibc maps whatever its size and whose free leaves the mmap threshold as it
 /// is (above glibc's ceiling; `elements` elsewhere). Its pages beyond those touched are not
 /// resident.

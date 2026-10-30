@@ -183,9 +183,8 @@ impl BlastnOutputFormat {
             BlastnOutputFormat::Tabular => Some(6),
             BlastnOutputFormat::TabularWithComments => Some(7),
             // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and 20):
-            // they read the subjects as 6 and 7 do, and show no taxonomy name that the prefetch
-            // would look up (`report::tabular` writes `N/A`; a name of the taxonomy database is
-            // LOSAT's refusal, `algorithm::blastn::tabular`).
+            // they read the subjects as 6 and 7 do; the rows' own lookups of the taxonomy names
+            // come with the rows (`report::tabular::TabularNames`).
             BlastnOutputFormat::CustomTabular(spec) => Some(match spec.kind {
                 crate::report::tabular::TabularKind::Commented => 7,
                 _ => 6,
@@ -494,7 +493,8 @@ impl BlastnHsp {
         Self {
             identity,
             length,
-            mismatch,
+            // A nucleotide alignment holds no stored gap character: never below 0.
+            mismatch: usize::try_from(mismatch).unwrap_or(0),
             gapopen,
             q_start,
             q_end,
@@ -537,7 +537,7 @@ impl BlastnHsp {
         Hit {
             identity: self.identity,
             length: self.length,
-            mismatch: self.mismatch,
+            mismatch: self.mismatch as i64,
             gapopen: self.gapopen,
             q_start: self.q_start,
             q_end: self.q_end,
@@ -1472,7 +1472,7 @@ pub(crate) fn write_hsp_rows<W: Write>(
             hsp.identity,
             hsp.num_ident,
             hsp.length,
-            hsp.mismatch,
+            hsp.mismatch as i64,
             hsp.gapopen,
             hsp.q_start,
             hsp.q_end,
@@ -1605,6 +1605,22 @@ mod tests {
         assert!(get_prelim_hitlist_size(i32::MAX as usize - 49, false, true) < 0);
         assert_eq!(get_prelim_hitlist_size(30, false, true), 60);
         assert_eq!(get_prelim_hitlist_size(1000, false, true), 1050);
+    }
+
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1258-1292 testSBlastHitsParamsUngapped
+    // NCBI's case is a blastp search with `gapped_calculation = FALSE` and the default hit list
+    // size; the function is the same one (`GetPrelimHitlistSize`), which keeps the hit list size
+    // for an ungapped search.
+    #[test]
+    fn ungapped_prelim_hitlist_size_is_the_hit_list_size() {
+        assert_eq!(get_prelim_hitlist_size(500, false, false), 500);
+        assert_eq!(get_prelim_hitlist_size(1, false, false), 1);
+        assert_eq!(
+            get_prelim_hitlist_size(i32::MAX as usize, false, false),
+            i32::MAX
+        );
+        // A gapped search adds 50 (testSBlastHitsParamsGapped).
+        assert_eq!(get_prelim_hitlist_size(500, false, true), 550);
     }
 
     #[test]

@@ -61,7 +61,9 @@ use crate::report::blast_xml::{
     REFERENCE_GAPPED_BLAST,
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
-use crate::report::query_warnings::{replaced_o_message, QueryWarnings, INVALID_QUERY_MESSAGE};
+use crate::report::query_warnings::{
+    replaced_o_message, QueryWarnings, IDENTITY_CBS_RESET_MESSAGE, INVALID_QUERY_MESSAGE,
+};
 use crate::report::serial::seqalign::seqalign_evalue;
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
@@ -82,6 +84,10 @@ pub(super) struct XmlValues {
     pub cbs: i32,
     /// `-db_gencode` (`Parameters_db-gencode` of XML2).
     pub db_gencode: i32,
+    /// IDENTITY searched in mode 0 for another mode: the messages of the searched queries before
+    /// this index, the first query batch's, have the warning (`IDENTITY_CBS_RESET_MESSAGE`,
+    /// `tblastn_app::search`).
+    pub identity_warned: usize,
 }
 
 /// The document's texts, made (and refused) before the first byte of any format is written:
@@ -144,10 +150,13 @@ pub(super) fn unsupported_matrix(matrix_name: &str, has_queries: bool) -> Result
 
 /// The messages of a query's result (the warnings the other formats write to standard error,
 /// `report::query_warning`): the O characters read as X, a record without letters, a query
-/// without a valid context.
-fn query_messages(query: &FastaRecord, valid: bool) -> Vec<String> {
+/// without a valid context, IDENTITY's reset of the composition mode.
+fn query_messages(query: &FastaRecord, valid: bool, identity_cbs_reset: bool) -> Vec<String> {
     let mut messages = Vec::new();
     messages.extend(replaced_o_message(query.seq()));
+    if identity_cbs_reset {
+        messages.push(IDENTITY_CBS_RESET_MESSAGE.to_string());
+    }
     if query.seq().is_empty() {
         messages.push(crate::algorithm::blastn::blast_engine::NO_DATA_MESSAGE.to_string());
     } else if !valid {
@@ -212,13 +221,14 @@ pub(super) fn prepare(
         .iter()
         .zip(hitlists)
         .zip(query_validity)
-        .map(|((query, hitlist), &valid)| {
+        .enumerate()
+        .map(|(q_idx, ((query, hitlist), &valid))| {
             names::query_text(
                 PROGRAM,
                 &query.local_id,
                 query.title(),
                 true,
-                &query_messages(query, valid),
+                &query_messages(query, valid, q_idx < values.identity_warned),
                 has_hits(hitlist),
             )
         })

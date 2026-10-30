@@ -291,6 +291,8 @@ fn parse_blastn_args(
         subject_loc: None,
         subject_besthit: false,
         culling_limit: None,
+        // The frozen web ABI v1 has no `-ungapped` (it is refused below as an unknown flag).
+        ungapped: false,
         verbose: false,
         scan_step: 0,
         outfmt: "6".to_string(),
@@ -407,6 +409,7 @@ fn parse_tblastx_args(
         query_loc: None,
         subject_loc: None,
         archive: None,
+        tabular_taxdb: None,
     };
 
     let mut index = 0;

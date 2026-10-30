@@ -174,15 +174,71 @@ fn makedb_takes_makeblastdb_s_option_names() {
     assert!(makedb(&["-in", "x.faa", "-dbtype", "protein"]).is_err());
     assert!(makedb(&["-in", "x.faa", "-dbtype", "prot", "-blastdb_version", "3"]).is_err());
 
+    assert!(!defaults.hash_index);
+    assert_eq!(defaults.taxid, None);
+
+    // `-hash_index` and `-taxid` (makeblastdb.cpp:249-251, 315-318: a flag, and an integer
+    // of at least 0 that excludes `-taxid_map`).
+    let given = args(makedb(&["-dbtype", "prot", "-hash_index", "-taxid", "9606"]).unwrap());
+    assert!(given.hash_index);
+    assert_eq!(given.taxid, Some(9606));
+    assert!(makedb(&["-dbtype", "prot", "-taxid", "-1"]).is_err());
+    assert!(makedb(&["-dbtype", "prot", "-taxid", "abc"]).is_err());
+
+    // `-parse_seqids` is a flag; `-taxid_map` takes a file and requires `-parse_seqids`, and
+    // `-taxid` excludes it (makeblastdb.cpp:246-247, 322-329). The parser's errors end with
+    // exit status 2 (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES; makeblastdb prints its usage, 1).
+    assert!(!defaults.parse_seqids);
+    assert_eq!(defaults.taxid_map, None);
+    let given = args(
+        makedb(&[
+            "-dbtype",
+            "prot",
+            "-parse_seqids",
+            "-taxid_map",
+            "map.txt",
+            "-hash_index",
+        ])
+        .unwrap(),
+    );
+    assert!(given.parse_seqids && given.hash_index);
+    assert_eq!(given.taxid_map.as_deref(), Some("map.txt"));
+    let given = args(makedb(&["-dbtype", "prot", "-parse_seqids", "-taxid", "9606"]).unwrap());
+    assert!(given.parse_seqids);
+    assert_eq!(given.taxid, Some(9606));
+    for words in [
+        &["-dbtype", "prot", "-taxid_map", "map.txt"][..],
+        &[
+            "-dbtype",
+            "prot",
+            "-parse_seqids",
+            "-taxid_map",
+            "map.txt",
+            "-taxid",
+            "9606",
+        ],
+        &[
+            "-dbtype",
+            "prot",
+            "-taxid",
+            "1",
+            "-taxid_map",
+            "map.txt",
+            "-parse_seqids",
+        ],
+        &["-dbtype", "prot", "-parse_seqids", "-taxid_map"],
+    ] {
+        let err = makedb(words).unwrap_err();
+        assert_eq!(err.exit_code(), 2, "{words:?}: {err}");
+        assert!(
+            !err.to_string().contains("not supported"),
+            "{words:?}: {err}"
+        );
+    }
+
     // The options of makeblastdb that LOSAT does not implement are named (`-h` and
     // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
-    for option in [
-        "-parse_seqids",
-        "-hash_index",
-        "-mask_data",
-        "-taxid",
-        "-taxid_map",
-    ] {
+    for option in ["-mask_data", "-gi_mask", "-randomize", "-oid_masks"] {
         let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
         assert!(
             err.to_string().contains(&format!(
@@ -495,33 +551,20 @@ fn defaults_and_task_overrides_remain_distinct() {
         .unwrap_err()
         .to_string()
         .contains("not supported by LOSAT's BLASTP"));
-    // The same for TBLASTN: tblastn-fast (the compressed lookup table) fails at the parse.
+    // TBLASTN takes both of its tasks (tblastn-fast: the compressed lookup table).
     parse("tblastn", &["-task", "tblastn"]).unwrap();
-    let error = parse("tblastn", &["-task", "tblastn-fast"]).unwrap_err();
-    assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
-    assert_eq!(error.exit_code(), 2);
-    let text = LOSAT::cli::render_message(&error);
-    assert!(
-        text.contains("invalid value 'tblastn-fast' for '-task <TASK>'")
-            && text.contains(
-                "-task tblastn-fast (word size 5 with the compressed lookup table) is not supported by LOSAT's TBLASTN"
-            ),
-        "{text}"
-    );
+    parse("tblastn", &["-task", "tblastn-fast"]).unwrap();
     // A task that is not an NCBI task keeps clap's list of the accepted names.
     for (program, other, listed) in [
         ("blastp", "blastp-x", "blastp-fast"),
-        ("tblastn", "tblastn-x", "tblastn"),
+        ("tblastn", "tblastn-x", "tblastn-fast"),
     ] {
         let text = LOSAT::cli::render_message(&parse(program, &["-task", other]).unwrap_err());
         assert!(
             text.contains("possible values") && text.contains(listed),
             "{text}"
         );
-        assert!(
-            !text.contains("-short") && !text.contains("tblastn-fast"),
-            "{text}"
-        );
+        assert!(!text.contains("-short"), "{text}");
     }
     // blast_args.cpp:3158-3163 (CArgAllowStringSet): the task names are case-sensitive.
     assert!(parse("blastp", &["-task", "BLASTP"]).is_err());
@@ -761,7 +804,7 @@ fn numeric_values_are_validated_before_io() {
     };
     assert_eq!(args.gap_open, Some(0));
     // NCBI's other blastn tasks and options are rejected explicitly (AGENTS.md rule 2).
-    for extra in [&["-task", "rmblastn"][..], &["-ungapped"], &["-version"]] {
+    for extra in [&["-task", "rmblastn"][..], &["-version"]] {
         let mut words = vec!["-outfmt", "6"];
         words.extend_from_slice(extra);
         let error = LOSAT::cli::render_message(&parse("blastn", &words).unwrap_err());
@@ -770,6 +813,18 @@ fn numeric_values_are_validated_before_io() {
             "{extra:?}: {error}"
         );
     }
+    // `-ungapped` is NCBI's flag (blast_args.cpp:917) and LOSAT's BLASTN searches with it (O4a).
+    let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-ungapped"])
+        .unwrap()
+        .command
+    else {
+        unreachable!("blastn")
+    };
+    assert!(args.ungapped);
+    let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6"]).unwrap().command else {
+        unreachable!("blastn")
+    };
+    assert!(!args.ungapped);
     assert!(parse("blastn", &["-outfmt", "6", "-task", "BLASTN"]).is_err());
     // `-strand` is NCBI's (blast_args.cpp:1953-1955): plus, minus and both are accepted, any
     // other value is a clap error (LOSAT's rule for argument errors, rc 2).
@@ -994,19 +1049,12 @@ enum Outfmt {
 }
 
 const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
-const CUSTOM: &[&str] = &["blastn", "blastp", "blastx"];
-/// The programs that check their own field lists and take no delimiter (line CLI C2 moves them to
-/// the shared tabular writer in its PR 3).
-const OWN_FIELDS: &[&str] = &["blastp", "blastx"];
-const NO_CUSTOM: &[&str] = &["tblastn", "tblastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
+/// The programs that write every field, a delimiter and outfmt 10 and 20 with the shared tabular
+/// writer: all of them (line CLI C2: BLASTN in PR 1, TBLASTN and TBLASTX in PR 2, BLASTP and
+/// BLASTX in PR 3).
+const SHARED: &[&str] = ALL;
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
-const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
-    "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {P}",
-);
-const DELIMITER: Outfmt = Outfmt::Losat(
-    "a custom delimiter (delim=) in the output format is not supported by LOSAT's {P}",
-);
 const OUT_OF_RANGE: Outfmt = Outfmt::Ncbi(255, "Error: Formatting choice is out of range\n");
 const INVALID_DELIMITER: Outfmt = Outfmt::Ncbi(
     1,
@@ -1034,31 +1082,23 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "0 delim=,", None, Writes(Pairwise)),
         (ALL, "6 delim=", None, Writes(Tabular)),
         (ALL, "7 delim= ", None, Writes(TabularWithComments)),
-        // Custom fields (BLASTP and BLASTX check their own lists; BLASTN writes every field and
-        // a delimiter with the shared tabular writer, line CLI C2) and delimiters.
-        (CUSTOM, "6 std", None, Writes(Tabular)),
-        (CUSTOM, "07 std", None, Writes(TabularWithComments)),
-        (CUSTOM, "6 qseqid sseqid pident length", None, Writes(Tabular)),
-        (NO_CUSTOM, "6 std", None, CUSTOM_SPEC),
-        (NO_CUSTOM, "6 qseqid", None, CUSTOM_SPEC),
-        (NO_CUSTOM, "7 qaccver", None, CUSTOM_SPEC),
-        (NO_CUSTOM, "7  qaccver", None, CUSTOM_SPEC),
-        (NO_CUSTOM, "6 delim=,", None, CUSTOM_SPEC),
-        (NO_CUSTOM, "6 delimiter=;", None, CUSTOM_SPEC),
-        (OWN_FIELDS, "6 delim=, std", None, DELIMITER),
-        (OWN_FIELDS, "6 delim=;", None, DELIMITER),
-        (&["blastn"], "7  qaccver", None, Writes(TabularWithComments)),
-        (&["blastn"], "6 delim=,", None, Writes(Tabular)),
-        (&["blastn"], "6 delimiter=;", None, Writes(Tabular)),
-        (&["blastn"], "6 delim=, std", None, Writes(Tabular)),
-        (&["blastn"], "7 delim=| qseqid sseqid", None, Writes(TabularWithComments)),
-        (&["blastn"], "6 delim=; qseqid", None, Writes(Tabular)),
+        // Custom fields (every program writes every field and a delimiter with the shared
+        // tabular writer, line CLI C2) and delimiters.
+        (SHARED, "6 std", None, Writes(Tabular)),
+        (SHARED, "07 std", None, Writes(TabularWithComments)),
+        (SHARED, "6 qseqid sseqid pident length", None, Writes(Tabular)),
+        (SHARED, "7  qaccver", None, Writes(TabularWithComments)),
+        (SHARED, "6 delim=,", None, Writes(Tabular)),
+        (SHARED, "6 delimiter=;", None, Writes(Tabular)),
+        (SHARED, "6 delim=, std", None, Writes(Tabular)),
+        (SHARED, "7 delim=| qseqid sseqid", None, Writes(TabularWithComments)),
+        (SHARED, "6 delim=; qseqid", None, Writes(Tabular)),
         // NCBI's check of a custom delimiter against the fields that separate their entries with
         // it, searched as text (blast_args.cpp:2753-2792).
-        (&["blastn"], "6 delim=; qseqid staxids", None, WritesThenNcbi(Tabular, "Your custom record separator (;) is also used by the format specifier (staxids) to separate multiple entries. Please use a different record separator (delim keyword).")),
-        (&["blastn"], "6 delim=; qseqid xstaxidsx", None, WritesThenNcbi(Tabular, "Your custom record separator (;) is also used by the format specifier (staxids) to separate multiple entries. Please use a different record separator (delim keyword).")),
-        (&["blastn"], "7 delim=/ frames", None, WritesThenNcbi(TabularWithComments, "Your custom record separator (/) is also used by the format specifier (frames) to separate multiple entries. Please use a different record separator (delim keyword).")),
-        (&["blastn"], "10 delim=<> salltitles", None, WritesThenNcbi(CommaSeparatedValues, "Your custom record separator (<>) is also used by the format specifier (salltitles) to separate multiple entries. Please use a different record separator (delim keyword).")),
+        (SHARED, "6 delim=; qseqid staxids", None, WritesThenNcbi(Tabular, "Your custom record separator (;) is also used by the format specifier (staxids) to separate multiple entries. Please use a different record separator (delim keyword).")),
+        (SHARED, "6 delim=; qseqid xstaxidsx", None, WritesThenNcbi(Tabular, "Your custom record separator (;) is also used by the format specifier (staxids) to separate multiple entries. Please use a different record separator (delim keyword).")),
+        (SHARED, "7 delim=/ frames", None, WritesThenNcbi(TabularWithComments, "Your custom record separator (/) is also used by the format specifier (frames) to separate multiple entries. Please use a different record separator (delim keyword).")),
+        (SHARED, "10 delim=<> salltitles", None, WritesThenNcbi(CommaSeparatedValues, "Your custom record separator (<>) is also used by the format specifier (salltitles) to separate multiple entries. Please use a different record separator (delim keyword).")),
         // NCBI's errors when it reads the value (the delimiter is read before the number).
         (ALL, "abc", None, Ncbi(1, "BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
         (ALL, "0x6", None, Ncbi(1, "BLAST query/options error: '0x6' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
@@ -1087,14 +1127,13 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "2", None, UNSUPPORTED),
         (ALL, "3", None, UNSUPPORTED),
         (ALL, "4", None, UNSUPPORTED),
-        (NOT_BLASTN, "10", None, UNSUPPORTED),
         (ALL, "18", None, UNSUPPORTED),
-        (NOT_BLASTN, "20", None, UNSUPPORTED),
-        // Line CLI C2 (PR 1): BLASTN writes 10 and 20 with the shared tabular writer.
-        (&["blastn"], "10", None, Writes(CommaSeparatedValues)),
-        (&["blastn"], "10 delim=; qseqid sseqid", None, Writes(CommaSeparatedValues)),
-        (&["blastn"], "20", None, Writes(CommaSeparatedValuesWithHeader)),
-        (&["blastn"], " 20 qseqid sseqid qcovus ", None, Writes(CommaSeparatedValuesWithHeader)),
+        // Line CLI C2: BLASTN (PR 1), TBLASTN and TBLASTX (PR 2), BLASTP and BLASTX (PR 3) write 10
+        // and 20 with the shared tabular writer.
+        (SHARED, "10", None, Writes(CommaSeparatedValues)),
+        (SHARED, "10 delim=; qseqid sseqid", None, Writes(CommaSeparatedValues)),
+        (SHARED, "20", None, Writes(CommaSeparatedValuesWithHeader)),
+        (SHARED, " 20 qseqid sseqid qcovus ", None, Writes(CommaSeparatedValuesWithHeader)),
         // Line OF track S (structured formats): 8 and 12 in every program (OF3b), 9 (OF3c), 5 in
         // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in every program (BLASTP and BLASTN: OF5a; BLASTX, TBLASTN and TBLASTX: OF5b), NCBI dropping a custom specification
         // (blast_args.cpp:2844-2851); the others not yet.
@@ -1792,13 +1831,12 @@ fn makedb_is_not_a_command_and_makeblastdb_checks_apply() {
         ("x.faa", Some("db"))
     );
     // The checks that name the command apply.
-    let error = makedb(&["-parse_seqids"]).unwrap_err().to_string();
+    let error = makedb(&["-mask_data"]).unwrap_err().to_string();
     assert!(
-        error.contains(
-            "the NCBI BLAST+ option -parse_seqids is not supported by LOSAT's makeblastdb"
-        ),
+        error.contains("the NCBI BLAST+ option -mask_data is not supported by LOSAT's makeblastdb"),
         "{error}"
     );
+    assert!(makedb(&["-parse_seqids"]).is_ok());
     assert!(makedb(&["-in", "x.faa", "--"]).is_ok());
     assert!(makedb(&["--", "-in", "x.faa"]).is_err());
     assert!(makedb(&["-evalue", "1"]).is_err());

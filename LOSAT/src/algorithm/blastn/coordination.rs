@@ -1504,6 +1504,66 @@ mod tests {
     // ...
     //     SetGapExtnAlgorithm(eDynProgScoreOnly);
     // ```
+    // DI-6: the given options replace the task's values; the defaults stay the handles'
+    // (api/blast_nucl_options.cpp:163-193, blast_args.cpp:276-286,487-489,518-522,681-685).
+    #[test]
+    fn xdrop_window_and_greedy_options_replace_the_task_values() {
+        let config = configure_task(&blastn_args(&[]));
+        assert_eq!(
+            (
+                config.x_drop_gapped,
+                config.x_drop_final,
+                config.x_drop_ungapped
+            ),
+            (25.0, 100.0, 0.0)
+        );
+        assert_eq!(
+            (config.window_size, config.scan_range, config.use_dp),
+            (0, 0, false)
+        );
+        let config = configure_task(&blastn_args(&[
+            "-xdrop_gap",
+            "12.5",
+            "-xdrop_gap_final",
+            "150",
+            "-xdrop_ungap",
+            "7",
+            "-window_size",
+            "40",
+            "-off_diagonal_range",
+            "2",
+            "-no_greedy",
+            "-gapopen",
+            "5",
+            "-gapextend",
+            "2",
+        ]));
+        assert_eq!(
+            (
+                config.x_drop_gapped,
+                config.x_drop_final,
+                config.x_drop_ungapped
+            ),
+            (12.5, 150.0, 7.0)
+        );
+        assert_eq!(
+            (config.window_size, config.scan_range, config.use_dp),
+            (40, 2, true)
+        );
+        let config = configure_task(&blastn_args(&[
+            "-task",
+            "dc-megablast",
+            "-window_size",
+            "0",
+        ]));
+        assert_eq!((config.window_size, config.x_drop_ungapped), (0, 20.0));
+        assert_eq!(
+            determine_window_size(&blastn_args(&["-task", "dc-megablast"])),
+            40
+        );
+        assert_eq!(determine_window_size(&blastn_args(&["-task", "blastn"])), 0);
+    }
+
     #[test]
     fn task_defaults_follow_ncbi_handles() {
         let config = configure_task(&blastn_args(&["-task", "dc-megablast"]));

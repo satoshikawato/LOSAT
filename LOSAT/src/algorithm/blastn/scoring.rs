@@ -727,6 +727,53 @@ mod tests {
         .contains("Greedy extension must be used"));
     }
 
+    // DI-6: `-no_greedy` makes megablast's gap costs 0/0 invalid (blast_options.c:1699-1711),
+    // and an off-diagonal range needs a window (blast_options.c:1583-1596), checked after the
+    // lookup table's options.
+    #[test]
+    fn no_greedy_and_off_diagonal_range_are_checked() {
+        assert!(message(check_scoring_options(&args(&["-no_greedy"])))
+            .contains("Greedy extension must be used"));
+        assert!(
+            check_scoring_options(&args(&["-no_greedy", "-gapopen", "5", "-gapextend", "2"]))
+                .is_ok()
+        );
+        assert!(check_scoring_options(&args(&["-task", "blastn", "-no_greedy"])).is_ok());
+        assert_eq!(
+            message(check_scoring_options(&args(&["-off_diagonal_range", "2"]))),
+            "BLAST query/options error: off_diagonal_range is only useful in 2-hit algorithm\nPlease refer to the BLAST+ user manual.\n"
+        );
+        assert!(check_scoring_options(&args(&["-off_diagonal_range", "0"])).is_ok());
+        assert!(
+            check_scoring_options(&args(&["-off_diagonal_range", "2", "-window_size", "40"]))
+                .is_ok()
+        );
+        assert!(check_scoring_options(&args(&[
+            "-task",
+            "dc-megablast",
+            "-off_diagonal_range",
+            "2"
+        ]))
+        .is_ok());
+        assert!(message(check_scoring_options(&args(&[
+            "-task",
+            "dc-megablast",
+            "-window_size",
+            "0",
+            "-off_diagonal_range",
+            "2"
+        ])))
+        .contains("off_diagonal_range is only useful"));
+        // The lookup table's check comes first.
+        assert!(message(check_scoring_options(&args(&[
+            "-off_diagonal_range",
+            "2",
+            "-word_size",
+            "101"
+        ])))
+        .contains("Word-size must be less than"));
+    }
+
     #[test]
     fn options_are_checked_in_ncbi_order() {
         assert!(check_scoring_options(&args(&[])).is_ok());

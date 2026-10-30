@@ -4958,11 +4958,10 @@ fn search_cli(
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
     let database = match resolved.db.as_deref() {
-        Some(name) => Some(database::BlastpDatabase::open(
-            name,
-            &settings,
-            args.app == BlastpApp::Blastp,
-        )?),
+        Some(name) => Some(
+            database::BlastpDatabase::open(name, &settings, args.app == BlastpApp::Blastp)?
+                .showing_gis(args.show_gis),
+        ),
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
@@ -11961,6 +11960,7 @@ mod tests {
             subject: Some(PathBuf::from("subject.faa")),
             db: None,
             dbsize: None,
+            show_gis: false,
             task: "blastp".to_string(),
             evalue: None,
             threshold: None,

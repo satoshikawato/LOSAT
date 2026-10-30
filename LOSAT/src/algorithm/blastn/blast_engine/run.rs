@@ -7266,7 +7266,9 @@ fn search_cli(
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
     let database = match args.database_name() {
-        Some(name) => Some(database::BlastnDatabase::open(name, &settings)?),
+        Some(name) => {
+            Some(database::BlastnDatabase::open(name, &settings)?.showing_gis(args.show_gis))
+        }
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104

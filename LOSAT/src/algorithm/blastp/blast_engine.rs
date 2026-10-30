@@ -6735,8 +6735,11 @@ fn write_reports_without_queries(
                     word_threshold: args.threshold,
                     window_size: args.window_size as i32,
                     gapped_karlin: lookup_protein_params(&args.scoring),
-                    gumbel: lookup_protein_gumbel_params(&args.scoring, total_db_len as i64)
-                        .context("missing NCBI gumbel parameters for supported blastp scoring")?,
+                    gumbel: Some(
+                        lookup_protein_gumbel_params(&args.scoring, total_db_len as i64).context(
+                            "missing NCBI gumbel parameters for supported blastp scoring",
+                        )?,
+                    ),
                     num_descriptions: args.num_descriptions,
                     num_alignments: args.num_alignments,
                 };
@@ -11533,7 +11536,7 @@ fn run_resolved_in_pool(
                     word_threshold: args.threshold,
                     window_size: args.window_size as i32,
                     gapped_karlin: gapped_params,
-                    gumbel: gapped_gumbel,
+                    gumbel: Some(gapped_gumbel),
                     // NCBI blast_args.cpp:2910-2927: 500 descriptions and 250 alignments,
                     // or the -num_descriptions / -num_alignments / -max_target_seqs values
                     // (`ReportCounts`).

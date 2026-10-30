@@ -843,7 +843,6 @@ fn is_unported_blastx_arg(name: &str) -> bool {
             | "negative_ipglist"
             | "best_hit_overhang"
             | "best_hit_score_edge"
-            | "searchsp"
             | "import_search_strategy"
             | "export_search_strategy"
             | "xdrop_ungap"

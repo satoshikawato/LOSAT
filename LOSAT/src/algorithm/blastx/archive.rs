@@ -46,6 +46,7 @@ use crate::stats::tables::KarlinParams;
 pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Blastx, &args.task);
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     inputs.evalue = Some(args.evalue);
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;

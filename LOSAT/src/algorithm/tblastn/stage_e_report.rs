@@ -1217,7 +1217,7 @@ fn write_pairwise(
         word_threshold: scoring.threshold,
         window_size: scoring.window,
         gapped_karlin: lookup_protein_params(&spec),
-        gumbel,
+        gumbel: Some(gumbel),
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2913-2927
         // ```c
         //     m_NumDescriptions = m_DfltNumDescriptions;

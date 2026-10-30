@@ -1313,3 +1313,13 @@ sp.tblastx.db.0	tblastx		tests/db_search/xslice_q.fna	tests/db_search/xslice.fna
 sp.tblastx.zero.0	tblastx		tests/db_search/xslice_q.fna	tests/db_search/xslice.fna	-searchsp 0							DI-7: TBLASTX -subject -searchsp 0
 sp.blastn.bn.0	blastn	blastn	tests/db_search/nslice_q.fna	tests/db_search/nslice.fna	-searchsp 500000000							DI-7: -task blastn -subject -searchsp
 sp.blastn.dc.6	blastn	dc-megablast	tests/db_search/nslice_q.fna	tests/db_search/nslice.fna	-searchsp 500000000	6						DI-7: -task dc-megablast -subject -searchsp
+sp.blastx.0	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa	-searchsp 500000000							DI-7: BLASTX -subject -searchsp, outfmt 0
+sp.blastx.5	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa	-searchsp 500000000	5						DI-7: BLASTX -subject -searchsp, outfmt 5
+sp.blastx.6	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa	-searchsp 500000000	6						DI-7: BLASTX -subject -searchsp, outfmt 6
+sp.blastx.7	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa	-searchsp 500000000	7						DI-7: BLASTX -subject -searchsp, outfmt 7
+sp.blastx.11	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa	-searchsp 500000000	11						DI-7: BLASTX -subject -searchsp, outfmt 11
+sp.blastx.db.0	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa	-searchsp 500000000 -dbsize 1000							DI-7: BLASTX -subject -searchsp -dbsize
+sp.blastx.zero.0	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa	-searchsp 0							DI-7: BLASTX -subject -searchsp 0 (OLD_FSC without a fixed space)
+sp.blastx.zero.11	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa	-searchsp 0	11						DI-7: BLASTX -subject -searchsp 0 in the archive
+sp.blastx.cbs0.6	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa	-searchsp 500000000 -comp_based_stats 0	6						DI-7: BLASTX -subject -searchsp without composition adjustment
+sp.blastx.nosum.6	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa	-searchsp 500000000 -sum_stats false	6						DI-7: BLASTX -subject -searchsp -sum_stats false

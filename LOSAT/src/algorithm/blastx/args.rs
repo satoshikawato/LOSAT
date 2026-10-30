@@ -100,6 +100,14 @@ pub struct BlastxArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    // ```
+    #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
     // ```c++
     //     arg_desc.AddDefaultKey(kArgOutput, "output_file",
@@ -703,6 +711,9 @@ pub struct ResolvedOptions {
     // ```
     pub db_length: i64,
     pub effective_search_space: i64,
+    /// Whether `-searchsp` was given, at any value: NCBI then has no Gumbel block
+    /// (`gumbel_block`).
+    pub old_fsc: bool,
 
     pub evalue: f64,
     pub sum_stats: bool,
@@ -1026,7 +1037,8 @@ impl BlastxArgs {
             // ```
             // `-dbsize` (`CBlastOptions::SetDbLength`, blast_args.cpp:2570-2572).
             db_length: self.dbsize.unwrap_or(0),
-            effective_search_space: 0,
+            effective_search_space: self.searchsp.unwrap_or(0),
+            old_fsc: self.searchsp.is_some(),
             window_size: self.window_size.unwrap_or(40),
             evalue: self.evalue,
             sum_stats: self.sum_stats.unwrap_or(true),

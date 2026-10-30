@@ -60,6 +60,7 @@ use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Tblastx, "tblastx");
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     // `-evalue` replaces the handle's value in place: the same list whether it was given.
     inputs.evalue = Some(args.evalue);
     inputs.word_size = args.word_size;

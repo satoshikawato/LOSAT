@@ -139,6 +139,8 @@ struct FirstContext {
     /// The effective search space and length adjustment of that context (0 without one).
     search_space: i64,
     length_adjustment: i64,
+    /// The `EffectiveSearchSpace` option: `-searchsp` in an invalid context too.
+    context0_space: i64,
 }
 
 /// The runs of lower-case letters of a record (inclusive 0-based positions).
@@ -386,12 +388,14 @@ pub(super) fn write_tblastn_archives(
                 karlin: Some((data.ungapped_karlin[first].clone(), data.gapped.clone())),
                 search_space: length.eff_searchsp,
                 length_adjustment: length.length_adjustment,
+                context0_space: length.eff_searchsp,
             }
         } else {
             FirstContext {
                 karlin: None,
                 search_space: 0,
                 length_adjustment: 0,
+                context0_space: data.parameters.lengths[first].eff_searchsp,
             }
         };
         let ka_blocks = match &context.karlin {
@@ -407,7 +411,7 @@ pub(super) fn write_tblastn_archives(
             ka_blocks,
             search_space: context.search_space,
             length_adjustment: context.length_adjustment,
-            searched_space: searched.then_some(context.search_space),
+            searched_space: searched.then_some(context.context0_space),
         };
         let mut aligns = TblastnAligns {
             run: RunRecord {

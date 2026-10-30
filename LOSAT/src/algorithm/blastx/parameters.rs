@@ -512,6 +512,24 @@ pub fn subject_parameters(
     // ```c++
     // #define BLAST_SEQSRC_MINLENGTH  10    /**< Default minimal sequence length */
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+    // ```c
+    //    if (sbp->gbp) {
+    //    ...
+    //    } else {
+    //        min_subject_length = (Int4) (total_length/num_seqs);
+    //    }
+    //
+    //    if(min_subject_length <=0) {
+    // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
+    //    }
+    // ```
+    // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
+    // length is too short"; LOSAT refuses the search instead.
+    ensure!(
+        !options.old_fsc || avg_subject_length > 0,
+        "-searchsp with subjects of an average length below one letter is not supported by LOSAT's BLASTX"
+    );
     let n = if options.gapped && !options.old_fsc {
         i32::try_from(min_subject_length.max(10))?
     } else {

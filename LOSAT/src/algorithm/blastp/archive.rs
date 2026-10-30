@@ -153,6 +153,9 @@ pub(crate) struct FirstContext {
     /// The effective search space and length adjustment of that context (0 without one).
     pub search_space: i64,
     pub length_adjustment: i64,
+    /// The `EffectiveSearchSpace` option: that of the first query's context, `-searchsp` in an
+    /// invalid one too.
+    pub context0_space: i64,
 }
 
 /// The Seq-aligns of one batch of a call (the elements of outfmt 8, without the Seq-annot).
@@ -323,7 +326,7 @@ pub(crate) fn write_blastp_archives(
             ka_blocks,
             search_space: context.search_space,
             length_adjustment: context.length_adjustment,
-            searched_space: searched.then_some(context.search_space),
+            searched_space: searched.then_some(context.context0_space),
         };
         let mut aligns = BlastpAligns {
             run,

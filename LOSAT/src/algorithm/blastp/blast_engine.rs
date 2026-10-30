@@ -7930,6 +7930,28 @@ fn run_resolved_in_pool(
     // The `-subject` search without `-dbsize` keeps its computation (`f64` products of
     // numbers that it holds exactly); a database or `-dbsize` can pass 2^53, so their
     // effective search space is computed in NCBI's `Int8` (`blastp_database_search_space`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+    // ```c
+    //    if (sbp->gbp) {
+    //    ...
+    //    } else {
+    //        min_subject_length = (Int4) (total_length/num_seqs);
+    //    }
+    //
+    //    if(min_subject_length <=0) {
+    // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
+    //    }
+    // ```
+    // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
+    // length is too short"; LOSAT refuses the search instead.
+    if args.searchsp.is_some()
+        && contexts.iter().any(|ctx| ctx.is_valid)
+        && total_db_len / num_subjects.max(1) == 0
+    {
+        anyhow::bail!(
+            "-searchsp with subjects of an average length below one letter is not supported by LOSAT's BLASTP"
+        );
+    }
     let exact_search_space = database.is_some() || args.dbsize > 0 || args.searchsp.is_some();
     let options_searchsp = args.searchsp.unwrap_or(0);
     // NCBI reference: c++/src/algo/blast/core/blast_setup.c:729-732
@@ -11265,16 +11287,19 @@ fn run_resolved_in_pool(
                             karlin: None,
                             search_space: 0,
                             length_adjustment: 0,
+                            context0_space: args.searchsp.unwrap_or(0),
                         };
                     }
+                    let search_space = exact_search_spaces[first]
+                        .unwrap_or(search_spaces[first].effective_space.round() as i64);
                     super::archive::FirstContext {
                         karlin: Some((
                             contexts[first].karlin_params,
                             (!args.ungapped).then_some(gapped_params),
                         )),
-                        search_space: exact_search_spaces[first]
-                            .unwrap_or(search_spaces[first].effective_space.round() as i64),
+                        search_space,
                         length_adjustment: search_spaces[first].length_adjustment,
+                        context0_space: search_space,
                     }
                 };
                 super::archive::write_blastp_archives(

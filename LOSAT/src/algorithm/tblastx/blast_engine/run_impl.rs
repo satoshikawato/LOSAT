@@ -3,6 +3,7 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c
 
 use super::*;
+use crate::algorithm::tblastn::search_seed::{translated_chunk_scan_ranges, TranslatedChunk};
 use crate::algorithm::tblastx::database::DatabaseTitles;
 use crate::algorithm::tblastx::hit_collector::HitCollector;
 use crate::algorithm::tblastx::subjects::{
@@ -315,6 +316,77 @@ fn clip_tblastx_seq_ranges_for_scan_interior(
         }
     }
     clipped
+}
+
+// NCBI reference: c++/src/algo/blast/core/blast_engine.c:816-831 (the ranges of context 0 serve the
+// positive frames, those of context 3, by `subject->length` of frame -1, the negative ones) and
+// :259-310 (one list per chunk; SUBJECT_SPLIT_NO_RANGE skips the chunk's WordFinder). The same
+// ranges as TBLASTN's (`translated_chunk_scan_ranges`): a nucleotide subject's lower-case runs in
+// `seq_ranges`, entered for both strands (blast_aux_priv.cpp:436-454).
+/// The chunks of one frame of subject `s_idx` that have ranges, with their ranges, when the subject
+/// has a lower-case letter. Cold and out of line (no NCBI counterpart: code placement only).
+#[cold]
+#[inline(never)]
+fn x_soft_subject_calls(
+    subjects: Subjects<'_>,
+    s_idx: usize,
+    frame: &QueryFrame,
+    frames: &[QueryFrame],
+) -> Option<Vec<(TranslatedChunk, Vec<(i32, i32)>)>> {
+    let Subjects::Fasta(records) = subjects else {
+        return None;
+    };
+    let letters = records[s_idx].seq();
+    if !letters.iter().any(u8::is_ascii_lowercase) {
+        return None;
+    }
+    // `translated_chunk_scan_ranges` lists the chunks of NCBI's MAX_DBSEQ_LEN.
+    debug_assert_eq!(tblastx_max_dbseq_len_for_run(), MAX_DBSEQ_LEN);
+    let negative_first_length = frames
+        .iter()
+        .find(|frame| frame.frame == -1)
+        .map_or(0, |frame| frame.aa_len);
+    Some(
+        translated_chunk_scan_ranges(
+            letters,
+            frame.frame,
+            frame.aa_len,
+            negative_first_length,
+            true,
+        )
+        .expect("the ranges of a soft-masked subject have their sentinel"),
+    )
+}
+
+// No NCBI counterpart: looks up what `x_soft_subject_calls` computed.
+/// The ranges of `chunk`; `None` for a chunk without ranges (SUBJECT_SPLIT_NO_RANGE).
+#[cold]
+#[inline(never)]
+fn x_soft_chunk<'a>(
+    calls: &'a [(TranslatedChunk, Vec<(i32, i32)>)],
+    chunk: &SubjectChunk,
+) -> Option<&'a [(i32, i32)]> {
+    calls
+        .iter()
+        .find(|(call, _)| call.offset == chunk.offset)
+        .map(|(_, ranges)| ranges.as_slice())
+}
+
+// NCBI reference: c++/src/algo/blast/core/blast_engine.c:816-831. A shorter frame takes the ranges
+// of the longest frame of its strand, so the last word NCBI scans can end on the NULLB after the
+// frame (blast_util.c:438-453, BLAST_GetAllTranslations).
+/// The letters the scan reads: `subject`, and the sentinel after it with `x_soft` ranges.
+#[inline(always)]
+fn x_soft_scan_letters<'a>(
+    x_soft: Option<&[(i32, i32)]>,
+    subject: &'a [u8],
+    subject_full: &'a [u8],
+    chunk: &SubjectChunk,
+) -> &'a [u8] {
+    match x_soft {
+        Some(_) => &subject_full[1 + chunk.offset..=1 + chunk.offset + chunk.length],
+        None => subject,
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:190-192
@@ -1001,10 +1073,11 @@ fn read_subject_set(
     // bases keeps every record's letters. The archive of `-subject` writes every subject's whole
     // letters (and its deflines) in every batch, which the packed stores do not keep (they hold
     // the interval of a `-subject_loc` and no letters), so a run that writes it reads the records
-    // as the switch's `=0` side does (as TBLASTN's `x_tbn_store`).
+    // as the switch's `=0` side does (as TBLASTN's `x_tbn_store`). So does `-lcase_masking`: the
+    // scan reads the case of the letters (`x_soft_subject_calls`).
     let mut warn = |message: &[u8]| std::io::Write::write_all(&mut *diagnostics, message);
     let (subjects, subject_placements, stores) =
-        if super::super::subjects::x_tbx_store() && args.archive.is_none() {
+        if super::super::subjects::x_tbx_store() && args.archive.is_none() && !args.lcase_masking {
             let (subjects, stores, placements) =
                 crate::blastinput::x_packed_subjects::x_read_packed_subjects(
                     &mut subject_source,
@@ -1330,11 +1403,17 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
+    crate::blastinput::fasta_reader::believed::refuse_with_subject(
+        args.parse_deflines,
+        args.subject.is_some(),
+        "TBLASTX",
+    )?;
     let mut query_source = FastaInputSource::from_argument(
         &args.query,
         query_file,
         ReaderConfig::query("TBLASTX", false, settings.data_loaders)
-            .with_defline(args.archive.is_some()),
+            .with_defline(args.archive.is_some())
+            .with_parse_deflines(args.parse_deflines),
     );
     if !shared_standard_input && query_source.stream_is_empty() {
         outputs
@@ -2051,7 +2130,9 @@ fn write_tblastx_outputs(
         None => tblastx_database_name(args),
     };
     // The `Query=` and `# Query:` text of each query: its title bytes.
-    let query_titles: Vec<&[u8]> = run.queries.iter().map(|query| query.title()).collect();
+    let query_lines: Vec<std::borrow::Cow<'_, [u8]>> =
+        run.queries.iter().map(|query| query.query_line()).collect();
+    let query_titles: Vec<&[u8]> = query_lines.iter().map(|line| line.as_ref()).collect();
     let unsearched: Vec<bool> = run.searched.iter().map(|&searched| !searched).collect();
     // The warnings of each query are written before its report, once, with the first format
     // (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the
@@ -2310,6 +2391,7 @@ fn write_tblastx_outputs(
                         query_placements: &run.ranges.input.placements,
                         numbers: run.numbers,
                         spans: run.archive_spans,
+                        lcase_masking: args.lcase_masking,
                     },
                     warnings.as_mut(),
                     &mut writer,
@@ -3834,7 +3916,21 @@ fn search_query_batch<S: TbxScore>(
 
     // NCBI blast_args.cpp:404-406: opt.SetSegFilteringWindow(...);
     // opt.SetSegFilteringLocut(...); opt.SetSegFilteringHicut(...);
-    if let Some(params) = args.seg_spec()?.params() {
+    if args.lcase_masking {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1239-1256 (see
+        // `mask_lcase`): the lower-case runs join the SEG intervals of each frame.
+        let seg = args
+            .seg_spec()?
+            .params()
+            .map(|params| SegMasker::new(params.window, params.locut, params.hicut));
+        x_query_frames::mask_lcase(
+            &mut query_frames,
+            queries_raw,
+            seg.as_ref(),
+            args.soft_masking(),
+            parallel_pool,
+        );
+    } else if let Some(params) = args.seg_spec()?.params() {
         // Diagnostic (LOSAT_TIMING): the queries' SEG for the common line (utils/xtiming.rs). No
         // NCBI counterpart.
         let t_seg = crate::utils::xtiming::clock();
@@ -3887,6 +3983,17 @@ fn search_query_batch<S: TbxScore>(
     // ```
     // The x86-64 conversion: `INT_MIN` for a threshold beyond `Int4` (every word).
     //
+    // NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
+    // ```c
+    //     BlastSeqBlkSetSeqRanges(subj, (SSeqRange*) masked_ranges.get_data(),
+    //                              masked_ranges.size() + 1, true, eSoftSubjMasking);
+    // ```
+    // `-lcase_masking` with a lower-case letter in a subject: only the reference frame loop scans
+    // ranges (`x_soft_subject_calls`), so the batch takes it as a debugging run does. A `-db`
+    // subject has no case.
+    let x_soft_subjects = args.lcase_masking
+        && matches!(subjects, Subjects::Fasta(records)
+            if records.iter().any(|record| record.seq().iter().any(u8::is_ascii_lowercase)));
     // EXPERIMENT (PAIRLUT, graduated on 2026-10-22), dispatch point 0 (per batch, at the
     // lookup build): when PAIRPAR will run the seed stage of every subject of this batch
     // as units, the units' tables (one per query-context group) are built directly from the
@@ -3919,7 +4026,8 @@ fn search_query_batch<S: TbxScore>(
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
                 || diag_enabled
-                || debug_hsp_saving,
+                || debug_hsp_saving
+                || x_soft_subjects,
             requested_parallel,
             use_serial_scan_chunks,
             pool: parallel_pool,
@@ -4245,7 +4353,8 @@ fn search_query_batch<S: TbxScore>(
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
                 || diag_enabled
-                || debug_hsp_saving,
+                || debug_hsp_saving
+                || x_soft_subjects,
             chunk_switches: use_serial_scan_chunks || use_parallel_chunks,
             // PAIRLUT: the groups built at dispatch point 0.
             lut: x_pair_lut_batch,
@@ -5007,6 +5116,13 @@ fn search_query_batch<S: TbxScore>(
             let mut frame_ungapped_hits: Vec<UngappedHit> = Vec::new();
             let mut split_state = SubjectSplitState::new(s_aa_len);
             let max_dbseq_len = tblastx_max_dbseq_len_for_run();
+            // `-lcase_masking`: the scan ranges of this frame's chunks, `None` for a subject
+            // without lower-case letters.
+            let x_soft_calls = if x_soft_subjects {
+                x_soft_subject_calls(subjects, s_idx, s_frame, s_frames_preliminary)
+            } else {
+                None
+            };
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
             // ```c
@@ -5053,18 +5169,41 @@ fn search_query_batch<S: TbxScore>(
                 // References: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:509-511,
                 // ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
                 let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
-                let scan_interiors = tblastx_scan_interiors(chunk.length, scan_chunk_size);
+                // `-lcase_masking`: this chunk's ranges, whole (`x_soft_chunk`).
+                let x_soft = x_soft_calls
+                    .as_ref()
+                    .map(|calls| x_soft_chunk(calls, &chunk));
+                if let Some(None) = x_soft {
+                    return TblastxChunkScanResult {
+                        chunk,
+                        hits: Vec::new(),
+                        stats,
+                    };
+                }
+                let x_soft = x_soft.flatten();
+                let x_scan_letters = x_soft_scan_letters(x_soft, subject, subject_full, &chunk);
+                let scan_interiors = tblastx_scan_interiors(
+                    chunk.length,
+                    if x_soft.is_some() {
+                        None
+                    } else {
+                        scan_chunk_size
+                    },
+                );
                 let mut previous_seed_s_off: Option<u32> = None;
                 for (_scan_chunk_index, (interior_start, interior_end)) in
                     scan_interiors.into_iter().enumerate()
                 {
-                    let seq_ranges = clip_tblastx_seq_ranges_for_scan_interior(
-                        &base_seq_ranges,
-                        interior_start,
-                        interior_end,
-                        wordsize as usize,
-                        subject.len(),
-                    );
+                    let seq_ranges = match x_soft {
+                        Some(ranges) => ranges.to_vec(),
+                        None => clip_tblastx_seq_ranges_for_scan_interior(
+                            &base_seq_ranges,
+                            interior_start,
+                            interior_end,
+                            wordsize as usize,
+                            subject.len(),
+                        ),
+                    };
                     if seq_ranges.is_empty() {
                         continue;
                     }
@@ -5072,6 +5211,18 @@ fn search_query_batch<S: TbxScore>(
                     // [C] scan_range[1] = subject->seq_ranges[0].left;
                     // [C] scan_range[2] = subject->seq_ranges[0].right - wordsize;
                     let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
+                    // [C] if (scan_range[2] < scan_range[1]) scan_range[2] = scan_range[1];
+                    // (aa_ungapped.c:499-500: only a masked subject's first range can be so short.)
+                    // A first range on the last letter of a chunk's frame has no word within the
+                    // frame and its NULLB: NCBI reads the next frame's letter there, and such a
+                    // word, the only one of the chunk, can only set a `last_hit` that the next
+                    // chunk's diagonal offset hides, so it is not scanned.
+                    if x_soft.is_some() && scan_range[2] < scan_range[1] {
+                        scan_range[2] = scan_range[1];
+                        if scan_range[1] + wordsize > x_scan_letters.len() as i32 {
+                            scan_range[2] = scan_range[1] - 1;
+                        }
+                    }
 
                     // [C] while (scan_range[1] <= scan_range[2])
                     while scan_range[1] <= scan_range[2] {
@@ -5086,7 +5237,7 @@ fn search_query_batch<S: TbxScore>(
                         let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
                             x_scan_bf,
                             lookup_ref,
-                            subject,
+                            x_scan_letters,
                             &seq_ranges,
                             offset_pairs,
                             offset_array_size,
@@ -6280,6 +6431,7 @@ fn search_query_batch<S: TbxScore>(
                 let x_debugging = scan_debug_range.is_some() || trace_hsp_target().is_some();
                 if crate::algorithm::tblastx::x_seed_bucket::bucketed(diag_array.len())
                     && !x_debugging
+                    && x_soft_calls.is_none()
                 {
                     scan_chunk_bucketed(
                         chunk,

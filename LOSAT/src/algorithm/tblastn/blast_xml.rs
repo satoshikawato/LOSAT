@@ -225,7 +225,8 @@ pub(super) fn prepare(
         .map(|(q_idx, ((query, hitlist), &valid))| {
             names::query_text(
                 PROGRAM,
-                &query.local_id,
+                query.warning_id(),
+                query.believed(),
                 query.title(),
                 true,
                 &query_messages(query, valid, q_idx < values.identity_warned),

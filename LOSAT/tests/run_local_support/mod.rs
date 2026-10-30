@@ -26,6 +26,18 @@ pub fn fixture_sequence(name: &str) -> Vec<u8> {
         .to_vec()
 }
 
+/// The `-out` file of the CLI run of `outfmt` for the query `query`: the query path with the
+/// extension `cli<outfmt>.out`, where every character of `outfmt` that is not an ASCII letter
+/// or digit (a space, `|`, `=`) is written `_`, so the name is a valid file name on Windows too.
+#[allow(dead_code)]
+pub fn cli_out_path(query: &Path, outfmt: &str) -> PathBuf {
+    let tag: String = outfmt
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    query.with_extension(format!("cli{tag}.out"))
+}
+
 /// A path in the temporary directory that no other call of this process gets. The tests of
 /// one binary run at the same time and remove their files when they end; the process id and
 /// the clock alone give two of them the same path where the clock ticks in microseconds

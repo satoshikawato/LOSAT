@@ -88,7 +88,7 @@ pub(super) fn write_tblastn_seqalign(
             &mut hsps,
         )?;
         let query = QueryRecord {
-            id: SeqId::Local(&query.local_id),
+            id: query.seq_id(),
             searched_length: i32::try_from(query.seq().len())?,
             offset: i32::try_from(ranges.queries.offset(q_idx))?,
         };

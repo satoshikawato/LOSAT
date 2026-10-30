@@ -1001,6 +1001,7 @@ mod tests {
             taxid_filter: Default::default(),
             dbsize: None,
             show_gis: false,
+            parse_deflines: false,
             searchsp: None,
             task: task.to_string(),
             evalue: None,

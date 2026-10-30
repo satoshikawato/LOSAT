@@ -325,6 +325,7 @@ impl PsiblastArgs {
             taxid_filter: Default::default(),
             dbsize: self.dbsize,
             show_gis: false,
+            parse_deflines: false,
             searchsp: None,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-50
             // ```c++

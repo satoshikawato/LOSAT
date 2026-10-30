@@ -236,6 +236,10 @@ fn defline_of(record: &FastaRecord) -> Cow<'_, [u8]> {
 fn bioseq_input<'a>(record: &'a FastaRecord, defline: &'a [u8], protein: bool) -> BioseqInput<'a> {
     BioseqInput {
         id: &record.internal_id,
+        ids: record.believed().map(|ids| ids.ids.as_slice()),
+        seq_loc: record
+            .believed()
+            .and_then(|ids| ids.seq_loc(0, record.sequence.len() as i32 - 1)),
         defline,
         title: record.title.as_bytes(),
         letters: &record.sequence,
@@ -281,6 +285,7 @@ fn results_masks(call: &ArchiveCall<'_>) -> Vec<MaskEntry> {
                 if !intervals.is_empty() {
                     masks.push(MaskEntry {
                         id: query.internal_id.clone(),
+                        best: query.believed().map(|ids| ids.best.clone()),
                         frame: frame_of(context.frame),
                         intervals,
                     });
@@ -304,6 +309,7 @@ fn lcase_masks(call: &ArchiveCall<'_>) -> Vec<MaskEntry> {
             for frame in [Frame::Plus1, Frame::Minus1] {
                 masks.push(MaskEntry {
                     id: query.internal_id.clone(),
+                    best: query.believed().map(|ids| ids.best.clone()),
                     frame,
                     intervals: vec![(from, to)],
                 });
@@ -345,7 +351,7 @@ impl<'a> AlignSource for BlastxAligns<'a> {
                     &mut hsp_records,
                 )?;
                 let query_record = QueryRecord {
-                    id: SeqId::Local(&query.internal_id),
+                    id: query.seq_id(),
                     searched_length: i32::try_from(query.sequence.len())?,
                     offset: 0,
                 };

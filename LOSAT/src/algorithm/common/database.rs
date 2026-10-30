@@ -563,18 +563,40 @@ pub(crate) fn read_header(
     match db.read_header(ordinal) {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set, db.is_version5())
-                .map(|subject| {
-                    ReportedHeader::Parsed(std::sync::Arc::new(
-                        subject.showing_gis(db.reports_show_gis()),
-                    ))
-                })
                 .map_err(|reason| parsed_refusal(ordinal, &reason, program))
+                .and_then(|subject| {
+                    refuse_id_of_a_query(&subject, ordinal, program)?;
+                    Ok(ReportedHeader::Parsed(std::sync::Arc::new(
+                        subject.showing_gis(db.reports_show_gis()),
+                    )))
+                })
         }
         Ok(crate::seqdb::SequenceHeader::Ordinal(deflines)) => {
             stored_title(Ok(deflines), ordinal, query, program).map(ReportedHeader::Stored)
         }
         Err(error) => Err(header_read_error(error, query, program)),
     }
+}
+
+/// With `-parse_deflines`, LOSAT's refusal of a reported database sequence whose Seq-align id is
+/// the id of a query: NCBI's scope finds the query instead, so its reports show the query's title
+/// and letters for the database sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8).
+fn refuse_id_of_a_query(
+    subject: &crate::report::db_subject::ParsedSubject,
+    ordinal: u32,
+    program: &str,
+) -> Result<()> {
+    let mut keys = Vec::new();
+    crate::report::db_subject::join_keys(subject, &mut keys);
+    if crate::blastinput::fasta_reader::believed::query_has_key(&keys) {
+        return Err(parsed_refusal(
+            ordinal,
+            "has the Seq-id of a query read with -parse_deflines (NCBI BLAST+ shows the query \
+             for it)",
+            program,
+        ));
+    }
+    Ok(())
 }
 
 /// LOSAT's refusal of a reported database sequence with parsed Seq-ids (`parsed_refusal`,

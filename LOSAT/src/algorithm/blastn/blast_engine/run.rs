@@ -7377,7 +7377,7 @@ fn search_cli(
         &args.query,
         &query_file,
         shared_standard_input,
-        x_rpt_stream::switch_on(),
+        x_rpt_stream::switch_on() && !args.parse_deflines,
         x_rule,
     );
     // EXPERIMENT (LOSAT_X_BNQDROP): whether the records read before the search move into a store
@@ -7395,8 +7395,15 @@ fn search_cli(
     if x_drop_rule && x_query_drop::pack_on() {
         crate::utils::xreach::x_reach!("LOSAT_X_BNQPACK", x_pack);
     }
+    crate::blastinput::fasta_reader::believed::refuse_with_subject(
+        args.parse_deflines,
+        args.subject.is_some(),
+        "BLASTN",
+    )?;
     let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders)
-        .with_defline(args.archive.is_some());
+        .with_defline(args.archive.is_some())
+        .with_parse_deflines(args.parse_deflines)
+        .with_strand(&args.strand);
     let mut query_source = FastaInputSource::from_argument(&args.query, query_file, query_config);
     if !shared_standard_input && query_source.stream_is_empty() {
         outputs
@@ -10023,7 +10030,10 @@ fn write_reports_untimed(
         .iter()
         .map(|record| Arc::from(record.shown_id()))
         .collect();
-    let query_titles: Vec<Arc<[u8]>> = query_records.iter().map(record_title).collect();
+    let query_titles: Vec<Arc<[u8]>> = query_records
+        .iter()
+        .map(|record| Arc::from(record.query_line().as_ref()))
+        .collect();
     // `User specified sequence set (Input: PATH)` for a subject set, the `-db` value for a
     // database (`ShownSubjects`).
     let subject_title = subjects.shown.name.as_str();

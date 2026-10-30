@@ -168,6 +168,7 @@ fn query_results_masks(
                 .collect();
             (!intervals.is_empty()).then(|| MaskEntry {
                 id: query.local_id.clone(),
+                best: query.believed().map(|ids| ids.best.clone()),
                 frame: frame_of(frame),
                 intervals,
             })
@@ -231,7 +232,7 @@ impl<'a> AlignSource for TblastxAligns<'a> {
             )?;
             let query = &data.queries[q_idx];
             let query = QueryRecord {
-                id: SeqId::Local(&query.local_id),
+                id: query.seq_id(),
                 searched_length: i32::try_from(query.seq().len())?,
                 offset: i32::try_from(data.query_placements.offset(q_idx))?,
             };
@@ -277,6 +278,8 @@ pub(super) fn write_tblastx_archives(
         .zip(&subject_deflines)
         .map(|(record, defline)| BioseqInput {
             id: &record.local_id,
+            ids: record.believed().map(|ids| ids.ids.as_slice()),
+            seq_loc: None,
             defline,
             title: &record.title,
             letters: record.archive_letters(),
@@ -299,6 +302,8 @@ pub(super) fn write_tblastx_archives(
             .zip(&deflines)
             .map(|(record, defline)| BioseqInput {
                 id: &record.local_id,
+                ids: record.believed().map(|ids| ids.ids.as_slice()),
+                seq_loc: record.archive_seq_loc(),
                 defline,
                 title: &record.title,
                 letters: record.archive_letters(),

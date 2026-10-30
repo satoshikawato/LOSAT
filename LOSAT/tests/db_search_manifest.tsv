@@ -31,6 +31,7 @@
 # Rows db.tf.* (DI-8a, dropin-survey-20261029/DI8): -taxids, -taxidlist, -negative_taxids, -negative_taxidlist and -no_taxid_expansion with -db on the version 5 databases of tests/db_search/taxfilter (tfp protein, tfn nucleotide in two volumes; make_taxfilter.py), the taxonomy file taxfilter/taxonomy4blast.sqlite3 by the BLASTDB=DIR token; db.tf.*.empty.6 are LOSAT refusals of a list that excludes every OID (NCBI searches an empty database).
 # Rows db.gis.* (dropin DI-7): -show_gis on databases with parsed Seq-ids (ids/prot_v5, prot_v4, nucl_v5, nucl_v4: every Seq-id form, GIs, several definition lines): outfmt 0 shows gi|N| and the FASTA form of the id; outfmt 5 and 6, and a database without parsed Seq-ids, do not change.
 # Rows db.sp.* (dropin DI-7): -searchsp with -db (the five programs): the effective search space of the E-values, the cutoffs, `Effective search space used:`, Statistics_eff-space and the archive; -dbsize stays in the length adjustment; NCBI sets OLD_FSC at any -searchsp value (blast_args.cpp:303-307), so the protein programs lose the Gumbel block.
+# Rows db.pd.* (dropin DI-7): -parse_deflines with -db (the five programs): the query ids of Query=, qseqid, qacc, qaccver, qgi, the XML query id and title, the Seq-aligns and the archive (Bioseq ids, seq-loc-list when no id is local); query files of tests/db_search/make_pd.py; losat-rejection rows are LOSAT's refusals of what NCBI's scope shows as another sequence (dropin-survey-20261029/DI7/DECISIONS.md 7, 8).
 row_id	program	kind	db	query	extra_args	outfmt	rc	stdout_sha256	stdout_bytes	stderr_sha256	covers	files	side_sha256
 db.ps.tk.0	psiblast	ncbi	tests/db_search/paja	tests/fasta/psiblast/tk.faa		0	0	dc480d196b0b247daa03d865edcb60f1717dcf05ff10395161b253116721cb95	6846		PS1: psiblast round 1 = blastp search; prolog PSIBLAST + 3 references, "Results from round 1"
 db.ps.tk.6	psiblast	ncbi	tests/db_search/paja	tests/fasta/psiblast/tk.faa		6	0	7d9eb4ae90906067d068a98576b4f094ffd144f54bd6d58b8cf8e802693b3e38	594		PS1: outfmt 6 of round 1 (blastp rows)
@@ -1312,3 +1313,192 @@ db.sp.blastp.zero.11	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.f
 db.sp.blastp.cbs0.0	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 500000000 -comp_based_stats 0	0	0	c051d124fbde625e5addec41a52d0b177d30d72cf4b53e86e07b08736cde67c4	366078		DI-7: BLASTP -searchsp without composition adjustment
 db.sp.blastp.cbs0.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 1000 -comp_based_stats 0	6	0	b5c5015ec46263d1c1f4ce9861c1548a44751b0df77d3e93364c13a1085cafc1	1205432		DI-7: BLASTP a small -searchsp without composition adjustment
 db.sp.blastp.cbs0.zero.0	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 0 -comp_based_stats 0	0	0	7430f1a66cf177c24597e41643aa285606a8f688395b560f655166050dee2d45	735879		DI-7: BLASTP -searchsp 0 without composition adjustment
+db.pd.blastn.0	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_q.fna	-parse_deflines	0	0				DI-7: BLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 0		
+db.pd.blastn.5	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_q.fna	-parse_deflines	5	0				DI-7: BLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 5		
+db.pd.blastn.6	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_q.fna	-parse_deflines	6	0				DI-7: BLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 6		
+db.pd.blastn.7	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_q.fna	-parse_deflines	7	0				DI-7: BLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 7		
+db.pd.blastn.8	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_q.fna	-parse_deflines	8	0				DI-7: BLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 8		
+db.pd.blastn.9	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_q.fna	-parse_deflines	9	0				DI-7: BLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 9		
+db.pd.blastn.11	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_q.fna	-parse_deflines	11	0				DI-7: BLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 11		
+db.pd.blastn.12	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_q.fna	-parse_deflines	12	0				DI-7: BLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 12		
+db.pd.blastn.15	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_q.fna	-parse_deflines	15	0				DI-7: BLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 15		
+db.pd.blastn.16	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_q.fna	-parse_deflines	16	0				DI-7: BLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 16		
+db.pd.blastn.17	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_q.fna	-parse_deflines	17	0				DI-7: BLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 17		
+db.pd.blastn.col	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_q.fna	-parse_deflines	6 qseqid qacc qaccver qgi qlen sseqid saccver bitscore	0				DI-7: BLASTN the query id fields of -parse_deflines		
+db.pd.blastn.gis.0	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_q.fna	-parse_deflines -show_gis	0	0				DI-7: BLASTN -parse_deflines -show_gis: Query= is not changed		
+db.pd.blastn.nl.0	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_nl_q.fna	-parse_deflines	0	0				DI-7: BLASTN no query id is local: the archive holds a seq-loc-list, outfmt 0		
+db.pd.blastn.nl.6	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_nl_q.fna	-parse_deflines	6	0				DI-7: BLASTN no query id is local: the archive holds a seq-loc-list, outfmt 6		
+db.pd.blastn.nl.11	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_nl_q.fna	-parse_deflines	11	0				DI-7: BLASTN no query id is local: the archive holds a seq-loc-list, outfmt 11		
+db.pd.blastn.nl.16	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_nl_q.fna	-parse_deflines	16	0				DI-7: BLASTN no query id is local: the archive holds a seq-loc-list, outfmt 16		
+db.pd.blastn.nl.loc.11	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_nl_q.fna	-parse_deflines -query_loc 5-200	11	0				DI-7: BLASTN the Seq-loc of -query_loc in the archive		
+db.pd.blastn.loc.6	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_q.fna	-parse_deflines -query_loc 5-200	6	0				DI-7: BLASTN -parse_deflines -query_loc		
+db.pd.blastn.nl.minus.11	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_nl_q.fna	-parse_deflines -strand minus	11	0				DI-7: BLASTN the strand of the Seq-loc in the archive		
+db.pd.blastn.nl.plus.11	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_n_nl_q.fna	-parse_deflines -strand plus	11	0				DI-7: BLASTN the strand of the Seq-loc in the archive		
+db.pd.blastn.range.0	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_range_q.fna	-parse_deflines	0	0				DI-7: BLASTN an id with a range: a generated id and the title		
+db.pd.blastn.range.6	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_range_q.fna	-parse_deflines	6	0				DI-7: BLASTN an id with a range: a generated id and the title		
+db.pd.blastn.comma.0	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_comma_q.fna	-parse_deflines	0	0				DI-7: BLASTN a comma in an id: the warning and the underscore		
+db.pd.blastn.comma.6	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_comma_q.fna	-parse_deflines	6	0				DI-7: BLASTN a comma in an id: the warning and the underscore		
+db.pd.blastn.empty.0	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_empty_q.fna	-parse_deflines	0	0				DI-7: BLASTN no hit needed; plain ids		
+db.pd.blastn.empty.6	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_empty_q.fna	-parse_deflines	6	0				DI-7: BLASTN no hit needed; plain ids		
+db.pd.blastn.bars.6	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_bars_q.fna	-parse_deflines	6	1				DI-7: BLASTN an id that is not a valid local id: NCBI reader error		
+db.pd.blastn.long.6	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_long_q.fna	-parse_deflines	6	1				DI-7: BLASTN a local id longer than 50 letters: NCBI reader error		
+db.pd.blastn.nodef.6	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_nodef_q.fna	-parse_deflines	6	1				DI-7: BLASTN input without a defline: NCBI reader error		
+db.pd.blastn.dup	blastn	losat-rejection	tests/db_search/nslice	tests/db_search/pd_dup_q.fna	-parse_deflines	6	1				DI-7: BLASTN two queries with one id | expect: two query records have the Seq-id		
+db.pd.blastn.ver	blastn	losat-rejection	tests/db_search/nslice	tests/db_search/pd_ver_q.fna	-parse_deflines	6	1				DI-7: BLASTN an accession with and without its version is one id | expect: two query records have the Seq-id		
+db.pd.blastn.ord	blastn	losat-rejection	tests/db_search/nslice	tests/db_search/pd_ord_q.fna	-parse_deflines	6	1				DI-7: BLASTN a query named as a database ordinal | expect: names a database ordinal		
+db.pd.blastn.range.11	blastn	losat-rejection	tests/db_search/nslice	tests/db_search/pd_range_q.fna	-parse_deflines	11	1				DI-7: BLASTN an id with a range in the archive | expect: with a range under -parse_deflines		
+db.pd.blastx.0	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_q.fna	-parse_deflines	0	0				DI-7: BLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 0		
+db.pd.blastx.5	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_q.fna	-parse_deflines	5	0				DI-7: BLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 5		
+db.pd.blastx.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_q.fna	-parse_deflines	6	0				DI-7: BLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 6		
+db.pd.blastx.7	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_q.fna	-parse_deflines	7	0				DI-7: BLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 7		
+db.pd.blastx.8	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_q.fna	-parse_deflines	8	0				DI-7: BLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 8		
+db.pd.blastx.9	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_q.fna	-parse_deflines	9	0				DI-7: BLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 9		
+db.pd.blastx.11	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_q.fna	-parse_deflines	11	0				DI-7: BLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 11		
+db.pd.blastx.12	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_q.fna	-parse_deflines	12	0				DI-7: BLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 12		
+db.pd.blastx.15	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_q.fna	-parse_deflines	15	0				DI-7: BLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 15		
+db.pd.blastx.16	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_q.fna	-parse_deflines	16	0				DI-7: BLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 16		
+db.pd.blastx.col	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_q.fna	-parse_deflines	6 qseqid qacc qaccver qgi qlen sseqid saccver bitscore	0				DI-7: BLASTX the query id fields of -parse_deflines		
+db.pd.blastx.gis.0	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_q.fna	-parse_deflines -show_gis	0	0				DI-7: BLASTX -parse_deflines -show_gis: Query= is not changed		
+db.pd.blastx.nl.0	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_nl_q.fna	-parse_deflines	0	0				DI-7: BLASTX no query id is local: the archive holds a seq-loc-list, outfmt 0		
+db.pd.blastx.nl.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_nl_q.fna	-parse_deflines	6	0				DI-7: BLASTX no query id is local: the archive holds a seq-loc-list, outfmt 6		
+db.pd.blastx.nl.11	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_nl_q.fna	-parse_deflines	11	0				DI-7: BLASTX no query id is local: the archive holds a seq-loc-list, outfmt 11		
+db.pd.blastx.nl.16	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_nl_q.fna	-parse_deflines	16	0				DI-7: BLASTX no query id is local: the archive holds a seq-loc-list, outfmt 16		
+db.pd.blastx.nl.minus.11	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_nl_q.fna	-parse_deflines -strand minus	11	0				DI-7: BLASTX the strand of the Seq-loc in the archive		
+db.pd.blastx.nl.plus.11	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bx_nl_q.fna	-parse_deflines -strand plus	11	0				DI-7: BLASTX the strand of the Seq-loc in the archive		
+db.pd.blastx.range.0	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_range_q.fna	-parse_deflines	0	0				DI-7: BLASTX an id with a range: a generated id and the title		
+db.pd.blastx.range.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_range_q.fna	-parse_deflines	6	0				DI-7: BLASTX an id with a range: a generated id and the title		
+db.pd.blastx.comma.0	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_comma_q.fna	-parse_deflines	0	0				DI-7: BLASTX a comma in an id: the warning and the underscore		
+db.pd.blastx.comma.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_comma_q.fna	-parse_deflines	6	0				DI-7: BLASTX a comma in an id: the warning and the underscore		
+db.pd.blastx.empty.0	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_empty_q.fna	-parse_deflines	0	0				DI-7: BLASTX no hit needed; plain ids		
+db.pd.blastx.empty.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_empty_q.fna	-parse_deflines	6	0				DI-7: BLASTX no hit needed; plain ids		
+db.pd.blastx.bars.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_bars_q.fna	-parse_deflines	6	1				DI-7: BLASTX an id that is not a valid local id: NCBI reader error		
+db.pd.blastx.long.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_long_q.fna	-parse_deflines	6	1				DI-7: BLASTX a local id longer than 50 letters: NCBI reader error		
+db.pd.blastx.nodef.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_nodef_q.fna	-parse_deflines	6	1				DI-7: BLASTX input without a defline: NCBI reader error		
+db.pd.blastx.dup	blastx	losat-rejection	tests/db_search/bslice	tests/db_search/pd_dup_q.fna	-parse_deflines	6	1				DI-7: BLASTX two queries with one id | expect: two query records have the Seq-id		
+db.pd.blastx.ver	blastx	losat-rejection	tests/db_search/bslice	tests/db_search/pd_ver_q.fna	-parse_deflines	6	1				DI-7: BLASTX an accession with and without its version is one id | expect: two query records have the Seq-id		
+db.pd.blastx.ord	blastx	losat-rejection	tests/db_search/bslice	tests/db_search/pd_ord_q.fna	-parse_deflines	6	1				DI-7: BLASTX a query named as a database ordinal | expect: names a database ordinal		
+db.pd.blastx.range.11	blastx	losat-rejection	tests/db_search/bslice	tests/db_search/pd_range_q.fna	-parse_deflines	11	1				DI-7: BLASTX an id with a range in the archive | expect: with a range under -parse_deflines		
+db.pd.tblastx.0	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_q.fna	-parse_deflines	0	0				DI-7: TBLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 0		
+db.pd.tblastx.5	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_q.fna	-parse_deflines	5	0				DI-7: TBLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 5		
+db.pd.tblastx.6	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_q.fna	-parse_deflines	6	0				DI-7: TBLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 6		
+db.pd.tblastx.7	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_q.fna	-parse_deflines	7	0				DI-7: TBLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 7		
+db.pd.tblastx.8	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_q.fna	-parse_deflines	8	0				DI-7: TBLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 8		
+db.pd.tblastx.9	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_q.fna	-parse_deflines	9	0				DI-7: TBLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 9		
+db.pd.tblastx.11	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_q.fna	-parse_deflines	11	0				DI-7: TBLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 11		
+db.pd.tblastx.12	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_q.fna	-parse_deflines	12	0				DI-7: TBLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 12		
+db.pd.tblastx.15	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_q.fna	-parse_deflines	15	0				DI-7: TBLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 15		
+db.pd.tblastx.16	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_q.fna	-parse_deflines	16	0				DI-7: TBLASTX -parse_deflines, query deflines of each Seq-id form, outfmt 16		
+db.pd.tblastx.col	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_q.fna	-parse_deflines	6 qseqid qacc qaccver qgi qlen sseqid saccver bitscore	0				DI-7: TBLASTX the query id fields of -parse_deflines		
+db.pd.tblastx.gis.0	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_q.fna	-parse_deflines -show_gis	0	0				DI-7: TBLASTX -parse_deflines -show_gis: Query= is not changed		
+db.pd.tblastx.nl.0	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_nl_q.fna	-parse_deflines	0	0				DI-7: TBLASTX no query id is local: the archive holds a seq-loc-list, outfmt 0		
+db.pd.tblastx.nl.6	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_nl_q.fna	-parse_deflines	6	0				DI-7: TBLASTX no query id is local: the archive holds a seq-loc-list, outfmt 6		
+db.pd.tblastx.nl.11	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_nl_q.fna	-parse_deflines	11	0				DI-7: TBLASTX no query id is local: the archive holds a seq-loc-list, outfmt 11		
+db.pd.tblastx.nl.16	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_nl_q.fna	-parse_deflines	16	0				DI-7: TBLASTX no query id is local: the archive holds a seq-loc-list, outfmt 16		
+db.pd.tblastx.nl.loc.11	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_nl_q.fna	-parse_deflines -query_loc 5-200	11	0				DI-7: TBLASTX the Seq-loc of -query_loc in the archive		
+db.pd.tblastx.loc.6	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_x_q.fna	-parse_deflines -query_loc 5-200	6	0				DI-7: TBLASTX -parse_deflines -query_loc		
+db.pd.tblastx.range.0	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_range_q.fna	-parse_deflines	0	0				DI-7: TBLASTX an id with a range: a generated id and the title		
+db.pd.tblastx.range.6	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_range_q.fna	-parse_deflines	6	0				DI-7: TBLASTX an id with a range: a generated id and the title		
+db.pd.tblastx.comma.0	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_comma_q.fna	-parse_deflines	0	0				DI-7: TBLASTX a comma in an id: the warning and the underscore		
+db.pd.tblastx.comma.6	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_comma_q.fna	-parse_deflines	6	0				DI-7: TBLASTX a comma in an id: the warning and the underscore		
+db.pd.tblastx.empty.0	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_empty_q.fna	-parse_deflines	0	0				DI-7: TBLASTX no hit needed; plain ids		
+db.pd.tblastx.empty.6	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_empty_q.fna	-parse_deflines	6	0				DI-7: TBLASTX no hit needed; plain ids		
+db.pd.tblastx.bars.6	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_bars_q.fna	-parse_deflines	6	1				DI-7: TBLASTX an id that is not a valid local id: NCBI reader error		
+db.pd.tblastx.long.6	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_long_q.fna	-parse_deflines	6	1				DI-7: TBLASTX a local id longer than 50 letters: NCBI reader error		
+db.pd.tblastx.nodef.6	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_nodef_q.fna	-parse_deflines	6	1				DI-7: TBLASTX input without a defline: NCBI reader error		
+db.pd.tblastx.dup	tblastx	losat-rejection	tests/db_search/xslice	tests/db_search/pd_dup_q.fna	-parse_deflines	6	1				DI-7: TBLASTX two queries with one id | expect: two query records have the Seq-id		
+db.pd.tblastx.ver	tblastx	losat-rejection	tests/db_search/xslice	tests/db_search/pd_ver_q.fna	-parse_deflines	6	1				DI-7: TBLASTX an accession with and without its version is one id | expect: two query records have the Seq-id		
+db.pd.tblastx.ord	tblastx	losat-rejection	tests/db_search/xslice	tests/db_search/pd_ord_q.fna	-parse_deflines	6	1				DI-7: TBLASTX a query named as a database ordinal | expect: names a database ordinal		
+db.pd.tblastx.range.11	tblastx	losat-rejection	tests/db_search/xslice	tests/db_search/pd_range_q.fna	-parse_deflines	11	1				DI-7: TBLASTX an id with a range in the archive | expect: with a range under -parse_deflines		
+db.pd.tblastn.0	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_q.faa	-parse_deflines	0	0				DI-7: TBLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 0		
+db.pd.tblastn.5	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_q.faa	-parse_deflines	5	0				DI-7: TBLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 5		
+db.pd.tblastn.6	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_q.faa	-parse_deflines	6	0				DI-7: TBLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 6		
+db.pd.tblastn.7	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_q.faa	-parse_deflines	7	0				DI-7: TBLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 7		
+db.pd.tblastn.8	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_q.faa	-parse_deflines	8	0				DI-7: TBLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 8		
+db.pd.tblastn.9	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_q.faa	-parse_deflines	9	0				DI-7: TBLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 9		
+db.pd.tblastn.11	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_q.faa	-parse_deflines	11	0				DI-7: TBLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 11		
+db.pd.tblastn.12	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_q.faa	-parse_deflines	12	0				DI-7: TBLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 12		
+db.pd.tblastn.15	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_q.faa	-parse_deflines	15	0				DI-7: TBLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 15		
+db.pd.tblastn.16	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_q.faa	-parse_deflines	16	0				DI-7: TBLASTN -parse_deflines, query deflines of each Seq-id form, outfmt 16		
+db.pd.tblastn.col	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_q.faa	-parse_deflines	6 qseqid qacc qaccver qgi qlen sseqid saccver bitscore	0				DI-7: TBLASTN the query id fields of -parse_deflines		
+db.pd.tblastn.gis.0	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_q.faa	-parse_deflines -show_gis	0	0				DI-7: TBLASTN -parse_deflines -show_gis: Query= is not changed		
+db.pd.tblastn.nl.0	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_nl_q.faa	-parse_deflines	0	0				DI-7: TBLASTN no query id is local: the archive holds a seq-loc-list, outfmt 0		
+db.pd.tblastn.nl.6	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_nl_q.faa	-parse_deflines	6	0				DI-7: TBLASTN no query id is local: the archive holds a seq-loc-list, outfmt 6		
+db.pd.tblastn.nl.11	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_nl_q.faa	-parse_deflines	11	0				DI-7: TBLASTN no query id is local: the archive holds a seq-loc-list, outfmt 11		
+db.pd.tblastn.nl.16	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_nl_q.faa	-parse_deflines	16	0				DI-7: TBLASTN no query id is local: the archive holds a seq-loc-list, outfmt 16		
+db.pd.tblastn.nl.loc.11	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_nl_q.faa	-parse_deflines -query_loc 5-200	11	0				DI-7: TBLASTN the Seq-loc of -query_loc in the archive		
+db.pd.tblastn.loc.6	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_tn_q.faa	-parse_deflines -query_loc 5-200	6	0				DI-7: TBLASTN -parse_deflines -query_loc		
+db.pd.tblastn.range.0	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_range_q.faa	-parse_deflines	0	0				DI-7: TBLASTN an id with a range: a generated id and the title		
+db.pd.tblastn.range.6	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_range_q.faa	-parse_deflines	6	0				DI-7: TBLASTN an id with a range: a generated id and the title		
+db.pd.tblastn.comma.0	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_comma_q.faa	-parse_deflines	0	0				DI-7: TBLASTN a comma in an id: the warning and the underscore		
+db.pd.tblastn.comma.6	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_comma_q.faa	-parse_deflines	6	0				DI-7: TBLASTN a comma in an id: the warning and the underscore		
+db.pd.tblastn.empty.0	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_empty_q.faa	-parse_deflines	0	0				DI-7: TBLASTN no hit needed; plain ids		
+db.pd.tblastn.empty.6	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_empty_q.faa	-parse_deflines	6	0				DI-7: TBLASTN no hit needed; plain ids		
+db.pd.tblastn.bars.6	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_bars_q.faa	-parse_deflines	6	1				DI-7: TBLASTN an id that is not a valid local id: NCBI reader error		
+db.pd.tblastn.long.6	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_long_q.faa	-parse_deflines	6	1				DI-7: TBLASTN a local id longer than 50 letters: NCBI reader error		
+db.pd.tblastn.nodef.6	tblastn	ncbi	tests/db_search/tslice	tests/db_search/pd_nodef_q.faa	-parse_deflines	6	1				DI-7: TBLASTN input without a defline: NCBI reader error		
+db.pd.tblastn.dup	tblastn	losat-rejection	tests/db_search/tslice	tests/db_search/pd_dup_q.faa	-parse_deflines	6	1				DI-7: TBLASTN two queries with one id | expect: two query records have the Seq-id		
+db.pd.tblastn.ver	tblastn	losat-rejection	tests/db_search/tslice	tests/db_search/pd_ver_q.faa	-parse_deflines	6	1				DI-7: TBLASTN an accession with and without its version is one id | expect: two query records have the Seq-id		
+db.pd.tblastn.ord	tblastn	losat-rejection	tests/db_search/tslice	tests/db_search/pd_ord_q.faa	-parse_deflines	6	1				DI-7: TBLASTN a query named as a database ordinal | expect: names a database ordinal		
+db.pd.tblastn.range.11	tblastn	losat-rejection	tests/db_search/tslice	tests/db_search/pd_range_q.faa	-parse_deflines	11	1				DI-7: TBLASTN an id with a range in the archive | expect: with a range under -parse_deflines		
+db.pd.blastp.0	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_q.faa	-parse_deflines	0	0				DI-7: BLASTP -parse_deflines, query deflines of each Seq-id form, outfmt 0		
+db.pd.blastp.5	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_q.faa	-parse_deflines	5	0				DI-7: BLASTP -parse_deflines, query deflines of each Seq-id form, outfmt 5		
+db.pd.blastp.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_q.faa	-parse_deflines	6	0				DI-7: BLASTP -parse_deflines, query deflines of each Seq-id form, outfmt 6		
+db.pd.blastp.7	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_q.faa	-parse_deflines	7	0				DI-7: BLASTP -parse_deflines, query deflines of each Seq-id form, outfmt 7		
+db.pd.blastp.8	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_q.faa	-parse_deflines	8	0				DI-7: BLASTP -parse_deflines, query deflines of each Seq-id form, outfmt 8		
+db.pd.blastp.9	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_q.faa	-parse_deflines	9	0				DI-7: BLASTP -parse_deflines, query deflines of each Seq-id form, outfmt 9		
+db.pd.blastp.11	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_q.faa	-parse_deflines	11	0				DI-7: BLASTP -parse_deflines, query deflines of each Seq-id form, outfmt 11		
+db.pd.blastp.12	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_q.faa	-parse_deflines	12	0				DI-7: BLASTP -parse_deflines, query deflines of each Seq-id form, outfmt 12		
+db.pd.blastp.15	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_q.faa	-parse_deflines	15	0				DI-7: BLASTP -parse_deflines, query deflines of each Seq-id form, outfmt 15		
+db.pd.blastp.16	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_q.faa	-parse_deflines	16	0				DI-7: BLASTP -parse_deflines, query deflines of each Seq-id form, outfmt 16		
+db.pd.blastp.col	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_q.faa	-parse_deflines	6 qseqid qacc qaccver qgi qlen sseqid saccver bitscore	0				DI-7: BLASTP the query id fields of -parse_deflines		
+db.pd.blastp.gis.0	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_q.faa	-parse_deflines -show_gis	0	0				DI-7: BLASTP -parse_deflines -show_gis: Query= is not changed		
+db.pd.blastp.nl.0	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_nl_q.faa	-parse_deflines	0	0				DI-7: BLASTP no query id is local: the archive holds a seq-loc-list, outfmt 0		
+db.pd.blastp.nl.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_nl_q.faa	-parse_deflines	6	0				DI-7: BLASTP no query id is local: the archive holds a seq-loc-list, outfmt 6		
+db.pd.blastp.nl.11	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_nl_q.faa	-parse_deflines	11	0				DI-7: BLASTP no query id is local: the archive holds a seq-loc-list, outfmt 11		
+db.pd.blastp.nl.16	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_nl_q.faa	-parse_deflines	16	0				DI-7: BLASTP no query id is local: the archive holds a seq-loc-list, outfmt 16		
+db.pd.blastp.nl.loc.11	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_nl_q.faa	-parse_deflines -query_loc 5-200	11	0				DI-7: BLASTP the Seq-loc of -query_loc in the archive		
+db.pd.blastp.loc.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bp_q.faa	-parse_deflines -query_loc 5-200	6	0				DI-7: BLASTP -parse_deflines -query_loc		
+db.pd.blastp.range.0	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_range_q.faa	-parse_deflines	0	0				DI-7: BLASTP an id with a range: a generated id and the title		
+db.pd.blastp.range.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_range_q.faa	-parse_deflines	6	0				DI-7: BLASTP an id with a range: a generated id and the title		
+db.pd.blastp.comma.0	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_comma_q.faa	-parse_deflines	0	0				DI-7: BLASTP a comma in an id: the warning and the underscore		
+db.pd.blastp.comma.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_comma_q.faa	-parse_deflines	6	0				DI-7: BLASTP a comma in an id: the warning and the underscore		
+db.pd.blastp.empty.0	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_empty_q.faa	-parse_deflines	0	0				DI-7: BLASTP no hit needed; plain ids		
+db.pd.blastp.empty.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_empty_q.faa	-parse_deflines	6	0				DI-7: BLASTP no hit needed; plain ids		
+db.pd.blastp.bars.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_bars_q.faa	-parse_deflines	6	1				DI-7: BLASTP an id that is not a valid local id: NCBI reader error		
+db.pd.blastp.long.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_long_q.faa	-parse_deflines	6	1				DI-7: BLASTP a local id longer than 50 letters: NCBI reader error		
+db.pd.blastp.nodef.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/pd_nodef_q.faa	-parse_deflines	6	1				DI-7: BLASTP input without a defline: NCBI reader error		
+db.pd.blastp.dup	blastp	losat-rejection	tests/db_search/bslice	tests/db_search/pd_dup_q.faa	-parse_deflines	6	1				DI-7: BLASTP two queries with one id | expect: two query records have the Seq-id		
+db.pd.blastp.ver	blastp	losat-rejection	tests/db_search/bslice	tests/db_search/pd_ver_q.faa	-parse_deflines	6	1				DI-7: BLASTP an accession with and without its version is one id | expect: two query records have the Seq-id		
+db.pd.blastp.ord	blastp	losat-rejection	tests/db_search/bslice	tests/db_search/pd_ord_q.faa	-parse_deflines	6	1				DI-7: BLASTP a query named as a database ordinal | expect: names a database ordinal		
+db.pd.blastp.range.11	blastp	losat-rejection	tests/db_search/bslice	tests/db_search/pd_range_q.faa	-parse_deflines	11	1				DI-7: BLASTP an id with a range in the archive | expect: with a range under -parse_deflines		
+db.pd.blastp.ids.0	blastp	ncbi	tests/db_search/ids/prot_v5	tests/db_search/pd_ids_q.faa	-parse_deflines	0	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.blastp.ids.5	blastp	ncbi	tests/db_search/ids/prot_v5	tests/db_search/pd_ids_q.faa	-parse_deflines	5	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.blastp.ids.6	blastp	ncbi	tests/db_search/ids/prot_v5	tests/db_search/pd_ids_q.faa	-parse_deflines	6	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.blastp.ids.11	blastp	ncbi	tests/db_search/ids/prot_v5	tests/db_search/pd_ids_q.faa	-parse_deflines	11	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.blastx.ids.0	blastx	ncbi	tests/db_search/ids/prot_v5	tests/db_search/pd_ids_q.fna	-parse_deflines	0	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.blastx.ids.5	blastx	ncbi	tests/db_search/ids/prot_v5	tests/db_search/pd_ids_q.fna	-parse_deflines	5	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.blastx.ids.6	blastx	ncbi	tests/db_search/ids/prot_v5	tests/db_search/pd_ids_q.fna	-parse_deflines	6	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.blastx.ids.11	blastx	ncbi	tests/db_search/ids/prot_v5	tests/db_search/pd_ids_q.fna	-parse_deflines	11	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.blastn.ids.0	blastn	ncbi	tests/db_search/ids/nucl_v5	tests/db_search/pd_ids_q.fna	-parse_deflines	0	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.blastn.ids.5	blastn	ncbi	tests/db_search/ids/nucl_v5	tests/db_search/pd_ids_q.fna	-parse_deflines	5	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.blastn.ids.6	blastn	ncbi	tests/db_search/ids/nucl_v5	tests/db_search/pd_ids_q.fna	-parse_deflines	6	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.blastn.ids.11	blastn	ncbi	tests/db_search/ids/nucl_v5	tests/db_search/pd_ids_q.fna	-parse_deflines	11	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.tblastn.ids.0	tblastn	ncbi	tests/db_search/ids/nucl_v5	tests/db_search/pd_ids_q.faa	-parse_deflines	0	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.tblastn.ids.5	tblastn	ncbi	tests/db_search/ids/nucl_v5	tests/db_search/pd_ids_q.faa	-parse_deflines	5	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.tblastn.ids.6	tblastn	ncbi	tests/db_search/ids/nucl_v5	tests/db_search/pd_ids_q.faa	-parse_deflines	6	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.tblastn.ids.11	tblastn	ncbi	tests/db_search/ids/nucl_v5	tests/db_search/pd_ids_q.faa	-parse_deflines	11	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.tblastx.ids.0	tblastx	ncbi	tests/db_search/ids/nucl_v5	tests/db_search/pd_ids_q.fna	-parse_deflines	0	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.tblastx.ids.5	tblastx	ncbi	tests/db_search/ids/nucl_v5	tests/db_search/pd_ids_q.fna	-parse_deflines	5	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.tblastx.ids.6	tblastx	ncbi	tests/db_search/ids/nucl_v5	tests/db_search/pd_ids_q.fna	-parse_deflines	6	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.tblastx.ids.11	tblastx	ncbi	tests/db_search/ids/nucl_v5	tests/db_search/pd_ids_q.fna	-parse_deflines	11	0				DI-7: BLASTP -parse_deflines against a database with parsed Seq-ids		
+db.pd.blastp.other	blastp	losat-rejection	tests/db_search/bslice	tests/db_search/pd_other_q.faa	-parse_deflines	6	1				DI-7: BLASTP an accession that names the other molecule and changes the letters | expect: names the other molecule		
+db.pd.tblastn.other	tblastn	losat-rejection	tests/db_search/tslice	tests/db_search/pd_other_q.faa	-parse_deflines	6	1				DI-7: TBLASTN an accession that names the other molecule and changes the letters | expect: names the other molecule		
+db.pd.blastn.nucprot.0	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_nucprot_q.fna	-parse_deflines	0	0				DI-7: BLASTN a protein accession on nucleotide letters reads the same		
+db.pd.blastn.nucprot.6	blastn	ncbi	tests/db_search/nslice	tests/db_search/pd_nucprot_q.fna	-parse_deflines	6	0				DI-7: BLASTN a protein accession on nucleotide letters reads the same		
+db.pd.blastx.nucprot.0	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_nucprot_q.fna	-parse_deflines	0	0				DI-7: BLASTX a protein accession on nucleotide letters reads the same		
+db.pd.blastx.nucprot.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/pd_nucprot_q.fna	-parse_deflines	6	0				DI-7: BLASTX a protein accession on nucleotide letters reads the same		
+db.pd.tblastx.nucprot.0	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_nucprot_q.fna	-parse_deflines	0	0				DI-7: TBLASTX a protein accession on nucleotide letters reads the same		
+db.pd.tblastx.nucprot.6	tblastx	ncbi	tests/db_search/xslice	tests/db_search/pd_nucprot_q.fna	-parse_deflines	6	0				DI-7: TBLASTX a protein accession on nucleotide letters reads the same		
+db.pd.blastp.clash	blastp	losat-rejection	tests/db_search/ids/prot_v5	tests/db_search/pd_clash_q.faa	-parse_deflines	6	1				DI-7: BLASTP a reported database sequence with the id of a query | expect: has the Seq-id of a query read with -parse_deflines		
+db.pd.blastx.clash	blastx	losat-rejection	tests/db_search/ids/prot_v5	tests/db_search/pd_clash_q.fna	-parse_deflines	6	1				DI-7: BLASTX a reported database sequence with the id of a query | expect: has the Seq-id of a query read with -parse_deflines		
+db.pd.tblastx.clash	tblastx	losat-rejection	tests/db_search/ids/nucl_v5	tests/db_search/pd_clash_x_q.fna	-parse_deflines	6	1				DI-7: TBLASTX a reported database sequence with the id of a query | expect: has the Seq-id of a query read with -parse_deflines		

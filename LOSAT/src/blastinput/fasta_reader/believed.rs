@@ -1,0 +1,542 @@
+//! `-parse_deflines` (`CBlastInputSourceConfig::SetBelieveDeflines`, `fParseRawID`): a record's
+//! first word is its Seq-ids, and the rest of its defline its title.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:319-322
+//! ```c++
+//!     CFastaReader::TFlags flags = m_Config.GetBelieveDeflines() ?
+//!                                     CFastaReader::fParseRawID:
+//!                                     (CFastaReader::fNoParseID |
+//!                                      CFastaReader::fDLOptional);
+//! ```
+//! The ids are parsed by the reader of `makeblastdb -parse_seqids` (`process_ids`, with the same
+//! `fQuickIDCheck` and `fAssumeNuc` or `fAssumeProt`).
+//!
+//! What NCBI's object manager does with these ids is not reproduced where it shows another
+//! sequence than the record's (`dropin-survey-20261029/DI7/DECISIONS.md` 7 and 8): LOSAT refuses
+//! such input. NCBI keeps every query in one scope and finds a sequence again by its id, so of
+//! two queries with one id it searches the first's letters twice, and it shows a database
+//! sequence with the id of a query as that query (probe of 2026-10-30).
+
+use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
+
+use crate::report::archive::bioseq::{QuerySeqLoc, SeqLocStrand};
+use crate::seqid::accguide::{identify_seq_id, parse_flags, GENERAL, LOCAL};
+use crate::seqid::defline_set::{match_keys, tabular_id, TabularId};
+use crate::seqid::label;
+use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId};
+use crate::seqid::rank::{best_rank_score, find_best, text_score};
+use crate::writedb::fasta_source::defline_ids::{parse_range, process_ids};
+
+/// The Seq-ids of a record that `-parse_deflines` read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BelievedIds {
+    /// `CBioseq::GetId()`: the Bioseq of the archive.
+    pub ids: Vec<ParsedSeqId>,
+    /// `FindBestChoice(ids, BestRank)`: the id of the record's Seq-aligns.
+    pub best: ParsedSeqId,
+    /// `qseqid`, `qacc` and `qaccver` (`s_GetSeqIdListString`).
+    pub tabular: [Vec<u8>; 3],
+    /// `qgi`.
+    pub gi: i64,
+    /// `id->GetSeqIdString()`: the id of the record in NCBI's warnings.
+    pub warning_id: Vec<u8>,
+    /// `IsLocalId(best)` (blast_aux.cpp:1094-1108): the archive then holds the Bioseqs.
+    pub local: bool,
+    /// The strand of the record's Seq-loc.
+    pub strand: SeqLocStrand,
+}
+
+impl BelievedIds {
+    /// The ids `ids` of a record.
+    pub(crate) fn new(ids: Vec<ParsedSeqId>, strand: SeqLocStrand) -> Self {
+        let best = find_best(&ids, best_rank_score)
+            .cloned()
+            .expect("a defline parse gives at least one id");
+        let field = |kind| {
+            let mut out = Vec::new();
+            tabular_id(&ids, kind, &mut out);
+            out
+        };
+        let tabular = [
+            field(TabularId::Full),
+            field(TabularId::Accession),
+            field(TabularId::AccessionVersion),
+        ];
+        let gi = label::first_gi(&ids);
+        let mut warning_id = Vec::new();
+        label::content(&best, false, &mut warning_id);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1102-1106
+        // ```c++
+        //     CSeq_id::EAccessionInfo id_info = seqid->IdentifyAccession();
+        //     if (seqid->IsLocal() || id_info == CSeq_id::eAcc_local  ||
+        //     	id_info == CSeq_id::eAcc_general) {
+        //         retval = true;
+        //     }
+        // ```
+        let info = identify_seq_id(
+            &best,
+            parse_flags::ANY_RAW | parse_flags::ANY_LOCAL,
+            &mut |_| {},
+        );
+        let local = matches!(best, ParsedSeqId::Local(_)) || info == LOCAL || info == GENERAL;
+        Self {
+            ids,
+            best,
+            tabular,
+            gi,
+            warning_id,
+            local,
+            strand,
+        }
+    }
+
+    /// `CAlignFormatUtil::GetSeqIdString(ids, true)`: the id of `Query=` and of the XML query.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4944-4956
+    /// ```c++
+    /// string CAlignFormatUtil::GetBareId(const CSeq_id& id)
+    /// {
+    ///     string retval;
+    ///
+    ///     if (id.IsGi() || id.IsPrf() || id.IsPir()) {
+    ///         retval = id.AsFastaString();
+    ///     }
+    ///     else {
+    ///         retval = id.GetSeqIdString(true);
+    ///     }
+    /// ```
+    /// The record as the Seq-loc of the archive's `seq-loc-list`, `None` for a local id.
+    pub(crate) fn seq_loc(&self, from: i32, to: i32) -> Option<QuerySeqLoc<'_>> {
+        (!self.local).then_some(QuerySeqLoc {
+            from,
+            to,
+            strand: self.strand,
+            id: &self.best,
+        })
+    }
+
+    pub(crate) fn bare_id(&self) -> String {
+        let mut out = Vec::new();
+        if let Some(id) = find_best(&self.ids, text_score) {
+            label::bare(id, &mut out);
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+}
+
+/// The keys of every query id read in this process under `-parse_deflines`.
+static QUERY_KEYS: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
+
+/// Whether a query read so far has an id with one of the keys `keys`. NCBI would show a database
+/// sequence with such an id as the query (`report::db_subject::ParsedSubject`). A query of an
+/// earlier batch counts too, though NCBI's scope has dropped it: a refusal, not another report.
+pub(crate) fn query_has_key(keys: &[u64]) -> bool {
+    QUERY_KEYS.get().is_some_and(|seen| {
+        let seen = seen.lock().unwrap_or_else(|error| error.into_inner());
+        keys.iter().any(|key| seen.contains(key))
+    })
+}
+
+/// A record's defline as `-parse_deflines` reads it: where its title starts, and its ids.
+#[derive(Debug)]
+pub(crate) struct BelievedDefline {
+    /// The position of the first byte after the first word (the title's search starts here).
+    pub title_search: usize,
+    /// The ids of the first word; empty for a blank defline (`GenerateID`).
+    pub ids: Vec<ParsedSeqId>,
+    pub range: bool,
+}
+
+/// `CFastaDeflineReader::ParseDefline` with `fParseRawID` and `fQuickIDCheck`. `Err` is the
+/// message of the `CObjReaderParseException`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:157-207
+/// ```c++
+///     const size_t len = defline.length();
+///     if (len <= 1 ||
+///         NStr::IsBlank(defline.substr(1))) {
+///         return;
+///     }
+///     ...
+///     // ignore spaces between '>' and the sequence ID
+///     size_t start;
+///     for(start = 1 ; start < len; ++start ) {
+///         if( ! isspace(defline[start]) ) {
+///             break;
+///         }
+///     }
+///     ...
+///         pos = start;
+///         while (pos < len && defline[pos] > ' ') {
+///             pos++;
+///         }
+///
+///         if ( ! (fFastaFlags & CFastaReader::fDisableParseRange) ) {
+///             range_len = ParseRange(defline.substr(start, pos - start),
+///                     data.range_start, data.range_end, pMessageListener);
+///         }
+///
+///         auto id_string = defline.substr(start, pos - start - range_len);
+///         if (NStr::IsBlank(id_string)) {
+///             NCBI_THROW2(CObjReaderParseException, eFormat,
+///                 "Unable to locate sequence id in definition line", 0);
+///         }
+/// ```
+/// `defline[pos]` is a signed `char` on the platforms compared: a byte from 0x80 up ends the id.
+pub(crate) fn parse_believed_defline(
+    defline: &[u8],
+    protein: bool,
+    program: &str,
+    line_number: u64,
+    warn: &mut dyn FnMut(&[u8]),
+) -> Result<BelievedDefline, String> {
+    let space = crate::seqid::parse::is_space;
+    let len = defline.len();
+    if len <= 1 || defline[1..].iter().all(|&byte| space(byte)) {
+        return Ok(BelievedDefline {
+            title_search: len,
+            ids: Vec::new(),
+            range: false,
+        });
+    }
+    let start = 1 + defline[1..]
+        .iter()
+        .position(|&byte| !space(byte))
+        .unwrap_or(len - 1);
+    let mut pos = start;
+    while pos < len && (defline[pos] as i8) > (b' ' as i8) {
+        pos += 1;
+    }
+    let (range_len, _, _) = parse_range(&defline[start..pos]);
+    let id_string = &defline[start..pos - range_len];
+    if id_string.iter().all(|&byte| space(byte)) {
+        return Err("Unable to locate sequence id in definition line".to_string());
+    }
+    // NCBI's diagnostics name the application; `process_ids` is makeblastdb's.
+    let name = program.to_ascii_lowercase();
+    let mut warn_named = |message: &[u8]| {
+        let text = String::from_utf8_lossy(message)
+            .replace("[makeblastdb]", &format!("[{name}]"))
+            .into_bytes();
+        warn(&text);
+    };
+    let ids = process_ids(id_string, protein, line_number, &mut warn_named)
+        .map_err(|error| error.message)?;
+    Ok(BelievedDefline {
+        title_search: pos,
+        ids,
+        range: range_len > 0,
+    })
+}
+
+/// LOSAT's refusal of the ids of a record, or `None`: a `gnl|BL_ORD_ID|n` id, and an id that a
+/// query or a subject read before has. Adds the keys of the ids.
+pub(crate) fn duplicate_id(
+    ids: &[ParsedSeqId],
+    seen: &mut HashSet<u64>,
+    role: &str,
+    program: &str,
+) -> Option<anyhow::Error> {
+    let fasta = |id: &ParsedSeqId| {
+        let mut out = Vec::new();
+        label::fasta(id, &mut out);
+        String::from_utf8_lossy(&out).into_owned()
+    };
+    for id in ids {
+        if matches!(id, ParsedSeqId::General(Dbtag { db, .. }) if db.as_slice() == b"BL_ORD_ID") {
+            return Some(anyhow::anyhow!(
+                "the {role} Seq-id {} of -parse_deflines names a database ordinal; this is not \
+                 supported by LOSAT's {program}",
+                fasta(id)
+            ));
+        }
+    }
+    let mut keys = Vec::new();
+    for id in ids {
+        keys.clear();
+        match_keys(id, &mut keys);
+        if keys.iter().any(|key| seen.contains(key)) {
+            return Some(anyhow::anyhow!(
+                "two {role} records have the Seq-id {} under -parse_deflines (NCBI BLAST+ searches \
+                 the letters of the first for both); this is not supported by LOSAT's {program}",
+                fasta(id)
+            ));
+        }
+        seen.extend(keys.iter().copied());
+    }
+    if role == "query" {
+        let shared = QUERY_KEYS.get_or_init(|| Mutex::new(HashSet::new()));
+        let mut shared = shared.lock().unwrap_or_else(|error| error.into_inner());
+        for id in ids {
+            keys.clear();
+            match_keys(id, &mut keys);
+            shared.extend(keys.iter().copied());
+        }
+    }
+    None
+}
+
+/// `CFastaReader::xSetSeqMol` against the molecule of the program: whether the first id whose
+/// accession names a molecule names the other one.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:547-562
+/// ```c++
+/// bool CFastaReader::xSetSeqMol(const list<CRef<CSeq_id>>& ids, CSeq_inst_Base::EMol& mol) {
+///
+///     for (auto pId : ids) {
+///         const CSeq_id::EAccessionInfo acc_info = pId->IdentifyAccession();
+///         if (acc_info & CSeq_id::fAcc_nuc) {
+///             mol = CSeq_inst::eMol_na;
+///             return true;
+///         }
+///
+///         if (acc_info & CSeq_id::fAcc_prot) {
+///             mol = CSeq_inst::eMol_aa;
+///             return true;
+///         }
+///     }
+///     return false;
+/// }
+/// ```
+pub(crate) fn names_other_molecule(ids: &[ParsedSeqId], protein: bool) -> bool {
+    use crate::seqid::accguide::{F_NUC, F_PROT};
+    for id in ids {
+        let info = identify_seq_id(
+            id,
+            parse_flags::ANY_RAW | parse_flags::ANY_LOCAL,
+            &mut |_| {},
+        );
+        if info & F_NUC != 0 {
+            return protein;
+        }
+        if info & F_PROT != 0 {
+            return !protein;
+        }
+    }
+    false
+}
+
+/// Whether both readings of a data line give the same letters: those of a molecule named by the
+/// accession and those of the program's. The nucleotide reading drops what it does not know and
+/// reads `U` as `T`; every letter here reads the same in both, and blanks and digits are skipped by
+/// both. A line with another byte is LOSAT's refusal (`dropin-survey-20261029/DI7/DECISIONS.md` 7).
+pub(crate) fn reads_the_same_in_both(line: &[u8]) -> bool {
+    line.iter().all(|&byte| {
+        byte.is_ascii_whitespace()
+            || byte.is_ascii_digit()
+            || matches!(
+                byte.to_ascii_uppercase(),
+                b'A' | b'C'
+                    | b'G'
+                    | b'T'
+                    | b'R'
+                    | b'Y'
+                    | b'M'
+                    | b'K'
+                    | b'W'
+                    | b'S'
+                    | b'B'
+                    | b'D'
+                    | b'H'
+                    | b'V'
+                    | b'N'
+            )
+    })
+}
+
+/// LOSAT's refusal of a first word with a range (`x:10-40`) in a run that writes the BLAST archive:
+/// NCBI's Bioseq holds a Seq-hist alignment to the old id (`CFastaReader::xCreateAlignment`), which
+/// LOSAT's archive does not write.
+pub(crate) fn refuse_range_in_archive(role: &str, program: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "a {role} Seq-id with a range under -parse_deflines in the BLAST archive is not supported \
+         by LOSAT's {program}"
+    )
+}
+
+/// LOSAT's refusal of `-parse_deflines` with `-subject` (`program` names the program).
+pub fn refuse_with_subject(
+    parse_deflines: bool,
+    subject: bool,
+    program: &str,
+) -> anyhow::Result<()> {
+    if parse_deflines && subject {
+        anyhow::bail!("-parse_deflines with -subject is not supported by LOSAT's {program}");
+    }
+    Ok(())
+}
+
+/// The local id `id_prefix` + `n` that `GenerateID` makes for a record without ids.
+pub(crate) fn generated_ids(id: &str) -> Vec<ParsedSeqId> {
+    vec![ParsedSeqId::Local(ObjectId::Str(id.as_bytes().to_vec()))]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{read_all, FastaInputSource, ReaderConfig};
+    use super::*;
+
+    fn read(fasta: &[u8], protein: bool) -> Result<Vec<super::super::FastaRecord>, String> {
+        let config = ReaderConfig::query("BLASTN", protein, false).with_parse_deflines(true);
+        let mut source = FastaInputSource::from_bytes(fasta, config);
+        read_all(&mut source, &mut |_| Ok(())).map_err(|error| format!("{error:#}"))
+    }
+
+    fn ids_of(record: &super::super::FastaRecord) -> &BelievedIds {
+        record.believed().expect("-parse_deflines keeps the ids")
+    }
+
+    // NCBI BLAST+ 2.17.0 -parse_deflines (probe `DI7/ws/pd_probe.sh`, `pdo/*`): `Query=`, `qseqid`,
+    // `qacc`, `qaccver` and `qgi` of each defline.
+    #[test]
+    fn the_ids_of_a_defline_follow_the_ncbi_oracle() {
+        for (defline, line, qseqid, qacc, qaccver, gi) in [
+            (
+                &b"gi|42|ref|NP_0042.1| t"[..],
+                &b"NP_0042.1 t"[..],
+                &b"gi|42|ref|NP_0042.1|"[..],
+                &b"NP_0042"[..],
+                &b"NP_0042.1"[..],
+                42,
+            ),
+            (
+                b"ref|NP_0043.1| t",
+                b"NP_0043.1 t",
+                b"ref|NP_0043.1|",
+                b"NP_0043",
+                b"NP_0043.1",
+                0,
+            ),
+            (b"lcl|q3 t", b"q3 t", b"q3", b"q3", b"q3", 0),
+            (
+                b"qplain4 t",
+                b"qplain4 t",
+                b"qplain4",
+                b"qplain4",
+                b"qplain4",
+                0,
+            ),
+            (
+                b"gnl|qdb|q5 t",
+                b"qdb:q5 t",
+                b"gnl|qdb|q5",
+                b"qdb:q5",
+                b"qdb:q5",
+                0,
+            ),
+            (b"gi|0 t", b"gi|0 t", b"gi|0", b"0", b"0", 0),
+            (
+                b"prf||123456A t",
+                b"prf||123456A t",
+                b"prf||123456A",
+                b"123456A",
+                b"123456A",
+                0,
+            ),
+            (
+                b"pdb|1ABC|A t",
+                b"1ABC_A t",
+                b"pdb|1ABC|A",
+                b"1ABC_A",
+                b"1ABC_A",
+                0,
+            ),
+            (b"q1", b"q1", b"q1", b"q1", b"q1", 0),
+            (b"a,b t", b"a_b t", b"a_b", b"a_b", b"a_b", 0),
+        ] {
+            let fasta = [b">", defline, b"\nACGTACGT\n"].concat();
+            let records = read(&fasta, false).unwrap();
+            let ids = ids_of(&records[0]);
+            let text = String::from_utf8_lossy(defline).into_owned();
+            assert_eq!(&*records[0].query_line(), line, "{text}");
+            assert_eq!(ids.tabular[0], qseqid, "{text}");
+            assert_eq!(ids.tabular[1], qacc, "{text}");
+            assert_eq!(ids.tabular[2], qaccver, "{text}");
+            assert_eq!(ids.gi, gi, "{text}");
+        }
+    }
+
+    // NCBI BLAST+ 2.17.0 (probe `edge3`, `blastn.gen.*`): the generated ids count the records
+    // without ids, not the records.
+    #[test]
+    fn generated_ids_count_the_records_without_ids() {
+        let records = read(b">has1 a\nACGT\n>\nACGT\n>has3 b\nACGT\n>\nACGT\n", false).unwrap();
+        let lines: Vec<_> = records
+            .iter()
+            .map(|record| record.query_line().into_owned())
+            .collect();
+        assert_eq!(lines, [&b"has1 a"[..], b"Query_1", b"has3 b", b"Query_2"]);
+    }
+
+    // NCBI BLAST+ 2.17.0 (probe `edge2`, `range.*`): a range replaces the ids by a generated one.
+    #[test]
+    fn a_range_gives_a_generated_id_and_keeps_the_title() {
+        let records = read(b">rq:10-40 t\nACGT\n", false).unwrap();
+        assert_eq!(&*records[0].query_line(), b"Query_1 t");
+        assert_eq!(records[0].title, b"t");
+    }
+
+    #[test]
+    fn two_records_with_one_id_are_refused() {
+        for fasta in [
+            &b">dup1 a\nACGT\n>dup1 b\nACGT\n"[..],
+            b">NM_000001 a\nACGT\n>NM_000001.1 b\nACGT\n",
+            b">gi|5|ref|NM_000001.1| a\nACGT\n>gi|5 b\nACGT\n",
+        ] {
+            let error = read(fasta, false).unwrap_err();
+            assert!(error.contains("two query records"), "{error}");
+        }
+    }
+
+    #[test]
+    fn a_database_ordinal_is_refused() {
+        let error = read(b">gnl|BL_ORD_ID|5 a\nACGT\n", false).unwrap_err();
+        assert!(error.contains("database ordinal"), "{error}");
+    }
+
+    // `xSetSeqMol`: NCBI reads a record by the molecule its accession names. The letters of a
+    // protein are dropped by the nucleotide reading (180 aa -> 121, probe `pdo`); a nucleotide
+    // record under a protein accession reads the same.
+    #[test]
+    fn only_a_molecule_that_changes_the_letters_is_refused() {
+        let error = read(b">NM_000001.1 a\nMKLVEF\n", true).unwrap_err();
+        assert!(error.contains("names the other molecule"), "{error}");
+        assert!(read(b">NP_000001.1 a\nACGTNNRY\n", false).is_ok());
+        let error = read(b">NP_000001.1 a\nACGU\n", false).unwrap_err();
+        assert!(error.contains("names the other molecule"), "{error}");
+        assert!(read(b">NM_000001.1 a\nACGT\n", false).is_ok());
+        assert!(read(b">NP_000001.1 a\nMKLVEF\n", true).is_ok());
+    }
+
+    // fasta.cpp:386-397: without fDLOptional a defline is required.
+    #[test]
+    fn a_record_without_a_defline_is_nothing_read() {
+        let error = read(b"ACGT\n", false).unwrap_err();
+        assert!(
+            error.contains("Input doesn't start with a defline"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn the_archive_form_follows_the_id() {
+        let local = read(b">lcl|q a\nACGT\n", false).unwrap();
+        assert!(local[0].archive_seq_loc().is_none());
+        let general = read(b">gnl|db|q a\nACGT\n", false).unwrap();
+        assert!(general[0].archive_seq_loc().is_none());
+        let mut text = read(b">NM_000001.1 a\nACGTACGT\n", false).unwrap();
+        let loc = text[0].archive_seq_loc().unwrap();
+        assert_eq!((loc.from, loc.to), (0, 7));
+        text[0].cut_in_place(2, 6);
+        let loc = text[0].archive_seq_loc().unwrap();
+        assert_eq!((loc.from, loc.to), (2, 5));
+    }
+
+    #[test]
+    fn subject_with_the_option_is_refused() {
+        assert!(refuse_with_subject(true, true, "BLASTN").is_err());
+        assert!(refuse_with_subject(true, false, "BLASTN").is_ok());
+        assert!(refuse_with_subject(false, true, "BLASTN").is_ok());
+    }
+}

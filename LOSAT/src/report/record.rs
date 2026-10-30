@@ -237,7 +237,7 @@ impl<'a> QueryNames<'a> {
     /// The record of query `index`.
     pub fn record(&self, index: usize) -> QueryRecord<'a> {
         QueryRecord {
-            id: SeqId::Local(&self.records[index].local_id),
+            id: self.records[index].seq_id(),
             searched_length: self.searched_lengths[index] as i32,
             offset: self.placements.offset(index) as i32,
         }

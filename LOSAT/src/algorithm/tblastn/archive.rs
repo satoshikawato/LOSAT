@@ -236,7 +236,7 @@ impl<'a> AlignSource for TblastnAligns<'a> {
             }
             let query = &self.queries[q_idx];
             let query = QueryRecord {
-                id: SeqId::Local(&query.local_id),
+                id: query.seq_id(),
                 searched_length: i32::try_from(query.seq().len())?,
                 offset: i32::try_from(self.ranges.queries.offset(q_idx))?,
             };
@@ -300,6 +300,8 @@ pub(super) fn write_tblastn_archives(
             .zip(&subject_deflines)
             .map(|(record, defline)| BioseqInput {
                 id: &record.local_id,
+                ids: record.believed().map(|ids| ids.ids.as_slice()),
+                seq_loc: None,
                 defline,
                 title: &record.title,
                 letters: record.archive_letters(),
@@ -325,6 +327,8 @@ pub(super) fn write_tblastn_archives(
             .zip(&deflines)
             .map(|(record, defline)| BioseqInput {
                 id: &record.local_id,
+                ids: record.believed().map(|ids| ids.ids.as_slice()),
+                seq_loc: record.archive_seq_loc(),
                 defline,
                 title: &record.title,
                 letters: record.archive_letters(),
@@ -360,6 +364,7 @@ pub(super) fn write_tblastn_archives(
                 if !intervals.is_empty() {
                     results_masks.push(MaskEntry {
                         id: records[offset].local_id.clone(),
+                        best: records[offset].believed().map(|ids| ids.best.clone()),
                         frame: Frame::NotSet,
                         intervals,
                     });
@@ -375,6 +380,7 @@ pub(super) fn write_tblastn_archives(
                 if !runs.is_empty() {
                     lcase_masks.push(MaskEntry {
                         id: record.local_id.clone(),
+                        best: record.believed().map(|ids| ids.best.clone()),
                         frame: Frame::NotSet,
                         intervals: runs,
                     });

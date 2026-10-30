@@ -1932,23 +1932,41 @@ impl BlastIntervalTree {
         self.nodes.len()
     }
 
-    // No NCBI counterpart: the state of the arrays for a caller that moves trees between threads;
-    // it does not change any value NCBI computes.
-    /// True for a tree that has never listed an HSP in the grid (`new` allocates no entries).
+    // No NCBI counterpart: the sizes for a caller that keeps small trees apart from large ones; it
+    // does not change any value NCBI computes.
+    /// The room of the node array.
     #[inline]
-    pub fn x_has_no_arrays(&self) -> bool {
-        self.x.entries.capacity() == 0
+    pub fn x_node_capacity(&self) -> usize {
+        self.nodes.capacity()
     }
 
-    // No NCBI counterpart: see `x_has_no_arrays`.
-    /// A tree `x_has_no_arrays` tells from the one `new` makes.
-    pub fn x_new_with_arrays() -> Self {
+    // No NCBI counterpart: see `x_node_capacity`.
+    /// Whether one more HSP may need more than the given room: `nodes` nodes (`new_nodes` of them
+    /// new per HSP), `entries` listings in the grid, `cells` cells of the subject's grid.
+    #[inline]
+    pub fn x_may_outgrow(
+        &self,
+        nodes: usize,
+        new_nodes: usize,
+        entries: usize,
+        cells: usize,
+    ) -> bool {
+        self.nodes.len() + new_nodes > nodes
+            || self.x.entries.len() + X_MAX_CELLS_PER_HSP > entries
+            || self.x.nq * self.x.ns > cells
+    }
+
+    // No NCBI counterpart: see `x_node_capacity`.
+    /// A tree with room for `nodes` nodes, `entries` listings and `cells` grid cells.
+    pub fn x_with_room(nodes: usize, entries: usize, cells: usize) -> Self {
         let mut tree = Self::new(0, 1, 0, 1);
-        tree.x.entries.reserve_exact(1);
+        tree.nodes.reserve_exact(nodes - tree.nodes.len());
+        tree.x.entries.reserve_exact(entries);
+        tree.x.head.reserve_exact(cells);
         tree
     }
 
-    // No NCBI counterpart: see `x_has_no_arrays`.
+    // No NCBI counterpart: see `x_node_capacity`.
     /// The bytes of the arrays this tree holds.
     pub fn x_array_bytes(&self) -> usize {
         use std::mem::size_of;
@@ -1960,11 +1978,33 @@ impl BlastIntervalTree {
             + self.x.ends.bits.capacity() * size_of::<u64>()
     }
 
-    // No NCBI counterpart: see `x_has_no_arrays`.
-    /// Empties this tree for the ranges of `other`, whose root is the only node it needs.
-    pub fn x_reset_to_ranges_of(&mut self, other: &Self) {
-        let root = &other.nodes[0];
-        self.reset_with_bounds(root.leftend, root.rightend, other.s_min, other.s_max);
+    // No NCBI counterpart: see `x_node_capacity`.
+    /// This tree becomes a copy of `other`, in its own arrays: same nodes, same indexes, same
+    /// answers.
+    pub fn x_copy_of(&mut self, other: &Self) {
+        self.s_min = other.s_min;
+        self.s_max = other.s_max;
+        self.nodes.clear();
+        self.nodes.extend_from_slice(&other.nodes);
+        let (x, y) = (&mut self.x, &other.x);
+        x.on = y.on;
+        x.usable = y.usable;
+        x.shift = y.shift;
+        x.q_min = y.q_min;
+        x.s_min = y.s_min;
+        x.nq = y.nq;
+        x.ns = y.ns;
+        x.head.clear();
+        x.head.extend_from_slice(&y.head);
+        x.used_cells.clear();
+        x.used_cells.extend_from_slice(&y.used_cells);
+        x.entries.clear();
+        x.entries.extend_from_slice(&y.entries);
+        x.overflow.clear();
+        x.overflow.extend_from_slice(&y.overflow);
+        x.ends.bits.clear();
+        x.ends.bits.extend_from_slice(&y.ends.bits);
+        x.ends.points = y.ends.points;
     }
 }
 

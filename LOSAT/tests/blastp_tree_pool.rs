@@ -15,7 +15,7 @@
 //!
 //! The queries are 450 windows of 50 letters every 13 letters of the fixture's longest protein
 //! (BDT62816.1 of `MejoMJNV.faa`, 6,729 letters); the subjects are that proteome (124 proteins), so
-//! the long subject's tree lists at least one HSP per window, and other subjects' trees follow it.
+//! the long subject's tree lists at least one HSP per window and passes the scratch's room.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

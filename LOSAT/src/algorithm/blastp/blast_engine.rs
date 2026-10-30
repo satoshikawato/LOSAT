@@ -581,7 +581,7 @@ impl BlastpSubjectScratch {
             // tree = Blast_IntervalTreeInit(0, query->length+1,
             //                               0, subject->length+1);
             // ```
-            preliminary_interval_tree: BlastIntervalTree::new(0, query_span, 0, 1),
+            preliminary_interval_tree: x_tree_pool::own_tree(query_span),
         }
     }
 
@@ -8991,7 +8991,7 @@ fn run_resolved_in_pool(
                 );
                 continue;
             }
-            // EXPERIMENT (LOSAT_X_BPTREEPOOL): the subject's first HSP takes a tree from the pool.
+            // EXPERIMENT (LOSAT_X_BPTREEPOOL): a tree past the scratch's room continues in the pool's.
             x_tree_pool::before_add(interval_tree);
             interval_tree.add_hsp(
                 preliminary_tree_hsp(&preliminary_hsp, ctx.frame_base),

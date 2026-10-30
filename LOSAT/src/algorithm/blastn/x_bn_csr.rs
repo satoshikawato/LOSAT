@@ -171,6 +171,21 @@ pub(super) fn print_summary() {
 const MIN_LUT: usize = 8;
 const MAX_LUT: usize = 11;
 
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_MBCSR, in the strict set: on unless it is `0`) megablast's
+/// tables of 4^12 cells are laid out as CSR too, with a packed head. It chooses between two LOSAT
+/// layouts of the same chains and changes no value NCBI computes.
+pub(super) fn x_mb12_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBCSR"))
+}
+
+/// No NCBI counterpart: whether a table of `lut_word_length` is in the scope (`MIN_LUT`, `MAX_LUT`;
+/// LOSAT_X_MBCSR: 12 too, when its head is packed).
+fn x_in_scope(lut_word_length: usize, ascending_cells: bool) -> bool {
+    (MIN_LUT..=MAX_LUT).contains(&lut_word_length)
+        || (lut_word_length == 12 && x_will_pack(ascending_cells) && x_mb12_on())
+}
+
 /// No NCBI counterpart: whether `build_mb_lookup` lays out a table of `cells` cells over `words`
 /// as CSR (module comment, scope). `db_word_counts`: the table is built with database word counts;
 /// `debug`: BLEMIR_DEBUG.
@@ -181,7 +196,7 @@ pub(super) fn plan(words: &Words<'_>, cells: usize, db_word_counts: bool, debug:
     // EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head has no size rule (module comment).
     let csr = !db_word_counts
         && !debug
-        && (MIN_LUT..=MAX_LUT).contains(&words.lut_word_length)
+        && x_in_scope(words.lut_word_length, words.ascending_cells)
         && (x_will_pack(words.ascending_cells) || wanted(positions(words), cells));
     crate::utils::xreach::x_reach!("LOSAT_X_BNCSR", csr);
     csr

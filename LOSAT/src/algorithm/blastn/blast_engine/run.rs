@@ -3236,6 +3236,20 @@ fn x_mb_hit_prefetch() -> bool {
 }
 const X_HIT_AHEAD: usize = 16;
 
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNPVONCE, in the strict set: on unless it is `0`) the
+/// scan of a table laid out as packed CSR tests each word once, in the head's presence bits, when
+/// those fit the second-level cache (4^11 cells or fewer); a larger head keeps the small presence
+/// vector in front. The words it keeps are the words with hits either way (the presence vector
+/// only skips words without hits). It changes no value.
+fn x_bn_pv_once(head: &x_dc_csr::XPacked<'_>) -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let on = *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNPVONCE"));
+    let once = on && head.x_bits_bytes() <= X_PV_ONCE_MAX_BITS;
+    crate::utils::xreach::x_reach!("LOSAT_X_BNPVONCE", once);
+    once
+}
+const X_PV_ONCE_MAX_BITS: usize = 1 << 20;
+
 /// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNTBRANGE) the traceback of a database search decodes
 /// a sequence of at least `x_tb_range_min` bases in the ranges of its HSPs only, as NCBI's partial
 /// fetch does (`database::traceback_listed`).
@@ -13914,8 +13928,12 @@ fn search_query_batch<const UNGAPPED: bool>(
                         // once (`x_dc_csr::XHead`), and `x_scan_csr!` expands to each form's scan,
                         // so the scan of a head of one element per cell is the one without the
                         // switch.
+                        // EXPERIMENT (LOSAT_X_BNPVONCE): a packed head's presence bits hold one bit
+                        // per cell, so its scan (`$pv` false) tests the word there only, not first
+                        // in the coarser presence vector, whose bit stands for several cells; for
+                        // a head whose bits fit the cache (`x_bn_pv_once`).
                         macro_rules! x_scan_csr {
-                            ($head:expr) => {{
+                            ($head:expr, $pv:expr) => {{
                                 use x_dc_csr::{XHead, XRing};
                                 let head = $head;
                             let mut x_on_word_csr =
@@ -13972,7 +13990,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                                     if debug_enabled {
                                         dbg_total_s_positions += 1;
                                     }
-                                    if two_stage.has_hits(current_lut_kmer) {
+                                    if !$pv || two_stage.has_hits(current_lut_kmer) {
                                         ring.push(
                                             (kmer_start, s_range, current_lut_kmer),
                                             |w| w.2 as usize,
@@ -13985,8 +14003,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                             }};
                         }
                         match csr.x_packed() {
-                            Some(packed) => x_scan_csr!(packed),
-                            None => x_scan_csr!(csr),
+                            Some(packed) if x_bn_pv_once(&packed) => x_scan_csr!(packed, false),
+                            Some(packed) => x_scan_csr!(packed, true),
+                            None => x_scan_csr!(csr, true),
                         }
                     } else {
                         let mb_scan_kind =

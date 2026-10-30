@@ -901,18 +901,22 @@ pub(crate) fn reports_may_refuse(
 
 /// Whether the lookup of one of `taxids` in the taxonomy database on the search path of `db`
 /// could be refused, as the batches' prefetch looks them up (`prefetch_messages`); `false`
-/// without `taxdb.bti` there. Each one is looked up once with a taxonomy handle of its own
-/// (as `taxdb_may_refuse`'s database side does), so the run's handle and messages are as they
-/// would be without this call. The prefetch's refusal of NCBI's cache
+/// without `taxdb.bti` there. One pass over the index usually finds that no lookup of any taxid
+/// can fail (`TaxDb::any_lookup_may_fail`); else each one is looked up once. Both use a taxonomy
+/// handle of their own (as `taxdb_may_refuse`'s database side does), so the run's handle and
+/// messages are as they would be without this call. The prefetch's refusal of NCBI's cache
 /// (`TaxdbRun::cache_collision`) comes at the run's first prefetch, before any report.
 fn taxids_may_refuse(db: &SeqDb, taxids: &[i32]) -> bool {
-    if !db.taxdb_found() {
+    if !db.taxdb_found() || taxids.is_empty() {
         return false;
     }
     let Some(search_path) = db.search_path() else {
         return false;
     };
     let taxdb = crate::seqdb::taxdb::LazyTaxDb::new(search_path.clone());
+    if matches!(taxdb.any_lookup_may_fail(), Ok(false)) {
+        return false;
+    }
     let mut messages = Vec::new();
     taxids
         .iter()

@@ -7,8 +7,10 @@ const crypto = require("node:crypto");
 // Inspect actual imports/exports and binary memory limits, never the filename.
 // Module validation and ownership are Wasm-host concerns. Retain the validated
 // module for execution; each invocation still creates its own WASI instance.
-function prepareArtifact(bytes, expected) {
-  const module = new WebAssembly.Module(bytes);
+// A caller that has compiled a module with the same imports and exports from these bytes (the
+// threaded host's guarded module) passes it, and the bytes' SHA-256 if it has it, to skip a
+// second compile.
+function prepareArtifact(bytes, expected, module = new WebAssembly.Module(bytes), sha256 = null) {
   const imports = WebAssembly.Module.imports(module);
   const exports = WebAssembly.Module.exports(module);
   const names = new Set(exports.filter(x => x.kind === "function").map(x => x.name));
@@ -56,7 +58,7 @@ function prepareArtifact(bytes, expected) {
   if (!threaded && (memories[0].shared || names.has("wasi_thread_start"))) throw new Error("inconsistent serial artifact thread interface");
   const kind = `${threaded ? "threaded" : "serial"}-${command ? "command" : "reactor"}`;
   if (expected && kind !== expected) throw new Error(`expected ${expected}, got ${kind}`);
-  return { module, identity: { kind, sha256: crypto.createHash("sha256").update(bytes).digest("hex"), imports, exports, memory: memories[0] } };
+  return { module, identity: { kind, sha256: sha256 ?? crypto.createHash("sha256").update(bytes).digest("hex"), imports, exports, memory: memories[0] } };
 }
 // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status); ... return status;

@@ -213,9 +213,23 @@ impl<R> Ahead<R> {
     /// Owner, at index `at`: offer the indexes of `[at, at + window)` below
     /// `len` that have not been offered yet. `wanted(j)` is the owner's guess,
     /// with what it knows now, whether index `j` will need its value.
-    pub(crate) fn announce(&self, at: usize, len: usize, mut wanted: impl FnMut(usize) -> bool) {
+    pub(crate) fn announce(&self, at: usize, len: usize, wanted: impl FnMut(usize) -> bool) {
+        self.x_announce_until(at, len, len, wanted);
+    }
+
+    // No NCBI counterpart (scheduling only): `announce` of a loop of `len` indexes that offers none
+    // at or past `until` yet (the flow across BLASTX chunks offers the tasks of the loop's chunk and
+    // the next one only, `blastx/x_subject_flow.rs` `run_chunks`). Helpers that leave do so once
+    // every index below `len` is claimed, as with `announce`.
+    pub(crate) fn x_announce_until(
+        &self,
+        at: usize,
+        until: usize,
+        len: usize,
+        mut wanted: impl FnMut(usize) -> bool,
+    ) {
         self.total.0.store(len, Ordering::Release);
-        let end = at.saturating_add(self.cells.len()).min(len);
+        let end = at.saturating_add(self.cells.len()).min(len).min(until);
         let mut next = self.announced.0.load(Ordering::Relaxed);
         while next < end {
             let state = if wanted(next) {

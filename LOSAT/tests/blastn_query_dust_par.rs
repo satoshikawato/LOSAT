@@ -8,9 +8,8 @@
 //! several queries (pieces of LC738874 with microsatellites, runs of `N`, a poly-A query and a
 //! query shorter than a triplet) at 1 and 4 threads, the searches without the switch and with it
 //! give the same bytes, and `-dust no` is not acted on (the switch's own path does not run). The
-//! same holds when the batches are searched in `LOSAT_X_QBATCHPAR` slots (private
-//! pools of two threads) and when a batch is split into query chunks (`CHUNK_SIZE`, which reaches
-//! `chunk_query_masks`). That the masks are made on the pool's threads is checked by the unit
+//! same holds with several query batches (`BATCH_SIZE`) and when a batch is split into query
+//! chunks (`CHUNK_SIZE`, which reaches `chunk_query_masks`). That the masks are made on the pool's threads is checked by the unit
 //! test `masks_are_made_on_the_pool_threads` in `x_query_dust_par.rs`; here the sides of the
 //! switch's decision (`LOSAT_X_REACH`) show that the pool path ran at 4 threads and not at one.
 //! That those bytes equal NCBI's is the business of the blastn fixtures.
@@ -33,7 +32,6 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
-    ("LOSAT_X_QBATCHPAR", "0"),
     ("LOSAT_X_QDUSTPAR", "0"),
     ("LOSAT_X_QPREPPAR", "0"),
     ("LOSAT_X_RPTSTREAM", "0"),
@@ -196,47 +194,42 @@ fn check_task(task: &str, extra: &[&str]) {
 type Var = (&'static str, &'static str);
 
 /// The searches of `env` (`BATCH_SIZE` and `CHUNK_SIZE` values), megablast: the report without
-/// the switch at one thread, then off, and with `slots` added to the switch, at 4 threads, all the
-/// same bytes and no standard error. Returns whether the masks were made on the pool (the switch's
+/// the switch at one thread, then off, and with the switch, at 4 threads, all the same bytes and no standard error. Returns whether the masks were made on the pool (the switch's
 /// decision's new side).
-fn check_env(env: &[Var], slots: &[Var]) -> bool {
+fn check_env(env: &[Var]) -> bool {
     let queries = Queries::new();
     let args = ["-task", "megablast"];
     let with = |extra: &[Var]| -> Vec<Var> { env.iter().chain(extra).copied().collect() };
     let (expected, stderr) = blastn(&queries, &args, 1, &with(&[]));
     assert!(!expected.is_empty(), "{env:?}: no hits");
     assert_eq!(stderr, "", "{env:?}");
-    let (report, stderr) = blastn(&queries, &args, 4, &with(slots));
-    assert!(report == expected, "{env:?} {slots:?}: off differs");
-    assert_eq!(stderr, "", "{env:?} {slots:?}");
+    let (report, stderr) = blastn(&queries, &args, 4, &with(&[]));
+    assert!(report == expected, "{env:?}: off differs");
+    assert_eq!(stderr, "", "{env:?}");
     let reach = reach_support::Reach::new("qdustpar-env");
-    let mut on: Vec<(&str, &str)> = with(&[&[SWITCH][..], slots].concat());
+    let mut on: Vec<(&str, &str)> = with(&[SWITCH]);
     on.push(reach.var());
     let (report, stderr) = blastn(&queries, &args, 4, &on);
-    assert!(report == expected, "{env:?} {slots:?}: on differs");
-    assert_eq!(stderr, "", "{env:?} {slots:?}");
+    assert!(report == expected, "{env:?}: on differs");
+    assert_eq!(stderr, "", "{env:?}");
     reach.sides("LOSAT_X_QDUSTPAR").0
 }
 
-// The batches are searched in LOSAT_X_QBATCHPAR slots (2 slots of 2 threads, each with a private
-// pool): the slot's DUST masks are made on the slot's pool, and the report is the same. A batch
-// size of 10,000 letters gives several batches.
+// Several batches (a batch size of 10,000 letters): each batch's DUST masks are made on the pool,
+// and the report is the same.
 #[test]
-fn queries_masked_in_qbatchpar_slots() {
-    assert!(check_env(
-        &[("BATCH_SIZE", "10000")],
-        &[("LOSAT_X_QBATCHPAR", "1"), ("LOSAT_X_QBATCHPARSLOTS", "2")],
-    ));
+fn queries_masked_in_several_batches() {
+    assert!(check_env(&[("BATCH_SIZE", "10000")]));
 }
 
 // A batch that is split into query chunks (`CHUNK_SIZE` below the batch's letters): the parts of
 // the split queries are masked by `chunk_query_masks`.
 #[test]
 fn split_query_chunks_masked_on_the_pool() {
-    assert!(check_env(
-        &[("BATCH_SIZE", "1000000"), ("CHUNK_SIZE", "7000")],
-        &[]
-    ));
+    assert!(check_env(&[
+        ("BATCH_SIZE", "1000000"),
+        ("CHUNK_SIZE", "7000")
+    ],));
 }
 
 #[test]

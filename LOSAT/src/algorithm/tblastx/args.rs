@@ -80,6 +80,16 @@ pub struct TblastxArgs {
     // (`subjects::SubjectSetNumbers`).
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
+    // ```c++
+    //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
+    // ```
+    #[arg(
+        long = "show_gis",
+        default_value_t = false,
+        help = "Show NCBI GIs in deflines?"
+    )]
+    pub show_gis: bool,
     #[arg(long, default_value_t = 10.0, value_parser = tblastx_real)]
     pub evalue: f64,
     // NCBI blast_args.cpp:578-583: a double of at least 0; the lookup table takes its
@@ -262,6 +272,12 @@ pub struct TblastxArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// by the command line before the search where a tabular field list shows a name of the
+    /// taxonomy database (`algorithm::tblastx::tabular`); `None` elsewhere (`run_local`'s callers
+    /// give no search path: not found, DECISIONS 7 of line CLI C2). Not a public option.
+    #[arg(skip)]
+    pub tabular_taxdb: Option<bool>,
 }
 
 /// What NCBI's score block makes of the `-matrix` name of an ungapped search.

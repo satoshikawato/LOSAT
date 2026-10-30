@@ -47,27 +47,27 @@ fn work_dir(test: &str) -> PathBuf {
 }
 
 /// A protein database of the fixture's subject proteome (`MejoMJNV.faa`, 124 sequences), made with
-/// `LOSAT makedb` in `dir`; returns the database name.
+/// `LOSAT makeblastdb` in `dir`; returns the database name.
 fn subject_database(dir: &Path) -> PathBuf {
     protein_database(&fixture("MejoMJNV.faa"), &dir.join("MejoMJNV"))
 }
 
-/// A protein database of the records of `fasta`, made with `LOSAT makedb` as `name`; returns
+/// A protein database of the records of `fasta`, made with `LOSAT makeblastdb` as `name`; returns
 /// `name`.
 fn protein_database(fasta: &Path, name: &Path) -> PathBuf {
     let name = name.to_path_buf();
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fasta)
         .args(["-dbtype", "prot"])
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run LOSAT makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     name

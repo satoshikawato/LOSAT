@@ -1,0 +1,92 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fixtures/blastn_regression/inputs/t2_subject.fa).
+           1 sequences; 373 total letters
+
+
+
+Query= q208
+
+Length=377
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s208                                                                  390     3e-113
+
+
+> s208
+Length=373
+
+ Score = 390 bits (426),  Expect = 3e-113
+ Identities = 228/238 (96%), Gaps = 0/238 (0%)
+ Strand=Plus/Minus
+
+Query  135  TAACTAATTTACGAATTAAGGGTCACAAAAATAAGATTGGAAAATCttatttttatatct  194
+            ||||||||||| ||||||| ||||| ||||||||||||| ||||||||||||||||||||
+Sbjct  238  TAACTAATTTATGAATTAAAGGTCAAAAAAATAAGATTGAAAAATCTTATTTTTATATCT  179
+
+Query  195  aatttatttttaattattgttgaaatgattttgaatttaattcaatattattaccatcat  254
+             |||||||||||||||||||||||||||||||||||||| |||||||||||| |||||||
+Sbjct  178  TATTTATTTTTAATTATTGTTGAAATGATTTTGAATTTATTTCAATATTATTTCCATCAT  119
+
+Query  255  tattCATTGCTGTTTCCACAAATTCTTCTACACTCATTCCAAAACCAGCTTGTGTAGCTA  314
+            |||||||||||||||||||||||||||||||||||||||||||  |||||||||||||||
+Sbjct  118  TATTCATTGCTGTTTCCACAAATTCTTCTACACTCATTCCAAATACAGCTTGTGTAGCTA  59
+
+Query  315  TTTCTATTTTAGAATCATTTGCTTCTGATTCTGTGACTGCTGTAAATCCTACTCCACC  372
+            ||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||
+Sbjct  58   TTTCTATTTTAGAATCATTTGCTTCTGATTCTGTGACTGCTGTAAATCCAACTCCACC  1
+
+
+ Score = 214 bits (233),  Expect = 4e-60
+ Identities = 127/134 (95%), Gaps = 0/134 (0%)
+ Strand=Plus/Minus
+
+Query  1    TTAAGCATTCTTTCTCCTTAAATTAAGTGGAGTGTAATATTTGTATATTTTACTCTTTTA  60
+            |||||||||||||||||||||||||||||||||||||  ||||||||||||||||||| |
+Sbjct  373  TTAAGCATTCTTTCTCCTTAAATTAAGTGGAGTGTAAATTTTGTATATTTTACTCTTTAA  314
+
+Query  61   TTGTACCTAAATATACATGTATGTTTGAACTAAAAATTACTGTTGATCAAAATTATTTTC  120
+            || |||||||||||||||||||||||||| |||||| |||||||||||||||||||||| 
+Sbjct  313  TTATACCTAAATATACATGTATGTTTGAATTAAAAACTACTGTTGATCAAAATTATTTTA  254
+
+Query  121  AATCCAAAAATTAT  134
+            ||||||||||||||
+Sbjct  253  AATCCAAAAATTAT  240
+
+
+ Score = 34.2 bits (36),  Expect = 7e-06
+ Identities = 24/28 (86%), Gaps = 0/28 (0%)
+ Strand=Plus/Plus
+
+Query  161  AAAAATAAGATTGGAAAATCttattttt  188
+            ||||||||||||    ||||||||||||
+Sbjct  185  AAAAATAAGATTTTTCAATCTTATTTTT  212
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+
+Effective search space used: 133952
+
+
+  Database: User specified sequence set (Input:
+tests/fixtures/blastn_regression/inputs/t2_subject.fa).
+    Posted date:  Unknown
+  Number of letters in database: 373
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3

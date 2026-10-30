@@ -1,14 +1,14 @@
-//! The merge of a partitioned seed stage putting the stage's hits in key order strip by strip on
-//! the pool (`LOSAT_X_PAIRPARMERGE`, `src/algorithm/blastn/blast_engine/x_pair_seed_part.rs`) on
-//! whole searches.
+//! The merge of a partitioned seed stage putting the stage's hits in key order strip by strip, on
+//! the pool in ranges of strips (`LOSAT_X_PAIRPARMERGE`,
+//! `src/algorithm/blastn/blast_engine/x_pair_seed_part.rs`), on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is `0`.
 //! It changes how the hits of a stage are put in the order of their keys, not the order, so the
 //! property under test is that the report does not depend on it, and that the default took the
-//! switch's path where its rule says so (`LOSAT_X_REACH`): a stage of 4,096 hits or more on a pool.
+//! switch's path in every stage (`LOSAT_X_REACH`), whatever its number of hits.
 //! The three folds that end in the merge, each against a subject file (`-subject`) at two and four
 //! threads (and at four with `LOSAT_X_PAIRPARHOME=0`): the one-hit fold of `-task blastn` (LC738874 against LC738868, 17,506 hits in its one
-//! stage; and 9,800 letters of LC738874, 412 hits, which keeps the sort), the one-hit fold of the
+//! stage; and 9,800 letters of LC738874, 412 hits), the one-hit fold of the
 //! Na table of `-task blastn-short` (the same 9,800 letters, 42,126 hits) and the two-hit fold of
 //! `-task dc-megablast` (Sakai against MG1655, 16,720 hits).
 //! That those bytes equal NCBI's is the business of the fixture suites.
@@ -111,8 +111,8 @@ fn search(
 /// For `query` and `extra` against `subject`: the report with the switch off at four threads,
 /// then by default at two and four threads and by default with `LOSAT_X_PAIRPARHOME=0` (the other
 /// participant loop before the merge) at four, the same bytes and standard error; the default took
-/// the switch's path (`own`) or kept the sort (not `own`) in its stages.
-fn check(query: &Path, subject: &Path, extra: &[&str], own: bool) {
+/// the switch's path in its stages and never the sort.
+fn check(query: &Path, subject: &Path, extra: &[&str]) {
     let (expected, expected_stderr) = search(query, subject, extra, 4, &[SWITCH_OFF]);
     assert!(!expected.is_empty(), "{extra:?}: no hits");
     for (threads, home) in [
@@ -134,24 +134,19 @@ fn check(query: &Path, subject: &Path, extra: &[&str], own: bool) {
         );
         assert_eq!(
             reach.sides(SWITCH),
-            (own, !own),
+            (true, false),
             "{extra:?} threads {threads} {home:?}: sides of {SWITCH}"
         );
     }
 }
 
-// The one-hit fold of `-task blastn` with 17,506 hits in its stage, and with 412 (the sort).
+// The one-hit fold of `-task blastn` with 17,506 hits in its stage, and with 412.
 #[test]
 fn blastn_one_hit_stages() {
     let dir = TestDir::new("bn");
     let subject = fasta("LC738868.fasta");
-    check(
-        &fasta("LC738874.fasta"),
-        &subject,
-        &["-task", "blastn"],
-        true,
-    );
-    check(&lc874_9800(&dir), &subject, &["-task", "blastn"], false);
+    check(&fasta("LC738874.fasta"), &subject, &["-task", "blastn"]);
+    check(&lc874_9800(&dir), &subject, &["-task", "blastn"]);
 }
 
 // The one-hit fold of the Na table of `-task blastn-short` (PAIRPARNA), 42,126 hits.
@@ -162,7 +157,6 @@ fn blastn_short_na_stage() {
         &lc874_9800(&dir),
         &fasta("LC738868.fasta"),
         &["-task", "blastn-short"],
-        true,
     );
 }
 
@@ -173,6 +167,5 @@ fn dc_megablast_two_hit_stage() {
         &fasta("Sakai.fna"),
         &fasta("MG1655.fna"),
         &["-task", "dc-megablast"],
-        true,
     );
 }

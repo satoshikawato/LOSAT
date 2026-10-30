@@ -389,6 +389,23 @@ fn x_make_room(
             );
             true
         }
+        // EXPERIMENT (LOSAT_X_BPLK16): the same for a table of 16-bit hits; the lengths of its
+        // vectors count their padding, which the next table of that width has as well.
+        BlastpRuntimeLookup::Aa16(table) => {
+            let Some(spares) = x_bp_aa_spares(pool) else {
+                return false;
+            };
+            let largest = largest_hits.get().max(table.overflow.len());
+            largest_hits.set(largest);
+            let room = (largest + largest / 2).max(X_MIN_HITS_ROOM);
+            spares.x_make_room16(
+                table.backbone.len(),
+                table.pv.len(),
+                room,
+                (2 * largest).max(room),
+            );
+            true
+        }
         BlastpRuntimeLookup::Compressed(_) => false,
     }
 }
@@ -982,11 +999,13 @@ mod tests {
             subject: Some(PathBuf::from("subject.faa")),
             db: None,
             dbsize: None,
+            show_gis: false,
             task: task.to_string(),
             evalue: None,
             threshold: None,
             word_size: None,
             num_threads: 1,
+            mt_mode: None,
             out: None,
             max_target_seqs: None,
             num_descriptions: None,
@@ -1058,7 +1077,9 @@ mod tests {
         pool: &SearchPool<'_>,
     ) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
         match args.lookup_table_type {
-            BlastpLookupTableType::AaLookupTable => super::super::blastp_aa_lookup(args, frames),
+            BlastpLookupTableType::AaLookupTable => {
+                super::super::blastp_aa_lookup(args, frames, false)
+            }
             BlastpLookupTableType::CompressedAaLookupTable => {
                 let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();
                 let batches = seq_range::QueryInput::whole(records).batches(batch_size);
@@ -1141,6 +1162,34 @@ mod tests {
                             x_assert_same_table_as("ahead:", got, want);
                             panic!("{task}: the tables differ");
                         }
+                    }
+                    // LOSAT_X_BPLK16: the tables of 16-bit hits, field by field as
+                    // `x_same_table`.
+                    (BlastpRuntimeLookup::Aa16(got), BlastpRuntimeLookup::Aa16(want)) => {
+                        assert!(
+                            want.backbone.iter().any(|cell| cell.num_used > 0)
+                                || !want.overflow.is_empty(),
+                            "{task}: the table has no hits"
+                        );
+                        assert!(
+                            got.backbone.len() == want.backbone.len()
+                                && got.backbone.iter().zip(&want.backbone).all(|(a, b)| {
+                                    a.num_used == b.num_used && a.entries == b.entries
+                                })
+                                && got.overflow == want.overflow
+                                && got.pv == want.pv
+                                && got.frame_bases == want.frame_bases
+                                && got.num_contexts == want.num_contexts
+                                && got.query_length == want.query_length
+                                && got.word_length == want.word_length
+                                && got.alphabet_size == want.alphabet_size
+                                && got.charsize == want.charsize
+                                && got.mask == want.mask
+                                && got.longest_chain == want.longest_chain
+                                && got.threshold == want.threshold
+                                && got.row_max == want.row_max,
+                            "{task}: the tables of 16-bit hits differ"
+                        );
                     }
                     _ => panic!("{task}: the tables are of different kinds"),
                 }

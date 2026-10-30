@@ -373,6 +373,11 @@ fn database_ranges_cover_every_sequence_once() {
         let db = SeqDb::open(fixture_db_dir().join(name).to_str().unwrap(), seqtype).unwrap();
         for max_seqs in [0, 1, 2, 3, 1024] {
             let ranges = db.header_ranges(max_seqs);
+            // EXPERIMENT (LOSAT_X_BPDBKEEP): the ranges made one at a time from their index.
+            assert_eq!(db.x_header_range_count(max_seqs), ranges.len(), "{name}");
+            for (index, range) in ranges.iter().enumerate() {
+                assert_eq!(db.x_header_range(max_seqs, index), *range, "{name} {index}");
+            }
             let mut next = 0;
             for range in &ranges {
                 assert_eq!(range.first_ordinal, next, "{name}");

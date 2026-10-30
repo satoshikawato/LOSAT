@@ -81,6 +81,15 @@ pub(crate) fn x_dbidxread() -> XDbIdxRead {
     })
 }
 
+// No NCBI counterpart: reads the LOSAT_X_BPDBKEEP switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPDBKEEP): a strict-set switch, on unless it is `0`
+/// (`algorithm/blastp/blast_engine/database/x_db_keep.rs`).
+pub(crate) fn x_bp_db_keep() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPDBKEEP"))
+}
+
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): the most sequences of a range of
 /// `SeqDb::header_ranges` that the checks of every title read at once.
 pub const HEADER_RANGE_SEQS: u32 = 1024;
@@ -88,6 +97,21 @@ pub const HEADER_RANGE_SEQS: u32 = 1024;
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): the most bytes of the header file that
 /// `SeqDb::visit_deflines` reads at once (one longer record alone).
 const HEADER_PIECE_BYTES: u64 = 1 << 20;
+
+/// EXPERIMENT (LOSAT_X_BPDBKEEP): `HEADER_PIECE_BYTES` with the switch (64 KiB): the reads stay
+/// below glibc's first mmap threshold (128 KiB), so that freeing them does not raise it (a range
+/// of 1,024 UniRef50 headers is about 190 KiB). The size changes nothing but the number of reads.
+const X_KEEP_HEADER_PIECE_BYTES: u64 = 1 << 16;
+
+/// EXPERIMENT (LOSAT_X_BPDBKEEP): the header piece size (`X_KEEP_HEADER_PIECE_BYTES` with the
+/// switch).
+fn header_piece_bytes() -> u64 {
+    if x_bp_db_keep() {
+        X_KEEP_HEADER_PIECE_BYTES
+    } else {
+        HEADER_PIECE_BYTES
+    }
+}
 
 /// Sequence type of a database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -389,6 +413,18 @@ impl BlockRange {
     }
 }
 
+/// A database resolved without opening its volumes
+/// ([`SeqDb::locate_one_name_metadata`]).
+#[derive(Debug)]
+pub(crate) struct LocatedDatabase {
+    /// `GetTitle()`.
+    pub title: Vec<u8>,
+    /// The volume paths without extension, in NCBI's order.
+    pub volumes: Vec<String>,
+    /// The alias files (paths with extension), sorted.
+    pub alias_files: Vec<String>,
+}
+
 /// An open database: one volume, or the volumes of an alias file.
 #[derive(Debug)]
 pub struct SeqDb {
@@ -403,6 +439,8 @@ pub struct SeqDb {
     /// The search path the database was found on (`open_in`), for files NCBI looks for
     /// beside it (`taxdb.bti`).
     search_path: Option<SearchPath>,
+    /// `-show_gis` of the search that reads the headers for its reports.
+    reports_show_gis: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1093-1102
@@ -459,10 +497,42 @@ impl SeqDb {
             .is_some_and(|path| path.resolve_file("taxdb.bti").is_some())
     }
 
+    /// Whether the reports of the search show the headers it reads with `-show_gis`.
+    pub fn reports_show_gis(&self) -> bool {
+        self.reports_show_gis
+    }
+
+    /// Sets `reports_show_gis`.
+    pub fn set_reports_show_gis(&mut self, show_gis: bool) {
+        self.reports_show_gis = show_gis;
+    }
+
     /// The search path the database was opened with (`open_in`), none for a database opened
     /// by another way.
     pub fn search_path(&self) -> Option<&SearchPath> {
         self.search_path.as_ref()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:566-572
+    // ```c++
+    //     // Print volume names
+    //     vector<string> volumes;
+    //     m_BlastDb->FindVolumePaths(volumes,false);
+    //     out << endl << "Volumes:" << endl;
+    //     ITERATE(vector<string>, file_name, volumes) {
+    //         out << "\t" << *file_name << endl;
+    //     }
+    // ```
+    /// What `blastdbcmd -info` lists under "Volumes:" for the database that
+    /// [`SeqDb::open_in`] opens with the same arguments: the volumes of the first two levels
+    /// of its alias tree and the alias files of the third, sorted by base name
+    /// (`alias::info_volumes`). The alias files are read again; no volume file is opened.
+    pub fn info_volumes(
+        name: &str,
+        seqtype: SeqType,
+        path: &SearchPath,
+    ) -> Result<Vec<String>, SeqDbError> {
+        alias::info_volumes(name, seqtype, path)
     }
 
     /// The number of the volume that holds `ordinal` (`CSeqDBVolSet::FindVol`).
@@ -487,6 +557,38 @@ impl SeqDb {
     /// read, so the cost does not grow with the number of sequences.
     pub(crate) fn locate_one_name(name: &str, seqtype: SeqType) -> Result<(), SeqDbError> {
         alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir).map(|_| ())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1613-1616
+    // ```c++
+    //     vector<string> paths;
+    //     vector<string> alias;
+    //     m_Impl->FindVolumePaths(paths, alias, true);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1726
+    // ```c++
+    // 	m->SetDescription(GetTitle());
+    // ```
+    /// Resolves the one database at `name` as [`SeqDb::locate_one_name`] does and
+    /// returns what `CSeqDB::GetDBMetaData` reads of its alias tree: the title
+    /// (`GetTitle`: the alias files' `TITLE`, else the volumes' titles, which
+    /// `volume_title` gives for a volume path), the volume paths and the paths of the
+    /// alias files (`FindVolumePaths(paths, alias, true)`). No volume file is read.
+    pub(crate) fn locate_one_name_metadata(
+        name: &str,
+        seqtype: SeqType,
+        volume_title: &dyn Fn(&str) -> Option<Vec<u8>>,
+    ) -> Result<LocatedDatabase, SeqDbError> {
+        let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir)?;
+        let mut title = Vec::new();
+        alias::walk_title(&tree.root, volume_title, &mut title);
+        let mut alias_files = std::collections::BTreeSet::new();
+        alias::collect_alias_files(&tree.root, &mut alias_files);
+        Ok(LocatedDatabase {
+            title,
+            volumes: tree.volumes,
+            alias_files: alias_files.into_iter().collect(),
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvolset.cpp:101-116
@@ -688,6 +790,7 @@ impl SeqDb {
             total_length,
             max_length,
             search_path: None,
+            reports_show_gis: false,
         };
         Ok(db)
     }
@@ -960,6 +1063,23 @@ impl SeqDb {
         volume.x_read_block_mapped(range.first, range.end, range.first_ordinal)
     }
 
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_block` with the bytes in `buf`
+    /// (`Volume::x_read_block_into`).
+    pub fn x_read_block_into(
+        &self,
+        range: BlockRange,
+        buf: Vec<u8>,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        let Some(volume) = self.volumes.get(range.volume) else {
+            return Err(SeqDbError::Range(format!(
+                "volume {} is outside the database ({} volumes)",
+                range.volume,
+                self.volumes.len()
+            )));
+        };
+        volume.x_read_block_into(range.first, range.end, range.first_ordinal, buf)
+    }
+
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_sequence` with the bytes in a buffer that glibc maps
     /// from 1 MiB on.
     pub fn x_read_sequence_mapped(&self, ordinal: u32) -> Result<SequenceBlock, SeqDbError> {
@@ -1183,6 +1303,37 @@ impl SeqDb {
         ranges
     }
 
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the number of ranges of `header_ranges(max_seqs)`.
+    pub fn x_header_range_count(&self, max_seqs: u32) -> usize {
+        let max_seqs = max_seqs.max(1);
+        self.volumes
+            .iter()
+            .map(|vol| vol.num_oids().div_ceil(max_seqs) as usize)
+            .sum()
+    }
+
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): `header_ranges(max_seqs)[index]`, without the list (a list
+    /// of UniRef50's 65,000 ranges is 1.5 MiB, whose free raises glibc's mmap threshold).
+    pub fn x_header_range(&self, max_seqs: u32, index: usize) -> BlockRange {
+        let max_seqs = max_seqs.max(1);
+        let mut index = index;
+        for (volume, vol) in self.volumes.iter().enumerate() {
+            let count = vol.num_oids().div_ceil(max_seqs) as usize;
+            if index < count {
+                let first = index as u32 * max_seqs;
+                let end = first + max_seqs.min(vol.num_oids() - first);
+                return BlockRange {
+                    volume,
+                    first,
+                    end,
+                    first_ordinal: self.volume_starts[volume] + first,
+                };
+            }
+            index -= count;
+        }
+        panic!("header range {index} past the database's ranges");
+    }
+
     /// EXPERIMENT (LOSAT_X_DBIDXREAD): calls `visit(ordinal, self.deflines(ordinal))` for
     /// the sequences of `range` in order until `visit` returns false; returns whether every
     /// call returned true. The headers of the range are read with one read of the index file
@@ -1222,7 +1373,7 @@ impl SeqDb {
         vol.visit_deflines_as(
             range.first,
             range.end,
-            HEADER_PIECE_BYTES,
+            header_piece_bytes(),
             want_taxid,
             &mut |oid, deflines| {
                 let ordinal = range.first_ordinal + (oid - range.first);
@@ -1250,7 +1401,28 @@ impl SeqDb {
         vol.visit_defline_taxids(
             range.first,
             range.end,
-            HEADER_PIECE_BYTES,
+            header_piece_bytes(),
+            &mut |oid, taxids| visit(range.first_ordinal + (oid - range.first), taxids),
+        )
+    }
+
+    /// [`SeqDb::visit_defline_taxids`] for a database of any Seq-ids: the taxid of every
+    /// definition line of each sequence of `range` (0 for none), decoded as [`SeqDb::defline_set`]
+    /// decodes the definition lines (parsed Seq-ids too), read as `visit_deflines` reads them.
+    pub fn visit_defline_set_taxids(
+        &self,
+        range: BlockRange,
+        mut visit: impl FnMut(u32, Result<Vec<i32>, SeqDbError>) -> bool,
+    ) -> bool {
+        let Some(vol) = self.volumes.get(range.volume) else {
+            return range.is_empty().then_some(true).unwrap_or_else(|| {
+                visit(range.first_ordinal, Err(volume_range_error(range, self)))
+            });
+        };
+        vol.visit_defline_set_taxids(
+            range.first,
+            range.end,
+            header_piece_bytes(),
             &mut |oid, taxids| visit(range.first_ordinal + (oid - range.first), taxids),
         )
     }

@@ -29,6 +29,9 @@ pub(crate) mod gapalign;
 mod hsp;
 mod query_split;
 mod seqalign;
+// NCBI c++/src/objtools/align_format/tabular.cpp: the tabular reports with a field list or a
+// delimiter, and outfmt 10 and 20, through the shared writer (`report::tabular`).
+mod tabular;
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries searched in blocks of whole query batches.
 mod x_query_blocks;
 // Redone HSP lists without spare room.

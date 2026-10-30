@@ -46,11 +46,19 @@ const PROGRAM: &str = "TBLASTX";
 pub(crate) struct TblastxDatabase {
     db: SeqDb,
     name: String,
-    /// The taxonomy database of the run, opened by the XML2 and JSON formats only.
+    /// The taxonomy database of the run and the taxids its volumes have looked up (XML2 and
+    /// JSON, and the batches' prefetch of outfmt 0, 5, 6 and 7), kept across the query batches
+    /// of the run.
     taxdb: shared::TaxdbRun,
 }
 
 impl TblastxDatabase {
+    /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
+    pub(crate) fn showing_gis(mut self, show_gis: bool) -> Self {
+        self.db.set_reports_show_gis(show_gis);
+        self
+    }
+
     /// Opens the nucleotide database `name` as NCBI's `CSearchDatabase` opens it
     /// (`common::database::open_database`). A total length that LOSAT cannot hold as an index
     /// (above `usize`) or as NCBI's `Int8` is LOSAT's refusal.
@@ -78,6 +86,48 @@ impl TblastxDatabase {
     /// The `-db` value (outfmt 7's `# Database:` line).
     pub(crate) fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Whether `taxdb.bti` is on the search path, asked once for the run
+    /// (`shared::TaxdbRun::found`): the batches' prefetch reads the taxonomy database only then
+    /// (`prefetch_messages`).
+    pub(crate) fn taxdb_found(&self) -> bool {
+        self.taxdb.found(&self.db)
+    }
+
+    /// The names of the taxonomy database that the rows of `spec` look up for the subjects
+    /// `taxonomy` (`shared::tabular_names`).
+    pub(crate) fn tabular_names(
+        &self,
+        spec: &crate::report::tabular::TabularSpec,
+        taxonomy: &[crate::report::tabular::TabularTaxonomy],
+    ) -> Result<Option<crate::report::tabular::TabularNames>> {
+        shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
+    }
+
+    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
+    pub(crate) fn open_for_tabular_rows(&self) -> Result<()> {
+        self.taxdb.open_for_rows(&self.db, PROGRAM)
+    }
+
+    /// Whether a report that names any sequence of the database could be refused by LOSAT
+    /// (`common::database::reports_may_refuse`, with the reports `shown` and the batches'
+    /// prefetch `prefetch`), read in `pool`.
+    pub(crate) fn reports_may_refuse(
+        &self,
+        shown: ParsedShown,
+        prefetch: bool,
+        pool: &crate::utils::threading::SearchPool<'_>,
+    ) -> Option<shared::ReportRefusal> {
+        shared::reports_may_refuse(
+            &self.db,
+            shown,
+            false,
+            self.taxdb_found(),
+            prefetch,
+            pool,
+            PROGRAM,
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:164-168,183-187
@@ -130,6 +180,32 @@ impl TblastxDatabase {
             parsed_taxonomy,
             notes,
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
+    // ```c++
+    //             	CRef<CBlast_def_line_set> bdlRef =
+    //             			CSeqDB::ExtractBlastDefline(subject_bh);
+    //     ...
+    //             	if(setSubjectTaxInfoAll) {
+    //             		x_SetTaxInfoAll(subject_bh, bdlRef);
+    //             	}
+    // ```
+    /// The taxonomy of the tabular fields (`staxid`, `staxids`) of every reported sequence, by
+    /// rank (every rank is made from a hit, `reported_subjects`;
+    /// `algorithm::common::tabular::tabular_taxonomy`). A header that does not decode is
+    /// refused before the report.
+    pub(crate) fn tabular_taxonomy(
+        &self,
+        reported: &ReportedSubjects,
+    ) -> Result<Vec<crate::report::tabular::TabularTaxonomy>> {
+        crate::algorithm::common::tabular::tabular_taxonomy(
+            &self.db,
+            &reported.ordinals,
+            &reported.parsed,
+            0..reported.ordinals.len(),
+            PROGRAM,
+        )
     }
 
     /// The database's sequences by ordinal id (`common::database::read_nucleotide_stores`).
@@ -194,6 +270,28 @@ pub(crate) fn read_titles(
     Ok(())
 }
 
+/// NCBI's messages about the taxonomy database when the query batch whose reported hits are
+/// `ordered` (subjects named by ordinal id, as `read_titles` reads them) prefetches the subjects
+/// it reports (`shared::prefetch_messages`): the sequences the hits name, with the definition
+/// lines of those with parsed Seq-ids from `titles` (`read_titles`). Empty, and nothing read,
+/// without `taxdb.bti` on the search path. A taxonomy database that LOSAT cannot read as NCBI
+/// does, and a header whose taxid does not decode, are refused.
+pub(crate) fn prefetch_messages(
+    database: &TblastxDatabase,
+    ordered: &[TblastxHsp],
+    titles: &DatabaseTitles,
+) -> Result<Vec<u8>> {
+    let subjects = ordered.iter().map(|hsp| {
+        let ordinal = hsp.hit.s_idx;
+        let parsed = match titles.get(&ordinal) {
+            Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+            _ => None,
+        };
+        (ordinal, parsed)
+    });
+    shared::prefetch_messages(&database.db, &database.taxdb, subjects, PROGRAM)
+}
+
 /// The database sequences that the reports show, by rank (`reported_subjects`).
 pub(crate) struct ReportedSubjects {
     /// The ordinal id of each rank.
@@ -233,9 +331,6 @@ pub(crate) fn reported_subjects(
     }
     let mut records = Vec::with_capacity(ordinals.len());
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
-    // Whether `taxdb.bti` is on the search path, looked up at the first sequence with parsed
-    // Seq-ids that outfmt 0 shows.
-    let mut taxdb_found: Option<bool> = None;
     for (rank, &ordinal) in ordinals.iter().enumerate() {
         let header = titles
             .get(&ordinal)
@@ -246,8 +341,9 @@ pub(crate) fn reported_subjects(
                 stored.title.clone()
             }
             ReportedHeader::Parsed(subject) => {
-                let taxdb =
-                    shown.pairwise && *taxdb_found.get_or_insert_with(|| database.db.taxdb_found());
+                // Whether `taxdb.bti` is on the search path, looked up at the first sequence
+                // with parsed Seq-ids that outfmt 0 shows (once for the run, `taxdb_found`).
+                let taxdb = shown.pairwise && database.taxdb_found();
                 shared::check_reported_parsed(subject, shown, false, taxdb, ordinal, PROGRAM)?;
                 if parsed.is_empty() {
                     parsed = vec![None; ordinals.len()];
@@ -341,5 +437,143 @@ mod tests {
         );
         TblastxDatabase::open(&path("tests/seqdb/db/nucl_v4"), &settings)
             .expect("a database without parsed Seq-ids opens with SEQ_ID_PREFER_ACCESSION_OVER_GI");
+    }
+
+    /// The fixture database `name` of `tests/db_search`, with the taxonomy database variant
+    /// `taxdb` of `tests/seqdb/taxdb` (`None`: none) as `BLASTDB`, from the directory `cwd`.
+    fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> TblastxDatabase {
+        use crate::seqdb::alias::SearchPath;
+        let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+        let taxdb = taxdb.map(|variant| tests.join("seqdb/taxdb").join(variant));
+        let search =
+            SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
+        let path = tests.join("db_search").join(name);
+        TblastxDatabase {
+            db: SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap(),
+            name: name.to_string(),
+            taxdb: shared::TaxdbRun::default(),
+        }
+    }
+
+    /// A reported hit of the batch's first query on the database sequence `ordinal`.
+    fn hit_on(ordinal: u32) -> TblastxHsp {
+        TblastxHsp {
+            hit: crate::common::Hit {
+                identity: 100.0,
+                length: 10,
+                mismatch: 0,
+                gapopen: 0,
+                q_start: 1,
+                q_end: 30,
+                s_start: 1,
+                s_end: 30,
+                e_value: 1e-9,
+                bit_score: 50.0,
+                num_ident: 10,
+                query_frame: 1,
+                query_length: 0,
+                q_idx: 0,
+                s_idx: ordinal,
+                raw_score: 100,
+                sort_query_offset: 0,
+                sort_query_end: 10,
+                sort_subject_offset: 0,
+                sort_subject_end: 10,
+                has_sort_offsets: true,
+                gap_info: None,
+                num_positives: 10,
+            },
+            subject_frame: 1,
+            num: 1,
+        }
+    }
+
+    // DBID item T: a batch's prefetch looks up the sequences that its reported hits name, once
+    // per volume and taxid over the batches of a run, and opens the taxonomy database at the
+    // run's first lookup; nothing without `taxdb.bti`. `x16_ntaxid_99990` (two sequences of
+    // taxid 99990) with `offset_last_past_end` (the last entry, 99990, is past the end of
+    // `taxdb.btd`), `x16_ntaxid` (taxid 9606) with `bad_magic`.
+    #[test]
+    fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-tblastx-db-prefetch-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let text = |database: &TblastxDatabase, ordinals: &[u32]| -> String {
+            let ordered: Vec<TblastxHsp> =
+                ordinals.iter().map(|&ordinal| hit_on(ordinal)).collect();
+            let mut titles = DatabaseTitles::new();
+            read_titles(database, &ordered, 0, &mut titles).unwrap();
+            String::from_utf8(prefetch_messages(database, &ordered, &titles).unwrap()).unwrap()
+        };
+        let database = open_with_taxdb("x16_ntaxid_99990", Some("offset_last_past_end"), &cwd);
+        assert!(database.taxdb_found());
+        // A batch without reported hits fetches nothing: the taxonomy database is not opened.
+        assert_eq!(text(&database, &[]), "");
+        // Two hits on sequence 1 and one on sequence 0, all of taxid 99990: one lookup.
+        let offset = "Error: [tblastx] Error: Offset error at end of taxdb file.\n";
+        assert_eq!(text(&database, &[1, 1, 0]), offset);
+        // The same volume and taxid in a later batch.
+        assert_eq!(text(&database, &[0, 1]), "");
+        let database = open_with_taxdb("x16_ntaxid", Some("bad_magic"), &cwd);
+        assert_eq!(
+            text(&database, &[1, 0]),
+            "Error: [tblastx] Error: Tax database file has wrong magic number.\n"
+        );
+        let database = open_with_taxdb("x16_ntaxid", None, &cwd);
+        assert!(!database.taxdb_found());
+        assert_eq!(text(&database, &[0, 1]), "");
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    // Line DBID, ID4t fix 2b: the loop writes each query batch's reports when it takes the batch
+    // only where no report of any sequence of the database can be refused (`report_stream`): a
+    // sequence that NCBI's formatters do not find by its Seq-align id (nrefuse_v5) refuses the
+    // tabular formats and outfmt 0, and two sequences whose Seq-align ids match (njoined, in two
+    // volumes) refuse outfmt 0 only, read on one thread and on four.
+    #[test]
+    fn a_report_of_any_sequence_that_could_be_refused_is_found() {
+        let open = |name: &str| {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/ids")
+                .join(name);
+            TblastxDatabase::open(path.to_str().unwrap(), &ApplicationSettings::default())
+                .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+        };
+        let tabular = ParsedShown {
+            tabular: true,
+            ..ParsedShown::default()
+        };
+        let pairwise = ParsedShown {
+            pairwise: true,
+            joined: true,
+            ..ParsedShown::default()
+        };
+        let answers = |pool: &crate::utils::threading::SearchPool<'_>| {
+            ["nucl_v5", "nucl_v4", "nrefuse_v5", "njoined"].map(|name| {
+                let database = open(name);
+                (
+                    database.reports_may_refuse(tabular, false, pool),
+                    database.reports_may_refuse(pairwise, false, pool),
+                )
+            })
+        };
+        use shared::ReportRefusal::{Headers, Joined};
+        let serial = answers(&crate::utils::threading::SearchPool::x_serial());
+        assert_eq!(
+            serial,
+            [
+                (None, None),
+                (None, None),
+                (Some(Headers), Some(Headers)),
+                (None, Some(Joined)),
+            ]
+        );
+        let parallel =
+            crate::utils::threading::with_search_pool(4, "TBLASTX", |pool| Ok(answers(pool)))
+                .unwrap();
+        assert_eq!(serial, parallel);
     }
 }

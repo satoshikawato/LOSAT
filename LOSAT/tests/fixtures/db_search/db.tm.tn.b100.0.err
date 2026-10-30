@@ -1,0 +1,2 @@
+FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?
+Error: [tblastn] Error: Offset error at end of taxdb file.

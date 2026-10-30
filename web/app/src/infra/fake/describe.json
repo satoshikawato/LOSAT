@@ -29,6 +29,16 @@
     "takes_value": true
    },
    {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-task",
     "help": "Task to execute: megablast, blastn, dc-megablast or blastn-short",
     "takes_value": true,
@@ -159,6 +169,15 @@
     "flag": "-culling_limit",
     "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
     "takes_value": true
+   },
+   {
+    "flag": "-ungapped",
+    "help": "Perform ungapped alignment only",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
    }
   ]
  },
@@ -190,6 +209,16 @@
     "flag": "-dbsize",
     "help": "Effective length of the database",
     "takes_value": true
+   },
+   {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
    },
    {
     "flag": "-task",
@@ -342,12 +371,23 @@
     "takes_value": true
    },
    {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-task",
     "help": "",
     "takes_value": true,
     "default": "tblastn",
     "choices": [
-     "tblastn"
+     "tblastn",
+     "tblastn-fast"
     ]
    },
    {
@@ -357,7 +397,7 @@
    },
    {
     "flag": "-word_size",
-    "help": "Word size for wordfinder algorithm [default: 3]",
+    "help": "Word size for wordfinder algorithm [default: 3; 5 for tblastn-fast]",
     "takes_value": true
    },
    {
@@ -388,7 +428,7 @@
    },
    {
     "flag": "-threshold",
-    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7]",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for tblastn-fast]",
     "takes_value": true
    },
    {
@@ -544,6 +584,16 @@
     "flag": "-dbsize",
     "help": "Effective length of the database",
     "takes_value": true
+   },
+   {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
    },
    {
     "flag": "-evalue",

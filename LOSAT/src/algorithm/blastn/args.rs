@@ -141,6 +141,16 @@ pub struct BlastnArgs {
     // (`BlastnArgs::db_length`).
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
+    // ```c++
+    //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
+    // ```
+    #[arg(
+        long = "show_gis",
+        default_value_t = false,
+        help = "Show NCBI GIs in deflines?"
+    )]
+    pub show_gis: bool,
     #[arg(long, default_value = "megablast", help = "Task to execute: megablast, blastn, dc-megablast or blastn-short", long_help = "Implemented tasks: megablast, blastn, dc-megablast and blastn-short. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2; dc-megablast uses the 11-of-18 coding template, reward 2, penalty -3, gaps 5/2 and two hits in a window of 40; blastn-short uses word size 7, reward 1, penalty -3, gaps 5/2, e-value 1000 and no DUST. An omitted option takes the default of the task.", value_parser = blastn_task)]
     pub task: String,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:708-730
@@ -180,6 +190,47 @@ pub struct BlastnArgs {
     pub word_size: Option<usize>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3169-3181
+    // ```c++
+    //     if (m_MTMode >= 0) {
+    //     	arg_desc.AddDefaultKey(kArgMTMode, "int_value",
+    //                                "Multi-thread mode to use in BLAST search:\n "
+    //                                "0 auto split by database or queries \n "
+    //                                "1 split by queries\n "
+    //                                "2 split by database",
+    //                                CArgDescriptions::eInteger,
+    //                                NStr::IntToString(0));
+    //     	arg_desc.SetConstraint(kArgMTMode,
+    //                                new CArgAllowValuesBetween(0, 2, true));
+    //     	arg_desc.SetDependency(kArgMTMode,
+    //                                CArgDescriptions::eRequires,
+    //                                kArgNumThreads);
+    //     }
+    // ```
+    /// `-mt_mode` is read and has no effect: LOSAT's output is the same at every thread count
+    /// and for every value, and equals NCBI's `-num_threads 1` output (Owner 2026-10-13;
+    /// CLI DECISIONS 5). NCBI's `-mt_mode 1` (and `0` when it chooses to split by queries)
+    /// runs the queries in batches and writes the end of an outfmt 0 report or each XML
+    /// document per batch (`blastn_app.cpp:134-170`, `blastx_app.cpp` `x_RunMTBySplitQuery`);
+    /// that framing is not reproduced. The value must be 0 to 2 and `-num_threads` must be
+    /// given with it, as in NCBI (clap's `requires` ignores a default value).
+    #[arg(long, value_name = "int_value", value_parser = crate::blastinput::value_parsers::ncbi_mt_mode, requires = "num_threads", help = "Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output does not depend on it)")]
+    pub mt_mode: Option<u8>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3354-3363
+    // ```c++
+    //     arg_desc.AddDefaultKey(
+    //             kArgUseIndex, "boolean",
+    //             "Use MegaBLAST database index",
+    //             CArgDescriptions::eBoolean, NStr::BoolToString(kDfltArgUseIndex));
+    //     arg_desc.AddOptionalKey(
+    //             kArgIndexName, "string",
+    //             "MegaBLAST database index name (deprecated; use only for old style indices)",
+    //             CArgDescriptions::eString );
+    // ```
+    /// `-use_index false` (NCBI's default) is accepted and changes nothing; `true` is refused
+    /// by the value parser: LOSAT has no MegaBLAST database index. `-index_name` stays unported.
+    #[arg(long, value_name = "boolean", value_parser = crate::blastinput::value_parsers::blastn_use_index, help = "Use MegaBLAST database index (only false is supported) [default: false]")]
+    pub use_index: Option<bool>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:142-146
     // ```c
     //     	string des = "Expectation value (E) threshold for saving hits. Default = 10";
@@ -365,6 +416,12 @@ pub struct BlastnArgs {
     /// gives the counts files it holds under their names.
     #[arg(skip)]
     pub window_masker_counts: Option<std::sync::Arc<dyn crate::utils::winmask::CountsSource>>,
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// by the command line before the search where a tabular field list shows a name of the
+    /// taxonomy database (`algorithm::blastn::tabular`); `None` elsewhere (`run_local`'s callers
+    /// give no search path: not found). Not a public option.
+    #[arg(skip)]
+    pub tabular_taxdb: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
     // ```c++
     //         arg_desc.AddDefaultKey(kArgStrand, "strand",
@@ -420,6 +477,15 @@ pub struct BlastnArgs {
     /// higher-scoring hits, delete the hit (default: 0, no culling).
     #[arg(long, value_parser = nonnegative_ncbi_integer)]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-917,929-929
+    // ```c++
+    //     arg_desc.AddFlag(kArgUngapped, "Perform ungapped alignment only?", true);
+    // ...
+    //     opt.SetGappedMode(!args[kArgUngapped]);
+    // ```
+    /// Perform ungapped alignment only.
+    #[arg(long)]
+    pub ungapped: bool,
     // NCBI blastn has no such option (the LOSAT-only option was removed, AGENTS.md rule 5).
     #[arg(skip = false)]
     pub verbose: bool,

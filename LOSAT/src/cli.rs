@@ -19,11 +19,32 @@ use crate::algorithm::{blastn, blastp, blastx, psiblast, tblastn, tblastx};
 // const string kArgNumThreads("num_threads");
 // ```
 // LOSAT retains its program subcommand; search parameter names are NCBI names.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3815-3826
+// ```c++
+// string& CArgDescriptions::PrintUsage(string& str, bool detailed) const
+// {
+//     CPrintUsage x(*this);
+//     list<string> arr;
+//
+//     // SYNOPSIS
+//     arr.push_back("USAGE");
+//     x.AddSynopsis(arr, m_UsageName, "    ");
+//
+//     // DESCRIPTION
+//     arr.push_back(kEmptyStr);
+//     x.AddDescription(arr, detailed);
+// ```
+// `-help` and `-h` open with NCBI's two headings, `USAGE` and `DESCRIPTION`: tools that call
+// BLAST+ look for them (BRIG takes a `blastn -help` that prints `USAGE` as BLAST+ found).
+// The options follow in clap's layout.
+const NCBI_HELP_TEMPLATE: &str = "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\n{all-args}";
+
 #[derive(Parser, Debug)]
 #[command(
     name = "losat",
     version,
-    about = "Pure-Rust pairwise alignment with NCBI-verified fixtures and genetic-code exceptions"
+    about = "Pure-Rust pairwise alignment with NCBI-verified fixtures and genetic-code exceptions",
+    help_template = NCBI_HELP_TEMPLATE
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -39,16 +60,21 @@ pub enum Commands {
     //                                   "Translated Query-Protein Subject BLAST"));
     // ```
     /// Translated nucleotide query vs protein subject (local blastx)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastx(blastx::BlastxArgs),
     /// Pairwise nucleotide alignment (megablast [default], blastn)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastn(blastn::BlastnArgs),
     /// Pairwise protein alignment (blastp)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastp(blastp::BlastpArgs),
     /// Pairwise 6-frame translated nucleotide alignment (tblastx)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Tblastx(tblastx::TblastxArgs),
     // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52:
     // static const string kProgram("tblastn"); SetTask("tblastn");
     /// Protein query vs translated nucleotide subject (local tblastn)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Tblastn(tblastn::TblastnArgs),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
     // ```c++
@@ -58,6 +84,7 @@ pub enum Commands {
     //                                           "Position-Specific Iterated BLAST"));
     // ```
     /// Position-Specific Iterated BLAST (psiblast; its first round)
+    #[command(help_template = NCBI_HELP_TEMPLATE)]
     Psiblast(psiblast::PsiblastArgs),
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
     // ```c++
@@ -65,7 +92,8 @@ pub enum Commands {
     //                   "Application to create BLAST databases, version "
     //                   + CBlastVersion().Print());
     // ```
-    /// Create a BLAST database from a FASTA file (makeblastdb, format version 4)
+    /// makeblastdb: create a BLAST database from a FASTA file, format version 4
+    #[command(name = "makeblastdb", help_template = NCBI_HELP_TEMPLATE)]
     Makedb(crate::writedb::makeblastdb::MakedbArgs),
 }
 
@@ -141,6 +169,16 @@ where
             translated.push("--help".into());
             continue;
         }
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:76-77
+        // ```c++
+        // static const char* s_AutoHelp     = "h";
+        // static const char* s_AutoHelpFull = "help";
+        // ```
+        // `-h` is the short usage of every NCBI program (rc 0); clap's `-h` is its short help.
+        if text == "-h" {
+            translated.push("-h".into());
+            continue;
+        }
         if text == "--version" && std::ptr::eq(scope, &command) {
             translated.push(token);
             continue;
@@ -163,7 +201,7 @@ where
             && input.len() == 0
             && matches!(
                 scope.get_name(),
-                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast" | "makedb"
+                "blastn" | "blastp" | "tblastn" | "tblastx" | "psiblast" | "makeblastdb"
             )
         {
             continue;
@@ -335,13 +373,11 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "export_search_strategy"
             | "filtering_db"
             | "gilist"
-            | "h"
             | "html"
             | "import_search_strategy"
             | "index_name"
             | "line_length"
             | "min_raw_gapped_score"
-            | "mt_mode"
             | "negative_gilist"
             | "negative_seqidlist"
             | "negative_taxidlist"
@@ -353,14 +389,11 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "remote"
             | "searchsp"
             | "seqidlist"
-            | "show_gis"
             | "soft_masking"
             | "sorthits"
             | "sorthsps"
             | "taxidlist"
             | "taxids"
-            | "ungapped"
-            | "use_index"
             | "version"
             | "window_masker_taxid"
             | "window_size"
@@ -392,13 +425,11 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "entrez_query"
             | "export_search_strategy"
             | "gilist"
-            | "h"
             | "html"
             | "import_search_strategy"
             | "ipglist"
             | "lcase_masking"
             | "line_length"
-            | "mt_mode"
             | "negative_gilist"
             | "negative_ipglist"
             | "negative_seqidlist"
@@ -409,7 +440,6 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "remote"
             | "searchsp"
             | "seqidlist"
-            | "show_gis"
             | "sorthits"
             | "sorthsps"
             | "subject_besthit"
@@ -456,8 +486,7 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
             | "save_each_pssm"
             | "save_pssm_after_last_round"
             | "sum_stats"
-    ) || (is_unported_blastp_arg(name)
-        && !matches!(name, "db_hard_mask" | "db_soft_mask" | "mt_mode"))
+    ) || (is_unported_blastp_arg(name) && !matches!(name, "db_hard_mask" | "db_soft_mask"))
 }
 
 fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
@@ -486,14 +515,14 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     //     arg_desc->AddFlag("hash_index",
     //                       "Create index of sequence hash values.",
     // ```
-    // makeblastdb's options that LOSAT's makedb does not serve are named in
+    // makeblastdb's options that LOSAT's makeblastdb does not serve are named in
     // its refusal (AGENTS.md rule 2: explicit unsupported errors).
-    if scope.get_name() == "makedb"
+    if scope.get_name() == "makeblastdb"
         && crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.contains(&name)
     {
         return clap::Error::raw(
             ErrorKind::InvalidValue,
-            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's makedb"),
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's makeblastdb"),
         );
     }
     if scope.get_name() == "blastn" && is_unported_blastn_arg(name) {
@@ -545,6 +574,61 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     )
 }
 
+/// The text `-version` prints for `argv` (`losat <program> ... -version ...`), or `None` when
+/// `argv` has no such request.
+///
+/// NCBI's application reads `-version` before its arguments (`ncbi_preparsed_toolkit_word`,
+/// ncbiapp.cpp:926-1001): anywhere before `--`, in an option's value place too
+/// (`blastn -out -version` prints the version), and also when other arguments are invalid.
+/// The text is the two lines of `fVersionInfo | fPackageShort`:
+/// the program name and version, then the package. NCBI's second line names its own
+/// package and build date; LOSAT's names LOSAT and the BLAST+ release its output follows.
+/// `makeblastdb` prints `makeblastdb`, as NCBI's program does. `main` prints the
+/// text on stdout and exits 0, before any argument is parsed. The top level `losat --version`
+/// is clap's and is not read here.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-977
+/// ```c++
+///             } else if ( NStr::strcmp(argv[i], s_ArgVersion) == 0 ) {
+///                 delete[] v;
+///                 // Print VERSION
+///                 cout << GetFullVersion().Print( appname, CVersionAPI::fVersionInfo | CVersionAPI::fPackageShort );
+///                 diag_context.DiscardMessages();
+///                 return 0;
+/// ```
+pub fn ncbi_version_request<I, S>(argv: I) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    let tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+    let command = Cli::command();
+    let program = command.find_subcommand(tokens.get(1)?.to_str()?)?;
+    let name = match program.get_name() {
+        "blastn" => "blastn",
+        "blastp" => "blastp",
+        "blastx" => "blastx",
+        "tblastn" => "tblastn",
+        "tblastx" => "tblastx",
+        "psiblast" => "psiblast",
+        "makeblastdb" => "makeblastdb",
+        _ => return None,
+    };
+    for token in &tokens[2..] {
+        match token.to_str().unwrap_or("") {
+            "--" => return None,
+            "-version" => {
+                return Some(format!(
+                    "{name}: 2.17.0+\n Package: LOSAT {}, output compatible with blast 2.17.0\n",
+                    env!("CARGO_PKG_VERSION")
+                ));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001
 // ```c++
 //         for (int i = 1;  i < argc;  i++) {
@@ -577,7 +661,10 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
 // NCBI's application reads these words anywhere before `--`, also where another option
 // expects its value: `-out -version` prints the version, and `-out -dryrun` loses the
 // value of `-out`. LOSAT rejects each of them (decision D9), so the first one found is
-// rejected there as it is in an option's place, rather than read as the value.
+// rejected there as it is in an option's place, rather than read as the value. The command
+// line never brings `-version` here: `main` prints the version before parsing
+// (`ncbi_version_request`). The Web engine, which parses its options here and has no
+// version to print, refuses it.
 fn ncbi_preparsed_toolkit_word(tokens: &[OsString]) -> Option<&str> {
     for token in tokens {
         let text = token.to_str().unwrap_or("");
@@ -652,12 +739,10 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "entrez_query"
             | "export_search_strategy"
             | "gilist"
-            | "h"
             | "html"
             | "import_search_strategy"
             | "in_pssm"
             | "line_length"
-            | "mt_mode"
             | "negative_gilist"
             | "negative_seqidlist"
             | "negative_taxidlist"
@@ -667,7 +752,6 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "remote"
             | "searchsp"
             | "seqidlist"
-            | "show_gis"
             | "sorthits"
             | "sorthsps"
             | "subject_besthit"
@@ -701,7 +785,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "entrez_query"
             | "export_search_strategy"
             | "gilist"
-            | "h"
             | "html"
             | "import_search_strategy"
             | "lcase_masking"
@@ -716,7 +799,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "remote"
             | "searchsp"
             | "seqidlist"
-            | "show_gis"
             | "sorthits"
             | "sorthsps"
             | "strand"
@@ -743,7 +825,6 @@ fn is_unported_blastx_arg(name: &str) -> bool {
         name,
         "query_loc"
             | "subject_loc"
-            | "show_gis"
             | "line_length"
             | "html"
             | "sorthits"
@@ -771,7 +852,6 @@ fn is_unported_blastx_arg(name: &str) -> bool {
             | "xdrop_gap"
             | "xdrop_gap_final"
             | "parse_deflines"
-            | "mt_mode"
             | "remote"
             | "use_sw_tback"
     )

@@ -1653,7 +1653,7 @@ fn recompute_num_identities_impl<const BLOSUM62: bool>(
             hsp.num_ident = num_ident;
             hsp.num_positives = num_positives;
             hsp.gapopen = gap_opens;
-            hsp.mismatch = alignment_len.saturating_sub(num_ident + gap_letters);
+            hsp.mismatch = alignment_len.saturating_sub(num_ident + gap_letters) as i64;
             hsp.identity = if alignment_len > 0 {
                 (num_ident as f64 * 100.0) / (alignment_len as f64)
             } else {
@@ -1688,7 +1688,7 @@ fn recompute_num_identities_impl<const BLOSUM62: bool>(
         hsp.length = q_span;
         hsp.num_ident = num_ident;
         hsp.num_positives = num_positives;
-        hsp.mismatch = q_span.saturating_sub(num_ident);
+        hsp.mismatch = q_span.saturating_sub(num_ident) as i64;
         hsp.gapopen = 0;
         hsp.identity = if q_span > 0 {
             (num_ident as f64 * 100.0) / (q_span as f64)
@@ -2076,7 +2076,7 @@ pub(crate) fn postprocess_preliminary_hits(
                     hsp.length,
                     hsp.num_ident,
                     hsp.num_positives,
-                    hsp.length.saturating_sub(hsp.num_ident.saturating_add(hsp.mismatch)),
+                    hsp.length as i64 - hsp.num_ident as i64 - hsp.mismatch,
                     hsp.gapopen,
                     hsp.mismatch,
                     hsp.identity,

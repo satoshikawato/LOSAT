@@ -92,7 +92,7 @@ fn pieces(first: usize, count: usize) -> Vec<u8> {
     fasta
 }
 
-/// A nucleotide database of `pieces(first, count)` made with `losat makedb` in the directory
+/// A nucleotide database of `pieces(first, count)` made with `losat makeblastdb` in the directory
 /// `label`, with `extra` arguments (`-max_file_sz` for volumes); returns the database name.
 fn database(label: &str, first: usize, count: usize, extra: &[&str]) -> PathBuf {
     let dir = temp_dir(label);
@@ -100,7 +100,7 @@ fn database(label: &str, first: usize, count: usize, extra: &[&str]) -> PathBuf 
     std::fs::write(&input, pieces(first, count)).unwrap();
     let name = dir.join("pieces");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&input)
         .args(["-dbtype", "nucl"])
@@ -108,10 +108,10 @@ fn database(label: &str, first: usize, count: usize, extra: &[&str]) -> PathBuf 
         .arg(&name)
         .args(extra)
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     name

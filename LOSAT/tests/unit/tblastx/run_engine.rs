@@ -47,7 +47,10 @@ fn db_gencode_controls_local_subject_search_translation() {
         query: query.clone(),
         subject: Some(subject.clone()),
         db: None,
+        taxid_filter: Default::default(),
         dbsize: None,
+        show_gis: false,
+        searchsp: None,
         evalue: 10.0,
         threshold: None,
         matrix: None,
@@ -70,6 +73,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         query_loc: None,
         subject_loc: None,
         archive: None,
+        tabular_taxdb: None,
     };
 
     run(

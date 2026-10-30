@@ -1,4 +1,5 @@
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
+use crate::utils::x87::X87;
 
 use super::protein_options::{gap_costs_row, scoring_matrix_table};
 use super::tables::KarlinParams;
@@ -97,7 +98,7 @@ pub fn lookup_protein_gumbel_params(
     })
 }
 
-// NCBI c++/src/algo/blast/core/boost_erf.c:1-35,59-260 is adapted
+// NCBI c++/src/algo/blast/core/boost_erf.c:1-35,52-255 is adapted
 // from Boost. (C) Copyright John Maddock 2006.
 // Boost Software License - Version 1.0 - August 17th, 2003
 // Permission is hereby granted, free of charge, to any person or organization
@@ -119,7 +120,7 @@ pub fn lookup_protein_gumbel_params(
 // FOR ANY DAMAGES OR OTHER LIABILITY ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
-// NCBI boost_erf.c:76-93,252-255:
+// NCBI boost_erf.c:54-64,252-255:
 // if (z < 0) { ... }
 // double ErfC(double z) { return ErfImpl(z, TRUE); }
 // NCBI blast_stat.c:5216,5223 calls ErfC, not NCBI_ErfC.
@@ -215,7 +216,7 @@ thread_local! {
         std::cell::RefCell::new(vec![(u64::MAX, 0); 4096]);
 }
 
-// NCBI c++/src/algo/blast/core/boost_erf.c:71-249:
+// NCBI c++/src/algo/blast/core/boost_erf.c:52-244:
 // static double ErfImpl(double z, int invert) {
 //   if (z < 0) { if (!invert) return -ErfImpl(-z, invert);
 //     else if (z < -0.5) return 2.0 - ErfImpl(-z, invert);
@@ -235,7 +236,7 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
     }
     let mut result;
     if z < 0.5 {
-        // NCBI boost_erf.c:96-129:
+        // NCBI boost_erf.c:71-110:
         // if (z < 1e-10) result = z * 1.125 + z * c;
         // else result = z * (Y + p / q);
         if z < 1e-10 {
@@ -264,7 +265,7 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
             result = z * (Y + horner_ncbi(&P, zz) / horner_ncbi(&Q, zz));
         }
     } else if (invert && z < 28.0) || (!invert && z < 5.8) {
-        // NCBI boost_erf.c:132-233:
+        // NCBI boost_erf.c:111-231:
         // invert = !invert; result = Y + p / q;
         // result *= expl(-z * z) / z;
         invert = !invert;
@@ -359,7 +360,7 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
         result = y + horner_ncbi(p, x) / horner_ncbi(q, x);
         result = exp_long_double_product_ncbi(result, z);
     } else {
-        // NCBI boost_erf.c:235-240:
+        // NCBI boost_erf.c:232-237:
         // result = 0; invert = !invert;
         result = 0.0;
         invert = !invert;
@@ -374,7 +375,7 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
 /// ```c
 ///             result *= expl(-z * z) / z;
 /// ```
-/// NCBI has no such helper. The long-double `expl(-z * z) / z` above is emulated here in
+/// NCBI has no such helper. The long-double `expl(-z * z)` above is emulated here in
 /// double-double arithmetic, and `DoubleDouble::mul` needs the rounding error of one product.
 /// `a.mul_add(b, -product)` gives it exactly; the Dekker path gives the same number
 /// (see the test `x_dekker_product_error_matches_fused_multiply_add`).
@@ -420,7 +421,7 @@ const X_TWO_POW_900: f64 = f64::from_bits((1023 + 900) << 52);
 //             result *= expl(-z * z) / z;
 // ```
 // Dekker (1971) product error with Veltkamp splitting, used in place of `mul_add` inside
-// the double-double emulation of the long-double `expl(-z * z) / z` above.
+// the double-double emulation of the long-double `expl(-z * z)` above.
 #[inline(always)]
 #[allow(dead_code)]
 fn x_dekker_product_error(a: f64, b: f64, product: f64) -> f64 {
@@ -434,11 +435,13 @@ fn x_dekker_product_error(a: f64, b: f64, product: f64) -> f64 {
     ((a_hi * b_hi - product) + a_hi * b_lo + a_lo * b_hi) + a_lo * b_lo
 }
 
-// NCBI c++/src/algo/blast/core/boost_erf.c:149,175,201,230:
-// result *= expl(-z * z) / z;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
+// ```c
+//             result *= expl(-z * z) / z;
+// ```
 // The argument is binary64, while expl and the following division/product
 // evaluate in C long double before the assignment back to binary64.
-// Double-double arithmetic preserves those intermediate guard bits in Rust.
+// Double-double arithmetic holds expl(-z * z) to more than the 64 bits of a long double.
 #[derive(Clone, Copy)]
 struct DoubleDouble {
     hi: f64,
@@ -471,8 +474,8 @@ impl DoubleDouble {
         //             result *= expl(-z * z) / z;
         // ```
         // Dispatch point of the Wasm Dekker product: the reference path (`mul_add`) is the
-        // double-double product that stands in for the long-double operations of this line. Only
-        // the way the product's rounding error is obtained changes, not its value.
+        // double-double product that stands in for the long-double `expl` of this line. Only the
+        // way the product's rounding error is obtained changes, not its value.
         let error = x_product_error(self.hi, other.hi, product)
             + self.hi * other.lo
             + self.lo * other.hi
@@ -496,8 +499,10 @@ impl DoubleDouble {
     }
 }
 
-// NCBI c++/src/algo/blast/core/boost_erf.c:149,175,201,230:
-// result *= expl(-z * z) / z;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
+// ```c
+//             result *= expl(-z * z) / z;
+// ```
 // Range reduction and the exponential Taylor series reproduce the required
 // long-double precision without a native C or NCBI runtime dependency.
 #[inline]
@@ -513,10 +518,21 @@ fn exp_long_double_product_ncbi(result: f64, z: f64) -> f64 {
     for _ in 0..9 {
         exponential = exponential.mul(exponential);
     }
-    exponential.div_f64(z).mul(DoubleDouble::from_hi(result)).hi
+    // NCBI's x86-64 gcc build evaluates the line in x87 long double (`-z * z` is a double):
+    // expl's 64-bit result, `fdiv` by z rounded to 64 bits, `fmul` by `result` rounded to 64
+    // bits, then the store to the double `result` (53 bits). The 64-bit product can lie exactly
+    // halfway between two doubles, where the store rounds to even and a single rounding of the
+    // exact value may go the other way, so the last three roundings are reproduced. expl is
+    // taken as the 64-bit value nearest the double-double exponential; glibc's expl is not
+    // always correctly rounded, and the result then differs for about 1 argument in 28,000
+    // (docs/evidence/spouge_x87_20261027/manifest.txt).
+    let expl = X87::nearest_to_sum(exponential.hi, exponential.lo);
+    X87::from_f64(result)
+        .mul(expl.div(X87::from_f64(z)))
+        .to_f64()
 }
 
-// NCBI c++/src/algo/blast/core/boost_erf.c:123-127,156-158,181-183:
+// NCBI c++/src/algo/blast/core/boost_erf.c:139-140,167-168,195-196,225-226:
 // p = (((P[last] * x + P[last-1]) * x + ...) * x + P[1]) * x + P[0];
 // q is evaluated in the same order.
 #[inline]
@@ -836,6 +852,129 @@ mod tests {
                 );
             }
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
+    // ```c
+    //             result *= expl(-z * z) / z;
+    // ```
+    // x86-64 NCBI rounds the long-double product to 64 bits and then stores it to the double:
+    // two roundings. For this argument (P_n_F of swissprot blastp Query_17 x P01717.2) the
+    // 64-bit product 0x9.6644bd26f0b6cp-11 lies halfway between two doubles and the store rounds
+    // to even, up, while the exact product lies just below halfway (one rounding gives ...16d).
+    #[test]
+    fn erfc_rounds_the_long_double_product_twice_as_ncbi() {
+        let z = f64::from_bits(0x4000_08CF_53B9_A16E);
+        assert_eq!(erfc_ncbi(z).to_bits(), 0x3F72_CC89_7A4D_E16E);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:207-229
+    // ```c
+    //             static const double Y = 0.5579090118408203125;
+    //             ...
+    //             result *= expl(-z * z) / z;
+    // ```
+    // From z near 25.9 the low part of the double-double exponential is subnormal, from 26.6 its
+    // high part, and from about 27.3 it is zero (NCBI's 80-bit expl is still normal there, and the
+    // stored product is zero all the same). The x87 model gets subnormal and zero operands there:
+    // no panic under the test profile's overflow checks, results at most 1e-290 that do not
+    // increase with z, and zero from 27.3 on. NCBI's bits there are not reproduced (the e-value is
+    // 0.0 either way, docs/evidence/spouge_x87_20261027/manifest.txt).
+    #[test]
+    fn erfc_in_the_underflow_range_of_the_double_double_exponential() {
+        let mut previous = f64::INFINITY;
+        for z in [26.0, 26.5, 26.62, 27.0, 27.2257, 27.3, 27.99] {
+            let r = erfc_ncbi(z);
+            assert!(
+                (0.0..=1e-290).contains(&r) && r <= previous,
+                "ErfC({z}) = {r:e}"
+            );
+            if z >= 27.3 {
+                assert_eq!(r.to_bits(), 0, "ErfC({z})");
+            }
+            previous = r;
+        }
+        for i in 0..20_000 {
+            let z = 25.9 + i as f64 * (2.1 / 20_000.0);
+            let r = erf_impl_ncbi(z, true);
+            assert!((0.0..=1e-290).contains(&r), "ErfC({z}) = {r:e}");
+        }
+    }
+
+    fn scaled_blosum62_11_1() -> (ProteinScoringSpec, KarlinParams) {
+        let spec = ProteinScoringSpec {
+            matrix: ScoringMatrix::Blosum62,
+            gap_open: 11,
+            gap_extend: 1,
+        };
+        let kbp = KarlinParams {
+            lambda: 0.267 / 32.0,
+            k: 0.041,
+            h: 0.14,
+            alpha: 1.9,
+            beta: -30.0,
+        };
+        (spec, kbp)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5223-5229
+    // ```c
+    //     P_n_F = ErfC(-n_F / sqrt(2.0)) / 2.0;
+    //     ...
+    //     e_value = area * k_ * exp(-lambda_ * y_) * db_scale_factor;
+    // ```
+    // swissprot blastp Query_17 (120 letters) x P01717.2 (112 letters), score 6558 of the
+    // matrix scaled by 32: NCBI's e-value 7.11685934590109512e-21 (outfmt 8
+    // `{ 71168593459011, 10, -34 }`) follows from the doubly rounded ErfC above.
+    #[test]
+    fn spouge_stoe_of_swissprot_query_17_x_p01717_has_the_ncbi_bits() {
+        let (spec, kbp) = scaled_blosum62_11_1();
+        let gbp = lookup_protein_gumbel_params(&spec, 186_063_409).unwrap();
+        assert_eq!(
+            blast_spouge_stoe(6558, &kbp, &gbp, 120, 112).to_bits(),
+            0x3BC0_CDE0_A46C_923E
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5216-5229
+    // ```c
+    //     P_m_F = ErfC(-m_F / sqrt(2.0)) / 2.0;
+    //     ...
+    //     e_value = area * k_ * exp(-lambda_ * y_) * db_scale_factor;
+    // ```
+    // The rows of docs/evidence/spouge_x87_20261027 (its manifest.txt): ErfC arguments and
+    // Spouge calls of a random sample where one rounding of the long-double product differs
+    // from NCBI's two.
+    #[test]
+    fn pinned_double_rounding_erfc_and_spouge_calls_match_ncbi_double_bits() {
+        let hex = |field: &str| u64::from_str_radix(field, 16).unwrap();
+        let erfc = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/spouge_x87_20261027/erfc_double_rounding.tsv"
+        ));
+        for row in erfc.lines() {
+            let f: Vec<_> = row.split('\t').collect();
+            let z = f64::from_bits(hex(f[0]));
+            assert_eq!(erfc_ncbi(z).to_bits(), hex(f[1]), "ErfC({z:.17e})");
+        }
+        let (spec, kbp) = scaled_blosum62_11_1();
+        let spouge = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/spouge_x87_20261027/spouge_double_rounding.tsv"
+        ));
+        for row in spouge.lines() {
+            let f: Vec<_> = row.split('\t').collect();
+            let gbp = lookup_protein_gumbel_params(&spec, f[3].parse().unwrap()).unwrap();
+            let actual = blast_spouge_stoe(
+                f[0].parse().unwrap(),
+                &kbp,
+                &gbp,
+                f[1].parse().unwrap(),
+                f[2].parse().unwrap(),
+            );
+            assert_eq!(actual.to_bits(), hex(f[4]), "{row}");
+        }
+        assert_eq!((erfc.lines().count(), spouge.lines().count()), (337, 177));
     }
 
     #[test]

@@ -588,6 +588,9 @@ struct XTripletWindow<'a> {
     r_v: u32,
     num_diff: u32,
     thresholds: &'a [u32],
+    /// No NCBI counterpart: the vector `find_perfect` merges the new perfect intervals into,
+    /// kept with the window between calls (emptied each time) instead of made for each call.
+    x_merged: Vec<PerfectInterval>,
 }
 
 impl<'a> XTripletWindow<'a> {
@@ -616,6 +619,7 @@ impl<'a> XTripletWindow<'a> {
             r_v: 0,
             num_diff: 0,
             thresholds,
+            x_merged: Vec::new(),
         }
     }
 
@@ -848,7 +852,8 @@ impl<'a> XTripletWindow<'a> {
         let mut pos = self.l.saturating_sub(1);
         let mut count = suffix_len;
         let mut read = 0usize;
-        let mut merged: Vec<PerfectInterval> = Vec::new();
+        let mut merged = std::mem::take(&mut self.x_merged);
+        merged.clear();
         let mut inserted = false;
         let old_len = perfect_list.len();
         for idx in suffix_len..self.len {
@@ -895,8 +900,9 @@ impl<'a> XTripletWindow<'a> {
         if inserted {
             merged.extend(perfect_list.iter().skip(read).copied());
             perfect_list.clear();
-            perfect_list.extend(merged);
+            perfect_list.extend(merged.drain(..));
         }
+        self.x_merged = merged;
     }
 }
 

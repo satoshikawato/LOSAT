@@ -66,6 +66,9 @@ pub struct OptionInputs {
     /// The task, its default included (`megablast`, `blastp`, ...).
     pub task: String,
     pub dbsize: Option<i64>,
+    /// `-searchsp`: recorded where `CGenericSearchArgs::ExtractAlgorithmOptions` sets it
+    /// (blast_args.cpp:303-307), else after the options (`writer`).
+    pub searchsp: Option<i64>,
     pub evalue: Option<f64>,
     pub gapopen: Option<i32>,
     pub gapextend: Option<i32>,
@@ -97,6 +100,8 @@ pub struct OptionInputs {
     pub subject_besthit: bool,
     pub window_size: Option<i32>,
     pub ungapped: bool,
+    /// `-no_greedy` (BLASTN): the dynamic programming algorithms are recorded.
+    pub no_greedy: bool,
     pub max_intron_length: i32,
     pub query_gencode: i32,
     pub db_gencode: i32,
@@ -115,6 +120,7 @@ impl OptionInputs {
             program,
             task: task.to_string(),
             dbsize: None,
+            searchsp: None,
             evalue: None,
             gapopen: None,
             gapextend: None,
@@ -139,6 +145,7 @@ impl OptionInputs {
             subject_besthit: false,
             window_size: None,
             ungapped: false,
+            no_greedy: false,
             max_intron_length: 0,
             query_gencode: 1,
             db_gencode: 1,
@@ -388,6 +395,9 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                     }
                     list.set("WordSize", Integer(word_size));
                 }
+                if let Some(searchsp) = inputs.searchsp {
+                    list.set("EffectiveSearchSpace", BigInteger(searchsp));
+                }
                 if let Some(identity) = inputs.perc_identity {
                     list.set("PercentIdentity", Real(identity));
                 }
@@ -407,6 +417,19 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                 }
                 if let Some(reward) = inputs.reward {
                     list.set("MatchReward", Integer(reward));
+                }
+                // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:681-685
+                // ```c++
+                //     if (cmd_line_args.Exist(kArgNoGreedyExtension) &&
+                //         cmd_line_args[kArgNoGreedyExtension]) {
+                //         options.SetGapExtnAlgorithm(eDynProgScoreOnly);
+                //         options.SetGapTracebackAlgorithm(eDynProgTbck);
+                //     }
+                // ```
+                // Both enumerators are 0 (blast_options.h: eDynProgScoreOnly, eDynProgTbck).
+                if inputs.no_greedy {
+                    list.set("GapExtnAlgorithm", Integer(0));
+                    list.set("GapTracebackAlgorithm", Integer(0));
                 }
             }
             Class::Dmb => {

@@ -11,6 +11,7 @@ pub mod record;
 pub mod sam;
 pub mod seqid;
 pub mod serial;
+pub mod tabular;
 pub(crate) mod x_pairwise_par;
 
 pub use outfmt6::*;

@@ -17,6 +17,7 @@ use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::protein_display_score;
 
 use super::blast_engine::{TblastxHsp, TblastxQueryStats};
+use super::hit_collector::{QueryLists, TblastxHspList};
 use super::scoring::{Blosum62Score, TbxScore};
 
 /// The version that NCBI's TBLASTX reports print.
@@ -445,6 +446,21 @@ impl SubjectLetters<'_> {
             subject_row,
         );
     }
+
+    /// The engine's identities of `hsp` (`hsp_engine_counts`; the Seq-align's `num_ident`,
+    /// which the custom tabular reports read where they show `nident` without the rows,
+    /// `tabular`). The identities do not depend on the matrix.
+    pub(crate) fn engine_identities(
+        &self,
+        hsp: &TblastxHsp,
+        query: &[u8],
+        query_code: &GeneticCode,
+        db_code: &GeneticCode,
+        window: &mut Vec<u8>,
+    ) -> usize {
+        self.engine_counts(hsp, query, query_code, db_code, window, Blosum62Score)
+            .0
+    }
 }
 
 /// The nucleotides `(start, number)` of the codons of residues `[from, to)` of `frame` in a
@@ -550,7 +566,7 @@ pub(crate) fn set_displayed_identities<S: TbxScore>(
         let hit = &mut hsp.hit;
         hit.num_ident = identities;
         hit.num_positives = positives;
-        hit.mismatch = hit.length - identities;
+        hit.mismatch = (hit.length - identities) as i64;
         hit.identity = if hit.length > 0 {
             identities as f64 / hit.length as f64 * 100.0
         } else {
@@ -931,7 +947,9 @@ fn lowercase_query_row(
 }
 
 /// Every HSP of the final hit list (in the order of all formats) with its displayed rows,
-/// frames, counts, linked-set size and subject.
+/// frames, counts, linked-set size and subject: the rows made up front (`run_impl::rows_up_front`,
+/// the Web adapter's hit records); otherwise outfmt 0 makes the rows of one window of queries at a
+/// time with the same `PairwiseRows::hit` (`run_impl::write_tblastx_outputs`).
 // Kept out of line: this runs only for outfmt 0 or hit records.
 #[inline(never)]
 ///
@@ -963,6 +981,27 @@ pub(crate) fn pairwise_hits(
     );
     let mut window = Vec::new();
     hits.iter().map(|hsp| rows.hit(hsp, &mut window)).collect()
+}
+
+/// The windows of the queries `0..num_queries` whose outfmt 0 rows are made and written
+/// together (`x_pairwise_par::query_windows` of the estimates of their HSPs' lengths, before any
+/// row is made, with the budget of `x_pool`, `x_pairwise_par::window_bytes`), as BLASTN's
+/// (`blastn::pairwise::pairwise_windows`). `hits` is the final list in report order (queries in
+/// input order).
+#[inline(never)]
+pub(crate) fn pairwise_windows(
+    hits: &[TblastxHsp],
+    num_queries: usize,
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
+) -> Vec<std::ops::Range<usize>> {
+    use crate::report::x_pairwise_par::{query_estimate_of, query_windows, window_bytes};
+    let mut estimates = vec![query_estimate_of(std::iter::empty()); num_queries];
+    for query_hits in hits.chunk_by(|a, b| a.hit.q_idx == b.hit.q_idx) {
+        if let Some(estimate) = estimates.get_mut(query_hits[0].hit.q_idx as usize) {
+            *estimate = query_estimate_of(query_hits.iter().map(|hsp| hsp.hit.length));
+        }
+    }
+    query_windows(&estimates, window_bytes(x_pool))
 }
 
 /// The positives of the outfmt 0 rows `hits` by `matrix`, a matrix other than BLOSUM62, counted
@@ -1150,6 +1189,7 @@ impl<'a> PairwiseRows<'a> {
                 .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()),
             comp_adjust_method: None,
             sum_n: Some(hsp.num),
+            subject_stored_gaps: Vec::new(),
         }
     }
 }
@@ -1247,7 +1287,8 @@ pub(crate) fn write_outfmt7_query_header<W: Write>(
 }
 
 /// Writes the outfmt 6 or 7 rows of the final hit list (in its order); outfmt 7 adds the
-/// block header of every query and, after the last batch, the count of queries.
+/// block header of every query and, with the epilog (`Some` of the queries that earlier calls
+/// wrote, `report_stream`), the count of queries.
 ///
 /// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
 /// ```c
@@ -1271,7 +1312,7 @@ pub(crate) fn write_tabular<W: Write>(
     query_ids: &[Arc<[u8]>],
     subject_ids: &[Arc<[u8]>],
     unsearched: &[bool],
-    epilog: bool,
+    epilog: Option<usize>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> io::Result<()> {
@@ -1319,8 +1360,12 @@ pub(crate) fn write_tabular<W: Write>(
     //     m_Ostream << "# BLAST processed " << num_queries << " queries\n";
     // }
     // ```
-    if comments && epilog {
-        writeln!(writer, "# BLAST processed {} queries", query_titles.len())?;
+    if let (true, Some(queries_before)) = (comments, epilog) {
+        writeln!(
+            writer,
+            "# BLAST processed {} queries",
+            queries_before + query_titles.len()
+        )?;
     }
     Ok(())
 }
@@ -1361,12 +1406,18 @@ pub(crate) fn write_tabular_row<W: Write>(
     )
 }
 
-/// The TBLASTX output formats (`-outfmt` 0, 5, 6, 7, 8, 9, 11, 12, 15 and 16, `tblastx_outfmt`).
+/// The TBLASTX output formats (`-outfmt` 0, 5 to 16 and 20, `tblastx_outfmt`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TblastxOutputFormat {
     Pairwise,
     Tabular,
     TabularWithComments,
+    /// The tabular reports with a field list or a delimiter (outfmt 6 and 7 other than the
+    /// default `std` fields with a tab) and outfmt 10 and 20 (`report::tabular`, through
+    /// `algorithm::tblastx::tabular`). The default outfmt 6 and 7 keep `Tabular` and
+    /// `TabularWithComments`, whose writers (`write_tabular`, the report pool) this report
+    /// never enters.
+    CustomTabular(&'static crate::report::tabular::TabularSpec),
     /// A Seq-annot of Seq-aligns (outfmt 8, 9, 12).
     Seqalign(crate::report::serial::SerialFormat),
     /// BLAST XML (outfmt 5, `tblastx/blast_xml.rs`).
@@ -1379,18 +1430,23 @@ pub(crate) enum TblastxOutputFormat {
 }
 
 impl TblastxOutputFormat {
-    /// Whether the format is a table (outfmt 6, 7).
+    /// Whether the format is a table (outfmt 6, 7, 10 and 20), which reads the tabular subject
+    /// ids.
     pub(crate) fn is_tabular(self) -> bool {
-        matches!(self, Self::Tabular | Self::TabularWithComments)
+        matches!(
+            self,
+            Self::Tabular | Self::TabularWithComments | Self::CustomTabular(_)
+        )
     }
 
     /// Whether the format writes the displayed identity counts of the rows
     /// (`set_displayed_identities`): not the structured formats, which read the engine's counts
-    /// (outfmt 8, 9, 12) or count the rows again themselves (outfmt 5, 15, 16).
+    /// (outfmt 8, 9, 12) or count the rows again themselves (outfmt 5, 15, 16), and not the
+    /// custom tabular reports, which make the rows they show themselves (`tabular`).
     pub(crate) fn reads_displayed_counts(self) -> bool {
         !matches!(
             self,
-            Self::Seqalign(_) | Self::Xml | Self::Xml2(_) | Self::Archive
+            Self::Seqalign(_) | Self::Xml | Self::Xml2(_) | Self::Archive | Self::CustomTabular(_)
         )
     }
 
@@ -1403,7 +1459,34 @@ impl TblastxOutputFormat {
     /// Whether the format writes a query's own warnings to standard error
     /// (`ReportFormat::writes_query_warnings`: not the structured formats).
     pub(crate) fn writes_query_warnings(self) -> bool {
-        self.reads_displayed_counts()
+        !matches!(
+            self,
+            Self::Seqalign(_) | Self::Xml | Self::Xml2(_) | Self::Archive
+        )
+    }
+
+    /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
+    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7, 10 and 20,
+    /// `database::prefetches_subjects`): as the call's first report, the taxonomy database's
+    /// messages of that prefetch go with the query warnings.
+    pub(crate) fn prefetches_subjects(self) -> bool {
+        crate::algorithm::common::database::prefetches_subjects(match self {
+            Self::Pairwise => Some(0),
+            Self::Xml => Some(5),
+            Self::Tabular => Some(6),
+            Self::TabularWithComments => Some(7),
+            // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and 20):
+            // they read the subjects as 6 and 7 do, and show no taxonomy name that the prefetch
+            // would look up (`report::tabular` writes `N/A`; a name of the taxonomy database is
+            // LOSAT's refusal, `tabular`).
+            Self::CustomTabular(spec) => Some(match spec.kind {
+                crate::report::tabular::TabularKind::Commented => 7,
+                _ => 6,
+            }),
+            // The Seq-annots and the archive fetch nothing; XML2 and JSON write the messages
+            // at each `Hit` (`TaxdbPrinter`).
+            Self::Seqalign(_) | Self::Archive | Self::Xml2(_) => None,
+        })
     }
 }
 
@@ -1415,8 +1498,36 @@ impl TblastxOutputFormat {
 ///         string fmt_choice =
 ///             NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
 /// ```
+///
+/// A tabular format with a field list or a delimiter, and every outfmt 10 and 20, is the custom
+/// tabular report (`report::tabular::TabularSpec::of`); the default outfmt 6 and 7 (the `std`
+/// fields with a tab) are `Tabular` and `TabularWithComments`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
+/// ```c++
+///     if (m_FormatType == CFormattingArgs::eTabular ||
+///         m_FormatType == CFormattingArgs::eTabularWithComments ||
+///         m_FormatType == CFormattingArgs::eCommaSeparatedValues ||
+///         m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
+///     ...
+///         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
+///         if(!m_CustomDelim.empty()) {
+///             tabinfo.SetCustomDelim(m_CustomDelim);
+///         }
+/// ```
 pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
-    match crate::blastinput::app::parse_formatting_string(outfmt).map(|choice| choice.number) {
+    let choice = crate::blastinput::app::parse_formatting_string(outfmt);
+    // Only a value with a custom specification, or outfmt 10 or 20, reads the field list.
+    if let Ok(choice) = &choice {
+        if choice.custom() || matches!(choice.number, 10 | 20) {
+            if let Some(spec) = crate::blastinput::app::ReportFormat::from_number(choice.number)
+                .and_then(|format| crate::report::tabular::TabularSpec::of(format, choice))
+            {
+                return TblastxOutputFormat::CustomTabular(spec.intern());
+            }
+        }
+    }
+    match choice.map(|choice| choice.number) {
         Ok(0) => TblastxOutputFormat::Pairwise,
         Ok(7) => TblastxOutputFormat::TabularWithComments,
         Ok(8) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::AsnText),
@@ -1429,80 +1540,6 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
         Ok(14) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Files14),
         Ok(13) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Files13),
         _ => TblastxOutputFormat::Tabular,
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-// ```c
-// typedef struct BlastHSPList {
-//    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-//    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-//                       Set to 0 if not applicable */
-//    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
-//    Int4 hspcnt; /**< Number of HSPs saved */
-//    ...
-//    double best_evalue; /**< Smallest e-value for HSPs in this list. Filled after
-//                           e-values are calculated. Necessary because HSPs are
-//                           sorted by score, but highest scoring HSP may not have
-//                           the lowest e-value if sum statistics is used. */
-// } BlastHSPList;
-// ```
-/// The final HSPs of one query and one subject, as the hit list holds them.
-struct TblastxHspList {
-    oid: u32,
-    hsps: Vec<TblastxHsp>,
-    best_evalue: f64,
-}
-
-impl crate::algorithm::blastn::hsp::HitListEntry for TblastxHspList {
-    fn oid(&self) -> u32 {
-        self.oid
-    }
-
-    fn hsp_count(&self) -> usize {
-        self.hsps.len()
-    }
-
-    fn best_evalue(&self) -> f64 {
-        self.best_evalue
-    }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1739-1749
-    // ```c
-    // static double
-    // s_BlastGetBestEvalue(const BlastHSPList* hsp_list)
-    // {
-    //     int index = 0;
-    //     double best_evalue = (double) INT4_MAX;
-    //
-    //     for (index=0; index<hsp_list->hspcnt; index++)
-    //        best_evalue = MIN(hsp_list->hsp_array[index]->evalue, best_evalue);
-    //
-    //     return best_evalue;
-    // }
-    // ```
-    fn update_best_evalue(&mut self) {
-        let mut best = i32::MAX as f64;
-        for hsp in &self.hsps {
-            if hsp.hit.e_value < best {
-                best = hsp.hit.e_value;
-            }
-        }
-        self.best_evalue = best;
-    }
-
-    fn first_score(&self) -> Option<i32> {
-        self.hsps.first().map(|hsp| hsp.hit.raw_score)
-    }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1452-1454
-    // ```c
-    //       qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-    //             s_EvalueCompareHSPs);
-    // ```
-    fn sort_by_evalue(&mut self) {
-        self.hsps
-            .sort_by(|a, b| crate::common::evalue_compare_hsps(&a.hit, &b.hit));
     }
 }
 
@@ -1542,7 +1579,7 @@ pub(crate) struct HitFilters<'a> {
 
 impl HitFilters<'_> {
     /// The lengths of the contexts (frames) of query `q_idx`, read only by the coverage.
-    fn context_lengths(&self, q_idx: u32) -> [i32; 6] {
+    pub(super) fn context_lengths(&self, q_idx: u32) -> [i32; 6] {
         if self.query_cov_hsp_perc > 0.0 {
             super::hsp_culling::tblastx_context_lengths(self.query_lengths[q_idx as usize])
         } else {
@@ -1552,7 +1589,7 @@ impl HitFilters<'_> {
 
     /// `Blast_HSPListReapByQueryCoverage` on one subject's HSPs; returns whether none is
     /// left (NCBI's collector and culling writer skip an empty list).
-    fn reap_by_query_coverage(
+    pub(super) fn reap_by_query_coverage(
         &self,
         hsps: &mut Vec<TblastxHsp>,
         context_lengths: &[i32; 6],
@@ -1617,48 +1654,29 @@ impl HitFilters<'_> {
 ///
 /// `filters` (`-qcov_hsp_perc`, `-max_hsps`) apply where NCBI applies them
 /// (`HitFilters`).
+///
+/// The search of a query batch runs the same steps on its queries' hit lists as the subjects'
+/// lists come (`hit_collector::QueryLists`, in OID order); this is the reference of the tests,
+/// on the HSPs of a run at once.
+#[cfg(test)]
 pub(crate) fn final_hit_order(
     hits: Vec<TblastxHsp>,
     hitlist_size: usize,
     filters: &HitFilters<'_>,
 ) -> Vec<TblastxHsp> {
-    use crate::algorithm::blastn::hsp::HitList;
-    let mut lists: std::collections::BTreeMap<(u32, u32), Vec<TblastxHsp>> =
+    let mut pairs: std::collections::BTreeMap<(u32, u32), Vec<TblastxHsp>> =
         std::collections::BTreeMap::new();
     for hsp in hits {
-        lists
+        pairs
             .entry((hsp.hit.q_idx, hsp.hit.s_idx))
             .or_default()
             .push(hsp);
     }
-    let mut ordered = Vec::new();
-    let mut lists = lists.into_iter().peekable();
-    while let Some(&((q_idx, _), _)) = lists.peek() {
-        let context_lengths = filters.context_lengths(q_idx);
-        let mut hit_list: HitList<TblastxHspList> = HitList::new(hitlist_size);
-        while let Some(((_, oid), mut hsps)) = lists.next_if(|((q, _), _)| *q == q_idx) {
-            hsps.sort_by(|a, b| crate::common::score_compare_hsps(&a.hit, &b.hit));
-            if filters.reap_by_query_coverage(&mut hsps, &context_lengths) {
-                continue;
-            }
-            hit_list.update(TblastxHspList {
-                oid,
-                hsps,
-                best_evalue: 0.0,
-            });
-        }
-        if filters.max_hsps > 0 {
-            for list in &mut hit_list.hsplist_array {
-                trim_by_max_hsps(&mut list.hsps, filters.max_hsps);
-            }
-        }
-        hit_list.sort_by_evalue();
-        for mut list in hit_list.hsplist_array {
-            crate::algorithm::blastn::hsp::HitListEntry::sort_by_evalue(&mut list);
-            ordered.extend(list.hsps);
-        }
+    let mut lists = QueryLists::new(hitlist_size);
+    for ((q_idx, oid), hsps) in pairs {
+        lists.add(q_idx, oid, hsps, filters);
     }
-    ordered
+    lists.finish(filters)
 }
 
 /// The final HSP list of a run with `-culling_limit` (`culling_limit` > 0) in NCBI's order:
@@ -2192,6 +2210,36 @@ mod tests {
             assert_eq!(format.reads_displayed_counts(), counts, "{outfmt}");
             assert_eq!(format.writes_query_warnings(), counts, "{outfmt}");
         }
+        // The custom tabular reports make their own rows and write the query warnings.
+        for outfmt in ["6 qseqid", "10", "20 std"] {
+            let format = output_format(outfmt);
+            assert!(!format.reads_displayed_counts(), "{outfmt}");
+            assert!(format.writes_query_warnings(), "{outfmt}");
+            assert!(format.is_tabular(), "{outfmt}");
+        }
+        // DBID item T: the formats whose batches' prefetch writes the taxonomy database's
+        // messages (not the Seq-annots, the archive, XML2 and JSON).
+        for (outfmt, prefetches) in [
+            ("0", true),
+            ("5", true),
+            ("6", true),
+            ("7 qseqid", true),
+            ("10", true),
+            ("20 qseqid", true),
+            ("8", false),
+            ("9", false),
+            ("11", false),
+            ("12", false),
+            ("13", false),
+            ("15", false),
+            ("16", false),
+        ] {
+            assert_eq!(
+                output_format(outfmt).prefetches_subjects(),
+                prefetches,
+                "{outfmt}"
+            );
+        }
     }
 
     // NCBI c++/src/algo/blast/api/blast_aux.cpp:825-842 (`Map`): with `-query_loc` a mask
@@ -2253,5 +2301,38 @@ mod tests {
             output_format("7 "),
             TblastxOutputFormat::TabularWithComments
         );
+    }
+
+    // NCBI blast_format.cpp:770-786: every tabular kind goes to `CBlastTabularInfo`; LOSAT's
+    // default 6 and 7 (the `std` fields with a tab) keep `write_tabular` and the report pool.
+    #[test]
+    fn only_a_field_list_a_delimiter_and_10_and_20_take_the_shared_writer() {
+        use crate::report::tabular::TabularKind;
+        for (outfmt, format) in [
+            ("6", TblastxOutputFormat::Tabular),
+            ("6 std", TblastxOutputFormat::Tabular),
+            (" 7 std ", TblastxOutputFormat::TabularWithComments),
+            ("6 -qseqid", TblastxOutputFormat::Tabular),
+            ("6 delim=", TblastxOutputFormat::Tabular),
+            ("0 qseqid", TblastxOutputFormat::Pairwise),
+            ("11 qseqid", TblastxOutputFormat::Archive),
+        ] {
+            assert_eq!(output_format(outfmt), format, "{outfmt}");
+        }
+        for (outfmt, kind, delimiter) in [
+            ("6 qseqid", TabularKind::Tabular, "\t"),
+            ("6 delim=, std", TabularKind::Tabular, ","),
+            ("7 qaccver foo", TabularKind::Commented, "\t"),
+            ("10", TabularKind::Csv, ","),
+            ("10 delim=; std", TabularKind::Csv, ";"),
+            ("20 qseqid", TabularKind::CsvWithHeader, ","),
+        ] {
+            match output_format(outfmt) {
+                TblastxOutputFormat::CustomTabular(spec) => {
+                    assert_eq!((spec.kind, spec.delimiter.as_str()), (kind, delimiter))
+                }
+                other => panic!("{outfmt}: {other:?}"),
+            }
+        }
     }
 }

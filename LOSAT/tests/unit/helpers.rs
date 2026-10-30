@@ -132,6 +132,3 @@ pub fn assert_evalue_close(actual: f64, expected: f64, tolerance: f64) {
 pub fn assert_bit_score_close(actual: f64, expected: f64, epsilon: f64) {
     assert_approx_eq(actual, expected, epsilon);
 }
-
-/// NCBI BLAST reference data and comparison utilities
-pub mod ncbi_reference;

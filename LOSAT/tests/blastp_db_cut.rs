@@ -43,7 +43,6 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
-    ("LOSAT_X_QBATCHPAR", "0"),
     ("LOSAT_X_QDUSTPAR", "0"),
     ("LOSAT_X_QPREPPAR", "0"),
     ("LOSAT_X_RPTSTREAM", "0"),
@@ -64,20 +63,20 @@ struct Run {
 
 /// A protein database of the fixture's subject proteome (`MejoMJNV.faa`, 124 sequences, about 90 KB
 /// of sequence: one block of 1 MiB, about 4 x threads blocks of the cut: 9 at 2 threads, 19 at 4), made with
-/// `losat makedb` in a directory of the test (`label`, which no other test uses); returns the
+/// `losat makeblastdb` in a directory of the test (`label`, which no other test uses); returns the
 /// database name.
 fn subject_database(label: &str) -> PathBuf {
     subject_database_with(label, &[])
 }
 
-/// `subject_database` with `extra` arguments for `losat makedb` (`-max_file_sz` for volumes).
+/// `subject_database` with `extra` arguments for `losat makeblastdb` (`-max_file_sz` for volumes).
 fn subject_database_with(label: &str, extra: &[&str]) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("losat-bpdbcut-{label}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let name = dir.join("MejoMJNV");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
         .args(["-dbtype", "prot"])
@@ -85,10 +84,10 @@ fn subject_database_with(label: &str, extra: &[&str]) -> PathBuf {
         .arg(&name)
         .args(extra)
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     name

@@ -1,0 +1,78 @@
+# TBLASTN 2.17.0+
+# Query: blaTEM-116_NG_050162.1 blaTEM-116 (translation of NG_050162.1)
+# Database: tests/db_search/tfast_amr
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+blaTEM-116_NG_050162.1	contig_1	99.301	286	2	0	1	286	574	1431	0.0	557
+# TBLASTN 2.17.0+
+# Query: blaCTX-M-14_NG_048929.1 blaCTX-M-14 (translation of NG_048929.1)
+# Database: tests/db_search/tfast_amr
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+blaCTX-M-14_NG_048929.1	contig_1	79.725	291	59	0	1	291	3537	4409	1.30e-159	482
+blaCTX-M-14_NG_048929.1	contig_1	52.158	278	132	1	15	291	2864	2031	7.92e-87	273
+# TBLASTN 2.17.0+
+# Query: blaOXA-48_NG_049762.1 blaOXA-48 (translation of NG_049762.1)
+# Database: tests/db_search/tfast_amr
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+blaOXA-48_NG_049762.1	contig_1	91.288	264	23	0	2	265	4897	5688	6.39e-166	499
+# TBLASTN 2.17.0+
+# Query: blaKPC-2_NG_049253.1 blaKPC-2 (translation of NG_049253.1)
+# Database: tests/db_search/tfast_amr
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+blaKPC-2_NG_049253.1	contig_1	100.000	293	0	0	1	293	2894	2016	0.0	557
+blaKPC-2_NG_049253.1	contig_1	52.521	238	112	1	29	266	3633	4343	5.20e-81	256
+# TBLASTN 2.17.0+
+# Query: blaNDM-1_NG_049326.1 blaNDM-1 (translation of NG_049326.1)
+# Database: tests/db_search/tfast_amr
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+blaNDM-1_NG_049326.1	contig_1	100.000	270	0	0	1	270	8591	7782	4.05e-164	494
+# TBLASTN 2.17.0+
+# Query: sul1_NG_048102.1 sul1 (translation of NG_048102.1)
+# Database: tests/db_search/tfast_amr
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+sul1_NG_048102.1	contig_1	100.000	279	0	0	1	279	6322	7158	2.10e-175	527
+# TBLASTN 2.17.0+
+# Query: tet_A__NG_048153.1 tet(A) (translation of NG_048153.1)
+# Database: tests/db_search/tfast_amr
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+tet_A__NG_048153.1	contig_2	100.000	399	0	0	1	399	486	1682	0.0	701
+# TBLASTN 2.17.0+
+# Query: qnrS1_NG_050543.1 qnrS1 (translation of NG_050543.1)
+# Database: tests/db_search/tfast_amr
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qnrS1_NG_050543.1	contig_2	100.000	218	0	0	1	218	2898	2245	4.11e-152	455
+# TBLASTN 2.17.0+
+# Query: erm_B__NG_047797.1 erm(B) (translation of NG_047797.1)
+# Database: tests/db_search/tfast_amr
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+erm_B__NG_047797.1	contig_2	84.898	245	37	0	1	245	3969	3235	7.19e-137	414
+# TBLASTN 2.17.0+
+# Query: vanA_NG_048323.1 vanA (translation of NG_048323.1)
+# Database: tests/db_search/tfast_amr
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+vanA_NG_048323.1	contig_2	100.000	206	0	0	1	206	4713	5330	1.49e-140	429
+# TBLASTN 2.17.0+
+# Query: blaSHV-12_NG_050590.1 blaSHV-12 (translation of NG_050590.1)
+# Database: tests/db_search/tfast_amr
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+blaSHV-12_NG_050590.1	contig_1	64.789	284	100	0	1	284	580	1431	6.64e-127	388
+blaSHV-12_NG_050590.1	contig_1	42.857	266	139	5	3	260	2885	2103	9.62e-64	207
+# TBLASTN 2.17.0+
+# Query: blaOXA-1_NG_049392.1 blaOXA-1 (translation of NG_049392.1)
+# Database: tests/db_search/tfast_amr
+# 0 hits found
+# TBLASTN 2.17.0+
+# Query: aph_3__-Ia_NG_056047.1 aph(3')-Ia (translation of NG_056047.1)
+# Database: tests/db_search/tfast_amr
+# 0 hits found
+# BLAST processed 13 queries

@@ -965,6 +965,68 @@ pub fn compare(a: &ParsedSeqId, b: &ParsedSeqId) -> Sic {
     }
 }
 
+// No NCBI counterpart: a necessary condition of `compare`'s `Yes`, for LOSAT's check that no two
+// sequences of a database can be taken for one where a report joins following hits
+// (`report::db_subject::join_keys`).
+/// Adds to `keys` the keys of `id`: two ids that `compare` finds the same (`Sic::Yes`) share at
+/// least one key, so ids that share none never do (ids that share one need not). A text Seq-id
+/// has its accession and its name in upper case, whatever its alternative (a superset of the
+/// alternatives `compare` compares across); a `pdb` id its molecule; the other alternatives their
+/// alternative and their value, an object id as its number or its string in upper case
+/// (`object_id_match`). The keys are 64-bit hashes of those values.
+pub fn match_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
+    use std::hash::{Hash, Hasher};
+    let mut key = |parts: &[&[u8]]| {
+        let mut hasher = std::hash::DefaultHasher::new();
+        parts.hash(&mut hasher);
+        keys.push(hasher.finish());
+    };
+    let tag_key = |tag: &ObjectId| -> Vec<u8> {
+        match object_id_number(tag) {
+            Some(number) => format!("n{number}").into_bytes(),
+            None => match tag {
+                ObjectId::Str(text) => [b"s".as_slice(), &text.to_ascii_uppercase()].concat(),
+                ObjectId::Id(_) => unreachable!("an integer tag is a number"),
+            },
+        }
+    };
+    match id {
+        ParsedSeqId::Local(tag) => key(&[b"local", &tag_key(tag)]),
+        ParsedSeqId::Gibbsq(number) => key(&[b"gibbsq", &number.to_le_bytes()]),
+        ParsedSeqId::Gibbmt(number) => key(&[b"gibbmt", &number.to_le_bytes()]),
+        ParsedSeqId::Giim(giim) => key(&[b"giim", &giim.id.to_le_bytes()]),
+        ParsedSeqId::Patent(patent) => {
+            let number = match &patent.cit.id {
+                PatentNumber::Number(number) | PatentNumber::AppNumber(number) => number,
+            };
+            key(&[
+                b"patent",
+                &patent.seqid.to_le_bytes(),
+                &patent.cit.country.to_ascii_uppercase(),
+                &number.to_ascii_uppercase(),
+            ])
+        }
+        ParsedSeqId::General(dbtag) => key(&[
+            b"general",
+            &dbtag.db.to_ascii_uppercase(),
+            &tag_key(&dbtag.tag),
+        ]),
+        ParsedSeqId::Gi(gi) => key(&[b"gi", &gi.to_le_bytes()]),
+        ParsedSeqId::Pdb(pdb) => key(&[b"pdb", &pdb.mol]),
+        _ => {
+            let text = id
+                .textseq()
+                .expect("the other alternatives are text Seq-ids");
+            if let Some(accession) = &text.accession {
+                key(&[b"accession", &accession.to_ascii_uppercase()]);
+            }
+            if let Some(name) = &text.name {
+                key(&[b"name", &name.to_ascii_uppercase()]);
+            }
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Patent_seq_id.cpp:53-56
 // ```c++
 // bool CPatent_seq_id::Match(const CPatent_seq_id& psip2) const

@@ -11,11 +11,11 @@ use super::constants::{
     LUT_WIDTH_11_THRESHOLD_10, LUT_WIDTH_11_THRESHOLD_8, MAX_DIRECT_LOOKUP_WORD_SIZE,
     MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN,
     MIN_UNGAPPED_SCORE_MEGABLAST, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, X_DROP_GAPPED_FINAL,
-    X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_NUCL,
+    X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_NUCL, X_DROP_UNGAPPED,
 };
 use super::disc_lookup::DiscWordType;
 use super::lookup::{
-    build_db_word_counts, build_disc_mb_lookup, build_na_lookup, build_pv_direct_lookup,
+    build_db_word_counts, build_disc_mb_lookup_kept, build_na_lookup, build_pv_direct_lookup,
     build_two_stage_lookup_kept, x_mb_lut_keep, NaLookupTable, PvDirectLookup, TwoStageLookup,
 };
 use crate::blastinput::fasta_reader::{FastaRecord, InputRecord};
@@ -49,11 +49,19 @@ pub struct TaskConfig {
     /// list query offsets newest first; the small and standard tables list them in
     /// ascending order.
     pub mb_lookup: bool,
-    pub x_drop_gapped: i32, // Task-specific gapped X-dropoff (blastn: 30, megablast: 25)
-    pub x_drop_final: i32,  // Final traceback X-dropoff (100 for all nucleotide tasks)
-    pub scan_range: usize,  // Off-diagonal scan range (BLAST_SCAN_RANGE_NUCL: 0 for every task)
+    /// The gapped X-dropoff in bits (`-xdrop_gap`, else the task's: blastn 30, megablast 25),
+    /// converted to a raw score once per batch (`scoring.rs` `gap_x_dropoffs`).
+    pub x_drop_gapped: f64,
+    /// The final (traceback) X-dropoff in bits (`-xdrop_gap_final`, else 100 for every task).
+    pub x_drop_final: f64,
+    /// The ungapped X-dropoff in bits (`-xdrop_ungap`, else 20; 0 for megablast, whose raw
+    /// X-drop is then the word cutoff of the context, blast_parameters.c:378-381).
+    pub x_drop_ungapped: f64,
+    /// The off-diagonal range of the second hit (`-off_diagonal_range`, else 0).
+    pub scan_range: usize,
     pub min_diag_separation: i32, // NCBI reference: blast_nucl_options.cpp:239,259 (blastn: 50, megablast: 6)
-    /// The two-hit window (`window_size`): 40 for dc-megablast, 0 (one hit) otherwise.
+    /// The two-hit window (`-window_size`, else the task's: 40 for dc-megablast, 0 (one hit)
+    /// otherwise).
     pub window_size: usize,
     /// The discontiguous template (`mb_template_type`, `mb_template_length`); a length
     /// of 0 is a contiguous word.
@@ -289,7 +297,8 @@ struct TaskDefaults {
     evalue: f64,
     dust: bool,
     greedy: bool,
-    x_drop_gapped: i32,
+    x_drop_gapped: f64,
+    x_drop_ungapped: f64,
     min_diag_separation: i32,
     window_size: usize,
     template_type: DiscWordType,
@@ -307,7 +316,10 @@ fn task_defaults(task: &str) -> TaskDefaults {
             evalue: 10.0,
             dust: true,
             greedy: true,
-            x_drop_gapped: X_DROP_GAPPED_GREEDY,
+            x_drop_gapped: f64::from(X_DROP_GAPPED_GREEDY),
+            // `SetMBInitialWordOptionsDefaults` sets the window only; the calloc'd X-drop
+            // (api/blast_options_local_priv.cpp:54) stays 0.
+            x_drop_ungapped: 0.0,
             min_diag_separation: MIN_DIAG_SEPARATION_MEGABLAST,
             window_size: 0,
             template_type: DiscWordType::Coding,
@@ -322,7 +334,8 @@ fn task_defaults(task: &str) -> TaskDefaults {
             evalue: 10.0,
             dust: true,
             greedy: false,
-            x_drop_gapped: X_DROP_GAPPED_NUCL,
+            x_drop_gapped: f64::from(X_DROP_GAPPED_NUCL),
+            x_drop_ungapped: f64::from(X_DROP_UNGAPPED),
             min_diag_separation: MIN_DIAG_SEPARATION_MEGABLAST,
             window_size: 40,
             template_type: DiscWordType::Coding,
@@ -337,7 +350,8 @@ fn task_defaults(task: &str) -> TaskDefaults {
             evalue: 1000.0,
             dust: false,
             greedy: false,
-            x_drop_gapped: X_DROP_GAPPED_NUCL,
+            x_drop_gapped: f64::from(X_DROP_GAPPED_NUCL),
+            x_drop_ungapped: f64::from(X_DROP_UNGAPPED),
             min_diag_separation: MIN_DIAG_SEPARATION_BLASTN,
             window_size: 0,
             template_type: DiscWordType::Coding,
@@ -352,7 +366,8 @@ fn task_defaults(task: &str) -> TaskDefaults {
             evalue: 10.0,
             dust: true,
             greedy: false,
-            x_drop_gapped: X_DROP_GAPPED_NUCL,
+            x_drop_gapped: f64::from(X_DROP_GAPPED_NUCL),
+            x_drop_ungapped: f64::from(X_DROP_UNGAPPED),
             min_diag_separation: MIN_DIAG_SEPARATION_BLASTN,
             window_size: 0,
             template_type: DiscWordType::Coding,
@@ -505,6 +520,31 @@ pub fn calculate_initial_scan_step(effective_word_size: usize, user_scan_step: u
     }
 }
 
+/// The two-hit window of a run: `-window_size` when given, else the task's (40 for
+/// dc-megablast, 0 otherwise; `task_defaults`).
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:487-497
+/// ```c++
+///     if (args[kArgWindowSize]) {
+///         opt.SetWindowSize(args[kArgWindowSize].AsInteger());
+///     } else {
+///         int window = -1;
+///         BLAST_GetSuggestedWindowSize(opt.GetProgramType(),
+///                                      opt.GetMatrixName(),
+///                                      &window);
+///         if (window != -1) {
+///             opt.SetWindowSize(window);
+///         }
+///     }
+/// ```
+/// BLASTN has no matrix, so no suggested window replaces the task's.
+pub fn determine_window_size(args: &BlastnArgs) -> usize {
+    args.window_size
+        .map_or(task_defaults(&args.task).window_size, |window| {
+            window as usize
+        })
+}
+
 /// Configure task-specific parameters
 pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     let effective_word_size = determine_effective_word_size(args);
@@ -521,18 +561,37 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     // - blastn, blastn-short, dc-megablast: eDynProgScoreOnly (dynamic programming)
     // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:182, 192;
     // disc_nucl_options.cpp:76-84
-    let use_dp = !defaults.greedy;
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:681-685
+    // ```c++
+    //     if (cmd_line_args.Exist(kArgNoGreedyExtension) &&
+    //         cmd_line_args[kArgNoGreedyExtension]) {
+    //         options.SetGapExtnAlgorithm(eDynProgScoreOnly);
+    //         options.SetGapTracebackAlgorithm(eDynProgTbck);
+    //     }
+    // ```
+    let use_dp = !defaults.greedy || args.no_greedy;
 
-    // NCBI BLAST: Task-specific gapped X-dropoff (`task_defaults`)
+    // NCBI BLAST: Task-specific gapped X-dropoff (`task_defaults`), in bits
     // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
-    // DP (blastn, blastn-short, dc-megablast): 30, greedy (megablast): 25
-    let x_drop_gapped = defaults.x_drop_gapped;
+    // DP (blastn, blastn-short, dc-megablast): 30, greedy (megablast): 25; `-xdrop_gap`
+    // replaces it (blast_args.cpp:280-282).
+    let x_drop_gapped = args.xdrop_gap.unwrap_or(defaults.x_drop_gapped);
 
-    // NCBI BLAST: Final traceback X-dropoff (100 for all nucleotide tasks)
+    // NCBI BLAST: Final traceback X-dropoff (100 for all nucleotide tasks), in bits
     // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:146
-    // BLAST_GAP_X_DROPOFF_FINAL_NUCL = 100
-    // Used in traceback phase to extend alignments further than preliminary extension
-    let x_drop_final = X_DROP_GAPPED_FINAL; // 100
+    // BLAST_GAP_X_DROPOFF_FINAL_NUCL = 100; `-xdrop_gap_final` replaces it
+    // (blast_args.cpp:284-286). The raw value is at least the gapped one (`gap_x_dropoffs`).
+    let x_drop_final = args
+        .xdrop_gap_final
+        .unwrap_or(f64::from(X_DROP_GAPPED_FINAL));
+
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:276-278
+    // ```c++
+    //     if (args.Exist(kArgUngappedXDropoff) && args[kArgUngappedXDropoff]) {
+    //         opt.SetXDropoff(args[kArgUngappedXDropoff].AsDouble());
+    //     }
+    // ```
+    let x_drop_ungapped = args.xdrop_ungap.unwrap_or(defaults.x_drop_ungapped);
 
     let scan_step = calculate_initial_scan_step(effective_word_size, args.scan_step);
 
@@ -541,10 +600,21 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     // SetWindowSize(BLAST_WINDOW_SIZE_NUCL);
     // SetOffDiagonalRange(BLAST_SCAN_RANGE_NUCL);
     // ```
-    let scan_range = match args.task.as_str() {
-        "megablast" => SCAN_RANGE_MEGABLAST, // 0
-        _ => SCAN_RANGE_BLASTN,              // 0
-    };
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:518-522
+    // ```c++
+    //     if (args[kArgOffDiagonalRange]) {
+    //         opt.SetOffDiagonalRange(args[kArgOffDiagonalRange].AsInteger());
+    //     } else {
+    //         opt.SetOffDiagonalRange(0);
+    //     }
+    // ```
+    let scan_range = args.off_diagonal_range.map_or(
+        match args.task.as_str() {
+            "megablast" => SCAN_RANGE_MEGABLAST, // 0
+            _ => SCAN_RANGE_BLASTN,              // 0
+        },
+        |range| range as usize,
+    );
 
     // NCBI reference: blast_nucl_options.cpp:239, 259
     // Minimum diagonal separation for HSP containment checking
@@ -580,9 +650,10 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         mb_lookup: false,
         x_drop_gapped,
         x_drop_final,
+        x_drop_ungapped,
         scan_range,
         min_diag_separation,
-        window_size: defaults.window_size,
+        window_size: determine_window_size(args),
         mb_template_type,
         mb_template_length,
     }
@@ -864,11 +935,72 @@ pub fn collect_lowercase_masks(seq: &[u8]) -> Vec<MaskedInterval> {
 // const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking) ? ... : kDfltArgUseLCaseMasking;
 // ReadSequencesToBlast(... use_lcase_masks, subjects, ...);
 // ```
-fn collect_lowercase_masks_for_records<R: InputRecord>(records: &[R]) -> Vec<Vec<MaskedInterval>> {
-    records
-        .iter()
-        .map(|record| collect_lowercase_masks(record.seq()))
+fn collect_lowercase_masks_for_records<L: QueryLetters + ?Sized>(
+    records: &L,
+) -> Vec<Vec<MaskedInterval>> {
+    (0..records.count())
+        .map(|index| records.read(index, collect_lowercase_masks))
         .collect()
+}
+
+/// The letters of a query batch's records for the readers that set the batch up (WindowMasker,
+/// DUST, the lower-case masks, the encoding), one record at a time. No NCBI counterpart (how
+/// LOSAT holds the letters).
+pub(crate) trait QueryLetters: Sync {
+    /// The number of records.
+    fn count(&self) -> usize;
+    /// The number of letters of record `index`.
+    fn length(&self, index: usize) -> usize;
+    /// `read` of the letters of record `index`.
+    fn read<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> T) -> T;
+}
+
+impl<R: InputRecord + Sync> QueryLetters for [R] {
+    fn count(&self) -> usize {
+        self.len()
+    }
+
+    fn length(&self, index: usize) -> usize {
+        self[index].seq().len()
+    }
+
+    fn read<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> T) -> T {
+        read(self[index].seq())
+    }
+}
+
+impl QueryLetters for [&[u8]] {
+    fn count(&self) -> usize {
+        self.len()
+    }
+
+    fn length(&self, index: usize) -> usize {
+        self[index].len()
+    }
+
+    fn read<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> T) -> T {
+        read(self[index])
+    }
+}
+
+/// The reverse complements of `L`'s letters, each made for the reader of one record (`-strand
+/// minus` DUST below).
+struct ReverseComplements<'a, L: ?Sized>(&'a L);
+
+impl<L: QueryLetters + ?Sized> QueryLetters for ReverseComplements<'_, L> {
+    fn count(&self) -> usize {
+        self.0.count()
+    }
+
+    fn length(&self, index: usize) -> usize {
+        self.0.length(index)
+    }
+
+    fn read<T>(&self, index: usize, read: impl FnOnce(&[u8]) -> T) -> T {
+        self.0.read(index, |letters| {
+            read(&super::lookup::reverse_complement(letters))
+        })
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:92-128
@@ -923,9 +1055,9 @@ pub(crate) fn reverse_mask_intervals(
 }
 
 /// Apply DUST filter to query sequences
-pub fn apply_dust_masking<R: InputRecord>(
+pub(crate) fn apply_dust_masking<L: QueryLetters + ?Sized>(
     args: &BlastnArgs,
-    queries: &[R],
+    queries: &L,
     pool: &SearchPool<'_>,
 ) -> Vec<Vec<MaskedInterval>> {
     // NCBI blast_args.cpp:418-420: opt.SetDustFilteringLevel(...);
@@ -975,37 +1107,34 @@ pub fn apply_dust_masking<R: InputRecord>(
         // `plus` and `both` dust the letters as they are.
         let masks: Vec<Vec<MaskedInterval>> =
             if QueryStrand::from_option(&args.strand) == QueryStrand::Minus {
-                let reverse: Vec<Vec<u8>> = queries
-                    .iter()
-                    .map(|record| super::lookup::reverse_complement(record.seq()))
-                    .collect();
-                let seqs: Vec<&[u8]> = reverse.iter().map(Vec::as_slice).collect();
-                super::x_query_dust_par::masks(&seqs, dust_level, dust_window, dust_linker, pool)
+                let reverse = ReverseComplements(queries);
+                super::x_query_dust_par::masks(&reverse, dust_level, dust_window, dust_linker, pool)
                     .into_iter()
-                    .zip(&seqs)
-                    .map(|(masks, seq)| reverse_mask_intervals(&masks, seq.len()))
+                    .enumerate()
+                    .map(|(index, masks)| reverse_mask_intervals(&masks, queries.length(index)))
                     .collect()
             } else {
-                let seqs: Vec<&[u8]> = queries.iter().map(|record| record.seq()).collect();
-                super::x_query_dust_par::masks(&seqs, dust_level, dust_window, dust_linker, pool)
+                super::x_query_dust_par::masks(queries, dust_level, dust_window, dust_linker, pool)
             };
 
         let total_masked: usize = masks
             .iter()
             .map(|m| m.iter().map(|i| i.end - i.start).sum::<usize>())
             .sum();
-        let total_bases: usize = queries.iter().map(|r| r.seq().len()).sum();
+        let total_bases: usize = (0..queries.count())
+            .map(|index| queries.length(index))
+            .sum();
         if args.verbose && total_bases > 0 {
             eprintln!(
                 "DUST masked {} bases ({:.2}%) across {} sequences",
                 total_masked,
                 100.0 * total_masked as f64 / total_bases as f64,
-                queries.len()
+                queries.count()
             );
         }
         masks
     } else {
-        vec![Vec::new(); queries.len()]
+        vec![Vec::new(); queries.count()]
     }
 }
 
@@ -1021,6 +1150,7 @@ pub fn build_lookup_tables<R: InputRecord>(
     subjects_packed: Option<&[Vec<u8>]>,
     approx_table_entries: usize,
     x_keep: Option<&std::sync::Arc<x_mb_lut_keep::Keep>>,
+    x_scan_letters: Option<u64>,
 ) -> (LookupTables, usize) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1231-1344
     // ```c
@@ -1111,7 +1241,7 @@ pub fn build_lookup_tables<R: InputRecord>(
     //                                      counts);
     // ```
     let two_stage_lookup: Option<TwoStageLookup> = if config.mb_template_length > 0 {
-        Some(build_disc_mb_lookup(
+        Some(build_disc_mb_lookup_kept(
             queries_blastna,
             query_offsets,
             config.effective_word_size,
@@ -1119,6 +1249,7 @@ pub fn build_lookup_tables<R: InputRecord>(
             config.mb_template_type,
             query_masks,
             approx_table_entries,
+            x_keep,
         ))
     } else if config.use_two_stage {
         Some(build_two_stage_lookup_kept(
@@ -1132,6 +1263,7 @@ pub fn build_lookup_tables<R: InputRecord>(
             approx_table_entries,
             !config.mb_lookup,
             x_keep,
+            x_scan_letters,
         ))
     } else {
         None
@@ -1201,9 +1333,9 @@ pub fn build_lookup_tables<R: InputRecord>(
 /// The masks of the queries: their DUST masks and, with `-lcase_masking`, their lower-case
 /// letters; with `-window_masker_db` the masks of WindowMasker, which replace both
 /// (`window_masker`). The error is that of the counts file or of the masker.
-pub fn query_masks<R: InputRecord>(
+pub(crate) fn query_masks<L: QueryLetters + ?Sized>(
     args: &BlastnArgs,
-    queries: &[R],
+    queries: &L,
     pool: &SearchPool<'_>,
 ) -> Result<Vec<Vec<MaskedInterval>>, crate::utils::winmask::WinMaskError> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:216-224
@@ -1217,10 +1349,10 @@ pub fn query_masks<R: InputRecord>(
     // After DUST, and `query.SetMaskedRegions(mqr)` (winmask_filter.cpp:311) replaces the
     // query's masks: DUST's and the lower case are not made.
     if let Some(window_masker) = &args.window_masker {
-        return window_masker.batch_masks(
-            queries.iter().map(|record| record.seq()),
-            QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
-        );
+        let minus = QueryStrand::from_option(&args.strand) == QueryStrand::Minus;
+        return (0..queries.count())
+            .map(|index| queries.read(index, |letters| window_masker.masks(letters, minus)))
+            .collect();
     }
     let mut query_masks = apply_dust_masking(args, queries, pool);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
@@ -1276,7 +1408,7 @@ pub fn query_masks<R: InputRecord>(
 /// search use the masked residues, which merging does not change. With `-window_masker_db`
 /// the chunk's `x_CalculateMasks` ends with WindowMasker on the part's letters, which
 /// replaces every mask the part had (`query_masks`).
-pub fn chunk_query_masks<R: InputRecord>(
+pub fn chunk_query_masks<R: InputRecord + Sync>(
     args: &BlastnArgs,
     parts: &[R],
     restricted: Vec<Vec<MaskedInterval>>,
@@ -1374,6 +1506,66 @@ mod tests {
     // ...
     //     SetGapExtnAlgorithm(eDynProgScoreOnly);
     // ```
+    // DI-6: the given options replace the task's values; the defaults stay the handles'
+    // (api/blast_nucl_options.cpp:163-193, blast_args.cpp:276-286,487-489,518-522,681-685).
+    #[test]
+    fn xdrop_window_and_greedy_options_replace_the_task_values() {
+        let config = configure_task(&blastn_args(&[]));
+        assert_eq!(
+            (
+                config.x_drop_gapped,
+                config.x_drop_final,
+                config.x_drop_ungapped
+            ),
+            (25.0, 100.0, 0.0)
+        );
+        assert_eq!(
+            (config.window_size, config.scan_range, config.use_dp),
+            (0, 0, false)
+        );
+        let config = configure_task(&blastn_args(&[
+            "-xdrop_gap",
+            "12.5",
+            "-xdrop_gap_final",
+            "150",
+            "-xdrop_ungap",
+            "7",
+            "-window_size",
+            "40",
+            "-off_diagonal_range",
+            "2",
+            "-no_greedy",
+            "-gapopen",
+            "5",
+            "-gapextend",
+            "2",
+        ]));
+        assert_eq!(
+            (
+                config.x_drop_gapped,
+                config.x_drop_final,
+                config.x_drop_ungapped
+            ),
+            (12.5, 150.0, 7.0)
+        );
+        assert_eq!(
+            (config.window_size, config.scan_range, config.use_dp),
+            (40, 2, true)
+        );
+        let config = configure_task(&blastn_args(&[
+            "-task",
+            "dc-megablast",
+            "-window_size",
+            "0",
+        ]));
+        assert_eq!((config.window_size, config.x_drop_ungapped), (0, 20.0));
+        assert_eq!(
+            determine_window_size(&blastn_args(&["-task", "dc-megablast"])),
+            40
+        );
+        assert_eq!(determine_window_size(&blastn_args(&["-task", "blastn"])), 0);
+    }
+
     #[test]
     fn task_defaults_follow_ncbi_handles() {
         let config = configure_task(&blastn_args(&["-task", "dc-megablast"]));
@@ -1383,7 +1575,8 @@ mod tests {
         );
         assert_eq!((config.gap_open, config.gap_extend), (5, 2));
         assert!(config.use_dp);
-        assert_eq!((config.x_drop_gapped, config.x_drop_final), (30, 100));
+        assert_eq!((config.x_drop_gapped, config.x_drop_final), (30.0, 100.0));
+        assert_eq!(config.x_drop_ungapped, 20.0);
         assert_eq!(config.min_diag_separation, 6);
         assert_eq!(config.window_size, 40);
         assert_eq!(
@@ -1507,7 +1700,7 @@ mod tests {
         let masks = |strand: &str| {
             let args = blastn_args(&["-strand", strand]);
             crate::utils::threading::with_search_pool(1, "blastn", |pool| {
-                Ok(apply_dust_masking(&args, &records, pool))
+                Ok(apply_dust_masking(&args, &records[..], pool))
             })
             .unwrap()
             .remove(0)

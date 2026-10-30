@@ -8,7 +8,7 @@
 //! path where its rule says so (`LOSAT_X_REACH`): LOSAT_X_QSTREAM reading the lengths first, two
 //! threads or more, a file of `LOSAT_X_QSCANPARMIN` bytes or more (0 here, so that a small file
 //! is cut), no `\r` and no reader error. The searches keep LOSAT_X_QSTREAM acting: small batches
-//! (`BATCH_SIZE`) and no LOSAT_X_QBATCHPAR slots (whose window would hold the whole file). Cases:
+//! (`BATCH_SIZE`). Cases:
 //! 240 pieces of two genomes (lower case, `N` runs, a line with digits that the reader warns
 //! about, records without letters and without ids) with dc-megablast and blastn against a subject
 //! file (`-subject`) at one, two and four threads and against a database (`-db`) at four; the same
@@ -25,8 +25,6 @@ const SWITCH: &str = "LOSAT_X_QSCANPAR";
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_QSCANPAR", "0");
 /// Every file is cut, whatever its size (tuning).
 const ANY_SIZE: (&str, &str) = ("LOSAT_X_QSCANPARMIN", "0");
-/// No slots: LOSAT_X_QSTREAM's rule keeps it off where they would read most of the file ahead.
-const NO_SLOTS: (&str, &str) = ("LOSAT_X_QBATCHPAR", "0");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -141,7 +139,7 @@ fn search(
         .args(["-outfmt", "6"])
         .args(["-num_threads", &threads.to_string()])
         .env("BATCH_SIZE", "20000")
-        .envs([NO_SLOTS, ANY_SIZE])
+        .env(ANY_SIZE.0, ANY_SIZE.1)
         .envs(vars.iter().copied())
         .output()
         .expect("run LOSAT");
@@ -164,7 +162,10 @@ fn check(query: &Path, target: [&str; 2], task: &str, threads: &[u32], own: bool
             String::from_utf8_lossy(&expected.2),
             "{what}: standard error"
         );
-        let took = own && n >= 2;
+        // The parts are read with `read_at` of `std::os::unix::fs::FileExt` and need the `parallel`
+        // feature: elsewhere (Windows, WebAssembly) the switch never acts and the sides stay
+        // `(false, true)` (module doc of `x_query_scan_par.rs`).
+        let took = own && n >= 2 && cfg!(all(unix, feature = "parallel"));
         assert_eq!(
             reach.sides(SWITCH),
             (took, !took),
@@ -196,13 +197,13 @@ fn a_database_search_gives_the_same_bytes() {
     std::fs::write(dir.path("set.fna"), set).unwrap();
     let db = dir.path("set").to_str().unwrap().to_string();
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(dir.path("set.fna"))
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
-    assert!(output.status.success(), "makedb");
+        .expect("run losat makeblastdb");
+    assert!(output.status.success(), "makeblastdb");
     check(&query, ["-db", &db], "dc-megablast", &[4], true);
 }
 

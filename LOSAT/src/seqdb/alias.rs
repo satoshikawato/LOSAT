@@ -12,7 +12,7 @@
 //! `[BLAST] BLASTDB`), names inside alias files are looked for there too when
 //! they are found nowhere else, and volumes are recorded under normalised
 //! directory names. `resolve_one_name` takes the path of one database as it
-//! is and looks nowhere else (`losat makedb`).
+//! is and looks nowhere else (`losat makeblastdb`).
 
 use std::collections::VecDeque;
 use std::ffi::OsStr;
@@ -1689,7 +1689,7 @@ pub(super) fn resolve_in(
 // }
 // ```
 // This entry point is for a caller that holds the path of one database, not
-// a list in the syntax above (`losat makedb`, whose output name is one name
+// a list in the syntax above (`losat makeblastdb`, whose output name is one name
 // by makeblastdb's own check): the name is not split, so a space or a double
 // quote in it is a character of the path. NCBI has no such entry point: its
 // reader splits every name it is given.
@@ -1745,7 +1745,7 @@ pub(super) fn resolve_one_name(
 //     }
 // }
 // ```
-fn collect_alias_files(node: &AliasNode, out: &mut std::collections::BTreeSet<String>) {
+pub(super) fn collect_alias_files(node: &AliasNode, out: &mut std::collections::BTreeSet<String>) {
     if let Some(name) = &node.this_name {
         out.insert(name.clone());
     }
@@ -2048,8 +2048,7 @@ pub(super) fn test_read_values(bytes: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
 // alias tree and the alias files of the third. The tests compare it with what
 // NCBI printed.
 /// What `blastdbcmd -info` lists under "Volumes:" for the database `dbname`.
-#[cfg(test)]
-pub(super) fn test_info_volumes(
+pub(super) fn info_volumes(
     dbname: &str,
     seqtype: SeqType,
     search: &SearchPath,

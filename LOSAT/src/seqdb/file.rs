@@ -10,6 +10,16 @@ use std::path::{Path, PathBuf};
 
 use super::SeqDbError;
 
+/// Where `DbFile::read_range_in` puts the bytes it reads.
+enum RangeBuffer {
+    /// A new buffer (`read_range`).
+    New,
+    /// EXPERIMENT (LOSAT_X_BNMAPPED): `x_read_range_mapped`'s buffer.
+    Mapped,
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): the caller's buffer (`x_read_range_into`).
+    Given(Vec<u8>),
+}
+
 /// One open database file (`.pin`, `.psq`, `.phr`, ... ) read by offset.
 #[derive(Debug)]
 pub struct DbFile {
@@ -164,17 +174,34 @@ impl DbFile {
 
     /// The bytes of `start..end` as a new buffer.
     pub fn read_range(&self, start: u64, end: u64) -> Result<Vec<u8>, SeqDbError> {
-        self.read_range_in(start, end, false)
+        self.read_range_in(start, end, RangeBuffer::New)
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_range` into a buffer taken from or sized
     /// by `utils::x_mapped::X_BYTES.reserve` (a mapped buffer from 1 MiB on, given back with
     /// `x_mapped::X_BYTES.give`). No NCBI counterpart: only where the bytes are kept.
     pub fn x_read_range_mapped(&self, start: u64, end: u64) -> Result<Vec<u8>, SeqDbError> {
-        self.read_range_in(start, end, true)
+        self.read_range_in(start, end, RangeBuffer::Mapped)
     }
 
-    fn read_range_in(&self, start: u64, end: u64, mapped: bool) -> Result<Vec<u8>, SeqDbError> {
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP): `read_range` into `buf`, whose bytes it replaces (its
+    /// capacity is kept when it holds the range). No NCBI counterpart: only where the bytes are
+    /// kept.
+    pub fn x_read_range_into(
+        &self,
+        start: u64,
+        end: u64,
+        buf: Vec<u8>,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        self.read_range_in(start, end, RangeBuffer::Given(buf))
+    }
+
+    fn read_range_in(
+        &self,
+        start: u64,
+        end: u64,
+        buffer: RangeBuffer,
+    ) -> Result<Vec<u8>, SeqDbError> {
         if end < start {
             return Err(SeqDbError::Format {
                 path: self.path.clone(),
@@ -196,13 +223,22 @@ impl DbFile {
             path: self.path.clone(),
             message: format!("byte range {start}..{end} does not fit in memory"),
         })?;
-        let mut buf = if mapped {
-            let mut buf = Vec::new();
-            crate::utils::x_mapped::X_BYTES.reserve(&mut buf, len);
-            buf.resize(len, 0u8);
-            buf
-        } else {
-            vec![0u8; len]
+        let mut buf = match buffer {
+            RangeBuffer::New => vec![0u8; len],
+            RangeBuffer::Mapped => {
+                let mut buf = Vec::new();
+                crate::utils::x_mapped::X_BYTES.reserve(&mut buf, len);
+                buf.resize(len, 0u8);
+                buf
+            }
+            RangeBuffer::Given(mut buf) => {
+                // Only the bytes past its length are filled before the read writes them all.
+                if buf.capacity() < len {
+                    buf.reserve_exact(len - buf.len());
+                }
+                buf.resize(len, 0u8);
+                buf
+            }
         };
         self.read_exact_at(&mut buf, start)?;
         Ok(buf)

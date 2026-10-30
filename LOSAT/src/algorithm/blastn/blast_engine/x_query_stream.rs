@@ -1,8 +1,7 @@
 //! EXPERIMENT (LOSAT_X_QSTREAM, in the strict set since 2026-10-18: on unless it is `0`): blastn
 //! reads the records of each query batch from the query file when the batch loop of
-//! `run_in_pool` takes the batch (or a LOSAT_X_QBATCHPAR slot searches it ahead of the loop), as
-//! NCBI reads its query batches one at a time, instead of holding the records of the whole query
-//! file for the whole search. It saves memory (the records of the batches not in flight) and costs
+//! `run_in_pool` takes the batch, as NCBI reads its query batches one at a time, instead of
+//! holding the records of the whole query file for the whole search. It saves memory (the records of the batches not in flight) and costs
 //! one more parse of the query file; where it wins and where it loses on the workstation is in its
 //! entry of `docs/agents/diagnostics.md`.
 //!
@@ -32,8 +31,7 @@
 //! Without the switch `search_cli` reads every record of the query file before the search
 //! (`read_queries`) and the loop cuts its batches from them. LOSAT needs, before its first batch,
 //! what NCBI learns only while it reads: the length of every record (the batch planner and size
-//! mixer, LOSAT_X_QBATCHPAR's plan and rule, LOSAT_X_RPTSTREAM's checks, `-query_loc`'s skipped
-//! records) and how the reading ends (an `eEOF`, a reader error, LOSAT's rejection of a Seq-id
+//! mixer, LOSAT_X_RPTSTREAM's checks, `-query_loc`'s skipped records) and how the reading ends (an `eEOF`, a reader error, LOSAT's rejection of a Seq-id
 //! line), whose message comes in the batch that NCBI reads it in. With the switch the file is read
 //! twice:
 //! - the first reading is today's reading, on the same source and at the same place (after
@@ -47,14 +45,10 @@
 //!   that comes before the first output today, comes from the same values at the same place;
 //! - the second reading is a new source over a second handle of the same open file (`try_clone`),
 //!   at the position where the first started, read forward only as far as the batches need: the
-//!   loop takes its batch's records when it reaches the batch (`Queries::batch`), and a slot gets
-//!   those of the batch it searches ahead (`Queries::slot_records`). The records read but not yet
-//!   taken by the loop wait in a window of chunks, each a run of consecutive records read at once
-//!   (`read_to`): a slot's records are read into a chunk of their own (the records before them
-//!   into another), which the slot shares with the window and the loop takes as it is when it
-//!   reaches that batch, so a record is held once; a request that is not exactly one chunk (a
-//!   mispredicted batch, `-query_loc`'s cut records) gets a copy. The loop's batch is held until
-//!   the batch is done (a slot may still read from it), then dropped.
+//!   loop takes its batch's records when it reaches the batch (`Queries::batch`). The records read
+//!   wait in a window of chunks, each a run of consecutive records read at once (`read_to`), which
+//!   the loop takes when it reaches their batch. The loop's batch is held until the batch is done,
+//!   then dropped.
 //!
 //! Why the records are the same: the reader is a function of the bytes it reads and of its
 //! configuration (the same `ReaderConfig`; the local-ID counter starts at 1 in a new reader and
@@ -67,16 +61,14 @@
 //! first reading read without an error, so it never meets the error or the `eEOF`. Each record's
 //! length is compared with the first reading's: a record whose length changed, a file that ends
 //! early or a reader error (the file changed between the two readings) ends the search with
-//! LOSAT's error, and every later reading of the search returns it (`State::failed`, also after a
-//! slot's reading failed for a batch the loop never takes); a change that keeps every record's
-//! length is read as the new content (as NCBI, which reads per batch, would read it). The batches
-//! are cut from the first reading's
-//! lengths by the same code as before (`next_ranged_batch`), so they have the same boundaries, the
-//! same records in the same order, the same cut letters (`FastaRecord::cut` at the placement of
-//! `query_input_of`), the same lower case letters (the `-lcase_masking` masks), the same local ids
-//! and titles (every outfmt's ids and titles are made from them), and the same reader warnings per
-//! record (written per batch, as before). DUST and the rest of the search read only the batch's
-//! records.
+//! LOSAT's error, and every later reading of the search returns it (`State::failed`); a change
+//! that keeps every record's length is read as the new content (as NCBI, which reads per batch,
+//! would read it). The batches are cut from the first reading's lengths by the same code as
+//! before (`next_ranged_batch`), so they have the same boundaries, the same records in the same
+//! order, the same cut letters (`FastaRecord::cut` at the placement of `query_input_of`), the same
+//! lower case letters (the `-lcase_masking` masks), the same local ids and titles (every outfmt's
+//! ids and titles are made from them), and the same reader warnings per record (written per batch,
+//! as before). DUST and the rest of the search read only the batch's records.
 //!
 //! Where the switch does not act (`Off`; the records are read before the search as without it):
 //! where the reports are written after the loop (LOSAT_X_RPTSTREAM off: every record is then
@@ -96,14 +88,10 @@
 //! - a file shorter than twice the largest query batch (`Batch`, `Rule::batch_letters`: `BATCH_SIZE`,
 //!   or the `CBatchSizeMixer` maximum, 999,000 letters for blastn and 4,999,000 for dc-megablast):
 //!   the batch in flight holds most of the file anyway. The file's bytes are compared with the
-//!   batch's letters (titles and line ends make the file a little longer than its letters);
-//! - where the slots of LOSAT_X_QBATCHPAR may run (LOSAT_X_QBATCHPAR on, the conditions of
-//!   `run.rs`'s `x_qbatch_par_off`: `-subject`, two threads or more, fewer subject units than
-//!   threads; and a budget: LOSAT_X_QBATCHPARMEM when set, else the default one of
-//!   `x_qbatch_par::ncbi_splits_by_queries`, or a slot count set), a file shorter than
-//!   twice what their default budget holds (`Slots`), `SLOT_WINDOW_BYTES_PER_THREAD` bytes per thread
-//!   beyond the first: the slots read most of the file ahead of the loop anyway (blastn against 3 Mb
-//!   at 16 threads: a 40 MB query file -12 MiB at 1.012 of the time, 15 MB -1.6 MiB at 1.014).
+//!   batch's letters (titles and line ends make the file a little longer than its letters).
+//!
+//! Until 2026-10-28 the rule had a third reason, `slots`, for the query-batch slots of
+//! LOSAT_X_QBATCHPAR, which were removed then.
 //!
 //! Elsewhere the second reading saved 3-77 MiB at 0.994-1.006 of the time (blastn and
 //! dc-megablast).
@@ -115,16 +103,12 @@
 //! on but not acting for the search (one of its refusals, `x_rpt_stream::check`); there the memory
 //! is that of the records read before the search. With LOSAT_X_RPTSTREAM acting they are not kept.
 //!
-//! With `LOSAT_X_STATS` and the switch, `[X_STATS] QSTREAM
-//! records= read= batches= slots= slot_copies= slot_records= kept= stale= scan_s= read_s=
-//! peak_window= off=` (records: the input records; read: the records read again; off: why the
-//! switch did not act, `none` when it did; slots: the slots' requests, slot_copies of them answered
-//! with a copy of slot_records records, the others with a shared chunk; kept: the searched records
-//! the loop kept for a writer after their batch, 0 where LOSAT_X_RPTSTREAM writes each batch's
-//! reports; stale: slot requests for records the loop had passed, answered with QBATCHPAR's
-//! `Cancelled`; scan_s: the first reading; read_s: the second, summed over the threads that read;
-//! peak_window: the most records read ahead of the loop at once). The line is printed for searches
-//! of the command line only.
+//! With `LOSAT_X_STATS` and the switch, `[X_STATS] QSTREAM records= read= batches= kept= scan_s=
+//! read_s= peak_window= off=` (records: the input records; read: the records read again; off: why
+//! the switch did not act, `none` when it did; kept: the searched records the loop kept for a
+//! writer after their batch, 0 where LOSAT_X_RPTSTREAM writes each batch's reports; scan_s: the
+//! first reading; read_s: the second; peak_window: the most records read ahead of the loop at
+//! once). The line is printed for searches of the command line only.
 
 use std::collections::VecDeque;
 use std::fs::File;
@@ -170,9 +154,6 @@ pub(super) enum Off {
     Megablast,
     /// The file is shorter than twice the largest query batch (`Rule::off`).
     Batch,
-    /// The slots of LOSAT_X_QBATCHPAR would read at least half of the file ahead anyway
-    /// (`Rule::off`).
-    Slots,
 }
 
 impl Off {
@@ -185,7 +166,6 @@ impl Off {
             Off::Io => "io",
             Off::Megablast => "megablast",
             Off::Batch => "batch",
-            Off::Slots => "slots",
         }
     }
 }
@@ -284,13 +264,6 @@ impl Opening {
     }
 }
 
-/// No NCBI counterpart (when LOSAT reads the records only): the query bytes that the default
-/// budget of LOSAT_X_QBATCHPAR's slots holds in flight per thread beyond the first, about 2 Mb
-/// of query in both profiles (`x_qbatch_par::allowance_mib` over the per-letter memory of a batch
-/// in flight: 96 MiB at about 50 bytes a blastn letter, 28 MiB at about 15 bytes a megablast or
-/// dc-megablast letter).
-const SLOT_WINDOW_BYTES_PER_THREAD: u64 = 2_000_000;
-
 /// No NCBI counterpart (when LOSAT reads the records only): what the rule of LOSAT_X_QSTREAM
 /// reads of a search (`Rule::off`).
 #[derive(Clone, Copy, Debug)]
@@ -300,30 +273,18 @@ pub(super) struct Rule {
     /// The letters of the largest query batch of the search: `BATCH_SIZE` when it is set, else
     /// the `CBatchSizeMixer` maximum of the task (`run.rs`, `x_query_batch_letters`).
     pub(super) batch_letters: u64,
-    /// `-num_threads`.
-    pub(super) threads: usize,
-    /// Whether the slots of LOSAT_X_QBATCHPAR may run: the switch on, the conditions of
-    /// `x_qbatch_par_off` (`run.rs`), and a budget (LOSAT_X_QBATCHPARMEM when it is set, else
-    /// `x_qbatch_par::ncbi_splits_by_queries`) or a slot count (LOSAT_X_QBATCHPARSLOTS).
-    pub(super) slots_may_run: bool,
 }
 
 impl Rule {
     /// Why the switch does not act on a regular query file of `file_bytes` bytes (the module's
     /// rule), or `None` where it acts: `-task megablast`; a file shorter than twice the largest
-    /// query batch; where the slots may run, a file shorter than twice the bytes their default
-    /// budget holds (`SLOT_WINDOW_BYTES_PER_THREAD` per thread beyond the first).
+    /// query batch.
     fn off(self, file_bytes: u64) -> Option<Off> {
         if self.megablast {
             return Some(Off::Megablast);
         }
         if file_bytes < self.batch_letters.saturating_mul(2) {
             return Some(Off::Batch);
-        }
-        let window =
-            SLOT_WINDOW_BYTES_PER_THREAD.saturating_mul(self.threads.saturating_sub(1) as u64);
-        if self.slots_may_run && file_bytes < window.saturating_mul(2) {
-            return Some(Off::Slots);
         }
         None
     }
@@ -407,7 +368,7 @@ struct State {
     /// The input records read again.
     next: usize,
     /// The input records `base..next`, read and not taken by the loop, in chunks of consecutive
-    /// records (first input record, records), which the slots that search them share.
+    /// records (first input record, records).
     base: usize,
     chunks: VecDeque<(usize, Arc<Vec<FastaRecord>>)>,
     /// The loop's batch: its first input record and its input records (up to `base`).
@@ -421,10 +382,6 @@ struct State {
 #[derive(Default)]
 struct Stats {
     batches: u64,
-    slots: u64,
-    slot_copies: u64,
-    slot_records: u64,
-    stale: u64,
     /// The searched records the loop kept for a writer after their batch (`Queries::note_kept`).
     kept: u64,
     read: Duration,
@@ -547,13 +504,9 @@ impl Drop for Store {
         let (read, stats) = stats;
         if std::env::var_os("LOSAT_X_STATS").is_some() {
             eprintln!(
-                "[X_STATS] QSTREAM records={records} read={read} batches={} slots={} slot_copies={} slot_records={} kept={} stale={} scan_s={:.4} read_s={:.4} peak_window={} off={off}",
+                "[X_STATS] QSTREAM records={records} read={read} batches={} kept={} scan_s={:.4} read_s={:.4} peak_window={} off={off}",
                 stats.batches,
-                stats.slots,
-                stats.slot_copies,
-                stats.slot_records,
                 stats.kept,
-                stats.stale,
                 scan.as_secs_f64(),
                 stats.read.as_secs_f64(),
                 stats.peak_window,
@@ -603,7 +556,7 @@ impl State {
     }
 
     /// A chunk boundary at input record `at` (`base <= at <= next`): the chunk across it is cut in
-    /// two, its records moved (copied while a slot still shares the chunk).
+    /// two, its records moved (copied while shared).
     fn split(&mut self, at: usize) {
         let Some(position) = self
             .chunks
@@ -691,21 +644,6 @@ impl State {
         self.failed = Some(message.clone());
         Err(anyhow::anyhow!(message))
     }
-
-    /// Input record `ordinal`, read and not yet dropped (in the loop's batch or a chunk).
-    fn record(&self, ordinal: usize) -> &FastaRecord {
-        if ordinal >= self.base {
-            let at = self.chunks.partition_point(|(start, _)| *start <= ordinal) - 1;
-            let (start, records) = &self.chunks[at];
-            &records[ordinal - start]
-        } else {
-            let (start, records) = self
-                .current
-                .as_ref()
-                .expect("an input record of the loop's batch");
-            &records[ordinal - start]
-        }
-    }
 }
 
 /// The query records of a search: read before it (the off path), or read batch by batch from
@@ -721,26 +659,6 @@ pub(super) enum Queries<'a> {
     /// EXPERIMENT (LOSAT_X_BNQDROP): the records read before the search, which the loop takes out
     /// batch by batch (`x_query_drop.rs`).
     Taken(&'a super::x_query_drop::Store),
-}
-
-/// The records a LOSAT_X_QBATCHPAR slot searches: those read before the search, a chunk of the
-/// records read again (shared with the window and the loop), or a copy.
-pub(super) enum SlotRecords<'a> {
-    Borrowed(&'a [FastaRecord]),
-    Shared(Arc<Vec<FastaRecord>>),
-    Owned(Vec<FastaRecord>),
-}
-
-impl std::ops::Deref for SlotRecords<'_> {
-    type Target = [FastaRecord];
-
-    fn deref(&self) -> &[FastaRecord] {
-        match self {
-            SlotRecords::Borrowed(records) => records,
-            SlotRecords::Shared(records) => records,
-            SlotRecords::Owned(records) => records,
-        }
-    }
 }
 
 /// The records of one batch of the loop: its input records (skipped ones included) and its
@@ -926,8 +844,7 @@ impl<'a> Queries<'a> {
     }
 
     /// The loop is done with its batch that ends at input record `input_end` (its reports are
-    /// written, or kept): its records are dropped (a slot that wants them now searches a batch
-    /// the loop has passed).
+    /// written, or kept): its records are dropped.
     pub(super) fn done(&self, input_end: usize) {
         if let Queries::Streamed(store) = self {
             let mut state = store.acting().lock();
@@ -939,67 +856,6 @@ impl<'a> Queries<'a> {
                 state.current = None;
             }
         }
-    }
-
-    /// The searched records `searched` for a LOSAT_X_QBATCHPAR slot: borrowed from the records
-    /// read before the search; read again, the chunk that holds exactly them (shared, without
-    /// `-query_loc`: the records gap before them are read into a chunk of their own, so the slots
-    /// of consecutive batches each get one), or a copy. `None` when the loop has passed their first
-    /// input record (the loop never takes a batch it has passed, so the slot's search of it is
-    /// cancelled).
-    pub(super) fn slot_records(&self, searched: Range<usize>) -> Result<Option<SlotRecords<'a>>> {
-        let store = match *self {
-            Queries::Records {
-                searched: records, ..
-            } => return Ok(Some(SlotRecords::Borrowed(&records[searched]))),
-            Queries::Taken(store) => return Ok(store.copy(searched).map(SlotRecords::Owned)),
-            Queries::Streamed(store) => store,
-        };
-        if searched.is_empty() {
-            return Ok(Some(SlotRecords::Owned(Vec::new())));
-        }
-        let acting = store.acting();
-        let input_lengths = &acting.query_input.input_lengths;
-        let first = acting.query_input.ordinal(searched.start);
-        let last = acting.query_input.ordinal(searched.end - 1) + 1;
-        let mut state = acting.lock();
-        let held_from = state
-            .current
-            .as_ref()
-            .map_or(state.base, |(start, _)| *start);
-        if first < held_from {
-            state.stats.stale += 1;
-            return Ok(None);
-        }
-        state.read_to(first, input_lengths)?;
-        state.read_to(last, input_lengths)?;
-        state.stats.slots += 1;
-        let shared = if acting.ranged || first < state.base {
-            None
-        } else {
-            state.split(first);
-            state.split(last);
-            state
-                .chunks
-                .iter()
-                .find(|(start, records)| *start == first && start + records.len() == last)
-                .map(|(_, records)| Arc::clone(records))
-        };
-        let records = match shared {
-            Some(records) => SlotRecords::Shared(records),
-            None => {
-                let copy: Vec<FastaRecord> = searched
-                    .clone()
-                    .map(|index| {
-                        acting.searched(state.record(acting.query_input.ordinal(index)), index)
-                    })
-                    .collect();
-                state.stats.slot_copies += 1;
-                state.stats.slot_records += copy.len() as u64;
-                SlotRecords::Owned(copy)
-            }
-        };
-        Ok(Some(records))
     }
 
     /// The searched records of the batches before searched query `start`, for a writer that
@@ -1325,8 +1181,8 @@ mod tests {
         text
     }
 
-    /// The batches of the second reading in `sizes` records (cycled), with the slots' copies of
-    /// the next records and a request the loop has passed: every record equals the first's.
+    /// The batches of the second reading in `sizes` records (cycled): every record equals the
+    /// first's.
     fn read_in_batches(
         path: &Path,
         old: &QueryRecords,
@@ -1350,10 +1206,6 @@ mod tests {
             let end = (start + sizes[turn % sizes.len()]).min(count);
             turn += 1;
             let searched = input.searched_in(start..end);
-            // A slot gets records ahead of the loop (read into the window first).
-            let ahead = input.searched_in(end..(end + 3).min(count));
-            let copy = queries.slot_records(ahead.clone()).unwrap().unwrap();
-            assert_eq!(&*copy, &searched_old[ahead.clone()], "{path:?}");
             let batch = queries.batch(start..end, searched.clone()).unwrap();
             assert_eq!(batch.input(), &old.records[start..end], "{path:?}");
             assert_eq!(
@@ -1361,16 +1213,6 @@ mod tests {
                 &searched_old[searched.clone()],
                 "{path:?}"
             );
-            // A slot of this batch (or a mispredicted one starting here) copies from it.
-            let copy = queries.slot_records(searched.clone()).unwrap().unwrap();
-            assert_eq!(&*copy, &searched_old[searched.clone()], "{path:?}");
-            if searched.start > 0 {
-                // A batch before this one: the loop never takes it.
-                assert!(queries
-                    .slot_records(searched.start - 1..searched.start)
-                    .unwrap()
-                    .is_none());
-            }
             drop(batch);
             queries.done(end);
             start = end;
@@ -1404,50 +1246,6 @@ mod tests {
             warned >= 10 && failed >= 5 && long >= 5,
             "{warned} {failed} {long}"
         );
-    }
-
-    /// The slots of consecutive batches, asked out of order, each get one chunk of their own,
-    /// shared and not copied; the loop takes the very chunk a slot searched; a request across
-    /// chunks gets a copy; every record equals the first reading's.
-    #[test]
-    fn slots_share_the_chunks_the_loop_takes() {
-        let mut bytes = Vec::new();
-        for index in 0..12 {
-            bytes.extend_from_slice(format!(">r{index} title\nACGTTGCA{index}\nGGCC\n").as_bytes());
-        }
-        let file = TempFile::new("chunks", &bytes);
-        let old = old(&file.0);
-        let (store, _) = store(&file.0, None);
-        let queries = Queries::Streamed(&store);
-        let shared = |records: &SlotRecords<'_>| match records {
-            SlotRecords::Shared(chunk) => Arc::clone(chunk),
-            _ => panic!("a shared chunk"),
-        };
-        let late = queries.slot_records(6..9).unwrap().unwrap();
-        let middle = queries.slot_records(3..6).unwrap().unwrap();
-        assert_eq!(&*late, &old.records[6..9]);
-        assert_eq!(&*middle, &old.records[3..6]);
-        let (late, middle) = (shared(&late), shared(&middle));
-        let first = queries.batch(0..3, 0..3).unwrap();
-        assert_eq!(first.input(), &old.records[0..3]);
-        drop(first);
-        queries.done(3);
-        let second = queries.batch(3..6, 3..6).unwrap();
-        match &second {
-            BatchRecords::Read { input, .. } => assert!(Arc::ptr_eq(input, &middle)),
-            BatchRecords::Borrowed { .. } | BatchRecords::Taken(_) => panic!("records read again"),
-        }
-        drop(second);
-        queries.done(6);
-        // Across the chunk a slot still shares (6..9) and the next records: a copy.
-        let across = queries.slot_records(7..10).unwrap().unwrap();
-        assert!(matches!(across, SlotRecords::Owned(_)));
-        assert_eq!(&*across, &old.records[7..10]);
-        drop(late);
-        let third = queries.batch(6..12, 6..12).unwrap();
-        assert_eq!(third.input(), &old.records[6..12]);
-        let state = store.acting().lock();
-        assert_eq!((state.stats.slots, state.stats.slot_copies), (3, 1));
     }
 
     /// The warnings of every record read again (a search that reads its batches and searches
@@ -1485,16 +1283,16 @@ mod tests {
         assert!(error.contains("changed while LOSAT read it"), "{error}");
     }
 
-    /// A read error in a slot (a record whose length changed) fails every later reading: the
-    /// loop's next batch is LOSAT's error, not a batch with records missing (the slot's records
-    /// before the failed one are lost, and the reader is past it).
+    /// A read error (a record whose length changed) fails every later reading: the loop's next
+    /// call is LOSAT's error again, not a batch with records missing (the records before the
+    /// failed one are lost, and the reader is past it).
     #[test]
-    fn a_read_error_in_a_slot_fails_the_loops_next_batch() {
+    fn a_read_error_fails_every_later_reading() {
         let mut bytes = Vec::new();
         for index in 0..6 {
             bytes.extend_from_slice(format!(">r{index}\nACGT\n").as_bytes());
         }
-        let file = TempFile::new("slot_error", &bytes);
+        let file = TempFile::new("read_error", &bytes);
         let (store, _) = store(&file.0, None);
         let mut changed = Vec::new();
         for index in 0..6 {
@@ -1507,18 +1305,18 @@ mod tests {
         assert_eq!(first.input().len(), 1);
         drop(first);
         queries.done(1);
-        let slot = queries
-            .slot_records(2..5)
+        let failed = queries
+            .batch(1..4, 1..4)
             .err()
-            .expect("the slot's error")
+            .expect("the reading's error")
             .to_string();
-        assert!(slot.contains("record 4: 3 letters"), "{slot}");
+        assert!(failed.contains("record 4: 3 letters"), "{failed}");
         let error = queries
             .batch(1..4, 1..4)
             .err()
-            .expect("the loop's error")
+            .expect("the error again")
             .to_string();
-        assert_eq!(error, slot);
+        assert_eq!(error, failed);
     }
 
     /// The loop's batch is released when the loop is done with it: no chunk of the window and no
@@ -1621,79 +1419,40 @@ mod tests {
     const NO_RULE: Rule = Rule {
         megablast: false,
         batch_letters: 0,
-        threads: 1,
-        slots_may_run: false,
     };
 
-    /// The rule: off for `-task megablast`, for a file shorter than twice the largest batch, and,
-    /// where the slots may run, for a file shorter than twice their window (2,000,000 bytes per
-    /// thread beyond the first); the files of v4-D's ws windows (1,775 cDNAs 5,398,904 bytes,
-    /// 3,492 cDNAs 10,779,147, 5,000 cDNAs 15,440,261, 40 MB 40,005,015, 31,168 cDNAs 96,191,719).
+    /// The rule: off for `-task megablast` and for a file shorter than twice the largest batch; the
+    /// files of v4-D's ws windows (1,775 cDNAs 5,398,904 bytes, 3,492 cDNAs 10,779,147, 5,000 cDNAs
+    /// 15,440,261, 40 MB 40,005,015, 31,168 cDNAs 96,191,719).
     #[test]
-    fn the_rule_follows_the_task_the_batch_and_the_slots_window() {
+    fn the_rule_follows_the_task_and_the_batch() {
         const BLASTN: u64 = 999_000;
         const DC: u64 = 4_999_000;
-        let rule = |megablast, batch_letters, threads, slots_may_run| Rule {
+        let rule = |megablast, batch_letters| Rule {
             megablast,
             batch_letters,
-            threads,
-            slots_may_run,
         };
         assert_eq!(NO_RULE.off(0), None);
-        // megablast: off at any size, with or without slots.
-        for (bytes, threads, slots) in [
-            (5_398_904, 16, false),
-            (96_191_719, 16, true),
-            (1, 1, false),
-        ] {
-            assert_eq!(
-                rule(true, DC, threads, slots).off(bytes),
-                Some(Off::Megablast)
-            );
+        // megablast: off at any size.
+        for bytes in [5_398_904, 96_191_719, 1] {
+            assert_eq!(rule(true, DC).off(bytes), Some(Off::Megablast));
         }
-        // The batch: blastn off below 1,998,000 bytes, dc-megablast below 9,998,000 (named before
-        // the slots), BATCH_SIZE 4,000 below 8,000.
-        assert_eq!(
-            rule(false, BLASTN, 1, false).off(1_997_999),
-            Some(Off::Batch)
-        );
-        assert_eq!(rule(false, BLASTN, 1, false).off(1_998_000), None);
-        assert_eq!(rule(false, BLASTN, 16, false).off(5_398_904), None);
-        assert_eq!(rule(false, DC, 16, false).off(5_398_904), Some(Off::Batch));
-        assert_eq!(rule(false, DC, 16, true).off(5_398_904), Some(Off::Batch));
-        assert_eq!(rule(false, DC, 4, false).off(9_997_999), Some(Off::Batch));
-        assert_eq!(rule(false, DC, 4, false).off(9_998_000), None);
-        assert_eq!(rule(false, DC, 16, false).off(96_191_719), None);
-        assert_eq!(rule(false, 4_000, 4, false).off(7_999), Some(Off::Batch));
-        assert_eq!(rule(false, 4_000, 4, false).off(8_000), None);
-        // The slots (blastn's batch): 16 threads, a window of 30 MB, off below 60 MB.
-        for bytes in [15_440_261, 40_005_015, 59_999_999] {
-            assert_eq!(rule(false, BLASTN, 16, true).off(bytes), Some(Off::Slots));
-            assert_eq!(rule(false, BLASTN, 16, false).off(bytes), None);
+        // The batch: blastn off below 1,998,000 bytes, dc-megablast below 9,998,000, BATCH_SIZE
+        // 4,000 below 8,000.
+        assert_eq!(rule(false, BLASTN).off(1_997_999), Some(Off::Batch));
+        assert_eq!(rule(false, BLASTN).off(1_998_000), None);
+        for bytes in [5_398_904, 10_779_147, 15_440_261, 40_005_015, 96_191_719] {
+            assert_eq!(rule(false, BLASTN).off(bytes), None);
         }
-        assert_eq!(rule(false, BLASTN, 16, true).off(60_000_000), None);
-        assert_eq!(rule(false, DC, 16, true).off(96_191_719), None);
-        // 8 threads: off below 28 MB; 4 threads: below 12 MB; 2 threads: below 4 MB; one thread
-        // has no window.
-        assert_eq!(rule(false, BLASTN, 8, true).off(40_005_015), None);
-        assert_eq!(
-            rule(false, BLASTN, 8, true).off(27_999_999),
-            Some(Off::Slots)
-        );
-        assert_eq!(rule(false, BLASTN, 4, true).off(15_440_261), None);
-        assert_eq!(
-            rule(false, BLASTN, 4, true).off(10_779_147),
-            Some(Off::Slots)
-        );
-        assert_eq!(rule(false, BLASTN, 2, true).off(10_779_147), None);
-        assert_eq!(rule(false, BLASTN, 1, true).off(1_998_000), None);
+        assert_eq!(rule(false, DC).off(5_398_904), Some(Off::Batch));
+        assert_eq!(rule(false, DC).off(9_997_999), Some(Off::Batch));
+        assert_eq!(rule(false, DC).off(9_998_000), None);
+        assert_eq!(rule(false, DC).off(96_191_719), None);
+        assert_eq!(rule(false, 4_000).off(7_999), Some(Off::Batch));
+        assert_eq!(rule(false, 4_000).off(8_000), None);
         // The ends saturate.
-        assert_eq!(
-            rule(false, u64::MAX, 1, false).off(u64::MAX - 1),
-            Some(Off::Batch)
-        );
-        assert_eq!(rule(false, u64::MAX, 1, false).off(u64::MAX), None);
-        assert_eq!(rule(false, 0, usize::MAX, true).off(0), Some(Off::Slots));
-        assert_eq!(rule(false, 0, usize::MAX, true).off(u64::MAX), None);
+        assert_eq!(rule(false, u64::MAX).off(u64::MAX - 1), Some(Off::Batch));
+        assert_eq!(rule(false, u64::MAX).off(u64::MAX), None);
+        assert_eq!(rule(false, 0).off(0), None);
     }
 }

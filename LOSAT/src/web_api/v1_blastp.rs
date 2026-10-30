@@ -8,9 +8,7 @@ use anyhow::{bail, Context, Result};
 use bio::io::fasta;
 
 use super::v1_bio::from_bio;
-use crate::algorithm::blastp::blast_engine::{
-    blastp_tabular_field, check_options, run_local_with, V1Checks,
-};
+use crate::algorithm::blastp::blast_engine::{check_options, run_local_with, V1Checks};
 use crate::algorithm::blastp::BlastpArgs;
 use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -97,10 +95,29 @@ pub(super) fn run_web_pair(
     run_web_pair_records(args, &queries, &subjects, "", "")
 }
 
+/// The tabular fields that ABI v1's BLASTP wrote (before line CLI C2 moved BLASTP to the shared
+/// tabular writer, which writes every one of NCBI's fields): its arguments are frozen (plan TD-1),
+/// so a field outside them stays its error.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:47-198
+/// ```c++
+/// const SFormatSpec sc_FormatSpecifiers[kNumTabularOutputFormatSpecifiers] = {
+///     SFormatSpec("qseqid",
+///                 "Query Seq-id",
+///                 eQuerySeqId),
+/// ```
+const V1_TABULAR_FIELDS: [&str; 30] = [
+    "qseqid", "qacc", "qaccver", "qlen", "sseqid", "sacc", "saccver", "slen", "qstart", "qend",
+    "sstart", "send", "qseq", "sseq", "evalue", "bitscore", "score", "length", "pident", "nident",
+    "mismatch", "positive", "gapopen", "gaps", "ppos", "qframe", "sframe", "frames", "btop",
+    "stitle",
+];
+
 /// ABI v1's checks of a BLASTP request, whose arguments, formats and errors are frozen
 /// (plan TD-1): the options are checked before the output format, and a tabular field that
-/// LOSAT's BLASTP does not write is an error, as in v1 before S08+ moved BLASTP to NCBI's
-/// application layer (which reads `-outfmt` first and ignores a token that is not a field).
+/// ABI v1's BLASTP did not write (`V1_TABULAR_FIELDS`) is an error, as in v1 before
+/// S08+ moved BLASTP to NCBI's application layer (which reads `-outfmt` first and ignores a
+/// token that is not a field).
 fn check_web_v1_request(args: &BlastpArgs) -> Result<()> {
     check_options(args)?;
     let (format, fields) = OutputFormat::parse(&args.outfmt).map_err(anyhow::Error::msg)?;
@@ -109,9 +126,7 @@ fn check_web_v1_request(args: &BlastpArgs) -> Result<()> {
             bail!("blastp outfmt 0 does not accept custom field lists");
         }
         for token in fields.split_whitespace() {
-            if !token.eq_ignore_ascii_case("std")
-                && !matches!(blastp_tabular_field(token), Ok(Some(_)))
-            {
+            if !token.eq_ignore_ascii_case("std") && !V1_TABULAR_FIELDS.contains(&token) {
                 bail!("unsupported blastp tabular field '{token}'");
             }
         }

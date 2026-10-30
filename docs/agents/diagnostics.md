@@ -21,7 +21,7 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   `_mm*_fnm*`, `vfmaq_*`, `vfmsq_*`), or the Wasm `relaxed-simd` feature (its `relaxed_madd`
   fuses or not depending on the engine). The Wasm builds enable `+simd128` only.
 - **One fused multiply-add**, `f64::mul_add` in `stats/spouge.rs::x_product_error`: the exact
-  rounding error of a product in the double-double emulation of the long-double line
+  rounding error of a product in the double-double emulation of `expl` in the long-double line
   `result *= expl(-z * z) / z` of NCBI's `boost_erf.c`. The other call is its test
   `x_dekker_product_error_matches_fused_multiply_add`. `mul_add` rounds once (IEEE 754
   fusedMultiplyAdd) on every target, so an instruction and a library routine give the same bits.
@@ -225,7 +225,9 @@ LOSAT_X_NEWTONEXACT_PROF
 - `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.
 - `LOSAT_WASI_PRESPAWN=auto|N` (Node threaded runner; `auto` when unset since
   2026-10-18, `0` boots none) boot N thread workers (`auto`: `-num_threads` - 1)
-  before `_start`; same output, extra `standby_*` debug events. See
+  before `_start`; with `auto`, a spawn that finds none left boots the next
+  `-num_threads` workers together (`standby_refill` event); same output, extra
+  `standby_*` debug events. See
   `LOSAT/tests/README.md`, "Threading contract gates".
 - `LOSAT_WASI_RECYCLE=0|1` (Node threaded runner, reactors; `1` when unset since
   2026-10-18) keep the thread workers between calls; a returned thread's worker
@@ -308,16 +310,17 @@ count of the set anywhere, so that two pull requests that each add a switch do n
 
 ```bash
 export LOSAT_X_BNCSR=1
+export LOSAT_X_BNCSRPACK=1
 export LOSAT_X_BNDBCUT=1
 export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNDCONE=1
-export LOSAT_X_BNEIGHTSLOTS=1
 export LOSAT_X_BNFEWSUBJ=1
 export LOSAT_X_BNHLGROW=1
 export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
 export LOSAT_X_BNQDROP=1
 export LOSAT_X_BNQPACK=1
+export LOSAT_X_BNSEEDLISTS=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BNTABPAR=1
@@ -326,6 +329,7 @@ export LOSAT_X_BNUNGAPCOUNT=1
 export LOSAT_X_BPCLUT=1
 export LOSAT_X_BPCLUTSCANBF=1
 export LOSAT_X_BPDBCUT=1
+export LOSAT_X_BPDBKEEP=1
 export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
 export LOSAT_X_BPFFILL=1
@@ -334,8 +338,12 @@ export LOSAT_X_BPFSEED=1
 export LOSAT_X_BPFSTAGE=1
 export LOSAT_X_BPGAP=1
 export LOSAT_X_BPGAP16=1
+export LOSAT_X_BPGAPBAND=1
 export LOSAT_X_BPHITBF=1
+export LOSAT_X_BPHITSFLAT=1
+export LOSAT_X_BPIHPOOL=1
 export LOSAT_X_BPLISTEDLEAN=1
+export LOSAT_X_BPLK16=1
 export LOSAT_X_BPLKDROP=1
 export LOSAT_X_BPLKPAHEAD=1
 export LOSAT_X_BPLKPFLAT=1
@@ -352,11 +360,13 @@ export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
 export LOSAT_X_BPREDOWINEXPAND=1
 export LOSAT_X_BPSEGWIN=4096
+export LOSAT_X_BPSTRIPEFILL=1
 export LOSAT_X_BPSUBJMETA=1
 export LOSAT_X_BPSUBJRUN=1
 export LOSAT_X_BPUNGAPSENT=1
 export LOSAT_X_BXBUILDPAR=1
 export LOSAT_X_BXCAPFILL=4
+export LOSAT_X_BXCHUNKCROSS=1
 export LOSAT_X_BXCHUNKFLOW=1
 export LOSAT_X_BXCROSS=1
 export LOSAT_X_BXCROSSDEFER=1
@@ -369,16 +379,18 @@ export LOSAT_X_BXEVALEMPTY=1
 export LOSAT_X_BXFLOW=1
 export LOSAT_X_BXHITBF=1
 export LOSAT_X_BXKAONCE=1
+export LOSAT_X_BXKAPPAFIT=1
 export LOSAT_X_BXLUTPOOL=1
 export LOSAT_X_BXPOOLN1=1
 export LOSAT_X_BXSCANBYTE=1
 export LOSAT_X_BXSUBJFLOW=1
+export LOSAT_X_BXTASKRES=1
 export LOSAT_X_BXUNGAPSENT=1
 export LOSAT_X_BXUNITCAP=8
 export LOSAT_X_CTXO1=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
-export LOSAT_X_DCTWOSLOTS=1
+export LOSAT_X_DCSEEDLEAN=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DIAGLV2=1
 export LOSAT_X_DISCLUTPAR=1
@@ -391,7 +403,9 @@ export LOSAT_X_DPWINDOW=1
 export LOSAT_X_FOLDLEAN=1
 export LOSAT_X_GREEDYROWFUSE=1
 export LOSAT_X_MB24=1
+export LOSAT_X_MBCSR=1
 export LOSAT_X_MBFILL=1
+export LOSAT_X_MBHITPF=1
 export LOSAT_X_MBLUTKEEP=1
 export LOSAT_X_MBLUTONCE=1
 export LOSAT_X_MBLUTPREFAULT=1
@@ -404,7 +418,6 @@ export LOSAT_X_PAIRPARMERGE=1
 export LOSAT_X_PAIRPARN1=1
 export LOSAT_X_PAIRPARNA=1
 export LOSAT_X_PAIRWISEPAR=1
-export LOSAT_X_QBATCHPAR=1
 export LOSAT_X_QDUSTPAR=1
 export LOSAT_X_QGROUPPAR=1
 export LOSAT_X_QPREPPAR=1
@@ -416,15 +429,19 @@ export LOSAT_X_SEEDCOMPACT=1
 export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNDBSTREAM=1
+export LOSAT_X_TBNDIAGPACK=1
 export LOSAT_X_TBNFLOWHELP=1
 export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNKEEPFEW=1
+export LOSAT_X_TBNLINKCTX=1
 export LOSAT_X_TBNLINKSETS=1
+export LOSAT_X_TBNLUTLEAN=1
 export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNPAIRCAP=1
 export LOSAT_X_TBNREAPIDX=1
 export LOSAT_X_TBNREDOLPT=1
 export LOSAT_X_TBNSCANBYTE=1
+export LOSAT_X_TBNSCANRESUME=1
 export LOSAT_X_TBNSTAGEDROP=1
 export LOSAT_X_TBNSTORE=1
 export LOSAT_X_TBNUNGAP=1
@@ -773,7 +790,7 @@ Same values, faster computation:
   NEON2); the fuzz tests against the scalar NCBI loops run every family in both layouts (20,000 cases),
   and `nibble_trace_keeps_every_result` compares long problems in both. The rule (conditional): a
   search's scratch takes the codes when it is made on a thread of a Rayon pool, that is in a search on
-  two threads or more (also the one-thread pools of the blastn query-batch slots); a one-thread search
+  two threads or more; a one-thread search
   (no pool) keeps one byte per cell, because there the packing cost time and the saving is one trace.
   Workstation, node 1, against dev a806eaa5 (per-pair median wall, max RSS MiB, `v4-B/results/b16e/`,
   same output): Sakai x EDL933 `-subject` dc-megablast 16 threads x0.962 (8 pairs), 613 -> 414; blastn 16
@@ -1116,8 +1133,11 @@ Rebuilding less:
 - TBNSSIDE (graduated 2026-10-22; no variable; conditional: its rule stays) tblastn: subject
   six-frame translations once per search of four or more
   query batches (20,000 query residues per batch), up to 256 MiB of translated residues
-  (`XSubjectSide::KEEP_FROM_BATCHES`, `KEEP_LIMIT`). The batches go to `x_search_batches` at any
-  thread count. A
+  (`XSubjectSide::KEEP_FROM_BATCHES`, `KEEP_LIMIT`; whether a plan is kept is decided from the
+  subject's length by the first batch that reaches it, `XSubjectSide::keeps`, and a plan that is
+  not kept is made per use as the plans of a search without a side are: since 2026-10-28 without
+  residues when its first frame has 1 MiB or more, `TBNUNITXLATE`). The batches go to
+  `x_search_batches` at any thread count. A
   search of one to three batches keeps none and translates a subject again for each batch, as
   NCBI does (`blast_engine.c:627-631`): one batch has no later reader, and two or three give
   the time the kept translations would save for their memory. Timed with two and three batches
@@ -1334,7 +1354,7 @@ Rebuilding less:
   per-thread excess this switch does not touch).
 - `LOSAT_X_BNDCONE=1` (BLASTN `-task dc-megablast`, speed; in the strict set from the pull request that added it
   (perf/dc-one-thread, evidence at the end of this entry): on unless it is `0`; acts only where a chunk in scope has
-  no pool of two threads or more: a search on one thread, and a one-thread slot of `LOSAT_X_QBATCHPAR`; nothing while
+  no pool of two threads or more: a search on one thread; nothing while
   `LOSAT_X_PAIRPARDISC` / `LOSAT_X_PAIRPARDISCARR` is `0`) the seed stages of `LOSAT_X_PAIRPARDISC` (diagonal hash) and
   `LOSAT_X_PAIRPARDISCARR` (diagonal array) also run without a pool: a chunk in their scope (a subject this thread searches by itself, unmasked, `scan_range` 0, no
   debug or trace) is scanned in their strips on this thread and folded in strip order, as the runs of their shadows
@@ -1360,7 +1380,7 @@ Rebuilding less:
   MiB; NCBI at one thread 313.4 and 151.0 MiB), the other cases within 1 MiB. After the review fixes (6b9281b6, v4-A15
   pr7, the same dev): one thread on the 31,168 cDNAs x0.723, 236 cDNAs x0.836, the 7 cDNAs x0.844, 236 cDNAs against
   15,000 200-bp pieces of the genome as `-subject` x0.994 (16 pairs), megablast with a coding 18 template (a
-  discontiguous table) x1.000; the one-thread slots of `LOSAT_X_QBATCHPAR` (4 threads with `LOSAT_X_QBATCHPARSLOTS=4`)
+  discontiguous table) x1.000; the one-thread slots of `LOSAT_X_QBATCHPAR` (4 threads with `LOSAT_X_QBATCHPARSLOTS=4`; slots, removed on 2026-10-28)
   on the 31,168 / 1,775 cDNAs x0.726 / x0.732 (peak RSS +13 MiB on the 31,168, the four slots' strips), by default at
   4 threads x1.001 / x0.999; megablast at one thread x0.9997 with the switch at `0` x0.9996 (the layout difference
   above is gone in this binary), 16 threads unchanged.
@@ -1818,6 +1838,157 @@ Rebuilding less:
   (the zero fill), cycles x1.000 (0.961-1.060) where the A/A arm read x1.001 (0.939-1.034), x0.999-1.002 in the 4
   quietest rounds (load 8-16); WSSV 8 rounds instructions x0.999998, cycles x1.002 (0.986-1.008), A/A x0.999
   (0.985-1.010); minor faults 13.2k -> 5.2k (human x yeast).
+- `LOSAT_X_BPIHPOOL=1` (BLASTP, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
+  added it (perf/bp-ih-pool, v4-D12 s21-s22, `DECISIONS` 62-63): on unless it is `0`) a subject's array of initial hits
+  (`BlastpSubjectScratch::init_hsps`, the ungapped hits `blastp_save_init_hsp` saves) past NCBI's first array size lives
+  in one pool shared by the threads (`blastp/blast_engine/x_ih_pool.rs`). NCBI starts each thread's list at
+  `MIN_INIT_HITLIST_SIZE` (100) and doubles it with `realloc` (`blast_extend.c:221-224`, `336-341`); the list is reset,
+  never shrunk, for each subject, so each thread keeps the largest array any of its subjects needed. The scratch did
+  the same, and each worker's malloc arena also kept the arrays its vector outgrew, so the preliminary stage held the
+  sum over the threads of each thread's largest (UniRef50 q100 at 32 threads: 53 MiB of capacity, of which a subject
+  used at most 0.2 MiB at any time). With the switch on the scratch holds an array of 100; a subject that fills it
+  continues in an array of twice the length from the pool (the smallest that holds it, or a new one) and the scratch's
+  array goes to the pool; a pool array that fills is exchanged for a larger one from the pool, or doubled in place when
+  the pool has none; at the subject's end the array goes back to the pool and the scratch takes an array of 100 from
+  it. The hits, their order and every value are those of the scratch's own vector (lib tests
+  `hits_through_the_pool_equal_the_scratch_vector`, `threads_sharing_the_pool_keep_their_own_hits`;
+  `tests/blastp_ih_pool.rs` compares reports with `=0`: `-subject` and `-db`, 1 and 4 threads, a subject past 100,
+  200 and 400 hits). At one thread the pool holds the largest array, as the scratch did. `LOSAT_TIMING=1` prints
+  `[TIMING] x_bpihpool: pooled=<n>` per search (the arrays that continued through the pool). After a search's
+  preliminary stage the pool's arrays are freed (`x_ih_pool::release`, next to the lookup table's drop), as the
+  subject loop's scratches freed theirs; without that, Swiss-Prot q100 at one thread, whose peak comes after the
+  preliminary stage, kept the largest array. The comparison before the push changes the code of the fused two-hit
+  loop: `=0` runs the previous allocation path, not the dev base's instructions (x0.9954-0.9959 of them, as the default).
+  Evidence 2026-10-28 (v4-D12 s22, workstation, heads 4bab83fa and fece4d68 (with `release`) on dev 4403cc12; arms default,
+  `=0`, and the dev base built the same way; every report identical): peak RssAnon of UniRef50 q100 `-evalue 0.001`
+  at 32 threads (node 1, 50 ms samples, runs alternated) 158.5, 160.0, 161.4, 162.1 MiB against `=0` 183.1, 185.1,
+  189.3 MiB (wall 402.9-403.4 against 403.3-408.3 s); q100 against a third of UniRef50 at 16 threads (4 pairs side
+  by side) 63.9-72.7 against 66.0-74.5 MiB; one thread (node 0, 2 ms samples) WSSV x PajaWSV `-db` 9,192-9,240
+  against the dev base 9,188-9,228 KiB, `-subject` 9,004-9,008 against 9,008-9,012, 3,000 human x
+  `BlastDBSpecies6` 13,240-13,264 against 13,264-13,300, Swiss-Prot q100 76,600-78,012 against 75,340-76,720 and
+  `=0` 75,628-77,748 (its peak is the last 0.4 s, the output stage, and spreads as much in every arm). Time: one
+  thread (`perf stat` `:u`, node 0, arms rotated) instructions default / `=0` x0.99998-1.00000, default / dev base
+  x0.9953 (WSSV), x0.9959 (human), x0.9956 (Swiss-Prot); cycles default / dev base x0.996 and x1.003 (WSSV, 4 and 8
+  rounds), x0.997 and x0.995 (human, 3 and 6), x0.995 and x0.995 (Swiss-Prot, 2 and 3); 16 threads (node 1 CPUs
+  32-47 warmed, 8 rounds rotated with an A/A arm, head 4bab83fa) Swiss-Prot q100 wall x1.0000 (A/A x0.9992), cycles
+  x1.0008 (A/A x0.9986), `bp_hsap` wall x1.0000 (A/A x1.0000), cycles x1.0004 (A/A x1.0017).
+- `LOSAT_X_BPHITSFLAT=1` (BLASTP, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
+  added it (perf/bp-hits-flat, v4-D12 s26, `DECISIONS` 71-72): on unless it is `0`) a subject's preliminary HSPs go to
+  their queries' compact lists through one array of their positions in query order (`blastp/blast_engine/x_hits_flat.rs`)
+  instead of one vector per query kept in the subject scratch (`BlastpSubjectScratch::preliminary_hits_by_query`, cleared,
+  never shrunk). NCBI makes the per-query lists for each subject (`calloc` of `num_queries` pointers and
+  `Blast_HSPListNew` per query with HSPs, `hspfilter_collector.c:112-153`) and hands them to the hit lists, so a thread keeps
+  nothing of them; the scratch kept, per query, the most HSPs that query had in any one subject of the thread, so the
+  preliminary stage held, per thread, the sum over the queries of each query's largest list (UniRef50 q100 at 32 threads:
+  14.0 MiB of capacity). With the switch a stable counting sort
+  (`order_by_query`: counts, ends, filled from the last HSP back) puts the positions in query order, and each query's HSPs are
+  read in place from the subject's list in the order of that list, the order the per-query vectors held them in
+  (`x_build_compact_preliminary_hsp_list` takes an iterator); a thread keeps 4 bytes per HSP of its largest subject and 4 per
+  query. The lists, their order and every value are unchanged (lib test `x_hits_flat_order_matches_the_per_query_vectors`:
+  200 random subjects, 1-5 queries, a query index past `num_queries`).
+  Evidence 2026-10-30 (v4-D12 s26, workstation, head e03234b2 on dev a46c6897c; arms default, `=0`, and the dev base
+  built the same way, 8 rounds rotated, peak RssAnon from 2 ms samples; every report identical across arms): UniRef50
+  q100 `-evalue 0.001` at 32 threads (node 1, membind 1) 129.8 [126.9-134.7] MiB against the dev base 143.1
+  [141.7-144.2] and `=0` 142.5 [139.3-144.7] (9.4-15.4 MiB lower in 8 of 8 rounds; wall x0.9982 [0.9905-1.0066]); q100
+  against a third of UniRef50 at 16 threads (two runs side by side, 12 slots): the highest sample of the preliminary plateau (30-110 s) 39.9
+  [39.7-40.1] against 42.0 [41.8-42.1] and `=0` 42.0 [41.8-42.1], while the peak, set by the jump after that plateau
+  (about 146-151 s), spreads over 64-81 MiB in every arm (69.9 against 69.1 and `=0` 66.9);
+  3,000 human x `BlastDBSpecies6` at 16 threads 37.4 [37.1-37.5] against 37.4 [37.2-37.6]; one thread (node 0) human
+  12.9 against 13.0, OrthoFinder Blast0_6 19.2 against 19.2 MiB. Census (probe exp/d12s26-treeprobe 5abfcfc3, UniRef50
+  q100 at 32 threads): the per-query vectors held 14.0 MiB of capacity.
+  Time: one thread (`perf stat` `:u`, node 0) instructions x1.0003 of the dev base in both cases (`=0` x1.0000), cycles human x0.9985 (`=0` x0.9970), Blast0_6 x0.9971
+  (`=0` x0.9984); 16 threads (node 1 CPUs 32-47 warmed 3 s, 8 rounds) Swiss-Prot q100 instructions x1.0005, cycles
+  x0.9980 (8 of 8 below 1; `=0` x0.9963), wall x0.9966; human instructions x1.0003, cycles x0.9972 (`=0` x0.9966), wall
+  x0.9956.
+- `LOSAT_X_BPLK16=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-lk16, v4-D12 s19-s20,
+  `DECISIONS` 59-61): on unless it is `0`; recorded for `LOSAT_X_REACH` once per table, taken where the table has 16-bit
+  hits): exact blastp's block tables (`-task blastp`, the table built
+  in place) hold 16-bit hits in 8-byte cells where the block's lookup query is at most 65,535 letters
+  (`BlastAaLookupTable<BackboneCell16>`, `lookup/backbone.rs`: `num_used: u16` and `entries: [u16; 3]`; a cell with more
+  than three hits keeps its cursor in the overflow array as a `u32` over `entries[0]` (low) and `entries[1]` (high)).
+  A block's lookup query is at most about 50,000 letters (`LOSAT_X_BPQBLOCK`), so every query offset and every cell's
+  hit count (at most one hit per offset) fits 16 bits; the overflow array and the cells halve (one thread, ws:
+  `bp_wssv` overflow 6.20 MiB, `bp_hsap` 8.56 MiB with 32-bit hits). The table holds exactly the hits of the table of
+  32-bit hits in the same order, and the fused two-hit loop (`blastp/x_seed_fused.rs`, generic over the hit type
+  `XHit`: `i32`, `u16`) reads them with one `vpmovzxwd ymm, m128` for a batch of eight and the same widening load for
+  the tail of fewer than eight hits (the lanes past the hits are blended away as before). Every table of every other
+  program, the `-window_size 0` search (its offset-pair scan reads the 32-bit table), the query chunks of a split
+  batch, `-task blastp-fast`, the reference builder (`LOSAT_DIAGNOSTICS`) and a block above 65,535 letters keep the
+  32-bit table. The 16-byte tail load of a `u16` hit list may read up to 14 bytes past the list; the table keeps two zero
+  cells after its backbone and eight zero hits after its overflow array so that the load stays inside the allocation
+  (the padding is in no count, `longest_chain` or presence bit). The spares of the block search keep the vectors of one
+  width (`XAaSpares::give16`, `x_make_room` with the width); a spare of the other width is dropped, not reused.
+  `LOSAT_X_BPLK16SHADOW=1` (diagnostic, never in the set): for each table of 16-bit hits the reference builder also
+  builds the table of 32-bit hits and the two are compared cell by cell (same `num_used`, same hit list, same pv,
+  `longest_chain` and fields; the padding is zero), panicking with the cell's index on a difference. Lib tests
+  `table_of_u16_hits_equals_the_table_of_i32_hits` (short queries, a low-complexity query, the block at 65,535 and
+  65,536 letters), `spares_serve_the_builds_of_both_widths` and
+  `scans_of_the_table_of_u16_hits_equal_the_scans_of_the_table_of_i32_hits` (every cell test and scan of the fused
+  loop). The tables and loops of 32-bit hits are the generic instances for `BackboneCell`/`i32`, whose reads are the
+  expressions the code had before; with the switch off, every program runs the instructions of the code before
+  (`perf stat` instructions:u of the dev base and of `=0` x1.0000 on three blastp cases and a blastx one).
+  Evidence (ws, binary 4bcbaf70 on dev 03528945 against `=0` and the dev base, reports identical; v4-D12 s20): peak
+  RssAnon at one thread (node 0, samples every 2 ms) `bp_wssv` (WSSV x PajaWSV) `-subject` 8,976-8,980 against
+  12,376-12,380 KiB, `-db` 9,208-9,212 against 12,608-12,612, `bp_hsap` (3,000 human x `BlastDBSpecies6`) 13,240-13,244
+  against 17,852-17,860, Swiss-Prot q100 75,316 against 75,288 (its peak is the composition stage); UniRef50 q100
+  `-evalue 0.001` at 32 threads (node 1) 181.8 against 191.9 MiB (wall 406.8 against 415.3 s); q100 against a third of
+  UniRef50 at 16 threads (six pairs side by side): the search stage 42.8-43.1 against 47.4-47.8 MiB, the peak (the
+  traceback stage, after the table is freed) 63.2-82.1 (median 70.9) against 67.1-72.6 (median 69.4), no difference
+  in rank (sum 41, 39 expected), wider spread. Time: one thread (`perf stat` :u, node 0, A/A arm) `bp_hsap` cycles
+  x0.973 (8 of 8 below 1; A/A x1.008), wall x0.980; Swiss-Prot q100 cycles x0.981 (4 of 4; A/A x0.996), wall x0.979;
+  `bp_wssv` cycles x0.994 (8 of 8; A/A x1.003); instructions x0.9992, x0.9983, x1.0003; 16 threads (node 1 CPUs
+  32-47 warmed, 16 rounds rotated with an A/A arm) Swiss-Prot q100 wall x0.991 (15 of 16; A/A x0.999), cycles x0.990
+  (16 of 16), `bp_hsap` wall x0.980 (16 of 16; A/A x1.000), cycles x0.985.
+- `LOSAT_X_BPDBKEEP=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-db-thresh):
+  on unless it is `0`; the preliminary stage of every BLASTP task with `-db`, at any thread count; also the chains of
+  every BLASTP lookup build, `-subject` too, and the reads of the index check and the title checks wherever a program
+  opens a database) keeps glibc's dynamic mmap threshold at its first value (128 KiB) through the preliminary stage
+  of a query block. glibc maps an allocation of 128 KiB or more and raises the threshold to the size of each mapped
+  allocation that is freed (up to 32 MiB); after that, allocations below the threshold come from the thread arenas,
+  and the space they leave there stays resident. Without the switch every task of a round made a search scratch
+  (offset pairs 256 KiB, a diagonal table of up to 512 KiB) and read its block into a new buffer of up to 1 MiB, and
+  freed both; before the stage the index check read 1 MiB at a time, the title checks read 1 MiB pieces and made a
+  list of all ranges (397 KiB with UniRef50), and the lookup build freed its chains (448 KiB): each free raised the
+  threshold. With the switch:
+  (1) each worker of the pool keeps one scratch and one block buffer for the whole stage
+  (`blastp/blast_engine/database/x_db_keep.rs`), and the blocks are cut to at most 96 KiB (`X_KEEP_BLOCK_BYTES`, at
+  one thread too), so that a kept buffer stays in its worker's arena instead of a mapping of its own beside it;
+  (2) the workers take the blocks one at a time in ordinal order and put each block's results into a window of 8
+  blocks per worker; the worker that ends the oldest block not yet merged merges it and the later blocks already
+  ended, in ordinal order, and a worker takes block j only once the blocks before j - W are merged (W, the window).
+  No round ends, where every worker waited for the round's last block and its merge: with 96 KiB blocks the rounds
+  were 11 times as many (Swiss-Prot at 16 threads 2 -> 17, UniRef50 at 32 threads about 74 -> 794);
+  (3) the index check (`seqdb/index.rs`) and the header pieces of the title checks read 64 KiB at a time, and
+  BLASTP's title checks read each range from the index (`SeqDb::x_header_range`) instead of a list of all ranges;
+  (4) the cells and chains of BLASTP's lookup build (`x_bp_build_direct`) come from allocations above 32 MiB
+  (`utils/x_mapped.rs` `x_unthresholded_capacity`), which glibc maps whatever the threshold and whose free does not
+  move it (the pages not written are not resident); the chains' slabs are cut from one such region while it has room
+  (`tblastx/lookup/backbone.rs`), so a build reserves one region of address space per 32 MiB of chains, not one per
+  256 KiB slab (64-bit Linux with glibc only; elsewhere the sizes are the plain ones).
+  Reports do not change: each block is searched as a task of the rounds searches it, from the one-thread order's
+  diagonal offset of its first sequence, and the blocks' results go to the hit lists in ordinal order; a failed
+  search stops at the first error in ordinal order, and `x_db_cut.rs` returns the one-thread order's error. The
+  waits end: the oldest block's search waits for nothing a waiting worker holds and runs no rayon work, and a panic
+  stops the window (`x_db_keep.rs` header). Lib tests `kept_scratches_and_buffers_give_the_search_without_them`,
+  `the_window_waits_for_its_oldest_block_and_ends_on_a_panic` and
+  `a_damaged_database_gives_the_one_thread_error_with_the_cut` compare the sequences, offsets, hit lists and errors
+  with the rounds without the switch at 1-7 threads. Evidence 2026-10-27 (v4-D12 s18, workstation, node 1 with
+  membind 1 at 16 and 32 threads, node 0 at one thread, binary f465af2d on dev f5326a59, every report identical and
+  the same as NCBI's), switch / `=0`: peak RssAnon UniRef50 q100 `-evalue 0.001` `-db` at 32 threads **188.1 /
+  212.1 MiB**, wall 411 / 425 s; `-db uniref50.03` at 16 threads **59.0, 59.2 / 95.7, 93.0 MiB**, wall 161.3, 161.6 /
+  169.1, 169.4 s; WSSV x PajaWSV `-db` at one thread **12,452, 12,528 / 12,784, 12,780 KiB**; 3,000 human proteins x
+  `BlastDBSpecies6` at one thread 17,792, 17,824 / 19,076, 18,068 KiB; Swiss-Prot q100 at one thread 75,040 /
+  75,232 KiB. 16 threads, 16 rounds rotated with an A/A arm (`=0` again), CPUs warmed 3 s, load 16-47: Swiss-Prot
+  q100 wall x0.943 (16 of 16 below 1; A/A x1.000), cycles:u x1.003, instructions x1.0001, minor faults x0.83;
+  human x `BlastDBSpecies6` wall x0.979 (15 of 16; A/A x1.003), cycles:u x0.999. One thread `perf stat` `:u` (8 and
+  4 rounds): instructions x0.9999 / x1.0000, cycles x0.999 / x1.003 where the A/A arm read x1.001 / x1.005. Forms
+  measured on the way (v4-D12 s16-s18, same cases): kits with 1 MiB blocks, UniRef50 n32 234.9 against 210.6 MiB (a
+  kept 1 MiB buffer is a mapping beside the arena); the fixes before the stage without kits, 210.2 against 209.0 (the
+  first task's block free raises the threshold to 1 MiB); kits with 96 KiB blocks in rounds, 184.0-186.3 against
+  206.6-209.2 MiB but Swiss-Prot n16 cycles:u x1.002-1.004 and wall x1.000-1.004; rounds of the cut's bytes,
+  199.7 MiB and wall x0.949. The window holds about 3 MiB more than those rounds with UniRef50 at 32 threads (a
+  worker, not the main thread, merges). A threshold held by `GLIBC_TUNABLES` (mmap and trim at 128 KiB, a diagnostic)
+  gave 136 MiB with 144 times the minor faults.
 - BPSEED (graduated 2026-10-26, in the set since 2026-10-14; no variable, no `[X_SHADOW] BPSEED` line; always on;
   `LOSAT_X_BPSEED_PREFETCH` became the constant 16) (BLASTP, speed) the two-hit seed
   stage with an amino-acid lookup table
@@ -2639,6 +2810,34 @@ Rebuilding less:
   In a `run_local` call with several outputs, hit records or an observer (`LOSAT_X_BPQBLOCKWEB`), an outfmt 13 to 16
   output does not take blocks (the run-level frame and carry were verified for one CLI-style output only): the
   format is recorded for `LOSAT_X_REACH` and the search of all queries runs (Owner-delegated 2026-10-22).
+- `LOSAT_X_BPQSLOTS` (two query blocks of `-task blastp-fast` searched at a time on the pool, `blastp/x_query_slots.rs`) was
+  removed on 2026-10-28 (Owner): at 16 threads on the workstation it saved 7.0 % of the time and raised the max RSS by
+  9.1 % (136 -> 150 MiB), which breaks the rule that the rise in max RSS in percent must not exceed the time saved in
+  percent. A run ignores the variable and searches the blocks of `LOSAT_X_BPQBLOCK` one at a time, as it did with
+  `LOSAT_X_BPQSLOTS=0`; the reports are unchanged. The entry and its evidence are in the history of this file
+  (dev b1af130b).
+- `LOSAT_X_BPSTRIPEFILL=1` (BLASTP `-task blastp-fast`, speed; in the strict set from the pull request that added
+  it, 2026-10-28, on unless it is `0`; acts wherever `LOSAT_X_BPLKPFLAT`'s one-latch build of the flat table of
+  `LOSAT_X_BPCLUT` runs, so with more than one thread) builds each stripe of that table from one read of the query
+  chunks' parts (`tblastx/lookup/x_clut_par.rs` `x_stripe_fill`, exactness argument in its header): the stripe
+  copies its part of each chunk, in chunk order, while it counts its cells, then lays out and fills from the copy;
+  before, `x_stripe_build` read the 128 parts (at 16 threads) twice, once to count and once to fill, and the second
+  read of short parts written by other cores stalled (line BPF `REPORT.md` §13-§14: the stripes pass was about 14 %
+  of the cycles of the human x yeast search at 16 threads, with a cycles per instruction of 0.565 against 0.395 for
+  the serial bucket fill). The overflow cells of NCBI's table are counted only when some table's appends pass
+  its capacity (an append takes at most one, so otherwise the capacity test cannot refuse). Memory: each task of
+  the pass keeps a copy as large as the largest stripe it took (4 bytes an append) beside the stripe's counts.
+  At one thread nothing changes (the serial builder runs). A form that wrote the chunks'
+  appends straight into the table's hits instead (line BPF s10, `exp/bpf-s8` 3c405fdb) was as fast and took
+  20-35 MiB more (its scattered stores stalled in turn).
+  Measured 2026-10-28 on the workstation (node 1 CPUs 32-47 / 32-39, siblings idle, `--membind=1`, CPUs warmed 3 s
+  before every run, 8 rounds in alternating order, dev 4403cc12 against 1cbb5109, one output hash per case and
+  thread count; line BPF `results/s10ab`), `-task blastp-fast`, wall at 16 / 8 threads: human x yeast (Species4 x
+  Species6 `-subject`) 4.550 -> 4.447 s (x0.977) / 8.270 -> 8.044 s (x0.973); its first 3,000 proteins 0.458 ->
+  0.448 (x0.978) / 0.778 -> 0.758 (x0.974); Species4 x Species6 `-db` 4.723 -> 4.607 (x0.976) / 8.389 -> 8.157
+  (x0.972); Species0 x Species3 `-db` 14.204 -> 14.161 (x0.997) / 27.049 -> 26.852 (x0.993). Cycles x0.964-0.970
+  (x0.993 on Species0 x Species3), instructions x0.989-0.991; the median of the per-round max RSS differences
+  -5.2 to +1.5 MiB (no rise); one-thread instructions the same (the serial builder).
 - `LOSAT_X_BPQBLOCKWEB=1` (BLASTP in `run_local`, the LOSAT Web build's search, speed and memory; in the strict set
   from the pull request that added it, 2026-10-22, on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search
   of `LOSAT_X_BPQBLOCK` also for a call with more than one output, the hit records or a format observer (ABI v2 of the
@@ -2671,9 +2870,8 @@ Rebuilding less:
   query's warnings before its first piece, before the next window is formatted; outfmt 7's last line stays on that
   thread (`blastn/x_tab_par.rs`, called from `post_process_hits_and_write` in `blastn/blast_engine/run.rs`). Same
   bytes: a query's pieces in order are its header and its HSP lists' rows in order, which is the serial call for
-  that query, and the serial writer is those calls in query order. Where: the pool that `write_reports` gets while
-  no LOSAT_X_QBATCHPAR slot exists (the batch loop: `LOSAT_X_QBATCHPAR=0`, query files below its budget, `-db`);
-  serial with one thread, while slots exist, with the Web adapter's format observer and with the BLASTN trace.
+  that query, and the serial writer is those calls in query order. Where: the search's pool, which `write_reports` gets in the batch loop
+  and after it; serial with one thread, with the Web adapter's format observer and with the BLASTN trace.
   Memory: the rows of one window (about 6 MiB at 32 threads with ~100-byte rows), also for one query of many rows
   or many queries without rows. `LOSAT_X_REACH` records the decision once per report call of at least one query
   (`switch_reach_expected.tsv`: conditional). Tests: `x_tab_par` unit tests (random hit lists, outfmt 6 and 7, with
@@ -2681,13 +2879,13 @@ Rebuilding less:
   flushes and warnings in the same order; every row in exactly one piece, in order; a format observer keeps the
   serial writer), integration test `blastn_tab_par` (default vs `=0` reports equal, the new side reached).
   Premise (2026-10-24, v4-D s12): 31,168 cDNAs x 3 Mb `-task blastn` `-outfmt 6` (1.02 M rows) with
-  `LOSAT_X_QBATCHPAR=0` on ws spent 0.88 s in the report calls at 8, 16 and 32 threads alike (`[TIMING] common`
+  `LOSAT_X_QBATCHPAR=0` (the batch loop, now the only form) on ws spent 0.88 s in the report calls at 8, 16 and 32 threads alike (`[TIMING] common`
   output 0.879 / 0.886 / 0.884 s), on one thread while the pool waited; local perf: 87 % of the call in
   `write_hit_fields_bytes`. Evidence (2026-10-24, ws node 1, ratios per round, median): window v4ds13-w2, this
   code (216ede53) vs dev 499cd95d, 106 runs, one sha per case: AB with `LOSAT_X_QBATCHPAR=0` x0.929 / 0.882 /
   0.866 at 8 / 16 / 32 threads (10.83 -> 10.12, 7.18 -> 6.33, 5.70 -> 4.93 s; `=0` 0.998 / 0.985 / 0.993 of dev),
   C5 (5,000 cDNAs) loop n16 x0.884, `-db` (C5's queries x the 3 Mb database) n16 x0.887, A1 (1,775 cDNAs, blastn,
-  by default) n16 x0.909, AB by default (slots: serial) 1.000; cycles and instructions per run equal (0.996-1.011);
+  by default) n16 x0.909, AB by default (slots, removed on 2026-10-28: serial) 1.000; cycles and instructions per run equal (0.996-1.011);
   max RSS AB loop n32 124 -> 127 MiB; `[TIMING] common` output AB loop 0.904 / 0.936 / 0.947 -> 0.241 / 0.230 /
   0.219 s. Window v4ds13-w1 (the first version, one buffer per query, 10f8aa9e vs dev 7a731a15, 370 runs): the
   same AB / C5 loop ratios (x0.932 / 0.892 / 0.869, x0.917 / 0.892 / 0.877), A1 by default x0.933 / 0.904 / 0.862,
@@ -2706,9 +2904,7 @@ Rebuilding less:
   formatted. BLASTN's and BLASTP's outfmt 0 rows (`pairwise_hits`, `build_pairwise_hits`) are made on the pool too, in
   the list order (the first error in that order). Each piece is the serial writer's calls on the same arguments, into a
   buffer instead of the writer; a piece that fails has its bytes up to the failure written, then the error. The serial
-  writer stays: `LOSAT_X_PAIRWISEPAR=0`, one thread, a format observer (the Web adapter's; text only), and BLASTN while
-  threads of `LOSAT_X_QBATCHPAR` slots exist (their pools share the CPUs; the slots' searches already overlap the
-  reports). Without it the writers ran on the loop's thread while the pool waited: megablast 100 queries x 16S rRNA
+  writer stays: `LOSAT_X_PAIRWISEPAR=0`, one thread, a format observer (the Web adapter's; text only). Without it the writers ran on the loop's thread while the pool waited: megablast 100 queries x 16S rRNA
   (`-subject`, 12 NCBI query batches, `LOSAT_X_RPTSTREAM` writes each batch's reports after its search) spent 1.4-2.0 s
   of 7-10 s there at 8 and 16 threads, TBLASTX's outfmt 0 text 0.41 s of the three genomes below at 16 threads. On the
   workstation (16 CPUs of one socket, 3 s warm-up per run, medians of alternating runs, every report identical; off =
@@ -2717,7 +2913,7 @@ Rebuilding less:
   12.95 / 13.23 s at 8; MelaMJNV x 9 MJNV genomes 1.23 / 1.30 s at 16; AP027131 x AP027133 2.01 / 2.07 s at 8;
   BLASTP 3,000 proteins x Species6 (`-subject`) 4.59 / 4.85 s at 16 threads and 7.71 / 7.89 s at 8, the
   yeast proteome against its own `-db` 23.13 / 25.72 s at 16 and 37.32 / 39.59 s at 8 (in `LOSAT_X_BPQBLOCKFMT`'s
-  blocks), equal at 1; BLASTN cDNA 31,168 x 3 Mb, where `LOSAT_X_QBATCHPAR`'s slots run (the switch does not act), 6.26 / 6.24 s.
+  blocks), equal at 1; BLASTN cDNA 31,168 x 3 Mb, where `LOSAT_X_QBATCHPAR`'s slots ran (removed on 2026-10-28; the switch did not act), 6.26 / 6.24 s.
   Peak memory: a window's text is at most 1 MiB of estimate per thread plus one piece; megablast 85-87 / 89-94 MiB at
   16 threads and 91-93 / 78-81 MiB at 8 (the pool threads' glibc arenas keep the freed buffers), TBLASTX and BLASTP within the
   runs' spread (BLASTP 40-51 / 42-53 MiB).
@@ -3063,7 +3259,7 @@ Scheduling (each value computed by one thread with the original function; order 
   the lock is free at its end. On other targets (macOS, Windows, musl, wasm32) the buffer has the fill's size and is
   freed at the end of the fill (their allocators return large blocks themselves). With `LOSAT_TIMING` `main` prints
   `[TIMING] x_mb_lookup_build: <s>s (builds=<n> parallel=<n> once=<n>)` when a megablast table was built (the summed
-  wall time of the builds, not the shadow's second build; with `LOSAT_X_QBATCHPAR` the slots' concurrent builds too;
+  wall time of the builds, not the shadow's second build;
   `parallel=` counts the builds filled on a pool) and `[TIMING] x_mb_lookup_split: alloc= loop= pool_fill= chain=`
   (the allocation, the fill by the loop or on the pool with the re-threading of `ascending_cells`, and the longest
   chain; seconds, summed).
@@ -3087,13 +3283,10 @@ Scheduling (each value computed by one thread with the original function; order 
   / 8)` lines of 64 bytes and P rows of `ceil((P + 1) / 16)` lines, `c` the smaller of the chunk and the positions
   read: at most `16 x (c + 8 P)` bytes plus the rows, about P x 0.5 MiB up to 16 threads (2.0 MiB at 4, 8.0 MiB at
   16) and 8.0 MiB at 16 to 64 threads (8.3 MiB at 255) for a query of 2^19 positions or more, less for smaller
-  queries. That is per fill, not per process: fills that run at the same time each hold their own arena, so with
-  `LOSAT_X_QBATCHPAR` each slot of m threads that fills a table while others do holds about m x 0.5 MiB, and the
-  slots, whose threads add up to the pool's (n), hold together about n x 0.5 MiB, what one fill on the whole pool
-  holds for n <= 16 (beyond, one fill stops at 8 MiB while the slots' fills add up: 8 slots of 8 threads at 64
-  threads about 32 MiB; `LOSAT_X_QBATCHPAR`'s memory estimate of a batch does not count it). Until 2026-10-18 the chunk was 2^19 positions
-  at every thread count and k slots held about k x 8 MiB (three E. coli genomes against LC738868 at 16 threads, 3
-  slots: +25 MiB against the loop's fill). On Linux with glibc the arena's capacity is at least 32 MiB + 4 KiB (the rule of `LOSAT_X_TBNSTORE`'s
+  queries. That is per fill, not per process: fills that run at the same time each hold their own arena. Until
+  2026-10-18 the chunk was 2^19 positions at every thread count and k concurrent fills (the slots of
+  `LOSAT_X_QBATCHPAR`, removed on 2026-10-28) held about k x 8 MiB (three E. coli genomes against LC738868 at 16
+  threads, 3 slots: +25 MiB against the loop's fill). On Linux with glibc the arena's capacity is at least 32 MiB + 4 KiB (the rule of `LOSAT_X_TBNSTORE`'s
   frames), so glibc maps it and unmaps it at the end of the fill without moving its mmap threshold and only the
   written part is resident; elsewhere (wasm32 included) it has its exact size and is freed at the end of the fill. The
   ranges of the stream are a list of one 48-byte entry per unmasked range read (0.1-0.3 MB for the megablast tables of
@@ -3116,7 +3309,7 @@ Scheduling (each value computed by one thread with the original function; order 
   (private copies in the PAIRPAR fill), and the switch with chunks of 2^18; every output had its expected sha256; perf-mb `logs/mbonce_ws_table_mbonce2_a.md` and
   `_b.md`), switch / base: megablast of 31,168 cDNAs (37 tables) fill 0.64 / 0.54 / 0.52 / 0.39 per round at 2 / 4 /
   16 / 64 threads (2.99 -> 1.92, 2.23 -> 1.21, 1.50 -> 0.79 and 1.71 -> 0.66 s), search 0.838 / 0.816 / 0.849 / 0.826;
-  with the slots of `LOSAT_X_QBATCHPAR` (the dsw candidate set) 0.843 at 16 threads, and 0.837 / 0.888 with 4 / 8
+  with the slots of `LOSAT_X_QBATCHPAR` (removed on 2026-10-28; the dsw candidate set) 0.843 at 16 threads, and 0.837 / 0.888 with 4 / 8
   slots at 64; megablast of 1,775 cDNAs fill 0.49, search 0.882 (16 threads); blastn of 31,168 cDNAs fill 0.43, search
   0.967; blastn of 1,775 cDNAs fill 0.59, search 1.064 (0.77-1.30 per round, the spread of its 1.9 s searches;
   the removed switch alone 0.988, 0.79-1.19); the three E. coli genomes against LC738868 fill 0.55, search 1.021
@@ -3166,11 +3359,11 @@ Scheduling (each value computed by one thread with the original function; order 
   8 alternating pairs per cell in one run, load 4-6, every report of a cell identical, the cDNAs' equal to NCBI
   BLAST+ 2.17.0's; v4-D `results/i9_ab*_summary.md`), round / without, wall per round, and max RSS (MiB): E. coli x
   LC738868 0.69 at 4 threads (141 -> 141), 0.64 at 8 (228 -> 241), 0.61 at 16 (330 -> 349), 0.63 at 32 (332 -> 354),
-  0.73 at 16 with `LOSAT_X_QBATCHPAR=0` (148 -> 148); MG1655 x LC738868 (one table) 0.88 at 16 (129 -> 129) and
+  0.73 at 16 with `LOSAT_X_QBATCHPAR=0` (the batch loop, now the only form; 148 -> 148); MG1655 x LC738868 (one table) 0.88 at 16 (129 -> 129) and
   0.93 at 32 (130 -> 130); megablast of 31,168 D. melanogaster cDNAs against 3 Mb of chromosome 2L 0.79 at 8 (382 ->
   383), 0.78 at 16 (620 -> 604), 0.78 at 32 (856 -> 830), 0.86 at 16 and 0.92 at 32 with `LOSAT_X_QBATCHPAR=0` (258 -> 257, 262 -> 264);
-  1.00 at one thread (no pool fill). The search's system time fell in every cell (0.25 -> 0.08 s on MG1655 at 16 threads, 6.29 -> 2.43 on the cDNAs at 32). Max RSS moves only where
-  `LOSAT_X_QBATCHPAR`'s slots fill tables side by side (+13 to +21 MiB on E. coli at 8-32 threads, -26 to +1 on the
+  1.00 at one thread (no pool fill). The search's system time fell in every cell (0.25 -> 0.08 s on MG1655 at 16 threads, 6.29 -> 2.43 on the cDNAs at 32). Max RSS moved only where
+  `LOSAT_X_QBATCHPAR`'s slots (removed on 2026-10-28) filled tables side by side (+13 to +21 MiB on E. coli at 8-32 threads, -26 to +1 on the
   cDNAs, spreads of 20-40 MiB): the round brings a slot's table to full residence at the start of its fill instead
   of during it, within the batch memory the slots already admit. Those cells are above NCBI's max RSS without the
   round too (NCBI with `-subject` does not split by queries and stays at 183 MiB for E. coli and 356 for the cDNAs at
@@ -3199,8 +3392,7 @@ Scheduling (each value computed by one thread with the original function; order 
   3-byte builds use its start. The readers (`for_each_hit`, `contains_hit`, `count_hits`) find a 3-byte table behind the
   bounds check of the head that already sends the CSR tables of `LOSAT_X_BNCSR` elsewhere, so the scans of 4-byte tables
   run the same instructions (`=0` against `dev`: x1.0001-1.0010 instructions; the blastn task, 4-byte tables only,
-  x1.0000). `x_qbatch_par::batch_estimate_bytes` still counts 4 bytes a cell and a position (more than a 3-byte batch
-  takes, so the slots plan no more than before). Evidence (workstation; one node 0 core with its HT sibling idle, or node 1
+  x1.0000). Evidence (workstation; one node 0 core with its HT sibling idle, or node 1
   CPUs 32-47 with theirs, membind to the node, cores warmed 3 s before each run; arms rotated every round; `dev`
   ce281c9a, outputs identical in every arm; peak `RssAnon` and max RSS = max(`%M`, a 10 ms `VmHWM` sample)): megablast of
   E. coli Sakai against MG1655 at one thread `RssAnon` 126.5 -> 99.9 MiB (max RSS 131.6 -> 105.4), wall x1.004 of `=0`
@@ -3212,6 +3404,26 @@ Scheduling (each value computed by one thread with the original function; order 
   blastn of the cDNAs against MG1655 (no 3-byte table) wall x0.988. Wasm (the serial WASI command in Node 26.8.2, all arms'
   modules in one process, a fresh instance per search, 8 rounds; two node 0 cores): the linear memory of Sakai against
   MG1655 133.1 -> 106.4 MiB, x0.995 of the time, of the cDNAs 234.3 -> 208.8 MiB, x0.992.
+- `LOSAT_X_MBCSR=1` (BLASTN megablast, the contiguous tables of 4^12 cells with a packed head, `-subject` and `-db`, any
+  thread count, not on wasm32; speed and memory; in the strict set from the pull request that added it, 2026-10-30
+  (perf/mb-csr12): on unless it is `0`) lays those tables out as CSR with a packed head (`blastn/x_bn_csr.rs`, `x_in_scope`), as
+  `LOSAT_X_BNCSR` and `LOSAT_X_BNCSRPACK` do for 4^8 to 4^11 cells, when the subjects' letters are at least 8 times the
+  positions of the word loop plus the cells (`X_MB12_LETTERS_PER_POSITION`). The scan then reads a word's presence bits and its run
+  through the prefetch ring instead of one miss per head and per chain element on `next_pos`, which took 45 % of the
+  cycles of draft200 x one volume of ref_prok_rep_genomes (4 Gnt) at one thread. The rule keeps the chains' cheaper
+  fill for small subjects: without it Sakai x MG1655 was ×1.34 and draft200 x an 8.7 MB database ×1.69 (the CSR's build
+  costs 13-22 ns more per position and about 40 ms per build, its scan saves about 3.2 ns per subject letter). v4-R R11 measured only a 5 Mb
+  subject and found no gain. Evidence (ws, one core of node 0, three rounds, the same reports): draft200 x that volume
+  ×0.72 of `=0` with max RSS ×0.90, 235 contigs x 1.5 Gnt of plasmids ×0.74 with ×0.86, Meles x 129 Mb of nt ×0.81 with
+  ×0.92; below the rule the same as `=0`. `LOSAT/tests/blastn_mb_csr.rs` checks both sides of the rule on whole
+  searches.
+- `LOSAT_X_MBHITPF=1` (BLASTN, every task, x86_64, the loop over the offset pairs of `search_query_batch`, not the seed
+  stage of `LOSAT_X_PAIRPAR`; speed; in the strict set from the pull request that added it, 2026-10-30 (perf/mb-csr12): on unless it is `0`) prefetches the query line of
+  the hit 16 places on (`x_mb_hit_prefetch`, `X_HIT_AHEAD`). A hit's first extension reads the query at a place its
+  lookup cell chose, which took about 20 % of the cycles of draft200 x one volume of ref_prok_rep_genomes at one thread.
+  Evidence (ws, one core of node 0, four rounds, the same reports, max RSS equal): that case ×0.922, 235 contigs x
+  1.5 Gnt of plasmids ×0.942, Meles x 129 Mb of nt ×0.945, Sakai x MG1655 ×0.982. Prefetching the hit's diagonal cell as
+  well gave ×1.000 and was dropped.
 - `LOSAT_X_MBFILL=1` (BLASTN megablast and blastn, the one-thread fill of `build_mb_lookup`: the contiguous megablast
   table and the two-stage blastn table; speed; in the strict set from the pull request that added it, 2026-10-23; `=0`
   runs the queued loop `x_fill_mb_queued`) reads the words of the fill run by run
@@ -3245,8 +3457,10 @@ Scheduling (each value computed by one thread with the original function; order 
   loop's in every case. Applying each word at once, or batching only the first 64 words of a run, was faster on the
   workstation for long runs (the cDNAs x0.82) but slower than the queued loop on the i9 (short runs x1.24, Sakai x1.07),
   so wasm32 takes the batch. The machine code of the x86_64 loops is unchanged.
-- `LOSAT_X_MBLUTKEEP=1` (BLASTN megablast and blastn, the contiguous megablast lookup table of `build_mb_lookup`; in the
-  strict set since 2026-10-19 (perf/mb-lut-keep, evidence at the end of this entry): on unless it is `0`)
+- `LOSAT_X_MBLUTKEEP=1` (BLASTN megablast, blastn and dc-megablast: the array of one element per cell of a batch's
+  lookup table, the contiguous megablast table's `hashtable` of `build_mb_lookup` and since perf/bn-keep-cells a CSR
+  table's `offsets` and a one-template discontiguous table's chain heads; in the strict set since 2026-10-19
+  (perf/mb-lut-keep, evidence at the end of this entry): on unless it is `0`)
   the batch loop keeps the table's `hashtable` from one query batch to the next
   (`blastn/x_mb_lut_keep.rs`). NCBI allocates each batch's table zeroed (`calloc`, `blast_nalookup.c:1262`) and frees it
   with the batch (`sfree`, `:1376`); a 4^12-cell table is 64 MiB, which glibc maps per batch and unmaps at the batch's
@@ -3261,16 +3475,28 @@ Scheduling (each value computed by one thread with the original function; order 
   probe batch zeroes its own cells only and the rest of a full batch's cells wait for the next build that uses them
   (megablast of 1,775 cDNAs builds tables of 4^11, 4^8 and 4^12 cells; zeroing the whole 4^11 start for the 4^8 build
   cost 1.7 % of the run at one thread). The prefault round does not run on a kept table (its pages are mapped; the round
-  writes zeros over zeros). The fill finds every cell of its table at 0, as in a fresh one, and every reader takes cells
-  below the table's size, so every array and every report is what it is without the switch; `next_pos`, `pv_array` and
+  writes zeros over zeros): the zeroing writes every cell of the build, also those past the start that builds wrote,
+  which a packed CSR of `LOSAT_X_BNCSRPACK` leaves unwritten (a fill that read such a page first mapped the zero page
+  and copied it on its write, one TLB flush of every CPU of the search per page). The fill finds every cell of its
+  table at 0, as in a fresh one, and every reader takes cells below the table's size, so every array and every report
+  is what it is without the switch; `next_pos`, `pv_array` and
   the counters are allocated as before. Where: only the batch loop of `run_in_pool`, for the batches it searches itself
-  and the query chunks of a split batch, and only while no `LOSAT_X_QBATCHPAR` slot can run (the driver turned off, or
-  before the first commit with no `LOSAT_X_QBATCHPARSLOTS` and a budget of 0 or one thread): the slots' tables are what
-  QBATCHPAR's budget counts. Not the discontiguous tables, the PAIRPAR sub-lookups or the tests. Memory:
-  between batches the loop holds the longest table instead of freeing it; a probe batch's peak with it stays below the
-  full batch's. With `LOSAT_TIMING` `[TIMING]
-  x_mb_lut_keep: kept= fresh= zero=` gives the loop's builds on the kept table, its builds on a fresh one and the time
-  spent zeroing (also in `x_mb_lookup_split`'s `alloc=`). Evidence. Premise probe (v4-D
+  and the query chunks of a split batch. Not the discontiguous tables of two templates, the PAIRPAR sub-lookups or the tests.
+  Memory: between batches the loop holds the longest table instead of freeing it; a probe batch's peak with it stays
+  below the full batch's. Since perf/bn-keep-cells the keep also serves the tables that have no `hashtable`: a build
+  laid out as CSR (`LOSAT_X_BNCSR`, `LOSAT_X_DCCSR`) builds its `offsets` (one element per cell and one or two more) in
+  the kept table (`Keep::take_buffer`; the build writes 0 to every element it uses before counting into it) and gives
+  it back when the batch drops the CSR, where it freed the kept table before; a one-template discontiguous table takes
+  its chain heads from the keep as the megablast table does. These arrays depend on the table's cells only (4^11 or
+  4^12), so one kept table serves the CSR builds of `CBatchSizeMixer`'s full batches and the chain builds of its probe
+  batches (dc-megablast of 31,168 cDNAs: 18 CSR and 19 chain builds of 4^11 cells); a fresh table has two elements more
+  than its cells for a later CSR. Why: glibc raises its mmap threshold to the size of a mapped block it frees (up to
+  32 MiB); a 16 MiB array freed after each batch put it up after the first batch, the heap then took the batches' other
+  buffers and the free space in its arena stayed resident (the dc-megablast above at one thread: anonymous RSS 84-92
+  MiB depending on the build, against 80.8 for the memory floor of plan v4 line MF). With `LOSAT_TIMING` `[TIMING]
+  x_mb_lut_keep: kept= fresh= csr= zero=` gives the loop's builds of a `hashtable` or chain heads on the kept table, its
+  builds (of either layout) on a fresh one, its CSR builds on the kept table and the time spent zeroing (also in
+  `x_mb_lookup_split`'s `alloc=`). Evidence. Premise probe (v4-D
   `results/d10d2_probe1_summary.md`, workstation node 1, `LOSAT_X_QBATCHPAR=0`): megablast of 31,168 D. melanogaster
   cDNAs against 3 Mb of chromosome 2L at 16 threads spent 0.141 s unmapping the batches' tables at their ends (serial,
   outside `[TIMING] total`) and 0.060 s in prefault rounds; keeping the table took 0.038 s of zeroing instead, with
@@ -3279,10 +3505,23 @@ Scheduling (each value computed by one thread with the original function; order 
   `d10d2_w3_summary.md`, medians of rounds in alternating order on warmed CPUs): in the batch loop
   (`LOSAT_X_QBATCHPAR=0`, against dev's loop) megablast of 100-250 kb E. coli pieces against LC738868 took 0.84-0.85 of
   the time at 8-32 threads and 0.80-0.82 at one thread, megablast of the 31,168 cDNAs 0.85-0.88 at 8-32 threads and
-  0.90-0.91 at one, blastn and dc-megablast of cDNAs 0.97-1.02; by default (`LOSAT_X_QBATCHPAR`'s slots, which the
-  switch leaves alone, at 8-32 threads) 0.97-1.02; megablast of 1,775 cDNAs (the loop by default) 1.00 at one thread and
+  0.90-0.91 at one, blastn and dc-megablast of cDNAs 0.97-1.02; by default (`LOSAT_X_QBATCHPAR`'s slots, removed on
+  2026-10-28, which the switch left alone, at 8-32 threads) 0.97-1.02; megablast of 1,775 cDNAs (the loop by default) 1.00 at one thread and
   1.02-1.03 at 8 and 16 threads, within the rounds' spread (0.97-1.09) with the same page faults, TLB shootdowns, user
-  and system time as dev. Max RSS: the same (the 31,168 cDNAs in the loop 236 MiB against 249).
+  and system time as dev. Max RSS: the same (the 31,168 cDNAs in the loop 236 MiB against 249). Evidence of
+  perf/bn-keep-cells (CSR `offsets` and discontiguous chain heads; workstation, 2026-10-27, against dev c780af86, plan
+  v4 line D sessions 20-22; the cDNAs against the first 3 Mb of chromosome 2L `-subject`, one sha per cell): one thread
+  on a node-0 core, 6 rounds in rotated order, median of the per-round ratios: dc-megablast of the 31,168 cDNAs peak
+  `RssAnon` 91.0 -> 79.4 MiB (the floor 80.8), time x0.997 (0.958-1.026), minor faults 192 K -> 183 K; blastn of them
+  62.1 -> 60.2 MiB, x1.003 (0.977-1.028), system time 0.41 -> 0.55 s and minor faults 146 K -> 231 K: glibc's threshold
+  now stops at 7.7 MB (a batch's CSR positions, freed once), its trim threshold at twice that, and the batches' scratch
+  freed at the top of the heap (the CSR positions, hit vectors, interval trees, sort buffers) goes back to the system
+  17 times and faults in again (`brk` 52 -> 188 calls); blastn of 5,000 cDNAs 54.5 -> 57.9 MiB (dev's own builds
+  52-60), x0.985; megablast of the 31,168 cDNAs and of E. coli Sakai against MG1655 unchanged (130.6 and 100.0 MiB,
+  x1.002 and x1.001). At 16 and 32 threads (node 1, 6 rounds): with `-subject` QBATCHPAR's slots (removed on 2026-10-28) ran and the keep did
+  not act (dc-megablast, blastn and megablast of the 31,168 cDNAs, blastn of 5,000: x1.001-1.023, cycles x1.001-1.002,
+  the same peaks); with `-db` the loop keeps (dc-megablast of the 31,168 cDNAs at 16 threads `RssAnon` 138 -> 131 MiB,
+  x0.993; blastn of 5,000 88 -> 87, x0.994).
 - `LOSAT_X_BNHLGROW=1` (BLASTN, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
   added it (perf/bn-hl-grow): on unless it is `0`) a hit list's array (`blastn/hsp.rs` `HitList`, the preliminary
   stage's lists per query and the final ones) is no longer reserved to NCBI's array size when a list comes
@@ -3314,7 +3553,7 @@ Scheduling (each value computed by one thread with the original function; order 
   shape of the subject search) are plain numbers. A `LOSAT_X_MBLUTKEEP` table goes back to the batch loop's keep when
   the tables drop, as at the batch's end before (zeroed and taken by the next build as before); what the traceback no
   longer holds is the rest: the chains (`next_pos`, 4 bytes a position of both strands), the PV array, and every table
-  that is not kept (the discontiguous tables, the tables of `LOSAT_X_QBATCHPAR`'s slots). A batch split into query
+  that is not kept (the discontiguous tables). A batch split into query
   chunks has no table of its own (its chunks drop theirs when their calls return after their preliminary stage). With
   `LOSAT_TIMING` `[TIMING] x_bn_lut_drop: batches=` gives the number of batches that dropped their tables before their
   traceback. Evidence (workstation node 1, 16 cores with their HT siblings idle, membind 1, cores warmed 3 s before each run; dev
@@ -3323,7 +3562,7 @@ Scheduling (each value computed by one thread with the original function; order 
   142.5 -> 136.7 at 16, `-db` 135.0 -> 130.6 and 142.6 -> 133.7 (the peak moves from the traceback to the scan; NCBI's
   anonymous memory 155.3 and 133.9, plan v4 line MF); megablast of 31,168 D. melanogaster cDNAs against dmel_dna_3M (37
   batches) at 16 threads 579.2 -> 552.1, blastn of the cDNAs 741.2 -> 705.7 and dc-megablast 392.4 -> 390.9 (16 threads,
-  `LOSAT_X_QBATCHPAR`'s slots, whose tables are not kept). One case reads higher: the cDNAs' megablast at one thread
+  `LOSAT_X_QBATCHPAR`'s slots, removed on 2026-10-28, whose tables were not kept). One case reads higher: the cDNAs' megablast at one thread
   217.5 -> 219.7 (the batch loop with the keep). It is glibc's dynamic mmap threshold (freeing a mapped block of up to 32
   MiB raises it): the chains of a batch are freed before its traceback instead of after, so the threshold rises one
   traceback earlier and that traceback's medium buffers stay in the heap; with the threshold fixed
@@ -3343,8 +3582,7 @@ Scheduling (each value computed by one thread with the original function; order 
   them after its chunks, before its traceback; the chunks' own copies keep their letters to the chunk's end, as before.
   The rule (class conditional, recorded where `search_cli` decides): every output
   format shows no query letter (`BlastnOutputFormat::reads_query_letters`: outfmt 6, 7, 8, 9, 12 and SAM without both
-  `SQ` and `SR`; BLASTN takes no custom tabular column) and no caller takes the hits' records, no `-query_loc`, no
-  `LOSAT_X_QBATCHPAR` slot may run (the condition `LOSAT_X_QSTREAM`'s rule computes), and the records are read before
+  `SQ` and `SR`; BLASTN takes no custom tabular column) and no caller takes the hits' records, no `-query_loc`, and the records are read before
   the search (`LOSAT_X_QSTREAM` not acting; not `run_local`, whose caller holds its records). With `LOSAT_TIMING`
   `[TIMING] x_bn_q_drop: batches= records= letters=` gives the batches, records and letters dropped. Evidence
   (workstation node 1, 16 cores with their HT siblings idle, membind 1, cores warmed 3 s before each run; pairs in
@@ -3353,7 +3591,7 @@ Scheduling (each value computed by one thread with the original function; order 
   126.3 and 135.5 -> 129.1 (against dev 313fd4e7 131.9 -> 126.5, 135.3 -> 130.2, 130.8 -> 126.4, 134.8 -> 129.8;
   with outfmt 0, where the rule keeps the letters, 132.0 -> 131.8); megablast of 31,168 D. melanogaster cDNAs against
   dmel_dna_3M at one thread (37 batches, 89 MB of letters, the peak in the first batches) 219.7 -> 215.3. At 16
-  threads the cDNAs' search keeps its letters (`LOSAT_X_QBATCHPAR`'s slots run); 12 pairs of that unchanged path read
+  threads the cDNAs' search kept its letters (`LOSAT_X_QBATCHPAR`'s slots, removed on 2026-10-28, ran); 12 pairs of that unchanged path read
   wall x1.017 (0.961-1.087, 4 of 12 below 1), cycles:u x1.001 and `RssAnon` 558-621 MiB in both arms. Time elsewhere:
   wall x0.981-0.999, cycles:u x0.990-1.001, instructions:u x0.998-1.000. Dropping the query chunks' copies before their
   chunk's scan (an earlier form) saved nothing measurable: blastn of Sakai, whose records `LOSAT_X_QSTREAM` reads,
@@ -3392,6 +3630,8 @@ Scheduling (each value computed by one thread with the original function; order 
   batch, not packed): `instructions:u` x1.000. The 22.3 MB of packed letters replace 89.3 MB. Before the reader
   packed in place of its copy, packing after it with `PackedNucleotide` cost x1.020 (one thread) and x1.098 (`-db`,
   16 threads) of the time (plan v4 line A10 session 19).
+- `LOSAT_X_BNQSLOTS` (REMOVED on 2026-10-28 with `LOSAT_X_QBATCHPAR`, whose slots it served; see the `LOSAT_X_QBATCHPAR`
+  entry below). The `LOSAT_X_BNQDROP` store no longer lends a batch to anything.
 - `LOSAT_X_GREEDYROWFUSE=1` (BLASTN megablast, the distances of the non-affine greedy alignment that `x_greedy_row` runs:
   every traceback, and the score-only calls the fused loop GREEDYFUSE declines; speed; in the strict set from the pull
   request that added it, 2026-10-24; `=0` runs `x_greedy_row_avx2`, the three passes) runs one distance in two passes per
@@ -3445,13 +3685,11 @@ Scheduling (each value computed by one thread with the original function; order 
   blocks of unmasked short repeats (each chunk's words on the cells of one or two owners, changing
   from chunk to chunk), where buckets that kept their room reserved 16 / 32 / 48 MiB (up to 2 x
   threads x 4 MiB); on (a) below 6.0 MiB at 4 threads and 7.8 MiB at 16. It acts only where a LOSAT search pool
-  of two threads or more is current: the search's pool, or the private pool of a `LOSAT_X_QBATCHPAR`
-  slot of two or more threads (never rayon's global pool); with one thread, a slot of one thread, a
+  of two threads or more is current: the search's pool (never rayon's global pool); with one thread, a
   build without the `parallel` feature or WebAssembly without `wasm-threads` the original loop runs.
   With `LOSAT_TIMING` (any switch state) `main` prints `[TIMING] disc_lookup_build: <s>s
   (builds=<n> parallel=<n>)` when a table was built: the summed wall time of the builds (allocation,
-  fill and longest chain; with `LOSAT_X_QBATCHPAR` it includes the
-  slots' concurrent builds) and how many were filled on a pool. A second line, `[TIMING]
+  fill and longest chain) and how many were filled on a pool. A second line, `[TIMING]
   disc_lookup_split: alloc= loop= pool_fill= chain= chunks= read_wall= read_max= read_sum= read_late=
   update_... link_... buckets_peak= x_prefault_wall= x_prefault_max= x_prefault_sum= x_prefault_late=
   x_prefault_rounds= x_prefault_touches=`, splits the same builds: the allocation, the fill by the
@@ -3565,7 +3803,7 @@ Scheduling (each value computed by one thread with the original function; order 
   pages of the accepted regions, array by array.
   Default ON (2026-10-17, Owner rule of 21:50: speed-ups land in the strict set in their PR). On the
   workstation (node 1, 16 idle physical cores with the siblings idle, `numactl --membind 1`; the rest of
-  the dsw `cand` env, `LOSAT_X_PAIRPARDISC`, `QBATCHPAR`, `DIAGLV`, `PAIRPARFOLD` and `QDUSTPAR`, in
+  the dsw `cand` env, `LOSAT_X_PAIRPARDISC`, `QBATCHPAR` (removed on 2026-10-28), `DIAGLV`, `PAIRPARFOLD` and `QDUSTPAR`, in
   every arm; off = the head with `LOSAT_X_DISCLUTPAR=0`, dev = 7a5a7f87 with the switch (#263's fill),
   head = 1a05a8a2 by default, the first version of the round; rotated rounds after a warm-up, 4 at 2 and 4 threads, 3 at 8 and 16, 2
   at 1; every output had its sha256) the fill took, off / dev / head: (a) 1,775 cDNAs 0.140 / 0.089
@@ -3614,7 +3852,7 @@ Scheduling (each value computed by one thread with the original function; order 
   the false sharing back); the bucket headers and the counter copies are
   whole 64-byte lines) and `LOSAT/tests/blastn_disc_lookup_par.rs`
   (off / on equal at 1 and 4 threads, `-subject` and `-db`, one and two templates, with
-  `LOSAT_X_PAIRPARDISC`, `LOSAT_X_QBATCHPAR` slots and split query chunks, megablast with and without a
+  `LOSAT_X_PAIRPARDISC` and split query chunks, megablast with and without a
   template, the timing and split lines, and AP027131 against NZ_CP006932 with one and two templates,
   whose tables span two chunks).
 - `LOSAT_X_DCCSR=1` (BLASTN `-task dc-megablast` with one template, `coding` or `optimal`, and megablast
@@ -3653,6 +3891,113 @@ Scheduling (each value computed by one thread with the original function; order 
   both arms) x1.003. `=0` is dev's (x0.998); instructions of megablast and blastn at one thread move by at most
   0.04 %. Peak RSS with `MALLOC_ARENA_MAX=1`: 374 against 386 MiB (`-subject`, 16 threads) and 113 against
   115 MiB (`-db`); with the default arenas both arms vary between about 130 and 144 MiB on `-db`.
+- `LOSAT_X_DCSEEDLEAN=1` (BLASTN `-task dc-megablast`, and megablast given template options, at two threads or more;
+  in the strict set from the pull request that added it, 2026-10-28: `LOSAT_X_DCSEEDLEAN=0` turns it off) changes
+  three LOSAT-only parts of dc-megablast's seed stage; each gives the same table, seeds and hits in the same order:
+  - the CSR of a one-template table built on a pool (`LOSAT_X_DCCSR` above; `x_disc_lookup_par::csr_on_pool_steps`):
+    two sets of the owners' buckets, chunk k's in set k % 2. Step k of each pass (count, then place) reads chunk k into
+    its set with the lean reader (`Fill::read`'s word loop with the template a const parameter, so a word's index is
+    computed without the dispatch per word of `compute_discontiguous_index`, and a range read through one slice), then
+    does the owner's work on chunk k - 1 from the other set; one spin barrier ends the step. `csr_on_pool` waits twice
+    per chunk (after the reading and after the owners' work), so each chunk costs the slowest reading plus the slowest
+    owner's work; a step costs the slowest thread's reading and owner's work together (about as many barriers per pass:
+    chunks of half the size, one barrier each). Chunks are 2^18 positions (`STEP_POSITIONS`, half of
+    `CHUNK_POSITIONS`, so the two sets keep room for about as many entries as one set did); the place pass prefetches the
+    `offsets` element of the entry 16 ahead, as the count pass does. A cell gets its words in the same order (chunks
+    in order, readers' spans in stream order, a bucket in reading order), so the counts, sums and runs are
+    `csr_on_pool`'s.
+  - the partitioned stage of `LOSAT_X_PAIRPARDISC` (`LOSAT_X_PAIRPARFOLD`) in `LOSAT_X_PAIRPARHOME`'s home loop: a
+    strip's scan pushes each seed into its partition's list (`x_pair_seed_part::PartSink`; the partition of the seed's
+    diagonal bucket from a table of the 512 buckets made at the stage's start), numbered in scan order, instead of into
+    one list that a stable counting sort then cuts by partition (two more passes over the strip's seeds and a copy of
+    each 16-byte seed and its 4-byte position). A partition gets the same seeds in the same order with the same
+    positions, so its folds and the merge's key order are the same.
+  - the folds of that stage (home loop or not) do not record the buckets their inserts change (`insert_t` without
+    `TRACK`), and the merge writes back every bucket of each partition: a bucket no fold changed has the stage's chain,
+    cells below the stage's occupancy, so writing it back changes nothing. That is one copy of the table's cells per
+    stage, where `rebuild` copies the table into each partition at the stage's start; the stages of dc-megablast begin
+    with a nearly empty table (at most 256 cells in the 27 stages of the 31,168 cDNAs below).
+  The scan into lists and the untracked folds are dc-megablast's only: the partitioned stages of `-task blastn` and
+  `blastn-short` (`LOSAT_X_PAIRPAR`, `LOSAT_X_PAIRPARNA`) keep the cut and the tracked folds. `x_reach!` at each pool
+  build and each partitioned stage, always the switch's side while it is on. Tests: `csr_on_a_pool_lists_the_chains`
+  (`csr_on_pool` and `csr_on_pool_steps` on pools of 2, 3 and 5 threads, chunks of 1, 97, 5,000 and `CHUNK_POSITIONS`
+  positions, against the chains of the serial loop), `seed_stage_part_equals_the_reference_fold` (the stage with and
+  without the lists and untracked folds, in every pairing with the home loop for each level setting, one scratch
+  passing its strip buffers from one form to the other, against the reference fold's hits and table cell for cell),
+  the dc-megablast stage test of `x_pair_seed_disc.rs` (both forms in both `LOSAT_X_FOLDLEAN` instances against the
+  reference fold) and `LOSAT/tests/blastn_dc_seed_lean.rs` (the reports at 2 and 4 threads, and at 4 with
+  `LOSAT_X_PAIRPARHOME=0`, against `=0` at 2 and 4: Sakai against MG1655, a CSR table built on the pool, and 9,800
+  letters of LC738874 against LC738868, a table of chains; with the sides of `LOSAT_X_REACH`, of `LOSAT_X_DCCSR`,
+  `LOSAT_X_DISCLUTPAR` and `LOSAT_X_PAIRPARFOLD` too).
+  Probe (v4-A15 s15-s18, 2026-10-26/28, exp/a15-csrpool; workstation 2x Xeon Gold 6338, node 1 booked through its FIFO,
+  16 / 8 physical cores with the siblings idle, `numactl --membind 1`, the arms in rotated order, 16 rounds at 16
+  threads; dc-megablast of 31,168 D. melanogaster cDNAs against 3 Mb of chromosome 2L, `-subject`, every output NCBI's
+  5c357f81): dev's form 1.441 s, 147.07 G instructions, 58.39 G cycles, max RSS 237 MiB; the lean reader, the scan into
+  lists and the untracked folds x0.957 (cycles x0.946, 133.04 G instructions, 221 MiB); with the steps as well (this
+  switch) x0.951 (median x0.952, no round slower, cycles x0.939, 137.12 G instructions, 220 MiB), at 8 threads x0.946.
+  Of the parts (s16, the same window): the untracked folds -2.7 G instructions and -0.5 G cycles; the scan into lists
+  -4 G instructions and -15 MiB (the strip buffers' copies) but about the same cycles (its stores go to buffers other
+  cores read in their folds); the steps against the lean reader alone -0.45 G cycles of the build (the waits of two
+  barriers per chunk, each waiting for the slowest thread, not the overlap of reading and owner's work: s15's form
+  taking one entry after each word read gained no more). Chunks of 2^19 positions took 55.42 against 54.75 G cycles
+  (screening on node 0). One thread takes none of these paths (no pool, no partitioned stage): 117.68 G instructions as
+  dev's.
+  Pull request A/B (v4-A15 s19, 2026-10-28; 7466dbc1b against dev 1ad262297, a byte copy of dev's binary (A/A) and the
+  pull request's binary with `=0`; node 1 as above at 16 threads unless noted, every arm's outputs the same, NCBI's
+  5c357f81 for the 31,168 cDNAs; median of the per-round ratios, pull request / dev [dev's copy / dev]): dc-megablast
+  of the 31,168 cDNAs x0.951 (24 rounds, none slower; 1.418 -> 1.348 s, CPU x0.947, max RSS 235 -> 220 MiB) [0.997], at
+  8 threads x0.944 (12 rounds, none slower; 2.518 -> 2.377 s, 212 -> 200 MiB) [0.998], against the 3 Mb as `-db` x0.953
+  (12, none slower; 129 -> 120 MiB) [1.000]; of 1,775 cDNAs x0.951 (40, none slower; 98 -> 93 MiB) [1.000]. The small
+  stages, inside the A/A spread: 236 cDNAs (two stages, 1.37 M seeds, 53 hits; 45 ms) 0.997 [1.001] and 7 cDNAs (no
+  hit) 0.995 [0.992]; with `LOSAT_TIMING` (node 0, 8 runs per arm) the merge of the 236 cDNAs takes under 1 ms with and
+  without the switch, and the folds 0.033-0.040 s against 0.040-0.043 s. Other tasks (the switch off their paths):
+  megablast of the 1,775 / 31,168 cDNAs 0.998 / 0.973 [0.999 / 0.968], the 31,168 with `LOSAT_X_QBATCHPAR=0` 1.006
+  [0.986]; blastn of the 1,775 / 5,000 cDNAs 1.001 / 0.999 [0.996 / 1.002], the 31,168 with `LOSAT_X_QBATCHPAR=0` 1.005
+  [1.008]; blastn-short of the 236 cDNAs 1.001 [0.997]; max RSS of these within the A/A spread. `=0` against dev:
+  0.993-1.005 in every case. One thread (node 0, `perf stat`, outputs the same): instructions of dev, the switch and
+  `=0` within 0.01 % (31,168 cDNAs 117.750 / 117.751 / 117.749 G; 1,775 cDNAs dc-megablast, megablast and blastn too).
+- `LOSAT_X_BNSEEDLISTS=1` (BLASTN `-task blastn`, `megablast` and `blastn-short`: the partitioned stages of
+  `LOSAT_X_PAIRPAR` and `LOSAT_X_PAIRPARNA` with `LOSAT_X_PAIRPARFOLD`, two threads or more, one unmasked subject, a
+  query block above 8,000 letters; in the strict set from the pull request that added it, 2026-10-28:
+  `LOSAT_X_BNSEEDLISTS=0` turns it off) gives those stages the form `LOSAT_X_DCSEEDLEAN` gives dc-megablast's
+  (`x_pair_seed_part::seed_stage_part_lists`); each partition gets the same seeds in the same order, so the hits and
+  the table are the same:
+  - in the home loop (`LOSAT_X_PAIRPARHOME`) a strip's scan pushes each seed into its partition's list (`PartSink`)
+    instead of into one list that a stable counting sort then cuts by partition (`produce`: a count pass, the
+    partition of each seed's bucket, and a copy of each 16-byte seed and its 4-byte position);
+  - the folds (`fold_t`, `fold_na_t` without `TRACK`) do not record the buckets their inserts change, and the merge
+    writes back every bucket of each partition (an unchanged one as it was).
+  The scans (`scan_strip`, `scan_strip_csr`, `scan_strip_na`) take the receiver as a type parameter (`SeedOut`), so
+  the lists are one more instance of each; the stages without partitions and one thread are unchanged. `x_reach!` at
+  each partitioned stage, always the switch's side while it is on. Tests: `seed_stage_on_strips_equals_one_scan` of
+  `x_pair_seed.rs` (the partitioned stage in both forms on 1 to 8 threads and 2 to 16 partitions, on tables with and
+  without level bounds, two chunks in a row on one scratch, against the serial fold) and of `x_pair_seed_na.rs` (word
+  sizes 6, 7 and 8, both forms on 2 to 6 threads), and `LOSAT/tests/blastn_bn_seed_lists.rs` (blastn and megablast of
+  LC738874 against LC738868 and blastn-short of 700 24-mers of LC738868: the reports at 2 and 4 threads and at 4 with
+  `LOSAT_X_PAIRPARHOME=0` against `=0` at 2 and 4, with the sides of `LOSAT_X_REACH`, `LOSAT_X_PAIRPARFOLD` and the
+  stage's switch).
+  Probe (v4-A15 s20, 2026-10-28, exp/a15-bnlists; workstation as above, 16 threads unless noted, against the 3 Mb of
+  chromosome 2L): the cut took 7-8 % of the cycles of blastn-short of 236 D. melanogaster cDNAs (three stages, 313 M
+  seeds) and about 2 % of blastn of 31,168 and 5,000 cDNAs (216 M and 35 M seeds; `perf record`, node 0). Time A/B on
+  node 1 (dev's form, a byte copy of its binary, this form; every output the same; median of the per-round ratios
+  [A/A]): blastn-short x0.972 (16 rounds, none slower; max RSS 408 -> 385 MiB) [1.002], at 8 threads x0.960 [1.000];
+  blastn of the 31,168 cDNAs x0.988 [0.999], against the 3 Mb as `-db` x0.991 [1.001] (104 -> 95 MiB), with
+  `LOSAT_X_QBATCHPAR=0` x0.993 [0.996] (101 -> 93 MiB); of 5,000 cDNAs x0.988 [1.002]; of 1,775 x0.998 [0.999].
+  Pull request A/B (v4-A15 s21, node 1: dev 2087618e6, a byte copy of its binary, d6e69cd1f, and d6e69cd1f with `=0`;
+  every output the same; median [95 %], rounds slower, [A/A]): blastn-short of the 236 cDNAs x0.969 [0.966-0.974]
+  0/16 [0.997] (2.359 -> 2.285 s, max RSS 416 -> 386 MiB), at 8 threads x0.961 0/8 [1.000] (383 -> 373 MiB); blastn
+  of the 31,168 cDNAs x0.986 1/16 [0.999] (392 -> 383 MiB), as `-db` x0.996 [1.002] (103 -> 94 MiB), with
+  `LOSAT_X_QBATCHPAR=0` x1.003 8 rounds [1.005] and x0.998 16 rounds [1.000] (102 -> 92-96 MiB); of 5,000 x0.996
+  [1.001]; of 1,775 x0.994 [0.998]; megablast of 1,775 x0.994 40 rounds [0.989], of the 31,168 x0.999 [0.985];
+  dc-megablast of the 31,168 (not reached) x0.997 [0.999]. Max RSS rises in no case. `=0` against dev 0.996-1.005.
+  The one case it does not help: megablast of the 31,168 cDNAs with `LOSAT_X_QBATCHPAR=0` at 16 threads, x1.020 in 12
+  rounds and x1.012 [0.998-1.024] in 40 (25 slower; A/A 0.999; CPU x1.013 in both), at 8 threads x1.004 [0.980-1.021]
+  (A/A 0.992). Its partitioned stages are small: 25 stages, 131 k seeds, 15 seeds a strip, so about one per partition,
+  which the lists put in 16 vectors per strip where the cut wrote one; `[TIMING]` fold and merge the same,
+  instructions +0.1-0.2 % at 16 threads and +0.02 % at 8, page faults the same (both arms 70-150 k, run to run), sys
+  time +0.03-0.05 s (node 0, `perf stat`). One thread (node 0, `perf stat`, outputs the same): instructions of dev,
+  the switch and `=0` within 0.01 % (blastn-short of the 236 cDNAs 260.834 / 260.821 / 260.821 G; 1,775 cDNAs
+  blastn, megablast and dc-megablast too).
 - `LOSAT_X_BNCSR=1` (BLASTN `-task blastn` and every task with word size 9, 10 or 11 that builds the contiguous
   two-stage table of `build_mb_lookup`, `-subject` and `-db`, any thread count, speed; in the strict set from the pull
   request that added it, 2026-10-25 (perf/bn-csr, evidence at the end of this entry): on unless it is `0`) lays out the
@@ -3667,7 +4012,7 @@ Scheduling (each value computed by one thread with the original function; order 
   word loop reads at least a quarter as many positions as the table has cells get it: with NCBI's choice of table, a
   query batch of 1,048,576 positions or more (about 524 kb, both strands) at word size 11, 262,144 at 10, 65,536
   (and 16,384 for the reading-order table of 4^8 cells) at 9; word sizes 12 and above build 4^11-cell tables only
-  below that size and keep their chains, and so do megablast's 4^12-cell tables. Such a table takes nothing from the
+  below that size and keep their chains, and so do megablast's 4^12-cell tables below `LOSAT_X_MBCSR`'s rule. Such a table takes nothing from the
   batch loop's keep (`LOSAT_X_MBLUTKEEP`): its `offsets` is allocated per build and freed with the table (before the
   traceback with `LOSAT_X_BNLUTDROP`), and a build laid out as CSR frees the table the keep holds. With a search pool
   of two threads or more (where PAIRPAR's fill would run) the table is built on the pool
@@ -3691,6 +4036,75 @@ Scheduling (each value computed by one thread with the original function; order 
   megablast (no CSR) ×0.979 (7/16, noise); one thread on one node 0 core (perf stat, user cycles) ×0.80 to ×0.88 at
   1.005 to 1.03 times the instructions; max RSS (time %M with a 2 ms sampler, three runs per arm) not above `=0`'s
   except the 1,775 cDNAs' 82 → 85 MiB (dev 84): 31,168 cDNAs 721 → 712, word size 9 329 → 322 MiB.
+- `LOSAT_X_BNCSRPACK=1` (BLASTN, the CSR tables of `LOSAT_X_BNCSR` whose runs list their words newest first: every
+  such table but the reading-order one of 4^8 cells, `-subject` and `-db`, any thread count, memory; in the strict set
+  from the pull request that added it, 2026-10-29 (perf/bn-csr-pack2, evidence at the end of this entry): on unless it
+  is `0`) packs the head of the table (`blastn/x_bn_csr.rs`, `x_pack_on`; `x_dc_csr::Csr::x_bits`): two words per 64
+  cells (the cells' presence bits, then the number of non-empty cells before them) and one `offsets` element per
+  non-empty cell and one more, indexed by that rank, instead of one element per cell. A table of 4^11 cells has
+  4,194,305 offsets (16 MiB) per build, of which a query batch of about 1 Mb of `-task blastn` fills 1.2-1.6 M; the
+  packed head is 1 MiB of bits and ranks and 4.6-6.1 MiB of offsets. A packed table has no size rule: every
+  newest-first table of `lut_word_length` 8 to 11 is laid out as CSR and packed, also below `LOSAT_X_BNCSR`'s rule
+  (the first and last query batch of a run, a run of one small batch, megablast's tables of 4^11 cells or fewer).
+  Below the rule those batches built chains on the batch loop's kept table (`LOSAT_X_MBLUTKEEP`), whose pages past the
+  start a packed head writes were then first mapped by the chains' zeroing at the end of the run (16 threads, 5,000
+  cDNAs: max RSS 2 MiB above dev at the run's last 1-3 % while the live data was 12 MiB below it, read with the mmap
+  threshold pinned in a diagnostic run, s27 w21). The table's form is chosen once per table (`Csr::x_packed`):
+  `Csr::run` and `Ring` are the code of a head of one element per cell, used by every discontiguous table and by a
+  contiguous one with the switch off, and the contiguous scans (`scan_strip_csr`, the reference scan of
+  `search_query_batch`) are generic over `x_dc_csr::XHead`, so each form's scan is compiled on its own (the
+  dc-megablast and `=0` scans have dev's instructions). The packed ring (`XRingPacked`) drops a word of an empty cell
+  (its run is empty, so the emit would read nothing) and prefetches the rank's two offsets; the one-word answers of
+  the lookup (`for_each_hit`, `count_hits`, `contains_hit`) read either form (`Csr::x_run_any`). The build counts each
+  word into one byte per cell (`x_count8`: up to 255, the words past 255 of a cell in a map of the thread that owns
+  the cell; 4 MiB for 4^11 cells), takes each block's presence bits from its 64 bytes (`x_presence8`, eight bytes at a
+  time without a branch), writes the blocks' ranks and the counts by rank (`x_rank_counts8`), then the sum pass
+  (`x_sum_packed`: the running sums of the non-empty cells, and the presence vector and helper counters that
+  `sum_cells` gives over the same cells) and the place pass by rank. The bytes are the first `cells` bytes of the run
+  list's capacity (`qs`, which has room for every position the word loop reads and for the bytes), zeroed by the
+  cells' owners; the place pass writes the run list only after the last count is read, so the build allocates nothing
+  more and frees nothing in the middle of a batch. The serial build (`x_serial_packed`) and the pool build
+  (`x_mb_lookup_once::csr_on_pool`: each owner counts, marks and ranks its blocks, one barrier to publish its number
+  of non-empty cells and one after the ranks) read the words twice, as the build of one offset per cell. With
+  `LOSAT_X_MBLUTKEEP` the kept table serves as the packed offsets (a fresh packed build hands the keep a zeroed table
+  of `cells + 2` elements, which a later chains build of the loop takes), and the keep's zeroing writes every cell of
+  a chains build, also those no packed build wrote (`Keep::take`; its entry). The runs, their order, the presence
+  vector and the counters are those of the unpacked head, so every value read from the table is the same. Not packed:
+  the reading-order table (4^8, `ascending_cells`; it keeps the size rule), the discontiguous tables of
+  `LOSAT_X_DCCSR` and megablast's 4^12-cell chains (below `LOSAT_X_MBCSR`'s rule). The CI fixtures do not reach the reading-order table (it needs
+  `-word_size 9` with a query batch of 16,384-21,000 positions), so its reach row is a gap. The tests of the chains'
+  fill (`LOSAT/tests/blastn_mb_fill.rs`, `blastn_mb_lookup_once.rs`, `blastn_mb_lut_keep.rs`) run `-task blastn` with
+  the switch off, which keeps the small tables' chains. Tests:
+  `x_dc_csr::tests::{a_packed_head_gives_the_same_runs_and_the_ring_skips_empty_cells,
+  byte_counts_give_the_presence_ranks_and_exact_counts}`, `x_bn_csr::tests::the_packed_head_lists_the_chains_too`
+  (packed and unpacked against the loop's chains, presence vector, counters and longest chain, `lut_word_length` 8-11,
+  with cells of 255, 256 and 1,200 words), `x_mb_lookup_once::tests::csr_on_a_pool_is_the_serial_build` (the pool
+  build in chunks of 1 to 2^19 positions on 2 to 40 threads against the serial one, with those cells in half the
+  rounds) and `LOSAT/tests/blastn_bn_csr.rs` (the whole search with `LOSAT_X_BNCSRPACK=0`: the same reports, and both
+  reach sides: word size 11 packed, word size 9 the reading-order table). Evidence (workstation 2x Xeon Gold 6338,
+  2026-10-29, perf/bn-csr-pack2 bebbad34 on dev ee39301d: three arms in one window, dev, the branch and the branch
+  with `=0`, order rotated per round, medians of per-round differences and ratios, one output per cell; D.
+  melanogaster cDNAs (AB 31,168, C5 5,000, C4 4,000, Q300 / Q500 the first 107 / 180 of them, one query batch below
+  `LOSAT_X_BNCSR`'s rule) against the first 3 Mb of chromosome 2L, DB the same 5,000 cDNAs against those 3 Mb as
+  `-db`, MB megablast of the 31,168; node 1 through its FIFO, `numactl --membind 1`, peak RssAnon and VmHWM sampled
+  every 2 ms): 16 threads (8 rounds; C5, DB, Q300, Q500 10), peak RssAnon dev -> branch in MiB with the median of
+  per-round differences and the rounds above dev, then wall: AB 100.5 -> 89.8 (-10.7, 0/8) x0.991, AB at 8 threads
+  69.6 -> 55.7 (-13.1, 0/8) x0.990, at 32 125.6 -> 116.6 (-9.0, 0/8) x0.993, C5 84.6 -> 72.7 (-11.7, 0/10) x0.985, at
+  8 60.2 -> 48.4 (-11.9, 0/8) x0.987, at 32 97.1 -> 86.0 (-10.6, 0/8) x0.997, C4 80.8 -> 71.7 (-8.3, 0/8) x0.978, DB
+  82.0 -> 73.4 (-9.0, 1/10) x0.983, Q300 32.8 -> 17.9 (-14.9, 0/10) x0.955, Q500 37.6 -> 21.8 (-15.8, 0/10) x0.977, MB
+  169.5 -> 167.6 (-1.0, 4/8) x0.983; `=0` against dev -3.7 to +2.9 MiB and x0.997-1.023; control dc-megablast (AD, the
+  31,168 cDNAs) -4.6 MiB, x0.994, instructions x1.0001. One thread (node 0 CPU 22, sibling idle, same three arms, 8
+  rounds, perf stat): AB 57.7 -> 47.0 MiB (-10.7, 0/8) x0.993, C5 53.5 -> 40.8 (-12.7, 0/8) x0.990, Q500 30.5 -> 17.0
+  (-13.4, 0/8) x0.900; MB 132.4 in every arm (the branch 4 KiB above dev: its peak is in a batch of 4^12-cell chains,
+  which the switch does not change) x0.999; AD instructions x1.0000 of dev (`=0` x1.0000), wall x0.993. Earlier forms:
+  three readings of the words (a presence pass first): the same RssAnon, wall x0.973-1.006 but cycles x1.010-1.020 at
+  16 / 32 threads (`[TIMING] x_mb_lookup_build` 2.755 -> 3.539 s at AB n16, the scan 8.711 -> 8.469 s), hence the byte
+  counts; the byte counts in a vector of their own, freed after each build: cycles x0.977-0.987, but TLB shootdowns 6
+  k -> 121 k at AB n16 and DB n16 x1.021 in wall (each trim interrupted every thread), hence the bytes in the run
+  list's capacity; without the keep's change, ~3,000 flushes per run (49 k shootdown interrupts at 16 threads) from
+  the chains build that followed packed builds; one `Csr::run` / `Ring` for both forms (a test of the form per word
+  and per call): dc-megablast x1.009 of dev at one thread with the switch on or off, hence a scan per form; the size
+  rule kept for packed heads: c516 / db16 max RSS +2.4 / +1.9 MiB over dev (7/10 rounds), hence no rule.
 - `LOSAT_X_PAIRPARDISC=1` (in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`; it does not depend on PAIRPAR) blastn `-task dc-megablast`, one query-subject pair
   on a pool of 2+ threads (or on one thread: `LOSAT_X_BNDCONE`): the two-hit seed stage of a subject chunk with a discontiguous megablast
   table (one or two templates) and the diagonal hash (query block over 8000 letters, `scan_range`
@@ -3735,7 +4149,7 @@ Scheduling (each value computed by one thread with the original function; order 
   against origin/dev 7e73ec9c, both built on that machine): dc-megablast of 31,168 D. melanogaster cDNAs against
   3 Mb of chromosome 2L (`-subject`) in the batch loop (`LOSAT_X_QBATCHPAR=0`) x0.950 / 0.918 / 0.900 at 8 / 16 / 32
   threads (its 10 array chunks took 0.024 s each on one thread; `[TIMING] scan_lookup` summed over the batches
-  1.57 -> 1.35 s at 16 threads), by default (QBATCHPAR slots) x0.974 / 0.996 / 1.006; 1,775 cDNAs (the batch loop
+  1.57 -> 1.35 s at 16 threads), by default (QBATCHPAR slots, removed on 2026-10-28) x0.974 / 0.996 / 1.006; 1,775 cDNAs (the batch loop
   by default) x0.919 / 0.879 at 8 / 16 threads, x0.996 at one thread (8 rounds; the stage needed a pool then: see
   `LOSAT_X_BNDCONE`); 31,168
   cDNAs at one thread x1.004 (2 rounds); megablast and blastn of 31,168 cDNAs at 16 threads x0.991 / 0.999 (it
@@ -3780,16 +4194,14 @@ Scheduling (each value computed by one thread with the original function; order 
   `N`, and the statics of `utils/dust.rs` are switches read once), so the per-query map is
   `par_iter().map().collect()` in query order (rayon splits the queries into ranges; the masks are per query,
   the jobs are not) with `SearchPool::install`: on the pool of the search that calls
-  it (the whole search pool, or the private pool of a `LOSAT_X_QBATCHPAR` slot of two or more threads), never
+  it (the whole search pool), never
   on rayon's global pool. It acts only with a pool of two or more threads and two or more queries in the
-  batch; with one thread, a slot of one thread, a build without the `parallel` feature, WebAssembly without
+  batch; with one thread, a build without the `parallel` feature, WebAssembly without
   `wasm-threads`, or the switch off, the serial map runs (with `-dust no` there is no map at all). The verbose lines and totals stay as
   they were. With `LOSAT_TIMING` (any switch state) `main` prints
   `[TIMING] query_dust: <s>s`, and with `LOSAT_X_STATS` `[X_STATS] QDUSTPAR dust_s=<s>`, only when at least one
   batch was masked (not for BLASTP, BLASTX, TBLASTN, TBLASTX or `-dust no`). `<s>` is the sum of the wall
-  times of every DUST call of the process, not the wall time of the step: with `LOSAT_X_QBATCHPAR` it includes
-  the slots' batches, which run concurrently, and those the loop discards. The ws numbers below have
-  neither, so there it is the step's time.
+  times of every DUST call of the process (every batch's).
   Measured on the workstation (2x Xeon Gold 6338, powersave, 16 idle physical cores of one node with the
   siblings idle, `numactl --membind`; `-outfmt 6`, subject 3 Mb of D. melanogaster 2L, `LOSAT_X_PAIRPARDISC=1`
   for the dc-megablast inputs, `LOSAT_X_STATS=1` in the timed pairs; off runs carry an unread
@@ -3806,7 +4218,7 @@ Scheduling (each value computed by one thread with the original function; order 
   empty sequences and batches of one; and a probe called once per query shows that the masks are made by
   at least two workers of a 3-thread pool, and by none with the switch off, one thread or one query) and
   `LOSAT/tests/blastn_query_dust_par.rs` (off / on equal at 1 and 4 threads for the three tasks, with
-  `-dust 10 32 2 -lcase_masking`, `-dust no`, `LOSAT_X_QBATCHPAR` slots of two threads, and split query chunks).
+  `-dust 10 32 2 -lcase_masking`, `-dust no`, and split query chunks).
   Default ON since 2026-10-17 (perf/perfmb-default-bundle; workstation (2x Xeon Gold 6338, 16 physical cores of one
   node with their siblings idle, alternating rounds, every output the expected one; perf-mb
   `logs/defaultset_ws_report.md` unless named); a reduction is 1 - with / without the switch, the other switches of
@@ -3841,13 +4253,12 @@ Scheduling (each value computed by one thread with the original function; order 
   46-48 MiB, 3 pairs).
 - `LOSAT_X_QPREPPAR=1` (BLASTN, all tasks; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`) the BLASTNA encoding of a query batch and the ungapped Karlin blocks of its contexts are made on the search pool
   instead of one query / context after the other (`blastn/blast_engine/x_query_prep_par.rs`, called from
-  `search_query_batch`, so for every query batch, in the loop or in a `LOSAT_X_QBATCHPAR` slot; `-db` searches too).
+  `search_query_batch`, so for every query batch; `-db` searches too).
   NCBI encodes the queries of a batch into one buffer and computes each context's block in turn
   (`blast_setup_cxx.cpp:500-603`, `blast_stat.c:2754-2784`); both run before the lookup table is built, with no other
   thread working (about 0.03 s per 5 Mb batch; 5 % of a batch at 4 threads, 11-14 % at 8-16). With the switch on and a
   `SearchPool` of two or more threads current, both are ordered parallel maps run with `SearchPool::install`, so on the
-  pool of the search that calls them (the whole search pool, or the private pool of a `LOSAT_X_QBATCHPAR` slot of two or
-  more threads), never on rayon's global pool. Encoding: the buffer is cut with `split_at_mut` into the span of each
+  pool of the search that calls them (the whole search pool), never on rayon's global pool. Encoding: the buffer is cut with `split_at_mut` into the span of each
   query (first context start to last context end; the spans must be in query order and disjoint, else the serial function
   runs) and each query writes its own span with the two calls of the serial function, plus context then minus context.
   Blocks: `par_iter().map().collect()` over the contexts (rayon splits them into ranges; the blocks are per context, the
@@ -3857,15 +4268,14 @@ Scheduling (each value computed by one thread with the original function; order 
   has none); there is no cache, memo table, counter
   or random generator, results are collected in order, and no floating-point operation changes order (the sums are inside
   one context). It acts only with a pool of two or more threads and two or more queries (encoding) or contexts (blocks);
-  with one thread, a slot of one thread, a build without the `parallel` feature, WebAssembly without `wasm-threads`, or
+  with one thread, a build without the `parallel` feature, WebAssembly without `wasm-threads`, or
   the switch off, today's serial code runs. With `LOSAT_X_STATS` (any switch state) `main` prints
-  `[X_STATS] QPREPPAR encode_s=<s> karlin_s=<s> fallbacks=<n>`, the summed wall times of the two steps over every batch
-  (with `LOSAT_X_QBATCHPAR` they include the slots' batches, which run concurrently, and those the loop discards) and the
+  `[X_STATS] QPREPPAR encode_s=<s> karlin_s=<s> fallbacks=<n>`, the summed wall times of the two steps over every batch and the
   fallbacks (counted when the switch is on: batches of two or more queries on a pool whose spans were not in query order
   and disjoint, which the serial function encoded; always 0 in the layout of `search_query_batch`).
   Measured on the workstation (2x Xeon Gold 6338, powersave, node 1 CPUs 32-47 with the siblings idle, `numactl
   --membind`; `-outfmt 6`, subject 3 Mb of D. melanogaster 2L; both arms run the same binary with `LOSAT_X_PAIRPARDISC`,
-  `LOSAT_X_QBATCHPAR`, `LOSAT_X_DIAGLV`, `LOSAT_X_PAIRPARFOLD`, `LOSAT_X_QDUSTPAR` and `LOSAT_X_DISCLUTPAR`, the off arm
+  `LOSAT_X_QBATCHPAR` (removed on 2026-10-28), `LOSAT_X_DIAGLV`, `LOSAT_X_PAIRPARFOLD`, `LOSAT_X_QDUSTPAR` and `LOSAT_X_DISCLUTPAR`, the off arm
   carries an unread `XOSAT_X_QPREPPAR=1` of the switch's length; alternating pairs, the order rotated per round, a
   discarded warm-up run before each pair; at most 1 other CPU busy at start and end of every run), dc-megablast, medians,
   on/off wall (per-round ratio median, range): (a) 1,775 cDNAs (5.0 Mb) 4 threads 0.653 -> 0.629 s (0.966, 3 rounds), 16
@@ -3880,9 +4290,9 @@ Scheduling (each value computed by one thread with the original function; order 
   compact layouts with touching spans or sentinel gaps, and in layouts the parallel path refuses (the fallback); blocks bit
   for bit; a probe called once per item shows that both steps run on at least two workers of a 3-thread pool, and on none
   with the switch off, one thread or one item; a caller that is not a pool worker still runs on the given pool (fails
-  without `SearchPool::install`); a `LOSAT_X_QBATCHPAR`-like slot pool and nested calls) and
+  without `SearchPool::install`); a pool other than the search's and nested calls) and
   `LOSAT/tests/blastn_query_prep_par.rs` (off / on equal at 1 and 4 threads for the four tasks, `-dust no`, other
-  scores, `-lcase_masking`, `LOSAT_X_QBATCHPAR` slots of two threads, split query chunks, the `[X_STATS]` line).
+  scores, `-lcase_masking`, split query chunks, the `[X_STATS]` line).
   Default ON since 2026-10-17 (perf/perfmb-default-bundle; workstation, perf-mb `logs/qpreppar_report.md`,
   alternating rounds): dc-megablast of 1,775 cDNAs against 3 Mb x0.966 / x0.941 at 4 / 16 threads, of 3,492 x0.963 /
   x0.922, of 31,168 x0.949 / x0.974; max RSS within 3 MiB.
@@ -3917,8 +4327,7 @@ Scheduling (each value computed by one thread with the original function; order 
   subjects), on one thread, and on the diagnostic paths (`-verbose`, `LOSAT_DEBUG_BLASTN`, `BLEMIR_DEBUG`,
   `BLEMIR_DEBUG_WINDOW`, `LOSAT_DEBUG_COORDS`, the blastn trace), which print in the loop's order. With the switch on,
   the look-ahead and the speculative traceback (also for megablast) act only where the owner loop
-  stays; inside a `LOSAT_X_QBATCHPAR` slot of two or more threads the stages run per query on the slot's pool, in a slot
-  of one thread on the owner. The chunk's ungapped hits are grouped by query in place (counting-sort destinations, 4
+  stays. The chunk's ungapped hits are grouped by query in place (counting-sort destinations, 4
   bytes per hit, applied by swaps), so the stage holds no second copy. In the per-query form the `[TIMING]` steps inside
   the stages (`traceback_alignment`, the purge passes, `reevaluate_ambiguities`, the final tree) are sums over the
   threads, while `gapped_extend` and `traceback_prune` stay the stages' wall times. The one-thread path's instructions
@@ -3928,8 +4337,8 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_WASI_THREADS_DEBUG=1`, `[losat-thread-stage] program=blastn stage=prelim_queries|traceback_queries`. Tests: the
   unit tests of `x_qgroup_par.rs` (the rule and the plan's order, the in-place grouping, slices, `run` serially and on a
   4-thread pool, the pooled stable sort on ties) and `LOSAT/tests/blastn_qgroup_par.rs`
-  (off / default equal at 1 and 4 threads for the four tasks, masking and other scores, `LOSAT_X_QBATCHPAR`
-  slots of two threads, split query chunks, the owner rule and the counters). Evidence (workstation ws, node 1, CPUs
+  (off / default equal at 1 and 4 threads for the four tasks, masking and other scores, split query
+  chunks, the owner rule and the counters). Evidence (workstation ws, node 1, CPUs
   32-39 / 32-47 / 32-63 for 8 / 16 / 32 threads, governor powersave, THP madvise; dev 0797cc40 and this branch in one
   window, arms rotated per round, the run's CPUs warmed 3 s before every run; every report one sha per case, equal to
   NCBI's; v4-D `results/d10d_w1_summary.md`): in the batch loop (`LOSAT_X_QBATCHPAR=0`) blastn of 5,000 D. melanogaster
@@ -3938,11 +4347,11 @@ Scheduling (each value computed by one thread with the original function; order 
   -> 7.70, 12.64 -> 6.32 s), with max RSS no higher (108-156 against 111-167 MiB) and fewer cycles (31,168 cDNAs at 16
   threads 234 against 344 Gcycles:u); megablast of 31,168 cDNAs and of three E. coli genomes against LC738868 and
   dc-megablast of 31,168 cDNAs x0.98-1.00 (their batches are bound by the lookup and the seed stage). By default
-  (`LOSAT_X_QBATCHPAR`'s slots, the stages per query only inside slots of two or more threads) the 15 cells took
+  (`LOSAT_X_QBATCHPAR`'s slots, removed on 2026-10-28, the stages per query only inside slots of two or more threads) the 15 cells took
   x0.95-1.03 of dev's time (medians of 4-8 rounds) at the same max RSS (G2's slots hold about 250 or 320 MiB from run to
   run in both arms), and 1,775 cDNAs (5.4 MB, a file the loop searches by default) x0.80 / x0.65 at 8 / 16 threads with
   blastn (0.93 -> 0.74, 0.80 -> 0.51 s), x1.00 with megablast, x0.97-0.99 with dc-megablast. With this switch the loop
-  is still slower than the default slots at 16-32 threads (31,168 cDNAs, blastn 7.70 against 5.89 s at 16 threads,
+  was still slower than the default slots of that date at 16-32 threads (31,168 cDNAs, blastn 7.70 against 5.89 s at 16 threads,
   megablast 1.23 against 0.96 s), at 121-250 instead of 287-1,484 MiB.
 - `LOSAT_X_DIAGLV=1` (in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`)
   blastn, every task, `-subject` and `-db`, with the diagonal hash (query block over 8000 letters): the
@@ -4089,7 +4498,7 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_DIAGLV=1` in every run, off runs with an unread placebo; 1,775 or 3,492 D. melanogaster cDNAs
   against 3 Mb of chromosome 2L): dc-megablast one batch 1.374 -> 0.797 s at 16 threads (0.580, 8 pairs,
   rounds 0.567-0.616), 0.687 at 8 (2 pairs), 0.835 at 4 (6 pairs); two batches 2.649 -> 1.527 s at 16
-  (0.577, 4 pairs), with `LOSAT_X_QBATCHPAR=1` 1.620 -> 0.959 s; blastn with the first query set 2.832 ->
+  (0.577, 4 pairs), with `LOSAT_X_QBATCHPAR=1` (slots, removed on 2026-10-28) 1.620 -> 0.959 s; blastn with the first query set 2.832 ->
   1.435 s at 16 (0.507, 4 pairs). Instructions +12 % (dc-megablast) and +4 % (blastn): the keys, the
   counting sort, the merge and the spinning of idle participants. Max RSS dc-megablast 90-92 -> 104-108 MiB
   (one batch) and 105-107 -> 119-123 MiB (two batches; the partition tables and up to `2 x threads`
@@ -4116,7 +4525,7 @@ Scheduling (each value computed by one thread with the original function; order 
   4 and 8 threads plain blastn reads -1.0 % and -9.0 % (rounds at a matched clock -1.0 / +6.9 %), inside the spread
   of the same rounds (dc-megablast-only switches, which cannot act there, read -1.0..+7.1 %). Max RSS +7..+48 MiB in
   those rounds: dc-megablast of 31,168 cDNAs +39 MiB and plain blastn of 1,775 cDNAs +48 MiB at 16 threads (the latter
-  beside the earlier budget's `LOSAT_X_QBATCHPAR` slots, which the budget rule now keeps off for that file), below
+  beside the earlier budget's `LOSAT_X_QBATCHPAR` slots (removed on 2026-10-28), which the budget rule then kept off for that file), below
   NCBI `-db` in every cell (494 vs 700 MiB; plain blastn 122 vs 136 MiB under the budget rule).
 - `LOSAT_X_PAIRPARHOME=1` (in the strict set since 2026-10-24 (perf/dc-fold-sync, evidence at the end of this entry): on
   unless it is `0`) blastn, in the partitioned stages of `LOSAT_X_PAIRPARFOLD`
@@ -4154,7 +4563,7 @@ Scheduling (each value computed by one thread with the original function; order 
   chromosome 2L (`-subject`) in the batch loop (`LOSAT_X_QBATCHPAR=0`) x0.950 / 0.900 / 0.831 at 8 / 16 / 32 threads
   (4 / 6 / 6 rounds; cycles x0.950 / 0.878 / 0.740, instructions x0.97-0.98; the folds' CPU time summed over the
   participants 8.36 -> 6.73 s at 16 threads and 11.40 -> 8.27 s at 32, where 60,352 runs folded the 1,769,472 fold
-  units of the 27 stages and 16,127 partition strips were folded away from home), by default (QBATCHPAR slots)
+  units of the 27 stages and 16,127 partition strips were folded away from home), by default (QBATCHPAR slots, removed on 2026-10-28)
   x0.958 / 0.963 / 0.975; 1,775 cDNAs (the batch loop by default) x0.950 / 0.953 / 0.891 at 8 / 16 / 32 threads; blastn
   of the 31,168 cDNAs at 16 threads in the batch loop x0.946, megablast x0.999 (rounds 0.977-1.009), megablast of E.
   coli genome pieces against LC738868 x1.023 (0.987-1.047; 0.22 s runs whose 7 stages carry no seeds and take 1 ms
@@ -4167,21 +4576,22 @@ Scheduling (each value computed by one thread with the original function; order 
   (`blastn/blast_engine/x_pair_seed_part.rs`) puts the stage's hits in the order of their keys. Without the switch the
   owner sorts the (key, partition, index) of every hit of the stage on its thread while the other participants wait
   (`sort_unstable`; the AB input below: 76,600 hits per stage, 91 stages, 0.30-0.40 s of a 4.7-9.8 s run at 8-32
-  threads, the only serial part of the stage, which otherwise scales in cycles). With the switch (`hits_by_strips`), a
-  stage on a pool of two threads or more with `MERGE_POOL_MIN_HITS` (4,096) hits or more is ordered strip by strip: a
-  partition's keys ascend (it folds the strips in order and a strip's seeds of the partition in their scan order, the
+  threads, the only serial part of the stage, which otherwise scales in cycles). With the switch (`hits_by_strips`), every
+  stage is ordered strip by strip: a partition's keys ascend (it folds the strips in order and a strip's seeds of the partition in their scan order, the
   counting sort of the strip being stable; one hit per seed at most) and a key is (strip, position in the strip's scan
   order), so the hits of strip i are one run per partition after those of the strips before i; each strip's runs are
   gathered and its few hits sorted (`hits_of_strips`). The strips are cut into `MERGE_RANGES_PER_THREAD` (2) ranges per
   thread of the pool, which the pool orders side by side (`rayon::scope`); a range starts each partition's cursor at its
   first key of the range (binary search) and writes its hits into its own slice of the list's spare capacity, after the
-  hits of the ranges before it. The order is the sort's (keys are unique), so the hits, and everything made from them,
-  are the same. A stage of fewer hits (the bound is kept above the estimated crossover: starting a scope's jobs takes
-  tens of microseconds, the sort about 50 ns per hit), of one strip, or without a pool keeps the sort (`x_reach!` per
-  stage: the switch's side for a stage it orders; no stage of the ci_fast blastn fixtures has 4,096 hits, so the reach
-  table marks the new side a gap, which the tests below cover). Tests: `hits_by_strips_on_a_pool_is_the_sort_of_merge` (random stages of 1 to 9 partitions and 1 to
-  300 strips, strips without hits, an empty partition, hits already in the list; pools of 2, 3 and 8 threads, 1 to
-  4 x strips ranges) and `LOSAT/tests/blastn_pairpar_merge.rs` (the reports at 2 and 4 threads, and at 4 with
+  hits of the ranges before it. A stage of one strip, or off a pool, is ordered on the owner's thread, the strips in turn
+  (`hits_by_strips_here`). The order is the sort's (keys are unique), so the hits, and everything made from them, are the
+  same. Until 2026-10-27 (perf/pairpar-merge-one-form) a stage of fewer than 4,096 hits kept the sort, a bound set above
+  an estimated crossover and never measured; it is gone because no measured stage has 2,048 to 6,080 hits, so any bound
+  there splits the stages the same way and the measured inputs give it no value (per-stage counts at the end of this
+  entry), and the pool's form costs the small stages tens of microseconds each (`x_reach!` per
+  stage, always the switch's side while it is on). Tests: `hits_by_strips_is_the_sort_of_merge` (random stages
+  of 1 to 9 partitions and 1 to 300 strips, strips without hits, an empty partition, hits already in the list; pools of
+  2, 3 and 8 threads, 1 to 4 x strips ranges, and the owner's thread with its `runs` left from the stage before) and `LOSAT/tests/blastn_pairpar_merge.rs` (the reports at 2 and 4 threads, and at 4 with
   `LOSAT_X_PAIRPARHOME=0`, against `=0`, the
   one-hit fold of `-task blastn` with 17,506 hits in its stage and with 412, the Na fold of `-task blastn-short`, the
   two-hit fold of `-task dc-megablast`, with the sides of `LOSAT_X_REACH`).
@@ -4193,9 +4603,9 @@ Scheduling (each value computed by one thread with the original function; order 
   (`LOSAT_X_QBATCHPAR=0`) x0.960 / 0.949 / 0.947 at 8 / 16 / 32 threads (5 / 8 / 8 rounds, none slower; at 32 threads
   rounds 2-6 of every arm ran with 1.6 times the CPU time, a disturbance outside the run, and rounds 0, 1 and 7 read
   x0.941-0.948), against a `-db` of the chromosome x0.953 / 0.958 at 16 / 32 threads, with eight QBATCHPAR slots
-  (`LOSAT_X_QBATCHPARSLOTS=8`) x0.988 / 0.981, 1,775 cDNAs (the batch loop by default) x0.940 at 16 threads (20 rounds).
+  (`LOSAT_X_QBATCHPARSLOTS=8`; removed on 2026-10-28) x0.988 / 0.981, 1,775 cDNAs (the batch loop by default) x0.940 at 16 threads (20 rounds).
   Within noise where no stage reaches the bound or none is partitioned (16 threads): the 31,168 cDNAs by default
-  (one-thread QBATCHPAR slots) x1.003, 5,000 cDNAs x1.000, dc-megablast of the 31,168 cDNAs x0.999, of 1,775 x0.999,
+  (one-thread QBATCHPAR slots, removed on 2026-10-28) x1.003, 5,000 cDNAs x1.000, dc-megablast of the 31,168 cDNAs x0.999, of 1,775 x0.999,
   of 236 x1.001 (100 rounds), megablast x1.004 and in the batch loop x0.985, blastn-short of 236 cDNAs x0.996. CPU time
   x0.985-1.009, max RSS unchanged (`ru_maxrss`, every cell within 1 % or the arena spread of the arms). One thread (one
   node 0 core, `perf stat`, the 1,775 cDNAs with blastn and dc-megablast): instructions within 0.0001 % of `=0` and of
@@ -4208,187 +4618,42 @@ Scheduling (each value computed by one thread with the original function; order 
   threads in cycles (cycles:u of the run 201 -> 218 G from 8 to 32 threads; its CPU time grows with the clock, 3.06 ->
   2.40 GHz). The switch's form as a probe (`A15_P3=2`, exp/a15-seedscale 09aa43f4) in the same window, 6 rounds against
   the probe without it: x0.944 / 0.948 at 16 / 32 threads in the batch loop (x0.942 at 8), `-db` x0.956 / 0.955, eight
-  QBATCHPAR slots (`LOSAT_X_QBATCHPARSLOTS=8`) x0.991 / 0.985.
-- `LOSAT_X_QBATCHPAR=1` (BLASTN, all tasks, `-subject` with two or more threads; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`) NCBI's query batches are searched side by
-  side ahead of the batch loop of `run_in_pool` (`blastn/blast_engine/x_qbatch_par.rs`). The size of each
-  batch after the first comes from the successful initial extensions of the batch before (NCBI's
-  `CBatchSizeMixer`), so a planner advances a copy of the loop's mixer with predicted extensions (the hit
-  rate per letter of the last batch of the same size, times the planned batch's letters; 0 for a batch that
-  is split into query chunks) and plans the keys (first record, end record, batch size) of the next `2k`
-  batches. `k` slots search them ahead, each with `m` threads (`k x m <= n`): `m = 1` on a plain thread,
-  `m > 1` on a pool of `m` threads whose first thread is the slot's. The loop computes every batch's key
-  from its own mixer as before and takes a slot's result only under that key, so it alone decides the
-  batch boundaries, the errors, the warnings, the appends and the order of the output; the first batch is
-  always its own; its thread waits while slots search, and it searches on the whole pool only when no
-  slot runs. After every batch the plan is made again from the true mixer: planned batches the new plan
-  no longer holds are dropped (queued), cancelled (running) or discarded (finished). Before the loop writes
-  anything (the reports, or what an error writes) every slot is cancelled and joined (except
-  `LOSAT_X_RPTSTREAM`'s per-batch writes, see there), and once a slot's
-  batch returns an error no batch planned after it starts. Cancellation: a slot's search carries a flag
-  that `search_query_batch` reads at its start, between subjects and 5 Mb subject chunks, between query
-  chunks and before its traceback; a cancelled search ends with an error the loop never takes (the loop's
-  own searches have no flag). Memory: a slot starts a batch only while the estimates of the running
-  batches and the sizes of the finished results not yet taken, with it, stay within the budget plus the
-  loop's next batch (always admitted). Waste: two mispredicted next keys within eight batches, or more
-  discarded batches (finished results dropped and searches cancelled) than `2k` plus a quarter of the
-  batches taken, stop the speculation for the search. A batch's `LOSAT_TIMING` block is printed when the
-  loop takes the batch (discarded batches print none). Off (the loop as before) with `-db`, one thread,
-  `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, `LOSAT_DEBUG_COORDS[_START]`, the blastn trace or
-  `LOSAT_WASI_THREADS_DEBUG`, subjects of at least as many 5 Mb work units as threads, fewer than two
-  batches or batch units after the first, a budget of fewer than two slots, or slots the model below does
-  not predict at least 3 % faster than the loop (`off=model`); not in WebAssembly or without the
-  `parallel` feature. Memory: one batch in flight is estimated at `4^w x 4` bytes of lookup table plus
-  `8 + q` bytes per query letter plus 220 bytes per predicted extension (`w` the batch's lookup width; `q`
-  = 13 for blastn and blastn-short, 5 for megablast and dc-megablast; calibrated to 50 MiB per 1 Mb blastn
-  batch and to the 65-81 MiB measured per extra 5 Mb dc-megablast slot, perf-mb split3), the budget of the
-  batches beyond the loop's one is `LOSAT_X_QBATCHPARMEM` MiB, by default 96 MiB (blastn, blastn-short) or
-  28 MiB (megablast, dc-megablast) per thread beyond the first (0.8 of NCBI BLAST+ 2.17.0's max-RSS growth
-  per thread on the audit input; provisional; a 5 Mb dc-megablast batch is estimated at about 79 MiB, so the
-  budget allows a second slot from four threads; a 5 Mb megablast batch at about 135 MiB, with its 12-letter
-  lookup table of 64 MiB, so from six threads). That default applies only where NCBI's blastn itself splits
-  the search by queries with `-mt_mode 0` and `-db`, which is where its max RSS grows with the threads: a
-  query file larger than 10,000,000 bytes (1,500,000 at a word size below 10) against fewer than 6e9 letters
-  (1.5e8) of subjects (blastn_app.cpp:96-153; `ncbi_splits_by_queries`, `Profile::of_search`, since
-  2026-10-17). Elsewhere (standard input included) the default budget is 0, so the slots do not start
-  (`off=budget`, `budget_mib=0`) and the max RSS is the loop's; `LOSAT_X_QBATCHPARMEM` still sets a budget, and
-  `LOSAT_X_QBATCHPARMEM=<96 or 28 x (threads - 1)>` restores the earlier default budget. With the budget 0 the driver still plans the input once after the first batch, for the `units=` and
-  `estimate_mib=` of its stats line (a pass over the planned batches, no search). `LOSAT_X_QBATCHPARSLOTS` alone
-  forces a layout but admits only the loop's next batch where the budget is 0: set `LOSAT_X_QBATCHPARMEM` with it.
-  The subjects' work units count their letters through the stored letters, so `LOSAT_X_BNSTORE`'s packed
-  subjects count as their records did. Slots (`choose_slots`, a throughput model): the units of
-  work are the planned batches of at least half the letters of the letter-weighted median planned batch
-  (the batch at which the batches sorted by size reach half of all letters; the mixer's 100-letter batches
-  between 5 Mb ones, or a short last batch, are none, and one oversized batch, a long record, counts as one
-  unit and does not move the reference); for `k = 1 ..= min(1 + budget / estimate, n, units)` and `m = n / k` the
-  predicted span is `rounds(k) x (1 + 0.05 (min(k, 5) - 1)) / (m x E(m))`, with `ceil(units / k)` rounds
-  while `units <= 2k`, else `units / k` plus half a round when `k` does not divide `units`, and E(m) the
-  measured efficiency of one batch on `m` threads (speedup / m; megablast and dc-megablast 1, 0.89, 0.81,
-  0.51, 0.49 at 1, 2, 4, 8, 16 threads, blastn and blastn-short 1, 0.85, 0.71, 0.50, 0.29; log2-linear
-  between; measured up to 16 threads per batch, on one machine with the SMT siblings idle (workstation,
-  perf-mb split3 window 1, 2026-10-17); beyond 16 the speedup `m x E(m)` is kept at 16's, so the model does
-  not assume the loop keeps scaling on 32-128 threads; on machines whose thread count includes SMT
-  siblings, E(m) for large m is lower still); `k = 1` is the loop on the
-  whole pool, and slots start only when the best `k >= 2` predicts less than 0.97 of its span. The
-  choices are sensitive near that gate: one E(m) point 20 % off turns the 4-thread dc-megablast cells of
-  split3 (predicted 0.956) off, and all E(m >= 2) 7 % lower turns blastn's 1 Mb x 5 batches at 8 threads
-  from 2 x 4 to 5 x 1 (perf-mb `scripts/qbprule_model.py sens`). `LOSAT_X_QBATCHPARSLOTS=k` sets `k`
-  (tuning). Without `LOSAT_X_STATS` the switch writes nothing of its own; with it, one line on stderr at
-  the end of the search: `[X_STATS] QBATCHPAR batches= precomputed= loop= mispredicted= discarded=
-  cancelled= panicked= waste_bound= k= m= idle= units= rule_k= rule_m= predicted= budget_mib= estimate_mib=
-  peak_mib= off=` (`precomputed`: batches taken from a slot; `discarded`: finished or cancelled batches
-  dropped (a search whose flag was set when it returned counts as cancelled, whatever it returned);
-  `panicked`: slot batches that panicked, kept or dropped; `waste_bound`: the discards that stop the
-  speculation, at the end; `idle`: threads no slot uses; `units`: the batch units after the first batch;
-  `rule_k`, `rule_m`: the layout the model judged, its best of two slots or more or the one
-  `LOSAT_X_QBATCHPARSLOTS` sets, 0 when the model did not run; `predicted`: that layout's predicted span
-  over the loop's, printed to three decimals, the value the gate compares (slots below 0.970), `-` when the model
-  did not run; `units` is 0 when no batch follows the first; `peak_mib`: the most memory admitted at once; `off`: why
-  it did not, or stopped to, speculate). `LOSAT_X_QBATCHPARMISS=N` (test
-  only) corrupts every N-th prediction. A slot's panic is kept and resumed only if the loop takes its
-  batch; the release profile aborts on a panic, so there a panic in a batch a slot searches ends the
-  process (no slot runs while output is written, which the writers check with debug assertions; the batch
-  writes of `LOSAT_X_RPTSTREAM` are the exception, see there). Past an
-  error at batch j, the slots may have searched up to the plan's window (2k - 1 batches) before it is
-  known; once it is known, at most k - 1 still run and are cancelled when the loop meets j. With debug assertions, a check after the slots are
-  joined fails if a slot started rayon's global pool. The counters and `LOSAT_TIMING` end-of-run lines of
-  other switches (PAIRPAR, PAIRPARDISC, the megablast lookup fill) and
-  `LOSAT_X_DPCAPTURE` files count the work of the slots' threads too, discarded batches included, so
-  they differ from a run without the switch. Tests: the unit tests of `x_qbatch_par.rs` and
-  `LOSAT/tests/blastn_qbatchpar.rs`.
-  Default ON since 2026-10-17 (perf/perfmb-default-bundle), with the default budget of the rule above
-  (`Profile::of_search`: none for a query file that NCBI's blastn does not split by queries). Where it runs
-  (workstation (2x Xeon Gold 6338, 16 physical cores of one node with their siblings idle, alternating rounds, every
-  output the expected one; perf-mb `logs/defaultset_ws_report.md` unless named); a reduction is 1 - with / without
-  the switch, the other switches of the candidate set on; perf-mb `logs/qbprule_report.md` for the chooser): blastn
-  of 31,168 cDNAs against 3 Mb at 16 threads -42.3 % wall (and x0.930 of that with the chooser of #271), dc-megablast
-  of them -19.4 % (x0.956), x0.910 against the loop at 4 threads, dc-megablast of 3,492 cDNAs x0.984 at 4 threads;
-  max RSS below NCBI `-db` there (1,076 vs 1,897 MiB, 775 with `LOSAT_X_RPTSTREAM`; 494-518 vs 700; 312 vs 437; 177
-  vs 199). Where the rule keeps the loop (1,775 cDNAs, 5.4 MB): plain blastn at 8 / 16 threads 120 / 122 MiB, 1.04 /
-  0.91 s, against 183 / 332 MiB, 0.99 / 0.66 s with the earlier default budget; NCBI `-db` 128 / 136 MiB, 15.2 / 15.1
-  s.
-- `LOSAT_X_DCTWOSLOTS=1` (BLASTN, `-task dc-megablast`, `-subject` with LOSAT_X_QBATCHPAR slots, memory and speed;
-  in the strict set since 2026-10-25 (perf/dc-two-slots, evidence at the end of this entry): on unless it is `0`)
-  where the slot model of LOSAT_X_QBATCHPAR (`choose_slots`) takes three slots or more (k slots of m threads) for
-  `-task dc-megablast` and the two-slot rule holds, two slots of `n / 2` threads search instead (`Profile::two_slots`,
-  `two_slots_win`, `blastn/blast_engine/x_qbatch_par.rs`). The rule: 12 to 33 threads (at most 16 threads per slot;
-  fewer threads, and 64 or 128, keep the model), an even count of batch units (an odd count leaves the last round to
-  one slot), and either narrow slots in the model's layout that leave threads idle (`m <= 3` and `k x m < 2 x (n /
-  2)`), or every unit in its first round (`units <= k`), or a last round at most half full within five rounds (`0 <
-  units mod k <= k / 2` and `ceil(units / k) <= 5`). Where the
-  model takes two slots or keeps the loop, where the rule declines, and with `LOSAT_X_QBATCHPARSLOTS`, nothing
-  changes; megablast (also with template options), blastn and blastn-short have no rule. Why: the model's E(m)
-  points (above) were measured before LOSAT_X_PAIRPARDISCARR and LOSAT_X_PAIRPARHOME made one dc-megablast batch
-  scale better on 8 to 32 threads; on a map of `LOSAT_X_QBATCHPARSLOTS=2` against the model (dev d92512d0, ws,
-  2026-10-25, line D session 14 window w2: dc-megablast of the first 6,900 / 10,400 / 15,600 / 20,800 / 31,168
-  D. melanogaster cDNAs and of 5,000 cDNAs against 3 Mb of chromosome 2L, `-subject`, 12 / 16 / 24 / 32 threads,
-  4 rounds) two slots win where the model's narrow slots leave threads idle (31,168 cDNAs at 32 threads, 9 x 3 on 27
-  threads: x0.909), where its batches fit in one round (10,400 at 24 / 32 threads: x0.946 / x0.943) and where its
-  last round is half empty in a short search (31,168 at 16 threads, 4 x 4 for 18 units: x0.983), and lose with an
-  odd unit count (5,000 cDNAs, 3 units: x1.10-1.16) and where the model runs two full rounds or more of 4-thread
-  slots (x1.006-1.031); the rule takes every winning cell of that map but five (an odd unit count; two full rounds of
-  4- and 5-thread slots) and none of the losing ones, and keeps the model where nothing was measured (narrow slots
-  on every thread, last rounds more than half full, fewer than 12 threads). Same bytes: the slots change no output (LOSAT_X_QBATCHPAR above), this chooses only `k` and
-  `m`. With `LOSAT_X_STATS` the QBATCHPAR line's `k=` and `m=` are the slots that ran; `rule_k=`, `rule_m=` and
-  `predicted=` stay the model's layout. Tests: `the_two_slot_rule_*`, `the_dc_rule_*` and
-  `the_rule_changes_only_layouts_of_more_than_two_slots_where_it_holds` in `x_qbatch_par.rs`,
-  `LOSAT/tests/blastn_dc_two_slots.rs` (`the_report_does_not_depend_on_the_rule`,
-  `no_side_without_the_model_s_slots`). Evidence (ws node 1, 2026-10-25, line D session 15 windows w3 to w5:
-  dc-megablast `-subject` 3 Mb of chromosome 2L, the candidate against dev 416c427f and e6429b65, 6 to 8 rounds
-  rotated, max RSS by `time %M`, one output sha per case): 31,168 cDNAs at 16 threads (model 4 x 4 -> 2 x 8)
-  x0.976-0.982 of dev's time, max RSS 394-398 -> 222-235 MiB (NCBI `-subject`, one thread: 313 MiB); at 32 threads
-  (9 x 3 -> 2 x 16) x0.911-0.916, 824 -> 330-335 MiB; 6,900 cDNAs at 16 threads (4 x 4 -> 2 x 8) x0.965-0.980,
-  347 -> 208-209 MiB; 10,400 at 24 threads (6 x 4 -> 2 x 12) x0.967-0.973, 510 -> 233-238 MiB; `=0` against dev
-  x0.985-1.001. Where the rule declines (5,000, 15,600 and 20,800 cDNAs at 16 threads, 31,168 at 24) the model's
-  layout runs (`LOSAT_X_STATS`), with dev's cycles and instructions (x0.996-1.002 / x1.000); `-db`, 1,775 cDNAs and
-  megablast are unchanged.
-- `LOSAT_X_BNEIGHTSLOTS=1` (BLASTN, `-task blastn`, `-subject` with LOSAT_X_QBATCHPAR slots, memory and speed; in the
-  strict set since 2026-10-26 (perf/bn-eight-slots, evidence at the end of this entry): on unless it is `0`) where the
-  slot model of LOSAT_X_QBATCHPAR (`choose_slots`) takes more than eight slots for `-task blastn` on 12 to 64 threads,
-  its best layout of at most eight slots runs instead: the least predicted span of 2 to 8 slots, the fewest on a tie
-  (`SlotRule::EightSlots`, `eight_slots_apply`, `blastn/blast_engine/x_qbatch_par.rs`; that layout always pays the
-  model's 0.97 gate there). Where the model takes eight slots or fewer or keeps the loop, on fewer than 12 or more
-  than 64 threads, and with `LOSAT_X_QBATCHPARSLOTS`, nothing changes; blastn-short (not measured), megablast and
-  dc-megablast (LOSAT_X_DCTWOSLOTS) have no such rule. Why: each slot holds a batch's lookup table, query copies and
-  hits (about 38 MiB for a 1 Mb blastn batch: 702 -> 400 MiB from 16 to 8 slots below), and for `-subject` searches of
-  many cDNAs NCBI's max RSS stays that of one thread (630 MiB for 31,168 D. melanogaster cDNAs against 3 Mb), while
-  the model's 16 one-thread slots at 16 threads held LOSAT at 702 MiB; the model's E(m) points underrate large slots
-  on blastn since LOSAT_X_BNCSR and the per-query stages (it predicted 16 x 1 at 0.379 of the loop there, measured
-  0.785), so fewer, wider slots lose no time. On slot counts of `LOSAT_X_QBATCHPARSLOTS` against the model (dev
-  51234c2a, ws, 2026-10-25, line D session 15 window w6: blastn of the first 31,168 cDNAs (89 batch units) and of
-  5,000 (14 units) against 3 Mb of chromosome 2L, `-subject`, 8 / 16 / 32 threads, 4-6 rounds): 31,168 cDNAs at 16
-  threads, model 16 x 1 (702 MiB), 8 x 2 x0.981 (400 MiB), 4 x 4 x1.022 (232), 2 x 8 x1.184 (149), the loop x1.274
-  (107); at 32 threads, model 32 x 1 (1,439 MiB), 8 x 4 x0.932 (515), 4 x 8 x0.994 (350); 5,000 cDNAs at 16 / 32
-  threads, model 14 x 1 / 14 x 2 (560 / 619 MiB), 8 slots x0.891 / x0.878 (363 / 380), 4 x0.883 / x0.872 (225 / 240).
-  Windows w1 and w3 (the same binary, session 16, 4-6 rounds) added 6 / 10 / 12 / 16 slots, 12 / 24 / 64 threads,
-  4,000 / 6,900 / 15,600 cDNAs and 10 / 30 Mb subjects (chromosome 2L, then 2R): 31,168 cDNAs at 12 threads 6 x 2
-  x0.991 of the model's 12 x 1 (307 / 542 MiB), at 24 threads 8 x 3 x0.946 (427 / 1,041), at 64 threads 8 x 8 x0.874
-  of 32 x 2 (575 / 1,563); slots that leave threads idle lose (16 threads: 6 x 2 x1.237, 10 x 1 x1.448). Of the 16
-  inputs and thread counts where the rule applies (4,000-31,168 cDNAs, 3-30 Mb, 12-64 threads), 10 were measured with
-  the rule's own layout: x0.755-0.991 of the model's time, within x1.054 of the best measured count (4,000 cDNAs (12
-  units) at 16 threads 4 x 4 x0.755, 214 / 452 MiB; 6,900 cDNAs x 10 Mb at 32 threads 8 x 4 x0.841, 661 / 686); for 14
-  units the rule runs 7 x m (a tie with 8 x m, the fewest slots), measured there through 8 x m (x0.768-0.901); 4,000
-  cDNAs at 32 threads (6 x 5) was not measured. Refits of the E(m) points (with contention, Amdahl's serial share, or
-  a loop-thread cost per batch) to these 145 cells missed the best count by up to x1.07 (the best form) to x1.36, so
-  the points stay and the rule caps the slots. Where the model takes eight slots or fewer it can still miss (5,000
-  cDNAs x 30 Mb at 16 threads: 7 x 2 at x1.320 of 2 x 8's time); the rule leaves those layouts as they are. Same
-  bytes: the slots change no output (LOSAT_X_QBATCHPAR above), this chooses only `k` and `m`. With `LOSAT_X_STATS` the
-  QBATCHPAR line's `k=` and `m=` are the slots that ran; `rule_k=`, `rule_m=` and `predicted=` stay the model's
-  layout. Tests: `the_eight_slot_rule_*` in `x_qbatch_par.rs` (boundaries, the measured cells, random inputs against
-  `=0`, whole runs), `LOSAT/tests/blastn_eight_slots.rs` (`the_report_does_not_depend_on_the_rule`,
-  `no_side_without_the_model_s_slots`). Evidence: window w2 (dev f24d161f against this code, 3116f486, and its `=0`;
-  ws node 1, 2026-10-25, 8 rounds): 31,168 cDNAs at 12 / 16 / 24 / 32 / 64 threads x0.996 / 0.984 / 0.939 / 0.925 /
-  0.886 of dev, max RSS 544 -> 311, 700 -> 398, 1,042 -> 423, 1,441 -> 524 and 1,546 -> 585 MiB; 4,000-20,800 cDNAs
-  against 3 Mb at 16 threads x0.745-0.971 (4,000: 452 -> 219 MiB) and at 32 threads x0.766-0.964 (4,000's 6 x 5
-  x0.817); 5,000 cDNAs at 16 / 32 threads (7 x 2 / 7 x 4) x0.899 / x0.872; 5,000 cDNAs x 10 Mb at 16 threads x0.911,
-  6,900 x 10 Mb at 32 x0.841, 5,000 x 30 Mb at 32 x0.775; where the rule declines (8 threads, 6,900 cDNAs at 16, 5,000
-  at 12, megablast, dc-megablast, `-db`) x0.982-0.999 with equal instructions; `=0` x0.989-1.013 of dev; one output
-  per input. Window w4 on dev e127613d (after LOSAT_X_BNQPACK) against the merged branch (6fb98bc0), 4-8 rounds:
-  31,168 cDNAs at 16 / 32 threads x0.980 / x0.932, max RSS 703 -> 397 / 1,439 -> 515 MiB; 4,000 cDNAs at 16 threads
-  x0.748 (453 -> 220); 5,000 / 15,600 cDNAs at 16 threads x0.903 / x0.970; 6,900 cDNAs x 10 Mb at 32 threads x0.851;
-  where the rule declines (8 threads, 6,900 cDNAs at 16, megablast) x0.996-1.014 with equal instructions.
+  QBATCHPAR slots (`LOSAT_X_QBATCHPARSLOTS=8`; removed on 2026-10-28) x0.991 / 0.985.
+  One form without the bound (v4-A15 s17, 2026-10-27, perf/pairpar-merge-one-form): per-stage hit counts (a probe on
+  origin/dev e15cc65e, exp/a15-mergeform 234ef1fd, `LOSAT_TIMING` per stage; workstation node 0, 16 CPUs shared with
+  other jobs, so its times are indicative; 21 inputs at 16 and 4 threads, five forms each, every output the same across
+  the forms, v4-A15 `results/s17/s17count_c1`). blastn of the 31,168 cDNAs (batch loop, slots, eight slots, `-db`): 91
+  stages, 86 of 65,536-131,071 hits, 3 of 32,768-65,535, one of 6,081 and the last one of 358; of 5,000 cDNAs: 14 of
+  65,536 or more, one of 22,883, the last of 358; of 1,775 cDNAs: 5 of 65,536 or more and the last of 358 (word size 9: 5
+  of 65,536 or more); blastn-short of 236 cDNAs: 8,896, 97,259 and 509,202. dc-megablast of the 31,168 cDNAs
+  (`-subject` and `-db`): 27 stages, none above 2,047; of 1,775 / 236 / 7 cDNAs: 0 and 1,086 / 0 and 53 / 0. megablast
+  of the 31,168 cDNAs (both loops): 25 stages, none above 511; of 1,775: 0 and 198. No stage had 2,048 to 6,080 hits.
+  Ordering time at 16 threads, the pool's strip order against the sort: 185 / 481 ms (31,168 cDNAs, slots), 62 / 315
+  (batch loop), 42 / 74 (5,000), 4.5 / 44.5 (blastn-short); the same strip order on the owner's thread alone took 0.7-0.8
+  of the sort, so the large stages need the pool. On the small stages the pool's start (`MERGE_RANGES_PER_THREAD` jobs
+  per thread) cost 0.03-0.1 ms per stage more than the sort (dc-megablast of the 31,168 cDNAs 1.7 / 0.8 ms over its 27
+  stages, `-db` 2.4 / 0.8, megablast in the batch loop 1.6 / 0.5 over 25), at most 0.1 % of the run, and about 5 us per
+  stage at 4 threads, the same as the sort: the crossover moves with the threads and the pool's state, so a bound on the
+  hit count alone has no measured value. Speed (workstation node 1 booked through its FIFO, 16 physical cores with the
+  siblings idle, `numactl --membind 1`, the many-pair driver with the arm order rotated; arms origin/dev e15cc65e, a
+  byte copy of it (A/A), b6b3a2d5 and b6b3a2d5 with `=0`; every output the same across the arms, dc-megablast of the
+  31,168 cDNAs NCBI's 5c357f81, blastn in the batch loop NCBI's daa7e0ac; v4-A15 `results/s17/many_s17ab1`): the
+  median of the per-round b6b3a2d5 / dev (A/A copy / dev) at 16 threads: dc-megablast of 236 cDNAs 1.011 (1.012, 60
+  rounds), of 7 cDNAs 1.011 (0.986, 60; spread +-4 %), of 1,775 1.005 (1.001, 40), of the 31,168 1.001 (1.003, 16) and at
+  8 threads 0.996 (0.997, 8), against the `-db` 1.003 (1.001, 12); megablast of 1,775 cDNAs 1.002 (1.003, 60), of the
+  31,168 1.021 (1.003, 16; spread +-6 %), in the batch loop 0.998 (0.994, 16); blastn of 1,775 cDNAs 0.996 (1.001, 24),
+  of 5,000 1.005 (1.004, 12), of the 31,168 in the batch loop 0.996 (0.998, 8); blastn-short of 236 cDNAs 1.003 (1.001,
+  12): every case within the A/A spread. b6b3a2d5 / its `=0`: blastn of 1,775 cDNAs x0.943, of the 31,168 in the batch
+  loop x0.947, of 5,000 1.002, blastn-short 0.995; the inputs with small stages only 0.976-1.035, inside their spread.
+  CPU time x0.997-1.006, max RSS within 2 % (`ru_maxrss`).
+- `LOSAT_X_QBATCHPAR` (BLASTN query-batch slots; REMOVED on 2026-10-28 with `LOSAT_X_QBATCHPARMEM`, `LOSAT_X_QBATCHPARSLOTS`,
+  `LOSAT_X_QBATCHPARMISS`, `LOSAT_X_DCTWOSLOTS`, `LOSAT_X_BNEIGHTSLOTS`, `LOSAT_X_BNQSLOTS` and the `[X_STATS] QBATCHPAR` line;
+  Owner decision: at 16 threads the slots' max RSS rise exceeded their time saving, 31,168 cDNAs x 3 Mb: blastn 107 -> 400 MiB for
+  6.0 -> 4.6 s, dc-megablast 136 -> 238 MiB for 3.2 -> 1.8 s). A run ignores these variables. Every query batch is searched by
+  the batch loop of `run_in_pool` on the whole search pool, as with `LOSAT_X_QBATCHPAR=0` before; outputs do not change. The
+  design and the evidence are in the git history (the entries of the slot switches as of commit 70fbab3af).
 - `LOSAT_X_RPTSTREAM=1` (BLASTN, all tasks, `-subject` and `-db`, memory and speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`) the batch loop of `run_in_pool` writes the
-  reports of each query batch right after it has taken the batch (in batch order, also when
-  `LOSAT_X_QBATCHPAR` slots finish out of order: the loop's in-order take is unchanged), finished its lists
+  reports of each query batch right after it has taken the batch (in batch order), finished its lists
   (`-db`) and given its gie to the mixer, and drops its final hit lists; after the loop it writes the
   epilogs (NCBI prints each batch's result sets in its batch loop and `PrintEpilog` after it,
   blastn_app.cpp:277-318). Without the switch the loop keeps the final lists of every batch and writes all
@@ -4403,11 +4668,13 @@ Scheduling (each value computed by one thread with the original function; order 
   with two or more batches the switch acts only where none can come after the first batch, and a subject
   set's tabular ids, outfmt 0 titles and `-lcase_masking` masks are then made once; with one batch (the
   first batch takes every query record) nothing is checked or made ahead (no refusal can follow its
-  batch). Otherwise the reports stay after the loop, and `off=` names why: `outputs` (hit records, a format
+  batch). Otherwise the reports stay after the loop, and `off=` names why: `custom_tabular` (a tabular
+  field list or delimiter, or outfmt 10 or 20: `BlastnOutputFormat::CustomTabular`, whose refusals of
+  taxonomy names and stored data come in its one report call), `outputs` (hit records, a format
   observer, a file sink, or two or more formats, which the library API allows on one stream and the batch
   writes would interleave: the Web adapter; the command line and ABI v1 are streamed), `debug` (`-verbose`,
   `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, `LOSAT_DEBUG_COORDS[_START]`, the blastn trace,
-  `LOSAT_WASI_THREADS_DEBUG`: `run.rs` `x_debug_output`, the list `LOSAT_X_QBATCHPAR` uses too), `scoring`
+  `LOSAT_WASI_THREADS_DEBUG`: `run.rs` `x_debug_output`), `scoring`
   (no Karlin-Altschul values, or greedy gap costs LOSAT refuses), `chunk_size` (a negative `CHUNK_SIZE`),
   `search_space` (`(db + n (2 q + 1)) (2 q + 1)` above 2^63 - 1, q the longest query: the overflow refusal
   of the effective search space), `subject_ids` (a subject whose tabular id LOSAT refuses), and with
@@ -4418,10 +4685,7 @@ Scheduling (each value computed by one thread with the original function; order 
   only the 2-bit letters, so the traceback of the batch whose lists name the sequence decodes them first;
   `SeqDb::check_ambiguity` reads only those bytes). With `LOSAT_TIMING` the `[TIMING]` blocks are printed
   when the loop takes a batch, as before, so with the switch a block comes after the query warnings of the
-  batches before it (the same lines in another order). With `LOSAT_X_QBATCHPAR` the batch writes run while
-  the slots search the batches ahead (the slots write nothing; the error paths still stop every slot
-  before they write), so a slot's panic, which ends a release build at once, ends it after the reports of
-  the batches taken so far, possibly in the middle of one. Memory: a batch's lists, flags, masks, blocks,
+  batches before it (the same lines in another order). Memory: a batch's lists, flags, masks, blocks,
   search spaces and its queries' warnings are dropped after its write; kept for the whole search, as without
   the switch, are one (empty) warnings slot per query and with `-db` the stored title of every distinct
   sequence that a batch reported (`DatabaseTitles`: at most the database's sequences and at most the queries
@@ -4430,14 +4694,14 @@ Scheduling (each value computed by one thread with the original function; order 
   (`batches` written by the loop, `off` why the switch did not act or `none`, `one_batch` 1 where nothing was
   checked, `check_s` the seconds of the checks, the `-db` pass included).
   Measured on the workstation (2x Xeon Gold 6338, powersave, node 1 CPUs 32-47 with the siblings idle,
-  `numactl --membind`; `-outfmt 6 -out FILE`; both arms with `LOSAT_X_PAIRPARDISC`, `QBATCHPAR`,
+  `numactl --membind`; `-outfmt 6 -out FILE`; both arms with `LOSAT_X_PAIRPARDISC`, `QBATCHPAR` (removed on 2026-10-28),
   `DIAGLV`, `PAIRPARFOLD`, `QDUSTPAR` and `DISCLUTPAR`, one binary, the arms alternating with the order
   rotated per round and a warm-up run before each 16-thread cell; every output has its expected sha256),
   on/off as the median of the per-round ratios. D. melanogaster cDNAs against 3 Mb of chromosome 2L with
   `-subject`: 31,168 cDNAs with blastn (91 batches, 1,020,023 rows): 1 thread 71.3 -> 71.7 s (1.006, one
   run each), max RSS 502 -> 157 MiB (NCBI BLAST+ 2.17.0 `-db` 126 MiB, in another window); 4 threads 20.54
   -> 20.00 s (0.974, 2 rounds), 638 -> 295 MiB; 16 threads 7.37 -> 6.13 s (0.831, 3 rounds: the serial write
-  of all reports after the loop now runs while the slots search), 1,076 -> 775 MiB. The same queries with
+  of all reports after the loop now runs while the slots (removed on 2026-10-28) search), 1,076 -> 775 MiB. The same queries with
   dc-megablast (37 batches), 16 threads: 3.48 -> 3.47 s (0.992), 503 -> 489 MiB; 1,775 cDNAs with blastn (6
   batches), 16 threads: 0.568 -> 0.543 s (0.963), 329 / 330 MiB; with dc-megablast (3 batches), 16
   threads: 0.392 -> 0.406 s (1.033, 3 rounds) and in 8 more rounds of another window (1.8 GHz) 0.534 / 0.534
@@ -4445,7 +4709,7 @@ Scheduling (each value computed by one thread with the original function; order 
   file (about 94 MiB of records, held for the whole run). Shrinking a batch's lists to their length (the
   prototype `LOSAT_X_HELDSHRINK` of `tmp/split3`) adds nothing with the switch on: 157.8 / 157.5 MiB at 1
   thread, 777.6 / 782.3 MiB at 16 threads (medians of 3, spread 767-793). With `-db` (megablast; the slots
-  do not run there, so the writes stay serial): 100 16S rRNAs against all 16S (28,036 sequences,
+  (removed on 2026-10-28) did not run there, so the writes stayed serial): 100 16S rRNAs against all 16S (28,036 sequences,
   `BATCH_SIZE=15000`, 10 batches, 50,762 rows): the checks took 0.021-0.022 s at 16 threads (0.3 % of the
   6.4 s search) and 0.048 s at 1 thread (0.07 % of 65.7 s); wall 6.37 -> 6.46 s (1.013, 1.005..1.022, 3
   rounds), 65.6 -> 65.7 s at 1 thread; max RSS 178 -> 168 and 53 -> 33 MiB. 5,000 D. melanogaster cDNAs
@@ -4457,7 +4721,7 @@ Scheduling (each value computed by one thread with the original function; order 
   header file and a refused title byte, and a raised ambiguity count in the old and the new format, whose
   error equals the traceback's), `LOSAT/tests/blastn_report_stream.rs` (off / on equal in exit
   status, report or `-out` file, and standard error, with `BATCH_SIZE` 4,000: the three tasks x outfmt 0,
-  6, 7 x 1 and 4 threads; `-out` files and `LOSAT_X_QBATCHPAR` slots (two, `LOSAT_X_QBATCHPARSLOTS=2`);
+  6, 7 x 1 and 4 threads; `-out` files;
   `-query_loc`, `-subject_loc -lcase_masking` with lower case subject runs, `-max_target_seqs -max_hsps
   -subject_besthit`; a reader error and a batch of queries without letters after earlier batches; `-db`,
   intact and with a refused title or a raised ambiguity count of a sequence that only the last batches hit
@@ -4476,16 +4740,13 @@ Scheduling (each value computed by one thread with the original function; order 
   records were read until now (after `Query is Empty!`, before the search's checks and the outfmt 0
   prolog), a first reading with the same reader, by the loop of `read_queries`, keeps only each
   record's length and how the reading ended (its error and warnings): the batch planner and size
-  mixer, `LOSAT_X_QBATCHPAR`'s plan and rule, `LOSAT_X_RPTSTREAM`'s checks and `-query_loc`'s query
+  mixer, `LOSAT_X_RPTSTREAM`'s checks and `-query_loc`'s query
   input (placements, skipped records, searched lengths, made from the lengths as `cut_queries`
   makes them) read only these, so every refusal, warning and error that comes before the first
   output comes from the same values at the same place. Then a second handle on the same open file
   (`try_clone`, at the position the first reading started from) reads the records forward as the
   batch loop takes its batches, as NCBI reads its query batches one at a time
-  (blastn_app.cpp:277-279, blast_input.cpp:134-171); a `LOSAT_X_QBATCHPAR` slot gets the records of
-  the batch it searches as a chunk shared with the window (read into a chunk of its own; a request
-  that is not exactly one chunk, a mispredicted batch or `-query_loc`'s cut records, gets a copy),
-  and the loop takes that chunk as it is. A batch's records are dropped after its reports
+  (blastn_app.cpp:277-279, blast_input.cpp:134-171). A batch's records are dropped after its reports
   (`LOSAT_X_RPTSTREAM`). Exactness (`blastn/blast_engine/x_query_stream.rs` header): the reader is a
   function of the bytes and its configuration; the second reading starts at the same byte with the
   same calls per record (`End()`, then `GetNextSequence`), so it reads the same records with the
@@ -4500,24 +4761,18 @@ Scheduling (each value computed by one thread with the original function; order 
   `/dev/stdin`: `metadata().is_file()`), `io` (no position or second handle, e.g. `try_clone` on
   WASI), and the rule (`x_query_stream::Rule::off`): `megablast` (`-task megablast`),
   `batch` (a file shorter than twice the largest query batch: `BATCH_SIZE`, or the `CBatchSizeMixer` maximum,
-  999,000 letters for blastn and 4,999,000 for dc-megablast; the file's bytes against the batch's letters),
-  `slots` (where `LOSAT_X_QBATCHPAR`'s slots may run: the switch on, the conditions of its `off=` reasons that are
-  known before the search (`-subject`, two threads or more, the build, no debug output, fewer 5 Mb subject units
-  than threads) and a budget (`LOSAT_X_QBATCHPARMEM` when set, else the default one, which NCBI's split by queries
-  decides) or a slot count (`LOSAT_X_QBATCHPARSLOTS`); a file shorter than twice their default window, 2,000,000
-  bytes per thread beyond the first); `run_local` (the Web adapter, ABI v1) gets its
+  999,000 letters for blastn and 4,999,000 for dc-megablast; the file's bytes against the batch's letters);
+  `run_local` (the Web adapter, ABI v1) gets its
   records from its caller. Where
   `LOSAT_X_RPTSTREAM` is on but keeps the reports after the loop for a search (its `off=` reasons),
   the records of every batch are kept for them (the memory of the records read before the search).
-  With `LOSAT_X_STATS` and the switch, `[X_STATS] QSTREAM records= read= batches= slots= slot_copies=
-  slot_records= kept= stale= scan_s= read_s= peak_window= off=` (slots: the slots' requests,
-  slot_copies of them copied; kept: the searched records kept for a writer after their batch, 0 where
-  `LOSAT_X_RPTSTREAM` writes each batch's reports; stale: requests
-  for records the loop had passed, answered with QBATCHPAR's `Cancelled`; scan_s / read_s: the first
+  With `LOSAT_X_STATS` and the switch, `[X_STATS] QSTREAM records= read= batches=
+  kept= scan_s= read_s= peak_window= off=` (kept: the searched records kept for a writer after their batch, 0 where
+  `LOSAT_X_RPTSTREAM` writes each batch's reports; scan_s / read_s: the first
   and the second reading; peak_window: the most records read ahead of the loop at once). Measured on
   the workstation (2x Xeon Gold 6338, powersave, node 1, 16 cores with the siblings idle,
   `numactl --membind`; D. melanogaster cDNAs against 3 Mb of chromosome 2L with `-subject`,
-  `-outfmt 6 -out FILE`; every arm with `LOSAT_X_PAIRPARDISC`, `QBATCHPAR`, `DIAGLV`, `PAIRPARFOLD`,
+  `-outfmt 6 -out FILE`; every arm with `LOSAT_X_PAIRPARDISC`, `QBATCHPAR` (removed on 2026-10-28), `DIAGLV`, `PAIRPARFOLD`,
   `QDUSTPAR`, `DISCLUTPAR` and `RPTSTREAM`, on vs off in the same window, one binary, the arms
   alternating with the order rotated per round and a warm-up before each 16-thread cell; every
   output has its expected sha256; on/off = median of the per-round ratios; window 4 of
@@ -4527,7 +4782,7 @@ Scheduling (each value computed by one thread with the original function; order 
   -> 90 (0.50; NCBI 150), 16 threads 488 -> 413 (0.85); 13,193 cDNAs (40 MB), 1 thread 99 -> 61
   (0.61); wall on these 0.991-1.025 (one round each at 1 thread: 1.011, 1.025 and 1.014, and
   0.979 and 1.004 for the 96 MB file at 1 thread in another window; 0.991 at 4 threads, 2 rounds) and
-  0.996-0.998 (16 threads, 3 rounds). Where it loses: at 16 threads on query files of 5-40 MB the slots read most of the file
+  0.996-0.998 (16 threads, 3 rounds). Where it loses: at 16 threads on query files of 5-40 MB the slots (removed on 2026-10-28) read most of the file
   ahead anyway (`peak_window` 71-93 % of the records), so max RSS stays within -1.5..+0.4 %, and the
   first reading's extra parse comes before the search: 1,775 cDNAs (5.4 MB) 0.554 -> 0.565 s (1.018,
   8 rounds; 1.021 in another window; the same code without the switch's effect 1.001 / 0.995),
@@ -4541,7 +4796,7 @@ Scheduling (each value computed by one thread with the original function; order 
   `d10_w4_summary.md`, `d10_w5_summary.md`. Off by the rule: megablast, where the serial first reading (`scan_s`
   0.117 s for 96 MB) is several % of a fast search: 31,168 cDNAs 1.052 at 4 threads (-89.8 MiB) and 1.037 at 16
   (-116.6), 1,775 cDNAs 1.039 at 8 and 1.063 at 16 (0 / +0.9 MiB); its max RSS stays below NCBI's without the switch
-  (31,168 cDNAs at 4 threads 241 MiB, NCBI 358.5); blastn at 16 threads where the slots read most of the file: 40 MB
+  (31,168 cDNAs at 4 threads 241 MiB, NCBI 358.5); blastn at 16 threads where the slots (removed on 2026-10-28) read most of the file: 40 MB
   1.012 (-12.0 MiB), 15 MB 1.014 (-1.6). Acting: blastn of 31,168 cDNAs at 16 threads 0.998 (-77.1 MiB), 40 MB at 8
   threads 0.994 (-21.4) and at one thread 1.025 (3 rounds; -37.2), 15 MB at 4 threads 1.008 (-10.9), 1,775 cDNAs
   (5.4 MB) at 16, 4 and 1 threads 1.006, 1.000-1.006 and 1.013 (-4.7, -3.3..-3.5, -5.6); dc-megablast of 31,168 cDNAs
@@ -4554,18 +4809,17 @@ Scheduling (each value computed by one thread with the original function; order 
   switch). Tests: the unit tests of `x_query_stream.rs` (the first reading equals
   `read_queries` on 40 seeded texts with LF / CR LF / mixed line ends, lines longer than the line
   reader's window, 1.1 MiB records, digits, comments and an error at the end; the second reading
-  equals the first in batches of every size, with slots' requests and stale ones, with and without
-  `-query_loc`; shared chunks; the query input from the lengths equals `cut_queries`'s; a file
-  changed between the readings, and a slot's failed reading that fails the loop's next batch;
-  `done` releases the loop's batch; the inputs that are read once) and
+  equals the first in batches of every size, with and without
+  `-query_loc`; the query input from the lengths equals `cut_queries`'s; a file
+  changed between the readings; `done` releases the loop's batch; the inputs that are read once) and
   `LOSAT/tests/blastn_query_stream.rs`
   (off / on equal in exit status, report or `-out` file and standard error, `BATCH_SIZE`
   4,000: the three tasks x outfmt 0, 6, 7 x 1 and 4 threads x `LOSAT_X_RPTSTREAM` off and on;
-  `-out`, `LOSAT_X_QBATCHPAR` slots; `-query_loc`, `-subject_loc
+  `-out`; `-query_loc`, `-subject_loc
   -lcase_masking`, `-max_target_seqs -max_hsps -subject_besthit`; a reader error late in the file
   and in the first record, a batch of queries without letters, a batch of skipped records, LOSAT's
   refusals; standard input and `/dev/stdin`; `-db`; the switch off unless set; `kept=0` with
-  `LOSAT_X_RPTSTREAM` acting, with and without slots).
+  `LOSAT_X_RPTSTREAM` acting).
 - `LOSAT_X_QSCANPAR=1` (BLASTN: blastn, blastn-short and dc-megablast, where `LOSAT_X_QSTREAM` acts (not megablast),
   `-subject` and `-db`, speed; in the strict set since 2026-10-26 (perf/bn-query-scan-par, evidence at the end of
   this entry): on unless it is `0`) the first reading of `LOSAT_X_QSTREAM` (each record's length and how the reading
@@ -4596,10 +4850,10 @@ Scheduling (each value computed by one thread with the original function; order 
   first reading (`[TIMING] read_fasta` 0.123 s); with the switch the reading takes 0.009 s on the local i9. Wall
   time: that search x0.932 at 16 threads (20 of 20 rounds faster, 1.528 -> 1.422 s), x0.964 at 8; the same queries
   against the database of 2L (`-db`) x0.935 at 16; blastn of them x0.972 (`-subject`) and x0.983 (`-db`); blastn of
-  1,775 cDNAs x0.978 (20 rounds); 5,000 and 1,775 cDNAs at 16 threads, whose files are below twice the slots' window
-  (`LOSAT_X_QSTREAM` does not act), x0.996 / x0.998; megablast (no `LOSAT_X_QSTREAM`) and 236 cDNAs (below the
-  minimum) within noise. At 32 threads the 31,168 cDNAs are read before the search (`LOSAT_X_QSTREAM`'s `Slots`), so
-  the switch does not act there (x1.002). Max RSS unchanged. At one thread (node 0, one core, perf stat):
+  1,775 cDNAs x0.978 (20 rounds); 5,000 and 1,775 cDNAs at 16 threads, whose files were below twice the slots' window
+  (`LOSAT_X_QSTREAM` did not act; slots removed on 2026-10-28), x0.996 / x0.998; megablast (no `LOSAT_X_QSTREAM`) and 236 cDNAs (below the
+  minimum) within noise. At 32 threads the 31,168 cDNAs were read before the search (`LOSAT_X_QSTREAM`'s `slots` reason, removed on 2026-10-28), so
+  the switch did not act there (x1.002). Max RSS unchanged. At one thread (node 0, one core, perf stat):
   dc-megablast of the 31,168 cDNAs `instructions:u` x1.0000, `cycles:u` x0.999; blastn of 1,775 cDNAs the same.
 - TBNPAR (graduated 2026-10-22; no variable, no `LOSAT_X_TBNPARSHADOW`; always on) tblastn:
   preliminary stage per (frame, chunk) and redo per match in parallel, one pool for the search. The
@@ -5067,6 +5321,104 @@ Scheduling (each value computed by one thread with the original function; order 
   path of the base, read x1.0001 / x1.0055 / x1.0039 (the layout of the new binary), so that the switch against `=0`
   in one binary is x0.9986 / x0.9978 / x0.9900 (11 / 11 / 12 of 16 faster; instructions x1.00002); AP027131 `-subject`
   x0.9963 at 1 thread (8 of 8 faster) and x0.9986 at 16.
+- `LOSAT_X_TBNDIAGPACK=1` tblastn (memory and speed; in the strict set from the pull request that added it,
+  2026-10-29; `=0` turns it off; `tblastn/search_init.rs` `XDiagCells`, `x_packs`, `tblastn/x_tbn_hitbf.rs`
+  `XDiagCell`): the diagonal table of the two-hit word finder (one per running unit; the units a thread runs one
+  after another share it, `XUnitBuffers`) holds NCBI's `DiagStruct` in four bytes (`blast_extend.h:51-55`:
+  `last_hit` in bits 0-30, `flag` in bit 31) instead of eight-byte `(last_hit, flag)` pairs: 128 KiB instead of 256
+  KiB for a query batch of 20,000 letters. The values fit: `last_hit` starts at 0 and is set to `s + offset` or
+  `s_last_off - (wordsize - 1) + offset`, the offset runs from the window to below INT4_MAX / 4 + the window + the
+  longest unit (at most 5,000,000 residues), so with a window above the word size and at most 2^28 every value is
+  below 2^30 and not negative, inside NCBI's signed 31 bits too; another window keeps the pairs (LOSAT's TBLASTN
+  takes window 40 with word size 3 and 60 with 2, both packed). A flag-0 cell read as `i32` is then
+  its `last_hit` and a flag-1 cell is negative, so the branch-free loop (`x_hits_bf`) reads one word per hit. The
+  tables give the same init HSPs and the same values in every cell (unit tests
+  `x_hits_bf_on_packed_cells_equals_pair_cells`, and `x_pairs_bf_gives_the_hits_and_table_of_pairs` on both
+  layouts against `pairs` on pairs). Always: every tblastn search with the default window.
+  Measured 2026-10-29 on the workstation (2x Xeon Gold 6338; base dev 593fff35; every output of a case the same
+  bytes in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16
+  CPUs for every run, medians of 4 rounds in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): the 595 proteins
+  of AP027131 x AP027133 (`-db_gencode 4`) `-subject` at 16 / 32 / 40 / 48 threads 56 / 75 / 83 / 94 -> 55 / 72 / 80
+  / 88 MiB (NCBI `-subject` runs one thread: 81), `-db` at 48 104 -> 101 (NCBI 117); `dmel_b4.faa` x zebrafish cDNAs
+  (`-db`) at 16 / 32 / 40 / 48 69 / 103 / 120 / 138 -> 67 / 101 / 116 / 132 (NCBI 137 / 150 / 156 / 162); with `=0`
+  in the same binary 56 / 75 / 83 / 93, 105, 68 / 104 / 120 / 137 (the base's). At one thread (`perf stat` of a
+  probe build with the same cells, 3 runs each, node 0, untimed): AP027131 `-subject` instructions x0.99995, cycles
+  x0.989; the `dmel_b4.faa` case instructions x1.00004, cycles x0.946 (64.8 -> 61.2 s): half the table's bytes on
+  the random reads of the two-hit test. Time (node 1, cores warmed 3 s before each run, arms alternating in order,
+  `perf stat`; the PR's binary against the base, and `=0` in the PR's binary): `dmel_b4.faa` at 1 / 8 / 16 / 32
+  threads x0.953 / x0.955 / x0.956 / x0.958 (8 of 8, 12 of 12 each faster; instructions x0.9987; `=0` x0.9992 /
+  x1.0005 / x1.0002 / x0.9998); AP027131 `-subject` at 1 / 16 / 32 x0.991 / x0.995 / x0.990 (12, 7, 8 of 12 faster;
+  `=0` x1.0001 / x1.0007 / x1.0000).
+- `LOSAT_X_TBNSCANRESUME=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-29;
+  `=0` turns it off; `tblastn/x_scan_byte.rs` `XScanHeld`, `x_scan_one_range_held`, `tblastn/search_seed.rs`
+  `x_scan_unit`, `OFFSET_ARRAY_SIZE`): a unit scanned on presence bytes (`LOSAT_X_TBNSCANBYTE`) keeps the block of
+  words where a scan call stops on a full offset array (the block's indexes and candidates and the candidate that did
+  not fit), and the next call of the same range copies on from that candidate instead of making the block's
+  candidates again; the offset array of such a unit then holds NCBI's 4,096 + the longest chain
+  (`lookup_wrap.c:264-266` `GetOffsetArraySize`) instead of `LOSAT_X_TBNPAIRCAP`'s 32,768 + it (never more than the
+  plan's size): 33 KiB instead of 257 KiB per running unit for the fly proteins of `dmel_b4.faa` (longest chain 108).
+  A stop then costs one call of the scan and of the two-hit loop, not a block of up to 256 words made again (which
+  took 1.0041 of the instructions at this size, `LOSAT_X_TBNPAIRCAP`). The pairs and the `s_range` of every call are
+  NCBI's at any size (unit tests `x_scan_byte_equals_ncbi_scan_on_random_subjects` and
+  `the_last_overflow_chain_is_copied_exactly`, both with and without the kept block; the first counts that the call
+  after every stop finds its block kept for it; `tests/tblastn_scan_byte.rs` `the_offset_array_size_changes_only_the_scan_calls`: the same
+  report at one and four threads with both switches, `=0` and neither). The units of the branch-free scan
+  (`x_scan_bf.rs`: aarch64, and tables that are not sparse without AVX2) keep `LOSAT_X_TBNPAIRCAP`'s size. Where:
+  the units that take TBNSCANBYTE's scan (platform).
+  Measured 2026-10-29 on the workstation (2x Xeon Gold 6338; base dev d6208db9; every output of a case the same bytes
+  in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16 CPUs for
+  every run, medians of 8 rounds in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): the 595 proteins of
+  AP027131 x AP027133 (`-db_gencode 4`) `-subject` at 1 / 16 / 32 / 40 / 48 threads 19 / 55 / 72 / 80 / 88 -> 18 / 53
+  / 69 / 76 / 84 MiB (NCBI `-subject` runs one thread: 81), `-db` at 48 101 -> 94 (NCBI 115); `dmel_b4.faa` x
+  zebrafish cDNAs (`-db`, `-evalue 1e-5 -max_target_seqs 5`) at 16 / 32 / 40 / 48 66 / 101 / 116 / 133 -> 62 / 90 /
+  102 / 117 (NCBI 137 / 149 / 156 / 162); lower in 79 of the 80 pairs; `=0` in the same binary x0.990-1.008 of the
+  base. The `dmel_b4.faa` case takes 3.08 M scan calls instead of 1.40 M (1.39 M units): at one thread x1.0019 of the
+  instructions (about 380 per extra stop, the calls of the scan and of the two-hit loop), AP027131 `-subject` x1.0003;
+  blastx (`BXSCANBYTE`, AP027131 x AP027133 proteins and 800 fly cDNAs x yeast proteins `-subject`) x1.00000. Time
+  (node 1, cores warmed 3 s before each run, arms alternating in order, `perf stat`; the PR's binary against the base,
+  and `=0` in the PR's binary): `dmel_b4.faa` at 1 / 8 / 16 / 32 threads x0.9962 / x0.9974 / x0.9958 / x0.9991 (7 of
+  8, 11, 11 and 7 of 12 faster), `=0` x0.9919 / x0.9915 / x0.9920 / x0.9910; AP027131 `-subject` at 1 / 16 / 32
+  x0.9986 / x1.0014 / x0.9985 (10, 4, 6 of 12 faster), `=0` x0.9974 / x0.9972 / x0.9999. Against `=0` in the same
+  binary the switch costs x1.004-1.008 on `dmel_b4.faa` (the extra stops), which the binary's layout hides against
+  the base.
+- `LOSAT_X_TBNLUTLEAN=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-30;
+  `=0` turns it off; `tblastx/lookup/x_lut_direct.rs` `x_build_lean`, `tblastx/lookup/backbone.rs`
+  `x_lookup_table_for_profile`): a query batch's lookup table is built with the passes of the in-place builder of
+  BLASTX, BLASTP and TBLASTX (`x_build_direct`: count, layout, fill, no chains) with every temporary freed by the
+  build: the exact backbone as a counting sort of the query's words, the neighbour lists of its words made once into
+  one vector (no memo kept by the thread), and the per-cell counts reused as the fill cursors. The table's backbone
+  and overflow are mapped (on 64-bit glibc a capacity above its mmap ceiling, `utils/x_mapped.rs`
+  `x_unthresholded_capacity`; only the pages written are resident; elsewhere the capacity `Vec` gives), so that a
+  batch's table goes back when its search ends.
+  The chain builder kept the exact and thin backbones' cells (446 KiB each), their chains' slabs (about 1.4 MiB) and
+  the counts next to the new table, 3.4 MiB at once for a batch of 18,000 letters; the lean build peaks at about
+  1.5 MiB. TBLASTN builds each batch's table on the thread of the batch's first subject, and a thread's glibc arena
+  keeps the high water of what it allocated: with the batches searched side by side (`-subject`) the difference
+  stayed in each building thread's arena under what its search allocated later. With the batches searched one after
+  the other (`-db`) glibc trimmed the chain builder's large free top with the table at the batch's end; the lean
+  build's smaller one is not trimmed, and a table left in the arena kept the peak 1-3 % above the chain builder's
+  until the table was mapped.
+  The table is the chain builder's (unit test `lean_table_equals_reference_for_thresholds_masks_matrices_and_word_lengths`:
+  BLOSUM62 word lengths 2 and 3, BLOSUM45 at 2 and 3, PAM30, thresholds 0-1000, masks, the overflow array and a query
+  set without words; `tests/tblastn_lut_lean.rs`: the same report as `=0` with BLOSUM62 word size 3 and BLOSUM45 word
+  size 2, at one and four threads, every table lean by default and with chains with `=0`, read from
+  `[X_STATS] TBNLUTLEAN lean= chain=` with `LOSAT_X_STATS`). Always: every TBLASTN lookup table (LOSAT's TBLASTN takes
+  word size 3, and 2 with BLOSUM45) outside diagnostics mode, whose prints read the chains; a table of 4 or more
+  letters a word (backbone indexes over 16 bits, which the CLI refuses) would take the chain builder, as the in-place
+  builders decline it.
+  Measured 2026-10-30 on the workstation (2x Xeon Gold 6338; base dev a2ee6ff3; every output of a case the same
+  bytes in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16
+  CPUs for every run, medians in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): the 595 proteins of AP027131
+  x AP027133 (`-db_gencode 4`) `-subject` at 1 / 16 / 32 / 40 / 48 threads 17 / 53 / 68 / 76 / 83 -> 17 / 45 / 60 /
+  67 / 75 MiB (8 rounds, lower in every pair; NCBI `-subject` runs one thread: 81), `-db` at 48 95 -> 93 (NCBI 115);
+  `dmel_b4.faa` x zebrafish cDNAs (`-db`, `-evalue 1e-5 -max_target_seqs 5`) at 16 / 32 / 40 / 48 62 / 90 / 102 / 116
+  -> 61 / 90 / 101 / 116 (x0.985 / x0.994 / x0.997 / x0.994, 16 rounds, lower in 8 / 12 / 9 / 11 of the pairs; NCBI
+  128 / 139 / 145 / 151); `=0` in the same binary x0.994-1.012 of the base. At one thread x0.9957 of the instructions
+  (AP027131 `-subject`) and x0.9998 (`dmel_b4.faa`); BLASTX, BLASTP and TBLASTX x1.00000 (their code is the same).
+  Time (node 1, cores warmed 3 s before each run, arms alternating in order; the PR's binary against the base, and
+  `=0` in the PR's binary): AP027131 `-subject` at 1 / 16 / 32 threads x0.9949 / x0.9986 / x0.9840 (11, 7, 10 of 12
+  faster), against `=0` x0.9937 / x0.9957 / x0.9844; `dmel_b4.faa` at 1 / 8 / 16 / 32 x0.9986 / x0.9963 / x0.9965 /
+  x0.9946 (6 of 8, 11, 9, 11 of 12 faster), against `=0` x0.9989 / x0.9987 / x0.9984 / x0.9919.
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list
@@ -5095,6 +5447,35 @@ Scheduling (each value computed by one thread with the original function; order 
   tblastn switches of 2026-10-17 against `=0` in rotating rounds, 3-8 rounds, one hash per case):
   zebrafish 0.58 (23.2 -> 13.5 s), human 0.82 at one thread and 0.84 at 8 threads, fly 0.81, MG1655
   0.98.
+- `LOSAT_X_TBNLINKCTX=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-27;
+  `=0` turns it off; `tblastn/stage_d_linking/x_link_ctx.rs` `x_link_by_context`): a subject's HSPs are linked one
+  query context at a time, and a subject whose units ran on the pool (the single subject of a search, or one longer
+  than a chunk's budget) links its contexts there side by side, those with the most HSPs first. Before, the whole list was linked in one pass on the
+  thread that merged the subject's units: with many queries the long subjects ended in a serial link while the
+  other threads waited (the B11e / B10-E probes, 35 human proteins x the human genome `-db`: chr1 936 k HSPs over
+  35 contexts, link 1.38-1.47 s, of it 1.03 s the head loop, 0.23 s sorts; the six longest chromosomes ended the
+  preliminary stage in links of 0.8-1.5 s with 2-6 threads busy, at 16 and at 32 threads). The chains of NCBI's
+  pass never leave a context (a head's candidates are HSPs of its context, `link_hsps.c` 1048-1060 and 1407-1491),
+  so each context's HSPs linked alone, in the sum-score order restricted to the context, give the same chains,
+  numbers and e-values; the values go back to the list's order before the final stable sort by score (unit test
+  `contexts_linked_apart_give_the_list_of_one_pass`: random lists of 1 to 3,000 HSPs over 1 to 35 contexts, on one
+  thread and on a pool of 4, against the one pass, every field and the e-value bits). A list of one context is one
+  call as before (single-query searches and the post-redo linking of one match do not change). Always: every
+  linked list of two or more contexts takes this path. Measured 2026-10-27 on the workstation (2x Xeon Gold 6338,
+  node 1 whole, cores warmed 3 s before each run, pairs alternating in order, `perf stat` walls; the first commit of
+  the pull request that added it, 1a4ef2a6, against its base c780af86; every output of a case the same bytes in
+  every arm; ratio = median of the per-pair ratios; `-evalue 1e-5 -max_target_seqs 5`): 35 human proteins x the
+  human genome (`-db hsap_dna`) at 32 threads 29.78 -> 28.49 s (x0.963, 3 of 3 pairs; `=0` 29.86 s), at 16 threads
+  41.35 -> 40.20 s (x0.972, 2 of 2; the probe model put -1.17 s and -1.15 s, the runs -1.29 s and -1.15 s); 794
+  proteins x E. coli MG1655 at 32 threads x0.989 (8 of 8), 27 fly proteins x the fly genome x0.974 (6 of 8). The same
+  where a list has one context or the subjects are short: one human protein x the human genome at 16 threads x0.998
+  (5 of 8 faster), one zebrafish protein x the zebrafish genome at 32 threads x1.009 (2 of 8; per pair 0.98-1.08,
+  instructions x1.0001), the 35 proteins x human cDNA (`-db hsap_cdna`, short subjects, each linked on its own
+  thread) at 16 threads x1.001 (instructions x1.0019, the grouping by context). One thread (node 0, one core):
+  794 x MG1655 9.58 -> 9.53 s, 27 fly proteins x the fly genome 15.46 -> 15.34 s, instructions x0.9994 and x0.9996.
+  Max RSS (`time` %M): 35 x human genome x0.994 at 32 threads and x0.991 at 16, x human cDNA 143 -> 121 MiB (x0.85,
+  3 of 3), other cases x0.98-1.01 at 32 threads; at one thread the fly case reads 49.0 or 54.6 MiB in either arm
+  (the A/B's pair 49.0 -> 54.6 MiB, a later run of 3 pairs on the same core 54.6 -> 49.0 MiB in each pair).
 - `LOSAT_X_TBNLINKSETS=1` tblastn (speed; in the strict set from the pull request that added it, 2026-10-26;
   `=0` turns it off; `tblastn/stage_d_linking/x_link_window.rs` `XLinkWindow::candidates`): the linking candidates
   of a head whose query-offset window holds more HSPs than its subject lookup (TBNLINKWIN, graduated) take a set of
@@ -5219,12 +5600,13 @@ Scheduling (each value computed by one thread with the original function; order 
   the branch-free scans of blastp / blastx / tblastx join the set once each shows no loss).
 - `LOSAT_X_TBNUNITXLATE=1` tblastn (speed and memory; in the strict set from the pull request that added it,
   2026-10-23; `=0` turns it off; `tblastn/x_subject_translate.rs` `x_packed_lean_plan`, `x_unit_residues`,
-  `tblastn/search_gapped.rs` `X_UNIT_RESIDUES`): the plan of a packed subject (every `-db` sequence, `-subject`
-  with `TBNSTORE`) whose first frame has 1 MiB or more (3,145,722 bases) and which is made for its search alone
-  (a search that keeps no subject plans: not one of 4+ query batches with `TBNSSIDE`, whose plans, kept or made
-  per use, keep their frames) has no residues: its frames have their lengths and its units
+  `tblastn/search_gapped.rs` `XUnitResiduesPool`): the plan of a packed subject (every `-db` sequence, `-subject`
+  with `TBNSTORE`) whose first frame has 1 MiB or more (3,145,722 bases) and which is made for its use alone
+  (a search that keeps no plan of it: fewer than 4 query batches, or, since 2026-10-28, a plan that the 256 MiB
+  of kept plans of `TBNSSIDE` refuses and every batch makes per use; `XSubjectSide::keeps`) has no residues: its
+  frames have their lengths and its units
   their chunks, and each (frame, chunk) unit translates the residues it reads, from the chunk's first to 4,096
-  past its last (or the frame's end sentinel), into a buffer its thread keeps, from the packed bytes of its
+  past its last (or the frame's end sentinel), into a buffer the threads share, from the packed bytes of its
   phase and strand with the tables and loops of `TBNXLATESIMD` (32 codons with AVX2, else eight from one word).
   Before, the thread that took a chromosome translated its six frames (up to 83 MB each on the human genome)
   before the chromosome's units started, glibc mapped them fresh and unmapped them after the subject
@@ -5233,12 +5615,25 @@ Scheduling (each value computed by one thread with the original function; order 
   tests `x_one_strand_of_a_phase_is_that_strand_of_both`, `x_frame_residues_of_a_range_are_the_frames`,
   `x_lean_plans_are_the_plans_without_residues`, `x_units_of_a_frame_of_three_chunks_read_the_frames_residues`;
   `long_packed_subject_chunk_wordfinder_hsps_match_ncbi`, NCBI's initial HSPs of a subject of two chunks per
-  frame; `tests/tblastn_unit_xlate.rs`). The buffer is taken from the thread for the unit and given back after
-  it, so a unit the thread runs while it waits (`TBNFLOWHELP`) makes its own; it only grows, and a thread keeps
-  it (up to a chunk and the margin, about 5 MB) until it ends. The units' codons count in `[X_STATS]
-  TBNXLATESIMD`. Subjects with shorter frames keep the frames of their plans (those of 256 KiB or less reused
-  by `TBNFRAMEREUSE`). With `LOSAT_X_STATS=1` `[X_STATS] TBNUNITXLATE plans= units= residues=` counts
-  the plans without residues and the units' residues. Measured 2026-10-23/24 on the workstation (physical cores
+  frame; `tests/tblastn_unit_xlate.rs`). The unit takes an idle buffer of its query batch's pool
+  (`search_gapped.rs` `XUnitResiduesPool`, part of the batch's query-side state with its lookup table), or a new
+  one, and gives it back after it, so a unit the thread runs while it waits (`TBNFLOWHELP`) takes another; a
+  buffer only grows (up to a chunk and the margin, about 5 MB; from 1 MiB on with a capacity glibc maps,
+  `x_reserve_mapped`), and the batch's buffers are freed at the end of its preliminary stage. Before 2026-10-28
+  (B11m) each thread kept its buffer until it ended, so the buffers of every thread that had run such a unit
+  were still there at the peak, which comes after the units. Measured 2026-10-29 on the workstation (node 1,
+  `--membind=1`, the pull request's binary against dev ddb8c7ad in the same run, 8 rounds with the order rotated, VmHWM
+  sampled every 2 ms; every output of a case the same bytes across arms): the fly genome with `dmel_b4.faa` (4
+  batches) at 16 threads max RSS 454 -> 381 MiB (-66 MiB per round, 8 of 8 lower; dev against itself -4), one batch
+  of 35 human proteins against the human genome at 16 threads 2,494 -> 2,441 MiB (-53, 7 of 8; dev against itself
+  -21), the zebrafish genome with `drer_b4.faa` (4 batches) at 32 threads 1,359 -> 1,319 MiB (-45, 8 of 8), the human
+  genome with `hsap_b4.faa` (4 batches) at 32 threads 4,743 -> 4,751 MiB (-40 per round, 5 of 8: no change beyond the
+  rounds' spread of -227 to +227); time x0.991 / 0.999 / 0.999 / 0.998 (dev against itself x0.995 / 1.001), minor
+  faults +5 % on the 4-batch human search (its buffers made once per batch). The units' codons count in
+  `[X_STATS] TBNXLATESIMD`. Subjects with shorter frames keep the frames of their plans (those of 256 KiB or less reused
+  by `TBNFRAMEREUSE`). With `LOSAT_X_STATS=1` `[X_STATS] TBNUNITXLATE plans= units= residues= buffers= freed=`
+  counts the plans without residues, the units' residues, and the buffers made and freed (every buffer made is
+  freed at the end of its batch's preliminary stage). Measured 2026-10-23/24 on the workstation (physical cores
   of node 1 with their HT siblings idle, `--membind=1`, cores warmed 3 s before each run, pairs with the order
   alternated, `perf stat` walls; node 0 busy, load 13-54), the pull request's binary against its base, one protein
   against a genome (`-db -evalue 1e-5 -max_target_seqs 5`), every output of a case the same bytes across arms (the
@@ -5252,7 +5647,29 @@ Scheduling (each value computed by one thread with the original function; order 
   cycles and user time, the flow's tail: 21-22 of 32 CPUs busy in both). E. coli x 16 protein batches (the plans of
   `TBNSSIDE`) and fly proteins against 5,000 16S sequences (frames below 1 MiB) take the frames as before
   (x1.000-1.006, the same instructions). With `=0` the binary ran as its base (the human genome at one thread
-  x1.002, the same instructions).
+  x1.002, the same instructions). Widened 2026-10-28 to the plans a search of 4+ batches does not keep: whether
+  a subject's plan is kept is decided from its length before the plan is made (`XSubjectSide::keeps`, the
+  same bytes and limit as before, `plan_bytes_of`), and a plan the limit refuses, which every batch made per
+  use with its six frames (a human chromosome of 128 Mb or more never fits; a search of 4 batches at 16 or 32
+  threads keeps its side, `TBNKEEPFEW`), is made as a plan without a side is: without residues when its
+  first frame has 1 MiB or more. Same reports; no new rule (`=0` makes every plan with its frames, as before
+  the widening for such a search). Measured 2026-10-28 on the workstation (node 1, physical cores with their HT
+  siblings idle, `--membind=1`, cores warmed 3 s, pairs with the order alternated, walls by the driver's monotonic
+  clock, peak anonymous memory sampled every 50 ms from the process; load 22-138 from node 0), the pull request's
+  binary (82db3a82) against its base (dev 2087618e), `-db -evalue 1e-5 -max_target_seqs 5`, every report the same
+  bytes in every arm: 122 human proteins (4 batches) against the human genome at 16 threads 137.2 -> 135.7 s
+  (x0.990, 2 of 2 pairs faster), peak RssAnon 7,267 -> 3,477 MiB (-3,791 MiB; -3,856 and -3,725 per pair), page
+  faults 8.30 M -> 2.65 M; at 32 threads 96.8 -> 95.3 s (x0.984, 2 of 2), 9,483 -> 4,700 MiB (-4,783), faults
+  8.73 M -> 3.00 M, where the same binary with `=0` ran as the base (x1.000, -140 MiB); 4 batches of zebrafish
+  proteins against the zebrafish genome at 32 threads (23 of 25 chromosomes refused) 26.7 -> 25.8 s (x0.965, 2 of
+  2), 3,318 -> 1,327 MiB (-1,991); one batch (35 human proteins, no side) x1.001 and -64 MiB (the unchanged path).
+  **Where it does not hold:** 4 batches of fly proteins against the fly genome at 16 threads (one refused
+  chromosome of about 32 Mb whose six frames were not at the peak) x0.996 but peak RssAnon 384 -> 425 MiB (+39;
+  +39, +16 and +49 per pair): the per-thread unit buffers of its lean plan (a chunk of its frame, about 3.6 MB per
+  thread that ran one of its units) stay for the search where the refused frames were freed after the subject.
+  NCBI BLAST+ 2.17.0 on the first batch alone (35 proteins) at 16 threads holds 6,240 MiB of anonymous memory
+  (capped at 900 s, unfinished; node 0), above the 4-batch search with the change (3,477) and the base's one batch
+  (2,474).
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject`: each subject record's letters are packed as soon as the
   reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST database volume: ncbi2na 4
   bases per byte with the remainder count in the last byte, the runs of letters other than `ACGT`
@@ -5342,6 +5759,48 @@ Scheduling (each value computed by one thread with the original function; order 
   Blast0_6 the restricted rows went from 20.1 to 13.3 G cycles (11.6 % of dev's cycles in `perf
   record`). With `=0` the instruction counts equal dev's (x1.00006) at x1.002-1.003 of its time. Max
   RSS within the spread of repeated runs of one binary.
+- `LOSAT_X_BPGAPBAND=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-gap-band,
+  v4-D12 s23-s25, `DECISIONS` 66-70): on unless it is `0`; acts only where `LOSAT_X_BPGAP` runs its vector rows) the
+  restricted gapped alignment's arrays (`XRestrictedScratch` in `blastp/x_restricted_gap.rs`: the score rows `h`, the
+  column gaps `e10`, the column letters `col`, and the 16-bit rows' `h16` and `e16`) hold the cells the band reaches
+  instead of the subject letters left or right of the seed (`len2`). NCBI starts `dp_mem` at `num_extra_cells + 100`
+  cells, `num_extra_cells = x_dropoff / gap_extend + 3` (`blast_gapalign.c:1040-1051`), and in the row loop grows it to
+  `MAX(last_b_index + num_extra_cells + 100, 2 * dp_mem_alloc)` (`1261-1269`). The scratch sized and filled its
+  arrays for `len2` and never shrank them, so each thread kept arrays for the longest subject it had aligned, about
+  15.4 bytes per letter (UniRef50 q100 at 32 threads: 16.3 MiB held, 26.6 MiB of capacity; sized by the furthest cell
+  each scratch's band reached, 0.7 MiB). With the switch `restricted_fast` starts the arrays at `ahead + 100` cells,
+  `ahead` = `(x_dropoff + 2 * max) / gap_extend + 3 + ROW_AHEAD` (`max` the largest matrix entry: a row's band
+  extension starts from a score at most `best_score + 2 * max`; `ROW_AHEAD` = 47 cells the rows read past `b_size`;
+  `len2` without a gap extension cost, as NCBI's `N + 3`), and gives `col` `held - ahead` letters (`band_col`):
+  `fill_col` returns false past them, so the rows stop (None) before a row's band passes the cells held; the arrays
+  then double (NCBI's `2 * dp_mem_alloc`, up to `len2 + ahead + 2 + TAIL` cells, where the rows copy every letter) and
+  the rows run again from row 0, as the 16-bit rows do when they hand over to the 32-bit rows (3,000 human proteins x
+  `BlastDBSpecies6`: 77 stops in 1.54 M alignments). `col`'s length depends on the arrays only; with `=0`, or without a
+  gap extension cost, the arrays hold `len2` cells and `col` only grows, as before. The row functions are those of
+  the build before the switch: growing the arrays inside the row loop (a comparison per row, or in the letter-copy
+  block) changed the register allocation of the 16-bit rows, +2.0 to +3.0 % of their instructions with the switch on
+  or off; this form reads x1.00029 of the dev base's instructions there and x1.00030 in OrthoFinder Blast0_6
+  (callgrind, one thread). The cells the rows read and write, and every value, are those of the arrays of `len2`
+  (lib tests `x_bpgapband_reused_scratch_matches_reference`, `x_bpgapband_arrays_hold_the_band_not_the_subject`, and
+  every restricted-alignment test of `check()` also with the switch on, on a scratch of its own;
+  `tests/blastp_restricted_gapped.rs` `restricted_gapped_alignments_match_ncbi_with_and_without_the_switch` compares
+  NCBI BLAST+ 2.17.0's rows with `=0` too).
+  Evidence 2026-10-29/30 (v4-D12 s24-s25, workstation, head d78bb8a8 on dev 593fff35; arms default, `=0`, and the
+  dev base built the same way, 8 rounds rotated, peak RssAnon from 2 ms samples; every report identical across
+  arms): UniRef50 q100 `-evalue 0.001` at 32 threads (node 1, membind 1) 141.2 [139.3-143.5] MiB against the dev
+  base 161.2 [159.0-162.7] and `=0` 161.6 [156.8-162.4] (17.9-22.0 MiB lower in 8 of 8 rounds; wall x1.0027
+  [0.9955-1.0138] of the dev base, `=0` x1.0000 [0.9969-1.0042], in runs not warmed beside the sampler); q100
+  against a third of UniRef50 at 16 threads (two runs side by side, 12 slots) 67.8 [59.0-86.5] against 69.6
+  [63.2-77.8] and `=0` 66.2 [63.3-72.2] (1.0-5.6 MiB lower than the dev base in the same slot, 4 of 4; this
+  case's peak spreads by +-16 MiB between slots, the arrays are 0.1 MiB of it); 3,000 human x `BlastDBSpecies6`
+  at 16 threads 37.4 [37.1-37.5] against 38.2 [38.1-38.6] and `=0` 38.3 (8 of 8 lower); one thread (node 0)
+  human 12.9 against 13.0, OrthoFinder Blast0_6 19.2 against 19.2 MiB. Time: one thread (`perf stat` `:u`, node
+  0, CPUs 18-19) instructions x1.0003 of the dev base in both cases (callgrind: x1.00029 and x1.00030, the
+  16-bit rows +0.02 %), cycles human x0.9932 (7 of 8 rounds below 1; `=0` x0.9978), Blast0_6 x0.9405 with `=0`
+  x0.9423, the binary's placement (both arms of the branch 139.1 G cycles, the dev base 146.5-148.3 G in three
+  runs), not a gain of the switch; 16 threads (node 1 CPUs 32-47 warmed 3 s, 8 rounds) Swiss-Prot q100
+  instructions x1.0000, cycles x1.0006 (`=0` x1.0012), wall x1.0008 (`=0` x1.0000); human instructions x1.0003,
+  cycles x1.0012 (`=0` x1.0031), wall x1.0015 (`=0` x0.9985).
 - PAIRPAR, TBLASTX half (graduated 2026-10-22; no variable, no `LOSAT_X_PAIRPARSHADOW`; class
   conditional, the name stays in `GRADUATED` for the reach table; it was in the strict set; the
   blastn half is above) TBLASTX seed stage (scan, two-hit test, ungapped extension) of each subject
@@ -5809,6 +6268,102 @@ Scheduling (each value computed by one thread with the original function; order 
   x1.004 with the same instructions; with one chunk per batch (the 10 transcripts of BX-t10 against Swiss-Prot at 8
   and 16 threads, 1,000 short reads against Swiss-Prot at 16) x0.996-1.000; the `-subject` case above x0.988-1.002
   (kept on the waves).
+- `LOSAT_X_BXCHUNKCROSS=1` (BLASTX, speed at 2+ threads; in the strict set from the pull request that added it: on
+  unless `=0` or `LOSAT_X_DEFAULT=0`; no condition of its own: it acts where the serial chunk loop of
+  `search::search_core` would search two or more chunks of a split query one after another, each with the subject
+  flow, which by default is `LOSAT_X_BXCHUNKFLOW`'s in-order case): the chunks run as one flow of tasks across the
+  chunks (`x_subject_flow::run_chunks`). Task `c x tasks + t` is task `t` (64 subjects) of chunk `c`; the helpers
+  search up to 16 tasks per thread ahead of the loop's thread across a chunk's end, so they no longer stop at each
+  chunk's end while that thread hands the chunk's last tasks to the sink and sets up the next chunk (before: one
+  `utils::xahead` loop per chunk with 4 tasks per thread ahead, then the next chunk's Karlin blocks and lookup table
+  on that thread alone). The tasks offered are those of the loop thread's chunk and the next one. A chunk's setup
+  (the loop's statements before its subject loop: `score_block`, the lookup table, the loop thread's diagonal
+  table, `subject_parameters`; a function of the chunk alone) is made once, on one thread, by the first thread
+  that needs it or ahead by a helper within 2 x threads tasks of the end of the loop thread's chunk, so at most two
+  chunks' setups are alive at a time. The first chunk's is made before the helpers start, its lookup table in one
+  part per thread (at most 8) on the idle pool (the partitioned build of `LOSAT_X_BXBUILDPAR`); a later one is not
+  built in parts, because a helper waiting at the end of such a build for a part another thread took could run a
+  helper loop not yet started and wait there for the setup it is building. Exactness: a task's value depends on its chunk and subjects alone (the module
+  comment's argument for the diagonal tables holds across chunks), the loop's thread makes the sink calls in the
+  serial loop's order (per chunk `chunk_start`, its subjects, `chunk_end`; a chunk without a valid context gets
+  `chunk_start` only), and a setup that fails returns its error after that chunk's `chunk_start`, where the loop met
+  it. `LOSAT_X_BXSUBJFLOWSHADOW` compares every task of every chunk (`tests/blastx_subject_flow.rs`: 30,000 letters
+  x 3,422 subjects at 2 / 3 / 8 threads, with `LOSAT_X_BXBUILDPAR=0`, and the switch `=0`, all equal to one
+  thread). Why 16 tasks per thread: in the ordered flow a task much slower than the others (a subject with many
+  hits) holds the loop's thread at its place while the helpers search the rest of the window; with 4 per thread
+  they ran out of tasks and spun in `sched_yield` (fly 2L 50 kb at 16 threads: 1.6 s of system time in a 0.69 s
+  run); with 16 they seldom do (0.08 s), and the tasks held at once stay few (only subjects with hits are kept).
+  The one-chunk subject flow (`x_subject_flow::run`) keeps 4 per thread. Measured 2026-10-27 on the workstation
+  (node 1, the first n physical cores with their HT siblings idle, `--membind=1`, cores warmed 3 s per case,
+  rounds in rotated arm order, medians of the per-round ratios; every output the same bytes as dev's and, for the
+  50 kb slice, as the progress board's d26), dev dfe8a461 against this change (d7eb5b30, the gate's binary): fly
+  2L 800,001-850,000 (five chunks) x the 30,802 fly proteins `-db -evalue 1e-5` at 16 threads 0.684 -> 0.570 s
+  (x0.833, 8 of 8 rounds), system time 1.58 -> 0.08 s, max RSS 16 -> 25 MiB (NCBI `-db` 91-96 MiB); 32 threads
+  0.555 -> 0.401 s (x0.723); 8 threads x0.882; 4 / 2 / 1 threads x0.947 / x1.003 (rounds 0.997-1.010) / x1.000;
+  S(16) (one thread / 16 threads) 11.43 -> 13.71. 2L slices of 20 kb (two chunks) and 150 kb (15 chunks) at 16
+  threads x0.894 and x0.799 (system time of the 150 kb slice 4.93 -> 0.13 s). The cross-chunk flow with 4 tasks
+  per thread ahead (a prototype) gave only x0.973 at 16 threads (system time 1.59 s); 32 or 64 per thread gave the
+  same times as 16. 800 cDNAs x the yeast proteins at 16 threads `-subject` x1.000 (0.999-1.001), `-db` x1.000
+  (1.000-1.003), `-db` at 32 threads x0.997 (0.995-1.006); max RSS at 16 threads +7 MiB (70 -> 79, 65 -> 72), at
+  32 threads 90 -> 91 (NCBI 143-154 MiB; the v4-MF floor of the 800-cDNA `-db` row at 16 threads is about 85).
+- `LOSAT_X_BXTASKRES=1` (BLASTX, speed at 2+ threads; in the strict set from the pull request that added it: on
+  unless `=0`; no condition of its own: it acts on every subject flow, `x_subject_flow::run` and `run_chunks`, i.e.
+  where `LOSAT_X_BXSUBJFLOW` runs): a flow's task ends after `k` subjects (as before) or before the subject that would
+  take the task's residues past `k` times the mean subject length (`XTasks::Cut`), so a run of long subjects stored
+  next to each other is spread over several tasks. The bounds come from the subjects' lengths (the records, the
+  stored sequences, or with `-db` read in blocks the index, 16,384 lengths per read); with `-db` read in blocks they
+  are made once per run for each `k` and shared (`XStreamDb::x_task_starts`). Where the lengths cannot be read (an
+  index read error) the grid of `k` subjects is kept, so the reader's error comes where it did before. Exactness:
+  only which thread computes which subjects changes; a task's value depends on its chunk and subjects alone and the
+  loop's thread makes the sink calls in subject order (`x_subject_flow.rs` header); `LOSAT_X_BXSUBJFLOWSHADOW`
+  compares every task (`tests/blastx_subject_flow.rs`: task counts of the cut and, with `=0`, of the grid; a unit
+  test of the bounds). Why: the ordered flow ends when its last task ends. Fly 2L 50 kb x the 30,802 fly proteins:
+  task 400 of each chunk (subjects 25,600-25,663, the isoforms of dumpy, about 20-23 kaa each) holds 248,369
+  residues against a median task of 38,410 and took 42-60 ms against a median of 4 ms (local probe), and in the last
+  chunk it ran alone for the last 21 ms of a 0.58 s run at 16 threads (about 2 of 16 CPUs busy). Cut by residues the
+  largest task holds 42,344 residues (547 tasks per chunk instead of 482) and the tail is gone. Measured 2026-10-28
+  on the workstation (node 1, the first n physical cores with their HT siblings idle, `--membind=1`, cores warmed
+  3 s per case, rounds in rotated arm order, medians of the per-round ratios; every output the same bytes as dev's,
+  the 50 kb slice also as the progress board's d26), dev 4403cc12 against this change: 50 kb slice x the fly
+  proteins `-db` at 16 threads 0.580 -> 0.562 s (x0.965, 0.928-0.983, 8 of 8 rounds), 32 threads x0.910, 8
+  threads x0.997, one thread x1.000 (S(16) in the same run 13.51 -> 13.95); 20 kb and 150 kb slices at 16
+  threads x0.910 and x0.976; 800 cDNAs x the yeast proteins at 16 threads `-subject` x0.995, `-db` x0.998, `-db` at
+  32 threads x0.991; with the switch off the same binary gives dev's times (x0.987-1.003). Max RSS at 16 / 32
+  threads of the 50 kb slice 26 -> 20 / 28 -> 19 MiB. A second run with the gated binary (12 rounds): 16 threads
+  0.571 -> 0.549 s (x0.962, 0.959-0.968, 12 of 12), S(16) 13.70 -> 14.29; the capped few-subject rows (800 cDNAs x
+  2 / 8 / 50 yeast proteins, AP027131 x 10 / 50 proteins, 16 and 32 threads) x0.986-1.031, each within its
+  per-round spread (`k` is 1 on the 2 and 8 protein rows, so the cut changes no task there).
+- `LOSAT_X_BXKAPPAFIT=1` (BLASTX, memory at many threads; in the strict set from the pull request that added it: on
+  unless `=0`; acts where a batch end at 2+ threads redoes composition for 2 or more matches, fewer than the
+  threads): the batch end makes `min(threads, matches)` composition-redo workers (`runtime.rs`, `x_kappa_workers`)
+  instead of one per pool thread; with fewer matches than threads one speculative batch holds every match and each
+  match takes the worker of its position (with as many matches or more, the thread's own, as before). Why: each
+  worker is a full redo state (`KappaState::x_for_thread`: the redo parameters, a gapped-alignment scratch and a
+  composition workspace), made per batch end; a `-subject` search of 800 fly cDNAs against a few yeast proteins at
+  32-64 threads made 32-64 of them at every batch end for a handful of matches, from several batch ends at a time
+  (the capped batch flow), and the threads' arenas kept that memory. Exactness: a worker's state does not change a
+  match's result (`x_speculate_match` redoes in stream order a result that read a predecessor's matrix); with fewer
+  matches than threads `x_batch` (32 per worker, at least 64) holds every match, so positions name distinct workers;
+  `tests/blastx_unit_cap.rs` compares reports with the switch on and off at 2, 4 and 8 threads for 3, 10 and 40
+  subjects and the batch flow, and checks both sides of the reach. Measured 2026-10-29 on the workstation, dev
+  ec91ea18 against this change, max RSS as the peak `VmHWM` sampled every 2 ms (`ru_maxrss` at 24-64 threads reads
+  9-31 MiB below it); every output the same bytes in every arm. Against NCBI BLAST+ 2.17.0 (node 0, 3 rounds, NCBI
+  `-subject` at one thread in the same window, the same bytes as NCBI's): 800 fly cDNAs x 8 / 50 / 200 yeast proteins
+  `-subject` at 32 threads 82.2 / 87.2 / 97.9 -> 79.5 / 81.6 / 83.3 MiB (NCBI 81.3 / 82.0 / 83.7), at 64 threads 112.6
+  / 131.5 / 161.4 -> 106.8 / 113.4 / 116.5, still above NCBI at 48 and 64 threads (the rest is per-thread live memory:
+  kept diagonal tables, scratch, 48-64 arenas). Time and max RSS in the same runs (node 1, the first n physical cores
+  with their HT siblings idle except at 64 threads, `--membind=1`, cores warmed 3 s per case, arms dev / new / `=0`
+  rotated per round, medians of per-round ratios; run 3 12 rounds on 26 cases, run 4 16 rounds with an exact end time
+  on 10): where the switch acts, max RSS 800 cDNAs x 200 proteins at 64 / 32 / 16 threads x0.716 / x0.855 / x0.968, x
+  50 proteins x0.865 / x0.930 / x0.981, x 8 proteins at 64 / 32 threads x0.954 / x0.972 (lower in 12 of 12 and 14-16
+  of 16 rounds), the proteome `-db` at 64 threads x0.933, AP027131 x 10 proteins at 16 threads x0.989; AP027131 x 50
+  proteins at 64 threads and the proteome `-subject` at 16 threads x1.002 / x1.007 (new / `=0` x1.001 / x1.010: batch
+  ends that are not the peak). Time x0.962-1.002 on every case (800 cDNAs x 2 / 8 / 50 / 200 proteins, AP027131 x 10 /
+  50, the proteome `-subject` / `-db`, AP027131 x AP027133, fly 2L 50 / 150 kb `-db`; 1-64 threads), each within its
+  per-round spread; the three run-3 readings above x1.01 (x 2 proteins at 16 threads x1.014, AP027131 x AP027133 at 32
+  x1.017, x 8 proteins at 64 x1.011) were run 3's clock, which moved in 2.35 ms steps, and read x0.990-0.997 in run 4.
+  The switch is not reached on 800 cDNAs x 2 proteins (no batch end with two matches) and takes the reference side on
+  AP027131 x AP027133 and the fly rows.
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

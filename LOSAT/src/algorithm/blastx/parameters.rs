@@ -9,7 +9,7 @@ use crate::stats::karlin_calc::{
     compute_score_freq_profile_for_matrix, compute_std_aa_composition,
 };
 use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
-use crate::stats::spouge::{blast_spouge_etos, lookup_protein_gumbel_params};
+use crate::stats::spouge::{blast_spouge_etos, lookup_protein_gumbel_params, BlastGumbelBlk};
 use crate::stats::{lookup_protein_params, KarlinParams};
 use anyhow::{ensure, Result};
 
@@ -152,6 +152,35 @@ pub fn gumbel_db_length(options: &ResolvedOptions, db_length: i64) -> i64 {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
+// ```c++
+//     if (args.Exist(kArgEffSearchSpace) && args[kArgEffSearchSpace]) {
+//         CNcbiEnvironment env;
+//         env.Set("OLD_FSC", "true");
+//         opt.SetEffectiveSearchSpace(args[kArgEffSearchSpace].AsInt8());
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:921-923
+// ```c
+//     /* FSCOLD: to switch back to original FSC, comment out the following line */
+//     use_old_fsc = getenv("OLD_FSC");
+//     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
+// ```
+/// The Gumbel block of a gapped search, none with `-searchsp`, at any value.
+pub fn gumbel_block(options: &ResolvedOptions, db_length: i64) -> Option<BlastGumbelBlk> {
+    if options.old_fsc {
+        return None;
+    }
+    lookup_protein_gumbel_params(
+        &ProteinScoringSpec {
+            matrix: ScoringMatrix::Blosum62,
+            gap_open: options.gap_open,
+            gap_extend: options.gap_extend,
+        },
+        gumbel_db_length(options, db_length),
+    )
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:784-824
 // ```c++
 //       if (query_info->contexts[index].is_valid &&
@@ -266,7 +295,8 @@ pub fn effective_lengths(
     //       return 0;
     //    }
     // ```
-    if db_length == 0 && fixed_spaces.is_none() {
+    let options_space = options.effective_search_space;
+    if db_length == 0 && fixed_spaces.is_none() && options_space == 0 {
         return Ok(());
     }
     let gapped = lookup_protein_params(&ProteinScoringSpec {
@@ -277,7 +307,7 @@ pub fn effective_lengths(
     for (i, (c, p)) in batch.contexts.iter().zip(parameters).enumerate() {
         if !p.valid {
             p.length_adjustment = 0;
-            p.search_space = fixed_spaces.map_or(0, |spaces| spaces[i]);
+            p.search_space = fixed_spaces.map_or(options_space, |spaces| spaces[i]);
             continue;
         }
         let ka = if options.gapped { gapped } else { p.ungapped };
@@ -286,6 +316,7 @@ pub fn effective_lengths(
         p.length_adjustment = i32::try_from(adj)?;
         p.search_space = match fixed_spaces {
             Some(spaces) => spaces[i],
+            None if options_space != 0 => options_space,
             None => (db_length - db_count * adj)
                 .max(1)
                 .checked_mul(c.length as i64 - adj)
@@ -481,7 +512,25 @@ pub fn subject_parameters(
     // ```c++
     // #define BLAST_SEQSRC_MINLENGTH  10    /**< Default minimal sequence length */
     // ```
-    let n = if options.gapped {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+    // ```c
+    //    if (sbp->gbp) {
+    //    ...
+    //    } else {
+    //        min_subject_length = (Int4) (total_length/num_seqs);
+    //    }
+    //
+    //    if(min_subject_length <=0) {
+    // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
+    //    }
+    // ```
+    // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
+    // length is too short"; LOSAT refuses the search instead.
+    ensure!(
+        !options.old_fsc || avg_subject_length > 0,
+        "-searchsp with subjects of an average length below one letter is not supported by LOSAT's BLASTX"
+    );
+    let n = if options.gapped && !options.old_fsc {
         i32::try_from(min_subject_length.max(10))?
     } else {
         avg_subject_length
@@ -501,7 +550,7 @@ pub fn subject_parameters(
     };
     let gapped = lookup_protein_params(&spec);
     let gumbel = if options.gapped {
-        lookup_protein_gumbel_params(&spec, gumbel_db_length(options, db_length))
+        gumbel_block(options, db_length)
     } else {
         None
     };

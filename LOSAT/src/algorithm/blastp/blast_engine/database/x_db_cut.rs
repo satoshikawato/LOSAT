@@ -13,7 +13,9 @@
 //! bytes, where the sequence bytes are the letters, one sentinel byte per sequence and one before
 //! the first (the size of a one-volume sequence file; `x_sequence_bytes`): about 4 blocks per
 //! thread, of at least 4 KiB. A database of at least 4 x threads MiB keeps blocks of 1 MiB; at one
-//! thread nothing changes. The rounds, the tasks and the merge are those of `search_blocks_of`; only
+//! thread nothing changes (EXPERIMENT LOSAT_X_BPDBKEEP: blocks of at most 96 KiB at every thread
+//! count, `x_db_keep.rs`, so a failed search at one thread also reads the blocks of `BLOCK_BYTES`
+//! again for its error). The rounds, the tasks and the merge are those of `search_blocks_of`; only
 //! its `block_bytes` differs.
 //!
 //! Why the reports do not change (the integer argument of `search_blocks`'s comment, which already
@@ -115,8 +117,26 @@ pub(super) fn x_sequence_bytes(database: &BlastpDatabase) -> u64 {
 /// The block size of the search of `database` on `pool`: the cut when the pool searches the rounds
 /// with more than one thread, else `BLOCK_BYTES`.
 pub(super) fn x_db_cut_block_bytes(database: &BlastpDatabase, pool: &SearchPool<'_>) -> u64 {
+    x_keep_cap(x_db_cut_bytes(database, pool))
+}
+
+// No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
+/// The cut of `database` on `pool` (`x_cut_block_bytes` at the pool's threads, 1 when it is off).
+fn x_db_cut_bytes(database: &BlastpDatabase, pool: &SearchPool<'_>) -> u64 {
     let threads = if pool.enabled() { pool.threads() } else { 1 };
     x_cut_block_bytes(x_sequence_bytes(database), threads)
+}
+
+// No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
+/// `cut`, or with LOSAT_X_BPDBKEEP at most `X_KEEP_BLOCK_BYTES`.
+fn x_keep_cap(cut: u64) -> u64 {
+    // EXPERIMENT (LOSAT_X_BPDBKEEP): blocks that a worker's kept buffer holds below glibc's mmap
+    // threshold (`x_db_keep.rs`).
+    if crate::seqdb::x_bp_db_keep() {
+        cut.min(super::x_db_keep::X_KEEP_BLOCK_BYTES)
+    } else {
+        cut
+    }
 }
 
 // No NCBI counterpart: counts blocks for the unit tests; it changes no value NCBI computes.
@@ -201,11 +221,13 @@ pub(super) fn x_search_blocks_cut<S, K, P>(
 where
     S: Fn() -> BlastpSubjectScratch + Sync,
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
-    P: PrelimSink,
+    P: PrelimSink + Send,
 {
     let db = &database.db;
-    let block_bytes = x_db_cut_block_bytes(database, pool);
-    crate::utils::xreach::x_reach!("LOSAT_X_BPDBCUT", block_bytes != BLOCK_BYTES);
+    let cut = x_db_cut_bytes(database, pool);
+    // The cut's own rule (LOSAT_X_BPDBKEEP's cap acts at every thread count, `x_keep_cap`).
+    crate::utils::xreach::x_reach!("LOSAT_X_BPDBCUT", cut != BLOCK_BYTES);
+    let block_bytes = x_keep_cap(cut);
     search_blocks_of(
         database,
         pool,

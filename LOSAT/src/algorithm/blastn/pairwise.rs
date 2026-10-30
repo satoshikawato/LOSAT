@@ -30,40 +30,53 @@ pub(crate) struct DisplayMasks<'a> {
     pub subject: Option<&'a [Vec<MaskedInterval>]>,
 }
 
-/// Every HSP of the final hit list, in the order of the tabular formats (queries, then the
-/// subjects and HSPs of each query as ranked), with its displayed rows.
+impl<'a> Rows<'a> {
+    /// The rows' inputs of a report call of `queries` and `subjects`, its shown masks made
+    /// once for every window of its queries (`pairwise_hits`).
+    // Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
+    // shared post-processing makes every BLASTN run compile it in Wasm hosts.
+    #[inline(never)]
+    pub(crate) fn new(
+        queries: &'a [FastaRecord],
+        subjects: SubjectLetters<'a>,
+        masks: &DisplayMasks<'_>,
+    ) -> Self {
+        let query_masks: Vec<Vec<MaskedInterval>> = masks
+            .query
+            .iter()
+            .zip(queries)
+            .enumerate()
+            .map(|(q_idx, (query_masks, query))| {
+                shown_query_masks(
+                    query_masks,
+                    query.seq().len(),
+                    masks.query_offsets.offset(q_idx),
+                )
+            })
+            .collect();
+        let subject_masks: Option<Vec<Vec<MaskedInterval>>> = masks
+            .subject
+            .map(|masks| masks.iter().map(|masks| merged(masks)).collect());
+        Rows {
+            queries,
+            subjects,
+            query_masks,
+            subject_masks,
+        }
+    }
+}
+
+/// Every HSP of the final hit lists `hit_lists` (those of all queries of `rows`, or of a window
+/// of them), in the order of the tabular formats (queries, then the subjects and HSPs of each
+/// query as ranked), with its displayed rows.
 // Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
 // shared post-processing makes every BLASTN run compile it in Wasm hosts.
 #[inline(never)]
 pub(crate) fn pairwise_hits(
     hit_lists: &[Option<BlastnHitList>],
-    queries: &[FastaRecord],
-    subjects: SubjectLetters<'_>,
-    masks: &DisplayMasks<'_>,
+    rows: &Rows<'_>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<Vec<PairwiseHit>> {
-    let query_masks: Vec<Vec<MaskedInterval>> = masks
-        .query
-        .iter()
-        .zip(queries)
-        .enumerate()
-        .map(|(q_idx, (query_masks, query))| {
-            shown_query_masks(
-                query_masks,
-                query.seq().len(),
-                masks.query_offsets.offset(q_idx),
-            )
-        })
-        .collect();
-    let subject_masks: Option<Vec<Vec<MaskedInterval>>> = masks
-        .subject
-        .map(|masks| masks.iter().map(|masks| merged(masks)).collect());
-    let rows = Rows {
-        queries,
-        subjects,
-        query_masks: &query_masks,
-        subject_masks: subject_masks.as_deref(),
-    };
     let hsp_lists = hit_lists
         .iter()
         .flatten()
@@ -105,6 +118,32 @@ pub(crate) fn pairwise_hits(
     Ok(hits)
 }
 
+/// The windows of the queries `0..num_queries` whose outfmt 0 rows are made and written
+/// together (`x_pairwise_par::query_windows` of the estimates of their HSPs' lengths, before any
+/// row is made, with the budget of `x_pool`, `x_pairwise_par::window_bytes`).
+#[inline(never)]
+pub(crate) fn pairwise_windows(
+    hit_lists: &[Option<BlastnHitList>],
+    num_queries: usize,
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
+) -> Vec<std::ops::Range<usize>> {
+    use crate::report::x_pairwise_par::{query_estimate_of, query_windows, window_bytes};
+    let estimates: Vec<usize> = (0..num_queries)
+        .map(|q_idx| {
+            query_estimate_of(
+                hit_lists
+                    .get(q_idx)
+                    .and_then(Option::as_ref)
+                    .into_iter()
+                    .flat_map(|hit_list| &hit_list.hsplist_array)
+                    .flat_map(|hsp_list| &hsp_list.hsps)
+                    .map(|hsp| hsp.length),
+            )
+        })
+        .collect();
+    query_windows(&estimates, window_bytes(x_pool))
+}
+
 /// The displayed rows of one HSP (the query on its plus strand, the subject reverse-complemented
 /// with it for a minus-strand HSP, upper case, no masking) for BLAST XML, which recounts its
 /// identities from them (`algorithm::blastn::blast_xml`). The same function of the HSP as the
@@ -135,20 +174,20 @@ pub(crate) fn xml_rows_into(
 }
 
 /// What the displayed rows of an HSP read besides the HSP (`pairwise_hits`).
-struct Rows<'a> {
+pub(crate) struct Rows<'a> {
     queries: &'a [FastaRecord],
     subjects: SubjectLetters<'a>,
     /// Per query, the shown masks (`shown_query_masks`).
-    query_masks: &'a [Vec<MaskedInterval>],
+    query_masks: Vec<Vec<MaskedInterval>>,
     /// Per subject, with `-lcase_masking`: its merged masks.
-    subject_masks: Option<&'a [Vec<MaskedInterval>]>,
+    subject_masks: Option<Vec<Vec<MaskedInterval>>>,
 }
 
 impl Rows<'_> {
     /// The rows of every HSP of one subject's list, appended to `hits` in the list's order.
     fn list(&self, hsp_list: &BlastnHspList, hits: &mut Vec<PairwiseHit>) -> Result<()> {
         let (queries, subjects) = (self.queries, self.subjects);
-        let list_subject_masks = self.subject_masks.and_then(|subject_masks| {
+        let list_subject_masks = self.subject_masks.as_deref().and_then(|subject_masks| {
             let s_idx = hsp_list.hsps.first()?.s_idx as usize;
             Some(shown_subject_masks(&subject_masks[s_idx], &hsp_list.hsps))
         });
@@ -200,6 +239,7 @@ impl Rows<'_> {
                     .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()),
                 comp_adjust_method: None,
                 sum_n: None,
+                subject_stored_gaps: Vec::new(),
             });
         }
         Ok(())
@@ -579,19 +619,22 @@ pub(crate) fn query_ungapped_karlin_blastna(
         return None;
     }
     let matrix = build_blastna_matrix(reward, penalty);
-    let mut probabilities = Vec::new();
+    // At most 16 residues x 4 bases: a fixed array in place of a vector grown for each query.
+    let mut probabilities = [(0i32, 0f64); 64];
+    let mut num_probabilities = 0usize;
     for (residue, &count) in counts.iter().enumerate() {
         if count == 0.0 {
             continue;
         }
         for base in 0..4 {
-            probabilities.push((matrix[residue * 16 + base], count / sum * 0.25));
+            probabilities[num_probabilities] = (matrix[residue * 16 + base], count / sum * 0.25);
+            num_probabilities += 1;
         }
     }
     let sfp = score_freq_profile_from_probabilities(
         penalty.min(reward),
         reward.max(penalty),
-        &probabilities,
+        &probabilities[..num_probabilities],
     );
     compute_karlin_params_ungapped(&sfp).ok()
 }

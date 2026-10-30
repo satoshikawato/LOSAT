@@ -410,6 +410,8 @@ pub(crate) struct SubjectSetNumbers {
     pub(crate) count: i64,
     /// `-dbsize`.
     pub(crate) dbsize: Option<i64>,
+    /// `-searchsp`.
+    pub(crate) searchsp: Option<i64>,
 }
 
 impl SubjectSetNumbers {
@@ -419,7 +421,56 @@ impl SubjectSetNumbers {
             total: records.iter().map(|record| record.seq().len() as i64).sum(),
             count: records.len() as i64,
             dbsize,
+            searchsp: None,
         }
+    }
+
+    /// The numbers with `-searchsp`.
+    pub(crate) fn with_searchsp(self, searchsp: Option<i64>) -> Self {
+        Self { searchsp, ..self }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:821-846
+    // ```c
+    //          BLAST_ComputeLengthAdjustment(kbp->K, kbp->logK,
+    //                                        alpha/kbp->Lambda, beta,
+    //                                        query_length, db_length,
+    //                                        db_num_seqs, &length_adjustment);
+    //
+    //          if (effective_search_space == 0) {
+    //          ...
+    //          }
+    // ```
+    /// The length adjustment and the effective search space of a context of `query_len_aa`
+    /// residues (`try_compute_eff_lengths_tblastx`), or `-searchsp` above 0 as the space.
+    pub(crate) fn context_lengths(
+        &self,
+        query_len_aa: i64,
+        karlin: &crate::stats::KarlinParams,
+    ) -> Option<super::ncbi_cutoffs::EffLengthsResult> {
+        let lengths = match self.searchsp {
+            Some(searchsp) if searchsp > 0 => super::ncbi_cutoffs::EffLengthsResult {
+                length_adjustment: if query_len_aa > 0 {
+                    crate::stats::length_adjustment::compute_length_adjustment_ncbi(
+                        query_len_aa,
+                        self.effective_length() / 3,
+                        self.count,
+                        karlin,
+                    )
+                    .length_adjustment
+                } else {
+                    0
+                },
+                eff_searchsp: searchsp,
+            },
+            _ => super::ncbi_cutoffs::try_compute_eff_lengths_tblastx(
+                query_len_aa,
+                self.effective_length(),
+                self.count,
+                karlin,
+            )?,
+        };
+        Some(lengths)
     }
 
     /// The database length of the effective lengths, in bases: `-dbsize` when above 0, else

@@ -59,3 +59,6 @@ one(D + 'pd_nucprot_q.fna', ['NP_000042.1 a', 'AAA12345 b'], letters)
 write(D + 'pd_clash_q.faa', ['XP_000001.1 a'], D + 'ids/ids_q.faa')
 write(D + 'pd_clash_q.fna', ['XP_000001.1 a'], D + 'ids/ids_q.fna')
 write(D + 'pd_clash_x_q.fna', ['tpe|BN000025.1| a'], D + 'ids/ids_q.fna')
+# BLASTN (megablast) against ids/nucl_v5: the query of the db.gis.* rows, which has hits.
+write(D + 'pd_ids_n_q.fna', ['gi|142|ref|NM_000142.1| q one', 'lcl|q2 q two'], 'tests/seqid/fasta/qnucl.fa')
+write(D + 'pd_clash_n_q.fna', ['AF000002.3 a'], 'tests/seqid/fasta/qnucl.fa')

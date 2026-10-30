@@ -899,6 +899,11 @@ pub fn tblastx_real(value: &str) -> Result<f64, String> {
     ncbi_double(value, "TBLASTX")
 }
 
+/// A real argument of BLASTN (`ncbi_double`).
+pub fn blastn_real(value: &str) -> Result<f64, String> {
+    ncbi_double(value, "BLASTN")
+}
+
 /// A `-threshold` value: NCBI's constraint reads it again with `NStr::StringToDouble` and
 /// requires at least 0 (a NaN fails it).
 ///

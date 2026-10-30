@@ -157,6 +157,14 @@ use std::ops::RangeInclusive;
 /// first packed as presence bits, ranks and one offset per non-empty cell, `blastn/x_bn_csr.rs`)
 /// joined the set in the pull request that added it, after it was verified and timed with it on
 /// and off.
+/// `LOSAT_X_MBCSR` (megablast's tables of 4^12 cells laid out as packed CSR and scanned through the
+/// prefetch ring when the search scans at least 8 subject letters per position of the word loop
+/// and one per cell,
+/// `blastn/x_bn_csr.rs`) joined the set in the pull request that added it, after it was verified
+/// and timed with it on and off.
+/// `LOSAT_X_MBHITPF` (BLASTN's loop over the offset pairs prefetches the query line of the hit 16
+/// places on, `blastn/blast_engine/run.rs`) joined the set in the pull request that added it, after
+/// it was verified and timed with it on and off.
 /// `LOSAT_X_QGROUPPAR` (BLASTN's preliminary gapped loop and traceback of a subject searched on one
 /// thread run per query on the pool, `blastn/blast_engine/x_qgroup_par.rs`) joined the set in the
 /// pull request that added it, after it was verified and timed with it on and off.
@@ -302,7 +310,9 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_FOLDLEAN",
     "LOSAT_X_GREEDYROWFUSE",
     "LOSAT_X_MB24",
+    "LOSAT_X_MBCSR",
     "LOSAT_X_MBFILL",
+    "LOSAT_X_MBHITPF",
     "LOSAT_X_MBLUTKEEP",
     "LOSAT_X_MBLUTONCE",
     "LOSAT_X_MBLUTPREFAULT",

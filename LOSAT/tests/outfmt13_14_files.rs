@@ -1217,7 +1217,7 @@ fn an_empty_query_gives_an_empty_master_or_a_master_with_no_entry_in_the_other_p
                         assert_eq!(output.status.code(), Some(1), "{label}");
                         assert!(
                             String::from_utf8_lossy(&output.stderr)
-                                .contains("unsupported BLASTX stdin query/subject"),
+                                .contains("unsupported BLASTX query input for -outfmt"),
                             "{label}"
                         );
                     } else {

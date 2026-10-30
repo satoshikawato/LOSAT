@@ -461,4 +461,12 @@ without, `ungapped_re` (the six subjects of `re_s.fa`: N every other base, a run
         -title "ungapped re-evaluation" -blastdb_version 4
     rm tests/db_search/ungapped_abr.njs tests/db_search/ungapped_ambrun.njs tests/db_search/ungapped_re.njs
 
+`mejo` is `LOSAT/tests/fasta/MejoMJNV.fasta` (one sequence, 401,182 bases) as pyani ANIb builds its databases
+(`makeblastdb -dbtype nucl -in FILE -title STEM -out OUT`, no parsed Seq-ids; version 4 for the repository), the
+subject of rows `db.xdrop.*` (DI-6: the X-drops, `-window_size`, `-off_diagonal_range` and `-no_greedy`; the queries
+`tests/fasta/outfmt0/anib_frags*.fna` are 1020-nt fragments of `MelaMJNV.fasta`, pyani's fragment size). Run from `LOSAT/`:
+
+    losat makeblastdb -dbtype nucl -in tests/fasta/MejoMJNV.fasta -title MejoMJNV -out tests/db_search/mejo -blastdb_version 4
+    rm tests/db_search/mejo.njs
+
 The rows `db.blastn.ungapped_rej.*` (outfmt 8, 11, 17 with `-ungapped`) are refusals until O4a-2.

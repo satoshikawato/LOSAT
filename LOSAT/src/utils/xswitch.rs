@@ -212,6 +212,9 @@ use std::ops::RangeInclusive;
 /// branch-free candidate loop, `blastx/x_seed_scan.rs`) graduated on 2026-10-26: it left
 /// `STRICT_SET` and the scan on the presence test was deleted (the compressed lookup table keeps
 /// its own scan, a rule of the table and not a switch).
+/// `LOSAT_X_SUMPMEMO` (the sum P-value of a linked set kept from the thread's last two calls,
+/// `stats/sum_statistics.rs`) graduated on 2026-10-27: it left `STRICT_SET` and the call that
+/// integrates every time was deleted.
 /// `LOSAT_X_QBATCHPAR` (BLASTN's query-batch slots) and the switches that acted only on the slots,
 /// `LOSAT_X_DCTWOSLOTS`, `LOSAT_X_BNEIGHTSLOTS` and `LOSAT_X_BNQSLOTS`, were removed on 2026-10-28
 /// with the slot code (Owner decision: at 16 threads the slots' max RSS rise exceeded their time
@@ -338,7 +341,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_RPTSTREAM",
     "LOSAT_X_SEEDCOMPACT",
     "LOSAT_X_SEEDUNMAP",
-    "LOSAT_X_SUMPMEMO",
     "LOSAT_X_TBNBATCHRULE",
     "LOSAT_X_TBNDBSTREAM",
     "LOSAT_X_TBNDIAGPACK",

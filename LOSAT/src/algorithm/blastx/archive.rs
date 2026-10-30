@@ -210,11 +210,8 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
         karlin: valid.map(|parameters| (parameters.ungapped.clone(), gapped)),
         search_space: valid.map_or(0, |parameters| parameters.search_space),
         length_adjustment: valid.map_or(0, |parameters| i64::from(parameters.length_adjustment)),
-        context0_space: if parameters[0].valid {
-            parameters[0].search_space
-        } else {
-            0
-        },
+        // An invalid context keeps `-searchsp`, else 0 (`effective_lengths`).
+        context0_space: parameters[0].search_space,
     }
 }
 

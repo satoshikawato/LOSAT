@@ -29,6 +29,8 @@ mod blastn_hit_group;
 mod blastn_hl_grow;
 #[path = "../blastn_lut_drop.rs"]
 mod blastn_lut_drop;
+#[path = "../blastn_mb_csr.rs"]
+mod blastn_mb_csr;
 #[path = "../blastn_mb_fill.rs"]
 mod blastn_mb_fill;
 #[path = "../blastn_mb_lookup_once.rs"]

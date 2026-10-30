@@ -42,3 +42,21 @@ Small NCBI BLAST databases for the unit tests in `LOSAT/src/seqdb/tests.rs`.
 `make_fixtures.py` rebuilds everything but `expected/search_path/`. NCBI BLAST+ is the comparison oracle only; the tests
 read the committed files and run no NCBI program. A rebuild changes the dates stored in the
 index files and in `expected/`.
+
+`lmdb/` and `taxsqlite/` hold the fixtures of the read-only LMDB, taxid-lookup and taxonomy readers
+(`src/seqdb/lmdb_read.rs`, `tax_files.rs`, `tax_sqlite.rs`). `lmdb/*.{pdb,ndb,ptf,ntf,pto,nto,pot,not,pos,nos}` are the
+lookup files of small databases written by makeblastdb 2.17.0 (`p5`, `n5`, `mv` of four volumes, `dup` with 700
+OIDs under one accession, `thr500`/`thr501` at the 500-duplicate sub-page threshold, `mvbig` with 400 volumes,
+`tx` with one to three taxids per OID, taxid 0 and a taxid listed twice). `lmdb/expected/` holds what a Python
+reference reader (`dump.py`) printed for them and the OID lists NCBI's `blastdbcmd -taxids` and
+`blastp -negative_taxids` selected for `tx` (`tx_oracle.txt`) and for the NCBI-distributed `18S_fungal_sequences`
+database (`18S_oracle.txt`; the database itself is not in the repository, the `#[ignore]` tests read it from
+`LOSAT_TEST_18S_DB`, with the dump files in `LOSAT_TEST_18S_EXPECTED`). `taxsqlite/*.sqlite3` are small databases made
+with Python's `sqlite3` from the schema text of NCBI's `taxonomy4blast.sqlite3` (`p512`: 3005 rows in 512-byte pages,
+`utf16`, `noindex`, `notable`, and `cycle` with a two-node parent cycle); their `.ref` files list, for every node,
+the count and FNV-1a digest of the descendants that NCBI's recursive query gave when run by SQLite (`notdb.bin` and
+`empty.bin` are not databases). `LOSAT_TEST_TAX_SQLITE` names the real file for the `#[ignore]` comparison, `LOSAT_TEST_TAX_SQLITE_EXPECTED` the file that
+`tax_sqlite_ref.py` writes from it (Python's `sqlite3` running NCBI's query; the test itself starts no program).
+`lmdb/tx.{pin,psq,phr}` complete `tx` as a database (made from `tx.fa` with the taxid map `tx.map`; `tx_q.fa` holds
+one query per sequence): `src/seqdb/filter.rs` restricts it to each taxid set of `tx_oracle.txt` and compares the
+OIDs with NCBI's.

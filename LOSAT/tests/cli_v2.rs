@@ -9,10 +9,67 @@ use LOSAT::blastinput::value_parsers::{
 };
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
+fn parse_argv(argv: Vec<&str>) -> Result<Cli, clap::Error> {
+    try_parse_from(argv)
+}
+
 fn parse(program: &str, extra: &[&str]) -> Result<Cli, clap::Error> {
     let mut argv = vec!["losat", program, "-query", "q.fa", "-subject", "s.fa"];
     argv.extend(extra);
     try_parse_from(argv)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2263-2299 (the
+// taxid lists exclude each other); blast_args.cpp:2370-2381 (`-subject` excludes them).
+#[test]
+fn taxid_options_go_with_a_database_only() {
+    let lists: [&[&str]; 5] = [
+        &["-taxids", "9606"],
+        &["-taxidlist", "t.txt"],
+        &["-negative_taxids", "9606"],
+        &["-negative_taxidlist", "t.txt"],
+        &["-no_taxid_expansion"],
+    ];
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        for words in lists {
+            let mut argv = vec!["losat", program, "-query", "q.fa", "-db", "db"];
+            argv.extend(words);
+            assert!(parse_argv(argv).is_ok(), "{program} -db {words:?}");
+            let error = LOSAT::cli::render_message(&parse(program, words).unwrap_err());
+            assert!(
+                error.contains("cannot be used with"),
+                "{program} {words:?}: {error}"
+            );
+        }
+        let argv = vec![
+            "losat",
+            program,
+            "-query",
+            "q.fa",
+            "-db",
+            "db",
+            "-taxids",
+            "1",
+            "-negative_taxids",
+            "2",
+        ];
+        assert!(parse_argv(argv).is_err(), "{program}: two lists");
+        let argv = vec![
+            "losat",
+            program,
+            "-query",
+            "q.fa",
+            "-db",
+            "db",
+            "-taxids",
+            "1",
+            "-no_taxid_expansion",
+        ];
+        assert!(
+            parse_argv(argv).is_ok(),
+            "{program}: a list without expansion"
+        );
+    }
 }
 
 #[test]
@@ -554,9 +611,50 @@ fn defaults_and_task_overrides_remain_distinct() {
     // TBLASTN takes both of its tasks (tblastn-fast: the compressed lookup table).
     parse("tblastn", &["-task", "tblastn"]).unwrap();
     parse("tblastn", &["-task", "tblastn-fast"]).unwrap();
+    // NCBI api/blast_options_handle.cpp:429-433: blastx-fast is word size 5 (the compressed
+    // lookup table, lookup type 4) with threshold 20; -word_size 5 sets its own threshold over
+    // the task's, -word_size 3 keeps the task's on the standard table
+    // (blast_args.cpp:291-297, blast_options_local_priv.hpp:612-619).
+    for (extra, word_size, threshold, lookup_type) in [
+        (&["-task", "blastx"][..], 3, 12.0, 3),
+        (&["-task", "blastx-fast"][..], 5, 20.0, 4),
+        (&["-word_size", "5"][..], 5, 19.3, 4),
+        (&["-task", "blastx-fast", "-word_size", "5"][..], 5, 19.3, 4),
+        (&["-task", "blastx-fast", "-word_size", "3"][..], 3, 20.0, 3),
+        (
+            &["-task", "blastx-fast", "-threshold", "15"][..],
+            5,
+            15.0,
+            4,
+        ),
+        (
+            &[
+                "-task",
+                "blastx-fast",
+                "-word_size",
+                "3",
+                "-threshold",
+                "14",
+            ][..],
+            3,
+            14.0,
+            3,
+        ),
+    ] {
+        let Commands::Blastx(a) = parse("blastx", extra).unwrap().command else {
+            panic!()
+        };
+        let resolved = a.resolve().unwrap();
+        assert_eq!(
+            (resolved.word_size, resolved.threshold, resolved.lookup_type),
+            (word_size, threshold, lookup_type),
+            "{extra:?}"
+        );
+    }
     // A task that is not an NCBI task keeps clap's list of the accepted names.
     for (program, other, listed) in [
         ("blastp", "blastp-x", "blastp-fast"),
+        ("blastx", "blastx-x", "blastx-fast"),
         ("tblastn", "tblastn-x", "tblastn-fast"),
     ] {
         let text = LOSAT::cli::render_message(&parse(program, &["-task", other]).unwrap_err());
@@ -1340,17 +1438,16 @@ fn show_gis_is_a_flag_of_every_search_program() {
 #[test]
 fn unported_ncbi_options_are_rejected_explicitly() {
     for (program, words) in [
-        ("blastn", &["-searchsp", "1000"][..]),
-        ("blastn", &["-db_soft_mask", "11"]),
+        ("blastn", &["-db_soft_mask", "11"][..]),
         ("blastn", &["-db_hard_mask", "11"]),
-        ("tblastn", &["-searchsp", "1000"]),
         ("tblastn", &["-db_soft_mask", "11"]),
-        ("tblastx", &["-searchsp", "1000"]),
         ("tblastx", &["-db_soft_mask", "11"]),
-        ("blastp", &["-searchsp", "1000"]),
         ("blastp", &["-gilist", "ids.gil"]),
         ("blastp", &["-seqidlist", "ids.txt"]),
-        ("blastp", &["-taxids", "9606"]),
+        ("blastp", &["-negative_seqidlist", "ids.txt"]),
+        // Line DI-8 ported the taxid options to BLASTP's database search, not to PSIBLAST's.
+        ("psiblast", &["-taxids", "9606"]),
+        ("psiblast", &["-no_taxid_expansion"]),
         ("blastp", &["-db_soft_mask", "21"]),
         ("blastp", &["-db_hard_mask", "21"]),
         ("blastp", &["-lcase_masking"]),

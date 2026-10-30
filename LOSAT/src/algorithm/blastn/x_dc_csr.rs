@@ -534,7 +534,7 @@ fn each_word(words: &DiscWords<'_>, mut f: impl FnMut(usize, u32)) {
 /// No NCBI counterpart (scheduling only): a hint to bring the line of `p` into the cache; no
 /// architectural access, so any address is allowed (x86_64 only).
 #[inline(always)]
-pub(super) fn prefetch<T>(p: *const T) {
+pub(crate) fn prefetch<T>(p: *const T) {
     #[cfg(target_arch = "x86_64")]
     // SAFETY: a prefetch does not access memory architecturally; any address is allowed.
     unsafe {

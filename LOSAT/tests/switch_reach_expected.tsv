@@ -1,7 +1,7 @@
 # One row per switch of STRICT_SET (LOSAT/src/utils/xswitch.rs); see switch_reach_check.py.
 switch	programs	class	new	ref	note
 LOSAT_X_AHEAD	blastn	conditional	required	required	2+ threads (1 thread runs reference loop); megablast traceback also needs GREEDYSPEC
-LOSAT_X_BNCSR	blastn	conditional	required	required	contiguous table of lut 8-11 as CSR when its positions x 4 >= cells (word 11: query batch >= ~524 kb); ref = smaller tables, lut 12, db word counts
+LOSAT_X_BNCSR	blastn	conditional	required	required	contiguous table of lut 8-11 as CSR when its positions x 4 >= cells (word 11: query batch >= ~524 kb); ref = smaller tables, lut 12 (below MBCSR), db word counts
 LOSAT_X_BNCSRPACK	blastn	conditional	required	gap	CSR table (BNCSR) whose chains list words newest first: packed head; ref = reading-order CSR table (4^8 cells, -word_size 9); ref gap: needs -word_size 9 with a query batch of 16,384-21,000 positions on both strands (8,192-10,500 letters: above it NCBI's choice is a megablast-type table, below it chains); no CI fixture has one; tests/blastn_bn_csr.rs (blastn_word_9_reading_order_table) reaches it
 LOSAT_X_BNDBCUT	blastn	conditional	required	required	-db only, 2+ threads; DB below 4 x threads MiB of sequence bytes
 LOSAT_X_BNDBSTREAM	blastn	conditional	required	required	-db only, 2+ threads; memory switch (little change for few long sequences)
@@ -104,10 +104,12 @@ LOSAT_X_DPWINDOW	blastn,blastp,blastx,tblastn	conditional	required	gap	vector X-
 LOSAT_X_FOLDLEAN	blastn	conditional	required	required	the dc-megablast strips folds (PAIRPARDISC / PAIRPARDISCARR stages: 2+ threads or 1 with BNDCONE, one unmasked subject); ref = the reference fold where those stages do not run; recorded only at their decision points (nothing while both are off)
 LOSAT_X_GREEDYROWFUSE	blastn	platform			x86_64 with AVX2, BMI1, BMI2 and LZCNT only (the megablast greedy rows); other CPUs and targets run the plain three-pass rows
 LOSAT_X_GREEDYSPEC	blastn	conditional	required	required	2+ threads (AHEAD scheduling); acts only where the QGROUPPAR owner loop stays
-LOSAT_X_MB24	blastn	conditional	required	required	contiguous megablast table of 4^12 cells (query batch of ~300,000 table entries or more), newest first, next_pos of at most 2^24 elements, no db word counts or BLEMIR_DEBUG; ref = smaller tables, the blastn task's re-threaded tables, larger batches
+LOSAT_X_MB24	blastn	conditional	required	required	contiguous megablast table of 4^12 cells (query batch of ~300,000 table entries or more) that MBCSR leaves as chains, newest first, next_pos of at most 2^24 elements, no db word counts or BLEMIR_DEBUG; ref = smaller tables, the blastn task's re-threaded tables, larger batches
+LOSAT_X_MBCSR	blastn	conditional	gap	required	megablast table of 4^12 cells with a packed head (BNCSRPACK), no db word counts or BLEMIR_DEBUG: packed CSR when the subjects' letters >= 8 x the word-loop positions + the cells; new gap: the CI fixtures have no subject that large beside such a query (tests/blastn_mb_csr.rs takes it)
 LOSAT_X_MBBATCH	blastn	platform			wasm/aarch64 where MBDELAY does not run
 LOSAT_X_MBDELAY	blastn	platform			x86 native (prefetch instruction); MBBATCH runs elsewhere
 LOSAT_X_MBFILL	blastn	conditional	required	gap	one-thread build (1 thread, or no pool of 2+ threads) of the contiguous megablast or the two-stage blastn table, x86_64 and wasm32 only; not with database word counts (limit_lookup, not a CLI option); ref gap: needs a target other than x86_64 and wasm32 (platform-checks arm64), or limit_lookup set by a library caller
+LOSAT_X_MBHITPF	blastn	conditional	required	gap	search_query_batch's loop over the offset pairs prefetches the query line of the hit 16 places on (x86_64); not PAIRPAR's seed stage; ref gap: only with =0
 LOSAT_X_MBLUTKEEP	blastn	conditional	required	required	only batch loop with several query batches, contiguous or one-template discontiguous table (hashtable, chain heads or CSR offsets)
 LOSAT_X_MBLUTONCE	blastn	conditional	required	required	only where PAIRPAR fills contiguous megablast table on pool of 2+ threads; not -limit_lookup; wins mainly for large query sets
 LOSAT_X_MBLUTPREFAULT	blastn	conditional	required	required	only with read-once pool fill (2+ threads); first chunk >=8 positions per 1,024 cells; Linux evidence

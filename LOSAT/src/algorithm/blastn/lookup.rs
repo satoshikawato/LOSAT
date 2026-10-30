@@ -1945,6 +1945,7 @@ fn build_mb_lookup(
     approx_table_entries: usize,
     ascending_cells: bool,
     x_keep: Option<&std::sync::Arc<x_mb_lut_keep::Keep>>,
+    x_scan_letters: Option<u64>,
 ) -> MbLookupTable {
     debug_assert_eq!(queries_blastna.len(), query_offsets.len());
     // No NCBI counterpart: the start of the `[TIMING] x_mb_lookup_build` interval (LOSAT_TIMING).
@@ -1971,7 +1972,13 @@ fn build_mb_lookup(
     // Dispatch point of LOSAT_X_BNCSR: a table laid out as CSR (`x_bn_csr.rs`) has neither
     // `hashtable` nor `next_pos`; its `offsets` (a cell's start, one element per cell) is built in
     // the table the batch loop's keep holds, so the loop does not hold that table beside this one.
-    let x_csr_layout = x_bn_csr::plan(&x_words, table_size, db_word_counts.is_some(), debug_mode);
+    let x_csr_layout = x_bn_csr::plan(
+        &x_words,
+        table_size,
+        db_word_counts.is_some(),
+        debug_mode,
+        x_scan_letters,
+    );
     let max_query_offset = queries_blastna
         .iter()
         .zip(query_offsets.iter())
@@ -2280,11 +2287,13 @@ pub fn build_two_stage_lookup(
         approx_table_entries,
         ascending_cells,
         None,
+        None,
     )
 }
 
 /// `build_two_stage_lookup` with the batch loop's keep of LOSAT_X_MBLUTKEEP (`x_keep`: the
-/// table is built on the kept one when it has the size, and goes back to it when dropped).
+/// table is built on the kept one when it has the size, and goes back to it when dropped) and the
+/// letters the search scans (`x_scan_letters`, LOSAT_X_MBCSR's size rule).
 pub(crate) fn build_two_stage_lookup_kept(
     queries_blastna: &[&[u8]],
     query_offsets: &[i32],
@@ -2296,6 +2305,7 @@ pub(crate) fn build_two_stage_lookup_kept(
     approx_table_entries: usize,
     ascending_cells: bool,
     x_keep: Option<&std::sync::Arc<x_mb_lut_keep::Keep>>,
+    x_scan_letters: Option<u64>,
 ) -> TwoStageLookup {
     let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
 
@@ -2317,6 +2327,7 @@ pub(crate) fn build_two_stage_lookup_kept(
         approx_table_entries,
         ascending_cells,
         x_keep,
+        x_scan_letters,
     );
 
     TwoStageLookup {

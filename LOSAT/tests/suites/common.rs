@@ -12,6 +12,8 @@ mod cli_smoke;
 mod cli_v2;
 #[path = "../compressed_lookup.rs"]
 mod compressed_lookup;
+#[path = "../db_taxid_root.rs"]
+mod db_taxid_root;
 #[path = "../default_bundle.rs"]
 mod default_bundle;
 #[path = "../newton_lanes8_default.rs"]

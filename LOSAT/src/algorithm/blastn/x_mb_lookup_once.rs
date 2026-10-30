@@ -2615,8 +2615,11 @@ mod tests {
                 let rounds = if threads == 40 { 2 } else { 8 };
                 for round in 0..rounds {
                     // lut 8 has 32 blocks of 2,048 cells: 40 threads leave owners without cells
+                    // one table of LOSAT_X_MBCSR's 4^12 cells, newest first, with repeats
                     let lut = if threads == 40 {
                         8
+                    } else if threads == 3 && round == 0 {
+                        12
                     } else {
                         [8usize, 9, 10, 11][round % 4]
                     };
@@ -2631,7 +2634,11 @@ mod tests {
                     let words = case.words(&refs, lut + rng.below(4) as usize, lut, ascending);
                     let cells = 1usize << (2 * lut);
                     let (pv_len, bts) = pv_params(&case, lut);
-                    let chunk = [1usize, 97, 5000, chunk_positions(threads)][(round / 2) % 4];
+                    let chunk = if lut == 12 {
+                        chunk_positions(threads)
+                    } else {
+                        [1usize, 97, 5000, chunk_positions(threads)][(round / 2) % 4]
+                    };
                     let what = format!("threads {threads} round {round} lut {lut} chunk {chunk}");
                     let mut pv = vec![0 as PvArrayType; pv_len];
                     let mut helper = vec![0u32; cells >> 11];

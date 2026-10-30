@@ -45,6 +45,18 @@ use super::greedy::{greedy_gapped_alignment_internal, GreedyAlignScratch};
 use crate::core::blast_encoding::COMPRESSION_RATIO;
 use std::sync::OnceLock;
 
+/// The four bases of each packed byte, first base first.
+const X_UNPACKED: [[u8; COMPRESSION_RATIO]; 256] = {
+    let mut table = [[0u8; COMPRESSION_RATIO]; 256];
+    let mut byte = 0usize;
+    while byte < 256 {
+        let b = byte as u8;
+        table[byte] = [(b >> 6) & 3, (b >> 4) & 3, (b >> 2) & 3, b & 3];
+        byte += 1;
+    }
+    table
+};
+
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_util.h:52-55
 /// ```c
 /// #define NCBI2NA_MASK 0x03
@@ -65,9 +77,12 @@ pub(crate) fn x_unpack_ncbi2na(packed: &[u8], len: usize) -> Vec<u8> {
         packed.len() >= bytes,
         "packed subject shorter than its length"
     );
-    let mut unpacked = Vec::with_capacity(bytes * COMPRESSION_RATIO);
-    for &byte in &packed[..bytes] {
-        unpacked.extend_from_slice(&[(byte >> 6) & 3, (byte >> 4) & 3, (byte >> 2) & 3, byte & 3]);
+    let mut unpacked = vec![0u8; bytes * COMPRESSION_RATIO];
+    for (bases, &byte) in unpacked
+        .chunks_exact_mut(COMPRESSION_RATIO)
+        .zip(&packed[..bytes])
+    {
+        bases.copy_from_slice(&X_UNPACKED[byte as usize]);
     }
     unpacked.truncate(len);
     unpacked

@@ -3222,6 +3222,15 @@ fn x_bn_mapped() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNMAPPED"))
 }
 
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_MBHITPF) the first extension of a hit reads the query
+/// at a place the hit's cell chose, a cache miss for a query of megabases; the loop over the offset
+/// pairs prefetches the line of the hit `X_HIT_AHEAD` places on. It changes no value.
+fn x_mb_hit_prefetch() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBHITPF"))
+}
+const X_HIT_AHEAD: usize = 16;
+
 /// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNTBRANGE) the traceback of a database search decodes
 /// a sequence of at least `x_tb_range_min` bases in the ranges of its HSPs only, as NCBI's partial
 /// fetch does (`database::traceback_listed`).
@@ -12396,6 +12405,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     // if (hitsfound == 0) continue;
                     // hits_extended += extend(offset_pairs, hitsfound, ...);
                     // ```
+                    let x_hit_prefetch = x_mb_hit_prefetch();
                     let mut process_offset_pairs =
                         |offset_pairs: &[OffsetPair],
                          offset_pairs_len: &mut usize,
@@ -12403,6 +12413,15 @@ fn search_query_batch<const UNGAPPED: bool>(
                          track_scan_pause: bool| {
                             let hitsfound = *offset_pairs_len;
                             for idx in 0..hitsfound {
+                                // EXPERIMENT (LOSAT_X_MBHITPF): the query's letters of a hit
+                                // `X_HIT_AHEAD` places on.
+                                if x_hit_prefetch && idx + X_HIT_AHEAD < hitsfound {
+                                    x_dc_csr::prefetch(
+                                        encoded_query_concat_blastna_with_sentinels
+                                            .as_ptr()
+                                            .wrapping_add(offset_pairs[idx + X_HIT_AHEAD].q_off),
+                                    );
+                                }
                                 let pair = offset_pairs[idx];
                                 let q_off0 = pair.q_off;
                                 let kmer_start = pair.s_off;

@@ -757,9 +757,8 @@ pub(super) unsafe fn two_hit_sent(
     debug_assert!(q_full.len() >= 2 && q_full[0] == 0 && q_full[q_full.len() - 1] == 0);
     debug_assert!(s_full.len() >= 2 && s_full[0] == 0 && s_full[s_full.len() - 1] == 0);
     debug_assert!(s_full.len() <= MAX_SENT_LEN);
-    let tab = state().table.as_deref()?.as_ptr();
     two_hit_sent_on::<8>(
-        tab,
+        || Some(state().table.as_deref()?.as_ptr()),
         q_full,
         s_full,
         s_left_off,
@@ -785,7 +784,7 @@ pub(crate) unsafe fn two_hit_sent_in(
     x_drop: i32,
 ) -> Option<TwoHit> {
     two_hit_sent_on::<5>(
-        t.0.as_ptr(),
+        || Some(t.0.as_ptr()),
         q_full,
         s_full,
         s_left_off,
@@ -795,13 +794,14 @@ pub(crate) unsafe fn two_hit_sent_in(
     )
 }
 
-/// `two_hit_sent` on the table `tab`, read at `q << SHIFT | s` (`walk_sent`).
+/// `two_hit_sent` on the table that `table` gives (read after the calls the path does not cover
+/// have returned), read at `q << SHIFT | s` (`walk_sent`).
 ///
 /// SAFETY: those of `two_hit_sent` and `walk_sent`.
 // NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
 #[inline(always)]
 unsafe fn two_hit_sent_on<const SHIFT: u32>(
-    tab: *const i8,
+    table: impl FnOnce() -> Option<*const i8>,
     q_full: &[u8],
     s_full: &[u8],
     s_left_off: usize,
@@ -817,6 +817,7 @@ unsafe fn two_hit_sent_on<const SHIFT: u32>(
     {
         return None;
     }
+    let tab = table()?;
     // offset 0 of the reference's sequences; one sentinel before each
     let qb = q_full.as_ptr().add(1);
     let sb = s_full.as_ptr().add(1);

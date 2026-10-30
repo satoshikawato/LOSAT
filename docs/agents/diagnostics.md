@@ -367,6 +367,7 @@ export LOSAT_X_BXBUILDPAR=1
 export LOSAT_X_BXCAPFILL=4
 export LOSAT_X_BXCHUNKCROSS=1
 export LOSAT_X_BXCHUNKFLOW=1
+export LOSAT_X_BXCLUTCAP=3
 export LOSAT_X_BXCROSS=1
 export LOSAT_X_BXCROSSDEFER=1
 export LOSAT_X_BXCTXONCE=1
@@ -6435,6 +6436,34 @@ Scheduling (each value computed by one thread with the original function; order 
   at 32 threads 274 -> 210 MiB (one table per thread still alive at once); BXUNITCAP with K + 1 unwritten batches,
   helpers waiting for the batch's thread and only the writing thread spawning batches cost bx_800 x1.07-1.14 at
   16-32 threads, which the three parts of the capped flow above remove.
+- `LOSAT_X_BXCLUTCAP=1` or `=K` (BLASTX `-task blastx-fast` and `-word_size 5`, memory; in the strict set from the
+  pull request that added it, 2026-10-31: on unless `=0` or `LOSAT_X_DEFAULT=0`; a value switch, K from 2 to 4,096,
+  otherwise 3; acts where the compressed lookup table is used and `LOSAT_X_BXUNITCAP` is on): `LOSAT_X_BXUNITCAP`'s
+  K is at most this K, or ceil(threads / subjects) where that is more, because K units of few subjects keep the
+  threads busy only with K x subjects tasks (`blastx/x_bx_mem.rs`). The order of the report is the writing order of
+  the units and of the subjects' tasks, as for `LOSAT_X_BXUNITCAP`, so reports do not change
+  (`tests/blastx_fast_flat.rs`: 3, 4 and 8 threads with the switch on, off and `=3`, both sides of the rule).
+  This pull request also gives BLASTX's compressed table the flat build of `LOSAT_X_BPCLUT` (`=0` keeps the
+  reference table, 29 MiB of fixed cells per unit). Choosing K, binary f14f3ad5, ws node 1, 3 rounds, K through
+  `LOSAT_X_BXUNITCAP`, 8 threads, time and peak `RssAnon` of K = 8 / 4 / 3 / 2 as parts of the reference table at
+  K = 8: Trinity x Swiss-Prot 0.875 0.585 / 0.853 0.370 / 0.860 0.304 / 0.869 0.242 (231 MiB; NCBI 47);
+  200 *D. melanogaster* cDNAs x Swiss-Prot 0.848 0.753 / 0.815 0.446 / 0.815 0.413 / 0.824 0.410; AMRProt with
+  ABRicate's call 0.775 0.509 / 0.769 0.505 / 0.775 0.506 / 0.936 0.395; Trinity x four proteins (4 subjects)
+  0.609 0.640 / 0.720 0.406 / 0.831 0.303 / 1.089 0.196; EDL933 x AMRProt 0.554 0.652 / 0.555 0.603 / 0.556 0.594 /
+  0.556 0.690. K = 2 is slower than the reference table with 4 subjects; K = 3 is not, and is the smallest K of
+  which that holds in all these cases, also at 16 threads (0.895 0.315, 0.763 0.501, 0.541 0.623).
+  Final binary 0f22ecd0 against dev caf4c166 (reports equal to NCBI 2.17.0 in every arm), time and peak `RssAnon`
+  as parts of dev, 3 pairs, ws node 1: Trinity x Swiss-Prot 4 threads 0.896 0.527, 8 threads 0.868 0.307, 16 threads
+  0.906 0.422; cDNAs 8 threads 0.825 0.392; AMRProt 8 threads 0.746 0.516, 16 threads 0.727 0.517; rhodopsin x four
+  proteins 8 threads 0.772 0.580; Trinity x four proteins 8 threads 0.856 0.360, 16 threads 0.717 0.385; EDL933 x
+  AMRProt 8 threads 0.562 0.597, 16 threads 0.542 0.590. One thread (no cap): Trinity 0.928 0.851, AMRProt 0.843
+  0.572, rhodopsin 0.773 0.578. Against `LOSAT_X_BXCLUTCAP=0` the cap costs time only with few subjects (Trinity x
+  four proteins, 0.2-0.3 s, 8 threads 0.291 s vs 0.218 s, 16 threads 0.229 s vs 0.193 s, `RssAnon` 0.56 and 0.61 of
+  that arm); cases of a second or more stay within about 2 %, and 0.1 s cases change sign between binaries (rhodopsin
+  x four proteins, 8 threads: 0.119 s vs 0.110 s here, 0.095 s vs 0.114 s on 958e1293). Still above NCBI in `RssAnon`: Trinity x Swiss-Prot 8 threads 72 vs 47 MiB,
+  EDL933 x AMRProt 16 threads 484 vs 124 MiB. BLASTX without `-word_size 5`: 8 pairs, cycles 0.9971 (byte copy of dev
+  1.0005) on 60 Trinity transcripts x Swiss-Prot at one thread, instructions x1.00001, `Lookup::Compressed` keeps one
+  variant so that the standard table's loops keep their match (a separate variant cost x1.003 to x1.006 there).
 - `LOSAT_X_BXCAPFILL=1` or `=f` (BLASTX, memory with few subjects; in the strict set from the pull request that
   added it, 2026-10-25: on unless `=0` or `LOSAT_X_DEFAULT=0`; a value switch, f from 2 to 64 tasks per thread,
   otherwise 4; acts where `LOSAT_X_BXUNITCAP` caps): the capped units keep the threads busy with few subjects

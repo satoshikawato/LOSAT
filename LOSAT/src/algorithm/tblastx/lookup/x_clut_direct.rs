@@ -390,6 +390,8 @@ const X_TARGET_PV_BYTES: usize = 262_144;
 pub(crate) const X_BLASTP: u8 = 0;
 /// TBLASTN's caller of `XFlatCompressedLookup::scan_subject` (`tblastn/search_seed.rs`).
 pub(crate) const X_TBLASTN: u8 = 1;
+/// BLASTX's caller of `XFlatCompressedLookup::scan_subject` (`blastx/seed.rs`, `x_seed_scan.rs`).
+pub(crate) const X_BLASTX: u8 = 2;
 
 /// EXPERIMENT (LOSAT_X_BPCLUT): the compressed lookup table with each cell's hits in one slice of
 /// `hits` (`starts[index]..starts[index + 1]`), in NCBI's scan order. The other fields are those of
@@ -2253,8 +2255,8 @@ pub(crate) fn x_bp_build_compressed_lookup(
 //                                     query, locations);
 //     s_CompressedLookupFinalize(lookup);
 // ```
-/// TBLASTN's compressed lookup table (word sizes 5 to 7, `tblastn/search_seed.rs`): what
-/// `x_bp_build_compressed_lookup` builds on one thread, the reference table with the switch off and
+/// TBLASTN's compressed lookup table (word sizes 5 to 7, `tblastn/search_seed.rs`) and BLASTX's
+/// (word size 5, `blastx/seed.rs`): what `x_bp_build_compressed_lookup` builds on one thread, the reference table with the switch off and
 /// otherwise the flat one (the bucket fill, the count-and-fill builder where it declines, the
 /// reference builder where that declines), with the same refusal. A function of its own, which
 /// calls only the builders that blastp-fast's build calls out of line, so that blastp-fast's build

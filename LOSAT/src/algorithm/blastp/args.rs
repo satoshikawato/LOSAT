@@ -327,6 +327,16 @@ pub struct BlastpArgs {
     // No constraint and no dependency: read with `-db` and with `-subject`.
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
+    // ```c++
+    //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
+    // ```
+    #[arg(
+        long = "show_gis",
+        default_value_t = false,
+        help = "Show NCBI GIs in deflines?"
+    )]
+    pub show_gis: bool,
     // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:225-228
     // ```c
     //     if (choice == eProtProt || choice == eAll) {
@@ -679,6 +689,11 @@ pub struct ResolvedBlastpArgs {
     pub inclusion_ethresh: f64,
     /// `traceback_hitlist_size`, computed once (psiblast's reads `ADAPTIVE_CBS`).
     traceback_hitlist: usize,
+    /// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search whose custom tabular
+    /// report checks it (`x_CheckTaxDB`, `blast_engine.rs` `search_cli`); false otherwise, and
+    /// for `run_local`, which has no search path (C2 DECISIONS 7). A `-db` search asks its
+    /// database (`BlastpDatabase::taxdb_found`).
+    pub subject_taxdb_found: bool,
 }
 
 impl ResolvedBlastpArgs {
@@ -1076,6 +1091,7 @@ impl BlastpArgs {
                 .inclusion_ethresh
                 .unwrap_or(super::blast_engine::PSI_INCLUSION_ETHRESH),
             traceback_hitlist: 0,
+            subject_taxdb_found: false,
         };
         resolved.traceback_hitlist = resolved.compute_traceback_hitlist_size();
         Ok(resolved)

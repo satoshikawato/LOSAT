@@ -5,8 +5,8 @@
 //! the default outfmt 6 rows (`report::write_tabular`); outfmt 20's header line comes before the
 //! first query and outfmt 7's count of queries after the last. The report is written once per run
 //! after every query batch was searched (`report_stream`'s `Off::CustomTabular`), so LOSAT's
-//! refusals (a name of the taxonomy database, the ids of a database sequence) come before the
-//! first byte of the report.
+//! refusals (the taxonomy database's names, `TblastxReportRun::tabular_names`, the ids of a
+//! database sequence) come before the first byte of the report.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:763-834
 //! ```c++
@@ -53,11 +53,10 @@ use anyhow::Result;
 
 use super::args::TblastxMatrix;
 use super::blast_engine::{TblastxHsp, TblastxReportRun};
-use crate::algorithm::common::tabular::{check_taxonomy_names, TabularSubjects, COUNTS_BLOCK};
+use crate::algorithm::common::tabular::{TabularSubjects, COUNTS_BLOCK};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::config::ScoringMatrix;
 use crate::report::blast_xml::hsp::translation_frame;
-use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
     coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularField, TabularHsp,
@@ -202,7 +201,7 @@ pub(super) fn write_tblastx_tabular(
             .filter(|&(index, hsp)| index == 0 || hits[index - 1].hit.s_idx != hsp.hit.s_idx)
             .map(|(_, hsp)| hsp.hit.s_idx as usize)
     };
-    check_taxonomy_names(spec, taxdb_found, &subjects, reported_ranks(), PROGRAM)?;
+    let names = run.tabular_names;
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
     // those of the other ids are `ReportedSubjects::tabular_subject_ids`'.
     if needs.all_deflines {
@@ -219,11 +218,10 @@ pub(super) fn write_tblastx_tabular(
         TblastxMatrix::Table(matrix) => matrix,
         TblastxMatrix::Unknown | TblastxMatrix::Aborts => ScoringMatrix::Blosum62,
     };
-    let positives = FormattingMatrix::ascii_protein(matrix);
     let table = TabularWriter {
         spec,
         program_version: PROGRAM_VERSION,
-        matrix: Some(&positives),
+        matrix: Some(matrix),
     };
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
@@ -360,9 +358,21 @@ pub(super) fn write_tblastx_tabular(
                 -1
             };
             // `qcovus` is inserted for BLASTN alone (`eQueryCovPerUniqSubj`): `N/A`.
-            let subject = values.nucleotide_subject(qcovs, -1);
+            let subject = values.nucleotide_subject(names, qcovs, -1);
             let subject_record_length = i32::try_from(record_length(s_idx))?;
             for &hsp_index in group {
+                // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
+                // `x_SetTaxInfo`) follow the rows before it.
+                if let (Some(names), Some(warnings)) = (names, warnings.as_deref_mut()) {
+                    let text = names.row_messages(spec, subject.taxonomy);
+                    if !text.is_empty() {
+                        writer.write_all(&buf)?;
+                        buf.clear();
+                        writer.flush()?;
+                        warnings.sink.write_all(&text)?;
+                        warnings.sink.flush()?;
+                    }
+                }
                 let hsp = &hits[hsp_index];
                 let hit = &hsp.hit;
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:762-768

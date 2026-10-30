@@ -26,6 +26,9 @@ pub(crate) mod window_masker;
 // Blast_IntervalTreeReset(tree);
 // ```
 pub mod tracing;
+// NCBI c++/src/algo/blast/core/blast_hits.c:676-735, blast_parameters.c:346-374: the steps of an
+// ungapped (`-ungapped`) search on a subject's HSP list and the word cutoff of its batch.
+pub(crate) mod ungapped;
 // NCBI c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520: the subjects' search forms made
 // from the scope. EXPERIMENT (LOSAT_X_BNSTORE): the subjects held packed, their letters made when
 // read.

@@ -57,7 +57,6 @@ pub(crate) struct DisplayAlignment {
     pub qseq: String,
     pub sseq: String,
     pub masked_qseq: String,
-    pub btop: String,
     pub identity: usize,
     pub positive: usize,
     pub gaps: usize,
@@ -737,38 +736,23 @@ pub(crate) fn alignment(
     //     retval('U', 'C') = retval('C', 'C');
     //     retval('C', 'U') = retval('C', 'C');
     // ```
-    let mut btop = String::new();
-    let mut run = 0;
     let mut identity = 0;
     let mut positive = 0;
     for (&qc, &sc) in qseq.iter().zip(&sseq) {
         if qc == sc {
             identity += 1;
             positive += 1;
-            run += 1;
-        } else {
-            if run > 0 {
-                btop.push_str(&run.to_string());
-                run = 0;
-            }
-            btop.push(qc as char);
-            btop.push(sc as char);
-            if qc != b'-'
-                && sc != b'-'
-                && protein_display_score(crate::config::ScoringMatrix::Blosum62, qc, sc) > 0
-            {
-                positive += 1;
-            }
+        } else if qc != b'-'
+            && sc != b'-'
+            && protein_display_score(crate::config::ScoringMatrix::Blosum62, qc, sc) > 0
+        {
+            positive += 1;
         }
-    }
-    if run > 0 {
-        btop.push_str(&run.to_string());
     }
     Ok(DisplayAlignment {
         qseq: String::from_utf8(qseq)?,
         sseq: String::from_utf8(sseq)?,
         masked_qseq: String::from_utf8(masked)?,
-        btop,
         identity,
         positive,
         gaps,
@@ -831,7 +815,7 @@ pub(crate) fn alignment(
 //
 //     return id_string;
 // ```
-fn local_id(record: &FastaRecord) -> &str {
+pub(super) fn local_id(record: &FastaRecord) -> &str {
     record
         .title
         .split(' ')
@@ -866,13 +850,11 @@ fn local_id(record: &FastaRecord) -> &str {
 //     }
 // ```
 fn id_field(record: &FastaRecord, field: &str) -> String {
-    // Local FASTA uses generated local Seq-ids, replaced by title tokens.
-    // Keep all three source field paths distinct; local content has no accession version object.
+    // Local FASTA uses generated local Seq-ids, replaced by title tokens. The default report's
+    // query field is `qaccver` (its other identifier fields are the shared writer's, `tabular`).
     match field {
-        "qseqid" | "sseqid" => local_id(record).to_owned(),
-        "qacc" | "sacc" => local_id(record).to_owned(),
-        "qaccver" | "saccver" => local_id(record).to_owned(),
-        _ => unreachable!("validated identifier field"),
+        "qaccver" => local_id(record).to_owned(),
+        _ => unreachable!("a std identifier field"),
     }
 }
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1128-1196
@@ -948,41 +930,25 @@ fn id_field(record: &FastaRecord, field: &str) -> String {
 //         case eSubjectTaxIds:
 // ```
 fn field_name(field: &str) -> &str {
+    // The `std` fields of the default report (`ResolvedOptions::fields`); the other fields are
+    // the shared writer's (`report::tabular::TabularField::header_name`).
     match field {
-        "qseqid" => "query id",
-        "qacc" => "query acc.",
         "qaccver" => "query acc.ver",
-        "qlen" => "query length",
-        "sseqid" => "subject id",
-        "sacc" => "subject acc.",
         "saccver" => "subject acc.ver",
-        "slen" => "subject length",
         "qstart" => "q. start",
         "qend" => "q. end",
         "sstart" => "s. start",
         "send" => "s. end",
-        "qseq" => "query seq",
-        "sseq" => "subject seq",
         "evalue" => "evalue",
         "bitscore" => "bit score",
-        "score" => "score",
         "length" => "alignment length",
         "pident" => "% identity",
-        "nident" => "identical",
         "mismatch" => "mismatches",
-        "positive" => "positives",
         "gapopen" => "gap opens",
-        "gaps" => "gaps",
-        "ppos" => "% positives",
-        "qframe" => "query frame",
-        "sframe" => "sbjct frame",
-        "frames" => "query/sbjct frames",
-        "btop" => "BTOP",
-        "stitle" => "subject title",
-        _ => unreachable!("validated BLASTX field"),
+        _ => unreachable!("a std field"),
     }
 }
-// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-479
+// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:437-442
 // ```c++
 // inline void CBlastTabularInfo::x_PrintPercentIdentical(void)
 // {
@@ -990,78 +956,23 @@ fn field_name(field: &str) -> &str {
 //         (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
 //     m_Ostream << NStr::DoubleToString(perc_ident, 3);
 // }
-//
-// inline void CBlastTabularInfo::x_PrintPercentPositives(void)
-// {
-//     double perc_positives =
-//         (m_AlignLength > 0 ? ((double)m_NumPositives)/m_AlignLength * 100 : 0);
-//     m_Ostream << NStr::DoubleToString(perc_positives, 2);
-// }
-//
-// inline void CBlastTabularInfo::x_PrintFrames(void)
-// {
-//     m_Ostream << m_QueryFrame << "/" << m_SubjectFrame;
-// }
-//
-// inline void CBlastTabularInfo::x_PrintQueryFrame(void)
-// {
-//     m_Ostream << m_QueryFrame;
-// }
-//
-// inline void CBlastTabularInfo::x_PrintSubjectFrame(void)
-// {
-//     m_Ostream << m_SubjectFrame;
-// }
-//
-// inline void CBlastTabularInfo::x_PrintBTOP(void)
-// {
-//     m_Ostream << m_BTOP;
-// }
-//
-// inline void CBlastTabularInfo::x_PrintNumIdentical(void)
-// {
-//     m_Ostream << m_NumIdent;
-// }
-//
+// ```
+// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:543-547
+// ```c++
 // inline void CBlastTabularInfo::x_PrintMismatches(void)
 // {
 //     int num_mismatches = m_AlignLength - m_NumIdent - m_NumGaps;
 //     m_Ostream << num_mismatches;
 // ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:415-436
-// ```c++
-// void CBlastTabularInfo::x_PrintSubjectTitle()
-// {
-// 	if(m_SubjectDefline.NotEmpty() && m_SubjectDefline->CanGet() &&
-// 	   m_SubjectDefline->IsSet() && !m_SubjectDefline->Get().empty())
-// 	{
-// 		const list<CRef<CBlast_def_line> > & defline = m_SubjectDefline->Get();
-//
-// 		if(defline.empty())
-// 			m_Ostream << NA;
-// 		else
-// 		{
-// 			if(defline.front()->IsSetTitle())
-// 			{
-// 				if(defline.front()->GetTitle().empty())
-// 					m_Ostream << NA;
-// 				else
-// 					m_Ostream << defline.front()->GetTitle();
-// 			}
-// 			else
-// 				m_Ostream << NA;
-// 		}
-// 	}
-// ```
-/// A subject as the tabular fields show it: its record (letters), its id and `stitle`
-/// (`ShownSubjects`).
+/// A subject as the default tabular report shows it: its `saccver`
+/// (`ShownSubjects::subject_ids`).
 struct ShownSubject<'a> {
-    record: &'a FastaRecord,
     /// `sseqid`, `sacc` and `saccver` (`ShownSubjects::subject_ids`).
     ids: [&'a str; 3],
-    title: &'a str,
 }
 
+/// The value of a `std` field of the default report (outfmt 6 and 7 without a field list or
+/// a delimiter); the other fields are the shared writer's (`tabular`).
 fn field_value(
     field: &str,
     query: &FastaRecord,
@@ -1070,36 +981,19 @@ fn field_value(
     a: &DisplayAlignment,
 ) -> String {
     match field {
-        "qseqid" | "qacc" | "qaccver" => id_field(query, field),
-        "sseqid" => subject.ids[0].to_owned(),
-        "sacc" => subject.ids[1].to_owned(),
+        "qaccver" => id_field(query, field),
         "saccver" => subject.ids[2].to_owned(),
-        "qlen" => query.sequence.len().to_string(),
-        "slen" => subject.record.sequence.len().to_string(),
         "qstart" => a.qstart.to_string(),
         "qend" => a.qend.to_string(),
         "sstart" => a.sstart.to_string(),
         "send" => a.send.to_string(),
-        "qseq" => a.qseq.clone(),
-        "sseq" => a.sseq.clone(),
         "evalue" => format_evalue_ncbi_tabular(hsp.evalue),
         "bitscore" => format_bitscore_ncbi(hsp.bit_score),
-        "score" => hsp.hsp.score.to_string(),
         "length" => a.qseq.len().to_string(),
         "pident" => format_percent_identity_ncbi(a.identity, a.qseq.len(), 3),
-        "nident" => a.identity.to_string(),
         "mismatch" => a.mismatches().to_string(),
-        "positive" => a.positive.to_string(),
         "gapopen" => a.gap_opens.to_string(),
-        "gaps" => a.gaps.to_string(),
-        "ppos" => format_percent_identity_ncbi(a.positive, a.qseq.len(), 2),
-        "qframe" => a.frame.to_string(),
-        "sframe" => "0".into(),
-        "frames" => format!("{}/0", a.frame),
-        "btop" => a.btop.clone(),
-        // Local-subject FASTA has no Blast-def-line-set; the source title field is NA.
-        "stitle" => subject.title.to_owned(),
-        _ => unreachable!("validated BLASTX field"),
+        _ => unreachable!("a std field"),
     }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1578
@@ -1163,19 +1057,6 @@ impl ShownSubjects<'_> {
         }
     }
 
-    /// `stitle` of subject `oid`: `N/A` for a record (NCBI's subject set has no BLAST
-    /// definition line), the stored title of a database sequence, or `N/A` for an empty one
-    /// (tabular.cpp's `NA`, as BLASTP's `blastp_subject_stitle`).
-    fn stitle(&self, oid: usize) -> &str {
-        match self {
-            ShownSubjects::Fasta { .. } => "N/A",
-            ShownSubjects::Database { reported, .. } => match reported.title(oid) {
-                "" => "N/A",
-                title => title,
-            },
-        }
-    }
-
     /// The `-db` database's `Database:` lines.
     fn pairwise_database(&self) -> Option<&crate::report::pairwise::PairwiseDatabase> {
         match self {
@@ -1194,7 +1075,8 @@ pub fn render(
     batches: &mut [BatchResults],
 ) -> Result<()> {
     let shown = ShownSubjects::Fasta { path: subject_path };
-    write_prolog(writer, options, subjects, &shown)?;
+    let mut stderr = std::io::stderr().lock();
+    write_prolog(writer, &mut stderr, options, subjects, &shown)?;
     // The library entry has no output file: outfmt 13 and 14 are the command line's.
     let mut xml2 = super::blast_xml::xml2_kind(options.outfmt).map(|kind| {
         super::blast_xml::xml2_writer(
@@ -1207,7 +1089,7 @@ pub fn render(
     });
     render_queries(
         writer,
-        &mut std::io::stderr().lock(),
+        &mut stderr,
         options,
         queries,
         subjects,
@@ -1218,6 +1100,7 @@ pub fn render(
     )?;
     write_epilog(
         writer,
+        &mut stderr,
         options,
         subjects,
         &shown,
@@ -1323,6 +1206,13 @@ pub fn render_queries(
             subjects,
             &names,
             batches,
+        );
+    }
+    // The tabular reports with a field list or a delimiter, and outfmt 10 and 20: the shared
+    // writer (`tabular`, NCBI's `CBlastTabularInfo`); the default outfmt 6 and 7 below.
+    if let Some(spec) = options.tabular {
+        return super::tabular::write_blastx_tabular(
+            writer, stderr, options, spec, queries, subjects, shown, batches,
         );
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
@@ -1470,9 +1360,7 @@ pub fn render_queries(
                 for list in lists {
                     let subject = &subjects[list.oid];
                     let shown_subject = ShownSubject {
-                        record: subject,
                         ids: shown.subject_ids(subject, list.oid),
-                        title: shown.stitle(list.oid),
                     };
                     for hsp in &list.hsps {
                         if !has_seqalign(hsp, options.gapped) {
@@ -1781,6 +1669,7 @@ fn pairwise_metadata(
 // ```
 pub(crate) fn write_prolog(
     writer: &mut impl Write,
+    diagnostics: &mut dyn Write,
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
@@ -1791,6 +1680,11 @@ pub(crate) fn write_prolog(
             &pairwise_metadata(options, subjects, shown),
             shown.pairwise_database(),
         )?;
+    }
+    // Outfmt 20's line of the field names, after its formatter's warning
+    // (`tabular::write_prolog`).
+    if let Some(spec) = options.tabular {
+        super::tabular::write_prolog(spec, options.taxdb_found, &mut *writer, diagnostics)?;
     }
     Ok(())
 }
@@ -1850,6 +1744,7 @@ pub(crate) fn write_prolog(
 // ```
 pub(crate) fn write_epilog(
     writer: &mut impl Write,
+    diagnostics: &mut dyn Write,
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
@@ -1882,6 +1777,16 @@ pub(crate) fn write_epilog(
         // document.
         super::blast_xml::write_xml_epilog(writer, queries, xml2)?;
     } else if options.outfmt == 7 {
+        // The warning of the epilog's formatter, for a field list that shows a plural name of
+        // the taxonomy database without `taxdb.bti` (`tabular::write_epilog_warning`).
+        if let Some(spec) = options.tabular {
+            super::tabular::write_epilog_warning(
+                spec,
+                options.taxdb_found,
+                &mut *writer,
+                diagnostics,
+            )?;
+        }
         writeln!(writer, "# BLAST processed {queries} queries")?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236
         // ```c++
@@ -1995,7 +1900,7 @@ pub(crate) fn write_epilog(
 //     }
 // ```
 // Global errorId0 "Could..." precedes per-query "Sequence..." after Combine.
-fn query_warning(query: &FastaRecord, search_skipped: bool) -> Vec<u8> {
+pub(super) fn query_warning(query: &FastaRecord, search_skipped: bool) -> Vec<u8> {
     if !query.sequence.is_empty() && !search_skipped {
         return Vec::new();
     }
@@ -2033,7 +1938,7 @@ fn query_warning(query: &FastaRecord, search_skipped: bool) -> Vec<u8> {
 // {
 //     m_Outfile.exceptions(NcbiBadbit);
 // ```
-fn tabular_io_error(error: anyhow::Error) -> anyhow::Error {
+pub(super) fn tabular_io_error(error: anyhow::Error) -> anyhow::Error {
     match error.downcast::<std::io::Error>() {
         Ok(error) => TabularFlushError(error).into(),
         Err(error) => error,

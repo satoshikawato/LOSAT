@@ -453,6 +453,9 @@ pub mod report;
 mod archive;
 mod blast_xml;
 mod seqalign;
+// NCBI c++/src/objtools/align_format/tabular.cpp (CBlastTabularInfo): the tabular reports with a
+// field list or a delimiter, and outfmt 10 and 20, through the shared writer (`report::tabular`).
+mod tabular;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
 // ```c++

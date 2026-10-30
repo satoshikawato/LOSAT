@@ -3,8 +3,9 @@
 //!
 //! `LOSAT_X_BPGAP` is in the strict set (`src/utils/xswitch.rs`): it is on by default, unless its
 //! variable is `0`. Every test states the
-//! default it runs with: the report is NCBI's with no variable, with `LOSAT_X_BPGAP=0` and with
-//! `LOSAT_X_BPGAP16=0` (the sixteen-bit rows, also in the set).
+//! default it runs with: the report is NCBI's with no variable, with `LOSAT_X_BPGAP=0`, with
+//! `LOSAT_X_BPGAP16=0` (the sixteen-bit rows, also in the set) and with `LOSAT_X_BPGAPBAND=0`
+//! (the rows' arrays sized for the subject letters instead of the band, also in the set).
 //!
 //! NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:3777-3786,3955-3957
 //! ```c
@@ -215,6 +216,7 @@ fn restricted_gapped_alignments_match_ncbi_with_and_without_the_switch() {
             &[][..],
             &[("LOSAT_X_BPGAP", "0")][..],
             &[("LOSAT_X_BPGAP16", "0")][..],
+            &[("LOSAT_X_BPGAPBAND", "0")][..],
         ] {
             let (report, _) = blastp(threads, variables);
             assert_eq!(report, NCBI_ROWS, "{threads} threads, {variables:?}");

@@ -20,20 +20,21 @@
 //! search at 8 threads from 53.6 to 60.3 MiB, medians of 3, against 53.9 MiB for the copy: v4-D12
 //! s5m3, workstation). The one-thread loop reads after the early termination test, as NCBI does,
 //! and after the first Newton problems; the parallel paths read the matches that they compute ahead
-//! of the test's replay. A read that finds a pyrrolysine (O) sets the subject's flag
-//! (`ListedSubjects::x_has_o`).
+//! of the test's replay. A read that finds a pyrrolysine (O) or a gap character sets the subject's
+//! flag (`ListedSubjects::x_recounted`).
 //! The block that the read returns holds the sentinel bytes of the sequence file on both sides of
 //! the residues, where the copy holds `NCBISTDAA_GAP`; the redo reads the residues only, and SEG
 //! makes its own copy of a range (`build_subject_range_data`). After the redo,
 //! `ListedSubjects::x_read_shown` reads the subjects of the final hit lists again for the reports
 //! (NCBI reads them again when it formats the Seq-aligns): their lengths are kept for every listed
 //! subject, and their residues where a report reads them: where every report is tabular rows of the
-//! default fields or Seq-aligns, which read the letters only to recount the HSPs whose query or
-//! subject has an O (`recount_pyrrolysine_identities`), a subject with a pyrrolysine (O) and every
-//! subject of an HSP whose query has an O (the others are not read again: the redo of a match reads
-//! its subject before the subject can reach a final hit list, so the flags of the subjects with an
-//! O are set); every subject of the final hit lists when a report renders the alignments (outfmt 0,
-//! XML, tabular fields other than the default ones, the hits of the library API); every listed
+//! default fields or Seq-aligns, which read the letters only to recount the HSPs whose query has an
+//! O or whose subject has an O or a gap character (`recount_shown_identities`), a subject with a
+//! pyrrolysine (O) or a gap character and every subject of an HSP whose query has an O (the others
+//! are not read again: the redo of a match reads its subject before the subject can reach a final
+//! hit list, so the flags of those subjects are set); every subject of the final hit lists when a
+//! report renders the alignments (outfmt 0, XML, tabular fields other than the default ones, the
+//! hits of the library API); every listed
 //! subject when the reports make records (`ListedSubjects::read_titles`: `LOSAT_X_BPLISTEDLEAN=0`,
 //! ABI v1's titles). No report reads the letters of a subject left without residues.
 //!
@@ -57,8 +58,10 @@ use anyhow::Result;
 use super::encoding::EncodedProtein;
 use crate::seqdb::{SeqDb, SequenceBlock};
 
-/// The stored residue of pyrrolysine (O) (`blast_engine.rs` `STORED_O`).
+/// The stored residues of pyrrolysine (O) and of the gap character (`blast_engine.rs` `STORED_O`,
+/// `STORED_GAP`).
 const STORED_O: u8 = 26;
+const STORED_GAP: u8 = 0;
 
 // No NCBI counterpart: reads the LOSAT_X_BPREDODBSUBJ switch once; it does not change any value
 // NCBI computes.
@@ -92,9 +95,10 @@ pub(crate) struct XDbSubjects<'a> {
     pub(crate) lengths: &'a [u32],
     /// The program that the refusals name.
     pub(crate) program: &'static str,
-    /// Whether a read found a pyrrolysine (O), by rank (`ListedSubjects::x_has_o`). The redo of a
-    /// match reads its subject before it can reach a final hit list.
-    pub(crate) has_o: &'a [AtomicBool],
+    /// Whether a read found a pyrrolysine (O) or a gap character, by rank
+    /// (`ListedSubjects::x_recounted`). The redo of a match reads its subject before it can reach a
+    /// final hit list.
+    pub(crate) recounted: &'a [AtomicBool],
 }
 
 /// A subject as the redo reads it: its residues, without the sentinels.
@@ -157,14 +161,15 @@ impl XDbSubjects<'_> {
         let block = self.db.read_sequence(ordinal).map_err(|error| {
             crate::algorithm::common::database::database_error(error, self.program)
         })?;
-        if x_has_stored_o(block.protein(0)) {
-            self.has_o[rank as usize].store(true, Ordering::Relaxed);
+        if x_has_recounted_residue(block.protein(0)) {
+            self.recounted[rank as usize].store(true, Ordering::Relaxed);
         }
         Ok(block)
     }
 }
 
-/// Whether stored residues hold a pyrrolysine (O).
-pub(crate) fn x_has_stored_o(residues: &[u8]) -> bool {
-    residues.contains(&STORED_O)
+/// Whether stored residues hold a residue that the reports read again to recount its HSPs
+/// (`recount_shown_identities`): a pyrrolysine (O) or a gap character.
+pub(crate) fn x_has_recounted_residue(residues: &[u8]) -> bool {
+    residues.contains(&STORED_O) || residues.contains(&STORED_GAP)
 }

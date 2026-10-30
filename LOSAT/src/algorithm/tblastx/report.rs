@@ -446,6 +446,21 @@ impl SubjectLetters<'_> {
             subject_row,
         );
     }
+
+    /// The engine's identities of `hsp` (`hsp_engine_counts`; the Seq-align's `num_ident`,
+    /// which the custom tabular reports read where they show `nident` without the rows,
+    /// `tabular`). The identities do not depend on the matrix.
+    pub(crate) fn engine_identities(
+        &self,
+        hsp: &TblastxHsp,
+        query: &[u8],
+        query_code: &GeneticCode,
+        db_code: &GeneticCode,
+        window: &mut Vec<u8>,
+    ) -> usize {
+        self.engine_counts(hsp, query, query_code, db_code, window, Blosum62Score)
+            .0
+    }
 }
 
 /// The nucleotides `(start, number)` of the codons of residues `[from, to)` of `frame` in a
@@ -551,7 +566,7 @@ pub(crate) fn set_displayed_identities<S: TbxScore>(
         let hit = &mut hsp.hit;
         hit.num_ident = identities;
         hit.num_positives = positives;
-        hit.mismatch = hit.length - identities;
+        hit.mismatch = (hit.length - identities) as i64;
         hit.identity = if hit.length > 0 {
             identities as f64 / hit.length as f64 * 100.0
         } else {
@@ -1174,6 +1189,7 @@ impl<'a> PairwiseRows<'a> {
                 .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()),
             comp_adjust_method: None,
             sum_n: Some(hsp.num),
+            subject_stored_gaps: Vec::new(),
         }
     }
 }
@@ -1390,12 +1406,18 @@ pub(crate) fn write_tabular_row<W: Write>(
     )
 }
 
-/// The TBLASTX output formats (`-outfmt` 0, 5, 6, 7, 8, 9, 11, 12, 15 and 16, `tblastx_outfmt`).
+/// The TBLASTX output formats (`-outfmt` 0, 5 to 16 and 20, `tblastx_outfmt`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TblastxOutputFormat {
     Pairwise,
     Tabular,
     TabularWithComments,
+    /// The tabular reports with a field list or a delimiter (outfmt 6 and 7 other than the
+    /// default `std` fields with a tab) and outfmt 10 and 20 (`report::tabular`, through
+    /// `algorithm::tblastx::tabular`). The default outfmt 6 and 7 keep `Tabular` and
+    /// `TabularWithComments`, whose writers (`write_tabular`, the report pool) this report
+    /// never enters.
+    CustomTabular(&'static crate::report::tabular::TabularSpec),
     /// A Seq-annot of Seq-aligns (outfmt 8, 9, 12).
     Seqalign(crate::report::serial::SerialFormat),
     /// BLAST XML (outfmt 5, `tblastx/blast_xml.rs`).
@@ -1408,18 +1430,23 @@ pub(crate) enum TblastxOutputFormat {
 }
 
 impl TblastxOutputFormat {
-    /// Whether the format is a table (outfmt 6, 7).
+    /// Whether the format is a table (outfmt 6, 7, 10 and 20), which reads the tabular subject
+    /// ids.
     pub(crate) fn is_tabular(self) -> bool {
-        matches!(self, Self::Tabular | Self::TabularWithComments)
+        matches!(
+            self,
+            Self::Tabular | Self::TabularWithComments | Self::CustomTabular(_)
+        )
     }
 
     /// Whether the format writes the displayed identity counts of the rows
     /// (`set_displayed_identities`): not the structured formats, which read the engine's counts
-    /// (outfmt 8, 9, 12) or count the rows again themselves (outfmt 5, 15, 16).
+    /// (outfmt 8, 9, 12) or count the rows again themselves (outfmt 5, 15, 16), and not the
+    /// custom tabular reports, which make the rows they show themselves (`tabular`).
     pub(crate) fn reads_displayed_counts(self) -> bool {
         !matches!(
             self,
-            Self::Seqalign(_) | Self::Xml | Self::Xml2(_) | Self::Archive
+            Self::Seqalign(_) | Self::Xml | Self::Xml2(_) | Self::Archive | Self::CustomTabular(_)
         )
     }
 
@@ -1432,11 +1459,14 @@ impl TblastxOutputFormat {
     /// Whether the format writes a query's own warnings to standard error
     /// (`ReportFormat::writes_query_warnings`: not the structured formats).
     pub(crate) fn writes_query_warnings(self) -> bool {
-        self.reads_displayed_counts()
+        !matches!(
+            self,
+            Self::Seqalign(_) | Self::Xml | Self::Xml2(_) | Self::Archive
+        )
     }
 
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
-    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6 and 7,
+    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7, 10 and 20,
     /// `database::prefetches_subjects`): as the call's first report, the taxonomy database's
     /// messages of that prefetch go with the query warnings.
     pub(crate) fn prefetches_subjects(self) -> bool {
@@ -1445,6 +1475,14 @@ impl TblastxOutputFormat {
             Self::Xml => Some(5),
             Self::Tabular => Some(6),
             Self::TabularWithComments => Some(7),
+            // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and 20):
+            // they read the subjects as 6 and 7 do, and show no taxonomy name that the prefetch
+            // would look up (`report::tabular` writes `N/A`; a name of the taxonomy database is
+            // LOSAT's refusal, `tabular`).
+            Self::CustomTabular(spec) => Some(match spec.kind {
+                crate::report::tabular::TabularKind::Commented => 7,
+                _ => 6,
+            }),
             // The Seq-annots and the archive fetch nothing; XML2 and JSON write the messages
             // at each `Hit` (`TaxdbPrinter`).
             Self::Seqalign(_) | Self::Archive | Self::Xml2(_) => None,
@@ -1460,8 +1498,36 @@ impl TblastxOutputFormat {
 ///         string fmt_choice =
 ///             NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
 /// ```
+///
+/// A tabular format with a field list or a delimiter, and every outfmt 10 and 20, is the custom
+/// tabular report (`report::tabular::TabularSpec::of`); the default outfmt 6 and 7 (the `std`
+/// fields with a tab) are `Tabular` and `TabularWithComments`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
+/// ```c++
+///     if (m_FormatType == CFormattingArgs::eTabular ||
+///         m_FormatType == CFormattingArgs::eTabularWithComments ||
+///         m_FormatType == CFormattingArgs::eCommaSeparatedValues ||
+///         m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
+///     ...
+///         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
+///         if(!m_CustomDelim.empty()) {
+///             tabinfo.SetCustomDelim(m_CustomDelim);
+///         }
+/// ```
 pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
-    match crate::blastinput::app::parse_formatting_string(outfmt).map(|choice| choice.number) {
+    let choice = crate::blastinput::app::parse_formatting_string(outfmt);
+    // Only a value with a custom specification, or outfmt 10 or 20, reads the field list.
+    if let Ok(choice) = &choice {
+        if choice.custom() || matches!(choice.number, 10 | 20) {
+            if let Some(spec) = crate::blastinput::app::ReportFormat::from_number(choice.number)
+                .and_then(|format| crate::report::tabular::TabularSpec::of(format, choice))
+            {
+                return TblastxOutputFormat::CustomTabular(spec.intern());
+            }
+        }
+    }
+    match choice.map(|choice| choice.number) {
         Ok(0) => TblastxOutputFormat::Pairwise,
         Ok(7) => TblastxOutputFormat::TabularWithComments,
         Ok(8) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::AsnText),
@@ -2144,6 +2210,13 @@ mod tests {
             assert_eq!(format.reads_displayed_counts(), counts, "{outfmt}");
             assert_eq!(format.writes_query_warnings(), counts, "{outfmt}");
         }
+        // The custom tabular reports make their own rows and write the query warnings.
+        for outfmt in ["6 qseqid", "10", "20 std"] {
+            let format = output_format(outfmt);
+            assert!(!format.reads_displayed_counts(), "{outfmt}");
+            assert!(format.writes_query_warnings(), "{outfmt}");
+            assert!(format.is_tabular(), "{outfmt}");
+        }
         // DBID item T: the formats whose batches' prefetch writes the taxonomy database's
         // messages (not the Seq-annots, the archive, XML2 and JSON).
         for (outfmt, prefetches) in [
@@ -2151,6 +2224,8 @@ mod tests {
             ("5", true),
             ("6", true),
             ("7 qseqid", true),
+            ("10", true),
+            ("20 qseqid", true),
             ("8", false),
             ("9", false),
             ("11", false),
@@ -2226,5 +2301,38 @@ mod tests {
             output_format("7 "),
             TblastxOutputFormat::TabularWithComments
         );
+    }
+
+    // NCBI blast_format.cpp:770-786: every tabular kind goes to `CBlastTabularInfo`; LOSAT's
+    // default 6 and 7 (the `std` fields with a tab) keep `write_tabular` and the report pool.
+    #[test]
+    fn only_a_field_list_a_delimiter_and_10_and_20_take_the_shared_writer() {
+        use crate::report::tabular::TabularKind;
+        for (outfmt, format) in [
+            ("6", TblastxOutputFormat::Tabular),
+            ("6 std", TblastxOutputFormat::Tabular),
+            (" 7 std ", TblastxOutputFormat::TabularWithComments),
+            ("6 -qseqid", TblastxOutputFormat::Tabular),
+            ("6 delim=", TblastxOutputFormat::Tabular),
+            ("0 qseqid", TblastxOutputFormat::Pairwise),
+            ("11 qseqid", TblastxOutputFormat::Archive),
+        ] {
+            assert_eq!(output_format(outfmt), format, "{outfmt}");
+        }
+        for (outfmt, kind, delimiter) in [
+            ("6 qseqid", TabularKind::Tabular, "\t"),
+            ("6 delim=, std", TabularKind::Tabular, ","),
+            ("7 qaccver foo", TabularKind::Commented, "\t"),
+            ("10", TabularKind::Csv, ","),
+            ("10 delim=; std", TabularKind::Csv, ";"),
+            ("20 qseqid", TabularKind::CsvWithHeader, ","),
+        ] {
+            match output_format(outfmt) {
+                TblastxOutputFormat::CustomTabular(spec) => {
+                    assert_eq!((spec.kind, spec.delimiter.as_str()), (kind, delimiter))
+                }
+                other => panic!("{outfmt}: {other:?}"),
+            }
+        }
     }
 }

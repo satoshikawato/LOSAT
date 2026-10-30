@@ -70,6 +70,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         query_loc: None,
         subject_loc: None,
         archive: None,
+        tabular_taxdb: None,
     };
 
     run(

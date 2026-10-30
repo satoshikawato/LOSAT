@@ -22,6 +22,9 @@ pub(crate) struct WriteDbFile {
     /// `m_Offset`: the stream position, an `unsigned int` in NCBI.
     offset: u32,
     max_file_size: u64,
+    /// `m_Created`: the file exists on disk (a file made with `always_create` false is
+    /// created by its first flush).
+    created: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:235-257
@@ -101,25 +104,55 @@ impl WriteDbFile {
         index: u32,
         max_file_size: u64,
     ) -> Result<Self, WriteDbError> {
-        let fname = format!("{}.{extension}", make_short_name(base_name, index));
-        let file = File::create(&fname).map_err(|source| WriteDbError::Io {
-            path: PathBuf::from(&fname),
-            source,
-        })?;
-        Ok(Self {
-            writer: Some(BufWriter::with_capacity(1 << 16, file)),
+        let mut file = Self::lazy(base_name, extension, index, max_file_size);
+        file.create_now()?;
+        Ok(file)
+    }
+
+    /// The constructor with `always_create` false: the file is named but created only by
+    /// `create_now` (`CWriteDB_File::Create`).
+    pub(crate) fn lazy(
+        base_name: &str,
+        extension: &'static str,
+        index: u32,
+        max_file_size: u64,
+    ) -> Self {
+        Self {
+            writer: None,
             base_name: base_name.to_string(),
             extension,
             index,
             use_index: true,
-            fname,
+            fname: format!("{}.{extension}", make_short_name(base_name, index)),
             offset: 0,
             max_file_size: if max_file_size == 0 {
                 1000 * 1000 * 1000 - 1
             } else {
                 max_file_size
             },
-        })
+            created: false,
+        }
+    }
+
+    /// `CWriteDB_File::Create`: creates the file under its current name.
+    pub(crate) fn create_now(&mut self) -> Result<(), WriteDbError> {
+        let file = File::create(&self.fname).map_err(|source| WriteDbError::Io {
+            path: PathBuf::from(&self.fname),
+            source,
+        })?;
+        self.writer = Some(BufWriter::with_capacity(1 << 16, file));
+        self.created = true;
+        Ok(())
+    }
+
+    /// `m_Created`.
+    pub(crate) fn created(&self) -> bool {
+        self.created
+    }
+
+    /// `m_MaxFileSize`.
+    pub(crate) fn max_file_size(&self) -> u64 {
+        self.max_file_size
     }
 
     fn io_error(&self, source: std::io::Error) -> WriteDbError {
@@ -140,7 +173,7 @@ impl WriteDbFile {
     // the index no longer name the data. makeblastdb limits `-max_file_sz`
     // below 4 GiB, but a volume takes its first sequence whatever its size;
     // LOSAT stops instead of writing offsets that wrapped.
-    fn write(&mut self, data: &[u8]) -> Result<u32, WriteDbError> {
+    pub(crate) fn write(&mut self, data: &[u8]) -> Result<u32, WriteDbError> {
         let end = u64::from(self.offset) + data.len() as u64;
         if end > u64::from(u32::MAX) {
             return Err(WriteDbError::Creation(format!(
@@ -159,7 +192,21 @@ impl WriteDbFile {
         Ok(self.offset)
     }
 
-    fn close(&mut self) -> Result<(), WriteDbError> {
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_files.hpp:103-108
+    // ```c++
+    //     unsigned int WriteInt4(int data)
+    //     {
+    //         s_WriteInt4(m_RealFile, data);
+    //         m_Offset += 4;
+    //         return m_Offset;
+    //     }
+    // ```
+    /// `WriteInt4`: a big-endian `Int4`.
+    pub(crate) fn write_int4(&mut self, value: i32) -> Result<u32, WriteDbError> {
+        self.write(&value.to_be_bytes())
+    }
+
+    pub(crate) fn close(&mut self) -> Result<(), WriteDbError> {
         if let Some(mut writer) = self.writer.take() {
             if let Err(source) = writer.flush() {
                 return Err(self.io_error(source));
@@ -189,7 +236,14 @@ impl WriteDbFile {
     // The error names both paths: the system's message does not say which
     // of the two it is about (a destination that is a directory, a source
     // that is gone).
+    // A file that was never created (an ISAM file without entries, a `.pog` of a volume
+    // without sequences) only changes its name; NCBI's `CDirEntry::Rename` of a missing
+    // file renames nothing.
     fn rename_to(&mut self, new_name: String) -> Result<(), WriteDbError> {
+        if !self.created {
+            self.fname = new_name;
+            return Ok(());
+        }
         std::fs::rename(&self.fname, &new_name).map_err(|source| WriteDbError::Rename {
             from: PathBuf::from(&self.fname),
             to: PathBuf::from(&new_name),

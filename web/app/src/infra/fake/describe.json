@@ -347,7 +347,8 @@
     "takes_value": true,
     "default": "tblastn",
     "choices": [
-     "tblastn"
+     "tblastn",
+     "tblastn-fast"
     ]
    },
    {
@@ -357,7 +358,7 @@
    },
    {
     "flag": "-word_size",
-    "help": "Word size for wordfinder algorithm [default: 3]",
+    "help": "Word size for wordfinder algorithm [default: 3; 5 for tblastn-fast]",
     "takes_value": true
    },
    {
@@ -388,7 +389,7 @@
    },
    {
     "flag": "-threshold",
-    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7]",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for tblastn-fast]",
     "takes_value": true
    },
    {

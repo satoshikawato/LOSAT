@@ -80,7 +80,7 @@ pub struct BlastxArgs {
     /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
     /// `-no_taxid_expansion` (line DI-8).
     #[command(flatten)]
-    pub taxid_filter: crate::blastinput::db_filter::TaxidFilterArgs,
+    pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // ```c++
     //     // DB size

@@ -228,7 +228,9 @@ impl DbFilterArgs {
         if let Some(value) = &self.seqidlist {
             Some((value, false))
         } else {
-            self.negative_seqidlist.as_deref().map(|value| (value, true))
+            self.negative_seqidlist
+                .as_deref()
+                .map(|value| (value, true))
         }
     }
 

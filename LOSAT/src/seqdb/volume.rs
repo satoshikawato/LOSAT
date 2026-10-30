@@ -477,9 +477,7 @@ impl Volume {
     pub fn defline_taxids(&self, oid: u32) -> Result<Vec<i32>, SeqDbError> {
         let record = self.header_bytes(oid)?;
         let path = with_extension(&self.base, self.index.seqtype, "hr");
-        self.kept_lines(
-            oid,
-            &record, &path, decode_defline_taxids(&record, &path))
+        self.kept_lines(oid, &record, &path, decode_defline_taxids(&record, &path))
     }
 
     /// The definition lines of the sequence `oid` (volume-relative) with every member and
@@ -539,9 +537,7 @@ impl Volume {
     ) -> Result<crate::seqid::DeflineSet, SeqDbError> {
         let mut set = decode_full(record, path)?;
         if let Some(rule) = &self.defline_rule {
-            let keep = rule
-                .keep_mask(&set)
-                .ok_or_else(|| self.no_line_kept(oid))?;
+            let keep = rule.keep_mask(&set).ok_or_else(|| self.no_line_kept(oid))?;
             set.retain_lines(&keep);
         }
         Ok(set)
@@ -805,7 +801,12 @@ impl Volume {
             piece_bytes,
             &|oid| self.deflines_as(oid, want_taxid),
             &|oid, record, path| {
-                self.kept_lines(oid, record, path, decode_deflines_as(record, path, want_taxid))
+                self.kept_lines(
+                    oid,
+                    record,
+                    path,
+                    decode_deflines_as(record, path, want_taxid),
+                )
             },
             visit,
         )
@@ -915,7 +916,10 @@ impl Volume {
             for j in i..stop {
                 let lo = (u64::from(offsets[j]) - start) as usize;
                 let hi = (u64::from(offsets[j + 1]) - start) as usize;
-                if !visit(first + j as u32, decode(first + j as u32, &data[lo..hi], &hr_path)) {
+                if !visit(
+                    first + j as u32,
+                    decode(first + j as u32, &data[lo..hi], &hr_path),
+                ) {
                     return false;
                 }
             }

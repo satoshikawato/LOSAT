@@ -4975,19 +4975,21 @@ fn search_cli(
     // ```
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
-    // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the database
-    // arguments reads it (`s_GetTaxIDList`) before the database opens.
+    // The taxid or seqid list (line DI-8) is read first: NCBI's handler of the database
+    // arguments reads it (`s_GetTaxIDList`, `CSeqDBFileGiList`) before the database opens.
     let database = match resolved.db.as_deref() {
         Some(name) => {
-            let taxids = args.taxid_filter.resolve(&settings, outputs.diagnostics)?;
-            Some(database::BlastpDatabase::open_restricted(
-                name,
-                &settings,
-                args.app == BlastpApp::Blastp,
-                taxids.as_ref(),
-                outputs.diagnostics,
-            )?
-            .showing_gis(args.show_gis))
+            let list = args.db_filter.resolve(&settings, outputs.diagnostics)?;
+            Some(
+                database::BlastpDatabase::open_restricted(
+                    name,
+                    &settings,
+                    args.app == BlastpApp::Blastp,
+                    list.as_ref(),
+                    outputs.diagnostics,
+                )?
+                .showing_gis(args.show_gis),
+            )
         }
         None => None,
     };
@@ -12042,7 +12044,7 @@ mod tests {
             query: PathBuf::from("query.faa"),
             subject: Some(PathBuf::from("subject.faa")),
             db: None,
-            taxid_filter: Default::default(),
+            db_filter: Default::default(),
             dbsize: None,
             show_gis: false,
             task: "blastp".to_string(),

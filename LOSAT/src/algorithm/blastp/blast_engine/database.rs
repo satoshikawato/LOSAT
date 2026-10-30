@@ -147,13 +147,13 @@ impl BlastpDatabase {
         Self::open_restricted(name, settings, parsed_seqids, None, &mut std::io::sink())
     }
 
-    /// `open` with the database restricted to the taxid list `list` of the command line
-    /// (`shared::restrict_database`, whose warning goes to `diagnostics`).
+    /// `open` with the database restricted to the taxid or seqid list `list` of the command
+    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
     pub(super) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
         parsed_seqids: bool,
-        list: Option<&crate::seqdb::TaxidList>,
+        list: Option<&crate::seqdb::DbList>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;

@@ -191,7 +191,10 @@ struct Cursor<'a> {
 
 impl<'a> Cursor<'a> {
     fn take(&mut self, len: usize) -> Option<&'a [u8]> {
-        let end = self.at.checked_add(len).filter(|&end| end <= self.bytes.len())?;
+        let end = self
+            .at
+            .checked_add(len)
+            .filter(|&end| end <= self.bytes.len())?;
         let piece = &self.bytes[self.at..end];
         self.at = end;
         Some(piece)
@@ -441,7 +444,10 @@ mod tests {
         let mut warnings = Vec::new();
         let ids = read_memory_si_list(b"\x0b\x0c ok\n", &mut warnings);
         assert_eq!(ids, [b"ok".to_vec()]);
-        assert_eq!(warnings, ["WARNING:  \x0b\x0c is not a valid seqid string."]);
+        assert_eq!(
+            warnings,
+            ["WARNING:  \x0b\x0c is not a valid seqid string."]
+        );
     }
 
     fn binary(ids: &[&[u8]], db_vol_length: u64) -> Vec<u8> {
@@ -571,13 +577,16 @@ mod tests {
                 "NP_000001.1",
                 "NP_000002",
                 "Q00001.1",
-                "myprot9",
                 "mydb:tag1",
+                "myprot9",
                 "pir||S00007",
             ]
         );
         assert!(processed(&["gi|999", "gi|998"]).is_empty());
-        let bad = process_for_v5(&[b"xyz|ABC|DEF".to_vec()]).unwrap_err();
-        assert_eq!(bad.message(), "Invalid seq id: xyz|ABC|DEF");
+        // An unknown FASTA tag is a local id under `fParse_AnyLocal` (probe S23 of
+        // dropin-survey-20261029/DI8: no error, the id is looked up as it is).
+        assert_eq!(processed(&["xyz|ABC|DEF"]), ["xyz|ABC|DEF"]);
+        let bad = process_for_v5(&[b"gi|abc".to_vec()]).unwrap_err();
+        assert_eq!(bad.message(), "Invalid seq id: gi|abc");
     }
 }

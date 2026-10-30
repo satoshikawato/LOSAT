@@ -72,6 +72,55 @@ fn taxid_options_go_with_a_database_only() {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2309-2314
+// ```c++
+//         arg_desc.SetDependency(kArgSeqIdList, CArgDescriptions::eExcludes, kArgTaxIdList);
+//         arg_desc.SetDependency(kArgSeqIdList, CArgDescriptions::eExcludes, kArgTaxIdListFile);
+//         arg_desc.SetDependency(kArgSeqIdList, CArgDescriptions::eExcludes, kArgNegativeGiList);
+//         arg_desc.SetDependency(kArgSeqIdList, CArgDescriptions::eExcludes, kArgNegativeSeqidList);
+//         arg_desc.SetDependency(kArgSeqIdList, CArgDescriptions::eExcludes, kArgNegativeTaxIdList);
+//         arg_desc.SetDependency(kArgSeqIdList, CArgDescriptions::eExcludes, kArgNegativeTaxIdListFile);
+// ```
+// Line DI-8b: `-seqidlist` and `-negative_seqidlist` go with `-db` only, exclude each other,
+// every taxid list and `-no_taxid_expansion` (clap's `conflicts_with`, exit status 2, as the
+// taxid lists do: PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
+#[test]
+fn seqid_list_options_go_with_a_database_only() {
+    let lists: [&[&str]; 2] = [
+        &["-seqidlist", "ids.txt"],
+        &["-negative_seqidlist", "ids.txt"],
+    ];
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        for words in lists {
+            let mut argv = vec!["losat", program, "-query", "q.fa", "-db", "db"];
+            argv.extend(words);
+            assert!(parse_argv(argv).is_ok(), "{program} -db {words:?}");
+            let error = LOSAT::cli::render_message(&parse(program, words).unwrap_err());
+            assert!(
+                error.contains("cannot be used with"),
+                "{program} {words:?}: {error}"
+            );
+            for other in [
+                &["-negative_seqidlist", "o.txt"][..],
+                &["-seqidlist", "o.txt"],
+                &["-taxids", "9606"],
+                &["-taxidlist", "t.txt"],
+                &["-negative_taxids", "9606"],
+                &["-negative_taxidlist", "t.txt"],
+                &["-no_taxid_expansion"],
+            ] {
+                if other[0] == words[0] {
+                    continue;
+                }
+                let mut argv = vec!["losat", program, "-query", "q.fa", "-db", "db"];
+                argv.extend(words);
+                argv.extend(other);
+                assert!(parse_argv(argv).is_err(), "{program} {words:?} {other:?}");
+            }
+        }
+    }
+}
+
 #[test]
 fn canonical_options_for_every_program() {
     for (program, word) in [
@@ -1406,11 +1455,12 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("tblastx", &["-db_soft_mask", "11"]),
         ("blastp", &["-searchsp", "1000"]),
         ("blastp", &["-gilist", "ids.gil"]),
-        ("blastp", &["-seqidlist", "ids.txt"]),
-        ("blastp", &["-negative_seqidlist", "ids.txt"]),
-        // Line DI-8 ported the taxid options to BLASTP's database search, not to PSIBLAST's.
+        // Line DI-8 ported the taxid and seqid list options to BLASTP's database search, not to
+        // PSIBLAST's.
         ("psiblast", &["-taxids", "9606"]),
         ("psiblast", &["-no_taxid_expansion"]),
+        ("psiblast", &["-seqidlist", "ids.txt"]),
+        ("psiblast", &["-negative_seqidlist", "ids.txt"]),
         ("blastp", &["-db_soft_mask", "21"]),
         ("blastp", &["-db_hard_mask", "21"]),
         ("blastp", &["-lcase_masking"]),

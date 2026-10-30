@@ -436,18 +436,20 @@ fn search_cli(
     // ```
     // The database of `-db` is opened after the options are processed, before
     // `Query is Empty!` (as BLASTN's).
-    // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the database
-    // arguments reads it (`s_GetTaxIDList`) before the database opens.
+    // The taxid or seqid list (line DI-8) is read first: NCBI's handler of the database
+    // arguments reads it (`s_GetTaxIDList`, `CSeqDBFileGiList`) before the database opens.
     let database = match args.database_name() {
         Some(name) => {
-            let taxids = args.taxid_filter.resolve(&settings, outputs.diagnostics)?;
-            Some(super::database::TblastnDatabase::open_restricted(
-                name,
-                &settings,
-                taxids.as_ref(),
-                outputs.diagnostics,
-            )?
-            .showing_gis(args.show_gis))
+            let list = args.db_filter.resolve(&settings, outputs.diagnostics)?;
+            Some(
+                super::database::TblastnDatabase::open_restricted(
+                    name,
+                    &settings,
+                    list.as_ref(),
+                    outputs.diagnostics,
+                )?
+                .showing_gis(args.show_gis),
+            )
         }
         None => None,
     };

@@ -379,7 +379,10 @@ impl DeflineRule {
         let mask: Vec<bool> = set.deflines.iter().map(|d| self.keeps(d)).collect();
         if mask.iter().any(|&keep| keep) {
             Some(mask)
-        } else if matches!(self, DeflineRule::Seqids(_) | DeflineRule::NegativeSeqids(_)) {
+        } else if matches!(
+            self,
+            DeflineRule::Seqids(_) | DeflineRule::NegativeSeqids(_)
+        ) {
             None
         } else {
             Some(vec![true; mask.len()])
@@ -395,7 +398,6 @@ pub(crate) fn no_line_kept(oid: u32) -> String {
     )
 }
 
-
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:733-737
 // ```c++
 // bool CSeqDBGiList::FindSi(const string &si) const
@@ -408,7 +410,8 @@ pub(crate) fn no_line_kept(oid: u32) -> String {
 // the sorted ids by `std::string` order (bytes).
 /// Whether the sorted list holds `si`.
 fn find_si(list: &[Vec<u8>], si: &[u8]) -> bool {
-    list.binary_search_by(|entry| entry.as_slice().cmp(si)).is_ok()
+    list.binary_search_by(|entry| entry.as_slice().cmp(si))
+        .is_ok()
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2698-2705
@@ -695,7 +698,8 @@ fn find_id(list: &[Vec<u8>], id: &ParsedSeqId) -> bool {
 /// The lookups of a Seq-id that is not a gi or a ti: its string with and without version,
 /// then its simplified string with and without version.
 fn find_si_forms(list: &[Vec<u8>], id: &ParsedSeqId) -> bool {
-    if find_si(list, &blast_seq_id_string(id, true)) || find_si(list, &blast_seq_id_string(id, false))
+    if find_si(list, &blast_seq_id_string(id, true))
+        || find_si(list, &blast_seq_id_string(id, false))
     {
         return true;
     }
@@ -1139,10 +1143,11 @@ impl LmdbEntry {
         pairs.sort();
         let nos_path = self.lookup_file("os");
         let nos_file = DbFile::open(&nos_path)?;
-        let lookup = tax_files::OidSeqIds::open(&nos_file).map_err(|message| SeqDbError::Format {
-            path: nos_path.clone(),
-            message,
-        })?;
+        let lookup =
+            tax_files::OidSeqIds::open(&nos_file).map_err(|message| SeqDbError::Format {
+                path: nos_path.clone(),
+                message,
+            })?;
         let mut excluded = Vec::new();
         let mut i = 0;
         while i < pairs.len() {
@@ -1256,7 +1261,8 @@ fn compare_id_list(file_ids: &[Vec<u8>], input_ids: &[&[u8]]) -> Result<bool, St
         if let ParsedSeqId::Pdb(pdb) = &seq_id {
             if pdb.chain_id.is_none() {
                 let file_seqid = parse(&file_ids[f])?;
-                if matches!(&file_seqid, ParsedSeqId::Pdb(file_pdb) if file_pdb.mol == input_ids[i]) {
+                if matches!(&file_seqid, ParsedSeqId::Pdb(file_pdb) if file_pdb.mol == input_ids[i])
+                {
                     f += 1;
                     let tmp_pdb = input_ids[i];
                     while f < file_ids.len() && starts_with_one_of(&file_ids[f], tmp_pdb) {
@@ -1272,7 +1278,9 @@ fn compare_id_list(file_ids: &[Vec<u8>], input_ids: &[&[u8]]) -> Result<bool, St
             let file_seq_id = parse(&file_ids[f])?;
             if blast_seq_id_string_plain(&file_seq_id, false) == input_ids[i] {
                 i += 1;
-                if i < input_ids.len() && blast_seq_id_string_plain(&file_seq_id, true) == input_ids[i] {
+                if i < input_ids.len()
+                    && blast_seq_id_string_plain(&file_seq_id, true) == input_ids[i]
+                {
                     i += 1;
                 }
                 f += 1;
@@ -1749,7 +1757,8 @@ impl SeqDb {
 
     /// The volume holding OID `oid` and the OID's number in it.
     fn volume_of_oid(&self, oid: u32) -> (usize, u32) {
-        let at = self.volume_starts[..self.volumes.len()].partition_point(|&start| start <= oid) - 1;
+        let at =
+            self.volume_starts[..self.volumes.len()].partition_point(|&start| start <= oid) - 1;
         (at, oid - self.volume_starts[at])
     }
 
@@ -2077,6 +2086,237 @@ mod tests {
         assert!(checked >= 30, "{checked}");
     }
 
+    fn ids_db(name: &str, seqtype: SeqType) -> SeqDb {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/db_search/ids")
+            .join(name);
+        SeqDb::open(path.to_str().unwrap(), seqtype).unwrap()
+    }
+
+    fn list_of(text: &[u8], negative: bool) -> SeqidList {
+        let mut warnings = Vec::new();
+        SeqidList {
+            negative,
+            file: seqidlist::read_si_list(text, &mut warnings).unwrap(),
+        }
+    }
+
+    /// The Seq-id strings (`GetSeqIdString(true)`) of the definition lines the restricted
+    /// database keeps, per ordinal id.
+    fn kept_ids(db: &SeqDb) -> Vec<Vec<String>> {
+        (0..db.num_seqs())
+            .map(|ordinal| {
+                let (at, vol_oid) = db.volume_of_oid(db.oid(ordinal));
+                let set = db.volumes[at].defline_set(vol_oid).unwrap();
+                set.deflines
+                    .iter()
+                    .flat_map(|d| d.ids.iter())
+                    .map(|id| {
+                        let mut out = Vec::new();
+                        label::content(id, true, &mut out);
+                        String::from_utf8(out).unwrap()
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_positive_seqid_list_keeps_the_named_oids_and_their_lines() {
+        let whole = ids_db("prot_v5", SeqType::Protein);
+        let mut db = ids_db("prot_v5", SeqType::Protein);
+        let mut warnings = Vec::new();
+        db.restrict(
+            &DbList::Seqids(list_of(b">DAA10001.1\n", false)),
+            &mut warnings,
+        )
+        .unwrap();
+        assert_eq!(
+            warnings,
+            [ListWarning::Posted(TEXT_LIST_WARNING.to_string())]
+        );
+        assert!(db.is_restricted());
+        assert_eq!(db.num_seqs(), 1);
+        assert_eq!(kept_ids(&db), [vec!["DAA10001.1".to_string()]]);
+        assert!(db.total_length() > 0 && db.total_length() < whole.total_length());
+        assert_eq!(db.printed_num_seqs(), whole.num_seqs());
+
+        // Versionless accessions, a pdb chain, a general id as db:tag, an unknown id, a gi.
+        let mut db = ids_db("prot_v5", SeqType::Protein);
+        db.restrict(
+            &DbList::Seqids(list_of(
+                b"NP_100006 XP_000011\n2XYZ_B mydb:prot10\nUNKNOWN1\ngi|1414\n",
+                false,
+            )),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(db.num_seqs(), 4);
+        for ids in kept_ids(&db) {
+            assert!(
+                ids.iter().any(|id| {
+                    ["NP_100006.1", "XP_000011.2", "2XYZ_B", "mydb:prot10"].contains(&id.as_str())
+                }),
+                "{ids:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_negative_seqid_list_excludes_an_oid_only_when_every_id_is_covered() {
+        let whole = ids_db("prot_v5", SeqType::Protein).num_seqs();
+        // `lcl|Subject_28|tpg|DAA10008.1|`: one id listed keeps the OID, both exclude it (the
+        // versionless `DAA10008` covers the stored `DAA10008.1`).
+        let mut db = ids_db("prot_v5", SeqType::Protein);
+        db.restrict(
+            &DbList::Seqids(list_of(b"Subject_28\n", true)),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(db.num_seqs(), whole);
+        assert!(db.is_restricted());
+        let mut db = ids_db("prot_v5", SeqType::Protein);
+        db.restrict(
+            &DbList::Seqids(list_of(b"Subject_28\nDAA10008\n", true)),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(db.num_seqs(), whole - 1);
+        // A definition line whose only ids are gis or `ti` general ids is dropped by a
+        // negative seqid list (`CSeqDBNegativeList::FindId` matches no type): an OID of such
+        // lines alone keeps none, which the read refuses (DECISIONS 17); every other kept OID
+        // reads.
+        let unrestricted = ids_db("prot_v5", SeqType::Protein);
+        let gi_only: Vec<u32> = (0..unrestricted.num_seqs())
+            .filter(|&oid| {
+                let (at, vol_oid) = unrestricted.volume_of_oid(oid);
+                let set = unrestricted.volumes[at].defline_set(vol_oid).unwrap();
+                set.deflines.iter().all(|d| {
+                    d.ids.iter().all(|id| {
+                        matches!(id, ParsedSeqId::Gi(_))
+                            || matches!(id, ParsedSeqId::General(tag) if tag.db == b"ti")
+                    })
+                })
+            })
+            .collect();
+        assert!(!gi_only.is_empty());
+        for ordinal in 0..db.num_seqs() {
+            let oid = db.oid(ordinal);
+            let (at, vol_oid) = db.volume_of_oid(oid);
+            match db.volumes[at].defline_set(vol_oid) {
+                Ok(set) => {
+                    assert!(!gi_only.contains(&oid), "{oid}");
+                    assert!(set.deflines.iter().all(|d| {
+                        d.ids.iter().all(|id| {
+                            let mut out = Vec::new();
+                            label::content(id, true, &mut out);
+                            out != b"DAA10008.1"
+                        })
+                    }));
+                }
+                Err(error) => {
+                    assert!(gi_only.contains(&oid), "{oid}: {error}");
+                    assert!(error.to_string().contains("none of its definition lines"));
+                }
+            }
+        }
+        // A nucleotide local id of its own OID.
+        let whole = ids_db("nucl_v5", SeqType::Nucleotide).num_seqs();
+        let mut db = ids_db("nucl_v5", SeqType::Nucleotide);
+        db.restrict(
+            &DbList::Seqids(list_of(b"mynuc6\nUNKNOWN1\n", true)),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(db.num_seqs(), whole - 1);
+    }
+
+    #[test]
+    fn a_list_that_loses_every_id_leaves_a_version_5_database_whole() {
+        let whole = ids_db("prot_v5", SeqType::Protein).num_seqs();
+        for negative in [false, true] {
+            let mut db = ids_db("prot_v5", SeqType::Protein);
+            let mut warnings = Vec::new();
+            db.restrict(
+                &DbList::Seqids(list_of(b"gi|1414\ngi|2\n", negative)),
+                &mut warnings,
+            )
+            .unwrap();
+            assert_eq!(
+                warnings,
+                [
+                    ListWarning::Posted(TEXT_LIST_WARNING.to_string()),
+                    ListWarning::Posted(EMPTY_LIST_WARNING.to_string())
+                ]
+            );
+            assert!(!db.is_restricted());
+            assert_eq!(db.num_seqs(), whole);
+        }
+    }
+
+    #[test]
+    fn a_binary_list_selects_what_its_text_list_selects() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/seqidlist");
+        let text = std::fs::read(dir.join("sl_nucl.txt")).unwrap();
+        let binary = std::fs::read(dir.join("sl_nucl.bsl")).unwrap();
+        let mut from_text = ids_db("nucl_v5", SeqType::Nucleotide);
+        let mut warnings = Vec::new();
+        from_text
+            .restrict(&DbList::Seqids(list_of(&text, false)), &mut warnings)
+            .unwrap();
+        assert_eq!(warnings.len(), 1);
+        let mut from_binary = ids_db("nucl_v5", SeqType::Nucleotide);
+        let mut warnings = Vec::new();
+        from_binary
+            .restrict(&DbList::Seqids(list_of(&binary, false)), &mut warnings)
+            .unwrap();
+        assert!(warnings.is_empty());
+        assert!(from_text.num_seqs() >= 6);
+        assert_eq!(from_text.num_seqs(), from_binary.num_seqs());
+        assert_eq!(kept_ids(&from_text), kept_ids(&from_binary));
+        assert_eq!(from_text.total_length(), from_binary.total_length());
+        // A recorded database length that is not this database's: NCBI's warning, the list used.
+        let badlen = std::fs::read(dir.join("sl_tfp_badlen.bsl")).unwrap();
+        let mut db = ids_db("prot_v5", SeqType::Protein);
+        let mut warnings = Vec::new();
+        let result = db.restrict(&DbList::Seqids(list_of(&badlen, false)), &mut warnings);
+        assert_eq!(warnings, [ListWarning::Posted(DB_INFO_WARNING.to_string())]);
+        // tfp's ids are not in prot_v5: no OID is kept (the search programs refuse that).
+        assert!(result.is_ok() && db.num_seqs() == 0);
+    }
+
+    #[test]
+    fn a_sequence_kept_without_a_definition_line_is_refused() {
+        // `lcl|Subject_29|pdb|3ABC|C`: the molecule name is a lookup key, no line's id.
+        let mut db = ids_db("prot_v5", SeqType::Protein);
+        let error = db
+            .restrict(
+                &DbList::Seqids(list_of(b"3ABC\nDAA10001.1\n", false)),
+                &mut Vec::new(),
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("but none of its definition lines, and NCBI leaves its hits out"),
+            "{error}"
+        );
+        assert!(error.ncbi_message().is_none());
+    }
+
+    #[test]
+    fn a_version_4_database_refuses_a_binary_seqid_list() {
+        let binary = std::fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/seqidlist/sl_tfp.bsl"),
+        )
+        .unwrap();
+        let mut db = ids_db("prot_v4", SeqType::Protein);
+        let error = db
+            .restrict(&DbList::Seqids(list_of(&binary, false)), &mut Vec::new())
+            .unwrap_err();
+        assert_eq!(error.ncbi_message().as_deref(), Some(BINARY_LIST_V4_ERROR));
+    }
+
     #[test]
     fn a_version_4_database_refuses_a_taxid_list() {
         let name = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db/prot_v4");
@@ -2125,11 +2365,11 @@ mod tests {
         let set = DeflineSet {
             deflines: vec![defline(Some(1), None), defline(Some(5), None)],
         };
-        assert_eq!(rule.keep_mask(&set), vec![false, true]);
+        assert_eq!(rule.keep_mask(&set), Some(vec![false, true]));
         let none = DeflineSet {
             deflines: vec![defline(Some(1), None), defline(Some(2), None)],
         };
-        assert_eq!(rule.keep_mask(&none), vec![true, true]);
+        assert_eq!(rule.keep_mask(&none), Some(vec![true, true]));
         let mut lines = vec![1, 2, 3];
         lines.retain_lines(&[true, false, true]);
         assert_eq!(lines, vec![1, 3]);

@@ -1,0 +1,165 @@
+# BLASTP 2.17.0+
+# Query: BDT62524.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62525.1 wsv465-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62529.1 innexin [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDT62529.1	BDT61857.1	46.927	358	181	5	1	353	1	354	8.50e-96	344
+# BLASTP 2.17.0+
+# Query: BDT62536.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62539.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62541.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62542.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62543.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62544.1 wsv192-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62555.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+BDT62555.1	BDT61962.1	24.198	343	198	15	25	323	47	371	1.57e-18	88.2
+BDT62555.1	BDT61876.1	36.782	87	51	2	159	245	80	162	4.04e-12	66.6
+BDT62555.1	BDT61964.1	28.289	152	92	6	162	302	251	396	5.15e-12	66.2
+BDT62555.1	BDT61964.1	23.276	116	82	3	140	252	99	210	5.2	26.6
+BDT62555.1	BDT61963.1	26.804	194	121	7	186	370	292	473	1.09e-09	58.5
+BDT62555.1	BDT61963.1	29.167	72	39	3	168	236	112	174	1.1	28.9
+BDT62555.1	BDT61959.1	30.400	125	72	4	189	312	142	252	6.04e-08	52.8
+# BLASTP 2.17.0+
+# Query: BDT62556.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 8 hits found
+BDT62556.1	BDT61962.1	27.734	256	151	8	158	385	186	435	4.72e-21	96.3
+BDT62556.1	BDT61962.1	33.333	78	45	4	156	233	44	114	8.72e-06	45.8
+BDT62556.1	BDT61962.1	33.333	39	24	2	413	449	530	568	2.9	27.3
+BDT62556.1	BDT61964.1	26.778	239	156	8	87	312	179	411	1.17e-11	65.1
+BDT62556.1	BDT61876.1	38.095	84	48	2	159	242	83	162	3.85e-10	60.1
+BDT62556.1	BDT61963.1	25.592	211	124	7	138	329	251	447	5.28e-10	59.7
+BDT62556.1	BDT61963.1	34.783	46	28	2	413	456	682	727	0.52	30.0
+BDT62556.1	BDT61959.1	27.922	154	90	5	159	309	119	254	2.47e-07	50.8
+# BLASTP 2.17.0+
+# Query: BDT62557.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 18 hits found
+BDT62557.1	BDT61964.1	33.058	121	79	2	252	370	243	363	2.68e-17	84.0
+BDT62557.1	BDT61964.1	36.735	98	51	3	35	131	246	333	3.66e-13	70.1
+BDT62557.1	BDT61964.1	46.154	39	19	2	265	302	126	163	0.16	31.6
+BDT62557.1	BDT61964.1	35.417	48	21	2	45	92	126	163	0.90	28.9
+BDT62557.1	BDT61962.1	41.837	98	56	1	247	343	174	271	1.01e-16	82.0
+BDT62557.1	BDT61962.1	39.604	101	52	3	33	133	180	271	9.94e-14	72.0
+BDT62557.1	BDT61962.1	37.500	64	40	0	263	326	48	111	2.85e-09	57.4
+BDT62557.1	BDT61962.1	39.623	53	30	1	385	437	526	576	9.39e-09	55.5
+BDT62557.1	BDT61962.1	31.325	83	47	2	37	119	42	114	1.14e-07	52.0
+BDT62557.1	BDT61962.1	45.161	31	17	0	221	251	530	560	1.05e-04	42.0
+BDT62557.1	BDT61963.1	23.560	382	214	12	43	423	109	413	1.34e-14	75.1
+BDT62557.1	BDT61963.1	33.898	118	65	3	33	150	264	368	4.94e-13	69.7
+BDT62557.1	BDT61963.1	34.921	63	40	1	373	435	665	726	3.46e-05	43.9
+BDT62557.1	BDT61963.1	42.308	26	15	0	221	246	682	707	0.78	29.3
+BDT62557.1	BDT61876.1	37.500	88	54	1	254	340	77	164	2.22e-13	70.9
+BDT62557.1	BDT61876.1	39.604	101	52	2	35	135	78	169	6.45e-13	69.3
+BDT62557.1	BDT61959.1	30.928	97	67	0	250	346	109	205	1.62e-09	58.2
+BDT62557.1	BDT61959.1	35.294	85	48	2	52	131	118	200	3.66e-05	43.5
+# BLASTP 2.17.0+
+# Query: BDT62560.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62561.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62562.1 wsv306-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDT62562.1	BDT61939.1	47.991	423	177	5	27	408	5	425	4.45e-113	402
+# BLASTP 2.17.0+
+# Query: BDT62564.1 wsv310-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62569.1 wsv282-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62575.1 wsv137-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62587.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62588.1 wsv267-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62589.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62590.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62593.1 SARAF-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62596.1 wsv161-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62597.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62598.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDT62598.1	BDT61945.1	48.000	25	13	0	283	307	219	243	0.014	35.0
+# BLASTP 2.17.0+
+# Query: BDT62599.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62606.1 wsv131-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDT62606.1	BDT61963.1	26.829	41	30	0	360	400	206	246	1.9	28.1
+# BLASTP 2.17.0+
+# Query: BDT62609.1 wsv415-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62611.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLAST processed 30 queries

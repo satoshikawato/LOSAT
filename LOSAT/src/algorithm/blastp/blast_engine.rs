@@ -79,6 +79,8 @@ mod x_subject_runs;
 // EXPERIMENT (LOSAT_X_BPSUBJMETA): the subjects' tabular IDs and titles of the block search made
 // once for all blocks (held by `x_query_blocks::XBlockSubjects`).
 pub(super) mod x_subject_meta;
+// `-comp_based_stats 0`: NCBI's ordinary traceback in place of the composition-based redo.
+mod traceback;
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{
@@ -920,15 +922,30 @@ fn blastp_cutoff_score_max(
     subject_length_for_hit_cutoff: i32,
     comp_based_stats: BlastpCompositionMode,
     gapped_params: &crate::stats::KarlinParams,
-    gumbel_params: &crate::stats::BlastGumbelBlk,
+    gumbel_params: Option<&crate::stats::BlastGumbelBlk>,
+    search_space: i64,
 ) -> i32 {
-    blast_spouge_etos(
-        blastp_prelim_evalue(expect_value, comp_based_stats),
-        gapped_params,
-        gumbel_params,
-        query_length,
-        subject_length_for_hit_cutoff,
-    )
+    match gumbel_params {
+        Some(gumbel_params) => blast_spouge_etos(
+            blastp_prelim_evalue(expect_value, comp_based_stats),
+            gapped_params,
+            gumbel_params,
+            query_length,
+            subject_length_for_hit_cutoff,
+        ),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:943-945
+        // ```c
+        //          } else {
+        //              BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
+        //          }
+        // ```
+        None => crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_from_evalue(
+            expect_value,
+            search_space,
+            gapped_params,
+        )
+        .max(1),
+    }
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:825-886
@@ -1325,7 +1342,8 @@ fn blastp_hit_cutoff_score_for_context(
     subject_length: i32,
     mode: BlastpCompositionMode,
     gapped_params: &KarlinParams,
-    gapped_gumbel: &BlastGumbelBlk,
+    gapped_gumbel: Option<&BlastGumbelBlk>,
+    search_space: i64,
 ) -> i32 {
     if !ctx.is_valid {
         return i32::MAX;
@@ -1337,6 +1355,7 @@ fn blastp_hit_cutoff_score_for_context(
         mode,
         gapped_params,
         gapped_gumbel,
+        search_space,
     )
 }
 
@@ -1450,20 +1469,30 @@ fn x_build_compact_preliminary_hsp_list<'h>(
     query_length: usize,
     subject_length: usize,
     karlin_params: &KarlinParams,
-    gumbel_params: &BlastGumbelBlk,
+    gumbel_params: Option<&BlastGumbelBlk>,
+    search_space: f64,
 ) -> BlastpHspList<XPrelimHsp> {
-    let hsps: Vec<XPrelimHsp> = preliminary_hits
-        .map(|hit| XPrelimHsp {
-            hsp: *hit,
-            e_value: blast_spouge_stoe(
-                hit.raw_score,
-                karlin_params,
-                gumbel_params,
-                query_length as i32,
-                subject_length as i32,
-            ),
-        })
-        .collect();
+    let hsps: Vec<XPrelimHsp> = match gumbel_params {
+        Some(gumbel_params) => preliminary_hits
+            .map(|hit| XPrelimHsp {
+                hsp: *hit,
+                e_value: blast_spouge_stoe(
+                    hit.raw_score,
+                    karlin_params,
+                    gumbel_params,
+                    query_length as i32,
+                    subject_length as i32,
+                ),
+            })
+            .collect(),
+        None => preliminary_hits
+            .map(|hit| XPrelimHsp {
+                hsp: *hit,
+                e_value: search_space
+                    * (-karlin_params.lambda * hit.raw_score as f64 + karlin_params.k.ln()).exp(),
+            })
+            .collect(),
+    };
     let mut hsp_list = BlastpHspList {
         oid,
         query_index,
@@ -2244,7 +2273,11 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} (NCBI BLAST+ 2.17.0 gives different reports for the same search)"
         );
     }
-    if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust {
+    // Mode 0 runs BLASTP's ordinary traceback (`traceback.rs`); psiblast's rounds keep mode 2.
+    if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust
+        && !(args.app == BlastpApp::Blastp
+            && args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats)
+    {
         bail!(
             "-comp_based_stats {} is not supported by LOSAT's {program}",
             args.comp_based_stats.to_ncbi_cli_string()
@@ -4970,11 +5003,10 @@ fn search_cli(
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
     let database = match resolved.db.as_deref() {
-        Some(name) => Some(database::BlastpDatabase::open(
-            name,
-            &settings,
-            args.app == BlastpApp::Blastp,
-        )?),
+        Some(name) => Some(
+            database::BlastpDatabase::open(name, &settings, args.app == BlastpApp::Blastp)?
+                .showing_gis(args.show_gis),
+        ),
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
@@ -6736,8 +6768,16 @@ fn write_reports_without_queries(
                     word_threshold: args.threshold,
                     window_size: args.window_size as i32,
                     gapped_karlin: lookup_protein_params(&args.scoring),
-                    gumbel: lookup_protein_gumbel_params(&args.scoring, total_db_len as i64)
-                        .context("missing NCBI gumbel parameters for supported blastp scoring")?,
+                    gumbel: if args.searchsp.is_none() {
+                        Some(
+                            lookup_protein_gumbel_params(&args.scoring, total_db_len as i64)
+                                .context(
+                                    "missing NCBI gumbel parameters for supported blastp scoring",
+                                )?,
+                        )
+                    } else {
+                        None
+                    },
                     num_descriptions: args.num_descriptions,
                     num_alignments: args.num_alignments,
                 };
@@ -7834,8 +7874,14 @@ fn run_resolved_in_pool(
     } else {
         total_db_len as i64
     };
-    let gapped_gumbel = lookup_protein_gumbel_params(&args.scoring, gumbel_db_length)
-        .context("missing NCBI gumbel parameters for supported blastp scoring")?;
+    let gapped_gumbel = if args.searchsp.is_none() {
+        Some(
+            lookup_protein_gumbel_params(&args.scoring, gumbel_db_length)
+                .context("missing NCBI gumbel parameters for supported blastp scoring")?,
+        )
+    } else {
+        None
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:163-168
     // ```c++
     // static Int4
@@ -7884,7 +7930,30 @@ fn run_resolved_in_pool(
     // The `-subject` search without `-dbsize` keeps its computation (`f64` products of
     // numbers that it holds exactly); a database or `-dbsize` can pass 2^53, so their
     // effective search space is computed in NCBI's `Int8` (`blastp_database_search_space`).
-    let exact_search_space = database.is_some() || args.dbsize > 0;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+    // ```c
+    //    if (sbp->gbp) {
+    //    ...
+    //    } else {
+    //        min_subject_length = (Int4) (total_length/num_seqs);
+    //    }
+    //
+    //    if(min_subject_length <=0) {
+    // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
+    //    }
+    // ```
+    // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
+    // length is too short"; LOSAT refuses the search instead.
+    if args.searchsp.is_some()
+        && contexts.iter().any(|ctx| ctx.is_valid)
+        && total_db_len / num_subjects.max(1) == 0
+    {
+        anyhow::bail!(
+            "-searchsp with subjects of an average length below one letter is not supported by LOSAT's BLASTP"
+        );
+    }
+    let exact_search_space = database.is_some() || args.dbsize > 0 || args.searchsp.is_some();
+    let options_searchsp = args.searchsp.unwrap_or(0);
     // NCBI reference: c++/src/algo/blast/core/blast_setup.c:729-732
     // ```c
     //    if (db_length == 0 &&
@@ -7898,6 +7967,31 @@ fn run_resolved_in_pool(
     let search_spaces: Vec<SearchSpace> = contexts
         .iter()
         .map(|ctx| -> Result<SearchSpace> {
+            if options_searchsp != 0 {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:826-846
+                // ```c
+                //          if (effective_search_space == 0) {
+                //          ...
+                //       query_info->contexts[index].eff_searchsp = effective_search_space;
+                // ```
+                exact_search_spaces.push(Some(options_searchsp));
+                return Ok(SearchSpace {
+                    effective_query_len: ctx.aa_len as f64,
+                    effective_db_len: eff_db_length as f64,
+                    effective_space: options_searchsp as f64,
+                    length_adjustment: if ctx.aa_len > 0 {
+                        crate::stats::length_adjustment::compute_length_adjustment_ncbi(
+                            ctx.aa_len as i64,
+                            eff_db_length,
+                            num_subjects as i64,
+                            &gapped_params,
+                        )
+                        .length_adjustment
+                    } else {
+                        0
+                    },
+                });
+            }
             if eff_db_length == 0 {
                 exact_search_spaces.push(None);
                 return Ok(SearchSpace {
@@ -7978,14 +8072,16 @@ fn run_resolved_in_pool(
     };
     let hit_cutoff_scores: Vec<i32> = contexts
         .iter()
-        .map(|ctx| {
+        .enumerate()
+        .map(|(context_idx, ctx)| {
             blastp_hit_cutoff_score_for_context(
                 ctx,
                 args.evalue,
                 cutoff_subject_length,
                 args.comp_based_stats.mode,
                 &gapped_params,
-                &gapped_gumbel,
+                gapped_gumbel.as_ref(),
+                exact_search_spaces[context_idx].unwrap_or(0),
             )
         })
         .collect();
@@ -8026,7 +8122,12 @@ fn run_resolved_in_pool(
     // int cbs_stretch = (compositionBasedStats > 1) ? 5 : 1;
     // params->prelim_evalue = cbs_stretch*evalue;
     // ```
-    let prelim_evalue = blastp_prelim_evalue(args.evalue, args.comp_based_stats.mode);
+    // `params->prelim_evalue = evalue` without a Gumbel block (blast_parameters.c:931-935).
+    let prelim_evalue = if gapped_gumbel.is_some() {
+        blastp_prelim_evalue(args.evalue, args.comp_based_stats.mode)
+    } else {
+        args.evalue
+    };
     // `x_prelim_free.rs`.
     let mut x_prelim_freed = 0usize;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3074-3077
@@ -9041,7 +9142,8 @@ fn run_resolved_in_pool(
                 s_idx as u32,
                 subject.aa_len,
                 &gapped_params,
-                &gapped_gumbel,
+                gapped_gumbel.as_ref(),
+                &search_spaces,
                 prelim_evalue,
                 subject_result,
             );
@@ -9073,7 +9175,8 @@ fn run_resolved_in_pool(
                     ctx.aa_len,
                     subject.aa_len,
                     &gapped_params,
-                    &gapped_gumbel,
+                    gapped_gumbel.as_ref(),
+                    search_spaces[q_idx].effective_space,
                 );
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1523-1539
                 // ```c
@@ -9451,7 +9554,10 @@ fn run_resolved_in_pool(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_win_expand = false;
-    if x_compact_expand_all && !x_win_expand {
+    // `-comp_based_stats 0`: the ordinary traceback below reads the compact lists as they are.
+    let ordinary_traceback =
+        args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats;
+    if x_compact_expand_all && !x_win_expand && !ordinary_traceback {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
 
@@ -9472,6 +9578,32 @@ fn run_resolved_in_pool(
     // hits are freed, as the subject loop's scratches freed theirs.
     x_ih_pool::release();
     let kappa_redo_start = blastp_timing_start(timing_enabled);
+    // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
+    // preliminary list here, so the composition-based redo below finds none; its hit lists
+    // replace the redo's after it.
+    let ordinary_hit_lists = if ordinary_traceback {
+        let ordinary = traceback::OrdinaryTraceback {
+            contexts: &contexts,
+            total_query_span,
+            subjects,
+            matrix: args.scoring.matrix,
+            gap_open: args.scoring.gap_open,
+            gap_extend: args.scoring.gap_extend,
+            x_drop_final: x_drop_gapped_final,
+            karlin: &gapped_params,
+            gumbel: gapped_gumbel.as_ref(),
+            search_spaces: &search_spaces,
+            expect_value: args.evalue,
+            hitlist_size: args.traceback_hitlist_size(),
+        };
+        Some(ordinary.run(
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            blastp_parallel_pool,
+        )?)
+    } else {
+        None
+    };
     // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2228-2236
     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
     // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
@@ -9742,7 +9874,7 @@ fn run_resolved_in_pool(
         query_batches: &kappa_query_batches,
         matrix: args.scoring.matrix,
         gapped_params: &gapped_params,
-        gapped_gumbel: &gapped_gumbel,
+        gapped_gumbel: gapped_gumbel.as_ref(),
         evalue: args.evalue,
         build_redo_align_params: &build_redo_align_params,
         timing: timing_enabled,
@@ -9778,7 +9910,7 @@ fn run_resolved_in_pool(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if x_redo_par_switch {
+    if x_redo_par_switch && !ordinary_traceback {
         crate::utils::xreach::x_reach!("LOSAT_X_BPREDOPAR", x_redo_par_on);
     }
     #[cfg(all(
@@ -9801,21 +9933,24 @@ fn run_resolved_in_pool(
     // one-thread loop shares none.
     // The serial and the query-parallel redo loops solve the first Newton problems of the next
     // `X_NEWTON_LANES_MATCHES` matches ahead (Newton lanes); the match-parallel redo solves none.
-    crate::utils::xreach::x_reach!(
-        "LOSAT_X_SEGSHARE",
-        x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
-    );
-    crate::utils::xreach::x_reach!(
-        "LOSAT_X_NEWTONLANES",
-        x_redo_par_run || !use_parallel_kappa_match_redo
-    );
+    // With `-comp_based_stats 0` no redo runs, so neither side is reached.
+    if !ordinary_traceback {
+        crate::utils::xreach::x_reach!(
+            "LOSAT_X_SEGSHARE",
+            x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
+        );
+        crate::utils::xreach::x_reach!(
+            "LOSAT_X_NEWTONLANES",
+            x_redo_par_run || !use_parallel_kappa_match_redo
+        );
+    }
     // EXPERIMENT (LOSAT_X_BPSEGWIN): a redo not in windows empties no store; the windows record
     // their side (`x_redo_par::x_redo`).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if super::x_redo_par::x_bp_seg_win().is_some() && !x_redo_par_on {
+    if super::x_redo_par::x_bp_seg_win().is_some() && !x_redo_par_on && !ordinary_traceback {
         crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", false);
     }
     if x_redo_par_run {
@@ -9935,7 +10070,7 @@ fn run_resolved_in_pool(
                                 subject_raw,
                                 args.scoring.matrix,
                                 &gapped_params,
-                                &gapped_gumbel,
+                                gapped_gumbel.as_ref(),
                                 &redo_align_params,
                                 args.evalue,
                                 kappa_gap_scratch,
@@ -10212,7 +10347,7 @@ fn run_resolved_in_pool(
                                 subject_raw,
                                 args.scoring.matrix,
                                 &gapped_params,
-                                &gapped_gumbel,
+                                gapped_gumbel.as_ref(),
                                 &redo_align_params,
                                 args.evalue,
                                 &mut kappa_gap_scratch,
@@ -10474,7 +10609,7 @@ fn run_resolved_in_pool(
                     subject_raw,
                     args.scoring.matrix,
                     &gapped_params,
-                    &gapped_gumbel,
+                    gapped_gumbel.as_ref(),
                     &redo_align_params,
                     args.evalue,
                     &mut kappa_gap_scratch,
@@ -10511,6 +10646,9 @@ fn run_resolved_in_pool(
     }
     let mut hit_lists =
         fill_results_from_compo_heaps(args.traceback_hitlist_size(), &mut redone_matches);
+    if let Some(ordinary_hit_lists) = ordinary_hit_lists {
+        hit_lists = ordinary_hit_lists;
+    }
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(
             &timing.kappa_redo_ns,
@@ -11149,16 +11287,19 @@ fn run_resolved_in_pool(
                             karlin: None,
                             search_space: 0,
                             length_adjustment: 0,
+                            context0_space: args.searchsp.unwrap_or(0),
                         };
                     }
+                    let search_space = exact_search_spaces[first]
+                        .unwrap_or(search_spaces[first].effective_space.round() as i64);
                     super::archive::FirstContext {
                         karlin: Some((
                             contexts[first].karlin_params,
                             (!args.ungapped).then_some(gapped_params),
                         )),
-                        search_space: exact_search_spaces[first]
-                            .unwrap_or(search_spaces[first].effective_space.round() as i64),
+                        search_space,
                         length_adjustment: search_spaces[first].length_adjustment,
+                        context0_space: search_space,
                     }
                 };
                 super::archive::write_blastp_archives(
@@ -11990,6 +12131,8 @@ mod tests {
             subject: Some(PathBuf::from("subject.faa")),
             db: None,
             dbsize: None,
+            show_gis: false,
+            searchsp: None,
             task: "blastp".to_string(),
             evalue: None,
             threshold: None,
@@ -12989,7 +13132,8 @@ mod tests {
             500,
             BlastpCompositionMode::NoCompositionBasedStats,
             &gapped,
-            &gumbel,
+            Some(&gumbel),
+            0,
         );
         let cutoff_with_cbs = blastp_cutoff_score_max(
             expect_value,
@@ -12997,7 +13141,8 @@ mod tests {
             500,
             BlastpCompositionMode::CompositionMatrixAdjust,
             &gapped,
-            &gumbel,
+            Some(&gumbel),
+            0,
         );
 
         assert!(cutoff_with_cbs <= cutoff_without_cbs);
@@ -13475,7 +13620,8 @@ mod tests {
                 100,
                 BlastpCompositionMode::CompositionMatrixAdjust,
                 &gapped,
-                &gumbel,
+                Some(&gumbel),
+                0,
             ),
             i32::MAX
         );

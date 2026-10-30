@@ -470,9 +470,12 @@ fn composition_tokens_follow_ncbis_first_character_rule() {
         else {
             unreachable!("blastp")
         };
-        // LOSAT's BLASTP runs mode 2 without unified P-values and rejects the others.
+        // LOSAT's BLASTP runs mode 2 without unified P-values and mode 0 (the ordinary
+        // traceback), and rejects the others.
         let checked = LOSAT::algorithm::blastp::blast_engine::check_options(&args);
-        if mode == CompositionMode::CompositionMatrixAdjust && !unified {
+        if (mode == CompositionMode::CompositionMatrixAdjust && !unified)
+            || mode == CompositionMode::NoCompositionBasedStats
+        {
             checked.unwrap();
         } else {
             assert!(
@@ -1315,19 +1318,32 @@ fn culling_limit_is_read_as_ncbi_does() {
     }
 }
 
+// NCBI blast_args.cpp:2663: -show_gis is a flag of every search program.
+#[test]
+fn show_gis_is_a_flag_of_every_search_program() {
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        assert!(parse(program, &["-show_gis"]).is_ok(), "{program}");
+        assert!(parse(program, &["-show_gis", "true"]).is_err(), "{program}");
+    }
+    let Commands::Blastn(args) = parse("blastn", &["-show_gis"]).unwrap().command else {
+        panic!()
+    };
+    assert!(args.show_gis);
+    let Commands::Blastn(args) = parse("blastn", &[]).unwrap().command else {
+        panic!()
+    };
+    assert!(!args.show_gis);
+}
+
 // NCBI blastp 2.17.0+ -help options that LOSAT's BLASTP does not implement, and the NCBI C++
 // Toolkit's standard options (ncbiargs.cpp:78-87), are rejected explicitly.
 #[test]
 fn unported_ncbi_options_are_rejected_explicitly() {
     for (program, words) in [
-        ("blastn", &["-searchsp", "1000"][..]),
-        ("blastn", &["-db_soft_mask", "11"]),
+        ("blastn", &["-db_soft_mask", "11"][..]),
         ("blastn", &["-db_hard_mask", "11"]),
-        ("tblastn", &["-searchsp", "1000"]),
         ("tblastn", &["-db_soft_mask", "11"]),
-        ("tblastx", &["-searchsp", "1000"]),
         ("tblastx", &["-db_soft_mask", "11"]),
-        ("blastp", &["-searchsp", "1000"]),
         ("blastp", &["-gilist", "ids.gil"]),
         ("blastp", &["-seqidlist", "ids.txt"]),
         ("blastp", &["-taxids", "9606"]),

@@ -322,6 +322,8 @@ impl PsiblastArgs {
             subject: self.subject,
             db: self.db,
             dbsize: self.dbsize,
+            show_gis: false,
+            searchsp: None,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-50
             // ```c++
             // CPSIBlastOptionsHandle::CPSIBlastOptionsHandle(EAPILocality locality)

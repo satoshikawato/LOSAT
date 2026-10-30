@@ -999,6 +999,8 @@ mod tests {
             subject: Some(PathBuf::from("subject.faa")),
             db: None,
             dbsize: None,
+            show_gis: false,
+            searchsp: None,
             task: task.to_string(),
             evalue: None,
             threshold: None,

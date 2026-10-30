@@ -182,11 +182,7 @@ fn x_evaluate_gapped_full(
     };
     let mut ka = lookup_protein_params(&spec);
     ka.lambda /= scale;
-    let gumbel = lookup_protein_gumbel_params(
-        &spec,
-        super::parameters::gumbel_db_length(options, db_length),
-    )
-    .expect("validated BLASTX Gumbel");
+    let gumbel = super::parameters::gumbel_block(options, db_length);
     let query_lengths: Vec<_> = batch.contexts.iter().map(|c| c.length as i32).collect();
     if let Some(link) = link_parameters(options) {
         return link_uneven(
@@ -195,7 +191,7 @@ fn x_evaluate_gapped_full(
             parameters,
             subject_length,
             &vec![ka; parameters.len()],
-            Some(&gumbel),
+            gumbel.as_ref(),
             &link,
         );
     }
@@ -240,13 +236,19 @@ fn x_evaluate_gapped_full(
         .map(|(source_index, h)| LinkedHsp {
             hsp: h.clone(),
             num: 0,
-            evalue: blast_spouge_stoe(
-                h.score,
-                &ka,
-                &gumbel,
-                query_lengths[h.context],
-                subject_length,
-            ),
+            evalue: match &gumbel {
+                Some(gumbel) => blast_spouge_stoe(
+                    h.score,
+                    &ka,
+                    gumbel,
+                    query_lengths[h.context],
+                    subject_length,
+                ),
+                None => {
+                    parameters[h.context].search_space as f64
+                        * (-ka.lambda * h.score as f64 + ka.k.ln()).exp()
+                }
+            },
             source_index,
         })
         .collect();
@@ -313,7 +315,13 @@ fn x_evaluate_gapped_full(
 //    }
 // ```
 pub fn reap_preliminary(list: &mut LinkedHspList, options: &ResolvedOptions) -> Vec<LinkedHsp> {
-    let cutoff = options.evalue * if options.composition > 0 { 5.0 } else { 1.0 };
+    // `params->prelim_evalue = evalue` without a Gumbel block (blast_parameters.c:931-935).
+    let cutoff = options.evalue
+        * if options.composition > 0 && !options.old_fsc {
+            5.0
+        } else {
+            1.0
+        };
     let mut deleted = Vec::new();
     list.hsps.retain(|h| {
         if h.evalue > cutoff {

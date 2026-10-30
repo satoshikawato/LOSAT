@@ -48,6 +48,8 @@ fn db_gencode_controls_local_subject_search_translation() {
         subject: Some(subject.clone()),
         db: None,
         dbsize: None,
+        show_gis: false,
+        searchsp: None,
         evalue: 10.0,
         threshold: None,
         matrix: None,

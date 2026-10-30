@@ -482,7 +482,7 @@ mod tests {
             &lengths,
             subject_nt,
             &vec![gapped; contexts],
-            &gumbel,
+            Some(&gumbel),
             link,
         )
         .unwrap();

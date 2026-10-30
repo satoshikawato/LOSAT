@@ -1224,9 +1224,10 @@ fn search_cli(
     // `-db`: the database opens after the options are processed, before `Query is Empty!`
     // (`TblastxDatabase::open`).
     let database = match args.database_name() {
-        Some(name) => Some(super::super::database::TblastxDatabase::open(
-            name, &settings,
-        )?),
+        Some(name) => Some(
+            super::super::database::TblastxDatabase::open(name, &settings)?
+                .showing_gis(args.show_gis),
+        ),
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
@@ -1669,6 +1670,7 @@ fn search(
                     total: stores.iter().map(|store| store.len() as i64).sum(),
                     count: records.len() as i64,
                     dbsize: args.dbsize,
+                    searchsp: args.searchsp,
                 },
                 shown: ShownSubjects::Fasta {
                     records,
@@ -1684,7 +1686,8 @@ fn search(
         } => (
             RunSubjects {
                 subjects: Subjects::Fasta(records),
-                numbers: SubjectSetNumbers::of_records(records, args.dbsize),
+                numbers: SubjectSetNumbers::of_records(records, args.dbsize)
+                    .with_searchsp(args.searchsp),
                 shown: ShownSubjects::Fasta {
                     records,
                     x_stored: None,
@@ -1699,7 +1702,7 @@ fn search(
                 } else {
                     Subjects::Stored(&stores)
                 },
-                numbers: database.numbers(args.dbsize),
+                numbers: database.numbers(args.dbsize).with_searchsp(args.searchsp),
                 shown: ShownSubjects::Database {
                     database,
                     pairwise: database.pairwise_database(),
@@ -4481,7 +4484,7 @@ fn search_query_batch<S: TbxScore>(
         if !ctx.is_valid || ctx.aa_len == 0 {
             cutoff_scores[ctx_idx] = i32::MAX;
             length_adj_per_context.push(0);
-            eff_searchsp_per_context.push(0);
+            eff_searchsp_per_context.push(numbers.searchsp.unwrap_or(0));
             continue;
         }
         // NCBI: per-context kbp_std[context] is used throughout cutoff/length calcs.
@@ -4503,16 +4506,15 @@ fn search_query_batch<S: TbxScore>(
         // =======================================================================
         // `-dbsize` replaces the database length here only (`SubjectSetNumbers`).
         let eff_db_length_nucl = numbers.effective_length();
-        let eff_lengths = crate::algorithm::tblastx::ncbi_cutoffs::try_compute_eff_lengths_tblastx(
-            query_len_aa,
-            eff_db_length_nucl,
-            db_num_seqs,
-            ctx_params, // tblastx uses per-context ungapped params (kbp_gap is NULL)
-        )
-        .ok_or(SearchSpaceOverflow {
-            db_length: eff_db_length_nucl,
-            query_length: ctx.aa_len,
-        })?;
+        let eff_lengths = numbers
+            .context_lengths(
+                query_len_aa,
+                ctx_params, // tblastx uses per-context ungapped params (kbp_gap is NULL)
+            )
+            .ok_or(SearchSpaceOverflow {
+                db_length: eff_db_length_nucl,
+                query_length: ctx.aa_len,
+            })?;
         let eff_searchsp = eff_lengths.eff_searchsp;
         length_adj_per_context.push(eff_lengths.length_adjustment);
         eff_searchsp_per_context.push(eff_searchsp);

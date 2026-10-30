@@ -361,7 +361,7 @@ pub fn render_message(error: &clap::Error) -> String {
 // ```
 // The options of NCBI blastn 2.17.0+ (-help) that LOSAT's BLASTN does not implement
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
-// (`blastn/args.rs`); the database masks and `-searchsp` are not.
+// (`blastn/args.rs`); the database masks are not.
 fn is_unported_blastn_arg(name: &str) -> bool {
     matches!(
         name,
@@ -387,9 +387,7 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "off_diagonal_range"
             | "parse_deflines"
             | "remote"
-            | "searchsp"
             | "seqidlist"
-            | "show_gis"
             | "soft_masking"
             | "sorthits"
             | "sorthsps"
@@ -439,9 +437,7 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "no_taxid_expansion"
             | "parse_deflines"
             | "remote"
-            | "searchsp"
             | "seqidlist"
-            | "show_gis"
             | "sorthits"
             | "sorthsps"
             | "subject_besthit"
@@ -752,9 +748,7 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "no_taxid_expansion"
             | "parse_deflines"
             | "remote"
-            | "searchsp"
             | "seqidlist"
-            | "show_gis"
             | "sorthits"
             | "sorthsps"
             | "subject_besthit"
@@ -800,9 +794,7 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "no_taxid_expansion"
             | "parse_deflines"
             | "remote"
-            | "searchsp"
             | "seqidlist"
-            | "show_gis"
             | "sorthits"
             | "sorthsps"
             | "strand"
@@ -829,7 +821,6 @@ fn is_unported_blastx_arg(name: &str) -> bool {
         name,
         "query_loc"
             | "subject_loc"
-            | "show_gis"
             | "line_length"
             | "html"
             | "sorthits"
@@ -850,7 +841,6 @@ fn is_unported_blastx_arg(name: &str) -> bool {
             | "negative_ipglist"
             | "best_hit_overhang"
             | "best_hit_score_edge"
-            | "searchsp"
             | "import_search_strategy"
             | "export_search_strategy"
             | "xdrop_ungap"

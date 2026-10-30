@@ -323,6 +323,24 @@ pub struct BlastpArgs {
     // No constraint and no dependency: read with `-db` and with `-subject`.
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
+    // ```c++
+    //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
+    // ```
+    #[arg(
+        long = "show_gis",
+        default_value_t = false,
+        help = "Show NCBI GIs in deflines?"
+    )]
+    pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    // ```
+    #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
     // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:225-228
     // ```c
     //     if (choice == eProtProt || choice == eAll) {
@@ -626,6 +644,9 @@ pub struct ResolvedBlastpArgs {
     pub db: Option<String>,
     /// `-dbsize` (`eff_len_options->db_length`; 0 when it is not given).
     pub dbsize: i64,
+    /// `-searchsp`: the effective search space when above 0, and at any value no Gumbel block
+    /// (blast_args.cpp:303-307, blast_stat.c:921-923).
+    pub searchsp: Option<i64>,
     pub task: String,
     pub evalue: f64,
     pub threshold: f64,
@@ -1021,6 +1042,7 @@ impl BlastpArgs {
             // The options start with a database length of 0
             // (blast_prot_options.cpp:150-156, `SetDbLength(0)`).
             dbsize: self.dbsize.unwrap_or(0),
+            searchsp: self.searchsp,
             task: self.task.clone(),
             evalue: options.evalue,
             threshold: options.threshold,

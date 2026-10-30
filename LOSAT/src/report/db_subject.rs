@@ -40,6 +40,8 @@ pub struct ParsedSubject {
     target: usize,
     /// Whether NCBI's formatters cannot find the sequence by its Seq-align id (`fetched`).
     unfetchable: bool,
+    /// `-show_gis`: the outfmt 0 description line and heading show it (`description`, `heading`).
+    show_gis: bool,
 }
 
 /// One `HitDescr` of the XML2 and JSON formats (`s_SeqAlignToXMLHit`).
@@ -108,7 +110,14 @@ impl ParsedSubject {
             alignment_id,
             target,
             unfetchable,
+            show_gis: false,
         })
+    }
+
+    /// The subject as the outfmt 0 report of a run with or without `-show_gis` shows it.
+    pub fn showing_gis(mut self, show_gis: bool) -> Self {
+        self.show_gis = show_gis;
+        self
     }
 
     /// `Err` for a subject whose sequence NCBI's formatters cannot find by its Seq-align id
@@ -412,29 +421,38 @@ impl ParsedSubject {
             .unwrap_or_default()
     }
 
-    /// The start of the outfmt 0 description line (`description_id` of `GetDisplayIds`' id,
-    /// without `-show_gis`, which LOSAT refuses) and its title: `GenerateDefline` of the subject
-    /// Bioseq with `fLeavePrefixSuffix` (`Unknown` where NCBI's `HtmlDecode` throws).
+    /// The start of the outfmt 0 description line (`description_id` of `GetDisplayIds`' id) and
+    /// its title: `GenerateDefline` of the subject Bioseq with `fLeavePrefixSuffix` (`Unknown`
+    /// where NCBI's `HtmlDecode` throws), after two spaces where `gi|N|` was written.
     pub fn description(&self, protein: bool) -> (Vec<u8>, Defline) {
-        let start = self.description_start();
-        let title = self.bioseq_title(protein, true).unwrap_or(Defline {
+        let (start, wrote_gi) = self.description_id();
+        let mut title = self.bioseq_title(protein, true).unwrap_or(Defline {
             text: b"Unknown".to_vec(),
             reads_past_end: false,
         });
+        if wrote_gi {
+            title.text.splice(0..0, *b"  ");
+        }
         (start, title)
     }
 
     /// The start of the outfmt 0 description line (`description`).
     pub fn description_start(&self) -> Vec<u8> {
+        self.description_id().0
+    }
+
+    /// `description`'s start and whether `gi|N|` was written.
+    fn description_id(&self) -> (Vec<u8>, bool) {
         let mut start = Vec::new();
+        let mut wrote_gi = false;
         if let Some(shown) = self.set.display_defline(&self.alignment_id) {
             let defline = &self.set.deflines[shown.index];
             if let Some(id) = defline.display_id() {
                 let gi = if shown.found { defline.gi() } else { 0 };
-                description_id(id, gi, false, &mut start);
+                wrote_gi = description_id(id, gi, self.show_gis, &mut start);
             }
         }
-        start
+        (start, wrote_gi)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2380-2384, 2451-2461
@@ -469,7 +487,7 @@ impl ParsedSubject {
         for (i, defline) in self.set.deflines.iter().enumerate() {
             let start = out.len();
             out.push(if i == 0 { b'>' } else { b' ' });
-            alignment_line_id(defline, false, &mut out);
+            alignment_line_id(defline, self.show_gis, &mut out);
             if i > 0 || out.len() - start > 1 {
                 out.push(b' ');
             }

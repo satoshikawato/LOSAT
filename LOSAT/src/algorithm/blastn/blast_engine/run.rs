@@ -5584,12 +5584,13 @@ fn archive_first_context(
         });
     };
     let search_space = report.query_eff_searchsp[2 * first + report.first_context];
-    let (length_adjustment, _) = context_lengths(
+    let length_adjustment = compute_length_adjustment_ncbi(
         query_lengths[first] as i64,
         report.eff_db_length,
         report.db_num_seqs as i64,
         &blocks.gapped,
-    )?;
+    )
+    .length_adjustment;
     Ok(archive::FirstContext {
         karlin: Some(blocks),
         search_space,
@@ -5613,16 +5614,13 @@ fn blastn_xml_stats(
                 return Ok(crate::report::blast_xml::XmlStats::NONE);
             };
             let eff_space = report.query_eff_searchsp[2 * q_idx + report.first_context];
-            let (length_adjustment, searched_space) = context_lengths(
+            let length_adjustment = compute_length_adjustment_ncbi(
                 query_lengths[q_idx] as i64,
                 report.eff_db_length,
                 report.db_num_seqs as i64,
                 &blocks.gapped,
-            )?;
-            debug_assert_eq!(
-                searched_space, eff_space,
-                "the search's own effective space"
-            );
+            )
+            .length_adjustment;
             Ok(crate::report::blast_xml::XmlStats {
                 hsp_len: length_adjustment as i32,
                 eff_space,
@@ -7266,7 +7264,9 @@ fn search_cli(
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
     let database = match args.database_name() {
-        Some(name) => Some(database::BlastnDatabase::open(name, &settings)?),
+        Some(name) => {
+            Some(database::BlastnDatabase::open(name, &settings)?.showing_gis(args.show_gis))
+        }
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
@@ -10029,8 +10029,8 @@ fn reborrow_outputs<'o, 'r>(outputs: &'o mut BatchOutputs<'_, 'r>) -> BatchOutpu
 /// The length adjustment and the effective search space of a valid query context of `query_len`
 /// letters against a database of `db_len` letters in `db_num_seqs` sequences
 /// (`BLAST_CalcEffLengths`), with the context's gapped Karlin-Altschul block. The search space
-/// is the context's `eff_searchsp` (the search calls this for it; the XML report calls it again
-/// for the length adjustment, which the search does not keep).
+/// is the context's `eff_searchsp` when no `-searchsp` replaces it. The reports compute the
+/// length adjustment again, which the search does not keep.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-846
 /// ```c
@@ -11062,7 +11062,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         .enumerate()
         .map(|(index, ((ctx, blocks), &valid))| {
             let options_searchsp = match stage {
-                BatchStage::Search { .. } => 0,
+                BatchStage::Search { .. } => args.options_searchsp(),
                 BatchStage::ChunkPrelim {
                     batch_eff_searchsp, ..
                 } => batch_eff_searchsp[index],

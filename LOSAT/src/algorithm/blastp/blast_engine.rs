@@ -66,6 +66,9 @@ mod database;
 // EXPERIMENT (LOSAT_X_BPIHPOOL): the arrays of initial hits past NCBI's first size in one pool
 // shared by the threads.
 mod x_ih_pool;
+// EXPERIMENT (LOSAT_X_BPHITSFLAT): a subject's preliminary HSPs grouped by query through one array
+// of their positions.
+mod x_hits_flat;
 // EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel `-subject` loop in runs of subjects, one diagonal
 // table fill per run.
 #[cfg(all(
@@ -274,6 +277,14 @@ struct BlastpSubjectScratch {
     // Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
     // ```
     preliminary_hits_by_query: Vec<Vec<BlastpPreliminaryHsp>>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:112
+    // ```c
+    //       hsp_list_array = calloc(results->num_queries, sizeof(BlastHSPList*));
+    // ```
+    // EXPERIMENT (LOSAT_X_BPHITSFLAT): in place of `preliminary_hits_by_query`, the positions of
+    // the HSPs in query order and each query's start (`x_hits_flat.rs`).
+    x_hits_order: Vec<u32>,
+    x_hits_starts: Vec<u32>,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3748-3786
     // ```c
     // found[query_index] = TRUE;
@@ -555,6 +566,8 @@ impl BlastpSubjectScratch {
             preliminary_hsp_list: Vec::new(),
             preliminary_hsp_counts_by_query: Vec::new(),
             preliminary_hits_by_query: Vec::new(),
+            x_hits_order: Vec::new(),
+            x_hits_starts: Vec::new(),
             restricted_align_found: Vec::new(),
             restricted_align_array: Vec::new(),
             preliminary_gap_scratch: GapAlignScratch::new(),
@@ -1430,8 +1443,8 @@ fn blastp_preliminary_cutoff_subject_length(subjects: &[EncodedProtein]) -> i32 
 // The preliminary HSP list of a subject for a query with the compact element, with the E-values
 // `Blast_HSPListGetEvalues` gives (`x_prelim_compact.rs`).
 #[allow(clippy::too_many_arguments)]
-fn x_build_compact_preliminary_hsp_list(
-    preliminary_hits: &[BlastpPreliminaryHsp],
+fn x_build_compact_preliminary_hsp_list<'h>(
+    preliminary_hits: impl ExactSizeIterator<Item = &'h BlastpPreliminaryHsp>,
     oid: u32,
     query_index: u32,
     query_length: usize,
@@ -1440,7 +1453,6 @@ fn x_build_compact_preliminary_hsp_list(
     gumbel_params: &BlastGumbelBlk,
 ) -> BlastpHspList<XPrelimHsp> {
     let hsps: Vec<XPrelimHsp> = preliminary_hits
-        .iter()
         .map(|hit| XPrelimHsp {
             hsp: *hit,
             e_value: blast_spouge_stoe(
@@ -9018,66 +9030,83 @@ fn run_resolved_in_pool(
                 endpoint_duplicates_purged,
             );
         }
-        let mut preliminary_hits_by_query = std::mem::take(&mut scratch.preliminary_hits_by_query);
-        split_preliminary_hits_by_query_into(
-            &mut preliminary_hsp_list,
-            &contexts,
-            query_ids.len(),
-            &mut preliminary_hits_by_query,
-        );
-        for (q_idx, preliminary_hits) in preliminary_hits_by_query
-            .iter_mut()
-            .take(query_ids.len())
-            .enumerate()
-        {
-            if preliminary_hits.is_empty() {
-                continue;
-            }
-            let ctx = &contexts[q_idx as usize];
-            // The compact list, with the E-values of `Blast_HSPListGetEvalues` and the reap by the
-            // preliminary E-value (`x_prelim_compact.rs`); a list that keeps HSPs gives back the
-            // room of the reaped ones (`x_prelim_free.rs`).
-            let mut compact_hsp_list = x_build_compact_preliminary_hsp_list(
-                preliminary_hits.as_slice(),
+        if x_hits_flat::x_bphitsflat() {
+            x_hits_flat::x_lists_by_query(
+                &mut preliminary_hsp_list,
+                &contexts,
+                query_ids.len(),
+                &mut scratch.x_hits_order,
+                &mut scratch.x_hits_starts,
                 s_idx as u32,
-                q_idx as u32,
-                ctx.aa_len,
                 subject.aa_len,
                 &gapped_params,
                 &gapped_gumbel,
+                prelim_evalue,
+                subject_result,
             );
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1523-1539
-            // ```c
-            // Blast_HSPListGetEvalues(program_number, query_info,
-            //                         stat_length, hsp_list,
-            //                         gapped_calculation, FALSE,
-            //                         sbp, 0, 1.0);
-            // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
-            // ```
-            //
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:640-670
-            // ```c
-            // cutoff = hit_params->prelim_evalue;
-            // ...
-            // if (hsp->evalue > cutoff) {
-            //     hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-            // }
-            // ```
-            reap_hsplist_by_evalue(&mut compact_hsp_list, prelim_evalue);
-            if !compact_hsp_list.hsps.is_empty() {
-                compact_hsp_list.hsps.shrink_to_fit();
-                subject_result
-                    .x_compact_hsp_lists
-                    .push((q_idx, compact_hsp_list));
+        } else {
+            let mut preliminary_hits_by_query =
+                std::mem::take(&mut scratch.preliminary_hits_by_query);
+            split_preliminary_hits_by_query_into(
+                &mut preliminary_hsp_list,
+                &contexts,
+                query_ids.len(),
+                &mut preliminary_hits_by_query,
+            );
+            for (q_idx, preliminary_hits) in preliminary_hits_by_query
+                .iter_mut()
+                .take(query_ids.len())
+                .enumerate()
+            {
+                if preliminary_hits.is_empty() {
+                    continue;
+                }
+                let ctx = &contexts[q_idx as usize];
+                // The compact list, with the E-values of `Blast_HSPListGetEvalues` and the reap by the
+                // preliminary E-value (`x_prelim_compact.rs`); a list that keeps HSPs gives back the
+                // room of the reaped ones (`x_prelim_free.rs`).
+                let mut compact_hsp_list = x_build_compact_preliminary_hsp_list(
+                    preliminary_hits.iter(),
+                    s_idx as u32,
+                    q_idx as u32,
+                    ctx.aa_len,
+                    subject.aa_len,
+                    &gapped_params,
+                    &gapped_gumbel,
+                );
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1523-1539
+                // ```c
+                // Blast_HSPListGetEvalues(program_number, query_info,
+                //                         stat_length, hsp_list,
+                //                         gapped_calculation, FALSE,
+                //                         sbp, 0, 1.0);
+                // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
+                // ```
+                //
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:640-670
+                // ```c
+                // cutoff = hit_params->prelim_evalue;
+                // ...
+                // if (hsp->evalue > cutoff) {
+                //     hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+                // }
+                // ```
+                reap_hsplist_by_evalue(&mut compact_hsp_list, prelim_evalue);
+                if !compact_hsp_list.hsps.is_empty() {
+                    compact_hsp_list.hsps.shrink_to_fit();
+                    subject_result
+                        .x_compact_hsp_lists
+                        .push((q_idx, compact_hsp_list));
+                }
+                preliminary_hits.clear();
             }
-            preliminary_hits.clear();
+            scratch.preliminary_hits_by_query = preliminary_hits_by_query;
         }
         scratch.restricted_align_array = restricted_align_array;
         scratch.restricted_align_array.clear();
         scratch.preliminary_hsp_counts_by_query = preliminary_hsp_counts_by_query;
         scratch.preliminary_hsp_counts_by_query.clear();
         scratch.preliminary_hsp_list = preliminary_hsp_list;
-        scratch.preliminary_hits_by_query = preliminary_hits_by_query;
     };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1498
@@ -13213,6 +13242,57 @@ mod tests {
         assert_eq!(hits_by_query[1].len(), 2);
         assert_eq!(hits_by_query[1][0].subject_start, 100);
         assert_eq!(hits_by_query[1][1].subject_start, 130);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:119-132
+    // ```c
+    //          query_index = Blast_GetQueryIndexFromContext(hsp->context, program);
+    // ...
+    //          Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
+    // ```
+    // LOSAT_X_BPHITSFLAT: the counting order lists each query's HSPs as the per-query vectors do,
+    // for random contexts, including a query index past `num_queries` (left out by both).
+    #[test]
+    fn x_hits_flat_order_matches_the_per_query_vectors() {
+        let contexts: Vec<QueryContext> = (0..5u32)
+            .map(|q| make_query_context(q, q as i32 * 1000))
+            .collect();
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % n
+        };
+        let mut order = Vec::new();
+        let mut starts = Vec::new();
+        for round in 0..200 {
+            let len = next(40) as usize;
+            let hits: Vec<BlastpPreliminaryHsp> = (0..len)
+                .map(|index| {
+                    let mut hsp = make_preliminary_hsp(
+                        index as u32,
+                        index as i32,
+                        index as i32 + 10,
+                        round,
+                        round + 10,
+                        next(100) as i32,
+                    );
+                    hsp.query_context = next(5) as i32;
+                    hsp
+                })
+                .collect();
+            let num_queries = 1 + (round as usize % 5);
+            x_hits_flat::order_by_query(&hits, &contexts, num_queries, &mut order, &mut starts);
+            let by_query = split_preliminary_hits_by_query(hits.clone(), &contexts, num_queries);
+            assert_eq!(starts.len(), num_queries + 1);
+            for (q, expected) in by_query.iter().enumerate().take(num_queries) {
+                let run = &order[starts[q] as usize..starts[q + 1] as usize];
+                let got: Vec<u32> = run.iter().map(|&i| hits[i as usize].q_idx).collect();
+                let want: Vec<u32> = expected.iter().map(|hsp| hsp.q_idx).collect();
+                assert_eq!(got, want, "round {round} query {q}");
+            }
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:289-318

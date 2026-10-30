@@ -727,6 +727,12 @@ pub fn join_keys(subject: &ParsedSubject, keys: &mut Vec<u64>) {
     crate::seqid::defline_set::match_keys(&subject.alignment_id, keys);
 }
 
+/// The keys of the Seq-align id of `subject` as NCBI's scope finds it
+/// (`defline_set::scope_keys`).
+pub fn scope_keys(subject: &ParsedSubject, keys: &mut Vec<u64>) {
+    crate::seqid::defline_set::scope_keys(&subject.alignment_id, keys);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

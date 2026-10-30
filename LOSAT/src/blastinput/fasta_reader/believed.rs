@@ -22,7 +22,7 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::report::archive::bioseq::{QuerySeqLoc, SeqLocStrand};
 use crate::seqid::accguide::{identify_seq_id, parse_flags, GENERAL, LOCAL};
-use crate::seqid::defline_set::{match_keys, tabular_id, TabularId};
+use crate::seqid::defline_set::{scope_keys, tabular_id, TabularId};
 use crate::seqid::label;
 use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best, text_score};
@@ -128,9 +128,14 @@ impl BelievedIds {
 /// The keys of every query id read in this process under `-parse_deflines`.
 static QUERY_KEYS: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
 
+/// Whether a query was read under `-parse_deflines`.
+pub(crate) fn query_keys_kept() -> bool {
+    QUERY_KEYS.get().is_some()
+}
+
 /// Whether a query read so far has an id with one of the keys `keys`. NCBI would show a database
-/// sequence with such an id as the query (`report::db_subject::ParsedSubject`). A query of an
-/// earlier batch counts too, though NCBI's scope has dropped it: a refusal, not another report.
+/// sequence with such an id as the query (`report::db_subject::ParsedSubject`). A query of another
+/// batch counts too, though NCBI's scope holds one batch: a refusal, not another report.
 pub(crate) fn query_has_key(keys: &[u64]) -> bool {
     QUERY_KEYS.get().is_some_and(|seen| {
         let seen = seen.lock().unwrap_or_else(|error| error.into_inner());
@@ -255,30 +260,32 @@ pub(crate) fn duplicate_id(
     let mut keys = Vec::new();
     for id in ids {
         keys.clear();
-        match_keys(id, &mut keys);
+        scope_keys(id, &mut keys);
         if keys.iter().any(|key| seen.contains(key)) {
             return Some(anyhow::anyhow!(
-                "two {role} records have the Seq-id {} under -parse_deflines (NCBI BLAST+ searches \
-                 the letters of the first for both); this is not supported by LOSAT's {program}",
+                "two {role} records have the Seq-id {} under -parse_deflines (in one query batch \
+                 NCBI BLAST+ searches the letters of the first for both); this is not supported \
+                 by LOSAT's {program}",
                 fasta(id)
             ));
         }
         seen.extend(keys.iter().copied());
     }
-    if role == "query" {
+    // A unit test's ids must not reach the searches of the other tests of the process.
+    if role == "query" && !cfg!(test) {
         let shared = QUERY_KEYS.get_or_init(|| Mutex::new(HashSet::new()));
         let mut shared = shared.lock().unwrap_or_else(|error| error.into_inner());
         for id in ids {
             keys.clear();
-            match_keys(id, &mut keys);
+            scope_keys(id, &mut keys);
             shared.extend(keys.iter().copied());
         }
     }
     None
 }
 
-/// `CFastaReader::xSetSeqMol` against the molecule of the program: whether the first id whose
-/// accession names a molecule names the other one.
+/// `CFastaReader::xSetSeqMol`: whether the first id whose accession names a molecule names a
+/// protein, `None` when none does.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:547-562
 /// ```c++
@@ -299,7 +306,7 @@ pub(crate) fn duplicate_id(
 ///     return false;
 /// }
 /// ```
-pub(crate) fn names_other_molecule(ids: &[ParsedSeqId], protein: bool) -> bool {
+pub(crate) fn named_molecule(ids: &[ParsedSeqId]) -> Option<bool> {
     use crate::seqid::accguide::{F_NUC, F_PROT};
     for id in ids {
         let info = identify_seq_id(
@@ -308,13 +315,37 @@ pub(crate) fn names_other_molecule(ids: &[ParsedSeqId], protein: bool) -> bool {
             &mut |_| {},
         );
         if info & F_NUC != 0 {
-            return protein;
+            return Some(false);
         }
         if info & F_PROT != 0 {
-            return !protein;
+            return Some(true);
         }
     }
-    false
+    None
+}
+
+/// `CFastaReader::x_NucOrProt`, in the reader's message about invalid letters: the molecule the
+/// accession named, nothing without one.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2117-2125
+/// ```c++
+/// std::string CFastaReader::x_NucOrProt(void) const
+/// {
+///     if( m_CurrentSeq && m_CurrentSeq->IsSetInst() &&
+///         m_CurrentSeq->GetInst().IsSetMol() )
+///     {
+///         return ( m_CurrentSeq->GetInst().IsAa() ? "protein " : "nucleotide " );
+///     } else {
+///         return kEmptyStr;
+///     }
+/// }
+/// ```
+pub(crate) fn nuc_or_prot(named: Option<bool>) -> &'static str {
+    match named {
+        Some(true) => "protein ",
+        Some(false) => "nucleotide ",
+        None => "",
+    }
 }
 
 /// Whether both readings of a data line give the same letters: those of a molecule named by the
@@ -481,12 +512,48 @@ mod tests {
     fn two_records_with_one_id_are_refused() {
         for fasta in [
             &b">dup1 a\nACGT\n>dup1 b\nACGT\n"[..],
-            b">NM_000001 a\nACGT\n>NM_000001.1 b\nACGT\n",
+            b">abc a\nACGT\n>ABC b\nACGT\n",
+            b">gb|AB000001.1| a\nACGT\n>emb|AB000001.1| b\nACGT\n",
             b">gi|5|ref|NM_000001.1| a\nACGT\n>gi|5 b\nACGT\n",
         ] {
             let error = read(fasta, false).unwrap_err();
             assert!(error.contains("two query records"), "{error}");
         }
+    }
+
+    // NCBI BLAST+ 2.17.0 (probes of the review): NCBI's scope finds these as two sequences.
+    #[test]
+    fn a_version_or_a_chain_tells_two_ids_apart() {
+        for fasta in [
+            &b">NM_000001.1 a\nACGT\n>NM_000001.2 b\nACGT\n"[..],
+            b">NM_000005 a\nACGT\n>NM_000005.1 b\nACGT\n",
+            b">pdb|1ABC|A a\nACGT\n>pdb|1ABC|B b\nACGT\n",
+            b">sp|P12345.2|NAME_X a\nACGT\n>sp|Q99999.1|NAME_X b\nACGT\n",
+        ] {
+            read(fasta, false).unwrap();
+        }
+    }
+
+    // fasta.cpp:1005, 2117-2125: the message names the molecule that the accession named.
+    #[test]
+    fn the_invalid_letters_message_names_the_molecule_of_the_accession() {
+        let message = |fasta: &[u8], protein: bool| {
+            let config = ReaderConfig::query("BLASTN", protein, false).with_parse_deflines(true);
+            let mut source = FastaInputSource::from_bytes(fasta, config);
+            let mut text = Vec::new();
+            read_all(&mut source, &mut |line| {
+                text.extend_from_slice(line);
+                Ok(())
+            })
+            .unwrap();
+            String::from_utf8(text).unwrap()
+        };
+        assert!(message(b">NM_000009.1 x\nACGTACGTAC!GTACGTACGT\n", false)
+            .starts_with("FASTA-Reader: Ignoring invalid nucleotide residues"));
+        assert!(message(b">NP_000009.1 x\nMKLVMKLVMK!LVMKLVMKLV\n", true)
+            .starts_with("FASTA-Reader: Ignoring invalid protein residues"));
+        assert!(message(b">plain x\nACGTACGTAC!GTACGTACGT\n", false)
+            .starts_with("FASTA-Reader: Ignoring invalid residues"));
     }
 
     #[test]

@@ -509,8 +509,8 @@ pub(crate) struct FastaReader<R: Read> {
     local_id: Option<String>,
     /// The Seq-ids of the record under `-parse_deflines`, once its defline is read.
     believed: Option<std::sync::Arc<super::believed::BelievedIds>>,
-    /// Whether the ids of the record name the other molecule (`believed::names_other_molecule`).
-    believed_other_molecule: bool,
+    /// Whether the ids of the record name a protein (`believed::named_molecule`).
+    believed_molecule: Option<bool>,
     /// The keys of the ids read so far (`believed::duplicate_id`).
     believed_keys: std::collections::HashSet<u64>,
     /// The defline line as read, kept when the configuration asks for it
@@ -561,7 +561,7 @@ impl<R: Read> FastaReader<R> {
             title: Vec::new(),
             local_id: None,
             believed: None,
-            believed_other_molecule: false,
+            believed_molecule: None,
             believed_keys: std::collections::HashSet::new(),
             defline: Vec::new(),
             bad_positions: Vec::new(),
@@ -823,7 +823,7 @@ impl<R: Read> FastaReader<R> {
         self.title.clear();
         self.local_id = None;
         self.believed = None;
-        self.believed_other_molecule = false;
+        self.believed_molecule = None;
 
         let mut need_defline = true;
         while !self.lines.at_eof() {
@@ -1020,7 +1020,7 @@ impl<R: Read> FastaReader<R> {
     /// (a generated local id for none, and for a word with a range), and the title after it.
     fn parse_believed_def_line(&mut self, defline: &[u8], warn: Warn<'_>) -> Result<(), ReadError> {
         use super::believed::{
-            duplicate_id, generated_ids, names_other_molecule, parse_believed_defline,
+            duplicate_id, generated_ids, named_molecule, parse_believed_defline,
             refuse_range_in_archive, BelievedIds,
         };
         self.titles.clear();
@@ -1072,7 +1072,7 @@ impl<R: Read> FastaReader<R> {
                 self.config.program,
             )));
         }
-        self.believed_other_molecule = names_other_molecule(&parsed.ids, self.config.protein);
+        self.believed_molecule = named_molecule(&parsed.ids);
         let ids = if parsed.ids.is_empty() || parsed.range {
             generated_ids(&self.generate_id())
         } else {
@@ -1293,7 +1293,11 @@ impl<R: Read> FastaReader<R> {
             return self.parse_gap_line(s, warn);
         }
         self.check_data_line(s)?;
-        if self.believed_other_molecule && !super::believed::reads_the_same_in_both(s) {
+        if self
+            .believed_molecule
+            .is_some_and(|named| named != self.config.protein)
+            && !super::believed::reads_the_same_in_both(s)
+        {
             return Err(ReadError::Unsupported(anyhow::anyhow!(
                 "the Seq-id of the {} on line {} names the other molecule under -parse_deflines \
                  (NCBI BLAST+ reads its letters as that molecule); this is not supported by \
@@ -1368,7 +1372,11 @@ impl<R: Read> FastaReader<R> {
             )?;
         }
         if !self.bad_positions.is_empty() {
-            let mut message = b"FASTA-Reader: Ignoring invalid residues at position(s): ".to_vec();
+            let mut message = format!(
+                "FASTA-Reader: Ignoring invalid {}residues at position(s): ",
+                super::believed::nuc_or_prot(self.believed_molecule)
+            )
+            .into_bytes();
             convert_bad_indexes_to_string(&mut message, self.line_number(), &self.bad_positions);
             self.post_warning(Problem::InvalidResidue, &message, warn)?;
         }

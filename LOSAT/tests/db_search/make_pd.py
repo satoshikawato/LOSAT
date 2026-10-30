@@ -54,6 +54,9 @@ for ext, seq, acc in (('fna', letters, 'NM_000042.1'), ('faa', amino, 'NP_000042
     one(f'{D}pd_nodef_q.{ext}', [None], seq)
     one(f'{D}pd_empty_q.{ext}', ['q1 a', 'q2 b'], seq)
 one(D + 'pd_other_q.faa', ['NM_000042.1 a'], amino)
+# The reader's message names the molecule of the accession.
+one(D + 'pd_warn_q.fna', ['NM_000042.1 a', 'plain2 b'], letters[:50] + '!' + letters[50:])
+one(D + 'pd_warn_q.faa', ['NP_000042.1 a', 'plain2 b'], amino[:50] + '!' + amino[50:])
 one(D + 'pd_nucprot_q.fna', ['NP_000042.1 a', 'AAA12345 b'], letters)
 # A query with the id of a database sequence that it hits (ids/prot_v5, ids/nucl_v5).
 write(D + 'pd_clash_q.faa', ['XP_000001.1 a'], D + 'ids/ids_q.faa')
@@ -61,4 +64,4 @@ write(D + 'pd_clash_q.fna', ['XP_000001.1 a'], D + 'ids/ids_q.fna')
 write(D + 'pd_clash_x_q.fna', ['tpe|BN000025.1| a'], D + 'ids/ids_q.fna')
 # BLASTN (megablast) against ids/nucl_v5: the query of the db.gis.* rows, which has hits.
 write(D + 'pd_ids_n_q.fna', ['gi|142|ref|NM_000142.1| q one', 'lcl|q2 q two'], 'tests/seqid/fasta/qnucl.fa')
-write(D + 'pd_clash_n_q.fna', ['AF000002.3 a'], 'tests/seqid/fasta/qnucl.fa')
+write(D + 'pd_clash_n_q.fna', ['AB000004.1 a'], 'tests/seqid/fasta/qnucl.fa')

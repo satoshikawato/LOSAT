@@ -586,9 +586,13 @@ fn refuse_id_of_a_query(
     ordinal: u32,
     program: &str,
 ) -> Result<()> {
+    use crate::blastinput::fasta_reader::believed::{query_has_key, query_keys_kept};
+    if !query_keys_kept() {
+        return Ok(());
+    }
     let mut keys = Vec::new();
-    crate::report::db_subject::join_keys(subject, &mut keys);
-    if crate::blastinput::fasta_reader::believed::query_has_key(&keys) {
+    crate::report::db_subject::scope_keys(subject, &mut keys);
+    if query_has_key(&keys) {
         return Err(parsed_refusal(
             ordinal,
             "has the Seq-id of a query read with -parse_deflines (NCBI BLAST+ shows the query \

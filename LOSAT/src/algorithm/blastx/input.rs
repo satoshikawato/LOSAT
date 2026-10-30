@@ -425,7 +425,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
 ) -> Result<Vec<FastaRecord>> {
     let mut believed_keys = std::collections::HashSet::new();
     let mut believed_generated = 0;
-    let mut believed_other_molecule = false;
+    let mut believed_molecule = None;
     let mut batch_start = 0;
     let mut batch_length = 0;
 
@@ -753,7 +753,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 warn(warning)?;
             }
             let mut record = new_record(records.len(), protein, title);
-            believed_other_molecule = false;
+            believed_molecule = None;
             if keep_defline || believed.is_some() {
                 record.source = Some(Box::new(crate::blastinput::fasta_reader::RecordSource {
                     defline: if keep_defline {
@@ -768,7 +768,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             }
             if let Some(defline) = believed {
                 record.internal_id = defline.ids.bare_id();
-                believed_other_molecule = defline.other_molecule;
+                believed_molecule = defline.molecule;
             }
             current = Some(record);
             raw_residues = 0;
@@ -786,7 +786,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         if raw_residues == 0 {
             check_data_line(line, line_index + 1)?;
         }
-        if believed_other_molecule
+        if believed_molecule.is_some_and(|named| named != protein)
             && !crate::blastinput::fasta_reader::believed::reads_the_same_in_both(line)
         {
             anyhow::bail!(
@@ -853,7 +853,9 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 line: line_index + 1,
                 kind: "invalid_residues",
                 positions: bad,
-                text: Vec::new(),
+                text: crate::blastinput::fasta_reader::believed::nuc_or_prot(believed_molecule)
+                    .as_bytes()
+                    .to_vec(),
             };
             warn(&warning)?;
             record.warnings.push(warning);
@@ -885,7 +887,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
 struct BelievedLine {
     title_search: usize,
     ids: std::sync::Arc<crate::blastinput::fasta_reader::believed::BelievedIds>,
-    other_molecule: bool,
+    molecule: Option<bool>,
 }
 
 /// `fasta_reader::reader::parse_believed_def_line` for BLASTX's reader.
@@ -900,7 +902,7 @@ fn read_believed_defline(
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
 ) -> Result<BelievedLine> {
     use crate::blastinput::fasta_reader::believed::{
-        duplicate_id, generated_ids, names_other_molecule, parse_believed_defline,
+        duplicate_id, generated_ids, named_molecule, parse_believed_defline,
         refuse_range_in_archive, BelievedIds,
     };
     let mut written = Ok(());
@@ -919,7 +921,7 @@ fn read_believed_defline(
     if parsed.range && keep_defline {
         return Err(refuse_range_in_archive("query", "BLASTX"));
     }
-    let other_molecule = names_other_molecule(&parsed.ids, protein);
+    let molecule = named_molecule(&parsed.ids);
     let ids = if parsed.ids.is_empty() || parsed.range {
         *generated += 1;
         generated_ids(&format!(
@@ -940,7 +942,7 @@ fn read_believed_defline(
     Ok(BelievedLine {
         title_search: parsed.title_search,
         ids: std::sync::Arc::new(BelievedIds::new(ids, strand)),
-        other_molecule,
+        molecule,
     })
 }
 

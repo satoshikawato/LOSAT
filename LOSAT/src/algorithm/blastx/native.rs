@@ -1138,7 +1138,10 @@ fn run_inner(
                 }
             }
             #[cfg(feature = "parallel")]
-            if let Some(pool) = x_pool.filter(|pool| pool.enabled()) {
+            // With `-parse_deflines` a batch is searched and reported before the next is read: a
+            // reported database sequence is refused by the ids of the queries read so far
+            // (`common::database::read_header`), which must not depend on the threads.
+            if let Some(pool) = x_pool.filter(|pool| pool.enabled() && !args.parse_deflines) {
                 use rayon::prelude::*;
                 enum XEvent {
                     Warn(Vec<u8>),
@@ -1734,7 +1737,7 @@ pub(crate) fn reader_warning(warning: &InputWarning, stderr: &mut dyn Write) -> 
                 let mut ranges:Vec<(usize,usize)>=Vec::new();
                 for &p in &warning.positions {if let Some(last)=ranges.last_mut().filter(|r|r.1+1==p){last.1=p;}else{if ranges.len()>=1000{break;}ranges.push((p,p));}}
                 let text=ranges.iter().map(|&(a,b)|if a==b{a.to_string()}else{format!("{a}-{b}")}).collect::<Vec<_>>().join(", ");
-                format!("FASTA-Reader: Ignoring invalid residues at position(s): On line {}: {text}",warning.line)
+                format!("FASTA-Reader: Ignoring invalid {}residues at position(s): On line {}: {text}",String::from_utf8_lossy(&warning.text),warning.line)
             },
             "defline_id"=>String::from_utf8_lossy(&warning.text).into_owned(),
             _=>unreachable!("source-registered FASTA warning"),

@@ -40,12 +40,13 @@ pub mod filter;
 pub mod header;
 pub mod index;
 pub mod lmdb_read;
+pub mod seqidlist;
 pub mod tax_files;
 pub mod tax_sqlite;
 pub mod taxdb;
 pub mod volume;
 
-pub use filter::TaxidList;
+pub use filter::{DbList, ListWarning, SeqidList, TaxidList};
 
 #[cfg(test)]
 mod tests;

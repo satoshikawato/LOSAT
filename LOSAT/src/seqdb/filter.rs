@@ -1,7 +1,8 @@
-//! A database seen through a list of taxids (line DI-8: `-taxids`, `-taxidlist`,
-//! `-negative_taxids`, `-negative_taxidlist`): the OIDs that NCBI's `CSeqDB` visits when it
-//! is opened with a user list or a negative list (`CSeqDBOIDList`), the totals it scans for
-//! them (`CSeqDBImpl::x_ScanTotals`) and the definition lines its filtered header read keeps
+//! A database seen through a list of taxids (line DI-8a: `-taxids`, `-taxidlist`,
+//! `-negative_taxids`, `-negative_taxidlist`) or of seqids (DI-8b: `-seqidlist`,
+//! `-negative_seqidlist`): the OIDs that NCBI's `CSeqDB` visits when it is opened with a
+//! user list or a negative list (`CSeqDBOIDList`), the totals it scans for them
+//! (`CSeqDBImpl::x_ScanTotals`) and the definition lines its filtered header read keeps
 //! (`CSeqDBVol::x_GetFilteredHeader`).
 //!
 //! A restricted [`SeqDb`] shows its included OIDs as the ordinal ids `0..k`, in OID order
@@ -15,8 +16,10 @@ use std::sync::Arc;
 
 use super::file::DbFile;
 use super::lmdb_read::Env;
+use super::seqidlist::{self, SeqidListFile};
 use super::{tax_files, SeqDb, SeqDbError, SeqType};
-use crate::seqid::{BlastDefline, DeflineSet};
+use crate::seqid::model::ObjectId;
+use crate::seqid::{label, BlastDefline, DeflineSet, ParsedSeqId};
 
 /// The taxids of a search's list after NCBI's expansion (`s_GetTaxIDList`): `-taxids` and
 /// `-taxidlist` give a positive list, `-negative_taxids` and `-negative_taxidlist` a negative
@@ -30,6 +33,67 @@ pub enum TaxidList {
     /// (`CSeqDBNegativeList` with taxids).
     Negative(BTreeSet<i32>),
 }
+
+/// The seqid list of a search as read from its file (`CSeqDBFileGiList(fname, eSiList)`,
+/// `seqidlist::read_si_list`): `-seqidlist` gives a positive list, `-negative_seqidlist`
+/// a negative one. A file without an id is no list at all (`CSearchDatabase::x_InitializeDb`
+/// opens the database without one); [`SeqDb::restrict`] is not called for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SeqidList {
+    pub negative: bool,
+    pub file: SeqidListFile,
+}
+
+/// The list a search restricts its database to: NCBI reads one of them
+/// (`CBlastDatabaseArgs::ExtractAlgorithmOptions`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DbList {
+    Taxids(TaxidList),
+    Seqids(SeqidList),
+}
+
+/// A warning NCBI writes while it applies the list, to be written as it is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ListWarning {
+    /// `LOG_POST(Warning << text)` or a line written to `cerr`: the text alone.
+    Log(String),
+    /// `ERR_POST(Warning << text)`: with the diagnostic prefix of the program.
+    Posted(String),
+    /// `ERR_POST(text)` at the default severity (an error that is reported before NCBI
+    /// throws): with the diagnostic prefix of the program.
+    Error(String),
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:206-226
+// ```c++
+// bool s_VerifySeqidlist(const SBlastSeqIdListInfo & list_info, const CSeqDBVolSet & volset, const CSeqDBLMDBSet & lmdb_set)
+// {
+// 	if(list_info.is_v4 && lmdb_set.IsBlastDBVersion5()) {
+// 		ERR_POST(Warning << "To obtain better run time performance, " \
+// 				            "please run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> " \
+// 				            "-seqid_file_out <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist");
+// 		return true;
+// 	}
+//
+// 	if((!list_info.is_v4) && (!lmdb_set.IsBlastDBVersion5())) {
+// 		NCBI_THROW(CSeqDBException, eArgErr,
+// 		           "Seqidlist is not in BLAST db v4 format");
+// 	}
+//
+// 	if((list_info.db_vol_length > 0) &&
+// 	   (list_info.db_vol_length != volset.GetVolumeSetLength())) {
+// 		ERR_POST(Warning << "Seqidlist file db info does not match input db");
+// 	}
+//
+// 	 return false;
+// }
+// ```
+const TEXT_LIST_WARNING: &str = "To obtain better run time performance, please run \
+     blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out <OUT_FILE_NAME> and use \
+     <OUT_FILE_NAME> as the argument to -seqidlist";
+const BINARY_LIST_V4_ERROR: &str = "Seqidlist is not in BLAST db v4 format";
+const DB_INFO_WARNING: &str = "Seqidlist file db info does not match input db";
+const EMPTY_LIST_WARNING: &str = "Empty seqid list";
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:242-244
 // ```c++
@@ -215,6 +279,46 @@ impl OidFilter {
 // ```
 // The sets are the taxids that the database holds of those requested: NCBI swaps the list's
 // set for them (seqdblmdbset.cpp:315-333, 335-354).
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:943-962
+// ```c++
+//     void x_FilterHasId(const CSeq_id & id,
+//                        bool          & have_user,
+//                        bool          & have_vol) const
+//     {
+//         if (! have_user) {
+//             if (m_UserGiList.NotEmpty() && m_UserGiList->HasIdFilters()) {
+//                 have_user |= x_ListIncludesId(*m_UserGiList, id);
+//             } else if (m_NegativeList.NotEmpty() && m_NegativeList->HasIdFilters() ) {
+//                 have_user |= x_ListIncludesId(*m_NegativeList, id);
+//             } else {
+//                 have_user = true;
+//             }
+//         }
+//
+//         if (! have_vol) {
+//             if (m_VolumeGiLists.empty()) {
+//                 have_vol = true;
+//             } else {
+// ```
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:997-1008
+// ```c++
+//     bool x_ListIncludesId(CSeqDBNegativeList & L, const CSeq_id & id) const
+//     {
+//         // A defline is included IFF either a GI or TI is found, and
+//         // that ID is not on the list.
+//
+//         // I use the terms 'included' and 'mentioned' to describe the
+//         // negative list processing as follows: "A negative list
+//         // INCLUDES a TI or GI if that ID is not MENTIONED in the
+//         // negative list."
+//
+//         bool match_type = false;
+//         bool found = L.FindId(id, match_type);
+//
+//         return (! found) && match_type;
+// ```
+// A list of seqids holds no gi and no ti (`HasIdFilters` is its `GetNumSis() > 0`), and the
+// volumes have no lists of their own (alias `GILIST` keys are refused, DI-8 DECISIONS 6).
 /// Which definition lines of an included OID a restricted database keeps.
 #[derive(Debug)]
 pub(crate) enum DeflineRule {
@@ -222,6 +326,12 @@ pub(crate) enum DeflineRule {
     Taxids(BTreeSet<i32>),
     /// A negative list: the lines with a taxid (`GetTaxIds`) outside these.
     NegativeTaxids(BTreeSet<i32>),
+    /// A positive seqid list (sorted, unique, as looked up): the lines with a Seq-id in it
+    /// (`CSeqDBGiList::FindId`).
+    Seqids(Vec<Vec<u8>>),
+    /// A negative seqid list (sorted, unique, as looked up): the lines with a Seq-id that is
+    /// not a gi or a ti and not in it (`CSeqDBNegativeList::FindId`).
+    NegativeSeqids(Vec<Vec<u8>>),
 }
 
 impl DeflineRule {
@@ -236,6 +346,11 @@ impl DeflineRule {
             DeflineRule::NegativeTaxids(found) => {
                 defline.tax_ids().iter().any(|taxid| !found.contains(taxid))
             }
+            DeflineRule::Seqids(list) => defline.ids.iter().any(|id| find_id(list, id)),
+            DeflineRule::NegativeSeqids(list) => defline.ids.iter().any(|id| {
+                let (found, match_type) = negative_find_id(list, id);
+                !found && match_type
+            }),
         }
     }
 
@@ -250,17 +365,408 @@ impl DeflineRule {
     //             }
     // ```
     // NCBI reads no Seq-id and no title for an OID whose every line is erased (`GetBioseq`
-    // returns null, seqdbvol.cpp:1370-1376). makeblastdb writes the taxid lookup files from
-    // the same lines, so an OID of the list has a line of the list; LOSAT keeps every line of
-    // an OID that would have none.
-    /// Which of the definition lines of `set` the read keeps, in order: every one when the
-    /// rule would keep none.
-    pub(crate) fn keep_mask(&self, set: &DeflineSet) -> Vec<bool> {
+    // returns null, seqdbvol.cpp:1370-1376): its reports leave the sequence's hits out
+    // without a word, in every format (dropin-survey-20261029/DI8 probe R01-R07, R14, R21:
+    // a seqid list naming a PDB molecule without its chain, a local id in other letters, or
+    // a Swiss-Prot name on a version 4 database selects the OID through the lookup table
+    // but matches none of its lines). makeblastdb writes the taxid lookup files from the
+    // same lines, so an OID of a taxid list has a line of the list; LOSAT keeps every line
+    // of such an OID that would have none, and refuses a seqid list that leaves an OID
+    // without a line (DI-8b DECISIONS 17).
+    /// Which of the definition lines of `set` the read keeps, in order: every one when a
+    /// taxid rule would keep none, `None` when a seqid rule would keep none.
+    pub(crate) fn keep_mask(&self, set: &DeflineSet) -> Option<Vec<bool>> {
         let mask: Vec<bool> = set.deflines.iter().map(|d| self.keeps(d)).collect();
         if mask.iter().any(|&keep| keep) {
-            mask
+            Some(mask)
+        } else if matches!(self, DeflineRule::Seqids(_) | DeflineRule::NegativeSeqids(_)) {
+            None
         } else {
-            vec![true; mask.len()]
+            Some(vec![true; mask.len()])
+        }
+    }
+}
+
+/// LOSAT's refusal of an included OID whose every definition line a seqid list removes.
+pub(crate) fn no_line_kept(oid: u32) -> String {
+    format!(
+        "the seqid list keeps sequence {oid} of the volume but none of its definition lines, \
+         and NCBI leaves its hits out of the report without notice"
+    )
+}
+
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:733-737
+// ```c++
+// bool CSeqDBGiList::FindSi(const string &si) const
+// {
+//     int oid(0), index(0);
+//     return (const_cast<CSeqDBGiList *>(this))->SiToOid(si, oid, index);
+// }
+// ```
+// `SiToOid` (:745-767) and `CSeqDBNegativeList::FindSi` (:1542-1560) are binary searches of
+// the sorted ids by `std::string` order (bytes).
+/// Whether the sorted list holds `si`.
+fn find_si(list: &[Vec<u8>], si: &[u8]) -> bool {
+    list.binary_search_by(|entry| entry.as_slice().cmp(si)).is_ok()
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2698-2705
+// ```c++
+// string GetBlastSeqIdString(const CSeq_id & seqid, bool version)
+// {
+// 	if(seqid.IsPir() || seqid.IsPrf()) {
+// 		return seqid.AsFastaString();
+// 	}
+//
+// 	return seqid.GetSeqIdString(version);
+// }
+// ```
+fn blast_seq_id_string(id: &ParsedSeqId, version: bool) -> Vec<u8> {
+    let mut out = Vec::new();
+    match id {
+        ParsedSeqId::Pir(_) | ParsedSeqId::Prf(_) => label::fasta(id, &mut out),
+        _ => label::content(id, version, &mut out),
+    }
+    out
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2264-2400
+// ```c++
+// ESeqDBIdType SeqDB_SimplifySeqid(CSeq_id       & bestid,
+//                                  const string  * acc,
+//                                  Int8          & num_id,
+//                                  string        & str_id,
+//                                  bool          & simpler)
+// {
+//     ESeqDBIdType result = eStringId;
+//
+//     const CTextseq_id * tsip = 0;
+//
+//     bool matched = true;
+//
+//     switch(bestid.Which()) {
+//     case CSeq_id::e_Gi:
+//         simpler = true;
+//         num_id = GI_TO(Int8, bestid.GetGi());
+//         result = eGiId;
+//         break;
+//
+//     case CSeq_id::e_Gibbsq:    /* gibbseq */
+//         simpler = true;
+//         result = eStringId;
+//         str_id = NStr::UIntToString(bestid.GetGibbsq());
+//         break;
+//
+//     case CSeq_id::e_General:
+//         {
+//             const CDbtag & dbt = bestid.GetGeneral();
+//
+//             if (dbt.CanGetDb()) {
+//                 if (dbt.GetDb() == "BL_ORD_ID") {
+//                     simpler = true;
+//                     num_id = dbt.GetTag().GetId();
+//                     result = eOID;
+//                     break;
+//                 }
+//
+//                 if (dbt.GetDb() == "PIG") {
+//                     simpler = true;
+//                     num_id = dbt.GetTag().GetId();
+//                     result = ePigId;
+//                     break;
+//                 }
+//
+//                 if (dbt.GetDb() == "ti") {
+//                     simpler = true;
+//                     num_id = (dbt.GetTag().IsStr()
+//                               ? NStr::StringToInt8(dbt.GetTag().GetStr())
+//                               : dbt.GetTag().GetId());
+//
+//                     result = eTiId;
+//                     break;
+//                 }
+//
+//
+//                 if (NStr::CompareNocase(dbt.GetDb(), "GNOMON") == 0) {
+//                     str_id = bestid.AsFastaString();
+//                     str_id = NStr::ToLower(str_id);
+//                     result = eStringId;
+//                     break;
+//                 }
+//             }
+//
+//             if (dbt.CanGetTag() && dbt.GetTag().IsStr()) {
+//                 result = eStringId;
+//                 str_id = dbt.GetTag().GetStr();
+//                 str_id = NStr::ToLower(str_id);
+//             } else {
+//                 // Use the default logic.
+//                 matched = false;
+//             }
+//         }
+//         break;
+//
+//     case CSeq_id::e_Local:     /* local */
+//         simpler = true;
+//         result = eStringId;
+//         {
+//             const CObject_id & objid = bestid.GetLocal();
+//
+//             if (objid.IsStr()) {
+//                 // sparse version will leave "lcl|" off.
+//                 str_id = objid.GetStr();
+//                 str_id = NStr::ToLower(str_id);
+//             } else {
+//                 // Local numeric ids are stored as strings.
+//                 str_id = "lcl|" + NStr::IntToString(objid.GetId());
+//             }
+//         }
+//         break;
+//
+//         // tsip types
+//
+//     case CSeq_id::e_Embl:      /* embl */
+//     case CSeq_id::e_Ddbj:      /* ddbj */
+//     case CSeq_id::e_Genbank:   /* genbank */
+//     case CSeq_id::e_Tpg:       /* Third Party Annot/Seq Genbank */
+//     case CSeq_id::e_Tpe:       /* Third Party Annot/Seq EMBL */
+//     case CSeq_id::e_Tpd:       /* Third Party Annot/Seq DDBJ */
+//     case CSeq_id::e_Other:     /* other */
+//     case CSeq_id::e_Swissprot: /* swissprot (now with versions) */
+//     case CSeq_id::e_Gpipe:     /* internal NCBI genome pipeline */
+//         tsip = bestid.GetTextseq_Id();
+//         break;
+//
+//     case CSeq_id::e_Pir:       /* pir   */
+//     case CSeq_id::e_Prf:       /* prf   */
+//         tsip = bestid.GetTextseq_Id();
+//         break;
+//
+//     default:
+//         matched = false;
+//     }
+//
+//     // Default: if we have a string, use it; if we only have seqid,
+//     // create a string.  This should not happen if the seqid matches
+//     // one of the cases above, which currently correspond to all the
+//     // supported seqid types.
+//
+//     CSeq_id::ELabelFlags label_flags = (CSeq_id::ELabelFlags)
+//         (CSeq_id::fLabel_GeneralDbIsContent | CSeq_id::fLabel_Version);
+//
+//     if (! matched) {
+//         // (should not happen normally)
+//
+//         simpler = false;
+//         result  = eStringId;
+//
+//         if (acc) {
+//             str_id = *acc;
+//             str_id = NStr::ToLower(str_id);
+//         } else {
+//             bestid.GetLabel(& str_id, CSeq_id::eFasta, label_flags);
+//             str_id = NStr::ToLower(str_id);
+//         }
+//     }
+//
+//     if (tsip) {
+//         bool found = false;
+//
+//         if (tsip->CanGetAccession()) {
+//             str_id = tsip->GetAccession();
+//             str_id = NStr::ToLower(str_id);
+//             found = true;
+//
+//             if (tsip->CanGetVersion()) {
+//                 str_id += ".";
+//                 str_id += NStr::UIntToString(tsip->GetVersion());
+//             }
+//         } else if (tsip->CanGetName()) {
+//             str_id = tsip->GetName();
+//             str_id = NStr::ToLower(str_id);
+//             found = true;
+//         }
+//
+//         if (found) {
+//             simpler = true;
+// ```
+// The list lookups call it with no accession string (`acc` null) and read only `str_id`:
+// empty when the id is a number (a gi, a `BL_ORD_ID`, `PIG` or `ti` general id). A `ti`
+// general id with a non-numeric tag throws in NCBI; it gives the empty string here.
+/// `str_id` of `SeqDB_SimplifySeqid(id, NULL, ...)`, lower-cased as NCBI leaves it.
+fn simplify_seqid_string(id: &ParsedSeqId) -> Vec<u8> {
+    let fasta_lower = |id: &ParsedSeqId| {
+        let mut out = Vec::new();
+        label::fasta(id, &mut out);
+        out.make_ascii_lowercase();
+        out
+    };
+    match id {
+        ParsedSeqId::Gi(_) => Vec::new(),
+        ParsedSeqId::Gibbsq(value) => value.to_string().into_bytes(),
+        ParsedSeqId::General(dbtag) => {
+            if dbtag.db == b"BL_ORD_ID" || dbtag.db == b"PIG" || dbtag.db == b"ti" {
+                return Vec::new();
+            }
+            if dbtag.db.eq_ignore_ascii_case(b"GNOMON") {
+                return fasta_lower(id);
+            }
+            match &dbtag.tag {
+                ObjectId::Str(tag) => tag.to_ascii_lowercase(),
+                ObjectId::Id(_) => fasta_lower(id),
+            }
+        }
+        ParsedSeqId::Local(ObjectId::Str(tag)) => tag.to_ascii_lowercase(),
+        ParsedSeqId::Local(ObjectId::Id(value)) => format!("lcl|{value}").into_bytes(),
+        ParsedSeqId::Embl(text)
+        | ParsedSeqId::Ddbj(text)
+        | ParsedSeqId::Genbank(text)
+        | ParsedSeqId::Tpg(text)
+        | ParsedSeqId::Tpe(text)
+        | ParsedSeqId::Tpd(text)
+        | ParsedSeqId::Other(text)
+        | ParsedSeqId::Swissprot(text)
+        | ParsedSeqId::Gpipe(text)
+        | ParsedSeqId::Pir(text)
+        | ParsedSeqId::Prf(text) => {
+            if let Some(accession) = &text.accession {
+                let mut str_id = accession.to_ascii_lowercase();
+                if let Some(version) = text.version {
+                    str_id.push(b'.');
+                    str_id.extend_from_slice(version.to_string().as_bytes());
+                }
+                str_id
+            } else if let Some(name) = &text.name {
+                name.to_ascii_lowercase()
+            } else {
+                Vec::new()
+            }
+        }
+        _ => fasta_lower(id),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1635-1665
+// ```c++
+// bool CSeqDBGiList::FindId(const CSeq_id & id)
+// {
+//     if (id.IsGi()) {
+//         return FindGi(id.GetGi());
+//     } else if (id.IsGeneral() && id.GetGeneral().GetDb() == "ti") {
+//         const CObject_id & obj = id.GetGeneral().GetTag();
+//
+//         TTi ti = (obj.IsId()
+//                    ? (TTi) obj.GetId()
+//                    : (TTi) NStr::StringToInt8(obj.GetStr()));
+//
+//         return FindTi(ti);
+//     } else {
+//     	if(FindSi(GetBlastSeqIdString(id, true))) return true;
+//     	if(FindSi(GetBlastSeqIdString(id, false))) return true;
+//
+//     	/// For isam lookup
+//         Int8 num_id;
+//         string str_id;
+//         bool simpler;
+//         SeqDB_SimplifySeqid(*(const_cast<CSeq_id *>(&id)), 0, num_id, str_id, simpler);
+//         if (FindSi(str_id)) return true;
+//
+//         // We may have to strip the version to find it...
+//         size_t pos = str_id.find(".");
+//         if (pos != str_id.npos) {
+//             string nover(str_id, 0, pos);
+//             return FindSi(nover);
+//         }
+//     }
+//     return false;
+// }
+// ```
+// A seqid list holds no gi and no ti: `FindGi` and `FindTi` find nothing.
+/// `CSeqDBGiList::FindId` of a list of seqids.
+fn find_id(list: &[Vec<u8>], id: &ParsedSeqId) -> bool {
+    match id {
+        ParsedSeqId::Gi(_) => false,
+        ParsedSeqId::General(dbtag) if dbtag.db == b"ti" => false,
+        _ => find_si_forms(list, id),
+    }
+}
+
+/// The lookups of a Seq-id that is not a gi or a ti: its string with and without version,
+/// then its simplified string with and without version.
+fn find_si_forms(list: &[Vec<u8>], id: &ParsedSeqId) -> bool {
+    if find_si(list, &blast_seq_id_string(id, true)) || find_si(list, &blast_seq_id_string(id, false))
+    {
+        return true;
+    }
+    let str_id = simplify_seqid_string(id);
+    if find_si(list, &str_id) {
+        return true;
+    }
+    match str_id.iter().position(|&c| c == b'.') {
+        Some(pos) => find_si(list, &str_id[..pos]),
+        None => false,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1565-1610
+// ```c++
+// bool CSeqDBNegativeList::FindId(const CSeq_id & id, bool & match_type)
+// {
+//     if (id.IsGi()) {
+//         match_type = (GetNumGis() > 0) ? true : false;
+//         if(match_type) {
+//             return(FindGi(id.GetGi()));
+//         }
+//     } else if (id.IsGeneral() && id.GetGeneral().GetDb() == "ti") {
+//         match_type = (GetNumTis() > 0) ? true : false;
+//
+//         if(match_type) {
+//             const CObject_id & obj = id.GetGeneral().GetTag();
+//
+//             Int8 ti = (obj.IsId()
+//                    ? obj.GetId()
+//                    : NStr::StringToInt8(obj.GetStr()));
+//
+//             return FindTi(ti);
+//         }
+//     } else {
+//         match_type = (GetNumSis() > 0) ? true : false;
+//
+//         if(match_type) {
+//         	if(FindSi(GetBlastSeqIdString(id, true))) return true;
+//         	if(FindSi(GetBlastSeqIdString(id, false))) return true;
+//
+//         	// For isam lookup
+//             Int8 num_id;
+//             string str_id;
+//             bool simpler;
+//
+//             SeqDB_SimplifySeqid(*(const_cast<CSeq_id *>(&id)), 0, num_id, str_id, simpler);
+//
+//             if (FindSi(str_id)) {
+//                 return true;
+//             }
+//
+//             // We may have to strip the version to find it...
+//             size_t pos = str_id.find(".");
+//             if (pos != str_id.npos) {
+//                 string nover(str_id, 0, pos);
+//                 return FindSi(nover);
+//             }
+//         }
+//     }
+//     return false;
+// }
+// ```
+/// `CSeqDBNegativeList::FindId` of a list of seqids: `(found, match_type)`.
+fn negative_find_id(list: &[Vec<u8>], id: &ParsedSeqId) -> (bool, bool) {
+    match id {
+        ParsedSeqId::Gi(_) => (false, false),
+        ParsedSeqId::General(dbtag) if dbtag.db == b"ti" => (false, false),
+        _ => {
+            let match_type = !list.is_empty();
+            (match_type && find_si_forms(list, id), match_type)
         }
     }
 }
@@ -431,6 +937,358 @@ impl LmdbEntry {
         found.oids = self.database_oids(std::mem::take(&mut found.oids));
         Ok(found)
     }
+
+    /// The LMDB file opened for a lookup, handed to `f`.
+    fn with_env<T>(
+        &self,
+        f: impl FnOnce(&Env<DbFile>) -> Result<T, SeqDbError>,
+    ) -> Result<T, SeqDbError> {
+        let file = DbFile::open(&self.lmdb)?;
+        let env = Env::open(&file).map_err(|message| SeqDbError::Format {
+            path: self.lmdb.clone(),
+            message,
+        })?;
+        f(&env)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:81-113
+    // ```c++
+    // void CSeqDBLMDBEntry::x_AdjustOidsOffset(vector<TOid> & oids) const
+    // {
+    // 	if ((m_OIDStart > 0) && (!m_isPartial)) {
+    // 		for(unsigned int i=0; i < oids.size(); i++) {
+    // 			if (oids[i] != kSeqDBEntryNotFound) {
+    // 				oids[i] +=m_OIDStart;
+    // 			}
+    // 		}
+    // 	}
+    //
+    // 	if(m_isPartial) {
+    // 		for(unsigned int i=0; i < oids.size(); i++) {
+    // 			if (oids[i] != kSeqDBEntryNotFound) {
+    // 				TOid skipped_oids = 0;
+    // 				for(unsigned int j=0;j < m_VolInfo.size(); j++) {
+    // 					if(oids[i] >=  m_VolInfo[j].max_oid) {
+    // 						skipped_oids += m_VolInfo[j].skipped_oids;
+    // 					}
+    // 					else {
+    // 						if(m_VolInfo[j].skipped_oids > 0) {
+    // 							// ids found but in skipped vol
+    // 							oids[i] = kSeqDBEntryNotFound;
+    // 						}
+    // 						else {
+    // 							oids[i] = oids[i] + m_OIDStart - skipped_oids ;
+    // 						}
+    // 						break;
+    // 					}
+    // 				}
+    // 			}
+    // 		}
+    // 	}
+    // }
+    // ```
+    /// The database OID of the LMDB file's OID `oid` of a seqid lookup: `None` when its
+    /// volume is one the database does not hold.
+    fn database_oid(&self, oid: u32) -> Option<u32> {
+        if !self.partial {
+            return Some(oid + self.oid_start);
+        }
+        let mut skipped = 0;
+        for &(max_oid, skipped_oids) in &self.volumes {
+            if oid >= max_oid {
+                skipped += skipped_oids;
+            } else {
+                return (skipped_oids == 0).then(|| oid + self.oid_start - skipped);
+            }
+        }
+        None
+    }
+
+    /// `CSeqDBLMDB::GetOids` of one id: the first OID of the key (`tax_files::acc_first_oid`),
+    /// with NCBI's messages for a database without the table and for a damaged one.
+    fn first_oid(&self, env: &Env<DbFile>, acc: &[u8]) -> Result<Option<u32>, SeqDbError> {
+        tax_files::acc_first_oid(env, acc).map_err(|message| {
+            let name = Self::base_name(&self.lmdb);
+            if message == tax_files::NO_ACCESSION_INFO {
+                SeqDbError::NotFound(format!(
+                    "Seqid list specified but no accession table is found in {name}"
+                ))
+            } else {
+                SeqDbError::Format {
+                    path: self.lmdb.clone(),
+                    message: format!("{} ({message})", tax_files::accessions_lookup_error(&name)),
+                }
+            }
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:153-157
+    // ```c++
+    // void CSeqDBLMDBEntry::AccessionsToOids(const vector<string>& accs, vector<TOid>& oids) const
+    // {
+    // 	m_LMDB->GetOids(accs, oids);
+    // 	x_AdjustOidsOffset(oids);
+    // }
+    // ```
+    // `GetOids` (seqdb_lmdb.cpp:360-400) reads the first duplicate of each key with
+    // `MDB_SET` and `MDB_GET_CURRENT`: an accession of more than about 500 OIDs, whose
+    // duplicates LMDB keeps in a sub-database, makes NCBI's read fail (`Accessions to Oids
+    // lookup error`); LOSAT reads its first duplicate like any other key (DI-8 DECISIONS 3,
+    // PD-LOSAT-NCBI-DEFECTS).
+    /// The database OID of each of `accs` in this entry (`None`: not found).
+    fn accessions_to_oids(&self, accs: &[Vec<u8>]) -> Result<Vec<Option<u32>>, SeqDbError> {
+        self.with_env(|env| {
+            accs.iter()
+                .map(|acc| {
+                    Ok(self
+                        .first_oid(env, acc)?
+                        .and_then(|oid| self.database_oid(oid)))
+                })
+                .collect()
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:402-413
+    // ```c++
+    // struct SOidSeqIdPair
+    // {
+    // 	SOidSeqIdPair(blastdb::TOid o, const string & i) : oid(o), id(i) {}
+    // 	blastdb::TOid oid;
+    // 	string id;
+    // 	static bool cmp_oid(const SOidSeqIdPair & v, const SOidSeqIdPair & k) {
+    // 		if(v.oid == k.oid) {
+    // 			return (v.id < k.id);
+    // 		}
+    // 		return (v.oid < k.oid );
+    // 	}
+    // };
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:515-556
+    // ```c++
+    // void
+    // CSeqDBLMDB::NegativeSeqIdsToOids(const vector<string>& ids, vector<blastdb::TOid>& rv) const
+    // {
+    // 	rv.clear();
+    // 	vector<blastdb::TOid> oids;
+    // 	GetOids(ids, oids);
+    // 	vector<SOidSeqIdPair> pairs;
+    // 	for (unsigned int i=0; i < ids.size(); i++) {
+    // 		if(oids[i] == kSeqDBEntryNotFound) {
+    // 			continue;
+    // 		}
+    // 		else {
+    // 			SOidSeqIdPair p(oids[i], ids[i]);
+    // 			pairs.push_back(p);
+    // 		}
+    // 	}
+    //
+    // 	if(pairs.size() == 0) {
+    // 		return;
+    // 	}
+    //
+    // 	sort (pairs.begin(), pairs.end(), SOidSeqIdPair::cmp_oid);
+    //
+    // 	CMemoryFile oid_file(m_Oid2SeqIdsFile);
+    // 	CLookupSeqIds lookup(oid_file);
+    // 	blastdb::TOid current_oid = 0;
+    // 	unsigned int i=0;
+    // 	while (i < pairs.size()) {
+    // 		vector<string> file_idlist;
+    // 		vector<string> input_idlist;
+    // 		current_oid = pairs[i].oid;
+    // 		lookup.GetSeqIdListForOid(current_oid, file_idlist);
+    // 		while ((i < pairs.size()) && (current_oid == pairs[i].oid)) {
+    // 			input_idlist.push_back(pairs[i].id);
+    // 			i++;
+    // 		}
+    // 		if(s_CompareIdList(file_idlist, input_idlist)) {
+    // 			rv.push_back(current_oid);
+    // 		}
+    //
+    // 	}
+    //
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:159-163
+    // ```c++
+    // void CSeqDBLMDBEntry::NegativeSeqIdsToOids(const vector<string>& ids, vector<blastdb::TOid>& rv) const
+    // {
+    // 	m_LMDB->NegativeSeqIdsToOids(ids, rv);
+    // 	x_AdjustOidsOffset(rv);
+    // }
+    // ```
+    // An excluded OID of a volume the database does not hold becomes `kSeqDBEntryNotFound`,
+    // which NCBI then clears as a bit (`ClearBit(-1)`, undefined); LOSAT drops it.
+    /// The database OIDs that the negative list `ids` excludes in this entry: those whose
+    /// every id of the `.nos`/`.pos` file is covered by the listed ids that have them as
+    /// first OID.
+    fn negative_seqids_to_oids(&self, ids: &[Vec<u8>]) -> Result<Vec<u32>, SeqDbError> {
+        let oids = self.with_env(|env| {
+            ids.iter()
+                .map(|id| self.first_oid(env, id))
+                .collect::<Result<Vec<_>, _>>()
+        })?;
+        let mut pairs: Vec<(u32, &[u8])> = oids
+            .iter()
+            .zip(ids)
+            .filter_map(|(oid, id)| oid.map(|oid| (oid, id.as_slice())))
+            .collect();
+        if pairs.is_empty() {
+            return Ok(Vec::new());
+        }
+        pairs.sort();
+        let nos_path = self.lookup_file("os");
+        let nos_file = DbFile::open(&nos_path)?;
+        let lookup = tax_files::OidSeqIds::open(&nos_file).map_err(|message| SeqDbError::Format {
+            path: nos_path.clone(),
+            message,
+        })?;
+        let mut excluded = Vec::new();
+        let mut i = 0;
+        while i < pairs.len() {
+            let current_oid = pairs[i].0;
+            let file_ids = lookup
+                .seqids(current_oid)
+                .map_err(|message| SeqDbError::Format {
+                    path: nos_path.clone(),
+                    message,
+                })?;
+            let mut input_ids = Vec::new();
+            while i < pairs.len() && pairs[i].0 == current_oid {
+                input_ids.push(pairs[i].1);
+                i += 1;
+            }
+            if compare_id_list(&file_ids, &input_ids).map_err(|message| SeqDbError::Format {
+                path: nos_path.clone(),
+                message,
+            })? {
+                excluded.push(current_oid);
+            }
+        }
+        Ok(excluded
+            .into_iter()
+            .filter_map(|oid| self.database_oid(oid))
+            .collect())
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:461-513
+// ```c++
+// bool s_CompareIdList(vector<string> & file_idlist, vector<string> &input_idlist)
+// {
+// 	bool rv = false;
+// 	vector<string>::iterator f_itr = file_idlist.begin();
+// 	vector<string>::iterator i_itr = input_idlist.begin();
+// 	while(f_itr != file_idlist.end() && i_itr != input_idlist.end()) {
+// 		if(*i_itr == *f_itr) {
+// 			i_itr++;
+// 			f_itr++;
+// 			continue;
+// 		}
+// 		else {
+// 			CSeq_id seq_id(*i_itr, CSeq_id::fParse_RawText | CSeq_id::fParse_AnyLocal | CSeq_id::fParse_PartialOK);
+// 			// Input id is PDB with just mol id
+// 			if(seq_id.IsPdb() &&  !seq_id.GetPdb().IsSetChain_id()) {
+// 				CSeq_id file_seqid(*f_itr, CSeq_id::fParse_RawText | CSeq_id::fParse_AnyLocal | CSeq_id::fParse_PartialOK);
+// 				if (file_seqid.IsPdb() && file_seqid.GetPdb().GetMol().Get() == *i_itr) {
+// 					f_itr++;
+// 					string tmp_pdb = *i_itr;
+// 					while ((f_itr != file_idlist.end()) && ((*f_itr).find_first_of(tmp_pdb) == 0)){
+// 						f_itr++;
+// 					}
+// 					// Skip pdb id in input list but with chain id
+// 					while ((i_itr != input_idlist.end()) && ((*i_itr).find_first_of(tmp_pdb) == 0)){
+// 						i_itr++;
+// 					}
+// 					continue;
+// 				}
+// 			}
+// 			else {
+// 				CSeq_id file_seq_id(*f_itr, CSeq_id::fParse_RawText | CSeq_id::fParse_AnyLocal | CSeq_id::fParse_PartialOK);
+// 				if( file_seq_id.GetSeqIdString(false) == *i_itr) {
+// 					i_itr++;
+// 					// Skip identical id in input list but with version
+// 					if((i_itr != input_idlist.end()) && (file_seq_id.GetSeqIdString(true) == *i_itr)){
+// 						i_itr++;
+// 					}
+// 					f_itr++;
+// 					continue;
+// 				}
+// 			}
+// 			break;
+// 		}
+// 	}
+// 	if(f_itr == file_idlist.end()){
+// 		rv=true;
+// 	}
+//
+// 	file_idlist.clear();
+// 	input_idlist.clear();
+// 	return rv;
+// }
+// ```
+// `find_first_of(tmp_pdb) == 0` asks whether the first character of the id is one of the
+// characters of the molecule name, not whether the id starts with the name: kept as it is.
+// A PDB id of the list with a molecule name that is not the file id's falls through to
+// `break` (the `else` is not taken), as in NCBI.
+/// Whether the sorted ids of the file (`file_ids`, an OID's `.nos` entries) are all covered
+/// by the sorted listed ids `input_ids` that resolved to the OID. `Err`: an id that does not
+/// parse (NCBI throws `CSeqIdException`).
+fn compare_id_list(file_ids: &[Vec<u8>], input_ids: &[&[u8]]) -> Result<bool, String> {
+    let parse = |text: &[u8]| {
+        seqidlist::parse_list_id(text).map_err(|error| {
+            format!(
+                "{}: {}",
+                String::from_utf8_lossy(text),
+                error.what().trim_end()
+            )
+        })
+    };
+    let starts_with_one_of = |s: &[u8], set: &[u8]| s.first().is_some_and(|c| set.contains(c));
+    let (mut f, mut i) = (0usize, 0usize);
+    while f < file_ids.len() && i < input_ids.len() {
+        if input_ids[i] == file_ids[f].as_slice() {
+            i += 1;
+            f += 1;
+            continue;
+        }
+        let seq_id = parse(input_ids[i])?;
+        if let ParsedSeqId::Pdb(pdb) = &seq_id {
+            if pdb.chain_id.is_none() {
+                let file_seqid = parse(&file_ids[f])?;
+                if matches!(&file_seqid, ParsedSeqId::Pdb(file_pdb) if file_pdb.mol == input_ids[i]) {
+                    f += 1;
+                    let tmp_pdb = input_ids[i];
+                    while f < file_ids.len() && starts_with_one_of(&file_ids[f], tmp_pdb) {
+                        f += 1;
+                    }
+                    while i < input_ids.len() && starts_with_one_of(input_ids[i], tmp_pdb) {
+                        i += 1;
+                    }
+                    continue;
+                }
+            }
+        } else {
+            let file_seq_id = parse(&file_ids[f])?;
+            if blast_seq_id_string_plain(&file_seq_id, false) == input_ids[i] {
+                i += 1;
+                if i < input_ids.len() && blast_seq_id_string_plain(&file_seq_id, true) == input_ids[i] {
+                    i += 1;
+                }
+                f += 1;
+                continue;
+            }
+        }
+        break;
+    }
+    Ok(f == file_ids.len())
+}
+
+/// `CSeq_id::GetSeqIdString(with_version)`.
+fn blast_seq_id_string_plain(id: &ParsedSeqId, with_version: bool) -> Vec<u8> {
+    let mut out = Vec::new();
+    label::content(id, with_version, &mut out);
+    out
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:85-89
@@ -450,12 +1308,20 @@ fn missing_file(path: &Path) -> SeqDbError {
     ))
 }
 
+/// A lookup file names an OID the database does not have.
+fn bad_lookup_oid(lmdb: &Path, oid: u32, num_oids: u32) -> SeqDbError {
+    SeqDbError::Format {
+        path: lmdb.to_path_buf(),
+        message: format!("the seqid lookup gives OID {oid} of a database of {num_oids} sequences"),
+    }
+}
+
 /// The OIDs of the sequences `first..end` of a volume read per window of the index.
 const SCAN_WINDOW: u32 = 1 << 16;
 
 impl SeqDb {
     /// The OID of ordinal id `ordinal`: `ordinal` itself unless the database is restricted
-    /// ([`SeqDb::restrict_taxids`]). NCBI prints it as `n` of `gnl|BL_ORD_ID|n`.
+    /// ([`SeqDb::restrict`]). NCBI prints it as `n` of `gnl|BL_ORD_ID|n`.
     pub fn oid(&self, ordinal: u32) -> u32 {
         match &self.filter {
             Some(filter) => filter.select(ordinal),
@@ -463,7 +1329,7 @@ impl SeqDb {
         }
     }
 
-    /// Whether the database is restricted by a taxid list ([`SeqDb::restrict_taxids`]).
+    /// Whether the database is restricted by a list ([`SeqDb::restrict`]).
     pub fn is_restricted(&self) -> bool {
         self.filter.is_some()
     }
@@ -717,13 +1583,243 @@ impl SeqDb {
                 words[word] |= 1u64 << bit;
             }
         }
-        let filter = OidFilter::new(words, num_oids);
-        let (total_length, max_length) = self.scan_totals(&filter)?;
         let rule = if negative {
             (!found.is_empty()).then(|| DeflineRule::NegativeTaxids(found))
         } else {
             Some(DeflineRule::Taxids(found))
         };
+        self.apply_filter(words, num_oids, rule)?;
+        Ok(warning)
+    }
+
+    /// Restricts the database to `list` ([`SeqDb::restrict_taxids`], [`SeqDb::restrict_seqids`]);
+    /// the warnings NCBI writes go to `warnings`, before an error too.
+    pub fn restrict(
+        &mut self,
+        list: &DbList,
+        warnings: &mut Vec<ListWarning>,
+    ) -> Result<(), SeqDbError> {
+        match list {
+            DbList::Taxids(list) => {
+                warnings.extend(self.restrict_taxids(list)?.map(ListWarning::Log));
+                Ok(())
+            }
+            DbList::Seqids(list) => self.restrict_seqids(list, warnings),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:236-240
+    // ```c++
+    //     if (m_UserList.NotEmpty() && m_UserList->NotEmpty()) {
+    //     	if(user_list->GetNumSis() > 0) {
+    //     		if(s_VerifySeqidlist(user_list->GetListInfo(), volset, lmdb_set)) {
+    //     			s_ProcessPositiveSeqIDsForV5(user_list);
+    //     		}
+    //     	}
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:245-252
+    // ```c++
+    //     	if (lmdb_set.IsBlastDBVersion5()) {
+    //     		if(user_list->GetNumSis() > 0) {
+    //     			vector<string> accs;
+    //     			vector<blastdb::TOid> oids;
+    //     			user_list->GetSiList(accs);
+    //     			lmdb_set.AccessionsToOids(accs, oids);
+    //     			for(unsigned int i=0; i < accs.size(); i++) {
+    //     				user_list->SetSiTranslation(i, oids[i]);
+    //     			}
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:294-302
+    // ```c++
+    // void CSeqDBOIDList::x_ApplyUserGiList(CSeqDBGiList   & gis)
+    //
+    // {
+    //     //m_Atlas.Lock(locked);
+    //
+    //     if (gis.Empty()) {
+    //         x_ClearBitRange(0, m_NumOIDs);
+    //         m_NumOIDs = 0;
+    //         return;
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:323-329
+    // ```c++
+    //     if(gis.GetNumSis()) {
+    //         for(j = 0; j < gis.GetNumSis(); j++) {
+    //             int oid = gis.GetSiOid(j).oid;
+    //             if ((oid != -1) && (oid < m_NumOIDs)) {
+    //                 gilist_oids->SetBit(oid);
+    //             }
+    //         }
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:328-331
+    // ```c++
+    //     		if(m_NegativeList->GetNumSis() > 0) {
+    //     			vector<blastdb::TOid> & oids = m_NegativeList->SetExcludedOids();
+    //     			lmdb_set.NegativeSeqIdsToOids(m_NegativeList->GetSiList(), oids);
+    //
+    //     		}
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:365-374
+    // ```c++
+    // void CSeqDBOIDList::x_ApplyNegativeList(CSeqDBNegativeList & nlist, bool is_v5)
+    //
+    // {
+    //     // We require a normalized list in order to turn bits off.
+    // 	m_AllBits->Normalize();
+    //     const vector<blastdb::TOid> & excluded_oids = nlist.GetExcludedOids();
+    // 	for(unsigned int i=0; i < excluded_oids.size(); i++) {
+    // 	    m_AllBits->ClearBit(excluded_oids[i]);
+    // 	}
+    // ```
+    // A text list that lost every id (all `gi|N`): NCBI warns `Empty seqid list` and searches
+    // the whole database, positive or negative (probe S17, S18, R08, R09 of
+    // dropin-survey-20261029/DI8: 500 hits of 514 sequences, the statistics of the whole
+    // database; a positive list with no id would clear every OID by the code above, which
+    // the run does not show). LOSAT does what the run shows: the warnings, no restriction.
+    // The ids of a binary list are used as written (the alias tool wrote them as the
+    // processing writes them). The lists the volumes keep for the filtered header read are
+    // the processed ids.
+    /// Restricts the database to the OIDs of a seqid list, as NCBI's `CSeqDB` opened with the
+    /// list (`CSeqDBGiListSet::x_ResolvePositiveList` / `x_ResolveNegativeList`, then
+    /// `CSeqDBOIDList`): the ordinal ids, totals and definition lines as
+    /// [`SeqDb::restrict_taxids`] leaves them. The warnings NCBI writes (a text list on a
+    /// version 5 database, a list with no id, a binary list of another database) go to
+    /// `warnings`, before an error too.
+    ///
+    /// Errors: NCBI's (`SeqDbError::NotFound`): a binary list on a version 4 database, an
+    /// id that does not parse, a database without the accession table; the reader's for
+    /// damaged lookup files.
+    pub fn restrict_seqids(
+        &mut self,
+        list: &SeqidList,
+        warnings: &mut Vec<ListWarning>,
+    ) -> Result<(), SeqDbError> {
+        if !self.is_version5() {
+            return self.restrict_seqids_v4(list, warnings);
+        }
+        let ids: Vec<Vec<u8>> = if list.file.info.is_v4 {
+            warnings.push(ListWarning::Posted(TEXT_LIST_WARNING.to_string()));
+            let ids = seqidlist::process_for_v5(&list.file.ids).map_err(|invalid| {
+                warnings.push(ListWarning::Error(invalid.error.message.clone()));
+                SeqDbError::NotFound(invalid.message())
+            })?;
+            if ids.is_empty() {
+                warnings.push(ListWarning::Posted(EMPTY_LIST_WARNING.to_string()));
+                return Ok(());
+            }
+            ids
+        } else {
+            if list.file.info.db_vol_length > 0
+                && list.file.info.db_vol_length != self.whole_total_length
+            {
+                warnings.push(ListWarning::Posted(DB_INFO_WARNING.to_string()));
+            }
+            let mut ids = list.file.ids.clone();
+            ids.sort();
+            ids
+        };
+        let num_oids = self.volume_starts[self.volumes.len()];
+        let words = self.seqid_words_v5(&ids, list.negative, num_oids)?;
+        let rule = if list.negative {
+            DeflineRule::NegativeSeqids(ids)
+        } else {
+            DeflineRule::Seqids(ids)
+        };
+        self.apply_filter(words, num_oids, Some(rule))?;
+        if !list.negative {
+            self.check_lines_kept()?;
+        }
+        Ok(())
+    }
+
+    /// Reads the definition lines of every included OID of a positive seqid list, so that
+    /// an OID the list keeps without a line is refused before the search (`no_line_kept`);
+    /// a negative list cannot leave a kept OID without a line short of NCBI's corner cases
+    /// of `s_CompareIdList`, which the read of the line refuses in the same words.
+    fn check_lines_kept(&self) -> Result<(), SeqDbError> {
+        for ordinal in 0..self.num_seqs {
+            let oid = self.oid(ordinal);
+            let (at, vol_oid) = self.volume_of_oid(oid);
+            self.volumes[at].defline_set(vol_oid)?;
+        }
+        Ok(())
+    }
+
+    /// The volume holding OID `oid` and the OID's number in it.
+    fn volume_of_oid(&self, oid: u32) -> (usize, u32) {
+        let at = self.volume_starts[..self.volumes.len()].partition_point(|&start| start <= oid) - 1;
+        (at, oid - self.volume_starts[at])
+    }
+
+    /// The bitmap of the OIDs a seqid list keeps in a version 5 database (`ids`: sorted and
+    /// unique, as the lookup wants them).
+    fn seqid_words_v5(
+        &self,
+        ids: &[Vec<u8>],
+        negative: bool,
+        num_oids: u32,
+    ) -> Result<Vec<u64>, SeqDbError> {
+        let entries = self.lmdb_entries()?;
+        let word_count = (num_oids as usize).div_ceil(64);
+        if negative {
+            let mut words = vec![u64::MAX; word_count];
+            for entry in &entries {
+                for oid in entry.negative_seqids_to_oids(ids)? {
+                    if oid >= num_oids {
+                        return Err(bad_lookup_oid(&entry.lmdb, oid, num_oids));
+                    }
+                    words[(oid / 64) as usize] &= !(1u64 << (oid % 64));
+                }
+            }
+            return Ok(words);
+        }
+        let mut words = vec![0u64; word_count];
+        let mut oids: Vec<Option<u32>> = vec![None; ids.len()];
+        for (at, entry) in entries.iter().enumerate() {
+            let found = entry.accessions_to_oids(ids)?;
+            for (slot, oid) in oids.iter_mut().zip(found) {
+                if at == 0 || oid.is_some() {
+                    *slot = oid;
+                }
+            }
+        }
+        for oid in oids.into_iter().flatten() {
+            if oid < num_oids {
+                words[(oid / 64) as usize] |= 1u64 << (oid % 64);
+            }
+        }
+        Ok(words)
+    }
+
+    /// [`SeqDb::restrict_seqids`] on a version 4 database: the string ISAM lookups of each
+    /// volume (`CSeqDBVol::IdsToOids`), after `PreprocessIdsForISAMSiLookup`.
+    fn restrict_seqids_v4(
+        &mut self,
+        list: &SeqidList,
+        _warnings: &mut [ListWarning],
+    ) -> Result<(), SeqDbError> {
+        if !list.file.info.is_v4 {
+            return Err(SeqDbError::NotFound(BINARY_LIST_V4_ERROR.to_string()));
+        }
+        Err(SeqDbError::Unsupported {
+            path: self.volumes[0].base().to_path_buf(),
+            message: "a seqid list on a version 4 database (string ISAM lookup) is not read yet"
+                .to_string(),
+        })
+    }
+
+    /// Makes `words` (bit `oid` set for an included OID) the database's OID set: the
+    /// ordinal ids, NCBI's scanned totals and the definition lines `rule` keeps.
+    fn apply_filter(
+        &mut self,
+        words: Vec<u64>,
+        num_oids: u32,
+        rule: Option<DeflineRule>,
+    ) -> Result<(), SeqDbError> {
+        let filter = OidFilter::new(words, num_oids);
+        let (total_length, max_length) = self.scan_totals(&filter)?;
         if let Some(rule) = rule.map(Arc::new) {
             for volume in &mut self.volumes {
                 volume.set_defline_rule(Arc::clone(&rule));
@@ -733,7 +1829,7 @@ impl SeqDb {
         self.total_length = total_length;
         self.max_length = max_length;
         self.filter = Some(Box::new(filter));
-        Ok(warning)
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1569-1590

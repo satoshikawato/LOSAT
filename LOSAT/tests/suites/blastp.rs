@@ -53,6 +53,8 @@ mod blastp_restricted_gapped;
 mod blastp_subj_meta;
 #[path = "../blastp_subject_runs.rs"]
 mod blastp_subject_runs;
+#[path = "../blastp_tree_pool.rs"]
+mod blastp_tree_pool;
 #[path = "../blastp_ungap_sent.rs"]
 mod blastp_ungap_sent;
 #[path = "../run_local_blastp.rs"]

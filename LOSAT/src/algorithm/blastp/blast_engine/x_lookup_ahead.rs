@@ -1000,6 +1000,7 @@ mod tests {
             db: None,
             taxid_filter: Default::default(),
             dbsize: None,
+            show_gis: false,
             task: task.to_string(),
             evalue: None,
             threshold: None,

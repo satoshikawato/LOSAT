@@ -340,6 +340,7 @@ export LOSAT_X_BPGAP=1
 export LOSAT_X_BPGAP16=1
 export LOSAT_X_BPGAPBAND=1
 export LOSAT_X_BPHITBF=1
+export LOSAT_X_BPHITSFLAT=1
 export LOSAT_X_BPIHPOOL=1
 export LOSAT_X_BPLISTEDLEAN=1
 export LOSAT_X_BPLK16=1
@@ -433,6 +434,7 @@ export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNKEEPFEW=1
 export LOSAT_X_TBNLINKCTX=1
 export LOSAT_X_TBNLINKSETS=1
+export LOSAT_X_TBNLUTLEAN=1
 export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNPAIRCAP=1
 export LOSAT_X_TBNREAPIDX=1
@@ -1869,6 +1871,34 @@ Rebuilding less:
   rounds), x0.997 and x0.995 (human, 3 and 6), x0.995 and x0.995 (Swiss-Prot, 2 and 3); 16 threads (node 1 CPUs
   32-47 warmed, 8 rounds rotated with an A/A arm, head 4bab83fa) Swiss-Prot q100 wall x1.0000 (A/A x0.9992), cycles
   x1.0008 (A/A x0.9986), `bp_hsap` wall x1.0000 (A/A x1.0000), cycles x1.0004 (A/A x1.0017).
+- `LOSAT_X_BPHITSFLAT=1` (BLASTP, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
+  added it (perf/bp-hits-flat, v4-D12 s26, `DECISIONS` 71-72): on unless it is `0`) a subject's preliminary HSPs go to
+  their queries' compact lists through one array of their positions in query order (`blastp/blast_engine/x_hits_flat.rs`)
+  instead of one vector per query kept in the subject scratch (`BlastpSubjectScratch::preliminary_hits_by_query`, cleared,
+  never shrunk). NCBI makes the per-query lists for each subject (`calloc` of `num_queries` pointers and
+  `Blast_HSPListNew` per query with HSPs, `hspfilter_collector.c:112-153`) and hands them to the hit lists, so a thread keeps
+  nothing of them; the scratch kept, per query, the most HSPs that query had in any one subject of the thread, so the
+  preliminary stage held, per thread, the sum over the queries of each query's largest list (UniRef50 q100 at 32 threads:
+  14.0 MiB of capacity). With the switch a stable counting sort
+  (`order_by_query`: counts, ends, filled from the last HSP back) puts the positions in query order, and each query's HSPs are
+  read in place from the subject's list in the order of that list, the order the per-query vectors held them in
+  (`x_build_compact_preliminary_hsp_list` takes an iterator); a thread keeps 4 bytes per HSP of its largest subject and 4 per
+  query. The lists, their order and every value are unchanged (lib test `x_hits_flat_order_matches_the_per_query_vectors`:
+  200 random subjects, 1-5 queries, a query index past `num_queries`).
+  Evidence 2026-10-30 (v4-D12 s26, workstation, head e03234b2 on dev a46c6897c; arms default, `=0`, and the dev base
+  built the same way, 8 rounds rotated, peak RssAnon from 2 ms samples; every report identical across arms): UniRef50
+  q100 `-evalue 0.001` at 32 threads (node 1, membind 1) 129.8 [126.9-134.7] MiB against the dev base 143.1
+  [141.7-144.2] and `=0` 142.5 [139.3-144.7] (9.4-15.4 MiB lower in 8 of 8 rounds; wall x0.9982 [0.9905-1.0066]); q100
+  against a third of UniRef50 at 16 threads (two runs side by side, 12 slots): the highest sample of the preliminary plateau (30-110 s) 39.9
+  [39.7-40.1] against 42.0 [41.8-42.1] and `=0` 42.0 [41.8-42.1], while the peak, set by the jump after that plateau
+  (about 146-151 s), spreads over 64-81 MiB in every arm (69.9 against 69.1 and `=0` 66.9);
+  3,000 human x `BlastDBSpecies6` at 16 threads 37.4 [37.1-37.5] against 37.4 [37.2-37.6]; one thread (node 0) human
+  12.9 against 13.0, OrthoFinder Blast0_6 19.2 against 19.2 MiB. Census (probe exp/d12s26-treeprobe 5abfcfc3, UniRef50
+  q100 at 32 threads): the per-query vectors held 14.0 MiB of capacity.
+  Time: one thread (`perf stat` `:u`, node 0) instructions x1.0003 of the dev base in both cases (`=0` x1.0000), cycles human x0.9985 (`=0` x0.9970), Blast0_6 x0.9971
+  (`=0` x0.9984); 16 threads (node 1 CPUs 32-47 warmed 3 s, 8 rounds) Swiss-Prot q100 instructions x1.0005, cycles
+  x0.9980 (8 of 8 below 1; `=0` x0.9963), wall x0.9966; human instructions x1.0003, cycles x0.9972 (`=0` x0.9966), wall
+  x0.9956.
 - `LOSAT_X_BPLK16=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-lk16, v4-D12 s19-s20,
   `DECISIONS` 59-61): on unless it is `0`; recorded for `LOSAT_X_REACH` once per table, taken where the table has 16-bit
   hits): exact blastp's block tables (`-task blastp`, the table built
@@ -5330,6 +5360,44 @@ Scheduling (each value computed by one thread with the original function; order 
   x0.9986 / x1.0014 / x0.9985 (10, 4, 6 of 12 faster), `=0` x0.9974 / x0.9972 / x0.9999. Against `=0` in the same
   binary the switch costs x1.004-1.008 on `dmel_b4.faa` (the extra stops), which the binary's layout hides against
   the base.
+- `LOSAT_X_TBNLUTLEAN=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-30;
+  `=0` turns it off; `tblastx/lookup/x_lut_direct.rs` `x_build_lean`, `tblastx/lookup/backbone.rs`
+  `x_lookup_table_for_profile`): a query batch's lookup table is built with the passes of the in-place builder of
+  BLASTX, BLASTP and TBLASTX (`x_build_direct`: count, layout, fill, no chains) with every temporary freed by the
+  build: the exact backbone as a counting sort of the query's words, the neighbour lists of its words made once into
+  one vector (no memo kept by the thread), and the per-cell counts reused as the fill cursors. The table's backbone
+  and overflow are mapped (on 64-bit glibc a capacity above its mmap ceiling, `utils/x_mapped.rs`
+  `x_unthresholded_capacity`; only the pages written are resident; elsewhere the capacity `Vec` gives), so that a
+  batch's table goes back when its search ends.
+  The chain builder kept the exact and thin backbones' cells (446 KiB each), their chains' slabs (about 1.4 MiB) and
+  the counts next to the new table, 3.4 MiB at once for a batch of 18,000 letters; the lean build peaks at about
+  1.5 MiB. TBLASTN builds each batch's table on the thread of the batch's first subject, and a thread's glibc arena
+  keeps the high water of what it allocated: with the batches searched side by side (`-subject`) the difference
+  stayed in each building thread's arena under what its search allocated later. With the batches searched one after
+  the other (`-db`) glibc trimmed the chain builder's large free top with the table at the batch's end; the lean
+  build's smaller one is not trimmed, and a table left in the arena kept the peak 1-3 % above the chain builder's
+  until the table was mapped.
+  The table is the chain builder's (unit test `lean_table_equals_reference_for_thresholds_masks_matrices_and_word_lengths`:
+  BLOSUM62 word lengths 2 and 3, BLOSUM45 at 2 and 3, PAM30, thresholds 0-1000, masks, the overflow array and a query
+  set without words; `tests/tblastn_lut_lean.rs`: the same report as `=0` with BLOSUM62 word size 3 and BLOSUM45 word
+  size 2, at one and four threads, every table lean by default and with chains with `=0`, read from
+  `[X_STATS] TBNLUTLEAN lean= chain=` with `LOSAT_X_STATS`). Always: every TBLASTN lookup table (LOSAT's TBLASTN takes
+  word size 3, and 2 with BLOSUM45) outside diagnostics mode, whose prints read the chains; a table of 4 or more
+  letters a word (backbone indexes over 16 bits, which the CLI refuses) would take the chain builder, as the in-place
+  builders decline it.
+  Measured 2026-10-30 on the workstation (2x Xeon Gold 6338; base dev a2ee6ff3; every output of a case the same
+  bytes in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16
+  CPUs for every run, medians in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): the 595 proteins of AP027131
+  x AP027133 (`-db_gencode 4`) `-subject` at 1 / 16 / 32 / 40 / 48 threads 17 / 53 / 68 / 76 / 83 -> 17 / 45 / 60 /
+  67 / 75 MiB (8 rounds, lower in every pair; NCBI `-subject` runs one thread: 81), `-db` at 48 95 -> 93 (NCBI 115);
+  `dmel_b4.faa` x zebrafish cDNAs (`-db`, `-evalue 1e-5 -max_target_seqs 5`) at 16 / 32 / 40 / 48 62 / 90 / 102 / 116
+  -> 61 / 90 / 101 / 116 (x0.985 / x0.994 / x0.997 / x0.994, 16 rounds, lower in 8 / 12 / 9 / 11 of the pairs; NCBI
+  128 / 139 / 145 / 151); `=0` in the same binary x0.994-1.012 of the base. At one thread x0.9957 of the instructions
+  (AP027131 `-subject`) and x0.9998 (`dmel_b4.faa`); BLASTX, BLASTP and TBLASTX x1.00000 (their code is the same).
+  Time (node 1, cores warmed 3 s before each run, arms alternating in order; the PR's binary against the base, and
+  `=0` in the PR's binary): AP027131 `-subject` at 1 / 16 / 32 threads x0.9949 / x0.9986 / x0.9840 (11, 7, 10 of 12
+  faster), against `=0` x0.9937 / x0.9957 / x0.9844; `dmel_b4.faa` at 1 / 8 / 16 / 32 x0.9986 / x0.9963 / x0.9965 /
+  x0.9946 (6 of 8, 11, 9, 11 of 12 faster), against `=0` x0.9989 / x0.9987 / x0.9984 / x0.9919.
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

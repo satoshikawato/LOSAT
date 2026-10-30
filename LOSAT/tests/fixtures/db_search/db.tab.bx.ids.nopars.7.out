@@ -1,0 +1,30 @@
+# BLASTX 2.17.0+
+# Query: bq1 reverse complement of a back-translation of qp1
+# Database: tests/db_search/x16_taxid
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, query id, query gi, query acc., query length, subject id, subject ids, subject gi, subject gis, subject acc., subject accs., subject length
+# 10 hits found
+bq1	st2	100.000	135	0	0	405	1	1	135	5.00e-105	283	bq1	0	bq1	420	st2	st2	0	0	st2	st2	135
+bq1	st2	31.250	16	11	0	346	393	5	20	0.59	15.4	bq1	0	bq1	420	st2	st2	0	0	st2	st2	135
+bq1	st2	30.769	13	9	0	159	197	87	99	0.65	15.4	bq1	0	bq1	420	st2	st2	0	0	st2	st2	135
+bq1	st2	37.500	16	10	0	50	97	6	21	2.3	13.9	bq1	0	bq1	420	st2	st2	0	0	st2	st2	135
+bq1	st2	35.714	14	8	1	133	174	108	120	8.3	11.9	bq1	0	bq1	420	st2	st2	0	0	st2	st2	135
+bq1	st2	37.500	24	10	2	50	121	115	133	9.5	11.9	bq1	0	bq1	420	st2	st2	0	0	st2	st2	135
+bq1	st1	100.000	130	0	0	420	31	1	130	1.31e-100	272	bq1	0	bq1	420	st1	st1	0	0	st1	st1	130
+bq1	st1	31.250	16	11	0	346	393	10	25	0.52	15.8	bq1	0	bq1	420	st1	st1	0	0	st1	st1	130
+bq1	st1	30.769	13	9	0	159	197	92	104	0.59	15.4	bq1	0	bq1	420	st1	st1	0	0	st1	st1	130
+bq1	st1	37.500	16	10	0	50	97	11	26	2.6	13.5	bq1	0	bq1	420	st1	st1	0	0	st1	st1	130
+# BLASTX 2.17.0+
+# Query: bq2 back-translation of qp1 from residue 2, one base in front
+# Database: tests/db_search/x16_taxid
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, query id, query gi, query acc., query length, subject id, subject ids, subject gi, subject gis, subject acc., subject accs., subject length
+# 2 hits found
+bq2	st2	100.000	135	0	0	14	418	1	135	4.79e-105	283	bq2	0	bq2	418	st2	st2	0	0	st2	st2	135
+bq2	st1	100.000	129	0	0	2	388	2	130	6.09e-100	270	bq2	0	bq2	418	st1	st1	0	0	st1	st1	130
+# BLASTX 2.17.0+
+# Query: bq3 300 random bases
+# Database: tests/db_search/x16_taxid
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, query id, query gi, query acc., query length, subject id, subject ids, subject gi, subject gis, subject acc., subject accs., subject length
+# 2 hits found
+bq3	st2	40.000	15	9	0	70	114	22	36	0.25	16.2	bq3	0	bq3	300	st2	st2	0	0	st2	st2	135
+bq3	st1	40.000	15	9	0	70	114	27	41	0.26	16.2	bq3	0	bq3	300	st1	st1	0	0	st1	st1	130
+# BLAST processed 3 queries

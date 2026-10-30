@@ -455,6 +455,8 @@ pub struct SeqDb {
     /// The search path the database was found on (`open_in`), for files NCBI looks for
     /// beside it (`taxdb.bti`).
     search_path: Option<SearchPath>,
+    /// `-show_gis` of the search that reads the headers for its reports.
+    reports_show_gis: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1093-1102
@@ -509,6 +511,16 @@ impl SeqDb {
         self.search_path
             .as_ref()
             .is_some_and(|path| path.resolve_file("taxdb.bti").is_some())
+    }
+
+    /// Whether the reports of the search show the headers it reads with `-show_gis`.
+    pub fn reports_show_gis(&self) -> bool {
+        self.reports_show_gis
+    }
+
+    /// Sets `reports_show_gis`.
+    pub fn set_reports_show_gis(&mut self, show_gis: bool) {
+        self.reports_show_gis = show_gis;
     }
 
     /// The search path the database was opened with (`open_in`), none for a database opened
@@ -797,6 +809,7 @@ impl SeqDb {
             whole_total_length: total_length,
             filter: None,
             search_path: None,
+            reports_show_gis: false,
         };
         Ok(db)
     }

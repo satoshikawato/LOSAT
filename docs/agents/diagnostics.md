@@ -3534,6 +3534,14 @@ Scheduling (each value computed by one thread with the original function; order 
   the search's wall time. A query's hit list does not read another's and the HSPs of a query keep their order, so that the
   lists are the same (lib test `grouped_hit_lists_equal_the_lists_per_query`; `tests/blastn_hit_group.rs` compares reports
   with `=0`: `-subject` and `-db`, 1 and 4 threads, blastn-short and megablast).
+  Evidence 2026-10-30 (workstation; dev 5ce40a9e0 / 13f17367e / that head with `=0` in one window, sampled VmHWM, one sha
+  per case): megablast of ENA DRR1003646 reads against 16S `-db` at 16 threads, 1e6 reads 37.47 -> 5.34 s (x0.146; NCBI
+  12.76 s in the same window) with VmHWM x0.9997 (537.8 -> 536.4 MiB; NCBI 5,132), 1e5 x0.174 and x1.008, 1e4 x0.520 and
+  x0.999; at one thread 1e6 x0.466, instructions:u x0.359. No gain and no loss where a batch holds few queries per subject:
+  QIIME-form amplicons 1e5 at 16 threads x0.996 (518.7 -> 516.6 s, one pair), VmHWM x0.9995; cDNAs against 3 Mb
+  (blastn, megablast, dc-megablast, `-subject`) and one query against a genome at one thread instructions:u x0.99997-1.00003.
+  The one VmHWM above dev past 0.5 %: 5,000 cDNAs, blastn at 16 threads x1.010 (`=0` x1.007, the binary's placement);
+  16 pairs with `MALLOC_MMAP_THRESHOLD_=131072` x0.9997.
 - `LOSAT_X_BNHLGROW=1` (BLASTN, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
   added it (perf/bn-hl-grow): on unless it is `0`) a hit list's array (`blastn/hsp.rs` `HitList`, the preliminary
   stage's lists per query and the final ones) is no longer reserved to NCBI's array size when a list comes

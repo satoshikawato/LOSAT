@@ -1,0 +1,2 @@
+BLAST query/options error: Your custom record separator (/) is also used by the format specifier (frames) to separate multiple entries. Please use a different record separator (delim keyword).
+Please refer to the BLAST+ user manual.

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use super::ber::decode_full_set;
 use super::defline_set::{
-    alignment_line_id, compare, description_id, seq_id_list, tabular_id, Sic, TabularId,
+    alignment_line_id, compare, description_id, match_keys, seq_id_list, tabular_id, Sic, TabularId,
 };
 use super::label::{bare, content, fasta, first_gi, format_label};
 use super::model::{
@@ -656,6 +656,95 @@ fn printings_of_forms_without_a_fixture() {
     assert_eq!(find_best(&[], text_score), None);
 }
 
+// LOSAT's check that no two sequences of a database are taken for one (line DBID, ID4t fix 2b):
+// every pair of ids that `compare` finds the same shares a key of `match_keys`.
+#[test]
+fn ids_that_compare_the_same_share_a_match_key() {
+    let pdb = |mol: &str, chain: Option<i32>, chain_id: Option<&str>| {
+        ParsedSeqId::Pdb(PdbSeqId {
+            mol: mol.as_bytes().to_vec(),
+            chain,
+            rel: None,
+            chain_id: chain_id.map(|id| id.as_bytes().to_vec()),
+        })
+    };
+    let patent = |country: &str, number: PatentNumber, seqid: i32| {
+        ParsedSeqId::Patent(PatentSeqId {
+            seqid,
+            cit: IdPat {
+                country: country.as_bytes().to_vec(),
+                id: number,
+                doc_type: None,
+            },
+        })
+    };
+    let general = |db: &str, tag: ObjectId| {
+        ParsedSeqId::General(Dbtag {
+            db: db.as_bytes().to_vec(),
+            tag,
+        })
+    };
+    let ids = [
+        ParsedSeqId::Genbank(textseq(Some("AB000015"), None, Some(1))),
+        ParsedSeqId::Genbank(textseq(Some("AB000015"), None, Some(2))),
+        ParsedSeqId::Embl(textseq(Some("ab000015"), None, None)),
+        ParsedSeqId::Ddbj(textseq(Some("AB000016"), Some("LOCUS1"), None)),
+        ParsedSeqId::Tpg(textseq(None, Some("locus1"), Some(3))),
+        ParsedSeqId::Other(textseq(Some("NR_000001"), None, Some(1))),
+        ParsedSeqId::Other(textseq(Some("nr_000001"), None, None)),
+        ParsedSeqId::Swissprot(textseq(Some("P12345"), Some("NAME_HUMAN"), Some(1))),
+        ParsedSeqId::Pir(textseq(None, Some("name_human"), None)),
+        ParsedSeqId::Local(ObjectId::Str(b"5".to_vec())),
+        ParsedSeqId::Local(ObjectId::Id(5)),
+        ParsedSeqId::Local(ObjectId::Str(b"05".to_vec())),
+        ParsedSeqId::Local(ObjectId::Str(b"Ab".to_vec())),
+        ParsedSeqId::Local(ObjectId::Str(b"aB".to_vec())),
+        general("db", ObjectId::Id(1)),
+        general("DB", ObjectId::Str(b"1".to_vec())),
+        general("db", ObjectId::Str(b"Tag".to_vec())),
+        general("Db", ObjectId::Str(b"TAG".to_vec())),
+        pdb("1ABC", None, None),
+        pdb("1ABC", Some(65), Some("AA")),
+        pdb("1ABC", Some(66), None),
+        pdb("1abc", None, None),
+        patent("us", PatentNumber::Number(b"123a".to_vec()), 1),
+        patent("US", PatentNumber::Number(b"123A".to_vec()), 1),
+        patent("US", PatentNumber::AppNumber(b"123A".to_vec()), 1),
+        ParsedSeqId::Gi(7),
+        ParsedSeqId::Gibbsq(7),
+        ParsedSeqId::Gibbmt(7),
+        ParsedSeqId::Giim(GiimportId {
+            id: 7,
+            db: None,
+            release: None,
+        }),
+    ];
+    let keys: Vec<HashSet<u64>> = ids
+        .iter()
+        .map(|id| {
+            let mut keys = Vec::new();
+            match_keys(id, &mut keys);
+            assert!(!keys.is_empty(), "{id:?} has no key");
+            keys.into_iter().collect()
+        })
+        .collect();
+    let mut same = 0;
+    for (a, a_keys) in ids.iter().zip(&keys) {
+        for (b, b_keys) in ids.iter().zip(&keys) {
+            if compare(a, b) == Sic::Yes {
+                same += 1;
+                assert!(!a_keys.is_disjoint(b_keys), "{a:?} and {b:?} share no key");
+            }
+        }
+    }
+    // Pairs other than an id with itself are among them (versions, case, alternatives, chains).
+    assert!(same > ids.len() + 12, "{same}");
+    // Distinct values have distinct keys.
+    assert!(keys[0].is_disjoint(&keys[5]));
+    assert!(keys[18].is_disjoint(&keys[21]));
+    assert!(keys[25].is_disjoint(&keys[26]));
+}
+
 #[test]
 fn seq_id_comparisons_follow_ncbi() {
     let gb = ParsedSeqId::Genbank(textseq(Some("AB000015"), None, Some(1)));
@@ -845,4 +934,158 @@ fn damaged_records_are_errors() {
         [ParsedSeqId::Local(ObjectId::Str(b"x#".to_vec()))]
     );
     assert!(decoded.deflines[0].ids.len() == 2);
+}
+
+fn text_id(name: Option<&str>, acc: Option<&str>, version: Option<i32>) -> TextseqId {
+    TextseqId {
+        name: name.map(|s| s.as_bytes().to_vec()),
+        accession: acc.map(|s| s.as_bytes().to_vec()),
+        release: None,
+        version,
+    }
+}
+
+/// `GetLabel(eDefault, fLabel_Default | fLabel_UpperCase)`, the label of makeblastdb's
+/// duplicate check: the labels makeblastdb 2.17.0 printed in "Duplicate seq_ids are found"
+/// (makedb-v5 survey B pd01-pd18, n06; S3b extra fixtures x_dup_*, x_hashvol_dup).
+#[test]
+fn duplicate_check_labels_are_makeblastdb_s() {
+    let label = |id: &ParsedSeqId| with(|out| super::label::both_upper_version(id, out));
+    let cases: Vec<(ParsedSeqId, &str)> = vec![
+        (
+            ParsedSeqId::Other(text_id(None, Some("np_000549"), Some(1))),
+            "REF|NP_000549.1",
+        ),
+        (
+            ParsedSeqId::Other(text_id(None, Some("NP_9"), None)),
+            "REF|NP_9",
+        ),
+        (
+            ParsedSeqId::Swissprot(TextseqId {
+                release: Some(b"unreviewed".to_vec()),
+                ..text_id(Some("HBA_HUMAN"), Some("P69905"), None)
+            }),
+            "SP|P69905",
+        ),
+        // No accession: the name is the secondary id.
+        (
+            ParsedSeqId::Genbank(text_id(Some("locus1"), None, None)),
+            "GB|LOCUS1",
+        ),
+        // pir and prf: the name first.
+        (
+            ParsedSeqId::Pir(text_id(Some("s12345"), None, None)),
+            "PIR|S12345",
+        ),
+        (
+            ParsedSeqId::Prf(text_id(Some("1234567A"), Some("X"), None)),
+            "PRF|1234567A",
+        ),
+        (
+            ParsedSeqId::Local(ObjectId::Str(b"abc".to_vec())),
+            "LCL|ABC",
+        ),
+        (ParsedSeqId::Local(ObjectId::Id(123)), "LCL|123"),
+        (
+            ParsedSeqId::General(Dbtag {
+                db: b"BL_ORD_ID".to_vec(),
+                tag: ObjectId::Id(6),
+            }),
+            "GNL|BL_ORD_ID|6",
+        ),
+        (
+            ParsedSeqId::General(Dbtag {
+                db: b"db".to_vec(),
+                tag: ObjectId::Str(b"x".to_vec()),
+            }),
+            "GNL|DB|X",
+        ),
+        (
+            ParsedSeqId::General(Dbtag {
+                db: b"db".to_vec(),
+                tag: ObjectId::Str(Vec::new()),
+            }),
+            "GNL|",
+        ),
+        (ParsedSeqId::Gi(42), "GI|42"),
+        (
+            ParsedSeqId::Pdb(PdbSeqId {
+                mol: b"1abc".to_vec(),
+                chain: Some(i32::from(b'a')),
+                rel: None,
+                chain_id: Some(b"a".to_vec()),
+            }),
+            "PDB|1ABC|a",
+        ),
+        (
+            ParsedSeqId::Pdb(PdbSeqId {
+                mol: b"3def".to_vec(),
+                chain: Some(i32::from(b' ')),
+                rel: None,
+                chain_id: None,
+            }),
+            "PDB|3DEF",
+        ),
+        (
+            ParsedSeqId::Patent(PatentSeqId {
+                seqid: 1,
+                cit: IdPat {
+                    country: b"us".to_vec(),
+                    id: PatentNumber::Number(b"1234567".to_vec()),
+                    doc_type: None,
+                },
+            }),
+            "PAT|US|1234567|1",
+        ),
+        (
+            ParsedSeqId::Giim(GiimportId {
+                id: 5,
+                db: None,
+                release: None,
+            }),
+            "GIM|5",
+        ),
+    ];
+    for (id, expected) in cases {
+        assert_eq!(label(&id), expected, "{id:?}");
+    }
+    // Bytes of 0x80 or more are kept (`NStr::ToUpper` of the C locale; S3b x_dup_nonascii).
+    let mut out = Vec::new();
+    super::label::both_upper_version(
+        &ParsedSeqId::Local(ObjectId::Str(b"\xe9abc".to_vec())),
+        &mut out,
+    );
+    assert_eq!(out, b"LCL|\xe9ABC");
+}
+
+/// `GetLabel(eContent, fLabel_GeneralDbIsContent)`: a general id's tag without its database,
+/// the accession without its version (the keys of `-taxid_map`).
+#[test]
+fn taxid_map_keys_drop_the_general_database_and_the_version() {
+    let key = |id: &ParsedSeqId| with(|out| super::label::content_general_db_is_content(id, out));
+    assert_eq!(
+        key(&ParsedSeqId::General(Dbtag {
+            db: b"mydb".to_vec(),
+            tag: ObjectId::Str(b"tag2".to_vec()),
+        })),
+        "tag2"
+    );
+    assert_eq!(
+        key(&ParsedSeqId::Other(text_id(
+            None,
+            Some("np_000551"),
+            Some(3)
+        ))),
+        "NP_000551"
+    );
+    assert_eq!(
+        key(&ParsedSeqId::Pdb(PdbSeqId {
+            mol: b"1ABC".to_vec(),
+            chain: Some(i32::from(b'A')),
+            rel: None,
+            chain_id: Some(b"A".to_vec()),
+        })),
+        "1ABC_A"
+    );
+    assert_eq!(key(&ParsedSeqId::Gi(777)), "777");
 }

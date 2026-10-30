@@ -218,6 +218,57 @@ impl BlastnDatabase {
             .collect()
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
+    // ```c++
+    //             	CRef<CBlast_def_line_set> bdlRef =
+    //             			CSeqDB::ExtractBlastDefline(subject_bh);
+    //             	if(setSubjectIds) {
+    //             		x_SetSubjectIds(subject_bh, bdlRef);
+    //             	}
+    //             	if(setSubjectTaxInfoAll) {
+    //             		x_SetTaxInfoAll(subject_bh, bdlRef);
+    //             	}
+    // ```
+    /// The taxonomy of the tabular fields (`staxid`, `staxids`;
+    /// `report::tabular::TabularTaxonomy::of_deflines`) of the reported sequences `ordinals`, by
+    /// rank: from the definition lines of a sequence with parsed Seq-ids (`parsed[rank]`), else
+    /// from its stored ones (`SeqDb::defline_set`, which keeps whether a line has a `taxid`), for
+    /// the ranks that `hit_lists` name; the others are left empty. A header that does not decode
+    /// is refused before the report.
+    pub(super) fn tabular_taxonomy(
+        &self,
+        ordinals: &[u32],
+        parsed: &[Option<Arc<ParsedSubject>>],
+        hit_lists: &[Option<BlastnHitList>],
+    ) -> Result<Vec<crate::report::tabular::TabularTaxonomy>> {
+        use crate::report::tabular::TabularTaxonomy;
+        let mut taxonomy = vec![TabularTaxonomy::default(); ordinals.len()];
+        let mut read = vec![false; ordinals.len()];
+        for hsp_list in hit_lists
+            .iter()
+            .flatten()
+            .flat_map(|hit_list| &hit_list.hsplist_array)
+        {
+            let Some(rank) = hsp_list.hsps.first().map(|hsp| hsp.s_idx as usize) else {
+                continue;
+            };
+            if rank >= ordinals.len() || std::mem::replace(&mut read[rank], true) {
+                continue;
+            }
+            taxonomy[rank] = match parsed.get(rank).and_then(Option::as_deref) {
+                Some(subject) => TabularTaxonomy::of_deflines(subject.deflines()),
+                None => {
+                    let set = self
+                        .db
+                        .defline_set(ordinals[rank])
+                        .map_err(database_error)?;
+                    TabularTaxonomy::of_deflines(&set.deflines)
+                }
+            };
+        }
+        Ok(taxonomy)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:222-234
     // ```c++
     //             vect.GetSeqData(tgt_rg.GetFrom(), tgt_rg.GetToOpen(), seq_data);

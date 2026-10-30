@@ -67,6 +67,25 @@ pub(crate) struct DisplayAlignment {
     pub sstart: i32,
     pub send: i32,
     pub frame: i8,
+    /// The columns (0-based) whose subject letter is a stored gap character (`-`): residues of
+    /// the subject that the rows show as the letter of a gap (`PairwiseHit::subject_stored_gaps`).
+    pub subject_stored_gaps: Vec<u32>,
+}
+
+impl DisplayAlignment {
+    // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:476-480
+    // ```c++
+    // inline void CBlastTabularInfo::x_PrintMismatches(void)
+    // {
+    //     int num_mismatches = m_AlignLength - m_NumIdent - m_NumGaps;
+    //     m_Ostream << num_mismatches;
+    // }
+    // ```
+    /// The mismatches as NCBI prints them: fewer than none when stored gap characters of the
+    /// subject face gaps of the query (equal letters, so identities, and gaps).
+    pub(crate) fn mismatches(&self) -> i64 {
+        self.qseq.len() as i64 - self.identity as i64 - self.gaps as i64
+    }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1348-1361
 // ```c++
@@ -512,6 +531,10 @@ pub(crate) fn alignment(
     let mut masked = Vec::new();
     let mut query_columns = Vec::new();
     let mut gap_opens = 0;
+    // The gaps of the Dense-seg (`GetAlignLengths`): the columns of a gap op, not the `-` letters
+    // of the rows (a stored gap character of the subject is one).
+    let mut gaps = 0;
+    let mut subject_stored_gaps = Vec::new();
     let script = if hsp.edit_script.is_empty() {
         vec![GapEditOp::Sub(u32::try_from(raw.q_end - raw.q_start)?)]
     } else {
@@ -525,6 +548,7 @@ pub(crate) fn alignment(
         };
         if !consume_q || !consume_s {
             gap_opens += 1;
+            gaps += count as usize;
         }
         for _ in 0..count {
             // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:162-176
@@ -565,6 +589,9 @@ pub(crate) fn alignment(
             };
             if consume_q {
                 query_columns.push(qseq.len());
+            }
+            if consume_s && sc == b'-' {
+                subject_stored_gaps.push(u32::try_from(sseq.len())?);
             }
             qseq.push(qc);
             sseq.push(sc);
@@ -714,7 +741,6 @@ pub(crate) fn alignment(
     let mut run = 0;
     let mut identity = 0;
     let mut positive = 0;
-    let mut gaps = 0;
     for (&qc, &sc) in qseq.iter().zip(&sseq) {
         if qc == sc {
             identity += 1;
@@ -734,7 +760,6 @@ pub(crate) fn alignment(
                 positive += 1;
             }
         }
-        gaps += usize::from(qc == b'-' || sc == b'-');
     }
     if run > 0 {
         btop.push_str(&run.to_string());
@@ -753,6 +778,7 @@ pub(crate) fn alignment(
         sstart: raw.s_start + 1,
         send: raw.s_end,
         frame: raw.frame,
+        subject_stored_gaps,
     })
 }
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
@@ -1062,7 +1088,7 @@ fn field_value(
         "length" => a.qseq.len().to_string(),
         "pident" => format_percent_identity_ncbi(a.identity, a.qseq.len(), 3),
         "nident" => a.identity.to_string(),
-        "mismatch" => (a.qseq.len() - a.identity - a.gaps).to_string(),
+        "mismatch" => a.mismatches().to_string(),
         "positive" => a.positive.to_string(),
         "gapopen" => a.gap_opens.to_string(),
         "gaps" => a.gaps.to_string(),
@@ -1591,7 +1617,7 @@ fn write_pairwise(
                     let hit = Hit {
                         identity: 100.0 * a.identity as f64 / len as f64,
                         length: len,
-                        mismatch: len - a.identity - a.gaps,
+                        mismatch: a.mismatches(),
                         gapopen: a.gap_opens,
                         q_start: usize::try_from(a.qstart)?,
                         q_end: usize::try_from(a.qend)?,
@@ -1632,6 +1658,7 @@ fn write_pairwise(
                         },
                         comp_adjust_method: Some(u8::try_from(hsp.composition_method)?),
                         sum_n: Some(hsp.num),
+                        subject_stored_gaps: a.subject_stored_gaps,
                     });
                 }
             }

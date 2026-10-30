@@ -27,7 +27,7 @@ use crate::algorithm::tblastx::constants::{
     GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
 };
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_bp_build_compressed_lookup, x_bpclut_on, XCompressedLookup, XFlatCompressedLookup,
+    x_bp_build_compressed_lookup, x_bpclut_on, XCompressedLookup, XFlatCompressedLookup, X_BLASTP,
 };
 use crate::algorithm::tblastx::lookup::compressed::BlastCompressedAaLookupTable;
 use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
@@ -2103,7 +2103,7 @@ fn blastp_for_each_offset_pair<F>(
         // cell's hits copied from its slice; lookup/x_clut_direct.rs).
         BlastpRuntimeLookup::CompressedFlat(lookup) => {
             while scan_range[1] <= scan_range[2] {
-                let hits = lookup.scan_subject(
+                let hits = lookup.scan_subject::<X_BLASTP>(
                     subject_sequence,
                     &seq_ranges,
                     offset_pairs,
@@ -3083,8 +3083,7 @@ fn write_blastp_hsp_tabular_field<W: Write>(
         BlastpTabularField::Gaps => write!(
             writer,
             "{}",
-            hsp.length
-                .saturating_sub(hsp.num_ident.saturating_add(hsp.mismatch))
+            hsp.length as i64 - hsp.num_ident as i64 - hsp.mismatch
         ),
         BlastpTabularField::PercentPositives => {
             let ppos = if hsp.length > 0 {
@@ -3755,6 +3754,10 @@ fn shift_hsp_to_records(hsp: &mut BlastpHsp, ranges: &BlastpRanges<'_>) {
 /// (`NCBISTDAA_TO_AMINOACID`, blast_encoding.c:115-121, quoted above it).
 const STORED_O: u8 = 26;
 
+/// The stored gap character (`-`): the code that `ncbistdaa_to_ascii` shows as `-`, the letter
+/// of a gap in the rows of an alignment.
+const STORED_GAP: u8 = 0;
+
 // No NCBI counterpart: how LOSAT's reports reach the letters they read; NCBI reads each
 // sequence from its Bioseq (alnvec.cpp:116-121, quoted above `restore_displayed_o`).
 /// The letters of one sequence as the reports read them (ASCII, as read).
@@ -3776,6 +3779,15 @@ impl ShownLetters<'_> {
                 .iter()
                 .any(|letter| letter.eq_ignore_ascii_case(&b'O')),
             Self::Stored(residues) => residues.contains(&STORED_O),
+        }
+    }
+
+    /// Whether a letter is a gap character (`-`, which makeblastdb stores in a protein
+    /// database; a `-` of a FASTA input is dropped as NCBI drops it).
+    fn has_gap(self) -> bool {
+        match self {
+            Self::Ascii(letters) => letters.contains(&b'-'),
+            Self::Stored(residues) => residues.contains(&STORED_GAP),
         }
     }
 
@@ -3869,9 +3881,12 @@ fn restore_displayed_o(
 }
 
 /// Recounts the identities, mismatches and positives of the HSPs whose query or subject has
-/// pyrrolysine (O). The search reads O as X (`encode_protein_sequence`), but NCBI's reports
-/// compare the letters of the alignment as read, where O is identical only to O (and O and
-/// X are not identical).
+/// pyrrolysine (O), or whose subject has a gap character (`-`, stored in a protein database).
+/// The search reads O as X (`encode_protein_sequence`), but NCBI's reports compare the letters
+/// of the alignment as read, where O is identical only to O (and O and X are not identical).
+/// A stored `-` shows as the letter of a gap, so a column of a gap in the query and that
+/// residue is an identity (and a gap), and the mismatches (the columns less the identities
+/// and the gaps) can be fewer than none.
 ///
 /// NCBI reference: c++/src/objtools/align_format/tabular.cpp:1006-1020
 /// ```c++
@@ -3891,7 +3906,7 @@ fn restore_displayed_o(
 /// `num_positives` of the search's letters (blast_seqalign.cpp:1199-1222): with
 /// `engine_counts` (`ReportNeeds::seqalign`), the counts of each HSP that the recount
 /// changes are kept there first.
-fn recount_pyrrolysine_identities(
+fn recount_shown_identities(
     hit_lists: &mut [Option<BlastpHitList>],
     query_records: &[FastaRecord],
     subjects: ShownSubjects<'_>,
@@ -3925,7 +3940,7 @@ fn recount_pyrrolysine_identities(
             ) else {
                 continue;
             };
-            if !(has_o(query.seq()) || subject.has_o()) {
+            if !(has_o(query.seq()) || subject.has_o() || subject.has_gap()) {
                 continue;
             }
             let implicit = [GapEditOp::Sub(hsp.length as u32)];
@@ -3969,13 +3984,14 @@ fn recount_pyrrolysine_identities(
             let num_ident = query_row
                 .bytes()
                 .zip(subject_row.bytes())
-                .filter(|&(q, s)| q == s && q != b'-')
+                .filter(|&(q, s)| q == s)
                 .count();
-            let gap_letters = query_row
-                .bytes()
-                .chain(subject_row.bytes())
-                .filter(|&b| b == b'-')
-                .count();
+            // The gaps of the Dense-seg (`GetAlignLengths`), not the `-` letters of the rows.
+            let gap_letters: usize = ops
+                .iter()
+                .filter(|op| !op.is_sub())
+                .map(|op| op.num() as usize)
+                .sum();
             let num_positives =
                 crate::utils::matrix::protein_display_positives(&query_row, &subject_row, matrix);
             if let Some(saved) = engine_counts.as_deref_mut() {
@@ -3988,7 +4004,7 @@ fn recount_pyrrolysine_identities(
             }
             hsp.num_ident = num_ident;
             hsp.num_positives = num_positives;
-            hsp.mismatch = hsp.length.saturating_sub(num_ident + gap_letters);
+            hsp.mismatch = hsp.length as i64 - (num_ident + gap_letters) as i64;
             hsp.identity = if hsp.length > 0 {
                 (num_ident as f64 * 100.0) / hsp.length as f64
             } else {
@@ -3996,6 +4012,37 @@ fn recount_pyrrolysine_identities(
             };
         }
     }
+}
+
+/// The columns (0-based) of the rows of `hit` whose subject letter is a stored gap character
+/// (`STORED_GAP`) of `subject`, its stored residues (`PairwiseHit::subject_stored_gaps`).
+fn subject_stored_gap_columns(subject: &[u8], hit: &Hit) -> Vec<u32> {
+    let s_start = hit.s_start.saturating_sub(1);
+    let s_end = hit.s_end.min(subject.len());
+    if !subject
+        .get(s_start..s_end)
+        .is_some_and(|range| range.contains(&STORED_GAP))
+    {
+        return Vec::new();
+    }
+    let implicit = [GapEditOp::Sub(hit.length as u32)];
+    let ops = hit.gap_info.as_deref().unwrap_or(&implicit);
+    let mut columns = Vec::new();
+    let (mut column, mut s_index) = (0u32, s_start);
+    for op in ops {
+        // An insertion is a gap in the subject; a substitution and a deletion read a residue.
+        let in_subject = !matches!(op, GapEditOp::Ins(_));
+        for _ in 0..op.num() {
+            if in_subject {
+                if subject.get(s_index) == Some(&STORED_GAP) {
+                    columns.push(column);
+                }
+                s_index += 1;
+            }
+            column += 1;
+        }
+    }
+    columns
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4108,6 +4155,11 @@ fn build_pairwise_hits(
         };
         hit.num_positives = positives;
         let gaps = hit.gap_letters();
+        let subject_stored_gaps = if subject_seq.is_some() {
+            subject_stored_gap_columns(subject, &hit)
+        } else {
+            Vec::new()
+        };
 
         Ok(PairwiseHit {
             hit,
@@ -4139,6 +4191,7 @@ fn build_pairwise_hits(
             // NCBI showalign.cpp:3595-3598: this optional Stage E field is
             // consumed only by the TBLASTN writer; BLASTP keeps its writer.
             sum_n: None,
+            subject_stored_gaps,
         })
     };
     // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the rows of the final list as an indexed map on the
@@ -11196,7 +11249,7 @@ fn run_resolved_in_pool(
         } else {
             database::XShownResidues::Final
         };
-        // The query test of `recount_pyrrolysine_identities`.
+        // The query test of `recount_shown_identities`.
         let query_has_o: Vec<bool> = if residues == database::XShownResidues::WithO {
             query_records
                 .iter()
@@ -11286,7 +11339,7 @@ fn run_resolved_in_pool(
             .collect()
     });
     let mut engine_counts = super::seqalign::EngineCounts::default();
-    recount_pyrrolysine_identities(
+    recount_shown_identities(
         &mut hit_lists,
         query_records,
         shown_subjects,
@@ -12551,6 +12604,7 @@ mod tests {
             threshold: None,
             word_size: None,
             num_threads: 1,
+            mt_mode: None,
             out: None,
             max_target_seqs: None,
             num_descriptions: None,
@@ -12618,6 +12672,7 @@ mod tests {
             // NCBI showalign.cpp:3595-3598: this optional Stage E field is
             // consumed only by the TBLASTN writer; BLASTP keeps its writer.
             sum_n: None,
+            subject_stored_gaps: Vec::new(),
         }
     }
 

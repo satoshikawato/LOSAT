@@ -23,6 +23,13 @@ FASTA files:
   `blastp -subject tests/fasta/PajaWSV.faa -outfmt 6` prints 1), then `nohit`, a 72-residue low-complexity
   glycine/serine sequence for which NCBI `-db paja` reports no hit. For the whole file: 4 rows with `-db`, 2
   rows with `-subject` (outfmt 6).
+- `gapmix.faa` (DI-12): six proteins of the CDS translations of Salmonella Typhi CT18 (AL513382.1, from the
+  drop-in survey's Roary data, the first six of at least 120 residues without `-`) with `-`: one inserted in
+  the middle (`ins1_pA`), one replacing a residue (`rep1_pA`), a run of three (`ins3_pB`), one at the
+  end (`end1_pC`), two at the start (`lead2_pC`), at the start, in the middle and at the end (`sme_pD`), one every
+  15 residues (`every15_pE`), none (`ctrl_pF`), and records of `-` only (`allgap5`, `onegap`).
+  `gapmix_q.faa`: the six proteins without `-`; `gapmix_q.fna`: the same back-translated with one codon per
+  letter (the BLASTX queries).
 - `nohit.faa`: `GGGGG`, a query without hits in `nophr` (the database of `LOSAT/tests/seqdb/prot.faa`).
 - `empty.faa`: an empty query file.
 - `split_q.faa`: one query of 20,600 letters (a fixed pseudo-random filler with records p10, p05, p06 and p01 of
@@ -38,6 +45,8 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "residues O U * B Z J X" -blastdb_version 4
     makeblastdb -in tests/db_search/residues_gap.faa -dbtype prot -out tests/db_search/residues_gap \
         -title "residues O U * - B Z J X" -blastdb_version 4
+    makeblastdb -in tests/db_search/gapmix.faa -dbtype prot -out tests/db_search/gapmix \
+        -title "gap character - at the start, in the middle, at the end, alone" -blastdb_version 4
     makeblastdb -in tests/fasta/PajaWSV.faa -dbtype prot -out tests/db_search/paja \
         -title "PajaWSV proteins" -blastdb_version 4
     makeblastdb -in tests/db_search/o_stored.faa -dbtype prot -out tests/db_search/o_stored \
@@ -68,6 +77,7 @@ of `tests/fasta/LC738875.fasta` and `AP027202.fasta`, two related viruses, mutat
   `c_amb`, 4 % substitutions), `q_d_minus` (reverse complement of `d_mut_15pct` bases, 12 % substitutions),
   `q_e_p` (1600 bases of `e_p2k`, 20 % substitutions) and `q_nohit` (900 random bases).
 - `nslice_nohit.fna`: `q_nohit` alone.
+- `nslice_qa.fna`: `q_a` alone (one query, for `-query_loc` and `-subject_loc`; rows `db.tab.bn.qloc.6`, `tab.bn.loc.6`).
 - `nnophr.nin` and `nnophr.nsq` are copies of `LOSAT/tests/seqdb/db/nucl_v4.nin` and `.nsq`: the nucleotide
   database without its header file (NCBI's `blastn` fails with exit 2 when it opens the header file).
 
@@ -115,6 +125,25 @@ Run from `LOSAT/`:
     makeblastdb -in tests/db_search/tgc4.fna -dbtype nucl -out tests/db_search/tgc4 \
         -title "slices of a genetic code 4 genome" -blastdb_version 4
     rm tests/db_search/tslice.njs tests/db_search/tgc4.njs
+
+TBLASTN tblastn-fast inputs (rows `tfast.*` of `outfmt0_manifest.tsv` and `db.tfast.*`, line DI4: AMRFinderPlus runs
+`tblastn -subject GENOME -query AMRProt.fa -task tblastn-fast -word_size 5 -window_size 15 -threshold 100 ...`),
+written by `make_tfast_amr_inputs.py` from the nucleotide sequences of ABRicate's `ncbi` database (NCBI's AMR
+reference genes, `db/ncbi/sequences`; the accessions are in the files):
+
+- `tfast_amr.fna`: two contigs of seeded random spacer DNA with ten AMR genes: forward (TEM-1, CTX-M-15, Sul1,
+  Tet(A)), reverse-complemented (KPC-2, NDM-1, QnrS1), with about 5 % substituted bases (OXA-48 forward, Erm(B)
+  reverse-complemented), the first 60 % of VanA, and a run of 40 N. The database `tfast_amr` is these contigs.
+- `tfast_amr_q.faa`: thirteen proteins (translations): TEM-116 and CTX-M-14 (other alleles of the families in the
+  contigs), the eight others in the contigs, and SHV-12 (related to TEM), OXA-1 and APH(3')-Ia (not in them).
+
+Run from `LOSAT/`:
+
+    python3 tests/db_search/make_tfast_amr_inputs.py ABRICATE/db/ncbi/sequences tests/db_search
+    mv tests/db_search/tfast_amr_s.fna tests/db_search/tfast_amr.fna
+    makeblastdb -in tests/db_search/tfast_amr.fna -dbtype nucl -out tests/db_search/tfast_amr \
+        -title "synthetic contigs with AMR genes" -blastdb_version 4
+    rm tests/db_search/tfast_amr.njs
 
 Translated-query inputs (BLASTX rows, `db.blastx.*`), written by `make_blastx_inputs.py` (run from `LOSAT/`;
 slices of `tests/fasta/MelaMJNV.fasta`, proteins of `tests/fasta/PemoMJNVA.faa`; the decoy proteins and the query
@@ -228,7 +257,9 @@ NCBI `tblastx -db xslice_flip -query tests/db_search/xslice_q.fna -outfmt 6 -num
 for `xslice`). `db.tblastx.dbsize.0` and `.6` use `-dbsize 1000000000` (112 rows in outfmt 6): at that value a
 search that feeds `-dbsize` to the link cutoffs gives 111 rows, at 100000000 it gave the same bytes.
 
-`residues_gap` is the database LOSAT rejects (a stored `-`). The other databases of the rows are the ones of
+`residues_gap` and `gapmix` hold stored `-` (NCBIstdaa 0), which NCBI searches as a residue that scores
+`BLAST_SCORE_MIN` against every letter and its reports show as the letter of a gap (rows `db.residues_gap.*`,
+`db.gap.*`). The other databases of the rows are the ones of
 `LOSAT/tests/seqdb/db` (see `LOSAT/tests/seqdb/README.md`). A rebuild changes the dates stored in the index
 files, so the frozen outputs (`Posted date:` lines) must then be frozen again:
 `python3 LOSAT/tests/db_search_fixtures.py freeze --ncbi-bin DIR`.

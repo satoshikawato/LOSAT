@@ -22,7 +22,7 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
     if extra.iter().any(|key| {
         matches!(
             key.split('=').next().unwrap_or(key),
-            "-query" | "-subject" | "-out" | "-help" | "--help" | "--version"
+            "-query" | "-subject" | "-out" | "-h" | "-help" | "--help" | "--version"
         )
     }) {
         bail!("file/help arguments are unsupported for the BLASTX web API");

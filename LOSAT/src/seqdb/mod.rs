@@ -413,6 +413,18 @@ impl BlockRange {
     }
 }
 
+/// A database resolved without opening its volumes
+/// ([`SeqDb::locate_one_name_metadata`]).
+#[derive(Debug)]
+pub(crate) struct LocatedDatabase {
+    /// `GetTitle()`.
+    pub title: Vec<u8>,
+    /// The volume paths without extension, in NCBI's order.
+    pub volumes: Vec<String>,
+    /// The alias files (paths with extension), sorted.
+    pub alias_files: Vec<String>,
+}
+
 /// An open database: one volume, or the volumes of an alias file.
 #[derive(Debug)]
 pub struct SeqDb {
@@ -489,6 +501,28 @@ impl SeqDb {
         self.search_path.as_ref()
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:566-572
+    // ```c++
+    //     // Print volume names
+    //     vector<string> volumes;
+    //     m_BlastDb->FindVolumePaths(volumes,false);
+    //     out << endl << "Volumes:" << endl;
+    //     ITERATE(vector<string>, file_name, volumes) {
+    //         out << "\t" << *file_name << endl;
+    //     }
+    // ```
+    /// What `blastdbcmd -info` lists under "Volumes:" for the database that
+    /// [`SeqDb::open_in`] opens with the same arguments: the volumes of the first two levels
+    /// of its alias tree and the alias files of the third, sorted by base name
+    /// (`alias::info_volumes`). The alias files are read again; no volume file is opened.
+    pub fn info_volumes(
+        name: &str,
+        seqtype: SeqType,
+        path: &SearchPath,
+    ) -> Result<Vec<String>, SeqDbError> {
+        alias::info_volumes(name, seqtype, path)
+    }
+
     /// The number of the volume that holds `ordinal` (`CSeqDBVolSet::FindVol`).
     pub fn volume_index(&self, ordinal: u32) -> Result<usize, SeqDbError> {
         self.find_volume(ordinal).map(|(volume, _)| volume)
@@ -511,6 +545,38 @@ impl SeqDb {
     /// read, so the cost does not grow with the number of sequences.
     pub(crate) fn locate_one_name(name: &str, seqtype: SeqType) -> Result<(), SeqDbError> {
         alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir).map(|_| ())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1613-1616
+    // ```c++
+    //     vector<string> paths;
+    //     vector<string> alias;
+    //     m_Impl->FindVolumePaths(paths, alias, true);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1726
+    // ```c++
+    // 	m->SetDescription(GetTitle());
+    // ```
+    /// Resolves the one database at `name` as [`SeqDb::locate_one_name`] does and
+    /// returns what `CSeqDB::GetDBMetaData` reads of its alias tree: the title
+    /// (`GetTitle`: the alias files' `TITLE`, else the volumes' titles, which
+    /// `volume_title` gives for a volume path), the volume paths and the paths of the
+    /// alias files (`FindVolumePaths(paths, alias, true)`). No volume file is read.
+    pub(crate) fn locate_one_name_metadata(
+        name: &str,
+        seqtype: SeqType,
+        volume_title: &dyn Fn(&str) -> Option<Vec<u8>>,
+    ) -> Result<LocatedDatabase, SeqDbError> {
+        let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir)?;
+        let mut title = Vec::new();
+        alias::walk_title(&tree.root, volume_title, &mut title);
+        let mut alias_files = std::collections::BTreeSet::new();
+        alias::collect_alias_files(&tree.root, &mut alias_files);
+        Ok(LocatedDatabase {
+            title,
+            volumes: tree.volumes,
+            alias_files: alias_files.into_iter().collect(),
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvolset.cpp:101-116

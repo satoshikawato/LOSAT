@@ -138,21 +138,21 @@ fn counts(stderr: &str, prefix: &str) -> std::collections::HashMap<String, u64> 
         .collect()
 }
 
-/// A protein database of the subject proteome, made with `losat makedb`; returns its name.
+/// A protein database of the subject proteome, made with `losat makeblastdb`; returns its name.
 fn protein_database(label: &str) -> PathBuf {
     let name = work_dir(label).join("MejoMJNV");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
         .args(["-dbtype", "prot"])
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     name

@@ -43,6 +43,7 @@
 
 use super::greedy::{greedy_gapped_alignment_internal, GreedyAlignScratch};
 use crate::core::blast_encoding::COMPRESSION_RATIO;
+use crate::utils::x_mapped::X_BYTES;
 use std::sync::OnceLock;
 
 /// The four bases of each packed byte, first base first.
@@ -77,7 +78,9 @@ pub(crate) fn x_unpack_ncbi2na(packed: &[u8], len: usize) -> Vec<u8> {
         packed.len() >= bytes,
         "packed subject shorter than its length"
     );
-    let mut unpacked = vec![0u8; bytes * COMPRESSION_RATIO];
+    let mut unpacked = Vec::new();
+    X_BYTES.reserve(&mut unpacked, bytes * COMPRESSION_RATIO);
+    unpacked.resize(bytes * COMPRESSION_RATIO, 0);
     for (bases, &byte) in unpacked
         .chunks_exact_mut(COMPRESSION_RATIO)
         .zip(&packed[..bytes])
@@ -129,6 +132,15 @@ impl<'a> XPrelimSubject<'a> {
             .unpacked
             .get_or_init(|| x_unpack_ncbi2na(self.packed_full, self.len_full));
         unpacked.get(chunk_offset..)
+    }
+}
+
+// No NCBI counterpart: the next subject's copy takes these bytes with their pages resident.
+impl Drop for XPrelimSubject<'_> {
+    fn drop(&mut self) {
+        if let Some(unpacked) = self.unpacked.get_mut() {
+            X_BYTES.give(unpacked);
+        }
     }
 }
 

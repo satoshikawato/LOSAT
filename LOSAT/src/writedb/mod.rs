@@ -11,17 +11,28 @@
 //! (`.pdb` / `.ndb` with the volume tables, `.ptf` / `.ntf` with the tax ids)
 //! and the tax id lookup files (`.pot` / `.not`, `.pto` / `.nto`).
 //!
-//! Not written: parsed Seq-ids and their ISAM files (`-parse_seqids`), the
-//! hash index, mask data, and tax ids other than 0 (`-taxid`, `-taxid_map`).
+//! With `-parse_seqids` (library only until the version 5 keys are written,
+//! `MakedbArgs::parse_seqids`) and `-hash_index`, the volumes also get their ISAM
+//! files (`.psi`/`.psd` of the Seq-ids in version 4, `.pni`/`.pnd` of the GIs,
+//! `.phi`/`.phd` of the sequence hashes), their OID to GI file (`.pog`) and the
+//! duplicate check of their Seq-ids (`volume`, `isam`, `id_set`); `-taxid` and
+//! `-taxid_map` (library only, it requires `-parse_seqids`) put tax ids on the
+//! definition lines and into the version 5 tax id files (`taxid_set`).
+//!
+//! Not written: the version 5 acc2oid keys and `.pos` of `-parse_seqids`, and
+//! mask data.
 
 pub mod bioseq;
 pub mod build_db;
 pub mod convert;
 pub mod data_size;
+pub mod deflines;
 pub mod fasta_source;
 pub mod files;
 pub mod format_guess;
 pub mod header;
+pub(crate) mod id_set;
+pub(crate) mod isam;
 // The LMDB files of version 5. Parts that only `-parse_seqids` and the tax id options
 // reach are not called yet.
 #[allow(dead_code)]
@@ -32,6 +43,7 @@ pub mod makeblastdb;
 pub(crate) mod mdb;
 pub(crate) mod metadata;
 pub mod platform;
+pub mod taxid_set;
 pub mod time;
 pub mod volume;
 pub mod writer;
@@ -50,6 +62,9 @@ pub enum WriteDbError {
     /// NCBI's `CWriteDBException`: the text makeblastdb prints after
     /// "BLAST Database creation error: ".
     Creation(String),
+    /// `Creation` whose text holds bytes that are not UTF-8 (a Seq-id label of the
+    /// duplicate check), which makeblastdb prints as they are.
+    CreationBytes(Vec<u8>),
     /// NCBI's `CInvalidDataException`: the text makeblastdb prints after
     /// "BLAST options error: ".
     Options(String),
@@ -101,6 +116,11 @@ impl std::fmt::Display for WriteDbError {
             WriteDbError::Creation(message) => {
                 write!(f, "BLAST Database creation error: {message}")
             }
+            WriteDbError::CreationBytes(message) => write!(
+                f,
+                "BLAST Database creation error: {}",
+                String::from_utf8_lossy(message)
+            ),
             WriteDbError::Options(message) => write!(f, "BLAST options error: {message}"),
             WriteDbError::Other(message) => write!(f, "Error: {message}"),
             WriteDbError::OutOfMemory => f.write_str("BLAST ran out of memory"),

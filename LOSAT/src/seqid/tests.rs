@@ -935,3 +935,157 @@ fn damaged_records_are_errors() {
     );
     assert!(decoded.deflines[0].ids.len() == 2);
 }
+
+fn text_id(name: Option<&str>, acc: Option<&str>, version: Option<i32>) -> TextseqId {
+    TextseqId {
+        name: name.map(|s| s.as_bytes().to_vec()),
+        accession: acc.map(|s| s.as_bytes().to_vec()),
+        release: None,
+        version,
+    }
+}
+
+/// `GetLabel(eDefault, fLabel_Default | fLabel_UpperCase)`, the label of makeblastdb's
+/// duplicate check: the labels makeblastdb 2.17.0 printed in "Duplicate seq_ids are found"
+/// (makedb-v5 survey B pd01-pd18, n06; S3b extra fixtures x_dup_*, x_hashvol_dup).
+#[test]
+fn duplicate_check_labels_are_makeblastdb_s() {
+    let label = |id: &ParsedSeqId| with(|out| super::label::both_upper_version(id, out));
+    let cases: Vec<(ParsedSeqId, &str)> = vec![
+        (
+            ParsedSeqId::Other(text_id(None, Some("np_000549"), Some(1))),
+            "REF|NP_000549.1",
+        ),
+        (
+            ParsedSeqId::Other(text_id(None, Some("NP_9"), None)),
+            "REF|NP_9",
+        ),
+        (
+            ParsedSeqId::Swissprot(TextseqId {
+                release: Some(b"unreviewed".to_vec()),
+                ..text_id(Some("HBA_HUMAN"), Some("P69905"), None)
+            }),
+            "SP|P69905",
+        ),
+        // No accession: the name is the secondary id.
+        (
+            ParsedSeqId::Genbank(text_id(Some("locus1"), None, None)),
+            "GB|LOCUS1",
+        ),
+        // pir and prf: the name first.
+        (
+            ParsedSeqId::Pir(text_id(Some("s12345"), None, None)),
+            "PIR|S12345",
+        ),
+        (
+            ParsedSeqId::Prf(text_id(Some("1234567A"), Some("X"), None)),
+            "PRF|1234567A",
+        ),
+        (
+            ParsedSeqId::Local(ObjectId::Str(b"abc".to_vec())),
+            "LCL|ABC",
+        ),
+        (ParsedSeqId::Local(ObjectId::Id(123)), "LCL|123"),
+        (
+            ParsedSeqId::General(Dbtag {
+                db: b"BL_ORD_ID".to_vec(),
+                tag: ObjectId::Id(6),
+            }),
+            "GNL|BL_ORD_ID|6",
+        ),
+        (
+            ParsedSeqId::General(Dbtag {
+                db: b"db".to_vec(),
+                tag: ObjectId::Str(b"x".to_vec()),
+            }),
+            "GNL|DB|X",
+        ),
+        (
+            ParsedSeqId::General(Dbtag {
+                db: b"db".to_vec(),
+                tag: ObjectId::Str(Vec::new()),
+            }),
+            "GNL|",
+        ),
+        (ParsedSeqId::Gi(42), "GI|42"),
+        (
+            ParsedSeqId::Pdb(PdbSeqId {
+                mol: b"1abc".to_vec(),
+                chain: Some(i32::from(b'a')),
+                rel: None,
+                chain_id: Some(b"a".to_vec()),
+            }),
+            "PDB|1ABC|a",
+        ),
+        (
+            ParsedSeqId::Pdb(PdbSeqId {
+                mol: b"3def".to_vec(),
+                chain: Some(i32::from(b' ')),
+                rel: None,
+                chain_id: None,
+            }),
+            "PDB|3DEF",
+        ),
+        (
+            ParsedSeqId::Patent(PatentSeqId {
+                seqid: 1,
+                cit: IdPat {
+                    country: b"us".to_vec(),
+                    id: PatentNumber::Number(b"1234567".to_vec()),
+                    doc_type: None,
+                },
+            }),
+            "PAT|US|1234567|1",
+        ),
+        (
+            ParsedSeqId::Giim(GiimportId {
+                id: 5,
+                db: None,
+                release: None,
+            }),
+            "GIM|5",
+        ),
+    ];
+    for (id, expected) in cases {
+        assert_eq!(label(&id), expected, "{id:?}");
+    }
+    // Bytes of 0x80 or more are kept (`NStr::ToUpper` of the C locale; S3b x_dup_nonascii).
+    let mut out = Vec::new();
+    super::label::both_upper_version(
+        &ParsedSeqId::Local(ObjectId::Str(b"\xe9abc".to_vec())),
+        &mut out,
+    );
+    assert_eq!(out, b"LCL|\xe9ABC");
+}
+
+/// `GetLabel(eContent, fLabel_GeneralDbIsContent)`: a general id's tag without its database,
+/// the accession without its version (the keys of `-taxid_map`).
+#[test]
+fn taxid_map_keys_drop_the_general_database_and_the_version() {
+    let key = |id: &ParsedSeqId| with(|out| super::label::content_general_db_is_content(id, out));
+    assert_eq!(
+        key(&ParsedSeqId::General(Dbtag {
+            db: b"mydb".to_vec(),
+            tag: ObjectId::Str(b"tag2".to_vec()),
+        })),
+        "tag2"
+    );
+    assert_eq!(
+        key(&ParsedSeqId::Other(text_id(
+            None,
+            Some("np_000551"),
+            Some(3)
+        ))),
+        "NP_000551"
+    );
+    assert_eq!(
+        key(&ParsedSeqId::Pdb(PdbSeqId {
+            mol: b"1ABC".to_vec(),
+            chain: Some(i32::from(b'A')),
+            rel: None,
+            chain_id: Some(b"A".to_vec()),
+        })),
+        "1ABC_A"
+    );
+    assert_eq!(key(&ParsedSeqId::Gi(777)), "777");
+}

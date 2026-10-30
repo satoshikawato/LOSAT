@@ -16,8 +16,9 @@
 //!   `bit_score`, `comp_adjustment_method`; `num` 0 (no linking);
 //! - `num_ident`, `num_positives`: the engine's counts (`kappa.rs` `recompute_num_identities`,
 //!   NCBI's `Blast_HSPGetNumIdentitiesAndPositives` on the search's letters, where O is read
-//!   as X), which `recount_pyrrolysine_identities` replaces by the display counts for the
-//!   pairs with O; `EngineCounts` keeps the engine's values of those HSPs.
+//!   as X), which `recount_shown_identities` replaces by the display counts for the pairs with O
+//!   and the subjects with a gap character; `EngineCounts` keeps the engine's values of those
+//!   HSPs.
 //! - the query length of the construction: the searched length (`query_lengths`, with
 //!   `-query_loc` the interval's), not `BlastpHsp::query_length`, which holds the range as
 //!   given.
@@ -52,8 +53,8 @@ use crate::report::serial::{write_hit_list_seqaligns, SerialFormat};
 /// Where an HSP lies in the final hit lists: (query, HSP list, HSP).
 type HspKey = (u32, u32, u32);
 
-/// The engine's `(num_ident, num_positives)` of the HSPs whose counts the pyrrolysine
-/// recount replaced (`recount_pyrrolysine_identities`), kept only when a Seq-annot format is
+/// The engine's `(num_ident, num_positives)` of the HSPs whose counts the display recount
+/// replaced (`recount_shown_identities`), kept only when a Seq-annot format is
 /// requested (`ReportNeeds::seqalign`). The keys are added in the order of the hit lists, so
 /// they are sorted.
 #[derive(Default)]

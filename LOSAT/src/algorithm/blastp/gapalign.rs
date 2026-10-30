@@ -3228,7 +3228,7 @@ pub(crate) fn traceback_preliminary_blastp_hsp(
     Hit {
         identity,
         length: alignment_len,
-        mismatch: aligned.mismatches,
+        mismatch: aligned.mismatches as i64,
         gapopen: aligned.gap_opens,
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-520,583: fence_error is handled before Blast_HSPUpdateWithTraceback.
         // This full-sequence BLASTP caller has no translation fence and converts only report coordinates.
@@ -3295,7 +3295,7 @@ fn refresh_blastp_hit_statistics(
     hit.gapopen = view.gap_opens;
     hit.mismatch = view
         .alignment_len
-        .saturating_sub(view.num_ident.saturating_add(view.gap_letters));
+        .saturating_sub(view.num_ident.saturating_add(view.gap_letters)) as i64;
     hit.identity = if view.alignment_len > 0 {
         (view.num_ident as f64 * 100.0) / view.alignment_len as f64
     } else {

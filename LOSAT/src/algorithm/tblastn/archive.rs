@@ -438,7 +438,7 @@ mod tests {
     // probes; `check_archive_layout.py opts`), without the `EffectiveSearchSpace` that each
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTN refuses many of these options at the command line or
-    // in its limits (`-task tblastn-fast`, other word sizes, matrices, gap costs,
+    // in its limits (word sizes 2 and 4, matrices, gap costs,
     // `-comp_based_stats 1` and `3`, `-ungapped`, `-max_intron_length`, `-subject_besthit`,
     // `-use_sw_tback`): the list that NCBI would record is what the archive's model knows
     // about them, pinned here.
@@ -547,7 +547,7 @@ mod tests {
     }
 
     /// The recorded inputs of a command line. The options that LOSAT's TBLASTN does not accept
-    /// (they stop at the command line; so does `-task tblastn-fast`) are applied to the inputs by hand.
+    /// (they stop at the command line) are applied to the inputs by hand.
     fn inputs_of(extra: &[&str]) -> Option<OptionInputs> {
         let mut parsed: Vec<&str> = Vec::new();
         let mut by_hand: Vec<(&str, &str)> = Vec::new();
@@ -561,10 +561,6 @@ mod tests {
                 // Not recorded (the ungapped X-drop is never set by the application).
                 "-xdrop_ungap" => index += 2,
                 "-parse_deflines" => index += 1,
-                "-task" if extra.get(index + 1) == Some(&"tblastn-fast") => {
-                    by_hand.push(("task", "tblastn-fast"));
-                    index += 2;
-                }
                 other => {
                     parsed.push(other);
                     index += 1;
@@ -575,16 +571,12 @@ mod tests {
         argv.extend_from_slice(&parsed);
         argv.extend_from_slice(&["-outfmt", "11"]);
         let cli: Cli = try_parse_from(argv).ok()?;
-        let Commands::Tblastn(mut args) = cli.command else {
+        let Commands::Tblastn(args) = cli.command else {
             return None;
         };
-        if by_hand.contains(&("task", "tblastn-fast")) {
-            args.task = "tblastn-fast".into();
-        }
         let mut inputs = option_inputs(&args);
-        for (name, value) in by_hand {
+        for (name, _) in by_hand {
             match name {
-                "task" => {}
                 "-subject_besthit" => inputs.subject_besthit = true,
                 _ => inputs.use_sw_tback = true,
             }

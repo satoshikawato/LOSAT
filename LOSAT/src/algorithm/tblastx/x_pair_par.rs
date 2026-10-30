@@ -997,9 +997,10 @@ fn x_guard_lengths(
 /// LOSAT_X_PAIRPARN1, the batch has at least `X_GATE_N1_LETTERS` letters, or the search has several
 /// threads and one subject holds more than one and a half thread's share of the bases
 /// (`2 * longest * threads > 3 * total`): the reference loop searches a subject on one thread, the
-/// units split it over the pool. Several threads without such a subject keep the reference loop
-/// below `X_GATE_DIAG_CELLS`: with the subjects spread over the pool the units used less CPU there
-/// but lost wall time on many short subjects (x1.02-1.06 at eight threads, session 9 of line A).
+/// units split it over the pool. With LOSAT_X_TBXFEWGROUPS several threads take the one-thread line
+/// too: one group for spread subjects, as at one thread. Without it they keep the reference loop
+/// below `X_GATE_DIAG_CELLS`: the six groups used less CPU there but lost wall time on many short
+/// subjects (x1.02-1.06 at eight threads, session 9 of line A).
 fn units_gain(g: &XGates<'_>) -> bool {
     if g.threshold < X_GATE_MIN_THRESHOLD || g.diag_array_size >= X_GATE_DIAG_CELLS {
         return true;
@@ -5152,8 +5153,8 @@ mod tests {
     }
 
     // No NCBI counterpart: LOSAT_X_PAIRPARN1 moves the one-thread line of LOSAT_X_PAIRPARGATE from
-    // 2^18 cells to batches of 5,000 letters; the rule of several threads, the threshold rule and
-    // the gates before them are unchanged.
+    // 2^18 cells to batches of 5,000 letters, and LOSAT_X_TBXFEWGROUPS takes the same line at several
+    // threads; the threshold rule and the gates before them are unchanged.
     #[test]
     fn the_one_thread_line_keeps_the_units_from_5000_letters() {
         let mut rng = Rng(11);
@@ -5203,15 +5204,15 @@ mod tests {
             decision(140_000, &one, 1, 13, false, false),
             XDecision::Units
         );
-        // Several threads keep their rule: spread subjects below 2^18 cells take the reference loop.
+        // Several threads, LOSAT_X_TBXFEWGROUPS: the same line for spread subjects.
         for threads in [2, 8] {
             assert_eq!(
-                decision(5_000, &spread, threads, 13, true, false),
+                decision(4_999, &spread, threads, 13, true, false),
                 XDecision::Cost
             );
             assert_eq!(
-                decision(100_000, &spread, threads, 13, true, false),
-                XDecision::Cost
+                decision(5_000, &spread, threads, 13, true, false),
+                XDecision::Units
             );
             assert_eq!(
                 decision(5_000, &one, threads, 13, true, false),

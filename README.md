@@ -257,7 +257,7 @@ losat psiblast \
 | `-query <file>` | File path | *(Required)* | Input query sequence file (FASTA) |
 | `-subject <file>` | File path | *(Required unless `-db`)* | Input subject sequence file (FASTA) |
 | `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX, PSIBLAST; section 6) |
-| `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp` or `blastp-fast` (for `blastp`); `blastx` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`). `blastp-short` is not supported |
+| `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp` or `blastp-fast` (for `blastp`); `blastx` or `blastx-fast` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`). `blastp-short` is not supported |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
 | `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `11`=BLAST archive (every program), `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out` (every program), `15`=BLAST JSON and `16`=BLAST XML2 (every program), `17`=SAM (BLASTN only); custom tabular fields in BLASTP and BLASTX only |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |

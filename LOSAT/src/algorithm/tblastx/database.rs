@@ -53,14 +53,32 @@ pub(crate) struct TblastxDatabase {
 }
 
 impl TblastxDatabase {
+    /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
+    pub(crate) fn showing_gis(mut self, show_gis: bool) -> Self {
+        self.db.set_reports_show_gis(show_gis);
+        self
+    }
+
     /// Opens the nucleotide database `name` as NCBI's `CSearchDatabase` opens it
     /// (`common::database::open_database`). A total length that LOSAT cannot hold as an index
     /// (above `usize`) or as NCBI's `Int8` is LOSAT's refusal.
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        let db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
+        Self::open_restricted(name, settings, None, &mut std::io::sink())
+    }
+
+    /// `open` with the database restricted to the taxid list `list` of the command line
+    /// (`shared::restrict_database`, whose warning goes to `diagnostics`).
+    pub(crate) fn open_restricted(
+        name: &str,
+        settings: &ApplicationSettings,
+        list: Option<&crate::seqdb::TaxidList>,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<Self> {
+        let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
         shared::check_seqids(&db, settings, PROGRAM)?;
+        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
             .ok()
@@ -87,6 +105,21 @@ impl TblastxDatabase {
     /// (`prefetch_messages`).
     pub(crate) fn taxdb_found(&self) -> bool {
         self.taxdb.found(&self.db)
+    }
+
+    /// The names of the taxonomy database that the rows of `spec` look up for the subjects
+    /// `taxonomy` (`shared::tabular_names`).
+    pub(crate) fn tabular_names(
+        &self,
+        spec: &crate::report::tabular::TabularSpec,
+        taxonomy: &[crate::report::tabular::TabularTaxonomy],
+    ) -> Result<Option<crate::report::tabular::TabularNames>> {
+        shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
+    }
+
+    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
+    pub(crate) fn open_for_tabular_rows(&self) -> Result<()> {
+        self.taxdb.open_for_rows(&self.db, PROGRAM)
     }
 
     /// Whether a report that names any sequence of the database could be refused by LOSAT
@@ -130,6 +163,7 @@ impl TblastxDatabase {
             total: i64::try_from(self.db.total_length()).expect("checked when opened"),
             count: i64::from(self.db.num_seqs()),
             dbsize,
+            searchsp: None,
         }
     }
 
@@ -336,7 +370,9 @@ pub(crate) fn reported_subjects(
             "database sequence {ordinal} was not read"
         );
         records.push(FastaRecord {
-            local_id: format!("gnl|BL_ORD_ID|{ordinal}"),
+            // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
+            // (line DI-8).
+            local_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
             title,
             sequence: Vec::new(),
             warnings: Vec::new(),

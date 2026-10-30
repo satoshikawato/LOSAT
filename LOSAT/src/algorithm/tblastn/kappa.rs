@@ -840,7 +840,7 @@ mod tests {
             &parameters.lengths,
             subject_nt.len() as i32,
             &[gapped],
-            &gumbel,
+            Some(&gumbel),
             parameters.link.as_ref().unwrap(),
         )
         .unwrap();
@@ -1131,7 +1131,7 @@ mod tests {
             &parameters.lengths,
             subject_nt.len() as i32,
             &[gapped],
-            &gumbel,
+            Some(&gumbel),
             parameters.link.as_ref().unwrap(),
         )
         .unwrap();
@@ -1321,7 +1321,7 @@ mod tests {
             &parameters.lengths,
             subject_nt.len() as i32,
             &[scaled],
-            &gumbel,
+            Some(&gumbel),
             &link_params,
         )
         .unwrap();
@@ -1541,7 +1541,7 @@ mod tests {
             &parameters.lengths,
             subject_nt.len() as i32,
             &[gapped; 3],
-            &gumbel,
+            Some(&gumbel),
             parameters.link.as_ref().unwrap(),
         )
         .unwrap();
@@ -1775,7 +1775,7 @@ mod tests {
                 &parameters.lengths,
                 6_377,
                 &[scaled; 3],
-                &gumbel,
+                Some(&gumbel),
                 &post_link,
             )
             .unwrap();
@@ -2313,7 +2313,7 @@ mod tests {
                 &parameters.lengths,
                 subject.len() as i32,
                 &[gapped],
-                &gumbel,
+                Some(&gumbel),
                 parameters.link.as_ref().unwrap(),
             )
             .unwrap();
@@ -2546,7 +2546,7 @@ mod tests {
                 &parameters.lengths,
                 subject.len() as i32,
                 &[scaled],
-                &gumbel,
+                Some(&gumbel),
                 &post_link,
             )
             .unwrap();

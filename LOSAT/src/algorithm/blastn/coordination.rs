@@ -1079,6 +1079,7 @@ pub fn build_lookup_tables<R: InputRecord>(
     subjects_packed: Option<&[Vec<u8>]>,
     approx_table_entries: usize,
     x_keep: Option<&std::sync::Arc<x_mb_lut_keep::Keep>>,
+    x_scan_letters: Option<u64>,
 ) -> (LookupTables, usize) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1231-1344
     // ```c
@@ -1191,6 +1192,7 @@ pub fn build_lookup_tables<R: InputRecord>(
             approx_table_entries,
             !config.mb_lookup,
             x_keep,
+            x_scan_letters,
         ))
     } else {
         None

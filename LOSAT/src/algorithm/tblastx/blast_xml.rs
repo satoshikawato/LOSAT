@@ -130,12 +130,7 @@ fn query_stats(stats: &TblastxQueryStats, numbers: &SubjectSetNumbers) -> XmlSta
     let Some(karlin) = &stats.karlin else {
         return XmlStats::NONE;
     };
-    let lengths = try_compute_eff_lengths_tblastx(
-        stats.aa_len as i64,
-        numbers.effective_length(),
-        numbers.count,
-        karlin,
-    );
+    let lengths = numbers.context_lengths(stats.aa_len as i64, karlin);
     debug_assert_eq!(
         lengths.map(|lengths| lengths.eff_searchsp),
         Some(stats.eff_searchsp),
@@ -438,6 +433,7 @@ mod tests {
             total: 3_000,
             count: 3,
             dbsize: None,
+            searchsp: None,
         };
         assert_eq!(
             query_stats(&TblastxQueryStats::default(), &numbers),
@@ -456,6 +452,7 @@ mod tests {
                 total: 3_000,
                 count,
                 dbsize,
+                searchsp: None,
             };
             let lengths = try_compute_eff_lengths_tblastx(
                 130,

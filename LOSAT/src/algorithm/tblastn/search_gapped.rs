@@ -2659,7 +2659,7 @@ mod tests {
             &parameters.lengths,
             subject.len() as i32,
             &[gapped; 3],
-            &gumbel,
+            Some(&gumbel),
             &parameters.link.unwrap(),
         )
         .unwrap();
@@ -2780,7 +2780,7 @@ mod tests {
             &parameters.lengths,
             subject.len() as i32,
             &[gapped],
-            &gumbel,
+            Some(&gumbel),
             &parameters.link.unwrap(),
         )
         .unwrap();

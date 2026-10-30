@@ -131,6 +131,12 @@ fn search_read_error(error: SeqDbError) -> anyhow::Error {
 }
 
 impl BlastpDatabase {
+    /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
+    pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
+        self.db.set_reports_show_gis(show_gis);
+        self
+    }
+
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     pub(super) fn open(
@@ -138,7 +144,19 @@ impl BlastpDatabase {
         settings: &ApplicationSettings,
         parsed_seqids: bool,
     ) -> Result<Self> {
-        let db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
+        Self::open_restricted(name, settings, parsed_seqids, None, &mut std::io::sink())
+    }
+
+    /// `open` with the database restricted to the taxid list `list` of the command line
+    /// (`shared::restrict_database`, whose warning goes to `diagnostics`).
+    pub(super) fn open_restricted(
+        name: &str,
+        settings: &ApplicationSettings,
+        parsed_seqids: bool,
+        list: Option<&crate::seqdb::TaxidList>,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<Self> {
+        let mut db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
         // A database with parsed Seq-ids (line DBID, ID2a): BLASTP reads it; psiblast, whose
         // reports were not checked against NCBI's for one, refuses it as before.
         if parsed_seqids {
@@ -146,6 +164,7 @@ impl BlastpDatabase {
         } else {
             shared::refuse_parsed_seqids(&db, "PSIBLAST")?;
         }
+        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -175,6 +194,17 @@ impl BlastpDatabase {
         self.db.total_length()
     }
 
+    /// The number of sequences the reports print: the whole database's, also with a taxid
+    /// list (`SeqDb::printed_num_seqs`).
+    pub(super) fn printed_num_sequences(&self) -> u32 {
+        self.db.printed_num_seqs()
+    }
+
+    /// The total length the reports print (`SeqDb::printed_total_length`).
+    pub(super) fn printed_total_letters(&self) -> u64 {
+        self.db.printed_total_length()
+    }
+
     /// The total length as the engine holds it.
     pub(super) fn total_letters_usize(&self) -> Result<usize> {
         let total = self.db.total_length();
@@ -193,6 +223,23 @@ impl BlastpDatabase {
     /// for an empty title), the date and the real totals, also with `-dbsize`.
     pub(super) fn pairwise_database(&self) -> PairwiseDatabase {
         shared::pairwise_database(&self.db, &self.name)
+    }
+
+    /// The names of the taxonomy database that the rows of the custom tabular report `spec`
+    /// look up for the subjects `taxonomy` (`shared::tabular_names`, with the run's `TaxdbRun`);
+    /// `program` names NCBI's messages and LOSAT's refusals (`BLASTP`, `PSIBLAST`).
+    pub(super) fn tabular_names(
+        &self,
+        spec: &crate::report::tabular::TabularSpec,
+        taxonomy: &[crate::report::tabular::TabularTaxonomy],
+        program: &str,
+    ) -> Result<Option<crate::report::tabular::TabularNames>> {
+        shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, program)
+    }
+
+    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
+    pub(super) fn open_for_tabular_rows(&self, program: &str) -> Result<()> {
+        self.taxdb.open_for_rows(&self.db, program)
     }
 }
 
@@ -884,7 +931,9 @@ impl ListedSubjects {
             let (title, replaced) = title.unwrap_or_default();
             replaced_title_bytes.push(replaced);
             records.push(FastaRecord::new(
-                format!("gnl|BL_ORD_ID|{ordinal}"),
+                // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the
+                // OID (line DI-8).
+                format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
                 &title,
                 &letters,
             ));
@@ -1178,6 +1227,49 @@ impl ListedTitles<'_> {
         Ok((ids, accessions))
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
+    // ```c++
+    //             	CRef<CBlast_def_line_set> bdlRef =
+    //             			CSeqDB::ExtractBlastDefline(subject_bh);
+    //             	if(setSubjectIds) {
+    //             		x_SetSubjectIds(subject_bh, bdlRef);
+    //             	}
+    //             	if(setSubjectTaxInfoAll) {
+    //             		x_SetTaxInfoAll(subject_bh, bdlRef);
+    //             	}
+    // ```
+    /// The taxonomy of the custom tabular fields (`staxid`, `staxids`;
+    /// `report::tabular::TabularTaxonomy::of_deflines`) of the reported subjects (those with
+    /// rows in `hit_lists`), by rank: from the definition lines of a subject with parsed Seq-ids,
+    /// else from its stored ones (`SeqDb::defline_set`, which keeps whether a line has a
+    /// `taxid`); the other ranks are left empty. A header that does not decode is refused before
+    /// the report, as BLASTN's (`BlastnDatabase::tabular_taxonomy`).
+    pub(super) fn tabular_taxonomy(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &[Option<BlastpHitList>],
+    ) -> Result<Vec<crate::report::tabular::TabularTaxonomy>> {
+        use crate::report::tabular::TabularTaxonomy;
+        let ranks = self.listed.ordinals.len();
+        let mut taxonomy = vec![TabularTaxonomy::default(); ranks];
+        for rank in Self::reported(hit_lists) {
+            if rank >= ranks {
+                continue;
+            }
+            taxonomy[rank] = match self.parsed_subject(rank) {
+                Some(subject) => TabularTaxonomy::of_deflines(subject.deflines()),
+                None => {
+                    let set = database
+                        .db
+                        .defline_set(self.listed.ordinals[rank])
+                        .map_err(database_error)?;
+                    TabularTaxonomy::of_deflines(&set.deflines)
+                }
+            };
+        }
+        Ok(taxonomy)
+    }
+
     /// The subject of rank `rank` when it has parsed Seq-ids.
     pub(super) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
         self.parsed.get(rank).and_then(Option::as_deref)
@@ -1228,7 +1320,7 @@ impl ListedTitles<'_> {
     }
 
     /// The `stitle` text of every listed subject, by rank: the stored title (an empty
-    /// one is written `N/A`, `blastp_subject_stitle`).
+    /// one is written `N/A` by the shared tabular writer, `report::tabular`).
     pub(super) fn stitles(&self) -> Vec<Arc<[u8]>> {
         match &self.shown {
             ListedShown::Records(records) => records

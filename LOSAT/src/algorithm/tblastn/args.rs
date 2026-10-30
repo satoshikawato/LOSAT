@@ -65,6 +65,10 @@ pub struct TblastnArgs {
         help = "BLAST database name (a nucleotide database without parsed Seq-ids)"
     )]
     pub db: Option<String>,
+    /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
+    /// `-no_taxid_expansion` (line DI-8).
+    #[command(flatten)]
+    pub taxid_filter: crate::blastinput::db_filter::TaxidFilterArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // ```c++
     //     // DB size
@@ -79,6 +83,24 @@ pub struct TblastnArgs {
     // (`stage_d_pipeline::SubjectSetNumbers`).
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
+    // ```c++
+    //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
+    // ```
+    #[arg(
+        long = "show_gis",
+        default_value_t = false,
+        help = "Show NCBI GIs in deflines?"
+    )]
+    pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    // ```
+    #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
     // `tblastn-fast`: word size 5, the compressed lookup table and threshold 20 (`resolve`).
     #[arg(long, default_value = "tblastn", value_parser = task_parser(&["tblastn", "tblastn-fast"], &[]))]
     pub task: String,
@@ -158,6 +180,7 @@ pub struct TblastnArgs {
     #[arg(
         long = "subject_loc",
         value_name = "RANGE",
+        conflicts_with_all = crate::blastinput::db_filter::TAXID_OPTIONS,
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
@@ -645,7 +668,17 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // ```
     // NCBI's compressed lookup table (word sizes 5 to 7, tblastn-fast) scores its words with
     // a matrix made from the search matrix's frequency ratios; LOSAT's table is BLOSUM62's
-    // (`tblastx/lookup/compressed.rs`, as blastp-fast's).
+    // (`tblastx/lookup/compressed.rs`, as blastp-fast's). IDENTITY has no frequency ratios, and
+    // NCBI BLAST+ 2.17.0's tblastn dies of SIGSEGV in `s_BlastCompressedAaScanSubject` with it
+    // at word size 5 (`-task tblastn-fast` too) on every input; larger word sizes are NCBI's
+    // error (`validate_protein_options`).
+    if args.compressed_lookup && args.matrix_name.eq_ignore_ascii_case("IDENTITY") {
+        anyhow::bail!(
+            "-matrix {} with the compressed lookup table (-word_size {}), with which NCBI BLAST+'s tblastn crashes, is not supported by LOSAT's TBLASTN",
+            args.matrix_name,
+            args.word_size
+        );
+    }
     if args.compressed_lookup && !args.matrix_name.eq_ignore_ascii_case("BLOSUM62") {
         anyhow::bail!(
             "-matrix {} with the compressed lookup table (-word_size {}) is not supported by LOSAT's TBLASTN",
@@ -676,7 +709,26 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // ```
     // The composition mode selects the ordinary traceback (mode 0) or the composition
     // redo; LOSAT's TBLASTN implements modes 0 and 2.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:143-155
+    // ```c++
+    //     if (opts_memento->m_ScoringOpts->matrix &&
+    //         strcasecmp("identity", opts_memento->m_ScoringOpts->matrix) == 0 &&
+    //         opts_memento->m_ExtnOpts->compositionBasedStats > 0) {
+    //
+    //         opts_memento->m_ExtnOpts->compositionBasedStats = 0;
+    // ...
+    //         search_messages.AddMessageAllQueries(eBlastSevWarning, 0, os.str());
+    //     }
+    // ```
+    // IDENTITY has no composition data: NCBI searches it in mode 0, whatever mode was asked,
+    // with a warning for each query of the first query batch (`IDENTITY_CBS_RESET_MESSAGE`; the
+    // later batches start in mode 0, `tblastn_app::search`). The reset is made with the score
+    // block, before the HSP writer takes the preliminary hit list size
+    // (`blast_aux_priv.cpp:175-229`), so that size is mode 0's too.
+    let identity_cbs_reset = args.matrix_name.eq_ignore_ascii_case("identity")
+        && args.composition_mode != CompositionMode::NoCompositionBasedStats;
     let composition_mode2 = match args.composition_mode {
+        _ if identity_cbs_reset => false,
         CompositionMode::NoCompositionBasedStats => false,
         CompositionMode::CompositionMatrixAdjust => true,
         CompositionMode::CompositionBasedStats | CompositionMode::CompoForceFullMatrixAdjust => {
@@ -743,34 +795,30 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     //     } else {
     //         status = s_BlastAaWordFinder_OneHit(subject, query,
     // ```
-    // BLOSUM62 takes the standard table of word size 3 or the compressed one of word sizes 5 to
-    // 7 with any threshold, and the two-hit word finder (a window above 0).
-    let profile_supported = (matrix == Some(ScoringMatrix::Blosum62)
-        && matches!(args.word_size, 3 | 5..=7)
-        && args.gap_open == 11
-        && args.gap_extend == 1
-        && window > 0)
-        || (matrix == Some(ScoringMatrix::Blosum45)
-            && !composition_mode2
-            && args.word_size == 2
-            && args.gap_open == 14
-            && args.gap_extend == 2
-            && threshold == 16.0
-            && window == 60);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:910-936
+    // ```c
+    //       if (options->gapped_calculation && !Blast_ProgramIsRpsBlast(program_number)) {
+    //           Int2 status=0;
+    //           if ((status=Blast_KarlinBlkGappedLoadFromTables(NULL, options->gap_open,
+    //              options->gap_extend, options->matrix, std_matrix_only)) != 0)
+    // ```
+    // Every matrix of NCBI's tables (the nine of blastp and tblastn, IDENTITY with them) and
+    // every gap cost pair of its table, as `validate_protein_options` has checked them; the
+    // threshold and window are the options' (the matrix's suggested values by default). The
+    // standard table takes word sizes 2 to 4 and the compressed one, BLOSUM62's, 5 to 7 (above);
+    // the word finder is the two-hit one (a window above 0).
+    let profile_supported = (2..=7).contains(&args.word_size) && window > 0;
     let Some(matrix) = matrix.filter(|_| profile_supported) else {
         anyhow::bail!(
-            "the matrix {} with gap costs {}/{}, word size {}, threshold {} and window size {} (composition mode {}) is not supported by LOSAT's TBLASTN; it implements BLOSUM62 11/1 with word size 3, 5, 6 or 7 and a window size above 0, and BLOSUM45 14/2 with word size 2, threshold 16, window size 60 and -comp_based_stats 0",
+            "the matrix {} with word size {} and window size {} is not supported by LOSAT's TBLASTN; it implements the two-hit word finder (a window size above 0) with word sizes 2 to 7",
             args.matrix_name,
-            args.gap_open,
-            args.gap_extend,
             args.word_size,
-            threshold,
-            window,
-            args.composition_mode as i32
+            window
         );
     };
     Ok(SearchSettings {
         composition_mode2,
+        identity_cbs_reset,
         scoring: LocalStageDScoring {
             matrix,
             gap_open: args.gap_open,
@@ -807,6 +855,9 @@ pub fn check_options(args: &TblastnArgs) -> Result<()> {
 /// The search settings that the options select.
 pub(super) struct SearchSettings {
     pub(super) composition_mode2: bool,
+    /// IDENTITY with a composition mode above 0, which NCBI searches in mode 0 with a warning
+    /// for each query of the first query batch (`IDENTITY_CBS_RESET_MESSAGE`).
+    pub(super) identity_cbs_reset: bool,
     pub(super) scoring: LocalStageDScoring,
 }
 
@@ -941,20 +992,26 @@ mod tests {
         assert!(error(&["-ungapped"]).contains("Composition-adjusted searched"));
         assert!(error(&["-seg", "12 2.2"]).contains("Invalid number of arguments"));
         assert!(parse(&["-word_size", "1"]).is_err());
-        // PAM30 with its best gap costs is an NCBI search that LOSAT does not implement.
+        // NCBI blast_args.cpp:255-275 and blast_options.c:1174-1235: a matrix without gap costs
+        // takes its best pair, and its suggested threshold (+2) and window.
         let resolved = parse(&["-matrix", "PAM30"]).unwrap().resolve().unwrap();
-        assert_eq!((resolved.gap_open, resolved.gap_extend), (9, 1));
+        assert_eq!(
+            (
+                resolved.gap_open,
+                resolved.gap_extend,
+                resolved.threshold,
+                resolved.window_size
+            ),
+            (9, 1, 18.0, 15)
+        );
         for extra in [
-            &["-matrix", "PAM30"][..],
-            &["-word_size", "2"],
-            &["-word_size", "4"],
-            &["-ungapped", "-comp_based_stats", "F"],
+            &["-ungapped", "-comp_based_stats", "F"][..],
             &["-max_intron_length", "100"],
             &["-comp_based_stats", "1"],
             &["-comp_based_stats", "3"],
+            &["-matrix", "PAM30", "-comp_based_stats", "1"],
             &["-window_size", "0"],
             &["-word_size", "5", "-window_size", "0"],
-            &["-matrix", "BLOSUM45", "-word_size", "3"],
             &["-max_target_seqs", "1073741799"],
             &["-comp_based_stats", "0", "-max_target_seqs", "2147483598"],
         ] {
@@ -963,9 +1020,56 @@ mod tests {
                 "{extra:?}"
             );
         }
-        // The compressed lookup table is BLOSUM62's.
+        // The compressed lookup table is BLOSUM62's; NCBI's tblastn crashes with IDENTITY's.
         assert!(limit(&["-task", "tblastn-fast", "-matrix", "BLOSUM80"])
             .contains("-matrix BLOSUM80 with the compressed lookup table (-word_size 5) is not supported by LOSAT's TBLASTN"));
+        for extra in [
+            &["-task", "tblastn-fast", "-matrix", "IDENTITY"][..],
+            &["-matrix", "identity", "-word_size", "5"],
+        ] {
+            assert!(
+                limit(extra).contains("with which NCBI BLAST+'s tblastn crashes"),
+                "{extra:?}"
+            );
+        }
+        // Every matrix of NCBI's tables with every gap cost pair of its table, word sizes 2 to 4,
+        // and composition modes 0 and 2 (series SC, SC1).
+        for extra in [
+            &["-matrix", "PAM30"][..],
+            &["-matrix", "pam250", "-comp_based_stats", "0"],
+            &["-matrix", "BLOSUM45", "-gapopen", "13", "-gapextend", "3"],
+            &["-matrix", "BLOSUM45", "-word_size", "3"],
+            &["-matrix", "BLOSUM80", "-gapopen", "25", "-gapextend", "2"],
+            &["-gapopen", "13", "-gapextend", "1"],
+            &["-word_size", "2"],
+            &["-word_size", "4", "-matrix", "PAM70"],
+            &[
+                "-matrix",
+                "BLOSUM90",
+                "-threshold",
+                "11",
+                "-window_size",
+                "60",
+            ],
+        ] {
+            check_options(&parse(extra).unwrap()).unwrap();
+        }
+        // NCBI setup_factory.cpp:143-155: IDENTITY is searched in mode 0 with a warning (for the
+        // first query batch), whatever mode is asked.
+        for (extra, reset) in [
+            (&["-matrix", "IDENTITY"][..], true),
+            (&["-matrix", "identity", "-comp_based_stats", "1"], true),
+            (&["-matrix", "IDENTITY", "-comp_based_stats", "3"], true),
+            (&["-matrix", "IDENTITY", "-comp_based_stats", "0"], false),
+            (&["-matrix", "BLOSUM62"], false),
+        ] {
+            let settings = search_settings(&parse(extra).unwrap().resolve().unwrap()).unwrap();
+            assert_eq!(
+                (settings.identity_cbs_reset, settings.composition_mode2),
+                (reset, !reset && extra.len() == 2),
+                "{extra:?}"
+            );
+        }
         // NCBI api/blast_options_handle.cpp:436-447: tblastn-fast sets word size 5, the
         // compressed lookup table and BLAST_WORD_THRESHOLD_BLASTP_FAST (20); with BLOSUM62 11/1
         // the table of word size 3, 5, 6 or 7 takes any threshold and window size above 0.

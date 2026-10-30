@@ -1223,10 +1223,21 @@ fn search_cli(
     // ```
     // `-db`: the database opens after the options are processed, before `Query is Empty!`
     // (`TblastxDatabase::open`).
+    // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the database
+    // arguments reads it (`s_GetTaxIDList`) before the database opens.
     let database = match args.database_name() {
-        Some(name) => Some(super::super::database::TblastxDatabase::open(
-            name, &settings,
-        )?),
+        Some(name) => {
+            let taxids = args.taxid_filter.resolve(&settings, outputs.diagnostics)?;
+            Some(
+                super::super::database::TblastxDatabase::open_restricted(
+                    name,
+                    &settings,
+                    taxids.as_ref(),
+                    outputs.diagnostics,
+                )?
+                .showing_gis(args.show_gis),
+            )
+        }
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
@@ -1248,7 +1259,7 @@ fn search_cli(
     }) {
         args.tabular_taxdb = Some(match database.as_ref() {
             Some(database) => database.taxdb_found(),
-            None => crate::algorithm::common::tabular::subject_taxdb_found(&settings, "TBLASTX")?,
+            None => crate::algorithm::common::database::subject_taxdb_found(&settings, "TBLASTX")?,
         });
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
@@ -1669,6 +1680,7 @@ fn search(
                     total: stores.iter().map(|store| store.len() as i64).sum(),
                     count: records.len() as i64,
                     dbsize: args.dbsize,
+                    searchsp: args.searchsp,
                 },
                 shown: ShownSubjects::Fasta {
                     records,
@@ -1684,7 +1696,8 @@ fn search(
         } => (
             RunSubjects {
                 subjects: Subjects::Fasta(records),
-                numbers: SubjectSetNumbers::of_records(records, args.dbsize),
+                numbers: SubjectSetNumbers::of_records(records, args.dbsize)
+                    .with_searchsp(args.searchsp),
                 shown: ShownSubjects::Fasta {
                     records,
                     x_stored: None,
@@ -1699,7 +1712,7 @@ fn search(
                 } else {
                     Subjects::Stored(&stores)
                 },
-                numbers: database.numbers(args.dbsize),
+                numbers: database.numbers(args.dbsize).with_searchsp(args.searchsp),
                 shown: ShownSubjects::Database {
                     database,
                     pairwise: database.pairwise_database(),
@@ -1806,6 +1819,10 @@ pub(crate) struct TblastxReportRun<'a> {
     /// `-db`, a custom tabular report that shows a taxonomy field: the taxonomy of each reported
     /// sequence by rank (`TblastxDatabase::tabular_taxonomy`; empty otherwise).
     pub tabular_taxonomy: &'a [crate::report::tabular::TabularTaxonomy],
+    /// `-db`: the names of the taxonomy database that the rows of the run's custom report (the
+    /// command line's one `-outfmt`) look up (`TblastxDatabase::tabular_names`); `None`: every
+    /// lookup fails (no name field, no `taxdb.bti`, `-subject`).
+    pub tabular_names: Option<&'a crate::report::tabular::TabularNames>,
     /// Whether ABI v1's rejection of outfmt 0 titles applies (`V1Checks`).
     pub v1_titles: bool,
     /// The queries of each batch searched, in order (the documents of the BLAST archive).
@@ -2937,6 +2954,15 @@ fn run_batch_loop(
         .formats
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
+    // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0 too,
+    // which the prefetch does not: the rows of a batch with hits may open the taxonomy database
+    // before a later batch's prefetch (`TaxdbRun::open_for_rows`).
+    let plural_names = outputs.formats.first().is_some_and(|format| {
+        matches!(
+            report::output_format(format.outfmt),
+            report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
+        )
+    });
     // A batch is read from the input records (`input_start..input_end`); its searched
     // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
     // whole records, and a record whose range starts past its end is skipped
@@ -3265,6 +3291,9 @@ fn run_batch_loop(
                     ordered,
                     &reports.titles.borrow(),
                 )?;
+                if plural_names && !ordered.is_empty() {
+                    database.open_for_tabular_rows()?;
+                }
                 warnings[start].extend(messages);
             }
         }
@@ -3511,6 +3540,21 @@ impl BatchReports<'_> {
             }
             _ => Vec::new(),
         };
+        // And the names of the taxonomy database that its rows look up (with their refusals,
+        // before any byte).
+        let custom_tabular = outputs
+            .formats
+            .iter()
+            .find_map(|format| match report::output_format(format.outfmt) {
+                report::TblastxOutputFormat::CustomTabular(spec) => Some(spec),
+                _ => None,
+            });
+        let tabular_names = match (&self.subjects, custom_tabular) {
+            (ShownSubjects::Database { database, .. }, Some(spec)) => {
+                database.tabular_names(spec, &tabular_taxonomy)?
+            }
+            _ => None,
+        };
         let written = write_tblastx_outputs(
             hits,
             outputs,
@@ -3530,6 +3574,7 @@ impl BatchReports<'_> {
                 numbers: self.numbers,
                 xml_taxa: &xml_taxa,
                 tabular_taxonomy: &tabular_taxonomy,
+                tabular_names: tabular_names.as_ref(),
                 v1_titles: self.v1_titles,
                 archive_spans: &done.spans,
                 x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
@@ -4457,7 +4502,7 @@ fn search_query_batch<S: TbxScore>(
         if !ctx.is_valid || ctx.aa_len == 0 {
             cutoff_scores[ctx_idx] = i32::MAX;
             length_adj_per_context.push(0);
-            eff_searchsp_per_context.push(0);
+            eff_searchsp_per_context.push(numbers.searchsp.unwrap_or(0));
             continue;
         }
         // NCBI: per-context kbp_std[context] is used throughout cutoff/length calcs.
@@ -4479,16 +4524,15 @@ fn search_query_batch<S: TbxScore>(
         // =======================================================================
         // `-dbsize` replaces the database length here only (`SubjectSetNumbers`).
         let eff_db_length_nucl = numbers.effective_length();
-        let eff_lengths = crate::algorithm::tblastx::ncbi_cutoffs::try_compute_eff_lengths_tblastx(
-            query_len_aa,
-            eff_db_length_nucl,
-            db_num_seqs,
-            ctx_params, // tblastx uses per-context ungapped params (kbp_gap is NULL)
-        )
-        .ok_or(SearchSpaceOverflow {
-            db_length: eff_db_length_nucl,
-            query_length: ctx.aa_len,
-        })?;
+        let eff_lengths = numbers
+            .context_lengths(
+                query_len_aa,
+                ctx_params, // tblastx uses per-context ungapped params (kbp_gap is NULL)
+            )
+            .ok_or(SearchSpaceOverflow {
+                db_length: eff_db_length_nucl,
+                query_length: ctx.aa_len,
+            })?;
         let eff_searchsp = eff_lengths.eff_searchsp;
         length_adj_per_context.push(eff_lengths.length_adjustment);
         eff_searchsp_per_context.push(eff_searchsp);

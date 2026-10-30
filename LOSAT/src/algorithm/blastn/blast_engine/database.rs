@@ -171,6 +171,39 @@ pub(super) struct BlastnDatabase {
 pub(super) struct SamLetterCache(RefCell<HashMap<u32, NucleotideAmbiguity>>);
 
 impl BlastnDatabase {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2645-2668
+    // (`Blast_HSPListReevaluateUngapped`)
+    // ```c
+    //       	seq_arg.oid = subject_blk->oid;
+    //       	seq_arg.encoding =
+    //        	  (kTranslateSubject ? eBlastEncodingNcbi4na : eBlastEncodingNucleotide);
+    //         seq_arg.check_oid_exclusion = TRUE;
+    //       	seq_arg.seq = subject_blk;
+    //       	/* Return the packed sequence to the database */
+    //       	BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
+    //       	/* Get the unpacked sequence */
+    //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
+    // ```
+    /// Calls `use_letters` with the letters of database sequence `ordinal` in BLASTNA, without
+    /// the sentinel bytes: the subject that an ungapped (`-ungapped`) search re-evaluates its
+    /// HSPs on in the preliminary stage (NCBI gets the sequence again, unpacked, for a sequence
+    /// whose HSP list is not empty). The letters stay in the kernel's buffer with its sentinel
+    /// bytes (no copy). A read error is the preliminary search's.
+    pub(super) fn with_blastna<T>(
+        &self,
+        ordinal: u32,
+        use_letters: impl FnOnce(&[u8]) -> T,
+    ) -> Result<T> {
+        let block = x_read_sequence(&self.db, ordinal).map_err(search_read_error)?;
+        let length = block.nucleotide_len(0).map_err(search_read_error)?;
+        let blastna = x_blastna(&block).map_err(search_read_error)?;
+        // The kernel's BLASTNA has a sentinel byte at each end.
+        let result = use_letters(&blastna[1..=length]);
+        x_done_bytes(blastna);
+        x_done_block(block);
+        Ok(result)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:185
     // ```c++
     //             "\tLN:" + NStr::UInt8ToString(refseq.GetBioseqLength()));
@@ -236,6 +269,21 @@ impl BlastnDatabase {
         Ok(taxonomy)
     }
 
+    /// The names of the taxonomy database that the rows of `spec` look up for the subjects
+    /// `taxonomy` (`shared::tabular_names`).
+    pub(super) fn tabular_names(
+        &self,
+        spec: &crate::report::tabular::TabularSpec,
+        taxonomy: &[crate::report::tabular::TabularTaxonomy],
+    ) -> Result<Option<crate::report::tabular::TabularNames>> {
+        shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
+    }
+
+    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
+    pub(super) fn open_for_tabular_rows(&self) -> Result<()> {
+        self.taxdb.open_for_rows(&self.db, PROGRAM)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:222-234
     // ```c++
     //             vect.GetSeqData(tgt_rg.GetFrom(), tgt_rg.GetToOpen(), seq_data);
@@ -264,6 +312,12 @@ impl BlastnDatabase {
             .map_err(database_error)
     }
 
+    /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
+    pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
+        self.db.set_reports_show_gis(show_gis);
+        self
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
     // ```c++
     //         /*** Initialize the database/subject ***/
@@ -287,10 +341,22 @@ impl BlastnDatabase {
     /// with the command line's errors. The total length is NCBI's `Int8`; one that the
     /// engine cannot hold in a `usize` (a 32-bit target) is LOSAT's refusal.
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        let db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
+        Self::open_restricted(name, settings, None, &mut std::io::sink())
+    }
+
+    /// `open` with the database restricted to the taxid list `list` of the command line
+    /// (`shared::restrict_database`, whose warning goes to `diagnostics`).
+    pub(super) fn open_restricted(
+        name: &str,
+        settings: &ApplicationSettings,
+        list: Option<&crate::seqdb::TaxidList>,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<Self> {
+        let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
         shared::check_seqids(&db, settings, PROGRAM)?;
+        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         let total = db.total_length();
         let db_len_total = usize::try_from(total)
             .ok()
@@ -1156,7 +1222,9 @@ pub(super) fn reported_subjects(
             Vec::new()
         };
         records.push(FastaRecord {
-            local_id: format!("gnl|BL_ORD_ID|{ordinal}"),
+            // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
+            // (line DI-8).
+            local_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
             title,
             sequence,
             warnings: Vec::new(),

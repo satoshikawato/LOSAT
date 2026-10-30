@@ -90,6 +90,51 @@ pub(crate) fn open_database(
     })
 }
 
+/// Restricts the search's database `db` to the taxid list of the command line (line DI-8,
+/// `TaxidFilterArgs::resolve`; none: the whole database), as NCBI's `CSeqDB` opened with the
+/// list (`SeqDb::restrict_taxids`): NCBI's errors are `BLAST Database error: <text>` with exit
+/// status 2 (`database_error`), and the warning of a negative list that excludes nothing is
+/// written to `diagnostics` (`LOG_POST(Warning << ...)`: the text alone).
+pub(crate) fn restrict_database(
+    db: &mut SeqDb,
+    list: Option<&crate::seqdb::TaxidList>,
+    diagnostics: &mut dyn std::io::Write,
+    program: &str,
+) -> Result<()> {
+    let Some(list) = list else {
+        return Ok(());
+    };
+    match db.restrict_taxids(list) {
+        Ok(Some(warning)) => {
+            diagnostics.write_all(warning.as_bytes())?;
+            diagnostics.write_all(b"\n")?;
+        }
+        Ok(None) => {}
+        Err(error) => return Err(database_error(error, program)),
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:207-214
+    // ```c++
+    //     if (! BlastSeqSrcGetNumSeqs(m_InternalData->m_SeqSrc->GetPointer())) {
+    //         string msg =
+    //             "Filtering resulted in an empty database.";
+    //
+    //         m_Messages.AddMessageAllQueries(eBlastSevWarning,
+    //                                         kBlastMessageNoContext,
+    //                                         msg);
+    //     }
+    // ```
+    // NCBI then searches nothing and reports each query without hits; LOSAT's searches need a
+    // sequence, so a negative list that excludes every sequence is refused.
+    if db.num_seqs() == 0 {
+        return Err(refusal(
+            "the taxid list excludes every sequence of the database (NCBI: \"Filtering \
+             resulted in an empty database.\" and no hits)",
+            program,
+        ));
+    }
+    Ok(())
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
 // ```c++
 //     catch (const CSeqDBException& e) {                                      \
@@ -403,8 +448,9 @@ pub(crate) fn pairwise_database(db: &SeqDb, name: &str) -> PairwiseDatabase {
             title.to_vec()
         },
         date: db.date().to_string(),
-        num_sequences: u64::from(db.num_seqs()),
-        total_letters: db.total_length(),
+        // The whole database's, also with a taxid list (`SeqDb::printed_num_seqs`).
+        num_sequences: u64::from(db.printed_num_seqs()),
+        total_letters: db.printed_total_length(),
     }
 }
 
@@ -517,7 +563,11 @@ pub(crate) fn read_header(
     match db.read_header(ordinal) {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set, db.is_version5())
-                .map(|subject| ReportedHeader::Parsed(std::sync::Arc::new(subject)))
+                .map(|subject| {
+                    ReportedHeader::Parsed(std::sync::Arc::new(
+                        subject.showing_gis(db.reports_show_gis()),
+                    ))
+                })
                 .map_err(|reason| parsed_refusal(ordinal, &reason, program))
         }
         Ok(crate::seqdb::SequenceHeader::Ordinal(deflines)) => {
@@ -1294,6 +1344,9 @@ pub(crate) struct TaxdbRun {
     /// The refusal of a run whose prefetch NCBI's cache makes write the offset error more than
     /// once, as a reader's refusal ([`TaxdbRun::cache_collision`]).
     collision: std::sync::OnceLock<Option<(std::path::PathBuf, String)>>,
+    /// The texts of opening the database when the rows of a tabular report opened it, kept for
+    /// those rows ([`TaxdbRun::open_for_rows`], [`tabular_names`]).
+    rows_open: std::sync::Mutex<Vec<String>>,
 }
 
 /// What the lookups of a run's taxonomy database can write ([`TaxdbRun::prefetch_texts`]).
@@ -1423,6 +1476,30 @@ impl TaxdbRun {
     /// drops.
     pub(crate) fn prefetch_refused(&self, db: &SeqDb) -> bool {
         self.cache_collision(db).is_some()
+    }
+
+    /// The open of the database by the rows of a query batch whose report looks names up, made
+    /// after the batch's prefetch ([`prefetch_messages`]) and before the next batch's: NCBI writes
+    /// a batch's rows before it fetches the next batch, and a plural name looks taxid 0 up, which
+    /// the prefetch does not, so the run's first lookup can be such a row's. The texts of opening,
+    /// when this call opens the database, are kept for the rows ([`tabular_names`]). Nothing
+    /// without `taxdb.bti` on the search path.
+    pub(crate) fn open_for_rows(&self, db: &SeqDb, program: &str) -> Result<()> {
+        if !self.found(db) {
+            return Ok(());
+        }
+        let Some(search_path) = db.search_path() else {
+            return Ok(());
+        };
+        let texts = self
+            .taxdb(search_path)
+            .open()
+            .map_err(|error| taxdb_error(error, program))?;
+        self.rows_open
+            .lock()
+            .expect("the texts of opening")
+            .extend(texts);
+        Ok(())
     }
 
     /// The run's taxonomy database, a handle that opens it at its first name asked for.
@@ -1643,6 +1720,60 @@ pub(crate) fn read_reported_taxonomy(
         parsed_taxonomy[rank] = answers;
     }
     Ok((taxids, taxonomy, parsed_taxonomy, notes))
+}
+
+/// Whether `taxdb.bti` is on NCBI's search path for a `-subject` search (`x_CheckTaxDB`'s
+/// `SeqDB_ResolveDbPath("taxdb.bti")`: the current directory, `BLASTDB` and the registry's
+/// `[BLAST] BLASTDB`, as a database is looked for, `seqdb::SearchPath`). A registry value that
+/// LOSAT does not read as NCBI is its refusal, as for `-db`; `program` names it.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
+/// ```c++
+/// void CBlastTabularInfo::x_CheckTaxDB()
+/// {
+///    	if( x_IsFieldRequested(eSubjectSciNames) ||
+///     ...
+///    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
+///    		if(resolved.empty())
+/// ```
+pub(crate) fn subject_taxdb_found(settings: &ApplicationSettings, program: &str) -> Result<bool> {
+    let registry = match &settings.blastdb {
+        Ok(value) => value.as_deref(),
+        Err(reason) => bail!("{reason}; this is not supported by LOSAT's {program}"),
+    };
+    let path =
+        SearchPath::from_environment(registry).map_err(|error| database_error(error, program))?;
+    Ok(path.resolve_file("taxdb.bti").is_some())
+}
+
+/// The names of the taxonomy database that the rows of a tabular report with a name field look
+/// up (`report::tabular::TabularNames`) for its subjects `taxonomies`, through the run's
+/// database; `None` without a name field or without `taxdb.bti` on the search path (every lookup
+/// fails, silently). A taxonomy database that LOSAT cannot read as NCBI does is refused as in
+/// [`read_reported_taxonomy`], before any byte of the report.
+pub(crate) fn tabular_names<'t>(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    spec: &crate::report::tabular::TabularSpec,
+    taxonomies: impl IntoIterator<Item = &'t crate::report::tabular::TabularTaxonomy>,
+    program: &str,
+) -> Result<Option<crate::report::tabular::TabularNames>> {
+    if !spec.needs().taxonomy_names || !run.found(db) {
+        return Ok(None);
+    }
+    let Some(search_path) = db.search_path() else {
+        return Ok(None);
+    };
+    let names = crate::report::tabular::TabularNames::look_up(
+        spec,
+        &run.taxdb(search_path),
+        taxonomies,
+        program,
+    )
+    .map_err(|error| taxdb_error(error, program))?;
+    // The texts of opening of an open by the rows of an earlier batch ([`TaxdbRun::open_for_rows`]).
+    let opened = std::mem::take(&mut *run.rows_open.lock().expect("the texts of opening"));
+    Ok(Some(names.opened_before(opened)))
 }
 
 /// NCBI's messages about the taxonomy database when a query batch prefetches the subjects it

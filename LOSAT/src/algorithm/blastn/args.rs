@@ -127,6 +127,10 @@ pub struct BlastnArgs {
         help = "BLAST database name (a nucleotide database without parsed Seq-ids)"
     )]
     pub db: Option<String>,
+    /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
+    /// `-no_taxid_expansion` (line DI-8).
+    #[command(flatten)]
+    pub taxid_filter: crate::blastinput::db_filter::TaxidFilterArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // ```c++
     //     // DB size
@@ -141,6 +145,24 @@ pub struct BlastnArgs {
     // (`BlastnArgs::db_length`).
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
+    // ```c++
+    //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
+    // ```
+    #[arg(
+        long = "show_gis",
+        default_value_t = false,
+        help = "Show NCBI GIs in deflines?"
+    )]
+    pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    // ```
+    #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
     #[arg(long, default_value = "megablast", help = "Task to execute: megablast, blastn, dc-megablast or blastn-short", long_help = "Implemented tasks: megablast, blastn, dc-megablast and blastn-short. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2; dc-megablast uses the 11-of-18 coding template, reward 2, penalty -3, gaps 5/2 and two hits in a window of 40; blastn-short uses word size 7, reward 1, penalty -3, gaps 5/2, e-value 1000 and no DUST. An omitted option takes the default of the task.", value_parser = blastn_task)]
     pub task: String,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:708-730
@@ -447,6 +469,7 @@ pub struct BlastnArgs {
     #[arg(
         long = "subject_loc",
         value_name = "RANGE",
+        conflicts_with_all = crate::blastinput::db_filter::TAXID_OPTIONS,
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
@@ -467,6 +490,15 @@ pub struct BlastnArgs {
     /// higher-scoring hits, delete the hit (default: 0, no culling).
     #[arg(long, value_parser = nonnegative_ncbi_integer)]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-917,929-929
+    // ```c++
+    //     arg_desc.AddFlag(kArgUngapped, "Perform ungapped alignment only?", true);
+    // ...
+    //     opt.SetGappedMode(!args[kArgUngapped]);
+    // ```
+    /// Perform ungapped alignment only.
+    #[arg(long)]
+    pub ungapped: bool,
     // NCBI blastn has no such option (the LOSAT-only option was removed, AGENTS.md rule 5).
     #[arg(skip = false)]
     pub verbose: bool,
@@ -575,6 +607,11 @@ impl BlastnArgs {
     /// whether it was given (`culling_limit`).
     pub fn culling_limit_value(&self) -> i32 {
         self.culling_limit.unwrap_or(0)
+    }
+
+    /// `-searchsp`, 0 without it (`CBlastOptions::SetEffectiveSearchSpace`).
+    pub fn options_searchsp(&self) -> i64 {
+        self.searchsp.unwrap_or(0)
     }
 
     pub fn db_length(&self) -> i64 {

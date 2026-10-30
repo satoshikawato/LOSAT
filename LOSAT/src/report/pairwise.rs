@@ -186,7 +186,8 @@ pub struct BlastpPairwiseReport {
     pub word_threshold: f64,
     pub window_size: i32,
     pub gapped_karlin: KarlinParams,
-    pub gumbel: BlastGumbelBlk,
+    /// None with `-searchsp` (`PrintKAParameters` without `gbp`).
+    pub gumbel: Option<BlastGumbelBlk>,
     /// Subjects in the description table and with alignments, per query (NCBI's
     /// `m_NumDescriptions` and `m_NumAlignments`).
     pub num_descriptions: usize,
@@ -1888,10 +1889,19 @@ fn write_blastp_query_footer_spacing<W: Write>(
     writer: &mut W,
     ungapped_karlin: KarlinParams,
     gapped_karlin: KarlinParams,
-    gumbel: BlastGumbelBlk,
+    gumbel: Option<BlastGumbelBlk>,
     effective_search_space: i64,
     trailing: bool,
 ) -> io::Result<()> {
+    let Some(gumbel) = gumbel else {
+        return write_nucleotide_query_footer_spacing(
+            writer,
+            Some((ungapped_karlin, gapped_karlin)),
+            true,
+            effective_search_space,
+            trailing,
+        );
+    };
     writeln!(writer)?;
     writeln!(writer, "Lambda      K        H        a         alpha")?;
     write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;
@@ -2325,6 +2335,9 @@ pub struct BlastnPairwiseReport {
     pub zero_gap_extension_formula: bool,
     /// The two-hit window (`options.GetWindowSize()`): 40 for dc-megablast.
     pub window_size: usize,
+    /// A gapped search (`options.GetGappedMode()`); an ungapped (`-ungapped`) search has no
+    /// Gapped Karlin block in a query's footer and no `Gap Penalties` line in the epilog.
+    pub gapped: bool,
     /// Subjects in the description table and with alignments, per query.
     pub num_descriptions: usize,
     pub num_alignments: usize,
@@ -2691,6 +2704,7 @@ fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io:
 fn write_nucleotide_query_footer_spacing<W: Write>(
     writer: &mut W,
     karlin: Option<(KarlinParams, KarlinParams)>,
+    gapped: bool,
     effective_search_space: i64,
     trailing: bool,
 ) -> io::Result<()> {
@@ -2703,12 +2717,18 @@ fn write_nucleotide_query_footer_spacing<W: Write>(
         writeln!(writer)?;
     }
     writeln!(writer)?;
-    if let Some((_, gapped)) = karlin {
+    // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1130-1159
+    // ```c++
+    //     if (kbp_ungap) ... PrintKAParameters(kbp_ungap->Lambda, kbp_ungap->K, kbp_ungap->H, ...,  false)
+    //     if (kbp_gap) ... PrintKAParameters(..., true)   ("Gapped")
+    // ```
+    // An ungapped search has no gapped Karlin block (`kbp_gap` is not made).
+    if let Some((_, gapped_block)) = karlin.filter(|_| gapped) {
         writeln!(writer, "Gapped")?;
         writeln!(writer, "Lambda      K        H")?;
-        write_ncbi_ka_field(writer, gapped.lambda)?;
-        write_ncbi_ka_field(writer, gapped.k)?;
-        write_ncbi_ka_field(writer, gapped.h)?;
+        write_ncbi_ka_field(writer, gapped_block.lambda)?;
+        write_ncbi_ka_field(writer, gapped_block.k)?;
+        write_ncbi_ka_field(writer, gapped_block.h)?;
         writeln!(writer)?;
     }
     writeln!(writer)?;
@@ -2795,11 +2815,13 @@ fn write_blastn_final_footer<W: Write>(
     } else {
         f64::from(report.gap_extend)
     };
-    writeln!(
-        writer,
-        "Gap Penalties: Existence: {}, Extension: {}",
-        report.gap_open, gap_extension
-    )?;
+    if report.gapped {
+        writeln!(
+            writer,
+            "Gap Penalties: Existence: {}, Extension: {}",
+            report.gap_open, gap_extension
+        )?;
+    }
     if report.window_size != 0 {
         writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
     }
@@ -2977,6 +2999,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
                 write_nucleotide_query_footer_spacing(
                     writer,
                     query.karlin,
+                    report.gapped,
                     query.effective_search_space,
                     false,
                 )?;
@@ -3055,6 +3078,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         write_nucleotide_query_footer_spacing(
             writer,
             query.karlin,
+            self.report.gapped,
             query.effective_search_space,
             false,
         )
@@ -4258,6 +4282,7 @@ mod tests {
             gap_extend: 0,
             zero_gap_extension_formula: true,
             window_size: 0,
+            gapped: true,
             num_descriptions: 500,
             num_alignments: 250,
             unsearched: vec![false; queries.len()],

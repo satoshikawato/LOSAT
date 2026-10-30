@@ -51,6 +51,12 @@ pub(super) struct TblastnDatabase {
 }
 
 impl TblastnDatabase {
+    /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
+    pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
+        self.db.set_reports_show_gis(show_gis);
+        self
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:188-194
     // ```c++
     //         /*** Initialize the database/subject ***/
@@ -65,10 +71,22 @@ impl TblastnDatabase {
     /// the command line's errors. The total length is NCBI's `Int8`; one that the engine
     /// cannot hold in a `usize` (a 32-bit target) is LOSAT's refusal.
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        let db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
+        Self::open_restricted(name, settings, None, &mut std::io::sink())
+    }
+
+    /// `open` with the database restricted to the taxid list `list` of the command line
+    /// (`shared::restrict_database`, whose warning goes to `diagnostics`).
+    pub(super) fn open_restricted(
+        name: &str,
+        settings: &ApplicationSettings,
+        list: Option<&crate::seqdb::TaxidList>,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<Self> {
+        let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
         shared::check_seqids(&db, settings, PROGRAM)?;
+        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
             .ok()
@@ -173,6 +191,21 @@ impl TblastnDatabase {
     /// (`prefetch_messages`).
     pub(super) fn taxdb_found(&self) -> bool {
         self.taxdb.found(&self.db)
+    }
+
+    /// The names of the taxonomy database that the rows of `spec` look up for the subjects
+    /// `taxonomy` (`shared::tabular_names`).
+    pub(super) fn tabular_names(
+        &self,
+        spec: &crate::report::tabular::TabularSpec,
+        taxonomy: &[crate::report::tabular::TabularTaxonomy],
+    ) -> Result<Option<crate::report::tabular::TabularNames>> {
+        shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
+    }
+
+    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
+    pub(super) fn open_for_tabular_rows(&self) -> Result<()> {
+        self.taxdb.open_for_rows(&self.db, PROGRAM)
     }
 
     /// NCBI's messages about the taxonomy database when the query batch whose final hit lists
@@ -346,7 +379,9 @@ pub(super) fn reported_subjects(
             }
         };
         records.push(FastaRecord {
-            local_id: format!("gnl|BL_ORD_ID|{ordinal}"),
+            // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
+            // (line DI-8).
+            local_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
             title,
             sequence: Vec::new(),
             warnings: Vec::new(),

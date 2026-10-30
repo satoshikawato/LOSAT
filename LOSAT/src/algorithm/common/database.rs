@@ -90,6 +90,51 @@ pub(crate) fn open_database(
     })
 }
 
+/// Restricts the search's database `db` to the taxid list of the command line (line DI-8,
+/// `TaxidFilterArgs::resolve`; none: the whole database), as NCBI's `CSeqDB` opened with the
+/// list (`SeqDb::restrict_taxids`): NCBI's errors are `BLAST Database error: <text>` with exit
+/// status 2 (`database_error`), and the warning of a negative list that excludes nothing is
+/// written to `diagnostics` (`LOG_POST(Warning << ...)`: the text alone).
+pub(crate) fn restrict_database(
+    db: &mut SeqDb,
+    list: Option<&crate::seqdb::TaxidList>,
+    diagnostics: &mut dyn std::io::Write,
+    program: &str,
+) -> Result<()> {
+    let Some(list) = list else {
+        return Ok(());
+    };
+    match db.restrict_taxids(list) {
+        Ok(Some(warning)) => {
+            diagnostics.write_all(warning.as_bytes())?;
+            diagnostics.write_all(b"\n")?;
+        }
+        Ok(None) => {}
+        Err(error) => return Err(database_error(error, program)),
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:207-214
+    // ```c++
+    //     if (! BlastSeqSrcGetNumSeqs(m_InternalData->m_SeqSrc->GetPointer())) {
+    //         string msg =
+    //             "Filtering resulted in an empty database.";
+    //
+    //         m_Messages.AddMessageAllQueries(eBlastSevWarning,
+    //                                         kBlastMessageNoContext,
+    //                                         msg);
+    //     }
+    // ```
+    // NCBI then searches nothing and reports each query without hits; LOSAT's searches need a
+    // sequence, so a negative list that excludes every sequence is refused.
+    if db.num_seqs() == 0 {
+        return Err(refusal(
+            "the taxid list excludes every sequence of the database (NCBI: \"Filtering \
+             resulted in an empty database.\" and no hits)",
+            program,
+        ));
+    }
+    Ok(())
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
 // ```c++
 //     catch (const CSeqDBException& e) {                                      \
@@ -403,8 +448,9 @@ pub(crate) fn pairwise_database(db: &SeqDb, name: &str) -> PairwiseDatabase {
             title.to_vec()
         },
         date: db.date().to_string(),
-        num_sequences: u64::from(db.num_seqs()),
-        total_letters: db.total_length(),
+        // The whole database's, also with a taxid list (`SeqDb::printed_num_seqs`).
+        num_sequences: u64::from(db.printed_num_seqs()),
+        total_letters: db.printed_total_length(),
     }
 }
 

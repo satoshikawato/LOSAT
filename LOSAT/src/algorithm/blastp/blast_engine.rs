@@ -5002,11 +5002,22 @@ fn search_cli(
     // ```
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
+    // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the database
+    // arguments reads it (`s_GetTaxIDList`) before the database opens.
     let database = match resolved.db.as_deref() {
-        Some(name) => Some(
-            database::BlastpDatabase::open(name, &settings, args.app == BlastpApp::Blastp)?
+        Some(name) => {
+            let taxids = args.taxid_filter.resolve(&settings, outputs.diagnostics)?;
+            Some(
+                database::BlastpDatabase::open_restricted(
+                    name,
+                    &settings,
+                    args.app == BlastpApp::Blastp,
+                    taxids.as_ref(),
+                    outputs.diagnostics,
+                )?
                 .showing_gis(args.show_gis),
-        ),
+            )
+        }
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
@@ -5434,8 +5445,8 @@ impl<'a> BlastpSubjectSource<'a> {
                 records.iter().map(|record| record.seq().len()).sum(),
             ),
             Self::Database(database) => (
-                database.num_sequences() as usize,
-                usize::try_from(database.total_letters()).unwrap_or(usize::MAX),
+                database.printed_num_sequences() as usize,
+                usize::try_from(database.printed_total_letters()).unwrap_or(usize::MAX),
             ),
         }
     }
@@ -10863,10 +10874,15 @@ fn run_resolved_in_pool(
     };
     let subject_input_label = blastp_subject_tag(&args, subject_label);
     // The number of sequences that the `Database:` lines show: the real count of the
-    // database, or the records of the subject set.
+    // database, or the records of the subject set. With a taxid list the reports show the
+    // whole database's totals and the statistics read the list's (line DI-8).
     let shown_num_sequences = match database {
-        Some(database) => database.num_sequences() as usize,
+        Some(database) => database.printed_num_sequences() as usize,
         None => subject_records.len(),
+    };
+    let shown_total_letters = match database {
+        Some(database) => usize::try_from(database.printed_total_letters()).unwrap_or(usize::MAX),
+        None => total_db_len,
     };
     let context = ReportContext {
         query_name: None,
@@ -10886,7 +10902,7 @@ fn run_resolved_in_pool(
             None => format!("User specified sequence set (Input: {subject_input_label})"),
         }),
         database_num_sequences: Some(shown_num_sequences),
-        database_total_letters: Some(total_db_len),
+        database_total_letters: Some(shown_total_letters),
         program: args.app.ncbi_name().to_string(),
         version: Some(NCBI_BLASTP_VERSION.to_string()),
     };
@@ -11508,7 +11524,7 @@ fn run_resolved_in_pool(
                             0
                         },
                         db_len: if database.is_some() {
-                            total_db_len as i64
+                            shown_total_letters as i64
                         } else {
                             0
                         },
@@ -11667,7 +11683,7 @@ fn run_resolved_in_pool(
                     version: NCBI_BLASTP_VERSION.to_string(),
                     database_name: blastp_scan_mode_definition(&subject_input_label),
                     database_num_sequences: shown_num_sequences,
-                    database_total_letters: total_db_len,
+                    database_total_letters: shown_total_letters,
                     // NCBI blast_format.cpp:2267: options.GetMatrixName(), as typed.
                     matrix_name: args.matrix_name.clone(),
                     gap_open: args.scoring.gap_open,
@@ -12130,6 +12146,7 @@ mod tests {
             query: PathBuf::from("query.faa"),
             subject: Some(PathBuf::from("subject.faa")),
             db: None,
+            taxid_filter: Default::default(),
             dbsize: None,
             show_gis: false,
             searchsp: None,

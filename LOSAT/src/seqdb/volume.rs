@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use super::file::DbFile;
+use super::filter::{DeflineList, DeflineRule};
 use super::header::{decode_defline_taxids, decode_deflines_as, decode_full, Defline};
 use super::index::IndexFile;
 use super::{SeqDbError, SeqType, XDbIdxRead};
@@ -16,6 +17,8 @@ pub struct Volume {
     index: IndexFile,
     seq: OnceLock<DbFile>,
     hdr: OnceLock<DbFile>,
+    /// The definition lines a taxid list keeps (`SeqDb::restrict_taxids`), none without one.
+    defline_rule: Option<std::sync::Arc<DeflineRule>>,
 }
 
 /// File name of `base` with the three-letter extension `{p|n}{ext}`.
@@ -88,6 +91,7 @@ impl Volume {
             index,
             seq: OnceLock::new(),
             hdr: OnceLock::new(),
+            defline_rule: None,
         };
         volume.reject_column_files()?;
         Ok(volume)
@@ -503,10 +507,8 @@ impl Volume {
     /// The `taxid` of each definition line of the sequence `oid` (volume-relative), 0 for none.
     pub fn defline_taxids(&self, oid: u32) -> Result<Vec<i32>, SeqDbError> {
         let record = self.header_bytes(oid)?;
-        decode_defline_taxids(
-            &record,
-            &with_extension(&self.base, self.index.seqtype, "hr"),
-        )
+        let path = with_extension(&self.base, self.index.seqtype, "hr");
+        self.kept_lines(&record, &path, decode_defline_taxids(&record, &path))
     }
 
     /// The definition lines of the sequence `oid` (volume-relative) with every member and
@@ -514,10 +516,47 @@ impl Volume {
     /// volume-relative tag.
     pub fn defline_set(&self, oid: u32) -> Result<crate::seqid::DeflineSet, SeqDbError> {
         let record = self.header_bytes(oid)?;
-        decode_full(
+        self.decode_kept_set(
             &record,
             &with_extension(&self.base, self.index.seqtype, "hr"),
         )
+    }
+
+    /// Restricts the definition lines that the reads of this volume give to those `rule`
+    /// keeps (`SeqDb::restrict_taxids`).
+    pub(super) fn set_defline_rule(&mut self, rule: std::sync::Arc<DeflineRule>) {
+        self.defline_rule = Some(rule);
+    }
+
+    /// `decoded`, the definition lines of `record` (one sequence's header), without those
+    /// that the volume's `DeflineRule` removes; `decoded` itself without a rule.
+    fn kept_lines<T: DeflineList>(
+        &self,
+        record: &[u8],
+        path: &Path,
+        decoded: Result<T, SeqDbError>,
+    ) -> Result<T, SeqDbError> {
+        let Some(rule) = &self.defline_rule else {
+            return decoded;
+        };
+        let mut decoded = decoded?;
+        decoded.retain_lines(&rule.keep_mask(&decode_full(record, path)?));
+        Ok(decoded)
+    }
+
+    /// `decode_full(record, path)` without the definition lines that the volume's
+    /// `DeflineRule` removes.
+    fn decode_kept_set(
+        &self,
+        record: &[u8],
+        path: &Path,
+    ) -> Result<crate::seqid::DeflineSet, SeqDbError> {
+        let mut set = decode_full(record, path)?;
+        if let Some(rule) = &self.defline_rule {
+            let keep = rule.keep_mask(&set);
+            set.retain_lines(&keep);
+        }
+        Ok(set)
     }
 
     /// The definition lines of the sequence `oid` (volume-relative), with
@@ -530,10 +569,11 @@ impl Volume {
     /// decode of `defline_taxids`, which also gives the titles).
     pub fn deflines_as(&self, oid: u32, want_taxid: bool) -> Result<Vec<Defline>, SeqDbError> {
         let record = self.header_bytes(oid)?;
-        decode_deflines_as(
+        let path = with_extension(&self.base, self.index.seqtype, "hr");
+        self.kept_lines(
             &record,
-            &with_extension(&self.base, self.index.seqtype, "hr"),
-            want_taxid,
+            &path,
+            decode_deflines_as(&record, &path, want_taxid),
         )
     }
 
@@ -775,7 +815,9 @@ impl Volume {
             end,
             piece_bytes,
             &|oid| self.deflines_as(oid, want_taxid),
-            &|record, path| decode_deflines_as(record, path, want_taxid),
+            &|record, path| {
+                self.kept_lines(record, path, decode_deflines_as(record, path, want_taxid))
+            },
             visit,
         )
     }
@@ -795,7 +837,7 @@ impl Volume {
             end,
             piece_bytes,
             &|oid| self.defline_taxids(oid),
-            &decode_defline_taxids,
+            &|record, path| self.kept_lines(record, path, decode_defline_taxids(record, path)),
             visit,
         )
     }
@@ -822,7 +864,7 @@ impl Volume {
             end,
             piece_bytes,
             &|oid| self.defline_set(oid).map(taxids),
-            &|record, path| decode_full(record, path).map(taxids),
+            &|record, path| self.decode_kept_set(record, path).map(taxids),
             visit,
         )
     }

@@ -1,0 +1,1 @@
+- `-searchsp` on BLASTN and TBLASTX (drop-in DI-7, MAKER, VecScreen): the effective search space of the E-values, the cutoffs and the reports, with `-subject` and `-db`, as NCBI BLAST+ 2.17.0.

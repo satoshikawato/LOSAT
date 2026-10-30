@@ -1337,12 +1337,10 @@ fn show_gis_is_a_flag_of_every_search_program() {
 #[test]
 fn unported_ncbi_options_are_rejected_explicitly() {
     for (program, words) in [
-        ("blastn", &["-searchsp", "1000"][..]),
-        ("blastn", &["-db_soft_mask", "11"]),
+        ("blastn", &["-db_soft_mask", "11"][..]),
         ("blastn", &["-db_hard_mask", "11"]),
         ("tblastn", &["-searchsp", "1000"]),
         ("tblastn", &["-db_soft_mask", "11"]),
-        ("tblastx", &["-searchsp", "1000"]),
         ("tblastx", &["-db_soft_mask", "11"]),
         ("blastp", &["-searchsp", "1000"]),
         ("blastp", &["-gilist", "ids.gil"]),

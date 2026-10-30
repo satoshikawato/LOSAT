@@ -361,7 +361,7 @@ pub fn render_message(error: &clap::Error) -> String {
 // ```
 // The options of NCBI blastn 2.17.0+ (-help) that LOSAT's BLASTN does not implement
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
-// (`blastn/args.rs`); the database masks and `-searchsp` are not.
+// (`blastn/args.rs`); the database masks are not.
 fn is_unported_blastn_arg(name: &str) -> bool {
     matches!(
         name,
@@ -387,7 +387,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "off_diagonal_range"
             | "parse_deflines"
             | "remote"
-            | "searchsp"
             | "seqidlist"
             | "soft_masking"
             | "sorthits"
@@ -797,7 +796,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "no_taxid_expansion"
             | "parse_deflines"
             | "remote"
-            | "searchsp"
             | "seqidlist"
             | "sorthits"
             | "sorthsps"

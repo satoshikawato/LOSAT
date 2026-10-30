@@ -90,6 +90,14 @@ pub struct TblastxArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    // ```
+    #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
     #[arg(long, default_value_t = 10.0, value_parser = tblastx_real)]
     pub evalue: f64,
     // NCBI blast_args.cpp:578-583: a double of at least 0; the lookup table takes its

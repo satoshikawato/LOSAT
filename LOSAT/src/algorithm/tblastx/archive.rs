@@ -33,7 +33,6 @@ use std::ops::Range;
 use anyhow::Result;
 
 use super::blast_engine::{TblastxHsp, TblastxQueryStats};
-use super::ncbi_cutoffs::try_compute_eff_lengths_tblastx;
 use super::report::SubjectLetters;
 use super::seqalign::{query_records_of, SeqalignSubjects};
 use super::subjects::SubjectSetNumbers;
@@ -338,13 +337,10 @@ pub(super) fn write_tblastx_archives(
         let stats = &data.query_stats[first];
         let (ka_blocks, search_space, length_adjustment) = match &stats.karlin {
             Some(karlin) => {
-                let adjustment = try_compute_eff_lengths_tblastx(
-                    stats.aa_len as i64,
-                    data.numbers.effective_length(),
-                    data.numbers.count,
-                    karlin,
-                )
-                .map_or(0, |lengths| lengths.length_adjustment);
+                let adjustment = data
+                    .numbers
+                    .context_lengths(stats.aa_len as i64, karlin)
+                    .map_or(0, |lengths| lengths.length_adjustment);
                 (
                     [ka_block(karlin, false), KaBlock::missing(true)],
                     stats.eff_searchsp,

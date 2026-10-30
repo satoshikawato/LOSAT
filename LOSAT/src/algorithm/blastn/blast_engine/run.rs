@@ -12416,11 +12416,20 @@ fn search_query_batch<const UNGAPPED: bool>(
                                 // EXPERIMENT (LOSAT_X_MBHITPF): the query's letters of a hit
                                 // `X_HIT_AHEAD` places on.
                                 if x_hit_prefetch && idx + X_HIT_AHEAD < hitsfound {
+                                    let ahead = offset_pairs[idx + X_HIT_AHEAD];
                                     x_dc_csr::prefetch(
                                         encoded_query_concat_blastna_with_sentinels
                                             .as_ptr()
-                                            .wrapping_add(offset_pairs[idx + X_HIT_AHEAD].q_off),
+                                            .wrapping_add(ahead.q_off),
                                     );
+                                    if use_array_indexing {
+                                        let diag = (ahead.s_off as isize + diag_array_length
+                                            - ahead.q_off as isize)
+                                            & diag_mask;
+                                        x_dc_csr::prefetch(
+                                            hit_level_array.as_ptr().wrapping_add(diag as usize),
+                                        );
+                                    }
                                 }
                                 let pair = offset_pairs[idx];
                                 let q_off0 = pair.q_off;

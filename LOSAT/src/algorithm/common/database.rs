@@ -808,13 +808,9 @@ pub(crate) fn tabular_subject_ids(
         .enumerate()
         .map(
             |(rank, (record, &ordinal))| match parsed.get(rank).and_then(Option::as_deref) {
-                Some(subject) => {
-                    let [_, _, accession_version] =
-                        subject.tabular_ids(protein).map_err(|problem| {
-                            parsed_refusal(ordinal, &format!("has {problem}"), program)
-                        })?;
-                    Ok(std::sync::Arc::from(accession_version))
-                }
+                Some(subject) => subject
+                    .tabular_saccver(protein)
+                    .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program)),
                 None => tabular_subject_id(&record.title, ordinal, protein, program)
                     .map(std::sync::Arc::from),
             },

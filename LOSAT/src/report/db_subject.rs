@@ -42,6 +42,8 @@ pub struct ParsedSubject {
     unfetchable: bool,
     /// `-show_gis`: the outfmt 0 description line and heading show it (`description`, `heading`).
     show_gis: bool,
+    /// `tabular_saccver`, kept for the reports of later query batches.
+    saccver: std::sync::OnceLock<std::sync::Arc<[u8]>>,
 }
 
 /// One `HitDescr` of the XML2 and JSON formats (`s_SeqAlignToXMLHit`).
@@ -111,6 +113,7 @@ impl ParsedSubject {
             target,
             unfetchable,
             show_gis: false,
+            saccver: std::sync::OnceLock::new(),
         })
     }
 
@@ -344,6 +347,17 @@ impl ParsedSubject {
             field(TabularId::Accession),
             field(TabularId::AccessionVersion),
         ])
+    }
+
+    /// The `saccver` of `tabular_ids`, made once for a subject (`protein` is its database's).
+    pub fn tabular_saccver(&self, protein: bool) -> Result<std::sync::Arc<[u8]>, &'static str> {
+        if let Some(saccver) = self.saccver.get() {
+            return Ok(std::sync::Arc::clone(saccver));
+        }
+        let [_, _, saccver] = self.tabular_ids(protein)?;
+        Ok(std::sync::Arc::clone(
+            self.saccver.get_or_init(|| std::sync::Arc::from(saccver)),
+        ))
     }
 
     /// `Err` as `tabular_ids`', which it does not make.
@@ -798,6 +812,7 @@ mod tests {
         assert!(check_shown_parsed_subject(&accession, true, false, 0, "BLASTP").is_err());
         let local = subject(ParsedSeqId::Local(ObjectId::Str(b"Subject_51".to_vec())));
         assert!(local.tabular_ids(true).is_err());
+        assert!(local.tabular_saccver(true).is_err());
         assert!(local.check_tabular_ids(true).is_err());
         assert!(local.check_tabular_ids(false).is_ok());
         let [id, _, _] = local.tabular_ids(false).unwrap();
@@ -926,6 +941,14 @@ mod tests {
         );
         assert_eq!(ids("lcl|Subject_29"), ["pdb|3ABC|C", "3ABC_C", "3ABC_C"]);
         assert!(subject("lcl|Subject_29").check_tabular_ids(true).is_ok());
+        // The `saccver`, made once.
+        let once = subject("lcl|Subject_28");
+        let first = once.tabular_saccver(true).unwrap();
+        assert_eq!(&*first, b"DAA10008.1");
+        assert!(std::sync::Arc::ptr_eq(
+            &first,
+            &once.tabular_saccver(true).unwrap()
+        ));
     }
 
     fn one_defline(ids: Vec<ParsedSeqId>) -> DeflineSet {

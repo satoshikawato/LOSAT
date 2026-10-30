@@ -1173,6 +1173,7 @@ pub(super) struct ReportedSubjects {
 /// does not report as NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the
 /// reports `shown` do not write as NCBI (`common::database::check_reported_parsed`, and with
 /// `shown.joined` `refuse_joined_hits`; `first_query`: the index of the query of `hit_lists[0]`).
+/// The records are made on `pool` (`x_reported_records`).
 pub(super) fn reported_subjects(
     database: &BlastnDatabase,
     titles: &DatabaseTitles,
@@ -1180,6 +1181,7 @@ pub(super) fn reported_subjects(
     letters: bool,
     shown: ParsedShown,
     first_query: usize,
+    pool: Option<&SearchPool<'_>>,
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = hit_lists
         .iter()
@@ -1206,48 +1208,55 @@ pub(super) fn reported_subjects(
             }
         }
     }
-    let mut records = Vec::with_capacity(ordinals.len());
-    let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
     // Whether `taxdb.bti` is on the search path, looked up at the first sequence with parsed
     // Seq-ids that outfmt 0 shows.
-    let mut taxdb_found: Option<bool> = None;
-    for (rank, &ordinal) in ordinals.iter().enumerate() {
+    let taxdb_found = std::sync::OnceLock::new();
+    let db = &database.db;
+    let record = |&ordinal: &u32| -> Result<(FastaRecord, Option<Arc<ParsedSubject>>)> {
         let header = titles
             .get(&ordinal)
             .with_context(|| format!("database sequence {ordinal} has no title read"))?;
-        let title = match header {
+        let (title, subject) = match header {
             ReportedHeader::Stored(stored) => {
                 shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
-                stored.title.clone()
+                (stored.title.clone(), None)
             }
             ReportedHeader::Parsed(subject) => {
-                let taxdb =
-                    shown.pairwise && *taxdb_found.get_or_insert_with(|| database.db.taxdb_found());
+                let taxdb = shown.pairwise && *taxdb_found.get_or_init(|| db.taxdb_found());
                 shared::check_reported_parsed(subject, shown, false, taxdb, ordinal, PROGRAM)?;
-                if parsed.is_empty() {
-                    parsed = vec![None; ordinals.len()];
-                }
-                parsed[rank] = Some(Arc::clone(subject));
-                subject.first_title().to_vec()
+                (subject.first_title().to_vec(), Some(Arc::clone(subject)))
             }
         };
         let sequence = if letters {
-            let block = x_read_sequence(&database.db, ordinal).map_err(database_error)?;
+            let block = x_read_sequence(db, ordinal).map_err(database_error)?;
             let letters = block.nucleotide_iupac(0).map_err(database_error)?;
             x_done_block(block);
             letters
         } else {
             Vec::new()
         };
-        records.push(FastaRecord {
+        let record = FastaRecord {
             // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
             // (line DI-8).
-            local_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
+            local_id: format!("gnl|BL_ORD_ID|{}", db.oid(ordinal)),
             title,
             sequence,
             warnings: Vec::new(),
             source: Default::default(),
-        });
+        };
+        Ok((record, subject))
+    };
+    let made = x_reported_records(&ordinals, pool, &record)?;
+    let mut records = Vec::with_capacity(ordinals.len());
+    let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
+    for (rank, (record, subject)) in made.into_iter().enumerate() {
+        records.push(record);
+        if let Some(subject) = subject {
+            if parsed.is_empty() {
+                parsed = vec![None; ordinals.len()];
+            }
+            parsed[rank] = Some(subject);
+        }
     }
     if shown.joined && !parsed.is_empty() {
         for (query, hit_list) in hit_lists.iter().enumerate() {
@@ -1273,6 +1282,38 @@ pub(super) fn reported_subjects(
         records,
         parsed,
     })
+}
+
+// No NCBI counterpart: NCBI's formatters read the sequence of each alignment when they write it.
+/// The sequences of a report that one read and decode at a time cost more than a task of the pool.
+const X_REPORTED_RECORDS_MIN: usize = 64;
+
+/// `record` of each of `ordinals`, in their order, on `pool` while the search's threads wait
+/// between the query batches (each batch's report reads its own reported sequences with
+/// LOSAT_X_RPTSTREAM); the error of the first one in that order that has one.
+#[allow(clippy::type_complexity)]
+fn x_reported_records(
+    ordinals: &[u32],
+    pool: Option<&SearchPool<'_>>,
+    record: &(dyn Fn(&u32) -> Result<(FastaRecord, Option<Arc<ParsedSubject>>)> + Sync),
+) -> Result<Vec<(FastaRecord, Option<Arc<ParsedSubject>>)>> {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if let Some(pool) = pool.filter(|pool| pool.enabled()) {
+        use rayon::prelude::*;
+        let made: Vec<_> = pool.install(|| {
+            ordinals
+                .par_iter()
+                .with_min_len(X_REPORTED_RECORDS_MIN)
+                .map(record)
+                .collect()
+        });
+        return made.into_iter().collect();
+    }
+    let _ = pool;
+    ordinals.iter().map(record).collect()
 }
 
 impl ReportedSubjects {
@@ -1980,6 +2021,7 @@ mod tests {
             true,
             ParsedShown::default(),
             0,
+            None,
         )
         .unwrap();
         assert_eq!(reported.ordinals, [5, 9]);
@@ -2023,6 +2065,7 @@ mod tests {
             false,
             ParsedShown::default(),
             0,
+            None,
         )
         .unwrap();
         assert!(reported.records[0].seq().is_empty());
@@ -2057,6 +2100,7 @@ mod tests {
             false,
             ParsedShown::default(),
             0,
+            None,
         )
         .unwrap();
         let mut bad = vec![hit_list(vec![(1, 1e-9)], 1)];
@@ -2069,6 +2113,7 @@ mod tests {
             false,
             ParsedShown::default(),
             0,
+            None,
         )
         .err()
         .expect("the bad byte");
@@ -2081,6 +2126,46 @@ mod tests {
         assert!(format!("{error:#}").ends_with("not supported by LOSAT's BLASTN"));
         drop(database);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // The records made on a pool are those made one at a time, and the error is the first one
+    // in the order of the ordinal ids.
+    #[test]
+    fn reported_records_on_a_pool_are_the_serial_ones() {
+        let ordinals: Vec<u32> = (0..500).collect();
+        let record = |&ordinal: &u32| -> Result<(FastaRecord, Option<Arc<ParsedSubject>>)> {
+            if ordinal >= 300 && ordinal % 2 == 0 {
+                anyhow::bail!("refused {ordinal}");
+            }
+            let record = FastaRecord {
+                local_id: format!("gnl|BL_ORD_ID|{ordinal}"),
+                title: Vec::new(),
+                sequence: Vec::new(),
+                warnings: Vec::new(),
+                source: Default::default(),
+            };
+            Ok((record, None))
+        };
+        let ids = |made: Vec<(FastaRecord, Option<Arc<ParsedSubject>>)>| -> Vec<String> {
+            made.into_iter()
+                .map(|(record, _)| record.local_id)
+                .collect()
+        };
+        let serial = x_reported_records(&ordinals[..300], None, &record).unwrap();
+        crate::utils::threading::with_search_pool(4, "BLASTN", |pool| {
+            let parallel = x_reported_records(&ordinals[..300], Some(pool), &record).unwrap();
+            assert_eq!(ids(parallel), ids(serial));
+            let error = x_reported_records(&ordinals, Some(pool), &record)
+                .err()
+                .expect("refused");
+            assert_eq!(format!("{error}"), "refused 300");
+            Ok(())
+        })
+        .unwrap();
+        let error = x_reported_records(&ordinals, None, &record)
+            .err()
+            .expect("refused");
+        assert_eq!(format!("{error}"), "refused 300");
     }
 
     // EXPERIMENT (LOSAT_X_RPTSTREAM): each batch's reports are written when the loop takes it

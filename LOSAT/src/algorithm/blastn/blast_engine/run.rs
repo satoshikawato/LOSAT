@@ -9872,6 +9872,7 @@ fn write_reports_untimed(
                 letters,
                 database::parsed_shown(output_formats),
                 written.queries,
+                x_pool,
             )?)
         }
     };

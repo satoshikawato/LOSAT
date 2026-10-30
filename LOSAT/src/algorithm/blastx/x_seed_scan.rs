@@ -485,6 +485,7 @@ where
     let lookup_word = match lookup {
         Lookup::Standard(l, _) => l.word_length,
         Lookup::Compressed(l) => l.word_length,
+        Lookup::XCompressedFlat(l) => l.word_length,
     };
     let ranges = [(0, length as i32)];
     let mut range = [0, 0, length as i32 - lookup_word];
@@ -534,6 +535,9 @@ where
                 }
                 (Lookup::Compressed(l), _) => {
                     l.scan_subject(scanned, &ranges, pairs, array_size, &mut range)
+                }
+                (Lookup::XCompressedFlat(l), _) => {
+                    l.scan_subject::<X_BLASTX>(scanned, &ranges, pairs, array_size, &mut range)
                 }
             };
             for pair in &pairs[..n as usize] {
@@ -1424,7 +1428,10 @@ mod tests {
             );
         }
         let compressed = blastx_lookup(&short, &["-word_size", "5"]);
-        assert!(matches!(compressed, Lookup::Compressed(_)));
+        assert!(matches!(
+            compressed,
+            Lookup::Compressed(_) | Lookup::XCompressedFlat(_)
+        ));
         assert!(compressed.x_scan_presence(plain).is_none());
     }
 }

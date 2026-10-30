@@ -1,0 +1,1 @@
+- `blastx -task blastx-fast` and `blastx -word_size 5` build their compressed lookup table flat, as `blastp-fast` and TBLASTN do (`LOSAT_X_BPCLUT`, on unless `=0`): each query unit's table no longer holds about 29 MiB for its fixed cells. Reports do not change.

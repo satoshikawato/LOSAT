@@ -125,7 +125,8 @@ use std::ops::RangeInclusive;
 /// records copied out at their exact length, `tblastx/x_pair_par.rs`) was added after the change as
 /// a switch that is off unless set and joined the set once it was verified and timed with it on.
 /// `LOSAT_X_BPCLUT` (the compressed lookup table of `blastp-fast` built flat, in three passes, by
-/// the search's pool at more than one thread, `tblastx/lookup/x_clut_direct.rs`) and
+/// the search's pool at more than one thread, `tblastx/lookup/x_clut_direct.rs`; the compressed
+/// tables of TBLASTN and BLASTX take it too, built on one thread) and
 /// `LOSAT_X_BPLKPFLAT` (how that build is scheduled and where its vectors come from, which acts
 /// only where `LOSAT_X_BPCLUT` builds the table on the pool, `tblastx/lookup/x_clut_par.rs`) were
 /// added after the change as switches that are off unless set and joined the set together once

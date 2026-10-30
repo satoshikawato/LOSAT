@@ -104,8 +104,8 @@
 //!    element for element, and every later step (`get_ungapped_hsp_list`, chunk merge, frame
 //!    append and sort) is the reference's code on the same input.
 //!
-//! Contexts of a multi-query batch are taken in at most `X_MAX_GROUPS` contiguous groups (one
-//! context per group for one query). A group is one unit: inside it the diagonals of its contexts
+//! Contexts of a multi-query batch are taken in at most `X_MAX_GROUPS` contiguous groups (without
+//! LOSAT_X_TBXFEWGROUPS, one context per group for one query). A group is one unit: inside it the diagonals of its contexts
 //! share unit cells exactly as reference cells without aliasing, and items 1-4 apply to its
 //! boundaries. The groups depend on the inputs and, with LOSAT_X_TBXFEWGROUPS, on the units the pool
 //! can use (`x_groups_wanted`, `group_starts`), which changes no output: a group boundary only decides
@@ -318,14 +318,26 @@ const X_UNITS_PER_THREAD: usize = 2;
 /// No NCBI counterpart: the frames of a subject (`XUnit::f`), which are the units of one group.
 const X_SUBJECT_FRAMES: usize = 6;
 
-/// No NCBI counterpart: the groups a batch needs for `threads` and `subjects`: enough for
-/// `X_UNITS_PER_THREAD` units per thread, one group at one thread or with subjects enough.
-fn x_groups_wanted(threads: usize, subjects: usize) -> usize {
+/// No NCBI counterpart: the groups a batch needs for `threads`: enough for `X_UNITS_PER_THREAD`
+/// units per thread on the longest subject's share of the bases (its frames are all the units a
+/// chromosome among plasmids can split into), so one group at one thread or with subjects enough.
+fn x_groups_wanted(
+    threads: usize,
+    subjects: crate::algorithm::tblastx::subjects::Subjects<'_>,
+) -> usize {
     if !few_groups() {
         return X_MAX_GROUPS;
     }
+    let (longest, total) = subjects
+        .lengths()
+        .fold((0u128, 0u128), |(longest, total), length| {
+            (longest.max(length as u128), total + length as u128)
+        });
+    let shares = usize::try_from(total / longest.max(1))
+        .unwrap_or(usize::MAX)
+        .max(1);
     (threads * X_UNITS_PER_THREAD)
-        .div_ceil(subjects.saturating_mul(X_SUBJECT_FRAMES).max(1))
+        .div_ceil(shares.saturating_mul(X_SUBJECT_FRAMES))
         .clamp(1, X_MAX_GROUPS)
 }
 
@@ -959,7 +971,8 @@ fn x_band_fits(longest_subject_chunk: usize, diag_array_size: i32) -> bool {
 // table (`x_unit_mask_for`: `x_masked_cells`, at most the reference's), so `x_band_fits` holds for
 // every unit that keeps an unmasked one. The scan in slices of LOSAT_X_TBXQSLICE never takes a
 // masked table (module doc), so a batch whose groups its rule cuts keeps `x_band_fits`.
-// `rule_cuts` reads only the contexts, the thread count and process-wide switches (not the
+// `rule_cuts` reads only the contexts, the thread count, the subjects' lengths (through the
+// groups, `x_groups_wanted`) and process-wide switches (not the
 // diagnostics ones), so the lookup build site and `prepare` agree, with and without diagnostics.
 /// LOSAT_X_TBXBAND with LOSAT_X_TBXUNITMASK: the switch is on and LOSAT_X_TBXQSLICE's rule cuts
 /// no group of the batch.
@@ -967,7 +980,7 @@ fn x_band_masked(g: &XGates<'_>) -> bool {
     g.unit_mask
         && !x_tbx_qslice::rule_cuts(
             g.contexts,
-            &group_starts(g.contexts, x_groups_wanted(g.threads, g.subjects.count())),
+            &group_starts(g.contexts, x_groups_wanted(g.threads, g.subjects)),
             g.threads,
         )
 }
@@ -1014,8 +1027,8 @@ fn units_gain(g: &XGates<'_>) -> bool {
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARN1", gain);
         return gain;
     }
-    // LOSAT_X_TBXFEWGROUPS: the one-thread line, as a thread that takes a subject runs its units
-    // like one thread does (one group with subjects enough).
+    // LOSAT_X_TBXFEWGROUPS: the one-thread line, as the batch takes the groups the pool needs
+    // (one with subjects enough) and no more scans of each frame than at one thread.
     if few_groups() && g.query_length >= X_GATE_N1_LETTERS {
         crate::utils::xreach::x_reach!("LOSAT_X_TBXFEWGROUPS", true);
         return true;
@@ -1194,7 +1207,7 @@ fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
     // EXPERIMENT (LOSAT_X_TBXQSLICE): the tables of the slices of the groups the switch cuts,
     // built directly as the groups are (x_tbx_qslice.rs).
     let threads = e.pool.threads();
-    let wanted = x_groups_wanted(threads, e.subjects.count());
+    let wanted = x_groups_wanted(threads, e.subjects);
     let starts = group_starts(contexts, wanted);
     let (groups, sliced) = match x_tbx_qslice::partition(contexts, &starts, threads) {
         None => (lut_direct_groups(&q, wanted, e.pool, lut_on_pool())?, None),
@@ -1262,6 +1275,8 @@ fn lut_direct_tables(
     on_pool: bool,
 ) -> Vec<XGroup> {
     let to_group = XGroup::from_direct;
+    // A cut group's slices are many tables (x_tbx_qslice.rs), each a region of address space.
+    let mapped = locations.len() <= X_MAX_GROUPS;
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1270,14 +1285,14 @@ fn lut_direct_tables(
         return pool.install(|| {
             locations
                 .par_iter()
-                .map(|group_locations| to_group(q.x_build_group(group_locations)))
+                .map(|group_locations| to_group(q.x_build_group(group_locations, mapped)))
                 .collect()
         });
     }
     let _ = (pool, on_pool);
     locations
         .iter()
-        .map(|group_locations| to_group(q.x_build_group(group_locations)))
+        .map(|group_locations| to_group(q.x_build_group(group_locations, mapped)))
         .collect()
 }
 
@@ -1981,7 +1996,7 @@ impl<M: TbxScore> XPairPar<M> {
     /// The unit path for this batch, or None (a gate, the guard or the cost rule sends it to the
     /// reference loop).
     pub(super) fn prepare(b: XBatch<'_, M>) -> Option<Self> {
-        let wanted = x_groups_wanted(b.threads, b.subjects.count());
+        let wanted = x_groups_wanted(b.threads, b.subjects);
         let decision = decide(&XGates {
             contexts: b.contexts,
             query_length: b.query_length,
@@ -2013,6 +2028,11 @@ impl<M: TbxScore> XPairPar<M> {
         // with the reference loop.
         let units = decision == XDecision::Units;
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", units);
+        if units {
+            if let Some(few) = x_takes_few_groups(b.contexts, wanted) {
+                crate::utils::xreach::x_reach!("LOSAT_X_TBXFEWGROUPS", few);
+            }
+        }
         if seed_compact() {
             crate::utils::xreach::x_reach!("LOSAT_X_SEEDCOMPACT", units);
         }
@@ -3306,6 +3326,19 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: bool>(
     }
 }
 
+// No NCBI counterpart: LOSAT_X_TBXFEWGROUPS's decision for a batch (scheduling only; module doc).
+/// Whether a batch that `wanted` would cut less than `X_MAX_GROUPS` does extends over at most
+/// `X_FEW_GROUPS_LETTERS` letters; None where `wanted` changes nothing.
+fn x_takes_few_groups(contexts: &[QueryContext], wanted: usize) -> Option<bool> {
+    let n = contexts.len();
+    if wanted >= X_MAX_GROUPS || n <= wanted {
+        return None;
+    }
+    let letters =
+        contexts[n - 1].frame_base + contexts[n - 1].aa_len as i32 - contexts[0].frame_base;
+    Some(letters as usize <= X_FEW_GROUPS_LETTERS)
+}
+
 // No NCBI counterpart: how the contexts are grouped into units (scheduling only; module doc).
 /// The first context of each group: one group per context up to `X_MAX_GROUPS` contexts, else
 /// `X_MAX_GROUPS` contiguous groups balanced by length; `wanted` groups in place of `X_MAX_GROUPS`
@@ -3313,16 +3346,11 @@ fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: bool>(
 /// `x_groups_wanted`).
 fn group_starts(contexts: &[QueryContext], wanted: usize) -> Vec<usize> {
     let n = contexts.len();
-    let mut max_groups = X_MAX_GROUPS;
-    if wanted < X_MAX_GROUPS && n > wanted {
-        let letters =
-            contexts[n - 1].frame_base + contexts[n - 1].aa_len as i32 - contexts[0].frame_base;
-        let few = letters as usize <= X_FEW_GROUPS_LETTERS;
-        crate::utils::xreach::x_reach!("LOSAT_X_TBXFEWGROUPS", few);
-        if few {
-            max_groups = wanted;
-        }
-    }
+    let max_groups = if x_takes_few_groups(contexts, wanted) == Some(true) {
+        wanted
+    } else {
+        X_MAX_GROUPS
+    };
     if n <= max_groups {
         return (0..n).collect();
     }
@@ -5150,6 +5178,53 @@ mod tests {
         // The gates and the guard come first.
         assert_eq!(decision(256, &one, true, 1, true), XDecision::Gate);
         assert_eq!(decision(256, &long, false, 1, true), XDecision::Guard);
+    }
+
+    // No NCBI counterpart: LOSAT_X_TBXFEWGROUPS's groups: two units per thread on the longest
+    // subject's share of the bases, at most six groups, and only up to the letters' line.
+    #[test]
+    fn a_batch_takes_the_groups_the_pool_needs() {
+        let subjects = |lengths: &[usize]| -> Vec<FastaRecord> {
+            lengths
+                .iter()
+                .map(|&length| FastaRecord::new("", b"s", &vec![b'A'; length]))
+                .collect()
+        };
+        let wanted = |threads: usize, records: &[FastaRecord]| {
+            x_groups_wanted(
+                threads,
+                crate::algorithm::tblastx::subjects::Subjects::Fasta(records),
+            )
+        };
+        let one = subjects(&[900]);
+        assert_eq!(wanted(1, &one), 1);
+        assert_eq!(wanted(2, &one), 1);
+        assert_eq!(wanted(3, &one), 1);
+        assert_eq!(wanted(4, &one), 2);
+        assert_eq!(wanted(8, &one), 3);
+        assert_eq!(wanted(16, &one), 6);
+        assert_eq!(wanted(48, &one), 6);
+        let equal = subjects(&[900; 40]);
+        assert_eq!(wanted(8, &equal), 1);
+        assert_eq!(wanted(48, &equal), 1);
+        // A chromosome among plasmids needs the units of a subject alone.
+        let chromosome = subjects(&[50_000, 500, 500, 500, 500, 500]);
+        assert_eq!(wanted(16, &chromosome), 6);
+        assert_eq!(wanted(8, &chromosome), 3);
+        let mut rng = Rng(5);
+        let alphabet = aa("ACDEKW");
+        let frames: Vec<QueryFrame> = (0..6)
+            .map(|k| frame(1 + k, &random_residues(&mut rng, 30, &alphabet)))
+            .collect();
+        let (_, contexts) = lookup_for(&frames);
+        assert_eq!(group_starts(&contexts, 1), vec![0]);
+        assert_eq!(group_starts(&contexts, 3), vec![0, 2, 4]);
+        assert_eq!(
+            group_starts(&contexts, X_MAX_GROUPS),
+            vec![0, 1, 2, 3, 4, 5]
+        );
+        assert_eq!(x_takes_few_groups(&contexts, 3), Some(true));
+        assert_eq!(x_takes_few_groups(&contexts, X_MAX_GROUPS), None);
     }
 
     // No NCBI counterpart: LOSAT_X_PAIRPARN1 moves the one-thread line of LOSAT_X_PAIRPARGATE from

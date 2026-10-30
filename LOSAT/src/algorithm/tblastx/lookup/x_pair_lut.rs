@@ -162,9 +162,9 @@ const X_GROUP_MAPPED_FROM: usize = 64 << 10;
 /// `X_GROUP_MAPPED_FROM` bytes takes the capacity that glibc maps whatever its size and whose free
 /// leaves its mmap threshold as it is (`x_unthresholded_capacity`, as TBLASTN's tables,
 /// x_lut_direct.rs); only what is written is touched.
-fn x_group_capacity<T>(elements: usize) -> usize {
+fn x_group_capacity<T>(elements: usize, mapped: bool) -> usize {
     let size = std::mem::size_of::<T>();
-    if elements.saturating_mul(size) >= X_GROUP_MAPPED_FROM {
+    if mapped && elements.saturating_mul(size) >= X_GROUP_MAPPED_FROM {
         crate::utils::x_mapped::x_unthresholded_capacity(elements, size)
     } else {
         elements
@@ -173,8 +173,8 @@ fn x_group_capacity<T>(elements: usize) -> usize {
 
 /// No NCBI counterpart: `vec![0; elements]` with `x_group_capacity`; `calloc` touches none of a
 /// mapped block.
-fn x_group_zeroed(elements: usize) -> Vec<u32> {
-    let mut zeroed = vec![0u32; x_group_capacity::<u32>(elements)];
+fn x_group_zeroed(elements: usize, mapped: bool) -> Vec<u32> {
+    let mut zeroed = vec![0u32; x_group_capacity::<u32>(elements, mapped)];
     zeroed.truncate(elements);
     zeroed
 }
@@ -358,7 +358,8 @@ impl XPairLutQuery {
     // place. The neighbour lists come from the calling thread's memo, as there.
     /// The lookup table of one group: the table `build_groups` filters out of the full table for
     /// the group whose lookup locations are `locations` (module comment).
-    pub(crate) fn x_build_group(&self, locations: &[(i32, i32)]) -> XPairLutGroup {
+    /// `mapped`: the build's large blocks take `x_group_capacity`'s mapped capacity.
+    pub(crate) fn x_build_group(&self, locations: &[(i32, i32)], mapped: bool) -> XPairLutGroup {
         let threshold = self.threshold;
         let matrix = self.matrix;
         let word_length = self.word_length;
@@ -400,7 +401,7 @@ impl XPairLutQuery {
             // Count pass: count[w] = number of appends the reference makes to cell w from the
             // source words of this group. The bounds of the entries are taken on the way: every
             // offset of a source word with a target is an entry of the table.
-            let mut counts: Vec<u32> = x_group_zeroed(backbone_size);
+            let mut counts: Vec<u32> = x_group_zeroed(backbone_size, mapped);
             let mut q_min = u32::MAX;
             let mut q_max = 0u32;
             for idx in 0..backbone_size {
@@ -443,10 +444,10 @@ impl XPairLutQuery {
                 crate::algorithm::tblastx::x_scan_bf::x_scan_bf_takes(used, backbone_size);
             let backbone_len = if compact { used } else { backbone_size };
             let mut backbone: Vec<BackboneCell> =
-                Vec::with_capacity(x_group_capacity::<BackboneCell>(backbone_len));
+                Vec::with_capacity(x_group_capacity::<BackboneCell>(backbone_len, mapped));
             backbone.resize(backbone_len, BackboneCell::default());
             let mut slot: Vec<u32> = if compact {
-                x_group_zeroed(backbone_size)
+                x_group_zeroed(backbone_size, mapped)
             } else {
                 Vec::new()
             };
@@ -462,9 +463,10 @@ impl XPairLutQuery {
                     longest_chain = count as i32;
                 }
             }
-            let mut overflow: Vec<i32> = Vec::with_capacity(x_group_capacity::<i32>(overflow_size));
+            let mut overflow: Vec<i32> =
+                Vec::with_capacity(x_group_capacity::<i32>(overflow_size, mapped));
             overflow.resize(overflow_size, 0);
-            let mut base: Vec<u32> = x_group_zeroed(backbone_size);
+            let mut base: Vec<u32> = x_group_zeroed(backbone_size, mapped);
             let mut overflow_cursor = 0usize;
             let mut kept = 0usize;
             for (idx, &count) in counts.iter().enumerate() {
@@ -488,7 +490,7 @@ impl XPairLutQuery {
             }
 
             // Fill pass: the reference's appends of this group, in the reference's order.
-            let mut fill: Vec<u32> = x_group_zeroed(backbone_size);
+            let mut fill: Vec<u32> = x_group_zeroed(backbone_size, mapped);
             for idx in 0..backbone_size {
                 let Some(offset_list) = exact_backbone[idx].as_deref() else {
                     continue;
@@ -920,7 +922,8 @@ mod tests {
             .x_group_locations(&starts)
             .expect("every location inside one group");
         assert_eq!(locations.len(), starts.len());
-        let groups: Vec<XPairLutGroup> = locations.iter().map(|l| q.x_build_group(l)).collect();
+        let groups: Vec<XPairLutGroup> =
+            locations.iter().map(|l| q.x_build_group(l, true)).collect();
         let mut with_entries = 0usize;
         let mut in_overflow = 0usize;
         for (g, direct) in groups.iter().enumerate() {

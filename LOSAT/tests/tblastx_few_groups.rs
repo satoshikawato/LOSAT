@@ -174,3 +174,39 @@ fn a_longer_batch_keeps_its_groups() {
     assert_eq!(report, expected);
     assert_eq!(sides, (false, true), "the side that a long batch took");
 }
+
+/// Records of the first `total` bases of `name`, `pieces` of equal length, as FASTA text.
+fn pieces_of(name: &str, total: usize, pieces: usize) -> String {
+    let record = bases(name, total);
+    let sequence = record.lines().nth(1).expect("the sequence");
+    let length = total / pieces;
+    (0..pieces)
+        .map(|k| format!(">piece{k}\n{}\n", &sequence[k * length..(k + 1) * length]))
+        .collect()
+}
+
+/// Many queries against many subjects, the gate on (the batches take the units from 5,000 letters
+/// at several threads, one group): the report of `=0` (the reference frame loop's at several
+/// threads), of one thread, of a chromosome-like subject among short ones. The threads differ in
+/// their order of work only.
+#[test]
+fn queries_against_subjects_give_the_same_report_with_the_gate() {
+    let inputs = Inputs::new(12_000, 6_000);
+    std::fs::write(&inputs.query, pieces_of("AP027131.fasta", 12_000, 4)).unwrap();
+    std::fs::write(&inputs.subject, pieces_of("AP027133.fasta", 12_000, 8)).unwrap();
+    let gate = ("LOSAT_X_PAIRPARGATE", "1");
+    let (expected, sides) = tblastx(&inputs, 4, &[gate, OFF], &[]);
+    assert!(!expected.is_empty(), "no hits");
+    assert_eq!(sides, (false, false), "=0 records nothing");
+    let (report, sides) = tblastx(&inputs, 4, &[gate], &[]);
+    assert_eq!(report, expected, "four threads");
+    assert_eq!(sides, (true, false), "one group for the subjects");
+    let (report, _) = tblastx(&inputs, 1, &[gate], &[]);
+    assert_eq!(report, expected, "one thread");
+    let mut mixed = bases("AP027133.fasta", 12_000);
+    mixed.push_str(">short\nACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n");
+    std::fs::write(&inputs.subject, &mixed).unwrap();
+    let (expected, _) = tblastx(&inputs, 4, &[gate, OFF], &[]);
+    let (report, _) = tblastx(&inputs, 4, &[gate], &[]);
+    assert_eq!(report, expected, "one long subject");
+}

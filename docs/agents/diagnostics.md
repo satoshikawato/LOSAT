@@ -450,6 +450,7 @@ export LOSAT_X_TBNUNITXLATE=1
 export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXBAND=1
 export LOSAT_X_TBXEXTBATCH=256
+export LOSAT_X_TBXFEWGROUPS=1
 export LOSAT_X_TBXHITBF=1
 export LOSAT_X_TBXKMERGE=1
 export LOSAT_X_TBXLUT=1
@@ -5826,7 +5827,8 @@ Scheduling (each value computed by one thread with the original function; order 
   frozen NCBI bytes of the fast fixtures (at one thread the frame loop for batches under 5,000 letters,
   `LOSAT_X_PAIRPARN1`, the units above; the units at 4 threads). The tests that need the frame loop reach it at one thread
   with `LOSAT_X_PAIRPARGATE=1` (the cost rule; batches under 5,000 letters, or any below 2^18 cells with
-  `LOSAT_X_PAIRPARN1=0`), with several subjects without a dominant one, or with
+  `LOSAT_X_PAIRPARN1=0`), with several subjects without a dominant one and `LOSAT_X_TBXFEWGROUPS=0` (or a
+  batch under 5,000 letters), or with
   `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1`, and assert `units=0`.
 - `LOSAT_X_TBXBAND=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19; `=0` turns it off; acts where the unit path runs) the unit path no longer applies
@@ -5909,7 +5911,8 @@ Scheduling (each value computed by one thread with the original function; order 
   reference frame loop (`units_gain` in `tblastx/x_pair_par.rs`): the reference's diagonal table has
   2^18 cells or more (query length plus window above 131,072 letters, a translated query batch of
   more than about 65 kb), or the search has two or more threads and one subject holds more than one
-  and a half thread's share of the bases (`2 * longest * threads > 3 * total`), or the lookup
+  and a half thread's share of the bases (`2 * longest * threads > 3 * total`), or two or more threads
+  and a batch of 5,000 letters or more (`LOSAT_X_TBXFEWGROUPS`, the line of `LOSAT_X_PAIRPARN1`), or the lookup
   threshold is below TBLASTX's default of 13 (not measured; a lower threshold puts more words in
   every position, and the full table grows faster than the group tables: with `-threshold +inf`,
   which NCBI converts to INT_MIN, every word, the option-sweep inputs took 14.2 GB in the reference
@@ -6012,6 +6015,18 @@ Scheduling (each value computed by one thread with the original function; order 
   8 threads extension x0.772 (5/6), whole search x0.916 (5/6); serial reactor x0.807 (5/6), x0.913 (5/6);
   MelaMJNV x PemoMJNVA 8 threads x0.889 (6/6), x0.977 (4/6); serial reactor x0.846 (6/6), x0.957 (6/6);
   every report identical. (The method's noise: the same unchanged code read x0.92-1.02.)
+- `LOSAT_X_TBXFEWGROUPS=1` (TBLASTX, speed and memory; in the strict set from the pull request that added it,
+  2026-10-31; `=0` turns it off) the unit path takes as few context groups as the pool can use: each group
+  scans every subject frame and has its own tables, and the groups serve only parallelism. A batch wants enough
+  groups for two units per thread on the longest subject's share of the bases (`x_groups_wanted`: one at up
+  to 3 threads, three at 8 threads on one subject, one with subjects enough), and takes them where it extends over at most
+  2^17 letters (`X_FEW_GROUPS_LETTERS`); a longer batch keeps its six groups (its diagonal tables would outgrow the
+  cache: 100-300 kb queries x1.03-1.05 in one or three groups). With fewer groups several threads take the
+  one-thread line of the cost rule (`units_gain`, `LOSAT_X_PAIRPARN1`: 5,000 letters), so a search of many
+  subjects runs the units there too. A group boundary only decides where the concatenated query is cut, so reports do
+  not change. A group build's blocks of 64 KiB or more take the capacity glibc maps
+  (`x_group_capacity`): batches are built on the pool's threads, and those blocks held the arenas' high water.
+DI16_NUMBERS
 - `LOSAT_X_TBXUNGAPSENT=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-25; `=0` turns it off) the two-hit ungapped extension (TBXUNGAP's table walks, above) with
   walks that the sentinels stop instead of a bound (`two_hit_sent` in
@@ -6024,7 +6039,10 @@ Scheduling (each value computed by one thread with the original function; order 
   the reference frame loops). Acts in native builds where the batch's query contexts carry both
   sentinels (checked once per batch) and the unit's subject chunk is its whole frame (frames of at
   most 5,000,000 residues, `MAX_DBSEQ_LEN`, so subjects up to 15 Mb; a longer frame is searched in
-  chunks whose ends are residues) of at most `i32::MAX / 16` bytes (no score wraps). An X-drop
+  chunks whose ends are residues) of at most `i32::MAX / 64` bytes (no score wraps at +63, the largest
+  score of a table). A matrix other than BLOSUM62 takes the same walks on its byte table
+  (`two_hit_sent_in`, `TbxScore::sent_two_hit`, read at `q << 5 | s`; since DI-16, 2026-10-31) where code 0
+  scores -128 against every letter in it (`MatrixWalkTable::x_sentinels_stop`). An X-drop
   outside 1..=127 or a word that does not fit runs the reference, and so does the debug output. In
   the unit path the switch acts on the units of the branch-free hit loops (`LOSAT_X_TBXHITBF`): each
   unit takes one of two instances of the loop's function (`scan_unit_bf`, `scan_unit_batched_bf`,

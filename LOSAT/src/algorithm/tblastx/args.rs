@@ -223,6 +223,12 @@ pub struct TblastxArgs {
     // by `soft_masking`.
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
+    // arg_desc.AddFlag(kArgUseLCaseMasking,
+    //     "Use lower case filtering in query and subject sequence(s)?", true);
+    // ReadSequencesToBlast(..., use_lcase_masks, subjects, ...);
+    #[arg(long)]
+    pub lcase_masking: bool,
 
     /// Two-hit window size for triggering ungapped extension (default: 40, or the matrix's
     /// suggestion; `window`). Smaller values are more strict, larger values are more sensitive.

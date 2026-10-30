@@ -835,6 +835,15 @@
     "takes_value": true
    },
    {
+    "flag": "-lcase_masking",
+    "help": "",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-window_size",
     "help": "Two-hit window size for triggering ungapped extension (default: 40, or the matrix's suggestion; `window`). Smaller values are more strict, larger values are more sensitive. 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX",
     "takes_value": true

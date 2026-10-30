@@ -37,6 +37,7 @@ use super::report::SubjectLetters;
 use super::seqalign::{query_records_of, SeqalignSubjects};
 use super::subjects::SubjectSetNumbers;
 use super::TblastxArgs;
+use crate::algorithm::tblastn::archive::lowercase_runs;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
@@ -56,7 +57,7 @@ use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 /// The recorded options of a TBLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
 /// always sets it (`S/DESIGN_OF8.md` 2.2). TBLASTX has one task, and the options it does not
-/// accept (`-strand`, `-lcase_masking`, ...) are never recorded.
+/// accept (`-strand`, ...) are never recorded.
 pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Tblastx, "tblastx");
     inputs.dbsize = args.dbsize;
@@ -193,6 +194,8 @@ pub(super) struct ArchiveData<'a> {
     pub numbers: &'a SubjectSetNumbers,
     /// The queries of each batch written, in order.
     pub spans: &'a [Range<usize>],
+    /// `-lcase_masking`.
+    pub lcase_masking: bool,
 }
 
 /// The Seq-aligns of one batch: the elements of outfmt 8, one query at a time.
@@ -350,11 +353,27 @@ pub(super) fn write_tblastx_archives(
             }
             None => ([KaBlock::missing(false), KaBlock::missing(true)], 0, 0),
         };
+        // `-lcase_masking`: the `LCaseMask` parameters of the request are the lower-case runs of
+        // each whole query record, each one for both strands (as BLASTX's `lcase_masks`).
+        let mut lcase_masks: Vec<MaskEntry> = Vec::new();
+        if data.lcase_masking {
+            for record in records {
+                for run in lowercase_runs(record.archive_letters()) {
+                    for frame in [Frame::Plus1, Frame::Minus1] {
+                        lcase_masks.push(MaskEntry {
+                            id: record.local_id.clone(),
+                            frame,
+                            intervals: vec![run],
+                        });
+                    }
+                }
+            }
+        }
         let batch = BatchArchive {
             queries: &queries,
             subjects: &subjects_input,
             required,
-            lcase_masks: &[],
+            lcase_masks: &lcase_masks,
             masks: &results_masks,
             ka_blocks,
             search_space,

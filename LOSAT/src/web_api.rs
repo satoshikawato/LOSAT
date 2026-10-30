@@ -417,6 +417,7 @@ fn parse_tblastx_args(
         // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
         seg: "yes".to_string(),
         soft_masking: None,
+        lcase_masking: false,
         window_size: None,
         outfmt: "6".to_string(),
         culling_limit: None,

@@ -177,6 +177,9 @@ def cases(program: str, tables: dict[str, list[tuple[int, int]]]) -> dict[str, l
         sets["mask"] = [["-soft_masking", value] for value in ("true", "false", "T", "F", "1", "x")]
         sets["mask"] += [["-seg", value, "-soft_masking", "true"] for value in ("no", "10 1.8 2.1")]
         sets["mask"] += [["-query_gencode", "4", "-soft_masking", "true"]]
+        # -lcase_masking (blast_filter.c:1239-1256): the lower-case runs join the SEG intervals (line NP, SM-L).
+        sets["mask"] += [["-lcase_masking"], ["-lcase_masking", "-seg", "no"], ["-lcase_masking", "-soft_masking", "true"],
+                         ["-lcase_masking", "-seg", "no", "-soft_masking", "true"]]
         # -matrix (series SCT, SC7): the nine matrices, other spellings (lower-case names are an error
         # in the XML family only; IDENTITYX makes NCBI abort, so LOSAT refuses: losat-rejects), and
         # an explicit -threshold or -window_size over the matrix's suggestion.
@@ -185,7 +188,7 @@ def cases(program: str, tables: dict[str, list[tuple[int, int]]]) -> dict[str, l
         sets["other"] = [[option] + values for option, values in
                          (("-sum_stats", ["false"]), ("-num_descriptions", ["5"]), ("-num_alignments", ["5"]),
                           ("-line_length", ["60"]), ("-sorthits", ["1"]), ("-sorthsps", ["1"]),
-                          ("-lcase_masking", []), ("-strand", ["plus"]), ("-qcov_hsp_perc", ["50"]),
+                          ("-strand", ["plus"]), ("-qcov_hsp_perc", ["50"]),
                           ("-xdrop_ungap", ["10"]), ("-searchsp", ["1000000"]), ("-dbsize", ["1000000"]))]
     return sets
 

@@ -144,7 +144,7 @@ struct FirstContext {
 }
 
 /// The runs of lower-case letters of a record (inclusive 0-based positions).
-fn lowercase_runs(letters: &[u8]) -> Vec<(i32, i32)> {
+pub(crate) fn lowercase_runs(letters: &[u8]) -> Vec<(i32, i32)> {
     let mut runs = Vec::new();
     let mut start = None;
     for (index, letter) in letters.iter().enumerate() {

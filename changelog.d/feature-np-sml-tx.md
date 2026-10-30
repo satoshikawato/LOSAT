@@ -1,0 +1,1 @@
+- TBLASTX accepts `-lcase_masking` with NCBI BLAST+ 2.17.0's bytes: lower-case query letters join the SEG intervals of each frame (hard or `-soft_masking true`), lower-case `-subject` letters leave its word scan; `-subject`, `-db`, the archive (outfmt 11) and LOSAT Web.

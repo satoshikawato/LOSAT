@@ -258,6 +258,49 @@ fn cases() -> Vec<Case> {
             subject: "does_not_exist.fa",
             ..case("nosubject", &[], "arch_tbx_q.fna", &[], 1)
         },
+        // `-lcase_masking`: a one-letter run on the first letter of a SEG interval (the order of
+        // the merge, `mask_lcase`).
+        Case {
+            subject: "arch_tbx_lcase_tie_s.fna",
+            ..case(
+                "lcase_tie_sub",
+                &[],
+                "arch_tbx_lcase_tie_q.fna",
+                &["-lcase_masking"],
+                0,
+            )
+        },
+        // `-lcase_masking`: the `LCaseMask` parameters, the results' masks, a subject's lower case.
+        Case {
+            subject: "arch_tbx_lcase_s.fna",
+            ..case(
+                "lcase_sub",
+                &[],
+                "arch_tbx_lcase_q.fna",
+                &["-lcase_masking"],
+                0,
+            )
+        },
+        Case {
+            subject: "arch_tbx_lcase_s.fna",
+            ..case(
+                "lcase_qloc_sub",
+                &[],
+                "arch_tbx_lcase_q.fna",
+                &["-lcase_masking", "-query_loc", "110-355"],
+                0,
+            )
+        },
+        Case {
+            subject: "arch_tbx_lcase_s.fna",
+            ..case(
+                "lcase_soft_sub",
+                &[],
+                "arch_tbx_lcase_q.fna",
+                &["-lcase_masking", "-soft_masking", "true", "-seg", "no"],
+                0,
+            )
+        },
         case("noquery_sub", &[], "no_such_query.fna", &[], 1),
         case("empty_query", &[], "arch_tbx_empty.fna", &[], 0),
         case("emptyonly", &[], "arch_tbx_emptyonly.fna", &[], 3),

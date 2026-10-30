@@ -514,7 +514,18 @@ pub(crate) fn read_header(
     query: usize,
     program: &str,
 ) -> Result<ReportedHeader> {
-    match db.read_header(ordinal) {
+    reported_header(db, db.read_header(ordinal), ordinal, query, program)
+}
+
+/// The `read_header` of the header `header` of the sequence `ordinal` of `db`.
+fn reported_header(
+    db: &SeqDb,
+    header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>,
+    ordinal: u32,
+    query: usize,
+    program: &str,
+) -> Result<ReportedHeader> {
+    match header {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set, db.is_version5())
                 .map(|subject| ReportedHeader::Parsed(std::sync::Arc::new(subject)))
@@ -622,18 +633,20 @@ pub(crate) fn check_shown_parsed_subject(
     ordinal: u32,
     program: &str,
 ) -> Result<()> {
-    let (start, title) = subject.description(protein);
     let generated = subject.heading_generates_title();
-    let heading_reads_past_end = generated
-        && subject
-            .bioseq_title(protein, false)
-            .is_ok_and(|defline| defline.reads_past_end);
-    if protein && (title.reads_past_end || heading_reads_past_end) {
-        return Err(parsed_refusal(
-            ordinal,
-            "has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0)",
-            program,
-        ));
+    if protein {
+        let (_, title) = subject.description(protein);
+        let heading_reads_past_end = generated
+            && subject
+                .bioseq_title(protein, false)
+                .is_ok_and(|defline| defline.reads_past_end);
+        if title.reads_past_end || heading_reads_past_end {
+            return Err(parsed_refusal(
+                ordinal,
+                "has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0)",
+                program,
+            ));
+        }
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:913-916
     // ```c++
@@ -645,7 +658,7 @@ pub(crate) fn check_shown_parsed_subject(
     // ```
     // The unsigned length wraps for an id longer than 65 bytes: NCBI 2.17.0 then pads the
     // line with spaces without end (probe of the ID2a review, `tests/db_search/ids/refuse.faa`).
-    if start.len() > 65 {
+    if subject.description_start().len() > 65 {
         return Err(parsed_refusal(
             ordinal,
             "has an outfmt 0 description id longer than 65 bytes (NCBI BLAST+ 2.17.0 pads the description line without end)",
@@ -713,7 +726,7 @@ pub(crate) fn check_reported_parsed(
     }
     if shown.tabular {
         subject
-            .tabular_ids(protein)
+            .check_tabular_ids(protein)
             .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program))?;
     }
     Ok(())
@@ -809,8 +822,11 @@ pub(crate) fn reports_may_refuse(
             Ok(self)
         }
     }
-    let check = |mut kept: Kept, ordinal: u32| -> std::result::Result<Kept, ReportRefusal> {
-        match read_header(db, ordinal, 0, program) {
+    let check = |kept: &mut Kept,
+                 ordinal: u32,
+                 header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>|
+     -> std::result::Result<(), ReportRefusal> {
+        match reported_header(db, header, ordinal, 0, program) {
             Ok(ReportedHeader::Stored(stored)) => {
                 check_reported_title(stored.replaced_bytes, ordinal, program)
                     .map_err(|_| ReportRefusal::Headers)?;
@@ -847,8 +863,19 @@ pub(crate) fn reports_may_refuse(
             }
             Err(_) => return Err(ReportRefusal::Headers),
         }
-        Ok(kept)
+        Ok(())
     };
+    let check_range = |mut kept: Kept,
+                       range: &crate::seqdb::BlockRange|
+     -> std::result::Result<Kept, ReportRefusal> {
+        let mut refusal = None;
+        db.visit_sequence_headers(*range, |ordinal, header| {
+            refusal = check(&mut kept, ordinal, header).err();
+            refusal.is_none()
+        });
+        refusal.map_or(Ok(kept), Err)
+    };
+    let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
     let all = || -> std::result::Result<Kept, ReportRefusal> {
         #[cfg(all(
             feature = "parallel",
@@ -857,15 +884,14 @@ pub(crate) fn reports_may_refuse(
         if pool.enabled() {
             use rayon::prelude::*;
             return pool.install(|| {
-                (0..db.num_seqs())
-                    .into_par_iter()
-                    .with_min_len(4096)
-                    .try_fold(Kept::default, check)
+                ranges
+                    .par_iter()
+                    .try_fold(Kept::default, check_range)
                     .try_reduce(Kept::default, Kept::join)
             });
         }
         let _ = pool;
-        (0..db.num_seqs()).try_fold(Kept::default(), check)
+        ranges.iter().try_fold(Kept::default(), check_range)
     };
     let mut kept = match all() {
         Ok(kept) => kept,

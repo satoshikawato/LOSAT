@@ -337,6 +337,11 @@ impl ParsedSubject {
         ])
     }
 
+    /// `Err` as `tabular_ids`', which it does not make.
+    pub fn check_tabular_ids(&self, protein: bool) -> Result<(), &'static str> {
+        self.title_word(protein).map(drop)
+    }
+
     /// The tabular `sgi`: the first GI of the subject Bioseq's ids (`FindGi`; `seq_id_list` only
     /// replaces ids that are no GI), 0 for none.
     pub fn tabular_gi(&self) -> i64 {
@@ -411,6 +416,16 @@ impl ParsedSubject {
     /// without `-show_gis`, which LOSAT refuses) and its title: `GenerateDefline` of the subject
     /// Bioseq with `fLeavePrefixSuffix` (`Unknown` where NCBI's `HtmlDecode` throws).
     pub fn description(&self, protein: bool) -> (Vec<u8>, Defline) {
+        let start = self.description_start();
+        let title = self.bioseq_title(protein, true).unwrap_or(Defline {
+            text: b"Unknown".to_vec(),
+            reads_past_end: false,
+        });
+        (start, title)
+    }
+
+    /// The start of the outfmt 0 description line (`description`).
+    pub fn description_start(&self) -> Vec<u8> {
         let mut start = Vec::new();
         if let Some(shown) = self.set.display_defline(&self.alignment_id) {
             let defline = &self.set.deflines[shown.index];
@@ -419,11 +434,7 @@ impl ParsedSubject {
                 description_id(id, gi, false, &mut start);
             }
         }
-        let title = self.bioseq_title(protein, true).unwrap_or(Defline {
-            text: b"Unknown".to_vec(),
-            reads_past_end: false,
-        });
-        (start, title)
+        start
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2380-2384, 2451-2461
@@ -769,6 +780,8 @@ mod tests {
         assert!(check_shown_parsed_subject(&accession, true, false, 0, "BLASTP").is_err());
         let local = subject(ParsedSeqId::Local(ObjectId::Str(b"Subject_51".to_vec())));
         assert!(local.tabular_ids(true).is_err());
+        assert!(local.check_tabular_ids(true).is_err());
+        assert!(local.check_tabular_ids(false).is_ok());
         let [id, _, _] = local.tabular_ids(false).unwrap();
         let word = stored.text.split(|&byte| byte == b' ').next().unwrap();
         assert_eq!(id, word);
@@ -894,6 +907,7 @@ mod tests {
             ["tpg|DAA10008.1|", "DAA10008", "DAA10008.1"]
         );
         assert_eq!(ids("lcl|Subject_29"), ["pdb|3ABC|C", "3ABC_C", "3ABC_C"]);
+        assert!(subject("lcl|Subject_29").check_tabular_ids(true).is_ok());
     }
 
     fn one_defline(ids: Vec<ParsedSeqId>) -> DeflineSet {

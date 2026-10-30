@@ -55,7 +55,8 @@ use crate::seqid::{DeflineSet, ParsedSeqId};
 pub use alias::SearchPath;
 pub use header::Defline;
 pub use volume::{
-    AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, BLASTNA_SENTINEL, FENCE_SENTRY,
+    AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, VolumeHeader, BLASTNA_SENTINEL,
+    FENCE_SENTRY,
 };
 
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): how the volumes read their index files.
@@ -1178,11 +1179,24 @@ impl SeqDb {
     /// (`deflines`), or every member and Seq-id (`defline_set`) of a record with parsed
     /// Seq-ids. A record without parsed Seq-ids is read as before, with the same errors.
     pub fn read_header(&self, ordinal: u32) -> Result<SequenceHeader, SeqDbError> {
-        match self.deflines(ordinal) {
-            Err(error) if error.is_parsed_seqids() => {
-                self.defline_set(ordinal).map(SequenceHeader::Parsed)
-            }
-            read => read.map(SequenceHeader::Ordinal),
+        let (volume, oid) = self.find_volume(ordinal)?;
+        self.sequence_header(volume, ordinal, self.volumes[volume].header(oid))
+    }
+
+    /// The `SequenceHeader` of the header `header` of the sequence `ordinal` in `volume`.
+    fn sequence_header(
+        &self,
+        volume: usize,
+        ordinal: u32,
+        header: Result<VolumeHeader, SeqDbError>,
+    ) -> Result<SequenceHeader, SeqDbError> {
+        match header? {
+            VolumeHeader::Ordinal(deflines) => self
+                .ordinal_deflines(volume, ordinal, Ok(deflines))
+                .map(SequenceHeader::Ordinal),
+            VolumeHeader::Parsed(set) => self
+                .ordinal_set(volume, ordinal, set)
+                .map(SequenceHeader::Parsed),
         }
     }
 
@@ -1192,7 +1206,18 @@ impl SeqDb {
     /// stored number plus the first ordinal id of the volume).
     pub fn defline_set(&self, ordinal: u32) -> Result<DeflineSet, SeqDbError> {
         let (volume, oid) = self.find_volume(ordinal)?;
-        let mut set = self.volumes[volume].defline_set(oid)?;
+        let set = self.volumes[volume].defline_set(oid)?;
+        self.ordinal_set(volume, ordinal, set)
+    }
+
+    /// `set`, the definition lines of the sequence `ordinal` in `volume`, with the tag of a
+    /// `general` id `BL_ORD_ID` made its database ordinal id (`defline_set`).
+    fn ordinal_set(
+        &self,
+        volume: usize,
+        ordinal: u32,
+        mut set: DeflineSet,
+    ) -> Result<DeflineSet, SeqDbError> {
         let volume_start = self.volume_starts[volume];
         if volume_start == 0 {
             return Ok(set);
@@ -1411,6 +1436,31 @@ impl SeqDb {
             range.end,
             header_piece_bytes(),
             &mut |oid, taxids| visit(range.first_ordinal + (oid - range.first), taxids),
+        )
+    }
+
+    /// `visit(ordinal, self.read_header(ordinal))` for the sequences of `range` in order until
+    /// `visit` returns false; returns whether every call returned true. The headers of the range
+    /// are read as [`SeqDb::visit_deflines`] reads them (one read of the index file and one read
+    /// of the header file per MiB).
+    pub fn visit_sequence_headers(
+        &self,
+        range: BlockRange,
+        mut visit: impl FnMut(u32, Result<SequenceHeader, SeqDbError>) -> bool,
+    ) -> bool {
+        let Some(vol) = self.volumes.get(range.volume) else {
+            return range.is_empty().then_some(true).unwrap_or_else(|| {
+                visit(range.first_ordinal, Err(volume_range_error(range, self)))
+            });
+        };
+        vol.visit_sequence_headers(
+            range.first,
+            range.end,
+            header_piece_bytes(),
+            &mut |oid, header| {
+                let ordinal = range.first_ordinal + (oid - range.first);
+                visit(ordinal, self.sequence_header(range.volume, ordinal, header))
+            },
         )
     }
 

@@ -27,6 +27,27 @@ pub(super) fn with_extension(base: &Path, seqtype: SeqType, ext: &str) -> PathBu
     PathBuf::from(name)
 }
 
+/// The header of a sequence of a volume, with its ordinal ids still relative to the volume
+/// (`Volume::header`, `SeqDb::read_header`).
+#[derive(Debug)]
+pub enum VolumeHeader {
+    /// A record whose only Seq-ids are `gnl|BL_ORD_ID|n` (`Volume::deflines`).
+    Ordinal(Vec<Defline>),
+    /// A record with parsed Seq-ids (`Volume::defline_set`).
+    Parsed(crate::seqid::DeflineSet),
+}
+
+/// The header in the bytes `record`: its definition lines where its only Seq-ids are
+/// `gnl|BL_ORD_ID|n`, or all its definition lines with their Seq-ids.
+fn decode_header(record: &[u8], path: &Path) -> Result<VolumeHeader, SeqDbError> {
+    match decode_deflines_as(record, path, false) {
+        Err(error) if error.is_parsed_seqids() => {
+            decode_full(record, path).map(VolumeHeader::Parsed)
+        }
+        read => read.map(VolumeHeader::Ordinal),
+    }
+}
+
 impl Volume {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:104-109
     // ```c++
@@ -469,6 +490,16 @@ impl Volume {
         self.hdr_file()?.read_range(start, end)
     }
 
+    /// The header of the sequence `oid` (volume-relative) from one read of its record
+    /// (`SeqDb::read_header`).
+    pub fn header(&self, oid: u32) -> Result<VolumeHeader, SeqDbError> {
+        let record = self.header_bytes(oid)?;
+        decode_header(
+            &record,
+            &with_extension(&self.base, self.index.seqtype, "hr"),
+        )
+    }
+
     /// The `taxid` of each definition line of the sequence `oid` (volume-relative), 0 for none.
     pub fn defline_taxids(&self, oid: u32) -> Result<Vec<i32>, SeqDbError> {
         let record = self.header_bytes(oid)?;
@@ -792,6 +823,24 @@ impl Volume {
             piece_bytes,
             &|oid| self.defline_set(oid).map(taxids),
             &|record, path| decode_full(record, path).map(taxids),
+            visit,
+        )
+    }
+
+    /// `visit_deflines` for `header`: the same pieces and fallbacks, with its decoder.
+    pub(super) fn visit_sequence_headers(
+        &self,
+        first: u32,
+        end: u32,
+        piece_bytes: u64,
+        visit: &mut dyn FnMut(u32, Result<VolumeHeader, SeqDbError>) -> bool,
+    ) -> bool {
+        self.visit_headers(
+            first,
+            end,
+            piece_bytes,
+            &|oid| self.header(oid),
+            &decode_header,
             visit,
         )
     }

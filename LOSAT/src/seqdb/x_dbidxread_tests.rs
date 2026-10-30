@@ -363,6 +363,57 @@ fn damaged_headers_read_in_ranges_as_one_by_one() {
 }
 
 #[test]
+fn a_header_is_read_alike_alone_and_in_a_range() {
+    let ids = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/ids");
+    for (path, seqtype) in [
+        (fixture_db_dir().join("prot_v4"), SeqType::Protein),
+        (fixture_db_dir().join("prot_mv"), SeqType::Protein),
+        (fixture_db_dir().join("nucl_v5"), SeqType::Nucleotide),
+        (fixture_db_dir().join("nucl_mv"), SeqType::Nucleotide),
+        (ids.join("nucl_v4"), SeqType::Nucleotide),
+        (ids.join("nucl_v5"), SeqType::Nucleotide),
+        (ids.join("njoined"), SeqType::Nucleotide),
+        (ids.join("prot_v4"), SeqType::Protein),
+        (ids.join("refuse_v5"), SeqType::Protein),
+    ] {
+        let db = SeqDb::open(path.to_str().unwrap(), seqtype).unwrap();
+        let mut parsed = 0;
+        for max_seqs in [1, 3, 1024] {
+            for range in db.header_ranges(max_seqs) {
+                let mut headers = Vec::new();
+                assert!(db.visit_sequence_headers(range, |ordinal, header| {
+                    headers.push((ordinal, header.unwrap()));
+                    true
+                }));
+                let expected: Vec<_> = (range.first_ordinal..range.end_ordinal())
+                    .map(|ordinal| {
+                        // A record with parsed Seq-ids is what `deflines` does not read.
+                        let header = match db.deflines(ordinal) {
+                            Err(error) if error.is_parsed_seqids() => {
+                                parsed += 1;
+                                SequenceHeader::Parsed(db.defline_set(ordinal).unwrap())
+                            }
+                            deflines => SequenceHeader::Ordinal(deflines.unwrap()),
+                        };
+                        assert_eq!(db.read_header(ordinal).unwrap(), header, "{path:?}");
+                        (ordinal, header)
+                    })
+                    .collect();
+                assert_eq!(headers, expected, "{path:?}");
+                // `visit` ends the walk.
+                let mut calls = 0;
+                assert!(!db.visit_sequence_headers(range, |_, _| {
+                    calls += 1;
+                    false
+                }));
+                assert_eq!(calls, 1, "{path:?}");
+            }
+        }
+        assert_eq!(parsed > 0, path.starts_with(&ids), "{path:?}");
+    }
+}
+
+#[test]
 fn database_ranges_cover_every_sequence_once() {
     for name in ["prot_v4", "prot_mv", "nucl_v5", "nucl_mv", "empty"] {
         let seqtype = if name.starts_with("nucl") {

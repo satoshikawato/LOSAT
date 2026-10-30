@@ -1,6 +1,7 @@
 //! EXPERIMENT (LOSAT_X_BNCSR, in the strict set: default ON since 2026-10-25, off with
 //! `LOSAT_X_BNCSR=0`): the chains of a contiguous table of `build_mb_lookup` (the two-stage table
-//! of `blastn`'s word sizes 9 to 11, `lut_word_length` 8 to 11) laid out as CSR (compressed sparse
+//! of `blastn`'s word sizes 9 to 11, `lut_word_length` 8 to 11, and with LOSAT_X_MBCSR megablast's
+//! tables of `lut_word_length` 12 above its size rule) laid out as CSR (compressed sparse
 //! rows) instead of NCBI's `hashtable` / `next_pos`, as LOSAT_X_DCCSR lays out a discontiguous
 //! table (`x_dc_csr.rs`, whose `Csr`, sum pass and scan `Ring` this module uses): `offsets[cell] ..
 //! offsets[cell + 1]` indexes `qs`, which holds the cell's 1-based query offsets in the order its
@@ -36,8 +37,8 @@
 //! A count pass adds 1 to the count of the word's cell, a sum pass (`x_dc_csr::sum_cells`) turns
 //! the counts into inclusive running sums (the end of each cell's run), and a place pass, in the
 //! loop's order again, writes each word into its cell's run. The two orders of a chain:
-//! - newest first (`ascending_cells == false`, the megablast-type table, `-task blastn`'s table of
-//!   word size 11 and its tables of 4^9 to 4^11 cells): the fill puts each word at the head of its
+//! - newest first (`ascending_cells == false`, the megablast-type table, also of 4^12 cells with
+//!   LOSAT_X_MBCSR, `-task blastn`'s table of word size 11 and its tables of 4^9 to 4^11 cells): the fill puts each word at the head of its
 //!   cell's chain, so a chain lists its words in reverse reading order. The count of `cell` is
 //!   `offsets[cell]`; the place pass writes each word at `--offsets[cell]`, so the first word read
 //!   lands at the end of the run and the last at its start, and `offsets[cell]` is left at the
@@ -168,17 +169,19 @@ pub(super) fn print_summary() {
 }
 
 /// No NCBI counterpart: the `lut_word_length` range of the tables laid out as CSR (module
-/// comment, scope).
+/// comment, scope), besides LOSAT_X_MBCSR's 12 (`x_in_scope`).
 const MIN_LUT: usize = 8;
 const MAX_LUT: usize = 11;
 
 /// No NCBI counterpart: EXPERIMENT (LOSAT_X_MBCSR, in the strict set: on unless it is `0`) megablast's
 /// tables of 4^12 cells are laid out as CSR too, with a packed head, when the search scans at least
 /// `X_MB12_LETTERS_PER_POSITION` subject letters per position of the word loop and one per cell. It
-/// chooses between two LOSAT layouts of the same chains and changes no value NCBI computes.
+/// chooses between two LOSAT layouts of the same chains and changes no value NCBI computes. Not on
+/// wasm32: `prefetch` does nothing there, and the untouched pages of the table's offsets are still
+/// linear memory.
 pub(super) fn x_mb12_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBCSR"))
+    *ON.get_or_init(|| !cfg!(target_arch = "wasm32") && crate::utils::xswitch::on("LOSAT_X_MBCSR"))
 }
 
 /// No NCBI counterpart: LOSAT_X_MBCSR's size rule. At one thread on the workstation the CSR's build
@@ -847,14 +850,21 @@ pub(super) mod tests {
     #[test]
     fn the_packed_head_lists_the_chains_too() {
         let mut rng = Lcg(0xB4C5_0002);
-        for lut in MIN_LUT..=MAX_LUT {
-            for (n, len, repeats) in [
-                (1, 6, false),
-                (3, 300, false),
-                (5, 6000, false),
-                (40, 3000, false),
-                (2, 500, true),
-            ] {
+        for lut in MIN_LUT..=12 {
+            // LOSAT_X_MBCSR's 4^12 cells: words past a byte's count, and the batch of 800,000 table
+            // entries or more whose presence vector has half the words.
+            let cases: &[(usize, usize, bool)] = if lut == 12 {
+                &[(40, 3000, false), (2, 500, true), (1, 900_000, false)]
+            } else {
+                &[
+                    (1, 6, false),
+                    (3, 300, false),
+                    (5, 6000, false),
+                    (40, 3000, false),
+                    (2, 500, true),
+                ]
+            };
+            for &(n, len, repeats) in cases {
                 let mut case = random_case(&mut rng, n, len);
                 if repeats {
                     x_with_repeats(&mut case, lut);

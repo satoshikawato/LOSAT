@@ -3228,7 +3228,11 @@ fn x_bn_mapped() -> bool {
 /// places on. It changes no value.
 fn x_mb_hit_prefetch() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBHITPF"))
+    *ON.get_or_init(|| {
+        let on = crate::utils::xswitch::on("LOSAT_X_MBHITPF");
+        crate::utils::xreach::x_reach!("LOSAT_X_MBHITPF", on);
+        on
+    })
 }
 const X_HIT_AHEAD: usize = 16;
 

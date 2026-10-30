@@ -9,8 +9,22 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// `fs::canonicalize` without the `\\?\` prefix that Windows puts on its result: a verbatim path
+/// takes `/` as a character of a name (`{O}/B23.out` below is not a file of the directory then),
+/// and the product prints the paths it lists without the prefix.
+fn canonical(path: &Path) -> PathBuf {
+    let path = fs::canonicalize(path).unwrap();
+    #[cfg(windows)]
+    if let Some(plain) = path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
+        if plain.as_bytes().get(1) == Some(&b':') {
+            return PathBuf::from(plain);
+        }
+    }
+    path
+}
+
 fn tests_dir() -> PathBuf {
-    fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests")).unwrap()
+    canonical(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests"))
 }
 
 /// A directory of its own for one test (the tests of a binary run in parallel), removed at
@@ -28,7 +42,7 @@ impl TestDir {
             std::process::id()
         ));
         fs::create_dir_all(&dir).unwrap();
-        TestDir(fs::canonicalize(dir).unwrap())
+        TestDir(canonical(&dir))
     }
 }
 
@@ -65,9 +79,57 @@ fn expected(name: &str) -> Vec<u8> {
     let tests = tests_dir();
     let text = fs::read(tests.join("blastdbcmd/expected").join(name)).unwrap();
     let text = String::from_utf8(text).unwrap();
+    native_paths(text, &tests)
+}
+
+/// The frozen text with `{R}` and `{T}` placed. NCBI's files come from Linux; on Windows the
+/// paths in them are the ones NCBI's code makes there (`SeqDB_ConvertOSPath`: the separator of
+/// the platform; the search path is split at `;`), so the rest of each placed path is written
+/// with `\`, so is the name in `database [name]`, and the `:` of the search path `[{R}::]` is `;`.
+#[cfg(not(windows))]
+fn native_paths(text: String, tests: &Path) -> Vec<u8> {
     text.replace("{T}", tests.to_str().unwrap())
         .replace("{R}", tests.join("blastdbcmd").to_str().unwrap())
         .into_bytes()
+}
+
+#[cfg(windows)]
+fn native_paths(text: String, tests: &Path) -> Vec<u8> {
+    let text = text.replace("{R}::]", "{R};;]");
+    // The database name of "No alias or index file found for ... database [name]" goes through
+    // the same conversion (`SeqDB_ConvertOSPath`).
+    let mut converted = String::new();
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find("database [") {
+        let name_at = at + "database [".len();
+        converted.push_str(&rest[..name_at]);
+        let end = rest[name_at..]
+            .find(']')
+            .map_or(rest.len(), |n| name_at + n);
+        converted.push_str(&rest[name_at..end].replace('/', "\\"));
+        rest = &rest[end..];
+    }
+    converted.push_str(rest);
+    let text = converted;
+    let mut out = String::new();
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find('{') {
+        out.push_str(&rest[..at]);
+        let root = match &rest[at..at + 3] {
+            "{R}" => tests.join("blastdbcmd"),
+            "{T}" => tests.to_path_buf(),
+            _ => unreachable!("a placeholder of the frozen files"),
+        };
+        out.push_str(root.to_str().unwrap());
+        rest = &rest[at + 3..];
+        let end = rest
+            .find(|c: char| !(c.is_ascii_alphanumeric() || "_./-".contains(c)))
+            .unwrap_or(rest.len());
+        out.push_str(&rest[..end].replace('/', "\\"));
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out.into_bytes()
 }
 
 /// The probe's cases that LOSAT answers as NCBI does: id, words, NCBI's exit status. The
@@ -180,6 +242,11 @@ const MATCHES: &[(&str, &[&str], i32)] = &[
 fn info_and_argument_errors_are_ncbi_s_bytes() {
     let dir = TestDir::new("match");
     for &(id, words, status) in MATCHES {
+        // C04 sends the diagnostics to `/dev/null`; Windows has no such file, so there `-logfile`
+        // is "not accessible" and NCBI's answer on Windows is not measured.
+        if cfg!(windows) && id == "C04" {
+            continue;
+        }
         let (stdout, stderr, code) = blastdbcmd(words, &dir.0);
         assert_eq!(
             String::from_utf8_lossy(&stdout),

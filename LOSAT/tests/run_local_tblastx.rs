@@ -15,7 +15,8 @@ mod run_local_support;
 use std::process::Command;
 
 use run_local_support::{
-    assert_observer_ranges, fixture_sequence, reader_records, run_formats, Run, TempFasta,
+    assert_observer_ranges, cli_out_path, fixture_sequence, reader_records, run_formats, Run,
+    TempFasta,
 };
 use LOSAT::algorithm::tblastx::TblastxArgs;
 use LOSAT::api::local_blast::{run_local_tblastx, FormatOutput, OutputSink, ReportOutputs};
@@ -91,7 +92,7 @@ impl Inputs {
 
     /// The CLI output file and standard error of one single-format run.
     fn cli(&self, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
-        let out = self.query.0.with_extension(format!("cli{outfmt}.out"));
+        let out = cli_out_path(&self.query.0, outfmt);
         let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("tblastx")
             .arg("-query")

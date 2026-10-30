@@ -6441,7 +6441,8 @@ Scheduling (each value computed by one thread with the original function; order 
   AMRProt 8 threads 0.562 0.597, 16 threads 0.542 0.590. One thread (no cap): Trinity 0.928 0.851, AMRProt 0.843
   0.572, rhodopsin 0.773 0.578. Against `LOSAT_X_BXCLUTCAP=0` the cap costs time only with few subjects (Trinity x
   four proteins, 0.2-0.3 s, 8 threads 0.291 s vs 0.218 s, 16 threads 0.229 s vs 0.193 s, `RssAnon` 0.56 and 0.61 of
-  that arm) and within 2 % elsewhere. Still above NCBI in `RssAnon`: Trinity x Swiss-Prot 8 threads 72 vs 47 MiB,
+  that arm); cases of a second or more stay within about 2 %, and 0.1 s cases change sign between binaries (rhodopsin
+  x four proteins, 8 threads: 0.119 s vs 0.110 s here, 0.095 s vs 0.114 s on 958e1293). Still above NCBI in `RssAnon`: Trinity x Swiss-Prot 8 threads 72 vs 47 MiB,
   EDL933 x AMRProt 16 threads 484 vs 124 MiB. BLASTX without `-word_size 5`: 8 pairs, cycles 0.9971 (byte copy of dev
   1.0005) on 60 Trinity transcripts x Swiss-Prot at one thread, instructions x1.00001, `Lookup::Compressed` keeps one
   variant so that the standard table's loops keep their match (a separate variant cost x1.003 to x1.006 there).

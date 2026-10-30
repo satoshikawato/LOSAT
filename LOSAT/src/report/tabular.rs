@@ -1676,6 +1676,74 @@ mod tests {
         );
     }
 
+    // NCBI tabular.cpp:219-255 (`sseqid`, `sacc`, `saccver`, `sgi`: the subject's own ids) and
+    // :387-439 (`salltitles` joined by `<>`, `stitle` the first title, an empty one `N/A`); a local
+    // query's id is its `qseqid`, `qacc` and `qaccver` alike.
+    #[test]
+    fn id_columns_are_the_subject_s_own() {
+        let spec = TabularSpec::of(
+            ReportFormat::Tabular,
+            &FormatChoice {
+                number: 6,
+                spec: "qseqid qacc qaccver sseqid sacc saccver sgi stitle salltitles".to_string(),
+                delimiter: String::new(),
+            },
+        )
+        .unwrap();
+        let taxonomy = TabularTaxonomy::default();
+        let titles: [&[u8]; 2] = [b"first title", b""];
+        let subject = TabularSubject {
+            id: b"gb|AE000111.1|",
+            accession: b"AE000111",
+            accession_version: b"AE000111.1",
+            gi: 42,
+            all_ids: &[],
+            length: 10,
+            titles: Some(&titles),
+            taxonomy: &taxonomy,
+            names: None,
+            nucleotide: false,
+            qcovs: -1,
+            qcovus: -1,
+        };
+        let hsp = TabularHsp {
+            q_start: 1,
+            q_end: 6,
+            s_start: 1,
+            s_end: 6,
+            evalue: 1e-5,
+            bit_score: 20.0,
+            score: 10,
+            length: 6,
+            gap_opens: 0,
+            gaps: 0,
+            num_ident: 6,
+            q_frame: 1,
+            s_frame: 1,
+            rows: None,
+            qcovhsp: 100,
+        };
+        let mut out = Vec::new();
+        TabularWriter {
+            spec: &spec,
+            program_version: "BLASTP 2.17.0+",
+            matrix: None,
+        }
+        .row(
+            &mut out,
+            &TabularQuery {
+                id: b"q1",
+                length: 6,
+            },
+            &subject,
+            &hsp,
+        );
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "q1\tq1\tq1\tgb|AE000111.1|\tAE000111\tAE000111.1\t42\tfirst title\tfirst title<>N/A\n"
+        );
+    }
+
     #[test]
     fn btop_counts_runs() {
         let mut out = Vec::new();

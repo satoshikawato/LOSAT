@@ -377,40 +377,59 @@ fn a_header_is_read_alike_alone_and_in_a_range() {
         (ids.join("refuse_v5"), SeqType::Protein),
     ] {
         let db = SeqDb::open(path.to_str().unwrap(), seqtype).unwrap();
-        let mut parsed = 0;
-        for max_seqs in [1, 3, 1024] {
-            for range in db.header_ranges(max_seqs) {
-                let mut headers = Vec::new();
-                assert!(db.visit_sequence_headers(range, |ordinal, header| {
-                    headers.push((ordinal, header.unwrap()));
-                    true
-                }));
-                let expected: Vec<_> = (range.first_ordinal..range.end_ordinal())
-                    .map(|ordinal| {
-                        // A record with parsed Seq-ids is what `deflines` does not read.
-                        let header = match db.deflines(ordinal) {
-                            Err(error) if error.is_parsed_seqids() => {
-                                parsed += 1;
-                                SequenceHeader::Parsed(db.defline_set(ordinal).unwrap())
-                            }
-                            deflines => SequenceHeader::Ordinal(deflines.unwrap()),
-                        };
-                        assert_eq!(db.read_header(ordinal).unwrap(), header, "{path:?}");
-                        (ordinal, header)
-                    })
-                    .collect();
-                assert_eq!(headers, expected, "{path:?}");
-                // `visit` ends the walk.
-                let mut calls = 0;
-                assert!(!db.visit_sequence_headers(range, |_, _| {
-                    calls += 1;
-                    false
-                }));
-                assert_eq!(calls, 1, "{path:?}");
-            }
-        }
+        let parsed = check_headers(&db, &path);
         assert_eq!(parsed > 0, path.starts_with(&ids), "{path:?}");
     }
+    // A taxid list leaves out sequences and definition lines (`SeqDb::restrict_taxids`).
+    for list in [
+        TaxidList::Positive([9606].into_iter().collect()),
+        TaxidList::Negative([9606].into_iter().collect()),
+    ] {
+        let path = ids.join("nucl_v5");
+        let mut db = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+        let whole = db.num_seqs();
+        db.restrict_taxids(&list).unwrap();
+        assert!(db.num_seqs() > 0 && db.num_seqs() < whole, "{list:?}");
+        assert!(check_headers(&db, &path) > 0, "{list:?}");
+    }
+}
+
+/// Checks `visit_sequence_headers` and `read_header` of every sequence of `db` against
+/// `deflines` and `defline_set`; returns how many records with parsed Seq-ids it saw.
+fn check_headers(db: &SeqDb, path: &Path) -> usize {
+    let mut parsed = 0;
+    for max_seqs in [1, 3, 1024] {
+        let mut headers = Vec::new();
+        for range in db.header_ranges(max_seqs) {
+            assert!(db.visit_sequence_headers(range, |ordinal, header| {
+                headers.push((ordinal, header.unwrap()));
+                true
+            }));
+            // `visit` ends the walk.
+            let mut calls = 0;
+            assert!(!db.visit_sequence_headers(range, |_, _| {
+                calls += 1;
+                false
+            }));
+            assert_eq!(calls, 1, "{path:?}");
+        }
+        let expected: Vec<_> = (0..db.num_seqs())
+            .map(|ordinal| {
+                // A record with parsed Seq-ids is what `deflines` does not read.
+                let header = match db.deflines(ordinal) {
+                    Err(error) if error.is_parsed_seqids() => {
+                        parsed += 1;
+                        SequenceHeader::Parsed(db.defline_set(ordinal).unwrap())
+                    }
+                    deflines => SequenceHeader::Ordinal(deflines.unwrap()),
+                };
+                assert_eq!(db.read_header(ordinal).unwrap(), header, "{path:?}");
+                (ordinal, header)
+            })
+            .collect();
+        assert_eq!(headers, expected, "{path:?}");
+    }
+    parsed
 }
 
 #[test]

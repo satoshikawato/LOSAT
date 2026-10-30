@@ -40,17 +40,6 @@ pub enum VolumeHeader {
     Parsed(crate::seqid::DeflineSet),
 }
 
-/// The header in the bytes `record`: its definition lines where its only Seq-ids are
-/// `gnl|BL_ORD_ID|n`, or all its definition lines with their Seq-ids.
-fn decode_header(record: &[u8], path: &Path) -> Result<VolumeHeader, SeqDbError> {
-    match decode_deflines_as(record, path, false) {
-        Err(error) if error.is_parsed_seqids() => {
-            decode_full(record, path).map(VolumeHeader::Parsed)
-        }
-        read => read.map(VolumeHeader::Ordinal),
-    }
-}
-
 impl Volume {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:104-109
     // ```c++
@@ -498,7 +487,7 @@ impl Volume {
     /// (`SeqDb::read_header`).
     pub fn header(&self, oid: u32) -> Result<VolumeHeader, SeqDbError> {
         let record = self.header_bytes(oid)?;
-        decode_header(
+        self.decode_header(
             &record,
             &with_extension(&self.base, self.index.seqtype, "hr"),
         )
@@ -542,6 +531,18 @@ impl Volume {
         let mut decoded = decoded?;
         decoded.retain_lines(&rule.keep_mask(&decode_full(record, path)?));
         Ok(decoded)
+    }
+
+    /// The header in the bytes `record` (`header`).
+    fn decode_header(&self, record: &[u8], path: &Path) -> Result<VolumeHeader, SeqDbError> {
+        match decode_deflines_as(record, path, false) {
+            Err(error) if error.is_parsed_seqids() => {
+                self.decode_kept_set(record, path).map(VolumeHeader::Parsed)
+            }
+            read => self
+                .kept_lines(record, path, read)
+                .map(VolumeHeader::Ordinal),
+        }
     }
 
     /// `decode_full(record, path)` without the definition lines that the volume's
@@ -882,7 +883,7 @@ impl Volume {
             end,
             piece_bytes,
             &|oid| self.header(oid),
-            &decode_header,
+            &|record, path| self.decode_header(record, path),
             visit,
         )
     }

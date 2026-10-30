@@ -1580,13 +1580,18 @@ impl SeqDb {
                 visit(range.first_ordinal, Err(volume_range_error(range, self)))
             });
         };
+        if self.excludes_all(range) {
+            return true;
+        }
         vol.visit_sequence_headers(
             range.first,
             range.end,
             header_piece_bytes(),
-            &mut |oid, header| {
-                let ordinal = range.first_ordinal + (oid - range.first);
-                visit(ordinal, self.sequence_header(range.volume, ordinal, header))
+            &mut |oid, header| match self.range_ordinal(range, oid) {
+                Some(ordinal) => {
+                    visit(ordinal, self.sequence_header(range.volume, ordinal, header))
+                }
+                None => true,
             },
         )
     }

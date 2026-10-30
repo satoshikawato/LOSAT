@@ -48,8 +48,8 @@
 //!   `ceil(threads / subjects)` where that is more (K units of few subjects keep the threads busy
 //!   only with K x subjects tasks). This table's search gains nothing from a unit per thread where
 //!   the subjects fill the threads, and each unit's table and buffers stay alive while it is
-//!   searched: with K = 3 instead of 8, all of Trinity x Swiss-Prot at 8 threads holds 70 MiB of
-//!   anonymous memory instead of 135 MiB in 0.98 of the time.
+//!   searched: with K = 3 instead of 8, all of Trinity x Swiss-Prot at 8 threads holds 72 MiB of
+//!   anonymous memory instead of 134 MiB in 0.99 of the time.
 //! - `LOSAT_X_BXCAPFILL[=f]` (built-in f = 4; acts only where `LOSAT_X_BXUNITCAP` caps): the capped
 //!   units keep the threads busy with few subjects too. A capped unit's subjects run as tasks of
 //!   `capped_subjects_per_task` subjects: f tasks for each of the `ceil(threads / K)` threads a unit

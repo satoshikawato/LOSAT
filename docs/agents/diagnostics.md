@@ -6434,6 +6434,17 @@ Scheduling (each value computed by one thread with the original function; order 
   0.609 0.640 / 0.720 0.406 / 0.831 0.303 / 1.089 0.196; EDL933 x AMRProt 0.554 0.652 / 0.555 0.603 / 0.556 0.594 /
   0.556 0.690. K = 2 is slower than the reference table with 4 subjects; K = 3 is not, and is the smallest K of
   which that holds in all these cases, also at 16 threads (0.895 0.315, 0.763 0.501, 0.541 0.623).
+  Final binary 0f22ecd0 against dev caf4c166 (reports equal to NCBI 2.17.0 in every arm), time and peak `RssAnon`
+  as parts of dev, 3 pairs, ws node 1: Trinity x Swiss-Prot 4 threads 0.896 0.527, 8 threads 0.868 0.307, 16 threads
+  0.906 0.422; cDNAs 8 threads 0.825 0.392; AMRProt 8 threads 0.746 0.516, 16 threads 0.727 0.517; rhodopsin x four
+  proteins 8 threads 0.772 0.580; Trinity x four proteins 8 threads 0.856 0.360, 16 threads 0.717 0.385; EDL933 x
+  AMRProt 8 threads 0.562 0.597, 16 threads 0.542 0.590. One thread (no cap): Trinity 0.928 0.851, AMRProt 0.843
+  0.572, rhodopsin 0.773 0.578. Against `LOSAT_X_BXCLUTCAP=0` the cap costs time only with few subjects (Trinity x
+  four proteins, 0.2-0.3 s, 8 threads 0.291 s vs 0.218 s, 16 threads 0.229 s vs 0.193 s, `RssAnon` 0.56 and 0.61 of
+  that arm) and within 2 % elsewhere. Still above NCBI in `RssAnon`: Trinity x Swiss-Prot 8 threads 72 vs 47 MiB,
+  EDL933 x AMRProt 16 threads 484 vs 124 MiB. BLASTX without `-word_size 5`: 8 pairs, cycles 0.9971 (byte copy of dev
+  1.0005) on 60 Trinity transcripts x Swiss-Prot at one thread, instructions x1.00001, `Lookup::Compressed` keeps one
+  variant so that the standard table's loops keep their match (a separate variant cost x1.003 to x1.006 there).
 - `LOSAT_X_BXCAPFILL=1` or `=f` (BLASTX, memory with few subjects; in the strict set from the pull request that
   added it, 2026-10-25: on unless `=0` or `LOSAT_X_DEFAULT=0`; a value switch, f from 2 to 64 tasks per thread,
   otherwise 4; acts where `LOSAT_X_BXUNITCAP` caps): the capped units keep the threads busy with few subjects

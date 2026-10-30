@@ -7,7 +7,7 @@ use crate::algorithm::tblastx::blast_aascan::s_blast_aa_scan_subject_one_range;
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair as OffsetPair;
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_tbn_build_compressed_lookup, XCompressedLookup, XFlatCompressedLookup, X_BLASTX,
+    x_tbn_build_compressed_lookup, XCompressedLookup, X_BLASTX,
 };
 use crate::algorithm::tblastx::lookup::compressed::{
     build_blosum62_compressed_lookup, x_compressed_scaled_threshold, BlastCompressedAaLookupTable,
@@ -271,9 +271,9 @@ pub struct InitHsp {
 // loop's scan, built the first time that loop scans with it (x_seed_scan.rs).
 pub enum Lookup {
     Standard(BlastAaLookupTable, x_seed_scan::XKeptPresence),
-    Compressed(BlastCompressedAaLookupTable),
-    // EXPERIMENT (LOSAT_X_BPCLUT): the compressed table built flat (`x_clut_direct.rs`).
-    XCompressedFlat(XFlatCompressedLookup),
+    // EXPERIMENT (LOSAT_X_BPCLUT): the compressed table as the reference builds it or flat
+    // (`x_clut_direct.rs`), one variant so that the standard table's loops keep their match.
+    Compressed(XCompressedLookup),
 }
 
 // No NCBI counterpart: buffer reuse only (LOSAT_X_BXLUTPOOL, tblastx/lookup/x_lut_direct.rs): a
@@ -310,12 +310,42 @@ fn x_compressed_lookup(query: &[u8], segments: &[(i32, i32)], threshold: f64) ->
         &[0..segments.len()],
     );
     match flat {
-        Some(Ok(XCompressedLookup::Flat(table))) => Ok(Lookup::XCompressedFlat(table)),
-        Some(Ok(XCompressedLookup::Reference(table))) => Ok(Lookup::Compressed(table)),
-        Some(Err(())) | None => Ok(Lookup::Compressed(
+        Some(Ok(table)) => Ok(Lookup::Compressed(table)),
+        Some(Err(())) | None => Ok(Lookup::Compressed(XCompressedLookup::Reference(
             build_blosum62_compressed_lookup(5, threshold, query, segments)
                 .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?,
-        )),
+        ))),
+    }
+}
+
+/// No NCBI counterpart: the word length of either form of the compressed table. Not inlined, so
+/// that the standard table's loops keep their code.
+#[inline(never)]
+pub(super) fn x_compressed_word_length(table: &XCompressedLookup) -> i32 {
+    match table {
+        XCompressedLookup::Reference(table) => table.word_length,
+        XCompressedLookup::Flat(table) => table.word_length,
+    }
+}
+
+/// No NCBI counterpart: `scan_subject` of either form of the compressed table, which give the same
+/// pairs and `s_range`. Not inlined, so that the standard table's loops keep their code.
+#[inline(never)]
+pub(super) fn x_compressed_scan(
+    table: &XCompressedLookup,
+    subject: &[u8],
+    seq_ranges: &[(i32, i32)],
+    offset_pairs: &mut [OffsetPair],
+    array_size: i32,
+    s_range: &mut [i32; 3],
+) -> i32 {
+    match table {
+        XCompressedLookup::Reference(table) => {
+            table.scan_subject(subject, seq_ranges, offset_pairs, array_size, s_range)
+        }
+        XCompressedLookup::Flat(table) => {
+            table.scan_subject::<X_BLASTX>(subject, seq_ranges, offset_pairs, array_size, s_range)
+        }
     }
 }
 
@@ -458,8 +488,8 @@ impl Lookup {
     pub fn capacity(&self) -> usize {
         4096 + match self {
             Self::Standard(l, _) => l.longest_chain as usize,
-            Self::Compressed(l) => l.longest_chain as usize,
-            Self::XCompressedFlat(l) => l.longest_chain as usize,
+            Self::Compressed(XCompressedLookup::Reference(l)) => l.longest_chain as usize,
+            Self::Compressed(XCompressedLookup::Flat(l)) => l.longest_chain as usize,
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-505
@@ -499,8 +529,7 @@ impl Lookup {
     ) {
         let word = match self {
             Self::Standard(l, _) => l.word_length,
-            Self::Compressed(l) => l.word_length,
-            Self::XCompressedFlat(l) => l.word_length,
+            Self::Compressed(l) => x_compressed_word_length(l),
         };
         let ranges = [(0, length as i32)];
         let mut range = [0, 0, length as i32 - word];
@@ -519,10 +548,7 @@ impl Lookup {
                     s_blast_aa_scan_subject_one_range(l, subject, &mut pairs, capacity, &mut range)
                 }
                 Self::Compressed(l) => {
-                    l.scan_subject(subject, &ranges, &mut pairs, capacity, &mut range)
-                }
-                Self::XCompressedFlat(l) => {
-                    l.scan_subject::<X_BLASTX>(subject, &ranges, &mut pairs, capacity, &mut range)
+                    x_compressed_scan(l, subject, &ranges, &mut pairs, capacity, &mut range)
                 }
             };
             for pair in &pairs[..n as usize] {

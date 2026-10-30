@@ -1019,22 +1019,13 @@ fn units_gain(g: &XGates<'_>) -> bool {
         crate::utils::xreach::x_reach!("LOSAT_X_TBXFEWGROUPS", true);
         return true;
     }
-    x_one_subject_dominates(g.subjects, g.threads)
-}
-
-// No NCBI counterpart: a choice between two LOSAT schedules with the same result (`units_gain`).
-/// One subject holds more than one and a half thread's share of the bases: the subject loop alone
-/// would leave threads idle while one takes it.
-fn x_one_subject_dominates(
-    subjects: crate::algorithm::tblastx::subjects::Subjects<'_>,
-    threads: usize,
-) -> bool {
-    let (longest, total) = subjects
+    let (longest, total) = g
+        .subjects
         .lengths()
         .fold((0u128, 0u128), |(longest, total), length| {
             (longest.max(length as u128), total + length as u128)
         });
-    2 * longest * threads as u128 > 3 * total
+    2 * longest * g.threads as u128 > 3 * total
 }
 
 /// The inputs of `lut_build`: what the lookup build site of the batch has (RI:2311).
@@ -1988,24 +1979,6 @@ impl<M: TbxScore> XPairPar<M> {
     // (`lut_build`). None means the reference loop runs for every subject of the batch.
     /// The unit path for this batch, or None (a gate, the guard or the cost rule sends it to the
     /// reference loop).
-    // No NCBI counterpart: scheduling only; NCBI's threads take whole subjects as the subject loop
-    // does (blast_engine.c:1411-1475).
-    /// LOSAT_X_TBXFEWGROUPS: whether a subject's units run on the thread that took the subject: one
-    /// group, and the subject loop spreads the subjects over the pool. A thread that waited for
-    /// its subject's split units would take another subject and hold both subjects' lists.
-    pub(super) fn x_units_on_thread(
-        &self,
-        subjects: crate::algorithm::tblastx::subjects::Subjects<'_>,
-        threads: usize,
-    ) -> bool {
-        few_groups()
-            && threads > 1
-            && subjects.count() > 1
-            && self.sliced.is_none()
-            && self.x_group_count() == 1
-            && !x_one_subject_dominates(subjects, threads)
-    }
-
     pub(super) fn prepare(b: XBatch<'_, M>) -> Option<Self> {
         let wanted = x_groups_wanted(b.threads, b.subjects.count());
         let decision = decide(&XGates {

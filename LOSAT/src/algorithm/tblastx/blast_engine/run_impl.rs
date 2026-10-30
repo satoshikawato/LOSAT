@@ -4289,9 +4289,6 @@ fn search_query_batch<S: TbxScore>(
     // ```
     // NCBI keeps its lookup table and diagonal table through the subject loop; when LOSAT
     // frees its copies is not a value NCBI computes (x_seed_release.rs).
-    let x_units_on_thread = x_pair_par_batch
-        .as_ref()
-        .is_some_and(|x| x.x_units_on_thread(subjects, parallel_pool.threads()));
     let x_seed_batch = x_seed_release::XSeedBatch::new(lookup, x_pair_par_batch, subjects.count());
     let x_worker_diag_cells = x_seed_batch.worker_table_cells(diag_array_size as usize);
 
@@ -4935,14 +4932,7 @@ fn search_query_batch<S: TbxScore>(
                     s_len,
                 };
                 x_lap.lap(XStage::Prepare);
-                let x_units = if x_units_on_thread {
-                    x.run_subject_units(
-                        &x_subject,
-                        &crate::utils::threading::SearchPool::x_serial(),
-                    )
-                } else {
-                    x.run_subject_units(&x_subject, parallel_pool)
-                };
+                let x_units = x.run_subject_units(&x_subject, parallel_pool);
                 x_lap.lap(XStage::Units);
                 x_units_stage.end();
                 x_lap.lap(XStage::UnitsRelease);

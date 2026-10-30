@@ -1931,6 +1931,41 @@ impl BlastIntervalTree {
     pub fn node_count(&self) -> usize {
         self.nodes.len()
     }
+
+    // No NCBI counterpart: the state of the arrays for a caller that moves trees between threads;
+    // it does not change any value NCBI computes.
+    /// True for a tree that has never listed an HSP in the grid (`new` allocates no entries).
+    #[inline]
+    pub fn x_has_no_arrays(&self) -> bool {
+        self.x.entries.capacity() == 0
+    }
+
+    // No NCBI counterpart: see `x_has_no_arrays`.
+    /// A tree `x_has_no_arrays` tells from the one `new` makes.
+    pub fn x_new_with_arrays() -> Self {
+        let mut tree = Self::new(0, 1, 0, 1);
+        tree.x.entries.reserve_exact(1);
+        tree
+    }
+
+    // No NCBI counterpart: see `x_has_no_arrays`.
+    /// The bytes of the arrays this tree holds.
+    pub fn x_array_bytes(&self) -> usize {
+        use std::mem::size_of;
+        self.nodes.capacity() * size_of::<IntervalNode>()
+            + self.x.head.capacity() * size_of::<u32>()
+            + self.x.used_cells.capacity() * size_of::<u32>()
+            + self.x.entries.capacity() * size_of::<XCellEntry>()
+            + self.x.overflow.capacity() * size_of::<u32>()
+            + self.x.ends.bits.capacity() * size_of::<u64>()
+    }
+
+    // No NCBI counterpart: see `x_has_no_arrays`.
+    /// Empties this tree for the ranges of `other`, whose root is the only node it needs.
+    pub fn x_reset_to_ranges_of(&mut self, other: &Self) {
+        let root = &other.nodes[0];
+        self.reset_with_bounds(root.leftend, root.rightend, other.s_min, other.s_max);
+    }
 }
 
 #[cfg(test)]

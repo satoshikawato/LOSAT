@@ -69,6 +69,9 @@ mod x_ih_pool;
 // EXPERIMENT (LOSAT_X_BPHITSFLAT): a subject's preliminary HSPs grouped by query through one array
 // of their positions.
 mod x_hits_flat;
+// EXPERIMENT (LOSAT_X_BPTREEPOOL): the interval trees of the preliminary stage in one pool shared by
+// the threads.
+mod x_tree_pool;
 // EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel `-subject` loop in runs of subjects, one diagonal
 // table fill per run.
 #[cfg(all(
@@ -8983,6 +8986,8 @@ fn run_resolved_in_pool(
                 );
                 continue;
             }
+            // EXPERIMENT (LOSAT_X_BPTREEPOOL): the subject's first HSP takes a tree from the pool.
+            x_tree_pool::before_add(interval_tree);
             interval_tree.add_hsp(
                 preliminary_tree_hsp(&preliminary_hsp, ctx.frame_base),
                 ctx.frame_base,
@@ -9004,6 +9009,7 @@ fn run_resolved_in_pool(
         }
         scratch.init_hsps = init_hsps;
         x_ih_pool::at_subject_end(&mut scratch.init_hsps);
+        x_tree_pool::at_subject_end(&mut scratch.preliminary_interval_tree);
         scratch.init_hsps.clear();
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:540-555
@@ -9471,6 +9477,8 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPIHPOOL): no subject scan runs any more; the pool's arrays of initial
     // hits are freed, as the subject loop's scratches freed theirs.
     x_ih_pool::release();
+    // EXPERIMENT (LOSAT_X_BPTREEPOOL): the same for the pool's interval trees.
+    x_tree_pool::release();
     let kappa_redo_start = blastp_timing_start(timing_enabled);
     // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2228-2236
     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;

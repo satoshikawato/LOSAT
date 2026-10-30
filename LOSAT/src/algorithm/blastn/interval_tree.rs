@@ -233,6 +233,22 @@ struct XCellEntry {
     next: u32,
 }
 
+// No NCBI counterpart (probe D14 s5, exp branch only): grid cells per registered leaf; 0 = the grid
+// sized from the ranges alone (dev).
+fn x_probe_grid_k() -> usize {
+    use std::sync::OnceLock;
+    static K: OnceLock<usize> = OnceLock::new();
+    *K.get_or_init(|| {
+        std::env::var("LOSAT_PROBE_ITREEGRID")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    })
+}
+
+/// Probe: cells of the first grid of a tree (the grid is refined as leaves come).
+const X_PROBE_START_CELLS: usize = 64;
+
 // No NCBI counterpart: size limits of the grid index (memory and fallback thresholds);
 // they do not change any value NCBI computes. Past a limit the index is dropped and the
 // tree walk answers.
@@ -351,6 +367,14 @@ struct XTreeIndex {
     s_min: i32,
     nq: usize,
     ns: usize,
+    /// Probe: the finest shift the ranges allow (the dev grid), the first shift, the spans.
+    full_shift: u32,
+    start_shift: u32,
+    q_span: usize,
+    s_span: usize,
+    /// Probe: leaves registered since the grid was last emptied; cells per leaf (0 = off).
+    leaves: usize,
+    grid_k: usize,
     /// Per cell: 1 + index of its first entry, 0 = empty. Allocated on the
     /// first HSP.
     head: Vec<u32>,
@@ -383,6 +407,12 @@ impl XTreeIndex {
             s_min,
             nq: 1,
             ns: 1,
+            full_shift: 0,
+            start_shift: 0,
+            q_span: 0,
+            s_span: 0,
+            leaves: 0,
+            grid_k: x_probe_grid_k(),
             head: Vec::new(),
             used_cells: Vec::new(),
             entries: Vec::new(),
@@ -410,14 +440,49 @@ impl XTreeIndex {
         while ((q_span >> shift) + 1).saturating_mul((s_span >> shift) + 1) > X_MAX_CELLS {
             shift += 1;
         }
-        self.shift = shift;
+        self.full_shift = shift;
+        self.q_span = q_span;
+        self.s_span = s_span;
+        if self.grid_k > 0 {
+            while shift < 62 && self.cells_at(shift) > X_PROBE_START_CELLS {
+                shift += 1;
+            }
+        }
+        self.start_shift = shift;
         self.q_min = q_min;
         self.s_min = s_min;
-        self.nq = (q_span >> shift) + 1;
-        self.ns = (s_span >> shift) + 1;
-        self.head.clear();
+        self.set_shift(shift);
         self.used_cells.clear();
         self.clear();
+    }
+
+    /// Probe: grid cells at `shift`.
+    fn cells_at(&self, shift: u32) -> usize {
+        ((self.q_span >> shift) + 1).saturating_mul((self.s_span >> shift) + 1)
+    }
+
+    /// Probe: the grid at `shift`, empty (the head is allocated on the next registration).
+    fn set_shift(&mut self, shift: u32) {
+        self.shift = shift;
+        self.nq = (self.q_span >> shift) + 1;
+        self.ns = (self.s_span >> shift) + 1;
+        self.head.clear();
+    }
+
+    /// Probe: the shift a grid with one more leaf needs, when finer than the present one.
+    fn x_refined_shift(&self) -> Option<u32> {
+        if self.grid_k == 0 || self.shift <= self.full_shift {
+            return None;
+        }
+        let target = (self.leaves + 1).saturating_mul(self.grid_k);
+        if self.cells_at(self.shift) >= target {
+            return None;
+        }
+        let mut shift = self.shift;
+        while shift > self.full_shift && self.cells_at(shift) < target {
+            shift -= 1;
+        }
+        Some(shift)
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:195-201
@@ -431,9 +496,15 @@ impl XTreeIndex {
     /// ```
     /// The index is emptied exactly when the tree is reset.
     fn clear(&mut self) {
-        for &cell in &self.used_cells {
-            self.head[cell as usize] = 0;
+        if self.grid_k > 0 {
+            // probe: back to the first grid (its head is written on the next registration)
+            self.set_shift(self.start_shift);
+        } else {
+            for &cell in &self.used_cells {
+                self.head[cell as usize] = 0;
+            }
         }
+        self.leaves = 0;
         self.used_cells.clear();
         self.entries.clear();
         self.overflow.clear();
@@ -476,6 +547,7 @@ impl XTreeIndex {
         let s_a = self.s_cell(hsp.subject_offset.min(hsp.subject_end));
         let s_b = self.s_cell(hsp.subject_offset.max(hsp.subject_end));
         let cells = (q_b - q_a + 1) * (s_b - s_a + 1);
+        self.leaves += 1;
         if cells > X_MAX_CELLS_PER_HSP {
             self.overflow.push(leaf as u32);
             if self.overflow.len() > X_MAX_OVERFLOW {
@@ -681,6 +753,26 @@ impl BlastIntervalTree {
         let node = IntervalNode::new_leaf(hsp, query_context_offset);
         self.nodes.push(node);
         self.nodes.len() - 1
+    }
+
+    /// Probe: the grid at the finer `shift`, refilled from the linked leaves below `limit` in
+    /// the order they were added (each cell lists its leaves newest first, as before).
+    #[inline(never)]
+    fn x_refine_grid(&mut self, shift: u32, limit: usize) {
+        let x = &mut self.x;
+        x.set_shift(shift);
+        x.used_cells.clear();
+        x.entries.clear();
+        x.overflow.clear();
+        x.leaves = 0;
+        for (leaf, node) in self.nodes[..limit].iter().enumerate() {
+            if node.x_dead {
+                continue;
+            }
+            if let Some(hsp) = node.hsp.as_ref() {
+                x.register(leaf, hsp, node.leftptr);
+            }
+        }
     }
 
     /// Determine whether an input HSP shares a common start- or endpoint with
@@ -1219,6 +1311,9 @@ impl BlastIntervalTree {
         // unchanged.
         let new_index = self.alloc_leaf_node(hsp, query_start);
         if x_on {
+            if let Some(shift) = self.x.x_refined_shift() {
+                self.x_refine_grid(shift, new_index);
+            }
             self.x.register(new_index, &hsp, query_start);
             if self.x.ends.needs_growth(2) {
                 // a larger table, refilled from every leaf ever allocated

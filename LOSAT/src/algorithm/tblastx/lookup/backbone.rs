@@ -1102,6 +1102,34 @@ pub(crate) fn x_lookup_table_for_profile(
     build_lookup_from_prepared(prepared, threshold, matrix, word_length).0
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:104-108
+// ```c
+//    case eCompressedAaLookupTable:
+//       BlastCompressedAaLookupTableNew(query, lookup_segments,
+//                          (BlastCompressedAaLookupTable* *) &(lookup_wrap->lut),
+//                          lookup_options, sbp);
+// ```
+/// The concatenated query and the lookup segments that `x_lookup_table_for_profile` builds its
+/// table from (BLOSUM62, no Karlin blocks), for a table of another kind: TBLASTN's compressed
+/// table (`tblastn/search_seed.rs`).
+pub(crate) fn x_lookup_query_for_profile(
+    queries: &[Vec<QueryFrame>],
+    word_length: usize,
+) -> (Vec<u8>, Vec<(i32, i32)>) {
+    let bounds = (-4, 11);
+    let prepared = x_prepare_lookup_query(
+        queries,
+        ideal_karlin_params_for_matrix(ScoringMatrix::Blosum62, bounds),
+        &compute_std_aa_composition(),
+        word_length,
+        false,
+        ScoringMatrix::Blosum62,
+        bounds,
+        false,
+    );
+    (prepared.concat_query, prepared.lookup_locations)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803
 // ```c
 // Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);

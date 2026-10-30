@@ -158,6 +158,28 @@ impl TblastnDatabase {
         })
     }
 
+    /// The taxonomy of the tabular fields (`staxid`, `staxids`) of the reported sequences, by
+    /// rank, for the sequences of `hitlists` with HSPs (their subject index is the rank,
+    /// `reported_subjects`; `algorithm::common::tabular::tabular_taxonomy`); the others are left
+    /// empty. A header that does not decode is refused before the report.
+    pub(super) fn tabular_taxonomy(
+        &self,
+        reported: &ReportedSubjects,
+        hitlists: &[KappaResultHitList],
+    ) -> Result<Vec<crate::report::tabular::TabularTaxonomy>> {
+        crate::algorithm::common::tabular::tabular_taxonomy(
+            &self.db,
+            &reported.ordinals,
+            &reported.parsed,
+            hitlists
+                .iter()
+                .flat_map(KappaResultHitList::lists)
+                .filter(|list| !list.hsps.hsps.is_empty())
+                .map(|list| list.oid as usize),
+            PROGRAM,
+        )
+    }
+
     /// Whether `taxdb.bti` is on the search path, asked once for the run
     /// (`shared::TaxdbRun::found`): the batches' prefetch reads the taxonomy database only then
     /// (`prefetch_messages`).

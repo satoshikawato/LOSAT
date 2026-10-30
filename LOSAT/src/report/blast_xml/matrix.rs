@@ -89,6 +89,36 @@ impl FormattingMatrix {
         Some(Self { scores })
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
+    // ```c++
+    //     retval.Resize(k_NumAsciiChar, k_NumAsciiChar, -1000);
+    //
+    //     SNCBIFullScoreMatrix mtx;
+    //     NCBISM_Unpack(packed_mtx, &mtx);
+    //
+    //     for(int i = 0; i < ePMatrixSize; ++i){
+    //         for(int j = 0; j < ePMatrixSize; ++j){
+    //             retval((size_t)k_PSymbol[i], (size_t)k_PSymbol[j]) =
+    //                 mtx.s[(size_t)k_PSymbol[i]][(size_t)k_PSymbol[j]];
+    //         }
+    //     }
+    // ```
+    /// The matrix of the tabular reports' positives: `CBlastFormat`'s `m_ScoringMatrix`
+    /// (`CAlignFormatUtil::GetAsciiProteinMatrix` of the run's matrix, which `SetFields` counts
+    /// `positive` and `ppos` with), not the XML's. Its scores are outfmt 0's
+    /// (`utils::matrix::protein_display_score`): only the letters of `k_PSymbol` and `*` score,
+    /// so a J, O or other pair is no positive, and U pairs with U and C as C with C.
+    pub fn ascii_protein(matrix: ScoringMatrix) -> Self {
+        let mut scores = vec![i32::MIN; 256 * 256].into_boxed_slice();
+        for row in 0..=u8::MAX {
+            for col in 0..=u8::MAX {
+                scores[usize::from(row) * 256 + usize::from(col)] =
+                    crate::utils::matrix::protein_display_score(matrix, row, col);
+            }
+        }
+        Self { scores }
+    }
+
     /// `(*matrix)(query, subject)`.
     pub fn score(&self, query: u8, subject: u8) -> i32 {
         self.scores[usize::from(query) * 256 + usize::from(subject)]
@@ -219,5 +249,31 @@ mod tests {
             (6, -7, -4)
         );
         assert_eq!(pam30.score(b'O', b'A'), -17);
+    }
+
+    // NCBI align_format_util.cpp:3563-3581: the tabular reports' matrix scores the letters of
+    // `k_PSymbol` and `*` only (J has no score, unlike the XML's), and U pairs with C.
+    #[test]
+    fn ascii_protein_is_the_tabular_reports_matrix() {
+        let xml = FormattingMatrix::new("BLOSUM62").expect("BLOSUM62");
+        let tabular = FormattingMatrix::ascii_protein(ScoringMatrix::Blosum62);
+        assert_eq!(tabular.score(b'A', b'A'), 4);
+        assert_eq!(tabular.score(b'W', b'F'), xml.score(b'W', b'F'));
+        assert!(xml.positive(b'J', b'I'));
+        assert_eq!(tabular.score(b'J', b'I'), -1000);
+        assert!(!xml.positive(b'U', b'C'));
+        assert_eq!(tabular.score(b'U', b'C'), 9);
+        assert_eq!(tabular.score(b'C', b'U'), 9);
+        assert_eq!(tabular.score(b'*', b'*'), 1);
+        assert_eq!(tabular.score(b'*', b'A'), -4);
+        assert_eq!(tabular.score(b'-', b'A'), -1000);
+        for q in 0..=u8::MAX {
+            for s in 0..=u8::MAX {
+                assert_eq!(
+                    tabular.score(q, s),
+                    crate::utils::matrix::protein_display_score(ScoringMatrix::Blosum62, q, s)
+                );
+            }
+        }
     }
 }

@@ -195,11 +195,11 @@ class ContractTests(unittest.TestCase):
     def test_contract_lists_rejected_tasks_and_toolchain(self) -> None:
         contract = release.load_contract(REPO_ROOT)
         self.assertEqual(
-            contract["public_cli"]["rejected_tasks"], ["blastp-short", "tblastn-fast"]
+            contract["public_cli"]["rejected_tasks"], ["blastp-short"]
         )
+        self.assertEqual(contract["public_cli"]["tblastn_tasks"], ["tblastn", "tblastn-fast"])
         for case in contract["smoke"]:
             self.assertNotIn("blastp-short", case["arguments"])
-            self.assertNotIn("tblastn-fast", case["arguments"])
         toolchain = contract["cert_toolchain"]
         self.assertEqual(toolchain["rust"], "1.92.0")
         self.assertEqual(toolchain["cargo"], "1.92.0")

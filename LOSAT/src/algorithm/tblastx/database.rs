@@ -173,6 +173,32 @@ impl TblastxDatabase {
         })
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
+    // ```c++
+    //             	CRef<CBlast_def_line_set> bdlRef =
+    //             			CSeqDB::ExtractBlastDefline(subject_bh);
+    //     ...
+    //             	if(setSubjectTaxInfoAll) {
+    //             		x_SetTaxInfoAll(subject_bh, bdlRef);
+    //             	}
+    // ```
+    /// The taxonomy of the tabular fields (`staxid`, `staxids`) of every reported sequence, by
+    /// rank (every rank is made from a hit, `reported_subjects`;
+    /// `algorithm::common::tabular::tabular_taxonomy`). A header that does not decode is
+    /// refused before the report.
+    pub(crate) fn tabular_taxonomy(
+        &self,
+        reported: &ReportedSubjects,
+    ) -> Result<Vec<crate::report::tabular::TabularTaxonomy>> {
+        crate::algorithm::common::tabular::tabular_taxonomy(
+            &self.db,
+            &reported.ordinals,
+            &reported.parsed,
+            0..reported.ordinals.len(),
+            PROGRAM,
+        )
+    }
+
     /// The database's sequences by ordinal id (`common::database::read_nucleotide_stores`).
     pub(crate) fn read_stores(&self) -> Result<Vec<PackedNucleotide>> {
         shared::read_nucleotide_stores(&self.db, PROGRAM)

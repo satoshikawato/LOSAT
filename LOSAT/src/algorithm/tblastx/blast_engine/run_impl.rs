@@ -803,8 +803,14 @@ pub fn run(
     let out_file = open_out_file(&args)?;
     let out_path = args.out.clone();
     let pairwise = format == Some(crate::blastinput::app::ReportFormat::Pairwise);
-    // LOSAT's reports read the format number that NCBI reads.
-    let outfmt = choice.normalized();
+    // LOSAT's reports read the format number that NCBI reads: the number and the custom fields,
+    // or the value as given when it has a delimiter, which `normalized` drops and the custom
+    // tabular report reads (`report::output_format`, which parses it again as NCBI does).
+    let outfmt = if choice.delimiter.is_empty() {
+        choice.normalized()
+    } else {
+        args.outfmt.clone()
+    };
     let mut stream = cli_report_stream(out_file);
     let result = {
         let mut outputs =
@@ -1231,6 +1237,28 @@ fn search_cli(
         }
         None => None,
     };
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
+    // ```c++
+    // void CBlastTabularInfo::x_CheckTaxDB()
+    // {
+    //    	if( x_IsFieldRequested(eSubjectSciNames) ||
+    //     ...
+    //    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
+    // ```
+    // A tabular field list that shows a name of the taxonomy database asks whether `taxdb.bti`
+    // is on the search path: its formatters warn without it (the plural names), and LOSAT
+    // refuses a name of a subject with a taxid with it (`tabular`), as BLASTN and TBLASTN.
+    if outputs.formats.iter().any(|format| {
+        matches!(
+            report::output_format(format.outfmt),
+            report::TblastxOutputFormat::CustomTabular(spec) if spec.needs().taxonomy_names
+        )
+    }) {
+        args.tabular_taxdb = Some(match database.as_ref() {
+            Some(database) => database.taxdb_found(),
+            None => crate::algorithm::common::tabular::subject_taxdb_found(&settings, "TBLASTX")?,
+        });
+    }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
     if let Some(database) = database.as_ref() {
@@ -1388,13 +1416,21 @@ pub(crate) fn run_local_with(
     // `run_local`); `search` checks the formats again.
     check_report_formats(outputs, None)?;
     // No NCBI counterpart: ABI v1 is frozen (plan TD-1; line OF, outfmt-20261019 DECISIONS
-    // 10): it adds no format, so it refuses the Seq-annot formats (outfmt 8, 9, 12) with the
-    // message that `check_report_formats` gave them before TBLASTX wrote them.
+    // 10): it adds no format, so it refuses the Seq-annot formats (outfmt 8, 9, 12), and outfmt
+    // 10 and 20 and a custom specification (fields or a delimiter) of the tabular formats (line
+    // CLI C2, PR 2), with the messages that `check_report_formats` gave them before TBLASTX wrote
+    // them. (Its `-outfmt` reader takes 6 alone, `tblastx_v1_outfmt`.)
     if v1.is_some() {
         for format in &outputs.formats {
-            let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
-            if matches!(number, 8 | 9 | 11 | 12) {
+            let choice = crate::blastinput::app::parse_formatting_string(format.outfmt)?;
+            let number = choice.number;
+            if matches!(number, 8 | 9 | 10 | 11 | 12 | 20) {
                 anyhow::bail!("output format {number} is not supported by LOSAT's TBLASTX");
+            }
+            if choice.custom() {
+                anyhow::bail!(
+                    "a custom output format specification (fields or a delimiter) is not supported by LOSAT's TBLASTX"
+                );
             }
         }
     }
@@ -1453,6 +1489,13 @@ pub(crate) fn run_local_with(
 ///
 /// `out` is the run's `-out`: outfmt 13 and 14 write side files next to it, and fail on standard
 /// output (`xinclude_check_for`). `run_local` has no output file.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2887
+/// ```c++
+///     s_ValidateCustomDelim(m_CustomOutputFormatSpec,m_CustomDelim);
+/// ```
+/// The formatting handler checks the custom delimiter of each format that LOSAT writes too
+/// (`formatting_handler_check`; the command line's comes before, in `check_ncbi_options`).
 fn check_report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Path>) -> Result<()> {
     use crate::blastinput::app;
     for format in &outputs.formats {
@@ -1460,6 +1503,8 @@ fn check_report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Pat
         if app::report_format(&choice, app::Program::Tblastx, out)?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastx)?;
             app::xinclude_check_for(&choice, out)?;
+        } else {
+            app::formatting_handler_check(&choice, app::Program::Tblastx)?;
         }
     }
     Ok(())
@@ -1766,6 +1811,9 @@ pub(crate) struct TblastxReportRun<'a> {
     /// `-db`, XML2 and JSON: the taxid of each reported sequence by rank and what the taxonomy
     /// database says about it (empty for the other formats).
     pub xml_taxa: &'a super::super::database::XmlTaxa,
+    /// `-db`, a custom tabular report that shows a taxonomy field: the taxonomy of each reported
+    /// sequence by rank (`TblastxDatabase::tabular_taxonomy`; empty otherwise).
+    pub tabular_taxonomy: &'a [crate::report::tabular::TabularTaxonomy],
     /// Whether ABI v1's rejection of outfmt 0 titles applies (`V1Checks`).
     pub v1_titles: bool,
     /// The queries of each batch searched, in order (the documents of the BLAST archive).
@@ -2012,8 +2060,14 @@ fn write_tblastx_outputs(
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
+        // So do the warnings of the formatters of a tabular field list that shows a taxonomy
+        // name (`x_CheckTaxDB`, `tabular`).
         let mut warnings = (warning_lines.is_some()
-            || matches!(output_format, report::TblastxOutputFormat::Xml2(_)))
+            || matches!(output_format, report::TblastxOutputFormat::Xml2(_))
+            || matches!(
+                output_format,
+                report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
+            ))
         .then(|| crate::report::query_warnings::QueryWarnings {
             before: warning_lines.take().unwrap_or(&[]),
             sink: &mut *outputs.diagnostics,
@@ -2284,6 +2338,24 @@ fn write_tblastx_outputs(
                 run,
                 warnings.as_mut(),
             )?,
+            // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
+            // (`tabular`); never the default 6 and 7 below.
+            report::TblastxOutputFormat::CustomTabular(spec) => {
+                super::super::tabular::write_tblastx_tabular(
+                    &super::super::tabular::TblastxTabular {
+                        spec,
+                        hits: &hits,
+                        run,
+                        query_titles: &query_titles,
+                        database: &database,
+                        subject_ids: &subject_ids,
+                        unsearched: &unsearched,
+                    },
+                    &mut writer,
+                    warnings.as_mut(),
+                    probe.as_mut(),
+                )?
+            }
             report::TblastxOutputFormat::Tabular
             | report::TblastxOutputFormat::TabularWithComments => match run.x_pool {
                 // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows formatted on the pool; with the format
@@ -3431,6 +3503,22 @@ impl BatchReports<'_> {
             }
             _ => Default::default(),
         };
+        // `-db`, a custom tabular report that shows `staxid`, `staxids` or a taxonomy name: the
+        // taxonomy of each reported sequence (a header that does not decode is refused before
+        // any byte, `tabular`).
+        let tabular_taxonomy = match (&self.subjects, &database) {
+            (ShownSubjects::Database { database, .. }, Some(shown))
+                if outputs.formats.iter().any(|format| {
+                    matches!(
+                        report::output_format(format.outfmt),
+                        report::TblastxOutputFormat::CustomTabular(spec) if spec.needs().taxonomy
+                    )
+                }) =>
+            {
+                database.tabular_taxonomy(shown.reported)?
+            }
+            _ => Vec::new(),
+        };
         let written = write_tblastx_outputs(
             hits,
             outputs,
@@ -3449,6 +3537,7 @@ impl BatchReports<'_> {
                 queries_before: first,
                 numbers: self.numbers,
                 xml_taxa: &xml_taxa,
+                tabular_taxonomy: &tabular_taxonomy,
                 v1_titles: self.v1_titles,
                 archive_spans: &done.spans,
                 x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
@@ -3475,14 +3564,27 @@ impl BatchReports<'_> {
             Ok(())
         } else if done.searched.is_empty() {
             write_pairwise_prologs(outputs, self.args, self.subjects, false)?;
-            // The XML2 and JSON documents start with their prolog too.
+            // The XML2 and JSON documents start with their prolog too, and outfmt 20 with its line
+            // of the field names (and its formatter's warning, `tabular::write_tabular_prolog`).
             for format in outputs.formats.iter_mut() {
-                if let report::TblastxOutputFormat::Xml2(kind) =
-                    report::output_format(format.outfmt)
-                {
-                    let mut writer = format.sink.open()?;
-                    writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
-                    writer.flush()?;
+                match report::output_format(format.outfmt) {
+                    report::TblastxOutputFormat::Xml2(kind) => {
+                        let mut writer = format.sink.open()?;
+                        writer
+                            .write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+                        writer.flush()?;
+                    }
+                    report::TblastxOutputFormat::CustomTabular(spec) => {
+                        let mut writer = format.sink.open()?;
+                        super::super::tabular::write_tabular_prolog(
+                            spec,
+                            self.args.tabular_taxdb.unwrap_or(false),
+                            &mut writer,
+                            &mut *outputs.diagnostics,
+                        )?;
+                        writer.flush()?;
+                    }
+                    _ => {}
                 }
             }
             Ok(())
@@ -6949,7 +7051,7 @@ fn search_query_batch<S: TbxScore>(
                 let out_hit = Hit {
                     identity,
                     length: len,
-                    mismatch,
+                    mismatch: mismatch as i64,
                     gapopen: 0,
                     q_start,
                     q_end,

@@ -267,6 +267,12 @@ pub struct TblastxArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// by the command line before the search where a tabular field list shows a name of the
+    /// taxonomy database (`algorithm::tblastx::tabular`); `None` elsewhere (`run_local`'s callers
+    /// give no search path: not found, DECISIONS 7 of line CLI C2). Not a public option.
+    #[arg(skip)]
+    pub tabular_taxdb: Option<bool>,
 }
 
 /// What NCBI's score block makes of the `-matrix` name of an ungapped search.

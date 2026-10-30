@@ -494,7 +494,8 @@ impl BlastnHsp {
         Self {
             identity,
             length,
-            mismatch,
+            // A nucleotide alignment holds no stored gap character: never below 0.
+            mismatch: usize::try_from(mismatch).unwrap_or(0),
             gapopen,
             q_start,
             q_end,
@@ -537,7 +538,7 @@ impl BlastnHsp {
         Hit {
             identity: self.identity,
             length: self.length,
-            mismatch: self.mismatch,
+            mismatch: self.mismatch as i64,
             gapopen: self.gapopen,
             q_start: self.q_start,
             q_end: self.q_end,
@@ -1472,7 +1473,7 @@ pub(crate) fn write_hsp_rows<W: Write>(
             hsp.identity,
             hsp.num_ident,
             hsp.length,
-            hsp.mismatch,
+            hsp.mismatch as i64,
             hsp.gapopen,
             hsp.q_start,
             hsp.q_end,

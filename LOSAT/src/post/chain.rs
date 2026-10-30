@@ -229,7 +229,7 @@ struct HspChain {
     diagonal: isize,
     total_score: f64,
     total_matches: usize,
-    total_mismatches: usize,
+    total_mismatches: i64,
     total_gap_opens: usize,
     total_length: usize,
     min_evalue: f64,

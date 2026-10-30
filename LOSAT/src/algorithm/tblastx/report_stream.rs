@@ -80,9 +80,12 @@
 //! (the hit records and the format observer of the Web adapter, whose HSP numbers count over the
 //! whole search; a file sink, created when its report is written; two or more formats, which the
 //! library API allows on one stream); formats other than 0, 6 and 7 (the BLAST XML documents,
-//! the Seq-annots and the archive, whose framing and refusals are not argued here); ABI v1's
-//! outfmt 0, which refuses a reported subject's title (`check_shown_subject_titles`); the
-//! debugging output; and the refusals above.
+//! the Seq-annots and the archive, whose framing and refusals are not argued here); the tabular
+//! reports with a field list or a delimiter and outfmt 10 and 20 (`Off::CustomTabular`: their
+//! refusals of a subject, a name of the taxonomy database or a definition line's ids, must come
+//! before the first byte, DECISIONS 5 of line CLI C2); ABI v1's outfmt 0, which refuses a
+//! reported subject's title (`check_shown_subject_titles`); the debugging output; and the
+//! refusals above.
 //!
 //! Diagnostics: with `LOSAT_X_STATS`, `[X_STATS] TBXRPTSTREAM off= check_s=` before the search
 //! (`off`: `none` when the loop writes each batch's reports, else the reason, `Off::name`;
@@ -111,6 +114,10 @@ pub(super) enum Off {
     Outputs,
     /// A format other than 0, 6 and 7.
     Format,
+    /// A tabular report with a field list or a delimiter, or outfmt 10 or 20
+    /// (`TblastxOutputFormat::CustomTabular`), which is written after the loop (the module
+    /// doc).
+    CustomTabular,
     /// ABI v1's outfmt 0, which refuses a reported subject's title.
     V1Titles,
     /// The debugging output of the search.
@@ -137,6 +144,7 @@ impl Off {
             Off::OneBatch => "one_batch",
             Off::Outputs => "outputs",
             Off::Format => "format",
+            Off::CustomTabular => "custom_tabular",
             Off::V1Titles => "v1_titles",
             Off::Debug => "debug",
             Off::Window => "window",
@@ -179,6 +187,15 @@ pub(super) fn check(
         return Err(Off::Outputs);
     }
     let format = report::output_format(format.outfmt);
+    // The custom tabular reports (line CLI C2, PR 2): their writer refuses a name of the
+    // taxonomy database for a subject with a taxid (DECISIONS 3) and reads the taxids and
+    // definition lines of the reported sequences, which a later batch's report call would do
+    // after the first batch's rows were written; and outfmt 20's header line comes with the
+    // first report. They keep the one report call after the search, where every refusal comes
+    // before the first byte, and never take the streamed path of the default 6 and 7.
+    if let report::TblastxOutputFormat::CustomTabular(_) = format {
+        return Err(Off::CustomTabular);
+    }
     let pairwise = format == report::TblastxOutputFormat::Pairwise;
     if !(pairwise || format.is_tabular()) {
         return Err(Off::Format);

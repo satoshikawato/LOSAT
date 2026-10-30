@@ -66,6 +66,9 @@ pub struct OptionInputs {
     /// The task, its default included (`megablast`, `blastp`, ...).
     pub task: String,
     pub dbsize: Option<i64>,
+    /// `-searchsp`: recorded where `CGenericSearchArgs::ExtractAlgorithmOptions` sets it
+    /// (blast_args.cpp:303-307), else after the options (`writer`).
+    pub searchsp: Option<i64>,
     pub evalue: Option<f64>,
     pub gapopen: Option<i32>,
     pub gapextend: Option<i32>,
@@ -117,6 +120,7 @@ impl OptionInputs {
             program,
             task: task.to_string(),
             dbsize: None,
+            searchsp: None,
             evalue: None,
             gapopen: None,
             gapextend: None,
@@ -390,6 +394,9 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                         }
                     }
                     list.set("WordSize", Integer(word_size));
+                }
+                if let Some(searchsp) = inputs.searchsp {
+                    list.set("EffectiveSearchSpace", BigInteger(searchsp));
                 }
                 if let Some(identity) = inputs.perc_identity {
                     list.set("PercentIdentity", Real(identity));

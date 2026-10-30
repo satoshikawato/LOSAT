@@ -46,6 +46,7 @@ use crate::utils::dust::MaskedInterval;
 pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Blastn, &args.task);
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     inputs.evalue = args.evalue;
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;

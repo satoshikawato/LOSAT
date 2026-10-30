@@ -24,6 +24,35 @@
     "takes_value": true
    },
    {
+    "flag": "-taxids",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxids",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxidlist",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-no_taxid_expansion",
+    "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-dbsize",
     "help": "Effective length of the database",
     "takes_value": true
@@ -37,6 +66,11 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
    },
    {
     "flag": "-task",
@@ -240,6 +274,35 @@
     "takes_value": true
    },
    {
+    "flag": "-taxids",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxids",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxidlist",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-no_taxid_expansion",
+    "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-dbsize",
     "help": "Effective length of the database",
     "takes_value": true
@@ -253,6 +316,11 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
    },
    {
     "flag": "-task",
@@ -400,6 +468,35 @@
     "takes_value": true
    },
    {
+    "flag": "-taxids",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxids",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxidlist",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-no_taxid_expansion",
+    "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-dbsize",
     "help": "Effective length of the database",
     "takes_value": true
@@ -413,6 +510,11 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
    },
    {
     "flag": "-task",
@@ -615,6 +717,35 @@
     "takes_value": true
    },
    {
+    "flag": "-taxids",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-taxidlist",
+    "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxids",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_taxidlist",
+    "help": "Restrict search of database to everything except the specified taxonomy IDs and their descendants",
+    "takes_value": true
+   },
+   {
+    "flag": "-no_taxid_expansion",
+    "help": "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs ",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-dbsize",
     "help": "Effective length of the database",
     "takes_value": true
@@ -628,6 +759,11 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
    },
    {
     "flag": "-evalue",

@@ -3473,6 +3473,16 @@ Scheduling (each value computed by one thread with the original function; order 
   not act (dc-megablast, blastn and megablast of the 31,168 cDNAs, blastn of 5,000: x1.001-1.023, cycles x1.001-1.002,
   the same peaks); with `-db` the loop keeps (dc-megablast of the 31,168 cDNAs at 16 threads `RssAnon` 138 -> 131 MiB,
   x0.993; blastn of 5,000 88 -> 87, x0.994).
+- `LOSAT_X_BNHITGROUP=1` (BLASTN, speed, every task, `-subject` and `-db`; in the strict set from the pull request that
+  added it (feature/manyq-reads): on unless it is `0`) the preliminary stage's collector (`blastn/blast_engine/run.rs`
+  `PrelimHitCollector::x_add_grouped`) groups a subject's HSPs by query with a stable sort of those HSPs and cuts the
+  groups off the same vector. `=0` runs `add_per_query`, which made one list per query of the batch for every subject
+  with an HSP and visited them all, as NCBI's `hsp_list_array` (`hspfilter_collector.c:116-161`): a 24-byte cell and a
+  visit per query x subject, on the thread that takes the subjects in OID order. With reads against a database of many
+  subjects (1e6 x 150 nt x 16S, 28,036 subjects, about 33,000 queries per batch) that was 53 % of the cycles at 8 threads
+  and held the search's wall time. A query's hit list does not read another's and the sort is stable, so that the lists are
+  the same (lib test `grouped_hit_lists_equal_the_lists_per_query`; `tests/blastn_hit_group.rs` compares reports with
+  `=0`: `-subject` and `-db`, 1 and 4 threads, blastn-short and megablast).
 - `LOSAT_X_BNHLGROW=1` (BLASTN, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
   added it (perf/bn-hl-grow): on unless it is `0`) a hit list's array (`blastn/hsp.rs` `HitList`, the preliminary
   stage's lists per query and the final ones) is no longer reserved to NCBI's array size when a list comes

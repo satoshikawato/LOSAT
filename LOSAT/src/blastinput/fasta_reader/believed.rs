@@ -270,6 +270,19 @@ pub(crate) fn duplicate_id(
             ));
         }
         seen.extend(keys.iter().copied());
+        if program == "BLASTN" {
+            if let Some((own, other)) = version_keys(id) {
+                if seen.contains(&other) {
+                    return Some(anyhow::anyhow!(
+                        "two query records have the accession of {} with and without a version \
+                         under -parse_deflines (NCBI BLAST+'s BLASTN writes a warning of its \
+                         scope); this is not supported by LOSAT's BLASTN",
+                        fasta(id)
+                    ));
+                }
+                seen.insert(own);
+            }
+        }
     }
     // A unit test's ids must not reach the searches of the other tests of the process.
     if role == "query" && !cfg!(test) {
@@ -282,6 +295,22 @@ pub(crate) fn duplicate_id(
         }
     }
     None
+}
+
+/// For a text Seq-id with an accession, the key of its accession with its kind of version (with or
+/// without one) and the key of the other kind. NCBI's BLASTN writes `CScope::GetSynonyms: ... is
+/// resolved to another Bioseq` for the pair (probe `db.pd.blastn.ver`, 2026-10-31).
+fn version_keys(id: &ParsedSeqId) -> Option<(u64, u64)> {
+    use std::hash::{Hash, Hasher};
+    let text = id.textseq()?;
+    let accession = text.accession.as_ref()?.to_ascii_uppercase();
+    let key = |versioned: bool| {
+        let mut hasher = std::hash::DefaultHasher::new();
+        (b"version kind", versioned, &accession).hash(&mut hasher);
+        hasher.finish()
+    };
+    let versioned = text.version.is_some();
+    Some((key(versioned), key(!versioned)))
 }
 
 /// `CFastaReader::xSetSeqMol`: whether the first id whose accession names a molecule names a
@@ -526,12 +555,22 @@ mod tests {
     fn a_version_or_a_chain_tells_two_ids_apart() {
         for fasta in [
             &b">NM_000001.1 a\nACGT\n>NM_000001.2 b\nACGT\n"[..],
-            b">NM_000005 a\nACGT\n>NM_000005.1 b\nACGT\n",
             b">pdb|1ABC|A a\nACGT\n>pdb|1ABC|B b\nACGT\n",
             b">sp|P12345.2|NAME_X a\nACGT\n>sp|Q99999.1|NAME_X b\nACGT\n",
         ] {
             read(fasta, false).unwrap();
         }
+    }
+
+    // NCBI BLAST+ 2.17.0 (`db.pd.*.ver`): the same letters and reports, but BLASTN warns.
+    #[test]
+    fn an_accession_with_and_without_a_version_is_refused_by_blastn_only() {
+        let fasta = b">NM_000005 a\nACGT\n>NM_000005.1 b\nACGT\n";
+        let error = read(fasta, false).unwrap_err();
+        assert!(error.contains("with and without a version"), "{error}");
+        let config = ReaderConfig::query("TBLASTX", false, false).with_parse_deflines(true);
+        let mut source = FastaInputSource::from_bytes(fasta, config);
+        read_all(&mut source, &mut |_| Ok(())).unwrap();
     }
 
     // fasta.cpp:1005, 2117-2125: the message names the molecule that the accession named.

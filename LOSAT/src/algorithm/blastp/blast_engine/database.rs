@@ -131,6 +131,12 @@ fn search_read_error(error: SeqDbError) -> anyhow::Error {
 }
 
 impl BlastpDatabase {
+    /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
+    pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
+        self.db.set_reports_show_gis(show_gis);
+        self
+    }
+
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     pub(super) fn open(

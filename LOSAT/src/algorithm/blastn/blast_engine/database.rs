@@ -312,6 +312,12 @@ impl BlastnDatabase {
             .map_err(database_error)
     }
 
+    /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
+    pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
+        self.db.set_reports_show_gis(show_gis);
+        self
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
     // ```c++
     //         /*** Initialize the database/subject ***/

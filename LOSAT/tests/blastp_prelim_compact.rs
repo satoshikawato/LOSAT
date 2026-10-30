@@ -8,7 +8,7 @@
 //! reports (every report is written from the redo's results, which read the expanded lists) with
 //! the reference (that the reports equal NCBI's is the business of the frozen fixtures), one search
 //! for each place where these searches expand the lists: the one-thread redo (each query's list
-//! when it reaches it), the windows of the redo at four threads (`LOSAT_X_BPREDOWINEXPAND`, in
+//! when it reaches it), the windows of the redo at four threads (in
 //! blocks of `LOSAT_X_BPQBLOCK`) and the end of a query chunk's search
 //! (`CHUNK_SIZE`). They check from the `[TIMING] x_bppcompact: expanded_lists=<n>` lines that
 //! compact lists were expanded, and from the `[TIMING] x_bpredopar:` lines that the redo ran in
@@ -22,8 +22,8 @@
 //! window of the redo (64 jobs per thread) holds all the jobs of a search here, so the search with
 //! query chunks runs in windows of one job per thread (`SMALL_WINDOWS`), several of them;
 //! the expansion ahead over several windows of compact lists runs on all 101 queries in
-//! `blastp_redo_par.rs`, which compares `LOSAT_X_BPREDOWINEXPAND=0` (every list expanded before a
-//! redo of more than one thread) with the windows, small and default. The default blocks of
+//! `blastp_redo_par.rs`, which compares the windows, small and default, with the redo of
+//! `LOSAT_X_BPREDOPAR=0` (every list expanded before a redo of more than one thread). The default blocks of
 //! 50,000 letters run in the default test of `blastp_query_blocks.rs`.
 //!
 //! Other files run the compact lists beside other settings:
@@ -196,8 +196,8 @@ fn compact_lists_of_query_chunks_give_the_same_rows() {
     // Each chunk's search (`CHUNKS`: two of each split batch) expands its lists, one per query
     // part (five), before the chunk merge; at four threads the windows of the redo
     // (`SMALL_WINDOWS`, several) then read the merged lists beside the compact list of
-    // BDT62581.1, which they expand: six in all. The reference expands every list before the
-    // redo (`LOSAT_X_BPREDOWINEXPAND=0`) instead of window by window.
+    // BDT62581.1, which they expand: six in all. The reference is the redo without windows
+    // (`LOSAT_X_BPREDOPAR=0`), which expands every list before it.
     let (reference, _, _) = blastp(
         &query,
         4,
@@ -207,7 +207,7 @@ fn compact_lists_of_query_chunks_give_the_same_rows() {
             CHUNKS[1],
             SMALL_WINDOWS,
             BLOCKS_OFF,
-            ("LOSAT_X_BPREDOWINEXPAND", "0"),
+            ("LOSAT_X_BPREDOPAR", "0"),
         ],
         &["-outfmt", "6"],
     );

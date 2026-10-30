@@ -3087,7 +3087,7 @@ impl<'a> ShownSubjects<'a> {
             Self::Records(records) => records
                 .get(s_idx)
                 .map(|record| ShownLetters::Ascii(record.seq())),
-            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a subject without residues has no O and no HSP with
+            // A subject without residues has no O and no HSP with
             // a query that has one; no report reads its letters (`ListedSubjects::x_read_shown`).
             Self::Listed { subjects, .. } => subjects.get(s_idx).map(|subject| {
                 ShownLetters::Stored(subject.aa_seq.get(1..=subject.aa_len).unwrap_or_default())
@@ -9501,18 +9501,11 @@ fn run_resolved_in_pool(
     // and stand for the subject set in the redo; the hit lists name them by their rank
     // among the listed ordinal ids from here on (`database::ListedSubjects`). Their
     // definition lines are read after the redo (`ListedSubjects::read_titles`).
-    // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the listed subjects without a copy of their residues
-    // (`ListedSubjects::x_list`); the redo reads each match's subject from the database.
+    // The listed subjects have no copy of their residues (`ListedSubjects::x_list`); the redo
+    // reads each match's subject from the database.
     let t_search = crate::utils::xtiming::clock();
     let mut listed_subjects = match database {
-        Some(database) if super::x_redo_subjects::x_bp_redo_db_subj() => {
-            Some(database::ListedSubjects::x_list(
-                database,
-                &mut preliminary_hit_lists,
-                &mut x_compact_hit_lists,
-            )?)
-        }
-        Some(database) => Some(database::ListedSubjects::read(
+        Some(database) => Some(database::ListedSubjects::x_list(
             database,
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
@@ -9544,7 +9537,7 @@ fn run_resolved_in_pool(
         );
     }
     // The redo reads lists of full HSPs. With more than one thread its parallel paths read the
-    // lists of all queries, so all are expanded here (but for LOSAT_X_BPREDOWINEXPAND below); the
+    // lists of all queries, so all are expanded here (but for the windows of the redo below); the
     // one-thread loop below expands each query's list when it reaches it.
     #[cfg(all(
         feature = "parallel",
@@ -9556,16 +9549,14 @@ fn run_resolved_in_pool(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_compact_expand_all = false;
-    // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): where the redo in windows (LOSAT_X_BPREDOPAR) may run,
+    // Where the redo in windows (LOSAT_X_BPREDOPAR) may run,
     // its windows expand the compact lists as they reach them (`x_redo_par.rs`); where it does not
     // run, every list is expanded below before the other paths.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let x_win_expand = x_compact_expand_all
-        && super::x_redo_par::x_bp_redo_par()
-        && super::x_redo_par::x_bp_redo_win_expand();
+    let x_win_expand = x_compact_expand_all && super::x_redo_par::x_bp_redo_par();
     #[cfg(any(
         not(feature = "parallel"),
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
@@ -9912,7 +9903,7 @@ fn run_resolved_in_pool(
             args.num_threads,
             blastp_num_threads,
             subjects.len(),
-            // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the compact lists count while not expanded.
+            // The compact lists count while not expanded.
             super::x_redo_par::x_matches(
                 &preliminary_hit_lists,
                 if x_win_expand {
@@ -9940,7 +9931,7 @@ fn run_resolved_in_pool(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_redo_par_run = false;
-    // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the other paths read the expanded lists of all queries.
+    // The other paths read the expanded lists of all queries.
     if x_win_expand && !x_redo_par_run {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
@@ -9976,8 +9967,8 @@ fn run_resolved_in_pool(
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         {
-            // The parallel paths read the expanded lists of all queries (above), or with
-            // LOSAT_X_BPREDOWINEXPAND the windows expand the compact lists as they reach them.
+            // The parallel paths read the expanded lists of all queries (above), or the windows
+            // expand the compact lists as they reach them.
             debug_assert!(x_win_expand || x_compact_hit_lists.iter().all(Option::is_none));
             let released = super::x_redo_par::x_redo_par_run(
                 &x_redo_par_search,
@@ -10062,7 +10053,7 @@ fn run_resolved_in_pool(
 
                             let s_idx = local_match.oid;
                             let redo_align_params = build_redo_align_params(q_idx)?;
-                            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here.
+                            // Read from the database here.
                             let subject = subjects.read(s_idx)?;
                             let subject_raw = subject.residues();
                             let query_workspace = query_workspace.get_or_init(|| {
@@ -10342,7 +10333,7 @@ fn run_resolved_in_pool(
                                     &mut kappa_subject_range_cache,
                                 );
                             }
-                            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after
+                            // Read from the database here, after
                             // the test (a query alone in its batch; the others ahead of the replay),
                             // as NCBI reads it, and after the first Newton problems, which read it
                             // ahead and drop it; an error is kept for the replay as the redo's own
@@ -10614,7 +10605,7 @@ fn run_resolved_in_pool(
                         &mut kappa_subject_range_cache,
                     );
                 }
-                // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after the test, as
+                // Read from the database here, after the test, as
                 // NCBI reads it, and after the first Newton problems, which read it ahead and drop it.
                 let subject = subjects.read(s_idx)?;
                 let subject_raw = subject.residues();
@@ -10751,7 +10742,7 @@ fn run_resolved_in_pool(
     if listed_subjects.is_some() && database.is_some() && database::x_bp_listed_lean() {
         crate::utils::xreach::x_reach!("LOSAT_X_BPLISTEDLEAN", !reports.v1_titles);
     }
-    // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the residues that the reports read, read from the
+    // The residues that the reports read, read from the
     // database again after the redo (`ListedSubjects::x_read_shown`): every listed subject's for
     // the records; where every report is tabular rows of the default fields or Seq-aligns, which
     // read the letters only to recount the HSPs whose query or subject has an O, those of the

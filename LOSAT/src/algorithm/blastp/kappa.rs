@@ -2186,7 +2186,7 @@ pub(crate) fn x_newton_lanes_prefetch_matches(
             .iter()
             .map(super::blast_engine::preliminary_hit_from_local_match_hsp)
             .collect();
-        // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database, dropped after the match (the
+        // Read from the database, dropped after the match (the
         // redo reads it again); on an error nothing is computed ahead, and the redo of the match
         // reaches the error itself.
         let Ok(subject) = subjects.read(local_match.oid) else {

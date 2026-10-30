@@ -75,6 +75,11 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BPREDOFIT`, `LOSAT_X_BPSCANBF`, `LOSAT_X_BPSEED` and `LOSAT_X_BPUNGAP` (all always on)
 /// graduated on 2026-10-26: they left `STRICT_SET` and their old code was deleted; nothing
 /// chooses any more, so they are not in `GRADUATED`.
+/// `LOSAT_X_BPREDODBSUBJ` (the composition redo of a `-db` search reads each match's subject from
+/// the database, `blastp/x_redo_subjects.rs`) and `LOSAT_X_BPREDOWINEXPAND` (the windows of the
+/// redo expand the compact preliminary lists as they reach them, `blastp/x_redo_par.rs`) graduated
+/// on 2026-10-27 the same way: both were always on, they left `STRICT_SET`, and the copy of the
+/// listed subjects and the expansion of all lists before a windowed redo were deleted.
 /// `LOSAT_X_LINKSLICES` (the groups of the TBLASTX linking call linked as slices of its one list,
 /// `tblastx/x_link_slices.rs`) was added after the change as a switch that is off unless set and
 /// joined the set once it was verified with it on.
@@ -263,10 +268,8 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPQBLOCKWEB",
     "LOSAT_X_BPQBLOCKXML",
     "LOSAT_X_BPQBLOCKXML2",
-    "LOSAT_X_BPREDODBSUBJ",
     "LOSAT_X_BPREDOLPT",
     "LOSAT_X_BPREDOPAR",
-    "LOSAT_X_BPREDOWINEXPAND",
     "LOSAT_X_BPSEGWIN",
     "LOSAT_X_BPSTRIPEFILL",
     "LOSAT_X_BPSUBJMETA",

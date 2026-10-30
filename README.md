@@ -269,6 +269,7 @@ losat psiblast \
 | `-dust <args>` | String | `20 64 1` | DUST low-complexity filter for BLASTN (`yes`, `no`, or `"level window linker"`) |
 | `-seg <args>` | String | `no` (blastp)<br>`12 2.2 2.5` (blastx/tblastx/tblastn) | SEG low-complexity filter for BLASTX/BLASTP/TBLASTX/TBLASTN (`yes`, `no`, or `"window locut hicut"`) |
 | `-soft_masking <bool>` | Boolean | `false` | Apply the filtering locations as soft masks: they keep words out of the lookup table, but the query keeps its letters (BLASTP, BLASTX, TBLASTN, TBLASTX) |
+| `-lcase_masking` | Flag | off | Lower-case letters of the query join the filtering locations, and those of a `-subject` are not scanned for words (BLASTN, BLASTX, TBLASTN, TBLASTX) |
 | `-query_gencode <int>` | Integer | `1` | Genetic code for query translation (BLASTX/TBLASTX) |
 | `-db_gencode <int>` | Integer | `1` | Genetic code for subject translation (TBLASTX/TBLASTN) |
 

@@ -52,7 +52,10 @@
 
 use std::sync::OnceLock;
 
+use crate::algorithm::blastx::query_setup::{combine_masks, dna_to_protein_masks};
+use crate::algorithm::tblastn::archive::lowercase_runs;
 use crate::algorithm::tblastx::translation::QueryFrame;
+use crate::blastinput::fasta_reader::FastaRecord;
 use crate::utils::seg::SegMasker;
 use crate::utils::threading::SearchPool;
 
@@ -274,6 +277,68 @@ pub(super) fn mask_soft(
     mask_with_mode::<true>(query_frames, seg, pool, on())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1239-1256
+// ```c
+//     if (filter_options->segOptions) { ... SeqBufferSeg(...) ... }
+//     ...
+//         BlastSeqLoc *lcase_mask_slp = NULL;
+//         if (query_blk->lcase_mask && query_blk->lcase_mask->seqloc_array)
+//         {
+//             ASSERT(context < query_blk->lcase_mask->total_size);
+//             lcase_mask_slp = query_blk->lcase_mask->seqloc_array[context];
+//             /* Set location list to NULL to allow safe memory deallocation,
+//               ownership transferred to filter_out. */
+//             query_blk->lcase_mask->seqloc_array[context] = NULL;
+//         }
+//         BlastSeqLocAppend(filter_out, lcase_mask_slp);
+//         status = BlastSeqLocCombine(filter_out, 0);
+// ```
+// The lower-case runs reach each frame in its protein coordinates (`s_AddMask`,
+// c++/src/algo/blast/api/blast_setup_cxx.cpp:320-350, `UseProteinCoords`: `dna_to_protein_masks`).
+/// `mask` / `mask_soft` for `-lcase_masking`: every frame's SEG intervals (none with `-seg no`) and
+/// its query's lower-case runs in `seg_masks`, combined as NCBI combines them. Without `soft` the
+/// frame keeps an unmasked copy and its masked letters become X (`mask_frame`). `query_frames[i]`
+/// are the frames of `records[i]`. Cold and out of line (no NCBI counterpart: code placement only),
+/// so that the caller, `run_impl::search_query_batch`, keeps the default path's code.
+#[cold]
+#[inline(never)]
+pub(super) fn mask_lcase(
+    query_frames: &mut [Vec<QueryFrame>],
+    records: &[FastaRecord],
+    seg: Option<&SegMasker>,
+    soft: bool,
+    pool: &SearchPool<'_>,
+) {
+    if let Some(seg) = seg {
+        mask_with_mode::<true>(query_frames, seg, pool, on());
+    }
+    for (frames, record) in query_frames.iter_mut().zip(records) {
+        let letters = record.seq();
+        let runs = lowercase_runs(letters);
+        for frame in frames.iter_mut().filter(|frame| frame.aa_seq.len() >= 3) {
+            let mut masks = dna_to_protein_masks(&runs, letters.len(), frame.frame);
+            masks.extend(
+                frame
+                    .seg_masks
+                    .iter()
+                    .map(|&(start, end)| (start as i32, end as i32 - 1)),
+            );
+            let combined = combine_masks(masks);
+            frame.seg_masks = combined
+                .iter()
+                .map(|&(from, to)| (from as usize, to as usize + 1))
+                .collect();
+            if !soft && !frame.seg_masks.is_empty() {
+                frame.aa_seq_nomask = Some(frame.aa_seq.clone());
+                for &(from, to) in &frame.seg_masks {
+                    // NCBI: kProtMask = 21 (X in NCBISTDAA), past the leading sentinel.
+                    frame.aa_seq[1 + from..1 + to].fill(21);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,6 +389,38 @@ mod tests {
     fn frames_of(seqs: &[Vec<u8>]) -> Vec<Vec<QueryFrame>> {
         let code = GeneticCode::from_id(1);
         seqs.iter().map(|s| generate_frames(s, &code)).collect()
+    }
+
+    /// `-lcase_masking`: a lower-case run reaches each frame in protein coordinates. Hard frames
+    /// get X there and keep their letters in the unmasked copy, soft frames keep their letters.
+    #[test]
+    fn lcase_runs_mask_each_frame() {
+        let mut letters = b"ATGGCTAAACCCGGGTTTGATGAACATCTGAGCACCTGGTACCGTATC".to_vec();
+        letters[9..18].make_ascii_lowercase();
+        let record = FastaRecord {
+            sequence: letters.clone(),
+            ..Default::default()
+        };
+        let code = GeneticCode::from_id(1);
+        let plain = generate_frames(&letters, &code);
+
+        let mut hard = vec![plain.clone()];
+        let mut soft = vec![plain.clone()];
+        with_search_pool(1, "tblastx", |pool| {
+            mask_lcase(&mut hard, std::slice::from_ref(&record), None, false, pool);
+            mask_lcase(&mut soft, std::slice::from_ref(&record), None, true, pool);
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(hard[0][0].seg_masks, vec![(3, 6)]);
+        assert_eq!(&hard[0][0].aa_seq[4..7], &[21, 21, 21]);
+        assert_eq!(hard[0][0].aa_seq_nomask.as_ref(), Some(&plain[0].aa_seq));
+        for (frame, (hard, plain)) in soft[0].iter().zip(hard[0].iter().zip(&plain)) {
+            assert_eq!(frame.seg_masks, hard.seg_masks);
+            assert_eq!(frame.aa_seq, plain.aa_seq);
+            assert!(frame.aa_seq_nomask.is_none());
+        }
     }
 
     /// The fields SEG writes, per frame, for comparison.

@@ -4,8 +4,9 @@
 //! warnings, outfmt 7's comment lines and one row per HSP of the query's final hit list, in the
 //! order of the default outfmt 6 rows (`stage_e_report::write_tabular`); outfmt 20's header line
 //! comes before the first query and outfmt 7's count of queries after the last. `render` calls it
-//! once per run, after every query batch was searched, so LOSAT's refusals (a name of the taxonomy
-//! database, the ids of a database sequence) come before the first byte of the report.
+//! once per run, after every query batch was searched, so LOSAT's refusals (the taxonomy database's
+//! names, `TabularInputs::names`, the ids of a database sequence) come before the first byte of the
+//! report.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:811-834
 //! ```c++
@@ -49,16 +50,15 @@ use super::stage_e_report::{
     aligned_sequences_into, record_coordinates, ReportRanges, ShownSubjects,
 };
 use super::x_subject_store::SubjectLetters;
-use crate::algorithm::common::tabular::{check_taxonomy_names, TabularSubjects, COUNTS_BLOCK};
+use crate::algorithm::common::tabular::{TabularSubjects, COUNTS_BLOCK};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::config::ScoringMatrix;
 use crate::report::blast_xml::hsp::translation_frame;
-use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
     coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularField, TabularHsp,
-    TabularKind, TabularQuery, TabularSpec, TabularTaxonomy, TabularWriter,
+    TabularKind, TabularNames, TabularQuery, TabularSpec, TabularTaxonomy, TabularWriter,
 };
 use crate::utils::genetic_code::GeneticCode;
 
@@ -76,6 +76,10 @@ pub(super) struct TabularInputs {
     /// `-db`: the taxonomy of the reported sequences by rank, read where a field shows it
     /// (`TblastnDatabase::tabular_taxonomy`); empty otherwise.
     pub taxonomy: Vec<TabularTaxonomy>,
+    /// `-db`: the names of the taxonomy database that the rows of the run's custom report (the
+    /// command line's one `-outfmt`) look up (`TblastnDatabase::tabular_names`); `None`: every
+    /// lookup fails (no name field, no `taxdb.bti`, `-subject`).
+    pub names: Option<TabularNames>,
     /// The length of the `-query_loc` range as given (NCBI's `m_QueryRange`), `None` without it.
     pub range_length: Option<usize>,
 }
@@ -210,13 +214,7 @@ pub(super) fn write_tblastn_tabular(
             taxonomy: &tab.inputs.taxonomy,
         },
     };
-    check_taxonomy_names(
-        spec,
-        tab.inputs.taxdb_found,
-        &subjects,
-        reported_ranks(hitlists),
-        PROGRAM,
-    )?;
+    let names = tab.inputs.names.as_ref();
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
     // those of the other ids are `ReportedSubjects::tabular_subject_ids`'.
     if needs.all_deflines {
@@ -226,11 +224,10 @@ pub(super) fn write_tblastn_tabular(
     }
     let code = GeneticCode::try_from_id(tab.genetic_code).map_err(anyhow::Error::msg)?;
     // The positives of the rows: the formatter's `m_ScoringMatrix` (`GetAsciiProteinMatrix`).
-    let positives = FormattingMatrix::ascii_protein(tab.matrix);
     let table = TabularWriter {
         spec,
         program_version: PROGRAM_VERSION,
-        matrix: Some(&positives),
+        matrix: Some(tab.matrix),
     };
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
@@ -345,11 +342,23 @@ pub(super) fn write_tblastn_tabular(
                 -1
             };
             // `qcovus` is inserted for BLASTN alone (`eQueryCovPerUniqSubj`): `N/A`.
-            let subject = values.nucleotide_subject(qcovs, -1);
+            let subject = values.nucleotide_subject(names, qcovs, -1);
             let subject_len = i32::try_from(tab.letters.length(oid))?;
             let whole_length = i32::try_from(record_length(oid))?;
             let mut translation = None;
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+                // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
+                // `x_SetTaxInfo`) follow the rows before it.
+                if let (Some(names), Some(warnings)) = (names, warnings.as_deref_mut()) {
+                    let text = names.row_messages(spec, subject.taxonomy);
+                    if !text.is_empty() {
+                        writer.write_all(&buf)?;
+                        buf.clear();
+                        writer.flush()?;
+                        warnings.sink.write_all(&text)?;
+                        warnings.sink.flush()?;
+                    }
+                }
                 let hsp = &linked.hsp;
                 let frame = i32::from(hsp.frame);
                 // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105: the nucleotide

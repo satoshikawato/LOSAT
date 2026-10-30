@@ -467,6 +467,15 @@ pub struct BlastnArgs {
     /// higher-scoring hits, delete the hit (default: 0, no culling).
     #[arg(long, value_parser = nonnegative_ncbi_integer)]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-917,929-929
+    // ```c++
+    //     arg_desc.AddFlag(kArgUngapped, "Perform ungapped alignment only?", true);
+    // ...
+    //     opt.SetGappedMode(!args[kArgUngapped]);
+    // ```
+    /// Perform ungapped alignment only.
+    #[arg(long)]
+    pub ungapped: bool,
     // NCBI blastn has no such option (the LOSAT-only option was removed, AGENTS.md rule 5).
     #[arg(skip = false)]
     pub verbose: bool,

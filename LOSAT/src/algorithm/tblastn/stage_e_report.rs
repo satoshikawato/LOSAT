@@ -918,6 +918,7 @@ mod tests {
                     gapped: true,
                     cbs: 2,
                     db_gencode: 1,
+                    identity_warned: 0,
                 },
                 Default::default(),
                 None,

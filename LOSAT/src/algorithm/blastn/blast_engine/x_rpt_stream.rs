@@ -177,6 +177,10 @@ pub(super) enum Off {
     Xml,
     /// A negative `CHUNK_SIZE`.
     ChunkSize,
+    /// An ungapped (`-ungapped`) search with a query of 2^30 letters or more, which LOSAT refuses
+    /// in the batch that holds it (the word cutoff's doubled length overflows NCBI's `Int4`): a
+    /// later batch's refusal would come after the first batch's reports.
+    UngappedCutoff,
     /// A database length times a query length that could overflow NCBI's 64-bit search space.
     SearchSpace,
     /// A subject of the set whose tabular id LOSAT refuses.
@@ -211,6 +215,7 @@ impl Off {
             Off::Xml => "xml",
             Off::Scoring => "scoring",
             Off::ChunkSize => "chunk_size",
+            Off::UngappedCutoff => "ungapped_cutoff",
             Off::SearchSpace => "search_space",
             Off::SubjectIds => "subject_ids",
             Off::Titles => "titles",
@@ -532,6 +537,13 @@ fn check(
     }
     if batching.split.negative_chunk_size() {
         return Err(Off::ChunkSize);
+    }
+    if args.ungapped
+        && !lengths.iter().all(|&length| {
+            crate::algorithm::blastn::ungapped::cutoff_context_length_supported(length)
+        })
+    {
+        return Err(Off::UngappedCutoff);
     }
     // The search space of a context (`search_query_batch`): the effective database length
     // `db - n x a` (at least 1) times the effective query length `q - a` (at least 1), with the

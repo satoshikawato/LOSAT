@@ -23,7 +23,9 @@ use crate::common::{GapEditOp, Hit};
 pub(crate) struct BlastpHsp {
     pub identity: f64,
     pub length: usize,
-    pub mismatch: usize,
+    /// The columns less the identities and the gaps (`Hit::mismatch`), fewer than none when
+    /// stored gap characters of the subject face gaps of the query.
+    pub mismatch: i64,
     pub gapopen: usize,
     pub q_start: usize,
     pub q_end: usize,

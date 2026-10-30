@@ -566,7 +566,7 @@ pub(crate) fn set_displayed_identities<S: TbxScore>(
         let hit = &mut hsp.hit;
         hit.num_ident = identities;
         hit.num_positives = positives;
-        hit.mismatch = hit.length - identities;
+        hit.mismatch = (hit.length - identities) as i64;
         hit.identity = if hit.length > 0 {
             identities as f64 / hit.length as f64 * 100.0
         } else {
@@ -1189,6 +1189,7 @@ impl<'a> PairwiseRows<'a> {
                 .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()),
             comp_adjust_method: None,
             sum_n: Some(hsp.num),
+            subject_stored_gaps: Vec::new(),
         }
     }
 }

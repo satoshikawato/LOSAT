@@ -7043,7 +7043,7 @@ fn search_query_batch<S: TbxScore>(
                 let out_hit = Hit {
                     identity,
                     length: len,
-                    mismatch,
+                    mismatch: mismatch as i64,
                     gapopen: 0,
                     q_start,
                     q_end,

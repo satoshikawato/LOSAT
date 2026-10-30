@@ -1010,14 +1010,14 @@ impl LmdbEntry {
     }
 
     /// `CSeqDBLMDB::GetOids` of one id: the first OID of the key (`tax_files::acc_first_oid`),
-    /// with NCBI's messages for a database without the table and for a damaged one.
+    /// with NCBI's messages for a database without the table (`DB contains no accession
+    /// info.`, the text of NCBI's LMDB manager for a `.pdb`/`.ndb` without `acc2oid`: a
+    /// database made without `-parse_seqids`, probe S48) and for a damaged one.
     fn first_oid(&self, env: &Env<DbFile>, acc: &[u8]) -> Result<Option<u32>, SeqDbError> {
         tax_files::acc_first_oid(env, acc).map_err(|message| {
             let name = Self::base_name(&self.lmdb);
             if message == tax_files::NO_ACCESSION_INFO {
-                SeqDbError::NotFound(format!(
-                    "Seqid list specified but no accession table is found in {name}"
-                ))
+                SeqDbError::NotFound(message)
             } else {
                 SeqDbError::Format {
                     path: self.lmdb.clone(),

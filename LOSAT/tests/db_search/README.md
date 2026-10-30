@@ -470,6 +470,10 @@ line (`CSeqDBNegativeList::FindId` matches no gi or ti): NCBI searches it and dr
 LOSAT refuses when the sequence is to be reported (`the seqid list keeps sequence N of the volume but none of its definition
 lines`, DI-8b DECISIONS 17). A positive list that selects such a sequence is refused before the search.
 
+`ids/noacc_v5` (three proteins of `ids/ids_q.faa`, `makeblastdb -dbtype prot -blastdb_version 5` without `-parse_seqids`,
+NCBI 2.17.0) has no accession table: a seqid list on it is NCBI's `BLAST Database error: DB contains no accession info.`
+(row `db.sl.bp.noacc.6`, rc 2).
+
 A list file that is not on the search path (NCBI: `Error: NCBI C++ Exception: ... To be memory mapped the file must
 exist: ''`, exit 255, with the path of NCBI's build tree) is checked by `tests/cli_v2.rs`, not by a row.
 

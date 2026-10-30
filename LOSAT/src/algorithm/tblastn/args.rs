@@ -698,8 +698,9 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     //     }
     // ```
     // IDENTITY has no composition data: NCBI searches it in mode 0, whatever mode was asked,
-    // with a warning for every query (`IDENTITY_CBS_RESET_MESSAGE`). The reset is made with the
-    // score block, before the HSP writer takes the preliminary hit list size
+    // with a warning for each query of the first query batch (`IDENTITY_CBS_RESET_MESSAGE`; the
+    // later batches start in mode 0, `tblastn_app::search`). The reset is made with the score
+    // block, before the HSP writer takes the preliminary hit list size
     // (`blast_aux_priv.cpp:175-229`), so that size is mode 0's too.
     let identity_cbs_reset = args.matrix_name.eq_ignore_ascii_case("identity")
         && args.composition_mode != CompositionMode::NoCompositionBasedStats;
@@ -832,7 +833,7 @@ pub fn check_options(args: &TblastnArgs) -> Result<()> {
 pub(super) struct SearchSettings {
     pub(super) composition_mode2: bool,
     /// IDENTITY with a composition mode above 0, which NCBI searches in mode 0 with a warning
-    /// for every query (`IDENTITY_CBS_RESET_MESSAGE`).
+    /// for each query of the first query batch (`IDENTITY_CBS_RESET_MESSAGE`).
     pub(super) identity_cbs_reset: bool,
     pub(super) scoring: LocalStageDScoring,
 }
@@ -1030,8 +1031,8 @@ mod tests {
         ] {
             check_options(&parse(extra).unwrap()).unwrap();
         }
-        // NCBI setup_factory.cpp:143-155: IDENTITY is searched in mode 0 with a warning, whatever
-        // mode is asked.
+        // NCBI setup_factory.cpp:143-155: IDENTITY is searched in mode 0 with a warning (for the
+        // first query batch), whatever mode is asked.
         for (extra, reset) in [
             (&["-matrix", "IDENTITY"][..], true),
             (&["-matrix", "identity", "-comp_based_stats", "1"], true),

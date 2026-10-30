@@ -99,8 +99,9 @@ pub fn invalid_query_warning<R: InputRecord>(program: &str, index: usize, query:
     query_warning(program, index, query, &[INVALID_QUERY_MESSAGE.to_string()])
 }
 
-/// The warning of every query of a search with the IDENTITY matrix and a composition mode above
-/// 0, which NCBI searches in mode 0 (blastp and tblastn; IDENTITY has no composition data).
+/// The warning of each query of the first query batch of a search with the IDENTITY matrix and a
+/// composition mode above 0, which NCBI searches in mode 0 (blastp and tblastn; IDENTITY has no
+/// composition data; the reset stays in the options of the later batches).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:150-154
 /// ```c++

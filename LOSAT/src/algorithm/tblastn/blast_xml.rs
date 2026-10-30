@@ -84,9 +84,10 @@ pub(super) struct XmlValues {
     pub cbs: i32,
     /// `-db_gencode` (`Parameters_db-gencode` of XML2).
     pub db_gencode: i32,
-    /// IDENTITY searched in mode 0 for another mode: every query's message has the warning
-    /// (`IDENTITY_CBS_RESET_MESSAGE`).
-    pub identity_cbs_reset: bool,
+    /// IDENTITY searched in mode 0 for another mode: the messages of the searched queries before
+    /// this index, the first query batch's, have the warning (`IDENTITY_CBS_RESET_MESSAGE`,
+    /// `tblastn_app::search`).
+    pub identity_warned: usize,
 }
 
 /// The document's texts, made (and refused) before the first byte of any format is written:
@@ -220,13 +221,14 @@ pub(super) fn prepare(
         .iter()
         .zip(hitlists)
         .zip(query_validity)
-        .map(|((query, hitlist), &valid)| {
+        .enumerate()
+        .map(|(q_idx, ((query, hitlist), &valid))| {
             names::query_text(
                 PROGRAM,
                 &query.local_id,
                 query.title(),
                 true,
-                &query_messages(query, valid, values.identity_cbs_reset),
+                &query_messages(query, valid, q_idx < values.identity_warned),
                 has_hits(hitlist),
             )
         })

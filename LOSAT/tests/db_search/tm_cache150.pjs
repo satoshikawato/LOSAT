@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "tm_cache150",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tm cache 150",
+  "number-of-letters": 390,
+  "number-of-sequences": 3,
+  "last-updated": "2026-10-27T22:54:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 2,
+  "bytes-total": 49971,
+  "bytes-to-cache": 522,
+  "files": [
+    "tm_cache150.pdb",
+    "tm_cache150.phr",
+    "tm_cache150.pin",
+    "tm_cache150.pog",
+    "tm_cache150.pos",
+    "tm_cache150.pot",
+    "tm_cache150.psq",
+    "tm_cache150.ptf",
+    "tm_cache150.pto"
+  ]
+}

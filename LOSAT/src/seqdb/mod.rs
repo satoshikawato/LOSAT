@@ -36,10 +36,16 @@
 pub mod alias;
 pub mod date;
 pub mod file;
+pub mod filter;
 pub mod header;
 pub mod index;
+pub mod lmdb_read;
+pub mod tax_files;
+pub mod tax_sqlite;
 pub mod taxdb;
 pub mod volume;
+
+pub use filter::TaxidList;
 
 #[cfg(test)]
 mod tests;
@@ -413,6 +419,18 @@ impl BlockRange {
     }
 }
 
+/// A database resolved without opening its volumes
+/// ([`SeqDb::locate_one_name_metadata`]).
+#[derive(Debug)]
+pub(crate) struct LocatedDatabase {
+    /// `GetTitle()`.
+    pub title: Vec<u8>,
+    /// The volume paths without extension, in NCBI's order.
+    pub volumes: Vec<String>,
+    /// The alias files (paths with extension), sorted.
+    pub alias_files: Vec<String>,
+}
+
 /// An open database: one volume, or the volumes of an alias file.
 #[derive(Debug)]
 pub struct SeqDb {
@@ -422,11 +440,22 @@ pub struct SeqDb {
     volume_starts: Vec<u32>,
     title: Vec<u8>,
     date: String,
+    /// The number of sequences a search sees: the volumes' OIDs, or the OIDs of a taxid list
+    /// (`restrict_taxids`).
+    num_seqs: u32,
+    /// The total length and the longest length of the sequences a search sees: the volumes'
+    /// values, or NCBI's scan of the OIDs of a taxid list.
     total_length: u64,
     max_length: u32,
+    /// The total length of the volumes, which the reports print (`printed_total_length`).
+    whole_total_length: u64,
+    /// The OIDs of a taxid list (`restrict_taxids`): ordinal id `i` is the `i`-th of them.
+    filter: Option<Box<filter::OidFilter>>,
     /// The search path the database was found on (`open_in`), for files NCBI looks for
     /// beside it (`taxdb.bti`).
     search_path: Option<SearchPath>,
+    /// `-show_gis` of the search that reads the headers for its reports.
+    reports_show_gis: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1093-1102
@@ -483,10 +512,42 @@ impl SeqDb {
             .is_some_and(|path| path.resolve_file("taxdb.bti").is_some())
     }
 
+    /// Whether the reports of the search show the headers it reads with `-show_gis`.
+    pub fn reports_show_gis(&self) -> bool {
+        self.reports_show_gis
+    }
+
+    /// Sets `reports_show_gis`.
+    pub fn set_reports_show_gis(&mut self, show_gis: bool) {
+        self.reports_show_gis = show_gis;
+    }
+
     /// The search path the database was opened with (`open_in`), none for a database opened
     /// by another way.
     pub fn search_path(&self) -> Option<&SearchPath> {
         self.search_path.as_ref()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:566-572
+    // ```c++
+    //     // Print volume names
+    //     vector<string> volumes;
+    //     m_BlastDb->FindVolumePaths(volumes,false);
+    //     out << endl << "Volumes:" << endl;
+    //     ITERATE(vector<string>, file_name, volumes) {
+    //         out << "\t" << *file_name << endl;
+    //     }
+    // ```
+    /// What `blastdbcmd -info` lists under "Volumes:" for the database that
+    /// [`SeqDb::open_in`] opens with the same arguments: the volumes of the first two levels
+    /// of its alias tree and the alias files of the third, sorted by base name
+    /// (`alias::info_volumes`). The alias files are read again; no volume file is opened.
+    pub fn info_volumes(
+        name: &str,
+        seqtype: SeqType,
+        path: &SearchPath,
+    ) -> Result<Vec<String>, SeqDbError> {
+        alias::info_volumes(name, seqtype, path)
     }
 
     /// The number of the volume that holds `ordinal` (`CSeqDBVolSet::FindVol`).
@@ -511,6 +572,38 @@ impl SeqDb {
     /// read, so the cost does not grow with the number of sequences.
     pub(crate) fn locate_one_name(name: &str, seqtype: SeqType) -> Result<(), SeqDbError> {
         alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir).map(|_| ())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1613-1616
+    // ```c++
+    //     vector<string> paths;
+    //     vector<string> alias;
+    //     m_Impl->FindVolumePaths(paths, alias, true);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1726
+    // ```c++
+    // 	m->SetDescription(GetTitle());
+    // ```
+    /// Resolves the one database at `name` as [`SeqDb::locate_one_name`] does and
+    /// returns what `CSeqDB::GetDBMetaData` reads of its alias tree: the title
+    /// (`GetTitle`: the alias files' `TITLE`, else the volumes' titles, which
+    /// `volume_title` gives for a volume path), the volume paths and the paths of the
+    /// alias files (`FindVolumePaths(paths, alias, true)`). No volume file is read.
+    pub(crate) fn locate_one_name_metadata(
+        name: &str,
+        seqtype: SeqType,
+        volume_title: &dyn Fn(&str) -> Option<Vec<u8>>,
+    ) -> Result<LocatedDatabase, SeqDbError> {
+        let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir)?;
+        let mut title = Vec::new();
+        alias::walk_title(&tree.root, volume_title, &mut title);
+        let mut alias_files = std::collections::BTreeSet::new();
+        alias::collect_alias_files(&tree.root, &mut alias_files);
+        Ok(LocatedDatabase {
+            title,
+            volumes: tree.volumes,
+            alias_files: alias_files.into_iter().collect(),
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvolset.cpp:101-116
@@ -709,9 +802,13 @@ impl SeqDb {
             volume_starts,
             title,
             date,
+            num_seqs: num_oids as u32,
             total_length,
             max_length,
+            whole_total_length: total_length,
+            filter: None,
             search_path: None,
+            reports_show_gis: false,
         };
         Ok(db)
     }
@@ -742,7 +839,7 @@ impl SeqDb {
     pub fn check_ordinal_ids(&self) -> Result<(), SeqDbError> {
         for (at, volume) in self.volumes.iter().enumerate() {
             if volume.num_oids() > 0 {
-                match self.deflines(self.volume_starts[at]) {
+                match self.first_deflines(at) {
                     Ok(_) | Err(SeqDbError::NotFound(_) | SeqDbError::Open { .. }) => {}
                     Err(error) => return Err(error),
                 }
@@ -758,7 +855,7 @@ impl SeqDb {
         let mut parsed = false;
         for (at, volume) in self.volumes.iter().enumerate() {
             if volume.num_oids() > 0 {
-                match self.deflines(self.volume_starts[at]) {
+                match self.first_deflines(at) {
                     Ok(_) | Err(SeqDbError::NotFound(_) | SeqDbError::Open { .. }) => {}
                     Err(error) if error.is_parsed_seqids() => parsed = true,
                     Err(error) => return Err(error),
@@ -766,6 +863,16 @@ impl SeqDb {
             }
         }
         Ok(parsed)
+    }
+
+    /// `deflines` of the first sequence of volume `at` (non-empty), whether a taxid list
+    /// includes it or not.
+    fn first_deflines(&self, at: usize) -> Result<Vec<OrdinalDefline>, SeqDbError> {
+        let ordinal = match &self.filter {
+            Some(filter) => filter.rank(self.volume_starts[at]),
+            None => self.volume_starts[at],
+        };
+        self.ordinal_deflines(at, ordinal, self.volumes[at].deflines(0))
     }
 
     /// Whether the database is of format version 5 (its volumes' index files name an LMDB
@@ -785,19 +892,37 @@ impl SeqDb {
         self.seqtype
     }
 
-    /// Number of sequences; ordinal ids run from 0 to this number minus one.
+    /// Number of sequences; ordinal ids run from 0 to this number minus one. With a taxid
+    /// list (`restrict_taxids`) these are the included OIDs, which NCBI's statistics count.
     pub fn num_seqs(&self) -> u32 {
-        self.volume_starts[self.volumes.len()]
+        self.num_seqs
     }
 
-    /// Total number of residues or bases.
+    /// Total number of residues or bases. With a taxid list, NCBI's scanned total of the
+    /// included OIDs (approximate for nucleotides: `restrict_taxids`), which its statistics
+    /// read.
     pub fn total_length(&self) -> u64 {
         self.total_length
     }
 
-    /// Length of the longest sequence.
+    /// Length of the longest sequence (with a taxid list, of NCBI's scan as `total_length`).
     pub fn max_length(&self) -> u32 {
         self.max_length
+    }
+
+    // NCBI's reports open the database again without the list (`CBlastFormatUtil::
+    // GetBlastDbInfo` reads a `CSeqDB` of the name alone): the `Database:` lines of the
+    // pairwise report and the database counts of XML and JSON are the whole database's.
+    /// The number of sequences of the volumes, which the reports print; `num_seqs` without a
+    /// taxid list.
+    pub fn printed_num_seqs(&self) -> u32 {
+        self.volume_starts[self.volumes.len()]
+    }
+
+    /// The total length of the volumes, which the reports print; `total_length` without a
+    /// taxid list.
+    pub fn printed_total_length(&self) -> u64 {
+        self.whole_total_length
     }
 
     /// Title of the database.
@@ -833,17 +958,32 @@ impl SeqDb {
     // ```
     /// The volume that holds `ordinal` and the sequence's number in it.
     fn find_volume(&self, ordinal: u32) -> Result<(usize, u32), SeqDbError> {
-        if ordinal >= self.num_seqs() {
+        if ordinal >= self.num_seqs {
             return Err(SeqDbError::Range(format!(
                 "ordinal id {ordinal} is outside the database ({} sequences)",
-                self.num_seqs()
+                self.num_seqs
             )));
         }
-        // The last volume whose first ordinal id is not above `ordinal`;
-        // empty volumes share their start with the next volume.
-        let volume =
-            self.volume_starts[..self.volumes.len()].partition_point(|&s| s <= ordinal) - 1;
-        Ok((volume, ordinal - self.volume_starts[volume]))
+        let oid = match &self.filter {
+            Some(filter) => filter.select(ordinal),
+            None => ordinal,
+        };
+        // The last volume whose first OID is not above `oid`; empty volumes share their
+        // start with the next volume.
+        let volume = self.volume_starts[..self.volumes.len()].partition_point(|&s| s <= oid) - 1;
+        Ok((volume, oid - self.volume_starts[volume]))
+    }
+
+    /// `end` cut at the first OID of `volume` from `first` on that a taxid list excludes:
+    /// a block of a restricted database holds consecutive OIDs.
+    fn included_end(&self, volume: usize, first: u32, end: u32) -> u32 {
+        match &self.filter {
+            Some(filter) => {
+                let start = self.volume_starts[volume];
+                filter.run_end(start + first, start + end) - start
+            }
+            None => end,
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:328-350
@@ -884,6 +1024,7 @@ impl SeqDb {
         let end = self.volumes[volume]
             .block_end(first, max_bytes)
             .unwrap_or(first + 1);
+        let end = self.included_end(volume, first, end);
         Some(BlockRange {
             volume,
             first,
@@ -904,6 +1045,7 @@ impl SeqDb {
         let end = self.volumes[volume]
             .num_oids()
             .min(first.saturating_add(end_ordinal - first_ordinal));
+        let end = self.included_end(volume, first, end);
         Some(BlockRange {
             volume,
             first,
@@ -1205,6 +1347,10 @@ impl SeqDb {
     /// volume each, in order: the ranges that a check of every sequence's
     /// header or ambiguity data reads one at a time
     /// ([`SeqDb::visit_deflines`], [`SeqDb::visit_ambiguity`]).
+    ///
+    /// With a taxid list (`restrict_taxids`) a range is still `max_seqs` OIDs of a volume:
+    /// the visits skip the OIDs that the list excludes, `first_ordinal` is the ordinal id of
+    /// the first included OID from `first` on, and a range without one is left out.
     pub fn header_ranges(&self, max_seqs: u32) -> Vec<BlockRange> {
         let max_seqs = max_seqs.max(1);
         let mut ranges = Vec::new();
@@ -1212,16 +1358,51 @@ impl SeqDb {
             let mut first = 0;
             while first < vol.num_oids() {
                 let end = first + max_seqs.min(vol.num_oids() - first);
-                ranges.push(BlockRange {
-                    volume,
-                    first,
-                    end,
-                    first_ordinal: self.volume_starts[volume] + first,
-                });
+                let range = self.oid_range(volume, first, end);
+                if !self.excludes_all(range) {
+                    ranges.push(range);
+                }
                 first = end;
             }
         }
         ranges
+    }
+
+    /// The range of the OIDs `first..end` of `volume` (`header_ranges`).
+    fn oid_range(&self, volume: usize, first: u32, end: u32) -> BlockRange {
+        let oid = self.volume_starts[volume] + first;
+        BlockRange {
+            volume,
+            first,
+            end,
+            first_ordinal: match &self.filter {
+                Some(filter) => filter.rank(oid),
+                None => oid,
+            },
+        }
+    }
+
+    /// Whether a taxid list excludes every OID of `range` (a range of `header_ranges`).
+    fn excludes_all(&self, range: BlockRange) -> bool {
+        let Some(filter) = &self.filter else {
+            return false;
+        };
+        let Some(&start) = self.volume_starts.get(range.volume) else {
+            return false;
+        };
+        filter.rank(start + range.end) == range.first_ordinal
+    }
+
+    /// The ordinal id of the sequence `oid` (volume-relative) of `range` (a range of
+    /// `header_ranges`); `None` for an OID that a taxid list excludes.
+    fn range_ordinal(&self, range: BlockRange, oid: u32) -> Option<u32> {
+        match &self.filter {
+            None => Some(range.first_ordinal + (oid - range.first)),
+            Some(filter) => {
+                let oid = self.volume_starts[range.volume] + oid;
+                filter.contains(oid).then(|| filter.rank(oid))
+            }
+        }
     }
 
     /// EXPERIMENT (LOSAT_X_BPDBKEEP): the number of ranges of `header_ranges(max_seqs)`.
@@ -1243,12 +1424,7 @@ impl SeqDb {
             if index < count {
                 let first = index as u32 * max_seqs;
                 let end = first + max_seqs.min(vol.num_oids() - first);
-                return BlockRange {
-                    volume,
-                    first,
-                    end,
-                    first_ordinal: self.volume_starts[volume] + first,
-                };
+                return self.oid_range(volume, first, end);
             }
             index -= count;
         }
@@ -1291,13 +1467,18 @@ impl SeqDb {
                 visit(range.first_ordinal, Err(volume_range_error(range, self)))
             });
         };
+        if self.excludes_all(range) {
+            return true;
+        }
         vol.visit_deflines_as(
             range.first,
             range.end,
             header_piece_bytes(),
             want_taxid,
             &mut |oid, deflines| {
-                let ordinal = range.first_ordinal + (oid - range.first);
+                let Some(ordinal) = self.range_ordinal(range, oid) else {
+                    return true;
+                };
                 let deflines = self.ordinal_deflines(range.volume, ordinal, deflines);
                 visit(ordinal, deflines)
             },
@@ -1319,11 +1500,44 @@ impl SeqDb {
                 visit(range.first_ordinal, Err(volume_range_error(range, self)))
             });
         };
+        if self.excludes_all(range) {
+            return true;
+        }
         vol.visit_defline_taxids(
             range.first,
             range.end,
             header_piece_bytes(),
-            &mut |oid, taxids| visit(range.first_ordinal + (oid - range.first), taxids),
+            &mut |oid, taxids| match self.range_ordinal(range, oid) {
+                Some(ordinal) => visit(ordinal, taxids),
+                None => true,
+            },
+        )
+    }
+
+    /// [`SeqDb::visit_defline_taxids`] for a database of any Seq-ids: the taxid of every
+    /// definition line of each sequence of `range` (0 for none), decoded as [`SeqDb::defline_set`]
+    /// decodes the definition lines (parsed Seq-ids too), read as `visit_deflines` reads them.
+    pub fn visit_defline_set_taxids(
+        &self,
+        range: BlockRange,
+        mut visit: impl FnMut(u32, Result<Vec<i32>, SeqDbError>) -> bool,
+    ) -> bool {
+        let Some(vol) = self.volumes.get(range.volume) else {
+            return range.is_empty().then_some(true).unwrap_or_else(|| {
+                visit(range.first_ordinal, Err(volume_range_error(range, self)))
+            });
+        };
+        if self.excludes_all(range) {
+            return true;
+        }
+        vol.visit_defline_set_taxids(
+            range.first,
+            range.end,
+            header_piece_bytes(),
+            &mut |oid, taxids| match self.range_ordinal(range, oid) {
+                Some(ordinal) => visit(ordinal, taxids),
+                None => true,
+            },
         )
     }
 
@@ -1341,13 +1555,16 @@ impl SeqDb {
                 visit(range.first_ordinal, Err(volume_range_error(range, self)))
             });
         };
+        if self.excludes_all(range) {
+            return true;
+        }
         vol.visit_ambiguity(
             range.first,
             range.end,
             range.first_ordinal,
-            &mut |oid, result| {
-                let ordinal = range.first_ordinal + (oid - range.first);
-                visit(ordinal, result)
+            &mut |oid, result| match self.range_ordinal(range, oid) {
+                Some(ordinal) => visit(ordinal, result),
+                None => true,
             },
         )
     }

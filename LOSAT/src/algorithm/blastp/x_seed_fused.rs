@@ -261,7 +261,7 @@
 use crate::algorithm::tblastn::x_scan_bf::{x_block_candidates, X_BLOCK};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::{
-    BlastAaLookupTable, AA_HITS_PER_CELL, PV_ARRAY_BTS, PV_ARRAY_MASK,
+    BlastAaLookupTable, XCell, XHit, AA_HITS_PER_CELL, PV_ARRAY_BTS, PV_ARRAY_MASK,
 };
 use crate::utils::matrix::BLASTAA_SIZE;
 use std::mem::MaybeUninit;
@@ -372,9 +372,9 @@ static X_BP_RATIO_MAX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU
 /// that matched all three would reuse the value, which changes only the speed), and whether this
 /// call worked it out.
 #[cfg(target_arch = "x86_64")]
-fn x_bp_table_ratio(table: &BlastAaLookupTable) -> (u64, bool) {
+fn x_bp_table_ratio<K: XCell>(table: &BlastAaLookupTable<K>) -> (u64, bool) {
     let key = (
-        table as *const BlastAaLookupTable as usize,
+        table as *const BlastAaLookupTable<K> as usize,
         table.backbone.as_ptr() as usize,
         table.overflow.len(),
     );
@@ -383,13 +383,7 @@ fn x_bp_table_ratio(table: &BlastAaLookupTable) -> (u64, bool) {
         if (a, b, c) == key {
             return (ratio, false);
         }
-        let (mut hits, mut used) = (0u64, 0u64);
-        for cell in &table.backbone {
-            if cell.num_used > 0 {
-                hits += cell.num_used as u64;
-                used += 1;
-            }
-        }
+        let (hits, used) = K::x_hits_and_used(&table.backbone);
         let ratio = (hits * 100).checked_div(used).unwrap_or(0);
         choice.set((key.0, key.1, key.2, ratio));
         (ratio, true)
@@ -402,7 +396,7 @@ fn x_bp_table_ratio(table: &BlastAaLookupTable) -> (u64, bool) {
 /// LOSAT_X_BPDEFER's deferred calls instead of LOSAT_X_BPMASKED's masked batch where the table has
 /// fewer hits per used cell than [`x_bp_masked_min`]. Counted for the timing line and marked for
 /// `LOSAT_X_REACH` once per table and thread.
-fn x_bp_table_mode(mode: XDiagMode, table: &BlastAaLookupTable) -> XDiagMode {
+fn x_bp_table_mode<K: XCell>(mode: XDiagMode, table: &BlastAaLookupTable<K>) -> XDiagMode {
     #[cfg(target_arch = "x86_64")]
     if mode == XDiagMode::Avx2DeferMasked {
         let (ratio, first) = x_bp_table_ratio(table);
@@ -942,8 +936,8 @@ pub(super) fn x_test_hit(
 //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
 // ```
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn x_scan_two_hit<F>(
-    lookup: &BlastAaLookupTable,
+pub(crate) fn x_scan_two_hit<K: XCell, F>(
+    lookup: &BlastAaLookupTable<K>,
     subject: &[u8],
     subject_length: usize,
     diag_array: &mut [DiagStruct],
@@ -1002,9 +996,9 @@ pub(crate) fn x_scan_two_hit<F>(
 /// was shared with another loop, the cell test had two callers and that instance ran 2-6 % more
 /// instructions).
 #[inline(never)]
-fn x_scan_two_hit_bf<F>(
+fn x_scan_two_hit_bf<K: XCell, F>(
     mode: XDiagMode,
-    lookup: &BlastAaLookupTable,
+    lookup: &BlastAaLookupTable<K>,
     subject: &[u8],
     subject_length: usize,
     table: &mut XDiagTable<'_>,
@@ -1017,7 +1011,15 @@ where
     let mut own = |query_offset, subject_offset, last_hit, diff, entry: &mut DiagStruct| {
         candidate(query_offset, subject_offset, last_hit, diff, entry)
     };
-    x_scan_two_hit_in_with::<true, _>(mode, lookup, subject, subject_length, table, test, &mut own)
+    x_scan_two_hit_in_with::<true, _, _>(
+        mode,
+        lookup,
+        subject,
+        subject_length,
+        table,
+        test,
+        &mut own,
+    )
 }
 
 // No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's outcomes.
@@ -1045,8 +1047,8 @@ fn x_hit_bf_for(
 /// [`x_scan_two_hit_bf`]).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn x_scan_two_hit_hitbf<F>(
-    lookup: &BlastAaLookupTable,
+fn x_scan_two_hit_hitbf<K: XCell, F>(
+    lookup: &BlastAaLookupTable<K>,
     subject: &[u8],
     subject_length: usize,
     table: &mut XDiagTable<'_>,
@@ -1059,7 +1061,7 @@ fn x_scan_two_hit_hitbf<F>(
     let mut own = |query_offset, subject_offset, last_hit, diff, entry: &mut DiagStruct| {
         candidate(query_offset, subject_offset, last_hit, diff, entry)
     };
-    x_scan_cells_with::<true, _>(lookup, subject, subject_length, |s, hits| {
+    x_scan_cells_with::<true, _, _>(lookup, subject, subject_length, |s, hits| {
         x_cell_per_hit_bf(hits, s, table, test, bf, &mut own)
     })
 }
@@ -1122,7 +1124,7 @@ where
     // A constant per instantiation, so that each scan loop has one call of the cell test and the
     // compiler inlines it, as in blastp's loop.
     let counts = if branch_free {
-        x_scan_two_hit_in_with::<true, F>(
+        x_scan_two_hit_in_with::<true, _, F>(
             mode,
             lookup,
             subject,
@@ -1132,7 +1134,7 @@ where
             &mut candidate,
         )
     } else {
-        x_scan_two_hit_in_with::<false, F>(
+        x_scan_two_hit_in_with::<false, _, F>(
             mode,
             lookup,
             subject,
@@ -1148,9 +1150,9 @@ where
 /// [`x_scan_two_hit`] with the cell test of `mode`; returns the counts of LOSAT_X_BPDIAG (zero for
 /// [`XDiagMode::PerHit`]). The cells are found by [`x_scan_cells_bf`] when `BRANCH_FREE`
 /// (LOSAT_X_BXSCANBF, graduated 2026-10-26 for blastx).
-fn x_scan_two_hit_in_with<const BRANCH_FREE: bool, F>(
+fn x_scan_two_hit_in_with<const BRANCH_FREE: bool, K: XCell, F>(
     mode: XDiagMode,
-    lookup: &BlastAaLookupTable,
+    lookup: &BlastAaLookupTable<K>,
     subject: &[u8],
     subject_length: usize,
     table: &mut XDiagTable<'_>,
@@ -1163,12 +1165,12 @@ where
     let mut counts = XDiagCounts::default();
     match mode {
         XDiagMode::PerHit => {
-            x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
+            x_scan_cells_with::<BRANCH_FREE, _, _>(lookup, subject, subject_length, |s, hits| {
                 x_cell_per_hit(hits, s, table, test, candidate)
             })
         }
         XDiagMode::Scalar => {
-            x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
+            x_scan_cells_with::<BRANCH_FREE, _, _>(lookup, subject, subject_length, |s, hits| {
                 let candidates = x_cell_scalar(hits, s, table, test, candidate);
                 counts.add_cell(hits.len(), candidates);
             })
@@ -1178,7 +1180,7 @@ where
             assert!(x_avx2_available(), "the AVX2 batch needs AVX2");
             // SAFETY: the CPU has AVX2 (asserted above).
             unsafe {
-                x_scan_cells_avx2::<BRANCH_FREE, F>(
+                x_scan_cells_avx2::<BRANCH_FREE, K, F>(
                     lookup,
                     subject,
                     subject_length,
@@ -1194,7 +1196,7 @@ where
             assert!(x_avx2_available(), "the deferred AVX2 batch needs AVX2");
             // SAFETY: the CPU has AVX2 (asserted above).
             unsafe {
-                x_scan_cells_avx2_defer::<BRANCH_FREE, F>(
+                x_scan_cells_avx2_defer::<BRANCH_FREE, K, F>(
                     lookup,
                     subject,
                     subject_length,
@@ -1210,7 +1212,7 @@ where
             assert!(x_avx2_available(), "the masked AVX2 batch needs AVX2");
             // SAFETY: the CPU has AVX2 (asserted above).
             unsafe {
-                x_scan_cells_avx2_defer_masked::<BRANCH_FREE, F>(
+                x_scan_cells_avx2_defer_masked::<BRANCH_FREE, K, F>(
                     lookup,
                     subject,
                     subject_length,
@@ -1327,8 +1329,8 @@ where
 /// The CPU must have AVX2.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn x_scan_cells_avx2<const BRANCH_FREE: bool, F>(
-    lookup: &BlastAaLookupTable,
+unsafe fn x_scan_cells_avx2<const BRANCH_FREE: bool, K: XCell, F>(
+    lookup: &BlastAaLookupTable<K>,
     subject: &[u8],
     subject_length: usize,
     table: &mut XDiagTable<'_>,
@@ -1338,7 +1340,7 @@ unsafe fn x_scan_cells_avx2<const BRANCH_FREE: bool, F>(
 ) where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
-    x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
+    x_scan_cells_with::<BRANCH_FREE, _, _>(lookup, subject, subject_length, |s, hits| {
         // SAFETY: the CPU has AVX2 (this function's contract).
         let candidates = unsafe { x_cell_avx2(hits, s, table, test, candidate) };
         counts.add_cell(hits.len(), candidates);
@@ -1356,8 +1358,8 @@ thread_local! {
 /// The CPU must have AVX2.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn x_scan_cells_avx2_defer<const BRANCH_FREE: bool, F>(
-    lookup: &BlastAaLookupTable,
+unsafe fn x_scan_cells_avx2_defer<const BRANCH_FREE: bool, K: XCell, F>(
+    lookup: &BlastAaLookupTable<K>,
     subject: &[u8],
     subject_length: usize,
     table: &mut XDiagTable<'_>,
@@ -1368,7 +1370,7 @@ unsafe fn x_scan_cells_avx2_defer<const BRANCH_FREE: bool, F>(
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
     let mut buffer = X_DEFER_BUFFER.take();
-    x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
+    x_scan_cells_with::<BRANCH_FREE, _, _>(lookup, subject, subject_length, |s, hits| {
         // SAFETY: the CPU has AVX2 (this function's contract).
         let candidates = unsafe { x_cell_avx2_defer(hits, s, table, test, candidate, &mut buffer) };
         counts.add_cell(hits.len(), candidates);
@@ -1385,8 +1387,8 @@ unsafe fn x_scan_cells_avx2_defer<const BRANCH_FREE: bool, F>(
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline(never)]
-unsafe fn x_scan_cells_avx2_defer_masked<const BRANCH_FREE: bool, F>(
-    lookup: &BlastAaLookupTable,
+unsafe fn x_scan_cells_avx2_defer_masked<const BRANCH_FREE: bool, K: XCell, F>(
+    lookup: &BlastAaLookupTable<K>,
     subject: &[u8],
     subject_length: usize,
     table: &mut XDiagTable<'_>,
@@ -1397,7 +1399,7 @@ unsafe fn x_scan_cells_avx2_defer_masked<const BRANCH_FREE: bool, F>(
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
     let mut buffer = X_DEFER_BUFFER.take();
-    x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
+    x_scan_cells_with::<BRANCH_FREE, _, _>(lookup, subject, subject_length, |s, hits| {
         // SAFETY: the CPU has AVX2 (this function's contract).
         let candidates =
             unsafe { x_cell_avx2_defer_masked(hits, s, table, test, candidate, &mut buffer) };
@@ -1565,7 +1567,7 @@ unsafe fn x_scan_cells_avx2_cross<
     {
         let cross = XCross::<CHUNK>::new::<DEFER>(&mut stage);
         let mut staged = 0usize;
-        x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
+        x_scan_cells_with::<BRANCH_FREE, _, _>(lookup, subject, subject_length, |s, hits| {
             // SAFETY: the CPU has AVX2 and POPCNT (this function's contract); `staged` is 0 at the
             // start and below the chunk after every call of `x_cross_cell`.
             staged = unsafe {
@@ -1582,13 +1584,13 @@ unsafe fn x_scan_cells_avx2_cross<
 /// Branch-free scan (LOSAT_X_BXSCANBF, graduated 2026-10-26 for blastx): [`x_scan_cells`], or [`x_scan_cells_bf`] when `BRANCH_FREE` (the
 /// same calls). One loop per instantiation, so `on_cell` has one call site and is inlined.
 #[inline(always)]
-fn x_scan_cells_with<const BRANCH_FREE: bool, C>(
-    lookup: &BlastAaLookupTable,
+fn x_scan_cells_with<const BRANCH_FREE: bool, K: XCell, C>(
+    lookup: &BlastAaLookupTable<K>,
     subject: &[u8],
     subject_length: usize,
     on_cell: C,
 ) where
-    C: FnMut(i32, &[i32]),
+    C: FnMut(i32, &[K::Hit]),
 {
     if BRANCH_FREE {
         x_scan_cells_bf(lookup, subject, subject_length, on_cell);
@@ -1623,13 +1625,13 @@ fn x_scan_cells_with<const BRANCH_FREE: bool, C>(
 //          }
 // ```
 #[inline(always)]
-fn x_scan_cells<C>(
-    lookup: &BlastAaLookupTable,
+fn x_scan_cells<K: XCell, C>(
+    lookup: &BlastAaLookupTable<K>,
     subject: &[u8],
     subject_length: usize,
     mut on_cell: C,
 ) where
-    C: FnMut(i32, &[i32]),
+    C: FnMut(i32, &[K::Hit]),
 {
     let word_length = lookup.word_length as usize;
     let charsize = lookup.charsize as usize;
@@ -1659,14 +1661,7 @@ fn x_scan_cells<C>(
         if pv[index >> PV_ARRAY_BTS] & (1u32 << (index & PV_ARRAY_MASK)) == 0 {
             continue;
         }
-        let cell = &backbone[index];
-        let numhits = cell.num_used as usize;
-        let hits: &[i32] = if numhits <= AA_HITS_PER_CELL {
-            &cell.entries[..numhits]
-        } else {
-            let cursor = cell.entries[0] as usize;
-            &overflow[cursor..cursor + numhits]
-        };
+        let hits = backbone[index].hits(overflow);
         on_cell(s, hits);
     }
 }
@@ -1678,13 +1673,13 @@ fn x_scan_cells<C>(
 /// [`x_scan_cells`]'s loop (the same rolling index over the same bytes), so the calls are the same.
 // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:60-99 (quoted at `x_scan_cells`)
 #[inline(always)]
-fn x_scan_cells_bf<C>(
-    lookup: &BlastAaLookupTable,
+fn x_scan_cells_bf<K: XCell, C>(
+    lookup: &BlastAaLookupTable<K>,
     subject: &[u8],
     subject_length: usize,
     mut on_cell: C,
 ) where
-    C: FnMut(i32, &[i32]),
+    C: FnMut(i32, &[K::Hit]),
 {
     let word_length = lookup.word_length as usize;
     let charsize = lookup.charsize as usize;
@@ -1736,14 +1731,7 @@ fn x_scan_cells_bf<C>(
         for c in &cand[..n] {
             // SAFETY: the first `n` candidates were written by `x_block_candidates`.
             let c = unsafe { c.assume_init() };
-            let cell = &backbone[(c & 0xffff_ffff) as usize];
-            let numhits = cell.num_used as usize;
-            let hits: &[i32] = if numhits <= AA_HITS_PER_CELL {
-                &cell.entries[..numhits]
-            } else {
-                let cursor = cell.entries[0] as usize;
-                &overflow[cursor..cursor + numhits]
-            };
+            let hits = backbone[(c & 0xffff_ffff) as usize].hits(overflow);
             on_cell((c >> 32) as i32, hits);
         }
         block_first = block_last + 1;
@@ -1754,8 +1742,8 @@ fn x_scan_cells_bf<C>(
 /// LOSAT_X_BPDIAG).
 // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
 #[inline(always)]
-fn x_cell_per_hit<F>(
-    hits: &[i32],
+fn x_cell_per_hit<H: XHit, F>(
+    hits: &[H],
     s: i32,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
@@ -1763,12 +1751,13 @@ fn x_cell_per_hit<F>(
 ) where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
-    for (i, &query_offset) in hits.iter().enumerate() {
+    for (i, &hit) in hits.iter().enumerate() {
+        let query_offset = hit.q();
         // Read ahead the entry of a later hit of this cell: the hits of one subject offset
         // fall on distinct diagonals spread over the table, so each is a cache miss that the
         // hardware cannot predict. A prefetch reads nothing the test depends on.
         if let Some(&ahead) = hits.get(i + test.prefetch) {
-            table.prefetch(ahead, s);
+            table.prefetch(ahead.q(), s);
         }
         let entry = table.entry(query_offset, s);
         if let Some((last_hit, diff)) =
@@ -1784,8 +1773,8 @@ fn x_cell_per_hit<F>(
 /// (module header).
 // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
 #[inline(always)]
-fn x_cell_per_hit_bf<F>(
-    hits: &[i32],
+fn x_cell_per_hit_bf<H: XHit, F>(
+    hits: &[H],
     s: i32,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
@@ -1807,11 +1796,11 @@ fn x_cell_per_hit_bf<F>(
     };
     let (first, rest) = hits.split_at(ahead);
     for (&query_offset, &later) in first.iter().zip(&hits[p.min(hits.len())..]) {
-        table.prefetch_bf(later, s);
-        x_hit_bf(query_offset, s, here, table, test, bf, candidate);
+        table.prefetch_bf(later.q(), s);
+        x_hit_bf(query_offset.q(), s, here, table, test, bf, candidate);
     }
     for &query_offset in rest {
-        x_hit_bf(query_offset, s, here, table, test, bf, candidate);
+        x_hit_bf(query_offset.q(), s, here, table, test, bf, candidate);
     }
 }
 
@@ -1861,9 +1850,9 @@ fn x_batch_coords_distinct(coords: &[usize]) -> bool {
 // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`): a hit
 // that passes the test reaches the context check with `last_hit` and `diff`.
 #[inline(always)]
-fn x_call_candidates<F>(
+fn x_call_candidates<H: XHit, F>(
     mut lanes: u32,
-    hits: &[i32],
+    hits: &[H],
     s: i32,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
@@ -1874,7 +1863,7 @@ fn x_call_candidates<F>(
     while lanes != 0 {
         let lane = lanes.trailing_zeros() as usize;
         lanes &= lanes - 1;
-        let query_offset = hits[lane];
+        let query_offset = hits[lane].q();
         let entry = table.entry(query_offset, s);
         // The batch stored a candidate's old value back, so this is the entry the test read.
         let last_hit = entry.last_hit().wrapping_sub(test.diag_offset);
@@ -1895,8 +1884,8 @@ fn x_call_candidates<F>(
 /// - candidate = !flag && word_size <= diff < window (its entry is not written).
 // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
 #[inline(always)]
-fn x_test_batch_scalar<F>(
-    hits: &[i32],
+fn x_test_batch_scalar<H: XHit, F>(
+    hits: &[H],
     s: i32,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
@@ -1910,7 +1899,7 @@ where
     let written = (subject_plus_offset as u32) & X_LAST_HIT_MASK;
     let mut lanes = 0u32;
     for (lane, &query_offset) in hits.iter().enumerate() {
-        let entry = table.entry(query_offset, s);
+        let entry = table.entry(query_offset.q(), s);
         let old = entry.raw_bits();
         let flag = old >> 31 != 0;
         let last = entry.last_hit();
@@ -1927,7 +1916,7 @@ where
     debug_assert!(x_batch_coords_distinct(
         &hits
             .iter()
-            .map(|&query_offset| table.coord(query_offset, s))
+            .map(|&query_offset| table.coord(query_offset.q(), s))
             .collect::<Vec<_>>()
     ));
     x_call_candidates(lanes, hits, s, table, test, candidate);
@@ -1940,8 +1929,8 @@ where
 /// not faster than none on 2026-10-14 (local, human block 1 x Species4 and the OrthoFinder
 /// sample job, one thread).
 #[inline(always)]
-fn x_cell_scalar<F>(
-    hits: &[i32],
+fn x_cell_scalar<H: XHit, F>(
+    hits: &[H],
     s: i32,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
@@ -1968,8 +1957,8 @@ where
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn x_test_batch_avx2<F>(
-    hits: &[i32],
+unsafe fn x_test_batch_avx2<H: XHit, F>(
+    hits: &[H],
     s: i32,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
@@ -1991,8 +1980,8 @@ where
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn x_batch_avx2(
-    hits: &[i32],
+unsafe fn x_batch_avx2<H: XHit>(
+    hits: &[H],
     s: i32,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
@@ -2001,7 +1990,8 @@ unsafe fn x_batch_avx2(
     assert!(hits.len() == X_DIAG_LANES);
     let subject_plus_offset = s.wrapping_add(test.diag_offset);
     let written = (subject_plus_offset as u32) & X_LAST_HIT_MASK;
-    let query = _mm256_loadu_si256(hits.as_ptr().cast());
+    // SAFETY: (caller) the CPU has AVX2; `hits` has eight hits (asserted above).
+    let query = unsafe { H::x_load8(hits.as_ptr()) };
     // (q - s) & diag_mask per lane
     let coords = _mm256_and_si256(
         _mm256_sub_epi32(query, _mm256_set1_epi32(s)),
@@ -2080,8 +2070,8 @@ const X_PACK_LANES: [[u8; X_DIAG_LANES]; 256] = {
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn x_cell_avx2_defer<F>(
-    hits: &[i32],
+unsafe fn x_cell_avx2_defer<H: XHit, F>(
+    hits: &[H],
     s: i32,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
@@ -2198,8 +2188,8 @@ unsafe fn x_batch_avx2_at(
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn x_cell_avx2_defer_masked<F>(
-    hits: &[i32],
+unsafe fn x_cell_avx2_defer_masked<H: XHit, F>(
+    hits: &[H],
     s: i32,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
@@ -2219,15 +2209,15 @@ where
     let mask = table.mask;
     for batch in &mut batches {
         let p = batch.as_ptr();
-        let query = _mm256_loadu_si256(p.cast());
+        // SAFETY: the batch has eight hits.
+        let query = H::x_load8(p);
         // The coordinates from scalar loads of the hits, not taken out of `query`: the volatile
         // reads keep the compiler from extracting them from the register, which would start the
         // chain of the entry loads 3-6 cycles later (line R's probe of blastp's cell test,
         // 2026-10-18).
         // i < X_DIAG_LANES = batch.len()
-        let lane_coords: [u32; X_DIAG_LANES] = std::array::from_fn(|i| {
-            (std::ptr::read_volatile(p.add(i)).wrapping_sub(s) & mask) as u32
-        });
+        let lane_coords: [u32; X_DIAG_LANES] =
+            std::array::from_fn(|i| (H::x_read_volatile(p.add(i)).wrapping_sub(s) & mask) as u32);
         debug_assert!(x_batch_coords_distinct(&lane_coords.map(|c| c as usize)));
         let lanes = x_batch_avx2_at(lane_coords, s, table, test);
         let order = _mm256_cvtepu8_epi32(_mm_loadl_epi64(
@@ -2250,9 +2240,12 @@ where
         );
         // Lanes 0..n hold the hits (the masked load reads nothing past them), the others the
         // first hit again: they read and store its entry as lane 0 does (x_batch_avx2_at).
+        // SAFETY (`x_load_tail`): the lanes below `n` are set in `in_rest`; for `u16` hits the 16
+        // bytes at `rest` lie inside the table's allocation (the cells and the overflow array
+        // are padded, `XCell::PAD_CELLS` and `XCell::PAD_HITS`).
         let query = _mm256_blendv_epi8(
-            _mm256_set1_epi32(rest[0]),
-            _mm256_maskload_epi32(rest.as_ptr(), in_rest),
+            _mm256_set1_epi32(rest[0].q()),
+            H::x_load_tail(rest.as_ptr(), in_rest),
             in_rest,
         );
         let mut lane_hits = [0i32; X_DIAG_LANES];
@@ -3050,8 +3043,8 @@ where
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn x_cell_avx2<F>(
-    hits: &[i32],
+unsafe fn x_cell_avx2<H: XHit, F>(
+    hits: &[H],
     s: i32,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
@@ -3927,7 +3920,7 @@ mod tests {
         #[cfg(not(target_arch = "x86_64"))]
         let _ = chunk;
         if branch_free {
-            x_scan_two_hit_in_with::<true, F>(
+            x_scan_two_hit_in_with::<true, _, F>(
                 mode,
                 lookup,
                 subject,
@@ -3937,7 +3930,7 @@ mod tests {
                 candidate,
             )
         } else {
-            x_scan_two_hit_in_with::<false, F>(
+            x_scan_two_hit_in_with::<false, _, F>(
                 mode,
                 lookup,
                 subject,
@@ -4100,6 +4093,209 @@ mod tests {
         assert!(calls > 100, "the subjects must give candidates: {calls}");
     }
 
+    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:495-512 and blast_aascan.c:60-99
+    // (quoted at `x_scan_two_hit` and `x_scan_cells`)
+    // LOSAT_X_BPLK16: the scans of the table of 16-bit hits (every cell test of blastp's loops, with
+    // both scans of the cells, and the scans that list the cells) call `candidate` and `on_cell`
+    // with the same offsets in the same order, and leave the same diagonal entries, as the scans of
+    // the table of 32-bit hits of the same query, on a query set with cells of every length
+    // (eight-lane tails of 1-7 hits, cells in the overflow array and the padding at its end).
+    #[test]
+    fn scans_of_the_table_of_u16_hits_equal_the_scans_of_the_table_of_i32_hits() {
+        use crate::algorithm::tblastx::lookup::XBpLookup;
+        use crate::algorithm::tblastx::lookup::{
+            x_bp_build_ncbi_lookup, x_bp_build_ncbi_lookup_as,
+        };
+        use crate::algorithm::tblastx::translation::QueryFrame;
+
+        const STANDARD: [u8; 20] = [
+            1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22,
+        ];
+        let mut seed = 0x16_u64;
+        let mut protein = |n: usize| -> Vec<u8> {
+            (0..n)
+                .map(|_| STANDARD[next(&mut seed) as usize % STANDARD.len()])
+                .collect()
+        };
+        let mut queries: Vec<Vec<u8>> = (0..5).map(|i| protein(70 + 110 * i)).collect();
+        let mut low = vec![11u8; 150];
+        low.extend(protein(30));
+        low.extend(std::iter::repeat_n([17u8, 18], 60).flatten());
+        queries.push(low);
+        let frames: Vec<Vec<QueryFrame>> = queries
+            .iter()
+            .map(|seq| {
+                let mut aa_seq = vec![0u8];
+                aa_seq.extend_from_slice(seq);
+                aa_seq.push(0);
+                vec![QueryFrame {
+                    frame: 1,
+                    aa_seq,
+                    aa_seq_nomask: None,
+                    aa_len: seq.len(),
+                    orig_len: seq.len(),
+                    seg_masks: Vec::new(),
+                }]
+            })
+            .collect();
+        let (wide, _) = x_bp_build_ncbi_lookup(&frames, 11, false);
+        let (XBpLookup::Narrow(narrow), _) = x_bp_build_ncbi_lookup_as(&frames, 11, false, true)
+        else {
+            panic!("the query set fits 16 bits");
+        };
+        let lengths: Vec<usize> = narrow.backbone.iter().map(|cell| cell.count()).collect();
+        for tail in 1..X_DIAG_LANES {
+            assert!(
+                lengths.iter().any(|&n| n > 3 && n % X_DIAG_LANES == tail),
+                "the query set must give a cell with {tail} hits past a batch of eight"
+            );
+        }
+        assert!(lengths.iter().any(|&n| n > 3 * X_DIAG_LANES));
+        let mut subjects: Vec<Vec<u8>> = queries
+            .iter()
+            .map(|q| {
+                q.iter()
+                    .enumerate()
+                    .map(|(i, &a)| if i % 5 == 4 { STANDARD[i % 20] } else { a })
+                    .collect()
+            })
+            .collect();
+        subjects.extend((0..3).map(|i| protein(60 + 300 * i)));
+        subjects.push(queries[5].clone());
+        subjects.push(protein(1));
+        subjects.push(protein(3));
+        let window = 40;
+        let mut size = 1usize;
+        while size < wide.query_length as usize + window as usize {
+            size <<= 1;
+        }
+        let mask = (size - 1) as i32;
+        // The calls, the entries and the cells of every cell test and scan over the subjects.
+        fn run<K: XCell>(
+            lookup: &BlastAaLookupTable<K>,
+            subjects: &[Vec<u8>],
+            (size, mask, window): (usize, i32, i32),
+        ) -> Vec<(Vec<(usize, Call)>, Vec<u32>)> {
+            let mut runs = Vec::new();
+            for mode in cell_modes() {
+                let XCellTest::Diag(mode) = mode else {
+                    continue;
+                };
+                for branch_free in [false, true] {
+                    let mut entries = vec![DiagStruct::clear(window); size];
+                    let mut log: Vec<(usize, Call)> = Vec::new();
+                    let mut diag_offset: i32 = window;
+                    for (k, subject) in subjects.iter().enumerate() {
+                        let mut buffer = subject.clone();
+                        buffer.push(0);
+                        let test = XDiagTest {
+                            diag_offset,
+                            window,
+                            word_size: 3,
+                            prefetch: 16,
+                        };
+                        let mut candidate =
+                            |q: i32, s: i32, last_hit: i32, diff: i32, entry: &mut DiagStruct| {
+                                log.push((k, (q, s, last_hit, diff, entry.raw_bits())));
+                                extend(q, s, entry, diag_offset);
+                            };
+                        let table = &mut XDiagTable::new(&mut entries, mask);
+                        if branch_free {
+                            x_scan_two_hit_in_with::<true, _, _>(
+                                mode,
+                                lookup,
+                                &buffer,
+                                subject.len(),
+                                table,
+                                test,
+                                &mut candidate,
+                            );
+                        } else {
+                            x_scan_two_hit_in_with::<false, _, _>(
+                                mode,
+                                lookup,
+                                &buffer,
+                                subject.len(),
+                                table,
+                                test,
+                                &mut candidate,
+                            );
+                        }
+                        diag_offset = diag_offset.wrapping_add(subject.len() as i32 + window);
+                    }
+                    runs.push((log, entries.iter().map(|e| e.raw_bits()).collect()));
+                }
+            }
+            // The per-hit loop with the branch-free two-hit test (LOSAT_X_BPHITBF).
+            let mut entries = vec![DiagStruct::clear(window); size];
+            let mut log: Vec<(usize, Call)> = Vec::new();
+            let mut diag_offset: i32 = window;
+            for (k, subject) in subjects.iter().enumerate() {
+                let mut buffer = subject.clone();
+                buffer.push(0);
+                let test = XDiagTest {
+                    diag_offset,
+                    window,
+                    word_size: 3,
+                    prefetch: 16,
+                };
+                let bf = XHitBf::new(diag_offset, subject.len(), window, 3).expect("in range");
+                let mut candidate =
+                    |q: i32, s: i32, last_hit: i32, diff: i32, entry: &mut DiagStruct| {
+                        log.push((k, (q, s, last_hit, diff, entry.raw_bits())));
+                        extend(q, s, entry, diag_offset);
+                    };
+                let table = &mut XDiagTable::new(&mut entries, mask);
+                x_scan_two_hit_hitbf(
+                    lookup,
+                    &buffer,
+                    subject.len(),
+                    table,
+                    test,
+                    bf,
+                    &mut candidate,
+                );
+                diag_offset = diag_offset.wrapping_add(subject.len() as i32 + window);
+            }
+            runs.push((log, entries.iter().map(|e| e.raw_bits()).collect()));
+            runs
+        }
+        let want = run(&wide, &subjects, (size, mask, window));
+        let got = run(&narrow, &subjects, (size, mask, window));
+        assert_eq!(want.len(), got.len());
+        let mut calls = 0;
+        for (i, (want, got)) in want.iter().zip(&got).enumerate() {
+            assert!(want.0 == got.0, "run {i}: candidate calls differ");
+            assert!(want.1 == got.1, "run {i}: diagonal entries differ");
+            calls += want.0.len();
+        }
+        assert!(calls > 100, "the subjects must give candidates: {calls}");
+        // The scans that list the cells.
+        let mut compared = 0usize;
+        for subject in &subjects {
+            let mut buffer = subject.clone();
+            buffer.push(0);
+            let (mut a, mut b, mut c): (Vec<(i32, Vec<i32>)>, Vec<_>, Vec<_>) =
+                (Vec::new(), Vec::new(), Vec::new());
+            x_scan_cells(&wide, &buffer, subject.len(), |s, hits| {
+                a.push((s, hits.to_vec()))
+            });
+            x_scan_cells(&narrow, &buffer, subject.len(), |s, hits| {
+                b.push((s, hits.iter().map(|h| h.q()).collect()))
+            });
+            x_scan_cells_with::<true, _, _>(&narrow, &buffer, subject.len(), |s, hits| {
+                c.push((s, hits.iter().map(|h| h.q()).collect()))
+            });
+            assert!(
+                a == b && a == c,
+                "the cells of a subject of {}",
+                subject.len()
+            );
+            compared += a.len();
+        }
+        assert!(compared > 100, "{compared} cells compared");
+    }
+
     // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:60-99 (quoted at `x_scan_cells`)
     // Branch-free scan (LOSAT_X_BXSCANBF, graduated 2026-10-26 for blastx): the branch-free scan calls `on_cell` with the positions and
     // hit lists of the presence-test loop, on subjects across the block boundaries, with the
@@ -4153,7 +4349,7 @@ mod tests {
                 x_scan_cells(&lookup, &subject, length, |s, hits| {
                     want.push((s, hits.to_vec()))
                 });
-                x_scan_cells_with::<true, _>(&lookup, &subject, length, |s, hits| {
+                x_scan_cells_with::<true, _, _>(&lookup, &subject, length, |s, hits| {
                     got.push((s, hits.to_vec()))
                 });
                 assert_eq!(got, want, "case {case} length {length}");

@@ -4,12 +4,16 @@
 //! two lines in its suite (`common` for the command line, the output formats and shared parts;
 //! `tests/suite_layout.rs` checks that every file is in exactly one test binary).
 
+#[path = "../blastdbcmd_info.rs"]
+mod blastdbcmd_info;
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;
 #[path = "../cli_v2.rs"]
 mod cli_v2;
 #[path = "../compressed_lookup.rs"]
 mod compressed_lookup;
+#[path = "../db_taxid_root.rs"]
+mod db_taxid_root;
 #[path = "../default_bundle.rs"]
 mod default_bundle;
 #[path = "../newton_lanes8_default.rs"]

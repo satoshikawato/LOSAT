@@ -52,7 +52,8 @@
 //! Where (`plan`): a contiguous table of 4^12 cells (the megablast task's table for queries of about
 //! 300,000 table entries or more), newest first (not the blastn task's re-threaded order), without
 //! database word counts or `BLEMIR_DEBUG`, with fewer than 2^24 elements of `next_pos` and queries
-//! whose offsets ascend without overlap (as the callers place them). Elsewhere the 4-byte table is
+//! whose offsets ascend without overlap (as the callers place them), unless LOSAT_X_MBCSR lays the
+//! table out as CSR first (`x_bn_csr::plan`, tried before this plan). Elsewhere the 4-byte table is
 //! built as before; the fills of the smaller tables are not changed, nor are their readers' paths:
 //! a 3-byte table leaves `hashtable` empty, so the readers find it behind the bounds check of the
 //! head that the CSR tables of LOSAT_X_BNCSR already take.

@@ -417,12 +417,28 @@ pub(crate) fn count_hsp(
         &mut scratch.columns,
     );
     let (identity, positive) = recount(hsp.qrow, hsp.srow, positives, &mut scratch.midline);
-    let gaps = hsp
-        .qrow
-        .iter()
-        .chain(hsp.srow)
-        .filter(|&&letter| letter == b'-')
-        .count() as i32;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:238-241
+    // ```c++
+    //         	if(!kTranslated)
+    //         	{
+    //         		num_gaps = kAlign.GetTotalGapCount();
+    // ```
+    // The gaps of the Seq-align's segments (also for a translated search, lines 259-260): the
+    // columns of the edit script's gaps, not the `-` letters of the rows, which a stored gap
+    // character of a protein subject also is. Without an edit script, the `-` letters.
+    let gaps = match hsp.ops {
+        Some(ops) => ops
+            .iter()
+            .filter(|op| !op.is_sub())
+            .map(|op| op.num() as usize)
+            .sum::<usize>() as i32,
+        None => hsp
+            .qrow
+            .iter()
+            .chain(hsp.srow)
+            .filter(|&&letter| letter == b'-')
+            .count() as i32,
+    };
     HspCounts {
         identity,
         positive,

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Compare LOSAT with the frozen NCBI -subject fixtures (LOSAT/tests/outfmt0_manifest.tsv: outfmt 0, 6
-and 7, and 8, 9 and 12 in the rows sa.*, 5 for all five programs, 15 and 16 (BLAST JSON and XML2) for
+and 7, and 8, 9 and 12 in the rows sa.* (8 and 12 in ulp.*), 5 for all five programs, 15 and 16 (BLAST JSON and XML2) for
 all five programs, 13 and 14 (the same as side files and a master file) for every program, and 17 (SAM) for
 BLASTN, whose @PG CL tag is not compared).
 

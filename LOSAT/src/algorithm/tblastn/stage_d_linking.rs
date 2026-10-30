@@ -12,6 +12,9 @@ use crate::stats::tables::KarlinParams;
 
 // The candidates of a head chosen by subject position.
 mod x_link_window;
+// Each query context linked on its own (LOSAT_X_TBNLINKCTX).
+mod x_link_ctx;
+pub use x_link_ctx::print_summary as x_link_ctx_print_summary;
 pub use x_link_window::print_summary as x_link_window_print_summary;
 
 // NCBI c++/include/algo/blast/core/blast_hits.h:126-143;
@@ -298,7 +301,32 @@ pub(super) fn link_preliminary_hsps(
     lengths: &[LocalContextLength],
     subject_nt_length: i32,
     gapped_params: &[KarlinParams],
-    gumbel: &BlastGumbelBlk,
+    gumbel: Option<&BlastGumbelBlk>,
+    link: &LocalLinkParameters,
+) -> Result<LinkedHspList> {
+    link_preliminary_hsps_on(
+        None,
+        input,
+        query_lengths,
+        lengths,
+        subject_nt_length,
+        gapped_params,
+        gumbel,
+        link,
+    )
+}
+
+/// `link_preliminary_hsps` for a subject whose units ran on `pool` (if any): with
+/// `LOSAT_X_TBNLINKCTX` the query contexts are linked on that pool side by side.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn link_preliminary_hsps_on(
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    input: &[(usize, GappedHsp)],
+    query_lengths: &[i32],
+    lengths: &[LocalContextLength],
+    subject_nt_length: i32,
+    gapped_params: &[KarlinParams],
+    gumbel: Option<&BlastGumbelBlk>,
     link: &LocalLinkParameters,
 ) -> Result<LinkedHspList> {
     // NCBI c++/src/algo/blast/core/link_hsps.c:1774-1777:
@@ -318,18 +346,57 @@ pub(super) fn link_preliminary_hsps(
         query_lengths.len() == lengths.len() && lengths.len() == gapped_params.len(),
         "one statistical context per query"
     );
+    let link_values = |input: &[(usize, GappedHsp)]| {
+        x_link_values(
+            input,
+            query_lengths,
+            lengths,
+            subject_nt_length,
+            gapped_params,
+            gumbel,
+            link,
+        )
+    };
+    // No NCBI counterpart: LOSAT_X_TBNLINKCTX links each query context's HSPs on their own
+    // (`stage_d_linking/x_link_ctx.rs`); a chain never leaves its context, so the values are the
+    // same.
+    let hsps = if x_link_ctx::x_link_ctx_on() {
+        x_link_ctx::x_link_by_context(pool, input, link_values)
+    } else {
+        link_values(input)
+    };
+    Ok(x_link_list(hsps))
+}
+
+/// The HSPs of `input` linked (`s_BlastUnevenGapLinkHSPs`), with their sum e-values and chain
+/// sizes, in the order of `input` (`source_index` = the position in `input`).
+fn x_link_values(
+    input: &[(usize, GappedHsp)],
+    query_lengths: &[i32],
+    lengths: &[LocalContextLength],
+    subject_nt_length: i32,
+    gapped_params: &[KarlinParams],
+    gumbel: Option<&BlastGumbelBlk>,
+    link: &LocalLinkParameters,
+) -> Vec<LinkedHsp> {
     let mut work: Vec<WorkHsp> = input
         .iter()
         .enumerate()
         .map(|(source_index, &(context, hsp))| {
             let kbp = &gapped_params[context];
-            let evalue = blast_spouge_stoe(
-                hsp.score,
-                kbp,
-                gumbel,
-                query_lengths[context],
-                subject_nt_length / 3,
-            ) / gap_decay_divisor(link.gap_decay_rate, 1);
+            let evalue = match gumbel {
+                Some(gumbel) => blast_spouge_stoe(
+                    hsp.score,
+                    kbp,
+                    gumbel,
+                    query_lengths[context],
+                    subject_nt_length / 3,
+                ),
+                None => {
+                    lengths[context].eff_searchsp as f64
+                        * (-kbp.lambda * hsp.score as f64 + kbp.k.ln()).exp()
+                }
+            } / gap_decay_divisor(link.gap_decay_rate, 1);
             WorkHsp {
                 value: LinkedHsp {
                     context,
@@ -457,14 +524,19 @@ pub(super) fn link_preliminary_hsps(
             }
         }
     }
-    work.sort_by(|a, b| score_compare(&a.value.hsp, &b.value.hsp));
-    let hsps: Vec<_> = work.into_iter().map(|item| item.value).collect();
+    work.into_iter().map(|item| item.value).collect()
+}
+
+/// The list of linked HSPs `hsps` (in the order of the input): sorted by score
+/// (`Blast_HSPListSortByScore`, stable), with the best e-value.
+fn x_link_list(mut hsps: Vec<LinkedHsp>) -> LinkedHspList {
+    hsps.sort_by(|a, b| score_compare(&a.hsp, &b.hsp));
     let best_evalue = hsps
         .iter()
         .map(|hsp| hsp.evalue)
         .reduce(f64::min)
         .unwrap_or(f64::MAX);
-    Ok(LinkedHspList { hsps, best_evalue })
+    LinkedHspList { hsps, best_evalue }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1385-1404,3071-3115,3404-3417;
@@ -556,7 +628,7 @@ mod tests {
             longest_intron: 40,
             cutoff_small_gap: 25,
         };
-        let result = link_preliminary_hsps(&[], &[], &[], 360, &[], &gumbel, &link).unwrap();
+        let result = link_preliminary_hsps(&[], &[], &[], 360, &[], Some(&gumbel), &link).unwrap();
         assert!(result.hsps.is_empty());
         assert_eq!(result.best_evalue.to_bits(), 0.0f64.to_bits());
     }
@@ -707,7 +779,7 @@ mod tests {
                 &parameters.lengths,
                 subject_nt_length as i32,
                 &vec![gapped; query_contexts.len()],
-                &gumbel,
+                Some(&gumbel),
                 &parameters.link.unwrap(),
             )
             .unwrap();
@@ -877,7 +949,7 @@ mod tests {
                 &parameters.lengths,
                 6_377,
                 &[scaled; 3],
-                &gumbel,
+                Some(&gumbel),
                 &parameters.link.unwrap(),
             )
             .unwrap();
@@ -1187,7 +1259,7 @@ mod tests {
                 &parameters.lengths,
                 subject.len() as i32,
                 &[gapped],
-                &gumbel,
+                Some(&gumbel),
                 parameters.link.as_ref().unwrap(),
             )
             .unwrap();
@@ -1589,7 +1661,7 @@ mod tests {
                 &parameters.lengths,
                 subject.len() as i32,
                 &[scaled],
-                &gumbel,
+                Some(&gumbel),
                 &post_link,
             )
             .unwrap();

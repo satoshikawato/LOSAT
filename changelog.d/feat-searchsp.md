@@ -1,0 +1,2 @@
+- `-searchsp` on all five search programs (drop-in DI-7, MAKER, VecScreen): the effective search space of the E-values, the cutoffs and the reports, with `-subject` and `-db`, and for BLASTP, BLASTX and TBLASTN the statistics without the Gumbel block that NCBI BLAST+ 2.17.0 turns off at any `-searchsp` value.
+  BLASTP, BLASTX and TBLASTN refuse `-searchsp` with `-subject` records of an average length below one letter, where NCBI writes the start of its report and an engine error.

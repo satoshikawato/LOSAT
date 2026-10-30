@@ -22,7 +22,7 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
     if extra.iter().any(|key| {
         matches!(
             key.split('=').next().unwrap_or(key),
-            "-query" | "-subject" | "-out" | "-help" | "--help" | "--version"
+            "-query" | "-subject" | "-out" | "-h" | "-help" | "--help" | "--version"
         )
     }) {
         bail!("file/help arguments are unsupported for the BLASTX web API");
@@ -84,11 +84,18 @@ fn v1_outfmt(value: &str) -> std::result::Result<String, String> {
 }
 
 /// The options of ABI v1's BLASTX: the format number and the fields as ABI v1 read them
-/// (`v1_outfmt`: the words between white space), before BLASTX read `-outfmt` as NCBI.
+/// (`v1_outfmt`: the words between white space, each `std` or one of `args::FIELDS`), before
+/// BLASTX read `-outfmt` as NCBI; a list other than the `std` fields is written by the shared
+/// tabular writer, as the CLI's (`ResolvedOptions::tabular`), without a taxonomy database
+/// (DECISIONS 7 of line CLI C2; ABI v1's fields show no taxonomy).
 fn v1_resolve(args: &BlastxArgs) -> Result<super::args::ResolvedOptions> {
     let mut words = args.outfmt.split_whitespace();
-    let outfmt = words.next().unwrap_or_default().parse::<u8>()?;
-    args.resolve_with_format(outfmt, words)
+    let number = words.next().unwrap_or_default().parse::<u8>()?;
+    args.resolve_with_format(&crate::blastinput::app::FormatChoice {
+        number: i32::from(number),
+        spec: words.collect::<Vec<_>>().join(" "),
+        delimiter: String::new(),
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:302-314
@@ -173,7 +180,13 @@ pub(crate) fn run_pair(
     // ```c++
     //         formatter.PrintProlog();
     // ```
-    report::write_prolog(&mut output, &options, &subjects, &shown)?;
+    report::write_prolog(
+        &mut output,
+        &mut *diagnostics.borrow_mut(),
+        &options,
+        &subjects,
+        &shown,
+    )?;
     let mut processed = 0;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-262
     // ```c++
@@ -392,7 +405,15 @@ pub(crate) fn run_pair(
     // ```c++
     //         formatter.PrintEpilog(opt);
     // ```
-    report::write_epilog(&mut output, &options, &subjects, &shown, processed, None)?;
+    report::write_epilog(
+        &mut output,
+        &mut *diagnostics.borrow_mut(),
+        &options,
+        &subjects,
+        &shown,
+        processed,
+        None,
+    )?;
     Ok(output)
 }
 

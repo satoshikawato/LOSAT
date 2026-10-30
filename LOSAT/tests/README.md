@@ -286,7 +286,10 @@ give the runner of before).
   starts. Each worker instantiates the module with the shared memory and waits.
   `thread-spawn` hands the next waiting worker its tid and start argument and
   returns the tid after the same start confirmation and timeout as a new worker;
-  when none is left it creates workers as before. Unused workers are terminated
+  when none is left, `auto` boots the next N workers together (the most one set
+  of threads asks for: a pool whose threads are all new, such as blastn's
+  query-batch slots, `standby_refill` event) and an integer creates one worker
+  per spawn as before. Unused workers are terminated
   when the run ends and never keep the process alive. With
   `LOSAT_WASI_THREADS_DEBUG=1`, spawn-attempt, spawned, ready and exit events keep
   their meaning for the guest's threads (`spawned` of a prebooted worker carries

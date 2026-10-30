@@ -43,7 +43,7 @@ fn temp_dir(tag: &str) -> PathBuf {
 }
 
 /// The subject set (seven genomes without ambiguity codes, 2.1 Mb) as one FASTA file, and
-/// its database made by `losat makedb`.
+/// its database made by `losat makeblastdb`.
 fn subject_set(dir: &Path) -> (PathBuf, String) {
     let set = dir.join("set.fna");
     let mut bytes = Vec::new();
@@ -55,15 +55,15 @@ fn subject_set(dir: &Path) -> (PathBuf, String) {
     std::fs::write(&set, bytes).unwrap();
     let db = dir.join("set").to_str().unwrap().to_string();
     let output = losat()
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&set)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     (set, db)
@@ -118,7 +118,7 @@ fn a_database_search_gives_the_same_report_at_every_thread_count() {
         }
     }
     // The reports name the database: outfmt 7 by the `-db` value, outfmt 0 by its title
-    // (makedb's default title: the input file's name) and its numbers.
+    // (makeblastdb's default title: the input file's name) and its numbers.
     let comments = String::from_utf8(blastn(&["-db", &db], "megablast", "7", 1)).unwrap();
     assert!(
         comments.contains(&format!("\n# Database: {db}\n")),

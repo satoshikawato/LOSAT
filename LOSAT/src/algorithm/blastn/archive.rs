@@ -46,6 +46,7 @@ use crate::utils::dust::MaskedInterval;
 pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Blastn, &args.task);
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     inputs.evalue = args.evalue;
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
@@ -82,6 +83,13 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.window_masker_db = args.window_masker_db.clone();
     inputs.culling_limit = args.culling_limit;
     inputs.subject_besthit = args.subject_besthit;
+    // The X-drops and the window as given (CGenericSearchArgs and CWindowSizeArg set them
+    // only then, blast_args.cpp:280-286,487-489) and `-no_greedy` (the algorithms); the
+    // ungapped X-drop and the off-diagonal range are not recorded (`options.rs`).
+    inputs.xdrop_gap = args.xdrop_gap;
+    inputs.xdrop_gap_final = args.xdrop_gap_final;
+    inputs.window_size = args.window_size;
+    inputs.no_greedy = args.no_greedy;
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
@@ -448,6 +456,13 @@ mod tests {
     // list as `Name=variant:value`.
     const CASES: &[(&str, &[&str], &str)] = &[
     ("b_n_allN_db_fmt11", &[], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
+    // DI-6 (the frozen archives xdrop.*.11 of tests/outfmt0_manifest.tsv): the X-drops and the window
+    // as given, -no_greedy's algorithms (eDynProgScoreOnly, eDynProgTbck = 0), the window of
+    // dc-megablast replaced in its place, pyani ANIb's options.
+    ("di6_nogreedy", &["-no_greedy", "-gapopen", "5", "-gapextend", "2"], "EvalueThreshold=cutoff:e-value:10 GapOpeningCost=integer:5 GapExtensionCost=integer:2 GapExtnAlgorithm=integer:0 GapTracebackAlgorithm=integer:0 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
+    ("di6_xdrops", &["-xdrop_ungap", "5", "-xdrop_gap", "12.5", "-xdrop_gap_final", "150", "-window_size", "40"], "EvalueThreshold=cutoff:e-value:10 GapXDropoff=real:12.5 GapXDropoffFinal=real:150 MaskAtHash=boolean:True UngappedMode=boolean:False WindowSize=integer:40 HitlistSize=integer:500"),
+    ("di6_dc_win0", &["-task", "dc-megablast", "-window_size", "0"], "EvalueThreshold=cutoff:e-value:10 MBTemplateType=integer:0 MBTemplateLength=integer:18 WordSize=integer:11 WindowSize=integer:0 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
+    ("di6_anib", &["-task", "blastn", "-xdrop_gap_final", "150", "-dust", "no", "-evalue", "1e-15", "-max_target_seqs", "1"], "EvalueThreshold=cutoff:e-value:1e-15 GapXDropoffFinal=real:150 MaskAtHash=boolean:True DustFiltering=boolean:False UngappedMode=boolean:False HitlistSize=integer:1"),
     ("e_n_badpair_fmt11", &["-reward", "2", "-penalty", "-7"], "EvalueThreshold=cutoff:e-value:10 MismatchPenalty=integer:-7 MatchReward=integer:2 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("in_n_dust_minus_fmt11", &["-strand", "minus"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("in_n_lcase_mask_fmt11", &["-lcase_masking"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),

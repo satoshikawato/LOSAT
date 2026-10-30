@@ -8,7 +8,7 @@ use super::pairwise::query_ungapped_karlin_blastna;
 use crate::blastinput::report_counts::{run_report_counts, ReportCounts};
 use crate::cli::NativeError;
 use crate::config::NuclScoringSpec;
-use crate::stats::{KarlinParams, NuclValues};
+use crate::stats::{ungapped_beta, KarlinParams, NuclValues};
 
 fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
     let (reward, penalty, gap_open, gap_extend) = determine_scoring_params(args);
@@ -129,21 +129,34 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 /// `coordination.rs` `task_defaults`). The reward and the penalty are NCBI's 16-bit values
 /// (`determine_scoring_params`). LOSAT's own limits are `check_losat_limits`.
 pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
-    check_scoring_options_with(args, &args.report_counts)
+    check_scoring_options_with(args, &args.report_counts, args.ungapped)
 }
 
 /// `check_scoring_options` with the hit list size of `counts` (the counts that
-/// [`report_counts_of`] derives for a run; `args.report_counts` is set by the run).
-fn check_scoring_options_with(args: &BlastnArgs, counts: &ReportCounts) -> anyhow::Result<()> {
+/// [`report_counts_of`] derives for a run; `args.report_counts` is set by the run), for an
+/// ungapped (`-ungapped`) search when `ungapped`.
+fn check_scoring_options_with(
+    args: &BlastnArgs,
+    counts: &ReportCounts,
+    ungapped: bool,
+) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     let word_size = super::coordination::determine_effective_word_size(args);
-    let greedy = args.task == "megablast";
+    // `-no_greedy` selects dynamic programming (blast_args.cpp:681-685).
+    let greedy = args.task == "megablast" && !args.no_greedy;
     let mb_lookup_options = matches!(args.task.as_str(), "megablast" | "dc-megablast");
     let (_, template_length) = super::coordination::determine_template(args);
     let matrix_only = spec.reward == 0 && spec.penalty == 0;
     let message = if !matrix_only && spec.penalty >= 0 {
         "BLASTN penalty must be negative".to_string()
-    } else if spec.gap_open > 0 && spec.gap_extend == 0 {
+    } else if !ungapped && spec.gap_open > 0 && spec.gap_extend == 0 {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_options.c:900-904
+        // ```c
+        //  if (options->gapped_calculation && options->gap_open > 0 && options->gap_extend == 0)
+        //  {
+        //      Blast_MessageWrite(blast_msg, eBlastSevWarning, kBlastMessageNoContext,
+        //         "BLASTN gap extension penalty cannot be 0");
+        // ```
         "BLASTN gap extension penalty cannot be 0".to_string()
     } else if word_size > DBSEQ_CHUNK_OVERLAP {
         format!("Word-size must be less than or equal to {DBSEQ_CHUNK_OVERLAP}")
@@ -151,6 +164,20 @@ fn check_scoring_options_with(args: &BlastnArgs, counts: &ReportCounts) -> anyho
         "Invalid discontiguous template parameters: word size must be either 11 or 12".to_string()
     } else if template_length > 0 && !mb_lookup_options {
         "Invalid lookup table type for discontiguous Mega BLAST".to_string()
+    } else if args.off_diagonal_range.is_some_and(|range| range != 0)
+        && super::coordination::determine_window_size(args) == 0
+    {
+        // NCBI reference: c++/src/algo/blast/core/blast_options.c:1583-1596
+        // (`BlastInitialWordOptionsValidate`, after the lookup table's checks and before the
+        // hit saving's)
+        // ```c
+        //    if (program_number == eBlastTypeBlastn &&
+        //        options->scan_range && !options->window_size)
+        //    {
+        //       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+        //                             "off_diagonal_range is only useful in 2-hit algorithm");
+        // ```
+        "off_diagonal_range is only useful in 2-hit algorithm".to_string()
     } else if counts.hitlist_size < 1 {
         // NCBI blast_options.c:1511-1517, `BlastHitSavingOptionsValidate`, whose hit list
         // check comes before the e-value's (the message of `ReportCounts::validate`, which
@@ -181,11 +208,17 @@ fn check_scoring_options_with(args: &BlastnArgs, counts: &ReportCounts) -> anyho
 /// after NCBI's conversion). The limit on greedy gap costs follows the table check
 /// (`check_greedy_gap_costs`).
 pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
-    check_losat_limits_with(args, &args.report_counts)
+    check_losat_limits_with(args, &args.report_counts, args.ungapped)
 }
 
 /// `check_losat_limits` with the hit list size of `counts`, see `check_scoring_options_with`.
-fn check_losat_limits_with(args: &BlastnArgs, counts: &ReportCounts) -> anyhow::Result<()> {
+/// An ungapped search keeps `hitlist_size` preliminary hits (`get_prelim_hitlist_size` with
+/// `gapped_calculation` false), which cannot overflow.
+fn check_losat_limits_with(
+    args: &BlastnArgs,
+    counts: &ReportCounts,
+    ungapped: bool,
+) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     if spec.reward <= 0 {
         anyhow::bail!(
@@ -194,7 +227,7 @@ fn check_losat_limits_with(args: &BlastnArgs, counts: &ReportCounts) -> anyhow::
         );
     }
     let hitlist_size = counts.hitlist_size;
-    if super::hsp::get_prelim_hitlist_size(hitlist_size, false, true) < 1 {
+    if super::hsp::get_prelim_hitlist_size(hitlist_size, false, !ungapped) < 1 {
         let what = if args.max_target_seqs.is_some() {
             format!("a -max_target_seqs of {hitlist_size}")
         } else {
@@ -350,6 +383,27 @@ pub fn check_scoring(args: &BlastnArgs) -> anyhow::Result<()> {
 /// hit list size): the hit list size is the one that the run of these formats derives. A
 /// host that runs one search per hit list size checks each of them.
 pub fn check_scoring_for_formats(args: &BlastnArgs, outfmts: &[i32]) -> anyhow::Result<()> {
+    check_scoring_for_formats_with(args, outfmts, args.ungapped)
+}
+
+/// `check_scoring_for_formats` for an ungapped (`-ungapped`) search when `ungapped`: NCBI
+/// builds no gapped Karlin-Altschul block then, so the gap costs are not looked up in the
+/// tables and greedy gap costs are not limited.
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:513-529
+/// ```c
+///     status = Blast_ScoreBlkKbpUngappedCalc(program_number, sbp, query_blk->sequence,
+///                                            query_info, blast_message);
+///     ...
+///     if (scoring_options->gapped_calculation) {
+///         status = s_BlastScoreBlkGappedFill(sbp, scoring_options, program_number,
+///                                            query_info, blast_message);
+/// ```
+pub(crate) fn check_scoring_for_formats_with(
+    args: &BlastnArgs,
+    outfmts: &[i32],
+    ungapped: bool,
+) -> anyhow::Result<()> {
     // The host has no database files (`run_local`).
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
@@ -357,8 +411,11 @@ pub fn check_scoring_for_formats(args: &BlastnArgs, outfmts: &[i32]) -> anyhow::
     // `args.report_counts` is set by `process_options` of a run; a host that has not run
     // it derives the counts the same way, for the output formats of the search.
     let (counts, _) = report_counts_of(args, outfmts)?;
-    check_scoring_options_with(args, &counts)?;
-    check_losat_limits_with(args, &counts)?;
+    check_scoring_options_with(args, &counts, ungapped)?;
+    check_losat_limits_with(args, &counts, ungapped)?;
+    if ungapped {
+        return Ok(());
+    }
     let spec = scoring_spec(args);
     NuclValues::new(spec.reward, spec.penalty)
         .and_then(|values| values.check_gaps(&spec))
@@ -372,8 +429,10 @@ pub(crate) struct ContextKarlin {
     /// From the context's composition (NCBI `kbp_std`): the gap trigger and the ungapped
     /// X-drop.
     pub ungapped: KarlinParams,
-    /// The gapped block (NCBI `kbp_gap`) with the alpha and beta of the length adjustment:
-    /// e-values, bit scores and cutoffs.
+    /// The block that NCBI's `gapped_calculation` selects for e-values, bit scores, cutoffs
+    /// and the length adjustment: the gapped block (NCBI `kbp_gap`) with its alpha and beta,
+    /// or, in an ungapped (`-ungapped`) search, the ungapped block (`kbp_std`) with the alpha
+    /// and beta of `Blast_GetNuclAlphaBeta` (see [`context_blocks_ungapped`]).
     pub gapped: KarlinParams,
 }
 
@@ -470,6 +529,66 @@ pub(crate) fn context_blocks(
     Ok((blocks, values.round_down))
 }
 
+/// The blocks of every valid context of an ungapped (`-ungapped`) search, and whether scores
+/// are rounded down to even numbers (never). NCBI builds no gapped block then, so no table is
+/// asked for the gap costs and a pair of scores without a table row is no error: its alpha
+/// and beta stay 0 and the length adjustment is 0.
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:513-529
+/// ```c
+///     if (scoring_options->gapped_calculation) { ... s_BlastScoreBlkGappedFill ... }
+/// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_setup.c:701-705, 768-848
+/// ```c
+///     double alpha = 0, beta = 0; /* alpha and beta for new scoring system */
+///     ...
+///     kbp_ptr = sbp->kbp;   (ungapped)
+///     ...
+///             Blast_GetNuclAlphaBeta(scoring_options->reward, scoring_options->penalty,
+///                 scoring_options->gap_open, scoring_options->gap_extend,
+///                 sbp->kbp_std[index], scoring_options->gapped_calculation, &alpha, &beta);
+/// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3989-3992, 4024-4029
+/// ```c
+///     if (status)
+///        return status;       (s_GetNuclValuesArray: no table row for the pair; alpha, beta unset)
+///     ...
+///     if (!found) {
+///         *alpha = kbp->Lambda/kbp->H;
+///         *beta = s_GetUngappedBeta(reward, penalty);
+///     }
+/// ```
+pub(crate) fn context_blocks_ungapped(
+    ungapped: &[Option<KarlinParams>],
+    spec: &NuclScoringSpec,
+) -> (Vec<Option<ContextKarlin>>, bool) {
+    let tabled = NuclValues::new(spec.reward, spec.penalty).is_ok();
+    let blocks = ungapped
+        .iter()
+        .map(|block| {
+            block.map(|ungapped| {
+                let (alpha, beta) = if tabled {
+                    (
+                        ungapped.lambda / ungapped.h,
+                        ungapped_beta(spec.reward, spec.penalty),
+                    )
+                } else {
+                    (0.0, 0.0)
+                };
+                ContextKarlin {
+                    ungapped,
+                    gapped: KarlinParams {
+                        alpha,
+                        beta,
+                        ..ungapped
+                    },
+                }
+            })
+        })
+        .collect();
+    (blocks, false)
+}
+
 /// The gapped X-drops of the search (raw scores of the preliminary and the final
 /// extension), from the smallest gapped Lambda of the valid contexts of a batch.
 ///
@@ -498,8 +617,8 @@ pub(crate) fn context_blocks(
 /// batch. Without a valid context the batch is not searched.
 pub(crate) fn gap_x_dropoffs(
     context_karlin: &[Option<ContextKarlin>],
-    x_drop_gapped_bits: i32,
-    x_drop_final_bits: i32,
+    x_drop_gapped_bits: f64,
+    x_drop_final_bits: f64,
 ) -> (i32, i32) {
     let min_lambda = context_karlin
         .iter()
@@ -507,8 +626,8 @@ pub(crate) fn gap_x_dropoffs(
         .map(|blocks| blocks.gapped.lambda)
         .reduce(f64::min)
         .unwrap_or(KarlinParams::default().lambda);
-    let gapped = (x_drop_gapped_bits as f64 * NCBIMATH_LN2 / min_lambda) as i32;
-    let finale = (x_drop_final_bits as f64 * NCBIMATH_LN2 / min_lambda).max(gapped as f64) as i32;
+    let gapped = (x_drop_gapped_bits * NCBIMATH_LN2 / min_lambda) as i32;
+    let finale = (x_drop_final_bits * NCBIMATH_LN2 / min_lambda).max(gapped as f64) as i32;
     (gapped, finale)
 }
 
@@ -606,6 +725,53 @@ mod tests {
             "0"
         ])))
         .contains("Greedy extension must be used"));
+    }
+
+    // DI-6: `-no_greedy` makes megablast's gap costs 0/0 invalid (blast_options.c:1699-1711),
+    // and an off-diagonal range needs a window (blast_options.c:1583-1596), checked after the
+    // lookup table's options.
+    #[test]
+    fn no_greedy_and_off_diagonal_range_are_checked() {
+        assert!(message(check_scoring_options(&args(&["-no_greedy"])))
+            .contains("Greedy extension must be used"));
+        assert!(
+            check_scoring_options(&args(&["-no_greedy", "-gapopen", "5", "-gapextend", "2"]))
+                .is_ok()
+        );
+        assert!(check_scoring_options(&args(&["-task", "blastn", "-no_greedy"])).is_ok());
+        assert_eq!(
+            message(check_scoring_options(&args(&["-off_diagonal_range", "2"]))),
+            "BLAST query/options error: off_diagonal_range is only useful in 2-hit algorithm\nPlease refer to the BLAST+ user manual.\n"
+        );
+        assert!(check_scoring_options(&args(&["-off_diagonal_range", "0"])).is_ok());
+        assert!(
+            check_scoring_options(&args(&["-off_diagonal_range", "2", "-window_size", "40"]))
+                .is_ok()
+        );
+        assert!(check_scoring_options(&args(&[
+            "-task",
+            "dc-megablast",
+            "-off_diagonal_range",
+            "2"
+        ]))
+        .is_ok());
+        assert!(message(check_scoring_options(&args(&[
+            "-task",
+            "dc-megablast",
+            "-window_size",
+            "0",
+            "-off_diagonal_range",
+            "2"
+        ])))
+        .contains("off_diagonal_range is only useful"));
+        // The lookup table's check comes first.
+        assert!(message(check_scoring_options(&args(&[
+            "-off_diagonal_range",
+            "2",
+            "-word_size",
+            "101"
+        ])))
+        .contains("Word-size must be less than"));
     }
 
     #[test]
@@ -732,5 +898,133 @@ mod tests {
         assert!(context_blocks(&[None, None], &spec).is_ok());
         let ungapped = query_ungapped_karlin(b"ACGTACGT", 1, -6);
         assert!(context_blocks(&[ungapped, ungapped], &spec).is_err());
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/blast_stat.c:3955-3963, 3989-3992, 4024-4029
+    // (oracle `-ungapped`: 2/-3 beta -2, 1/-1 beta -2, 2/-2 and 4/-6 beta 0, 1/-6 and 3/-1 no table
+    // row: alpha = beta = 0 and a length adjustment of 0, effective search space 377 x 373)
+    #[test]
+    fn ungapped_blocks_take_alpha_beta_from_the_ungapped_block() {
+        let spec = |reward, penalty| NuclScoringSpec {
+            reward,
+            penalty,
+            gap_open: 0,
+            gap_extend: 0,
+        };
+        let block = KarlinParams {
+            lambda: 0.634,
+            k: 0.408,
+            h: 0.912,
+            alpha: 7.0,
+            beta: 7.0,
+        };
+        for (reward, penalty, beta) in [
+            (2, -3, -2.0),
+            (1, -1, -2.0),
+            (2, -2, 0.0),
+            (4, -6, 0.0),
+            (1, -2, 0.0),
+        ] {
+            let (blocks, round_down) =
+                context_blocks_ungapped(&[Some(block), None], &spec(reward, penalty));
+            assert!(!round_down);
+            assert!(blocks[1].is_none());
+            let blocks = blocks[0].unwrap();
+            assert_eq!(blocks.ungapped.lambda, block.lambda);
+            assert_eq!(blocks.gapped.lambda, block.lambda);
+            assert_eq!(blocks.gapped.k, block.k);
+            assert_eq!(blocks.gapped.h, block.h);
+            assert_eq!(
+                blocks.gapped.alpha,
+                block.lambda / block.h,
+                "{reward}/{penalty}"
+            );
+            assert_eq!(blocks.gapped.beta, beta, "{reward}/{penalty}");
+        }
+        // A pair with no table row (1/-6, 3/-1) is no error: alpha = beta = 0.
+        for (reward, penalty) in [(1, -6), (3, -1)] {
+            let (blocks, _) = context_blocks_ungapped(&[Some(block)], &spec(reward, penalty));
+            let blocks = blocks[0].unwrap();
+            assert_eq!((blocks.gapped.alpha, blocks.gapped.beta), (0.0, 0.0));
+            assert!(context_blocks(&[Some(block)], &spec(reward, penalty)).is_err());
+        }
+        // No valid context: no blocks, as `context_blocks`.
+        assert!(context_blocks_ungapped(&[None, None], &spec(1, -6))
+            .0
+            .iter()
+            .all(Option::is_none));
+    }
+
+    /// Oracle (`t2`, 377 x 373, 1/-6 `-ungapped`): the effective search space is 377 x 373 =
+    /// 140,621, so the length adjustment of alpha = beta = 0 is 0.
+    #[test]
+    fn ungapped_blocks_without_a_table_row_have_no_length_adjustment() {
+        let spec = NuclScoringSpec {
+            reward: 1,
+            penalty: -6,
+            gap_open: 0,
+            gap_extend: 0,
+        };
+        let block = KarlinParams {
+            lambda: 1.39,
+            k: 0.749,
+            h: 1.38,
+            alpha: 0.0,
+            beta: 0.0,
+        };
+        let (blocks, _) = context_blocks_ungapped(&[Some(block)], &spec);
+        let adjustment =
+            crate::stats::compute_length_adjustment_ncbi(377, 373, 1, &blocks[0].unwrap().gapped);
+        assert_eq!(adjustment.length_adjustment, 0);
+    }
+
+    #[test]
+    fn ungapped_option_checks_follow_gapped_calculation() {
+        let zero_extension = args(&["-gapopen", "3"]);
+        let zero_costs = args(&["-task", "blastn", "-gapopen", "0", "-gapextend", "0"]);
+        let counts = ReportCounts::default();
+        // "gap extension penalty cannot be 0" only in a gapped search.
+        assert!(check_scoring_options_with(&zero_extension, &counts, false).is_err());
+        assert!(check_scoring_options_with(&zero_extension, &counts, true).is_ok());
+        // "Greedy extension must be used ..." is raised in both.
+        assert!(
+            message(check_scoring_options_with(&zero_costs, &counts, true))
+                .contains("Greedy extension must be used")
+        );
+        // Gap costs without a table row (gapped: exit 3) and an unsupported pair are accepted.
+        for words in [
+            &["-reward", "1", "-penalty", "-6"][..],
+            &["-reward", "3", "-penalty", "-1"],
+            &["-task", "blastn", "-gapopen", "3", "-gapextend", "7"],
+            &["-gapopen", "5", "-gapextend", "0"],
+            &["-gapopen", "40000", "-gapextend", "40000"],
+        ] {
+            let parsed = args(words);
+            assert!(
+                check_scoring_for_formats_with(&parsed, &[6], true).is_ok(),
+                "{words:?}"
+            );
+        }
+        assert!(check_scoring_for_formats_with(
+            &args(&["-reward", "1", "-penalty", "-6"]),
+            &[6],
+            false
+        )
+        .is_err());
+        // reward <= 0 stays refused.
+        assert!(check_scoring_for_formats_with(&args(&["-reward", "0"]), &[6], true).is_err());
+        // The preliminary hit list of an ungapped search is the hit list: 2147483598 is accepted.
+        assert!(check_scoring_for_formats_with(
+            &args(&["-num_alignments", "2147483598"]),
+            &[0],
+            true
+        )
+        .is_ok());
+        assert!(check_scoring_for_formats_with(
+            &args(&["-num_alignments", "2147483598"]),
+            &[0],
+            false
+        )
+        .is_err());
     }
 }

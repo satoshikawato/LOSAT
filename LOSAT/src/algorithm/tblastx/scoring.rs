@@ -12,11 +12,12 @@
 //! The search reads its matrix through [`TbxScore`], chosen once before the search
 //! (`blast_engine::run_impl::run_in_pool`). BLOSUM62's instance ([`Blosum62Score`], no data)
 //! calls what the search called before `-matrix`: `blosum62_score` and the paths built on
-//! BLOSUM62's scores (the lookup tables of TBXLUT and PAIRLUT, the unit path of PAIRPAR, the
-//! table walks of TBXUNGAP, the AVX2 reevaluation). The other matrices' instance
-//! ([`MatrixScore`]) reads a table of the matrix and runs the reference frame loop, whose two-hit
-//! extension takes the table walks of TBXUNGAP with a byte table of the matrix
-//! ([`TbxScore::table_two_hit`]).
+//! BLOSUM62's scores (the batch table of TBXLUT, the table walks of TBXUNGAP with the sentinel
+//! walks of TBXUNGAPSENT, the AVX2 reevaluation). The other matrices' instance ([`MatrixScore`])
+//! reads a table of the matrix: PAIRLUT builds its group tables with the matrix's scores and the
+//! units of PAIRPAR run wherever `decide` takes the batch, the reference frame loop builds NCBI's
+//! table with them (`build_ncbi_lookup_for_profile`), and both two-hit extensions take the table
+//! walks of TBXUNGAP with a byte table of the matrix ([`TbxScore::table_two_hit`]).
 
 use super::extension::{matrix_walk_table, two_hit_in, MatrixWalkTable, TwoHit};
 use crate::config::ScoringMatrix;

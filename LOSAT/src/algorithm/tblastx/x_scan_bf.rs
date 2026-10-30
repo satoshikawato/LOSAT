@@ -200,15 +200,12 @@ pub(crate) fn x_scan_subject_bf(
 /// `i & 31` (`x_scan_subject_compact`).
 pub(crate) fn x_compact(lookup: &mut BlastAaLookupTable) -> Vec<u32> {
     let rank = x_rank(&lookup.pv);
-    let cells: Vec<BackboneCell> = lookup
-        .backbone
-        .iter()
-        .filter(|cell| cell.num_used > 0)
-        .copied()
-        .collect();
+    let kept = x_rank_end(&lookup.pv, &rank);
+    let mut cells: Vec<BackboneCell> = Vec::with_capacity(kept);
+    cells.extend(lookup.backbone.iter().filter(|cell| cell.num_used > 0));
     assert_eq!(
         cells.len(),
-        x_rank_end(&lookup.pv, &rank),
+        kept,
         "a presence bit for every cell with entries"
     );
     lookup.backbone = cells;

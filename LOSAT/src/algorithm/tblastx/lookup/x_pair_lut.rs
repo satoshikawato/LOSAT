@@ -151,6 +151,34 @@ pub(crate) struct XPairLutGroup {
     pub rank: Vec<u32>,
 }
 
+/// No NCBI counterpart: a block of a group's build from which glibc maps it (`x_group_capacity`).
+const X_GROUP_MAPPED_FROM: usize = 64 << 10;
+
+/// No NCBI counterpart: the capacity of a block of `elements` of a group's build. Batches are built
+/// and searched on the pool's threads at several threads, and blocks of 100 KiB to 1.5 MiB that
+/// stay in those threads' arenas between the kept tables hold their heaps' high water: 50 cDNAs x
+/// 1 Mb and 40 x 40 Begomovirus genomes at 8 threads, the arenas 17-23 MiB, with one arena (the
+/// same live data) a max RSS below that of the reference loop. So a block of at least
+/// `X_GROUP_MAPPED_FROM` bytes takes the capacity that glibc maps whatever its size and whose free
+/// leaves its mmap threshold as it is (`x_unthresholded_capacity`, as TBLASTN's tables,
+/// x_lut_direct.rs); only what is written is touched.
+fn x_group_capacity<T>(elements: usize) -> usize {
+    let size = std::mem::size_of::<T>();
+    if elements.saturating_mul(size) >= X_GROUP_MAPPED_FROM {
+        crate::utils::x_mapped::x_unthresholded_capacity(elements, size)
+    } else {
+        elements
+    }
+}
+
+/// No NCBI counterpart: `vec![0; elements]` with `x_group_capacity`; `calloc` touches none of a
+/// mapped block.
+fn x_group_zeroed(elements: usize) -> Vec<u32> {
+    let mut zeroed = vec![0u32; x_group_capacity::<u32>(elements)];
+    zeroed.truncate(elements);
+    zeroed
+}
+
 impl XPairLutQuery {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
     // ```c
@@ -372,7 +400,7 @@ impl XPairLutQuery {
             // Count pass: count[w] = number of appends the reference makes to cell w from the
             // source words of this group. The bounds of the entries are taken on the way: every
             // offset of a source word with a target is an entry of the table.
-            let mut counts: Vec<u32> = vec![0; backbone_size];
+            let mut counts: Vec<u32> = x_group_zeroed(backbone_size);
             let mut q_min = u32::MAX;
             let mut q_max = 0u32;
             for idx in 0..backbone_size {
@@ -413,10 +441,12 @@ impl XPairLutQuery {
             let used = counts.iter().filter(|&&count| count > 0).count();
             let compact =
                 crate::algorithm::tblastx::x_scan_bf::x_scan_bf_takes(used, backbone_size);
+            let backbone_len = if compact { used } else { backbone_size };
             let mut backbone: Vec<BackboneCell> =
-                vec![BackboneCell::default(); if compact { used } else { backbone_size }];
+                Vec::with_capacity(x_group_capacity::<BackboneCell>(backbone_len));
+            backbone.resize(backbone_len, BackboneCell::default());
             let mut slot: Vec<u32> = if compact {
-                vec![0; backbone_size]
+                x_group_zeroed(backbone_size)
             } else {
                 Vec::new()
             };
@@ -432,8 +462,9 @@ impl XPairLutQuery {
                     longest_chain = count as i32;
                 }
             }
-            let mut overflow: Vec<i32> = vec![0; overflow_size];
-            let mut base: Vec<u32> = vec![0; backbone_size];
+            let mut overflow: Vec<i32> = Vec::with_capacity(x_group_capacity::<i32>(overflow_size));
+            overflow.resize(overflow_size, 0);
+            let mut base: Vec<u32> = x_group_zeroed(backbone_size);
             let mut overflow_cursor = 0usize;
             let mut kept = 0usize;
             for (idx, &count) in counts.iter().enumerate() {
@@ -457,7 +488,7 @@ impl XPairLutQuery {
             }
 
             // Fill pass: the reference's appends of this group, in the reference's order.
-            let mut fill: Vec<u32> = vec![0; backbone_size];
+            let mut fill: Vec<u32> = x_group_zeroed(backbone_size);
             for idx in 0..backbone_size {
                 let Some(offset_list) = exact_backbone[idx].as_deref() else {
                     continue;

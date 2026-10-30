@@ -91,7 +91,17 @@ pub struct Hit {
     // ```
     pub identity: f64,
     pub length: usize,
-    pub mismatch: usize,
+    // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:476-480
+    // ```c++
+    // inline void CBlastTabularInfo::x_PrintMismatches(void)
+    // {
+    //     int num_mismatches = m_AlignLength - m_NumIdent - m_NumGaps;
+    //     m_Ostream << num_mismatches;
+    // }
+    // ```
+    // Fewer than none when a stored gap character of the subject (`-`) faces a gap of the
+    // query: the letters are equal, an identity, and the column is a gap.
+    pub mismatch: i64,
     pub gapopen: usize,
     pub q_start: usize,
     pub q_end: usize,
@@ -226,8 +236,7 @@ impl Hit {
     // ```
     #[inline]
     pub fn gap_letters(&self) -> usize {
-        self.length
-            .saturating_sub(self.num_ident.saturating_add(self.mismatch))
+        usize::try_from(self.length as i64 - self.num_ident as i64 - self.mismatch).unwrap_or(0)
     }
 }
 
@@ -1062,7 +1071,7 @@ mod shared_output_sort_tests {
         Hit {
             identity: marker as f64,
             length: 100 + marker,
-            mismatch: marker + 1,
+            mismatch: (marker + 1) as i64,
             gapopen: marker + 2,
             q_start: 11,
             q_end: 20,

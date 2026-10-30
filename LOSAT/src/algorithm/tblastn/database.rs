@@ -146,11 +146,48 @@ impl TblastnDatabase {
         })
     }
 
+    /// The taxonomy of the tabular fields (`staxid`, `staxids`) of the reported sequences, by
+    /// rank, for the sequences of `hitlists` with HSPs (their subject index is the rank,
+    /// `reported_subjects`; `algorithm::common::tabular::tabular_taxonomy`); the others are left
+    /// empty. A header that does not decode is refused before the report.
+    pub(super) fn tabular_taxonomy(
+        &self,
+        reported: &ReportedSubjects,
+        hitlists: &[KappaResultHitList],
+    ) -> Result<Vec<crate::report::tabular::TabularTaxonomy>> {
+        crate::algorithm::common::tabular::tabular_taxonomy(
+            &self.db,
+            &reported.ordinals,
+            &reported.parsed,
+            hitlists
+                .iter()
+                .flat_map(KappaResultHitList::lists)
+                .filter(|list| !list.hsps.hsps.is_empty())
+                .map(|list| list.oid as usize),
+            PROGRAM,
+        )
+    }
+
     /// Whether `taxdb.bti` is on the search path, asked once for the run
     /// (`shared::TaxdbRun::found`): the batches' prefetch reads the taxonomy database only then
     /// (`prefetch_messages`).
     pub(super) fn taxdb_found(&self) -> bool {
         self.taxdb.found(&self.db)
+    }
+
+    /// The names of the taxonomy database that the rows of `spec` look up for the subjects
+    /// `taxonomy` (`shared::tabular_names`).
+    pub(super) fn tabular_names(
+        &self,
+        spec: &crate::report::tabular::TabularSpec,
+        taxonomy: &[crate::report::tabular::TabularTaxonomy],
+    ) -> Result<Option<crate::report::tabular::TabularNames>> {
+        shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
+    }
+
+    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
+    pub(super) fn open_for_tabular_rows(&self) -> Result<()> {
+        self.taxdb.open_for_rows(&self.db, PROGRAM)
     }
 
     /// NCBI's messages about the taxonomy database when the query batch whose final hit lists

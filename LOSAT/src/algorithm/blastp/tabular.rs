@@ -593,9 +593,7 @@ fn tabular_hsp<'r>(
         score: hsp.raw_score,
         length: hsp.length,
         gap_opens: hsp.gapopen,
-        gaps: hsp
-            .length
-            .saturating_sub(hsp.num_ident.saturating_add(hsp.mismatch)),
+        gaps: usize::try_from(hsp.length as i64 - hsp.num_ident as i64 - hsp.mismatch).unwrap_or(0),
         num_ident: hsp.num_ident,
         q_frame: 1,
         s_frame: 1,

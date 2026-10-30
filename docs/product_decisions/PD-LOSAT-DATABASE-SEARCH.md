@@ -133,14 +133,25 @@ in one `-db`, index files cut short, NCBI's threshold of open files and its warn
 ## What `losat makeblastdb` of stage DB-2 writes and rejects
 
 `losat makeblastdb -in FASTA[ FASTA...] -dbtype prot|nucl -out NAME [-title T] [-max_file_sz S]
-[-blastdb_version 4|5] [-logfile F]` writes the files of `makeblastdb` (format version 5 unless
-`-blastdb_version 4` is given) without `-parse_seqids`: sequence files
+[-blastdb_version 4|5] [-logfile F] [-parse_seqids] [-hash_index] [-taxid N | -taxid_map F]`
+writes the files of `makeblastdb` (format version 5 unless `-blastdb_version 4` is given): sequence files
 (`.psq`, `.nsq`) and header files (`.phr`, `.nhr`) byte for byte, the index file (`.pin`,
 `.nin`) but for the creation date, for several volumes the alias file (`.pal`, `.nal`)
 but for its date line, and the JSON metadata file (`.pjs`, `.njs`) but for the date
 it records. Version 5 adds, once for the whole database, the two LMDB files (`.pdb` with
 the volume tables and `.ptf` with the tax ids; `.ndb`, `.ntf`) and the two tax-id lookup
-files (`.pot`, `.pto`; `.not`, `.nto`), page for page. Several input files can be named in
+files (`.pot`, `.pto`; `.not`, `.nto`), page for page. With `-parse_seqids` the header files hold
+the Seq-ids of the definition lines as makeblastdb parses them (its accession guide included),
+duplicate ids stop the build with makeblastdb's message, and the id indexes are written: of
+version 4 the string and GI indexes (`.psi`/`.psd`, `.pni`/`.pnd`), of both versions the OID-to-GI
+file (`.pog`), of version 5 the accession keys in the LMDB file (`acc2oid` of `.pdb`) and the
+OID-to-ids file (`.pos`). `-hash_index` adds the sequence hash index (`.phi`/`.phd`, `.pog`),
+`-taxid` and `-taxid_map` (which needs `-parse_seqids`) the tax ids of the definition lines and of
+the version 5 tax-id files. As in makeblastdb, `-taxid_map -` reads the map from the standard
+input (before the FASTA input, so with `-in -` the map takes all of it), a map file whose reading
+fails (a directory) keeps the lines read before the failure without a message, and a plain FASTA
+id with a control byte or a byte from 0x80 up is not a valid local id: the definition line keeps
+the id up to that byte. Several input files can be named in
 `-in` (as makeblastdb splits the value), and `-logfile` redirects the log and the messages
 to a file (appended); as in makeblastdb, `-logfile -` keeps them on the standard streams,
 and `-logfile /dev/null` and `-logfile ""` discard the messages (the empty name then ends
@@ -166,7 +177,8 @@ the same bytes as on Linux.
 
 | Not written or rejected | Why |
 | --- | --- |
-| `-parse_seqids`, `-hash_index`, `-randomize`, `-mask_data`, `-mask_id`, `-mask_desc`, `-gi_mask`, `-gi_mask_name`, `-taxid`, `-taxid_map`, `-oid_masks`, `-metadata_output_prefix` | parsed Seq-ids, `-hash_index` and taxonomy are the next step (P4), masks and the others are not implemented; each is an explicit error that names the option |
+| `-randomize`, `-mask_data`, `-mask_id`, `-mask_desc`, `-gi_mask`, `-gi_mask_name`, `-oid_masks`, `-metadata_output_prefix` | not implemented; each is an explicit error that names the option |
+| `[BLAST] MAX_SEQID_LENGTH` (registry or `NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH`) with `-parse_seqids`, when makeblastdb uses the value (the first layer that has the entry gives a number `NStr::StringToUInt` converts, not 0; an empty, unconvertible or 0 value is ignored by makeblastdb and accepted by LOSAT); `[BLAST] LONG_SEQID` | they change which FASTA ids makeblastdb parses; LOSAT keeps NCBI's defaults and refuses to run |
 | `-input_type` other than `fasta`, compressed input (`.gz`, `.bz2`, `.zst`) | uncompressed FASTA only; `-in -` reads the standard input |
 | NCBI settings that change makeblastdb's messages or stored titles (`DIAG_*`, `NCBI_CONFIG_*`, registry entries outside the accepted list, a non-empty `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS`) | as for the search programs: LOSAT refuses to run instead of giving a different result |
 | Replacing a database of the same name whose alias file the reader of stage DB-1 rejects | the files to remove are found by resolving the alias file; LOSAT stops before it removes anything |
@@ -219,8 +231,9 @@ Errors that makeblastdb does not detect, or detects elsewhere:
   LOSAT stops when it creates the first file, after the first lines of the log.
 - `-max_file_sz` that is no size or is 4 GiB or more: LOSAT checks it before it removes an
   existing database or writes the log; makeblastdb after. The exit status is the same.
-- Usage errors (unknown option, missing `-dbtype`) end with exit status 2 and the text of
-  LOSAT's option parser, as in every LOSAT subcommand; makeblastdb uses 1.
+- Usage errors (unknown option, missing `-dbtype`, `-taxid -1`, `-taxid_map` without
+  `-parse_seqids` or with `-taxid`) end with exit status 2 and the text of LOSAT's option
+  parser, as in every LOSAT subcommand; makeblastdb uses 1.
 - Errors of makeblastdb's general handler carry the source path of its binary
   (`Error: NCBI C++ Exception: ...`); LOSAT prints `Error:` and the sentence.
 - With more volumes than the process may hold open files, makeblastdb writes the database
@@ -229,6 +242,29 @@ Errors that makeblastdb does not detect, or detects elsewhere:
 - An allocation failure outside the reading of the input ends LOSAT abnormally; makeblastdb
   prints "BLAST ran out of memory" (exit status 4), as LOSAT does when a length written in
   the input does not fit.
+
+Inputs on which makeblastdb 2.17.0 crashes, refused with an error (exit status 1):
+
+- Version 5 with `-parse_seqids`: a sequence whose ids are all GIs between two sequences with
+  other ids (makeblastdb aborts when it writes the `.pos` file); LOSAT names the sequence.
+  GI-only sequences before the first sequence with other ids or after the last one are written
+  as makeblastdb writes them (its `.pos` file then lists the ids from OID 0 on, a deterministic
+  NCBI result).
+- Version 5 with `-parse_seqids`: a duplicate id inside the first sequence. makeblastdb prints
+  the duplicate message and then aborts in its tax-id writer; LOSAT prints the same message.
+- Version 5 with `-parse_seqids`: an accession key longer than 511 bytes (a general id with a
+  long database name), which LMDB refuses (`MDB_BAD_VALSIZE`); makeblastdb aborts after its
+  `.pos` file.
+- Version 4 with `-parse_seqids`: a string-index key longer than 256 bytes (makeblastdb stops
+  with "buffer overflow detected").
+- A `-taxid_map` line of white space only (makeblastdb crashes).
+
+Reproduced although it looks wrong (deterministic NCBI behaviour): with `-hash_index`, no
+`-parse_seqids` and several volumes, the first sequence of a later volume is indexed under the
+ordinal id it would have had in the earlier volume, so makeblastdb and LOSAT both stop with
+"Duplicate seq_ids are found: GNL|BL_ORD_ID|n" when that volume holds more than n sequences.
+`-taxid_map` lines end at a line feed on every platform (makeblastdb on macOS also ends them at a
+carriage return).
 
 Undefined behaviour of NCBI that is not reproduced:
 

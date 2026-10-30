@@ -291,7 +291,14 @@ impl TblastnArgs {
         };
         let out_file = open_out_file(&args)?;
         let pairwise = format == Some(app::ReportFormat::Pairwise);
-        let outfmt = choice.normalized();
+        // The format as the reports read it: the number and the custom fields, or the value as
+        // given when it has a delimiter, which `normalized` drops and the custom tabular report
+        // reads (`tabular::tabular_spec`, which parses it again as NCBI does).
+        let outfmt = if choice.delimiter.is_empty() {
+            choice.normalized()
+        } else {
+            args.outfmt.clone()
+        };
         let mut stream = cli_report_stream(out_file);
         let result = {
             let mut outputs =
@@ -405,7 +412,7 @@ fn cli_report_stream(
 /// the queries and the search.
 #[allow(clippy::too_many_arguments)]
 fn search_cli(
-    args: TblastnArgs,
+    mut args: TblastnArgs,
     query_file: std::fs::File,
     subjects: &[FastaRecord],
     subject_placements: &crate::blastinput::seq_range::Placements,
@@ -433,6 +440,28 @@ fn search_cli(
         Some(name) => Some(super::database::TblastnDatabase::open(name, &settings)?),
         None => None,
     };
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
+    // ```c++
+    // void CBlastTabularInfo::x_CheckTaxDB()
+    // {
+    //    	if( x_IsFieldRequested(eSubjectSciNames) ||
+    //     ...
+    //    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
+    // ```
+    // A tabular field list that shows a name of the taxonomy database asks whether `taxdb.bti`
+    // is on the search path: its formatters warn without it (the plural names), and LOSAT
+    // refuses a name of a subject with a taxid with it (`tabular`), as BLASTN.
+    if outputs
+        .formats
+        .iter()
+        .filter_map(|format| super::tabular::tabular_spec(format.outfmt))
+        .any(|spec| spec.needs().taxonomy_names)
+    {
+        args.tabular_taxdb = Some(match database.as_ref() {
+            Some(database) => database.taxdb_found(),
+            None => crate::algorithm::common::tabular::subject_taxdb_found(&settings, "TBLASTN")?,
+        });
+    }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
     if let (Some(database), Some(serial)) = (
@@ -685,6 +714,13 @@ fn run_local_formats(
             app::formatting_handler_check(&choice, app::Program::Tblastn)?;
             app::xinclude_check(&choice)?;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2887
+        // ```c++
+        //     s_ValidateCustomDelim(m_CustomOutputFormatSpec,m_CustomDelim);
+        // ```
+        // The formatting handler checks the custom delimiter of each format (the command line's
+        // in `check_options`).
+        app::formatting_handler_check(&choice, app::Program::Tblastn)?;
         outfmts.push(choice.number);
     }
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
@@ -741,6 +777,7 @@ fn write_first_batch_prologs(
     num_subjects: usize,
     subject_letters: SubjectLetters<'_>,
     database: Option<&crate::report::pairwise::PairwiseDatabase>,
+    taxdb_found: bool,
 ) -> Result<()> {
     let name = subject_path.map_or_else(String::new, |path| {
         format!("User specified sequence set (Input: {})", path.display())
@@ -765,6 +802,17 @@ fn write_first_batch_prologs(
             // The XML2 and JSON documents start with their prolog too.
             let mut writer = format.sink.open()?;
             writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+            writer.flush()?;
+        } else if let Some(spec) = super::tabular::tabular_spec(format.outfmt) {
+            // Outfmt 20's line of the field names and its formatter's warning (nothing for the
+            // other tabular kinds).
+            let mut writer = format.sink.open()?;
+            super::tabular::write_tabular_prolog(
+                &spec,
+                taxdb_found,
+                &mut writer,
+                &mut *outputs.diagnostics,
+            )?;
             writer.flush()?;
         }
     }
@@ -906,6 +954,7 @@ fn search(
             subjects.len(),
             subject_letters,
             pairwise_database.as_ref(),
+            args.tabular_taxdb.unwrap_or(false),
         )?;
     } else {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1426
@@ -1331,14 +1380,49 @@ fn search(
         // and prefetches nothing (`failed`, a header file or the sequence file that NCBI cannot
         // read during the batch's search).
         if let (Some(reported), Some(database)) = (&reported, database) {
+            // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-725
+            // ```c++
+            // s_IsPrefetchFormat(blast::CFormattingArgs::EOutputFormat format_type)
+            // {
+            // 	if ((format_type == CFormattingArgs::eAsnText) ||
+            // 	    (format_type == CFormattingArgs::eAsnBinary) ||
+            // 	    (format_type == CFormattingArgs::eArchiveFormat)||
+            // 	    (format_type == CFormattingArgs::eJsonSeqalign)) {
+            // 		return false;
+            // 	}
+            // 	return true;
+            // ```
+            // Outfmt 10 and 20 prefetch as the tabular 6 and 7 do (a name of the taxonomy
+            // database that the prefetch would look up is LOSAT's refusal, `tabular`).
             if outputs.formats.first().is_some_and(|format| {
                 crate::algorithm::common::database::prefetches_subjects(Some(
-                    super::stage_e_report::format_number(format.outfmt),
+                    match super::stage_e_report::format_number(format.outfmt) {
+                        10 | 20 => 6,
+                        number => number,
+                    },
                 ))
             }) && database.taxdb_found()
             {
+                // A custom tabular report with a plural name looks every taxid of its rows up,
+                // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
+                // the taxonomy database before a later batch's prefetch
+                // (`TaxdbRun::open_for_rows`).
+                let plural_names = outputs
+                    .formats
+                    .first()
+                    .and_then(|format| super::tabular::tabular_spec(format.outfmt))
+                    .is_some_and(|spec| spec.checks_taxdb());
                 for span in &batch_spans {
-                    let messages = database.prefetch_messages(reported, &results[span.clone()])?;
+                    let hitlists = &results[span.clone()];
+                    let messages = database.prefetch_messages(reported, hitlists)?;
+                    if plural_names
+                        && hitlists
+                            .iter()
+                            .flat_map(super::stage_d_results::KappaResultHitList::lists)
+                            .any(|list| !list.hsps.hsps.is_empty())
+                    {
+                        database.open_for_tabular_rows()?;
+                    }
                     if messages.is_empty() {
                         continue;
                     }
@@ -1359,6 +1443,36 @@ fn search(
                 database.read_taxids(reported, &results)?
             }
             _ => Default::default(),
+        };
+        // The custom tabular reports (`tabular`): whether `taxdb.bti` was found, the taxids of the
+        // reported database sequences where a field shows them and the taxonomy database's names
+        // that the rows look up (read here, before any byte, so that their refusals come before
+        // it), and the `-query_loc` range's length (`qlen`, `qcovs`).
+        let tabular_specs: Vec<_> = outputs
+            .formats
+            .iter()
+            .filter_map(|format| super::tabular::tabular_spec(format.outfmt))
+            .collect();
+        let taxonomy = match (&reported, database) {
+            (Some(reported), Some(database))
+                if tabular_specs.iter().any(|spec| spec.needs().taxonomy) =>
+            {
+                database.tabular_taxonomy(reported, &results)?
+            }
+            _ => Vec::new(),
+        };
+        let names = match (tabular_specs.first(), database) {
+            (Some(spec), Some(database)) => database.tabular_names(spec, &taxonomy)?,
+            _ => None,
+        };
+        let tabular_inputs = super::tabular::TabularInputs {
+            taxdb_found: args.tabular_taxdb.unwrap_or(false),
+            taxonomy,
+            names,
+            range_length: resolved
+                .query_range
+                .as_ref()
+                .map(crate::blastinput::seq_range::SequenceRange::length),
         };
         let (report_records, report_letters, shown) = match (&reported, database) {
             (Some(reported), Some(database)) => (
@@ -1435,6 +1549,7 @@ fn search(
             xml_taxa,
             args.out.as_deref(),
             archive_render.as_ref(),
+            &tabular_inputs,
         )?;
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
         // The failed batch's reading messages, then its error.
@@ -1453,9 +1568,9 @@ fn search(
 }
 
 /// What the reports `formats` show of the reported database sequences, for LOSAT's refusals of
-/// those with parsed Seq-ids (`common::database::ParsedShown`): the tabular formats (6, 7),
-/// outfmt 0, and the formats that join the alignments of following hits whose Seq-align ids
-/// match (0, 5, 13 to 16).
+/// those with parsed Seq-ids (`common::database::ParsedShown`): the tabular formats (6, 7, 10,
+/// 20), outfmt 0, and the formats that join the alignments of following hits whose Seq-align
+/// ids match (0, 5, 13 to 16).
 fn parsed_shown(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
 ) -> crate::algorithm::common::database::ParsedShown {
@@ -1465,7 +1580,9 @@ fn parsed_shown(
         .collect();
     let pairwise = numbers.contains(&0);
     crate::algorithm::common::database::ParsedShown {
-        tabular: numbers.iter().any(|&number| number == 6 || number == 7),
+        tabular: numbers
+            .iter()
+            .any(|&number| matches!(number, 6 | 7 | 10 | 20)),
         pairwise,
         joined: pairwise
             || formats

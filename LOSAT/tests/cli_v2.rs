@@ -174,15 +174,71 @@ fn makedb_takes_makeblastdb_s_option_names() {
     assert!(makedb(&["-in", "x.faa", "-dbtype", "protein"]).is_err());
     assert!(makedb(&["-in", "x.faa", "-dbtype", "prot", "-blastdb_version", "3"]).is_err());
 
+    assert!(!defaults.hash_index);
+    assert_eq!(defaults.taxid, None);
+
+    // `-hash_index` and `-taxid` (makeblastdb.cpp:249-251, 315-318: a flag, and an integer
+    // of at least 0 that excludes `-taxid_map`).
+    let given = args(makedb(&["-dbtype", "prot", "-hash_index", "-taxid", "9606"]).unwrap());
+    assert!(given.hash_index);
+    assert_eq!(given.taxid, Some(9606));
+    assert!(makedb(&["-dbtype", "prot", "-taxid", "-1"]).is_err());
+    assert!(makedb(&["-dbtype", "prot", "-taxid", "abc"]).is_err());
+
+    // `-parse_seqids` is a flag; `-taxid_map` takes a file and requires `-parse_seqids`, and
+    // `-taxid` excludes it (makeblastdb.cpp:246-247, 322-329). The parser's errors end with
+    // exit status 2 (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES; makeblastdb prints its usage, 1).
+    assert!(!defaults.parse_seqids);
+    assert_eq!(defaults.taxid_map, None);
+    let given = args(
+        makedb(&[
+            "-dbtype",
+            "prot",
+            "-parse_seqids",
+            "-taxid_map",
+            "map.txt",
+            "-hash_index",
+        ])
+        .unwrap(),
+    );
+    assert!(given.parse_seqids && given.hash_index);
+    assert_eq!(given.taxid_map.as_deref(), Some("map.txt"));
+    let given = args(makedb(&["-dbtype", "prot", "-parse_seqids", "-taxid", "9606"]).unwrap());
+    assert!(given.parse_seqids);
+    assert_eq!(given.taxid, Some(9606));
+    for words in [
+        &["-dbtype", "prot", "-taxid_map", "map.txt"][..],
+        &[
+            "-dbtype",
+            "prot",
+            "-parse_seqids",
+            "-taxid_map",
+            "map.txt",
+            "-taxid",
+            "9606",
+        ],
+        &[
+            "-dbtype",
+            "prot",
+            "-taxid",
+            "1",
+            "-taxid_map",
+            "map.txt",
+            "-parse_seqids",
+        ],
+        &["-dbtype", "prot", "-parse_seqids", "-taxid_map"],
+    ] {
+        let err = makedb(words).unwrap_err();
+        assert_eq!(err.exit_code(), 2, "{words:?}: {err}");
+        assert!(
+            !err.to_string().contains("not supported"),
+            "{words:?}: {err}"
+        );
+    }
+
     // The options of makeblastdb that LOSAT does not implement are named (`-h` and
     // `-version` are served: `makeblastdb_is_a_name_of_makedb`).
-    for option in [
-        "-parse_seqids",
-        "-hash_index",
-        "-mask_data",
-        "-taxid",
-        "-taxid_map",
-    ] {
+    for option in ["-mask_data", "-gi_mask", "-randomize", "-oid_masks"] {
         let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
         assert!(
             err.to_string().contains(&format!(
@@ -978,17 +1034,12 @@ enum Outfmt {
 }
 
 const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
-const CUSTOM: &[&str] = &["blastn", "blastp", "blastx"];
-/// The programs that write field lists, delimiters and outfmt 10 and 20 with the shared tabular
-/// writer (line CLI C2: BLASTN in PR 1, BLASTP and BLASTX in PR 3).
-const SHARED: &[&str] = &["blastn", "blastp", "blastx"];
-const NOT_SHARED: &[&str] = &["tblastn", "tblastx"];
-const NO_CUSTOM: &[&str] = &["tblastn", "tblastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
+/// The programs that write every field, a delimiter and outfmt 10 and 20 with the shared tabular
+/// writer: all of them (line CLI C2: BLASTN in PR 1, TBLASTN and TBLASTX in PR 2, BLASTP and
+/// BLASTX in PR 3).
+const SHARED: &[&str] = ALL;
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
-const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
-    "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {P}",
-);
 const OUT_OF_RANGE: Outfmt = Outfmt::Ncbi(255, "Error: Formatting choice is out of range\n");
 const INVALID_DELIMITER: Outfmt = Outfmt::Ncbi(
     1,
@@ -1016,17 +1067,11 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "0 delim=,", None, Writes(Pairwise)),
         (ALL, "6 delim=", None, Writes(Tabular)),
         (ALL, "7 delim= ", None, Writes(TabularWithComments)),
-        // Custom fields (BLASTN, BLASTP and BLASTX write every field and a delimiter with the
-        // shared tabular writer, line CLI C2) and delimiters.
-        (CUSTOM, "6 std", None, Writes(Tabular)),
-        (CUSTOM, "07 std", None, Writes(TabularWithComments)),
-        (CUSTOM, "6 qseqid sseqid pident length", None, Writes(Tabular)),
-        (NO_CUSTOM, "6 std", None, CUSTOM_SPEC),
-        (NO_CUSTOM, "6 qseqid", None, CUSTOM_SPEC),
-        (NO_CUSTOM, "7 qaccver", None, CUSTOM_SPEC),
-        (NO_CUSTOM, "7  qaccver", None, CUSTOM_SPEC),
-        (NO_CUSTOM, "6 delim=,", None, CUSTOM_SPEC),
-        (NO_CUSTOM, "6 delimiter=;", None, CUSTOM_SPEC),
+        // Custom fields (every program writes every field and a delimiter with the shared
+        // tabular writer, line CLI C2) and delimiters.
+        (SHARED, "6 std", None, Writes(Tabular)),
+        (SHARED, "07 std", None, Writes(TabularWithComments)),
+        (SHARED, "6 qseqid sseqid pident length", None, Writes(Tabular)),
         (SHARED, "7  qaccver", None, Writes(TabularWithComments)),
         (SHARED, "6 delim=,", None, Writes(Tabular)),
         (SHARED, "6 delimiter=;", None, Writes(Tabular)),
@@ -1067,11 +1112,9 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "2", None, UNSUPPORTED),
         (ALL, "3", None, UNSUPPORTED),
         (ALL, "4", None, UNSUPPORTED),
-        (NOT_SHARED, "10", None, UNSUPPORTED),
         (ALL, "18", None, UNSUPPORTED),
-        (NOT_SHARED, "20", None, UNSUPPORTED),
-        // Line CLI C2: BLASTN (PR 1), BLASTP and BLASTX (PR 3) write 10 and 20 with the shared
-        // tabular writer.
+        // Line CLI C2: BLASTN (PR 1), TBLASTN and TBLASTX (PR 2), BLASTP and BLASTX (PR 3) write 10
+        // and 20 with the shared tabular writer.
         (SHARED, "10", None, Writes(CommaSeparatedValues)),
         (SHARED, "10 delim=; qseqid sseqid", None, Writes(CommaSeparatedValues)),
         (SHARED, "20", None, Writes(CommaSeparatedValuesWithHeader)),
@@ -1773,13 +1816,12 @@ fn makedb_is_not_a_command_and_makeblastdb_checks_apply() {
         ("x.faa", Some("db"))
     );
     // The checks that name the command apply.
-    let error = makedb(&["-parse_seqids"]).unwrap_err().to_string();
+    let error = makedb(&["-mask_data"]).unwrap_err().to_string();
     assert!(
-        error.contains(
-            "the NCBI BLAST+ option -parse_seqids is not supported by LOSAT's makeblastdb"
-        ),
+        error.contains("the NCBI BLAST+ option -mask_data is not supported by LOSAT's makeblastdb"),
         "{error}"
     );
+    assert!(makedb(&["-parse_seqids"]).is_ok());
     assert!(makedb(&["-in", "x.faa", "--"]).is_ok());
     assert!(makedb(&["--", "-in", "x.faa"]).is_err());
     assert!(makedb(&["-evalue", "1"]).is_err());

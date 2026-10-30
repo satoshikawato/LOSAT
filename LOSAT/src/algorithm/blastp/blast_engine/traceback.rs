@@ -57,7 +57,9 @@ pub(super) struct OrdinaryTraceback<'a> {
     pub(super) x_drop_final: i32,
     /// `sbp->kbp_gap`, unscaled (no composition adjustment).
     pub(super) karlin: &'a KarlinParams,
-    pub(super) gumbel: &'a BlastGumbelBlk,
+    /// None with `-searchsp`: the E-values then come from the context's search space.
+    pub(super) gumbel: Option<&'a BlastGumbelBlk>,
+    pub(super) search_spaces: &'a [crate::stats::search_space::SearchSpace],
     pub(super) expect_value: f64,
     pub(super) hitlist_size: usize,
 }
@@ -381,14 +383,26 @@ impl OrdinaryTraceback<'_> {
         ctx: &QueryContext,
         subject_length: usize,
     ) {
-        for hsp in &mut hsp_list.hsps {
-            hsp.e_value = blast_spouge_stoe(
-                hsp.raw_score,
-                self.karlin,
-                self.gumbel,
-                ctx.aa_len as i32,
-                subject_length as i32,
-            );
+        match self.gumbel {
+            Some(gumbel) => {
+                for hsp in &mut hsp_list.hsps {
+                    hsp.e_value = blast_spouge_stoe(
+                        hsp.raw_score,
+                        self.karlin,
+                        gumbel,
+                        ctx.aa_len as i32,
+                        subject_length as i32,
+                    );
+                }
+            }
+            None => {
+                let search_space =
+                    self.search_spaces[hsp_list.query_index as usize].effective_space;
+                for hsp in &mut hsp_list.hsps {
+                    hsp.e_value = search_space
+                        * (-self.karlin.lambda * hsp.raw_score as f64 + self.karlin.k.ln()).exp();
+                }
+            }
         }
         reap_hsplist_by_evalue(hsp_list, self.expect_value);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1926-1928

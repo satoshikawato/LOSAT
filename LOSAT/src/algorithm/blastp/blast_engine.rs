@@ -9569,7 +9569,8 @@ fn run_resolved_in_pool(
             gap_extend: args.scoring.gap_extend,
             x_drop_final: x_drop_gapped_final,
             karlin: &gapped_params,
-            gumbel: &gapped_gumbel,
+            gumbel: gapped_gumbel.as_ref(),
+            search_spaces: &search_spaces,
             expect_value: args.evalue,
             hitlist_size: args.traceback_hitlist_size(),
         };

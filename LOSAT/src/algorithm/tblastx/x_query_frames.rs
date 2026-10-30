@@ -316,13 +316,15 @@ pub(super) fn mask_lcase(
         let letters = record.seq();
         let runs = lowercase_runs(letters);
         for frame in frames.iter_mut().filter(|frame| frame.aa_seq.len() >= 3) {
-            let mut masks = dna_to_protein_masks(&runs, letters.len(), frame.frame);
-            masks.extend(
-                frame
-                    .seg_masks
-                    .iter()
-                    .map(|&(start, end)| (start as i32, end as i32 - 1)),
-            );
+            // SEG's intervals first, as `BlastSeqLocAppend(filter_out, lcase_mask_slp)`: the sort
+            // of `BlastSeqLocCombine` compares only the left ends, and a one-letter run on the
+            // first letter of a SEG interval is merged only in this order (the results' masks).
+            let mut masks: Vec<(i32, i32)> = frame
+                .seg_masks
+                .iter()
+                .map(|&(start, end)| (start as i32, end as i32 - 1))
+                .collect();
+            masks.extend(dna_to_protein_masks(&runs, letters.len(), frame.frame));
             let combined = combine_masks(masks);
             frame.seg_masks = combined
                 .iter()

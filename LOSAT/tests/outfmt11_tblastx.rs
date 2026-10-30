@@ -258,6 +258,18 @@ fn cases() -> Vec<Case> {
             subject: "does_not_exist.fa",
             ..case("nosubject", &[], "arch_tbx_q.fna", &[], 1)
         },
+        // `-lcase_masking`: a one-letter run on the first letter of a SEG interval (the order of
+        // the merge, `mask_lcase`).
+        Case {
+            subject: "arch_tbx_lcase_tie_s.fna",
+            ..case(
+                "lcase_tie_sub",
+                &[],
+                "arch_tbx_lcase_tie_q.fna",
+                &["-lcase_masking"],
+                0,
+            )
+        },
         // `-lcase_masking`: the `LCaseMask` parameters, the results' masks, a subject's lower case.
         Case {
             subject: "arch_tbx_lcase_s.fna",

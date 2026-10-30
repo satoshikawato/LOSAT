@@ -340,6 +340,8 @@ fn x_soft_subject_calls(
     if !letters.iter().any(u8::is_ascii_lowercase) {
         return None;
     }
+    // `translated_chunk_scan_ranges` lists the chunks of NCBI's MAX_DBSEQ_LEN.
+    debug_assert_eq!(tblastx_max_dbseq_len_for_run(), MAX_DBSEQ_LEN);
     let negative_first_length = frames
         .iter()
         .find(|frame| frame.frame == -1)
@@ -5203,8 +5205,15 @@ fn search_query_batch<S: TbxScore>(
                     let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
                     // [C] if (scan_range[2] < scan_range[1]) scan_range[2] = scan_range[1];
                     // (aa_ungapped.c:499-500: only a masked subject's first range can be so short.)
+                    // A first range on the last letter of a chunk's frame has no word within the
+                    // frame and its NULLB: NCBI reads the next frame's letter there, and such a
+                    // word, the only one of the chunk, can only set a `last_hit` that the next
+                    // chunk's diagonal offset hides, so it is not scanned.
                     if x_soft.is_some() && scan_range[2] < scan_range[1] {
                         scan_range[2] = scan_range[1];
+                        if scan_range[1] + wordsize > x_scan_letters.len() as i32 {
+                            scan_range[2] = scan_range[1] - 1;
+                        }
                     }
 
                     // [C] while (scan_range[1] <= scan_range[2])

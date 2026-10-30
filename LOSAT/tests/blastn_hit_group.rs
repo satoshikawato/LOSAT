@@ -1,5 +1,5 @@
-//! A subject's HSPs grouped by query (`LOSAT_X_BNHITGROUP`, `src/algorithm/blastn/blast_engine/run.rs`
-//! `PrelimHitCollector::x_add_grouped`) on whole searches.
+//! A subject's HSPs put in the collector's lists per query (`LOSAT_X_BNHITGROUP`,
+//! `src/algorithm/blastn/blast_engine/run.rs` `PrelimHitCollector::x_add_grouped`) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:116-161
 //! ```c
@@ -152,8 +152,8 @@ fn most_queries(report: &[u8]) -> usize {
     per_subject.values().map(|q| q.len()).max().unwrap_or(0)
 }
 
-// The default search groups a subject's HSPs by query; `LOSAT_X_BNHITGROUP=0` makes a list per
-// query of the batch. The reports are equal, and no run prints a line on standard error.
+// The default search visits only the queries of a subject's HSPs; `LOSAT_X_BNHITGROUP=0` makes a
+// list per query of the batch and visits them all. The reports are equal, and no run prints a line on standard error.
 #[test]
 fn the_report_does_not_depend_on_how_a_subjects_hsps_are_grouped() {
     let dir = TestDir::new("report");

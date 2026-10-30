@@ -3999,10 +3999,11 @@ fn x_bnstream() -> bool {
 const X_BNSTREAM_SUBJECTS_PER_THREAD: usize = 64;
 
 /// EXPERIMENT (LOSAT_X_BNHITGROUP, a strict-set switch: on unless it is `0`): a subject's HSPs
-/// grouped by query with a stable sort of the HSPs, instead of a list per query of the batch,
-/// each visited: that cost a 24-byte cell per query for every subject with an HSP, on the thread
-/// that takes the subjects in OID order (reads 1e6 x 16S, 33,000 queries per batch x 28,036
-/// subjects: 53 % of the cycles at 8 threads). The hit lists are the same.
+/// go to lists kept by the collector and only the queries of those HSPs are visited, instead of a
+/// new list per query of the batch, each visited: that cost a 24-byte cell and a visit per query
+/// for every subject with an HSP, on the thread that takes the subjects in OID order (reads 1e6 x
+/// 16S, 33,000 queries per batch x 28,036 subjects: 53 % of the cycles at 8 threads). The hit
+/// lists are the same.
 // No NCBI counterpart: reads the switch once; it does not change any value NCBI computes. NCBI
 // visits every query per subject (hspfilter_collector.c, above); AGENTS.md rule 9 allows less work.
 fn x_bnhitgroup() -> bool {
@@ -4016,6 +4017,10 @@ fn x_bnhitgroup() -> bool {
 struct PrelimHitCollector {
     hit_lists: PrelimHitLists,
     prelim_hitlist_size: usize,
+    /// LOSAT_X_BNHITGROUP: one empty list per query from the first subject with an HSP, and the
+    /// queries of the subject being added.
+    x_slots: Vec<Vec<PrelimHit>>,
+    x_touched: Vec<u32>,
 }
 
 impl PrelimHitCollector {
@@ -4025,6 +4030,8 @@ impl PrelimHitCollector {
         Self {
             hit_lists,
             prelim_hitlist_size,
+            x_slots: Vec::new(),
+            x_touched: Vec::new(),
         }
     }
 
@@ -4053,26 +4060,28 @@ impl PrelimHitCollector {
         }
     }
 
-    /// EXPERIMENT (LOSAT_X_BNHITGROUP): the same lists, made from the subject's HSPs alone. A
-    /// query's hit list does not read another's, so that the queries may come in any order; the
-    /// sort is stable, so that the HSPs of a query keep their order.
-    fn x_add_grouped(&mut self, oid: usize, mut hits: Vec<PrelimHit>) {
-        if !hits.is_sorted_by_key(|hit| hit.query_idx) {
-            hits.sort_by_key(|hit| hit.query_idx);
+    /// EXPERIMENT (LOSAT_X_BNHITGROUP): the same lists, made in the collector's slots: only the
+    /// queries of the subject's HSPs are visited. A query's hit list does not read another's, so
+    /// that the queries may come in the order of their first HSPs; the HSPs of a query keep their
+    /// order. A slot gives its list away, so that the lists grow as those of `add_per_query`.
+    fn x_add_grouped(&mut self, oid: usize, hits: Vec<PrelimHit>) {
+        if self.x_slots.is_empty() {
+            self.x_slots.resize_with(self.hit_lists.len(), Vec::new);
         }
-        while let Some(last) = hits.last() {
-            let query = last.query_idx;
-            let start = hits.partition_point(|hit| hit.query_idx < query);
-            let hsps = if start == 0 {
-                // The hit list keeps this list until the traceback: without the room of the
-                // groups cut off above it.
-                hits.shrink_to_fit();
-                std::mem::take(&mut hits)
-            } else {
-                hits.split_off(start)
-            };
+        let mut touched = std::mem::take(&mut self.x_touched);
+        for hit in hits {
+            let slot = &mut self.x_slots[hit.query_idx as usize];
+            if slot.is_empty() {
+                touched.push(hit.query_idx);
+            }
+            slot.push(hit);
+        }
+        for &query in &touched {
+            let hsps = std::mem::take(&mut self.x_slots[query as usize]);
             self.update(query as usize, oid, hsps);
         }
+        touched.clear();
+        self.x_touched = touched;
     }
 
     fn update(&mut self, query: usize, oid: usize, hsps: Vec<PrelimHit>) {

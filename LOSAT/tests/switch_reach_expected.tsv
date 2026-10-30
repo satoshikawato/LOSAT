@@ -7,7 +7,7 @@ LOSAT_X_BNDBCUT	blastn	conditional	required	required	-db only, 2+ threads; DB be
 LOSAT_X_BNDBSTREAM	blastn	conditional	required	required	-db only, 2+ threads; memory switch (little change for few long sequences)
 LOSAT_X_BNDCONE	blastn	conditional	required	gap	-task dc-megablast (or megablast with template options) where a chunk in the scope of PAIRPARDISC / PAIRPARDISCARR (a subject searched by itself, unmasked) has no pool of 2+ threads: one thread; ref gap: cannot happen: recorded only where a chunk in that scope has no pool, and every such chunk takes the stage while the switch is on
 LOSAT_X_BNFEWSUBJ	blastn	conditional	gap	required	-subject, 2+ threads, longest work unit a large share of letters (per-task thresholds); no -lcase_masking, never -db; new gap: needs -subject with 2+ subjects at 2+ threads, one subject holding most letters, query block > 8000
-LOSAT_X_BNHITGROUP	blastn	always			A subject's HSPs grouped by query with a stable sort, instead of one list per query of the batch
+LOSAT_X_BNHITGROUP	blastn	always			A subject's HSPs go to lists kept by the collector, only their queries visited, instead of a new list per query of the batch
 LOSAT_X_BNHLGROW	blastn	always			A hit list's array grows as lists come (from 4, up to NCBI's array size) instead of reserved to 100 lists, then doubled
 LOSAT_X_BNLUTDROP	blastn	always			A query batch's lookup tables dropped after its preliminary stage, before its traceback
 LOSAT_X_BNMAPPED	blastn	conditional	required	required	Linux 64-bit glibc and a buffer of 1 MiB or more: a subject's ungapped hits at their sort by score, a -db sequence's BLASTNA letters at traceback (mapped; database buffers and sort scratch pooled); smaller buffers or other allocators keep Vec's capacity

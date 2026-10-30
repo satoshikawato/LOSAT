@@ -1,7 +1,7 @@
 //! EXPERIMENT (LOSAT_X_BPHITSFLAT): a subject's preliminary HSPs are grouped by query through one
 //! array of their positions, not copied into one vector per query that each thread keeps.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:112-133
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:112-132
 //! ```c
 //!       hsp_list_array = calloc(results->num_queries, sizeof(BlastHSPList*));
 //! ...
@@ -45,7 +45,7 @@ pub(super) fn x_bphitsflat() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPHITSFLAT"))
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:119-133
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:116-132
 /// ```c
 ///       for (index = 0; index < hsp_list->hspcnt; index++) {
 ///          Int4 query_index;
@@ -91,7 +91,7 @@ pub(super) fn order_by_query(
     }
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:143-153
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:143-151
 /// ```c
 ///       for (index = 0; index < results->num_queries; index++) {
 ///          if (hsp_list_array[index]) {
@@ -136,6 +136,14 @@ pub(super) fn x_lists_by_query(
             karlin_params,
             gumbel_params,
         );
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:654-663
+        // ```c
+        //    cutoff = hit_params->prelim_evalue;
+        // ...
+        //          if (hsp->evalue > cutoff) {
+        //             hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+        // ```
+        // The reap by the preliminary E-value, as in the per-query loop.
         reap_hsplist_by_evalue(&mut compact_hsp_list, prelim_evalue);
         if !compact_hsp_list.hsps.is_empty() {
             compact_hsp_list.hsps.shrink_to_fit();

@@ -14118,7 +14118,7 @@ mod tests {
         assert_eq!(hits_by_query[1][1].subject_start, 130);
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:119-133
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:119-132
     // ```c
     //          query_index = Blast_GetQueryIndexFromContext(hsp->context, program);
     // ...

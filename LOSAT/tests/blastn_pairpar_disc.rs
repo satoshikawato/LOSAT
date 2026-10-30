@@ -35,7 +35,6 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
-    ("LOSAT_X_QBATCHPAR", "0"),
     ("LOSAT_X_QDUSTPAR", "0"),
     ("LOSAT_X_QPREPPAR", "0"),
     ("LOSAT_X_RPTSTREAM", "0"),
@@ -265,30 +264,27 @@ fn two_templates_give_the_same_report() {
     ]);
 }
 
-// A contiguous table in two-hit mode is not taken: the CLI has no way to ask for it
-// (`-window_size` is an unported option), and a megablast search (one hit) with the switch set
-// is the search without it (the unit test `scope_is_the_two_hit_discontiguous_stage` checks
-// that the stage refuses a contiguous table with a window).
+// A contiguous table is not taken, in one-hit mode (megablast) or in two-hit mode (megablast
+// with `-window_size 40`, DI-6): a search with the switch set is the search without it (the
+// unit test `scope_is_the_two_hit_discontiguous_stage` checks that the stage refuses a
+// contiguous table with a window).
 #[test]
 fn contiguous_tables_are_not_taken() {
-    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("blastn")
-        .arg("-query")
-        .arg(fasta("LC738874.fasta"))
-        .arg("-subject")
-        .arg(fasta("LC738868.fasta"))
-        .args(["-task", "megablast", "-window_size", "40", "-outfmt", "6"])
-        .output()
-        .expect("run LOSAT");
-    assert!(!output.status.success());
-    let task_args = ["-task", "megablast"];
-    let (expected, _) = blastn(&task_args, 4, &[]);
-    let reach = reach_support::Reach::new("pairpardisc-contiguous");
-    let (report, stderr) = blastn(&task_args, 4, &[SWITCH, reach.var()]);
-    assert!(report == expected, "megablast with {SWITCH:?}");
-    assert_eq!(stderr, "");
-    assert!(
-        !reach.sides("LOSAT_X_PAIRPARDISC").0,
-        "megablast: the stage took a contiguous table"
-    );
+    for (task_args, name) in [
+        (&["-task", "megablast"][..], "pairpardisc-contiguous"),
+        (
+            &["-task", "megablast", "-window_size", "40"][..],
+            "pairpardisc-contiguous-window",
+        ),
+    ] {
+        let (expected, _) = blastn(task_args, 4, &[]);
+        let reach = reach_support::Reach::new(name);
+        let (report, stderr) = blastn(task_args, 4, &[SWITCH, reach.var()]);
+        assert!(report == expected, "{task_args:?} with {SWITCH:?}");
+        assert_eq!(stderr, "");
+        assert!(
+            !reach.sides("LOSAT_X_PAIRPARDISC").0,
+            "{task_args:?}: the stage took a contiguous table"
+        );
+    }
 }

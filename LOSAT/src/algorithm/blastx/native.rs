@@ -28,7 +28,9 @@ use super::{
     runtime::BatchResults,
     subjects::{Subjects, UnreadableSubjects},
 };
-use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
+use crate::algorithm::common::database::{
+    prefetches_subjects, HeaderReadError, PreliminaryReadError, TaxonomyRefusal,
+};
 use crate::report::blast_xml2::{FsSideFiles, NoSideFiles, RunSideFiles, Xml2Kind};
 use anyhow::{bail, Result};
 use std::{
@@ -281,14 +283,11 @@ fn run_inner(
     // ```
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
     // option handlers run, with NCBI's errors; a format that NCBI runs and LOSAT does not
-    // write is rejected there too, and the custom tabular fields are checked (LOSAT's own
-    // list, `check_custom_fields`).
+    // write is rejected there too. The custom tabular fields are read as NCBI reads them
+    // (`ResolvedOptions::tabular`).
     use crate::blastinput::app::{self, Program};
     let choice = app::parse_formatting_string(&args.outfmt)?;
     let format = app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
-    if format.is_some() {
-        super::args::check_custom_fields(&choice)?;
-    }
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
     // before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -407,8 +406,7 @@ fn run_inner(
     if args.db.is_none() && subjects.is_empty() {
         return Err(early_archive_error(engine("Empty CBlastQueryVector")));
     }
-    let query_file = File::open(&args.query)
-        .map_err(|_| inaccessible("query", &args.query))
+    let query_file = crate::blastinput::input_files::open_input(&args.query, "query", "BLASTX")
         .map_err(early_archive_error)?;
     let destination: Box<dyn Write> = match args.out.as_deref().filter(|p| *p != Path::new("-")) {
         Some(path) => Box::new(File::create(path).map_err(|_| inaccessible("out", path))?),
@@ -505,10 +503,41 @@ fn run_inner(
             let settings =
                 crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
                     .map_err(anyhow::Error::msg)?;
-            Some(BlastxDatabase::open(name, &settings)?)
+            // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the
+            // database arguments reads it (`s_GetTaxIDList`) before the database opens.
+            let taxids = args.taxid_filter.resolve(&settings, &mut stderr)?;
+            Some(
+                BlastxDatabase::open_restricted(name, &settings, taxids.as_ref(), &mut stderr)?
+                    .showing_gis(args.show_gis),
+            )
         }
         None => None,
     };
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
+    // ```c++
+    // void CBlastTabularInfo::x_CheckTaxDB()
+    // {
+    //    	if( x_IsFieldRequested(eSubjectSciNames) ||
+    //     ...
+    //    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
+    //    		if(resolved.empty())
+    //    			ERR_POST(Warning << "Taxonomy name lookup from taxid requires installation of taxdb database with ftp://ftp.ncbi.nlm.nih.gov/blast/db/taxdb.tar.gz");
+    // ```
+    // A custom tabular field list that shows a plural name of the taxonomy database asks
+    // whether `taxdb.bti` is on the search path: its formatters warn without it. A `-db` search
+    // asks its database; a `-subject` search the search path of NCBI's databases (the
+    // environment and the registry, read here for it alone), as BLASTP's and BLASTN's.
+    if options.tabular.is_some_and(|spec| spec.checks_taxdb()) {
+        options.taxdb_found = match &database {
+            Some(database) => database.taxdb_found(),
+            None => {
+                let settings =
+                    crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
+                        .map_err(anyhow::Error::msg)?;
+                crate::algorithm::common::database::subject_taxdb_found(&settings, "BLASTX")?
+            }
+        };
+    }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
     if let (Some(database), Some(serial)) = (
@@ -536,9 +565,10 @@ fn run_inner(
     // too). Only with outfmt 5 and 13 to 16; the other formats read the file once.
     if let Some(held) = &held {
         // A query that is not a regular file (a pipe, `<(...)`, `/dev/stdin` from a pipe, a
-        // FIFO) cannot be read a second time: the read before the search would take every
-        // byte (DECISIONS 22). Refused as `-query -` is (`args.rs`), before the search.
-        if !query_file.metadata().is_ok_and(|m| m.is_file())
+        // FIFO) or `-query -` cannot be read a second time: the read before the search would
+        // take every byte (DECISIONS 22). Refused before the search.
+        if args.query.as_os_str() == "-"
+            || !query_file.metadata().is_ok_and(|m| m.is_file())
             || !crate::blastinput::input_files::has_stream_position(&query_file)
         {
             bail!(
@@ -549,15 +579,20 @@ fn run_inner(
         let query_file = File::open(&args.query).map_err(|_| inaccessible("query", &args.query))?;
         let messages_may_be_refused =
             super::blast_xml::prescan_queries(query_file, args.lcase_masking)?;
-        // The XML2 and JSON documents of a `-db` search with a taxonomy database on the search
-        // path: a later batch can still refuse the scientific name of a taxid, or the damaged
-        // database (`read_reported_taxids`, which needs the batch's hits). The taxids of every
-        // sequence are looked up here, once, and the output is held only when one of them would
-        // be refused (DECISIONS 32); the usual run, in which none is, writes batch by batch.
-        let taxdb_may_refuse = choice.number != 5
-            && database
-                .as_ref()
-                .is_some_and(|database| database.taxdb_found() && database.taxdb_may_refuse());
+        // The documents of a `-db` search with a taxonomy database on the search path: a later
+        // batch can still refuse the scientific name of a taxid (XML2 and JSON), or the damaged
+        // database (`read_reported_taxids`, which needs the batch's hits; outfmt 5 looks the
+        // batch's subjects up in its prefetch, `ReportedSubjects::prefetch_messages`, DBID item
+        // T). The taxids of every sequence are looked up here, once, and the output is held only
+        // when one of them would be refused (DECISIONS 32; outfmt 5 asks no scientific name); the
+        // usual run, in which none is, writes batch by batch. Outfmt 5's prefetch is also refused
+        // at the run's first prefetch where NCBI's taxonomy cache would repeat the offset error
+        // (`BlastxDatabase::prefetch_refused`), after the prolog: the run holds then too.
+        let prefetch = prefetches_subjects(Some(choice.number));
+        let taxdb_may_refuse = database.as_ref().is_some_and(|database| {
+            database.taxdb_found()
+                && (database.taxdb_may_refuse(!prefetch) || prefetch && database.prefetch_refused())
+        });
         // A database with parsed Seq-ids: a later batch can still refuse one of its subjects
         // (`ReportedSubjects::for_batch`), which only the batch's hits show.
         let parsed_may_be_refused = database
@@ -594,7 +629,7 @@ fn run_inner(
     // ```
     // The prescan of the titles of outfmt 11 (below) reads the query file a second time: whether it
     // is a regular file is decided here, on the handle already open, before any second open.
-    let query_is_regular = archive::query_is_regular(&query_file);
+    let query_is_regular = args.query.as_os_str() != "-" && archive::query_is_regular(&query_file);
     let mut query_stream = FastaStream::from_file(query_file);
     if stream_is_empty(&mut query_stream) {
         stderr.write_all(b"Warning: [blastx] Query is Empty!\n")?;
@@ -700,7 +735,8 @@ fn run_inner(
         };
         super::blast_xml::xml2_writer(kind, &options, &subjects, &shown_run, files)
     }));
-    report::write_prolog(&mut *writer, &options, &subjects, &shown_run).map_err(report_error)?;
+    report::write_prolog(&mut *writer, &mut *stderr, &options, &subjects, &shown_run)
+        .map_err(report_error)?;
     if let Some(xml2) = xml2.borrow_mut().as_mut() {
         let mut start = Vec::new();
         xml2.start(&mut start);
@@ -882,13 +918,13 @@ fn run_inner(
                             search_subjects,
                             results,
                             options.gapped,
-                            matches!(options.outfmt, 6 | 7),
+                            matches!(options.outfmt, 6 | 7 | 10 | 20),
                             options.outfmt == 0,
                             matches!(options.outfmt, 13..=16),
                             matches!(options.outfmt, 0 | 5 | 13..=16),
                         );
                         super::x_timing::run(XRun::Titles, x_t);
-                        reported
+                        let reported = reported
                             .map_err(|error| match error.downcast::<HeaderReadError>() {
                                 Ok(header) => header.error,
                                 // EXPERIMENT (LOSAT_X_BXDBSTREAM): a failed read of a record's residues.
@@ -912,7 +948,69 @@ fn run_inner(
                                         held.discard();
                                     }
                                 }
-                            })?
+                            })?;
+                        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
+                        // ```c++
+                        //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+                        //                 		                            fmt_args->GetFormattedOutputChoice());
+                        //             	ITERATE(CSearchResultSet, result, *results) {
+                        //                	    formatter.PrintOneResultSet(**result, query_batch);
+                        //             	}
+                        // ```
+                        // Before the reports of a batch NCBI fetches every subject that the batch
+                        // reports, and with `taxdb.bti` on the search path the taxonomy database
+                        // writes its messages there (`ReportedSubjects::prefetch_messages`: the
+                        // texts of opening it at the run's first lookup, a volume's lookup of a
+                        // taxid once per run): after the reader's messages of the reader batch,
+                        // which every batch loop writes before it calls this, and before the
+                        // warnings of its first query (`report::render_queries`). Outfmt 0, 5, 6
+                        // and 7 (`database::prefetches_subjects`); XML2 and JSON write theirs at
+                        // each `Hit` (`TaxdbPrinter`). Without `taxdb.bti` nothing is read. A
+                        // refusal comes after the reports of the batches before, as the refusals
+                        // of the batch's titles above (line DBID, DECISIONS 9 (9)); a refusal of
+                        // the taxonomy database (`TaxonomyRefusal`) drops what an outfmt 5 run
+                        // holds, and the run holds where one could come (`taxdb_may_refuse`
+                        // above), as XML2's does.
+                        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:716-725
+                        // ```c++
+                        // s_IsPrefetchFormat(blast::CFormattingArgs::EOutputFormat format_type)
+                        // {
+                        // 	if ((format_type == CFormattingArgs::eAsnText) ||
+                        // 	    (format_type == CFormattingArgs::eAsnBinary) ||
+                        // 	    (format_type == CFormattingArgs::eArchiveFormat)||
+                        // 	    (format_type == CFormattingArgs::eJsonSeqalign)) {
+                        // 		return false;
+                        // 	}
+                        // 	return true;
+                        // ```
+                        // Outfmt 10 and 20 read the subjects as 6 and 7 do; the rows' own
+                        // lookups of the taxonomy names come with the rows (`tabular`).
+                        let prefetch_format = match options.outfmt {
+                            10 | 20 => 6,
+                            outfmt => i32::from(outfmt),
+                        };
+                        if prefetches_subjects(Some(prefetch_format)) && database.taxdb_found() {
+                            let messages = reported
+                                .prefetch_messages(database, results, options.gapped)
+                                .inspect_err(|error| {
+                                    if error.is::<TaxonomyRefusal>() {
+                                        if let Some(held) = &held {
+                                            held.discard();
+                                        }
+                                    }
+                                })?;
+                            diagnostics.write_all(&messages)?;
+                        }
+                        // The values of a custom tabular field list that reads more of the
+                        // definition lines than the default report (`sall*`) or the taxonomy
+                        // (`staxid`, `staxids`, the names), read before the batch's first byte so
+                        // that their refusals come before it, after the prefetch (which opens the
+                        // taxonomy database first, as NCBI's does).
+                        let mut reported = reported;
+                        if let Some(spec) = options.tabular {
+                            reported.read_tabular(database, spec, results, options.gapped)?;
+                        }
+                        reported
                     }
                 };
                 report::render_queries(
@@ -1425,6 +1523,7 @@ fn run_inner(
     let x_t = super::x_timing::lap();
     report::write_epilog(
         &mut *writer,
+        &mut *stderr,
         &options,
         &subjects,
         &shown_run,

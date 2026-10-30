@@ -1,27 +1,49 @@
-//! Writer of NCBI BLAST databases (the version 4 volume layout that
-//! `makeblastdb -blastdb_version 4` writes) and the `losat makedb` command.
+//! Writer of NCBI BLAST databases (format version 5, makeblastdb's default,
+//! and version 4) and the `losat makeblastdb` command.
 //!
 //! NCBI's writer is `c++/src/objtools/blast/seqdb_writer/` (CWriteDB,
 //! CBuildDatabase) under the application `c++/src/app/blastdb/makeblastdb.cpp`.
-//! The files written are the ones `crate::seqdb` reads: the index file
-//! (`.pin` / `.nin`), the sequence file (`.psq` / `.nsq`), the header file
-//! (`.phr` / `.nhr`), and an alias file (`.pal` / `.nal`) when the database
-//! has more than one volume.
+//! The files written are those makeblastdb writes for a FASTA input without
+//! parsed Seq-ids: the index file (`.pin` / `.nin`), the sequence file
+//! (`.psq` / `.nsq`), the header file (`.phr` / `.nhr`), an alias file
+//! (`.pal` / `.nal`) when the database has more than one volume, the JSON
+//! metadata file (`.pjs` / `.njs`), and for version 5 the LMDB files
+//! (`.pdb` / `.ndb` with the volume tables, `.ptf` / `.ntf` with the tax ids)
+//! and the tax id lookup files (`.pot` / `.not`, `.pto` / `.nto`).
 //!
-//! Not written: parsed Seq-ids and their ISAM files (`-parse_seqids`), mask
-//! data, taxonomy data, the LMDB files of version 5, and the JSON metadata
-//! file (`.pjs` / `.njs`).
+//! With `-parse_seqids` (library only until the version 5 keys are written,
+//! `MakedbArgs::parse_seqids`) and `-hash_index`, the volumes also get their ISAM
+//! files (`.psi`/`.psd` of the Seq-ids in version 4, `.pni`/`.pnd` of the GIs,
+//! `.phi`/`.phd` of the sequence hashes), their OID to GI file (`.pog`) and the
+//! duplicate check of their Seq-ids (`volume`, `isam`, `id_set`); `-taxid` and
+//! `-taxid_map` (library only, it requires `-parse_seqids`) put tax ids on the
+//! definition lines and into the version 5 tax id files (`taxid_set`).
+//!
+//! Not written: the version 5 acc2oid keys and `.pos` of `-parse_seqids`, and
+//! mask data.
 
 pub mod bioseq;
 pub mod build_db;
 pub mod convert;
 pub mod data_size;
+pub mod deflines;
 pub mod fasta_source;
 pub mod files;
 pub mod format_guess;
 pub mod header;
+pub(crate) mod id_set;
+pub(crate) mod isam;
+// The LMDB files of version 5. Parts that only `-parse_seqids` and the tax id options
+// reach are not called yet.
+#[allow(dead_code)]
+pub(crate) mod lmdb;
 pub mod local_offset;
 pub mod makeblastdb;
+#[allow(dead_code)]
+pub(crate) mod mdb;
+pub(crate) mod metadata;
+pub mod platform;
+pub mod taxid_set;
 pub mod time;
 pub mod volume;
 pub mod writer;
@@ -31,6 +53,7 @@ mod tests;
 
 use std::path::PathBuf;
 
+pub use platform::Platform;
 pub use writer::WriteDb;
 
 /// Error of the database writer.
@@ -39,6 +62,9 @@ pub enum WriteDbError {
     /// NCBI's `CWriteDBException`: the text makeblastdb prints after
     /// "BLAST Database creation error: ".
     Creation(String),
+    /// `Creation` whose text holds bytes that are not UTF-8 (a Seq-id label of the
+    /// duplicate check), which makeblastdb prints as they are.
+    CreationBytes(Vec<u8>),
     /// NCBI's `CInvalidDataException`: the text makeblastdb prints after
     /// "BLAST options error: ".
     Options(String),
@@ -90,6 +116,11 @@ impl std::fmt::Display for WriteDbError {
             WriteDbError::Creation(message) => {
                 write!(f, "BLAST Database creation error: {message}")
             }
+            WriteDbError::CreationBytes(message) => write!(
+                f,
+                "BLAST Database creation error: {}",
+                String::from_utf8_lossy(message)
+            ),
             WriteDbError::Options(message) => write!(f, "BLAST options error: {message}"),
             WriteDbError::Other(message) => write!(f, "Error: {message}"),
             WriteDbError::OutOfMemory => f.write_str("BLAST ran out of memory"),

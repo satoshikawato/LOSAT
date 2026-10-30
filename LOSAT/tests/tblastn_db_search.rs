@@ -43,19 +43,19 @@ fn temp_dir(tag: &str) -> PathBuf {
     dir
 }
 
-/// The database of `fasta_file` made by `losat makedb` in `dir` under `name`.
+/// The database of `fasta_file` made by `losat makeblastdb` in `dir` under `name`.
 fn makedb(dir: &Path, fasta_file: &Path, name: &str) -> String {
     let db = dir.join(name).to_str().unwrap().to_string();
     let output = losat()
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fasta_file)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     db
@@ -123,7 +123,7 @@ fn a_database_search_gives_the_same_report_at_every_thread_count() {
         }
     }
     // The reports name the database: outfmt 7 by the `-db` value, outfmt 0 by its title
-    // (makedb's default title: the input file's name) and its numbers.
+    // (makeblastdb's default title: the input file's name) and its numbers.
     let comments = String::from_utf8(tblastn(&query, &["-db", &db], "7", 1)).unwrap();
     assert!(
         comments.contains(&format!("\n# Database: {db}\n")),

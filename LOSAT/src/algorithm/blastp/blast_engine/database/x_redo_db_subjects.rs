@@ -16,10 +16,10 @@ use crate::algorithm::blastp::x_redo_subjects::{XDbSubjects, XRedoSubjects};
 /// (`ListedSubjects::x_read_shown`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::algorithm::blastp::blast_engine) enum XShownResidues {
-    /// Those of the subjects of the final hit lists with a pyrrolysine (O), and of every subject of
-    /// an HSP whose query has an O: the reports read the letters only to recount the HSPs whose
-    /// query or subject has an O (`recount_pyrrolysine_identities`; the tabular rows of the
-    /// default fields, the Seq-aligns).
+    /// Those of the subjects of the final hit lists with a pyrrolysine (O) or a gap character, and
+    /// of every subject of an HSP whose query has an O: the reports read the letters only to
+    /// recount the HSPs whose query has an O or whose subject has an O or a gap character
+    /// (`recount_shown_identities`; the tabular rows of the default fields, the Seq-aligns).
     WithO,
     /// Those of every subject of the final hit lists: a report renders the alignments.
     Final,
@@ -43,7 +43,7 @@ impl ListedSubjects {
             .collect::<Result<Vec<u32>>>()?;
         rename_to_ranks(&ordinals, hit_lists, x_compact_hit_lists);
         Ok(Self {
-            x_has_o: ordinals.iter().map(|_| Default::default()).collect(),
+            x_recounted: ordinals.iter().map(|_| Default::default()).collect(),
             ordinals,
             encoded: Vec::new(),
             x_database: true,
@@ -62,7 +62,7 @@ impl ListedSubjects {
                 db: &database.db,
                 ordinals: &self.ordinals,
                 lengths: &self.x_lengths,
-                has_o: &self.x_has_o,
+                recounted: &self.x_recounted,
                 program: PROGRAM,
             })
         } else {
@@ -112,10 +112,10 @@ impl ListedSubjects {
                 encoded.push(length_only);
                 continue;
             }
-            // With `WithO`, a subject that no read of the redo found an O in (the redo read every
-            // subject of the final hit lists) and no HSP of a query with an O names keeps its length
-            // only, without a read.
-            if !kept[rank] && !self.x_has_o[rank].load(Ordering::Relaxed) {
+            // With `WithO`, a subject that no read of the redo found an O or a gap character in (the
+            // redo read every subject of the final hit lists) and no HSP of a query with an O names
+            // keeps its length only, without a read.
+            if !kept[rank] && !self.x_recounted[rank].load(Ordering::Relaxed) {
                 encoded.push(length_only);
                 continue;
             }

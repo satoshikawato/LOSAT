@@ -69,7 +69,7 @@ bio = "1.6"
 clap = { version = "4.5", features = ["derive"] }
 rayon = { version = "1.11", optional = true }
 libm = "0.2.15"
-indicatif = "0.17"
+indicatif = "0.18"
 rustc-hash = "1.1"
 
 # NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
@@ -84,15 +84,25 @@ rustc-hash = "1.1"
 #     x_FillBuffer((size_t) m_Sb->in_avail());
 #     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
 # ```
-# Rust filesystem support for the native readable-byte hint; no BLAST behavior,
-# foreign algorithm, NCBI runtime/build dependency or libc-auxv feature.
+# NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:395,3969
+# ```c
+# #define	GET_PAGESIZE(x)	((x) = sysconf(_SC_PAGE_SIZE))
+# 	GET_PAGESIZE(e->me_os_psize);
+# ```
+# Rust system calls for the native readable-byte hint (`io`), and for the page size
+# of the LMDB files of version 5 (`writedb::platform::host_page_size`): `param`
+# (rustix's `sysconf(_SC_PAGESIZE)` on macOS and the BSDs) and `mm` (the kernel's
+# alignment through `mmap` and `mprotect` on Linux, which needs neither /proc nor
+# the C library). No BLAST behavior, foreign algorithm, NCBI runtime/build
+# dependency or libc-auxv feature (the pure-Rust runtime boundary,
+# tests/check_pure_rust_runtime_boundary.py, allows no direct libc call).
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "=0.38.44", default-features = false, features = ["std"] }
+rustix = { version = "=0.38.44", default-features = false, features = ["std", "param", "mm"] }
 
 # Windows file-handle type (`GetFileType`, `GetConsoleMode`) for the stream-position test of
 # `IsIStreamEmpty` (`input_files::has_stream_position`); only the three features those need.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console"] }
+windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_SystemInformation"] }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }

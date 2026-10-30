@@ -4,7 +4,7 @@
 //! TBLASTX is an ungapped search, so NCBI makes one `diags` Seq-align per subject of a query's
 //! final hit list, one Std-seg per HSP (`BLASTUngappedHspListToSeqAlign`, see `seqalign`), and
 //! the XML writer takes each Std-seg as an `Hsp` of the subject's `Hit`
-//! (`PrepareBlastUngappedSeqalign`): the final list (`report_order`) holds the HSPs in that
+//! (`PrepareBlastUngappedSeqalign`): the final list (`hit_collector.rs`) holds the HSPs in that
 //! order, query by query, one run of HSPs per subject. What `s_SeqAlignSetToXMLHsps` reads of an
 //! HSP is its Seq-align (the coordinates in the records, lower first, the score, the bit score,
 //! the e-value or the sum e-value of a linked set) and the two rows of the alignment, from which
@@ -130,12 +130,7 @@ fn query_stats(stats: &TblastxQueryStats, numbers: &SubjectSetNumbers) -> XmlSta
     let Some(karlin) = &stats.karlin else {
         return XmlStats::NONE;
     };
-    let lengths = try_compute_eff_lengths_tblastx(
-        stats.aa_len as i64,
-        numbers.effective_length(),
-        numbers.count,
-        karlin,
-    );
+    let lengths = numbers.context_lengths(stats.aa_len as i64, karlin);
     debug_assert_eq!(
         lengths.map(|lengths| lengths.eff_searchsp),
         Some(stats.eff_searchsp),
@@ -438,6 +433,7 @@ mod tests {
             total: 3_000,
             count: 3,
             dbsize: None,
+            searchsp: None,
         };
         assert_eq!(
             query_stats(&TblastxQueryStats::default(), &numbers),
@@ -456,6 +452,7 @@ mod tests {
                 total: 3_000,
                 count,
                 dbsize,
+                searchsp: None,
             };
             let lengths = try_compute_eff_lengths_tblastx(
                 130,

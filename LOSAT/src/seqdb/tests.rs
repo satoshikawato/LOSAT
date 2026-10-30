@@ -1111,7 +1111,7 @@ fn a_name_is_a_list_as_for_ncbi() {
 }
 
 /// One database name is a path taken as it is: a space or a double quote in
-/// it does not split it (the entry point of `losat makedb`, whose output name
+/// it does not split it (the entry point of `losat makeblastdb`, whose output name
 /// is one name).
 #[test]
 fn one_name_is_not_a_list() {
@@ -1675,7 +1675,7 @@ fn check_search_path_row(
             let db = opened.unwrap_or_else(|e| panic!("{id}: NCBI opens it, LOSAT: {e:?}"));
             assert_eq!(String::from_utf8_lossy(db.title()), *title, "{id}: title");
             assert_eq!(db.num_seqs().to_string(), *sequences, "{id}: sequences");
-            let listed = super::alias::test_info_volumes(name, SeqType::Protein, search).unwrap();
+            let listed = super::alias::info_volumes(name, SeqType::Protein, search).unwrap();
             let expected: Vec<String> = volumes.split(" | ").map(place).collect();
             assert_eq!(listed, expected, "{id}: volumes");
         }

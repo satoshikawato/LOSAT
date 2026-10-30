@@ -385,6 +385,12 @@ pub(crate) struct XFlatArgs<'a> {
 // ```
 const X_TARGET_PV_BYTES: usize = 262_144;
 
+// No NCBI counterpart: the callers of `XFlatCompressedLookup::scan_subject`, one copy each.
+/// BLASTP's caller of `XFlatCompressedLookup::scan_subject` (and the tests').
+pub(crate) const X_BLASTP: u8 = 0;
+/// TBLASTN's caller of `XFlatCompressedLookup::scan_subject` (`tblastn/search_seed.rs`).
+pub(crate) const X_TBLASTN: u8 = 1;
+
 /// EXPERIMENT (LOSAT_X_BPCLUT): the compressed lookup table with each cell's hits in one slice of
 /// `hits` (`starts[index]..starts[index + 1]`), in NCBI's scan order. The other fields are those of
 /// `BlastCompressedAaLookupTable` that the scans read.
@@ -1438,8 +1444,9 @@ impl XFlatCompressedLookup {
     // }
     // ```
     /// `BlastCompressedAaLookupTable::scan_subject` on the flat table: the same statements, a cell's
-    /// hits copied from its slice.
-    pub(crate) fn scan_subject(
+    /// hits copied from its slice. `CALLER` gives each program's caller a copy of its own (`X_BLASTP`,
+    /// `X_TBLASTN`), so that the compiler inlines BLASTP's as it did when that was the only caller.
+    pub(crate) fn scan_subject<const CALLER: u8>(
         &self,
         subject: &[u8],
         seq_ranges: &[(i32, i32)],
@@ -2240,6 +2247,64 @@ pub(crate) fn x_bp_build_compressed_lookup(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// TBLASTN's compressed lookup table (word sizes 5 to 7, `tblastn/search_seed.rs`): what
+/// `x_bp_build_compressed_lookup` builds on one thread, the reference table with the switch off and
+/// otherwise the flat one (the bucket fill, the count-and-fill builder where it declines, the
+/// reference builder where that declines), with the same refusal. A function of its own, which
+/// calls only the builders that blastp-fast's build calls out of line, so that blastp-fast's build
+/// keeps its code.
+#[inline(never)]
+pub(crate) fn x_tbn_build_compressed_lookup(
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+) -> Option<Result<XCompressedLookup, ()>> {
+    let reference = || {
+        try_build_blosum62_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
+            .map(|built| built.map(XCompressedLookup::Reference))
+    };
+    if !x_bpclut_on() {
+        return reference();
+    }
+    let bucket = if x_bpffill_on() {
+        x_try_build_flat_by_buckets(
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            NCBI_OVERFLOW_CELL_CAPACITY,
+        )
+    } else {
+        XBucketBuild::Declined
+    };
+    let built = match bucket {
+        XBucketBuild::Built(built) => built,
+        XBucketBuild::Declined => x_try_build_flat_with_capacity(
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            NCBI_OVERFLOW_CELL_CAPACITY,
+            X_COUNT_CHUNK,
+        ),
+    };
+    match built? {
+        XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
+        XFlatBuild::Refused => Some(Err(())),
+        XFlatBuild::TooLarge => reference(),
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149
 // ```c
 //     TBlastThreads the_threads(GetNumberOfThreads());
@@ -2919,7 +2984,7 @@ mod tests {
                         });
                     let (got, got_rounds) =
                         rounds(5, length, array_size, |ranges, pairs, size, range| {
-                            flat.scan_subject(subject, ranges, pairs, size, range)
+                            flat.scan_subject::<X_BLASTP>(subject, ranges, pairs, size, range)
                         });
                     assert_eq!(got, want, "subject {n}, array {array_size}");
                     assert_eq!(got_rounds, want_rounds, "subject {n}, array {array_size}");

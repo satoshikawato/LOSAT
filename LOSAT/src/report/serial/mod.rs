@@ -22,7 +22,6 @@ pub mod encoder;
 pub mod json;
 pub mod real;
 pub mod seqalign;
-mod x87;
 pub mod xml;
 
 pub(crate) use seqalign::{write_hit_list_seqaligns, write_query_to};

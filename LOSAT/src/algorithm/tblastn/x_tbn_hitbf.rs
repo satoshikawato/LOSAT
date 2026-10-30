@@ -73,6 +73,74 @@
 
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:51-55
+// ```c
+// typedef struct DiagStruct {
+//    Int4 last_hit : 31; /**< Offset of the last hit */
+//    Uint4 flag : 1; /**< Reset this hit? */
+// } DiagStruct;
+// ```
+/// A cell of the two-hit diagonal table (`search_init::XDiagCells`): `u32`, NCBI's `DiagStruct` in
+/// its four bytes (`LOSAT_X_TBNDIAGPACK`: last_hit in bits 0-30, flag in bit 31; the table's
+/// values fit 31 bits without a sign, `search_init::x_packs`), or `(last_hit, flag)`.
+pub(super) trait XDiagCell: Copy {
+    /// `(last_hit, flag)`.
+    fn get(self) -> (i32, bool);
+    /// `last_hit = last_hit; flag = flag;`
+    fn set(&mut self, last_hit: i32, flag: bool);
+    /// `last_hit = last_hit;` on a cell whose flag is 0.
+    fn set_last_hit(&mut self, last_hit: i32);
+    /// `(value, flag)` for `x_hits_bf`: `value` is `last_hit` when `flag` is false.
+    fn bf_read(self) -> (i32, bool);
+}
+
+impl XDiagCell for (i32, bool) {
+    #[inline(always)]
+    fn get(self) -> (i32, bool) {
+        self
+    }
+
+    #[inline(always)]
+    fn set(&mut self, last_hit: i32, flag: bool) {
+        *self = (last_hit, flag);
+    }
+
+    #[inline(always)]
+    fn set_last_hit(&mut self, last_hit: i32) {
+        self.0 = last_hit;
+    }
+
+    #[inline(always)]
+    fn bf_read(self) -> (i32, bool) {
+        self
+    }
+}
+
+impl XDiagCell for u32 {
+    #[inline(always)]
+    fn get(self) -> (i32, bool) {
+        ((self & 0x7fff_ffff) as i32, self >> 31 != 0)
+    }
+
+    #[inline(always)]
+    fn set(&mut self, last_hit: i32, flag: bool) {
+        debug_assert!(last_hit >= 0, "a packed cell holds 31 bits without a sign");
+        *self = last_hit as u32 | u32::from(flag) << 31;
+    }
+
+    #[inline(always)]
+    fn set_last_hit(&mut self, last_hit: i32) {
+        debug_assert!(last_hit >= 0, "a packed cell holds 31 bits without a sign");
+        *self = last_hit as u32;
+    }
+
+    // A set flag is the sign bit; a clear one leaves last_hit, which is never negative.
+    #[inline(always)]
+    fn bf_read(self) -> (i32, bool) {
+        (self as i32, (self as i32) < 0)
+    }
+}
+
 /// Whether `x_hits_bf` gives the reference's outcomes for this
 /// window and word size (module doc): `0 <= wordsize < window`.
 pub(super) fn fits(window: i32, word_size: usize) -> bool {
@@ -81,13 +149,14 @@ pub(super) fn fits(window: i32, word_size: usize) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552 (module doc).
 /// The hits of `pairs` from the first, each on its cell of
-/// `entries` (`(last_hit, flag)`), up to the first that is a flag-1 cell or a candidate for the
-/// extension; returns the number of hits taken (`pairs.len()` when there is no such hit). The
-/// hits taken are too far (`last_hit = s + offset`) or overlap (no change). The outcomes are
-/// exact when `fits(window, word_size)` (module doc); `entries.len()` is a power of two.
+/// `entries` (`(last_hit, flag)`, `XDiagCell`), up to the first that is a flag-1 cell or a
+/// candidate for the extension; returns the number of hits taken (`pairs.len()` when there is no
+/// such hit). The hits taken are too far (`last_hit = s + offset`) or overlap (no change). The
+/// outcomes are exact when `fits(window, word_size)` (module doc); `entries.len()` is a power of
+/// two.
 #[inline(always)]
-pub(super) fn x_hits_bf(
-    entries: &mut [(i32, bool)],
+pub(super) fn x_hits_bf<C: XDiagCell>(
+    entries: &mut [C],
     offset: i32,
     window: i32,
     word_size: i32,
@@ -114,7 +183,7 @@ pub(super) fn x_hits_bf(
         // SAFETY: index <= mask = entries.len() - 1.
         let entry = unsafe { base.add(index) };
         // SAFETY: as above.
-        let (last_hit, flag) = unsafe { entry.read() };
+        let (last_hit, flag) = unsafe { entry.read() }.bf_read();
         // [C] last_hit = diag_array[diag_coord].last_hit - diag_offset;
         // [C] diff = subject_offset - last_hit;
         let s_diag = (pair.s_off as i32).wrapping_add(offset);
@@ -128,7 +197,7 @@ pub(super) fn x_hits_bf(
         // [C] if (diff < wordsize) continue;
         let next = if diff >= window { s_diag } else { last_hit };
         // SAFETY: as above.
-        unsafe { (*entry).0 = next };
+        unsafe { (*entry).set_last_hit(next) };
         // SAFETY: p < end, so p + 1 <= end.
         p = unsafe { p.add(1) };
     }
@@ -175,6 +244,86 @@ mod tests {
         } else {
             None
         }
+    }
+
+    // LOSAT_X_TBNDIAGPACK: the loop on NCBI's four-byte cells takes the same hits and leaves the same
+    // values as on `(last_hit, flag)` cells, on random tables of the values a packed table holds
+    // (`search_init::x_packs`: last_hit from 0 to 2^31 - 1, windows from wordsize + 1 to 2^28,
+    // offsets from the window to INT4_MAX / 4 + 2 x 5,000,000 + 2 x the window), the cells set
+    // next to each test's boundary as in the test below.
+    #[test]
+    fn x_hits_bf_on_packed_cells_equals_pair_cells() {
+        let mut rng = Rng(0x7b1f_5eed_a6a6_0002);
+        let mut taken = [0u64; 3];
+        for round in 0..4000 {
+            let word_size = [0, 1, 2, 3, 3, 5][round % 6];
+            let window = match round % 5 {
+                0 => word_size + 1,
+                1 | 3 => 40,
+                2 => 1 << 28,
+                _ => word_size + 1 + rng.below(1000) as i32,
+            };
+            assert!(fits(window, word_size as usize));
+            let offset = match round % 4 {
+                0 => window,
+                1 => i32::MAX / 4 + 10_000_000 + 2 * window - rng.below(1 << 20) as i32,
+                _ => window + rng.below((i32::MAX / 4) as u64) as i32,
+            };
+            let length = 1usize << rng.below(7);
+            let pair: Vec<(i32, bool)> = (0..length)
+                .map(|_| ((rng.next() as u32 & 0x7fff_ffff) as i32, rng.below(40) == 0))
+                .collect();
+            let mut packed: Vec<u32> = pair
+                .iter()
+                .map(|&(last_hit, flag)| {
+                    let mut cell = 0u32;
+                    cell.set(last_hit, flag);
+                    cell
+                })
+                .collect();
+            let mut pair = pair;
+            let n = rng.below(300) as usize;
+            let mut pairs = Vec::with_capacity(n);
+            for _ in 0..n {
+                let q = rng.below(1 << 20) as u32;
+                let s = rng.below(1 << 20) as u32;
+                let cell = (q.wrapping_sub(s) as usize) & (length - 1);
+                let s_diag = (s as i32) + offset;
+                let diff = match rng.below(8) {
+                    0 => window,
+                    1 => window - 1,
+                    2 => word_size,
+                    3 => word_size - 1,
+                    _ => rng.next() as i32,
+                };
+                let last_hit = s_diag.wrapping_sub(diff);
+                if rng.below(3) == 0 && last_hit >= 0 {
+                    pair[cell].0 = last_hit;
+                    packed[cell].set(last_hit, pair[cell].1);
+                }
+                pairs.push(BlastOffsetPair { q_off: q, s_off: s });
+            }
+            let mut done = 0;
+            while done < pairs.len() {
+                let a = x_hits_bf(&mut pair, offset, window, word_size, &pairs[done..]);
+                let b = x_hits_bf(&mut packed, offset, window, word_size, &pairs[done..]);
+                assert_eq!(a, b, "round {round}: hits taken");
+                let cells: Vec<(i32, bool)> = packed.iter().map(|cell| cell.get()).collect();
+                assert_eq!(cells, pair, "round {round}: cells");
+                taken[0] += a as u64;
+                done += a;
+                if let Some(pair_at) = pairs.get(done) {
+                    let cell = (pair_at.q_off.wrapping_sub(pair_at.s_off) as usize) & (length - 1);
+                    taken[if pair[cell].1 { 1 } else { 2 }] += 1;
+                    // The per-hit body's outcome on the stop: a new hit on the cell.
+                    let next = (pair_at.s_off as i32) + offset;
+                    pair[cell] = (next, false);
+                    packed[cell].set(next, false);
+                    done += 1;
+                }
+            }
+        }
+        assert!(taken.iter().all(|&count| count > 0), "taken {taken:?}");
     }
 
     // The loop against the reference's statements on random tables: windows from wordsize + 1 to
@@ -285,6 +434,7 @@ mod tests {
     #[test]
     fn an_empty_table_takes_no_hit() {
         let pairs = [BlastOffsetPair { q_off: 1, s_off: 0 }];
-        assert_eq!(x_hits_bf(&mut [], 40, 40, 3, &pairs), 0);
+        assert_eq!(x_hits_bf::<(i32, bool)>(&mut [], 40, 40, 3, &pairs), 0);
+        assert_eq!(x_hits_bf::<u32>(&mut [], 40, 40, 3, &pairs), 0);
     }
 }

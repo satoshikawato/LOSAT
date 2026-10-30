@@ -65,9 +65,9 @@ impl ListedSubjects {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2310, quoted
     // above `read_titles`: NCBI reads the database again when it formats the results of a batch.
-    /// After the redo, `encoded` for the reports: every listed subject with its length, and with its residues read from
-    /// the database where the reports read them (`residues`; `query_has_o`: whether each query's
-    /// record has an O, by query index, read with `WithO`).
+    /// After the redo, `encoded` for the reports: every listed subject with its length, and with
+    /// its residues read from the database where the reports read them (`residues`; `query_has_o`:
+    /// whether each query's record has an O, by query index, read with `WithO`).
     pub(in crate::algorithm::blastp::blast_engine) fn x_read_shown(
         &mut self,
         database: &BlastpDatabase,

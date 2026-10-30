@@ -39,8 +39,7 @@
 //! operation is involved.
 //!
 //! Memory: the peak of a batch whose traceback held the tables on top of its own memory moves to
-//! the scan (megablast of Sakai x MG1655, one thread: 135.7 -> 131.3 MiB of `RssAnon`); the slots
-//! of LOSAT_X_QBATCHPAR, which run whole batches side by side, hold their tables for a shorter time.
+//! the scan (megablast of Sakai x MG1655, one thread: 135.7 -> 131.3 MiB of `RssAnon`).
 //! Where glibc's dynamic mmap threshold rises when the chains are freed (a mapped block of up to 32
 //! MiB), it now rises one traceback earlier, whose medium buffers then come from the heap: megablast
 //! of 31,168 cDNAs at one thread reads 2.2 MiB more (none with the threshold fixed).

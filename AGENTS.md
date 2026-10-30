@@ -80,7 +80,11 @@ authoritative, current guidance for agent behavior in LOSAT.
      reads past it and crashes). BLASTP: a one-hit gapped start whose window
      of 11 letters passes the end of a sequence reads the letters past it as
      the sentinel (NCBI reads past its buffer and can crash; LOSAT's output
-     equals NCBI's under valgrind). Deterministic NCBI results, even wrong-looking ones, are
+     equals NCBI's under valgrind). Taxid lists with `-db`: a taxid whose
+     ancestors form a cycle (the root, its own parent in
+     `taxonomy4blast.sqlite3`) expands to every taxid below it, each visited
+     once (NCBI's recursive query does not end; LOSAT's `-taxids 1` equals
+     NCBI's `-taxids` of the root's children). Deterministic NCBI results, even wrong-looking ones, are
      reproduced, not excepted; NCBI failures without a checkable valid result
      are explicit rejections.
 
@@ -216,9 +220,10 @@ authoritative, current guidance for agent behavior in LOSAT.
   inputs where it does not with their ratios. A body that only says "X is slow" or "X uses memory"
   is not ready for review. Owner, 2026-10-27.
 - No new conditional switch (a path that runs only under a rule) while these structural items are
-  open: blastn's QBATCHPAR slots each holding a lookup table and a query-batch copy, one lookup table
-  per parallel unit in blastx and tblastx, and tblastn's OID-order hand-back waits. A rule-limited
-  path lands only as a deadline fallback that its body names as such and the Owner approves.
+  open: one lookup table per parallel unit in blastx and tblastx, and tblastn's OID-order hand-back
+  waits (blastn's QBATCHPAR slots, each holding a lookup table and a query-batch copy, were removed
+  on 2026-10-28). A rule-limited path lands only as a deadline fallback that its body names as such
+  and the Owner approves.
   Thresholds (`..MIN`, capacities, backoffs) and stacked variants of one loop are folded to one form
   per family before graduation freezes them as constants. Owner, 2026-10-27 (audit of #329-#553
   after #554 was closed).

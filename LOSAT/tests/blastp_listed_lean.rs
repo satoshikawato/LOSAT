@@ -44,24 +44,24 @@ struct Run {
 }
 
 /// A protein database of the fixture's subject proteome (`MejoMJNV.faa`, 124 sequences), made with
-/// `losat makedb` in a directory of this test; returns the database name.
+/// `losat makeblastdb` in a directory of this test; returns the database name.
 fn subject_database() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("losat-bplistedlean-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let name = dir.join("MejoMJNV");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
         .args(["-dbtype", "prot"])
         .arg("-out")
         .arg(&name)
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     name

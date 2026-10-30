@@ -13,14 +13,13 @@
 //! after another, on the thread of the application's loop. `write_output_blastn_hitlists_to_writer`
 //! (`hsp.rs`) does the same on the thread of `run_in_pool`'s batch loop, while the other threads of
 //! the search's pool wait: 31,168 cDNAs against 3 Mb with `-task blastn` (1.02 M rows, 90 query
-//! batches written one at a time by LOSAT_X_RPTSTREAM, LOSAT_X_QBATCHPAR=0) spent 0.88 s in the
+//! batches written one at a time by LOSAT_X_RPTSTREAM, no query-batch slots) spent 0.88 s in the
 //! report calls at 8, 16 and 32 threads alike (ws, 2026-10-24), 87 % of it in the rows
 //! (`write_hit_fields_bytes`, local perf).
 //!
 //! What the switch changes (read once per process, `mode`), when the caller gives a pool of two
-//! threads or more (`pool`: the search's pool while no LOSAT_X_QBATCHPAR slot exists), there is no
-//! format observer (`FormatProbe`, which flushes around every row; the Web adapter) and the
-//! BLASTN trace is off (`tracing::enabled`; it logs rows in the serial order): the rows are cut
+//! threads or more (`pool`: the search's pool), there is no format observer (`FormatProbe`, which
+//! flushes around every row; the Web adapter) and the BLASTN trace is off (`tracing::enabled`; it logs rows in the serial order): the rows are cut
 //! into pieces (`Piece`) of at most `PIECE_ROWS` rows of one query, the first piece of each query
 //! with its outfmt 7 header (a query without rows is one piece of no row); the pieces are taken in
 //! windows of at least `ROWS_PER_THREAD` rows per thread of the pool (a piece of no row counts as
@@ -41,9 +40,8 @@
 //! so a failed write is one of the writer's, which stops the report as before.
 //!
 //! Off (the serial writer): the switch off (`LOSAT_X_BNTABPAR=0`); no pool or one of one thread
-//! (`-num_threads 1`, builds without the `parallel` feature, Wasm without threads); while
-//! LOSAT_X_QBATCHPAR slots exist (their pools would share the CPUs; their reports already overlap
-//! the other slots' searches); a format observer; the BLASTN trace.
+//! (`-num_threads 1`, builds without the `parallel` feature, Wasm without threads); a format
+//! observer; the BLASTN trace.
 //!
 //! Memory: the formatted rows of one window (`ROWS_PER_THREAD` x threads rows plus one piece,
 //! about 6 MiB at 32 threads with the ~100-byte rows of the cDNA input), also for one query of

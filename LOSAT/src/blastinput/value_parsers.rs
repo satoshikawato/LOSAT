@@ -448,6 +448,28 @@ pub fn ncbi_integer_at_least(value: &str, at_least: i32) -> Result<i32, String> 
     Ok(n)
 }
 
+/// A non-negative `Int8` argument (`CArg_Int8` with `CArgAllowValuesGreaterThanOrEqual(0)`):
+/// `-searchsp`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+/// ```c
+///     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+///                             "Effective length of the search space",
+///                             CArgDescriptions::eInt8);
+///     arg_desc.SetConstraint(kArgEffSearchSpace,
+///                            new CArgAllowValuesGreaterThanOrEqual(0));
+/// ```
+pub fn nonnegative_ncbi_int8(value: &str) -> Result<i64, String> {
+    if value.eq_ignore_ascii_case("0x") {
+        return Err("Illegal value".into());
+    }
+    let n = ncbi_int8(value)?;
+    if n < 0 {
+        return Err("expected an integer >= 0".into());
+    }
+    Ok(n)
+}
+
 /// A non-negative integer argument (`CArg_Integer` with `CArgAllowValuesGreaterThanOrEqual(0)`),
 /// such as `-culling_limit`.
 ///
@@ -877,6 +899,11 @@ pub fn tblastx_real(value: &str) -> Result<f64, String> {
     ncbi_double(value, "TBLASTX")
 }
 
+/// A real argument of BLASTN (`ncbi_double`).
+pub fn blastn_real(value: &str) -> Result<f64, String> {
+    ncbi_double(value, "BLASTN")
+}
+
 /// A `-threshold` value: NCBI's constraint reads it again with `NStr::StringToDouble` and
 /// requires at least 0 (a NaN fails it).
 ///
@@ -935,6 +962,44 @@ pub fn tblastx_threshold(value: &str) -> Result<f64, String> {
 pub fn ncbi_boolean(value: &str) -> Result<bool, String> {
     crate::blastinput::ncbi_environment::ncbi_string_to_bool(value)
         .ok_or_else(|| format!("Argument cannot be converted: `{value}'"))
+}
+
+/// A `-mt_mode` value: an integer from 0 to 2 (`CArgAllowValuesBetween(0, 2, true)`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3176-3177
+/// ```c++
+///     	arg_desc.SetConstraint(kArgMTMode,
+///                                new CArgAllowValuesBetween(0, 2, true));
+/// ```
+pub fn ncbi_mt_mode(value: &str) -> Result<u8, String> {
+    let mode = ncbi_integer_at_least(value, 0)?;
+    u8::try_from(mode)
+        .ok()
+        .filter(|mode| *mode <= 2)
+        .ok_or_else(|| "Illegal value: expected an integer from 0 to 2".to_string())
+}
+
+/// A BLASTN `-use_index` value: a Boolean (`ncbi_boolean`), of which only `false` is served.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3382-3395
+/// ```c++
+///     if( args.Exist( kArgUseIndex ) &&
+///         !(args.Exist( kArgSubject ) && args[kArgSubject])) {
+///         bool use_index   = true;
+///         bool force_index = false;
+///         bool old_style_index = false;
+///         if( args[kArgUseIndex] ) {
+///             if( args[kArgUseIndex].AsBoolean() ) force_index = true;
+///             else use_index = false;
+///         }
+/// ```
+pub fn blastn_use_index(value: &str) -> Result<bool, String> {
+    if ncbi_boolean(value)? {
+        return Err(
+            "-use_index true (the megablast index) is not supported by LOSAT's BLASTN".into(),
+        );
+    }
+    Ok(false)
 }
 
 /// A protein `-word_size` (`CArgAllowValuesGreaterThanOrEqual(2)` for a protein query).

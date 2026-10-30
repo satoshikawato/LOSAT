@@ -85,6 +85,9 @@ fn search(task: &str, query: &Path, threads: u32, switches: &[(&str, &str)]) -> 
             command.env_remove(name);
         }
     }
+    // LOSAT_X_BNCSRPACK lays out every contiguous table of 4^8 to 4^11 cells as CSR, with no
+    // chains to fill: `-task blastn`'s tables keep the chains these tests are about with it off.
+    command.env("LOSAT_X_BNCSRPACK", "0");
     let output = command
         .arg("blastn")
         .arg("-query")

@@ -99,6 +99,19 @@ pub fn invalid_query_warning<R: InputRecord>(program: &str, index: usize, query:
     query_warning(program, index, query, &[INVALID_QUERY_MESSAGE.to_string()])
 }
 
+/// The warning of each query of the first query batch of a search with the IDENTITY matrix and a
+/// composition mode above 0, which NCBI searches in mode 0 (blastp and tblastn; IDENTITY has no
+/// composition data; the reset stays in the options of the later batches).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:150-154
+/// ```c++
+///         ostringstream os;
+///         os << "Composition-based statistics cannot be used with the IDENTITY "
+///            << "matrix, resetting the composition-based statistics option to 0";
+///         search_messages.AddMessageAllQueries(eBlastSevWarning, 0, os.str());
+/// ```
+pub const IDENTITY_CBS_RESET_MESSAGE: &str = "Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0";
+
 /// NCBI's `kBlastErrMsg_CantCalculateUngappedKAParams` (see `invalid_query_warning`).
 pub const INVALID_QUERY_MESSAGE: &str = "Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options";
 

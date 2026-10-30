@@ -51,11 +51,11 @@ fn temp_dir(tag: &str) -> PathBuf {
     dir
 }
 
-/// The protein database of the fixture's subjects, made by `losat makedb` in `dir`.
+/// The protein database of the fixture's subjects, made by `losat makeblastdb` in `dir`.
 fn database(dir: &Path) -> PathBuf {
     let db = dir.join("s2db");
     let made = losat()
-        .args(["makedb", "-in"])
+        .args(["makeblastdb", "-in"])
         .arg(fixture("subjects.faa"))
         .args(["-dbtype", "prot", "-out"])
         .arg(&db)
@@ -63,7 +63,7 @@ fn database(dir: &Path) -> PathBuf {
         .unwrap();
     assert!(
         made.status.success(),
-        "makedb failed: {}",
+        "makeblastdb failed: {}",
         String::from_utf8_lossy(&made.stderr)
     );
     db

@@ -53,24 +53,24 @@ fn letters(path: &Path) -> String {
 }
 
 /// The query (the first 4,000 letters of LC738874) and a database of LC738868 made with
-/// `losat makedb`, in `dir`.
+/// `losat makeblastdb`, in `dir`.
 fn inputs(dir: &TestDir) -> (PathBuf, PathBuf) {
     let genome = letters(&fasta("LC738874.fasta"));
     let query = dir.0.join("q4000.fna");
     std::fs::write(&query, format!(">q4000\n{}\n", &genome[..4_000])).expect("write the query");
     let db = dir.0.join("lc738868");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fasta("LC738868.fasta"))
         .args(["-dbtype", "nucl"])
         .arg("-out")
         .arg(&db)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run LOSAT makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     (query, db)

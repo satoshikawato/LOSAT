@@ -296,7 +296,9 @@ impl PsiblastArgs {
         // ```
         // NCBI parses `-outfmt` before the option handlers; its own errors come from that parse
         // and from blastp's (`run`). The formats that NCBI runs and LOSAT's psiblast does not
-        // write yet are refused here.
+        // write yet are refused here. The tabular reports with a field list, and outfmt 10 and
+        // 20, are blastp's (`blastp::tabular`), without a custom delimiter, which psiblast's
+        // formatter does not get (psiblast_app.cpp:482-505, `blast_engine.rs` `run`).
         let choice = crate::blastinput::app::parse_formatting_string(&self.outfmt)?;
         if let Some(format) = crate::blastinput::app::ReportFormat::from_number(choice.number) {
             use crate::blastinput::app::ReportFormat;
@@ -305,6 +307,8 @@ impl PsiblastArgs {
                 ReportFormat::Pairwise
                     | ReportFormat::Tabular
                     | ReportFormat::TabularWithComments
+                    | ReportFormat::CommaSeparatedValues
+                    | ReportFormat::CommaSeparatedValuesWithHeader
                     | ReportFormat::Sam
             ) {
                 bail!(
@@ -317,7 +321,11 @@ impl PsiblastArgs {
             query: self.query,
             subject: self.subject,
             db: self.db,
+            // PSIBLAST's parser refuses the taxid options (line DI-8 ported them to BLASTP).
+            taxid_filter: Default::default(),
             dbsize: self.dbsize,
+            show_gis: false,
+            searchsp: None,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-50
             // ```c++
             // CPSIBlastOptionsHandle::CPSIBlastOptionsHandle(EAPILocality locality)
@@ -333,6 +341,8 @@ impl PsiblastArgs {
             threshold: self.threshold,
             word_size: self.word_size,
             num_threads: self.num_threads,
+            // psiblast has no `-mt_mode` (`cli.rs` `is_unported_psiblast_arg`).
+            mt_mode: None,
             out: self.out,
             max_target_seqs: self.max_target_seqs,
             num_descriptions: self.num_descriptions,
@@ -428,7 +438,7 @@ mod tests {
                 "{error}"
             );
         }
-        for format in ["1", "3", "5", "8", "10", "11", "13", "15", "16", "18"] {
+        for format in ["1", "3", "5", "8", "11", "13", "15", "16", "18"] {
             let error = parse(&["-outfmt", format])
                 .unwrap()
                 .into_blastp_args()
@@ -439,7 +449,16 @@ mod tests {
                 format!("output format {format} is not supported by LOSAT's PSIBLAST")
             );
         }
-        for format in ["0", "6", "7", "6 qseqid sseqid evalue", "17"] {
+        for format in [
+            "0",
+            "6",
+            "7",
+            "6 qseqid sseqid evalue",
+            "6 delim=| std",
+            "10",
+            "20 qseqid sseqid",
+            "17",
+        ] {
             assert!(parse(&["-outfmt", format])
                 .unwrap()
                 .into_blastp_args()

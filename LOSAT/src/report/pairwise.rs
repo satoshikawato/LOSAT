@@ -100,6 +100,12 @@ pub struct PairwiseHit {
     // NCBI c++/src/objtools/align_format/showalign.cpp:3595-3598:
     // if (aln_vec_info->sum_n > 0) out << "(" << sum_n << ")";
     pub sum_n: Option<i32>,
+    /// The columns (0-based) of `subject_seq` whose letter is a stored gap character (`-`,
+    /// NCBIstdaa 0, which makeblastdb stores for a `-` of a protein FASTA): residues of the
+    /// subject that the row shows as the letter of a gap. Empty when the subject holds none.
+    /// NCBI counts the coordinates of the rows by the Dense-seg, where these columns are
+    /// residues (`write_sequence_row`).
+    pub subject_stored_gaps: Vec<u32>,
 }
 
 impl From<Hit> for PairwiseHit {
@@ -118,6 +124,7 @@ impl From<Hit> for PairwiseHit {
             subject_title: None,
             comp_adjust_method: None,
             sum_n: None,
+            subject_stored_gaps: Vec::new(),
         }
     }
 }
@@ -179,7 +186,8 @@ pub struct BlastpPairwiseReport {
     pub word_threshold: f64,
     pub window_size: i32,
     pub gapped_karlin: KarlinParams,
-    pub gumbel: BlastGumbelBlk,
+    /// None with `-searchsp` (`PrintKAParameters` without `gbp`).
+    pub gumbel: Option<BlastGumbelBlk>,
     /// Subjects in the description table and with alignments, per query (NCBI's
     /// `m_NumDescriptions` and `m_NumAlignments`).
     pub num_descriptions: usize,
@@ -838,7 +846,7 @@ pub fn write_alignment<W: Write>(
 
     // If we have actual sequences, display them
     if let (Some(ref qseq), Some(ref sseq)) = (&hit.query_seq, &hit.subject_seq) {
-        write_alignment_with_sequences(writer, h, qseq, sseq, config)?;
+        write_alignment_with_sequences(writer, h, qseq, sseq, &hit.subject_stored_gaps, config)?;
     } else {
         // No sequences available - show placeholder
         writeln!(
@@ -864,6 +872,7 @@ fn write_alignment_with_sequences<W: Write>(
     hit: &Hit,
     query_seq: &str,
     subject_seq: &str,
+    subject_stored_gaps: &[u32],
     config: &PairwiseConfig,
 ) -> io::Result<()> {
     let line_len = config.line_length;
@@ -948,6 +957,7 @@ fn write_alignment_with_sequences<W: Write>(
             writer,
             "Query",
             &q_chars[offset..end],
+            0,
             &mut q_next,
             1,
             max_start_len,
@@ -959,6 +969,7 @@ fn write_alignment_with_sequences<W: Write>(
             writer,
             "Sbjct",
             &s_chars[offset..end],
+            stored_gaps_between(subject_stored_gaps, offset, end),
             &mut s_next,
             subject_step,
             max_start_len,
@@ -1003,17 +1014,21 @@ fn write_alignment_with_sequences<W: Write>(
 /// ```
 /// A later chunk without residues ends where the previous chunk ended
 /// (`end == prev_stop`). `AddSpace` takes a `size_t`, so an omitted start gives
-/// `maxStartLen + 2` spaces.
+/// `maxStartLen + 2` spaces. The residues of the chunk are its letters other than `-` and
+/// its `stored_gaps` columns whose `-` is a stored gap character (a residue of the
+/// Dense-seg).
+#[allow(clippy::too_many_arguments)]
 fn write_sequence_row<W: Write>(
     writer: &mut W,
     label: &str,
     residues: &[char],
+    stored_gaps: usize,
     next: &mut isize,
     step: isize,
     width: usize,
     first_chunk: bool,
 ) -> io::Result<()> {
-    let count = residues.iter().filter(|&&c| c != '-').count() as isize;
+    let count = (residues.iter().filter(|&&c| c != '-').count() + stored_gaps) as isize;
     let start = *next;
     let end = start + step * (count - 1);
     let shown = !(!first_chunk && count == 0 || first_chunk && start == 1 && end == 1);
@@ -1035,6 +1050,12 @@ fn write_sequence_row<W: Write>(
     writeln!(writer)?;
     *next += step * count;
     Ok(())
+}
+
+/// The number of the sorted columns `stored_gaps` in `start..end`.
+fn stored_gaps_between(stored_gaps: &[u32], start: usize, end: usize) -> usize {
+    let below = |column: usize| stored_gaps.partition_point(|&c| (c as usize) < column);
+    below(end) - below(start)
 }
 
 /// Check if two amino acids are a positive match (similar)
@@ -1868,10 +1889,19 @@ fn write_blastp_query_footer_spacing<W: Write>(
     writer: &mut W,
     ungapped_karlin: KarlinParams,
     gapped_karlin: KarlinParams,
-    gumbel: BlastGumbelBlk,
+    gumbel: Option<BlastGumbelBlk>,
     effective_search_space: i64,
     trailing: bool,
 ) -> io::Result<()> {
+    let Some(gumbel) = gumbel else {
+        return write_nucleotide_query_footer_spacing(
+            writer,
+            Some((ungapped_karlin, gapped_karlin)),
+            true,
+            effective_search_space,
+            trailing,
+        );
+    };
     writeln!(writer)?;
     writeln!(writer, "Lambda      K        H        a         alpha")?;
     write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;
@@ -2072,6 +2102,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
             database,
             parsed_subjects,
         },
+        0,
         &hits_by_query,
         subject_titles,
         probe,
@@ -2304,6 +2335,9 @@ pub struct BlastnPairwiseReport {
     pub zero_gap_extension_formula: bool,
     /// The two-hit window (`options.GetWindowSize()`): 40 for dc-megablast.
     pub window_size: usize,
+    /// A gapped search (`options.GetGappedMode()`); an ungapped (`-ungapped`) search has no
+    /// Gapped Karlin block in a query's footer and no `Gap Penalties` line in the epilog.
+    pub gapped: bool,
     /// Subjects in the description table and with alignments, per query.
     pub num_descriptions: usize,
     pub num_alignments: usize,
@@ -2670,6 +2704,7 @@ fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io:
 fn write_nucleotide_query_footer_spacing<W: Write>(
     writer: &mut W,
     karlin: Option<(KarlinParams, KarlinParams)>,
+    gapped: bool,
     effective_search_space: i64,
     trailing: bool,
 ) -> io::Result<()> {
@@ -2682,12 +2717,18 @@ fn write_nucleotide_query_footer_spacing<W: Write>(
         writeln!(writer)?;
     }
     writeln!(writer)?;
-    if let Some((_, gapped)) = karlin {
+    // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1130-1159
+    // ```c++
+    //     if (kbp_ungap) ... PrintKAParameters(kbp_ungap->Lambda, kbp_ungap->K, kbp_ungap->H, ...,  false)
+    //     if (kbp_gap) ... PrintKAParameters(..., true)   ("Gapped")
+    // ```
+    // An ungapped search has no gapped Karlin block (`kbp_gap` is not made).
+    if let Some((_, gapped_block)) = karlin.filter(|_| gapped) {
         writeln!(writer, "Gapped")?;
         writeln!(writer, "Lambda      K        H")?;
-        write_ncbi_ka_field(writer, gapped.lambda)?;
-        write_ncbi_ka_field(writer, gapped.k)?;
-        write_ncbi_ka_field(writer, gapped.h)?;
+        write_ncbi_ka_field(writer, gapped_block.lambda)?;
+        write_ncbi_ka_field(writer, gapped_block.k)?;
+        write_ncbi_ka_field(writer, gapped_block.h)?;
         writeln!(writer)?;
     }
     writeln!(writer)?;
@@ -2774,11 +2815,13 @@ fn write_blastn_final_footer<W: Write>(
     } else {
         f64::from(report.gap_extend)
     };
-    writeln!(
-        writer,
-        "Gap Penalties: Existence: {}, Extension: {}",
-        report.gap_open, gap_extension
-    )?;
+    if report.gapped {
+        writeln!(
+            writer,
+            "Gap Penalties: Existence: {}, Extension: {}",
+            report.gap_open, gap_extension
+        )?;
+    }
     if report.window_size != 0 {
         writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
     }
@@ -2822,10 +2865,12 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
     )
 }
 
-/// Writes the BLASTN pairwise report (outfmt 0).
+/// Writes the BLASTN pairwise report (outfmt 0) of the queries `query_range` of `queries`.
 ///
-/// `hits` is the final hit list of the run in its order (queries in input order, then
-/// subjects and HSPs in result order); each hit's index in it identifies it to the probe.
+/// `hits` is the final hit list of those queries in its order (queries in input order, then
+/// subjects and HSPs in result order); each hit's index in it identifies it to the probe. The
+/// prolog comes with the first query of `queries`, the epilog with the last: the reports of
+/// consecutive ranges written in turn are the report of all of them.
 ///
 /// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1491-1589
 /// ```c++
@@ -2850,11 +2895,13 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
 // Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
 // shared post-processing makes every BLASTN run compile it in Wasm hosts.
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 pub fn write_blastn_pairwise_report<W: Write>(
     hits: &[PairwiseHit],
     writer: &mut W,
     config: &PairwiseConfig,
     queries: &[BlastnPairwiseQuery],
+    query_range: std::ops::Range<usize>,
     subject_titles: &[Arc<[u8]>],
     report: &BlastnPairwiseReport,
     probe: Option<&mut FormatProbe<'_>>,
@@ -2864,7 +2911,10 @@ pub fn write_blastn_pairwise_report<W: Write>(
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
-    if report.prolog {
+    // The prolog with the report's first query, the epilog with its last (`query_range` is all of
+    // `queries`, or one window of a caller that makes the rows a window at a time,
+    // `x_pairwise_par::query_windows`).
+    if report.prolog && query_range.start == 0 {
         write_blastn_pairwise_prolog(
             writer,
             &report.version,
@@ -2875,9 +2925,12 @@ pub fn write_blastn_pairwise_report<W: Write>(
             report.database.as_ref(),
         )?;
     }
-    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
+    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
-        if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
+        if let Some(bucket) = (hit.hit.q_idx as usize)
+            .checked_sub(query_range.start)
+            .and_then(|offset| hits_by_query.get_mut(offset))
+        {
             bucket.push((hsp_index, hit));
         }
     }
@@ -2889,6 +2942,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
             queries,
             report,
         },
+        query_range.start,
         &hits_by_query,
         subject_titles,
         probe,
@@ -2903,7 +2957,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
     // ```
     // An error in a later query batch skips the epilog, and nothing follows the last
     // query's footer. The epilog starts with two blank lines (blast_format.cpp:2249).
-    if report.epilog {
+    if report.epilog && query_range.end == queries.len() {
         writer.write_all(b"\n\n")?;
         write_blastn_final_footer(writer, report)?;
     }
@@ -2945,6 +2999,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
                 write_nucleotide_query_footer_spacing(
                     writer,
                     query.karlin,
+                    report.gapped,
                     query.effective_search_space,
                     false,
                 )?;
@@ -3023,6 +3078,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         write_nucleotide_query_footer_spacing(
             writer,
             query.karlin,
+            self.report.gapped,
             query.effective_search_space,
             false,
         )
@@ -3464,10 +3520,13 @@ fn cpp_default_double(value: f64) -> String {
     }
 }
 
-/// Writes the TBLASTX pairwise report (outfmt 0).
+/// Writes the TBLASTX pairwise report (outfmt 0) of the queries `query_range` of `queries`.
 ///
-/// `hits` is the final hit list of the run in its order (queries in input order, then
-/// subjects and HSPs in result order); each hit's index in it identifies it to the probe.
+/// `hits` is the final hit list of those queries in its order (queries in input order, then
+/// subjects and HSPs in result order); each hit's index in it identifies it to the probe. The
+/// prolog comes with the first query of `queries`, the epilog with the last: the reports of
+/// consecutive ranges written in turn are the report of all of them. The probe numbers the HSPs
+/// over the whole report, so a caller with a probe passes every query (`0..queries.len()`).
 ///
 /// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1491-1589
 /// ```c++
@@ -3497,6 +3556,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     writer: &mut W,
     config: &PairwiseConfig,
     queries: &[TblastxPairwiseQuery],
+    query_range: std::ops::Range<usize>,
     subject_titles: &[Arc<[u8]>],
     report: &TblastxPairwiseReport,
     database: Option<&PairwiseDatabase>,
@@ -3507,7 +3567,9 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
-    if report.prolog {
+    // The prolog with the report's first query, the epilog with its last (`query_range` is all of
+    // `queries`, or one window of a caller that makes the rows a window at a time).
+    if report.prolog && query_range.start == 0 {
         write_tblastx_pairwise_prolog(
             writer,
             &report.version,
@@ -3517,9 +3579,12 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             database,
         )?;
     }
-    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
+    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
-        if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
+        if let Some(bucket) = (hit.hit.q_idx as usize)
+            .checked_sub(query_range.start)
+            .and_then(|offset| hits_by_query.get_mut(offset))
+        {
             bucket.push((hsp_index, hit));
         }
     }
@@ -3532,6 +3597,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             report,
             database,
         },
+        query_range.start,
         &hits_by_query,
         subject_titles,
         probe,
@@ -3545,7 +3611,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     // ```
     // An error in a later query batch skips the epilog, and nothing follows the last
     // query's footer.
-    if report.epilog {
+    if report.epilog && query_range.end == queries.len() {
         write_tblastx_epilog(writer, report, database)?;
     }
     writer.flush()
@@ -4175,6 +4241,116 @@ mod tests {
             let output = String::from_utf8(output).unwrap();
             assert!(output.contains(strand), "{output}");
         }
+    }
+
+    // Line DBID item ID4f: BLASTN's outfmt 0 makes its rows a window of queries at a time and
+    // writes each window's report (`algorithm::blastn::blast_engine::run`); the reports of
+    // consecutive query ranges, each given only its own hits, are the report of all queries,
+    // on one thread and on a pool.
+    #[test]
+    fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
+        let config = PairwiseConfig {
+            program: "blastn".to_string(),
+            show_frame: false,
+            ..PairwiseConfig::default()
+        };
+        let karlin = KarlinParams {
+            lambda: 1.28,
+            k: 0.46,
+            h: 0.85,
+            alpha: 0.0,
+            beta: 0.0,
+        };
+        let queries: Vec<BlastnPairwiseQuery> = (0..4)
+            .map(|q_idx| BlastnPairwiseQuery {
+                query_name: format!("q{q_idx} query {q_idx}").into_bytes(),
+                query_length: 100,
+                karlin: Some((karlin, karlin)),
+                effective_search_space: 10_000,
+            })
+            .collect();
+        let report = BlastnPairwiseReport {
+            version: "2.17.0+".to_string(),
+            megablast: true,
+            database_name: "subjects".to_string(),
+            database_num_sequences: 3,
+            database_total_letters: 300,
+            database: None,
+            reward: 1,
+            penalty: -2,
+            gap_open: 0,
+            gap_extend: 0,
+            zero_gap_extension_formula: true,
+            window_size: 0,
+            gapped: true,
+            num_descriptions: 500,
+            num_alignments: 250,
+            unsearched: vec![false; queries.len()],
+            epilog: true,
+            prolog: true,
+            parsed_subjects: Vec::new(),
+        };
+        // Query 0: subjects 1 (2 HSPs) and 2; query 1: no hits; queries 2 and 3: subject 1.
+        let hits: Vec<PairwiseHit> = [(0, 1), (0, 1), (0, 2), (2, 1), (3, 1)]
+            .into_iter()
+            .map(|(q_idx, s_idx)| {
+                let mut hit = PairwiseHit::from(Hit {
+                    q_idx,
+                    s_idx,
+                    ..make_hit()
+                });
+                hit.query_seq = Some("A".repeat(100));
+                hit.subject_seq = Some("A".repeat(100));
+                hit.gaps = Some(0);
+                hit.subject_length = Some(100);
+                hit
+            })
+            .collect();
+        let titles: Vec<Arc<[u8]>> = (0..3)
+            .map(|s_idx| Arc::from(format!("s{s_idx} subject {s_idx}").as_bytes()))
+            .collect();
+        crate::utils::threading::with_search_pool(4, "test", |pool| {
+            for x_pool in [None, Some(pool)] {
+                let write = |range: std::ops::Range<usize>| {
+                    let range_hits: Vec<PairwiseHit> = hits
+                        .iter()
+                        .filter(|hit| range.contains(&(hit.hit.q_idx as usize)))
+                        .cloned()
+                        .collect();
+                    let mut written = Vec::new();
+                    write_blastn_pairwise_report(
+                        &range_hits,
+                        &mut written,
+                        &config,
+                        &queries,
+                        range,
+                        &titles,
+                        &report,
+                        None,
+                        None,
+                        x_pool,
+                    )
+                    .unwrap();
+                    written
+                };
+                let whole = write(0..queries.len());
+                let text = String::from_utf8(whole.clone()).unwrap();
+                assert!(text.starts_with("BLASTN 2.17.0+"), "{text}");
+                assert_eq!(text.matches("Query= ").count(), queries.len(), "{text}");
+                assert!(text.contains("No hits found"), "{text}");
+                for cuts in [vec![1], vec![2], vec![3], vec![1, 2, 3], vec![1, 3]] {
+                    let mut joined = Vec::new();
+                    let mut start = 0;
+                    for end in cuts.into_iter().chain([queries.len()]) {
+                        joined.extend(write(start..end));
+                        start = end;
+                    }
+                    assert_eq!(String::from_utf8(joined).unwrap(), text);
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[test]
@@ -5268,12 +5444,16 @@ fn write_blastx_alignment(
     };
     let mut qp = hit.hit.q_start as isize;
     let mut sp = hit.hit.s_start;
-    for (qpart, spart) in q
+    for (chunk, (qpart, spart)) in q
         .chunks(config.line_length)
         .zip(s.chunks(config.line_length))
+        .enumerate()
     {
+        let first = chunk * config.line_length;
         let qn = qpart.iter().filter(|&&c| c != b'-').count();
-        let sn = spart.iter().filter(|&&c| c != b'-').count();
+        // The stored gap characters of the subject are residues (`write_sequence_row`).
+        let sn = spart.iter().filter(|&&c| c != b'-').count()
+            + stored_gaps_between(&hit.subject_stored_gaps, first, first + spart.len());
         let qe = qp + direction * (3 * qn as isize - 1);
         let se = sp + sn.saturating_sub(1);
         write!(writer, "Query  ")?;
@@ -5412,7 +5592,134 @@ mod tblastx_tests {
             subject_title: None,
             comp_adjust_method: None,
             sum_n: Some(sum_n),
+            subject_stored_gaps: Vec::new(),
         }
+    }
+
+    // Line DBID item ID4t: TBLASTX's outfmt 0 makes its rows a window of queries at a time and
+    // writes each window's report (`algorithm::tblastx::blast_engine::run_impl`), as BLASTN's
+    // (ID4f, above): the reports of consecutive query ranges, each given only its own hits, are
+    // the report of all queries, on one thread and on a pool.
+    #[test]
+    fn tblastx_reports_of_consecutive_query_ranges_are_the_whole_report() {
+        let config = PairwiseConfig {
+            program: "tblastx".to_string(),
+            ..PairwiseConfig::default()
+        };
+        let karlin = KarlinParams {
+            lambda: 0.3176,
+            k: 0.134,
+            h: 0.4012,
+            alpha: 0.0,
+            beta: 0.0,
+        };
+        let queries: Vec<TblastxPairwiseQuery> = (0..4)
+            .map(|q_idx| TblastxPairwiseQuery {
+                query_name: format!("q{q_idx} query {q_idx}").into_bytes(),
+                query_length: 300,
+                karlin: Some(karlin),
+                effective_search_space: 10_000,
+            })
+            .collect();
+        let report = TblastxPairwiseReport {
+            version: "2.17.0+".to_string(),
+            database_name: "subjects".to_string(),
+            database_num_sequences: 3,
+            database_total_letters: 900,
+            matrix_name: "BLOSUM62".to_string(),
+            word_threshold: 13.0,
+            window_size: 40,
+            num_descriptions: 500,
+            num_alignments: 250,
+            // Query 1 is not searched (a batch without a valid context).
+            unsearched: vec![false, true, false, false],
+            epilog: true,
+            prolog: true,
+            parsed_subjects: Vec::new(),
+        };
+        // Query 0: subjects 1 (2 HSPs) and 2; query 1: no hits; queries 2 and 3: subject 1.
+        let hits: Vec<PairwiseHit> = [(0, 1, 4), (0, 1, 4), (0, 2, 1), (2, 1, 1), (3, 1, 1)]
+            .into_iter()
+            .map(|(q_idx, s_idx, sum_n)| {
+                let mut hit = tblastx_hit(sum_n);
+                hit.hit.q_idx = q_idx;
+                hit.hit.s_idx = s_idx;
+                hit
+            })
+            .collect();
+        let titles: Vec<Arc<[u8]>> = (0..3)
+            .map(|s_idx| Arc::from(format!("s{s_idx} subject {s_idx}").as_bytes()))
+            .collect();
+        // The warnings written before queries 0 and 2 (`QueryWarnings`, by query index).
+        let before: Vec<Vec<u8>> = (0..queries.len())
+            .map(|q_idx| match q_idx {
+                0 | 2 => format!(
+                    "Warning: [tblastx] Query_{} q{q_idx}: a warning\n",
+                    q_idx + 1
+                )
+                .into_bytes(),
+                _ => Vec::new(),
+            })
+            .collect();
+        crate::utils::threading::with_search_pool(4, "test", |pool| {
+            for x_pool in [None, Some(pool)] {
+                // The report and the warnings of the queries `range`.
+                let write = |range: std::ops::Range<usize>| {
+                    let range_hits: Vec<PairwiseHit> = hits
+                        .iter()
+                        .filter(|hit| range.contains(&(hit.hit.q_idx as usize)))
+                        .cloned()
+                        .collect();
+                    let mut written = Vec::new();
+                    let mut diagnostics = Vec::new();
+                    write_tblastx_pairwise_report(
+                        &range_hits,
+                        &mut written,
+                        &config,
+                        &queries,
+                        range,
+                        &titles,
+                        &report,
+                        None,
+                        None,
+                        Some(&mut crate::report::query_warnings::QueryWarnings {
+                            before: &before,
+                            sink: &mut diagnostics,
+                        }),
+                        x_pool,
+                    )
+                    .unwrap();
+                    (written, diagnostics)
+                };
+                let (whole, whole_warnings) = write(0..queries.len());
+                let text = String::from_utf8(whole.clone()).unwrap();
+                assert!(text.starts_with("TBLASTX 2.17.0+"), "{text}");
+                assert_eq!(text.matches("Query= ").count(), queries.len(), "{text}");
+                assert!(text.contains("No hits found"), "{text}");
+                assert!(text.contains("Expect(4)"), "{text}");
+                assert!(text.ends_with("Window for multiple hits: 40\n"), "{text}");
+                assert_eq!(text.matches("Window for multiple hits").count(), 1, "{text}");
+                assert_eq!(
+                    String::from_utf8(whole_warnings.clone()).unwrap(),
+                    "Warning: [tblastx] Query_1 q0: a warning\nWarning: [tblastx] Query_3 q2: a warning\n"
+                );
+                for cuts in [vec![1], vec![2], vec![3], vec![1, 2, 3], vec![1, 3]] {
+                    let mut joined = Vec::new();
+                    let mut joined_warnings = Vec::new();
+                    let mut start = 0;
+                    for end in cuts.into_iter().chain([queries.len()]) {
+                        let (written, warnings) = write(start..end);
+                        joined.extend(written);
+                        joined_warnings.extend(warnings);
+                        start = end;
+                    }
+                    assert_eq!(String::from_utf8(joined).unwrap(), text);
+                    assert_eq!(joined_warnings, whole_warnings);
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
     }
 
     // NCBI c++/src/objtools/align_format/showalign.cpp:3593-3606 and 310-332: Expect(n)

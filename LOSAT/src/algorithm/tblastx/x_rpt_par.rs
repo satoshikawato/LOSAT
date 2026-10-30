@@ -7,14 +7,16 @@
 //! 1.31 s of 8.6 s with outfmt 6 and 3.37 s of 10.6 s with outfmt 0, of which the displayed
 //! identities took 0.99 s (each HSP's codons translated again from the nucleotides), the
 //! outfmt 0 rows 1.80 s (translated a second time, with the masks lowercased), the tabular rows
-//! 0.17 s (outfmt 0's text 0.41 s) and the final order (`report_order`) 0.15 s.
+//! 0.17 s (outfmt 0's text 0.41 s) and the final order (then `report_order` over every batch's
+//! HSPs at once; now `hit_collector.rs` inside each batch's search) 0.15 s.
 //!
 //! What the switch changes (read once per process, `on`), when the pool has two threads or
 //! more (`pool`):
 //! 1. The displayed identities (`report::set_displayed_identities`) run over chunks of the final
 //!    list on the pool, each chunk with the serial function.
 //! 2. The outfmt 0 rows (`report::pairwise_hits`, also the Web adapter's hit records) are an
-//!    indexed parallel map of `PairwiseRows::hit` over the final list, collected in its order.
+//!    indexed parallel map of `PairwiseRows::hit` over the final list, or over the HSPs of one
+//!    window of queries (`run_impl::write_tblastx_outputs`), collected in its order.
 //! 3. The outfmt 6 / 7 rows of a query (`report::write_tabular`) with more than `CHUNK` rows are
 //!    formatted into one buffer per chunk of `CHUNK` rows by the pool's threads, in windows of
 //!    `WINDOW_CHUNKS` chunks per thread; the loop's thread writes a window's buffers in order
@@ -24,8 +26,8 @@
 //!    flushes around every row) the rows are written by the serial function.
 //! With a Seq-align format requested (outfmt 8, 12), the engine counts of the Seq-aligns
 //! (`report::engine_counts`) run over chunks of the final list on the pool as item 1 does.
-//! The final order (`report_order`), the outfmt 0 text (`write_tblastx_pairwise_report`) and the
-//! writes stay on the loop's thread.
+//! The outfmt 0 text (`write_tblastx_pairwise_report`) and the writes stay on the loop's thread
+//! (the final order is made in each batch's search, `hit_collector.rs`).
 //!
 //! Why the bytes are those of the serial stage: every value is computed by the serial code's
 //! function of one HSP (or of one row) on the same inputs (the HSP, the query and subject
@@ -104,7 +106,7 @@ pub(crate) fn write_tabular<W: Write>(
     query_ids: &[Arc<[u8]>],
     subject_ids: &[Arc<[u8]>],
     unsearched: &[bool],
-    epilog: bool,
+    epilog: Option<usize>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> io::Result<()> {
     let config = crate::report::outfmt6::OutputConfig::ncbi_compat();
@@ -144,8 +146,12 @@ pub(crate) fn write_tabular<W: Write>(
     //         tabinfo.PrintNumProcessed(m_QueriesFormatted);
     // ```
     // The same last line as `report::write_tabular`.
-    if comments && epilog {
-        writeln!(writer, "# BLAST processed {} queries", query_titles.len())?;
+    if let (true, Some(queries_before)) = (comments, epilog) {
+        writeln!(
+            writer,
+            "# BLAST processed {} queries",
+            queries_before + query_titles.len()
+        )?;
     }
     Ok(())
 }

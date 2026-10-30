@@ -89,8 +89,7 @@
 //! bytes per hit, applied by swaps), so the stage holds no second copy of them.
 //!
 //! Programs that reach it: BLASTN only (megablast, dc-megablast, blastn, blastn-short), from
-//! `search_query_batch` (the loop, a LOSAT_X_QBATCHPAR slot of two or more threads, and a `-db`
-//! search of a database of one sequence).
+//! `search_query_batch` (the loop, and a `-db` search of a database of one sequence).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;

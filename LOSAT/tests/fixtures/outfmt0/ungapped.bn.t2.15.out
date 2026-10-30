@@ -1,0 +1,112 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 2,
+        "sc_mismatch": -3,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "q208",
+            "query_len": 377,
+            "query_masking": [
+              {
+                "from": 180,
+                "to": 257
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s208",
+                    "title": "s208"
+                  }
+                ],
+                "len": 373,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 390.777,
+                    "score": 426,
+                    "evalue": 3.1007e-113,
+                    "identity": 228,
+                    "query_from": 135,
+                    "query_to": 372,
+                    "query_strand": "Plus",
+                    "hit_from": 238,
+                    "hit_to": 1,
+                    "hit_strand": "Minus",
+                    "align_len": 238,
+                    "gaps": 0,
+                    "qseq": "TAACTAATTTACGAATTAAGGGTCACAAAAATAAGATTGGAAAATCttatttttatatctaatttatttttaattattgttgaaatgattttgaatttaattcaatattattaccatcattattCATTGCTGTTTCCACAAATTCTTCTACACTCATTCCAAAACCAGCTTGTGTAGCTATTTCTATTTTAGAATCATTTGCTTCTGATTCTGTGACTGCTGTAAATCCTACTCCACC",
+                    "hseq": "TAACTAATTTATGAATTAAAGGTCAAAAAAATAAGATTGAAAAATCTTATTTTTATATCTTATTTATTTTTAATTATTGTTGAAATGATTTTGAATTTATTTCAATATTATTTCCATCATTATTCATTGCTGTTTCCACAAATTCTTCTACACTCATTCCAAATACAGCTTGTGTAGCTATTTCTATTTTAGAATCATTTGCTTCTGATTCTGTGACTGCTGTAAATCCAACTCCACC",
+                    "midline": "||||||||||| ||||||| ||||| ||||||||||||| |||||||||||||||||||| |||||||||||||||||||||||||||||||||||||| |||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||  |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 214.32,
+                    "score": 233,
+                    "evalue": 4.07465e-60,
+                    "identity": 127,
+                    "query_from": 1,
+                    "query_to": 134,
+                    "query_strand": "Plus",
+                    "hit_from": 373,
+                    "hit_to": 240,
+                    "hit_strand": "Minus",
+                    "align_len": 134,
+                    "gaps": 0,
+                    "qseq": "TTAAGCATTCTTTCTCCTTAAATTAAGTGGAGTGTAATATTTGTATATTTTACTCTTTTATTGTACCTAAATATACATGTATGTTTGAACTAAAAATTACTGTTGATCAAAATTATTTTCAATCCAAAAATTAT",
+                    "hseq": "TTAAGCATTCTTTCTCCTTAAATTAAGTGGAGTGTAAATTTTGTATATTTTACTCTTTAATTATACCTAAATATACATGTATGTTTGAATTAAAAACTACTGTTGATCAAAATTATTTTAAATCCAAAAATTAT",
+                    "midline": "|||||||||||||||||||||||||||||||||||||  ||||||||||||||||||| ||| |||||||||||||||||||||||||| |||||| |||||||||||||||||||||| ||||||||||||||"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 34.207,
+                    "score": 36,
+                    "evalue": 6.75501e-06,
+                    "identity": 24,
+                    "query_from": 161,
+                    "query_to": 188,
+                    "query_strand": "Plus",
+                    "hit_from": 185,
+                    "hit_to": 212,
+                    "hit_strand": "Plus",
+                    "align_len": 28,
+                    "gaps": 0,
+                    "qseq": "AAAAATAAGATTGGAAAATCttattttt",
+                    "hseq": "AAAAATAAGATTTTTCAATCTTATTTTT",
+                    "midline": "||||||||||||    ||||||||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 9,
+              "eff_space": 133952,
+              "kappa": 0.408145662544724,
+              "lambda": 0.633731443099174,
+              "entropy": 0.91243839227971
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

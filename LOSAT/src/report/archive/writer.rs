@@ -291,9 +291,19 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out.enc.begin_list(false);
     let mut written_search_space = false;
     for param in &request.algorithm {
-        if param.name == "EffectiveSearchSpace" {
+        // `-searchsp` holds the option's place; its value is the batch's (`-searchsp 0` too).
+        if let ("EffectiveSearchSpace", Some(space)) = (param.name, search_space_option) {
             written_search_space = true;
+            write_param(
+                &mut out.enc,
+                &Param {
+                    name: param.name,
+                    value: ParamValue::BigInteger(space),
+                },
+            );
+            continue;
         }
+        written_search_space |= param.name == "EffectiveSearchSpace";
         write_param(&mut out.enc, param);
     }
     if let (Some(space), false) = (search_space_option, written_search_space) {

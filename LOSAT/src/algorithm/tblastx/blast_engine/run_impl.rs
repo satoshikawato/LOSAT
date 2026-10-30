@@ -1224,9 +1224,10 @@ fn search_cli(
     // `-db`: the database opens after the options are processed, before `Query is Empty!`
     // (`TblastxDatabase::open`).
     let database = match args.database_name() {
-        Some(name) => Some(super::super::database::TblastxDatabase::open(
-            name, &settings,
-        )?),
+        Some(name) => Some(
+            super::super::database::TblastxDatabase::open(name, &settings)?
+                .showing_gis(args.show_gis),
+        ),
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104

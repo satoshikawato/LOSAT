@@ -53,6 +53,12 @@ pub(crate) struct TblastxDatabase {
 }
 
 impl TblastxDatabase {
+    /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
+    pub(crate) fn showing_gis(mut self, show_gis: bool) -> Self {
+        self.db.set_reports_show_gis(show_gis);
+        self
+    }
+
     /// Opens the nucleotide database `name` as NCBI's `CSearchDatabase` opens it
     /// (`common::database::open_database`). A total length that LOSAT cannot hold as an index
     /// (above `usize`) or as NCBI's `Int8` is LOSAT's refusal.

@@ -504,7 +504,7 @@ fn run_inner(
             let settings =
                 crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
                     .map_err(anyhow::Error::msg)?;
-            Some(BlastxDatabase::open(name, &settings)?)
+            Some(BlastxDatabase::open(name, &settings)?.showing_gis(args.show_gis))
         }
         None => None,
     };

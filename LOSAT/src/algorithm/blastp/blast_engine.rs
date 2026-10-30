@@ -66,6 +66,9 @@ mod database;
 // EXPERIMENT (LOSAT_X_BPIHPOOL): the arrays of initial hits past NCBI's first size in one pool
 // shared by the threads.
 mod x_ih_pool;
+// EXPERIMENT (LOSAT_X_BPHITSFLAT): a subject's preliminary HSPs grouped by query through one array
+// of their positions.
+mod x_hits_flat;
 // EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel `-subject` loop in runs of subjects, one diagonal
 // table fill per run.
 #[cfg(all(
@@ -76,6 +79,8 @@ mod x_subject_runs;
 // EXPERIMENT (LOSAT_X_BPSUBJMETA): the subjects' tabular IDs and titles of the block search made
 // once for all blocks (held by `x_query_blocks::XBlockSubjects`).
 pub(super) mod x_subject_meta;
+// `-comp_based_stats 0`: NCBI's ordinary traceback in place of the composition-based redo.
+mod traceback;
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{
@@ -274,6 +279,14 @@ struct BlastpSubjectScratch {
     // Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
     // ```
     preliminary_hits_by_query: Vec<Vec<BlastpPreliminaryHsp>>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:112
+    // ```c
+    //       hsp_list_array = calloc(results->num_queries, sizeof(BlastHSPList*));
+    // ```
+    // EXPERIMENT (LOSAT_X_BPHITSFLAT): in place of `preliminary_hits_by_query`, the positions of
+    // the HSPs in query order and each query's start (`x_hits_flat.rs`).
+    x_hits_order: Vec<u32>,
+    x_hits_starts: Vec<u32>,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3748-3786
     // ```c
     // found[query_index] = TRUE;
@@ -555,6 +568,8 @@ impl BlastpSubjectScratch {
             preliminary_hsp_list: Vec::new(),
             preliminary_hsp_counts_by_query: Vec::new(),
             preliminary_hits_by_query: Vec::new(),
+            x_hits_order: Vec::new(),
+            x_hits_starts: Vec::new(),
             restricted_align_found: Vec::new(),
             restricted_align_array: Vec::new(),
             preliminary_gap_scratch: GapAlignScratch::new(),
@@ -1430,8 +1445,8 @@ fn blastp_preliminary_cutoff_subject_length(subjects: &[EncodedProtein]) -> i32 
 // The preliminary HSP list of a subject for a query with the compact element, with the E-values
 // `Blast_HSPListGetEvalues` gives (`x_prelim_compact.rs`).
 #[allow(clippy::too_many_arguments)]
-fn x_build_compact_preliminary_hsp_list(
-    preliminary_hits: &[BlastpPreliminaryHsp],
+fn x_build_compact_preliminary_hsp_list<'h>(
+    preliminary_hits: impl ExactSizeIterator<Item = &'h BlastpPreliminaryHsp>,
     oid: u32,
     query_index: u32,
     query_length: usize,
@@ -1440,7 +1455,6 @@ fn x_build_compact_preliminary_hsp_list(
     gumbel_params: &BlastGumbelBlk,
 ) -> BlastpHspList<XPrelimHsp> {
     let hsps: Vec<XPrelimHsp> = preliminary_hits
-        .iter()
         .map(|hit| XPrelimHsp {
             hsp: *hit,
             e_value: blast_spouge_stoe(
@@ -2232,7 +2246,11 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} (NCBI BLAST+ 2.17.0 gives different reports for the same search)"
         );
     }
-    if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust {
+    // Mode 0 runs BLASTP's ordinary traceback (`traceback.rs`); psiblast's rounds keep mode 2.
+    if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust
+        && !(args.app == BlastpApp::Blastp
+            && args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats)
+    {
         bail!(
             "-comp_based_stats {} is not supported by LOSAT's {program}",
             args.comp_based_stats.to_ncbi_cli_string()
@@ -4958,11 +4976,10 @@ fn search_cli(
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
     let database = match resolved.db.as_deref() {
-        Some(name) => Some(database::BlastpDatabase::open(
-            name,
-            &settings,
-            args.app == BlastpApp::Blastp,
-        )?),
+        Some(name) => Some(
+            database::BlastpDatabase::open(name, &settings, args.app == BlastpApp::Blastp)?
+                .showing_gis(args.show_gis),
+        ),
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
@@ -9019,66 +9036,83 @@ fn run_resolved_in_pool(
                 endpoint_duplicates_purged,
             );
         }
-        let mut preliminary_hits_by_query = std::mem::take(&mut scratch.preliminary_hits_by_query);
-        split_preliminary_hits_by_query_into(
-            &mut preliminary_hsp_list,
-            &contexts,
-            query_ids.len(),
-            &mut preliminary_hits_by_query,
-        );
-        for (q_idx, preliminary_hits) in preliminary_hits_by_query
-            .iter_mut()
-            .take(query_ids.len())
-            .enumerate()
-        {
-            if preliminary_hits.is_empty() {
-                continue;
-            }
-            let ctx = &contexts[q_idx as usize];
-            // The compact list, with the E-values of `Blast_HSPListGetEvalues` and the reap by the
-            // preliminary E-value (`x_prelim_compact.rs`); a list that keeps HSPs gives back the
-            // room of the reaped ones (`x_prelim_free.rs`).
-            let mut compact_hsp_list = x_build_compact_preliminary_hsp_list(
-                preliminary_hits.as_slice(),
+        if x_hits_flat::x_bphitsflat() {
+            x_hits_flat::x_lists_by_query(
+                &mut preliminary_hsp_list,
+                &contexts,
+                query_ids.len(),
+                &mut scratch.x_hits_order,
+                &mut scratch.x_hits_starts,
                 s_idx as u32,
-                q_idx as u32,
-                ctx.aa_len,
                 subject.aa_len,
                 &gapped_params,
                 &gapped_gumbel,
+                prelim_evalue,
+                subject_result,
             );
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1523-1539
-            // ```c
-            // Blast_HSPListGetEvalues(program_number, query_info,
-            //                         stat_length, hsp_list,
-            //                         gapped_calculation, FALSE,
-            //                         sbp, 0, 1.0);
-            // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
-            // ```
-            //
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:640-670
-            // ```c
-            // cutoff = hit_params->prelim_evalue;
-            // ...
-            // if (hsp->evalue > cutoff) {
-            //     hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-            // }
-            // ```
-            reap_hsplist_by_evalue(&mut compact_hsp_list, prelim_evalue);
-            if !compact_hsp_list.hsps.is_empty() {
-                compact_hsp_list.hsps.shrink_to_fit();
-                subject_result
-                    .x_compact_hsp_lists
-                    .push((q_idx, compact_hsp_list));
+        } else {
+            let mut preliminary_hits_by_query =
+                std::mem::take(&mut scratch.preliminary_hits_by_query);
+            split_preliminary_hits_by_query_into(
+                &mut preliminary_hsp_list,
+                &contexts,
+                query_ids.len(),
+                &mut preliminary_hits_by_query,
+            );
+            for (q_idx, preliminary_hits) in preliminary_hits_by_query
+                .iter_mut()
+                .take(query_ids.len())
+                .enumerate()
+            {
+                if preliminary_hits.is_empty() {
+                    continue;
+                }
+                let ctx = &contexts[q_idx as usize];
+                // The compact list, with the E-values of `Blast_HSPListGetEvalues` and the reap by the
+                // preliminary E-value (`x_prelim_compact.rs`); a list that keeps HSPs gives back the
+                // room of the reaped ones (`x_prelim_free.rs`).
+                let mut compact_hsp_list = x_build_compact_preliminary_hsp_list(
+                    preliminary_hits.iter(),
+                    s_idx as u32,
+                    q_idx as u32,
+                    ctx.aa_len,
+                    subject.aa_len,
+                    &gapped_params,
+                    &gapped_gumbel,
+                );
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1523-1539
+                // ```c
+                // Blast_HSPListGetEvalues(program_number, query_info,
+                //                         stat_length, hsp_list,
+                //                         gapped_calculation, FALSE,
+                //                         sbp, 0, 1.0);
+                // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
+                // ```
+                //
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:640-670
+                // ```c
+                // cutoff = hit_params->prelim_evalue;
+                // ...
+                // if (hsp->evalue > cutoff) {
+                //     hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+                // }
+                // ```
+                reap_hsplist_by_evalue(&mut compact_hsp_list, prelim_evalue);
+                if !compact_hsp_list.hsps.is_empty() {
+                    compact_hsp_list.hsps.shrink_to_fit();
+                    subject_result
+                        .x_compact_hsp_lists
+                        .push((q_idx, compact_hsp_list));
+                }
+                preliminary_hits.clear();
             }
-            preliminary_hits.clear();
+            scratch.preliminary_hits_by_query = preliminary_hits_by_query;
         }
         scratch.restricted_align_array = restricted_align_array;
         scratch.restricted_align_array.clear();
         scratch.preliminary_hsp_counts_by_query = preliminary_hsp_counts_by_query;
         scratch.preliminary_hsp_counts_by_query.clear();
         scratch.preliminary_hsp_list = preliminary_hsp_list;
-        scratch.preliminary_hits_by_query = preliminary_hits_by_query;
     };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1498
@@ -9422,7 +9456,10 @@ fn run_resolved_in_pool(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_win_expand = false;
-    if x_compact_expand_all && !x_win_expand {
+    // `-comp_based_stats 0`: the ordinary traceback below reads the compact lists as they are.
+    let ordinary_traceback =
+        args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats;
+    if x_compact_expand_all && !x_win_expand && !ordinary_traceback {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
 
@@ -9443,6 +9480,31 @@ fn run_resolved_in_pool(
     // hits are freed, as the subject loop's scratches freed theirs.
     x_ih_pool::release();
     let kappa_redo_start = blastp_timing_start(timing_enabled);
+    // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
+    // preliminary list here, so the composition-based redo below finds none; its hit lists
+    // replace the redo's after it.
+    let ordinary_hit_lists = if ordinary_traceback {
+        let ordinary = traceback::OrdinaryTraceback {
+            contexts: &contexts,
+            total_query_span,
+            subjects,
+            matrix: args.scoring.matrix,
+            gap_open: args.scoring.gap_open,
+            gap_extend: args.scoring.gap_extend,
+            x_drop_final: x_drop_gapped_final,
+            karlin: &gapped_params,
+            gumbel: &gapped_gumbel,
+            expect_value: args.evalue,
+            hitlist_size: args.traceback_hitlist_size(),
+        };
+        Some(ordinary.run(
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            blastp_parallel_pool,
+        )?)
+    } else {
+        None
+    };
     // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2228-2236
     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
     // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
@@ -9749,7 +9811,7 @@ fn run_resolved_in_pool(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if x_redo_par_switch {
+    if x_redo_par_switch && !ordinary_traceback {
         crate::utils::xreach::x_reach!("LOSAT_X_BPREDOPAR", x_redo_par_on);
     }
     #[cfg(all(
@@ -9772,21 +9834,24 @@ fn run_resolved_in_pool(
     // one-thread loop shares none.
     // The serial and the query-parallel redo loops solve the first Newton problems of the next
     // `X_NEWTON_LANES_MATCHES` matches ahead (Newton lanes); the match-parallel redo solves none.
-    crate::utils::xreach::x_reach!(
-        "LOSAT_X_SEGSHARE",
-        x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
-    );
-    crate::utils::xreach::x_reach!(
-        "LOSAT_X_NEWTONLANES",
-        x_redo_par_run || !use_parallel_kappa_match_redo
-    );
+    // With `-comp_based_stats 0` no redo runs, so neither side is reached.
+    if !ordinary_traceback {
+        crate::utils::xreach::x_reach!(
+            "LOSAT_X_SEGSHARE",
+            x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
+        );
+        crate::utils::xreach::x_reach!(
+            "LOSAT_X_NEWTONLANES",
+            x_redo_par_run || !use_parallel_kappa_match_redo
+        );
+    }
     // EXPERIMENT (LOSAT_X_BPSEGWIN): a redo not in windows empties no store; the windows record
     // their side (`x_redo_par::x_redo`).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if super::x_redo_par::x_bp_seg_win().is_some() && !x_redo_par_on {
+    if super::x_redo_par::x_bp_seg_win().is_some() && !x_redo_par_on && !ordinary_traceback {
         crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", false);
     }
     if x_redo_par_run {
@@ -10482,6 +10547,9 @@ fn run_resolved_in_pool(
     }
     let mut hit_lists =
         fill_results_from_compo_heaps(args.traceback_hitlist_size(), &mut redone_matches);
+    if let Some(ordinary_hit_lists) = ordinary_hit_lists {
+        hit_lists = ordinary_hit_lists;
+    }
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(
             &timing.kappa_redo_ns,
@@ -11961,6 +12029,7 @@ mod tests {
             subject: Some(PathBuf::from("subject.faa")),
             db: None,
             dbsize: None,
+            show_gis: false,
             task: "blastp".to_string(),
             evalue: None,
             threshold: None,
@@ -13213,6 +13282,57 @@ mod tests {
         assert_eq!(hits_by_query[1].len(), 2);
         assert_eq!(hits_by_query[1][0].subject_start, 100);
         assert_eq!(hits_by_query[1][1].subject_start, 130);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:119-132
+    // ```c
+    //          query_index = Blast_GetQueryIndexFromContext(hsp->context, program);
+    // ...
+    //          Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
+    // ```
+    // LOSAT_X_BPHITSFLAT: the counting order lists each query's HSPs as the per-query vectors do,
+    // for random contexts, including a query index past `num_queries` (left out by both).
+    #[test]
+    fn x_hits_flat_order_matches_the_per_query_vectors() {
+        let contexts: Vec<QueryContext> = (0..5u32)
+            .map(|q| make_query_context(q, q as i32 * 1000))
+            .collect();
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % n
+        };
+        let mut order = Vec::new();
+        let mut starts = Vec::new();
+        for round in 0..200 {
+            let len = next(40) as usize;
+            let hits: Vec<BlastpPreliminaryHsp> = (0..len)
+                .map(|index| {
+                    let mut hsp = make_preliminary_hsp(
+                        index as u32,
+                        index as i32,
+                        index as i32 + 10,
+                        round,
+                        round + 10,
+                        next(100) as i32,
+                    );
+                    hsp.query_context = next(5) as i32;
+                    hsp
+                })
+                .collect();
+            let num_queries = 1 + (round as usize % 5);
+            x_hits_flat::order_by_query(&hits, &contexts, num_queries, &mut order, &mut starts);
+            let by_query = split_preliminary_hits_by_query(hits.clone(), &contexts, num_queries);
+            assert_eq!(starts.len(), num_queries + 1);
+            for (q, expected) in by_query.iter().enumerate().take(num_queries) {
+                let run = &order[starts[q] as usize..starts[q + 1] as usize];
+                let got: Vec<u32> = run.iter().map(|&i| hits[i as usize].q_idx).collect();
+                let want: Vec<u32> = expected.iter().map(|hsp| hsp.q_idx).collect();
+                assert_eq!(got, want, "round {round} query {q}");
+            }
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:289-318

@@ -79,6 +79,16 @@ pub struct TblastnArgs {
     // (`stage_d_pipeline::SubjectSetNumbers`).
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
+    // ```c++
+    //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
+    // ```
+    #[arg(
+        long = "show_gis",
+        default_value_t = false,
+        help = "Show NCBI GIs in deflines?"
+    )]
+    pub show_gis: bool,
     // `tblastn-fast`: word size 5, the compressed lookup table and threshold 20 (`resolve`).
     #[arg(long, default_value = "tblastn", value_parser = task_parser(&["tblastn", "tblastn-fast"], &[]))]
     pub task: String,

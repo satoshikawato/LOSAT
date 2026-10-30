@@ -598,7 +598,7 @@ fn refseq_source_accession(accession: &[u8]) -> bool {
 }
 
 /// `BioseqIds` of the Seq-ids `ids` of a Bioseq.
-fn bioseq_ids(ids: &[ParsedSeqId]) -> BioseqIds {
+pub(crate) fn bioseq_ids(ids: &[ParsedSeqId]) -> BioseqIds {
     let mut flags = BioseqIds::default();
     for id in ids {
         match id {

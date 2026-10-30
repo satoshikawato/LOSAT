@@ -6,6 +6,8 @@
 
 #[path = "../blastdbcmd_info.rs"]
 mod blastdbcmd_info;
+#[path = "../blastdbcmd_retrieve.rs"]
+mod blastdbcmd_retrieve;
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;
 #[path = "../cli_v2.rs"]

@@ -14,7 +14,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use run_local_support::{
-    assert_observer_ranges, reader_records, run_formats, temp_path, Run, TempFasta,
+    assert_observer_ranges, cli_out_path, reader_records, run_formats, temp_path, Run, TempFasta,
 };
 use LOSAT::algorithm::tblastn::TblastnArgs;
 use LOSAT::api::local_blast::{run_local_tblastn, FormatOutput, OutputSink, ReportOutputs};
@@ -229,7 +229,7 @@ impl Drop for Inputs {
 
 /// The CLI output file and standard error of one single-format run.
 fn cli(inputs: &Inputs, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
-    let out = inputs.query.with_extension(format!("cli{outfmt}.out"));
+    let out = cli_out_path(&inputs.query, outfmt);
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("tblastn")
         .arg("-query")

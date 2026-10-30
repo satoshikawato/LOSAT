@@ -315,7 +315,13 @@ fn x_evaluate_gapped_full(
 //    }
 // ```
 pub fn reap_preliminary(list: &mut LinkedHspList, options: &ResolvedOptions) -> Vec<LinkedHsp> {
-    let cutoff = options.evalue * if options.composition > 0 { 5.0 } else { 1.0 };
+    // `params->prelim_evalue = evalue` without a Gumbel block (blast_parameters.c:931-935).
+    let cutoff = options.evalue
+        * if options.composition > 0 && !options.old_fsc {
+            5.0
+        } else {
+            1.0
+        };
     let mut deleted = Vec::new();
     list.hsps.retain(|h| {
         if h.evalue > cutoff {

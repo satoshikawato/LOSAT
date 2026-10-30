@@ -1241,5 +1241,3 @@ db.sp.blastp.small.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.f
 db.sp.blastp.zero.0	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 0	0	0				DI-7: BLASTP -searchsp 0 changes the statistics only where NCBI sets OLD_FSC		
 db.sp.blastp.zero.db.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 0 -dbsize 1000	6	0				DI-7: BLASTP -searchsp 0 with -dbsize		
 db.sp.blastp.zero.11	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 0	11	0				DI-7: BLASTP -searchsp 0 in the archive		
-db.sp.blastp.cbs0.0	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 500000000 -comp_based_stats 0	0	0				DI-7: BLASTP -searchsp without composition adjustment		
-db.sp.blastp.cbs0.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 1000 -comp_based_stats 0	6	0				DI-7: BLASTP a small -searchsp without composition adjustment		

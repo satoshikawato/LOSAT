@@ -1248,7 +1248,7 @@ fn search_cli(
     }) {
         args.tabular_taxdb = Some(match database.as_ref() {
             Some(database) => database.taxdb_found(),
-            None => crate::algorithm::common::tabular::subject_taxdb_found(&settings, "TBLASTX")?,
+            None => crate::algorithm::common::database::subject_taxdb_found(&settings, "TBLASTX")?,
         });
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
@@ -1806,6 +1806,10 @@ pub(crate) struct TblastxReportRun<'a> {
     /// `-db`, a custom tabular report that shows a taxonomy field: the taxonomy of each reported
     /// sequence by rank (`TblastxDatabase::tabular_taxonomy`; empty otherwise).
     pub tabular_taxonomy: &'a [crate::report::tabular::TabularTaxonomy],
+    /// `-db`: the names of the taxonomy database that the rows of the run's custom report (the
+    /// command line's one `-outfmt`) look up (`TblastxDatabase::tabular_names`); `None`: every
+    /// lookup fails (no name field, no `taxdb.bti`, `-subject`).
+    pub tabular_names: Option<&'a crate::report::tabular::TabularNames>,
     /// Whether ABI v1's rejection of outfmt 0 titles applies (`V1Checks`).
     pub v1_titles: bool,
     /// The queries of each batch searched, in order (the documents of the BLAST archive).
@@ -2937,6 +2941,15 @@ fn run_batch_loop(
         .formats
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
+    // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0 too,
+    // which the prefetch does not: the rows of a batch with hits may open the taxonomy database
+    // before a later batch's prefetch (`TaxdbRun::open_for_rows`).
+    let plural_names = outputs.formats.first().is_some_and(|format| {
+        matches!(
+            report::output_format(format.outfmt),
+            report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
+        )
+    });
     // A batch is read from the input records (`input_start..input_end`); its searched
     // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
     // whole records, and a record whose range starts past its end is skipped
@@ -3265,6 +3278,9 @@ fn run_batch_loop(
                     ordered,
                     &reports.titles.borrow(),
                 )?;
+                if plural_names && !ordered.is_empty() {
+                    database.open_for_tabular_rows()?;
+                }
                 warnings[start].extend(messages);
             }
         }
@@ -3511,6 +3527,21 @@ impl BatchReports<'_> {
             }
             _ => Vec::new(),
         };
+        // And the names of the taxonomy database that its rows look up (with their refusals,
+        // before any byte).
+        let custom_tabular = outputs
+            .formats
+            .iter()
+            .find_map(|format| match report::output_format(format.outfmt) {
+                report::TblastxOutputFormat::CustomTabular(spec) => Some(spec),
+                _ => None,
+            });
+        let tabular_names = match (&self.subjects, custom_tabular) {
+            (ShownSubjects::Database { database, .. }, Some(spec)) => {
+                database.tabular_names(spec, &tabular_taxonomy)?
+            }
+            _ => None,
+        };
         let written = write_tblastx_outputs(
             hits,
             outputs,
@@ -3530,6 +3561,7 @@ impl BatchReports<'_> {
                 numbers: self.numbers,
                 xml_taxa: &xml_taxa,
                 tabular_taxonomy: &tabular_taxonomy,
+                tabular_names: tabular_names.as_ref(),
                 v1_titles: self.v1_titles,
                 archive_spans: &done.spans,
                 x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),

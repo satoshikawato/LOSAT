@@ -1,0 +1,8 @@
+Warning: [tblastn] Query_1 BDT62569.1 wsv282.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [tblastn] Query_2 BDT62529.1 innexi.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [tblastn] Query_3 BDT62562.1 wsv306.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [tblastn] Query_4 BDT62620.1 wsv325.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [tblastn] Query_5 BDT62567.1 wsv332.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [tblastn] Query_6 BDT62581.1 wsv303.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [tblastn] Query_7 BDT63274.1 hypoth.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [tblastn] Query_8 BDT62533.1 dUTPas.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 

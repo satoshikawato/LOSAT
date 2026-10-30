@@ -1,0 +1,20 @@
+# BLASTX 2.17.0+
+# Query: qn1 query protein one, back-translated
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bp_s.faa)
+# Fields: query id, subject id, evalue
+# 2 hits found
+qn1,sp1,5.89e-94
+qn1,sp2,3.14e-67
+# BLASTX 2.17.0+
+# Query: qn2 unrelated protein, back-translated
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bp_s.faa)
+# Fields: query id, subject id, evalue
+# 3 hits found
+qn2,sp2,0.069
+qn2,sp1,1.4
+qn2,sp1,1.7
+# BLASTX 2.17.0+
+# Query: qnnone no hits
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bp_s.faa)
+# 0 hits found
+# BLAST processed 3 queries

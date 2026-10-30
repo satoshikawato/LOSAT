@@ -395,7 +395,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "sorthsps"
             | "taxidlist"
             | "taxids"
-            | "ungapped"
             | "version"
             | "window_masker_taxid"
             | "window_size"

@@ -801,7 +801,7 @@ fn numeric_values_are_validated_before_io() {
     };
     assert_eq!(args.gap_open, Some(0));
     // NCBI's other blastn tasks and options are rejected explicitly (AGENTS.md rule 2).
-    for extra in [&["-task", "rmblastn"][..], &["-ungapped"], &["-version"]] {
+    for extra in [&["-task", "rmblastn"][..], &["-version"]] {
         let mut words = vec!["-outfmt", "6"];
         words.extend_from_slice(extra);
         let error = LOSAT::cli::render_message(&parse("blastn", &words).unwrap_err());
@@ -810,6 +810,18 @@ fn numeric_values_are_validated_before_io() {
             "{extra:?}: {error}"
         );
     }
+    // `-ungapped` is NCBI's flag (blast_args.cpp:917) and LOSAT's BLASTN searches with it (O4a).
+    let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-ungapped"])
+        .unwrap()
+        .command
+    else {
+        unreachable!("blastn")
+    };
+    assert!(args.ungapped);
+    let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6"]).unwrap().command else {
+        unreachable!("blastn")
+    };
+    assert!(!args.ungapped);
     assert!(parse("blastn", &["-outfmt", "6", "-task", "BLASTN"]).is_err());
     // `-strand` is NCBI's (blast_args.cpp:1953-1955): plus, minus and both are accepted, any
     // other value is a clap error (LOSAT's rule for argument errors, rc 2).
@@ -1034,19 +1046,12 @@ enum Outfmt {
 }
 
 const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
-const CUSTOM: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
-/// The programs that check their own field lists and take no delimiter (line CLI C2 moves them to
-/// the shared tabular writer in its PR 3).
-const OWN_FIELDS: &[&str] = &["blastp", "blastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
 /// The programs that write every field, a delimiter and outfmt 10 and 20 with the shared tabular
-/// writer (line CLI C2: BLASTN in PR 1, TBLASTN and TBLASTX in PR 2), and the others.
-const SHARED: &[&str] = &["blastn", "tblastn", "tblastx"];
-const NOT_SHARED: &[&str] = &["blastp", "blastx"];
+/// writer: all of them (line CLI C2: BLASTN in PR 1, TBLASTN and TBLASTX in PR 2, BLASTP and
+/// BLASTX in PR 3).
+const SHARED: &[&str] = ALL;
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
-const DELIMITER: Outfmt = Outfmt::Losat(
-    "a custom delimiter (delim=) in the output format is not supported by LOSAT's {P}",
-);
 const OUT_OF_RANGE: Outfmt = Outfmt::Ncbi(255, "Error: Formatting choice is out of range\n");
 const INVALID_DELIMITER: Outfmt = Outfmt::Ncbi(
     1,
@@ -1074,13 +1079,11 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "0 delim=,", None, Writes(Pairwise)),
         (ALL, "6 delim=", None, Writes(Tabular)),
         (ALL, "7 delim= ", None, Writes(TabularWithComments)),
-        // Custom fields (BLASTP and BLASTX check their own lists; BLASTN, TBLASTN and TBLASTX write
-        // every field and a delimiter with the shared tabular writer, line CLI C2) and delimiters.
-        (CUSTOM, "6 std", None, Writes(Tabular)),
-        (CUSTOM, "07 std", None, Writes(TabularWithComments)),
-        (CUSTOM, "6 qseqid sseqid pident length", None, Writes(Tabular)),
-        (OWN_FIELDS, "6 delim=, std", None, DELIMITER),
-        (OWN_FIELDS, "6 delim=;", None, DELIMITER),
+        // Custom fields (every program writes every field and a delimiter with the shared
+        // tabular writer, line CLI C2) and delimiters.
+        (SHARED, "6 std", None, Writes(Tabular)),
+        (SHARED, "07 std", None, Writes(TabularWithComments)),
+        (SHARED, "6 qseqid sseqid pident length", None, Writes(Tabular)),
         (SHARED, "7  qaccver", None, Writes(TabularWithComments)),
         (SHARED, "6 delim=,", None, Writes(Tabular)),
         (SHARED, "6 delimiter=;", None, Writes(Tabular)),
@@ -1121,11 +1124,9 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "2", None, UNSUPPORTED),
         (ALL, "3", None, UNSUPPORTED),
         (ALL, "4", None, UNSUPPORTED),
-        (NOT_SHARED, "10", None, UNSUPPORTED),
         (ALL, "18", None, UNSUPPORTED),
-        (NOT_SHARED, "20", None, UNSUPPORTED),
-        // Line CLI C2 (PRs 1 and 2): BLASTN, TBLASTN and TBLASTX write 10 and 20 with the shared
-        // tabular writer.
+        // Line CLI C2: BLASTN (PR 1), TBLASTN and TBLASTX (PR 2), BLASTP and BLASTX (PR 3) write 10
+        // and 20 with the shared tabular writer.
         (SHARED, "10", None, Writes(CommaSeparatedValues)),
         (SHARED, "10 delim=; qseqid sseqid", None, Writes(CommaSeparatedValues)),
         (SHARED, "20", None, Writes(CommaSeparatedValuesWithHeader)),

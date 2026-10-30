@@ -28,8 +28,8 @@ LOSAT/target/blastn_regression/ (outfmt 6 prints no file names).
 
 Usage:
   blastn_regression_fixtures.py generate
-  blastn_regression_fixtures.py freeze --oracle /path/to/blastn
-  blastn_regression_fixtures.py check --losat BIN [--jobs N] [--out TSV]
+  blastn_regression_fixtures.py freeze --oracle /path/to/blastn [--only PREFIX]
+  blastn_regression_fixtures.py check --losat BIN [--jobs N] [--out TSV] [--threads N] [--only PREFIX]
 """
 from __future__ import annotations
 
@@ -78,6 +78,15 @@ WMC = "tests/winmask/counts/mg1655_u9.obinary"
 WMB = "tests/winmask/counts/dm2L_u9.binary"
 AB = f"-query {I}/culling_abricate_query.fa -subject {I}/culling_abricate_genes.fa -task blastn -dust no" \
      " -perc_identity 80 -evalue 1E-20 -max_target_seqs 10000"
+# O4a (blastn -ungapped): the inputs of generate_ungapped_inputs (the t2 pair, rep, B and A are the ones above).
+T2 = f"-query {I}/t2_query.fa -subject {I}/t2_subject.fa"
+AMB = f"-query {I}/ambrun_q.fa -subject {I}/ambrun_s.fa"
+RE = f"-query {I}/re_q.fa -subject {I}/re_s.fa"
+EDLU = f"-query {R}/edl_ungapped_q.fa -subject tests/fasta/EDL933.fna"
+MX = f"-query {I}/mix_q.fa -subject {I}/mix_s.fa"
+SM = f"-query {I}/strand_mixed_query.fa -subject {I}/s60k.fa"
+MLST = f"-query {I}/culling_abricate_query.fa -subject {I}/culling_abricate_genes.fa -ungapped -dust no" \
+       " -word_size 32 -max_target_seqs 100000 -perc_identity 95 -evalue 1E-20"
 DCQ = f"-query {O}/dc_query.fasta -subject {O}/dc_subject.fasta"
 DC = f"{DCQ} -task dc-megablast"
 DVQ = f"-query {O}/dc_div_query.fasta -subject {O}/dc_div_subject.fasta"
@@ -479,6 +488,76 @@ _CASES = [
     ("wm.fmt16", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 16", ""),
     ("wm.fmt15", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 15", ""),
 ]
+
+
+def _ungapped_cases():
+    """Line NP O4a: `-ungapped` (NCBI blast_args.cpp:917,929) in the four tasks, with the options that
+    change the preliminary stage's result list (culling, -max_hsps, -qcov_hsp_perc, -strand, -perc_identity,
+    -subject_besthit), scores without Karlin tables, gap costs, the query split (CHUNK_SIZE), the
+    ambiguity re-evaluation, and the formats that O4a-1 writes (0, 6, 7)."""
+    tasks = (("mb", ""), ("bn", "-task blastn "), ("dc", "-task dc-megablast "), ("short", "-task blastn-short "))
+    cases = []
+    for key, task in tasks:
+        for name, inputs in (("t2", T2), ("p", P), ("mq", B), ("amb", A), ("ambrun", AMB), ("reeval", RE)):
+            # blastn-short with the 60 kb subject and many queries has hundreds of thousands of HSPs at the
+            # default E-value (2 MB of output); 1e-3 keeps the batch and the many hits of a short query.
+            small = " -evalue 1e-3" if (key, name) == ("short", "mq") else ""
+            cases.append((f"ungapped.{key}.{name}", f"{inputs} {task}-ungapped{small} -outfmt 6", ""))
+    for key, task in tasks[:2]:
+        for name, option in (("cl1", "-culling_limit 1"), ("cl2", "-culling_limit 2"), ("mh1", "-max_hsps 1"),
+                             ("qcov50", "-qcov_hsp_perc 50"), ("plus", "-strand plus"), ("minus", "-strand minus"),
+                             ("pid95", "-perc_identity 95"), ("sbh", "-subject_besthit"),
+                             ("mts1", "-max_target_seqs 1")):
+            cases.append((f"ungapped.{key}.rep_{name}", f"{RP} {task}-ungapped {option} -outfmt 6", ""))
+        for name, option in (("cl1", "-culling_limit 1"), ("mh1", "-max_hsps 1"), ("qcov20", "-qcov_hsp_perc 20"),
+                             ("minus", "-strand minus"), ("sbh", "-subject_besthit")):
+            cases.append((f"ungapped.{key}.mix_{name}", f"{MX} {task}-ungapped {option} -outfmt 6", ""))
+        cases.append((f"ungapped.{key}.t2_fmt0", f"{T2} {task}-ungapped -outfmt 0", ""))
+        cases.append((f"ungapped.{key}.mq_fmt7", f"{B} {task}-ungapped -outfmt 7", ""))
+        cases.append((f"ungapped.{key}.mq_c2000", f"{B} {task}-ungapped -outfmt 6", "", "CHUNK_SIZE=2000"))
+    # Ties (review M1): a query X + revcomp(X) has plus and minus HSPs of the same score and range; the
+    # order of those comes from the initial hits' sort by score (na_ungapped.c:1691-1692).
+    cases.append(("ungapped.mb.pal", f"{PL} -ungapped -outfmt 6", ""))
+    cases.append(("ungapped.dc.pal", f"{PL} -task dc-megablast -ungapped -outfmt 6", ""))
+    # A subject above 5 Mb is searched in chunks that are joined without a gap (review S3): a 600 bp piece of
+    # EDL933 at 4,999,701 with a one base deletion and a mismatch, against the whole EDL933 (5,528,445 bp);
+    # the HSP crosses the chunk border at 5,000,000 (made at run time, prepare_runtime_inputs).
+    for key, task in (("mb", ""), ("bn", "-task blastn "), ("dc", "-task dc-megablast ")):
+        cases.append((f"ungapped.{key}.edl", f"{EDLU} {task}-ungapped -outfmt 6", ""))
+    cases.append(("ungapped.mb.mix_qloc", f"{MX} -ungapped -query_loc 150-750 -outfmt 6", ""))
+    cases.append(("ungapped.mb.mix_sloc", f"{MX} -ungapped -subject_loc 50-700 -outfmt 6", ""))
+    for name, reward, penalty in (("1_6", 1, -6), ("3_1", 3, -1), ("2_7", 2, -7), ("5_4", 5, -4),
+                                  ("1_1", 1, -1), ("2_2", 2, -2)):
+        cases.append((f"ungapped.bn.t2_rp{name}",
+                      f"{T2} -task blastn -ungapped -reward {reward} -penalty {penalty} -outfmt 6", ""))
+    cases.append(("ungapped.bn.t2_go5ge0", f"{T2} -task blastn -ungapped -gapopen 5 -gapextend 0 -outfmt 6", ""))
+    cases.append(("ungapped.mb.t2_go40000",
+                  f"{T2} -task megablast -ungapped -gapopen 40000 -gapextend 40000 -outfmt 6", ""))
+    cases.append(("ungapped.bn.t2_go0ge0", f"{T2} -task blastn -ungapped -gapopen 0 -gapextend 0 -outfmt 6", ""))
+    cases.append(("ungapped.bn.inval_fmt7", f"{SM} -task blastn -ungapped -outfmt 7", ""))
+    cases.append(("ungapped.bn.alln_fmt0", f"-query {I}/ungapped_alln_query.fa -subject {I}/s60k.fa -task blastn"
+                                           " -ungapped -outfmt 0", ""))
+    cases.append(("ungapped.mlst", f"{MLST} -outfmt 6", ""))
+    cases.append(("ungapped.mlst_fmt0", f"{MLST} -outfmt 0", ""))
+    # The custom tabular reports (line CLI, C2) of an ungapped search: mlst's real call, and the columns whose values an
+    # ungapped alignment may set differently from a gapped one (an HSP without an edit script is one run of
+    # substitutions: gapopen 0, gaps 0, btop and the identity counts from the re-evaluated alignment).
+    cases.append(("ungapped.mlst_tab", f"{MLST} -outfmt '6 sseqid slen length nident qseqid qstart qend qseq sstrand'",
+                  ""))
+    tab_cols = "qseqid sseqid qstart qend sstart send gapopen gaps btop qcovhsp qcovs nident positive ppos pident" \
+               " length mismatch qseq sseq"
+    cases.append(("ungapped.tab_cols_t2", f"{T2} -ungapped -outfmt '6 {tab_cols}'", ""))
+    cases.append(("ungapped.tab_cols_mix", f"{MX} -task blastn -ungapped -outfmt '7 {tab_cols}'", ""))
+    cases.append(("ungapped.tab_cols_ambrun", f"{AMB} -task blastn -ungapped -outfmt '6 {tab_cols}'", ""))
+    cases.append(("ungapped.tab_csv20", f"{MX} -task blastn -ungapped -outfmt 20", ""))
+    cases.append(("ungapped.tab_csv10", f"{MX} -task blastn -ungapped -outfmt '10 qseqid sseqid btop gaps nident'", ""))
+    for name, argv in (("mb.t2", f"{T2} -ungapped -outfmt 6"), ("bn.p", f"{P} -task blastn -ungapped -outfmt 6"),
+                       ("mb.mq", f"{B} -ungapped -outfmt 6"), ("dc.mq", f"{B} -task dc-megablast -ungapped -outfmt 6")):
+        cases.append((f"ungapped.{name}_threads4", argv, "-num_threads 4"))
+    return cases
+
+
+_CASES += _ungapped_cases()
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 # NCBI's arguments of the cases of an approved exception that is an argument (see above).
 ORACLE_ARGV = {
@@ -556,6 +635,7 @@ def command_generate(_args) -> int:
     generate_e2g_inputs(edl, sakai)
     generate_qctx_inputs()
     generate_wm_inputs()
+    generate_ungapped_inputs()
     return 0
 
 
@@ -620,6 +700,29 @@ def generate_e2g_inputs(edl: str, sakai: str) -> None:
     write_fasta(INPUTS / "warn_subject.fa", [("s Sakai window", window)])
 
 
+def generate_ungapped_inputs() -> None:
+    """Inputs added for line NP O4a (the ungapped.* cases): the probes of O/O4a/probe/d/gen_inputs.py with the same
+    seed. ambrun: a subject with 30 N and one R inside a matching stretch, which the ungapped re-evaluation
+    splits into two HSPs; mix: a query with plus and minus HSPs on two subjects; alln: a query of N only."""
+    rng = random.Random(4242)
+
+    def random_seq(n: int) -> str:
+        return "".join(rng.choice("ACGT") for _ in range(n))
+
+    core = random_seq(600)
+    s = random_seq(200) + core[:290] + "N" * 30 + core[320:450] + "R" + core[451:] + random_seq(200)
+    q = random_seq(50) + core + random_seq(50)
+    write_fasta(INPUTS / "ambrun_q.fa", [("qamb", q)])
+    write_fasta(INPUTS / "ambrun_s.fa", [("samb", s)])
+    q2 = random_seq(1000)
+    s2 = (random_seq(100) + q2[100:400] + random_seq(100) + revcomp(q2[500:700]) + random_seq(100) + q2[750:900]
+          + random_seq(50) + q2[120:260] + random_seq(100))
+    write_fasta(INPUTS / "mix_q.fa", [("qmix", q2)])
+    write_fasta(INPUTS / "mix_s.fa", [("smix first", s2),
+                                      ("smix2 second", revcomp(q2[300:600]) + random_seq(80) + q2[600:800])])
+    write_fasta(INPUTS / "ungapped_alln_query.fa", [("alln1 all N", "N" * 24), ("alln2 all N", "N" * 40)])
+
+
 def generate_culling_inputs() -> None:
     """The subjects of tblastx_regression's culling_ties and culling_multi inputs in reverse record order
     (O3a: the order of the subjects decides which of equal HSPs a culling limit keeps)."""
@@ -674,6 +777,15 @@ def prepare_runtime_inputs() -> None:
     expected = ">edl933_2m EDL933 1-2000000\n" + genome("EDL933.fna")[:2_000_000] + "\n"
     if not path.exists() or path.read_text() != expected:
         path.write_text(expected)
+    # The query of the ungapped.*.edl cases: EDL933 4,999,701-5,000,300 without the base at 4,999,821 and
+    # with a transition at the 401st base of what is left.
+    window = genome("EDL933.fna")[4_999_700:5_000_300]
+    piece = window[:120] + window[121:]
+    piece = piece[:400] + {"A": "G", "G": "A", "C": "T", "T": "C"}[piece[400]] + piece[401:]
+    path = RUNTIME / "edl_ungapped_q.fa"
+    expected = ">edlq EDL933 4999701-5000300 with a deletion and a mismatch\n" + piece + "\n"
+    if not path.exists() or path.read_text() != expected:
+        path.write_text(expected)
 
 
 def sha256(data: bytes) -> str:
@@ -703,7 +815,16 @@ def command_freeze(args) -> int:
     oracle = str(Path(args.oracle).resolve())
     version = subprocess.run([oracle, "-version"], capture_output=True, text=True).stdout.strip().replace("\n", "; ")
     rows = []
+    kept = {}
+    if args.only:
+        # Only the cases whose id starts with the prefix (or one of the comma-separated prefixes) are run again;
+        # the other rows and files stay.
+        kept = {row["case_id"]: row for row in read_manifest()}
     for case_id, argv, extra, case_env, oracle_env in CASES:
+        if args.only and not case_id.startswith(tuple(args.only.split(","))):
+            if case_id in kept:
+                rows.append(kept[case_id])
+            continue
         result = run_case(oracle, [], case_id, ORACLE_ARGV.get(case_id, argv), oracle_env or case_env)
         (FIXTURES / f"{case_id}.out").write_bytes(result.stdout)
         err = FIXTURES / f"{case_id}.err"
@@ -735,8 +856,11 @@ def run_case(program: str, prefix: list[str], case_id: str, argv: str, case_env:
     return subprocess.run(command, cwd=ENGINE, capture_output=True, env=clean_env(case_env))
 
 
-def check_one(losat: str, row: dict[str, str]) -> tuple[str, str]:
-    result = run_case(losat, ["blastn"], row["case_id"], row["argv"], row.get("env") or "", row["losat_extra"])
+def check_one(losat: str, row: dict[str, str], threads: int | None = None) -> tuple[str, str]:
+    extra = row["losat_extra"]
+    if threads and "-num_threads" not in extra:
+        extra = f"{extra} -num_threads {threads}".strip()
+    result = run_case(losat, ["blastn"], row["case_id"], row["argv"], row.get("env") or "", extra)
     expected_out = (FIXTURES / f"{row['case_id']}.out").read_bytes()
     err_path = FIXTURES / f"{row['case_id']}.err"
     expected_err = err_path.read_bytes() if err_path.exists() else b""
@@ -758,9 +882,9 @@ def check_one(losat: str, row: dict[str, str]) -> tuple[str, str]:
 def command_check(args) -> int:
     prepare_runtime_inputs()
     losat = str(Path(args.losat).resolve())
-    rows = read_manifest()
+    rows = [row for row in read_manifest() if not args.only or row["case_id"].startswith(tuple(args.only.split(",")))]
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        results = list(pool.map(lambda row: check_one(losat, row), rows))
+        results = list(pool.map(lambda row: check_one(losat, row, args.threads), rows))
     lines = [f"{case_id}\t{verdict}" for case_id, verdict in results]
     if args.out:
         Path(args.out).write_text("case_id\tresult\n" + "\n".join(lines) + "\n")
@@ -776,10 +900,13 @@ def main() -> int:
     sub.add_parser("generate")
     freeze = sub.add_parser("freeze")
     freeze.add_argument("--oracle", required=True)
+    freeze.add_argument("--only", help="run only the cases whose id starts with this prefix (new cases)")
     check = sub.add_parser("check")
     check.add_argument("--losat", required=True)
     check.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     check.add_argument("--out")
+    check.add_argument("--threads", type=int, help="LOSAT's -num_threads for the cases that give none")
+    check.add_argument("--only", help="check only the cases whose id starts with this prefix")
     args = parser.parse_args()
     return {"generate": command_generate, "freeze": command_freeze, "check": command_check}[args.action](args)
 

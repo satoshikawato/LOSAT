@@ -417,3 +417,24 @@ Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTD
   NCBI's 256-slot taxonomy cache of a volume (`CSeqDBVol::m_TaxCache`), so NCBI writes the offset error again after a fetch
   of 150, as often as its order of fetches makes it (twice for the row's query, once for the same query with a version 4
   database or an absolute `BLASTDB`); LOSAT refuses the run. `tm_cache151` (151 instead of 150) is the control: once.
+
+## Taxid filtering (DI-8a)
+
+Rows `db.tf.*`: `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and `-no_taxid_expansion` with `-db`, five
+programs. `taxfilter/` holds the inputs and what `make_taxfilter.py MAKEBLASTDB TAXONOMY4BLAST_SQLITE` builds from them
+(makeblastdb 2.17.0, version 5, `-parse_seqids` with a taxid map; `.pjs` and `.njs` dropped):
+
+- `tfp.faa` and `tfp.map`: 23 Swiss-Prot globins of mammals, birds, reptiles, amphibians and fishes (the HBA_HUMAN hits of
+  the DI-8 probe); the records of P69905.2, P01923.1, Q9TS35.2 and P63107.2 carry a second definition line (control-A) of a
+  bird or another mammal. Database `tfp` (one volume).
+- `tfn.fna` and `tfn.map`: 16 globin cDNAs of human (Ensembl GRCh38), zebrafish and fly; human HBA1 (ENST00000320868.9) carries
+  a second definition line of a zebrafish transcript, zebrafish hbaa1 (ENSDART00000113098.5) one of a fly transcript.
+  Database `tfn` in two volumes (`-max_file_sz 4KB`: OIDs 0-11 and 12-15) under one LMDB.
+- `taxonomy4blast.sqlite3`: the 226 rows of NCBI's taxonomy file (the copy distributed with swissprot) for the taxids of both
+  maps and all their ancestors, in a new file with the source's schema text. NCBI reads the table `TaxidInfo` and its index
+  only, so a taxid's descendants within the databases are those of the whole file. The rows reach it by `BLASTDB=tests/db_search/taxfilter`;
+  the `nosql` rows leave it out of reach (NCBI's warning, no restriction).
+- `q.faa` (HBA_HUMAN) and `q.fna` (human HBA1 cDNA): the queries. `tl_crlf.txt` (40674 and 8782 with CRLF line ends, an
+  empty line and blanks) and `tl_neg.txt` (9443): the taxid lists.
+
+The `v4` rows search `x16_taxid` and `x16_ntaxid` (version 4 databases with taxids, above).

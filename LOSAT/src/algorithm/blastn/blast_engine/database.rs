@@ -171,6 +171,39 @@ pub(super) struct BlastnDatabase {
 pub(super) struct SamLetterCache(RefCell<HashMap<u32, NucleotideAmbiguity>>);
 
 impl BlastnDatabase {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2645-2668
+    // (`Blast_HSPListReevaluateUngapped`)
+    // ```c
+    //       	seq_arg.oid = subject_blk->oid;
+    //       	seq_arg.encoding =
+    //        	  (kTranslateSubject ? eBlastEncodingNcbi4na : eBlastEncodingNucleotide);
+    //         seq_arg.check_oid_exclusion = TRUE;
+    //       	seq_arg.seq = subject_blk;
+    //       	/* Return the packed sequence to the database */
+    //       	BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
+    //       	/* Get the unpacked sequence */
+    //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
+    // ```
+    /// Calls `use_letters` with the letters of database sequence `ordinal` in BLASTNA, without
+    /// the sentinel bytes: the subject that an ungapped (`-ungapped`) search re-evaluates its
+    /// HSPs on in the preliminary stage (NCBI gets the sequence again, unpacked, for a sequence
+    /// whose HSP list is not empty). The letters stay in the kernel's buffer with its sentinel
+    /// bytes (no copy). A read error is the preliminary search's.
+    pub(super) fn with_blastna<T>(
+        &self,
+        ordinal: u32,
+        use_letters: impl FnOnce(&[u8]) -> T,
+    ) -> Result<T> {
+        let block = x_read_sequence(&self.db, ordinal).map_err(search_read_error)?;
+        let length = block.nucleotide_len(0).map_err(search_read_error)?;
+        let blastna = x_blastna(&block).map_err(search_read_error)?;
+        // The kernel's BLASTNA has a sentinel byte at each end.
+        let result = use_letters(&blastna[1..=length]);
+        x_done_bytes(blastna);
+        x_done_block(block);
+        Ok(result)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:185
     // ```c++
     //             "\tLN:" + NStr::UInt8ToString(refseq.GetBioseqLength()));

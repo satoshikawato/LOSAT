@@ -1607,6 +1607,22 @@ mod tests {
         assert_eq!(get_prelim_hitlist_size(1000, false, true), 1050);
     }
 
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1258-1292 testSBlastHitsParamsUngapped
+    // NCBI's case is a blastp search with `gapped_calculation = FALSE` and the default hit list
+    // size; the function is the same one (`GetPrelimHitlistSize`), which keeps the hit list size
+    // for an ungapped search.
+    #[test]
+    fn ungapped_prelim_hitlist_size_is_the_hit_list_size() {
+        assert_eq!(get_prelim_hitlist_size(500, false, false), 500);
+        assert_eq!(get_prelim_hitlist_size(1, false, false), 1);
+        assert_eq!(
+            get_prelim_hitlist_size(i32::MAX as usize, false, false),
+            i32::MAX
+        );
+        // A gapped search adds 50 (testSBlastHitsParamsGapped).
+        assert_eq!(get_prelim_hitlist_size(500, false, true), 550);
+    }
+
     #[test]
     fn test_hitlist_update_keeps_best() {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3243-3297

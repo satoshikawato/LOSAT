@@ -100,9 +100,10 @@ use super::super::query_split::{
 };
 use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
-    context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
+    context_blocks_ungapped, context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
 };
 use super::super::seqalign::write_blastn_seqalign;
+use super::super::ungapped;
 use crate::blastinput::app::{self as app, Program};
 use crate::core::blast_hits::reap_by_query_coverage;
 use crate::report::record::{QueryNames, SubjectNames};
@@ -5400,6 +5401,9 @@ struct BlastnReportInputs<'a> {
     zero_gap_extension_formula: bool,
     /// The two-hit window of the task, printed in the epilog when not 0.
     window_size: usize,
+    /// An ungapped (`-ungapped`) search: one Karlin block, no gap costs in the reports, and the
+    /// hit list of the end of the traceback is the preliminary one (`finish_query_hit_list`).
+    ungapped: bool,
     /// Per query context (the plus strand of query `q` is context `2 * q`); `None` for
     /// the contexts of an invalid query (not searched by NCBI) and of the strand that
     /// `-strand` does not search.
@@ -5549,6 +5553,7 @@ fn blastn_pairwise_report(
         gap_extend: report.gap_extend,
         zero_gap_extension_formula: report.zero_gap_extension_formula,
         window_size: report.window_size,
+        gapped: !report.ungapped,
         num_descriptions,
         num_alignments,
         unsearched,
@@ -5772,6 +5777,7 @@ fn finish_query_hit_list(
     query_cov_hsp_perc: f64,
     subject_besthit: bool,
     culling_limit: i32,
+    ungapped: bool,
 ) {
     // NCBI's culling pipe is the first thing the traceback does with the consolidated results
     // (`-culling_limit`; the mask level of 101, the default, is no step).
@@ -5787,7 +5793,7 @@ fn finish_query_hit_list(
             hit_list,
             query_len,
             culling_limit,
-            usize::try_from(get_prelim_hitlist_size(hitlist_size, false, true)).unwrap_or(0),
+            usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !ungapped)).unwrap_or(0),
         );
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:836-867
@@ -5991,6 +5997,7 @@ fn post_process_hits_and_write(
                 query_cov_hsp_perc,
                 subject_besthit,
                 report.culling_limit,
+                report.ungapped,
             );
             drop_hsps_of_score_zero(hit_list);
         }
@@ -6614,8 +6621,8 @@ fn post_process_hits_and_write(
                     format_warnings.as_mut(),
                 )?,
                 Some(kind) => {
-                    // The gap costs are written for a gapped search, which LOSAT's BLASTN
-                    // always is (it does not take `-ungapped`); `cbs` and the genetic codes
+                    // The gap costs are written for a gapped search (NCBI reads them from
+                    // the options when `GetGappedMode()`); `cbs` and the genetic codes
                     // are not those of a nucleotide search (blastxml2_format.cpp:531-546).
                     let params = crate::report::blast_xml2::Xml2Run {
                         target: if is_database {
@@ -6623,7 +6630,7 @@ fn post_process_hits_and_write(
                         } else {
                             crate::report::blast_xml2::Xml2Target::Subjects(subject_records.len())
                         },
-                        gapped: true,
+                        gapped: !report.ungapped,
                         cbs: 0,
                         query_gencode: None,
                         db_gencode: None,
@@ -7633,6 +7640,17 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         app::formatting_handler_check(&choice, Program::Blastn)?;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1397-1440
+        // (`BLASTUngappedHspListToSeqAlign`: a subject's Seq-align of Dense-diags, and
+        // objtools/align_format/sam.cpp:66-80 for SAM's one line per subject)
+        // O4a-1 writes the formats that need no Seq-align of Dense-diags: 8, 9, 11, 12 (the
+        // Seq-align formats) and 17 (SAM) of an ungapped search are refused (O4a-2).
+        if args.ungapped && matches!(choice.number, 8 | 9 | 11 | 12 | 17) {
+            anyhow::bail!(
+                "output format {} with -ungapped (an ungapped search) is not supported by LOSAT's BLASTN",
+                choice.number
+            );
+        }
         outfmts.push(choice.number);
     }
     // The hit list size and the counts of the pairwise report, with the formatting
@@ -8162,6 +8180,120 @@ enum Subjects<'a> {
     Records(SubjectLetters<'a>),
     /// An NCBI BLAST database (`-db`).
     Database(&'a database::BlastnDatabase),
+}
+
+/// The steps of NCBI's preliminary stage that finish the HSP list of one subject of an ungapped
+/// (`-ungapped`) search (`Blast_HSPListReevaluateUngapped`, the e-values, the reap by the
+/// preliminary e-value and by query coverage): the HSPs are re-evaluated with the ambiguity
+/// codes of the subject (`s_blastna`, whole, without sentinel bytes), the ones below the
+/// word cutoff of their context or the `-perc_identity` are deleted, the list is sorted by
+/// score again, and the ones above the e-value (`evalue_of`) are deleted. The reap by the
+/// query coverage (`-qcov_hsp_perc`) follows it, where the subject's HSPs are given to the
+/// collector (`ungapped_reap_query_coverage`).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2609-2737
+/// ```c
+///       if (kNucleotideSubject) {
+///          delete_hsp = Blast_HSPReevaluateWithAmbiguitiesUngapped(hsp, query_start,
+///                 subject_start, word_params, sbp, kTranslateSubject);
+///       }
+///       if (!delete_hsp) {
+///           const Uint1* query_nomask = query_blk->sequence_nomask +
+///               query_info->contexts[context].query_offset;
+///           Int4 align_length = 0;
+///           Blast_HSPGetNumIdentitiesAndPositives(query_nomask, subject_start, hsp,
+///                                score_params->options, &align_length, sbp);
+///           delete_hsp = Blast_HSPTest(hsp, hit_params->options, align_length);
+///       }
+///    ...
+///    /* Sort the HSP array by score (scores may have changed!) */
+///    Blast_HSPListSortByScore(hsp_list);
+///    Blast_HSPListAdjustOddBlastnScores(hsp_list, FALSE, sbp);
+/// ```
+#[allow(clippy::too_many_arguments)]
+fn ungapped_subject_stage(
+    hits: &mut Vec<PrelimHit>,
+    s_blastna: &[u8],
+    queries_blastna: &[&[u8]],
+    score_matrix: &[i32; 256],
+    word_cutoffs: &[i32],
+    percent_identity: f64,
+    evalue_of: impl Fn(&PrelimHit) -> f64,
+    evalue_threshold: f64,
+) {
+    hits.retain_mut(|hit| {
+        let context_idx = hit.context_idx as usize;
+        let query = queries_blastna[context_idx];
+        let length = hit.prelim_qe - hit.prelim_qs;
+        let Some(reevaluated) = ungapped::reevaluate_with_ambiguities_ungapped(
+            query,
+            s_blastna,
+            hit.prelim_qs,
+            hit.prelim_ss,
+            length,
+            word_cutoffs[context_idx],
+            score_matrix,
+        ) else {
+            return false;
+        };
+        hit.prelim_score = reevaluated.score;
+        hit.prelim_qs = reevaluated.q_offset;
+        hit.prelim_qe = reevaluated.q_end;
+        hit.prelim_ss = reevaluated.s_offset;
+        hit.prelim_se = reevaluated.s_end;
+        let align_length = hit.prelim_qe - hit.prelim_qs;
+        let identities = ungapped::count_identities_ungapped(
+            query,
+            s_blastna,
+            hit.prelim_qs,
+            hit.prelim_ss,
+            align_length,
+        );
+        // `min_hit_length` is 0 for BLASTN.
+        !ungapped::blast_hsp_test(identities, align_length, percent_identity, 0)
+    });
+    sort_prelim_hits_by_score(hits);
+    hits.retain_mut(|hit| {
+        hit.prelim_evalue = evalue_of(hit);
+        hsp_survives_evalue_reap(hit.prelim_evalue, evalue_threshold)
+    });
+}
+
+/// The last step of the preliminary stage's finish of a subject's HSP list in an ungapped
+/// (`-ungapped`) search: the HSPs below `-qcov_hsp_perc` percent of their query are deleted
+/// (`Blast_HSPListReapByQueryCoverage`). It does not depend on the subject, so the collector's
+/// caller makes it, where the subject's HSPs are given over.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1482-1541
+/// ```c
+///             Blast_HSPListReapByQueryCoverage(hsp_list,hit_params->options, query_info, program_number);
+/// ```
+fn ungapped_reap_query_coverage(
+    hits: &mut Vec<PrelimHit>,
+    query_cov_hsp_perc: f64,
+    context_length: impl Fn(usize) -> usize,
+) {
+    reap_by_query_coverage(hits, query_cov_hsp_perc, |hit| {
+        (
+            hit.prelim_qs as i64,
+            hit.prelim_qe as i64,
+            context_length(hit.context_idx as usize) as i64,
+        )
+    });
+}
+
+/// LOSAT's refusal of a word cutoff whose arithmetic NCBI does in a way that overflows (memory
+/// "no NCBI UB / overflow"): a context of 2^30 letters or more, or a search space beyond `Int8`.
+fn ungapped_cutoff_limit_error(limit: ungapped::CutoffLimit) -> anyhow::Error {
+    let what = match limit {
+        ungapped::CutoffLimit::QueryLength => {
+            "a query of 2^30 letters or more, whose doubled length overflows NCBI BLAST+'s 32-bit int in the ungapped word cutoff"
+        }
+        ungapped::CutoffLimit::SearchSpace => {
+            "an average subject length whose ungapped word cutoff search space overflows NCBI BLAST+'s 64-bit int"
+        }
+    };
+    anyhow::anyhow!("{what} is not supported by LOSAT's BLASTN with -ungapped")
 }
 
 /// What the query batches search (`search_query_batch`): the prepared subject set, or the
@@ -8879,20 +9011,42 @@ fn run_in_pool(
         warnings[start].extend(batch_title_warnings);
         // The batch's search, on the whole pool. EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps
         // its megablast table from batch to batch.
-        let searched = search_query_batch(
-            &args,
-            batch_records.batch_queries(),
-            source,
-            Some((&mut *outputs, &output_formats)),
-            parallel_pool,
-            batching,
-            input_start == 0,
-            BatchStage::Search {
-                query_offsets: &query_offsets[start..end],
-                query_masks: window_masker_masks.as_deref(),
-            },
-            x_lut_keep.as_ref(),
-        );
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:929
+        // ```c
+        //     opt.SetGappedMode(!args[kArgUngapped]);
+        // ```
+        // The instance of the batch search is chosen here, once for the batch.
+        let searched = if args.ungapped {
+            search_query_batch::<true>(
+                &args,
+                batch_records.batch_queries(),
+                source,
+                Some((&mut *outputs, &output_formats)),
+                parallel_pool,
+                batching,
+                input_start == 0,
+                BatchStage::Search {
+                    query_offsets: &query_offsets[start..end],
+                    query_masks: window_masker_masks.as_deref(),
+                },
+                x_lut_keep.as_ref(),
+            )
+        } else {
+            search_query_batch::<false>(
+                &args,
+                batch_records.batch_queries(),
+                source,
+                Some((&mut *outputs, &output_formats)),
+                parallel_pool,
+                batching,
+                input_start == 0,
+                BatchStage::Search {
+                    query_offsets: &query_offsets[start..end],
+                    query_masks: window_masker_masks.as_deref(),
+                },
+                x_lut_keep.as_ref(),
+            )
+        };
         let batch = match searched {
             Ok(batch) => batch,
             Err(error) => match error.downcast::<ErrorAfterInvalidBatches>() {
@@ -9003,6 +9157,7 @@ fn run_in_pool(
                         args.qcov_hsp_perc.unwrap_or(0.0),
                         args.subject_besthit,
                         args.culling_limit_value(),
+                        args.ungapped,
                     );
                 }
             }
@@ -9768,6 +9923,7 @@ fn write_reports_untimed(
         // ```
         zero_gap_extension_formula: matches!(args.task.as_str(), "megablast" | "blastn"),
         window_size: config.window_size,
+        ungapped: args.ungapped,
         context_karlin: results.context_karlin,
         num_descriptions: args.report_counts.num_descriptions,
         num_alignments: args.report_counts.num_alignments,
@@ -9941,7 +10097,7 @@ fn window_masker_rejection(
 /// diagonal table of the batch, as NCBI's `CLocalBlast` does for each batch that
 /// `run_in_pool` reads. `x_keep`: the batch loop's keep of LOSAT_X_MBLUTKEEP, which the batch's
 /// megablast table is built on and goes back to (`lookup::x_mb_lut_keep`).
-fn search_query_batch(
+fn search_query_batch<const UNGAPPED: bool>(
     args: &BlastnArgs,
     mut query_records: x_query_drop::BatchQueries<'_>,
     subjects: SubjectSource<'_>,
@@ -10616,10 +10772,17 @@ fn search_query_batch(
     // references. NCBI raises an unsupported scoring system when it sets up the first
     // batch with a valid query, after the outfmt 0 prolog.
     let megablast = args.task == "megablast";
-    let (context_karlin, round_down_evalue_score) = match context_blocks(
-        &context_ungapped,
-        &scoring_spec,
-    ) {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:513-529
+    // ```c
+    //     if (scoring_options->gapped_calculation) { ... s_BlastScoreBlkGappedFill ... }
+    // ```
+    // An ungapped (`-ungapped`) search has the ungapped blocks only (`context_blocks_ungapped`).
+    let context_blocks_result = if UNGAPPED {
+        Ok(context_blocks_ungapped(&context_ungapped, &scoring_spec))
+    } else {
+        context_blocks(&context_ungapped, &scoring_spec)
+    };
+    let (context_karlin, round_down_evalue_score) = match context_blocks_result {
         Ok(blocks) => blocks,
         Err(message) => {
             // NCBI reference: ncbi-blast/c++/src/algo/blast/api/setup_factory.cpp:170-172
@@ -10819,7 +10982,7 @@ fn search_query_batch(
     }
     // Gap costs that the tables accept but LOSAT's greedy extension does not (`scoring.rs`);
     // with no valid context, NCBI extends nothing.
-    if any_valid_context {
+    if any_valid_context && !UNGAPPED {
         check_greedy_gap_costs(&args)?;
     }
     let search_karlin: Vec<ContextKarlin> = {
@@ -10941,20 +11104,26 @@ fn search_query_batch(
     //         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
     // ```
     let split_prelim_lists = match stage {
-        BatchStage::Search { query_offsets, .. } if any_valid_context => search_query_chunks(
-            args,
-            &letters,
-            &seq_data.query_masks,
-            query_offsets,
-            &query_eff_searchsp,
-            &query_context_offsets,
-            subjects,
-            reborrow_outputs(&mut outputs),
-            parallel_pool,
-            batching,
-            first_batch,
-            x_keep,
-        )?,
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:60-61
+        // ```c
+        //     if (!options->GetGappedMode()) m_NumChunks = 1;
+        // ```
+        BatchStage::Search { query_offsets, .. } if any_valid_context && !UNGAPPED => {
+            search_query_chunks(
+                args,
+                &letters,
+                &seq_data.query_masks,
+                query_offsets,
+                &query_eff_searchsp,
+                &query_context_offsets,
+                subjects,
+                reborrow_outputs(&mut outputs),
+                parallel_pool,
+                batching,
+                first_batch,
+                x_keep,
+            )?
+        }
         _ => None,
     };
     // EXPERIMENT (LOSAT_X_BNQDROP): the encoding and the query chunks were the last readers of the
@@ -11127,7 +11296,7 @@ fn search_query_batch(
     // }
     // ```
     let prelim_hitlist_size =
-        usize::try_from(get_prelim_hitlist_size(hitlist_size, false, true))
+        usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !UNGAPPED))
             .map_err(|_| anyhow::anyhow!("the preliminary hit list size overflows"))?;
 
     // Debug mode: set BLEMIR_DEBUG=1 to enable, BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end" to focus on a region
@@ -11290,7 +11459,8 @@ fn search_query_batch(
     // thread may run per query on the pool (x_qgroup_par.rs). Not on the diagnostic paths, which
     // print in the loop's order, and not while the pool searches subjects in parallel
     // (`use_parallel`; several subjects one at a time under LOSAT_X_BNFEWSUBJ take it).
-    let x_qgroup_batch = x_qgroup_par::on()
+    let x_qgroup_batch = !UNGAPPED
+        && x_qgroup_par::on()
         && !use_parallel
         && parallel_pool.enabled()
         && num_threads > 1
@@ -11405,6 +11575,26 @@ fn search_query_batch(
     // (`process_subject`): the cutoff scores, the hit-saving cutoff scores, the X-dropoffs and the
     // reduced cutoff scores of each context.
     let x_batch_cutoffs = {
+        // The subject length that NCBI's word cutoff of an ungapped search takes: the average
+        // length of the subjects (a `-subject` set's `(Uint4)(total / count)`, a database's
+        // `(Int4)(total / MAX(1, count))`); the dbscan mode of the command line holds the total
+        // of a `-subject` set, so `BlastInitialWordParametersUpdate` runs once for the batch.
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1434-1445,
+        // c++/src/algo/blast/api/seqsrc_multiseq.cpp:245-266, seqsrc_seqdb.cpp:203-209
+        let x_avg_subject_length: u64 = if UNGAPPED {
+            match subjects {
+                SubjectSource::Database(_) => ungapped::average_subject_length_database(
+                    seq_data.db_len_total as u64,
+                    seq_data.db_num_seqs as u64,
+                ),
+                SubjectSource::Prepared(_) => ungapped::average_subject_length_subject_set(
+                    seq_data.db_len_total as u64,
+                    seq_data.db_num_seqs as u64,
+                ),
+            }
+        } else {
+            0
+        };
         let mut cutoff_scores: Vec<i32> = Vec::with_capacity(query_contexts.len());
         let mut hit_saving_cutoff_scores: Vec<i32> = Vec::with_capacity(query_contexts.len());
         // NCBI reference: c++/src/app/blast/blast_app_util.cpp:206-211;
@@ -11441,7 +11631,30 @@ fn search_query_batch(
                 GAP_TRIGGER_BIT_SCORE_NUCL,
                 &search_karlin_ref[context_idx].ungapped,
             );
-            let cutoff = cutoff_score_for_ungapped_extension(gap_trigger, hit_saving_cutoff, 1.0);
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:346-374
+            // ```c
+            //       if (!gapped_calculation || sbp->matrix_only_scoring) {
+            //          ...
+            //          BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
+            //                        MIN((Uint8)subj_length, (Uint8)query_length)*((Uint8)subj_length),
+            //                        TRUE, gap_decay_rate);
+            //       } else {
+            //          new_cutoff = gap_trigger;
+            //       }
+            //       new_cutoff *= (Int4)sbp->scale_factor;
+            //       new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
+            // ```
+            let cutoff = if UNGAPPED {
+                ungapped::word_cutoff_score(
+                    query_contexts[context_idx].len,
+                    x_avg_subject_length,
+                    &search_karlin_ref[context_idx].ungapped,
+                    hit_saving_cutoff,
+                )
+                .map_err(|limit| ungapped_cutoff_limit_error(limit))?
+            } else {
+                cutoff_score_for_ungapped_extension(gap_trigger, hit_saving_cutoff, 1.0)
+            };
             cutoff_scores.push(cutoff);
             hit_saving_cutoff_scores.push(hit_saving_cutoff);
         }
@@ -14728,6 +14941,99 @@ fn search_query_batch(
                 } // end of if/else for two-stage vs original lookup
             } // end of strand loop
 
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:556-563
+            // ```c
+            //       if (aux_struct->GetGappedScore) {
+            //          status = aux_struct->GetGappedScore(program_number, query, query_info,
+            //                        subject, gap_align, score_params, ext_params, hit_params,
+            //                        init_hitlist, &hsp_list, gapped_stats, fence_hit);
+            //       } else {
+            //          status = BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
+            //                        hit_params->options, &hsp_list);
+            //       }
+            // ```
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4719-4775
+            // ```c
+            // for (index = 0; index < init_hitlist->total; ++index) {
+            //     init_hsp = &init_hsp_array[index];
+            //     ...
+            //     Blast_HSPInit(ungapped_data->q_start, ungapped_data->q_start + length,
+            //                   ungapped_data->s_start, ungapped_data->s_start + length,
+            //                   init_hsp->offsets.qs_offsets.q_off, init_hsp->offsets.qs_offsets.s_off,
+            //                   context, query_frame, subject->frame, ungapped_data->score, NULL, &new_hsp);
+            //     Blast_HSPListSaveHSP(hsp_list, new_hsp);
+            // }
+            // /* Sort by score: */
+            // Blast_HSPListSortByScore(hsp_list);
+            // ```
+            // An ungapped (`-ungapped`) search sorts the initial hits by score first, as a gapped
+            // search does (`BlastNaWordFinder` ends with `if (word_params->ungapped_extension)
+            // Blast_InitHitListSortByScore(init_hitlist)`, na_ungapped.c:1691-1692, and
+            // `ungapped_extension` is TRUE for every program but PHI: blast_parameters.c:189-192),
+            // with the same comparator (`score_compare_ungapped_hits` = `score_compare_match`:
+            // score descending, s_start, length descending, the concatenated query's q_start;
+            // stable, as the oracle's glibc qsort). The order of ties (a plus and a minus hit
+            // with the same score and context-relative ranges) then comes out as NCBI's, and
+            // `Blast_HSPListSortByScore` below keeps it. Then the HSP list of the chunk is made
+            // from those hits (no gapped extension), the subject chunk's offset is taken
+            // (blast_engine.c:564-580), and there is no purge of common end points (a gapped
+            // search's step).
+            if UNGAPPED {
+                // The same sort as the gapped branch below (review 2 S5): with LOSAT_X_BNMAPPED
+                // (default ON) the scratch of the stable sort is a mapped buffer, not a plain
+                // `sort_by` scratch of up to 8 MB left in the thread's arena. The comparator and
+                // the stability are the same, so the order is `sort_by`'s. LOSAT_X_QGROUPPAR is
+                // not used for an ungapped search.
+                if x_bn_mapped() {
+                    x_bn_mapped_reach(
+                        ungapped_hits
+                            .len()
+                            .saturating_mul(std::mem::size_of::<UngappedHit>()),
+                    );
+                    crate::utils::x_mapped::x_sort_by_mapped(
+                        ungapped_hits,
+                        score_compare_ungapped_hits,
+                        &X_SORT,
+                    )
+                } else {
+                    ungapped_hits.sort_by(score_compare_ungapped_hits)
+                }
+                good_init_extends.fetch_add(
+                    ungapped_hits.len() as u64,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                let mut chunk_prelim_hits: Vec<PrelimHit> = ungapped_hits
+                    .iter()
+                    .map(|uh| PrelimHit {
+                        context_idx: uh.context_idx,
+                        query_idx: uh.query_idx,
+                        query_frame: uh.query_frame,
+                        query_context_offset: uh.query_context_offset,
+                        prelim_qs: uh.qs,
+                        prelim_qe: uh.qe,
+                        prelim_ss: uh.ss.saturating_add(chunk.offset),
+                        prelim_se: uh.se.saturating_add(chunk.offset),
+                        prelim_score: uh.score,
+                        seed_qs: uh.seed_q_off,
+                        seed_ss: uh.seed_s_off.saturating_add(chunk.offset),
+                        prelim_evalue: 0.0,
+                    })
+                    .collect();
+                sort_prelim_hits_by_score(&mut chunk_prelim_hits);
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
+                // (the diagonal table's offset moves on after each chunk, as below)
+                advance_diag_table_offset(
+                    &mut subject_scratch.diag_table_offset,
+                    diag_window,
+                    s_len,
+                    use_array_indexing,
+                    &mut subject_scratch.hit_level_array,
+                    &mut subject_scratch.hit_len_array,
+                    &mut subject_scratch.diag_hash,
+                );
+                return chunk_prelim_hits;
+            }
+
             // ============================================================
             // NCBI ARCHITECTURE: Batch process ungapped hits in score order
             // ============================================================
@@ -15713,7 +16019,7 @@ fn search_query_batch(
                                         offset: chunk.offset,
                                     },
                                     chunk.overlap,
-                                    true,
+                                    !UNGAPPED,
                                 );
                                 if subject_besthit {
                                     prelim_subject_best_hit(
@@ -15772,7 +16078,7 @@ fn search_query_batch(
                                     hits,
                                     HspListSplit::Subject { offset },
                                     overlap,
-                                    true,
+                                    !UNGAPPED,
                                 );
                                 if subject_besthit {
                                     prelim_subject_best_hit(
@@ -15840,7 +16146,7 @@ fn search_query_batch(
                                     offset: chunk.offset,
                                 },
                                 chunk.overlap,
-                                true,
+                                !UNGAPPED,
                             );
                             if subject_besthit {
                                 prelim_subject_best_hit(&mut combined_prelim_hits, &query_lengths);
@@ -15858,7 +16164,7 @@ fn search_query_batch(
                 }
             }
 
-            if !combined_prelim_hits.is_empty() {
+            if !UNGAPPED && !combined_prelim_hits.is_empty() {
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:885-899
                 // ```c
                 // Blast_HSPListGetEvalues(program_number, query_info,
@@ -15897,6 +16203,76 @@ fn search_query_batch(
                     prelim.prelim_evalue = prelim_evalue;
                     hsp_survives_evalue_reap(prelim_evalue, evalue_threshold)
                 });
+            }
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1482-1541
+            // ```c
+            //       if (hsp_list && hsp_list->hspcnt > 0) {
+            //          if (!gapped_calculation) {
+            //             status = Blast_HSPListReevaluateUngapped(program_number, hsp_list, query,
+            //                         seq_arg.seq, word_params, hit_params, query_info, sbp,
+            //                         score_params, seq_src, seq_arg.seq->gen_code_string);
+            //             ...
+            //                Blast_HSPListGetEvalues(program_number, query_info, stat_length,
+            //                                        hsp_list, gapped_calculation, FALSE, sbp, 0, 1.0);
+            //             ...
+            //         	   status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
+            //             Blast_HSPListReapByQueryCoverage(hsp_list,hit_params->options, query_info, program_number);
+            //             Blast_HSPListGetBitScores(hsp_list, gapped_calculation, sbp);
+            // ```
+            // An ungapped (`-ungapped`) search finishes each subject's HSP list here, in the
+            // preliminary stage: the traceback only keeps what this leaves.
+            if UNGAPPED && !combined_prelim_hits.is_empty() {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2645-2668
+                // ```c
+                //       	seq_arg.encoding = (kTranslateSubject ? eBlastEncodingNcbi4na : eBlastEncodingNucleotide);
+                //       	BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
+                //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
+                // ```
+                // The subject again, unpacked (BLASTNA, without sentinel bytes). A database
+                // sequence has none here: the preliminary search's caller reads it again, for
+                // the sequences that keep an HSP, and finishes the list itself
+                // (`x_ungapped_database_stage`, lazily as NCBI does).
+                let mut x_subject_vec: Vec<u8>;
+                let s_blastna: Option<&[u8]> =
+                    match (subject.blastna, subject.store, subject.letters) {
+                        (Some(blastna), _, _) => Some(blastna),
+                        (None, Some(store), _) => {
+                            x_subject_vec = Vec::new();
+                            x_blastna_into(store, &mut x_subject_vec);
+                            Some(x_subject_vec.as_slice())
+                        }
+                        (None, None, Some(letters)) => {
+                            x_subject_vec = encode_iupac_to_blastna(letters);
+                            Some(x_subject_vec.as_slice())
+                        }
+                        (None, None, None) => None,
+                    };
+                if let Some(s_blastna) = s_blastna {
+                    // (`percent_identity` and the cutoffs are the values the traceback below
+                    // reads already; the query coverage is reaped by the collector's caller.)
+                    ungapped_subject_stage(
+                        &mut combined_prelim_hits,
+                        s_blastna,
+                        encoded_queries_blastna.as_slice(),
+                        &score_matrix,
+                        cutoff_scores,
+                        percent_identity,
+                        |prelim| {
+                            let eff_searchsp = query_eff_searchsp
+                                .get(prelim.context_idx as usize)
+                                .copied()
+                                .unwrap_or(0);
+                            calculate_blastn_context_statistics(
+                                prelim.prelim_score,
+                                &search_karlin_ref[prelim.context_idx as usize].gapped,
+                                eff_searchsp,
+                                round_down_evalue_score,
+                            )
+                            .1
+                        },
+                        evalue_threshold,
+                    );
+                }
             }
         }
 
@@ -15956,6 +16332,88 @@ fn search_query_batch(
                 s_seq_blastna_vec.as_slice()
             }
         };
+
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:1526,1690-1706
+        // ```c
+        //     const Boolean perform_traceback = score_params->options->gapped_calculation;
+        //     ...
+        //             if (perform_traceback) { ... }
+        //             /* Update bit scores */
+        //             Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
+        //             ...
+        //             status = Blast_HSPResultsInsertHSPList(results, hsp_list, hit_options->hitlist_size);
+        // ```
+        // The traceback of an ungapped (`-ungapped`) search aligns nothing and purges nothing:
+        // the HSPs the preliminary stage kept (re-evaluated, with their e-values) become the
+        // subject's hits in the kept order, with the identities counted again on the subject's
+        // BLASTNA letters (the ranges the traceback decoded include the HSPs').
+        if UNGAPPED {
+            let mut final_hits: Vec<BlastnHsp> = Vec::with_capacity(combined_prelim_hits.len());
+            for prelim in combined_prelim_hits.iter() {
+                let context_idx = prelim.context_idx as usize;
+                let length = prelim.prelim_qe - prelim.prelim_qs;
+                let matches = ungapped::count_identities_ungapped(
+                    encoded_queries_blastna[context_idx],
+                    s_seq_blastna,
+                    prelim.prelim_qs,
+                    prelim.prelim_ss,
+                    length,
+                );
+                let eff_searchsp = query_eff_searchsp[context_idx];
+                let (bit_score, eval) = calculate_blastn_context_statistics(
+                    prelim.prelim_score,
+                    &search_karlin_ref[context_idx].gapped,
+                    eff_searchsp,
+                    round_down_evalue_score,
+                );
+                let identity = if length > 0 {
+                    ((matches as f64 / length as f64) * 100.0).min(100.0)
+                } else {
+                    0.0
+                };
+                let query_length = query_lengths[prelim.query_idx as usize];
+                let (hit_q_start, hit_q_end, hit_s_start, hit_s_end) = adjust_blastn_offsets(
+                    prelim.prelim_qs,
+                    prelim.prelim_qe,
+                    prelim.prelim_ss,
+                    prelim.prelim_se,
+                    query_length,
+                    prelim.query_frame,
+                );
+                final_hits.push(BlastnHsp {
+                    identity,
+                    length,
+                    mismatch: length - matches,
+                    gapopen: 0,
+                    q_start: hit_q_start,
+                    q_end: hit_q_end,
+                    s_start: hit_s_start,
+                    s_end: hit_s_end,
+                    e_value: eval,
+                    bit_score,
+                    num_ident: matches,
+                    query_frame: prelim.query_frame,
+                    query_length,
+                    q_idx: prelim.query_idx,
+                    s_idx: s_idx as u32,
+                    raw_score: prelim.prelim_score,
+                    internal_q_offset_0: prelim.prelim_qs,
+                    internal_q_end_0: prelim.prelim_qe,
+                    internal_s_offset_0: prelim.prelim_ss,
+                    internal_s_end_0: prelim.prelim_se,
+                    internal_query_context_offset: prelim.query_context_offset,
+                    gap_info: None,
+                    num_positives: matches,
+                });
+            }
+            if !final_hits.is_empty() {
+                *subject_hits = Some(final_hits);
+            }
+            if let Some(bar) = progress_bar.as_ref() {
+                bar.inc(1);
+            }
+            return;
+        }
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:371-373
         // ```c
@@ -18072,6 +18530,91 @@ fn search_query_batch(
             SubjectScratch::new(queries_ref.len(), offset_array_size, window_size),
         )
     };
+    // An ungapped (`-ungapped`) search only (the other instance never calls them): the steps of
+    // NCBI's preliminary stage that finish a subject's HSP list and that `process_subject` leaves
+    // to its caller. The reap by the query coverage is made as the HSPs are given to the
+    // collector (it takes nothing of the subject). A database sequence is read again, unpacked
+    // (BLASTNA), when its HSP list is not empty only, and re-evaluated there.
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1482
+    // ```c
+    //           if (hsp_list && hsp_list->hspcnt > 0) {
+    //              ...  Blast_HSPListReevaluateUngapped(hsp_list, query, subject, ...
+    // ```
+    let x_ungapped_query_coverage = |hits: &mut Vec<PrelimHit>| {
+        ungapped_reap_query_coverage(hits, args.qcov_hsp_perc.unwrap_or(0.0), |context_idx| {
+            query_contexts_ref[context_idx].len
+        });
+    };
+    let x_ungapped_database_stage =
+        |database: &database::BlastnDatabase, ordinal: u32, hits: &mut Vec<PrelimHit>| {
+            if hits.is_empty() {
+                return Ok(());
+            }
+            database.with_blastna(ordinal, |s_blastna| {
+                ungapped_subject_stage(
+                    hits,
+                    s_blastna,
+                    encoded_queries_blastna.as_slice(),
+                    &score_matrix,
+                    &x_batch_cutoffs.0,
+                    percent_identity,
+                    |prelim| {
+                        let eff_searchsp = query_eff_searchsp_ref
+                            .get(prelim.context_idx as usize)
+                            .copied()
+                            .unwrap_or(0);
+                        calculate_blastn_context_statistics(
+                            prelim.prelim_score,
+                            &search_karlin_ref[prelim.context_idx as usize].gapped,
+                            eff_searchsp,
+                            round_down_evalue_score,
+                        )
+                        .1
+                    },
+                    evalue_threshold,
+                );
+                x_ungapped_query_coverage(hits);
+            })
+        };
+    // The callback of the database's preliminary pass in an ungapped search: the search of the
+    // sequence as for a default search, then the finish of its HSP list when it has HSPs left
+    // (`x_ungapped_database_stage`). A read error goes to the cell `$error` (the one of the
+    // smallest ordinal stays) and the sequence has no HSPs. The default search has its own
+    // callback (a different closure, so that the default instance of this function holds no
+    // capture of this one).
+    macro_rules! ungapped_database_callback {
+        ($database:expr, $error:expr) => {
+            |state: &mut (GapAlignScratch, SubjectScratch),
+             ordinal: u32,
+             subject: BlastnSubjectRef<'_>| {
+                let (gap_scratch, subject_scratch) = state;
+                let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                let mut prelim_hits: Vec<PrelimHit> = Vec::new();
+                process_subject(
+                    ordinal as usize,
+                    subject,
+                    gap_scratch,
+                    subject_scratch,
+                    Some(&lookup_tables),
+                    None,
+                    &mut subject_hits,
+                    &mut prelim_hits,
+                );
+                if let Err(error) = x_ungapped_database_stage($database, ordinal, &mut prelim_hits)
+                {
+                    let mut first = $error.lock().expect("the error cell is not poisoned");
+                    if first
+                        .as_ref()
+                        .is_none_or(|(smallest, _)| ordinal < *smallest)
+                    {
+                        *first = Some((ordinal, error));
+                    }
+                    return None;
+                }
+                (!prelim_hits.is_empty()).then_some(prelim_hits)
+            }
+        };
+    }
     let prelim_lists = match split_prelim_lists {
         Some(lists) => lists,
         None => match subjects {
@@ -18094,9 +18637,16 @@ fn search_query_batch(
                     prelim_hitlist_size,
                     args.culling_limit_value(),
                 );
-                search_subjects(None, Some(&lookup_tables), &mut |oid, _, prelim| {
-                    writer.add(oid, prelim)
-                });
+                if UNGAPPED {
+                    search_subjects(None, Some(&lookup_tables), &mut |oid, _, mut prelim| {
+                        x_ungapped_query_coverage(&mut prelim);
+                        writer.add(oid, prelim)
+                    });
+                } else {
+                    search_subjects(None, Some(&lookup_tables), &mut |oid, _, prelim| {
+                        writer.add(oid, prelim)
+                    });
+                }
                 writer.finish()
             }
             SubjectSource::Database(database) if args.culling_limit_value() > 0 => {
@@ -18107,33 +18657,61 @@ fn search_query_batch(
                     prelim_hitlist_size,
                     args.culling_limit_value(),
                 );
+                let mut add = |ordinal: u32, prelim_hits: Vec<PrelimHit>| {
+                    writer.add(ordinal as usize, prelim_hits)
+                };
                 if any_valid_context {
-                    database::search_blocks(
-                        database,
-                        parallel_pool,
-                        use_parallel,
-                        &new_scratch,
-                        &|state: &mut (GapAlignScratch, SubjectScratch),
-                          ordinal: u32,
-                          subject: BlastnSubjectRef<'_>| {
-                            let (gap_scratch, subject_scratch) = state;
-                            let mut subject_hits: Option<Vec<BlastnHsp>> = None;
-                            let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                            process_subject(
-                                ordinal as usize,
-                                subject,
-                                gap_scratch,
-                                subject_scratch,
-                                Some(&lookup_tables),
-                                None,
-                                &mut subject_hits,
-                                &mut prelim_hits,
-                            );
-                            (!prelim_hits.is_empty()).then_some(prelim_hits)
-                        },
-                        &mut |ordinal, prelim_hits| writer.add(ordinal as usize, prelim_hits),
-                    )
-                    .map_err(|error| {
+                    let searched = if UNGAPPED {
+                        // The first error of reading a database sequence again for the
+                        // ungapped re-evaluation (`BlastnDatabase::with_blastna`).
+                        let x_ungapped_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> =
+                            std::sync::Mutex::new(None);
+                        database::search_blocks(
+                            database,
+                            parallel_pool,
+                            use_parallel,
+                            &new_scratch,
+                            &ungapped_database_callback!(database, x_ungapped_error),
+                            &mut add,
+                        )
+                        .and_then(|()| {
+                            match x_ungapped_error
+                                .lock()
+                                .expect("the error cell is not poisoned")
+                                .take()
+                            {
+                                Some((_, error)) => Err(error),
+                                None => Ok(()),
+                            }
+                        })
+                    } else {
+                        database::search_blocks(
+                            database,
+                            parallel_pool,
+                            use_parallel,
+                            &new_scratch,
+                            &|state: &mut (GapAlignScratch, SubjectScratch),
+                              ordinal: u32,
+                              subject: BlastnSubjectRef<'_>| {
+                                let (gap_scratch, subject_scratch) = state;
+                                let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                                let mut prelim_hits: Vec<PrelimHit> = Vec::new();
+                                process_subject(
+                                    ordinal as usize,
+                                    subject,
+                                    gap_scratch,
+                                    subject_scratch,
+                                    Some(&lookup_tables),
+                                    None,
+                                    &mut subject_hits,
+                                    &mut prelim_hits,
+                                );
+                                (!prelim_hits.is_empty()).then_some(prelim_hits)
+                            },
+                            &mut add,
+                        )
+                    };
+                    searched.map_err(|error| {
                         database_search_error(
                             error,
                             first_batch,
@@ -18147,9 +18725,16 @@ fn search_query_batch(
             }
             SubjectSource::Prepared(_) => {
                 let mut collector = PrelimHitCollector::new(queries_ref.len(), prelim_hitlist_size);
-                search_subjects(None, Some(&lookup_tables), &mut |oid, _, prelim| {
-                    collector.add(oid, prelim)
-                });
+                if UNGAPPED {
+                    search_subjects(None, Some(&lookup_tables), &mut |oid, _, mut prelim| {
+                        x_ungapped_query_coverage(&mut prelim);
+                        collector.add(oid, prelim)
+                    });
+                } else {
+                    search_subjects(None, Some(&lookup_tables), &mut |oid, _, prelim| {
+                        collector.add(oid, prelim)
+                    });
+                }
                 collector.hit_lists
             }
             SubjectSource::Database(database) => {
@@ -18164,33 +18749,61 @@ fn search_query_batch(
                 //          // Search was not run, but we send back an empty CSearchResultSet.
                 // ```
                 // With no valid context NCBI does not search, and reads no sequence.
+                let mut add = |ordinal: u32, prelim_hits: Vec<PrelimHit>| {
+                    collector.add(ordinal as usize, prelim_hits)
+                };
                 if any_valid_context {
-                    database::search_blocks(
-                        database,
-                        parallel_pool,
-                        use_parallel,
-                        &new_scratch,
-                        &|state: &mut (GapAlignScratch, SubjectScratch),
-                          ordinal: u32,
-                          subject: BlastnSubjectRef<'_>| {
-                            let (gap_scratch, subject_scratch) = state;
-                            let mut subject_hits: Option<Vec<BlastnHsp>> = None;
-                            let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                            process_subject(
-                                ordinal as usize,
-                                subject,
-                                gap_scratch,
-                                subject_scratch,
-                                Some(&lookup_tables),
-                                None,
-                                &mut subject_hits,
-                                &mut prelim_hits,
-                            );
-                            (!prelim_hits.is_empty()).then_some(prelim_hits)
-                        },
-                        &mut |ordinal, prelim_hits| collector.add(ordinal as usize, prelim_hits),
-                    )
-                    .map_err(|error| {
+                    let searched = if UNGAPPED {
+                        // The first error of reading a database sequence again for the
+                        // ungapped re-evaluation (`BlastnDatabase::with_blastna`).
+                        let x_ungapped_error: std::sync::Mutex<Option<(u32, anyhow::Error)>> =
+                            std::sync::Mutex::new(None);
+                        database::search_blocks(
+                            database,
+                            parallel_pool,
+                            use_parallel,
+                            &new_scratch,
+                            &ungapped_database_callback!(database, x_ungapped_error),
+                            &mut add,
+                        )
+                        .and_then(|()| {
+                            match x_ungapped_error
+                                .lock()
+                                .expect("the error cell is not poisoned")
+                                .take()
+                            {
+                                Some((_, error)) => Err(error),
+                                None => Ok(()),
+                            }
+                        })
+                    } else {
+                        database::search_blocks(
+                            database,
+                            parallel_pool,
+                            use_parallel,
+                            &new_scratch,
+                            &|state: &mut (GapAlignScratch, SubjectScratch),
+                              ordinal: u32,
+                              subject: BlastnSubjectRef<'_>| {
+                                let (gap_scratch, subject_scratch) = state;
+                                let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                                let mut prelim_hits: Vec<PrelimHit> = Vec::new();
+                                process_subject(
+                                    ordinal as usize,
+                                    subject,
+                                    gap_scratch,
+                                    subject_scratch,
+                                    Some(&lookup_tables),
+                                    None,
+                                    &mut subject_hits,
+                                    &mut prelim_hits,
+                                );
+                                (!prelim_hits.is_empty()).then_some(prelim_hits)
+                            },
+                            &mut add,
+                        )
+                    };
+                    searched.map_err(|error| {
                         database_search_error(
                             error,
                             first_batch,
@@ -18387,7 +19000,7 @@ fn search_query_chunks(
             .collect();
         let part_masks = chunk_query_masks(args, &parts, restricted, parallel_pool)
             .map_err(|error| window_masker_rejection(args, &error))?;
-        let batch = search_query_batch(
+        let batch = search_query_batch::<false>(
             args,
             x_query_drop::BatchQueries::Shared(&parts),
             subjects,

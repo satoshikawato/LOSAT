@@ -539,6 +539,18 @@ def _ungapped_cases():
                                            " -ungapped -outfmt 0", ""))
     cases.append(("ungapped.mlst", f"{MLST} -outfmt 6", ""))
     cases.append(("ungapped.mlst_fmt0", f"{MLST} -outfmt 0", ""))
+    # The custom tabular reports (line CLI, C2) of an ungapped search: mlst's real call, and the columns whose values an
+    # ungapped alignment may set differently from a gapped one (an HSP without an edit script is one run of
+    # substitutions: gapopen 0, gaps 0, btop and the identity counts from the re-evaluated alignment).
+    cases.append(("ungapped.mlst_tab", f"{MLST} -outfmt '6 sseqid slen length nident qseqid qstart qend qseq sstrand'",
+                  ""))
+    tab_cols = "qseqid sseqid qstart qend sstart send gapopen gaps btop qcovhsp qcovs nident positive ppos pident" \
+               " length mismatch qseq sseq"
+    cases.append(("ungapped.tab_cols_t2", f"{T2} -ungapped -outfmt '6 {tab_cols}'", ""))
+    cases.append(("ungapped.tab_cols_mix", f"{MX} -task blastn -ungapped -outfmt '7 {tab_cols}'", ""))
+    cases.append(("ungapped.tab_cols_ambrun", f"{AMB} -task blastn -ungapped -outfmt '6 {tab_cols}'", ""))
+    cases.append(("ungapped.tab_csv20", f"{MX} -task blastn -ungapped -outfmt 20", ""))
+    cases.append(("ungapped.tab_csv10", f"{MX} -task blastn -ungapped -outfmt '10 qseqid sseqid btop gaps nident'", ""))
     for name, argv in (("mb.t2", f"{T2} -ungapped -outfmt 6"), ("bn.p", f"{P} -task blastn -ungapped -outfmt 6"),
                        ("mb.mq", f"{B} -ungapped -outfmt 6"), ("dc.mq", f"{B} -task dc-megablast -ungapped -outfmt 6")):
         cases.append((f"ungapped.{name}_threads4", argv, "-num_threads 4"))

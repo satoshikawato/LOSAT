@@ -569,7 +569,7 @@ fn final_hsp(
             0.0
         },
         length,
-        mismatch: length - (num_ident + gap_letters),
+        mismatch: length as i64 - (num_ident + gap_letters) as i64,
         gapopen: gap_opens,
         q_start: hsp.query_start as usize + 1,
         q_end: hsp.query_end as usize,

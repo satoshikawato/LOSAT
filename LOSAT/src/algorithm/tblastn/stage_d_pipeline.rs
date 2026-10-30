@@ -105,6 +105,9 @@ pub(super) struct DatabaseNumbers {
 pub(super) struct SubjectSetNumbers {
     pub database: Option<DatabaseNumbers>,
     pub dbsize: Option<i64>,
+    /// `-searchsp`: the effective search space when above 0, and at any value no Gumbel block
+    /// (`gumbel_block`).
+    pub searchsp: Option<i64>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:131-136
@@ -181,6 +184,31 @@ impl SubjectSetNumbers {
             Some(dbsize) if dbsize != 0 => dbsize / 3,
             _ => (total_nt / 3) as i64,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
+    // ```c++
+    //     if (args.Exist(kArgEffSearchSpace) && args[kArgEffSearchSpace]) {
+    //         CNcbiEnvironment env;
+    //         env.Set("OLD_FSC", "true");
+    //         opt.SetEffectiveSearchSpace(args[kArgEffSearchSpace].AsInt8());
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:921-923
+    // ```c
+    //     use_old_fsc = getenv("OLD_FSC");
+    //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
+    // ```
+    /// The Gumbel block of the database length `total_nt`, none with `-searchsp`.
+    pub(super) fn gumbel_block(
+        &self,
+        spec: &ProteinScoringSpec,
+        total_nt: u64,
+    ) -> Option<BlastGumbelBlk> {
+        if self.searchsp.is_some() {
+            return None;
+        }
+        lookup_protein_gumbel_params(spec, self.gumbel_db_length(total_nt))
     }
 
     /// The shortest subject length of the hit-saving cutoff, in residues
@@ -1059,7 +1087,12 @@ fn run_local_search_with_pool(
     // The local `-subject` sequences are a multi-sequence source: the shortest record (an
     // empty one counts as 0, in nucleotides) is raised to 10 before the division. A database
     // answers 10 (`SubjectSetNumbers::min_subject_length`).
-    let min_subject_length = profile.subject_set.min_subject_length(&subjects);
+    // Without a Gumbel block it is the average, in nucleotides (blast_setup.c:975).
+    let min_subject_length = if profile.subject_set.searchsp.is_some() {
+        total_nt / num_subjects.max(1)
+    } else {
+        profile.subject_set.min_subject_length(&subjects)
+    };
     let query_lengths: Vec<i32> = queries
         .iter()
         .map(|query| i32::try_from(query.len()))
@@ -1081,8 +1114,8 @@ fn run_local_search_with_pool(
     // NCBI c++/src/algo/blast/core/blast_stat.c:4091-4171;
     // core/blast_hits.c:1870-1895: gbp is optional; absent gbp selects
     // BLAST_KarlinStoE_simple with the context's effective search space.
-    let gumbel =
-        lookup_protein_gumbel_params(&spec, profile.subject_set.gumbel_db_length(total_nt as u64));
+    let gumbel = profile.subject_set.gumbel_block(&spec, total_nt as u64);
+    let options_searchsp = profile.subject_set.searchsp;
     let QuerySetSetup {
         working_frames,
         contexts,
@@ -1103,7 +1136,7 @@ fn run_local_search_with_pool(
             composition_mode2,
             do_sum_stats,
         },
-        None,
+        options_searchsp.as_ref().map(std::slice::from_ref),
         true,
     )?;
     let batch_setup = LocalBatchSetup {
@@ -1322,9 +1355,7 @@ fn run_local_search_with_pool(
         .collect();
     // NCBI c++/src/algo/blast/core/blast_kappa.c:2439-2479:
     // do_link_hsps and cutoff_s follow the actual sum-statistics option.
-    let gumbel = gumbel
-        .as_ref()
-        .context("TBLASTN composition Spouge state is missing")?;
+    let gumbel = gumbel.as_ref();
     let redo_params = local_kappa_redo_params(
         scoring.matrix,
         scoring.gap_open,
@@ -1450,7 +1481,7 @@ fn run_local_search_with_pool(
                 i32::try_from(subject.len())?,
                 &scaled_by_context,
                 &parameters.lengths,
-                Some(gumbel),
+                gumbel,
             )
         };
         reap_by_evalue(&mut postredo, profile.expect_value);
@@ -2676,9 +2707,7 @@ fn run_preliminary_subjects_into(
                 inputs.lengths,
                 i32::try_from(subject.len())?,
                 inputs.gapped_by_context,
-                inputs
-                    .gumbel
-                    .context("TBLASTN sum-statistics Spouge state is missing")?,
+                inputs.gumbel,
                 &link,
             )?
         } else {
@@ -3064,7 +3093,7 @@ fn finish_local_mode0_no_sum_stats(
                 lengths,
                 stat_length,
                 gapped_params,
-                gumbel.context("TBLASTN sum-statistics Spouge state is missing")?,
+                gumbel,
                 &post_link,
             )?
         } else {

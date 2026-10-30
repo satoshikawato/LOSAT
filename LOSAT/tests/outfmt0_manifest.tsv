@@ -1323,3 +1323,26 @@ sp.blastx.zero.0	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa
 sp.blastx.zero.11	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa	-searchsp 0	11						DI-7: BLASTX -subject -searchsp 0 in the archive
 sp.blastx.cbs0.6	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa	-searchsp 500000000 -comp_based_stats 0	6						DI-7: BLASTX -subject -searchsp without composition adjustment
 sp.blastx.nosum.6	blastx		tests/db_search/bslice_q.fna	tests/db_search/bslice.faa	-searchsp 500000000 -sum_stats false	6						DI-7: BLASTX -subject -searchsp -sum_stats false
+sp.tblastn.0	tblastn		tests/db_search/tslice_q.faa	tests/db_search/tslice.fna	-searchsp 500000000							DI-7: TBLASTN -subject -searchsp, outfmt 0
+sp.tblastn.5	tblastn		tests/db_search/tslice_q.faa	tests/db_search/tslice.fna	-searchsp 500000000	5						DI-7: TBLASTN -subject -searchsp, outfmt 5
+sp.tblastn.6	tblastn		tests/db_search/tslice_q.faa	tests/db_search/tslice.fna	-searchsp 500000000	6						DI-7: TBLASTN -subject -searchsp, outfmt 6
+sp.tblastn.7	tblastn		tests/db_search/tslice_q.faa	tests/db_search/tslice.fna	-searchsp 500000000	7						DI-7: TBLASTN -subject -searchsp, outfmt 7
+sp.tblastn.11	tblastn		tests/db_search/tslice_q.faa	tests/db_search/tslice.fna	-searchsp 500000000	11						DI-7: TBLASTN -subject -searchsp, outfmt 11
+sp.tblastn.db.0	tblastn		tests/db_search/tslice_q.faa	tests/db_search/tslice.fna	-searchsp 500000000 -dbsize 1000							DI-7: TBLASTN -subject -searchsp -dbsize
+sp.tblastn.zero.0	tblastn		tests/db_search/tslice_q.faa	tests/db_search/tslice.fna	-searchsp 0							DI-7: TBLASTN -subject -searchsp 0 (OLD_FSC without a fixed space)
+sp.tblastn.zero.11	tblastn		tests/db_search/tslice_q.faa	tests/db_search/tslice.fna	-searchsp 0	11						DI-7: TBLASTN -subject -searchsp 0 in the archive
+sp.tblastn.cbs0.6	tblastn		tests/db_search/tslice_q.faa	tests/db_search/tslice.fna	-searchsp 500000000 -comp_based_stats 0	6						DI-7: TBLASTN -subject -searchsp without composition adjustment
+sp.tblastn.cbs3.6	tblastn		tests/db_search/tslice_q.faa	tests/db_search/tslice.fna	-searchsp 500000000 -comp_based_stats 3	6						DI-7: TBLASTN -subject -searchsp, composition mode 3
+sp.tblastn.small.6	tblastn		tests/db_search/tslice_q.faa	tests/db_search/tslice.fna	-searchsp 1000 -evalue 1e-6	6						DI-7: TBLASTN -subject a small -searchsp
+sp.blastp.0	blastp		tests/db_search/bpqb_q.faa	tests/db_search/bslice.faa	-searchsp 500000000							DI-7: BLASTP -subject -searchsp, outfmt 0
+sp.blastp.5	blastp		tests/db_search/bpqb_q.faa	tests/db_search/bslice.faa	-searchsp 500000000	5						DI-7: BLASTP -subject -searchsp, outfmt 5
+sp.blastp.6	blastp		tests/db_search/bpqb_q.faa	tests/db_search/bslice.faa	-searchsp 500000000	6						DI-7: BLASTP -subject -searchsp, outfmt 6
+sp.blastp.7	blastp		tests/db_search/bpqb_q.faa	tests/db_search/bslice.faa	-searchsp 500000000	7						DI-7: BLASTP -subject -searchsp, outfmt 7
+sp.blastp.11	blastp		tests/db_search/bpqb_q.faa	tests/db_search/bslice.faa	-searchsp 500000000	11						DI-7: BLASTP -subject -searchsp, outfmt 11
+sp.blastp.db.0	blastp		tests/db_search/bpqb_q.faa	tests/db_search/bslice.faa	-searchsp 500000000 -dbsize 1000							DI-7: BLASTP -subject -searchsp -dbsize
+sp.blastp.zero.0	blastp		tests/db_search/bpqb_q.faa	tests/db_search/bslice.faa	-searchsp 0							DI-7: BLASTP -subject -searchsp 0 (OLD_FSC without a fixed space)
+sp.blastp.zero.11	blastp		tests/db_search/bpqb_q.faa	tests/db_search/bslice.faa	-searchsp 0	11						DI-7: BLASTP -subject -searchsp 0 in the archive
+sp.blastp.cbs0.6	blastp		tests/db_search/bpqb_q.faa	tests/db_search/bslice.faa	-searchsp 500000000 -comp_based_stats 0	6						DI-7: BLASTP -subject -searchsp without composition adjustment
+sp.blastp.cbs3.6	blastp		tests/db_search/bpqb_q.faa	tests/db_search/bslice.faa	-searchsp 500000000 -comp_based_stats 3	6						DI-7: BLASTP -subject -searchsp, composition mode 3
+sp.blastp.small.6	blastp		tests/db_search/bpqb_q.faa	tests/db_search/bslice.faa	-searchsp 1000 -evalue 1e-6	6						DI-7: BLASTP -subject a small -searchsp
+sp.blastp.fast.0	blastp	blastp-fast	tests/db_search/bpqb_q.faa	tests/db_search/bslice.faa	-searchsp 500000000							DI-7: -task blastp-fast -searchsp

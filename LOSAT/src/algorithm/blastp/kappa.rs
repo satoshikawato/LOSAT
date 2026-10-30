@@ -1767,7 +1767,7 @@ fn adjust_evalues_for_composition(
 fn evaluate_and_purge(
     hsp_list: &mut BlastpHspList,
     params: &KarlinParams,
-    gumbel_params: &BlastGumbelBlk,
+    gumbel_params: Option<&BlastGumbelBlk>,
     query_workspace: &BlastpKappaQueryWorkspace,
     subject_length: i32,
     expect_value: f64,
@@ -1793,13 +1793,19 @@ fn evaluate_and_purge(
     // ```
     let eval_params = scaled_karlin_params(params, score_divisor);
     for hsp in &mut hsp_list.hsps {
-        hsp.e_value = blast_spouge_stoe(
-            hsp.raw_score,
-            &eval_params,
-            gumbel_params,
-            query_workspace.query_length,
-            subject_length,
-        );
+        hsp.e_value = match gumbel_params {
+            Some(gumbel_params) => blast_spouge_stoe(
+                hsp.raw_score,
+                &eval_params,
+                gumbel_params,
+                query_workspace.query_length,
+                subject_length,
+            ),
+            None => {
+                query_workspace.redo_query_info.eff_search_space
+                    * (-eval_params.lambda * hsp.raw_score as f64 + eval_params.k.ln()).exp()
+            }
+        };
     }
     update_best_evalue(hsp_list);
     if let Some(comp_p_value) = pvalue_for_this_pair.filter(|p| (0.0..=1.0).contains(p)) {
@@ -1849,7 +1855,7 @@ pub(crate) fn postprocess_preliminary_hits(
     subject: &[u8],
     matrix: ScoringMatrix,
     karlin_params: &KarlinParams,
-    gumbel_params: &BlastGumbelBlk,
+    gumbel_params: Option<&BlastGumbelBlk>,
     redo_align_params: &BlastRedoAlignParams,
     expect_value: f64,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1719-1720
@@ -2618,7 +2624,7 @@ mod tests {
         let (_best_score, best_evalue) = evaluate_and_purge(
             &mut hsp_list,
             &params,
-            &gumbel,
+            Some(&gumbel),
             &query_workspace,
             200,
             10.0,
@@ -2667,7 +2673,7 @@ mod tests {
         let (_best_score, best_evalue) = evaluate_and_purge(
             &mut hsp_list,
             &params,
-            &gumbel,
+            Some(&gumbel),
             &query_workspace,
             200,
             10.0,

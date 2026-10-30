@@ -159,7 +159,6 @@ db.tblastn.nohit.0	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_no
 db.tblastn.nohit_masked.0	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_nohit_masked.faa		0	0	ffea3ca56bcaed50dd5add908c5af69a1ef1cc2240c364adb67cca169a7d13d5	929	6eba951c46ec6c864484542b8f2172c4f5943e001fd494d078013322e663ecb8	a query that SEG masks completely: NCBI prints no hits and the warning that it could not calculate ungapped Karlin-Altschul parameters (exit 0), pairwise
 db.tblastn.nohit.7	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_nohit.faa		7	0	d15f3aca50f87d7f7e82b5a250c5c87669d58316473ea276ad521001d1ca857b	143		a random protein query without hits, tabular with comments
 db.tblastn.no_nhr.nohit.0	tblastn	ncbi	tests/db_search/nnophr	tests/db_search/tslice_nohit.faa		0	0	526e01c9ecb273c996c9349c9fd21f6bcb573ca81cce57ea646f2b12b7aef068	1008		a nucleotide database without its header file and the random query without hits: NCBI reads no header, so it reports no hits (exit 0). With a hit NCBI fails with exit 2 and a message that holds the absolute path of the file, which is not frozen
-db.tblastn.searchsp.reject	tblastn	losat-rejection	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 1000	6	2				-searchsp (an explicit search space) is rejected | expect: -searchsp is not supported by LOSAT's TBLASTN
 db.blastx.default.0	blastx	ncbi	tests/db_search/bslice	tests/db_search/bslice_q.fna		0	0	1b090581d5dbfa4e3a0c26b854c4c004c59d5ff3bb94b7fa8cd6b3c3410c16e0	30464		default options, pairwise: two nucleotide queries (MelaMJNV 26001-31000, a family of related minus-strand genes; 56001-61600, a plus- and a minus-strand gene) against 35 proteins of PemoMJNVA
 db.blastx.default.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/bslice_q.fna		6	0	9ffbe7e1c37a977a58ba5822f584779e179cc295a515e3f3ce96a873348f7a16	2227		the same, tabular. D1: -db keeps a weak hit that -subject drops: NCBI blastx -db gives 36 rows and -subject tests/db_search/bslice.faa gives 35 (the extra row is m_fam against BDT61959.1, E value 0.21), because a database answers 3 as the shortest subject length and a FASTA set its real shortest (75 residues here)
 db.blastx.default.7	blastx	ncbi	tests/db_search/bslice	tests/db_search/bslice_q.fna		7	0	a1870ea68126a2491ea254ca9c8a0d95bd673448ba7d7e2351721d54e210b300	2760		the same, tabular with comments
@@ -1214,3 +1213,33 @@ db.sp.blastx.cbs0.0	blastx	ncbi	tests/db_search/bslice	tests/db_search/bslice_q.
 db.sp.blastx.cbs0.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/bslice_q.fna	-searchsp 1000 -comp_based_stats 0	6	0				DI-7: BLASTX a small -searchsp without composition adjustment		
 db.sp.blastn.zero.11	blastn	ncbi	tests/db_search/nslice	tests/db_search/nslice_q.fna	-searchsp 0	11	0				DI-7: BLASTN -searchsp 0 in the archive		
 db.sp.tblastx.zero.11	tblastx	ncbi	tests/db_search/xslice	tests/db_search/xslice_q.fna	-searchsp 0	11	0				DI-7: TBLASTX -searchsp 0 in the archive		
+db.sp.tblastn.0	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 500000000	0	0				DI-7: TBLASTN -searchsp fixes the effective search space, outfmt 0		
+db.sp.tblastn.5	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 500000000	5	0				DI-7: TBLASTN -searchsp fixes the effective search space, outfmt 5		
+db.sp.tblastn.6	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 500000000	6	0				DI-7: TBLASTN -searchsp fixes the effective search space, outfmt 6		
+db.sp.tblastn.7	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 500000000	7	0				DI-7: TBLASTN -searchsp fixes the effective search space, outfmt 7		
+db.sp.tblastn.8	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 500000000	8	0				DI-7: TBLASTN -searchsp fixes the effective search space, outfmt 8		
+db.sp.tblastn.11	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 500000000	11	0				DI-7: TBLASTN -searchsp fixes the effective search space, outfmt 11		
+db.sp.tblastn.15	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 500000000	15	0				DI-7: TBLASTN -searchsp fixes the effective search space, outfmt 15		
+db.sp.tblastn.db.0	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 500000000 -dbsize 1000	0	0				DI-7: TBLASTN -searchsp with -dbsize (MAKER): -dbsize stays in the length adjustment		
+db.sp.tblastn.db.5	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 500000000 -dbsize 1000	5	0				DI-7: TBLASTN -searchsp with -dbsize: outfmt 5 Statistics_hsp-len		
+db.sp.tblastn.small.6	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 1000 -evalue 1e-6	6	0				DI-7: TBLASTN a small -searchsp		
+db.sp.tblastn.zero.0	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 0	0	0				DI-7: TBLASTN -searchsp 0 changes the statistics only where NCBI sets OLD_FSC		
+db.sp.tblastn.zero.db.6	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 0 -dbsize 1000	6	0				DI-7: TBLASTN -searchsp 0 with -dbsize		
+db.sp.tblastn.zero.11	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 0	11	0				DI-7: TBLASTN -searchsp 0 in the archive		
+db.sp.tblastn.cbs0.0	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 500000000 -comp_based_stats 0	0	0				DI-7: TBLASTN -searchsp without composition adjustment		
+db.sp.tblastn.cbs0.6	tblastn	ncbi	tests/db_search/tslice	tests/db_search/tslice_q.faa	-searchsp 1000 -comp_based_stats 0	6	0				DI-7: TBLASTN a small -searchsp without composition adjustment		
+db.sp.blastp.0	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 500000000	0	0				DI-7: BLASTP -searchsp fixes the effective search space, outfmt 0		
+db.sp.blastp.5	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 500000000	5	0				DI-7: BLASTP -searchsp fixes the effective search space, outfmt 5		
+db.sp.blastp.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 500000000	6	0				DI-7: BLASTP -searchsp fixes the effective search space, outfmt 6		
+db.sp.blastp.7	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 500000000	7	0				DI-7: BLASTP -searchsp fixes the effective search space, outfmt 7		
+db.sp.blastp.8	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 500000000	8	0				DI-7: BLASTP -searchsp fixes the effective search space, outfmt 8		
+db.sp.blastp.11	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 500000000	11	0				DI-7: BLASTP -searchsp fixes the effective search space, outfmt 11		
+db.sp.blastp.15	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 500000000	15	0				DI-7: BLASTP -searchsp fixes the effective search space, outfmt 15		
+db.sp.blastp.db.0	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 500000000 -dbsize 1000	0	0				DI-7: BLASTP -searchsp with -dbsize (MAKER): -dbsize stays in the length adjustment		
+db.sp.blastp.db.5	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 500000000 -dbsize 1000	5	0				DI-7: BLASTP -searchsp with -dbsize: outfmt 5 Statistics_hsp-len		
+db.sp.blastp.small.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 1000 -evalue 1e-6	6	0				DI-7: BLASTP a small -searchsp		
+db.sp.blastp.zero.0	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 0	0	0				DI-7: BLASTP -searchsp 0 changes the statistics only where NCBI sets OLD_FSC		
+db.sp.blastp.zero.db.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 0 -dbsize 1000	6	0				DI-7: BLASTP -searchsp 0 with -dbsize		
+db.sp.blastp.zero.11	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 0	11	0				DI-7: BLASTP -searchsp 0 in the archive		
+db.sp.blastp.cbs0.0	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 500000000 -comp_based_stats 0	0	0				DI-7: BLASTP -searchsp without composition adjustment		
+db.sp.blastp.cbs0.6	blastp	ncbi	tests/db_search/bslice	tests/db_search/bpqb_q.faa	-searchsp 1000 -comp_based_stats 0	6	0				DI-7: BLASTP a small -searchsp without composition adjustment		

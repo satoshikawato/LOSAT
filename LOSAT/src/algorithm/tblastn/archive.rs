@@ -53,6 +53,7 @@ use crate::utils::seg::SegParams;
 pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Tblastn, &args.task);
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     inputs.evalue = args.evalue;
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;

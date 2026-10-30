@@ -42,7 +42,8 @@ pub struct BlastxArgs {
     //                      "Input file name",
     //                      CArgDescriptions::eInputFile, kDfltArgQuery);
     // ```
-    #[arg(long, value_name = "PATH")]
+    // The default `-` is standard input (`input_files::open_input`).
+    #[arg(long, value_name = "PATH", default_value = "-")]
     pub query: PathBuf,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2366
     // ```c++
@@ -125,7 +126,7 @@ pub struct BlastxArgs {
     //         arg_desc.AddDefaultKey(kTask, "task_name", "Task to execute",
     //                                CArgDescriptions::eString, m_DefaultTask);
     // ```
-    #[arg(long, default_value = "blastx", value_parser = ["blastx"])]
+    #[arg(long, default_value = "blastx", value_parser = ["blastx", "blastx-fast"])]
     pub task: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:146-146
     // ```c++
@@ -834,13 +835,12 @@ impl BlastxArgs {
         choice: &crate::blastinput::app::FormatChoice,
     ) -> Result<ResolvedOptions> {
         let outfmt = u8::try_from(choice.number)?;
-        if self.query.as_os_str() == "-"
-            || self
-                .subject
-                .as_deref()
-                .is_some_and(|subject| subject.as_os_str() == "-")
+        if self
+            .subject
+            .as_deref()
+            .is_some_and(|subject| subject.as_os_str() == "-")
         {
-            bail!("unsupported BLASTX stdin query/subject");
+            bail!("unsupported BLASTX stdin subject");
         }
         if self.matrix.as_deref().is_some_and(|m| m != "BLOSUM62") {
             bail!("unsupported BLASTX matrix: use BLOSUM62");
@@ -929,7 +929,20 @@ impl BlastxArgs {
             )
             .into());
         }
-        let word_size = self.word_size.unwrap_or(3);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:429-433
+        // ```c++
+        //         if (task == "blastx-fast") {
+        //             opts->SetWordSize(5);
+        //             opts->SetOptions().SetLookupTableType(eCompressedAaLookupTable);
+        //             opts->SetWordThreshold(BLAST_WORD_THRESHOLD_BLASTP_FAST);
+        //         }
+        // ```
+        let fast = self.task == "blastx-fast";
+        let word_size = self.word_size.unwrap_or(if fast { 5 } else { 3 });
+        // The word size given on the command line sets its own threshold (19.3 for 5, the citation
+        // at `word_size` below) and word size 3 leaves the task's: `-task blastx-fast -word_size 3`
+        // is the standard table with threshold 20 (api/blast_options_local_priv.hpp:612-619).
+        let task_threshold = if fast { 20.0 } else { 12.0 };
         // The counts are at most `i32::MAX` (the options are `Int4`).
         let hitlist_size = counts.hitlist_size as i32;
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:76-99
@@ -966,9 +979,11 @@ impl BlastxArgs {
             .map(crate::report::tabular::TabularSpec::intern);
         Ok(ResolvedOptions {
             word_size,
-            threshold: self
-                .threshold
-                .unwrap_or(if word_size == 5 { 19.3 } else { 12.0 }),
+            threshold: self.threshold.unwrap_or(if self.word_size == Some(5) {
+                19.3
+            } else {
+                task_threshold
+            }),
             lookup_type: if word_size == 5 { 4 } else { 3 },
             matrix: "BLOSUM62".into(),
             gap_open: 11,

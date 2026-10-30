@@ -2414,6 +2414,10 @@ mod tests {
                 blastdb_version: 4,
                 max_file_sz: max_file_sz.to_string(),
                 logfile: None,
+                parse_seqids: false,
+                hash_index: false,
+                taxid: None,
+                taxid_map: None,
             };
             let now = crate::writedb::time::LocalTime {
                 year: 2026,

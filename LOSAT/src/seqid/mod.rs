@@ -2,6 +2,10 @@
 //! and prints the ids that a BLAST database built with `-parse_seqids` stores (NCBI's
 //! `CSeq_id`, `CBlast_def_line_set` and the formatters' id helpers).
 //!
+//! - `accguide`: NCBI's accession guide and `IdentifyAccession` (the type of a bare
+//!   accession), for `makeblastdb -parse_seqids`.
+//! - `parse`: `CSeq_id`'s text parsers (`ParseIDs`, the bare-id constructor, the typed
+//!   `Set`).
 //! - `model`: the Seq-id value of every alternative (`ParsedSeqId`) and its serial writer
 //!   (outfmt 8, 9, 11, 12, through `report::seqid::SeqId::Db`).
 //! - `ber`: the BER decoding of a header record (`decode_full_set`), whose reader
@@ -18,10 +22,12 @@
 //! parsed Seq-ids from `seqdb::SeqDb::defline_set`; psiblast refuses such a database when it
 //! opens it (`algorithm::common::database::refuse_parsed_seqids`).
 
+pub mod accguide;
 pub mod ber;
 pub mod defline_set;
 pub mod label;
 pub mod model;
+pub mod parse;
 pub mod rank;
 
 #[cfg(test)]

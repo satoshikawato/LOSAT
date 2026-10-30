@@ -655,9 +655,7 @@ impl<M: TbxScore> XPairPar<M> {
                 while scan_range[1] <= scan_range[2] {
                     let prev_scan_left = scan_range[1];
                     // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-                    let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
-                        slice.scan_bf,
-                        sub,
+                    let hits = slice.scan(
                         subject,
                         &seq_ranges,
                         &mut scratch.offset_pairs[..],

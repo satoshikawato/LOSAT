@@ -183,7 +183,7 @@
 //! last context, `x_group_extents`) plus the window, and the cell of hit (q, s) is
 //! (q - s - lo) & (P - 1) (`XMasked`), where its unmasked table (`x_unit_width`) has at least four
 //! times P cells and P is at most the switch's KiB at eight threads or more, at most 4,096 cells at
-//! two to seven, never at one (`x_mask_max_cells`), or, in a batch that `guard` rejects
+//! two to seven, at most 8,192 at one (`x_mask_max_cells`), or, in a batch that `guard` rejects
 //! (LOSAT_X_TBXBAND), where its subject chunk is longer than the reference table has cells
 //! (`x_unit_mask_for`). Measured (workstation node 1): a unit's hit loop
 //! does one more instruction per hit on a masked table and saves the clearing of the unmasked
@@ -367,14 +367,18 @@ const X_UNITMASK_MANY_THREADS: usize = 8;
 /// rule at 2 to `X_UNITMASK_MANY_THREADS - 1` threads (module doc).
 const X_UNITMASK_FEW_THREADS_CELLS: usize = 1 << 12;
 
+/// No NCBI counterpart: the largest masked table, in cells (32 KiB), of LOSAT_X_TBXUNITMASK's size
+/// rule at one thread (module doc).
+const X_UNITMASK_ONE_THREAD_CELLS: usize = 1 << 13;
+
 // No NCBI counterpart: the size limit of LOSAT_X_TBXUNITMASK's rule (module doc).
 /// The largest masked table, in cells, that a unit takes for its size at `threads` threads, for
-/// the switch's `kib`: none at one thread, at most `X_UNITMASK_FEW_THREADS_CELLS` below
-/// `X_UNITMASK_MANY_THREADS`, the switch's KiB from there.
+/// the switch's `kib`: at most `X_UNITMASK_ONE_THREAD_CELLS` at one thread,
+/// `X_UNITMASK_FEW_THREADS_CELLS` below `X_UNITMASK_MANY_THREADS`, the switch's KiB from there.
 fn x_mask_max_cells(kib: usize, threads: usize) -> usize {
     let cells = kib.saturating_mul(1024) / std::mem::size_of::<DiagStruct>();
     match threads {
-        0 | 1 => 0,
+        0 | 1 => cells.min(X_UNITMASK_ONE_THREAD_CELLS),
         t if t < X_UNITMASK_MANY_THREADS => cells.min(X_UNITMASK_FEW_THREADS_CELLS),
         _ => cells,
     }
@@ -1209,12 +1213,7 @@ fn lut_direct_tables(
     pool: &crate::utils::threading::SearchPool<'_>,
     on_pool: bool,
 ) -> Vec<XGroup> {
-    let to_group = |g: XPairLutGroup| XGroup {
-        scan_bf: crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&g.table),
-        lookup: g.table,
-        q_min: g.q_min,
-        q_max: g.q_max,
-    };
+    let to_group = XGroup::from_direct;
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1280,11 +1279,117 @@ pub(super) struct XSubject<'a> {
 
 /// One unit-context group: its contexts' lookup entries and their query-offset bounds.
 struct XGroup {
+    /// The group's table. With `rank` not empty its backbone holds only the cells with entries
+    /// (`x_scan_bf::x_compact`): it is read through `scan` and `hits`, never by index.
     lookup: BlastAaLookupTable,
     q_min: u32,
     q_max: u32,
     /// EXPERIMENT (LOSAT_X_TBXSCANBF): `x_scan_bf_for(&lookup)`, decided once per table.
     scan_bf: bool,
+    /// The presence-vector rank of a compacted table, empty for a table of the full backbone.
+    rank: Vec<u32>,
+}
+
+impl XGroup {
+    // No NCBI counterpart: the layout of a group table (`x_scan_bf::x_compact`); its cells,
+    // entries and presence bits are those of `lookup`.
+    /// The group of `lookup`. A table the branch-free scan takes (`x_scan_bf_for`: fewer than
+    /// half of its cells have entries) keeps only the cells with entries.
+    fn new(mut lookup: BlastAaLookupTable, q_min: u32, q_max: u32) -> Self {
+        let scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup);
+        let rank = if scan_bf {
+            crate::algorithm::tblastx::x_scan_bf::x_compact(&mut lookup)
+        } else {
+            Vec::new()
+        };
+        Self {
+            lookup,
+            q_min,
+            q_max,
+            scan_bf,
+            rank,
+        }
+    }
+
+    // No NCBI counterpart: as `new`, for a table `x_build_group` laid out (compacted there where
+    // `new` would compact it).
+    /// The group of a direct table (`XPairLutQuery::x_build_group`).
+    fn from_direct(g: XPairLutGroup) -> Self {
+        let scan_bf = if g.rank.is_empty() {
+            crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&g.table)
+        } else {
+            crate::algorithm::tblastx::x_scan_bf::x_reach_scan_bf(true);
+            true
+        };
+        Self {
+            lookup: g.table,
+            q_min: g.q_min,
+            q_max: g.q_max,
+            scan_bf,
+            rank: g.rank,
+        }
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:509-511
+    // ```c
+    // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+    // ```
+    /// One scan call of this group's table: `x_scan_subject` (LOSAT_X_TBXSCANBF's choice), or
+    /// `x_scan_subject_compact` on a compacted table. The offset array holds
+    /// `x_offset_pairs_len(array_size)` entries.
+    #[inline(always)]
+    fn scan(
+        &self,
+        subject: &[u8],
+        seq_ranges: &[(i32, i32)],
+        offset_pairs: &mut [OffsetPair],
+        array_size: i32,
+        scan_range: &mut [i32; 3],
+    ) -> i32 {
+        if self.rank.is_empty() {
+            crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
+                self.scan_bf,
+                &self.lookup,
+                subject,
+                seq_ranges,
+                offset_pairs,
+                array_size,
+                scan_range,
+            )
+        } else {
+            crate::algorithm::tblastx::x_scan_bf::x_scan_subject_compact(
+                &self.lookup,
+                &self.rank,
+                subject,
+                seq_ranges,
+                offset_pairs,
+                array_size,
+                scan_range,
+            )
+        }
+    }
+
+    /// The entries of cell `index` (none for a cell without its presence bit).
+    #[cfg(test)]
+    fn hits(&self, index: usize) -> &[i32] {
+        if self.rank.is_empty() {
+            return self.lookup.get_hits(index);
+        }
+        let word = index >> crate::algorithm::tblastx::lookup::PV_ARRAY_BTS;
+        let bit = index & crate::algorithm::tblastx::lookup::PV_ARRAY_MASK;
+        if (self.lookup.pv[word] >> bit) & 1 == 0 {
+            return &[];
+        }
+        let below = self.lookup.pv[word] & ((1u32 << bit) - 1);
+        let cell = &self.lookup.backbone[self.rank[word] as usize + below.count_ones() as usize];
+        let num = cell.num_used as usize;
+        if num <= AA_HITS_PER_CELL {
+            &cell.entries[..num]
+        } else {
+            let cursor = cell.entries[0] as usize;
+            &self.lookup.overflow[cursor..cursor + num]
+        }
+    }
 }
 
 /// One unit: subject frame `f`, its chunk number `k`, context group `g`.
@@ -2809,9 +2914,7 @@ fn x_unit_batch<
     let prev_scan_left = scan_range[1];
     // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
     // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
-    let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
-        group.scan_bf,
-        &group.lookup,
+    let hits = group.scan(
         subject,
         seq_ranges,
         &mut scratch.offset_pairs[..],
@@ -3293,12 +3396,11 @@ fn build_tables(lookup: &BlastAaLookupTable, bounds: &[i32]) -> Vec<XGroup> {
                 threshold: lookup.threshold,
                 row_max: lookup.row_max.clone(),
             };
-            XGroup {
-                q_min: if b.longest_chain > 0 { b.q_min } else { 0 },
-                q_max: b.q_max,
-                scan_bf: crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup),
+            XGroup::new(
                 lookup,
-            }
+                if b.longest_chain > 0 { b.q_min } else { 0 },
+                b.q_max,
+            )
         })
         .collect()
 }
@@ -3694,6 +3796,12 @@ mod tests {
         let (lookup, contexts) = lookup_for(&frames);
         let groups = build_groups(&lookup, &contexts);
         assert_eq!(groups.len(), 6);
+        // The tables of 300-letter contexts are sparse: with LOSAT_X_TBXSCANBF they keep only
+        // their cells with entries (`XGroup::new`), read here through `XGroup::hits`.
+        assert_eq!(
+            groups.iter().all(|g| !g.rank.is_empty()),
+            crate::algorithm::tblastx::x_scan_bf::x_tbx_scan_bf()
+        );
         for idx in 0..lookup.backbone.len() {
             let full = lookup.get_hits(idx);
             let rank = |q: i32| {
@@ -3703,7 +3811,7 @@ mod tests {
             };
             let mut merged: Vec<i32> = Vec::new();
             for (g, group) in groups.iter().enumerate() {
-                let sub = group.lookup.get_hits(idx);
+                let sub = group.hits(idx);
                 assert_eq!(
                     crate::algorithm::tblastx::lookup::pv_test(&group.lookup.pv, idx),
                     !sub.is_empty()
@@ -4421,8 +4529,9 @@ mod tests {
             x_unit_mask_for(&rule(0, None), 24, 40, 1 << 20, 1 << 20),
             None
         );
-        // The size limit by thread count: none at one, 4,096 cells at 2-7, the switch's KiB at 8+.
-        assert_eq!(x_mask_max_cells(256, 1), 0);
+        // The size limit by thread count: 8,192 cells at one, 4,096 at 2-7, the switch's KiB at 8+.
+        assert_eq!(x_mask_max_cells(256, 1), 8192);
+        assert_eq!(x_mask_max_cells(2, 1), 512);
         assert_eq!(x_mask_max_cells(256, 2), 4096);
         assert_eq!(x_mask_max_cells(256, 7), 4096);
         assert_eq!(x_mask_max_cells(256, 8), 65536);

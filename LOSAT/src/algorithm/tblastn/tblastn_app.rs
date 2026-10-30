@@ -437,7 +437,9 @@ fn search_cli(
     // The database of `-db` is opened after the options are processed, before
     // `Query is Empty!` (as BLASTN's).
     let database = match args.database_name() {
-        Some(name) => Some(super::database::TblastnDatabase::open(name, &settings)?),
+        Some(name) => Some(
+            super::database::TblastnDatabase::open(name, &settings)?.showing_gis(args.show_gis),
+        ),
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104

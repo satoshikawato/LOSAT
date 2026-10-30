@@ -517,7 +517,11 @@ pub(crate) fn read_header(
     match db.read_header(ordinal) {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set, db.is_version5())
-                .map(|subject| ReportedHeader::Parsed(std::sync::Arc::new(subject)))
+                .map(|subject| {
+                    ReportedHeader::Parsed(std::sync::Arc::new(
+                        subject.showing_gis(db.reports_show_gis()),
+                    ))
+                })
                 .map_err(|reason| parsed_refusal(ordinal, &reason, program))
         }
         Ok(crate::seqdb::SequenceHeader::Ordinal(deflines)) => {

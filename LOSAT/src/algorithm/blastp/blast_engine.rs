@@ -82,6 +82,8 @@ mod x_subject_runs;
 // EXPERIMENT (LOSAT_X_BPSUBJMETA): the subjects' tabular IDs and titles of the block search made
 // once for all blocks (held by `x_query_blocks::XBlockSubjects`).
 pub(super) mod x_subject_meta;
+// `-comp_based_stats 0`: NCBI's ordinary traceback in place of the composition-based redo.
+mod traceback;
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{
@@ -2247,7 +2249,11 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} (NCBI BLAST+ 2.17.0 gives different reports for the same search)"
         );
     }
-    if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust {
+    // Mode 0 runs BLASTP's ordinary traceback (`traceback.rs`); psiblast's rounds keep mode 2.
+    if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust
+        && !(args.app == BlastpApp::Blastp
+            && args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats)
+    {
         bail!(
             "-comp_based_stats {} is not supported by LOSAT's {program}",
             args.comp_based_stats.to_ncbi_cli_string()
@@ -4973,11 +4979,10 @@ fn search_cli(
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
     let database = match resolved.db.as_deref() {
-        Some(name) => Some(database::BlastpDatabase::open(
-            name,
-            &settings,
-            args.app == BlastpApp::Blastp,
-        )?),
+        Some(name) => Some(
+            database::BlastpDatabase::open(name, &settings, args.app == BlastpApp::Blastp)?
+                .showing_gis(args.show_gis),
+        ),
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
@@ -9457,7 +9462,10 @@ fn run_resolved_in_pool(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_win_expand = false;
-    if x_compact_expand_all && !x_win_expand {
+    // `-comp_based_stats 0`: the ordinary traceback below reads the compact lists as they are.
+    let ordinary_traceback =
+        args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats;
+    if x_compact_expand_all && !x_win_expand && !ordinary_traceback {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
 
@@ -9480,6 +9488,31 @@ fn run_resolved_in_pool(
     // EXPERIMENT (LOSAT_X_BPTREEPOOL): the same for the pool's interval trees.
     x_tree_pool::release();
     let kappa_redo_start = blastp_timing_start(timing_enabled);
+    // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
+    // preliminary list here, so the composition-based redo below finds none; its hit lists
+    // replace the redo's after it.
+    let ordinary_hit_lists = if ordinary_traceback {
+        let ordinary = traceback::OrdinaryTraceback {
+            contexts: &contexts,
+            total_query_span,
+            subjects,
+            matrix: args.scoring.matrix,
+            gap_open: args.scoring.gap_open,
+            gap_extend: args.scoring.gap_extend,
+            x_drop_final: x_drop_gapped_final,
+            karlin: &gapped_params,
+            gumbel: &gapped_gumbel,
+            expect_value: args.evalue,
+            hitlist_size: args.traceback_hitlist_size(),
+        };
+        Some(ordinary.run(
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            blastp_parallel_pool,
+        )?)
+    } else {
+        None
+    };
     // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2228-2236
     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
     // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
@@ -9786,7 +9819,7 @@ fn run_resolved_in_pool(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if x_redo_par_switch {
+    if x_redo_par_switch && !ordinary_traceback {
         crate::utils::xreach::x_reach!("LOSAT_X_BPREDOPAR", x_redo_par_on);
     }
     #[cfg(all(
@@ -9809,21 +9842,24 @@ fn run_resolved_in_pool(
     // one-thread loop shares none.
     // The serial and the query-parallel redo loops solve the first Newton problems of the next
     // `X_NEWTON_LANES_MATCHES` matches ahead (Newton lanes); the match-parallel redo solves none.
-    crate::utils::xreach::x_reach!(
-        "LOSAT_X_SEGSHARE",
-        x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
-    );
-    crate::utils::xreach::x_reach!(
-        "LOSAT_X_NEWTONLANES",
-        x_redo_par_run || !use_parallel_kappa_match_redo
-    );
+    // With `-comp_based_stats 0` no redo runs, so neither side is reached.
+    if !ordinary_traceback {
+        crate::utils::xreach::x_reach!(
+            "LOSAT_X_SEGSHARE",
+            x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
+        );
+        crate::utils::xreach::x_reach!(
+            "LOSAT_X_NEWTONLANES",
+            x_redo_par_run || !use_parallel_kappa_match_redo
+        );
+    }
     // EXPERIMENT (LOSAT_X_BPSEGWIN): a redo not in windows empties no store; the windows record
     // their side (`x_redo_par::x_redo`).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if super::x_redo_par::x_bp_seg_win().is_some() && !x_redo_par_on {
+    if super::x_redo_par::x_bp_seg_win().is_some() && !x_redo_par_on && !ordinary_traceback {
         crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", false);
     }
     if x_redo_par_run {
@@ -10519,6 +10555,9 @@ fn run_resolved_in_pool(
     }
     let mut hit_lists =
         fill_results_from_compo_heaps(args.traceback_hitlist_size(), &mut redone_matches);
+    if let Some(ordinary_hit_lists) = ordinary_hit_lists {
+        hit_lists = ordinary_hit_lists;
+    }
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(
             &timing.kappa_redo_ns,
@@ -11998,6 +12037,7 @@ mod tests {
             subject: Some(PathBuf::from("subject.faa")),
             db: None,
             dbsize: None,
+            show_gis: false,
             task: "blastp".to_string(),
             evalue: None,
             threshold: None,

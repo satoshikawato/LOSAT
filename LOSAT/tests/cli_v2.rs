@@ -1315,6 +1315,23 @@ fn culling_limit_is_read_as_ncbi_does() {
     }
 }
 
+// NCBI blast_args.cpp:2663: -show_gis is a flag of every search program.
+#[test]
+fn show_gis_is_a_flag_of_every_search_program() {
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        assert!(parse(program, &["-show_gis"]).is_ok(), "{program}");
+        assert!(parse(program, &["-show_gis", "true"]).is_err(), "{program}");
+    }
+    let Commands::Blastn(args) = parse("blastn", &["-show_gis"]).unwrap().command else {
+        panic!()
+    };
+    assert!(args.show_gis);
+    let Commands::Blastn(args) = parse("blastn", &[]).unwrap().command else {
+        panic!()
+    };
+    assert!(!args.show_gis);
+}
+
 // NCBI blastp 2.17.0+ -help options that LOSAT's BLASTP does not implement, and the NCBI C++
 // Toolkit's standard options (ncbiargs.cpp:78-87), are rejected explicitly.
 #[test]

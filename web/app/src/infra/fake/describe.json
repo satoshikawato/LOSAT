@@ -29,6 +29,16 @@
     "takes_value": true
    },
    {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-task",
     "help": "Task to execute: megablast, blastn, dc-megablast or blastn-short",
     "takes_value": true,
@@ -201,6 +211,16 @@
     "takes_value": true
    },
    {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-task",
     "help": "",
     "takes_value": true,
@@ -349,6 +369,16 @@
     "flag": "-dbsize",
     "help": "Effective length of the database",
     "takes_value": true
+   },
+   {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
    },
    {
     "flag": "-task",
@@ -554,6 +584,16 @@
     "flag": "-dbsize",
     "help": "Effective length of the database",
     "takes_value": true
+   },
+   {
+    "flag": "-show_gis",
+    "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
    },
    {
     "flag": "-evalue",

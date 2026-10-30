@@ -1,0 +1,1 @@
+- `-show_gis` on all five search programs (drop-in DI-7, MAKER): outfmt 0 of a database with parsed Seq-ids shows `gi|N|` and the FASTA form of the id as NCBI BLAST+ 2.17.0 does; other formats, `-subject` and databases without parsed Seq-ids do not change.

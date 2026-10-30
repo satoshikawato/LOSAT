@@ -1159,4 +1159,4 @@ db.bxfast.thr15.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/bslice_q.fn
 db.bxfast.cbs0.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/bslice_q.fna	-task blastx-fast -comp_based_stats 0	6	0	5537069d78882d4350393d5f87334934d4a776b922153b1ea9b25a52a8a223d0	1386		DI2: composition mode 0
 db.bxfast.ungapped.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/bslice_q.fna	-task blastx-fast -ungapped -comp_based_stats 0	6	0	7f060ac8983d4de8661df7d9644015683f933b960a6d53c4d37cad105bc3cb5a	3080		DI2: ungapped
 db.bxfast.gc11.6	blastx	ncbi	tests/db_search/bslice	tests/db_search/bslice_q.fna	-task blastx-fast -query_gencode 11	6	0	d1cb0d2f89621849df2d2d1420450b029196ebb4441a8cca31092b6c1f586993	1327		DI2: -query_gencode 11
-db.bxfast.genome.6	blastx	ncbi	tests/db_search/bslice	tests/fasta/MelaMJNV.fasta	-task blastx-fast	6	0				DI2: one 291 kb query, cut into NCBI's chunks of 10,002 bases
+db.bxfast.genome.6	blastx	ncbi	tests/db_search/bslice	tests/fasta/MelaMJNV.fasta	-task blastx-fast	6	0	912e6aa7c8c31d77f4b35f27f638234cee91b28a8d11a1c6222660ebef806080	7397		DI2: one 291 kb query, cut into NCBI's chunks of 10,002 bases

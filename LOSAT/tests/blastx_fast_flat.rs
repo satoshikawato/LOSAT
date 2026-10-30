@@ -10,7 +10,9 @@
 //! The flat table lists each cell's hits in the order of the reference table's scan (the lib tests
 //! of `x_clut_direct.rs`), so the property under test is that the report does not depend on the
 //! switch, for subjects read from FASTA (`-subject`) and from a database (`-db`), on one thread
-//! and on several. That reports equal NCBI's is the business of the BLASTX fixtures.
+//! and on several. That reports equal NCBI's is the business of the BLASTX fixtures. The same for
+//! the units searched at a time with this table (`LOSAT_X_BXCLUTCAP`, `blastx/x_bx_mem.rs`), which
+//! is scheduling only, and the side of its rule each run takes.
 //!
 //! The query is long enough to be split into chunks, and a batch of short records follows it, so
 //! that several tables are built in one search.
@@ -20,6 +22,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const REFERENCE_TABLE: (&str, &str) = ("LOSAT_X_BPCLUT", "0");
+const NO_UNIT_RULE: (&str, &str) = ("LOSAT_X_BXCLUTCAP", "0");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -93,15 +96,30 @@ fn search(
     output.stdout
 }
 
-#[test]
-fn the_flat_table_gives_the_reference_tables_report() {
-    let dir = temp_dir("report");
-    let subject = fixture("AP027133.faa");
+/// The query: a long record (split into chunks) and short ones (several batches).
+fn write_query(dir: &Path) -> PathBuf {
+    let genome = std::fs::read_to_string(fixture("AP027133.fasta")).unwrap();
+    let residues: String = genome
+        .lines()
+        .filter(|line| !line.starts_with('>'))
+        .collect();
+    let mut text = format!(">long\n{}\n", &residues[..60_000]);
+    for k in 0..16 {
+        let at = 60_000 + 6_000 * k;
+        text.push_str(&format!(">short{k}\n{}\n", &residues[at..at + 5_500]));
+    }
+    let query = dir.join("query.fna");
+    std::fs::write(&query, text).unwrap();
+    query
+}
+
+/// The database of `subject`, in `dir`.
+fn make_db(dir: &Path, subject: &Path) -> PathBuf {
     let db = dir.join("db");
-    let made = losat(&[], &dir)
+    let made = losat(&[], dir)
         .arg("makeblastdb")
         .arg("-in")
-        .arg(&subject)
+        .arg(subject)
         .args(["-dbtype", "prot", "-out"])
         .arg(&db)
         .output()
@@ -111,29 +129,89 @@ fn the_flat_table_gives_the_reference_tables_report() {
         "makeblastdb: {}",
         String::from_utf8_lossy(&made.stderr)
     );
-    let genome = std::fs::read_to_string(fixture("AP027133.fasta")).unwrap();
-    let residues: String = genome
-        .lines()
-        .filter(|line| !line.starts_with('>'))
-        .collect();
-    let mut text = format!(">long\n{}\n", &residues[..60_000]);
-    for k in 0..4 {
-        let at = 60_000 + 3_000 * k;
-        text.push_str(&format!(">short{k}\n{}\n", &residues[at..at + 2_500]));
-    }
-    let query = dir.join("query.fna");
-    std::fs::write(&query, text).unwrap();
+    db
+}
 
+/// The sides of `LOSAT_X_BXCLUTCAP` a search recorded: (its own K, K raised for few subjects).
+fn unit_rule_sides(dir: &Path, query: &Path, target: &[&str], threads: &str) -> (bool, bool) {
+    let reach = dir.join(format!("reach-{threads}"));
+    let _ = std::fs::remove_dir_all(&reach);
+    let reach_text = reach.to_str().unwrap().to_string();
+    search(
+        &[("LOSAT_X_REACH", &reach_text)],
+        dir,
+        query,
+        target,
+        threads,
+    );
+    let mut sides = (false, false);
+    for file in std::fs::read_dir(&reach).unwrap() {
+        let text = std::fs::read_to_string(file.unwrap().path()).unwrap();
+        for line in text.lines() {
+            let fields: Vec<&str> = line.split('\t').collect();
+            if fields[0] == "LOSAT_X_BXCLUTCAP" {
+                sides.0 |= fields[1] == "1";
+                sides.1 |= fields[2] == "1";
+            }
+        }
+    }
+    sides
+}
+
+#[test]
+fn the_flat_table_gives_the_reference_tables_report() {
+    let dir = temp_dir("report");
+    let subject = fixture("AP027133.faa");
+    let db = make_db(&dir, &subject);
+    let query = write_query(&dir);
     let subject = subject.to_str().unwrap();
     let db = db.to_str().unwrap();
-    let targets = [["-subject", subject], ["-db", db]];
-    for target in &targets {
+    for target in [["-subject", subject], ["-db", db]] {
         for threads in ["1", "4"] {
-            let flat = search(&[], &dir, &query, target, threads);
-            let reference = search(&[REFERENCE_TABLE], &dir, &query, target, threads);
+            let flat = search(&[], &dir, &query, &target, threads);
+            let reference = search(&[REFERENCE_TABLE], &dir, &query, &target, threads);
             assert!(!flat.is_empty(), "{target:?} n{threads}: no hits");
             assert_eq!(flat, reference, "{target:?} n{threads}");
         }
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_units_at_a_time_do_not_change_the_report() {
+    let dir = temp_dir("units");
+    let subject = fixture("AP027133.faa");
+    let db = make_db(&dir, &subject);
+    let query = write_query(&dir);
+    let subject = subject.to_str().unwrap();
+    let db = db.to_str().unwrap();
+    for target in [["-subject", subject], ["-db", db]] {
+        let reference = search(&[NO_UNIT_RULE], &dir, &query, &target, "1");
+        assert!(!reference.is_empty(), "{target:?}: no hits");
+        for threads in ["3", "4", "8"] {
+            for env in [
+                &[][..],
+                &[REFERENCE_TABLE][..],
+                &[NO_UNIT_RULE][..],
+                &[("LOSAT_X_BXCLUTCAP", "3")][..],
+            ] {
+                let got = search(env, &dir, &query, &target, threads);
+                assert_eq!(got, reference, "{target:?} n{threads} {env:?}");
+            }
+        }
+    }
+    // Many subjects: the rule's own K. One subject: K rises to the threads.
+    assert_eq!(
+        unit_rule_sides(&dir, &query, &["-db", db], "4"),
+        (true, false)
+    );
+    let one = dir.join("one.faa");
+    let proteins = std::fs::read_to_string(&subject).unwrap();
+    let second = proteins[1..].find('>').unwrap() + 1;
+    std::fs::write(&one, &proteins[..second]).unwrap();
+    assert_eq!(
+        unit_rule_sides(&dir, &query, &["-subject", one.to_str().unwrap()], "4"),
+        (false, true)
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

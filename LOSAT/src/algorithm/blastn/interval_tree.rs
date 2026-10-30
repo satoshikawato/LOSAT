@@ -1940,6 +1940,11 @@ impl BlastIntervalTree {
         self.x.entries.capacity() == 0
     }
 
+    /// PROBE s27: nodes, entries, cells in use, cells listed, ends words.
+    pub fn x_probe_sizes(&self) -> [usize; 5] {
+        [self.nodes.len(), self.x.entries.len(), self.x.head.len(), self.x.used_cells.len(), self.x.ends.bits.len()]
+    }
+
     // No NCBI counterpart: see `x_has_no_arrays`.
     /// A tree `x_has_no_arrays` tells from the one `new` makes.
     pub fn x_new_with_arrays() -> Self {

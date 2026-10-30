@@ -74,6 +74,7 @@ pub(super) fn before_add(tree: &mut BlastIntervalTree) {
 #[inline]
 pub(super) fn at_subject_end(tree: &mut BlastIntervalTree) {
     if !tree.x_has_no_arrays() && x_bptreepool() {
+        probe_record(tree);
         give_back(&POOL, tree);
     }
 }
@@ -81,6 +82,7 @@ pub(super) fn at_subject_end(tree: &mut BlastIntervalTree) {
 // No NCBI counterpart: frees the trees no subject uses; it does not change any value NCBI computes.
 /// After a search's preliminary stage (no subject scan runs any more): the pool's trees are freed.
 pub(super) fn release() {
+    probe_print();
     if x_bptreepool() {
         release_pool(&POOL);
     }
@@ -133,6 +135,32 @@ fn release_pool(pool: &Mutex<Pool>) {
         Pool::new(),
     );
     drop(trees);
+}
+
+// PROBE s27: log2 histograms of the tree's sizes at each subject's end (subjects with an HSP).
+use std::sync::atomic::{AtomicU64, Ordering};
+const Z: AtomicU64 = AtomicU64::new(0);
+const ZR: [AtomicU64; 33] = [Z; 33];
+static HIST: [[AtomicU64; 33]; 5] = [ZR; 5];
+fn probe_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_PROBE_S27TREE").is_some())
+}
+fn probe_record(tree: &BlastIntervalTree) {
+    if probe_on() {
+        for (h, v) in HIST.iter().zip(tree.x_probe_sizes()) {
+            let bin = (usize::BITS - v.leading_zeros()) as usize;
+            h[bin].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+fn probe_print() {
+    if probe_on() {
+        for (name, h) in ["nodes", "entries", "cells", "used", "ends"].iter().zip(HIST.iter()) {
+            let c: Vec<u64> = h.iter().map(|a| a.load(Ordering::Relaxed)).collect();
+            eprintln!("[S27TREE] {name} {c:?}");
+        }
+    }
 }
 
 #[cfg(test)]

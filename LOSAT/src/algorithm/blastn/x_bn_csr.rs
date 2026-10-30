@@ -64,7 +64,8 @@
 //!
 //! Scope (`plan`): a table without database word counts (the fill's `kDbFilter` path) and without
 //! BLEMIR_DEBUG (whose counters the serial loop makes), of `lut_word_length` 8 to 11 (`MIN_LUT`,
-//! `MAX_LUT`; megablast's tables of 4^12 cells keep their chains: v4-R R11 found no gain there),
+//! `MAX_LUT`; megablast's tables of 4^12 cells keep their chains, v4-R R11 found no gain with a
+//! subject of 5 Mb, unless LOSAT_X_MBCSR's size rule takes them: `X_MB12_LETTERS_PER_POSITION`),
 //! whose word loop reads at least a quarter as many positions as the table has cells (the size rule
 //! of `x_dc_csr`, `wanted`; below it the chains fit the caches and the CSR saves no miss). With
 //! NCBI's choice of table (`choose_na_lookup_table`) that is: word size 11 (the default) with the
@@ -72,7 +73,7 @@
 //! strands); word size 10 with its 4^10-cell table from 262,144 positions; word size 9 with its
 //! 4^9-cell table from 65,536 and its 4^8-cell table (reading order) from 16,384. Word sizes 12 and
 //! above build 4^11-cell tables only for fewer positions than that (NCBI moves to 4^12 cells
-//! first), so their tables keep the chains. EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head (every
+//! first), so their tables keep the chains unless LOSAT_X_MBCSR takes them. EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head (every
 //! table of the scope but the reading-order one) has no size rule, so these tables (and megablast's
 //! of 4^11 cells or fewer, for small query batches) are packed too. Its build writes one byte per
 //! cell and two words per 64 cells (5 MiB at 4^11 cells, in `qs` and its bits) where the chains
@@ -190,13 +191,17 @@ const X_MB12_LETTERS_PER_POSITION: u64 = 8;
 /// LOSAT_X_MBCSR: 12 too, when its head is packed and the search scans enough letters).
 /// `scan_letters`: the letters of the search's subjects, `None` when the caller does not say.
 fn x_in_scope(words: &Words<'_>, scan_letters: Option<u64>) -> bool {
-    (MIN_LUT..=MAX_LUT).contains(&words.lut_word_length)
-        || (words.lut_word_length == 12
-            && x_will_pack(words.ascending_cells)
-            && x_mb12_on()
-            && scan_letters.is_some_and(|letters| {
-                letters >= (positions(words) as u64).saturating_mul(X_MB12_LETTERS_PER_POSITION)
-            }))
+    if (MIN_LUT..=MAX_LUT).contains(&words.lut_word_length) {
+        return true;
+    }
+    if words.lut_word_length != 12 || !x_will_pack(words.ascending_cells) || !x_mb12_on() {
+        return false;
+    }
+    let taken = scan_letters.is_some_and(|letters| {
+        letters >= (positions(words) as u64).saturating_mul(X_MB12_LETTERS_PER_POSITION)
+    });
+    crate::utils::xreach::x_reach!("LOSAT_X_MBCSR", taken);
+    taken
 }
 
 /// No NCBI counterpart: whether `build_mb_lookup` lays out a table of `cells` cells over `words`
@@ -940,10 +945,34 @@ pub(super) mod tests {
                 masks: vec![Vec::new()],
             };
             let refs = big.refs();
-            assert!(plan(&big.words(&refs, 9, 8, true), 1 << 16, false, false, None));
-            assert!(!plan(&big.words(&refs, 9, 8, true), 1 << 16, true, false, None));
-            assert!(!plan(&big.words(&refs, 9, 8, true), 1 << 16, false, true, None));
-            assert!(!plan(&big.words(&refs, 9, 7, true), 1 << 14, false, false, None));
+            assert!(plan(
+                &big.words(&refs, 9, 8, true),
+                1 << 16,
+                false,
+                false,
+                None
+            ));
+            assert!(!plan(
+                &big.words(&refs, 9, 8, true),
+                1 << 16,
+                true,
+                false,
+                None
+            ));
+            assert!(!plan(
+                &big.words(&refs, 9, 8, true),
+                1 << 16,
+                false,
+                true,
+                None
+            ));
+            assert!(!plan(
+                &big.words(&refs, 9, 7, true),
+                1 << 14,
+                false,
+                false,
+                None
+            ));
             assert!(!plan(
                 &big.words(&refs, 13, 12, false),
                 1 << 24,
@@ -972,7 +1001,13 @@ pub(super) mod tests {
             ));
             // below the rule: chains, unless the head is packed (LOSAT_X_BNCSRPACK has no rule)
             assert_eq!(
-                plan(&big.words(&refs, 11, 11, false), 1 << 22, false, false, None),
+                plan(
+                    &big.words(&refs, 11, 11, false),
+                    1 << 22,
+                    false,
+                    false,
+                    None
+                ),
                 x_will_pack(false)
             );
         }

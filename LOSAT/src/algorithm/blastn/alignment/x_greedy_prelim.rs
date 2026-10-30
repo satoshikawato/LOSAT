@@ -57,7 +57,6 @@ const X_UNPACKED: [[u8; COMPRESSION_RATIO]; 256] = {
     table
 };
 
-
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_util.h:52-55
 /// ```c
 /// #define NCBI2NA_MASK 0x03

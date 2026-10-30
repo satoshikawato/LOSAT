@@ -1002,7 +1002,7 @@ mod tests {
             let queries = [frames.clone()];
             let threshold = 11;
             let (lookup, contexts) = build_ncbi_lookup(&queries, threshold, &params, true);
-            let starts = group_starts(&contexts);
+            let starts = group_starts(&contexts, 8);
             // Every fourth case cuts no group (one slice each, as a group of a cut batch that is
             // not cut).
             let spans = x_group_spans(&contexts, &starts);
@@ -1014,7 +1014,7 @@ mod tests {
             let direct = lut_direct_sliced(&q, &starts, &parts, &serial, false).expect("groups");
             lut_shadow_compare(Some(&direct), Some(&filtered));
             cut_groups += direct.iter().filter(|g| g.slices.len() > 1).count();
-            let groups = build_groups(&lookup, &contexts);
+            let groups = build_groups(&lookup, &contexts, 8);
             // The stub's longest_chain over the slices is the full table's.
             let (stub, _) = q.x_into_stub(tables(&direct));
             assert_eq!(stub.longest_chain, lookup.longest_chain);

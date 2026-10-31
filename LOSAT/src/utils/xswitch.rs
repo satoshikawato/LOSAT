@@ -75,6 +75,11 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BPREDOFIT`, `LOSAT_X_BPSCANBF`, `LOSAT_X_BPSEED` and `LOSAT_X_BPUNGAP` (all always on)
 /// graduated on 2026-10-26: they left `STRICT_SET` and their old code was deleted; nothing
 /// chooses any more, so they are not in `GRADUATED`.
+/// `LOSAT_X_BPQBLOCKFMT`, `LOSAT_X_BPQBLOCKSA`, `LOSAT_X_BPQBLOCKWEB`, `LOSAT_X_BPQBLOCKXML`,
+/// `LOSAT_X_BPQBLOCKXML2` and `LOSAT_X_BPSUBJMETA` (which reports and calls the block search of
+/// `LOSAT_X_BPQBLOCK` takes, and its subjects' IDs and titles made once) were folded into it on
+/// 2026-10-31 (structural line S3): they only cut the block search off, so they left `STRICT_SET`
+/// and nothing chooses any more; the refusals of the writers stay as rules of its plan.
 /// `LOSAT_X_BPREDODBSUBJ` (the composition redo of a `-db` search reads each match's subject from
 /// the database, `blastp/x_redo_subjects.rs`) and `LOSAT_X_BPREDOWINEXPAND` (the windows of the
 /// redo expand the compact preliminary lists as they reach them, `blastp/x_redo_par.rs`) graduated
@@ -278,16 +283,10 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPLKREUSE",
     "LOSAT_X_BPMASKED",
     "LOSAT_X_BPQBLOCK",
-    "LOSAT_X_BPQBLOCKFMT",
-    "LOSAT_X_BPQBLOCKSA",
-    "LOSAT_X_BPQBLOCKWEB",
-    "LOSAT_X_BPQBLOCKXML",
-    "LOSAT_X_BPQBLOCKXML2",
     "LOSAT_X_BPREDOLPT",
     "LOSAT_X_BPREDOPAR",
     "LOSAT_X_BPSEGWIN",
     "LOSAT_X_BPSTRIPEFILL",
-    "LOSAT_X_BPSUBJMETA",
     "LOSAT_X_BPSUBJRUN",
     "LOSAT_X_BPUNGAPSENT",
     "LOSAT_X_BXBUILDPAR",

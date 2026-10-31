@@ -283,7 +283,7 @@ pub struct ReportOutputs<'a> {
     pub diagnostics: &'a mut (dyn Write + Send),
     /// Receives the final, sorted hit list with rendered alignments, once per call. It may come
     /// before or after the reports are written (blastp's query blocks hand it over after the
-    /// last block, `LOSAT_X_BPQBLOCKWEB`).
+    /// last block, `LOSAT_X_BPQBLOCK`).
     pub hits: Option<&'a mut (dyn FnMut(&[PairwiseHit]) + Send)>,
     /// Receives the row and section boundaries of each HSP in each format. The events of one
     /// format come in that format's write order; those of different formats may interleave in

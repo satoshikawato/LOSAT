@@ -2040,7 +2040,7 @@ fn write_final_database_report<W: Write>(
 // display.DisplaySeqalign(m_Outfile);
 // x_PrintOneQueryFooter(*results.GetAncillaryData());
 // ```
-/// The report of `queries`: the prolog when `prolog` is set (EXPERIMENT (LOSAT_X_BPQBLOCKFMT):
+/// The report of `queries`: the prolog when `prolog` is set (EXPERIMENT (LOSAT_X_BPQBLOCK):
 /// false for the query blocks after the first of blastp's block search, whose first block wrote
 /// it), each query's section, and the epilog when `epilog` is set.
 pub fn write_blastp_pairwise_report<W: Write>(

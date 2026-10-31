@@ -1,7 +1,7 @@
-//! EXPERIMENT (LOSAT_X_BPSUBJMETA): the subjects' tabular IDs and titles of the blastp block search
-//! (`LOSAT_X_BPQBLOCK`, `x_query_blocks.rs`) made once for all blocks.
+//! EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects' tabular IDs and titles of the blastp block search
+//! (`x_query_blocks.rs`) made once for all blocks.
 //!
-//! Without the switch every block's search (`run_resolved_in_pool`) makes one title `Arc` per
+//! Without these values every block's search (`run_resolved_in_pool`) makes one title `Arc` per
 //! subject before its lookup table, and its output stage makes every subject's tabular ID
 //! (`tabular_subject_ids`: `report::defline::tabular_subject_id`, which for a `Subject_` first word
 //! generates NCBI's definition line), and both are dropped at the end of the block. These stages
@@ -41,8 +41,6 @@
 //! search's peak (about 80 B per subject: about 0.5 MiB for 6,600 subjects, 8 MiB per 100k), and are
 //! freed when the block search ends.
 //!
-//! `LOSAT_X_BPSUBJMETA` is a switch of the strict set (on by default since 2026-10-17): on unless it is `0`.
-//!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:218-227
 //! ```c++
 //!     ITERATE(vector< CConstRef<CSeq_id> >, itr, original_seqids) {
@@ -63,15 +61,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::blastinput::fasta_reader::FastaRecord;
 
-// No NCBI counterpart: reads the LOSAT_X_BPSUBJMETA switch once; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_BPSUBJMETA): a strict-set switch, on unless it is `0`.
-pub(crate) fn x_bp_subj_meta() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPSUBJMETA"))
-}
-
-/// EXPERIMENT (LOSAT_X_BPSUBJMETA): the subjects' tabular ID results, shown IDs and titles, by
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects' tabular ID results, shown IDs and titles, by
 /// subject index, made once for all blocks of a block search.
 pub(crate) struct XSubjectMeta {
     /// `tabular_subject_id(local_id, title, true)` of each subject
@@ -102,14 +92,10 @@ impl XSubjectMeta {
     }
 
     // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
-    /// The values of the block search's subject `records` when the switch is on and there are
-    /// records (a `-db` search has none), else `None`.
+    /// The values of the block search's subject `records` when there are records (a `-db` search
+    /// has none), else `None`.
     pub(crate) fn x_for_block_search(records: &[FastaRecord]) -> Option<Self> {
-        let on = x_bp_subj_meta();
-        if on {
-            crate::utils::xreach::x_reach!("LOSAT_X_BPSUBJMETA", !records.is_empty());
-        }
-        (on && !records.is_empty()).then(|| Self::new(records))
+        (!records.is_empty()).then(|| Self::new(records))
     }
 
     /// Each subject's `tabular_subject_id` result (`None`: the ID cannot be written).

@@ -47,7 +47,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         query: query.clone(),
         subject: Some(subject.clone()),
         db: None,
-        taxid_filter: Default::default(),
+        db_filter: Default::default(),
         dbsize: None,
         show_gis: false,
         parse_deflines: false,

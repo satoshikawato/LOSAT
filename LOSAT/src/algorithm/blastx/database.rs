@@ -103,7 +103,7 @@ impl BlastxDatabase {
         self.db.filtered_empty()
     }
 
-    /// The taxids of the list that the database holds (`SeqDb::list_taxids`).
+    /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(crate) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
     }

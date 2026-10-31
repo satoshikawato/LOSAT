@@ -467,7 +467,7 @@ pub struct SeqDb {
     reports_show_gis: bool,
     /// Whether the database was opened with a positive list (`SeqDb::restrict`).
     positive_list: bool,
-    /// The taxids of the list that the database holds (`SeqDb::restrict_taxids`), ascending.
+    /// `SeqDb::list_taxids`.
     list_taxids: Vec<i32>,
 }
 
@@ -549,9 +549,11 @@ impl SeqDb {
         self.positive_list
     }
 
-    /// The taxids of the list that the database holds, ascending: what NCBI's list object has
-    /// after the volumes opened (`CSeqDBLMDBSet::TaxIdsToOids`, `tax_ids.swap(rv_tax_ids)`), and
-    /// the BLAST archive writes (`DbFilterArgs::archive_parameter`). Empty without a taxid list.
+    /// The taxids of the search's list object after the volumes opened, ascending, which the
+    /// BLAST archive writes (`DbFilterArgs::archive_parameter`): of a positive list those the
+    /// database holds (`CSeqDBLMDBSet::TaxIdsToOids`, `tax_ids.swap(rv_tax_ids)`), of a negative
+    /// list all (`CSearchDatabase::x_InitializeDb` opens the database with a copy of it). Empty
+    /// without a taxid list.
     pub fn list_taxids(&self) -> &[i32] {
         &self.list_taxids
     }

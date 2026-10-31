@@ -564,16 +564,39 @@ impl ParsedSubject {
     // ```
     // `out` holds the heading of this subject only; the title of a definition line is its own,
     // or the subject Bioseq's generated title when it is empty (`x_FillDispParams`).
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3166-3180
+    // ```c++
+    //     ITERATE(CSeq_align_set::Tdata, iter, alnset.Get()){
+    //         const CSeq_align::TSegs& seg = (*iter)->GetSegs();
+    //         if(seg.Which() == CSeq_align::C_Segs::e_Std){
+    //             if(seg.GetStd().size() > 1){
+    //                 //has more than one stdseg. Need to seperate as each
+    //                 //is a distinct HSP
+    //                 ITERATE (CSeq_align::C_Segs::TStd, iterStdseg, seg.GetStd()){
+    //                     CRef<CSeq_align> aln(new CSeq_align);
+    //                     if((*iterStdseg)->IsSetScores()){
+    //                         aln->SetScore() = (*iterStdseg)->GetScores();
+    //                     }
+    //                     aln->SetSegs().SetStd().push_back(*iterStdseg);
+    //                     alnSetRef->Set().push_back(aln);
+    //                 }
+    //
+    //             } else {
+    //                 alnSetRef->Set().push_back(*iter);
+    //             }
+    // ```
     /// The definition-line lines of the outfmt 0 alignment of the subject (each ending with a
-    /// newline; `Length=` follows): every definition line (`heading_shows`), the first after `>`
+    /// newline; `Length=` follows): the definition lines (`heading_shows`), the first after `>`
     /// and the others after a space, with its id (`alignment_line_id`) and its title wrapped at
-    /// 60 bytes.
-    pub fn heading(&self, protein: bool) -> Vec<u8> {
+    /// 60 bytes. `every_line`: the Seq-align has no `ext` when the report is made, so nothing
+    /// limits the lines: a Seq-align of an ungapped search with two or more HSPs, which the
+    /// formatter splits into new ones (`PrepareBlastUngappedSeqalign` above).
+    pub fn heading(&self, protein: bool, every_line: bool) -> Vec<u8> {
         let mut out = Vec::new();
         let mut generated = None;
         let mut first = true;
         for defline in &self.set.deflines {
-            if !self.heading_shows(defline) {
+            if !every_line && !self.heading_shows(defline) {
                 continue;
             }
             let start = out.len();
@@ -1020,7 +1043,7 @@ mod tests {
             "DAA10002.1 unnamed protein product"
         );
         assert_eq!(
-            text(&subject("tpg|DAA10002.1|").heading(true)),
+            text(&subject("tpg|DAA10002.1|").heading(true, false)),
             ">DAA10002.1 TPA: unnamed protein product\n"
         );
         assert_eq!(description("pdb|2XYZ|B"), "2XYZ_B Chain B");
@@ -1031,7 +1054,7 @@ mod tests {
         );
         assert_eq!(description("ref|NC_100013.1|"), "NC_100013.1 ");
         assert_eq!(
-            text(&subject("ref|NC_100013.1|").heading(true)),
+            text(&subject("ref|NC_100013.1|").heading(true, false)),
             ">NC_100013.1 \n"
         );
         assert_eq!(
@@ -1040,16 +1063,16 @@ mod tests {
         );
         assert_eq!(description("lcl|Subject_27"), "subject seven title");
         assert_eq!(
-            text(&subject("lcl|Subject_30").heading(true)),
+            text(&subject("lcl|Subject_30").heading(true, false)),
             ">Subject_30 unnamed protein product\n"
         );
         assert_eq!(description("pdb|5ABC|D"), "5ABC_D Chain D");
         assert_eq!(
-            text(&subject("pdb|5ABC|D").heading(true)),
+            text(&subject("pdb|5ABC|D").heading(true, false)),
             ">5ABC_D Chain D\n XP_100015.1 second\n"
         );
         assert_eq!(
-            text(&subject("lcl|Subject_36").heading(true)),
+            text(&subject("lcl|Subject_36").heading(true, false)),
             ">Subject_36 unnamed protein product\n DAA10016.1 tpa second\n"
         );
         // A title from the source: the taxonomy database would name its organism.
@@ -1123,11 +1146,13 @@ mod tests {
         let subject = subject.under_positive_list(true);
         assert_eq!(strings(&subject), ["seqid:AF000001.1"]);
         // The heading leaves out the line the strings do not name, and `>` goes to the next.
-        assert_eq!(subject.heading(true), b">AF000001.1 t\n");
+        assert_eq!(subject.heading(true, false), b">AF000001.1 t\n");
+        // An ungapped Seq-align of two HSPs reaches the report without the strings.
+        assert_eq!(subject.heading(true, true), b">loc t\n AF000001.1 t\n");
         // A local id alone: no string, every line in the heading.
         let subject = lines(vec![vec![local()]]).under_positive_list(true);
         assert!(subject.use_this_seqid().is_empty());
-        assert_eq!(subject.heading(true), b">loc t\n");
+        assert_eq!(subject.heading(true, false), b">loc t\n");
         // A Seq-align id that is a GI: only GIs are named, and a line without one is left out.
         let subject = lines(vec![
             vec![ParsedSeqId::Gi(888), gb("GG000001", 1)],
@@ -1136,7 +1161,10 @@ mod tests {
         ])
         .under_positive_list(true);
         assert_eq!(strings(&subject), ["gi:888", "gi:890"]);
-        assert_eq!(subject.heading(true), b">GG000001.1 t\n GG000003.1 t\n");
+        assert_eq!(
+            subject.heading(true, false),
+            b">GG000001.1 t\n GG000003.1 t\n"
+        );
         // A name without an accession is not named; a PDB id is.
         let name_only = ParsedSeqId::Prf(crate::seqid::model::TextseqId {
             name: Some(b"NAME".to_vec()),
@@ -1154,7 +1182,7 @@ mod tests {
         let subject =
             lines(vec![vec![local()], vec![gb("AF000001", 1)]]).under_positive_list(false);
         assert!(subject.use_this_seqid().is_empty());
-        assert_eq!(subject.heading(true), b">loc t\n AF000001.1 t\n");
+        assert_eq!(subject.heading(true, false), b">loc t\n AF000001.1 t\n");
     }
 
     #[test]

@@ -315,7 +315,7 @@ impl DbFilterArgs {
     /// The `program-options` parameter of the BLAST archive for the list option of the command
     /// line: NCBI's list object is there for each option, so the parameter is written also when
     /// no id came of it, or the list is a seqid list, without ids. `taxids` are the ids of NCBI's
-    /// `set` after the database opened, the ones it holds (`SeqDb::list_taxids`), ascending.
+    /// `set` after the database opened (`SeqDb::list_taxids`), ascending.
     pub fn archive_parameter(
         &self,
         taxids: &[i32],

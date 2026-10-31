@@ -1592,7 +1592,12 @@ impl SeqDb {
                 words[word] |= 1u64 << bit;
             }
         }
-        self.list_taxids = found.iter().copied().collect();
+        // A positive list is the object that `tax_ids.swap(rv_tax_ids)` narrows to the found ids;
+        // a negative one is a copy (uniform_search.cpp:277-280), so the search's list keeps all.
+        self.list_taxids = if negative { tax_ids } else { &found }
+            .iter()
+            .copied()
+            .collect();
         let rule = if negative {
             (!found.is_empty()).then(|| DeflineRule::NegativeTaxids(found))
         } else {

@@ -452,7 +452,9 @@ Rows `db.sa8.*`: the `ext` `use_this_seqid` of a positive list on the Seq-align 
 `makeblastdb -in p_m.fa -dbtype prot -out p5m -parse_seqids -blastdb_version 5 -taxid 9606 -title p5m`,
 `makeblastdb -in p_m.fa -dbtype prot -out p5mt -parse_seqids -blastdb_version 5 -taxid_map p_m.map -title p5mt`,
 `makeblastdb -in n_m.fa -dbtype nucl -out n5m -parse_seqids -blastdb_version 5 -taxid 562 -title n5m`;
-`q.faa`, `q.fna`, `qx.fna` are the queries and `sl_m.txt` a seqid list.
+`makeblastdb -in n_l.fa -dbtype nucl -out n5l -parse_seqids -blastdb_version 5 -taxid 562 -title n5l` (a local id and a
+text id on one OID). `q.faa`, `q.fna`, `qx.fna` are the queries, `qnn.fna`, `qxx.fna` the queries with two copies apart (two
+ungapped HSPs per subject), and `sl_m.txt` a seqid list.
 
 Rows `db.sl.*`: `-seqidlist` and `-negative_seqidlist` with `-db`, five programs, on `taxfilter/tfp`, `taxfilter/tfn`
 (two volumes), `ids/prot_v5`, `ids/nucl_v5` (version 5) and `ids/prot_v4`, `ids/nucl_v4` (version 4, string ISAM).

@@ -1,0 +1,251 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">ENST00000320868.9 cdna
+ chromosome:GRCh38:16:176680:177522:1 gene:ENSG00000206172.10
+ gene_biotype:protein_coding transcript_biotype:protein_coding
+ gene_symbol:HBA1 description:hemoglobin subunit alpha 1 [Source:HGNC
+ Symbol;Acc:HGNC:4823]"
+                  }
+                }
+              },
+              title "ENST00000320868.9 cdna
+ chromosome:GRCh38:16:176680:177522:1 gene:ENSG00000206172.10
+ gene_biotype:protein_coding transcript_biotype:protein_coding
+ gene_symbol:HBA1 description:hemoglobin subunit alpha 1 [Source:HGNC
+ Symbol;Acc:HGNC:4823]"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 577,
+              seq-data ncbi2na '1DF7AD5448748881514EB9EDD796108506D0A597AAC2B6
+99919E98B3AE68A57A228EF5ED7D545142171F5647D85E251A77952BC2A51A420AE96199E14196
+E991BA184E54199ED6578985E4664427DABA15AD07D09D70947979EB857A5951755962F455E6B9
+19757A10BD7A7DEE245B9E1750316F09E8976BA539F7E55FA97555255D755F5E456C556EB7F830
+2DE2EA6900'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/taxfilter/tfn",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 1575252
+        }
+      },
+      program-options {
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 494,
+                  to 544,
+                  id local str "Query_1"
+                },
+                {
+                  from 494,
+                  to 544,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame plus1
+          }
+        },
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 577
+          },
+          {
+            id str "blast_score",
+            value int 577
+          },
+          {
+            id str "e_value",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "bit_score",
+            value real { 106663714363267, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 577
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "ENST00000320868.9"
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            577
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 516
+          },
+          {
+            id str "blast_score",
+            value int 516
+          },
+          {
+            id str "e_value",
+            value real { 0, 10, 0 }
+          },
+          {
+            id str "bit_score",
+            value real { 95399151484006, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 557
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "Query_1",
+            local str "ENST00000251595.11"
+          },
+          starts {
+            0,
+            0,
+            545,
+            -1,
+            546,
+            545
+          },
+          lens {
+            545,
+            1,
+            31
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 494,
+              to 544,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus1
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 1575252",
+      "Effective search space used: 1575252",
+      "Length adjustment: 13"
+    }
+  },
+  messages {
+    {
+      code 1,
+      message "Warning: [blastn] To obtain better run time performance, please
+ run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out
+ <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist"
+    }
+  }
+}

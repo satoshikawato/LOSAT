@@ -525,7 +525,8 @@ impl SideFiles for HeldSideFiles {
 fn query_text(query: &FastaRecord, search_skipped: bool, has_hits: bool) -> Result<QueryText> {
     names::query_text(
         PROGRAM,
-        &query.internal_id,
+        query.warning_id(),
+        query.believed(),
         query.title.as_bytes(),
         false,
         &query_messages(query, search_skipped),

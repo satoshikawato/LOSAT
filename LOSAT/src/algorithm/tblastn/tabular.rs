@@ -281,10 +281,7 @@ pub(super) fn write_tblastn_tabular(
         //             	m_QueryLength = query_bh.GetBioseqLength();
         // ```
         let query_length = tab.inputs.range_length.unwrap_or(searched_length);
-        let tabular_query = TabularQuery {
-            id: query.shown_id(),
-            length: query_length,
-        };
+        let tabular_query = TabularQuery::of_ids(query.believed(), query.shown_id(), query_length);
         let hit_count: usize = hitlist
             .lists()
             .iter()
@@ -295,7 +292,7 @@ pub(super) fn write_tblastn_tabular(
         // null alignment set, so outfmt 7 has no count line (`write_tabular`).
         table.query_header(
             &mut buf,
-            query.title(),
+            &query.query_line(),
             tab.shown.name().as_bytes(),
             (!tab.query_batch_skipped[q_idx]).then_some(hit_count),
         )?;

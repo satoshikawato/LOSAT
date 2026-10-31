@@ -1,0 +1,22 @@
+# TBLASTX 2.17.0+
+# Query: q_mask query with lowercase runs and a CA-repeat block
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/mask_subject.fasta)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 16 hits found
+q_mask	subj_mask	96.721	61	2	0	400	218	450	268	1.59e-66	135
+q_mask	subj_mask	98.214	56	1	0	169	2	219	52	1.59e-66	118
+q_mask	subj_mask	96.667	60	2	0	219	398	269	448	1.07e-65	138
+q_mask	subj_mask	98.182	55	1	0	1	165	51	215	1.07e-65	113
+q_mask	subj_mask	98.361	61	1	0	218	400	268	450	1.11e-62	129
+q_mask	subj_mask	100.000	56	0	0	2	169	52	219	1.11e-62	111
+q_mask	subj_mask	96.721	61	2	0	399	217	449	267	3.19e-60	120
+q_mask	subj_mask	98.148	54	1	0	164	3	214	53	3.19e-60	112
+q_mask	subj_mask	98.214	56	1	0	168	1	218	51	1.08e-52	107
+q_mask	subj_mask	96.667	60	2	0	398	219	448	269	1.08e-52	100
+q_mask	subj_mask	98.214	56	1	0	3	170	53	220	8.21e-50	105
+q_mask	subj_mask	98.333	60	1	0	220	399	270	449	8.21e-50	92.7
+q_mask	subj_mask	71.429	7	2	0	149	129	183	203	0.13	18.0
+q_mask	subj_mask	71.429	7	2	0	133	153	199	179	0.13	18.0
+q_mask	subj_mask	35.714	14	9	0	315	274	179	138	0.18	17.6
+q_mask	subj_mask	85.714	7	1	0	236	256	164	184	6.0	12.5
+# BLAST processed 1 queries

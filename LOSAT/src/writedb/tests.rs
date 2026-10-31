@@ -1429,6 +1429,19 @@ fn run_fix_case(case: &FixCase) {
     let show = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     let err = build_tree_masked(&v5_markers(&err, &dir));
     let out = v5_markers(&out, &dir);
+    // A directory as the map: Unix opens it (`ifstream::open`, `File::open`) and reads an empty
+    // map, which is what the case expects; Windows refuses to open a directory, so there the
+    // map is "File is not accessible", as for any file that cannot be opened (NCBI's own
+    // answer on Windows is not measured).
+    if case.mapdir && !cfg!(unix) {
+        assert_eq!(status, 1, "{name}: exit status");
+        assert!(
+            show(&err).contains("Argument \"taxid_map\". File is not accessible:  `<D>/mapdir'"),
+            "{name}: standard error\n{}",
+            show(&err)
+        );
+        return;
+    }
     assert!(
         err == build_tree_masked(case.stderr),
         "{name}: standard error\n{}\nexpected\n{}",

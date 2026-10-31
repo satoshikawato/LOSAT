@@ -247,6 +247,8 @@ pub(crate) fn write_blastp_archives(
                 .zip(&subject_deflines)
                 .map(|(record, defline)| BioseqInput {
                     id: &record.local_id,
+                    ids: record.believed().map(|ids| ids.ids.as_slice()),
+                    seq_loc: None,
                     defline,
                     title: &record.title,
                     letters: record.archive_letters(),
@@ -271,6 +273,8 @@ pub(crate) fn write_blastp_archives(
             .zip(&deflines)
             .map(|(record, defline)| BioseqInput {
                 id: &record.local_id,
+                ids: record.believed().map(|ids| ids.ids.as_slice()),
+                seq_loc: record.archive_seq_loc(),
                 defline,
                 title: &record.title,
                 letters: record.archive_letters(),
@@ -301,6 +305,7 @@ pub(crate) fn write_blastp_archives(
                 if !call.masks[index].is_empty() {
                     masks.push(MaskEntry {
                         id: call.queries[index].local_id.clone(),
+                        best: call.queries[index].believed().map(|ids| ids.best.clone()),
                         frame: Frame::NotSet,
                         intervals: call.masks[index].clone(),
                     });

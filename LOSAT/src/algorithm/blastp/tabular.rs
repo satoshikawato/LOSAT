@@ -42,6 +42,7 @@ use anyhow::Result;
 use super::args::BlastpApp;
 use super::hsp::{BlastpHitList, BlastpHsp};
 use crate::api::local_blast::{FormatProbe, HspIndex};
+use crate::blastinput::fasta_reader::FastaRecord;
 use crate::config::ScoringMatrix;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseHit;
@@ -66,6 +67,8 @@ pub(super) struct BlastpTabular<'a> {
     /// By query: the shown id (the default outfmt 6 query id), the title (outfmt 7's
     /// `# Query:` line) and the searched length.
     pub query_ids: &'a [Arc<[u8]>],
+    /// The query records (the ids `-parse_deflines` read).
+    pub query_records: &'a [FastaRecord],
     pub query_titles: &'a [Arc<[u8]>],
     pub searched_lengths: &'a [usize],
     /// The length of the `-query_loc` range as given (NCBI's `m_QueryRange`), `None` without it.
@@ -390,10 +393,11 @@ pub(super) fn write_blastp_tabular(
         //             	m_QueryLength = query_bh.GetBioseqLength();
         // ```
         let query_length = tab.range_length.unwrap_or(searched_length);
-        let query = TabularQuery {
-            id: tab.query_ids.get(q_idx).map_or(&b""[..], |id| id.as_ref()),
-            length: query_length,
-        };
+        let query = TabularQuery::of_ids(
+            tab.query_records.get(q_idx).and_then(FastaRecord::believed),
+            tab.query_ids.get(q_idx).map_or(&b""[..], |id| id.as_ref()),
+            query_length,
+        );
         buf.clear();
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1277-1278
         // ```c++
@@ -683,6 +687,7 @@ mod tests {
             iteration: (app == BlastpApp::Psiblast).then_some(1),
             matrix: ScoringMatrix::Blosum62,
             query_ids: &[Arc::from(&b"q1"[..]), Arc::from(&b"q2"[..])],
+            query_records: &[],
             query_titles: &[Arc::from(&b"q1 first"[..]), Arc::from(&b"q2"[..])],
             searched_lengths: &[100, 50],
             range_length: None,

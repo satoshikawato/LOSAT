@@ -380,7 +380,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "line_length"
             | "negative_gilist"
             | "remote"
-            | "soft_masking"
             | "sorthits"
             | "sorthsps"
             | "version"

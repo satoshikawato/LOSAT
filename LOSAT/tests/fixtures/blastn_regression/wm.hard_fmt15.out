@@ -1,0 +1,903 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 2,
+        "sc_mismatch": -3,
+        "gap_open": 5,
+        "gap_extend": 2,
+        "filter": "L;W -d tests/winmask/counts/mg1655_u9.obinary;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "wm_mq00 len1250",
+            "query_len": 1314,
+            "query_masking": [
+              {
+                "from": 132,
+                "to": 146
+              },
+              {
+                "from": 414,
+                "to": 428
+              },
+              {
+                "from": 489,
+                "to": 501
+              },
+              {
+                "from": 530,
+                "to": 542
+              },
+              {
+                "from": 742,
+                "to": 754
+              },
+              {
+                "from": 911,
+                "to": 923
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s60k",
+                    "title": "s60k Sakai 2000001-2060000 mutated"
+                  }
+                ],
+                "len": 59980,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 1121.18,
+                    "score": 1242,
+                    "evalue": 0,
+                    "identity": 807,
+                    "query_from": 1,
+                    "query_to": 833,
+                    "query_strand": "Plus",
+                    "hit_from": 22961,
+                    "hit_to": 23794,
+                    "hit_strand": "Plus",
+                    "align_len": 835,
+                    "gaps": 3,
+                    "qseq": "ATGCGCTGATTGTTCAGGATATGGGGATTCTGGAACTTGATATTCCGTCGATTGAACTGCACGCCAGTACGCAGTGCGACAATCGTACAGTAGAAAAAGCGAAGTTCCTCTCTGATGTTGGCGTCACGCAGAttgtgctggcgcgagAGCTGCATCTTGATCAGATCCGCGCGATGCACCCGGCCACGGACGCGACCATTGAATTCTTGATTCATGGCGCACTGTGCGTGGCCTATTCGTGTCAGTGCTACATTTCTCATGCGCAAACAGGGCGTAGCGCCAACCGTGGCGATTGCTCGCAAGCGTGCCGTTTGACATAC-ACATTGAAAGACGATCAGGGGCGGGTGGTTTCCTATGAAAAACATCTGCTGTCGATGAAAGATAACGATCAGACTGCCAAGCTCGGCGCGCTGAttgatgctggcgtacGTTCCTTCAAGATTGAAGGGCGTTACAAAGATATGAGCTACGTGAAGAATATCACCGGCCattatcgccagatGC-TTGTTGCCAATATTGAAGAACGTGGCgatctggcgcgcgCTTCATCAGGTCGTACTGAACATTTCTTTGTTCCATCGACGGACAAGACTTGCCACCGTGGTAGCACAGATTATTTTGTGAATGCCCGTAATGGCGATATTGGCGCGTTCTATTCGCCGAAATTTGTCGGCCTGCCGGTAGGTGAAGTAGTGAAAGTGGAGAAAGATCATCTCGATGTTGCCGTTACCGAGCCACTGGCaaatggcgatggcCTGAACGTGTTGATTAAACGTGAAGTCGTCGGTTTTCGGGCCAATACGGTCGAGAAAACCGGAGAAAATCAGTACCGC",
+                    "hseq": "ATGCGCTGATTGTTCAGGATATGGGGATTCTGGAACTTGATATTCCGCCGATTGAACTGCACGCCAGTACGCAGTGCGACATTCGTACAGTAGAAAAAGGGAAGTTCCTCTCTGATGTTGGCTTCACGCAGATTGTGCTGGCGCGAGAGCTGAATCTTGATCAGATCCGCGCGATTCACCAGGCCACGGACGCGACCATTGAATTCTTTATTCATGGCGCACTGTGCGTGGCCTATTCGGGTCAGTGCTACATTTCTCATGCGCAAACAGGGCGTAGCGCCAACCGTGGCGATTGCTCGCAAGCGTGCCGTTTGCCTTACAACATTGAAAGACGATCAGGGGCGGGTGGTTTCCTATGAAAAACATCTGCTGTCGATGAAAGATAACGATCAGACTGCCAACCTCGGCGCGCTGATTGATGCTGGCGTACGTTCCTTCAAGATTGAAGGGCGTTACGAAGATATGAGCTACGTGAAGAATATTACCGCCCATTATCGCCAGATGCATTGATGCCATTATTGAAGAACGTGGCGATCTGGCGCGCGCTTCATCAGGTCGTACTGAACATTTCTTTGTTCCATCGACGGAAAAGACTTTCCACCGTGGTAGCACAGATTATTTTGTGAAT-CCCGTAAAGGCGATATTGGCGCGTTCGATTCGCCGAAATTTATCGGCCTGCCGGTAGGTGAAGTAGTGAAAGTGGCGAAAGATCATCTCGATGTTGCCGTTACCGAGCCACTGGCAAATGGCGATGGCCTGAACGTGTTGATGAAACGTGAAGTCGTCGGTTTTCGTGCCAATACGGTCGAGAAAACCGGAGAAAATCAGTACCGC",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||| ||||||||||||||||| |||||||||||||||||||||| ||||||||||||||||||||||||||||| |||||||||||||||||||||| |||| ||||||||||||||||||||||||||| |||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| | ||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||| |||| ||||||||||||||||| ||| ||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||| ||||||||||||||||||||||||||||||| ||||||| |||||||||||||||||| |||||||||||||| ||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 608.12,
+                    "score": 673,
+                    "evalue": 1.25573e-175,
+                    "identity": 373,
+                    "query_from": 925,
+                    "query_to": 1314,
+                    "query_strand": "Plus",
+                    "hit_from": 23824,
+                    "hit_to": 24213,
+                    "hit_strand": "Plus",
+                    "align_len": 392,
+                    "gaps": 4,
+                    "qseq": "TTGCACAAAATTCGCCCGCATCACCCACTAAACCGTAATCTTGATCATAACTGGCAGCAGGCACTGACAAAAACCTCGAGCGAACGTCGGGTGGCGGTAGACATTGAACTGGGCGGTTGGCAGGAACAATTGATTCT-GACTCTCACCAGTGAAGAGGGGTTCAGCATAACGCACACGCTGGATGGGCAGTTCGACGAAGCCAATAACGCAGAAAAAGCAATGAACAATCTGAAGGATGGTCTGGCAAAACTGGGGCAAACCCTCTATTACGCCCGCGATGTGCAAATTAATTTGGCGGGGGCGCTGTTTGTACCAACCAGACTGTTAAACGAGTT-CCGCCGTGAAGCTGCCGACATGCAGGATGCTGCGCGTCTTGCCAGTTACCAGCGC",
+                    "hseq": "TTGCACAAAACTCGCCCGCATCACCCTCTAAACCGTAATCTTGATCATAACTGGCAGCAGGCACTGACAAAAACCTCTAGCGAACGTCGGGTGGCGGTAGACAT-GAACTGGGCGGTTGGCAGGAACAATTGATTCTAGACTCTCAACAGTGAAGAGGGGGTCAGCATAACGCATACGCTGGCTGGGCAGTTCGACTAAGCCAATAACGCAGAAAAAGCAATGATCAATCTGAAGGATGGTCTGGCAAAACTGGGGCAAACCCTCTATTACGCCCGCGATGTGCAAATTAATTTGCCGGGGGCCCTGTTTGTACCAAACAGTCTGTTAAACCAGTTACCGCCGTGAAGCTGCCGACATGCTGGATGCTGCGCGTCTTGCCAGTTA-CAGCGC",
+                    "midline": "|||||||||| ||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||| |||||||||||||||||||||||||||||||| |||||||| ||||||||||||| ||||||||||||| ||||||| ||||||||||||| ||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||| ||||||||||||| ||| ||||||||| |||| ||||||||||||||||||||||| |||||||||||||||||||||||| ||||||"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 26.5335,
+                    "score": 28,
+                    "evalue": 0.798778,
+                    "identity": 14,
+                    "query_from": 1284,
+                    "query_to": 1297,
+                    "query_strand": "Plus",
+                    "hit_from": 47088,
+                    "hit_to": 47075,
+                    "hit_strand": "Minus",
+                    "align_len": 14,
+                    "gaps": 0,
+                    "qseq": "GGATGCTGCGCGTC",
+                    "hseq": "GGATGCTGCGCGTC",
+                    "midline": "||||||||||||||"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 24.7301,
+                    "score": 26,
+                    "evalue": 2.78801,
+                    "identity": 13,
+                    "query_from": 2,
+                    "query_to": 14,
+                    "query_strand": "Plus",
+                    "hit_from": 6143,
+                    "hit_to": 6155,
+                    "hit_strand": "Plus",
+                    "align_len": 13,
+                    "gaps": 0,
+                    "qseq": "TGCGCTGATTGTT",
+                    "hseq": "TGCGCTGATTGTT",
+                    "midline": "|||||||||||||"
+                  },
+                  {
+                    "num": 5,
+                    "bit_score": 24.7301,
+                    "score": 26,
+                    "evalue": 2.78801,
+                    "identity": 13,
+                    "query_from": 1206,
+                    "query_to": 1218,
+                    "query_strand": "Plus",
+                    "hit_from": 24118,
+                    "hit_to": 24106,
+                    "hit_strand": "Minus",
+                    "align_len": 13,
+                    "gaps": 0,
+                    "qseq": "GCAAATTAATTTG",
+                    "hseq": "GCAAATTAATTTG",
+                    "midline": "|||||||||||||"
+                  },
+                  {
+                    "num": 6,
+                    "bit_score": 24.7301,
+                    "score": 26,
+                    "evalue": 2.78801,
+                    "identity": 13,
+                    "query_from": 363,
+                    "query_to": 375,
+                    "query_strand": "Plus",
+                    "hit_from": 50904,
+                    "hit_to": 50916,
+                    "hit_strand": "Plus",
+                    "align_len": 13,
+                    "gaps": 0,
+                    "qseq": "CATCTGCTGTCGA",
+                    "hseq": "CATCTGCTGTCGA",
+                    "midline": "|||||||||||||"
+                  },
+                  {
+                    "num": 7,
+                    "bit_score": 23.8284,
+                    "score": 25,
+                    "evalue": 9.73111,
+                    "identity": 14,
+                    "query_from": 594,
+                    "query_to": 608,
+                    "query_strand": "Plus",
+                    "hit_from": 28928,
+                    "hit_to": 28942,
+                    "hit_strand": "Plus",
+                    "align_len": 15,
+                    "gaps": 0,
+                    "qseq": "TGCCACCGTGGTAGC",
+                    "hseq": "TGCCACCGTGGGAGC",
+                    "midline": "||||||||||| |||"
+                  },
+                  {
+                    "num": 8,
+                    "bit_score": 23.8284,
+                    "score": 25,
+                    "evalue": 9.73111,
+                    "identity": 14,
+                    "query_from": 1135,
+                    "query_to": 1149,
+                    "query_strand": "Plus",
+                    "hit_from": 39262,
+                    "hit_to": 39248,
+                    "hit_strand": "Minus",
+                    "align_len": 15,
+                    "gaps": 0,
+                    "qseq": "GAAAAAGCAATGAAC",
+                    "hseq": "GAACAAGCAATGAAC",
+                    "midline": "||| |||||||||||"
+                  },
+                  {
+                    "num": 9,
+                    "bit_score": 23.8284,
+                    "score": 25,
+                    "evalue": 9.73111,
+                    "identity": 17,
+                    "query_from": 330,
+                    "query_to": 349,
+                    "query_strand": "Plus",
+                    "hit_from": 47144,
+                    "hit_to": 47163,
+                    "hit_strand": "Plus",
+                    "align_len": 20,
+                    "gaps": 0,
+                    "qseq": "GACGATCAGGGGCGGGTGGT",
+                    "hseq": "GACGATACCGGGCGGGTGGT",
+                    "midline": "||||||   |||||||||||"
+                  },
+                  {
+                    "num": 10,
+                    "bit_score": 23.8284,
+                    "score": 25,
+                    "evalue": 9.73111,
+                    "identity": 14,
+                    "query_from": 1272,
+                    "query_to": 1286,
+                    "query_strand": "Plus",
+                    "hit_from": 49984,
+                    "hit_to": 49998,
+                    "hit_strand": "Plus",
+                    "align_len": 15,
+                    "gaps": 0,
+                    "qseq": "TGCCGACATGCAGGA",
+                    "hseq": "TGCGGACATGCAGGA",
+                    "midline": "||| |||||||||||"
+                  },
+                  {
+                    "num": 11,
+                    "bit_score": 23.8284,
+                    "score": 25,
+                    "evalue": 9.73111,
+                    "identity": 14,
+                    "query_from": 948,
+                    "query_to": 962,
+                    "query_strand": "Plus",
+                    "hit_from": 54715,
+                    "hit_to": 54701,
+                    "hit_strand": "Minus",
+                    "align_len": 15,
+                    "gaps": 0,
+                    "qseq": "CCCACTAAACCGTAA",
+                    "hseq": "CCCACTAAACCGGAA",
+                    "midline": "|||||||||||| ||"
+                  },
+                  {
+                    "num": 12,
+                    "bit_score": 22.9267,
+                    "score": 24,
+                    "evalue": 9.73111,
+                    "identity": 12,
+                    "query_from": 765,
+                    "query_to": 776,
+                    "query_strand": "Plus",
+                    "hit_from": 1125,
+                    "hit_to": 1136,
+                    "hit_strand": "Plus",
+                    "align_len": 12,
+                    "gaps": 0,
+                    "qseq": "TTGATTAAACGT",
+                    "hseq": "TTGATTAAACGT",
+                    "midline": "||||||||||||"
+                  },
+                  {
+                    "num": 13,
+                    "bit_score": 22.9267,
+                    "score": 24,
+                    "evalue": 9.73111,
+                    "identity": 15,
+                    "query_from": 350,
+                    "query_to": 366,
+                    "query_strand": "Plus",
+                    "hit_from": 3160,
+                    "hit_to": 3176,
+                    "hit_strand": "Plus",
+                    "align_len": 17,
+                    "gaps": 0,
+                    "qseq": "TTCCTATGAAAAACATC",
+                    "hseq": "TTTCTATGAAAAACTTC",
+                    "midline": "|| ||||||||||| ||"
+                  },
+                  {
+                    "num": 14,
+                    "bit_score": 22.9267,
+                    "score": 24,
+                    "evalue": 9.73111,
+                    "identity": 12,
+                    "query_from": 1283,
+                    "query_to": 1294,
+                    "query_strand": "Plus",
+                    "hit_from": 41998,
+                    "hit_to": 41987,
+                    "hit_strand": "Minus",
+                    "align_len": 12,
+                    "gaps": 0,
+                    "qseq": "AGGATGCTGCGC",
+                    "hseq": "AGGATGCTGCGC",
+                    "midline": "||||||||||||"
+                  },
+                  {
+                    "num": 15,
+                    "bit_score": 22.9267,
+                    "score": 24,
+                    "evalue": 9.73111,
+                    "identity": 18,
+                    "query_from": 693,
+                    "query_to": 714,
+                    "query_strand": "Plus",
+                    "hit_from": 51003,
+                    "hit_to": 51024,
+                    "hit_strand": "Plus",
+                    "align_len": 22,
+                    "gaps": 0,
+                    "qseq": "GTGAAAGTGGAGAAAGATCATC",
+                    "hseq": "GTGAGATTAGGGAAAGATCATC",
+                    "midline": "|||| | | | |||||||||||"
+                  },
+                  {
+                    "num": 16,
+                    "bit_score": 22.9267,
+                    "score": 24,
+                    "evalue": 9.73111,
+                    "identity": 15,
+                    "query_from": 1133,
+                    "query_to": 1149,
+                    "query_strand": "Plus",
+                    "hit_from": 58696,
+                    "hit_to": 58680,
+                    "hit_strand": "Minus",
+                    "align_len": 17,
+                    "gaps": 0,
+                    "qseq": "CAGAAAAAGCAATGAAC",
+                    "hseq": "CAGAAAAAGCACTTAAC",
+                    "midline": "||||||||||| | |||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 20,
+              "eff_space": 77588240,
+              "kappa": 0.41,
+              "lambda": 0.625,
+              "entropy": 0.78
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 2,
+        "sc_mismatch": -3,
+        "gap_open": 5,
+        "gap_extend": 2,
+        "filter": "L;W -d tests/winmask/counts/mg1655_u9.obinary;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "wm_mq03 len1438",
+            "query_len": 1502,
+            "query_masking": [
+              {
+                "from": 741,
+                "to": 756
+              },
+              {
+                "from": 1276,
+                "to": 1291
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s60k",
+                    "title": "s60k Sakai 2000001-2060000 mutated"
+                  }
+                ],
+                "len": 59980,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 1545.87,
+                    "score": 1713,
+                    "evalue": 0,
+                    "identity": 936,
+                    "query_from": 1,
+                    "query_to": 960,
+                    "query_strand": "Plus",
+                    "hit_from": 25067,
+                    "hit_to": 26023,
+                    "hit_strand": "Plus",
+                    "align_len": 961,
+                    "gaps": 5,
+                    "qseq": "CTTCCTGATTTTGCATTGCATTCTGCCGTTGCGGCGATTTAGTGCTATTTTCGAGCAAATTACACACGGAGGTAAACACTAATGTTT-ACTTTGTTGATATACTCAGCCGCAGGGAGGCGATGTGAAACAAAGCGAGTTCAGACGTTGGCTCGAATCTCAGGGCGTCGATGTAGCGAATGGCAGCAACCATTTGAAACTCAGGTTTCATGGGAGGCGCAGTGTCATGCCGCGTCACCCCTGCGATGAGACTAAAGAACCATTGCGTAAAGCAATCCTGAAACAACTCGGTTTGAGTTAATCGCCAATTAAAAAGGTTAATGACATGCGAGAGACAGTCGAAATTATGCGTTATCCCGTTACTCTTACACCCGCGCCGGAAGGCGGTTATATGGTTTCTTTTGTGGATATCCCTGAAGCGTTGACGCAGGGCGAAACTGTCGCTGAAGCGATGGAAGCGGCAAAAGATGCTTTACTGACCGCATTTGATTTTTTTTTTGAAGATAACGAGCTTATCCCTTTACCTTCGCCATTAAATAGTCATGATCACTTTATTGAAGTACCTTTGAGCGTCGCCTCTAAGTTATTGCTGTTAAATGCTTTTTTACAGTCAGAAATCACTCAGCAAGAGTTAGCCAGGCGAATTGGCAAACCTAAACAAGAGATTACTCGCCTATTTAACTTGCATCATGCGACAAAAATCGAGGCGGTCCAGCTCGCGGCAAAGGCGCTTGGCAAAGAGTTatcgctggtgatggttTAATTACAGTTTACGAAAAGTTGTCATTTTTAACAACTGATATAGACTGCCGAATCATCTGCACATAATTACGATTCGATAATGAAAAAATACCAGCAGCTTGCAGAACAATTACGCGAGCAGATTGCGTCGGGTATCTGGCAACCCGGCGATCGTTTACCTTCGTTGCGTGACCAGGTGGCGCTTTCTGGCATGAGCTTTAT",
+                    "hseq": "CTTCCTGATTTTGCATTGCATTCTGCCGTTGCGGCGATTTAGTGCTATTTTCGAGCAAATTA-ACACGGAGGTAAACACTAATGTTTGACTTTGTTGATATACTCAGACGCAGGGAGGAGATGTGAAACAAAGCGAGTTCAGACGTTGGCTCGAATCTCAGGGCGTCGATGTAGCGAATGGCAGCAACCATTTGAAACTCAGGTTTCATGGGAGGCGCAGTGTCATGCCGCGTCACCCCTGCGATGAGATTAAAGAACCATTGCGTAAAGCAATCCTGAAACAAGTCGGTTTGAGTTAATCGCCAATTAAAAAGGTTAATGACATGCGAGAGACAGTCGAAATTATGCGTTATCCCGTCACTCTTACACCCGCGCCGGAAGGCGGTTATATGGTTTCTTTTGTGGATATCCCTGACTCGTTGACGCAGGGCGAAACTGTCGCTGAAGCGATGGAAGCGGCAAAAGATGCTTTCCTGACCGCATTTGATTTTTATTTTGAAGATAACGAGCTTATCCCTTTACCTTCGCCATTAAATAGTCATGATCACTTTATTGAAGTACCTTTGAGCGTCGCCTATAAGGTATTGCTGTTAAATGCTTTTTTACAGTCAGAAATCACTCAGCAAGAGTTAGCCAGGCGAATTGCCAAACCTAAACAAGACATTACTCGCCTATTTAACTTGCATCATGCGACAAAAATCGACGCAGTCCAGCTCGCGGCAAAGGCGCTTGGCAAAGAGTTATCGCTGGTGATGGTTTAATTACAGTTAACGAAAAGTTGTC-CTTTTAACAACTGATATAGACTGCCGAATCATCTGCACATAATTACGATTCGAT-ATGAAAAAATACCAGCAGCTTGCAGAACAATTACGGGAGCAGATTGCGTAGGGTATCTGGCAACCCGGCGATCGTTT-CCTTCGTTGCGTGACCAGGTGGCGCTTTCTGGCATGAGCTTGAT",
+                    "midline": "|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||| ||||||||||||||||||| |||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||  ||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||| ||||||||||||||||||||||||||||||||||||||||| || |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||  ||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||| ||||||||||||| ||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||| ||"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 733.454,
+                    "score": 812,
+                    "evalue": 0,
+                    "identity": 466,
+                    "query_from": 1023,
+                    "query_to": 1502,
+                    "query_strand": "Plus",
+                    "hit_from": 26022,
+                    "hit_to": 26503,
+                    "hit_strand": "Plus",
+                    "align_len": 482,
+                    "gaps": 2,
+                    "qseq": "ATGACTGTCAGCCATGCCTATCAGTTGCTCGAAAGTCAGTGATATATTATCGCACGACCGCAGTCGGGTTATTACGTTGCGCCA-CAGGCAAGAAAAATGCCGAAAGTGCCAGTCATTCCAGTCACTCGAGATGAAGCAGTCGATATCAACACTTATATTTTTGATATGCTGCAGGCCAGTCGCGATCCGTCGGTCGTTCCGTTTGC-CTCGGCCTTTCCCGACCCGCAACTTTTCCCCCTCCAACAACTAAACCGctcgctggcgcaggtaAGCAAAACCGCCACGGCGATGAGCGTGATTGAAAACTTGCCGCCAGGAAACGCAGAACTGCGTCAGGCTATTGCCCGTCGCTATGCCTTACAGGGGATCACCATTTCTCCTGATGAAATTGTCATCACTGCCGGGCCGTTAGAGGCATTAAACCTCAGTTTGCAAGCGGTAACTGAACCGGGCGATTGGGTGATAGTAGAGAATCCTTGT",
+                    "hseq": "ATGACTGTCAGCCATGCCTATCAGTTGCTCGAAAGTCAGGGATATATTATCGCACGACCGCAGTCGGGTTATTACGTTGCGCCAACAGACAATAAAAATGCCGAGAGTGCCAGTCATTCCAGTCACTCGAGATGAAGCAGTCGATATCGACACTTACATCTTTGATATGTTGCAGGCCAGTCGCGATCCATCGGTCGTTCCGTTTGCGCTCGGCCTTTCCCGACCCGCGACTTTTCCCCCTCCAACAACTAAACCGCTCGCTGGCGCAGGTAAGCAAAACCTCCACGGCGATGAGCGTGATTGAAAACTTGCCGCCAGGAAACGCAGAACTGCGTCAGGCTATTGCCCGTCGCTATGCCTTAAAGGGGATCACCATTTCTGCTGATGAAATTGTCATCACTGCCGGGGCGTTAGAGGCATTAAACCTCAGTTTGCAAGCGGTAACTGAACCGGGCGATTGGGTGATAGTAGAGAATCCTTGT",
+                    "midline": "||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||| ||| ||| ||||||||||| ||||||||||||||||||||||||||||||||||||||||||| ||||||| || ||||||||| ||||||||||||||||||| ||||||||||||||||| |||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||| |||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 25.6318,
+                    "score": 27,
+                    "evalue": 3.19307,
+                    "identity": 15,
+                    "query_from": 628,
+                    "query_to": 643,
+                    "query_strand": "Plus",
+                    "hit_from": 11558,
+                    "hit_to": 11573,
+                    "hit_strand": "Plus",
+                    "align_len": 16,
+                    "gaps": 0,
+                    "qseq": "GTTAGCCAGGCGAATT",
+                    "hseq": "GTTAGCCAGGCGATTT",
+                    "midline": "||||||||||||| ||"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 25.6318,
+                    "score": 27,
+                    "evalue": 3.19307,
+                    "identity": 15,
+                    "query_from": 491,
+                    "query_to": 506,
+                    "query_strand": "Plus",
+                    "hit_from": 56080,
+                    "hit_to": 56065,
+                    "hit_strand": "Minus",
+                    "align_len": 16,
+                    "gaps": 0,
+                    "qseq": "TTTTTTGAAGATAACG",
+                    "hseq": "TTTATTGAAGATAACG",
+                    "midline": "||| ||||||||||||"
+                  },
+                  {
+                    "num": 5,
+                    "bit_score": 24.7301,
+                    "score": 26,
+                    "evalue": 3.19307,
+                    "identity": 13,
+                    "query_from": 784,
+                    "query_to": 796,
+                    "query_strand": "Plus",
+                    "hit_from": 16556,
+                    "hit_to": 16568,
+                    "hit_strand": "Plus",
+                    "align_len": 13,
+                    "gaps": 0,
+                    "qseq": "TTTTTAACAACTG",
+                    "hseq": "TTTTTAACAACTG",
+                    "midline": "|||||||||||||"
+                  },
+                  {
+                    "num": 6,
+                    "bit_score": 24.7301,
+                    "score": 26,
+                    "evalue": 3.19307,
+                    "identity": 13,
+                    "query_from": 516,
+                    "query_to": 528,
+                    "query_strand": "Plus",
+                    "hit_from": 20676,
+                    "hit_to": 20664,
+                    "hit_strand": "Minus",
+                    "align_len": 13,
+                    "gaps": 0,
+                    "qseq": "CTTTACCTTCGCC",
+                    "hseq": "CTTTACCTTCGCC",
+                    "midline": "|||||||||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 20,
+              "eff_space": 88860720,
+              "kappa": 0.41,
+              "lambda": 0.625,
+              "entropy": 0.78
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 2,
+        "sc_mismatch": -3,
+        "gap_open": 5,
+        "gap_extend": 2,
+        "filter": "L;W -d tests/winmask/counts/mg1655_u9.obinary;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_3",
+            "query_title": "wm_mq04 len1682",
+            "query_len": 1746,
+            "query_masking": [
+              {
+                "from": 69,
+                "to": 83
+              },
+              {
+                "from": 113,
+                "to": 127
+              },
+              {
+                "from": 140,
+                "to": 153
+              },
+              {
+                "from": 608,
+                "to": 622
+              },
+              {
+                "from": 815,
+                "to": 829
+              },
+              {
+                "from": 875,
+                "to": 889
+              },
+              {
+                "from": 931,
+                "to": 950
+              },
+              {
+                "from": 999,
+                "to": 1015
+              },
+              {
+                "from": 1454,
+                "to": 1469
+              },
+              {
+                "from": 1689,
+                "to": 1703
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s60k",
+                    "title": "s60k Sakai 2000001-2060000 mutated"
+                  }
+                ],
+                "len": 59980,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 1518.82,
+                    "score": 1683,
+                    "evalue": 0,
+                    "identity": 1112,
+                    "query_from": 1,
+                    "query_to": 1121,
+                    "query_strand": "Plus",
+                    "hit_from": 55576,
+                    "hit_to": 56694,
+                    "hit_strand": "Plus",
+                    "align_len": 1122,
+                    "gaps": 4,
+                    "qseq": "CATGATGATGATATCCGGCGTAGTGGAAGTGGCACGCACGCGCTGATTTGTCAGCCTGCGCCACAGCAGtcctgcgccgccaatCAACGTCAACACACC-GCAAATACCACCGAgcaccatcgccattaGTTGTTTCGCTGccactggcaaaaacCACGCGTACATCCAGTGTGGCGTTAACATGCCGAACAGGTGCCCGAAGAAGATCCCCAAAATGCCGATATGGAACAGATTCGACCATATCACCATCCCGCGTTTATCGAGCATCTGACTTGAGGAGGCGCGCCAGGTGTACTGCCCGTAGTCGTAGCGCAGCCAGCTGCCGAGGAAAAACACCGTCGCACAAATGTACGGGTAGATATCGTAAAAAAAGACGTTCAGATACTGAATCATTTCCCACCTCCCGCACTGATGTCGACATATTGCGGCGCGACATCCTGACTAAAGCGTCGCTGATATTGATTAAGCGGCGAGCTGTCACACGCCGTGGCGTTATCTTCAATAAACTTCACCTGTTCCTCTTCCCACACTGCATCAAGCGCCTGGCGGGTGTCATCGCGCTCTTCGCTGTTTACTTGTTTTGTGACACTGTCACTTGAAAGTGTACTtcccgccagttgcagCAGAGCATCAAACAACGCGTACCACGGTGCCTCGCGTTGTTTTAAGCGACCGCCAAGCAGGGCGAGGATCGGCGCAACGTTGAGCAATCCTTCTTTCGCCTGATCGTCAGGCAGTACGCTTAAATACTCCAGATACAGCGGTAGATAATCGGGCAGTTCCCGACAATCCAGCTGCAGGCCGACCTTTTCATActccgccagcaggtcCACCATTGCCTGGCCGCGATCGCGGGACTCGGCATGAACATGTTCgaacagcagcagcgaCGTGGTGCGCCCGCGGTCAAACACTTCGCACCATTCGGCCTgtttatccagcagcggcgcgTTAAGCAGGTTGCGGGTGAAATCCGTAAGCATCGGCGCATCGCGGCGGatcaacgccagcgcgtcCTCCTTGCATTCCCACAACATCTCGTCCGGATACTCCATCAACAGGCCGATCACTTTGAGGATCTGCATTATTCGCCCTCCGCTTTGTCGCGCACTTCGGTGATG",
+                    "hseq": "CATGATGATGATATCCGGCGTAGTGGAAGTGGCACGCACGCGCTGATTTGTCAGCCTGCGCCACGGCAGTCCTGCGCCGCCAATCAACGTCAACACACCCGCAAATACCACCGAGCACCATCGCCATTAGTTGTTTCGCTGCCACTGGCAAAAACCACGCGTACATCCAGTGTGGCGTTAACATGCCGAACAGGTGCCCGAAGAAGATCCCCAAAATGCCGATATGGAACAGATTCGACCATATCACCATCCCGCGTTTATCGAGCATCTGAATTGAGGGGGCGCGCCAGGTGTACT-CCCGTAGTCGTAGCGCAGCCAGCTGCCGAGGAAAAACACCGTCGCACAAATGTACGGGTAGATATCGTAAAAAAAGACGTTCAGATACTGAATCATTTCCCACCTCTCGCACTGA-GTCGACATATTGCGGCGCGACATCCTGACTAAAGCGTCGCTGATATTGATTAAGCGGCGAGCTGTCACACGCCGTGGCGTTATCTTCAATAAACTTCACCTGTTCCTCTTCCCACACTCCATCAAGCGCCTGGCGGGTGTCATCGCGCTCTTCGCTGTTTACTTGTTTTGTGACACTGTCACTTGAAAGTGTACT-CCCGCCAGTTGCAGCAGAGCATCAAACAACGCGTACCACGGTGCCTCGCGTTGTTTTAAGCGACCGCCAAGCAGGGCGAGGATCGGCGCAACGTTGAGCAATCCTTCTTTCGCCTGATCGTCAGGCAGTACGCTTAAATACTCCAGATACAGCGGTAGATAATCGGGCAGTTCCCGACAATCCAGCTGCAGGCCGACCTTTTCATACTCCGCCAGCAGGTCCACCATTGCCTGGCCGCGATCGCGGGACTCGGCATGAACATGTTCGAACAGCAGCAGCGACGTGGTGCGCCCGCGGTCAAACACTTCGCACCATTCGGCCTGTTTATCCAGCAGCGGCGCGTTAAGCAGGTTGCGGGTGAAATCCGTAAGCATCGGCGCATCGCGGCGGATCAACGCCAACGCGTCCTCCTTGCATTCCCACAACATCTCGTCCGGATACTCCATCAACAGGCCGATCACTTTGAGGATCTGCATTATTCGCCCTCCGCTTTGTCGCGCACTTCGGTGATG",
+                    "midline": "|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||| ||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 858.788,
+                    "score": 951,
+                    "evalue": 0,
+                    "identity": 549,
+                    "query_from": 1186,
+                    "query_to": 1746,
+                    "query_strand": "Plus",
+                    "hit_from": 56696,
+                    "hit_to": 57256,
+                    "hit_strand": "Plus",
+                    "align_len": 562,
+                    "gaps": 2,
+                    "qseq": "TTGATGGCATCGATACGGCTACTGTTGAACAGGTTGAATTTGCTGTCCGAGCCGTGACAACCGTCACCAAAGGTAAAACCGCAGCCATTGCGTTCTGCGAAGGCATCGCCCGCCATTTCCCGATGGCTGGTCGGGATAACAAAACGATCTTCATAGTTGGCAATGGCGAGATAGCGATACATTTCTTCG-ACCTGGGCGATGCTCAGGCCTACTTCGTCGATGGCACGAGTATCAGTAACGCCTTCCACGGTTTGTGAACGCATATAGTGgcgcatcgccatcatcCGTTTCAGCGCCCGCAGTACCGGACCGGTATCGCCGGCACTCAACATATTGGCGAGATATTGCACCGGAATACGCAGGCTTTCGATGGCGGGCAGCACGCCTTCGCTTTTCGGCAAACCGCCCGCATCTGCGTAGGACTGAATCGGTGACAGCGGAGGAACGTACCAGACCATCGGCAGGGTGCGGTATTCAGGGTGCAGCGGTAGTGCCAGTTTCCAGtccatcgccattttgTAGACTGGCGAACGCTGGGCAGCGTCAATCACATTTTGTGGA",
+                    "hseq": "TTGATGGCATCGATACGGCTACTGTTGAACAGGTTGAATTTGCTGTCCGAGCCGTGATAACCTTCACCACAGGTAAAACCGCAGCCATTGCGTTCTGCGAAGGCATCGCCCGCCATTTCCCGATGGCTGGCCGGGATAACAAAACGATCTTCATAGTTGGCAATGGCGAGATAGCGATACATTTCTTCGAACCTGGGCGATGCTCAGGCCTACTTCGTCGATGGCACGAGTATCAGTAACGCCTTCCACGGTTTGTGAACGCATATAGTG-GCGATCGCCATCAGCCGTTTCAGCGCCCGCAGTACCGGACCGGTATCGCCGGCACTCAACATATTGGCGAGATATTGCACCGGAATACGCAGGCTTTCGATGGCTGGCAGCACGCCTTCGCTTTTCGGCAAACCGCCCGCATCTGCGTAGGACTGAATCGGTGACAGCGGAGGAACGTACCAGACCATCGGCAGGGTGCGGTATTCAGGGTGCAGCGGTAGTGCCAGGTTCCAGTCCATCGCCATTTTGTAGACTGGCGAACGCTGGGCAGCGTCAATCACCTTTTGTGGA",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||| |||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||    |||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 32.8453,
+                    "score": 35,
+                    "evalue": 0.025057,
+                    "identity": 21,
+                    "query_from": 583,
+                    "query_to": 604,
+                    "query_strand": "Plus",
+                    "hit_from": 30854,
+                    "hit_to": 30874,
+                    "hit_strand": "Plus",
+                    "align_len": 22,
+                    "gaps": 1,
+                    "qseq": "GTGACACTGTCACTTGAAAGTG",
+                    "hseq": "GTGACACTGTCACTT-AAAGTG",
+                    "midline": "||||||||||||||| ||||||"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 28.3368,
+                    "score": 30,
+                    "evalue": 0.305256,
+                    "identity": 15,
+                    "query_from": 583,
+                    "query_to": 597,
+                    "query_strand": "Plus",
+                    "hit_from": 17764,
+                    "hit_to": 17778,
+                    "hit_strand": "Plus",
+                    "align_len": 15,
+                    "gaps": 0,
+                    "qseq": "GTGACACTGTCACTT",
+                    "hseq": "GTGACACTGTCACTT",
+                    "midline": "|||||||||||||||"
+                  },
+                  {
+                    "num": 5,
+                    "bit_score": 26.5335,
+                    "score": 28,
+                    "evalue": 1.06545,
+                    "identity": 17,
+                    "query_from": 1341,
+                    "query_to": 1359,
+                    "query_strand": "Plus",
+                    "hit_from": 4782,
+                    "hit_to": 4800,
+                    "hit_strand": "Plus",
+                    "align_len": 19,
+                    "gaps": 0,
+                    "qseq": "GTTGGCAATGGCGAGATAG",
+                    "hseq": "GTTCGCGATGGCGAGATAG",
+                    "midline": "||| || ||||||||||||"
+                  },
+                  {
+                    "num": 6,
+                    "bit_score": 24.7301,
+                    "score": 26,
+                    "evalue": 3.71878,
+                    "identity": 16,
+                    "query_from": 351,
+                    "query_to": 368,
+                    "query_strand": "Plus",
+                    "hit_from": 8935,
+                    "hit_to": 8952,
+                    "hit_strand": "Plus",
+                    "align_len": 18,
+                    "gaps": 0,
+                    "qseq": "ACGGGTAGATATCGTAAA",
+                    "hseq": "ACGGGTAGATAGCTTAAA",
+                    "midline": "||||||||||| | ||||"
+                  },
+                  {
+                    "num": 7,
+                    "bit_score": 24.7301,
+                    "score": 26,
+                    "evalue": 3.71878,
+                    "identity": 13,
+                    "query_from": 1553,
+                    "query_to": 1565,
+                    "query_strand": "Plus",
+                    "hit_from": 11156,
+                    "hit_to": 11168,
+                    "hit_strand": "Plus",
+                    "align_len": 13,
+                    "gaps": 0,
+                    "qseq": "CGATGGCGGGCAG",
+                    "hseq": "CGATGGCGGGCAG",
+                    "midline": "|||||||||||||"
+                  },
+                  {
+                    "num": 8,
+                    "bit_score": 24.7301,
+                    "score": 26,
+                    "evalue": 3.71878,
+                    "identity": 13,
+                    "query_from": 341,
+                    "query_to": 353,
+                    "query_strand": "Plus",
+                    "hit_from": 32292,
+                    "hit_to": 32280,
+                    "hit_strand": "Minus",
+                    "align_len": 13,
+                    "gaps": 0,
+                    "qseq": "GCACAAATGTACG",
+                    "hseq": "GCACAAATGTACG",
+                    "midline": "|||||||||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 20,
+              "eff_space": 103490960,
+              "kappa": 0.41,
+              "lambda": 0.625,
+              "entropy": 0.78
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 2,
+        "sc_mismatch": -3,
+        "gap_open": 5,
+        "gap_extend": 2,
+        "filter": "L;W -d tests/winmask/counts/mg1655_u9.obinary;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_4",
+            "query_title": "wm_mq02 len77",
+            "query_len": 77,
+            "query_masking": [
+              {
+                "from": 17,
+                "to": 33
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s60k",
+                    "title": "s60k Sakai 2000001-2060000 mutated"
+                  }
+                ],
+                "len": 59980,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 66.2076,
+                    "score": 72,
+                    "evalue": 4.29292e-14,
+                    "identity": 41,
+                    "query_from": 35,
+                    "query_to": 77,
+                    "query_strand": "Plus",
+                    "hit_from": 11930,
+                    "hit_to": 11971,
+                    "hit_strand": "Plus",
+                    "align_len": 43,
+                    "gaps": 1,
+                    "qseq": "CATGACGCAGGTCGTCTTTTACCGCGCCAGTAGGGACAAACCA",
+                    "hseq": "CATGACGCAG-TCGTCTTTTACCGCGCCAGAAGGGACAAACCA",
+                    "midline": "|||||||||| ||||||||||||||||||| ||||||||||||"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 31.9436,
+                    "score": 34,
+                    "evalue": 0.000885618,
+                    "identity": 17,
+                    "query_from": 1,
+                    "query_to": 17,
+                    "query_strand": "Plus",
+                    "hit_from": 11896,
+                    "hit_to": 11912,
+                    "hit_strand": "Plus",
+                    "align_len": 17,
+                    "gaps": 0,
+                    "qseq": "CCATGTCCCGGAACAGG",
+                    "hseq": "CCATGTCCCGGAACAGG",
+                    "midline": "|||||||||||||||||"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 22.9267,
+                    "score": 24,
+                    "evalue": 0.458762,
+                    "identity": 12,
+                    "query_from": 54,
+                    "query_to": 65,
+                    "query_strand": "Plus",
+                    "hit_from": 47001,
+                    "hit_to": 46990,
+                    "hit_strand": "Minus",
+                    "align_len": 12,
+                    "gaps": 0,
+                    "qseq": "TACCGCGCCAGT",
+                    "hseq": "TACCGCGCCAGT",
+                    "midline": "||||||||||||"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 21.1234,
+                    "score": 22,
+                    "evalue": 1.60124,
+                    "identity": 11,
+                    "query_from": 50,
+                    "query_to": 60,
+                    "query_strand": "Plus",
+                    "hit_from": 51742,
+                    "hit_to": 51732,
+                    "hit_strand": "Minus",
+                    "align_len": 11,
+                    "gaps": 0,
+                    "qseq": "CTTTTACCGCG",
+                    "hseq": "CTTTTACCGCG",
+                    "midline": "|||||||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 16,
+              "eff_space": 3657804,
+              "kappa": 0.41,
+              "lambda": 0.625,
+              "entropy": 0.78
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

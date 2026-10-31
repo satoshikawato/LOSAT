@@ -52,18 +52,46 @@ fn main() -> Result<()> {
     // ```
     // `losat blastdbcmd` reads its command line with NCBI's argument reader
     // (`blastdbcmd::args`), not clap's: the words after `blastdbcmd` go to it as they are.
-    let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    // An executable called `blastn` is `losat blastn` (`cli::entry_argv`).
+    let argv: Vec<std::ffi::OsString> = LOSAT::cli::entry_argv(std::env::args_os());
     if argv.get(1).is_some_and(|word| word == "blastdbcmd") {
         std::process::exit(LOSAT::blastdbcmd::run(&argv[2..]));
     }
+    // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
+    // top level has no options of its own.
+    if argv
+        .get(1)
+        .is_some_and(|word| LOSAT::cli::INSTALL_SHIMS_WORDS.iter().any(|w| word == w))
+    {
+        // An option word is not a directory (`./-h` names one).
+        let option = argv
+            .get(2)
+            .is_some_and(|word| word.to_string_lossy().starts_with('-'));
+        if argv.len() > 3 || option {
+            eprintln!("usage: losat --install-shims [DIR]");
+            std::process::exit(1);
+        }
+        match LOSAT::cli::install_shims(argv.get(2).map(std::ffi::OsString::as_os_str)) {
+            Ok(paths) => {
+                for path in paths {
+                    println!("{}", path.display());
+                }
+                return Ok(());
+            }
+            Err(message) => {
+                eprintln!("losat --install-shims: {message}");
+                std::process::exit(1);
+            }
+        }
+    }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` is read
     // before the program's arguments, `cli::ncbi_version_request`).
-    if let Some(text) = LOSAT::cli::ncbi_version_request(std::env::args_os()) {
+    if let Some(text) = LOSAT::cli::ncbi_version_request(argv.iter().cloned()) {
         print!("{text}");
         return Ok(());
     }
     // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
-    let cli: Cli = match LOSAT::cli::try_parse_from(std::env::args_os()) {
+    let cli: Cli = match LOSAT::cli::try_parse_from(argv) {
         Ok(cli) => cli,
         Err(error) => {
             let message = LOSAT::cli::render_message(&error);

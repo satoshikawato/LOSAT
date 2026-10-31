@@ -566,6 +566,21 @@ pub struct BlastnArgs {
     /// Use non-greedy dynamic programming extension.
     #[arg(long)]
     pub no_greedy: bool,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:701-704,739-741
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgMinRawGappedScore, "int_value",
+    //                             "Minimum raw gapped score to keep an alignment "
+    //                             "in the preliminary gapped and traceback stages",
+    //                             CArgDescriptions::eInteger);
+    // ...
+    //     if (args[kArgMinRawGappedScore]) {
+    //         options.SetCutoffScore(args[kArgMinRawGappedScore].AsInteger());
+    //     }
+    // ```
+    // No constraint on the value: 0 and below keep the cutoff of the e-value
+    // (`coordination.rs` `configure_task`).
+    #[arg(long, value_parser = ncbi_integer, help = "Minimum raw gapped score to keep an alignment in the preliminary gapped and traceback stages")]
+    pub min_raw_gapped_score: Option<i32>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:475-481,487-497
     // ```c++
     //     arg_desc.AddOptionalKey(kArgWindowSize, "int_value",

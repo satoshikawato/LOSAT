@@ -1010,6 +1010,16 @@ fn numeric_values_are_validated_before_io() {
         assert!(parse(program, &["-outfmt", "6", "-window_size", "2147483648"]).is_err());
         parse(program, &["-outfmt", "6", "-window_size", "0"]).unwrap();
     }
+    // `-min_raw_gapped_score` is BLASTN's only (blast_args.cpp:701-704, `eInteger`, no constraint).
+    for value in ["15", "0", "-5", "2147483647", "-2147483648"] {
+        parse("blastn", &["-min_raw_gapped_score", value]).unwrap();
+    }
+    for value in ["2147483648", "1.5", "abc"] {
+        assert!(parse("blastn", &["-min_raw_gapped_score", value]).is_err());
+    }
+    for program in ["blastp", "blastx", "tblastn", "tblastx"] {
+        assert!(parse(program, &["-min_raw_gapped_score", "15"]).is_err());
+    }
     // TBLASTX checks its options after the files are opened, with NCBI's messages.
     for (words, message) in [
         (&["-threshold", "0"][..], "Non-zero threshold required"),

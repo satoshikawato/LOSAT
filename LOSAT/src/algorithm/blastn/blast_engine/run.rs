@@ -11763,11 +11763,26 @@ fn search_query_batch<const UNGAPPED: bool>(
             // searchsp = query_info->contexts[context].eff_searchsp;
             // BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
             // params->cutoffs[context].cutoff_score_max = new_cutoff;
-            let hit_saving_cutoff = cutoff_score_max_from_evalue(
-                evalue_threshold,
-                query_eff_searchsp[context_idx],
-                &search_karlin_ref[context_idx].gapped,
-            );
+            // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:876-882
+            // ```c
+            //    if (options->cutoff_score > 0) {
+            //       Int4 new_cutoff = options->cutoff_score * (Int4) sbp->scale_factor;
+            //       for (context = query_info->first_context;
+            //                           context <= query_info->last_context; ++context) {
+            //          params->cutoffs[context].cutoff_score = new_cutoff;
+            //          params->cutoffs[context].cutoff_score_max = new_cutoff;
+            // ```
+            // `-min_raw_gapped_score` replaces the e-value's cutoff (the scale factor of
+            // BLASTN is 1); the word cutoff, the reduced cutoff and megablast's ungapped
+            // X-drop below follow it.
+            let hit_saving_cutoff = match config.min_raw_gapped_score {
+                Some(score) => score,
+                None => cutoff_score_max_from_evalue(
+                    evalue_threshold,
+                    query_eff_searchsp[context_idx],
+                    &search_karlin_ref[context_idx].gapped,
+                ),
+            };
             // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-374
             // gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
             // new_cutoff = gap_trigger;

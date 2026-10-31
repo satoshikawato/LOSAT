@@ -372,6 +372,28 @@ fn run_inner(
         }
         None => Box::new(io::stderr()),
     };
+    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
+    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the formatting handler and before
+    // `CStdCmdLineArgs`, which opens the query and the output: its warning before theirs (probe
+    // F04 of line DI-8), and a list error leaves no `-out`, only the error archive that NCBI's
+    // `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8). NCBI's application layer
+    // has read its environment and registry files by then; LOSAT reads them for `-db` (the
+    // registry's `BLASTDB`), as its other programs with `-db`, and leaves `-subject`'s path as it
+    // was.
+    let db_settings = match args.database_name() {
+        Some(_) => Some(
+            crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
+                .map_err(anyhow::Error::msg)?,
+        ),
+        None => None,
+    };
+    let list = match &db_settings {
+        Some(settings) => args
+            .db_filter
+            .resolve(settings, &mut stderr)
+            .map_err(early_archive_error)?,
+        None => None,
+    };
     // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
     // counterpart.
     let x_t_read_fasta = crate::utils::xtiming::clock();
@@ -467,22 +489,6 @@ fn run_inner(
     // The formatting handler raises NCBI's errors for the formats of other programs (SAM,
     // AIRR rearrangement, FASTA) before its warning. The deferred errors of `resolve` are
     // those of the composition-based statistics handler and of `Validate`, which come later.
-    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
-    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the formatting handler, so its warning
-    // before theirs (probe F04 of line DI-8). NCBI's application layer has read its environment
-    // and registry files by then; LOSAT reads them for `-db` (the registry's `BLASTDB`), as its
-    // other programs with `-db`, and leaves `-subject`'s path as it was.
-    let db_settings = match args.database_name() {
-        Some(_) => Some(
-            crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
-                .map_err(anyhow::Error::msg)?,
-        ),
-        None => None,
-    };
-    let list = match &db_settings {
-        Some(settings) => args.db_filter.resolve(settings, &mut stderr)?,
-        None => None,
-    };
     app::formatting_handler_check(&choice, Program::Blastx)?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).

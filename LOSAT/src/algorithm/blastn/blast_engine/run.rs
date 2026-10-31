@@ -7115,6 +7115,22 @@ pub fn run(
         }
         None => &mut stderr,
     };
+    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
+    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
+    // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
+    // and before `CStdCmdLineArgs`, which opens the query and the output: its warning before
+    // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
+    // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
+    let list = match args.database_name() {
+        Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
+            Ok(list) => list,
+            Err(error) => {
+                write_run_error_archive(&args, archive.as_ref(), &error);
+                return Err(error);
+            }
+        },
+        None => None,
+    };
     let cli_subjects = if args.db.is_some() {
         None
     } else {
@@ -7181,6 +7197,7 @@ pub fn run(
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut *diagnostics);
         search_cli(
             args,
+            list,
             query_file,
             cli_subjects.as_ref().map(|read| {
                 (
@@ -7401,24 +7418,17 @@ fn read_cli_subjects(
 /// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`,
 /// `-window_masker_db`), the
 /// processing of the options, the opening of the database of `-db`, `Query is Empty!`, the
-/// reading of the queries and the search. `subjects` are those of `-subject` (`None` with
-/// `-db`).
+/// reading of the queries and the search. `list` is the taxid or seqid list of `-db`, read
+/// before the output is opened; `subjects` are those of `-subject` (`None` with `-db`).
 fn search_cli(
     mut args: BlastnArgs,
+    list: Option<crate::seqdb::DbList>,
     query_file: std::fs::File,
     subjects: Option<(Subjects<'_>, SubjectRanges<'_>)>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
-    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
-    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
-    // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65),
-    // so its warning before theirs (probe F04 of line DI-8).
-    let list = match args.database_name() {
-        Some(_) => args.db_filter.resolve(&settings, outputs.diagnostics)?,
-        None => None,
-    };
     args.resolve_dust()?;
     args.resolve_window_masker()?;
     let query_range = parse_query_range(&args)?;

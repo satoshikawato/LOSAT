@@ -71,7 +71,7 @@ impl PreparedQueryBatch {
     /// EXPERIMENT (LOSAT_X_BXENDMEM): what the results of a searched batch keep: the batch without
     /// its residues and lookup segments, which the report does not read.
     pub(crate) fn x_for_results(&self) -> Self {
-        if !super::search::x_bx_mem::end_mem() {
+        if !super::kappa::x_end_mem() {
             return self.clone();
         }
         Self {

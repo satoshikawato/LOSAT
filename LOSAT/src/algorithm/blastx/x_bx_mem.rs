@@ -123,14 +123,6 @@ fn keeps_tables(options: &ResolvedOptions, subjects: Subjects<'_>) -> bool {
         )
 }
 
-// No NCBI counterpart: reads the switch; it changes no value NCBI computes (module comment).
-/// EXPERIMENT (LOSAT_X_BXENDMEM): whether a batch's end makes no word-hash table and no copy of the
-/// residues (module comment).
-pub(crate) fn end_mem() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXENDMEM"))
-}
-
 /// No NCBI counterpart: whether the pool's workers keep one diagonal table per thread
 /// (`LOSAT_X_BXDIAGKEEP`, module comment), and so may run on a table another chunk or batch used.
 pub(crate) fn diag_keep(options: &ResolvedOptions, subjects: Subjects<'_>) -> bool {

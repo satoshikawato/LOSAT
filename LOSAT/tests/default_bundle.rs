@@ -1,5 +1,5 @@
 //! The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle): blastp's
-//! `LOSAT_X_BPREDOPAR`, `LOSAT_X_BPREDOLPT`, `LOSAT_X_BPDBCUT`, `LOSAT_X_BPSUBJMETA` and
+//! `LOSAT_X_BPREDOPAR`, `LOSAT_X_BPREDOLPT`, `LOSAT_X_BPDBCUT` and
 //! `LOSAT_X_BPLKPAHEAD`, and blastn's `LOSAT_X_PAIRPARDISC`, `LOSAT_X_PAIRPARFOLD`,
 //! `LOSAT_X_QDUSTPAR`, `LOSAT_X_DIAGLV`, `LOSAT_X_QPREPPAR` and `LOSAT_X_RPTSTREAM` (and
 //! `LOSAT_X_QBATCHPAR`, which was removed on 2026-10-28). Each has its own test file, whose
@@ -7,7 +7,7 @@
 //! (no variable) and give the report of each switch off (`=0`) and of all of them off, with the
 //! same standard error. And the default runs them: the `[TIMING] x_bpredopar:` line of BPREDOPAR,
 //! with BPREDOLPT's `lpt_windows=`, comes without a variable and not with `LOSAT_X_BPREDOPAR=0`.
-//! `LOSAT_X_REACH`, set in the default run of a search, shows that BPLKPAHEAD, BPSUBJMETA, BPDBCUT, DIAGLV, QDUSTPAR and
+//! `LOSAT_X_REACH`, set in the default run of a search, shows that BPLKPAHEAD, BPDBCUT, DIAGLV, QDUSTPAR and
 //! QPREPPAR take their own paths on these searches.
 
 use std::path::{Path, PathBuf};
@@ -21,7 +21,6 @@ const BLASTP: &[&str] = &[
     "LOSAT_X_BPLKPAHEAD",
     "LOSAT_X_BPREDOLPT",
     "LOSAT_X_BPREDOPAR",
-    "LOSAT_X_BPSUBJMETA",
 ];
 
 /// The blastn switches of the bundle.
@@ -197,9 +196,7 @@ fn blastp_gives_one_report_with_the_switches_on_and_off() {
         "-num_threads",
         "4",
     ];
-    // The first (default) run of each search also writes the reach rows (S2: no extra run).
-    let reach_fast = reach_support::Reach::new("blastp_fast");
-    one_report(&fast, &[], &[reach_fast.var()], BLASTP);
+    one_report(&fast, &[], &[], BLASTP);
     let db = protein_database("blastp");
     let db = db.to_str().unwrap();
     let exact = [
@@ -215,17 +212,12 @@ fn blastp_gives_one_report_with_the_switches_on_and_off() {
         "-num_threads",
         "4",
     ];
+    // The first (default) run of this search also writes the reach rows (S2: no extra run).
     let reach_db = reach_support::Reach::new("blastp_db");
     one_report(&exact, &[], &[reach_db.var()], BLASTP);
     // The rows come from the default runs whose reports every `=0` arm above matched, so the
     // equalities compare these paths (a later change of scope or input would otherwise make
-    // them vacuous). BPSUBJMETA: subject records were read by the metadata path. BPLKPAHEAD: the
-    // look-ahead build was chosen for exact blastp's blocks.
-    let sides = reach_fast.sides("LOSAT_X_BPSUBJMETA");
-    assert!(
-        sides.0,
-        "LOSAT_X_BPSUBJMETA: sides {sides:?}: its path did not run"
-    );
+    // them vacuous). BPLKPAHEAD: the look-ahead build was chosen for exact blastp's blocks.
     let sides = reach_db.sides("LOSAT_X_BPLKPAHEAD");
     assert!(
         sides.0,

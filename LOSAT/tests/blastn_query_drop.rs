@@ -464,7 +464,16 @@ fn standard_input_is_packed() {
     let packed = timing_counts(&stderr, "x_bn_q_pack")
         .unwrap_or_else(|| panic!("standard input, nothing packed: {stderr}"));
     assert!(packed[0] > 0, "standard input: {packed:?}");
-    let (report, stderr) = run(&[TIMING, SWITCH_OFF]);
+    let (report, off_stderr) = run(&[TIMING, SWITCH_OFF]);
     assert!(report == default, "standard input {SWITCH_OFF:?}");
-    assert_eq!(timing_counts(&stderr, "x_bn_q_pack"), None);
+    assert_eq!(timing_counts(&off_stderr, "x_bn_q_pack"), None);
+    // The reader's messages and every other line of standard error are the same.
+    let messages = |stderr: &str| -> Vec<String> {
+        stderr
+            .lines()
+            .filter(|line| !line.starts_with("[TIMING]"))
+            .map(str::to_owned)
+            .collect()
+    };
+    assert_eq!(messages(&stderr), messages(&off_stderr), "standard input");
 }

@@ -250,7 +250,8 @@ impl Store {
     }
 }
 
-/// No NCBI counterpart: the letters of a batch's packed records made again, by the search pool where it has two threads or more (each record by one thread).
+/// No NCBI counterpart: the letters of a batch's packed records made again, by the search pool
+/// where it has two threads or more (each record by one thread).
 fn unpack(
     batch: &mut [FastaRecord],
     stores: Vec<Option<Arc<PackedLetters>>>,

@@ -7566,16 +7566,13 @@ fn search_cli(
     // EXPERIMENT (LOSAT_X_BNQPACK): whether the records read before the search move into a store
     // that the batch loop takes them out of (`x_query_drop::Rule`), decided before the reading so
     // that their letters are packed as they are read.
-    let x_store_acts = !x_opening.acts() && x_query_drop::on() && {
-        let acts = x_query_drop::Rule {
-            formats: &output_formats,
-            query_range: query_range.is_some(),
-            hit_records: outputs.hits.is_some(),
-        }
-        .acts();
-        crate::utils::xreach::x_reach!("LOSAT_X_BNQPACK", acts);
-        acts
-    };
+    let x_store_rule = x_query_drop::Rule {
+        formats: &output_formats,
+        query_range: query_range.is_some(),
+        hit_records: outputs.hits.is_some(),
+    }
+    .acts();
+    let x_store_acts = !x_opening.acts() && x_query_drop::on() && x_store_rule;
     crate::blastinput::fasta_reader::believed::refuse_with_subject(
         args.parse_deflines,
         args.subject.is_some(),
@@ -7656,7 +7653,11 @@ fn search_cli(
     };
     // EXPERIMENT (LOSAT_X_BNQPACK): where no report reads the queries' letters, the records read
     // before the search move into a store that the batch loop takes them out of, so a batch can drop
-    // its letters once it has encoded them (`x_query_drop.rs`).
+    // its letters once it has encoded them (`x_query_drop.rs`). The reach of the switch is recorded
+    // here, after the reading, for the searches that reach it.
+    if !x_store.acts() && x_query_drop::on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_BNQPACK", x_store_rule);
+    }
     let x_taken_store;
     let queries = if x_store.acts() {
         SearchQueries::Streamed(&x_store)

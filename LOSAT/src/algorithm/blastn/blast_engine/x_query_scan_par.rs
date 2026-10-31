@@ -4,8 +4,9 @@
 //! reader of its own. It is the form of that reading wherever LOSAT_X_QSTREAM acts: it had its own
 //! switch, LOSAT_X_QSCANPAR, and a minimum of 4 MiB (`LOSAT_X_QSCANPARMIN`) until 2026-11-01, when
 //! both were folded into LOSAT_X_QSTREAM (line SF S3, family bn-query-read): LOSAT_X_QSTREAM acts
-//! only on files of two of the task's largest batches or more (2 MB for blastn), and below 4 MiB
-//! the parts read the same time as one thread or less (2.1 and 4.0 MB at 2, 16 and 32 threads).
+//! only on files of two of the task's largest batches or more (about 2 MB for blastn and 10 MB for
+//! dc-megablast; `BATCH_SIZE` sets the batch), and below 4 MiB the parts read the same time as one
+//! thread or less (2.1 and 4.0 MB at 2, 16 and 32 threads).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
 //! ```c++

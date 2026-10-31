@@ -170,6 +170,7 @@ fn masks_with_probe<L: QueryLetters + ?Sized, P: Fn() + Sync>(
     if !on || !on_pool(pool, seqs.count()) {
         return serial(seqs, level, window, linker);
     }
+    DUST_POOL_CALLS.fetch_add(1, Ordering::Relaxed);
     parallel(seqs, level, window, linker, pool, probe)
 }
 
@@ -178,6 +179,9 @@ fn masks_with_probe<L: QueryLetters + ?Sized, P: Fn() + Sync>(
 // no value NCBI computes.
 static DUST_NANOS: AtomicU64 = AtomicU64::new(0);
 static DUST_CALLS: AtomicU64 = AtomicU64::new(0);
+// No NCBI counterpart: the DUST calls whose masks were made on the pool (the `pool=` of the
+// `[X_STATS]` line); it changes no value NCBI computes.
+static DUST_POOL_CALLS: AtomicU64 = AtomicU64::new(0);
 
 /// Whether the DUST step is timed: with LOSAT_TIMING (the `[TIMING]` line) or LOSAT_X_STATS (the
 /// `[X_STATS]` line, which costs no more than two clock reads per batch; LOSAT_TIMING also times
@@ -217,7 +221,10 @@ pub fn print_summary() {
             eprintln!("[TIMING] query_dust: {seconds:.3}s");
         }
         if std::env::var_os("LOSAT_X_STATS").is_some() {
-            eprintln!("[X_STATS] QDUSTPAR dust_s={seconds:.3}");
+            eprintln!(
+                "[X_STATS] QDUSTPAR dust_s={seconds:.3} pool={}",
+                DUST_POOL_CALLS.load(Ordering::Relaxed)
+            );
         }
     }
 }

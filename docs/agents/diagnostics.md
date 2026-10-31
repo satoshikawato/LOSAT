@@ -4238,8 +4238,8 @@ Scheduling (each value computed by one thread with the original function; order 
   for every batch and by `chunk_query_masks` for the parts of a split query; the per-query map is
   `par_iter().map().collect()` in query order with `SearchPool::install`, exact because a mask is a function of the
   query's letters and the three DUST parameters only; `-dust no` has no map at all). With `LOSAT_TIMING` `main` prints
-  `[TIMING] query_dust: <s>s` and with `LOSAT_X_STATS` `[X_STATS] QDUSTPAR dust_s=<s>`, the summed wall times of the DUST
-  calls, only when at least one batch was masked. The numbers that justified the parallel masks (QDUSTPAR alone, 16
+  `[TIMING] query_dust: <s>s` and with `LOSAT_X_STATS` `[X_STATS] QDUSTPAR dust_s=<s> pool=<n>`, the summed wall times of
+  the DUST calls and how many of them made their masks on the pool, only when at least one batch was masked. The numbers that justified the parallel masks (QDUSTPAR alone, 16
   threads, workstation): the DUST step of 1,775 cDNAs 0.211 -> 0.019 s, wall 2.19 -> 2.01 s (x0.92); blastn of them
   0.211 -> 0.022 s, x0.91; outputs identical.
   Measured on the workstation (2x Xeon Gold 6338, powersave, node 1 CPUs 32-47 with the siblings idle, `numactl
@@ -4738,7 +4738,8 @@ Scheduling (each value computed by one thread with the original function; order 
   Since 2026-11-01 (line SF S3, family bn-query-read) the first reading is read in parts wherever the switch acts, at
   two threads or more on a `unix` build with the `parallel` feature (formerly `LOSAT_X_QSCANPAR`, in the strict set
   from 2026-10-26, with a minimum of 4 MiB set by `LOSAT_X_QSCANPARMIN`; both are gone, and the switch acts only for a
-  file of two of the task's largest batches or more, 2 MB for blastn, `blastn/blast_engine/x_query_scan_par.rs`). The
+  file of two of the task's largest batches or more, about 2 MB for blastn and 10 MB for dc-megablast, less with
+  `BATCH_SIZE`, `blastn/blast_engine/x_query_scan_par.rs`). The
   bytes from the reader's start to the end of the file are cut at targets at most 256 KiB apart (at least four parts per
   thread); a part runs from the first record start at or after its target (a `>` that begins a line, not followed by
   `?`) to the next part's, and a new reader with the same configuration reads it with the loop of `scan` on the calling
@@ -4746,7 +4747,8 @@ Scheduling (each value computed by one thread with the original function; order 
   reader stays where it was). A line that starts with `>` and not `>?` always starts a record, so the parts' lengths
   are the first reading's. The first reading falls back to one thread, which finds the error with its messages, on a
   `\r` or a `>?` anywhere in the file, a record start not within 256 KiB after a target, a byte of a part not read, a
-  part that does not end at its `eEOF`, a reader error or LOSAT's rejection of a Seq-id line, and for the BLAST archive,
+  part whose reading ends otherwise than at the end of its bytes (an `eEOF`, a reader error or LOSAT's rejection of a
+  Seq-id line), and for the BLAST archive,
   other targets than `unix` (WebAssembly, Windows) and one thread. <EVIDENCE-S3-SCAN> Earlier evidence of the parts
   against one thread (workstation node 1, 16 threads, outputs identical and NCBI's): the first reading of 31,168 cDNAs
   (96 MB) 0.123 -> 0.009 s on the local i9, dc-megablast of them x0.932 wall at 16 threads (20 of 20 rounds) and x0.964

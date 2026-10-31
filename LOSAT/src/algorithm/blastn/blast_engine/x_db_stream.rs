@@ -18,7 +18,9 @@
 //! at p99, or for the owner's own search of one. The threads waited for room 3,344 s of 10,860 s,
 //! evenly over the run (`dropin-survey-20261029/BIGDB/STATE.md`, 2026-10-31). The bytes keep the
 //! bound on memory: the results that wait are at most the larger of the old window's and those
-//! bytes, plus the blocks in flight.
+//! bytes, plus the blocks in flight. They act behind a stall on a database of many hits: 1,600
+//! mutated Sakai copies in 1 kb contigs with slow stretches, draft200 at 16 threads, 25.6 s and 114
+//! MiB of max RSS with them, 24.7 s and 133 MiB without (`dropin-survey-20261029/BIGDB/s3/dense/`).
 //!
 //! Without the switch, `search_blocks_of` searches rounds of `BLOCKS_PER_THREAD` x threads blocks
 //! (`search_rounds`) and merges a round's results when the whole round is searched, so the

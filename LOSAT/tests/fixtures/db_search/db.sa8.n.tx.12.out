@@ -1,0 +1,3181 @@
+{
+  "Seq_annot": {
+    "desc": [
+      {
+        "user": {
+          "type": {
+            "str": "Hist Seqalign"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "Hist Seqalign"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Type"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "tblastx"
+              },
+              "data": {
+                "int": 5
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Database Title"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "n5m"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "data": {
+      "align": [
+        {
+          "type": "diags",
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "other": {
+                      "accession": "NR_999999",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 599,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 599,
+                      "strand": "plus",
+                      "id": {
+                        "other": {
+                          "accession": "NR_999999",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 1028
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 1028
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 1.05527611025726e-137
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 473.938546495547
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 200
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 200
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.2931034482759
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "other": {
+                      "accession": "NR_999999",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 598,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 598,
+                      "strand": "minus",
+                      "id": {
+                        "other": {
+                          "accession": "NR_999999",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 1019
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 1019
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 1.83982594915761e-136
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 469.814669635206
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 199
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 199
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.2241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "other": {
+                      "accession": "NR_999999",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 1,
+                      "to": 597,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 1,
+                      "to": 597,
+                      "strand": "plus",
+                      "id": {
+                        "other": {
+                          "accession": "NR_999999",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 1001
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 1001
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 5.59239716253528e-134
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 461.566915914525
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 198
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 199
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.2241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "other": {
+                      "accession": "NR_999999",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 598,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 598,
+                      "strand": "plus",
+                      "id": {
+                        "other": {
+                          "accession": "NR_999999",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 985
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 985
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 9.00637952134905e-132
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 454.235579273919
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 198
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 199
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.2241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "other": {
+                      "accession": "NR_999999",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 1,
+                      "to": 597,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 1,
+                      "to": 597,
+                      "strand": "minus",
+                      "id": {
+                        "other": {
+                          "accession": "NR_999999",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 941
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 941
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 1.05601210358866e-125
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 434.074403512253
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 198
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 198
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.2241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "other": {
+                      "accession": "NR_999999",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 318,
+                      "to": 599,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 318,
+                      "to": 599,
+                      "strand": "minus",
+                      "id": {
+                        "other": {
+                          "accession": "NR_999999",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 482
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 482
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "sum_n"
+                    },
+                    "value": {
+                      "int": 2
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "sum_e"
+                    },
+                    "value": {
+                      "real": 1.54894156307483e-120
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 223.756683634876
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 94
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 94
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 6.98275862068965
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "other": {
+                      "accession": "NR_999999",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 266,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 266,
+                      "strand": "minus",
+                      "id": {
+                        "other": {
+                          "accession": "NR_999999",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 462
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 462
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "sum_n"
+                    },
+                    "value": {
+                      "int": 2
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "sum_e"
+                    },
+                    "value": {
+                      "real": 1.54894156307483e-120
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 214.592512834119
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 89
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 89
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 6.63793103448276
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "other": {
+                      "accession": "NR_999999",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 874,
+                      "to": 924,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 433,
+                      "to": 483,
+                      "strand": "minus",
+                      "id": {
+                        "other": {
+                          "accession": "NR_999999",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 43
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 43
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 0.0774217894611242
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 22.6031345582559
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 11
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 11
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 1.67241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "other": {
+                      "accession": "NR_999999",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 359,
+                      "to": 409,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 343,
+                      "to": 393,
+                      "strand": "minus",
+                      "id": {
+                        "other": {
+                          "accession": "NR_999999",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 31
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 31
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 3.49248290616392
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 17.1046320778016
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 6
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 7
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 1.67241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "other": {
+                      "accession": "NR_999999",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 343,
+                      "to": 393,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 359,
+                      "to": 409,
+                      "strand": "plus",
+                      "id": {
+                        "other": {
+                          "accession": "NR_999999",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 31
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 31
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 3.50007526030776
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 17.1046320778016
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 6
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 7
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 1.67241379310345
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "seqid:NR_999999.1"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "diags",
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "genbank": {
+                      "accession": "NM000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 599,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 599,
+                      "strand": "plus",
+                      "id": {
+                        "genbank": {
+                          "accession": "NM000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 1026
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 1026
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 1.99175142323181e-137
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 473.022129415471
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 199
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 200
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.2931034482759
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "genbank": {
+                      "accession": "NM000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 5,
+                      "to": 598,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 5,
+                      "to": 598,
+                      "strand": "minus",
+                      "id": {
+                        "genbank": {
+                          "accession": "NM000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 1014
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 1014
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 9.00428668680776e-136
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 467.523626935017
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 198
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 198
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.1551724137931
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "genbank": {
+                      "accession": "NM000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 1,
+                      "to": 597,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 1,
+                      "to": 597,
+                      "strand": "plus",
+                      "id": {
+                        "genbank": {
+                          "accession": "NM000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 1004
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 1004
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 2.15672345891948e-134
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 462.941541534638
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 199
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 199
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.2241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "genbank": {
+                      "accession": "NM000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 598,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 598,
+                      "strand": "plus",
+                      "id": {
+                        "genbank": {
+                          "accession": "NM000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 987
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 987
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 4.77178880754527e-132
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 455.151996353995
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 198
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 199
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.2241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "genbank": {
+                      "accession": "NM000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 4,
+                      "to": 597,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 4,
+                      "to": 597,
+                      "strand": "minus",
+                      "id": {
+                        "genbank": {
+                          "accession": "NM000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 941
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 941
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 1.05601210358866e-125
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 434.074403512253
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 198
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 198
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.1551724137931
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "genbank": {
+                      "accession": "NM000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 318,
+                      "to": 599,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 318,
+                      "to": 599,
+                      "strand": "minus",
+                      "id": {
+                        "genbank": {
+                          "accession": "NM000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 482
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 482
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "sum_n"
+                    },
+                    "value": {
+                      "int": 2
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "sum_e"
+                    },
+                    "value": {
+                      "real": 7.53827092997842e-120
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 223.756683634876
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 94
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 94
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 6.98275862068965
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "genbank": {
+                      "accession": "NM000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 266,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 266,
+                      "strand": "minus",
+                      "id": {
+                        "genbank": {
+                          "accession": "NM000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 457
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 457
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "sum_n"
+                    },
+                    "value": {
+                      "int": 2
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "sum_e"
+                    },
+                    "value": {
+                      "real": 7.53827092997842e-120
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 212.301470133929
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 88
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 88
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 6.63793103448276
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "genbank": {
+                      "accession": "NM000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 874,
+                      "to": 924,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 433,
+                      "to": 483,
+                      "strand": "minus",
+                      "id": {
+                        "genbank": {
+                          "accession": "NM000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 43
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 43
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 0.0774217894611242
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 22.6031345582559
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 11
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 11
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 1.67241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "genbank": {
+                      "accession": "NM000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 359,
+                      "to": 409,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 343,
+                      "to": 393,
+                      "strand": "minus",
+                      "id": {
+                        "genbank": {
+                          "accession": "NM000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 31
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 31
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 3.49248290616392
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 17.1046320778016
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 6
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 7
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 1.67241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "genbank": {
+                      "accession": "NM000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 343,
+                      "to": 393,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 359,
+                      "to": 409,
+                      "strand": "plus",
+                      "id": {
+                        "genbank": {
+                          "accession": "NM000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 31
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 31
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 3.50007526030776
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 17.1046320778016
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 6
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 7
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 1.67241379310345
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 2,
+                  "data": {
+                    "strs": [
+                      "seqid:NM000001.1",
+                      "seqid:NM000002.1"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "diags",
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "nlocal"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 599,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 599,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "nlocal"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 1022
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 1022
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 7.09533974349947e-137
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 471.18929525532
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 199
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 199
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.2931034482759
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "nlocal"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 598,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 598,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "nlocal"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 1016
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 1016
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 4.77067997525406e-136
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 468.440044015092
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 198
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 199
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.2241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "nlocal"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 1,
+                      "to": 597,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 1,
+                      "to": 597,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "nlocal"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 990
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 990
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 1.84025357340263e-132
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 456.526621974108
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 198
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 198
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.2241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "nlocal"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 598,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 2,
+                      "to": 598,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "nlocal"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 982
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 982
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 2.33535973615933e-131
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 452.860953653805
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 198
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 198
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.2241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "nlocal"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 1,
+                      "to": 597,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 1,
+                      "to": 597,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "nlocal"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 947
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 947
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 1.57058630783761e-126
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 436.82365475248
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 199
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 199
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 14.2241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "nlocal"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 318,
+                      "to": 599,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 318,
+                      "to": 599,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "nlocal"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 482
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 482
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "sum_n"
+                    },
+                    "value": {
+                      "int": 2
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "sum_e"
+                    },
+                    "value": {
+                      "real": 5.03428320319806e-119
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 223.756683634876
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 94
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 94
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 6.98275862068965
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "nlocal"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 266,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 266,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "nlocal"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 451
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 451
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "sum_n"
+                    },
+                    "value": {
+                      "int": 2
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "sum_e"
+                    },
+                    "value": {
+                      "real": 5.03428320319806e-119
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 209.552218893702
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 88
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 88
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 6.63793103448276
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "nlocal"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 874,
+                      "to": 924,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 433,
+                      "to": 483,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "nlocal"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 43
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 43
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 0.0774217894611242
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 22.6031345582559
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 11
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 11
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 1.67241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "nlocal"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 359,
+                      "to": 409,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 343,
+                      "to": 393,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "nlocal"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 31
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 31
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 3.49248290616392
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 17.1046320778016
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 6
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 7
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 1.67241379310345
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "nlocal"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 343,
+                      "to": 393,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 359,
+                      "to": 409,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "nlocal"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "scores": [
+                  {
+                    "id": {
+                      "str": "score"
+                    },
+                    "value": {
+                      "int": 31
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "blast_score"
+                    },
+                    "value": {
+                      "int": 31
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "e_value"
+                    },
+                    "value": {
+                      "real": 3.50007526030776
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "bit_score"
+                    },
+                    "value": {
+                      "real": 17.1046320778016
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_ident"
+                    },
+                    "value": {
+                      "int": 6
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "num_positives"
+                    },
+                    "value": {
+                      "int": 7
+                    }
+                  },
+                  {
+                    "id": {
+                      "str": "hsp_percent_coverage"
+                    },
+                    "value": {
+                      "real": 1.67241379310345
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -2,8 +2,9 @@
 //! for a batch where it is expected to be faster than the reference frame loop
 //! (`units_gain` in `src/algorithm/tblastx/x_pair_par.rs`): a reference diagonal table of 2^18
 //! cells or more, or at one thread a translated batch of 5,000 letters or more
-//! (`LOSAT_X_PAIRPARN1`), or several threads and one subject with more than one and a half
-//! thread's share of the bases, or a lookup threshold below the default (13). Other batches run
+//! (`LOSAT_X_PAIRPARN1`; at several threads too with `LOSAT_X_TBXFEWGROUPS`), or several threads
+//! and one subject with more than one and a half thread's share of the bases, or a lookup threshold
+//! below the default (13). Other batches run
 //! the reference loop ("fallback: cost").
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-504
@@ -137,6 +138,7 @@ const GATE_OFF: (&str, &str) = ("LOSAT_X_PAIRPARGATE", "0");
 
 /// The one-thread line of the gate at 2^18 cells, as before `LOSAT_X_PAIRPARN1`.
 const N1_OFF: (&str, &str) = ("LOSAT_X_PAIRPARN1", "0");
+const FEW_OFF: (&str, &str) = ("LOSAT_X_TBXFEWGROUPS", "0");
 
 /// The reports with the gate (the default) and without it (`=0`) are the same; returns
 /// (units, fallback_cost) with it.
@@ -170,8 +172,8 @@ fn with_and_without_switches(
 }
 
 // A short query (about 12,000 letters, a diagonal table of 2^14 cells) against many short subjects:
-// the units at one thread (the reference loop with `LOSAT_X_PAIRPARN1=0`), the reference loop at
-// several threads.
+// the units at one thread (the reference loop with `LOSAT_X_PAIRPARN1=0`), and at several threads
+// (the reference loop with `LOSAT_X_TBXFEWGROUPS=0`).
 #[test]
 fn a_short_query_against_short_subjects_takes_the_units_at_one_thread() {
     let dir = temp_dir("short");
@@ -185,10 +187,13 @@ fn a_short_query_against_short_subjects_takes_the_units_at_one_thread() {
         (0, 1)
     );
     for threads in [2, 4] {
+        let (units, cost) = with_and_without(&q, &set, threads, &[]);
+        assert!(units > 0, "threads {threads}");
+        assert_eq!(cost, 0, "threads {threads}");
         assert_eq!(
-            with_and_without(&q, &set, threads, &[]),
+            with_and_without_switches(&q, &set, threads, &[], &[FEW_OFF]),
             (0, 1),
-            "threads {threads}"
+            "threads {threads}, =0"
         );
     }
 }

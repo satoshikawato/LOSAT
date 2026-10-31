@@ -81,6 +81,12 @@ use std::ops::RangeInclusive;
 /// with it) graduated on 2026-10-27 the same way: both were always on, they left `STRICT_SET`, and
 /// the frames allocated new for every plan and the copy of the whole database
 /// (`TblastnDatabase::read_stores`) were deleted.
+/// `LOSAT_X_BPQBLOCKFMT`, `LOSAT_X_BPQBLOCKSA`, `LOSAT_X_BPQBLOCKWEB`, `LOSAT_X_BPQBLOCKXML`,
+/// `LOSAT_X_BPQBLOCKXML2` and `LOSAT_X_BPSUBJMETA` (which reports and calls the block search of
+/// `LOSAT_X_BPQBLOCK` takes, and its subjects' IDs and titles made once) were folded into it on
+/// 2026-10-31 (structural line S3): they only cut the block search off (`LOSAT_X_BPSUBJMETA` made
+/// the IDs and titles once per block instead), so they left `STRICT_SET` and nothing chooses any
+/// more; the refusals of the writers stay as rules of its plan.
 /// `LOSAT_X_BPREDODBSUBJ` (the composition redo of a `-db` search reads each match's subject from
 /// the database, `blastp/x_redo_subjects.rs`) and `LOSAT_X_BPREDOWINEXPAND` (the windows of the
 /// redo expand the compact preliminary lists as they reach them, `blastp/x_redo_par.rs`) graduated
@@ -228,6 +234,12 @@ use std::ops::RangeInclusive;
 /// branch-free candidate loop, `blastx/x_seed_scan.rs`) graduated on 2026-10-26: it left
 /// `STRICT_SET` and the scan on the presence test was deleted (the compressed lookup table keeps
 /// its own scan, a rule of the table and not a switch).
+/// `LOSAT_X_DISPTABLE` (the displayed residues of TBLASTX's and TBLASTN's rows read from a per-code
+/// table of 4-bit codons, `tblastx/report.rs`) and `LOSAT_X_TBXMASKSEEK` (the scan of a frame's SEG
+/// masks in an outfmt 0 row starts at the first mask range that reaches the row,
+/// `tblastx/report.rs`) graduated on 2026-10-27: they left `STRICT_SET` and their previous code was
+/// deleted (the scan of each codon's bases and the scan of all the ranges stay as the references of
+/// unit tests).
 /// `LOSAT_X_SUMPMEMO` (the sum P-value of a linked set kept from the thread's last two calls,
 /// `stats/sum_statistics.rs`) graduated on 2026-10-27: it left `STRICT_SET` and the call that
 /// integrates every time was deleted.
@@ -284,16 +296,10 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPLKREUSE",
     "LOSAT_X_BPMASKED",
     "LOSAT_X_BPQBLOCK",
-    "LOSAT_X_BPQBLOCKFMT",
-    "LOSAT_X_BPQBLOCKSA",
-    "LOSAT_X_BPQBLOCKWEB",
-    "LOSAT_X_BPQBLOCKXML",
-    "LOSAT_X_BPQBLOCKXML2",
     "LOSAT_X_BPREDOLPT",
     "LOSAT_X_BPREDOPAR",
     "LOSAT_X_BPSEGWIN",
     "LOSAT_X_BPSTRIPEFILL",
-    "LOSAT_X_BPSUBJMETA",
     "LOSAT_X_BPSUBJRUN",
     "LOSAT_X_BPUNGAPSENT",
     "LOSAT_X_BXBUILDPAR",
@@ -327,7 +333,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_DIAGLV",
     "LOSAT_X_DIAGLV2",
     "LOSAT_X_DISCLUTPAR",
-    "LOSAT_X_DISPTABLE",
     "LOSAT_X_DPEMASK",
     "LOSAT_X_DPNEON2",
     "LOSAT_X_DPNIBBLE",
@@ -379,11 +384,12 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNUNITXLATE",
     "LOSAT_X_TBNXLATESIMD",
     "LOSAT_X_TBXBAND",
+    "LOSAT_X_TBXBOARD",
     "LOSAT_X_TBXEXTBATCH",
+    "LOSAT_X_TBXFEWGROUPS",
     "LOSAT_X_TBXHITBF",
     "LOSAT_X_TBXKMERGE",
     "LOSAT_X_TBXLUT",
-    "LOSAT_X_TBXMASKSEEK",
     "LOSAT_X_TBXNEXT",
     "LOSAT_X_TBXPIPE",
     "LOSAT_X_TBXPREFETCH",

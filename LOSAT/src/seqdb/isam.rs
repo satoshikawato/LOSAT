@@ -122,6 +122,7 @@ use crate::seqid::label;
 use crate::seqid::model::{ObjectId, ParsedSeqId, TextseqId};
 use crate::seqid::parse::{parse_ids, seq_id_from_text, which_inverse_seq_id, SeqIdError};
 use crate::seqid::rank::{best_rank_score, find_best};
+use crate::writedb::data_size::printable_string;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:45-55
 // ```c++
@@ -3226,6 +3227,43 @@ fn string_to_int8(s: &[u8]) -> Option<i64> {
     i64::try_from(n).ok()
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:845-860
+// ```c++
+//     Int8 limdiv = kMax_I8 / base;
+//     Int8 limoff = kMax_I8 % base + (sign ? 1 : 0);
+//     ...
+//     while (char ch = str[pos]) {
+//         int delta;  // corresponding numeric value of 'ch'
+//         // Check digit
+//         if (!s_IsGoodCharForRadix(ch, base, &delta)) {
+//             break;
+//         }
+//         // Check for overflow
+//         if (n >= limdiv  &&  (n > limdiv  ||  delta > limoff)) {
+//             S2N_CONVERSION_ERROR(int8_t, kEmptyStr, ERANGE, pos);
+//         }
+// ```
+/// Whether `NStr::StringToInt8(s)` fails with its ", overflow" message: the digits after an
+/// optional sign overflow before the first other byte (which fails without it).
+fn int8_digits_overflow(s: &[u8]) -> bool {
+    let negative = s.first() == Some(&b'-');
+    let digits = match s.first() {
+        Some(b'-' | b'+') => &s[1..],
+        _ => s,
+    };
+    let limdiv = i64::MAX / 10;
+    let limoff = i64::MAX % 10 + i64::from(negative);
+    let mut n: i64 = 0;
+    for &c in digits.iter().take_while(|c| c.is_ascii_digit()) {
+        let delta = i64::from(c - b'0');
+        if n >= limdiv && (n > limdiv || delta > limoff) {
+            return true;
+        }
+        n = n * 10 + delta;
+    }
+    false
+}
+
 /// `CObject_id::GetId()`: a string tag is NCBI's `CInvalidChoiceSelection` (probe D11 of line
 /// BDC).
 fn object_id_id(tag: &ObjectId) -> Result<i64, SimplifyError> {
@@ -3450,13 +3488,14 @@ fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccessio
                 out.simpler = true;
                 out.num_id = match &dbt.tag {
                     ObjectId::Str(text) => string_to_int8(text).ok_or_else(|| {
-                        let digits = text.strip_prefix(b"-").or(text.strip_prefix(b"+"));
-                        let digits = digits.unwrap_or(text);
-                        let overflow = !digits.is_empty() && digits.iter().all(u8::is_ascii_digit);
                         SimplifyError::Exception(format!(
                             "Cannot convert string '{}' to Int8{}",
-                            String::from_utf8_lossy(text),
-                            if overflow { ", overflow" } else { "" }
+                            printable_string(text),
+                            if int8_digits_overflow(text) {
+                                ", overflow"
+                            } else {
+                                ""
+                            }
                         ))
                     })?,
                     ObjectId::Id(n) => i64::from(*n),

@@ -1391,8 +1391,14 @@ Rebuilding less:
   9.61 s (62-63 / 61-63 / 61-67), blastn 9.94 / 9.95 / 9.97 s (48-49 / 47-49 / 48-51). RSS falls where the waits fall.
   Results pile up only behind a stall: untimed on node 0 (`perf/bn-db-wide-tune`, two rounds, 5 arms, 16 threads), the
   results waiting at their peak were 28-36 MiB on the 16S with the old window as well, and max RSS was flat across
-  windows of 2, 8 and 16 blocks per thread with budgets of 1 MiB, 4 MiB and none. The bytes are the guarantee for a
-  database of 1 MiB blocks dense with hits, which no run measured; a window of the count alone could hold GiBs there. One thread does not run the window: one core of node 0, the first volume
+  windows of 2, 8 and 16 blocks per thread with budgets of 1 MiB, 4 MiB and none. On databases made dense with hits
+  (draft200 or 100 16S queries, 16 threads on node 1, two rounds, the same output; `dropin-survey-20261029/BIGDB/s3/dense/`,
+  2026-10-31), bound / no bound / `=0` / NCBI: 1,600 mutated Sakai copies in 1 kb contigs with seven slow stretches of a repeated
+  1 kb window 25.6 / 24.7 / 27.8 / 33.5 s, max RSS 114 / 133 / 100 / 3,090 MiB, results waiting at their peak 22 / 43 / 9.7 MiB. 50
+  mutated copies of the 28,036 16S 190 / 189 / 192 / 307 s, 131 / 125-134 / 130 / 671 MiB, 62-70 / 49-83 / 67-81 MiB; with a long
+  subject every 140,000 genes 209 / 209 / 210 / 422 s, 317 / 324-332 / 317-330 / 913-930 MiB, 54-62 / 56-64 / 59-62 MiB. The bytes
+  act only behind a stall on a database of many hits, and there they cost 3 % of the time for 14 % of the memory; without
+  them no run held more than 83 MiB. One thread does not run the window: one core of node 0, the first volume
   dev / `=0` / on 27.45 / 27.20 / 27.34 s, 110 MiB in each arm (three rounds; `dropin-survey-20261029/BIGDB/s2/n1_ab.tsv`).
 - `LOSAT_X_BNDCONE=1` (BLASTN `-task dc-megablast`, speed; in the strict set from the pull request that added it
   (perf/dc-one-thread, evidence at the end of this entry): on unless it is `0`; acts only where a chunk in scope has

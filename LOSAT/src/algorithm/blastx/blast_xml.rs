@@ -196,11 +196,14 @@ fn subject_names(
     oid: usize,
 ) -> Result<SubjectNames> {
     match shown {
-        ShownSubjects::Fasta { .. } => SubjectNames::of_record(
-            subject.internal_id.as_bytes(),
-            subject.title.as_bytes(),
-            true,
-        )
+        ShownSubjects::Fasta { .. } => match subject.believed() {
+            Some(ids) => SubjectNames::of_believed(ids, subject.title.as_bytes(), true),
+            None => SubjectNames::of_record(
+                subject.internal_id.as_bytes(),
+                subject.title.as_bytes(),
+                true,
+            ),
+        }
         .map_err(|refusal| refuse(refusal, "a subject title")),
         ShownSubjects::Database { reported, .. } => match reported.parsed_subject(oid) {
             Some(parsed) => SubjectNames::of_parsed(parsed, reported.parsed_taxonomy(oid)),

@@ -178,7 +178,8 @@ impl TblastnArgs {
                 &subject_path,
                 subject_file,
                 ReaderConfig::subject("TBLASTN", false, settings.data_loaders)
-                    .with_defline(archive.is_some()),
+                    .with_defline(archive.is_some())
+                    .with_parse_deflines(args.parse_deflines),
             );
             // EXPERIMENT (LOSAT_X_TBNSTORE): each record's letters packed as it is read
             // (`x_read_subject_stores`), with a subject range after the record is cut to its
@@ -206,7 +207,12 @@ impl TblastnArgs {
                 // batch, which the packed stores do not keep (they hold the interval of a
                 // `-subject_loc` and no letters), so a run that writes it reads the records
                 // as the switch's `=0` side does.
-                if super::x_subject_store::x_tbn_store() && archive.is_none() {
+                // Under `-parse_deflines` the reader compares each record's letters
+                // (`believed::scope_clash`).
+                if super::x_subject_store::x_tbn_store()
+                    && archive.is_none()
+                    && !args.parse_deflines
+                {
                     let (records, stores, placements) =
                         super::x_subject_store::x_read_subject_stores(
                             &mut subject_source,
@@ -546,11 +552,6 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
-    crate::blastinput::fasta_reader::believed::refuse_with_subject(
-        args.parse_deflines,
-        args.subject.is_some(),
-        "TBLASTN",
-    )?;
     let mut query_source = FastaInputSource::from_argument(
         &args.query,
         query_file,
@@ -1538,6 +1539,20 @@ fn search(
                 .as_ref()
                 .map(crate::blastinput::seq_range::SequenceRange::length),
         };
+        // The records of a subject set whose ids `-parse_deflines` read, by subject index.
+        let records_parsed = if args.parse_deflines && reported.is_none() {
+            crate::report::db_subject::parsed_records(
+                subjects
+                    .iter()
+                    .map(|record| (record.believed(), record.title.as_slice())),
+                args.show_gis,
+                false,
+                crate::blastinput::app::parse_formatting_string(&args.outfmt)?.number == 0,
+                "TBLASTN",
+            )?
+        } else {
+            Vec::new()
+        };
         let (report_records, report_letters, shown) = match (&reported, database) {
             (Some(reported), Some(database)) => (
                 reported.records.as_slice(),
@@ -1555,6 +1570,7 @@ fn search(
                 subject_letters,
                 ShownSubjects::Fasta {
                     path: subject_path.expect("a search of -subject has its path"),
+                    parsed: &records_parsed,
                 },
             ),
         };

@@ -106,6 +106,35 @@ impl SubjectNames {
         })
     }
 
+    /// The names of a `-subject` record whose ids `-parse_deflines` read (`ParsedSubject::of_record`):
+    /// its id list, its generated title and the accession of its best id. Like a record without the
+    /// option it has one `HitDescr` of these (no definition lines).
+    pub fn of_believed(
+        ids: &crate::blastinput::fasta_reader::believed::BelievedIds,
+        title: &[u8],
+        protein: bool,
+    ) -> Result<Self, Refusal> {
+        let subject = ParsedSubject::of_record(ids, title);
+        let (id, accession) = subject.record_xml_ids();
+        let title = subject
+            .bioseq_title(protein, false)
+            .map_err(|_| Refusal::UnknownEncoding)?;
+        if title.reads_past_end {
+            return Err(Refusal::ReadsPastEnd);
+        }
+        names::check_text(&id)?;
+        names::check_text(&title.text)?;
+        Ok(SubjectNames {
+            id,
+            title: title.text,
+            accession,
+            taxid: 0,
+            taxonomy: HitTaxonomy::Unnamed,
+            descriptions: Vec::new(),
+            volume_taxids: Vec::new(),
+        })
+    }
+
     /// The names of the database sequence `ordinal` with the stored title `title`
     /// (`gnl|BL_ORD_ID|n`, the title as stored).
     pub fn of_database_sequence(
@@ -189,8 +218,13 @@ impl XmlSubjects<'_> {
                 records, protein, ..
             } => {
                 let record = records.get(s_idx).context("HSP of an unknown subject")?;
-                SubjectNames::of_record(record.local_id.as_bytes(), &record.title, *protein)
-                    .map_err(|refusal| refusal.error(program, "a subject title"))
+                match record.believed() {
+                    Some(ids) => SubjectNames::of_believed(ids, &record.title, *protein),
+                    None => {
+                        SubjectNames::of_record(record.local_id.as_bytes(), &record.title, *protein)
+                    }
+                }
+                .map_err(|refusal| refusal.error(program, "a subject title"))
             }
             XmlSubjects::Database {
                 ordinals,

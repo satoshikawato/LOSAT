@@ -624,7 +624,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         }
         if is_header {
             if let Some(record) = current.take() {
-                finish_record(record, &mut records, pending_title_warning.take())?;
+                finish_record(record, protein, &mut records, pending_title_warning.take())?;
                 emit_fasta_batch(
                     &records,
                     batch_size,
@@ -862,7 +862,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         }
     }
     if let Some(record) = current {
-        finish_record(record, &mut records, pending_title_warning.take())?;
+        finish_record(record, protein, &mut records, pending_title_warning.take())?;
         emit_fasta_batch(
             &records,
             batch_size,
@@ -918,8 +918,9 @@ fn read_believed_defline(
     });
     written?;
     let parsed = parsed.map_err(FastaParseError)?;
+    let role = if protein { "subject" } else { "query" };
     if parsed.range && keep_defline {
-        return Err(refuse_range_in_archive("query", "BLASTX"));
+        return Err(refuse_range_in_archive(role, "BLASTX"));
     }
     let molecule = named_molecule(&parsed.ids);
     let ids = if parsed.ids.is_empty() || parsed.range {
@@ -931,12 +932,7 @@ fn read_believed_defline(
     } else {
         parsed.ids
     };
-    if let Some(refusal) = duplicate_id(
-        &ids,
-        keys,
-        if protein { "subject" } else { "query" },
-        "BLASTX",
-    ) {
+    if let Some(refusal) = duplicate_id(&ids, keys, role, "BLASTX") {
         return Err(refusal);
     }
     Ok(BelievedLine {
@@ -992,6 +988,7 @@ fn new_record(index: usize, protein: bool, title: String) -> FastaRecord {
 // ```
 fn finish_record(
     mut record: FastaRecord,
+    protein: bool,
     records: &mut Vec<FastaRecord>,
     title_warning: Option<InputWarning>,
 ) -> Result<()> {
@@ -1011,6 +1008,23 @@ fn finish_record(
     // Empty records remain input objects; query/subject setup owns their
     if record.sequence.len() > i32::MAX as usize {
         bail!("BLASTX sequence exceeds Int4 length");
+    }
+    if let Some(source) = record.source.as_mut() {
+        if let Some(believed) = &source.believed {
+            let role = if protein { "subject" } else { "query" };
+            if let Some(refusal) = crate::blastinput::fasta_reader::believed::scope_clash(
+                &believed.ids,
+                record.title.as_bytes(),
+                &record.sequence,
+                role,
+                "BLASTX",
+            ) {
+                return Err(refusal);
+            }
+            if protein && believed.subject_local() {
+                source.believed = None;
+            }
+        }
     }
     records.push(record);
     Ok(())

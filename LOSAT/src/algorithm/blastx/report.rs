@@ -1041,12 +1041,69 @@ fn field_value(
 pub(crate) enum ShownSubjects<'a> {
     Fasta {
         path: &'a Path,
+        /// The records whose ids `-parse_deflines` read (empty without the option).
+        parsed: &'a RecordsParsed,
     },
     Database {
         name: &'a str,
         pairwise: &'a crate::report::pairwise::PairwiseDatabase,
         reported: &'a ReportedSubjects,
     },
+}
+
+/// The records of a subject set whose ids `-parse_deflines` read, by subject index: as subjects
+/// (`db_subject::parsed_records`), with what the tabular rows show of each (`None`: shown as a
+/// record without the option).
+#[derive(Default)]
+pub(crate) struct RecordsParsed {
+    pub(crate) subjects: Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>>,
+    pub(crate) tabular: Vec<Option<RecordTabularIds>>,
+}
+
+/// `sseqid`, `sacc` and `saccver`, and the `sall*` of a subject in `RecordsParsed`.
+pub(crate) struct RecordTabularIds {
+    pub(crate) ids: [String; 3],
+    pub(crate) all_ids: Vec<crate::report::tabular::DeflineIds>,
+}
+
+impl RecordsParsed {
+    /// The records of `records`, with LOSAT's refusals of outfmt 0 with `pairwise`.
+    pub(crate) fn of(records: &[FastaRecord], show_gis: bool, pairwise: bool) -> Result<Self> {
+        let subjects = crate::report::db_subject::parsed_records(
+            records
+                .iter()
+                .map(|record| (record.believed(), record.title.as_bytes())),
+            show_gis,
+            true,
+            pairwise,
+            "BLASTX",
+        )?;
+        let refused = |subject: &crate::report::db_subject::ParsedSubject, problem: &str| {
+            anyhow::anyhow!(
+                "the subject record {} has {problem}, which is not supported by LOSAT's BLASTX",
+                String::from_utf8_lossy(&subject.alignment_fasta())
+            )
+        };
+        let tabular = subjects
+            .iter()
+            .map(|subject| {
+                let Some(subject) = subject else {
+                    return Ok(None);
+                };
+                let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
+                let [id, accession, version] = subject
+                    .tabular_ids(true)
+                    .map_err(|problem| refused(subject, problem))?;
+                Ok(Some(RecordTabularIds {
+                    ids: [text(id), text(accession), text(version)],
+                    all_ids: subject
+                        .all_tabular_ids(true)
+                        .map_err(|problem| refused(subject, problem))?,
+                }))
+            })
+            .collect::<Result<_>>()?;
+        Ok(Self { subjects, tabular })
+    }
 }
 
 impl ShownSubjects<'_> {
@@ -1056,7 +1113,12 @@ impl ShownSubjects<'_> {
     /// (`ParsedSubject::tabular_ids`).
     fn subject_ids<'s>(&'s self, subject: &'s FastaRecord, oid: usize) -> [&'s str; 3] {
         match self {
-            ShownSubjects::Fasta { .. } => [local_id(subject); 3],
+            ShownSubjects::Fasta { parsed, .. } => {
+                match parsed.tabular.get(oid).and_then(Option::as_ref) {
+                    Some(ids) => [&ids.ids[0], &ids.ids[1], &ids.ids[2]],
+                    None => [local_id(subject); 3],
+                }
+            }
             ShownSubjects::Database { reported, .. } => reported.tabular_ids(oid),
         }
     }
@@ -1078,7 +1140,11 @@ pub fn render(
     subject_path: &Path,
     batches: &mut [BatchResults],
 ) -> Result<()> {
-    let shown = ShownSubjects::Fasta { path: subject_path };
+    let no_parsed = RecordsParsed::default();
+    let shown = ShownSubjects::Fasta {
+        path: subject_path,
+        parsed: &no_parsed,
+    };
     let mut stderr = std::io::stderr().lock();
     write_prolog(writer, &mut stderr, options, subjects, &shown)?;
     // The library entry has no output file: outfmt 13 and 14 are the command line's.
@@ -1340,7 +1406,7 @@ pub fn render_queries(
                         query.query_line()
                     )?;
                     match shown {
-                        ShownSubjects::Fasta { path } => writeln!(
+                        ShownSubjects::Fasta { path, .. } => writeln!(
                             writer,
                             "# Database: User specified sequence set (Input: {})",
                             path.display()
@@ -1566,9 +1632,22 @@ fn write_pairwise(
     }
     let report = pairwise_metadata(options, subjects, shown);
     let ids: Vec<std::sync::Arc<str>> = match shown {
-        ShownSubjects::Fasta { .. } => subjects
+        ShownSubjects::Fasta { parsed, .. } => subjects
             .iter()
-            .map(|s| std::sync::Arc::from(local_id(s)))
+            .enumerate()
+            .map(
+                |(index, s)| match parsed.subjects.get(index).and_then(Option::as_deref) {
+                    Some(subject) => {
+                        let label = crate::report::pairwise::database_description_label(
+                            b"",
+                            Some(subject),
+                            true,
+                        );
+                        std::sync::Arc::from(String::from_utf8_lossy(&label).as_ref())
+                    }
+                    None => std::sync::Arc::from(local_id(s)),
+                },
+            )
             .collect(),
         ShownSubjects::Database { reported, .. } => reported.descriptions(),
     };
@@ -1577,6 +1656,10 @@ fn write_pairwise(
         ShownSubjects::Database {
             pairwise, reported, ..
         } => Some((*pairwise, reported.stored_titles(), reported.parsed())),
+    };
+    let records_parsed = match shown {
+        ShownSubjects::Fasta { parsed, .. } => parsed.subjects.as_slice(),
+        ShownSubjects::Database { .. } => &[],
     };
     let config = PairwiseConfig {
         program: "blastx".into(),
@@ -1602,6 +1685,7 @@ fn write_pairwise(
             num_alignments: options.num_alignments as usize,
         },
         database,
+        records_parsed,
     )?;
     Ok(())
 }
@@ -1646,7 +1730,7 @@ fn pairwise_metadata(
     // A database's lines come from `ShownSubjects::pairwise_database`; these fields serve
     // `-subject` (the Gumbel block's printed numbers do not depend on the length).
     let (database_name, num_sequences, total) = match shown {
-        ShownSubjects::Fasta { path } => (
+        ShownSubjects::Fasta { path, .. } => (
             format!("User specified sequence set (Input: {})", path.display()),
             subjects.len(),
             subjects.iter().map(|s| s.sequence.len()).sum(),

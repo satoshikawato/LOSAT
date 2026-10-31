@@ -5574,7 +5574,8 @@ struct BlastnReportInputs<'a> {
     database_reader: Option<&'a database::BlastnDatabase>,
     /// The reported sequences with parsed Seq-ids of a database search, by rank
     /// (`database::ReportedSubjects::parsed`; empty without them): their ids and titles come from
-    /// their definition lines.
+    /// their definition lines. Of a subject set, the records whose ids `-parse_deflines` read, by
+    /// subject index (`db_subject::parsed_records`).
     database_parsed: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
     /// Whether the hit lists were finished after each query batch's traceback (a database
     /// search, `run_in_pool`), not by `post_process_hits_and_write`.
@@ -6975,6 +6976,7 @@ fn write_custom_tabular(
         _ => TabularSubjects::Records {
             ids: subject_ids,
             length: &record_length,
+            parsed: report.database_parsed,
         },
     };
     let tab = BlastnTabular {
@@ -7358,7 +7360,9 @@ fn read_cli_subjects(
     let mut subject_source = FastaInputSource::from_argument(
         subject_path,
         subject_file,
-        ReaderConfig::subject("BLASTN", false, settings.data_loaders).with_defline(keep_deflines),
+        ReaderConfig::subject("BLASTN", false, settings.data_loaders)
+            .with_defline(keep_deflines)
+            .with_parse_deflines(args.parse_deflines),
     );
     // EXPERIMENT (LOSAT_X_BNSTORE): without a subject range, each record's letters are packed as
     // soon as it has been read, and the records keep none (`x_read_subject_stores`).
@@ -7368,7 +7372,7 @@ fn read_cli_subjects(
     let (read_subjects, stores) = {
         let mut warn = |message: &[u8]| std::io::Write::write_all(&mut *diagnostics, message);
         // The archive writes the subjects' letters from the records, not from a packed store.
-        if x_bnstore() && subject_range.is_none() && !keep_deflines {
+        if x_bnstore() && subject_range.is_none() && !keep_deflines && !args.parse_deflines {
             x_read_subject_stores(&mut subject_source, &mut warn)?
         } else {
             (
@@ -7557,15 +7561,12 @@ fn search_cli(
             hit_records: outputs.hits.is_some(),
         }
         .acts();
-    let x_pack = x_query_drop::packs(x_drop_rule, x_file_bytes, x_batch_letters);
+    // Under `-parse_deflines` the reader compares each record's letters (`believed::scope_clash`).
+    let x_pack =
+        !args.parse_deflines && x_query_drop::packs(x_drop_rule, x_file_bytes, x_batch_letters);
     if x_drop_rule && x_query_drop::pack_on() {
         crate::utils::xreach::x_reach!("LOSAT_X_BNQPACK", x_pack);
     }
-    crate::blastinput::fasta_reader::believed::refuse_with_subject(
-        args.parse_deflines,
-        args.subject.is_some(),
-        "BLASTN",
-    )?;
     let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders)
         .with_defline(args.archive.is_some())
         .with_parse_deflines(args.parse_deflines)
@@ -10126,6 +10127,20 @@ fn write_reports_untimed(
     } else {
         Vec::new()
     };
+    let records_parsed = if args.parse_deflines && reported.is_none() {
+        crate::report::db_subject::parsed_records(
+            subject_letters
+                .records()
+                .iter()
+                .map(|record| (record.believed(), record.title.as_slice())),
+            args.show_gis,
+            false,
+            output_formats.contains(&BlastnOutputFormat::Pairwise),
+            "BLASTN",
+        )?
+    } else {
+        Vec::new()
+    };
     let report_inputs = BlastnReportInputs {
         queries: query_records,
         subjects: subject_letters,
@@ -10164,7 +10179,9 @@ fn write_reports_untimed(
         },
         database_parsed: reported
             .as_ref()
-            .map_or(&[][..], |reported| reported.parsed.as_slice()),
+            .map_or(records_parsed.as_slice(), |reported| {
+                reported.parsed.as_slice()
+            }),
         finished_hit_lists: reported.is_some(),
         epilog,
         prolog: outputs

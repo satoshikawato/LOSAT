@@ -42,6 +42,8 @@ pub struct ParsedSubject {
     unfetchable: bool,
     /// `-show_gis`: the outfmt 0 description line and heading show it (`description`, `heading`).
     show_gis: bool,
+    /// Whether this is a `-subject` record (`of_record`): a Bioseq without definition lines.
+    record: bool,
 }
 
 /// `AdjustSeqIdType` with `eGetId_ForceAcc` (`ParsedSubject::sam_id`) of a Bioseq with the ids
@@ -134,7 +136,48 @@ impl ParsedSubject {
             target,
             unfetchable,
             show_gis: false,
+            record: false,
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-466
+    // ```c++
+    //     // set ID
+    //     retval->SetInt().SetId().Assign(*FindBestChoice(itr->GetId(), CSeq_id::BestRank));
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:272-283
+    // ```c++
+    //     CRef<CBlast_def_line_set> bdlRef = CSeqDB::ExtractBlastDefline(handle);
+    //     const list< CRef< CBlast_def_line > > &bdl = (bdlRef.Empty()) ? list< CRef< CBlast_def_line > >() : bdlRef->Get();
+    //     ...
+    //     if(bdl.empty()){ //no blast defline struct, should be no such case now
+    //         //actually not so fast...as we now fetch from entrez even when it's not in blast db
+    //         //there is no blast defline in such case.
+    //         seqid = GetSeqIdListString(ids, show_gi);
+    //         defline = sequence::CDeflineGenerator().GenerateDefline(handle);
+    // ```
+    /// The `-subject` record with the ids `ids` and the FASTA title `title` under
+    /// `-parse_deflines`, as one definition line: its Bioseq has no Blast-def-line user object, so
+    /// its titles are generated and `stitle` and `salltitles` are `N/A`, and NCBI's scope holds
+    /// it, so it is always found.
+    pub fn of_record(
+        ids: &crate::blastinput::fasta_reader::believed::BelievedIds,
+        title: &[u8],
+    ) -> Self {
+        Self {
+            set: DeflineSet {
+                deflines: vec![BlastDefline {
+                    title: (!title.is_empty()).then(|| title.to_vec()),
+                    ids: ids.ids.clone(),
+                    ..BlastDefline::default()
+                }],
+            },
+            alignment_id: ids.best.clone(),
+            target: 0,
+            unfetchable: false,
+            show_gis: false,
+            record: true,
+        }
     }
 
     /// The subject as the outfmt 0 report of a run with or without `-show_gis` shows it.
@@ -386,8 +429,8 @@ impl ParsedSubject {
     ) -> Result<Vec<super::tabular::DeflineIds>, &'static str> {
         // `GetSeqIdList` replaces the ids of each definition line, so the word is made when any
         // line has an id to replace, not only the target's.
-        let replaced =
-            self.set.deflines.iter().any(|defline| {
+        let replaced = !self.record
+            && self.set.deflines.iter().any(|defline| {
                 matches!(seq_id_list(&defline.ids, b"x"), std::borrow::Cow::Owned(_))
             });
         let word = if replaced {
@@ -485,7 +528,7 @@ impl ParsedSubject {
                 out.push(b' ');
             }
             let title = match defline.title.as_deref() {
-                Some(title) if !title.is_empty() => title,
+                Some(title) if !title.is_empty() && !self.record => title,
                 _ => generated.get_or_insert_with(|| {
                     self.bioseq_title(protein, false)
                         .map(|defline| defline.text)
@@ -496,6 +539,18 @@ impl ParsedSubject {
             out.push(b'\n');
         }
         out
+    }
+
+    /// The XML `Hit_id` and `Hit_accession` of a `-subject` record (`of_record`; `Hit_def` is the
+    /// generated title, `bioseq_title`).
+    pub fn record_xml_ids(&self) -> (Vec<u8>, Vec<u8>) {
+        let mut id = Vec::new();
+        label::seqid_list_string(&self.target().ids, true, &mut id);
+        let mut accession = Vec::new();
+        if let Some(best) = find_best(&self.target().ids, text_score) {
+            label::format_label(best, false, &mut accession);
+        }
+        (id, accession)
     }
 
     /// The outfmt 5 `Hit_id` and `Hit_def` (`DeflineSet::hit_id_and_def` with the GIs shown;
@@ -561,6 +616,64 @@ impl ParsedSubject {
         label::fasta(&self.alignment_id, &mut out);
         out
     }
+}
+
+/// The subjects of a `-subject` run under `-parse_deflines`, by subject index: `records` gives the
+/// ids (`None`: shown as a record without the option) and title of each. With `pairwise` (outfmt
+/// 0) LOSAT's refusals of `check_pairwise_record`. `program` names the program.
+pub fn parsed_records<'a>(
+    records: impl Iterator<
+        Item = (
+            Option<&'a crate::blastinput::fasta_reader::believed::BelievedIds>,
+            &'a [u8],
+        ),
+    >,
+    show_gis: bool,
+    protein: bool,
+    pairwise: bool,
+    program: &str,
+) -> anyhow::Result<Vec<Option<std::sync::Arc<ParsedSubject>>>> {
+    records
+        .map(|(ids, title)| {
+            let Some(ids) = ids else {
+                return Ok(None);
+            };
+            let subject = ParsedSubject::of_record(ids, title).showing_gis(show_gis);
+            if pairwise {
+                check_pairwise_record(&subject, protein, program)?;
+            }
+            Ok(Some(std::sync::Arc::new(subject)))
+        })
+        .collect()
+}
+
+/// LOSAT's refusals of a `-subject` record in outfmt 0, as of a database sequence
+/// (`algorithm::common::database::check_shown_parsed_subject`): a protein title that NCBI's
+/// `x_CleanAndCompress` reads past the end of, and a description id longer than 65 bytes.
+fn check_pairwise_record(
+    subject: &ParsedSubject,
+    protein: bool,
+    program: &str,
+) -> anyhow::Result<()> {
+    let (start, title) = subject.description(protein);
+    let name = || String::from_utf8_lossy(&start).trim_end().to_string();
+    if protein && title.reads_past_end {
+        anyhow::bail!(
+            "the subject record {} has a title of punctuation that NCBI BLAST+'s \
+             x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0), \
+             which is not supported by LOSAT's {program}",
+            name()
+        );
+    }
+    if start.len() > 65 {
+        anyhow::bail!(
+            "the subject record {} has an outfmt 0 description id longer than 65 bytes (NCBI \
+             BLAST+ 2.17.0 pads the description line without end), which is not supported by \
+             LOSAT's {program}",
+            name()
+        );
+    }
+    Ok(())
 }
 
 /// Whether NCBI's formatters cannot find a sequence by the Seq-align id `id` in a database of

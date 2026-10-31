@@ -134,7 +134,7 @@ pub(super) fn query_records<'a>(
         let subject = &subjects[list.oid];
         subject_records.push(SubjectRecord {
             id: match names {
-                SeqalignSubjects::Records => SeqId::Local(&subject.internal_id),
+                SeqalignSubjects::Records => subject.seq_id(),
                 SeqalignSubjects::Database { reported, .. } => {
                     match reported.parsed_subject(list.oid) {
                         Some(subject) => SeqId::Db(subject.alignment_id()),

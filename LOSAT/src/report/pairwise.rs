@@ -2240,8 +2240,9 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         part: std::ops::Range<usize>,
     ) -> io::Result<()> {
         let config = self.config;
-        if self.database.is_some() {
-            let heading = match parsed_subject(self.parsed_subjects, s_idx) {
+        let parsed = parsed_subject(self.parsed_subjects, s_idx);
+        if self.database.is_some() || parsed.is_some() {
+            let heading = match parsed {
                 Some(subject) => DatabaseHeading::Parsed(subject),
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
@@ -3038,8 +3039,9 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         // A database sequence's heading is its stored title after `>` (a `BL_ORD_ID`
         // id is not shown), as BLASTP's (`write_database_subject_alignments`), or the lines
         // of the definition lines of one with parsed Seq-ids.
-        if self.report.database.is_some() {
-            let heading = match parsed_subject(&self.report.parsed_subjects, s_idx) {
+        let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
+        if self.report.database.is_some() || parsed.is_some() {
+            let heading = match parsed {
                 Some(subject) => DatabaseHeading::Parsed(subject),
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
@@ -3705,8 +3707,9 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         // A database sequence's heading is its stored title after `>` (as BLASTP's,
         // BLASTN's and TBLASTN's `-db` reports), or the lines of the definition lines of one
         // with parsed Seq-ids.
-        if self.database.is_some() {
-            let heading = match parsed_subject(&self.report.parsed_subjects, s_idx) {
+        let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
+        if self.database.is_some() || parsed.is_some() {
+            let heading = match parsed {
                 Some(subject) => DatabaseHeading::Parsed(subject),
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
@@ -4585,8 +4588,9 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             // A database sequence's heading is its stored title after `>` (as BLASTP's
             // and BLASTN's `-db` reports), or the lines of the definition lines of one with
             // parsed Seq-ids.
-            if database.is_some() {
-                let heading = match parsed_subject(parsed_subjects, s_idx) {
+            let parsed = parsed_subject(parsed_subjects, s_idx);
+            if database.is_some() || parsed.is_some() {
+                let heading = match parsed {
                     Some(subject) => DatabaseHeading::Parsed(subject),
                     None => DatabaseHeading::Title(&subject_titles[&s_idx]),
                 };
@@ -4995,6 +4999,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         &[Arc<[u8]>],
         &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     )>,
+    records_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
 ) -> io::Result<()> {
     let mut writer = io::BufWriter::new(writer);
     let mut by_query: Vec<Vec<&PairwiseHit>> = vec![Vec::new(); queries.len()];
@@ -5067,12 +5072,20 @@ pub fn write_blastx_pairwise_report<W: Write>(
                         true,
                         first.subject_length,
                     )?,
-                    None => write_subject_header(
-                        &mut writer,
-                        subject_ids[*oid as usize].as_bytes(),
-                        first.subject_title.as_deref().map(str::as_bytes),
-                        first.subject_length,
-                    )?,
+                    None => match parsed_subject(records_parsed, *oid) {
+                        Some(subject) => write_database_subject_heading(
+                            &mut writer,
+                            DatabaseHeading::Parsed(subject),
+                            true,
+                            first.subject_length,
+                        )?,
+                        None => write_subject_header(
+                            &mut writer,
+                            subject_ids[*oid as usize].as_bytes(),
+                            first.subject_title.as_deref().map(str::as_bytes),
+                            first.subject_length,
+                        )?,
+                    },
                 }
                 for hit in shits {
                     write_tblastn_hsp_info(&mut writer, hit)?;

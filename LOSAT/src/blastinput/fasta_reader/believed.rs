@@ -17,7 +17,7 @@
 //! two queries with one id it searches the first's letters twice, and it shows a database
 //! sequence with the id of a query as that query (probe of 2026-10-30).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 use crate::report::archive::bioseq::{QuerySeqLoc, SeqLocStrand};
@@ -116,6 +116,17 @@ impl BelievedIds {
         })
     }
 
+    /// Whether these are the ids of a `-subject` record that the reports show as a record without
+    /// `-parse_deflines` shows (a local id `Subject_N`, written or generated): the branch of
+    /// `CShowBlastDefline::GetSeqIdList` on `lcl|Subject_` puts the first word of the title in its
+    /// place. A `gnl|BL_ORD_ID|n` subject takes that branch too, and `duplicate_id` refuses it.
+    pub(crate) fn subject_local(&self) -> bool {
+        matches!(
+            self.ids.as_slice(),
+            [ParsedSeqId::Local(ObjectId::Str(name))] if name.starts_with(b"Subject_")
+        )
+    }
+
     pub(crate) fn bare_id(&self) -> String {
         let mut out = Vec::new();
         if let Some(id) = find_best(&self.ids, text_score) {
@@ -141,6 +152,70 @@ pub(crate) fn query_has_key(keys: &[u64]) -> bool {
         let seen = seen.lock().unwrap_or_else(|error| error.into_inner());
         keys.iter().any(|key| seen.contains(key))
     })
+}
+
+/// The records read so far by the keys of their ids, for each of the roles query and subject.
+type ScopeRecords = [HashMap<u64, u64>; 2];
+
+/// `ScopeRecords` of this process.
+static SCOPE_RECORDS: OnceLock<Mutex<ScopeRecords>> = OnceLock::new();
+
+/// LOSAT's refusal of a record whose id a record of the other role has with another title or other
+/// letters, or `None`. NCBI keeps queries and subjects in one scope, so one of the two shows the
+/// title and letters of the other (`dropin-survey-20261029/DI7/DECISIONS.md` 12); of one record
+/// given as both, nothing shows. A query of another batch counts too (`query_has_key`). Queries
+/// and subjects may be read in either order.
+pub(crate) fn scope_clash(
+    ids: &[ParsedSeqId],
+    title: &[u8],
+    letters: &[u8],
+    role: &str,
+    program: &str,
+) -> Option<anyhow::Error> {
+    // A unit test's records must not reach the other tests of the process.
+    if cfg!(test) {
+        return None;
+    }
+    let scope = SCOPE_RECORDS.get_or_init(Mutex::default);
+    let mut scope = scope.lock().unwrap_or_else(|error| error.into_inner());
+    scope_clash_in(&mut scope, ids, title, letters, role, program)
+}
+
+fn scope_clash_in(
+    scope: &mut ScopeRecords,
+    ids: &[ParsedSeqId],
+    title: &[u8],
+    letters: &[u8],
+    role: &str,
+    program: &str,
+) -> Option<anyhow::Error> {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    title.hash(&mut hasher);
+    for letter in letters {
+        letter.to_ascii_uppercase().hash(&mut hasher);
+    }
+    let record = hasher.finish();
+    let (own, other) = if role == "query" { (0, 1) } else { (1, 0) };
+    let mut keys = Vec::new();
+    for id in ids {
+        keys.clear();
+        scope_keys(id, &mut keys);
+        for key in &keys {
+            if scope[other].get(key).is_some_and(|seen| *seen != record) {
+                let mut fasta = Vec::new();
+                label::fasta(id, &mut fasta);
+                return Some(anyhow::anyhow!(
+                    "a query and a subject record have the Seq-id {} with another title or other \
+                     letters under -parse_deflines (NCBI BLAST+ shows the one for the other); \
+                     this is not supported by LOSAT's {program}",
+                    String::from_utf8_lossy(&fasta)
+                ));
+            }
+            scope[own].insert(*key, record);
+        }
+    }
+    None
 }
 
 /// A record's defline as `-parse_deflines` reads it: where its title starts, and its ids.
@@ -262,19 +337,27 @@ pub(crate) fn duplicate_id(
         keys.clear();
         scope_keys(id, &mut keys);
         if keys.iter().any(|key| seen.contains(key)) {
-            return Some(anyhow::anyhow!(
-                "two {role} records have the Seq-id {} under -parse_deflines (in one query batch \
-                 NCBI BLAST+ searches the letters of the first for both); this is not supported \
-                 by LOSAT's {program}",
-                fasta(id)
-            ));
+            return Some(if role == "query" {
+                anyhow::anyhow!(
+                    "two query records have the Seq-id {} under -parse_deflines (in one query \
+                     batch NCBI BLAST+ searches the letters of the first for both); this is not \
+                     supported by LOSAT's {program}",
+                    fasta(id)
+                )
+            } else {
+                anyhow::anyhow!(
+                    "two subject records have the Seq-id {} under -parse_deflines (NCBI BLAST+ \
+                     shows the first for both); this is not supported by LOSAT's {program}",
+                    fasta(id)
+                )
+            });
         }
         seen.extend(keys.iter().copied());
         if program == "BLASTN" {
             if let Some((own, other)) = version_keys(id) {
                 if seen.contains(&other) {
                     return Some(anyhow::anyhow!(
-                        "two query records have the accession of {} with and without a version \
+                        "two {role} records have the accession of {} with and without a version \
                          under -parse_deflines (NCBI BLAST+'s BLASTN writes a warning of its \
                          scope); this is not supported by LOSAT's BLASTN",
                         fasta(id)
@@ -413,18 +496,6 @@ pub(crate) fn refuse_range_in_archive(role: &str, program: &str) -> anyhow::Erro
         "a {role} Seq-id with a range under -parse_deflines in the BLAST archive is not supported \
          by LOSAT's {program}"
     )
-}
-
-/// LOSAT's refusal of `-parse_deflines` with `-subject` (`program` names the program).
-pub fn refuse_with_subject(
-    parse_deflines: bool,
-    subject: bool,
-    program: &str,
-) -> anyhow::Result<()> {
-    if parse_deflines && subject {
-        anyhow::bail!("-parse_deflines with -subject is not supported by LOSAT's {program}");
-    }
-    Ok(())
 }
 
 /// The local id `id_prefix` + `n` that `GenerateID` makes for a record without ids.

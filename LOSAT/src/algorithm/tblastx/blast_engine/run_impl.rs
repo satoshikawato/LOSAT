@@ -1061,7 +1061,8 @@ fn read_subject_set(
         &subject_path,
         subject_file,
         ReaderConfig::subject("TBLASTX", false, settings.data_loaders)
-            .with_defline(args.archive.is_some()),
+            .with_defline(args.archive.is_some())
+            .with_parse_deflines(args.parse_deflines),
     );
     // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs); with
     // LOSAT_X_TBXSTORE the packing of each record is in this interval too. No NCBI counterpart.
@@ -1411,11 +1412,6 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
-    crate::blastinput::fasta_reader::believed::refuse_with_subject(
-        args.parse_deflines,
-        args.subject.is_some(),
-        "TBLASTX",
-    )?;
     let mut query_source = FastaInputSource::from_argument(
         &args.query,
         query_file,
@@ -2049,6 +2045,20 @@ fn write_tblastx_outputs(
         .iter()
         .map(|format| report::output_format(format.outfmt))
         .collect();
+    // The records of a subject set whose ids `-parse_deflines` read, by subject index.
+    let records_parsed = if args.parse_deflines && run.database.is_none() {
+        crate::report::db_subject::parsed_records(
+            run.subjects
+                .iter()
+                .map(|record| (record.believed(), record.title.as_slice())),
+            args.show_gis,
+            false,
+            output_formats.contains(&report::TblastxOutputFormat::Pairwise),
+            "TBLASTX",
+        )?
+    } else {
+        Vec::new()
+    };
     if run.v1_titles && output_formats.contains(&report::TblastxOutputFormat::Pairwise) {
         check_shown_subject_titles(&hits, run.subjects)?;
     }
@@ -2238,7 +2248,7 @@ fn write_tblastx_outputs(
                     prolog,
                     parsed_subjects: match &run.database {
                         Some(database) => database.reported.parsed.clone(),
-                        None => Vec::new(),
+                        None => records_parsed.clone(),
                     },
                 };
                 let config = crate::report::pairwise::PairwiseConfig {

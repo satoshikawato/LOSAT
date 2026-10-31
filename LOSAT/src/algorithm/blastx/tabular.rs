@@ -218,6 +218,23 @@ fn subject_values<'a>(
         // ```
         // A FASTA subject has no definition lines: its `sall*` are its own ids (the first
         // word of its title), its title and taxonomy are empty (`N/A`).
+        ShownSubjects::Fasta { parsed, .. }
+            if parsed.tabular.get(oid).is_some_and(Option::is_some) =>
+        {
+            let ids = parsed.tabular[oid].as_ref().expect("the guard");
+            SubjectValues {
+                id: ids.ids[0].as_bytes(),
+                accession: ids.ids[1].as_bytes(),
+                accession_version: ids.ids[2].as_bytes(),
+                gi: parsed.subjects[oid]
+                    .as_deref()
+                    .map_or(0, |subject| subject.tabular_gi()),
+                all_ids: &ids.all_ids,
+                titles: None,
+                length: subject.sequence.len(),
+                taxonomy: no_taxonomy,
+            }
+        }
         ShownSubjects::Fasta { .. } => {
             let id = local_id(subject).as_bytes();
             SubjectValues {
@@ -303,7 +320,7 @@ pub(super) fn write_blastx_tabular(
     //     m_Ostream << "# Database: " << dbname << "\n";
     // ```
     let database: Vec<u8> = match shown {
-        ShownSubjects::Fasta { path } => {
+        ShownSubjects::Fasta { path, .. } => {
             format!("User specified sequence set (Input: {})", path.display()).into_bytes()
         }
         ShownSubjects::Database { name, .. } => name.as_bytes().to_vec(),

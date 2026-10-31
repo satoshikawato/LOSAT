@@ -69,7 +69,12 @@ pub(crate) fn add_blastn_sam(
             let subject = sam_subjects.len() as u32;
             let (id, offset, key) = match subjects {
                 SubjectNames::Records(records) => (
-                    SeqId::Local(&records[s_idx].local_id),
+                    match records[s_idx].believed() {
+                        Some(ids) => SeqId::Db(crate::report::db_subject::forced_accession(
+                            &ids.best, &ids.ids,
+                        )),
+                        None => SeqId::Local(&records[s_idx].local_id),
+                    },
                     subject_placements.offset(s_idx) as i32,
                     s_idx as u64,
                 ),

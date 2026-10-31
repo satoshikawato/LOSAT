@@ -201,9 +201,10 @@ pub(super) fn write_tblastn_tabular(
         _ => Vec::new(),
     };
     let subjects = match tab.shown {
-        ShownSubjects::Fasta { .. } => TabularSubjects::Records {
+        ShownSubjects::Fasta { parsed, .. } => TabularSubjects::Records {
             ids: tab.subject_ids,
             length: &record_length,
+            parsed,
         },
         ShownSubjects::Database { reported, .. } => TabularSubjects::Database {
             ids: tab.subject_ids,

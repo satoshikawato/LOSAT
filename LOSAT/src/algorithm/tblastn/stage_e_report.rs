@@ -39,8 +39,12 @@ use crate::utils::seg::SegParams;
 // ```
 /// The subject set as the reports name it.
 pub(super) enum ShownSubjects<'a> {
-    /// `-subject`: `User specified sequence set (Input: PATH)`; the records are the whole set.
-    Fasta { path: &'a Path },
+    /// `-subject`: `User specified sequence set (Input: PATH)`; the records are the whole set,
+    /// and `parsed` the ones whose ids `-parse_deflines` read (empty without the option).
+    Fasta {
+        path: &'a Path,
+        parsed: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    },
     /// `-db`: the `-db` value (outfmt 7's `# Database:` line), the database's `Database:`
     /// lines (outfmt 0) and the reported sequences by rank (their tabular ids).
     Database {
@@ -54,7 +58,7 @@ impl ShownSubjects<'_> {
     /// The name after `# Database: ` (outfmt 7) and in the pairwise report of a subject set.
     pub(super) fn name(&self) -> String {
         match self {
-            Self::Fasta { path } => {
+            Self::Fasta { path, .. } => {
                 format!("User specified sequence set (Input: {})", path.display())
             }
             Self::Database { name, .. } => name.to_string(),
@@ -84,23 +88,27 @@ impl ShownSubjects<'_> {
         }
     }
 
-    /// The reported database sequences with parsed Seq-ids by rank (empty without them).
-    fn parsed_subjects(&self) -> &[Option<Arc<crate::report::db_subject::ParsedSubject>>] {
+    /// The reported database sequences with parsed Seq-ids by rank, or the records whose ids
+    /// `-parse_deflines` read by index (empty without them).
+    pub(super) fn parsed_subjects(
+        &self,
+    ) -> &[Option<Arc<crate::report::db_subject::ParsedSubject>>] {
         match self {
-            Self::Fasta { .. } => &[],
+            Self::Fasta { parsed, .. } => parsed,
             Self::Database { reported, .. } => &reported.parsed,
         }
     }
 }
 
 impl<'a> ShownSubjects<'a> {
-    /// The reported database sequence of rank `rank` when it has parsed Seq-ids.
+    /// The reported database sequence of rank `rank` when it has parsed Seq-ids, or the record
+    /// of index `rank` whose ids `-parse_deflines` read.
     pub(super) fn parsed_subject(
         &self,
         rank: usize,
     ) -> Option<&'a crate::report::db_subject::ParsedSubject> {
         match *self {
-            Self::Fasta { .. } => None,
+            Self::Fasta { parsed, .. } => parsed.get(rank).and_then(Option::as_deref),
             Self::Database { reported, .. } => reported.parsed_subject(rank),
         }
     }

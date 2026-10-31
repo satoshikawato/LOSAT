@@ -40,7 +40,9 @@ pub mod filter;
 pub mod header;
 pub mod index;
 pub mod isam;
+pub mod isam_num;
 pub mod lmdb_read;
+pub mod lookup;
 pub mod seqidlist;
 pub mod tax_files;
 pub mod tax_sqlite;
@@ -763,8 +765,7 @@ impl SeqDb {
         // ```
         // NCBI opens the LMDB file of a version 5 database when it opens the
         // database (seqdblmdbset.cpp:235-262, 35-74) and compares the file's
-        // volume list with the volumes. LOSAT requires the file, in the
-        // volume's directory, and does not read it.
+        // volume list with the volumes: below, `lmdb_entries`.
         for volume in &volumes {
             if !names_lmdb(volume) {
                 continue;
@@ -822,6 +823,14 @@ impl SeqDb {
             search_path: None,
             reports_show_gis: false,
         };
+        // A volume list that NCBI opens and whose OIDs it then gets wrong
+        // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
+        if db.is_version5() {
+            match db.lmdb_entries() {
+                Ok(_) | Err(SeqDbError::Unsupported { .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
         Ok(db)
     }
 

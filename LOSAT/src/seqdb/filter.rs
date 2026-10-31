@@ -802,7 +802,7 @@ impl DeflineList for DeflineSet {
 }
 
 /// The volumes of a database that share one LMDB file (`CSeqDBLMDBEntry`).
-struct LmdbEntry {
+pub(super) struct LmdbEntry {
     /// The LMDB file (`.pdb`, `.ndb`).
     lmdb: PathBuf,
     /// The OID of the entry's first volume (`m_OIDStart`).
@@ -994,16 +994,18 @@ impl LmdbEntry {
     // ```
     /// The database OID of the LMDB file's OID `oid` of a seqid lookup: `None` when its
     /// volume is one the database does not hold.
-    fn database_oid(&self, oid: u32) -> Option<u32> {
+    pub(super) fn database_oid(&self, oid: u32) -> Option<u32> {
         if !self.partial {
-            return Some(oid + self.oid_start);
+            return oid.checked_add(self.oid_start);
         }
         let mut skipped = 0;
         for &(max_oid, skipped_oids) in &self.volumes {
             if oid >= max_oid {
                 skipped += skipped_oids;
             } else {
-                return (skipped_oids == 0).then(|| oid + self.oid_start - skipped);
+                return (skipped_oids == 0)
+                    .then(|| oid.checked_add(self.oid_start)?.checked_sub(skipped))
+                    .flatten();
             }
         }
         None
@@ -1014,16 +1016,41 @@ impl LmdbEntry {
     /// info.`, the text of NCBI's LMDB manager for a `.pdb`/`.ndb` without `acc2oid`: a
     /// database made without `-parse_seqids`, probe S48) and for a damaged one.
     fn first_oid(&self, env: &Env<DbFile>, acc: &[u8]) -> Result<Option<u32>, SeqDbError> {
-        tax_files::acc_first_oid(env, acc).map_err(|message| {
-            let name = Self::base_name(&self.lmdb);
-            if message == tax_files::NO_ACCESSION_INFO {
-                SeqDbError::NotFound(message)
-            } else {
-                SeqDbError::Format {
-                    path: self.lmdb.clone(),
-                    message: format!("{} ({message})", tax_files::accessions_lookup_error(&name)),
-                }
+        tax_files::acc_first_oid(env, acc).map_err(|message| self.lookup_error(message))
+    }
+
+    /// The error of a lookup in the `acc2oid` table: NCBI's exception for a database without
+    /// the table and for an empty key (`MDB_BAD_VALSIZE`, probe H01), LOSAT's for a damaged
+    /// file.
+    fn lookup_error(&self, message: String) -> SeqDbError {
+        let name = Self::base_name(&self.lmdb);
+        if message == tax_files::NO_ACCESSION_INFO {
+            SeqDbError::NotFound(message)
+        } else if message.starts_with("MDB_BAD_VALSIZE") {
+            SeqDbError::NotFound(tax_files::accessions_lookup_error(&name))
+        } else {
+            SeqDbError::Format {
+                path: self.lmdb.clone(),
+                message: format!("{} ({message})", tax_files::accessions_lookup_error(&name)),
             }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:146-151
+    // ```c++
+    // void CSeqDBLMDBEntry::AccessionToOids(const string & acc, vector<TOid>  & oids) const
+    // {
+    // 	m_LMDB->GetOid(acc,oids, true);
+    // 	x_AdjustOidsOffset(oids);
+    //
+    // }
+    // ```
+    // `GetOid` fails on an accession of more than about 500 OIDs as `GetOids` does (probe
+    // H107): LOSAT reads every duplicate (`PD-LOSAT-NCBI-DEFECTS` exception 6).
+    /// All the OIDs of the key `acc` in the LMDB file, in LMDB's order.
+    pub(super) fn oids(&self, acc: &[u8]) -> Result<Vec<u32>, SeqDbError> {
+        self.with_env(|env| {
+            tax_files::acc_oids(env, acc).map_err(|message| self.lookup_error(message))
         })
     }
 
@@ -1308,6 +1335,93 @@ fn blast_seq_id_string_plain(id: &ParsedSeqId, with_version: bool) -> Vec<u8> {
 //             NCBI_THROW( CSeqDBException, eFileErr, "File " + fname + " not found. If you renamed any BLAST database files, please use original file names, and makeblastdb to rename the database. If you deleted any BLAST database files, you need to recreate the database.");
 //         }
 // ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:288-300
+// ```c++
+// void CSeqDBLMDBSet::AccessionsToOids(const vector<string>& accs, vector<TOid>& oids) const
+// {
+// 	m_LMDBEntrySet[0]->AccessionsToOids(accs, oids);
+//
+// 	for(unsigned int i=1; i < m_LMDBEntrySet.size(); i++) {
+// 		vector <TOid> tmp(accs.size(), 0);
+// 		m_LMDBEntrySet[i]->AccessionsToOids(accs, tmp);
+// 		// This implies we will return higher OID fro diplicate entry
+// 		for(unsigned int j=0; j < oids.size(); j++) {
+// 			if(tmp[j] != kSeqDBEntryNotFound) {
+// 				oids[j] = tmp[j];
+// 			}
+// 		}
+// 	}
+// }
+// ```
+/// One OID for each of `accs`, the last LMDB file that has the key deciding. On an error
+/// `oids` keeps the answers of the files before the one that failed.
+pub(super) fn entries_accessions_to_oids(
+    entries: &[LmdbEntry],
+    accs: &[Vec<u8>],
+    oids: &mut Vec<Option<u32>>,
+) -> Result<(), SeqDbError> {
+    oids.clear();
+    oids.resize(accs.len(), None);
+    for entry in entries {
+        for (slot, oid) in oids.iter_mut().zip(entry.accessions_to_oids(accs)?) {
+            if oid.is_some() {
+                *slot = oid;
+            }
+        }
+    }
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:91-96
+// ```c++
+//         try {
+//             m_Env.open(m_Filename.c_str(), MDB_NOSUBDIR|MDB_NOLOCK|MDB_RDONLY, 0664);
+//         }
+//         catch (lmdb::error& e) {
+//             NCBI_THROW(CSeqDBException, eFileErr, "LMDB runtime error: " + (string)e.what());
+//         }
+// ```
+// NCBI reference (598d8ae6): c++/src/util/lmdb/mdb.c:1461-1462
+// ```c++
+// 	"MDB_VERSION_MISMATCH: Database environment version mismatch",
+// 	"MDB_INVALID: File is not an LMDB file",
+// ```
+/// The error of an LMDB file that opens but is not read: NCBI's text for an empty file (probe
+/// SR4), a file of another format (SR3) and another LMDB version; LOSAT's for the rest.
+fn lmdb_open_error(file: &DbFile, message: String) -> SeqDbError {
+    let what = if file.is_empty() {
+        "Bad file descriptor"
+    } else if message.contains("MDB_VERSION_MISMATCH") {
+        "MDB_VERSION_MISMATCH: Database environment version mismatch"
+    } else if message.contains("MDB_INVALID") || message.contains("too small for a meta page") {
+        "MDB_INVALID: File is not an LMDB file"
+    } else {
+        return SeqDbError::Format {
+            path: file.path().to_path_buf(),
+            message,
+        };
+    };
+    SeqDbError::NotFound(format!("LMDB runtime error: mdb_env_open: {what}"))
+}
+
+/// The error of an LMDB file that does not open: the system's text in NCBI's words (a file
+/// without read permission gives `Permission denied`, checked with NCBI on 2026-10-31).
+fn lmdb_file_error(error: SeqDbError) -> SeqDbError {
+    if let SeqDbError::Open { source, .. } = &error {
+        if let Some(code) = source.raw_os_error() {
+            let text = source.to_string();
+            if let Some(strerror) = text.strip_suffix(&format!(" (os error {code})")) {
+                if cfg!(unix) && !strerror.contains("Too many open files") {
+                    return SeqDbError::NotFound(format!(
+                        "LMDB runtime error: mdb_env_open: {strerror}"
+                    ));
+                }
+            }
+        }
+    }
+    error
+}
+
 fn missing_file(path: &Path) -> SeqDbError {
     SeqDbError::NotFound(format!(
         "File {} not found. If you renamed any BLAST database files, please use original file \
@@ -1400,7 +1514,7 @@ impl SeqDb {
     // the database that the LMDB file does not list, or lists with another number of OIDs,
     // leaves NCBI's OIDs off by the difference; LOSAT refuses such a database.
     /// The LMDB files of a version 5 database with the volumes each one lists.
-    fn lmdb_entries(&self) -> Result<Vec<LmdbEntry>, SeqDbError> {
+    pub(super) fn lmdb_entries(&self) -> Result<Vec<LmdbEntry>, SeqDbError> {
         let mut groups: Vec<(PathBuf, std::ops::Range<usize>)> = Vec::new();
         for (at, volume) in self.volumes.iter().enumerate() {
             let name = volume.index().lmdb_file.as_deref().unwrap_or_default();
@@ -1414,14 +1528,17 @@ impl SeqDb {
         }
         let mut entries = Vec::with_capacity(groups.len());
         for (lmdb, range) in groups {
-            let file = DbFile::open(&lmdb)?;
-            let env = Env::open(&file).map_err(|message| SeqDbError::Format {
-                path: lmdb.clone(),
-                message,
-            })?;
-            let listed = tax_files::volumes(&env).map_err(|message| SeqDbError::Format {
-                path: lmdb.clone(),
-                message,
+            let file = DbFile::open(&lmdb).map_err(lmdb_file_error)?;
+            let env = Env::open(&file).map_err(|message| lmdb_open_error(&file, message))?;
+            let listed = tax_files::volumes(&env).map_err(|message| {
+                if tax_files::is_ncbi_volume_error(&message) {
+                    SeqDbError::NotFound(message)
+                } else {
+                    SeqDbError::Format {
+                        path: lmdb.clone(),
+                        message,
+                    }
+                }
             })?;
             let held = &self.volumes[range.clone()];
             if held.len() > listed.len() {
@@ -1790,15 +1907,8 @@ impl SeqDb {
             return Ok(words);
         }
         let mut words = vec![0u64; word_count];
-        let mut oids: Vec<Option<u32>> = vec![None; ids.len()];
-        for (at, entry) in entries.iter().enumerate() {
-            let found = entry.accessions_to_oids(ids)?;
-            for (slot, oid) in oids.iter_mut().zip(found) {
-                if at == 0 || oid.is_some() {
-                    *slot = oid;
-                }
-            }
-        }
+        let mut oids = Vec::new();
+        entries_accessions_to_oids(&entries, ids, &mut oids)?;
         for oid in oids.into_iter().flatten() {
             if oid < num_oids {
                 words[(oid / 64) as usize] |= 1u64 << (oid % 64);

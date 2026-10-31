@@ -38,6 +38,9 @@ pub(super) enum SubjectLetters<'a> {
     /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the sequences of a `-db` database, each read where it is
     /// searched (`x_db_stream.rs`).
     Stream(&'a super::x_db_stream::XDbStream<'a>),
+    /// The numbers of bases alone, of the reported sequences of a `-db` search whose reports read
+    /// no letters (`database::reported_subjects`).
+    Lengths(&'a [usize]),
 }
 
 impl<'a> SubjectLetters<'a> {
@@ -47,6 +50,7 @@ impl<'a> SubjectLetters<'a> {
             Self::Records(subjects) => subjects.len(),
             Self::Packed(subjects) => subjects.len(),
             Self::Stream(stream) => stream.count(),
+            Self::Lengths(lengths) => lengths.len(),
         }
     }
 
@@ -56,6 +60,7 @@ impl<'a> SubjectLetters<'a> {
             Self::Records(subjects) => subjects[oid].len(),
             Self::Packed(subjects) => subjects[oid].len(),
             Self::Stream(stream) => stream.length(oid),
+            Self::Lengths(lengths) => lengths[oid],
         }
     }
 
@@ -75,7 +80,9 @@ impl<'a> SubjectLetters<'a> {
                 LETTERS_MADE.fetch_add(1, Ordering::Relaxed);
                 with_buffer(|buffer| subjects[oid].ascii_into(buffer), f)
             }
-            Self::Stream(_) => unreachable!("a database sequence has no lower-case letters"),
+            Self::Stream(_) | Self::Lengths(_) => {
+                unreachable!("a database sequence has no lower-case letters")
+            }
         }
     }
 
@@ -110,6 +117,7 @@ impl<'a> SubjectLetters<'a> {
                 f(XPrelimSubject::Nt(SubjectNt::Letters(letters)))
             }),
             Self::Stream(stream) => f(XPrelimSubject::Stream(stream, oid)),
+            Self::Lengths(_) => unreachable!("the lengths of the reports are not searched"),
         }
     }
 
@@ -122,6 +130,7 @@ impl<'a> SubjectLetters<'a> {
             Self::Records(subjects) => SubjectNt::Letters(subjects[oid]),
             Self::Packed(subjects) => SubjectNt::Packed(&subjects[oid]),
             Self::Stream(_) => unreachable!("a -db stream is read through XStageSubjects"),
+            Self::Lengths(_) => unreachable!("reports that read no letters hold the lengths"),
         }
     }
 }

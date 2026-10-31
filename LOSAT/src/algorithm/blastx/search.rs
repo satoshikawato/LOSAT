@@ -552,7 +552,7 @@ pub(crate) fn search_core(
         "BLASTX preliminary protein-subject splitting above 5000000 residues is not implemented"
     );
     let db_length = subjects.total_length()?;
-    let db_count = i64::try_from(subjects.statistics_len()?)?;
+    let db_count = i64::try_from(subjects.statistics_len())?;
     let min_subject_length = subjects.shortest_length();
     let mut result = Vec::new();
     let mut call = 0;

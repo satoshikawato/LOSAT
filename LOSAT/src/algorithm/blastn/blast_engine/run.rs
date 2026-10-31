@@ -8719,8 +8719,14 @@ fn run_in_pool(
     write_pairwise_prologs(outputs, &output_formats, megablast, &shown, true)?;
     let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
     if batching.fixed_batch_size == 0 {
-        // A database's total is the `Int8` of its index files (`GetDbTotalLength`).
-        let total_length = source.metadata().db_len_total as i64;
+        // A database's total is the `Int8` of its index files (`GetDbTotalLength` sums
+        // `m_DbInfo`, `GetBlastDbInfo`: the whole database's, also with a list).
+        let total_length = shown
+            .database
+            .as_ref()
+            .map_or(source.metadata().db_len_total as i64, |database| {
+                database.total_letters as i64
+            });
         if total_length > 0 {
             mixer.set_target_hits((total_length / 3000) as i32);
         }

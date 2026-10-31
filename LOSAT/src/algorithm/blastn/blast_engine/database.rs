@@ -480,12 +480,13 @@ impl BlastnDatabase {
         &self.name
     }
 
-    /// The number of sequences (`CSeqDB::GetNumSeqs`) and the total length
-    /// (`CSeqDB::GetTotalLength`): the real numbers, also with `-dbsize`.
+    /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
     pub(super) fn filtered_empty(&self) -> bool {
         self.db.filtered_empty()
     }
 
+    /// The number of sequences and the total length that the statistics read
+    /// (`SeqDb::statistics_numbers`): the real numbers, also with `-dbsize`.
     pub(super) fn metadata(&self) -> &SubjectMetadata {
         &self.metadata
     }

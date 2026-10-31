@@ -6610,7 +6610,7 @@ Scheduling (each value computed by one thread with the original function; order 
   from the bytes of one block of 256 KiB per thread, without a store; a subject whose plan has no residues,
   `LOSAT_X_TBNUNITXLATE`, is read before its plan and held while its units translate it); the composition redo and the traceback of `-comp_based_stats 0` read each subject of their
   lists when they first align it and hold it until the stage has done its last match (`LOSAT_X_TBNSTAGEDROP` below;
-  until the stage ends with `=0`); the reports read the sequences they show. A long
+  until the stage ends with `=0`); the reports read the sequences they show where a report reads their letters (outfmt 0, the XML family, the tabular rows), and only their lengths otherwise. A long
   sequence is read once while anything holds it: stages and batches that hold it at the same time share it, and a
   thread that asks for it while another thread reads it waits for that read. With more than one thread it is read
   into a buffer that glibc maps (taken from `utils::x_mapped::X_BYTES` when it holds one) and its store is that

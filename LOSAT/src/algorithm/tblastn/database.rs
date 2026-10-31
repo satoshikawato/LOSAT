@@ -596,6 +596,8 @@ mod tests {
         let reported = of(true);
         assert_eq!(reported.lengths, whole);
         assert_eq!(reported.stores.len(), 2);
+        assert_eq!(reported.stores[0].len(), whole[0]);
+        assert_eq!(reported.stores[1].len(), whole[1]);
         let letters = reported.letters();
         assert!(matches!(letters, SubjectLetters::Packed(_)));
         assert_eq!(letters.length(1), whole[1]);

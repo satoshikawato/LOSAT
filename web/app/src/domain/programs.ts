@@ -237,7 +237,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       },
       { title: 'General Parameters', placement: 'algorithm', fields: [maxTargetSeqs, evalue, wordSize] },
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix, gapOpen, gapExtend, compBasedStats] },
-      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking] },
+      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
       { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize, maxHsps] },
     ],
   },

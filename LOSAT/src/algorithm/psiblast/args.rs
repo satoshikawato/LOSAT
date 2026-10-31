@@ -327,6 +327,8 @@ impl PsiblastArgs {
             show_gis: false,
             parse_deflines: false,
             searchsp: None,
+            // PSIBLAST's parser refuses `-lcase_masking` (line NP ported it to BLASTP).
+            lcase_masking: false,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-50
             // ```c++
             // CPSIBlastOptionsHandle::CPSIBlastOptionsHandle(EAPILocality locality)

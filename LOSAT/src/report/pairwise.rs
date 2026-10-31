@@ -936,16 +936,16 @@ fn write_alignment_with_sequences<W: Write>(
             .iter()
             .zip(s_chars[offset..end].iter())
             .map(|(q, s)| {
-                let q = &q.to_ascii_uppercase();
+                let (q, s) = (q.to_ascii_uppercase(), s.to_ascii_uppercase());
                 if nucleotide {
-                    if q.eq_ignore_ascii_case(s) {
+                    if q == s {
                         '|'
                     } else {
                         ' '
                     }
                 } else if q == s {
-                    *q // Identity: show the character
-                } else if is_positive_match(*q, *s, config.protein_matrix) {
+                    q // Identity: show the character
+                } else if is_positive_match(q, s, config.protein_matrix) {
                     '+' // Positive: show +
                 } else {
                     ' ' // Mismatch: show space

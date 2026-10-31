@@ -1526,7 +1526,8 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("psiblast", &["-negative_seqidlist", "ids.txt"]),
         ("blastp", &["-db_soft_mask", "21"]),
         ("blastp", &["-db_hard_mask", "21"]),
-        ("blastp", &["-lcase_masking"]),
+        // Line NP ported it to BLASTP, not to PSIBLAST.
+        ("psiblast", &["-lcase_masking"]),
         ("blastp", &["-version"]),
         ("blastp", &["-xdrop_gap_final", "30"]),
         ("blastn", &["-logfile", "log"]),

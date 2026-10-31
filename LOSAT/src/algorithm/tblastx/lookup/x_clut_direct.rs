@@ -392,6 +392,9 @@ pub(crate) const X_BLASTP: u8 = 0;
 pub(crate) const X_TBLASTN: u8 = 1;
 /// BLASTX's caller of `XFlatCompressedLookup::scan_subject` (`blastx/seed.rs`, `x_seed_scan.rs`).
 pub(crate) const X_BLASTX: u8 = 2;
+/// BLASTP's scan of a `-subject` with lower-case letters (`-lcase_masking`), a copy of its own so
+/// that `X_BLASTP` keeps its one caller.
+pub(crate) const X_BLASTP_SOFT: u8 = 3;
 
 /// EXPERIMENT (LOSAT_X_BPCLUT): the compressed lookup table with each cell's hits in one slice of
 /// `hits` (`starts[index]..starts[index + 1]`), in NCBI's scan order. The other fields are those of

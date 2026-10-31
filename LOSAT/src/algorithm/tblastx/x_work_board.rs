@@ -435,6 +435,13 @@ impl XBoard {
         while set.run_one(&mut taker) {}
         set.wait();
         drop(owned);
+        // Its set leaves the list here: with every thread an owner nothing else may take from the
+        // list, and a batch of N subjects would keep N sets until a helper job runs.
+        self.groups
+            .sets
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|other| !Arc::ptr_eq(other, &set));
     }
 
     /// A thread of `batch`'s subject loop without a subject: takes items until the batch's units
@@ -763,7 +770,7 @@ mod tests {
     }
 
     // Subject after subject puts a group set on the board inside a subject loop, whose threads take
-    // no pool job: the helper jobs in the queues stay at one, not one per set.
+    // no pool job: one helper job waits in the queues, not one per set, and no set stays listed.
     #[test]
     fn group_sets_leave_one_helper_job_in_the_queues() {
         let pool = rayon::ThreadPoolBuilder::new()
@@ -771,39 +778,73 @@ mod tests {
             .build()
             .expect("test pool");
         let board = XBoard::default();
+        let checked = AtomicBool::new(false);
         pool.install(|| {
-            for _ in 0..1_000 {
-                board.run_groups(6, &|_, _| {});
-                assert!(!board.groups.any_left());
-            }
-            assert!(Arc::strong_count(&board.groups) <= 2);
+            rayon::broadcast(|ctx| {
+                if ctx.index() == 0 {
+                    for _ in 0..1_000 {
+                        board.run_groups(6, &|_, _| {});
+                    }
+                    let jobs = Arc::strong_count(&board.groups) - 1;
+                    let sets = board.groups.sets.lock().unwrap().len();
+                    checked.store(true, Ordering::SeqCst);
+                    assert_eq!((jobs, sets), (1, 0));
+                } else {
+                    while !checked.load(Ordering::SeqCst) {
+                        std::thread::yield_now();
+                    }
+                }
+            });
         });
     }
 
-    // A thread that helps sleeps until a subject puts its units on the board, then takes them, and
-    // returns once every subject has closed; a stopped loop wakes it without any ring.
+    // A thread that helps stays, asleep, until a subject puts its units on the board, and takes one
+    // (the owner's first unit waits for it, up to a bound); a stopped loop wakes it without a ring.
     #[test]
     fn a_helper_sleeps_until_the_units_come() {
-        let board = XBoard::default();
-        let batch = board.batch(2);
-        let ran = AtomicUsize::new(0);
-        let helper_in = AtomicBool::new(false);
-        std::thread::scope(|scope| {
-            scope.spawn(|| {
-                helper_in.store(true, Ordering::SeqCst);
-                board.help(&batch, &AtomicBool::new(false));
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let board = XBoard::default();
+            let batch = board.batch(2);
+            let helper_took = AtomicBool::new(false);
+            let helper = std::sync::Mutex::new(None);
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    *helper.lock().unwrap() = Some(std::thread::current().id());
+                    board.help(&batch, &AtomicBool::new(false));
+                });
+                while helper.lock().unwrap().is_none() {
+                    std::thread::yield_now();
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                let helper_id = helper.lock().unwrap().expect("set above");
+                board.run_units(&batch, 0, 8, &|_, _: &mut XTaker| {
+                    if std::thread::current().id() == helper_id {
+                        helper_took.store(true, Ordering::SeqCst);
+                        return;
+                    }
+                    let start = std::time::Instant::now();
+                    while !helper_took.load(Ordering::SeqCst)
+                        && start.elapsed() < std::time::Duration::from_secs(20)
+                    {
+                        std::thread::yield_now();
+                    }
+                });
+                batch.close_without_units(1);
             });
-            while !helper_in.load(Ordering::SeqCst) {
-                std::thread::yield_now();
-            }
-            board.run_units(&batch, 0, 8, &|_, _: &mut XTaker| {
-                ran.fetch_add(1, Ordering::SeqCst);
+            let stopped_board = XBoard::default();
+            let stopped_batch = stopped_board.batch(1);
+            let stopped = AtomicBool::new(false);
+            std::thread::scope(|scope| {
+                scope.spawn(|| stopped_board.help(&stopped_batch, &stopped));
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                stopped.store(true, Ordering::SeqCst);
             });
-            batch.close_without_units(1);
+            let _ = tx.send(helper_took.load(Ordering::SeqCst));
         });
-        assert_eq!(ran.load(Ordering::SeqCst), 8);
-        let board = XBoard::default();
-        let batch = board.batch(1);
-        board.help(&batch, &AtomicBool::new(true));
+        let helper_took = rx
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .expect("the helpers returned");
+        assert!(helper_took, "the helper stayed for the units");
     }
 }

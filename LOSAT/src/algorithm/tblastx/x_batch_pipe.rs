@@ -298,7 +298,8 @@ impl<'a> XSeedEnd<'a> {
             if board.is_some_and(|board| board.take_one(&mut taker)) {
                 continue;
             }
-            // No unit to run now: a unit's scratch is not held through the chains' peak.
+            // Nothing to take now: a unit's scratch is not held while this thread only waits. (While it
+            // takes groups one after the other it stays: a unit may come next, and a new one costs more.)
             taker.scratch = None;
             // This thread's own pool jobs and broadcast parts (see `XPipe::wait`).
             #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -538,7 +539,8 @@ impl<'s, R: Send> XPipe<'s, R> {
                 if board.take_one(&mut taker) {
                     continue;
                 }
-                // No unit to run now: a unit's scratch is not held through the chains' peak.
+                // Nothing to take now: a unit's scratch is not held while this thread only waits. (While it
+                // takes groups one after the other it stays: a unit may come next, and a new one costs more.)
                 taker.scratch = None;
                 if !matches!(rayon::yield_local(), Some(rayon::Yield::Executed)) {
                     std::thread::sleep(std::time::Duration::from_micros(50));

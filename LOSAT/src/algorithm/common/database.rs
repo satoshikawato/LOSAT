@@ -129,7 +129,7 @@ pub(crate) fn restrict_database(
 pub(crate) fn note_archive_database_filter(
     archive: Option<&crate::report::archive::ArchiveHandle>,
     filter: &crate::blastinput::db_filter::DbFilterArgs,
-    list: Option<&crate::seqdb::DbList>,
+    list_taxids: &[i32],
     filtered_empty: bool,
     searchsp: bool,
     dbsize: bool,
@@ -143,7 +143,10 @@ pub(crate) fn note_archive_database_filter(
             "-dbsize with -outfmt 11 and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
         );
     }
-    handle.set_database_filter(filter.archive_parameter(list), filtered_empty && !searchsp);
+    handle.set_database_filter(
+        filter.archive_parameter(list_taxids),
+        filtered_empty && !searchsp,
+    );
     Ok(())
 }
 
@@ -590,7 +593,9 @@ fn reported_header(
                 .and_then(|subject| {
                     refuse_id_of_a_query(&subject, ordinal, program)?;
                     Ok(ReportedHeader::Parsed(std::sync::Arc::new(
-                        subject.showing_gis(db.reports_show_gis()),
+                        subject
+                            .showing_gis(db.reports_show_gis())
+                            .under_positive_list(db.has_positive_list()),
                     )))
                 })
         }

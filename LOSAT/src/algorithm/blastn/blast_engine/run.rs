@@ -7411,6 +7411,14 @@ fn search_cli(
     output_formats: Vec<BlastnOutputFormat>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
+    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
+    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
+    // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65),
+    // so its warning before theirs (probe F04 of line DI-8).
+    let list = match args.database_name() {
+        Some(_) => args.db_filter.resolve(&settings, outputs.diagnostics)?,
+        None => None,
+    };
     args.resolve_dust()?;
     args.resolve_window_masker()?;
     let query_range = parse_query_range(&args)?;
@@ -7437,11 +7445,8 @@ fn search_cli(
     // ```
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
-    // The taxid or seqid list (line DI-8) is read first: NCBI's handler of the database
-    // arguments reads it (`s_GetTaxIDList`, `CSeqDBFileGiList`) before the database opens.
     let database = match args.database_name() {
         Some(name) => {
-            let list = args.db_filter.resolve(&settings, outputs.diagnostics)?;
             let database = database::BlastnDatabase::open_restricted(
                 name,
                 &settings,
@@ -7452,7 +7457,7 @@ fn search_cli(
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
-                list.as_ref(),
+                database.list_taxids(),
                 database.filtered_empty(),
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),

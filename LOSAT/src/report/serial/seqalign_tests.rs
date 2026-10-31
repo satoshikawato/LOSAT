@@ -93,6 +93,7 @@ fn subject(id: SeqId<'_>, searched_length: i32) -> SubjectRecord<'_> {
         id,
         searched_length,
         offset: 0,
+        use_this_seqid: &[],
     }
 }
 
@@ -656,4 +657,60 @@ fn ungapped_translated_hsps_are_diags_seq_aligns() {
     assert!(text.contains("from 12,\n              to 41,\n              strand plus,"));
     // An empty edit script and no gap: no `empty` row.
     assert!(!text.contains("empty"));
+}
+
+/// Under a positive list every Seq-align of a subject with strings ends with the `ext`
+/// `use_this_seqid`: a gapped one per HSP, a `diags` one per subject; a subject without strings
+/// has none (blast_seqalign.cpp:1234-1245; probes E01, E12 of line DI-8).
+#[test]
+fn a_subject_with_strings_writes_the_use_this_seqid_ext() {
+    const EXT: &str = "ext{{typestr\"use_this_seqid\",data{{labelstr\"SEQIDS\",num2,\
+         datastrs{\"seqid:P69905.2\",\"seqid:P01942.2\"}}}}}";
+    let strings = [b"seqid:P69905.2".to_vec(), b"seqid:P01942.2".to_vec()];
+    let ops = [Sub(30)];
+    for gapped in [true, false] {
+        let run = RunRecord {
+            program: if gapped {
+                Program::Blastp
+            } else {
+                Program::Tblastx
+            },
+            db_title: Some(b"db"),
+            gapped,
+        };
+        let subjects = [
+            SubjectRecord {
+                use_this_seqid: &strings,
+                ..subject(SeqId::Local("Subject_1"), 100)
+            },
+            subject(SeqId::Local("Subject_2"), 100),
+        ];
+        let document = |subject_index| {
+            let frames = if gapped { (0, 0) } else { (1, 1) };
+            let hsps = [hsp(
+                subject_index,
+                (0, 0),
+                frames,
+                100,
+                1e-5,
+                50.0,
+                (30, 30, 0),
+                &ops,
+            )];
+            let mut buf = Vec::new();
+            assert!(write_query(
+                SerialFormat::AsnText,
+                &run,
+                &query("Query_1", 100),
+                &subjects,
+                &hsps,
+                &mut buf,
+            )
+            .unwrap());
+            String::from_utf8(buf).unwrap().replace([' ', '\n'], "")
+        };
+        let named = document(0);
+        assert!(named.contains(EXT), "{named}");
+        assert!(!document(1).contains("use_this_seqid"));
+    }
 }

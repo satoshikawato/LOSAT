@@ -1,0 +1,8 @@
+Error: [blastdbcmd] Entry not found: 1111
+Error: [blastdbcmd] Skipped gi|1111
+Error: [blastdbcmd] Entry not found: 1111
+Error: [blastdbcmd] Skipped 1111
+Error: [blastdbcmd] Entry not found: LOCUS13
+Error: [blastdbcmd] Skipped LOCUS13
+Error: [blastdbcmd] Entry not found: NOSUCH
+Error: [blastdbcmd] Skipped NOSUCH

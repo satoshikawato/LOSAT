@@ -91,6 +91,7 @@ pub(crate) fn add_blastn_sam(
                     id,
                     searched_length: (lengths.searched)(s_idx) as i32,
                     offset,
+                    use_this_seqid: &[],
                 }),
                 key,
                 index: s_idx,

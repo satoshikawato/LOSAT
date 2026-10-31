@@ -6506,6 +6506,25 @@ Scheduling (each value computed by one thread with the original function; order 
   EDL933 x AMRProt 16 threads 484 vs 124 MiB. BLASTX without `-word_size 5`: 8 pairs, cycles 0.9971 (byte copy of dev
   1.0005) on 60 Trinity transcripts x Swiss-Prot at one thread, instructions x1.00001, `Lookup::Compressed` keeps one
   variant so that the standard table's loops keep their match (a separate variant cost x1.003 to x1.006 there).
+- `LOSAT_X_BXCLUTPOOL=1` (BLASTX `-task blastx-fast` and `-word_size 5`, memory; in the strict set from the pull
+  request that added it, 2026-10-31: on unless `=0` or `LOSAT_X_DEFAULT=0`): the flat compressed lookup tables are
+  built on vectors kept between builds: a table's starts, hits and pv when the table is dropped
+  (`blastx::seed::Lookup`'s drop) and the bucket fill's record of the appends after the build, each cleared and
+  zero-filled to the new table's sizes as calloc gives them; the hits grow to n + n/4 where short
+  (`tblastx/lookup/x_clut_direct.rs`). A split query builds a table per chunk on whichever thread needs it, and each
+  of those threads kept a table's worth and the record in its glibc arena after they were freed, about 20 MiB per
+  thread (`MALLOC_ARENA_MAX=1` removed it). The pool holds as many sets as tables and builds were alive at once.
+  The table equals the unpooled one in every field (unit test
+  `pooled_flat_tables_equal_the_unpooled_ones_on_kept_vectors`); reports: `tests/blastx_fast_flat.rs`.
+- `LOSAT_X_BXENDMEM=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-31: on unless
+  `=0` or `LOSAT_X_DEFAULT=0`): at the end of a query batch, no table of word hashes per context for the
+  near-identical test of composition-based statistics (8 bytes per letter of six frames: 84 MiB for a 5.6 Mb query)
+  and no copy of the batch's residues in its results, which the report does not read (21 MiB). The test reads the
+  same words from the context's residues: a hash is its word's letters in 5 bits each and residues are below 32, so
+  two hashes are equal exactly where the 8 letters are; the table's last entry stays 0 as NCBI's loop leaves it
+  (`redo_alignment::x_test_near_identical_on_residues`; unit test
+  `near_identical_on_residues_equals_the_table`, also at ranges not starting at 0, where NCBI reads the table at the
+  range's offsets). Other programs keep the table: their queries are proteins of a few thousand letters.
 - `LOSAT_X_BXCAPFILL=1` or `=f` (BLASTX, memory with few subjects; in the strict set from the pull request that
   added it, 2026-10-25: on unless `=0` or `LOSAT_X_DEFAULT=0`; a value switch, f from 2 to 64 tasks per thread,
   otherwise 4; acts where `LOSAT_X_BXUNITCAP` caps): the capped units keep the threads busy with few subjects

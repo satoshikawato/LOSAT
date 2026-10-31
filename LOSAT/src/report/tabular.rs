@@ -489,11 +489,49 @@ pub fn taxdb_warning_line(program: &str) -> String {
 /// A query of the report.
 #[derive(Clone, Copy, Debug)]
 pub struct TabularQuery<'a> {
-    /// `qseqid`, `qacc` and `qaccver`: LOSAT's queries have local ids, shown as the first word of
-    /// the title (`FastaRecord::shown_id`); `qgi` is 0.
+    /// `qseqid`: a query with a local id shows the first word of the title
+    /// (`FastaRecord::shown_id`) in `id`, `accession` and `accession_version`, and `gi` is 0; with
+    /// `-parse_deflines` these are the record's ids (`TabularQuery::of_record`).
     pub id: &'a [u8],
+    /// `qacc`.
+    pub accession: &'a [u8],
+    /// `qaccver`.
+    pub accession_version: &'a [u8],
+    /// `qgi`.
+    pub gi: i64,
     /// `qlen`: the searched length (of the `-query_loc` interval).
     pub length: usize,
+}
+
+impl<'a> TabularQuery<'a> {
+    /// The query with the shown id `id` (every id field) and the searched length `length`.
+    pub fn local(id: &'a [u8], length: usize) -> Self {
+        Self {
+            id,
+            accession: id,
+            accession_version: id,
+            gi: 0,
+            length,
+        }
+    }
+
+    /// The query `query`, shown as `shown_id` when `-parse_deflines` did not read its ids.
+    pub fn of_ids(
+        believed: Option<&'a crate::blastinput::fasta_reader::believed::BelievedIds>,
+        shown_id: &'a [u8],
+        length: usize,
+    ) -> Self {
+        match believed {
+            Some(ids) => Self {
+                id: &ids.tabular[0],
+                accession: &ids.tabular[1],
+                accession_version: &ids.tabular[2],
+                gi: ids.gi,
+                length,
+            },
+            None => Self::local(shown_id, length),
+        }
+    }
 }
 
 /// The ids of one definition line of a subject (`sallseqid`, `sallgi`, `sallacc`).
@@ -943,10 +981,10 @@ impl TabularWriter<'_> {
                 out.extend_from_slice(spec.delimiter.as_bytes());
             }
             match field {
-                QuerySeqId | QueryAccession | QueryAccessionVersion => {
-                    out.extend_from_slice(query.id)
-                }
-                QueryGi => out.push(b'0'),
+                QuerySeqId => out.extend_from_slice(query.id),
+                QueryAccession => out.extend_from_slice(query.accession),
+                QueryAccessionVersion => out.extend_from_slice(query.accession_version),
+                QueryGi => push_num(out, query.gi as usize),
                 QueryLength => push_num(out, query.length),
                 SubjectSeqId => out.extend_from_slice(subject.id),
                 SubjectAccession => out.extend_from_slice(subject.accession),
@@ -1441,15 +1479,7 @@ mod tests {
                 qcovhsp: 100,
             };
             let mut out = Vec::new();
-            writer.row(
-                &mut out,
-                &TabularQuery {
-                    id: b"q",
-                    length: 10,
-                },
-                &subject,
-                &hsp,
-            );
+            writer.row(&mut out, &TabularQuery::local(b"q", 10), &subject, &hsp);
             String::from_utf8(out).unwrap()
         };
         let two = TabularTaxonomy {
@@ -1638,15 +1668,7 @@ mod tests {
                 qcovhsp: 100,
             };
             let mut out = Vec::new();
-            writer.row(
-                &mut out,
-                &TabularQuery {
-                    id: b"q",
-                    length: 6,
-                },
-                &subject,
-                &hsp,
-            );
+            writer.row(&mut out, &TabularQuery::local(b"q", 6), &subject, &hsp);
             String::from_utf8(out).unwrap()
         };
         let frames = spec(ReportFormat::Tabular, "qseqid frames sframe");
@@ -1729,15 +1751,7 @@ mod tests {
             program_version: "BLASTP 2.17.0+",
             matrix: None,
         }
-        .row(
-            &mut out,
-            &TabularQuery {
-                id: b"q1",
-                length: 6,
-            },
-            &subject,
-            &hsp,
-        );
+        .row(&mut out, &TabularQuery::local(b"q1", 6), &subject, &hsp);
         assert_eq!(
             String::from_utf8(out).unwrap(),
             "q1\tq1\tq1\tgb|AE000111.1|\tAE000111\tAE000111.1\t42\tfirst title\tfirst title<>N/A\n"

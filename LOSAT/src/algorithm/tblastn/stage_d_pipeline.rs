@@ -96,6 +96,9 @@ pub(super) struct LocalStageDProfile<'a> {
 pub(super) struct DatabaseNumbers {
     pub total_length: u64,
     pub num_seqs: u64,
+    /// The scanned shortest length in nucleotides with a list (`SeqDb::min_length`,
+    /// line DI-8), `None` for a whole database.
+    pub min_length: Option<u32>,
 }
 
 /// The numbers of the subject set behind the statistics: a database's (`database`), or,
@@ -212,11 +215,14 @@ impl SubjectSetNumbers {
     }
 
     /// The shortest subject length of the hit-saving cutoff, in residues
-    /// (`BlastSeqSrcGetMinSeqLen / 3`): a database answers `BLAST_SEQSRC_MINLENGTH`, a FASTA
-    /// set its shortest record raised to it.
+    /// (`BlastSeqSrcGetMinSeqLen / 3`): a database answers `BLAST_SEQSRC_MINLENGTH` (with a
+    /// list, its scanned shortest length: line DI-8), a FASTA set its shortest record raised
+    /// to it.
     pub(super) fn min_subject_length(&self, subjects: &SubjectLetters<'_>) -> usize {
         let shortest = match self.database {
-            Some(_) => Self::MIN_LENGTH,
+            Some(database) => database
+                .min_length
+                .map_or(Self::MIN_LENGTH, |shortest| shortest as usize),
             None => subjects
                 .lengths()
                 .min()

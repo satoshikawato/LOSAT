@@ -21,6 +21,10 @@ use crate::report::serial::encoder::Encoder;
 pub struct BioseqInput<'a> {
     /// `Query_N` or `Subject_N`.
     pub id: &'a str,
+    /// With `-parse_deflines`: the record's Seq-ids, written instead of `id`.
+    pub ids: Option<&'a [crate::seqid::ParsedSeqId]>,
+    /// With `-parse_deflines` and an id that is not local: the query as a Seq-loc.
+    pub seq_loc: Option<QuerySeqLoc<'a>>,
     /// The defline line as read, with its `>` and without the line end.
     pub defline: &'a [u8],
     /// The title (the defline after the `>` up to the first control byte, trimmed).
@@ -29,6 +33,36 @@ pub struct BioseqInput<'a> {
     /// them; a nucleotide `U` is already `T`).
     pub letters: &'a [u8],
     pub protein: bool,
+}
+
+/// The strand of a query's Seq-loc (`CBlastFastaInputSource::x_FastaToSeqLoc`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SeqLocStrand {
+    Unknown,
+    Plus,
+    Minus,
+    Both,
+}
+
+impl SeqLocStrand {
+    /// The strand a nucleotide program reads with `-strand value`.
+    pub fn of_option(value: &str) -> Self {
+        match value {
+            "plus" => Self::Plus,
+            "minus" => Self::Minus,
+            _ => Self::Both,
+        }
+    }
+}
+
+/// A query as the Seq-loc of the archive's `seq-loc-list`: the searched interval and the
+/// record's Seq-align id (`CBlastInputReader` with `-parse_deflines`, an id that is not local).
+#[derive(Clone, Copy, Debug)]
+pub struct QuerySeqLoc<'a> {
+    pub from: i32,
+    pub to: i32,
+    pub strand: SeqLocStrand,
+    pub id: &'a crate::seqid::ParsedSeqId,
 }
 
 /// `NStr::PrintableString(s, 0)`: a byte outside 0x20..0x7e, a backslash or a quote is
@@ -131,14 +165,55 @@ pub fn pack_nucleotides(letters: &[u8]) -> (bool, Vec<u8>) {
     }
 }
 
+/// Writes the query as the element it is in the `seq-loc-list` (the caller has called
+/// `element()`).
+pub fn write_seq_loc<E: Encoder>(enc: &mut E, loc: &QuerySeqLoc<'_>) {
+    enc.variant("Seq-loc", "int", 3);
+    enc.begin_sequence("Seq-interval");
+    enc.member("from", 0);
+    enc.int(loc.from);
+    enc.end_member();
+    enc.member("to", 1);
+    // `TSeqPos`: `seqlen - 1` of an empty record is written unsigned (x_FastaToSeqLoc).
+    if loc.to < 0 {
+        enc.big_int(i64::from(u32::MAX));
+    } else {
+        enc.int(loc.to);
+    }
+    enc.end_member();
+    enc.member("strand", 2);
+    match loc.strand {
+        SeqLocStrand::Unknown => enc.enumerated("unknown", 0),
+        SeqLocStrand::Plus => enc.enumerated("plus", 1),
+        SeqLocStrand::Minus => enc.enumerated("minus", 2),
+        SeqLocStrand::Both => enc.enumerated("both", 3),
+    }
+    enc.end_member();
+    enc.member("id", 3);
+    SeqId::Db(loc.id).write(enc);
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_variant();
+}
+
 /// Writes the Bioseq as the element it is in a `SEQUENCE OF` / `SET OF` (the caller has
 /// called `element()`; a Seq-entry wrapper is the caller's too).
 pub fn write_bioseq<E: Encoder>(enc: &mut E, bioseq: &BioseqInput<'_>) {
     enc.begin_sequence("Bioseq");
     enc.member("id", 0);
     enc.begin_list(true);
-    enc.element();
-    SeqId::Local(bioseq.id).write(enc);
+    match bioseq.ids {
+        Some(ids) => {
+            for id in ids {
+                enc.element();
+                SeqId::Db(id).write(enc);
+            }
+        }
+        None => {
+            enc.element();
+            SeqId::Local(bioseq.id).write(enc);
+        }
+    }
     enc.end_list();
     enc.end_member();
 

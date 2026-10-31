@@ -1,12 +1,21 @@
 //! `losat blastdbcmd`: NCBI BLAST+ 2.17.0 blastdbcmd, of which LOSAT serves `-info` (the
-//! information of a database: `-db`, `-dbtype`, `-exact_length`, `-out`, `-logfile`), `-h`,
-//! `-help` and `-version`. Its command line is NCBI's (`args`, NCBI's argument reader), not
-//! clap's: `main` hands it the words after `blastdbcmd`. Every other use of the program
-//! (sequence retrieval, `-list`, taxonomy, metadata) is refused, and so is a database that
-//! `-info` would describe with something LOSAT does not read (the masks of
-//! `makeblastdb -mask_data`, several names in `-db`).
+//! information of a database: `-db`, `-dbtype`, `-exact_length`, `-out`, `-logfile`), the
+//! retrieval of sequences (`retrieve`: `-entry all`, `-entry`, `-entry_batch`, every
+//! `-outfmt` but the ASN.1 texts, `-range`, `-strand`, `-line_length`, `-ctrl_a`,
+//! `-target_only`, `-get_dups`, `-long_seqids`), `-h`, `-help` and `-version`. Its command
+//! line is NCBI's (`args`, NCBI's argument reader), not clap's: `main` hands it the words
+//! after `blastdbcmd`. The other uses of the program (`-list`, taxonomy, metadata, IPGs)
+//! are refused, and so are the lookups of an accession or GI in the tables of a database
+//! built with `-parse_seqids` (line BDC's BDC2b and BDC2c) and a database that LOSAT does
+//! not read (the masks of `makeblastdb -mask_data`, several names in `-db`).
 
 mod args;
+mod fasta;
+mod format;
+mod letters;
+mod lmdb_dbis;
+mod range;
+mod retrieve;
 
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
@@ -134,6 +143,34 @@ impl Diag<'_> {
     fn refuse(&mut self, reason: &str) -> i32 {
         self.post(&format!("Error: {reason}"));
         1
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
+    // ```c++
+    //     SetDiagPostLevel(eDiag_Warning);
+    //     SetDiagPostPrefix("blastdbcmd");
+    // ```
+    /// `ERR_POST(Error << message)` inside `Run`: the severity, the prefix of the
+    /// application, the message.
+    fn err_post(&mut self, message: &str) {
+        self.post(&format!("Error: [blastdbcmd] {message}"));
+    }
+
+    /// `err_post` of a message that is not UTF-8.
+    fn err_post_bytes(&mut self, message: &[u8]) {
+        let mut line = b"Error: [blastdbcmd] ".to_vec();
+        line.extend_from_slice(message);
+        line.push(b'\n');
+        match &mut self.target {
+            DiagTarget::File(file) => {
+                let _ = file.write_all(&line);
+            }
+            DiagTarget::Stderr => {
+                let _ = self.stderr.write_all(&line);
+                let _ = self.stderr.flush();
+            }
+            DiagTarget::Discard => {}
+        }
     }
 }
 
@@ -473,6 +510,9 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         Ok(opened) => opened,
         Err(error) => return database_error(&mut diag, error),
     };
+    if !args.given("info") {
+        return retrieve::process(&db, &args, &path, &mut diag, out);
+    }
     // NCBI prints the date bytes of the index file; the reader keeps them as text
     // (`SeqDb::date`), with U+FFFD for bytes that are not UTF-8.
     if db.date().contains('\u{fffd}') {
@@ -522,35 +562,30 @@ fn refusal(reason: &str) -> String {
 //        		status = x_ProcessSearchRequest();
 //     	}
 // ```
-/// LOSAT's refusal of a use of blastdbcmd other than `-info`, named by the option that selects
-/// it in NCBI's `Run`. With `-info`, NCBI's reader refuses every option the information does
-/// not use but `-line_length`, `-mask_sequence_with`, `-ipg` and `-ipg_batch`, which NCBI then
-/// ignores, and so does LOSAT.
+/// LOSAT's refusal of a use of blastdbcmd other than `-info` and the retrieval of sequences
+/// (`-entry`, `-entry_batch`), named by the option that selects it in NCBI's `Run` (line
+/// BDC's BDC3: the lists, the taxonomy, the metadata, the IPGs). With `-info`, NCBI's reader
+/// refuses every option the information does not use but `-line_length`,
+/// `-mask_sequence_with`, `-ipg` and `-ipg_batch`, which NCBI then ignores, and so does
+/// LOSAT. Without a selector NCBI opens the database and then asks for one
+/// (`retrieve`).
 fn unserved_use(args: &Args) -> Option<String> {
     if args.given("info") {
         return None;
     }
-    let selector = [
+    [
         "show_blastdb_search_path",
         "list",
         "metadata",
         "tax_info",
         "taxids",
         "taxidlist",
-        "entry",
-        "entry_batch",
         "ipg",
         "ipg_batch",
     ]
     .into_iter()
-    .find(|name| args.given(name));
-    Some(match selector {
-        Some(name) => unsupported_option(&format!("-{name}")),
-        None => format!(
-            "the retrieval of sequences (blastdbcmd without -info) is not supported by LOSAT's \
-             {PROGRAM}"
-        ),
-    })
+    .find(|name| args.given(name))
+    .map(|name| unsupported_option(&format!("-{name}")))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:110-153

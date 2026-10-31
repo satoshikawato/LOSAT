@@ -89,7 +89,7 @@ pub(crate) fn post_seq_id_warning(warning: SeqIdWarning, warn: Warn<'_>) {
 /// }
 /// ```
 /// `TSeqPos` is a 32-bit unsigned integer: the sums and `mult` wrap as NCBI's do.
-pub(super) fn parse_range(s: &[u8]) -> (usize, u32, u32) {
+pub(crate) fn parse_range(s: &[u8]) -> (usize, u32, u32) {
     if s.is_empty() {
         return (0, 0, 0);
     }
@@ -238,7 +238,7 @@ fn error(message: String) -> ParseError {
 /// Neither `fAllIdsAsLocal` nor `fNumericIdsAsLocal` is set (base flags 0), and the
 /// registry's `MAX_SEQID_LENGTH` is not read (makedb-v5 DECISIONS 12), so the default
 /// limits apply.
-pub(super) fn process_ids(
+pub(crate) fn process_ids(
     id_string: &[u8],
     protein: bool,
     line_number: u64,

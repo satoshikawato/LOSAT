@@ -44,8 +44,7 @@ mod x_redo_fit;
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod x_redo_par;
-// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the redo of a `-db` search reads each match's subject from
-// the database.
+// The redo of a `-db` search reads each match's subject from the database.
 mod x_redo_subjects;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-3691
 // ```c

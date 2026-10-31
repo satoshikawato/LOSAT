@@ -158,7 +158,7 @@ pub(super) struct Seed {
 // #define DBSEQ_CHUNK_OVERLAP 100
 // This schedule covers the unmasked translated frame's single hard range.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct TranslatedChunk {
+pub(crate) struct TranslatedChunk {
     pub offset: usize,
     pub length: usize,
 }
@@ -261,7 +261,7 @@ fn translated_scan_ranges(
 // clamp only the first left and last right, and skip SUBJECT_SPLIT_NO_RANGE.
 // NCBI c++/src/algo/blast/core/blast_engine.c:261-274:
 // without soft masking, each chunk has one range [0, subject->length].
-pub(super) fn translated_chunk_scan_ranges(
+pub(crate) fn translated_chunk_scan_ranges(
     subject: &[u8],
     frame: i8,
     frame_length: usize,

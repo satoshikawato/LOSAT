@@ -245,6 +245,12 @@ pub(crate) struct XPacked<'a> {
 }
 
 impl<'a> XPacked<'a> {
+    /// The bytes of the presence bits and their ranks, which a scan that tests each word here reads.
+    #[inline(always)]
+    pub(crate) fn x_bits_bytes(self) -> usize {
+        std::mem::size_of_val(self.bits)
+    }
+
     /// `Csr::run` of a packed head: an empty cell has no element of it.
     #[inline(always)]
     pub(crate) fn run(self, cell: usize) -> &'a [u32] {

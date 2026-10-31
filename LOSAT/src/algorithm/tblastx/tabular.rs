@@ -300,10 +300,11 @@ pub(super) fn write_tblastx_tabular(
         let query_length = run.ranges.input.range_length.unwrap_or(searched_length);
         // The record's length, which the frames are read in (`GetFrame`).
         let query_record_length = run.ranges.input.placements.length(q_idx, searched_length);
-        let tabular_query = TabularQuery {
-            id: run.query_ids[q_idx].as_ref(),
-            length: query_length,
-        };
+        let tabular_query = TabularQuery::of_ids(
+            run.queries[q_idx].believed(),
+            run.query_ids[q_idx].as_ref(),
+            query_length,
+        );
         let query_hits = &by_query[q_idx];
         buf.clear();
         // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208: a skipped search has a

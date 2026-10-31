@@ -9,6 +9,8 @@
 //! cell (19.9 M); against one copy (4.6 Mb) it is below. Each against a subject file (`-subject`)
 //! and a database (`-db`), at one and four threads.
 //! That those bytes equal NCBI's is the business of the fixture suites.
+//! `-task blastn` of 50 kb against 2 Mb has a packed table of 4^11 cells, whose scan tests each
+//! word once (`LOSAT_X_BNPVONCE`); the report does not depend on that either.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -84,6 +86,16 @@ fn search(
     threads: u32,
     vars: &[(&str, &str)],
 ) -> (Vec<u8>, String) {
+    search_task("megablast", query, subjects, threads, vars)
+}
+
+fn search_task(
+    task: &str,
+    query: &Path,
+    subjects: (&str, &Path),
+    threads: u32,
+    vars: &[(&str, &str)],
+) -> (Vec<u8>, String) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
@@ -96,7 +108,7 @@ fn search(
         .arg(query)
         .arg(subjects.0)
         .arg(subjects.1)
-        .args(["-task", "megablast", "-outfmt", "6"])
+        .args(["-task", task, "-outfmt", "6"])
         .args(["-num_threads", &threads.to_string()])
         .envs(vars.iter().copied())
         .output()
@@ -158,4 +170,33 @@ fn above_the_size_rule_is_csr() {
 #[test]
 fn below_the_size_rule_keeps_chains() {
     check(&TestDir::new("below"), 1, false);
+}
+
+#[test]
+fn a_word_is_tested_once_on_a_packed_table_of_4_11_cells() {
+    let dir = TestDir::new("pvonce");
+    let query = dir.path("sakai_50k.fna");
+    let sakai = letters(&fasta("Sakai.fna"));
+    std::fs::write(
+        &query,
+        format!(">sakai_50k\n{}\n", &sakai[1_000_000..1_050_000]),
+    )
+    .expect("write the query");
+    let subject = dir.path("mg1655_2m.fna");
+    let genome = letters(&fasta("MG1655.fna"));
+    std::fs::write(&subject, format!(">mg\n{}\n", &genome[..2_000_000]))
+        .expect("write the subject");
+    let subjects = ("-subject", subject.as_path());
+    let (expected, _) = search_task("blastn", &query, subjects, 1, &[("LOSAT_X_BNPVONCE", "0")]);
+    assert!(!expected.is_empty(), "no hits");
+    for threads in [1, 4] {
+        let reach = reach_support::Reach::new("pvonce");
+        let (report, _) = search_task("blastn", &query, subjects, threads, &[reach.var()]);
+        assert!(report == expected, "threads {threads}: default differs");
+        assert_eq!(
+            reach.sides("LOSAT_X_BNPVONCE"),
+            (true, false),
+            "threads {threads}: the side"
+        );
+    }
 }

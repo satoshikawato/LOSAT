@@ -251,9 +251,10 @@ fn parse_blastn_args(
         // The frozen web ABI v1 (plan TD-1) has no database search.
         db: None,
         // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
-        taxid_filter: Default::default(),
+        db_filter: Default::default(),
         dbsize: None,
         show_gis: false,
+        parse_deflines: false,
         searchsp: None,
         task: "megablast".to_string(),
         template_type: None,
@@ -283,6 +284,8 @@ fn parse_blastn_args(
         dust_filtering: None,
         dust: crate::blastinput::value_parsers::DustSpec::Yes,
         lcase_masking: false,
+        // The frozen web ABI v1 has no `-soft_masking` (refused below as an unknown flag).
+        soft_masking: None,
         // The frozen web ABI v1 (plan TD-1) has no WindowMasker.
         window_masker_db: None,
         window_masker: None,
@@ -295,13 +298,15 @@ fn parse_blastn_args(
         subject_loc: None,
         subject_besthit: false,
         culling_limit: None,
-        // The frozen web ABI v1 has no `-ungapped`, X-drops, `-no_greedy`, `-window_size` or
-        // `-off_diagonal_range` (they are refused below as unknown flags).
+        // The frozen web ABI v1 has no `-ungapped`, X-drops, `-no_greedy`, `-window_size`,
+        // `-off_diagonal_range` or `-min_raw_gapped_score` (they are refused below as unknown
+        // flags).
         ungapped: false,
         xdrop_ungap: None,
         xdrop_gap: None,
         xdrop_gap_final: None,
         no_greedy: false,
+        min_raw_gapped_score: None,
         window_size: None,
         off_diagonal_range: None,
         verbose: false,
@@ -394,9 +399,10 @@ fn parse_tblastx_args(
         // A database search is not part of LOSAT Web yet (DB-7).
         db: None,
         // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
-        taxid_filter: Default::default(),
+        db_filter: Default::default(),
         dbsize: None,
         show_gis: false,
+        parse_deflines: false,
         searchsp: None,
         evalue: 10.0,
         // The frozen web ABI v1 (plan TD-1) has no -threshold, -matrix or -window_size: BLOSUM62's
@@ -417,6 +423,7 @@ fn parse_tblastx_args(
         // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
         seg: "yes".to_string(),
         soft_masking: None,
+        lcase_masking: false,
         window_size: None,
         outfmt: "6".to_string(),
         culling_limit: None,
@@ -558,9 +565,10 @@ fn parse_blastp_args(
         // The frozen web ABI v1 (plan TD-1) searches subject records, not a database.
         db: None,
         // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
-        taxid_filter: Default::default(),
+        db_filter: Default::default(),
         dbsize: None,
         show_gis: false,
+        parse_deflines: false,
         searchsp: None,
         task: "blastp".to_string(),
         evalue: None,

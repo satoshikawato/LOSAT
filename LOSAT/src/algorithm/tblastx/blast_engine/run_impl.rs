@@ -3749,6 +3749,19 @@ impl Drop for XCloseUnits<'_> {
     }
 }
 
+// EXPERIMENT (LOSAT_X_TBXBOARD): the batch leaves the board on every return of its search. No NCBI
+// counterpart.
+struct XEndBatch<'a>(
+    &'a crate::algorithm::tblastx::x_work_board::XBoard,
+    &'a std::sync::Arc<crate::algorithm::tblastx::x_work_board::XBatch>,
+);
+
+impl Drop for XEndBatch<'_> {
+    fn drop(&mut self) {
+        self.0.end_batch(self.1);
+    }
+}
+
 fn search_query_batch<S: TbxScore>(
     // The scores of the search's matrix (`scoring.rs`).
     sc: S,
@@ -4435,6 +4448,9 @@ fn search_query_batch<S: TbxScore>(
                 && (subjects.count() == 1 || x_subject_next::on())
         })
         .map(|board| (board, board.batch(subjects.count())));
+    let _x_board_end = x_board_batch
+        .as_ref()
+        .map(|(board, batch)| XEndBatch(board, batch));
     // A batch without the unit path puts no units on the board: its subjects' slots are closed
     // now, so the subject loop's threads without a subject return at once (`XBoard::help`).
     if let Some((_, batch)) = x_board_batch

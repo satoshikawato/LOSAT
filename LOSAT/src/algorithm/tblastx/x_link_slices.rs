@@ -449,7 +449,7 @@ fn x_link_board(
             kernel_times.time(|| link_one_slice(group, args, pool));
         });
     };
-    board.run_groups(n, &run, rayon::current_num_threads() - 1);
+    board.run_groups(n, &run);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531

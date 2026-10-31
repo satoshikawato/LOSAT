@@ -455,11 +455,7 @@ fn x_merge<R: XRecord + Send>(
                     unreachable!("a frame is merged once");
                 }
             };
-            board.run_groups(
-                frame_chunks.len(),
-                &run,
-                frame_chunks.len().min(rayon::current_num_threads()) - 1,
-            );
+            board.run_groups(frame_chunks.len(), &run);
             let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
             for frame in outputs {
                 x_merge_frame(

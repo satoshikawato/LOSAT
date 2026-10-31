@@ -330,7 +330,7 @@ fn x_board_sort<C>(
                 unsafe { std::slice::from_raw_parts_mut((base as *mut usize).add(a), b - a) };
             chunk.sort_by(|&lhs, &rhs| compare(&records[lhs], &records[rhs]));
         };
-        board.run_groups(runs.len(), &sort_chunk, runs.len() - 1);
+        board.run_groups(runs.len(), &sort_chunk);
     }
     let mut in_indices = true;
     while runs.len() > 1 {
@@ -372,7 +372,7 @@ fn x_board_sort<C>(
                 }
             }
         };
-        board.run_groups(pairs.len(), &merge, pairs.len().saturating_sub(1));
+        board.run_groups(pairs.len(), &merge);
         runs = pairs
             .iter()
             .map(|&((a0, a1), right)| (a0, right.map_or(a1, |(_, b1)| b1)))

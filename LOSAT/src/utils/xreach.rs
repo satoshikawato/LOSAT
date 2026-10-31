@@ -112,7 +112,9 @@ pub fn write_report() {
     let Some(directory) = directory() else {
         return;
     };
-    let program = std::env::args().nth(1).unwrap_or_default();
+    let program = crate::cli::entry_argv(std::env::args_os())
+        .get(1)
+        .map_or_else(String::new, |word| word.to_string_lossy().into_owned());
     let mut text = String::from("switch\tnew\tref\tprogram\n");
     for (name, sides) in STRICT_SET.iter().chain(GRADUATED).zip(SIDES.iter()) {
         let sides = sides.load(Ordering::Relaxed);

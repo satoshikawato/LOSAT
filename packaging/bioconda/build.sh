@@ -12,3 +12,6 @@ cargo install \
   --verbose \
   --root "${PREFIX}" \
   --path .
+
+# NCBI's program names on PATH (relative links, so the prefix can move).
+"${PREFIX}/bin/losat" --install-shims "${PREFIX}/bin"

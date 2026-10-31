@@ -365,9 +365,13 @@ fn scan_strip<O: SeedOut>(x: &Inputs<'_>, job: &StripJob, out: &mut O) {
     // EXPERIMENT (LOSAT_X_BNCSR): a contiguous table laid out as CSR has no chains.
     // EXPERIMENT (LOSAT_X_BNCSRPACK): the form of its head chosen once, each form's scan its own.
     if let Some(csr) = x.two_stage.x_mb_csr() {
+        // EXPERIMENT (LOSAT_X_BNPVONCE): one presence test per word on a head that fits the cache.
         return match csr.x_packed() {
-            Some(packed) => scan_strip_csr(x, &packed, job, out),
-            None => scan_strip_csr(x, csr, job, out),
+            Some(packed) if super::x_bn_pv_once(&packed) => {
+                scan_strip_csr::<O, _, false>(x, &packed, job, out)
+            }
+            Some(packed) => scan_strip_csr::<O, _, true>(x, &packed, job, out),
+            None => scan_strip_csr::<O, _, true>(x, csr, job, out),
         };
     }
     let two_stage = x.two_stage;
@@ -408,7 +412,11 @@ fn scan_strip<O: SeedOut>(x: &Inputs<'_>, job: &StripJob, out: &mut O) {
 /// chain's order; so the same pairs reach `seed_of_pair` in the same order. EXPERIMENT
 /// (LOSAT_X_BNCSRPACK): over a head of either form (`x_dc_csr::XHead`).
 #[inline(never)]
-fn scan_strip_csr<O: SeedOut, H: crate::algorithm::blastn::lookup::x_dc_csr::XHead>(
+fn scan_strip_csr<
+    O: SeedOut,
+    H: crate::algorithm::blastn::lookup::x_dc_csr::XHead,
+    const PV: bool,
+>(
     x: &Inputs<'_>,
     csr: &H,
     job: &StripJob,
@@ -429,7 +437,7 @@ fn scan_strip_csr<O: SeedOut, H: crate::algorithm::blastn::lookup::x_dc_csr::XHe
     };
     let mut ring: H::Ring<'_, (usize, u64)> = csr.ring();
     let mut on_kmer = |kmer_start: usize, current_lut_kmer: u64| {
-        if two_stage.has_hits(current_lut_kmer) {
+        if !PV || two_stage.has_hits(current_lut_kmer) {
             ring.push((kmer_start, current_lut_kmer), |w| w.1 as usize, &mut emit);
         }
     };

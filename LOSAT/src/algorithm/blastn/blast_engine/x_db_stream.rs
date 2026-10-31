@@ -9,6 +9,17 @@
 //! `assist`): the chunks of a long sequence that a search hands out (a nested parallel stage) are
 //! searched by the waiting threads too, as the idle workers of the rounds' `par_iter` search them.
 //!
+//! EXPERIMENT (LOSAT_X_BNDBWIDE, a switch of the strict set: on unless it is `0`): the window is
+//! `X_BNDBWIDE_BLOCKS_PER_THREAD` x threads blocks, and it narrows to
+//! `X_BNDBSTREAM_BLOCKS_PER_THREAD` x threads while more than
+//! `X_BNDBWIDE_WAITING_BYTES_PER_THREAD` x threads bytes of results wait for the owner
+//! (`WaitingBound`). A window of 2 blocks per thread was shorter than the blocks themselves: on
+//! core_nt at 16 threads its 32 blocks were about 24 ms of the wall clock, against 54 ms for a block
+//! at p99, or for the owner's own search of one. The threads waited for room 3,344 s of 10,860 s,
+//! evenly over the run (`dropin-survey-20261029/BIGDB/STATE.md`, 2026-10-31). The bytes keep the
+//! bound on memory: the results that wait are at most the larger of the old window's and those
+//! bytes, plus the blocks in flight.
+//!
 //! Without the switch, `search_blocks_of` searches rounds of `BLOCKS_PER_THREAD` x threads blocks
 //! (`search_rounds`) and merges a round's results when the whole round is searched, so the
 //! preliminary HSP lists of every sequence of the round are in memory together. A database of at
@@ -40,6 +51,9 @@
 //! - the count of good initial extensions (the next query batch's size) adds up over every block
 //!   searched once, as in the rounds; a failed search ends the run.
 //!
+//! The window's width and the bytes decide only when a block is claimed, so they change none of
+//! the above.
+//!
 //! Memory: at most the window's blocks of results wait for the owner, and each thread holds one
 //! block and one scratch (the rounds make a scratch per `map_init` run, a few hundred per thread
 //! in the case above). The blocks are listed `X_SEGMENT_BLOCKS` at a time, one `BlockRange` (24
@@ -56,7 +70,7 @@
 //! It acts for every BLASTN task with `-db` at more than
 //! one thread; at one thread the blocks are searched one after another, as without it.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 use anyhow::Result;
@@ -64,7 +78,8 @@ use anyhow::Result;
 use crate::seqdb::{BlockRange, SeqDb};
 use crate::utils::threading::SearchPool;
 
-use super::{block_subject, search_read_error, BlastnSubjectRef};
+use super::super::x_bnstream::{search_in_order_bounded, WaitingBound};
+use super::{block_subject, search_read_error, BlastnSubjectRef, XWaitingBytes};
 
 /// No NCBI counterpart (scheduling only): whether LOSAT_X_BNDBSTREAM is on (a strict-set switch:
 /// on unless it is `0`).
@@ -73,10 +88,36 @@ pub(super) fn x_bn_db_stream() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNDBSTREAM"))
 }
 
+/// No NCBI counterpart (scheduling only): whether LOSAT_X_BNDBWIDE is on (a strict-set switch:
+/// on unless it is `0`).
+fn x_bn_db_wide() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNDBWIDE"))
+}
+
 // No NCBI counterpart (scheduling only): the window; it changes no value NCBI computes.
-/// Blocks per thread of the window: a thread finds a block to claim while the owner waits for
-/// the oldest one.
+/// Blocks per thread of the window that bytes of waiting results cannot narrow: a thread finds a
+/// block to claim while the owner waits for the oldest one.
 const X_BNDBSTREAM_BLOCKS_PER_THREAD: usize = 2;
+
+// No NCBI counterpart (scheduling only): as the window.
+/// Blocks per thread of the window with LOSAT_X_BNDBWIDE. Measured on core_nt (575,156 blocks,
+/// 10.7 ms at the median, 54 ms at p99): 32 blocks are about 24 ms of the wall clock at 16 threads,
+/// less than one slow block; 256 are about 190 ms (module documentation).
+const X_BNDBWIDE_BLOCKS_PER_THREAD: usize = 16;
+
+// No NCBI counterpart (scheduling only): as the window.
+/// Bytes of waiting results per thread above which LOSAT_X_BNDBWIDE's window narrows to
+/// `X_BNDBSTREAM_BLOCKS_PER_THREAD`.
+const X_BNDBWIDE_WAITING_BYTES_PER_THREAD: usize = 1 << 20;
+
+/// No NCBI counterpart (scheduling only): the heap bytes of a block's kept results.
+fn kept_bytes<R: XWaitingBytes>(kept: &Vec<(u32, R)>) -> usize {
+    kept.iter()
+        .map(|(_, result)| result.x_waiting_bytes())
+        .sum::<usize>()
+        .saturating_add(kept.x_waiting_bytes())
+}
 
 // No NCBI counterpart (scheduling only): as the window.
 /// Blocks listed at a time.
@@ -123,7 +164,7 @@ fn stream_blocks<T, R, I, K, M>(
     merge: &mut M,
 ) -> Result<()>
 where
-    R: Send,
+    R: Send + XWaitingBytes,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R) + Send,
@@ -151,7 +192,7 @@ pub(super) fn x_search_blocks_stream<T, R, I, K, M>(
     merge: &mut M,
 ) -> Result<()>
 where
-    R: Send,
+    R: Send + XWaitingBytes,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R) + Send,
@@ -180,12 +221,13 @@ fn search_window<T, R, I, K, M>(
     merge: &mut M,
 ) -> Result<()>
 where
-    R: Send,
+    R: Send + XWaitingBytes,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R) + Send,
 {
     let stop = AtomicBool::new(false);
+    let waiting_bytes = AtomicUsize::new(0);
     let search_block = |scratch: &mut T, i: usize| -> Result<Vec<(u32, R)>> {
         if stop.load(Ordering::Relaxed) {
             return Ok(Vec::new());
@@ -200,12 +242,26 @@ where
             }
         }
         super::x_done_block(block);
+        waiting_bytes.fetch_add(kept_bytes(&kept), Ordering::Relaxed);
         Ok(kept)
     };
-    let window = pool
-        .threads()
-        .max(1)
-        .saturating_mul(X_BNDBSTREAM_BLOCKS_PER_THREAD);
+    let threads = pool.threads().max(1);
+    let floor = threads.saturating_mul(X_BNDBSTREAM_BLOCKS_PER_THREAD);
+    let wide = x_bn_db_wide();
+    let window = if wide {
+        threads.saturating_mul(X_BNDBWIDE_BLOCKS_PER_THREAD)
+    } else {
+        floor
+    };
+    let bound = wide.then_some(WaitingBound {
+        floor,
+        waiting_bytes: &waiting_bytes,
+        max_bytes: threads.saturating_mul(X_BNDBWIDE_WAITING_BYTES_PER_THREAD),
+    });
+    if wide {
+        // A list of `floor` blocks or fewer behaves as without the switch.
+        crate::utils::xreach::x_reach!("LOSAT_X_BNDBWIDE", blocks.len() > floor);
+    }
     let mut first_error: Option<anyhow::Error> = None;
     let mut hand_over = |_: usize, found: Result<Vec<(u32, R)>>| {
         if first_error.is_some() {
@@ -213,9 +269,11 @@ where
         }
         match found {
             Ok(kept) => {
+                let bytes = kept_bytes(&kept);
                 for (ordinal, result) in kept {
                     merge(ordinal, result);
                 }
+                waiting_bytes.fetch_sub(bytes, Ordering::Relaxed);
             }
             Err(error) => {
                 // The blocks not claimed yet are not searched; those claimed are dropped.
@@ -225,10 +283,11 @@ where
         }
     };
     pool.install(|| {
-        super::super::x_bnstream::search_in_order(
+        search_in_order_bounded(
             blocks.len(),
             window,
             true,
+            bound,
             new_scratch,
             &search_block,
             &mut hand_over,
@@ -236,7 +295,12 @@ where
     });
     match first_error {
         Some(error) => Err(error),
-        None => Ok(()),
+        None => {
+            // Every block was handed over: a count that does not return to 0 would pin the window
+            // at its floor, or lift the bound, without changing a report.
+            debug_assert_eq!(waiting_bytes.load(Ordering::Relaxed), 0);
+            Ok(())
+        }
     }
 }
 
@@ -258,6 +322,17 @@ mod tests {
     }
 
     // Uneven work per sequence, so that the blocks end out of order.
+    // The bytes that wait are the results' lists and the list of the block's kept results.
+    #[test]
+    fn the_kept_bytes_are_the_capacities_of_the_lists() {
+        let mut kept: Vec<(u32, Vec<u64>)> = Vec::with_capacity(3);
+        kept.push((0, Vec::with_capacity(100)));
+        kept.push((1, Vec::with_capacity(1000)));
+        let outer = kept.capacity() * std::mem::size_of::<(u32, Vec<u64>)>();
+        let inner = (kept[0].1.capacity() + kept[1].1.capacity()) * std::mem::size_of::<u64>();
+        assert_eq!(kept_bytes(&kept), outer + inner);
+    }
+
     fn work(ordinal: u32) -> u64 {
         let rounds = if ordinal % 5 == 1 { 200_000 } else { 100 };
         (0..rounds).fold(u64::from(ordinal), |acc, x| {

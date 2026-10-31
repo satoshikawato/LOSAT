@@ -127,7 +127,7 @@ use crate::report::pairwise::{
     write_blastn_pairwise_prolog, write_blastn_pairwise_report, BlastnPairwiseQuery,
     BlastnPairwiseReport, PairwiseConfig, PairwiseDatabase, PairwiseHit,
 };
-use crate::report::query_warnings::{invalid_query_warning, query_warning};
+use crate::report::query_warnings::query_warning;
 use crate::sequence::packed_subject::PackedNucleotide;
 use crate::stats::KarlinParams;
 // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-344,370-374
@@ -6580,13 +6580,24 @@ fn post_process_hits_and_write(
                 .iter()
                 .enumerate()
                 .map(|(q_idx, query)| {
-                    if report.context_karlin[2 * q_idx + report.first_context].is_some() {
-                        Vec::new()
-                    } else if query.seq().is_empty() {
-                        vec![NO_DATA_MESSAGE.to_string()]
-                    } else {
-                        vec![crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string()]
+                    let mut messages = Vec::new();
+                    if report.context_karlin[2 * q_idx + report.first_context].is_none() {
+                        messages.push(if query.seq().is_empty() {
+                            NO_DATA_MESSAGE.to_string()
+                        } else {
+                            crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string()
+                        });
                     }
+                    if !unsearched[q_idx]
+                        && report
+                            .database_reader
+                            .is_some_and(|database| database.filtered_empty())
+                    {
+                        messages.push(
+                            crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string(),
+                        );
+                    }
+                    messages
                 })
                 .collect();
             let version = format!("BLASTN {NCBI_BLASTN_VERSION}");
@@ -7367,15 +7378,23 @@ fn search_cli(
     let database = match args.database_name() {
         Some(name) => {
             let list = args.db_filter.resolve(&settings, outputs.diagnostics)?;
-            Some(
-                database::BlastnDatabase::open_restricted(
-                    name,
-                    &settings,
-                    list.as_ref(),
-                    outputs.diagnostics,
-                )?
-                .showing_gis(args.show_gis),
-            )
+            let database = database::BlastnDatabase::open_restricted(
+                name,
+                &settings,
+                list.as_ref(),
+                outputs.diagnostics,
+            )?
+            .showing_gis(args.show_gis);
+            crate::algorithm::common::database::note_archive_database_filter(
+                args.archive.as_ref(),
+                &args.db_filter,
+                list.as_ref(),
+                database.filtered_empty(),
+                args.searchsp.is_some_and(|space| space > 0),
+                args.dbsize.is_some_and(|size| size > 0),
+                "BLASTN",
+            )?;
+            Some(database)
         }
         None => None,
     };
@@ -8700,8 +8719,14 @@ fn run_in_pool(
     write_pairwise_prologs(outputs, &output_formats, megablast, &shown, true)?;
     let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
     if batching.fixed_batch_size == 0 {
-        // A database's total is the `Int8` of its index files (`GetDbTotalLength`).
-        let total_length = source.metadata().db_len_total as i64;
+        // A database's total is the `Int8` of its index files (`GetDbTotalLength` sums
+        // `m_DbInfo`, `GetBlastDbInfo`: the whole database's, also with a list).
+        let total_length = shown
+            .database
+            .as_ref()
+            .map_or(source.metadata().db_len_total as i64, |database| {
+                database.total_letters as i64
+            });
         if total_length > 0 {
             mixer.set_target_hits((total_length / 3000) as i32);
         }
@@ -9425,6 +9450,10 @@ fn run_in_pool(
         let result_warnings = output_formats
             .first()
             .is_none_or(|format| format.writes_query_warnings());
+        let filtered_empty = match source {
+            SubjectSource::Database(database) => database.filtered_empty(),
+            _ => false,
+        };
         // The query's first valid context (`-strand minus`: its minus context).
         let first_context = QueryStrand::from_option(&args.strand).first_context();
         for (index, karlin) in batch
@@ -9434,15 +9463,26 @@ fn run_in_pool(
             .step_by(2)
             .enumerate()
         {
-            if karlin.is_none() && result_warnings {
-                let query = &batch_records.searched()[index];
-                let ordinal = query_input.ordinal(start + index);
-                warnings[start + index].extend(if lengths[start + index] == 0 {
-                    query_warning("blastn", ordinal, query, &[NO_DATA_MESSAGE.to_string()])
+            if !result_warnings {
+                continue;
+            }
+            let mut messages = Vec::new();
+            if karlin.is_none() {
+                messages.push(if lengths[start + index] == 0 {
+                    NO_DATA_MESSAGE.to_string()
                 } else {
-                    invalid_query_warning("blastn", ordinal, query)
+                    crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string()
                 });
             }
+            if batch.searched && filtered_empty {
+                messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
+            }
+            warnings[start + index].extend(query_warning(
+                "blastn",
+                query_input.ordinal(start + index),
+                &batch_records.searched()[index],
+                &messages,
+            ));
         }
         context_karlin.extend(batch.context_karlin);
         query_eff_searchsp.extend(batch.query_eff_searchsp);
@@ -11763,11 +11803,26 @@ fn search_query_batch<const UNGAPPED: bool>(
             // searchsp = query_info->contexts[context].eff_searchsp;
             // BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
             // params->cutoffs[context].cutoff_score_max = new_cutoff;
-            let hit_saving_cutoff = cutoff_score_max_from_evalue(
-                evalue_threshold,
-                query_eff_searchsp[context_idx],
-                &search_karlin_ref[context_idx].gapped,
-            );
+            // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:876-882
+            // ```c
+            //    if (options->cutoff_score > 0) {
+            //       Int4 new_cutoff = options->cutoff_score * (Int4) sbp->scale_factor;
+            //       for (context = query_info->first_context;
+            //                           context <= query_info->last_context; ++context) {
+            //          params->cutoffs[context].cutoff_score = new_cutoff;
+            //          params->cutoffs[context].cutoff_score_max = new_cutoff;
+            // ```
+            // `-min_raw_gapped_score` replaces the e-value's cutoff (the scale factor of
+            // BLASTN is 1); the word cutoff, the reduced cutoff and megablast's ungapped
+            // X-drop below follow it.
+            let hit_saving_cutoff = match config.min_raw_gapped_score {
+                Some(score) => score,
+                None => cutoff_score_max_from_evalue(
+                    evalue_threshold,
+                    query_eff_searchsp[context_idx],
+                    &search_karlin_ref[context_idx].gapped,
+                ),
+            };
             // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-374
             // gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
             // new_cutoff = gap_trigger;

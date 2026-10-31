@@ -1,0 +1,3 @@
+Warning: [blastx] To obtain better run time performance, please run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist
+Warning: [blastx] Query_1 first nucleotide .. : Filtering resulted in an empty database. 
+Warning: [blastx] Query_2 second: Filtering resulted in an empty database. 

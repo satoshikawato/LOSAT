@@ -423,6 +423,12 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit6.option.off_diagonal_range.onehit", [*mq, *multi_s, "-off_diagonal_range", "2"], "same-error"),
         ("audit6.option.no_greedy", [*mq, *multi_s, "-no_greedy", "-gapopen", "5", "-gapextend", "2", "-outfmt", "6"], "same"),
         ("audit6.option.no_greedy.zero_gaps", [*mq, *multi_s, "-no_greedy"], "same-error"),
+        # DI-6b: -min_raw_gapped_score replaces the e-value's cutoff; 0 and below are unset.
+        ("audit6.option.min_raw_gapped_score", [*mq, *multi_s, "-min_raw_gapped_score", "15", "-outfmt", "6"], "same"),
+        ("audit6.option.min_raw_gapped_score.zero", [*mq, *multi_s, "-min_raw_gapped_score", "0", "-outfmt", "6"], "same"),
+        ("audit6.option.min_raw_gapped_score.negative", [*mq, *multi_s, "-min_raw_gapped_score", "-5", "-outfmt", "6"], "same"),
+        ("audit6.option.min_raw_gapped_score.evalue0", [*mq, *multi_s, "-min_raw_gapped_score", "40", "-evalue", "0", "-outfmt", "6"], "same"),
+        ("audit6.option.min_raw_gapped_score.evalue0_zero", [*mq, *multi_s, "-min_raw_gapped_score", "0", "-evalue", "0"], "same-error"),
         ("audit6.option.num_alignments", [*mq, *multi_s, "-num_alignments", "5"], "losat-rejects"),
         ("audit6.out_name.trailing_dot", [*mq, *multi_s, "-out", f"{w}/missing_dir/" + "o" * 256 + "/."], "same-error"),
     ]

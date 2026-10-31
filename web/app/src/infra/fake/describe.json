@@ -258,6 +258,11 @@
     ]
    },
    {
+    "flag": "-min_raw_gapped_score",
+    "help": "Minimum raw gapped score to keep an alignment in the preliminary gapped and traceback stages",
+    "takes_value": true
+   },
+   {
     "flag": "-window_size",
     "help": "Multiple hits window size, use 0 to specify 1-hit algorithm (default: 40 for dc-megablast, 0 for the other tasks)",
     "takes_value": true

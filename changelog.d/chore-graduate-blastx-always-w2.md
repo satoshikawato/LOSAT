@@ -6,3 +6,4 @@
   two threads or more (a search on one thread still builds its tables without the pool, `LOSAT_X_BXPOOLN1`). The
   shadow modes `LOSAT_X_BXDBSTREAMSHADOW` and `LOSAT_X_BXEVALEMPTYSHADOW` and their `[X_SHADOW]` lines went with
   them. Outputs do not change.
+- `blastx -db` with a `-seqidlist`, `-taxids` or other list reads the scanned shortest length in its hit-saving cutoff as NCBI BLAST+ does (the default path answered 10, and could keep rows NCBI drops).

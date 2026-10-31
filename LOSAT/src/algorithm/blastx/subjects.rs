@@ -71,7 +71,7 @@ impl<'a> Subjects<'a> {
     /// sequences (`SeqDb::statistics_numbers`; a database without any sequence is `Unreadable`).
     pub(crate) fn statistics_len(&self) -> usize {
         match self {
-            Subjects::Database(_) | Subjects::Stream(_) => self.len().max(1),
+            Subjects::Stream(_) => self.len().max(1),
             Subjects::Fasta(_) | Subjects::Unreadable => self.len(),
         }
     }
@@ -162,7 +162,11 @@ impl<'a> Subjects<'a> {
     pub(crate) fn shortest_length(&self) -> usize {
         match self {
             Subjects::Fasta(records) => records.iter().map(|s| s.sequence.len()).min().unwrap_or(0),
-            Subjects::Stream(_) | Subjects::Unreadable => BLAST_SEQSRC_MINLENGTH,
+            Subjects::Stream(stream) => stream
+                .db
+                .min_length()
+                .map_or(BLAST_SEQSRC_MINLENGTH, |shortest| shortest as usize),
+            Subjects::Unreadable => BLAST_SEQSRC_MINLENGTH,
         }
     }
 

@@ -130,6 +130,11 @@ impl<'a> XStreamDb<'a> {
         self.longest
     }
 
+    /// The scanned shortest length with a list (`SeqDb::min_length`), `None` for a whole database.
+    pub(crate) fn min_length(&self) -> Option<u32> {
+        self.db.min_length()
+    }
+
     /// The block of a pass that starts at `oid`: as many sequences as fit `block_bytes`
     /// (`SeqDb::next_block`, at least one).
     fn read_from(&self, oid: usize) -> Result<XBlock> {

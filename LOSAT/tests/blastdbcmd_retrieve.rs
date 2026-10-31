@@ -87,8 +87,9 @@ fn check(id: &str, words: &[&str], status: i32, out_dir: &Path) {
 }
 
 /// The probe's cases that LOSAT answers as NCBI does: id, words, NCBI's exit status. The
-/// databases are the probe's (`db/`), without parsed Seq-ids (`p4n`, `p5n`, `n4n`, `n5n`,
-/// `pL`, `nL`) or with them where no id is looked up (`-entry all`: `p4`, `p5`, `n4`, `n5`).
+/// databases are the probe's (`db/`): without parsed Seq-ids (`p4n`, `p5n`, `n4n`, `n5n`,
+/// `pL`, `nL`), version 4 with them where no id is looked up (`-entry all`: `p4`, `n4`), and
+/// version 5 with them (`p5`, `n5`, `d5` and `e5` with an accession on many sequences).
 #[rustfmt::skip]
 const MATCHES: &[(&str, &[&str], i32)] = &[
     ("F01", &["-db", "db/p5n", "-entry", "all"], 0),
@@ -210,6 +211,69 @@ const MATCHES: &[(&str, &[&str], i32)] = &[
     ("D110", &["-db", "db/n4n", "-entry", "gnl|BL_ORD_ID|1", "-range", "488-"], 0),
     ("D111", &["-db", "db/n4n", "-entry", "gnl|BL_ORD_ID|1", "-range", "489-"], 0),
     ("D112", &["-db", "db/n4n", "-entry", "gnl|BL_ORD_ID|1", "-range", "488-600", "-strand", "minus"], 0),
+    ("F10", &["-db", "db/p5", "-entry_batch", "in/pids.txt"], 1),
+    ("F12", &["-db", "db/p5", "-entry_batch", "in/pids.txt", "-get_dups"], 1),
+    ("F19", &["-db", "db/p5", "-entry", "XP_000020.1", "-ctrl_a"], 0),
+    ("F24", &["-db", "db/n5", "-entry_batch", "in/nids.txt"], 1),
+    ("S03", &["-db", "db/d5", "-entry", "XP_800001", "-outfmt", "%o %a"], 0),
+    ("S05", &["-db", "db/d5", "-entry", "XP_800002", "-outfmt", "%o %a"], 0),
+    ("S07", &["-db", "db/d5", "-entry_batch", "in/dups.txt", "-outfmt", "%o %a"], 1),
+    ("S09", &["-db", "db/d5", "-entry_batch", "in/dups.txt", "-get_dups", "-outfmt", "%o %a"], 1),
+    ("S12", &["-db", "db/d5", "-entry", "XP_800001.3", "-outfmt", "%o %a"], 1),
+    ("S46", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%o", "-get_dups"], 0),
+    ("H01", &["-db", "db/p5", "-entry", ""], 1),
+    ("H02", &["-db", "db/p5", "-entry", "XP_000001.1,,P00012", "-outfmt", "%o %a"], 1),
+    ("H03", &["-db", "db/p5", "-entry", "emb|CAA00019.1|", "-target_only"], 0),
+    ("H04", &["-db", "db/p5", "-entry", "gi|1819", "-target_only"], 0),
+    ("H05", &["-db", "db/p5", "-entry", "1819", "-target_only"], 0),
+    ("H06", &["-db", "db/p5", "-entry", "CAA00019.1", "-target_only", "-outfmt", "%a %g"], 0),
+    ("H07", &["-db", "db/p5", "-entry", "XP_000020.1", "-target_only"], 0),
+    ("H08", &["-db", "db/p5", "-entry", "CAA00019.1", "-outfmt", "%o %a %g"], 0),
+    ("H11", &["-db", "db/p5", "-entry_batch", "in/pids.txt", "-target_only"], 1),
+    ("H12", &["-db", "db/p5", "-entry_batch", "in/pids.txt", "-get_dups", "-outfmt", "%o %a"], 1),
+    ("H13", &["-db", "db/p5", "-entry", "0"], 1),
+    ("H14", &["-db", "db/p5", "-entry", "-5"], 1),
+    ("H15", &["-db", "db/p5", "-entry", "+1819"], 0),
+    ("H16", &["-db", "db/p5", "-entry", "99999999999"], 1),
+    ("H17", &["-db", "db/p5", "-entry", "99999999999999999999"], 1),
+    ("H18", &["-db", "db/p5", "-entry", "1818,1819,1820", "-outfmt", "%o %a"], 0),
+    ("H22", &["-db", "db/p5", "-entry", "gnl|BL_ORD_ID|3"], 1),
+    ("H23", &["-db", "db/p5", "-entry", "lcl|"], 1),
+    ("H24", &["-db", "db/p5", "-entry", "gi|"], 1),
+    ("H25", &["-db", "db/p5", "-entry", "|"], 1),
+    ("H26", &["-db", "db/p5", "-entry", "_"], 1),
+    ("H27", &["-db", "db/p5", "-entry", " XP_000001.1"], 0),
+    ("H28", &["-db", "db/p5", "-entry", "XP_000001.1 "], 0),
+    ("H29", &["-db", "db/p5", "-entry", "xp_000001.1", "-target_only", "-outfmt", "%a"], 0),
+    ("H30", &["-db", "db/p5", "-entry", "XP_000001", "-outfmt", "%o %a"], 0),
+    ("H31", &["-db", "db/p5", "-entry", "XP_000001.2", "-outfmt", "%o %a"], 1),
+    ("H32", &["-db", "db/n5", "-entry", "654321", "-outfmt", "%o %a %g"], 0),
+    ("H33", &["-db", "db/n5", "-entry", "gi|654321", "-target_only", "-outfmt", "%o %a %g"], 0),
+    ("H34", &["-db", "db/n5", "-entry", "X00001", "-outfmt", "%o %a"], 0),
+    ("H35", &["-db", "db/n5", "-entry_batch", "in/nids.txt", "-get_dups", "-outfmt", "%o %a"], 1),
+    ("H36", &["-db", "db/n5", "-entry_batch", "in/nids.txt", "-target_only", "-outfmt", "%o %a"], 1),
+    // An alias over two LMDB files with the same keys: `-entry` joins their OIDs, the bulk
+    // lookup keeps the last file's.
+    ("H120", &["-db", "db/h_dd", "-entry", "XP_800001", "-outfmt", "%o %a"], 0),
+    ("H121", &["-db", "db/h_dd", "-entry", "XP_800002", "-outfmt", "%o %a"], 0),
+    ("H122", &["-db", "db/h_dd", "-entry_batch", "in/dups.txt", "-outfmt", "%o %a"], 1),
+    ("H123", &["-db", "db/h_dd", "-entry_batch", "in/dups.txt", "-get_dups", "-outfmt", "%o %a"], 1),
+    // One LMDB file with `acc2oid` and one without: the exception stops `-entry` and `-get_dups`,
+    // the bulk lookup swallows it and keeps the first file's answers.
+    ("H58", &["-db", "db/h_p5p5n", "-entry", "XP_000001.1", "-outfmt", "%o %a"], 1),
+    ("H59", &["-db", "db/h_p5p5n", "-entry_batch", "in/h_p.txt", "-outfmt", "%o %a"], 1),
+    ("H60", &["-db", "db/h_p5p5n", "-entry_batch", "in/h_p.txt", "-get_dups", "-outfmt", "%o %a"], 1),
+    ("H65", &["-db", "db/h_p5np5", "-entry_batch", "in/h_gi.txt", "-outfmt", "%o %a"], 1),
+    // A database of two volumes (`pv`), and its second volume alone: accessions in the other
+    // volume are not found, and the OIDs and GIs of the volume start from 0.
+    ("H125", &["-db", "db/pv", "-entry", "XP_000001.1,DAA00016.1,1819", "-outfmt", "%o %a"], 0),
+    ("H126", &["-db", "db/pv.01", "-entry", "DAA00016.1", "-outfmt", "%o %a"], 0),
+    ("H127", &["-db", "db/pv.01", "-entry", "XP_000001.1", "-outfmt", "%o %a"], 1),
+    ("H128", &["-db", "db/pv.01", "-entry", "1819", "-outfmt", "%o %a"], 0),
+    ("H129", &["-db", "db/pv.01", "-entry_batch", "in/h_gi.txt", "-outfmt", "%o %a"], 1),
+    ("H130", &["-db", "db/pv.00", "-entry", "1819", "-outfmt", "%o %a"], 1),
+    ("H110", &["-db", "db/e5", "-entry", "XP_900002", "-outfmt", "%o %a"], 0),
+    ("H111", &["-db", "db/e5", "-entry", "XP_900001.599", "-outfmt", "%o %a"], 0),
 ];
 
 #[test]
@@ -230,6 +294,7 @@ const APPROVED: &[(&str, &[&str], i32)] = &[
     ("D87", &["-db", "db/n4n", "-entry", "gnl|BL_ORD_ID|1", "-range", "5-20", "-strand", "minus", "-long_seqids"], 0),
     ("D97", &["-db", "db/n4n", "-entry", "gnl|BL_ORD_ID|1", "-range", "5-20", "-strand", "minus", "-long_seqids", "-ctrl_a"], 0),
     ("D101", &["-db", "db/n4n", "-entry", "gnl|BL_ORD_ID|1", "-long_seqids", "-range", "5-20", "-strand", "minus", "-line_length", "5"], 0),
+    ("H09", &["-db", "db/n5", "-entry", "NM_000001.1", "-long_seqids", "-range", "5-20", "-strand", "minus"], 0),
 ];
 
 #[test]
@@ -238,6 +303,172 @@ fn long_ids_on_the_minus_strand_write_the_reverse_complement() {
     for &(id, words, status) in APPROVED {
         check(id, words, status, &dir.0);
     }
+}
+
+/// An accession on more than about 500 sequences (`PD-LOSAT-NCBI-DEFECTS` exception 6): NCBI
+/// stops with `Accessions to Oids lookup error in e5` (probes H107-H109), LOSAT answers as NCBI
+/// does for a key of fewer sequences (H110). `e5`: `XP_900001.i` on OID `i - 1`, 600 of them.
+#[test]
+fn an_accession_on_many_sequences_is_looked_up_like_any_other() {
+    let dir = TestDir::new("many");
+    check(
+        "H107",
+        &["-db", "db/e5", "-entry", "XP_900001", "-outfmt", "%o %a"],
+        0,
+        &dir.0,
+    );
+    check(
+        "H108",
+        &[
+            "-db",
+            "db/e5",
+            "-entry_batch",
+            "in/h_e.txt",
+            "-outfmt",
+            "%o %a",
+        ],
+        0,
+        &dir.0,
+    );
+    check(
+        "H109",
+        &[
+            "-db",
+            "db/e5",
+            "-entry_batch",
+            "in/h_e.txt",
+            "-get_dups",
+            "-outfmt",
+            "%o %a",
+        ],
+        0,
+        &dir.0,
+    );
+}
+
+/// Copies the files of the database `name` of `tests/blastdbcmd/db` into `dir`.
+fn copy_db(name: &str, dir: &Path) {
+    fs::create_dir_all(dir).unwrap();
+    let db = tests_dir().join("blastdbcmd/db");
+    for entry in fs::read_dir(&db).unwrap() {
+        let path = entry.unwrap().path();
+        if path.file_stem().unwrap().to_str() == Some(name) {
+            fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
+        }
+    }
+}
+
+/// A damaged lookup file (probes H78, H74, H86, H90-H106): NCBI's message at the opening of
+/// the database, a silent miss of a GI without its ISAM, and refusals where NCBI crashes.
+#[test]
+fn damaged_lookup_files_are_reported_as_ncbi_s_or_refused() {
+    let dir = TestDir::new("damaged");
+    let damaged = |case: &str, change: &dyn Fn(&Path)| {
+        let db = dir.0.join(case);
+        copy_db("p5", &db);
+        change(&db);
+        format!("{}/p5", db.display())
+    };
+    let open_error = |p5: &str, words: &[&str], message: String| {
+        let mut all = vec!["-db", p5, "-dbtype", "prot"];
+        all.extend_from_slice(words);
+        let (stdout, stderr, code) = blastdbcmd(&all, &dir.0);
+        assert_eq!(stdout, b"", "{all:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&stderr),
+            format!("{message}\n"),
+            "{all:?}"
+        );
+        assert_eq!(code, 2, "{all:?}");
+    };
+    let nopdb = damaged("nopdb", &|db| fs::remove_file(db.join("p5.pdb")).unwrap());
+    open_error(
+        &nopdb,
+        &["-entry", "all"],
+        format!(
+            "BLAST Database error: File {nopdb}.pdb not found. If you renamed any BLAST database \
+             files, please use original file names, and makeblastdb to rename the database. If \
+             you deleted any BLAST database files, you need to recreate the database."
+        ),
+    );
+    let garbage = damaged("garbage", &|db| {
+        fs::write(db.join("p5.pdb"), vec![0x5a; 8192]).unwrap();
+    });
+    for words in [&["-entry", "all"][..], &["-info"][..]] {
+        open_error(
+            &garbage,
+            words,
+            "BLAST Database error: LMDB runtime error: mdb_env_open: MDB_INVALID: File is not an \
+             LMDB file"
+                .to_string(),
+        );
+    }
+    let empty = damaged("empty", &|db| fs::write(db.join("p5.pdb"), b"").unwrap());
+    open_error(
+        &empty,
+        &["-entry", "all"],
+        "BLAST Database error: LMDB runtime error: mdb_env_open: Bad file descriptor".to_string(),
+    );
+    let wrong = damaged("wrong", &|db| {
+        let d5 = tests_dir().join("blastdbcmd/db/d5.pdb");
+        fs::copy(d5, db.join("p5.pdb")).unwrap();
+    });
+    open_error(
+        &wrong,
+        &["-entry", "all"],
+        "BLAST Database error: Input db vol does not match lmdb vol".to_string(),
+    );
+
+    // NCBI stops with a bus error on a truncated LMDB file (H82).
+    let trunc = damaged("trunc", &|db| {
+        let bytes = fs::read(db.join("p5.pdb")).unwrap();
+        fs::write(db.join("p5.pdb"), &bytes[..8192]).unwrap();
+    });
+    let (stdout, stderr, code) = blastdbcmd(&["-db", &trunc, "-entry", "all"], &dir.0);
+    let stderr = String::from_utf8_lossy(&stderr);
+    assert_eq!(stdout, b"");
+    assert_eq!(code, 1, "{stderr}");
+    assert!(
+        stderr.ends_with("is not supported by LOSAT's BLASTDBCMD\n"),
+        "{stderr}"
+    );
+
+    let missed = "Error: [blastdbcmd] Entry not found: 1819\nError: [blastdbcmd] Entry or entries \
+                  not found in BLAST database\n";
+    let nopnd = damaged("nopnd", &|db| fs::remove_file(db.join("p5.pnd")).unwrap());
+    let nopni = damaged("nopni", &|db| fs::remove_file(db.join("p5.pni")).unwrap());
+    let shortpnd = damaged("shortpnd", &|db| {
+        let bytes = fs::read(db.join("p5.pnd")).unwrap();
+        fs::write(db.join("p5.pnd"), &bytes[..bytes.len() - 8]).unwrap();
+    });
+    for (case, p5) in [("nopnd", nopnd), ("nopni", nopni), ("shortpnd", shortpnd)] {
+        let (stdout, stderr, code) = blastdbcmd(&["-db", &p5, "-entry", "1819"], &dir.0);
+        assert_eq!(stdout, b"", "{case}");
+        assert_eq!(String::from_utf8_lossy(&stderr), missed, "{case}");
+        assert_eq!(code, 1, "{case}");
+    }
+    // NCBI crashes on a GI index with a bad header (H98): only the lookups of a GI reach it.
+    let badpni = damaged("badpni", &|db| {
+        let mut bytes = fs::read(db.join("p5.pni")).unwrap();
+        bytes[3] = 2;
+        fs::write(db.join("p5.pni"), bytes).unwrap();
+    });
+    let (stdout, stderr, code) = blastdbcmd(&["-db", &badpni, "-entry", "1819"], &dir.0);
+    let stderr = String::from_utf8_lossy(&stderr);
+    assert_eq!(stdout, b"");
+    assert_eq!(code, 1, "{stderr}");
+    assert!(
+        stderr.ends_with("is not supported by LOSAT's BLASTDBCMD\n"),
+        "{stderr}"
+    );
+    let (stdout, _, code) = blastdbcmd(
+        &["-db", &badpni, "-entry", "XP_000001.1", "-outfmt", "%o"],
+        &dir.0,
+    );
+    assert_eq!(
+        (String::from_utf8_lossy(&stdout).as_ref(), code),
+        ("0\n", 0)
+    );
 }
 
 /// `gnl|BL_ORD_ID|n` of a version 4 database in volumes is the one sequence `n` of the
@@ -333,18 +564,15 @@ fn out_and_logfile_take_the_retrieval_and_its_diagnostics() {
 }
 
 /// The probe's cases that LOSAT's BLASTDBCMD does not serve: the lookup of an accession, a
-/// name or a GI in a database built with `-parse_seqids` (line BDC's BDC2b and BDC2c), an
+/// name or a GI in a version 4 database built with `-parse_seqids` (line BDC's BDC2c), an
 /// alias of a database with masks and several names in `-db` (DECISIONS 6), `-range ""`
 /// (NCBI crashes), and `-outfmt %d` / `%b` (DECISIONS 9).
 #[rustfmt::skip]
 const REFUSALS: &[(&str, &[&str])] = &[
     ("F09", &["-db", "db/p4", "-entry_batch", "in/pids.txt"]),
-    ("F10", &["-db", "db/p5", "-entry_batch", "in/pids.txt"]),
     ("F11", &["-db", "db/p4", "-entry_batch", "in/pids.txt", "-get_dups"]),
-    ("F12", &["-db", "db/p5", "-entry_batch", "in/pids.txt", "-get_dups"]),
     ("F17", &["-db", "db/p4", "-entry", "XP_000020.1", "-target_only"]),
     ("F18", &["-db", "db/p4", "-entry", "1819", "-target_only"]),
-    ("F19", &["-db", "db/p5", "-entry", "XP_000020.1", "-ctrl_a"]),
     ("F20", &["-db", "db/p4", "-entry", "XP_000001.1,gi|123456,1ABC_A", "-long_seqids"]),
     ("F23", &["-db", "db/n4", "-entry_batch", "in/nids.txt"]),
     ("F32", &["-db", "db/palias", "-entry", "all", "-outfmt", "%o %a %t"]),
@@ -357,7 +585,6 @@ const REFUSALS: &[(&str, &[&str])] = &[
     ("S17", &["-db", "db/p4", "-entry", "CAA00019.1", "-target_only", "-outfmt", "%a %g"]),
     ("S18", &["-db", "db/n4", "-entry", "NM_000001.1", "-long_seqids", "-range", "5-20", "-strand", "minus"]),
     ("S19", &["-db", "db/n4", "-entry", "NM_000001.1,NM_000001.1", "-long_seqids"]),
-    ("S46", &["-db", "db/p5", "-entry", "XP_000001.1", "-outfmt", "%o", "-get_dups"]),
     ("D61", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-range", ""]),
     ("asn-d", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-outfmt", "%d"]),
     ("asn-b", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-outfmt", "%b"]),

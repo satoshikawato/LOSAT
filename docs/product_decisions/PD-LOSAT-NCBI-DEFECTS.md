@@ -1,14 +1,15 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.6
+- Version: 1.7
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
   1.4 2026-10-22 (exception 4, the culling limit near `INT4_MAX`, NCBI parity line O3b);
   1.5 2026-10-30 (exception 5, the expansion of a taxid whose ancestors form a cycle, line DI-8a);
   1.6 2026-10-30 (exception 6, an accession stored under more than about 500 sequences of a
-  version 5 database, and the seqid-list items of rules 2 and 3, line DI-8b)
+  version 5 database, and the seqid-list items of rules 2 and 3, line DI-8b);
+  1.7 2026-10-31 (exception 6 also for the id lookups of `losat blastdbcmd`, line BDC's BDC2b)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -197,7 +198,12 @@ defects are fixed and presented as differences); its PR (DI-8b) asks the maintai
    and negative lists, probe S03 and S62 of `dropin-survey-20261029/DI8`). LOSAT reads the
    first duplicate as for any other key (`LmdbEntry::accessions_to_oids`, `first_oid`), as
    NCBI does for an accession of fewer sequences: a positive list keeps that first OID, a
-   negative list judges it, and the other ids of the list are unaffected.
+   negative list judges it, and the other ids of the list are unaffected. `blastdbcmd -entry`
+   and `-entry_batch` stop on such a key the same way (`Error: [blastdbcmd] Accessions to Oids
+   lookup error in <db>`, exit 1, probes H107-H109 of `dropin-survey-20261029/BDC/probe`): LOSAT
+   answers with the OIDs of the key in LMDB's order, what NCBI gives for a key of fewer
+   sequences (H110), and with the first of them in the bulk lookup of `-entry_batch`
+   (`LmdbEntry::oids`, `IdLookup`; `LOSAT/tests/blastdbcmd_retrieve.rs`).
 
 ## Reproduced as NCBI (rule 2)
 

@@ -181,6 +181,15 @@ fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
             enc.variant("Blast4-value", "string", 11);
             enc.visible_str(value.as_bytes());
         }
+        ParamValue::IntegerList(values) => {
+            enc.variant("Blast4-value", "integer-list", 16);
+            enc.begin_list(false);
+            for &value in values {
+                enc.element();
+                enc.int(value);
+            }
+            enc.end_list();
+        }
     }
     enc.end_variant();
     enc.end_member();
@@ -228,6 +237,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     request: &super::ArchiveRequest,
     batch: &BatchArchive<'_>,
     search_space_option: Option<i64>,
+    database_list: Option<&Param>,
     messages: &[Message],
     aligns: &mut A,
 ) -> Result<()> {
@@ -355,7 +365,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out.enc.end_named();
     out.enc.end_member();
 
-    if batch.required.is_some() || !batch.lcase_masks.is_empty() {
+    if batch.required.is_some() || !batch.lcase_masks.is_empty() || database_list.is_some() {
         out.enc.member("program-options", 6);
         out.enc.begin_named("Blast4-parameters");
         out.enc.begin_list(false);
@@ -382,6 +392,16 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
             out.enc.end_variant();
             out.enc.end_member();
             out.enc.end_sequence();
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:318-320
+        // ```c++
+        //     x_Process_BlastOptions(opts_handle);
+        //     x_Process_Query(query);
+        //     x_Process_SearchDb(db);
+        // ```
+        // The database's list comes after the parameters of the query.
+        if let Some(param) = database_list {
+            write_param(&mut out.enc, param);
         }
         out.enc.end_list();
         out.enc.end_named();
@@ -482,6 +502,7 @@ pub fn write_archive<A: AlignSource>(
 ) -> Result<()> {
     let messages = handle.take_messages();
     let space = handle.search_space_option(batch.searched_space);
+    let list = handle.database_list();
     let request = handle.request();
     match handle.encoding() {
         ArchiveEncoding::Nothing => Ok(()),
@@ -492,7 +513,15 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(&mut out, request, batch, space, &messages, aligns)?;
+            write_search_archive(
+                &mut out,
+                request,
+                batch,
+                space,
+                list.as_ref(),
+                &messages,
+                aligns,
+            )?;
             out.finish()
         }
         ArchiveEncoding::Text => {
@@ -502,7 +531,15 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(&mut out, request, batch, space, &messages, aligns)?;
+            write_search_archive(
+                &mut out,
+                request,
+                batch,
+                space,
+                list.as_ref(),
+                &messages,
+                aligns,
+            )?;
             out.finish()
         }
         ArchiveEncoding::Binary => {
@@ -512,7 +549,15 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(&mut out, request, batch, space, &messages, aligns)?;
+            write_search_archive(
+                &mut out,
+                request,
+                batch,
+                space,
+                list.as_ref(),
+                &messages,
+                aligns,
+            )?;
             out.finish()
         }
     }

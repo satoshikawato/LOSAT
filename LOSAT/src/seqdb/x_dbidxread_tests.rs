@@ -392,6 +392,33 @@ fn a_header_is_read_alike_alone_and_in_a_range() {
         assert!(db.num_seqs() > 0 && db.num_seqs() < whole, "{list:?}");
         assert!(check_headers(&db, &path) > 0, "{list:?}");
     }
+    // A seqid list too. The negative list keeps a sequence without any of its lines here, which
+    // both reads refuse alike (`no_line_kept`).
+    for negative in [false, true] {
+        let path = ids.join("nucl_v5");
+        let mut db = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+        let whole = db.num_seqs();
+        let file =
+            super::seqidlist::read_si_list(b"AF000002.3\nAJ000003.1\n", &mut Vec::new()).unwrap();
+        let list = DbList::Seqids(SeqidList { negative, file });
+        db.restrict(&list, &mut Vec::new()).unwrap();
+        assert!(db.num_seqs() > 0 && db.num_seqs() < whole, "{negative}");
+        if !negative {
+            assert!(check_headers(&db, &path) > 0);
+            continue;
+        }
+        let mut refused = 0;
+        for range in db.header_ranges(1024) {
+            assert!(db.visit_sequence_headers(range, |ordinal, header| {
+                let walked = header.err().map(|error| error.to_string());
+                refused += usize::from(walked.is_some());
+                let alone = db.read_header(ordinal).err();
+                assert_eq!(walked, alone.map(|error| error.to_string()), "{ordinal}");
+                true
+            }));
+        }
+        assert!(refused > 0);
+    }
 }
 
 /// Checks `visit_sequence_headers` and `read_header` of every sequence of `db` against

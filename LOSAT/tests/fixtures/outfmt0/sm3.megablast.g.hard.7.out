@@ -1,0 +1,8 @@
+# BLASTN 2.17.0+
+# Query: gq
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/sm3_g_s.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+gq	gs	100.000	120	0	0	1	120	51	170	9.96e-63	222
+gq	gs	100.000	120	0	0	177	296	227	346	6.03e-55	196
+# BLAST processed 1 queries

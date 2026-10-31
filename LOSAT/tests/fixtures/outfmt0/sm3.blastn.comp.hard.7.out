@@ -1,0 +1,16 @@
+# BLASTN 2.17.0+
+# Query: comp1
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/sm3_comp_s.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+comp1	cs1	100.000	31	0	0	157	187	197	227	1.12e-11	57.2
+comp1	cs1	96.774	31	1	0	1014	1044	1054	1084	4.75e-10	52.7
+comp1	cs1	96.154	26	1	0	1175	1200	1215	1240	2.46e-07	43.7
+comp1	cs1	100.000	22	0	0	5	26	45	66	8.58e-07	41.0
+comp1	cs1	100.000	16	0	0	313	328	353	368	0.002	30.1
+comp1	cs1	100.000	16	0	0	873	888	913	928	0.002	30.1
+# BLASTN 2.17.0+
+# Query: comp2
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/sm3_comp_s.fna)
+# 0 hits found
+# BLAST processed 2 queries

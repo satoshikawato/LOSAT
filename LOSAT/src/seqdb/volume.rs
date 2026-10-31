@@ -488,6 +488,7 @@ impl Volume {
     pub fn header(&self, oid: u32) -> Result<VolumeHeader, SeqDbError> {
         let record = self.header_bytes(oid)?;
         self.decode_header(
+            oid,
             &record,
             &with_extension(&self.base, self.index.seqtype, "hr"),
         )
@@ -497,7 +498,7 @@ impl Volume {
     pub fn defline_taxids(&self, oid: u32) -> Result<Vec<i32>, SeqDbError> {
         let record = self.header_bytes(oid)?;
         let path = with_extension(&self.base, self.index.seqtype, "hr");
-        self.kept_lines(&record, &path, decode_defline_taxids(&record, &path))
+        self.kept_lines(oid, &record, &path, decode_defline_taxids(&record, &path))
     }
 
     /// The definition lines of the sequence `oid` (volume-relative) with every member and
@@ -506,6 +507,7 @@ impl Volume {
     pub fn defline_set(&self, oid: u32) -> Result<crate::seqid::DeflineSet, SeqDbError> {
         let record = self.header_bytes(oid)?;
         self.decode_kept_set(
+            oid,
             &record,
             &with_extension(&self.base, self.index.seqtype, "hr"),
         )
@@ -521,6 +523,7 @@ impl Volume {
     /// that the volume's `DeflineRule` removes; `decoded` itself without a rule.
     fn kept_lines<T: DeflineList>(
         &self,
+        oid: u32,
         record: &[u8],
         path: &Path,
         decoded: Result<T, SeqDbError>,
@@ -529,19 +532,36 @@ impl Volume {
             return decoded;
         };
         let mut decoded = decoded?;
-        decoded.retain_lines(&rule.keep_mask(&decode_full(record, path)?));
+        let keep = rule
+            .keep_mask(&decode_full(record, path)?)
+            .ok_or_else(|| self.no_line_kept(oid))?;
+        decoded.retain_lines(&keep);
         Ok(decoded)
     }
 
-    /// The header in the bytes `record` (`header`).
-    fn decode_header(&self, record: &[u8], path: &Path) -> Result<VolumeHeader, SeqDbError> {
+    /// The header of the sequence `oid` (volume-relative) in the bytes `record` (`header`).
+    fn decode_header(
+        &self,
+        oid: u32,
+        record: &[u8],
+        path: &Path,
+    ) -> Result<VolumeHeader, SeqDbError> {
         match decode_deflines_as(record, path, false) {
-            Err(error) if error.is_parsed_seqids() => {
-                self.decode_kept_set(record, path).map(VolumeHeader::Parsed)
-            }
+            Err(error) if error.is_parsed_seqids() => self
+                .decode_kept_set(oid, record, path)
+                .map(VolumeHeader::Parsed),
             read => self
-                .kept_lines(record, path, read)
+                .kept_lines(oid, record, path, read)
                 .map(VolumeHeader::Ordinal),
+        }
+    }
+
+    /// LOSAT's refusal of the sequence `oid` (volume-relative) whose every definition line
+    /// the seqid list removes (`filter::no_line_kept`).
+    fn no_line_kept(&self, oid: u32) -> SeqDbError {
+        SeqDbError::Unsupported {
+            path: self.base.clone(),
+            message: super::filter::no_line_kept(oid),
         }
     }
 
@@ -549,12 +569,13 @@ impl Volume {
     /// `DeflineRule` removes.
     fn decode_kept_set(
         &self,
+        oid: u32,
         record: &[u8],
         path: &Path,
     ) -> Result<crate::seqid::DeflineSet, SeqDbError> {
         let mut set = decode_full(record, path)?;
         if let Some(rule) = &self.defline_rule {
-            let keep = rule.keep_mask(&set);
+            let keep = rule.keep_mask(&set).ok_or_else(|| self.no_line_kept(oid))?;
             set.retain_lines(&keep);
         }
         Ok(set)
@@ -572,6 +593,7 @@ impl Volume {
         let record = self.header_bytes(oid)?;
         let path = with_extension(&self.base, self.index.seqtype, "hr");
         self.kept_lines(
+            oid,
             &record,
             &path,
             decode_deflines_as(&record, &path, want_taxid),
@@ -816,8 +838,13 @@ impl Volume {
             end,
             piece_bytes,
             &|oid| self.deflines_as(oid, want_taxid),
-            &|record, path| {
-                self.kept_lines(record, path, decode_deflines_as(record, path, want_taxid))
+            &|oid, record, path| {
+                self.kept_lines(
+                    oid,
+                    record,
+                    path,
+                    decode_deflines_as(record, path, want_taxid),
+                )
             },
             visit,
         )
@@ -838,7 +865,9 @@ impl Volume {
             end,
             piece_bytes,
             &|oid| self.defline_taxids(oid),
-            &|record, path| self.kept_lines(record, path, decode_defline_taxids(record, path)),
+            &|oid, record, path| {
+                self.kept_lines(oid, record, path, decode_defline_taxids(record, path))
+            },
             visit,
         )
     }
@@ -865,7 +894,7 @@ impl Volume {
             end,
             piece_bytes,
             &|oid| self.defline_set(oid).map(taxids),
-            &|record, path| self.decode_kept_set(record, path).map(taxids),
+            &|oid, record, path| self.decode_kept_set(oid, record, path).map(taxids),
             visit,
         )
     }
@@ -883,21 +912,21 @@ impl Volume {
             end,
             piece_bytes,
             &|oid| self.header(oid),
-            &|record, path| self.decode_header(record, path),
+            &|oid, record, path| self.decode_header(oid, record, path),
             visit,
         )
     }
 
     /// The shared walk of `visit_deflines` and `visit_defline_taxids`: `single(oid)` is the
     /// one-sequence read that gives the result for a sequence that is not read in a piece,
-    /// `decode(record, path)` decodes a record read in a piece.
+    /// `decode(oid, record, path)` decodes a record read in a piece.
     fn visit_headers<T>(
         &self,
         first: u32,
         end: u32,
         piece_bytes: u64,
         single: &dyn Fn(u32) -> Result<T, SeqDbError>,
-        decode: &dyn Fn(&[u8], &Path) -> Result<T, SeqDbError>,
+        decode: &dyn Fn(u32, &[u8], &Path) -> Result<T, SeqDbError>,
         visit: &mut dyn FnMut(u32, Result<T, SeqDbError>) -> bool,
     ) -> bool {
         let one_by_one =
@@ -943,7 +972,10 @@ impl Volume {
             for j in i..stop {
                 let lo = (u64::from(offsets[j]) - start) as usize;
                 let hi = (u64::from(offsets[j + 1]) - start) as usize;
-                if !visit(first + j as u32, decode(&data[lo..hi], &hr_path)) {
+                if !visit(
+                    first + j as u32,
+                    decode(first + j as u32, &data[lo..hi], &hr_path),
+                ) {
                     return false;
                 }
             }

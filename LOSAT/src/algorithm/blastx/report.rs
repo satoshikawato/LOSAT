@@ -8,6 +8,7 @@ use crate::{
     report::outfmt6::{
         format_bitscore_ncbi, format_evalue_ncbi_tabular, format_percent_identity_ncbi,
     },
+    report::query_warnings::EMPTY_DATABASE_MESSAGE,
 };
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
 // ```c++
@@ -1237,7 +1238,11 @@ pub fn render_queries(
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            stderr.write_all(&query_warning(query, batch.search_skipped))?;
+            stderr.write_all(&query_warning(
+                query,
+                batch.search_skipped,
+                options.filtered_empty,
+            ))?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:779-783
             // ```c++
             //               m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader)
@@ -1493,7 +1498,11 @@ fn write_pairwise(
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            warnings.push(query_warning(query, batch.search_skipped));
+            warnings.push(query_warning(
+                query,
+                batch.search_skipped,
+                options.filtered_empty,
+            ));
             valid.push(first.is_some());
             skipped.push(batch.search_skipped);
             for list in lists {
@@ -1905,8 +1914,13 @@ pub(crate) fn write_epilog(
 //     }
 // ```
 // Global errorId0 "Could..." precedes per-query "Sequence..." after Combine.
-pub(super) fn query_warning(query: &FastaRecord, search_skipped: bool) -> Vec<u8> {
-    if !query.sequence.is_empty() && !search_skipped {
+pub(super) fn query_warning(
+    query: &FastaRecord,
+    search_skipped: bool,
+    filtered_empty: bool,
+) -> Vec<u8> {
+    let empty_database = filtered_empty && !search_skipped;
+    if !query.sequence.is_empty() && !search_skipped && !empty_database {
         return Vec::new();
     }
     let mut id = query.warning_id().to_vec();
@@ -1926,6 +1940,10 @@ pub(super) fn query_warning(query: &FastaRecord, search_skipped: bool) -> Vec<u8
     }
     if query.sequence.is_empty() {
         bytes.extend_from_slice(b"Sequence contains no data ");
+    }
+    if empty_database {
+        bytes.extend_from_slice(EMPTY_DATABASE_MESSAGE.as_bytes());
+        bytes.push(b' ');
     }
     bytes.push(b'\n');
     bytes

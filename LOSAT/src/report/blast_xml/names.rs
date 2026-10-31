@@ -158,9 +158,6 @@ pub fn xml_db_title(stored_title: &[u8]) -> Result<Vec<u8>, Refusal> {
 pub fn xml_message(query_id: &[u8], warnings: &[String], has_hits: bool) -> Option<Vec<u8>> {
     let mut message: Vec<u8> = Vec::new();
     if !warnings.is_empty() {
-        let mut sorted: Vec<&String> = warnings.iter().collect();
-        sorted.sort();
-        sorted.dedup();
         // GetErrorStrings(): the id and ": "
         message.extend_from_slice(query_id);
         message.extend_from_slice(b": ");
@@ -168,7 +165,7 @@ pub fn xml_message(query_id: &[u8], warnings: &[String], has_hits: bool) -> Opti
         message.push(b' ');
         message.extend_from_slice(query_id);
         message.extend_from_slice(b": ");
-        for warning in sorted {
+        for warning in crate::report::query_warnings::sorted_query_messages(warnings) {
             message.extend_from_slice(warning.as_bytes());
             message.push(b' ');
         }

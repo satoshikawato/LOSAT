@@ -446,6 +446,40 @@ programs. `taxfilter/` holds the inputs and what `make_taxfilter.py MAKEBLASTDB 
 
 The `v4` rows search `x16_taxid` and `x16_ntaxid` (version 4 databases with taxids, above).
 
+## Seqid lists (DI-8b)
+
+Rows `db.sl.*`: `-seqidlist` and `-negative_seqidlist` with `-db`, five programs, on `taxfilter/tfp`, `taxfilter/tfn`
+(two volumes), `ids/prot_v5`, `ids/nucl_v5` (version 5) and `ids/prot_v4`, `ids/nucl_v4` (version 4, string ISAM).
+`seqidlist/` holds the lists, written by `seqidlist/make_seqidlist.py`:
+
+- text lists in the forms NCBI's reader takes (white-space separated tokens, a leading `>` skipped, `#` to the end of the
+  line a comment, CRLF lines): `sl_tfp.txt` (five Swiss-Prot ids of tfp, with and without versions, one in FASTA form, and an
+  unknown id), `sl_tfp_neg.txt` (the same ids without versions: a versionless id excludes the versioned stored id),
+  `sl_tfn.txt` (four local ids across tfn's two volumes), `sl_prot.txt` and `sl_nucl.txt` (every Seq-id form of
+  `ids/prot_v5` and `ids/nucl_v5`: tpg, RefSeq and Swiss-Prot without versions, a pdb chain, local ids, a general id as
+  `db:tag`, a versionless accession of an OID of several definition lines, a gi that NCBI drops), `sl_gi.txt` (gi ids only:
+  NCBI's `Empty seqid list` warning and no restriction on a version 5 database, no OID on a version 4 one),
+  `sl_comment.txt` (no id: no list), `sl_none.txt` (ids no database has: NCBI searches an empty database, LOSAT refuses),
+  `sl_empty.txt` (0 bytes: NCBI's `Failed to map seqidlist file ` error);
+- binary lists in the format of `blastdb_aliastool -seqid_file_out` (NUL, file size, count, title, date, database length
+  and, when it is not 0, the database's date and volume names, then the ids with a one-byte length): `sl_tfp.bsl` and
+  `sl_nucl.bsl` (the processed ids of the text lists: no warning), `sl_tfp_badlen.bsl` (a database length that is not
+  tfp's: NCBI's `Seqidlist file db info does not match input db` warning, the list is used).
+
+The negative lists on `ids/prot_v5`, `ids/prot_v4`, `ids/nucl_v5` and `ids/nucl_v4` (rows `db.sl.bp.nforms.6`,
+`db.sl.bp.v4neg.6`, `db.sl.bp.v4gi.6`, `db.sl.bn.nforms.6`, `db.sl.bn.v4neg.6`) are `losat-rejection` rows: those databases
+hold sequences whose every definition line has only a gi or a ti, and a negative seqid list leaves such a sequence without a
+line (`CSeqDBNegativeList::FindId` matches no gi or ti): NCBI searches it and drops its hits from the report without notice,
+LOSAT refuses when the sequence is to be reported (`the seqid list keeps sequence N of the volume but none of its definition
+lines`, DI-8b DECISIONS 17). A positive list that selects such a sequence is refused before the search.
+
+`ids/noacc_v5` (three proteins of `ids/ids_q.faa`, `makeblastdb -dbtype prot -blastdb_version 5` without `-parse_seqids`,
+NCBI 2.17.0) has no accession table: a seqid list on it is NCBI's `BLAST Database error: DB contains no accession info.`
+(row `db.sl.bp.noacc.6`, rc 2).
+
+A list file that is not on the search path (NCBI: `Error: NCBI C++ Exception: ... To be memory mapped the file must
+exist: ''`, exit 255, with the path of NCBI's build tree) is checked by `tests/cli_v2.rs`, not by a row.
+
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
 `ungapped_abr` (the 33 genes of `LOSAT/tests/fixtures/blastn_regression/inputs/culling_abricate_genes.fa`, as `ungapped_abr.fna`) is built like
@@ -463,7 +497,8 @@ without, `ungapped_re` (the six subjects of `re_s.fa`: N every other base, a run
 
 `mejo` is `LOSAT/tests/fasta/MejoMJNV.fasta` (one sequence, 401,182 bases) as pyani ANIb builds its databases
 (`makeblastdb -dbtype nucl -in FILE -title STEM -out OUT`, no parsed Seq-ids; version 4 for the repository), the
-subject of rows `db.xdrop.*` (DI-6: the X-drops, `-window_size`, `-off_diagonal_range` and `-no_greedy`; the queries
+subject of rows `db.xdrop.*` (DI-6: the X-drops, `-window_size`, `-off_diagonal_range` and `-no_greedy`) and of some of
+rows `db.minraw.*` (DI-6b: `-min_raw_gapped_score`; the queries
 `tests/fasta/outfmt0/anib_frags*.fna` are 1020-nt fragments of `MelaMJNV.fasta`, pyani's fragment size). Run from `LOSAT/`:
 
     losat makeblastdb -dbtype nucl -in tests/fasta/MejoMJNV.fasta -title MejoMJNV -out tests/db_search/mejo -blastdb_version 4

@@ -183,6 +183,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         placement: 'algorithm',
         fields: [
           { flag: '-dust', label: 'Low complexity regions filter (DUST)', kind: 'text', suggestions: ['no', 'yes'] },
+          softMasking,
           lcaseMasking,
         ],
       },

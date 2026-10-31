@@ -32,6 +32,8 @@ pub enum ParamValue {
     Real(f64),
     /// `string`.
     Str(String),
+    /// `integer-list`.
+    IntegerList(Vec<i32>),
 }
 
 /// A recorded parameter (`Blast4-parameter`).

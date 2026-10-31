@@ -505,11 +505,20 @@ fn run_inner(
                     .map_err(anyhow::Error::msg)?;
             // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the
             // database arguments reads it (`s_GetTaxIDList`) before the database opens.
-            let taxids = args.taxid_filter.resolve(&settings, &mut stderr)?;
-            Some(
-                BlastxDatabase::open_restricted(name, &settings, taxids.as_ref(), &mut stderr)?
-                    .showing_gis(args.show_gis),
-            )
+            let list = args.db_filter.resolve(&settings, &mut stderr)?;
+            let database =
+                BlastxDatabase::open_restricted(name, &settings, list.as_ref(), &mut stderr)?
+                    .showing_gis(args.show_gis);
+            crate::algorithm::common::database::note_archive_database_filter(
+                archive.as_ref(),
+                &args.db_filter,
+                list.as_ref(),
+                database.filtered_empty(),
+                args.searchsp.is_some_and(|space| space > 0),
+                args.dbsize.is_some_and(|size| size > 0),
+                "BLASTX",
+            )?;
+            Some(database)
         }
         None => None,
     };
@@ -523,6 +532,9 @@ fn run_inner(
     //    		if(resolved.empty())
     //    			ERR_POST(Warning << "Taxonomy name lookup from taxid requires installation of taxdb database with ftp://ftp.ncbi.nlm.nih.gov/blast/db/taxdb.tar.gz");
     // ```
+    options.filtered_empty = database
+        .as_ref()
+        .is_some_and(|database| database.filtered_empty());
     // A custom tabular field list that shows a plural name of the taxonomy database asks
     // whether `taxdb.bti` is on the search path: its formatters warn without it. A `-db` search
     // asks its database; a `-subject` search the search path of NCBI's databases (the

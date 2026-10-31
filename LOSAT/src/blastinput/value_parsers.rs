@@ -929,6 +929,11 @@ pub fn blastp_threshold(value: &str) -> Result<f64, String> {
     ncbi_threshold(value, "BLASTP")
 }
 
+/// A BLASTX `-threshold` value (`ncbi_threshold`).
+pub fn blastx_threshold(value: &str) -> Result<f64, String> {
+    ncbi_threshold(value, "BLASTX")
+}
+
 /// A PSIBLAST `-threshold` value (`ncbi_threshold`).
 pub fn psiblast_threshold(value: &str) -> Result<f64, String> {
     ncbi_threshold(value, "PSIBLAST")

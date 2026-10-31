@@ -304,6 +304,43 @@ impl DbFilterArgs {
     // 2026-10-29). A taxid whose descendants loop back to it (taxid 1, whose parent is 1)
     // never ends NCBI's recursive query; LOSAT visits each taxid once and ends with every
     // taxid below it (DECISIONS 10, `TaxonomySqlite::descendants`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:458-469
+    // ```c++
+    //     CRef<CSeqDBGiList>& gilist = const_cast<CRef<CSeqDBGiList>& > (db->GetGiList());
+    //     if (gilist.NotEmpty()) {
+    //         vector<TTaxId> taxids((gilist->GetTaxIdsList().begin()), gilist->GetTaxIdsList().end());
+    //         ...
+    //         x_AddParameterToProgramOptions(CBlast4Field::Get(eBlastOpt_TaxidList), int_taxids);
+    // ```
+    /// The `program-options` parameter of the BLAST archive for the list option of the command
+    /// line: NCBI's list object is there for each option, so the parameter is written also when
+    /// no id came of it, or the list is a seqid list (`resolved`: `resolve`'s answer), without
+    /// ids. The ids are those of NCBI's `set`, ascending.
+    pub fn archive_parameter(
+        &self,
+        resolved: Option<&DbList>,
+    ) -> Option<crate::report::archive::options::Param> {
+        use crate::report::archive::options::{Param, ParamValue};
+        let negative = match (self.seqid_list(), self.list()) {
+            (Some((_, negative)), _) | (None, Some((_, _, negative))) => negative,
+            (None, None) => return None,
+        };
+        let ids = match resolved {
+            Some(DbList::Taxids(TaxidList::Positive(ids) | TaxidList::Negative(ids))) => {
+                ids.iter().copied().collect()
+            }
+            _ => Vec::new(),
+        };
+        Some(Param {
+            name: if negative {
+                "NegativeTaxidList"
+            } else {
+                "TaxidList"
+            },
+            value: ParamValue::IntegerList(ids),
+        })
+    }
+
     /// The list of the command line, read (and a taxid list expanded) as NCBI reads it, with
     /// the warnings NCBI writes while reading (a missing taxonomy file, a dropped token of a
     /// seqid list) written to `warnings`. `Ok(None)`: no list, or one without an id (NCBI
@@ -541,6 +578,31 @@ fn string_to_int(token: &[u8]) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Probes E01-E08, F01-F04 of line DI-8 (`search_strategy.cpp:458-469`).
+    #[test]
+    fn the_archive_parameter_follows_the_list_option() {
+        use crate::report::archive::options::ParamValue;
+        let ids = BTreeSet::from([10090, 9606]);
+        let filter = |taxids: bool, negative: bool| DbFilterArgs {
+            taxids: (taxids && !negative).then(|| "1".to_string()),
+            negative_taxids: (taxids && negative).then(|| "1".to_string()),
+            seqidlist: (!taxids && !negative).then(|| "f".to_string()),
+            negative_seqidlist: (!taxids && negative).then(|| "f".to_string()),
+            ..DbFilterArgs::default()
+        };
+        let list = DbList::Taxids(TaxidList::Positive(ids.clone()));
+        let param = filter(true, false).archive_parameter(Some(&list)).unwrap();
+        assert_eq!(param.name, "TaxidList");
+        assert_eq!(param.value, ParamValue::IntegerList(vec![9606, 10090]));
+        // A missing taxonomy file: the list object of NCBI has no id.
+        let param = filter(true, false).archive_parameter(None).unwrap();
+        assert_eq!(param.value, ParamValue::IntegerList(Vec::new()));
+        let param = filter(false, true).archive_parameter(None).unwrap();
+        assert_eq!(param.name, "NegativeTaxidList");
+        assert_eq!(param.value, ParamValue::IntegerList(Vec::new()));
+        assert!(DbFilterArgs::default().archive_parameter(None).is_none());
+    }
 
     #[test]
     fn lines_end_as_ncbis_stream_reader_ends_them() {

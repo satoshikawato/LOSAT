@@ -416,6 +416,16 @@ pub struct BlastnArgs {
     // ```
     #[arg(long = "lcase_masking", default_value_t = false)]
     pub lcase_masking: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:365-368
+    // ```c++
+    //         arg_desc.AddDefaultKey(kArgLookupTableMaskingOnly, "soft_masking",
+    //                         "Apply filtering locations as soft masks",
+    //                         CArgDescriptions::eBoolean,
+    //                         kDfltArgLookupTableMaskingOnlyNucl);
+    // ```
+    // Read by `soft_masking`.
+    #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: true]")]
+    pub soft_masking: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:358-363
     // ```c++
     //         arg_desc.AddOptionalKey(kArgWindowMaskerDatabase, "window_masker_db",
@@ -566,6 +576,21 @@ pub struct BlastnArgs {
     /// Use non-greedy dynamic programming extension.
     #[arg(long)]
     pub no_greedy: bool,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:701-704,739-741
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgMinRawGappedScore, "int_value",
+    //                             "Minimum raw gapped score to keep an alignment "
+    //                             "in the preliminary gapped and traceback stages",
+    //                             CArgDescriptions::eInteger);
+    // ...
+    //     if (args[kArgMinRawGappedScore]) {
+    //         options.SetCutoffScore(args[kArgMinRawGappedScore].AsInteger());
+    //     }
+    // ```
+    // No constraint on the value: 0 and below keep the cutoff of the e-value
+    // (`coordination.rs` `configure_task`).
+    #[arg(long, value_parser = ncbi_integer, help = "Minimum raw gapped score to keep an alignment in the preliminary gapped and traceback stages")]
+    pub min_raw_gapped_score: Option<i32>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:475-481,487-497
     // ```c++
     //     arg_desc.AddOptionalKey(kArgWindowSize, "int_value",
@@ -725,6 +750,21 @@ impl BlastnArgs {
         self.dbsize.unwrap_or(0)
     }
 
+    /// `-soft_masking` (`mask_at_hash`): `false` writes the query's masks into the searched copy
+    /// of the query (`mask_query_letters`). The task's `ClearFilterOptions` does not change the
+    /// value: blastn-short takes the default as well.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
+    /// ```c++
+    /// CFilteringArgs::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
+    /// {
+    ///     if (args[kArgLookupTableMaskingOnly]) {
+    ///         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
+    /// ```
+    pub fn soft_masking(&self) -> bool {
+        self.soft_masking.unwrap_or(true)
+    }
+
     /// Reads the `-dust` value (`parse_dust_filtering`) where NCBI's filtering handler reads
     /// it, with NCBI's error.
     ///
@@ -791,7 +831,33 @@ impl BlastnArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::QueryStrand;
+    use super::{BlastnArgs, QueryStrand};
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        args: BlastnArgs,
+    }
+
+    // `-soft_masking` takes NCBI's boolean spellings (`NStr::StringToBool`); its default is true,
+    // also for blastn-short (the handler comes after `ClearFilterOptions`).
+    #[test]
+    fn soft_masking_sets_mask_at_hash() {
+        let soft = |extra: &[&str]| {
+            let mut argv = vec!["losat", "--query", "q.fa", "--subject", "s.fa"];
+            argv.extend_from_slice(extra);
+            TestCli::parse_from(argv).args.soft_masking()
+        };
+        assert!(soft(&[]));
+        assert!(soft(&["--task", "blastn-short"]));
+        for value in ["true", "T", "1", "YES"] {
+            assert!(soft(&["--soft_masking", value]), "{value}");
+        }
+        for value in ["false", "F", "0", "no"] {
+            assert!(!soft(&["--soft_masking", value]), "{value}");
+        }
+    }
 
     #[test]
     fn the_strand_option_is_read_once() {

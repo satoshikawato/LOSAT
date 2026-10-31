@@ -454,6 +454,8 @@ pub struct SeqDb {
     /// scanned shortest length of the included OIDs with one (`CSeqDBImpl::x_ScanTotals`,
     /// approximate for nucleotides).
     min_length: u32,
+    /// The length of OID 0 of the volumes when a list kept no sequence (`SeqDb::filtered_empty`).
+    empty_list_first_length: Option<u64>,
     /// The total length of the volumes, which the reports print (`printed_total_length`).
     whole_total_length: u64,
     /// The OIDs of a taxid list (`restrict_taxids`): ordinal id `i` is the `i`-th of them.
@@ -813,6 +815,7 @@ impl SeqDb {
             total_length,
             max_length,
             min_length: 0,
+            empty_list_first_length: None,
             whole_total_length: total_length,
             filter: None,
             search_path: None,
@@ -952,6 +955,41 @@ impl SeqDb {
     /// taxid list.
     pub fn printed_total_length(&self) -> u64 {
         self.whole_total_length
+    }
+
+    /// Whether a list kept none of the sequences of a database that has some: NCBI searches
+    /// nothing, warns for each query and reports it without hits
+    /// (`report::query_warnings::EMPTY_DATABASE_MESSAGE`). A database without any sequence,
+    /// with or without a list, is not this: its first query batch fails.
+    pub fn filtered_empty(&self) -> bool {
+        self.empty_list_first_length.is_some()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-938
+    // ```c
+    //       if (total_length > 0) {
+    //           num_seqs = BlastSeqSrcGetNumSeqsStats(seq_src);
+    //           if (num_seqs <= 0)
+    //               num_seqs = BlastSeqSrcGetNumSeqs(seq_src);
+    //       } else {
+    //           /* Not a database search; each subject sequence is considered
+    //              individually */
+    //           Int4 oid = 0;  /* Get length of first sequence. */
+    //           if ( (total_length = BlastSeqSrcGetSeqLen(seq_src, (void*) &oid)) < 0) {
+    //               total_length = -1;
+    //               num_seqs = -1;
+    //           }
+    //           num_seqs = 1;
+    //       }
+    // ```
+    /// The total length and the number of sequences that the statistics of a search read:
+    /// `total_length` and `num_seqs`, except where a list kept no sequence, where NCBI takes the
+    /// length of OID 0 (`CSeqDB::GetSeqLength` does not ask the list) and one sequence.
+    pub fn statistics_numbers(&self) -> (u64, u32) {
+        match self.empty_list_first_length {
+            Some(length) => (length, 1),
+            None => (self.total_length, self.num_seqs),
+        }
     }
 
     /// Title of the database.

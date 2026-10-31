@@ -14,7 +14,10 @@ fn losat() -> &'static str {
 
 /// A new directory of this test.
 fn temp_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("losat-entry-{tag}-{}", std::process::id()));
+    // In the target directory: the hard link of `the_default_directory_...` needs the binary's
+    // file system.
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("losat-entry-{tag}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
@@ -186,8 +189,34 @@ fn installing_twice_is_fine_and_another_file_is_left_alone() {
     assert_eq!(fs::read(shim(&other, "blastp")).unwrap(), b"NCBI\n");
     assert!(!shim(&other, "blastn").exists());
 
-    let usage = run(losat(), &["--install-shims", "a", "b"]);
-    assert_eq!(usage.status.code(), Some(1), "{usage:?}");
+    for words in [
+        &["--install-shims", "a", "b"][..],
+        &["--install-shims", "-h"],
+    ] {
+        let usage = run(losat(), words);
+        assert_eq!(usage.status.code(), Some(1), "{words:?} {usage:?}");
+    }
+    assert!(!Path::new(env!("CARGO_MANIFEST_DIR")).join("-h").exists());
+
+    // A link left by a `losat` that moved is replaced; the single-dash form of `-help` works.
+    let moved = temp_dir("moved");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("/no/such/dir/losat", shim(&moved, "blastx")).unwrap();
+    #[cfg(not(unix))]
+    fs::copy(losat(), shim(&moved, "blastx")).unwrap();
+    let replaced = run(losat(), &["-install-shims", moved.to_str().unwrap()]);
+    assert!(replaced.status.success(), "{replaced:?}");
+    let version = run(shim(&moved, "blastx"), &["-version"]);
+    assert!(
+        version.stdout.starts_with(b"blastx: 2.17.0+\n"),
+        "{version:?}"
+    );
+    let help = run(losat(), &["-h"]);
+    assert!(
+        String::from_utf8_lossy(&help.stdout).contains("losat -install-shims [DIR]"),
+        "{help:?}"
+    );
+    fs::remove_dir_all(&moved).unwrap();
     fs::remove_dir_all(&dir).unwrap();
     fs::remove_dir_all(&other).unwrap();
 }

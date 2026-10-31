@@ -82,7 +82,9 @@ use super::{
 pub(super) const X_KEEP_BLOCK_BYTES: u64 = 96 << 10;
 
 // No NCBI counterpart (scheduling only): the window; it changes no value NCBI computes.
-/// Blocks per worker of the window with LOSAT_X_BPDBWIDE.
+/// Blocks per worker of the window with LOSAT_X_BPDBWIDE. Measured on UniRef50 with blastp-fast at
+/// 16 threads, 100 queries: 8 per worker waited 130 of 840 thread-seconds, 32 waited 44, 64 waited
+/// 15, 128 waited 3 and took the same time as 64 with more memory.
 const X_BPDBWIDE_BLOCKS_PER_THREAD: usize = 64;
 
 // No NCBI counterpart (scheduling only): as the window.

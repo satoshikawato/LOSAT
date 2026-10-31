@@ -1,0 +1,1 @@
+- BLASTP: threads searching a large database with `-db` spend less time waiting for each other behind slow blocks.

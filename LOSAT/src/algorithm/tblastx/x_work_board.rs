@@ -410,6 +410,12 @@ impl XBoard {
     /// caller's order), on this thread, on the board's takers before any unit, and on the board's
     /// helper jobs. Returns when every group has run.
     pub(crate) fn run_groups(&self, n: usize, run: &Run<'_>) {
+        self.run_set(n, run, true);
+    }
+
+    /// `run_groups`, with or without the helper job (a panic in a `rayon::spawn` job aborts, so the
+    /// tests of a panicking item run without it).
+    fn run_set(&self, n: usize, run: &Run<'_>, helper: bool) {
         let set = XSet::new(run, n);
         let owned = XOwned(&set);
         self.groups
@@ -422,7 +428,7 @@ impl XBoard {
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
-        if n > 1 {
+        if helper && n > 1 {
             x_spawn_group_helper(&self.groups);
         }
         let mut taker = XTaker::default();
@@ -640,18 +646,22 @@ mod tests {
                 pool.install(|| {
                     rayon::broadcast(|ctx| {
                         if ctx.index() == 0 {
-                            board.run_groups(4, &|_, _| {
-                                if rayon::current_thread_index() != Some(0) {
-                                    other_took.store(true, Ordering::SeqCst);
-                                    panic!("an item panics on the other thread");
-                                }
-                                let start = std::time::Instant::now();
-                                while !other_took.load(Ordering::SeqCst)
-                                    && start.elapsed() < std::time::Duration::from_secs(5)
-                                {
-                                    std::hint::spin_loop();
-                                }
-                            });
+                            board.run_set(
+                                4,
+                                &|_, _| {
+                                    if rayon::current_thread_index() != Some(0) {
+                                        other_took.store(true, Ordering::SeqCst);
+                                        panic!("an item panics on the other thread");
+                                    }
+                                    let start = std::time::Instant::now();
+                                    while !other_took.load(Ordering::SeqCst)
+                                        && start.elapsed() < std::time::Duration::from_secs(5)
+                                    {
+                                        std::hint::spin_loop();
+                                    }
+                                },
+                                false,
+                            );
                             owner_done.store(true, Ordering::SeqCst);
                         } else {
                             let mut taker = XTaker::default();
@@ -703,21 +713,25 @@ mod tests {
                                 }
                             }
                             let _done = Done(&owner_done, &other_ended, &ended_at_unwind);
-                            board.run_groups(4, &|_, _| {
-                                if rayon::current_thread_index() != Some(0) {
-                                    other_running.store(true, Ordering::SeqCst);
-                                    std::thread::sleep(std::time::Duration::from_millis(50));
-                                    other_ended.store(true, Ordering::SeqCst);
-                                    return;
-                                }
-                                let start = std::time::Instant::now();
-                                while !other_running.load(Ordering::SeqCst)
-                                    && start.elapsed() < std::time::Duration::from_secs(5)
-                                {
-                                    std::hint::spin_loop();
-                                }
-                                panic!("the owner's own item panics");
-                            });
+                            board.run_set(
+                                4,
+                                &|_, _| {
+                                    if rayon::current_thread_index() != Some(0) {
+                                        other_running.store(true, Ordering::SeqCst);
+                                        std::thread::sleep(std::time::Duration::from_millis(50));
+                                        other_ended.store(true, Ordering::SeqCst);
+                                        return;
+                                    }
+                                    let start = std::time::Instant::now();
+                                    while !other_running.load(Ordering::SeqCst)
+                                        && start.elapsed() < std::time::Duration::from_secs(5)
+                                    {
+                                        std::hint::spin_loop();
+                                    }
+                                    panic!("the owner's own item panics");
+                                },
+                                false,
+                            );
                         } else {
                             let mut taker = XTaker::default();
                             while !owner_done.load(Ordering::SeqCst) {

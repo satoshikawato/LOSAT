@@ -138,9 +138,9 @@ On macOS, an E value printed with full precision (`-outfmt 11`, `-outfmt 8`) can
 
 ## Quick Start
 
-LOSAT adopts the standard NCBI single-dash command-line syntax:
-
 Tools that look for `blastn` on `PATH` can use LOSAT without changes: `losat --install-shims [DIR]` links `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `makeblastdb` and `blastdbcmd` to `losat` in `DIR` (default: the directory of `losat`; Windows gets copies), and an executable called by one of these names runs that program. It stops without changing anything if a file of one of these names is already there, such as NCBI's own program.
+
+LOSAT adopts the standard NCBI single-dash command-line syntax:
 
 ### 1. Nucleotide Alignment (BLASTN / MegaBLAST)
 ```bash

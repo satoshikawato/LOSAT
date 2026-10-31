@@ -59,8 +59,15 @@ fn main() -> Result<()> {
     }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
     // top level has no options of its own.
-    if argv.get(1).is_some_and(|word| word == "--install-shims") {
-        if argv.len() > 3 {
+    if argv
+        .get(1)
+        .is_some_and(|word| LOSAT::cli::INSTALL_SHIMS_WORDS.iter().any(|w| word == w))
+    {
+        // An option word is not a directory (`./-h` names one).
+        let option = argv
+            .get(2)
+            .is_some_and(|word| word.to_string_lossy().starts_with('-'));
+        if argv.len() > 3 || option {
             eprintln!("usage: losat --install-shims [DIR]");
             std::process::exit(1);
         }

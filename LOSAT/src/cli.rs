@@ -89,11 +89,16 @@ where
     words
 }
 
+/// The words that ask for `install_shims`: `-install-shims` is how the top level's `-help` shows
+/// it (`render_message` writes long options with one dash).
+pub const INSTALL_SHIMS_WORDS: [&str; 2] = ["--install-shims", "-install-shims"];
+
 /// `losat --install-shims [DIR]`: makes the `ENTRY_NAMES` in `DIR` (default: the directory of
 /// this executable) and returns their paths. Each is a symbolic link to this executable, relative
 /// when it lies in `DIR` so that the directory can move; Windows, where a link needs a privilege,
-/// gets a copy. A name that exists and is not this executable is an error and nothing is made:
-/// it may be NCBI's program. No NCBI counterpart.
+/// gets a copy. A name made by an earlier LOSAT (a link to a `losat`, or a copy of one) is
+/// replaced. Any other file of that name is an error and nothing is made: it may be NCBI's
+/// program. No NCBI counterpart.
 pub fn install_shims(dir: Option<&std::ffi::OsStr>) -> Result<Vec<std::path::PathBuf>, String> {
     let exe = std::env::current_exe()
         .and_then(std::fs::canonicalize)
@@ -108,13 +113,18 @@ pub fn install_shims(dir: Option<&std::ffi::OsStr>) -> Result<Vec<std::path::Pat
     let dir = std::fs::canonicalize(&dir)
         .map_err(|error| format!("cannot read {}: {error}", dir.display()))?;
     let mut missing = Vec::new();
+    let mut stale = Vec::new();
     let mut paths = Vec::new();
     let mut taken = Vec::new();
     for name in ENTRY_NAMES {
         let path = dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
         if std::fs::symlink_metadata(&path).is_err() {
             missing.push(path.clone());
-        } else if !is_this_executable(&path, &exe) {
+        } else if is_this_executable(&path, &exe) {
+            // Already made by this executable: kept.
+        } else if is_earlier_shim(&path) {
+            stale.push(path.clone());
+        } else {
             taken.push(path.display().to_string());
         }
         paths.push(path);
@@ -125,11 +135,30 @@ pub fn install_shims(dir: Option<&std::ffi::OsStr>) -> Result<Vec<std::path::Pat
             taken.join(" ")
         ));
     }
-    for path in missing {
+    for path in &stale {
+        std::fs::remove_file(path)
+            .map_err(|error| format!("cannot replace {}: {error}", path.display()))?;
+    }
+    for path in missing.into_iter().chain(stale) {
         make_shim(&exe, &exe_dir == &dir, &path)
             .map_err(|error| format!("cannot make {}: {error}", path.display()))?;
     }
     Ok(paths)
+}
+
+/// Whether `path` was made by `install_shims` of another `losat` (an upgrade, a move): a link
+/// whose target is named `losat`, which may be gone, or a file with LOSAT's `-version` text (a
+/// Windows copy, a copy of an older build).
+fn is_earlier_shim(path: &std::path::Path) -> bool {
+    let losat = format!("losat{}", std::env::consts::EXE_SUFFIX);
+    if let Ok(target) = std::fs::read_link(path) {
+        return target
+            .file_name()
+            .is_some_and(|name| name == losat.as_str());
+    }
+    const MARKER: &[u8] = b" Package: LOSAT ";
+    std::fs::read(path)
+        .is_ok_and(|bytes| bytes.windows(MARKER.len()).any(|window| window == MARKER))
 }
 
 /// Whether `path` is a link to `exe`, or `exe` itself.
@@ -171,7 +200,7 @@ fn make_shim(_: &std::path::Path, _: bool, _: &std::path::Path) -> std::io::Resu
     version,
     about = "Pure-Rust pairwise alignment with NCBI-verified fixtures and genetic-code exceptions",
     help_template = LOSAT_HELP_TEMPLATE,
-    after_help = "To call the programs by NCBI's names (blastn, makeblastdb, ...), link them with:\n  losat --install-shims [DIR]   (default: the directory of this executable)"
+    after_help = "To call the programs by NCBI's names (blastn, makeblastdb, ...), link them with:\n  losat -install-shims [DIR]   (default: the directory of this executable)"
 )]
 pub struct Cli {
     #[command(subcommand)]

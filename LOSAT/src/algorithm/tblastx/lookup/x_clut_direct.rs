@@ -2416,14 +2416,7 @@ pub(crate) fn x_tbn_build_compressed_lookup(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
 ) -> Option<Result<XCompressedLookup, ()>> {
-    x_build_compressed_on(
-        word_size,
-        scaled_threshold,
-        query,
-        locations,
-        tables,
-        false,
-    )
+    x_build_compressed_on(word_size, scaled_threshold, query, locations, tables, false)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see

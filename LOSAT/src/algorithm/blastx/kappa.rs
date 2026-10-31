@@ -80,7 +80,9 @@ pub fn query_infos(
                 // ```
                 composition: BlastAminoAcidComposition::empty(),
                 eff_search_space: p.search_space as f64,
-                words: Some(build_query_word_hashes(query)),
+                // EXPERIMENT (LOSAT_X_BXENDMEM): no table; `get_range` reads the context's words.
+                words: (!super::search::x_bx_mem::end_mem())
+                    .then(|| build_query_word_hashes(query)),
             }
         })
         .collect()
@@ -322,7 +324,19 @@ fn get_range<'a>(
     if params.uses_composition_based_stats()
         && biased
         && (!should_test
-            || !test_near_identical(&subject, 0, &query, query_range.begin, words, align))
+            || !match words {
+                Some(_) => {
+                    test_near_identical(&subject, 0, &query, query_range.begin, words, align)
+                }
+                None => x_test_near_identical_on_residues(
+                    &subject,
+                    0,
+                    &query,
+                    query_range.begin,
+                    orig_query.data(),
+                    align,
+                ),
+            })
     {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
         // ```c

@@ -67,6 +67,27 @@ pub struct PreparedQueryBatch {
     /// loops' sentinel walks (`blastx/x_ungap_sent.rs`, `query_fits`; false with the switch off).
     pub(crate) x_ungap_sent: bool,
 }
+impl PreparedQueryBatch {
+    /// EXPERIMENT (LOSAT_X_BXENDMEM): what the results of a searched batch keep: the batch without
+    /// its residues and lookup segments, which the report does not read.
+    pub(crate) fn x_for_results(&self) -> Self {
+        if !super::search::x_bx_mem::end_mem() {
+            return self.clone();
+        }
+        Self {
+            original_lengths: self.original_lengths.clone(),
+            contexts: self.contexts.clone(),
+            first_context: self.first_context,
+            max_length: self.max_length,
+            min_length: self.min_length,
+            sequence_start: Vec::new(),
+            sequence_start_nomask: Vec::new(),
+            lookup_segments: Vec::new(),
+            reader_shape: self.reader_shape.clone(),
+            x_ungap_sent: self.x_ungap_sent,
+        }
+    }
+}
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:123-136
 // ```c++
 //     // in the next chunk

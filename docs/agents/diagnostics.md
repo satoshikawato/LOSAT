@@ -6509,8 +6509,9 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_BXCLUTPOOL=1` (BLASTX `-task blastx-fast` and `-word_size 5`, memory; in the strict set from the pull
   request that added it, 2026-10-31: on unless `=0` or `LOSAT_X_DEFAULT=0`): the flat compressed lookup tables are
   built on vectors kept between builds: a table's starts, hits and pv when the table is dropped
-  (`blastx::seed::Lookup`'s drop), each cleared and zero-filled to the new table's sizes as calloc gives them; the
-  hits grow to n + n/4 where short (`tblastx/lookup/x_clut_direct.rs`). A split query builds a table per chunk on
+  (`blastx::seed::Lookup`'s drop): the pv cleared and zero-filled as calloc gives it, the starts and hits only sized,
+  since the bucket fill writes each of their entries before any is read (zero-filling them again cost the small
+  searches 1-5 % of their user cycles); the hits grow to n + n/4 where short (`tblastx/lookup/x_clut_direct.rs`). A split query builds a table per chunk on
   whichever thread needs it, and each of those threads kept a table's worth and the build's record of the appends in
   its glibc arena after they were freed, about 20 MiB per thread (`MALLOC_ARENA_MAX=1` removed it). The pool holds as
   many sets as tables were alive at once. The record of the appends is not kept (three builds side by side would hold

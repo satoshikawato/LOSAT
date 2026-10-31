@@ -1217,7 +1217,8 @@ fn x_try_build_flat_by_buckets(
 //     sfree(lookup->backbone);
 // ```
 // NCBI allocates a zeroed table for each query chunk and frees it with the chunk. Buffer reuse only:
-// a kept vector is cleared and zero-filled to the new table's size as calloc gives it.
+// the kept pv is cleared and zero-filled as calloc gives it; the kept starts and hits, every entry of
+// which the bucket fill writes before any is read, are only sized (`x_sized_on`).
 /// EXPERIMENT (LOSAT_X_BXCLUTPOOL): whether BLASTX builds its flat compressed tables on vectors kept
 /// between builds. Every thread that built a table kept a table's worth and its build's record of
 /// the appends in its glibc arena after they were freed, about 20 MiB per thread on a split query.
@@ -1257,17 +1258,29 @@ const fn x_mapped_record_entries() -> usize {
     }
 }
 
-// No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them). One
-// short of room is replaced by a zeroed one of `n` entries, or with `slack` (the hits, whose number
-// changes from table to table) of capacity `n + n / 4`, not the doubling of `resize`.
-fn x_zeroed_on<T: Copy + Default>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
+// No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them); one
+// short of room is replaced by a zeroed one of `n` entries.
+fn x_zeroed_on<T: Copy + Default>(mut vector: Vec<T>, n: usize) -> Vec<T> {
     if vector.capacity() < n {
-        if !slack {
-            return vec![T::default(); n];
-        }
-        vector = Vec::with_capacity(n + n / 4);
+        return vec![T::default(); n];
     }
     vector.clear();
+    vector.resize(n, T::default());
+    vector
+}
+
+// No NCBI counterpart: `vector` with `n` entries for a fill that writes every entry before any is
+// read (the bucket fill's starts and hits): the values the table before left are not cleared, only
+// entries added past them are zeroed. One short of room is replaced by a zeroed one (calloc'd, so
+// that a large one is mapped and its pages are touched only when the fill writes them) of `n`
+// entries, or with `slack` (the hits, whose number changes from table to table) of `n + n / 4`
+// entries cut to `n`. Zero-filling them again cost the small searches 1-5 % of their user cycles.
+fn x_sized_on<T: Copy + Default>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
+    if vector.capacity() < n {
+        let mut fresh = vec![T::default(); if slack { n + n / 4 } else { n }];
+        fresh.truncate(n);
+        return fresh;
+    }
     vector.resize(n, T::default());
     vector
 }
@@ -1337,7 +1350,7 @@ fn x_buckets_on(
         XFlatTableVectors::default()
     };
     // One more entry: the number of hits.
-    let mut starts = x_zeroed_on(kept.starts, backbone_size + 1, false);
+    let mut starts = x_sized_on(kept.starts, backbone_size + 1, false);
 
     // Appends, over the segments before, inside and between NCBI's tables, recorded as the
     // count-and-fill builder records them; not counted.
@@ -1402,8 +1415,8 @@ fn x_buckets_on(
     for b in 0..buckets {
         bucket_starts[b + 1] += bucket_starts[b];
     }
-    let mut pv = x_zeroed_on(kept.pv, (backbone_size >> PV_ARRAY_BTS) + 1, false);
-    let mut hits = x_zeroed_on(kept.hits, total, pooled);
+    let mut pv = x_zeroed_on(kept.pv, (backbone_size >> PV_ARRAY_BTS) + 1);
+    let mut hits = x_sized_on(kept.hits, total, pooled);
     {
         let mut cursors = bucket_starts[..buckets].to_vec();
         let out = hits.as_mut_ptr();
@@ -3369,7 +3382,15 @@ mod tests {
                         x_give_back_flat(&mut kept);
                     }
                 }
-                _ => x_give_back_flat(&mut { got }),
+                // Values no table holds: the build must write every entry it keeps (starts, hits)
+                // and clear the PV array.
+                _ => {
+                    let mut poisoned = got;
+                    poisoned.starts.fill(u32::MAX);
+                    poisoned.hits.fill(-7);
+                    poisoned.pv.fill(u32::MAX);
+                    x_give_back_flat(&mut poisoned);
+                }
             }
         }
         if let Some(mut kept) = alive {

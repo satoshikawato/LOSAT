@@ -78,6 +78,15 @@ impl<'a> Subjects<'a> {
         }
     }
 
+    /// The number of subjects the statistics read: one for a database that a list left without
+    /// sequences (`SeqDb::statistics_numbers`; a database without any sequence is `Unreadable`).
+    pub(crate) fn statistics_len(&self) -> usize {
+        match self {
+            Subjects::Database(_) | Subjects::Stream(_) => self.len().max(1),
+            Subjects::Fasta(_) | Subjects::Unreadable => self.len(),
+        }
+    }
+
     /// Whether the subjects are `Unreadable`.
     pub(crate) fn is_unreadable(&self) -> bool {
         matches!(self, Subjects::Unreadable)

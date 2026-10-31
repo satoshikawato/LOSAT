@@ -184,6 +184,11 @@
     ]
    },
    {
+    "flag": "-soft_masking",
+    "help": "Apply filtering locations as soft masks [default: true]",
+    "takes_value": true
+   },
+   {
     "flag": "-window_masker_db",
     "help": "Enable WindowMasker filtering using this repeats database.",
     "takes_value": true
@@ -256,6 +261,11 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-min_raw_gapped_score",
+    "help": "Minimum raw gapped score to keep an alignment in the preliminary gapped and traceback stages",
+    "takes_value": true
    },
    {
     "flag": "-window_size",

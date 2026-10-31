@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Write the seqid list files of the rows db.sl.* (line DI-8b: -seqidlist, -negative_seqidlist).
+"""Write the seqid list files of the rows db.sl.* (line DI-8b: -seqidlist, -negative_seqidlist)
+and the lists and query files of the rows db.ec.* (line DI-8c).
 
 Text lists hold the forms NCBI's reader takes (`SeqDB_ReadMemorySiList`: white-space separated
 tokens, a leading `>` skipped, `#` to the end of the line a comment, CRLF lines) for the
@@ -38,7 +39,27 @@ TEXT = {
     "sl_comment.txt": "# a comment only\n\n",
     "sl_none.txt": "UNKNOWN1\nUNKNOWN2\n",
     "sl_empty.txt": "",
+    # queries of the rows db.ec.* (line DI-8c: a list that keeps no sequence of the database):
+    # two queries, the title of the first longer than the 35 bytes of a warning's query id
+    "q_multi.faa": ">first protein query with a title long enough to be cut\nMVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR\n>second\nMVHLTPEEKSAVTALWGKVNVDEVGGEALGRLLVVYPWTQRFFESFGDLSTPDAVMGNPKVKAHGKKVLGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVLVCVLAHHFGKEFTPPVQAAYQKVVAGVANALAHKYH\n",
+    "q_multi.fna": ">first nucleotide query with a title long enough to be cut\nATGGTGCTGTCTCCTGCCGACAAGACCAACGTCAAGGCCGCCTGGGGTAAGGTCGGCGCGCACGCTGGCGAGTATGGTGCGGAGGCCCTGGAGAGGATGTTCCTGTCCTTCCCCACCACCAAGACCTACTTCCCGCACTTCGACCTGAGCCACGGCTCTGCCCAGGTTAAGGGCCACGGCAAGAAGGTGGCCGACGCGCTGACCAACGCCGTGGCGCACGTGGACGACATGCCCAACGCGCTGTCCGCCCTGAGCGACCTGCACGCGCACAAGCTTCGGGTGGACCCGGTCAACTTCAAGCTCCTAAGCCACTGCCTGCTGGTGACCCTGGCCGCCCACCTCCCCGCCGAGTTCACCCCTGCGGTGCACGCCTCCCTGGACAAGTTCCTGGCTTCTGTGAGCACCGTGCTGACCTCCAAATACCGTTAA\n>second\nATGGTGCATCTGACTCCTGAGGAGAAGTCTGCCGTTACTGCCCTGTGGGGCAAGGTGAACGTGGATGAAGTTGGTGGTGAGGCCCTGGGCAGGCTGCTGGTGGTCTACCCTTGGACCCAGAGGTTCTTTGAGTCCTTTGGGGATCTGTCCACTCCTGATGCTGTTATGGGCAACCCTAAGGTGAAGGCTCATGGCAAGAAAGTGCTCGGTGCCTTTAGTGATGGCCTGGCTCACCTGGACAACCTCAAGGGCACCTTTGCCACACTGAGTGAGCTGCACTGTGACAAGCTGCACGTGGATCCTGAGAACTTCAGGCTCCTGGGCAACGTGCTGGTCTGTGTGCTGGCCCATCACTTTGGCAAAGAATTCACCCCACCAGTGCAGGCTGCCTATCAGAAAGTGGTGGCTGGTGTGGCTAATGCCCTGGCCCACAAGTATCACTAA\n",
+    # an invalid query and a record without letters before a valid query (a searched batch)
+    "q_special.faa": ">allx only X residues\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n>nothing\n>valid after them\nMVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF\n",
+    "q_special.fna": ">alln only N\nNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN\n>nothing\n>valid after them\nATGGTGCTGTCTCCTGCCGACAAGACCAACGTCAAGGCCGCCTGGGGTAAGGTCGGCGCGCACGCTGGCGAGTATGGTGCGGAGGCCCTGGAGAGG\n",
+    # a batch without a valid context
+    "q_invalid.faa": ">allx only X residues\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n",
+    "q_invalid.fna": ">alln only N\nNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN\n",
 }
+
+
+def every_id(fasta: Path) -> str:
+    """Every id of every definition line of a database's FASTA file (a negative list that leaves
+    out all its sequences)."""
+    ids = []
+    for line in fasta.read_text().splitlines():
+        if line.startswith(">"):
+            ids.extend(part.split()[0] for part in line[1:].split("\x01"))
+    return "".join(f"{sid}\n" for sid in ids)
 
 
 def binary(ids: list[bytes], title: bytes, db_length: int = 0, db_date: bytes = b"", db_vols: bytes = b"") -> bytes:
@@ -67,6 +88,9 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     for name, text in TEXT.items():
         (args.out / name).write_bytes(text.encode())
+    taxfilter = args.out.parent / "taxfilter"
+    (args.out / "sl_tfp_all.txt").write_bytes(every_id(taxfilter / "tfp.faa").encode())
+    (args.out / "sl_tfn_all.txt").write_bytes(every_id(taxfilter / "tfn.fna").encode())
     for name, data in BINARY.items():
         (args.out / name).write_bytes(data)
 

@@ -1,0 +1,9 @@
+# BLASTP 2.17.0+
+# Query: first protein query with a title long enough to be cut
+# Database: tests/db_search/taxfilter/tfp
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: second
+# Database: tests/db_search/taxfilter/tfp
+# 0 hits found
+# BLAST processed 2 queries

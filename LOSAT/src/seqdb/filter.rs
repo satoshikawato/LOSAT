@@ -2010,6 +2010,15 @@ impl SeqDb {
                 volume.set_defline_rule(Arc::clone(&rule));
             }
         }
+        // OID 0 is the first OID of the first volume that has any.
+        let first_volume = self.volumes.iter().find(|volume| volume.num_oids() > 0);
+        self.empty_list_first_length = match first_volume {
+            Some(volume) if filter.count() == 0 => Some(match self.seqtype {
+                SeqType::Protein => u64::from(volume.protein_length(0)?),
+                SeqType::Nucleotide => volume.nucleotide_length(0, 0)? as u64,
+            }),
+            _ => None,
+        };
         self.num_seqs = filter.count();
         self.total_length = total_length;
         self.max_length = max_length;
@@ -2432,6 +2441,35 @@ mod tests {
             assert_eq!(db.num_seqs(), whole);
             assert_eq!(kept_ids(&db).len(), whole as usize);
             assert!(db.min_length().is_some_and(|min| min > 0));
+        }
+    }
+
+    // Probes T08-T12, C01-C97 of line DI-8: 0 OIDs, NCBI's statistics read OID 0 and one sequence.
+    #[test]
+    fn a_list_without_a_kept_sequence_has_the_statistics_of_oid_zero() {
+        for (name, seqtype) in [
+            ("prot_v5", SeqType::Protein),
+            ("nucl_v5", SeqType::Nucleotide),
+        ] {
+            let mut db = ids_db(name, seqtype);
+            let first = match seqtype {
+                SeqType::Protein => u64::from(db.protein_length(0).unwrap()),
+                SeqType::Nucleotide => db.nucleotide_length(0).unwrap() as u64,
+            };
+            let whole = (db.total_length(), db.num_seqs());
+            assert!(!db.filtered_empty());
+            assert_eq!(db.statistics_numbers(), whole, "{name}");
+            let mut warnings = Vec::new();
+            db.restrict(
+                &DbList::Seqids(list_of(b"UNKNOWN1\n", false)),
+                &mut warnings,
+            )
+            .unwrap();
+            assert!(db.filtered_empty(), "{name}");
+            assert_eq!((db.num_seqs(), db.total_length()), (0, 0), "{name}");
+            assert_eq!(db.statistics_numbers(), (first, 1), "{name}");
+            assert_eq!(db.printed_num_seqs(), whole.1, "{name}");
+            assert!(db.next_block(0, 1 << 20).is_none(), "{name}");
         }
     }
 

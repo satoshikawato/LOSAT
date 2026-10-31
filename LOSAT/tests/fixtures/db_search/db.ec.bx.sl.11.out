@@ -1,0 +1,311 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">first nucleotide query with a title long enough
+ to be cut"
+                  }
+                }
+              },
+              title "first nucleotide query with a title long enough to be cut"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 429,
+              seq-data ncbi2na '3AE7B75E5842141B42965EAB0ADA66467A62CEB9A295E8
+8A3BD7B5F55145085C7D591F61789469DE54AF0A9469082BA5866785065BA646E8613950667B59
+5E26179199109F6AE856B41F4275C251E5E7AE15E96545D5658BD1579AE465D5E842F5E9F7B891
+6E785D40C5BC00'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">second"
+                  }
+                }
+              },
+              title "second"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 444,
+              seq-data ncbi2na '3AE4DE1D78A20B796F1E57BAA42B81BA382FAEB8A57A92
+9E7AEB715FA1522BDFE2D7FAA37B51D78E7BCEA415C2B829D3A4202E76B97F2E3A5E9D17A105D0
+A917F94478B89E47B842791BA35E207D29D7A906E7ADEEE7A54D1FE9020F45514B929E5CD202EB
+A7AEE9C395E9510B3470'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/taxfilter/tfp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 0
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 79,
+              to 271,
+              id local str "Query_1"
+            },
+            {
+              from 289,
+              to 313,
+              id local str "Query_1"
+            },
+            {
+              from 316,
+              to 376,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 17,
+              to 68,
+              id local str "Query_1"
+            },
+            {
+              from 161,
+              to 245,
+              id local str "Query_1"
+            },
+            {
+              from 302,
+              to 362,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 318,
+              to 377,
+              id local str "Query_1"
+            },
+            {
+              from 189,
+              to 269,
+              id local str "Query_1"
+            },
+            {
+              from 84,
+              to 146,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 280,
+              to 378,
+              id local str "Query_1"
+            },
+            {
+              from 88,
+              to 240,
+              id local str "Query_1"
+            },
+            {
+              from 31,
+              to 69,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 10,
+              to 40,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 62,
+              to 110,
+              id local str "Query_2"
+            },
+            {
+              from 224,
+              to 248,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 380,
+              to 427,
+              id local str "Query_2"
+            },
+            {
+              from 266,
+              to 304,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 208,
+              to 255,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus3
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 16002",
+      "Effective search space used: 16002",
+      "Length adjustment: 16"
+    }
+  },
+  messages {
+    {
+      code 1,
+      message "Warning: [blastx] To obtain better run time performance, please
+ run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out
+ <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist"
+    }
+  }
+}

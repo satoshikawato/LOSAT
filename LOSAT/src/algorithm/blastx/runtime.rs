@@ -1460,7 +1460,7 @@ impl PreliminarySink for Runtime<'_> {
             &mut full,
             self.options,
             self.db_length,
-            self.subjects.len() as i64,
+            self.subjects.statistics_len() as i64,
             self.subjects.shortest_length(),
             None,
         )?;

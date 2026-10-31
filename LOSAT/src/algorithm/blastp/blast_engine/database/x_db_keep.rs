@@ -42,6 +42,17 @@
 //! so no waiting task can sit below it on its thread, and its worker merges it. A worker that panics stops the search and
 //! wakes the others (`XStopOnPanic`); the scope then raises the panic.
 //!
+//! EXPERIMENT (LOSAT_X_BPDBWIDE, a switch of the strict set: on unless it is `0`): the window is
+//! `X_BPDBWIDE_BLOCKS_PER_THREAD` x workers blocks, and a worker takes a block past
+//! `blocks_per_thread` x workers only while at most `X_BPDBWIDE_WAITING_BYTES_PER_THREAD` x workers
+//! bytes of results wait for the merge (`XWindow::full`). A window of `blocks_per_thread` per worker
+//! was shorter than the blocks at the start of a pass, where a database of long sequences keeps
+//! its slow blocks (UniRef50, blastp-fast, 100 queries, 8 threads: 64 blocks are about 38 ms of the
+//! wall clock, a block of the first tenth takes 39 ms at p99 and up to 1.2 s): the workers ran out
+//! of room behind them. The width and the bytes decide only when a block is taken, not what it
+//! finds or the order of the merge, so they change none of the reports. The oldest block not merged
+//! is always within `blocks_per_thread` x workers, so the waits end as below.
+//!
 //! `LOSAT_X_BPDBKEEP` is a switch of the strict set: on unless it is `0`. It acts for every task of
 //! BLASTP with `-db`; the chains of BLASTP's lookup builds (`tblastx/lookup/backbone.rs`) with
 //! `-subject` too; the index check and the header pieces of the title checks for every program that
@@ -54,6 +65,8 @@ use anyhow::Result;
 use crate::seqdb::{BlockRange, SeqDb, SequenceBlock};
 use crate::utils::threading::SearchPool;
 
+use super::super::super::hsp::BlastpHspList;
+use super::super::super::x_prelim_compact::XPrelimHsp;
 use super::{
     block_subject, diag_offset_after, prepare_search_block, search_read_error, BlastpDatabase,
     BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, PrelimSink,
@@ -67,6 +80,22 @@ use super::{
 /// BLASTP of 100 UniRef50 queries against UniRef50 at 32 threads peaked 12 MiB above the search
 /// without the switch with blocks of 1 MiB, v4-D12 s17).
 pub(super) const X_KEEP_BLOCK_BYTES: u64 = 96 << 10;
+
+// No NCBI counterpart (scheduling only): the window; it changes no value NCBI computes.
+/// Blocks per worker of the window with LOSAT_X_BPDBWIDE.
+const X_BPDBWIDE_BLOCKS_PER_THREAD: usize = 64;
+
+// No NCBI counterpart (scheduling only): as the window.
+/// Bytes of waiting results per worker above which LOSAT_X_BPDBWIDE's window narrows to
+/// `blocks_per_thread` per worker.
+const X_BPDBWIDE_WAITING_BYTES_PER_THREAD: usize = 1 << 20;
+
+// No NCBI counterpart (scheduling only): reads the LOSAT_X_BPDBWIDE switch once.
+/// Whether LOSAT_X_BPDBWIDE is on (a switch of the strict set).
+fn x_bp_db_wide() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPDBWIDE"))
+}
 
 // No NCBI counterpart: reads the LOSAT_X_BPDBKEEP switch once; it does not change any value NCBI
 // computes.
@@ -128,6 +157,26 @@ where
     Ok(with_hits)
 }
 
+/// No NCBI counterpart (scheduling only): the heap bytes of a block's results while they wait.
+fn x_kept_bytes(found: &Result<Vec<BlastpSubjectResult>>) -> usize {
+    use std::mem::size_of;
+    let Ok(results) = found else {
+        return 0;
+    };
+    results
+        .iter()
+        .map(|result| {
+            let lists = &result.x_compact_hsp_lists;
+            lists
+                .iter()
+                .map(|(_, list)| list.hsps.capacity() * size_of::<XPrelimHsp>())
+                .sum::<usize>()
+                + lists.capacity() * size_of::<(usize, BlastpHspList<XPrelimHsp>)>()
+        })
+        .sum::<usize>()
+        + results.capacity() * size_of::<BlastpSubjectResult>()
+}
+
 // No NCBI counterpart: the state of the window's scheduling and merge; it changes no value NCBI
 // computes.
 /// The window of `x_search_window`, under its lock.
@@ -141,13 +190,30 @@ struct XWindow<'a, P> {
     /// The blocks merged (the index of the next block to merge). The slot of this block is empty:
     /// the worker that ends it merges it.
     merged: usize,
-    /// The results of the blocks taken and not merged, block j in slot j mod the window.
-    slots: Vec<Option<Result<Vec<BlastpSubjectResult>>>>,
+    /// The results of the blocks taken and not merged and their heap bytes, block j in slot j mod
+    /// the window.
+    slots: Vec<Option<(Result<Vec<BlastpSubjectResult>>, usize)>>,
+    /// The blocks within this many of the oldest not merged are taken whatever the bytes.
+    floor: usize,
+    /// The heap bytes of the results in `slots`, and the most of them above which only the blocks
+    /// within `floor` are taken.
+    waiting_bytes: usize,
+    max_waiting_bytes: usize,
     sink: &'a mut P,
     /// The first error in ordinal order, once the merge has reached it.
     error: Option<anyhow::Error>,
     /// The search stopped: an error merged, or a worker panicked.
     stopped: bool,
+}
+
+impl<P> XWindow<'_, P> {
+    /// Whether the next block must wait: past the window, or past `floor` with too many bytes
+    /// waiting (the module header).
+    fn full(&self) -> bool {
+        let past = self.taken - self.merged;
+        past >= self.slots.len()
+            || (past >= self.floor && self.waiting_bytes > self.max_waiting_bytes)
+    }
 }
 
 /// The window and its condition: blocks merged, or the search stopped.
@@ -199,7 +265,7 @@ fn x_window_worker<S, K, P>(
             return;
         }
         let width = state.slots.len();
-        if state.taken >= state.merged + width {
+        if state.full() {
             state = shared
                 .merged
                 .wait(state)
@@ -220,19 +286,22 @@ fn x_window_worker<S, K, P>(
             bytes: Vec::new(),
         });
         let found = x_search_block(db, range, first_diag_offset, kit, process_subject);
+        let bytes = x_kept_bytes(&found);
         state = shared.lock();
         if state.stopped {
             return;
         }
-        state.slots[index % width] = Some(found);
+        state.waiting_bytes += bytes;
+        state.slots[index % width] = Some((found, bytes));
         if index != state.merged {
             continue;
         }
         // The subjects without HSP lists change no hit list, so the order of the updates is
         // the one-thread order.
         let merge = &mut *state;
-        while let Some(found) = merge.slots[merge.merged % width].take() {
+        while let Some((found, bytes)) = merge.slots[merge.merged % width].take() {
             merge.merged += 1;
+            merge.waiting_bytes -= bytes;
             match found {
                 Ok(block_results) => {
                     for mut subject_result in block_results {
@@ -271,7 +340,18 @@ where
     P: PrelimSink + Send,
 {
     let workers = pool.threads().max(1);
-    let width = workers.saturating_mul(blocks_per_thread).max(1);
+    let floor = workers.saturating_mul(blocks_per_thread).max(1);
+    let wide = x_bp_db_wide();
+    let width = if wide {
+        workers
+            .saturating_mul(X_BPDBWIDE_BLOCKS_PER_THREAD)
+            .max(floor)
+    } else {
+        floor
+    };
+    if wide {
+        crate::utils::xreach::x_reach!("LOSAT_X_BPDBWIDE", true);
+    }
     let shared = XShared {
         window: Mutex::new(XWindow {
             next_ordinal: 0,
@@ -279,6 +359,9 @@ where
             taken: 0,
             merged: 0,
             slots: std::iter::repeat_with(|| None).take(width).collect(),
+            floor,
+            waiting_bytes: 0,
+            max_waiting_bytes: workers.saturating_mul(X_BPDBWIDE_WAITING_BYTES_PER_THREAD),
             sink,
             error: None,
             stopped: false,
@@ -312,6 +395,10 @@ where
         return Err(error);
     }
     debug_assert_eq!(state.merged, state.taken, "every block taken is merged");
+    debug_assert_eq!(
+        state.waiting_bytes, 0,
+        "every block merged gave back its bytes"
+    );
     Ok(())
 }
 
@@ -359,6 +446,10 @@ where
         );
     }
 
+    if x_bp_db_wide() {
+        // One worker: the blocks are searched one after another, no window.
+        crate::utils::xreach::x_reach!("LOSAT_X_BPDBWIDE", false);
+    }
     let mut scratch = new_scratch();
     let mut subject_result = BlastpSubjectResult::new(0);
     let mut bytes = Vec::new();
@@ -378,4 +469,73 @@ where
         bytes = block.x_into_data();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct NoSink;
+    impl PrelimSink for NoSink {
+        fn add(&mut self, _result: &mut BlastpSubjectResult) {}
+    }
+
+    fn window(sink: &mut NoSink, width: usize, floor: usize, max: usize) -> XWindow<'_, NoSink> {
+        XWindow {
+            next_ordinal: 0,
+            diag_offset: 0,
+            taken: 0,
+            merged: 0,
+            slots: std::iter::repeat_with(|| None).take(width).collect(),
+            floor,
+            waiting_bytes: 0,
+            max_waiting_bytes: max,
+            sink,
+            error: None,
+            stopped: false,
+        }
+    }
+
+    // Past the width nothing is taken; past the floor only while few bytes wait; within the floor
+    // always, so the oldest block not merged always runs.
+    #[test]
+    fn the_window_narrows_to_the_floor_while_many_bytes_wait() {
+        let mut sink = NoSink;
+        let mut w = window(&mut sink, 64, 8, 1000);
+        w.merged = 5;
+        for (past, bytes, full) in [
+            (0, 5000, false),
+            (7, 5000, false),
+            (8, 5000, true),
+            (8, 1000, false),
+            (63, 1000, false),
+            (63, 1001, true),
+            (64, 0, true),
+        ] {
+            w.taken = w.merged + past;
+            w.waiting_bytes = bytes;
+            assert_eq!(w.full(), full, "past {past} bytes {bytes}");
+        }
+    }
+
+    #[test]
+    fn the_bytes_of_a_block_count_its_vectors() {
+        use std::mem::size_of;
+        let mut result = BlastpSubjectResult::new(0);
+        let list = BlastpHspList {
+            oid: 0,
+            query_index: 0,
+            hsps: Vec::with_capacity(10),
+            best_evalue: 0.0,
+        };
+        let hsps = list.hsps.capacity() * size_of::<XPrelimHsp>();
+        result.x_compact_hsp_lists = Vec::with_capacity(2);
+        let lists =
+            result.x_compact_hsp_lists.capacity() * size_of::<(usize, BlastpHspList<XPrelimHsp>)>();
+        result.x_compact_hsp_lists.push((0, list));
+        let block = vec![result];
+        let blocks = block.capacity() * size_of::<BlastpSubjectResult>();
+        assert_eq!(x_kept_bytes(&Ok(block)), hsps + lists + blocks);
+        assert_eq!(x_kept_bytes(&Err(anyhow::anyhow!("failed"))), 0);
+    }
 }

@@ -171,6 +171,9 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BNDBWIDE` (BLASTN `-db`'s window of 16 blocks per thread while few bytes of results
 /// wait for the owner, `blastn/blast_engine/x_db_stream.rs`) joined the set in the pull request
 /// that added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_BPDBWIDE` (BLASTP `-db`'s window of 64 blocks per thread while few bytes of results
+/// wait for the merge, `blastp/blast_engine/database/x_db_keep.rs`) joined the set in the pull
+/// request that added it, after it was verified and timed with it on and off.
 /// `LOSAT_X_MBHITPF` (BLASTN's loop over the offset pairs prefetches the query line of the hit 16
 /// places on, `blastn/blast_engine/run.rs`) joined the set in the pull request that added it, after
 /// it was verified and timed with it on and off.
@@ -258,6 +261,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPCLUTSCANBF",
     "LOSAT_X_BPDBCUT",
     "LOSAT_X_BPDBKEEP",
+    "LOSAT_X_BPDBWIDE",
     "LOSAT_X_BPDEFER",
     "LOSAT_X_BPDIAG",
     "LOSAT_X_BPFFILL",

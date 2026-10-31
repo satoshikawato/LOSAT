@@ -284,6 +284,8 @@ fn parse_blastn_args(
         dust_filtering: None,
         dust: crate::blastinput::value_parsers::DustSpec::Yes,
         lcase_masking: false,
+        // The frozen web ABI v1 has no `-soft_masking` (refused below as an unknown flag).
+        soft_masking: None,
         // The frozen web ABI v1 (plan TD-1) has no WindowMasker.
         window_masker_db: None,
         window_masker: None,

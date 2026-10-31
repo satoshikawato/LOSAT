@@ -83,7 +83,7 @@ use super::super::filtering::{
     subject_best_hit, subject_best_hit_by, BestHitKey, ReevalParams,
 };
 use super::super::hsp::{
-    evalue_comp, get_prelim_hitlist_size, score_compare_hsps, sort_hsplist_by_evalue,
+    evalue_comp, get_prelim_hitlist_size, sort_hsplist_by_evalue,
     sort_hsps_by_score, trim_by_max_hsps, update_best_evalue, BlastnHitList, BlastnHsp,
     BlastnHspList, BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
@@ -109,7 +109,7 @@ use crate::core::blast_hits::reap_by_query_coverage;
 use crate::report::record::{QueryNames, SubjectNames};
 // EXPERIMENT (LOSAT_X_BNSTORE): the subjects' letters read from the records or from packed subjects.
 use super::super::x_subject_store::{
-    x_blastna_into, x_bnstore, x_read_subject_stores, SubjectLetters,
+    x_blastna_into, x_blastna_into_pool, x_bnstore, x_read_subject_stores, SubjectLetters,
 };
 use crate::blastinput::fasta_reader::{
     read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords, ReadError,
@@ -4049,6 +4049,8 @@ struct PrelimHitCollector {
     /// queries of the subject being added.
     x_slots: Vec<Vec<PrelimHit>>,
     x_touched: Vec<u32>,
+    /// LOSAT_X_BNHITGROUP: the HSPs of each query in the subject being added (0 between calls).
+    x_counts: Vec<usize>,
 }
 
 impl PrelimHitCollector {
@@ -4060,6 +4062,7 @@ impl PrelimHitCollector {
             prelim_hitlist_size,
             x_slots: Vec::new(),
             x_touched: Vec::new(),
+            x_counts: Vec::new(),
         }
     }
 
@@ -4095,14 +4098,24 @@ impl PrelimHitCollector {
     fn x_add_grouped(&mut self, oid: usize, hits: Vec<PrelimHit>) {
         if self.x_slots.is_empty() {
             self.x_slots.resize_with(self.hit_lists.len(), Vec::new);
+            self.x_counts.resize(self.hit_lists.len(), 0);
         }
         let mut touched = std::mem::take(&mut self.x_touched);
-        for hit in hits {
-            let slot = &mut self.x_slots[hit.query_idx as usize];
-            if slot.is_empty() {
+        // No NCBI counterpart: the queries' lists are made at their sizes, so that no HSP is
+        // copied as a list grows (a slot gives its list away, so each subject starts it empty).
+        for hit in &hits {
+            let count = &mut self.x_counts[hit.query_idx as usize];
+            if *count == 0 {
                 touched.push(hit.query_idx);
             }
-            slot.push(hit);
+            *count += 1;
+        }
+        for &query in &touched {
+            let count = std::mem::take(&mut self.x_counts[query as usize]);
+            self.x_slots[query as usize].reserve_exact(count);
+        }
+        for hit in hits {
+            self.x_slots[hit.query_idx as usize].push(hit);
         }
         for &query in &touched {
             let hsps = std::mem::take(&mut self.x_slots[query as usize]);
@@ -4141,8 +4154,13 @@ impl PrelimHitCollector {
 ///    }
 /// ```
 fn prelim_hits_by_subject(hit_lists: PrelimHitLists, num_subjects: usize) -> Vec<Vec<PrelimHit>> {
-    let mut by_subject: Vec<Vec<PrelimHit>> = Vec::with_capacity(num_subjects);
-    by_subject.resize_with(num_subjects, Vec::new);
+    // No NCBI counterpart: each subject's list is made at its size, so that it is not copied as it
+    // grows (with one subject, every kept HSP of the batch was copied again at each doubling).
+    let mut sizes = vec![0usize; num_subjects];
+    for list in hit_lists.iter().flatten().flat_map(|hit_list| &hit_list.hsplist_array) {
+        sizes[list.oid as usize] += list.hsps.len();
+    }
+    let mut by_subject: Vec<Vec<PrelimHit>> = sizes.into_iter().map(Vec::with_capacity).collect();
     for hit_list in hit_lists.into_iter().flatten() {
         for list in hit_list.hsplist_array {
             by_subject[list.oid as usize].extend(list.hsps);
@@ -5449,11 +5467,63 @@ fn blastn_timing_text(
 // Blast_HitListUpdate(results->hitlist_array[index],
 //                     hsp_list_array[index]);
 // ```
+/// A subject's final HSPs (`process_subject`'s traceback).
+#[derive(Debug)]
+enum SubjectHits {
+    /// The HSPs of every query in one list, in any order.
+    Mixed(Vec<BlastnHsp>),
+    /// No NCBI counterpart (LOSAT_X_QGROUPPAR's traceback): the lists of its queries, one query
+    /// each, in query order, each sorted by score (`sort_hsps_by_score`). These are the lists that
+    /// `update_hitlists_with_subject_hits` makes of the subject's list sorted by score: that sort
+    /// is stable and those lists are sorted by the same comparison, so splitting the joined, sorted
+    /// list by query gives each query's list back unchanged. No HSP is moved to make them.
+    ByQuery(Vec<Vec<BlastnHsp>>),
+}
+
+impl SubjectHits {
+    fn len(&self) -> usize {
+        match self {
+            SubjectHits::Mixed(hits) => hits.len(),
+            SubjectHits::ByQuery(lists) => lists.iter().map(Vec::len).sum(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
 fn update_hitlists_with_subject_hits(
     hit_lists: &mut [Option<BlastnHitList>],
-    hits: Vec<BlastnHsp>,
+    hits: SubjectHits,
     prelim_hitlist_size: usize,
 ) {
+    let hits = match hits {
+        SubjectHits::Mixed(hits) => hits,
+        SubjectHits::ByQuery(lists) => {
+            for mut hsps in lists {
+                let Some(first) = hsps.first() else {
+                    continue;
+                };
+                let (q_idx, oid) = (first.q_idx as usize, first.s_idx);
+                debug_assert!(hsps.iter().all(|hsp| hsp.q_idx as usize == q_idx));
+                if q_idx >= hit_lists.len() {
+                    continue;
+                }
+                sort_hsps_by_score(&mut hsps);
+                let hsp_list = BlastnHspList {
+                    oid,
+                    query_index: q_idx as u32,
+                    hsps,
+                    best_evalue: i32::MAX as f64,
+                };
+                hit_lists[q_idx]
+                    .get_or_insert_with(|| BlastnHitList::new(prelim_hitlist_size))
+                    .update(hsp_list);
+            }
+            return;
+        }
+    };
     if hits.is_empty() {
         return;
     }
@@ -12010,7 +12080,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                            subject_scratch: &mut SubjectScratch,
                            lookups: Option<&LookupTables>,
                            prelim_source: Option<&Vec<PrelimHit>>,
-                           subject_hits: &mut Option<Vec<BlastnHsp>>,
+                           subject_hits: &mut Option<SubjectHits>,
                            prelim_out: &mut Vec<PrelimHit>| {
         // The batch's lookup tables: the preliminary stage's calls pass them, the traceback's
         // (`prelim_source` set) pass `None` and do not scan (LOSAT_X_BNLUTDROP, `x_lut_drop.rs`).
@@ -16637,10 +16707,11 @@ fn search_query_batch<const UNGAPPED: bool>(
         let mut s_seq_blastna_vec: Vec<u8>;
         let s_seq_blastna: &[u8] = match (subject.blastna, subject.store) {
             (Some(blastna), _) => blastna,
-            // EXPERIMENT (LOSAT_X_BNSTORE): made from the packed subject.
+            // EXPERIMENT (LOSAT_X_BNSTORE): made from the packed subject, on the threads of the
+            // pool (one thread decoding a long subject left the others waiting at every batch).
             (None, Some(store)) => {
                 s_seq_blastna_vec = Vec::new();
-                x_blastna_into(store, &mut s_seq_blastna_vec);
+                x_blastna_into_pool(store, &mut s_seq_blastna_vec, parallel_pool);
                 s_seq_blastna_vec.as_slice()
             }
             (None, None) => {
@@ -16727,7 +16798,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 });
             }
             if !final_hits.is_empty() {
-                *subject_hits = Some(final_hits);
+                *subject_hits = Some(SubjectHits::Mixed(final_hits));
             }
             if let Some(bar) = progress_bar.as_ref() {
                 bar.inc(1);
@@ -18595,20 +18666,24 @@ fn search_query_batch<const UNGAPPED: bool>(
                         (list, [s1, s2, s3, s4, s5], edit_lengths, alignment_lengths)
                     },
                 );
-                let mut fast: Vec<BlastnHsp> = Vec::new();
+                // Each query's list is sorted by score (`x_final_list`), so the lists go to the
+                // hit lists as they are, in query order (`SubjectHits::ByQuery`), not joined into
+                // the subject's list and split by query again.
+                let mut lists: Vec<Vec<BlastnHsp>> = Vec::new();
                 let mut steps = [0usize; 5];
                 for (list, step_counts, edit_lengths, alignment_lengths) in
                     x_results.into_iter().flatten()
                 {
-                    fast.extend(list);
+                    if !list.is_empty() {
+                        lists.push(list);
+                    }
                     for (sum, step) in steps.iter_mut().zip(step_counts) {
                         *sum += step;
                     }
                     traceback_edit_script_lengths.extend(edit_lengths);
                     traceback_alignment_lengths.extend(alignment_lengths);
                 }
-                x_qgroup_par::sort_stable(parallel_pool, &mut fast, score_compare_hsps);
-                (fast, steps)
+                (SubjectHits::ByQuery(lists), steps)
             } else {
                 x_trace_list(
                     prelim_hits,
@@ -18623,7 +18698,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 );
                 let (list, s1, s2, s3, s4) = x_post_purge(hits.drain(..).collect());
                 let (list, s5) = x_final_list(list, interval_tree);
-                (list, [s1, s2, s3, s4, s5])
+                (SubjectHits::Mixed(list), [s1, s2, s3, s4, s5])
             };
         prelim_hits.clear();
 
@@ -18734,7 +18809,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     // `LOSAT_X_BNSTREAM`, hand each subject over in OID order while they search the next ones.
     let search_subjects = |kept: Option<&[Vec<PrelimHit>]>,
                            lookups: Option<&LookupTables>,
-                           sink: &mut (dyn FnMut(usize, Option<Vec<BlastnHsp>>, Vec<PrelimHit>)
+                           sink: &mut (dyn FnMut(usize, Option<SubjectHits>, Vec<PrelimHit>)
                                      + Send)| {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
         // ```c
@@ -18751,7 +18826,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         };
         let search_one = |state: &mut (GapAlignScratch, SubjectScratch), s_idx: usize| {
             let (gap_scratch, subject_scratch) = state;
-            let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+            let mut subject_hits: Option<SubjectHits> = None;
             let mut prelim_hits: Vec<PrelimHit> = Vec::new();
             process_subject(
                 s_idx,
@@ -18787,7 +18862,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                         )
                     });
                 } else {
-                    let results: Vec<(Option<Vec<BlastnHsp>>, Vec<PrelimHit>)> = parallel_pool
+                    let results: Vec<(Option<SubjectHits>, Vec<PrelimHit>)> = parallel_pool
                         .install(|| {
                             (0..num_subjects)
                                 .into_par_iter()
@@ -18909,7 +18984,7 @@ fn search_query_batch<const UNGAPPED: bool>(
              ordinal: u32,
              subject: BlastnSubjectRef<'_>| {
                 let (gap_scratch, subject_scratch) = state;
-                let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                let mut subject_hits: Option<SubjectHits> = None;
                 let mut prelim_hits: Vec<PrelimHit> = Vec::new();
                 process_subject(
                     ordinal as usize,
@@ -19015,7 +19090,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                               ordinal: u32,
                               subject: BlastnSubjectRef<'_>| {
                                 let (gap_scratch, subject_scratch) = state;
-                                let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                                let mut subject_hits: Option<SubjectHits> = None;
                                 let mut prelim_hits: Vec<PrelimHit> = Vec::new();
                                 process_subject(
                                     ordinal as usize,
@@ -19107,7 +19182,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                               ordinal: u32,
                               subject: BlastnSubjectRef<'_>| {
                                 let (gap_scratch, subject_scratch) = state;
-                                let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                                let mut subject_hits: Option<SubjectHits> = None;
                                 let mut prelim_hits: Vec<PrelimHit> = Vec::new();
                                 process_subject(
                                     ordinal as usize,
@@ -19170,7 +19245,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                   subject: BlastnSubjectRef<'_>,
                   kept: &Vec<PrelimHit>| {
                     let (gap_scratch, subject_scratch) = state;
-                    let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                    let mut subject_hits: Option<SubjectHits> = None;
                     let mut prelim_hits: Vec<PrelimHit> = Vec::new();
                     process_subject(
                         ordinal as usize,
@@ -20741,5 +20816,115 @@ mod tests {
                 })
             ]
         );
+    }
+
+    // SubjectHits::ByQuery: the lists of a subject's queries, each sorted by score, give the hit
+    // lists that their join sorted by score (stable, as `x_qgroup_par::sort_stable`) gave as one
+    // subject list: ties of score and place within and across queries, queries without HSPs, a
+    // query past the batch, several subjects and hit lists that drop subjects.
+    #[test]
+    fn query_lists_give_the_hit_lists_of_the_sorted_subject_list() {
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut below = |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % n.max(1)
+        };
+        type Row = (u32, u32, i32, usize, usize, usize, usize, u64, u64);
+        let rows = |hit_lists: &[Option<BlastnHitList>]| -> Vec<Option<Vec<(u32, u32, Vec<Row>)>>> {
+            hit_lists
+                .iter()
+                .map(|list| {
+                    list.as_ref().map(|list| {
+                        list.hsplist_array
+                            .iter()
+                            .map(|hsps| {
+                                let rows = hsps
+                                    .hsps
+                                    .iter()
+                                    .map(|h| {
+                                        (
+                                            h.q_idx,
+                                            h.s_idx,
+                                            h.raw_score,
+                                            h.internal_q_offset_0,
+                                            h.internal_q_end_0,
+                                            h.internal_s_offset_0,
+                                            h.internal_s_end_0,
+                                            h.e_value.to_bits(),
+                                            h.bit_score.to_bits(),
+                                        )
+                                    })
+                                    .collect();
+                                (hsps.oid, hsps.query_index, rows)
+                            })
+                            .collect()
+                    })
+                })
+                .collect()
+        };
+        for _ in 0..300 {
+            let queries = 1 + below(10) as usize;
+            let subjects = 1 + below(4) as u32;
+            let hitlist_size = 1 + below(3) as usize;
+            let mut joined: Vec<Option<BlastnHitList>> = (0..queries).map(|_| None).collect();
+            let mut by_query: Vec<Option<BlastnHitList>> = (0..queries).map(|_| None).collect();
+            for s_idx in 0..subjects {
+                let mut lists = Vec::new();
+                // one query past the batch now and then (both paths drop its HSPs)
+                for q_idx in 0..queries as u32 + u32::from(below(8) == 0) {
+                    if below(3) == 0 {
+                        continue;
+                    }
+                    let mut list: Vec<BlastnHsp> = (0..1 + below(6))
+                        .map(|_| {
+                            let q = below(4) as usize;
+                            let s = below(4) as usize;
+                            BlastnHsp {
+                                identity: 100.0,
+                                length: 10,
+                                mismatch: 0,
+                                gapopen: 0,
+                                q_start: q + 1,
+                                q_end: q + 10,
+                                s_start: s + 1,
+                                s_end: s + 10,
+                                e_value: below(5) as f64 * 1e-3,
+                                bit_score: below(50) as f64,
+                                num_ident: 10,
+                                query_frame: 1,
+                                query_length: 100,
+                                q_idx,
+                                s_idx,
+                                raw_score: below(4) as i32,
+                                internal_q_offset_0: q,
+                                internal_q_end_0: q + 1 + below(2) as usize,
+                                internal_s_offset_0: s,
+                                internal_s_end_0: s + 1 + below(2) as usize,
+                                internal_query_context_offset: 0,
+                                gap_info: None,
+                                num_positives: 10,
+                            }
+                        })
+                        .collect();
+                    sort_hsps_by_score(&mut list);
+                    lists.push(list);
+                }
+                let mut sorted: Vec<BlastnHsp> = lists.iter().flatten().cloned().collect();
+                sorted.sort_by(crate::algorithm::blastn::hsp::score_compare_hsps);
+                update_hitlists_with_subject_hits(
+                    &mut joined,
+                    SubjectHits::Mixed(sorted),
+                    hitlist_size,
+                );
+                update_hitlists_with_subject_hits(
+                    &mut by_query,
+                    SubjectHits::ByQuery(lists),
+                    hitlist_size,
+                );
+            }
+            assert_eq!(rows(&by_query), rows(&joined));
+        }
     }
 }

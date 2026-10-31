@@ -1,6 +1,9 @@
-//! EXPERIMENT (LOSAT_X_QDUSTPAR): the DUST masks of a query batch
-//! made on the search pool, the per-query map split over the pool's threads and collected in
-//! query order.
+//! EXPERIMENT (LOSAT_X_QPREPPAR): the DUST masks of a query batch made on the search pool, the
+//! per-query map split over the pool's threads and collected in query order. Until 2026-11-01 this
+//! map had a switch of its own (LOSAT_X_QDUSTPAR) with the same rule as LOSAT_X_QPREPPAR's maps
+//! of the same batch (a pool of two or more threads, two or more queries); it was folded into
+//! LOSAT_X_QPREPPAR then (line SF S3, family bn-query-read), which makes a batch's setup on the
+//! pool: these masks, the encoding and the Karlin blocks (`blast_engine/x_query_prep_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:92-102,171-180
 //! ```c++
@@ -64,13 +67,13 @@ use crate::utils::threading::SearchPool;
 ))]
 use rayon::prelude::*;
 
-// No NCBI counterpart: reads the switch once (LOSAT_X_QDUSTPAR is a strict-set switch since
+// No NCBI counterpart: reads the switch once (LOSAT_X_QPREPPAR is a strict-set switch since
 // 2026-10-17: on unless it is `0`). It chooses between two LOSAT code paths with the same result
 // and changes no value NCBI computes.
-/// Whether LOSAT_X_QDUSTPAR is on.
+/// Whether LOSAT_X_QPREPPAR is on.
 fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_QDUSTPAR"))
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_QPREPPAR"))
 }
 
 /// The DUST masks of `seqs`, one list per sequence, in order: the serial map of NCBI's loop.
@@ -162,7 +165,7 @@ fn masks_with_probe<L: QueryLetters + ?Sized, P: Fn() + Sync>(
     probe: &P,
 ) -> Vec<Vec<MaskedInterval>> {
     if on {
-        crate::utils::xreach::x_reach!("LOSAT_X_QDUSTPAR", on_pool(pool, seqs.count()));
+        crate::utils::xreach::x_reach!("LOSAT_X_QPREPPAR", on_pool(pool, seqs.count()));
     }
     if !on || !on_pool(pool, seqs.count()) {
         return serial(seqs, level, window, linker);

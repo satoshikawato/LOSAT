@@ -217,7 +217,7 @@ impl BlastnOutputFormat {
         }
     }
 
-    /// Whether the report reads the queries' letters (EXPERIMENT, LOSAT_X_BNQDROP's rule): the
+    /// Whether the report reads the queries' letters (EXPERIMENT, LOSAT_X_BNQPACK's rule): the
     /// HSP rows of outfmt 0 and of the XML / JSON documents, the archive's Bioseqs and DUST, and
     /// SAM's SEQ where the query is the target (`SQ SR`). The default tabular formats, the
     /// Seq-aligns and the other SAM documents show none; a custom tabular report shows them

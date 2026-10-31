@@ -16,12 +16,12 @@
 //! stage, the one-thread loop reads every block into one buffer, and the check of
 //! `IndexFile::open` reads 64 KiB at a time (`seqdb/index.rs`). The workers take the blocks one at
 //! a time in ordinal order (the block and the one-thread order's diagonal offset of its first
-//! sequence, under one lock) and put each block's results into a window of `blocks_per_thread` x
-//! workers slots; the worker that ends the oldest block not yet merged merges it and every later
-//! block already ended, in ordinal order. A worker takes block j only once the blocks before j - W
-//! are merged (W, the window), and otherwise waits, so the results held for the merge stay within
-//! W blocks, as within a round of `search_blocks_of`, without the end of a round where every worker
-//! waits for the round's last block and the merge. NCBI's threads allocate their search structures
+//! sequence, under one lock) and put each block's results into a window of slots (`XWindowSize`);
+//! the worker that ends the oldest block not yet merged merges it and every later block already
+//! ended, in ordinal order. A worker takes block j only once the blocks before j - W are merged (W,
+//! the window), and otherwise waits, so the results held for the merge stay within W blocks, without
+//! the end of a round of `search_blocks_of` where every worker waits for the round's last block and
+//! the merge. NCBI's threads allocate their search structures
 //! once each (`BlastCoreAuxStruct`, `aux_struct->offset_pairs`, quoted at `BlastpSubjectScratch`)
 //! and read the sequences in the mapped files.
 //!
@@ -36,8 +36,8 @@
 //! block is taken after it (blocks already taken end unmerged). No floating-point operation
 //! changes order.
 //!
-//! Why the waits end: a worker waits only while block j - W, the oldest not merged, is taken and
-//! not ended, so another worker is searching it; that search waits for nothing a waiting worker
+//! Why the waits end: a worker waits only while the oldest block not merged is taken and not ended
+//! (W is at least 1, and the bytes narrow it to at least 1), so another worker is searching it; that search waits for nothing a waiting worker
 //! holds and runs no rayon work (the kernel `process_subject` and the block's read are sequential),
 //! so no waiting task can sit below it on its thread, and its worker merges it. A worker that panics stops the search and
 //! wakes the others (`XStopOnPanic`); the scope then raises the panic.
@@ -67,6 +67,7 @@ use crate::utils::threading::SearchPool;
 
 use super::super::super::hsp::BlastpHspList;
 use super::super::super::x_prelim_compact::XPrelimHsp;
+use super::x_db_cut::x_sequence_bytes;
 use super::{
     block_subject, diag_offset_after, prepare_search_block, search_read_error, BlastpDatabase,
     BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, PrelimSink,
@@ -91,6 +92,39 @@ const X_BPDBWIDE_BLOCKS_PER_THREAD: usize = 64;
 /// Bytes of waiting results per worker above which LOSAT_X_BPDBWIDE's window narrows to
 /// `blocks_per_thread` per worker.
 const X_BPDBWIDE_WAITING_BYTES_PER_THREAD: usize = 1 << 20;
+
+// No NCBI counterpart (scheduling only): as the window.
+/// The window of `x_search_window`: past `width` blocks after the oldest not merged no block is
+/// taken, and past `floor` none while more than `max_waiting_bytes` of results wait.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct XWindowSize {
+    pub(super) floor: usize,
+    pub(super) width: usize,
+    pub(super) max_waiting_bytes: usize,
+}
+
+impl XWindowSize {
+    /// The window of `workers` workers: `blocks_per_thread` per worker, or with LOSAT_X_BPDBWIDE
+    /// (`wide`) the wider one that narrows to it.
+    fn of(workers: usize, blocks_per_thread: usize, wide: bool) -> Self {
+        let floor = workers.saturating_mul(blocks_per_thread).max(1);
+        Self {
+            floor,
+            width: if wide {
+                workers
+                    .saturating_mul(X_BPDBWIDE_BLOCKS_PER_THREAD)
+                    .max(floor)
+            } else {
+                floor
+            },
+            max_waiting_bytes: if wide {
+                workers.saturating_mul(X_BPDBWIDE_WAITING_BYTES_PER_THREAD)
+            } else {
+                usize::MAX
+            },
+        }
+    }
+}
 
 // No NCBI counterpart (scheduling only): reads the LOSAT_X_BPDBWIDE switch once.
 /// Whether LOSAT_X_BPDBWIDE is on (a switch of the strict set).
@@ -324,14 +358,14 @@ fn x_window_worker<S, K, P>(
 // No NCBI counterpart: scheduling of the preliminary loop (NCBI's loop is quoted above
 // `search_blocks`); it changes no value NCBI computes.
 /// The parallel stage of `x_search_blocks_kept`: the blocks of at most `block_bytes` searched by
-/// one task per worker, in a window of `blocks_per_thread` blocks per worker (module header).
+/// one task per worker, in the window `size` (module header).
 #[allow(clippy::too_many_arguments)]
-fn x_search_window<S, K, P>(
+pub(super) fn x_search_window<S, K, P>(
     db: &SeqDb,
     pool: &SearchPool<'_>,
     window: i32,
     block_bytes: u64,
-    blocks_per_thread: usize,
+    size: XWindowSize,
     new_scratch: &S,
     process_subject: &K,
     sink: &mut P,
@@ -342,28 +376,16 @@ where
     P: PrelimSink + Send,
 {
     let workers = pool.threads().max(1);
-    let floor = workers.saturating_mul(blocks_per_thread).max(1);
-    let wide = x_bp_db_wide();
-    let width = if wide {
-        workers
-            .saturating_mul(X_BPDBWIDE_BLOCKS_PER_THREAD)
-            .max(floor)
-    } else {
-        floor
-    };
-    if wide {
-        crate::utils::xreach::x_reach!("LOSAT_X_BPDBWIDE", true);
-    }
     let shared = XShared {
         window: Mutex::new(XWindow {
             next_ordinal: 0,
             diag_offset: window,
             taken: 0,
             merged: 0,
-            slots: std::iter::repeat_with(|| None).take(width).collect(),
-            floor,
+            slots: std::iter::repeat_with(|| None).take(size.width).collect(),
+            floor: size.floor,
             waiting_bytes: 0,
-            max_waiting_bytes: workers.saturating_mul(X_BPDBWIDE_WAITING_BYTES_PER_THREAD),
+            max_waiting_bytes: size.max_waiting_bytes,
             sink,
             error: None,
             stopped: false,
@@ -436,12 +458,21 @@ where
         0,
     ) && pool.enabled()
     {
+        let wide = x_bp_db_wide();
+        let size = XWindowSize::of(pool.threads().max(1), blocks_per_thread, wide);
+        if wide {
+            // A database of `floor` blocks or fewer behaves as without the switch.
+            crate::utils::xreach::x_reach!(
+                "LOSAT_X_BPDBWIDE",
+                x_sequence_bytes(database) / block_bytes.max(1) > size.floor as u64
+            );
+        }
         return x_search_window(
             db,
             pool,
             window,
             block_bytes,
-            blocks_per_thread,
+            size,
             new_scratch,
             process_subject,
             sink,
@@ -449,7 +480,7 @@ where
     }
 
     if x_bp_db_wide() {
-        // One worker: the blocks are searched one after another, no window.
+        // The blocks are searched one after another, no window.
         crate::utils::xreach::x_reach!("LOSAT_X_BPDBWIDE", false);
     }
     let mut scratch = new_scratch();
@@ -518,6 +549,16 @@ mod tests {
             w.waiting_bytes = bytes;
             assert_eq!(w.full(), full, "past {past} bytes {bytes}");
         }
+    }
+
+    #[test]
+    fn the_size_of_the_window_without_and_with_the_switch() {
+        let narrow = XWindowSize::of(4, 8, false);
+        assert_eq!((narrow.floor, narrow.width), (32, 32));
+        assert_eq!(narrow.max_waiting_bytes, usize::MAX);
+        let wide = XWindowSize::of(4, 8, true);
+        assert_eq!((wide.floor, wide.width), (32, 256));
+        assert_eq!(wide.max_waiting_bytes, 4 << 20);
     }
 
     #[test]

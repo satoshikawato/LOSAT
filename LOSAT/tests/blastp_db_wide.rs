@@ -38,11 +38,11 @@ struct Run {
     stderr: String,
 }
 
-/// A protein database of 40 numbered copies of the fixture's proteome (`MejoMJNV.faa`, about 90 KB
-/// of sequence), about 3.6 MB: about 38 blocks of 96 KiB, more than the 8 blocks per thread of the
-/// narrow window at 2 and 4 threads, and the query file `query.faa` beside it, the first 10 records
+/// A protein database of `copies` numbered copies of the fixture's proteome (`MejoMJNV.faa`, about
+/// 90 KB of sequence), with 40 copies about 3.6 MB: about 38 blocks of 96 KiB, more than the 8 blocks
+/// per thread of the narrow window at 2 and 4 threads, and the query file `query.faa` beside it, the first 10 records
 /// of the fixture's other proteome. Returns the database name.
-fn database(label: &str) -> PathBuf {
+fn database(label: &str, copies: usize) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("losat-bpdbwide-{label}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -53,21 +53,21 @@ fn database(label: &str) -> PathBuf {
         .map_or(query.len(), |(at, _)| at);
     std::fs::write(dir.join("query.faa"), &query[..end]).unwrap();
     let text = std::fs::read_to_string(fixture("MejoMJNV.faa")).unwrap();
-    let mut copies = String::with_capacity(40 * text.len());
-    for copy in 0..40 {
+    let mut records = String::with_capacity(copies * text.len());
+    for copy in 0..copies {
         let mut record = 0;
         for line in text.lines() {
             if line.starts_with('>') {
-                copies.push_str(&format!(">c{copy}_{record}\n"));
+                records.push_str(&format!(">c{copy}_{record}\n"));
                 record += 1;
             } else {
-                copies.push_str(line);
-                copies.push('\n');
+                records.push_str(line);
+                records.push('\n');
             }
         }
     }
     let fasta = dir.join("copies.faa");
-    std::fs::write(&fasta, copies).unwrap();
+    std::fs::write(&fasta, records).unwrap();
     let name = dir.join("copies");
     let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("makeblastdb")
@@ -132,7 +132,7 @@ fn blastp(task: &str, db: &Path, threads: u32, vars: &[(&str, &str)]) -> Run {
 
 #[test]
 fn reports_with_the_wide_window_are_the_reports_with_the_narrow_one() {
-    let db = database("reports");
+    let db = database("reports", 40);
     for (task, thread_counts) in [("blastp", &[4u32][..]), ("blastp-fast", &[2, 4][..])] {
         let one_thread = blastp(task, &db, 1, &[]);
         assert!(
@@ -153,18 +153,21 @@ fn reports_with_the_wide_window_are_the_reports_with_the_narrow_one() {
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
 
-// At one thread the blocks are searched one after another: the switch's decision takes its
-// reference side only.
+// At one thread the blocks are searched one after another, and a database of fewer blocks than the
+// narrow window holds behaves as without the switch: the switch's decision takes its reference
+// side only.
 #[test]
-fn the_window_does_not_act_at_one_thread() {
-    let db = database("one");
-    let reach = reach_support::Reach::new("bpdbwide-one");
-    let run = blastp("blastp-fast", &db, 1, &[reach.var()]);
-    assert_eq!(
-        reach.sides("LOSAT_X_BPDBWIDE"),
-        (false, true),
-        "{}",
-        run.stderr
-    );
+fn the_window_does_not_act_at_one_thread_or_on_few_blocks() {
+    let db = database("one", 1);
+    for threads in [1u32, 2] {
+        let reach = reach_support::Reach::new("bpdbwide-one");
+        let run = blastp("blastp-fast", &db, threads, &[reach.var()]);
+        assert_eq!(
+            reach.sides("LOSAT_X_BPDBWIDE"),
+            (false, true),
+            "threads {threads}: {}",
+            run.stderr
+        );
+    }
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }

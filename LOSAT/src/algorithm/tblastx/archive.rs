@@ -367,6 +367,7 @@ pub(super) fn write_tblastx_archives(
                     for frame in [Frame::Plus1, Frame::Minus1] {
                         lcase_masks.push(MaskEntry {
                             id: record.local_id.clone(),
+                            best: record.believed().map(|ids| ids.best.clone()),
                             frame,
                             intervals: vec![run],
                         });

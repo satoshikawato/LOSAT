@@ -88,6 +88,39 @@ mod x_db_cut;
 #[path = "x_db_stream.rs"]
 mod x_db_stream;
 
+/// No NCBI counterpart (scheduling only): the heap bytes of a result of the preliminary stage
+/// while it waits for the owner of `x_db_stream.rs`'s window.
+#[cfg_attr(
+    not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )),
+    allow(dead_code)
+)]
+pub(super) trait XWaitingBytes {
+    fn x_waiting_bytes(&self) -> usize;
+}
+
+impl<T> XWaitingBytes for Vec<T> {
+    fn x_waiting_bytes(&self) -> usize {
+        self.capacity().saturating_mul(std::mem::size_of::<T>())
+    }
+}
+
+#[cfg(test)]
+impl XWaitingBytes for u32 {
+    fn x_waiting_bytes(&self) -> usize {
+        0
+    }
+}
+
+#[cfg(test)]
+impl XWaitingBytes for u64 {
+    fn x_waiting_bytes(&self) -> usize {
+        0
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:75-78
 // ```c
 // const char BLASTNA_TO_IUPACNA[BLASTNA_SIZE] = {
@@ -171,6 +204,39 @@ pub(super) struct BlastnDatabase {
 pub(super) struct SamLetterCache(RefCell<HashMap<u32, NucleotideAmbiguity>>);
 
 impl BlastnDatabase {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2645-2668
+    // (`Blast_HSPListReevaluateUngapped`)
+    // ```c
+    //       	seq_arg.oid = subject_blk->oid;
+    //       	seq_arg.encoding =
+    //        	  (kTranslateSubject ? eBlastEncodingNcbi4na : eBlastEncodingNucleotide);
+    //         seq_arg.check_oid_exclusion = TRUE;
+    //       	seq_arg.seq = subject_blk;
+    //       	/* Return the packed sequence to the database */
+    //       	BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
+    //       	/* Get the unpacked sequence */
+    //       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
+    // ```
+    /// Calls `use_letters` with the letters of database sequence `ordinal` in BLASTNA, without
+    /// the sentinel bytes: the subject that an ungapped (`-ungapped`) search re-evaluates its
+    /// HSPs on in the preliminary stage (NCBI gets the sequence again, unpacked, for a sequence
+    /// whose HSP list is not empty). The letters stay in the kernel's buffer with its sentinel
+    /// bytes (no copy). A read error is the preliminary search's.
+    pub(super) fn with_blastna<T>(
+        &self,
+        ordinal: u32,
+        use_letters: impl FnOnce(&[u8]) -> T,
+    ) -> Result<T> {
+        let block = x_read_sequence(&self.db, ordinal).map_err(search_read_error)?;
+        let length = block.nucleotide_len(0).map_err(search_read_error)?;
+        let blastna = x_blastna(&block).map_err(search_read_error)?;
+        // The kernel's BLASTNA has a sentinel byte at each end.
+        let result = use_letters(&blastna[1..=length]);
+        x_done_bytes(blastna);
+        x_done_block(block);
+        Ok(result)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:185
     // ```c++
     //             "\tLN:" + NStr::UInt8ToString(refseq.GetBioseqLength()));
@@ -183,6 +249,72 @@ impl BlastnDatabase {
             .iter()
             .map(|&ordinal| self.db.nucleotide_length(ordinal).map_err(database_error))
             .collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
+    // ```c++
+    //             	CRef<CBlast_def_line_set> bdlRef =
+    //             			CSeqDB::ExtractBlastDefline(subject_bh);
+    //             	if(setSubjectIds) {
+    //             		x_SetSubjectIds(subject_bh, bdlRef);
+    //             	}
+    //             	if(setSubjectTaxInfoAll) {
+    //             		x_SetTaxInfoAll(subject_bh, bdlRef);
+    //             	}
+    // ```
+    /// The taxonomy of the tabular fields (`staxid`, `staxids`;
+    /// `report::tabular::TabularTaxonomy::of_deflines`) of the reported sequences `ordinals`, by
+    /// rank: from the definition lines of a sequence with parsed Seq-ids (`parsed[rank]`), else
+    /// from its stored ones (`SeqDb::defline_set`, which keeps whether a line has a `taxid`), for
+    /// the ranks that `hit_lists` name; the others are left empty. A header that does not decode
+    /// is refused before the report.
+    pub(super) fn tabular_taxonomy(
+        &self,
+        ordinals: &[u32],
+        parsed: &[Option<Arc<ParsedSubject>>],
+        hit_lists: &[Option<BlastnHitList>],
+    ) -> Result<Vec<crate::report::tabular::TabularTaxonomy>> {
+        use crate::report::tabular::TabularTaxonomy;
+        let mut taxonomy = vec![TabularTaxonomy::default(); ordinals.len()];
+        let mut read = vec![false; ordinals.len()];
+        for hsp_list in hit_lists
+            .iter()
+            .flatten()
+            .flat_map(|hit_list| &hit_list.hsplist_array)
+        {
+            let Some(rank) = hsp_list.hsps.first().map(|hsp| hsp.s_idx as usize) else {
+                continue;
+            };
+            if rank >= ordinals.len() || std::mem::replace(&mut read[rank], true) {
+                continue;
+            }
+            taxonomy[rank] = match parsed.get(rank).and_then(Option::as_deref) {
+                Some(subject) => TabularTaxonomy::of_deflines(subject.deflines()),
+                None => {
+                    let set = self
+                        .db
+                        .defline_set(ordinals[rank])
+                        .map_err(database_error)?;
+                    TabularTaxonomy::of_deflines(&set.deflines)
+                }
+            };
+        }
+        Ok(taxonomy)
+    }
+
+    /// The names of the taxonomy database that the rows of `spec` look up for the subjects
+    /// `taxonomy` (`shared::tabular_names`).
+    pub(super) fn tabular_names(
+        &self,
+        spec: &crate::report::tabular::TabularSpec,
+        taxonomy: &[crate::report::tabular::TabularTaxonomy],
+    ) -> Result<Option<crate::report::tabular::TabularNames>> {
+        shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
+    }
+
+    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
+    pub(super) fn open_for_tabular_rows(&self) -> Result<()> {
+        self.taxdb.open_for_rows(&self.db, PROGRAM)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:222-234
@@ -213,6 +345,12 @@ impl BlastnDatabase {
             .map_err(database_error)
     }
 
+    /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
+    pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
+        self.db.set_reports_show_gis(show_gis);
+        self
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
     // ```c++
     //         /*** Initialize the database/subject ***/
@@ -236,11 +374,23 @@ impl BlastnDatabase {
     /// with the command line's errors. The total length is NCBI's `Int8`; one that the
     /// engine cannot hold in a `usize` (a 32-bit target) is LOSAT's refusal.
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        let db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
+        Self::open_restricted(name, settings, None, &mut std::io::sink())
+    }
+
+    /// `open` with the database restricted to the taxid or seqid list `list` of the command
+    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
+    pub(super) fn open_restricted(
+        name: &str,
+        settings: &ApplicationSettings,
+        list: Option<&crate::seqdb::DbList>,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<Self> {
+        let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
         shared::check_seqids(&db, settings, PROGRAM)?;
-        let total = db.total_length();
+        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
+        let (total, num_seqs) = db.statistics_numbers();
         let db_len_total = usize::try_from(total)
             .ok()
             .filter(|&letters| i64::try_from(letters).is_ok())
@@ -251,7 +401,7 @@ impl BlastnDatabase {
             })?;
         let metadata = SubjectMetadata {
             db_len_total,
-            db_num_seqs: db.num_seqs() as usize,
+            db_num_seqs: num_seqs as usize,
         };
         Ok(Self {
             db,
@@ -330,8 +480,13 @@ impl BlastnDatabase {
         &self.name
     }
 
-    /// The number of sequences (`CSeqDB::GetNumSeqs`) and the total length
-    /// (`CSeqDB::GetTotalLength`): the real numbers, also with `-dbsize`.
+    /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
+    pub(super) fn filtered_empty(&self) -> bool {
+        self.db.filtered_empty()
+    }
+
+    /// The number of sequences and the total length that the statistics read
+    /// (`SeqDb::statistics_numbers`): the real numbers, also with `-dbsize`.
     pub(super) fn metadata(&self) -> &SubjectMetadata {
         &self.metadata
     }
@@ -442,7 +597,7 @@ pub(super) fn search_blocks<T, R, I, K, M>(
     merge: &mut M,
 ) -> Result<()>
 where
-    R: Send,
+    R: Send + XWaitingBytes,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R) + Send,
@@ -506,7 +661,7 @@ fn search_rounds<T, R, I, K, M>(
     merge: &mut M,
 ) -> Result<()>
 where
-    R: Send,
+    R: Send + XWaitingBytes,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R),
@@ -568,7 +723,7 @@ fn search_blocks_of<T, R, I, K, M>(
     merge: &mut M,
 ) -> Result<()>
 where
-    R: Send,
+    R: Send + XWaitingBytes,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R) + Send,
@@ -1105,7 +1260,9 @@ pub(super) fn reported_subjects(
             Vec::new()
         };
         records.push(FastaRecord {
-            local_id: format!("gnl|BL_ORD_ID|{ordinal}"),
+            // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
+            // (line DI-8).
+            local_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
             title,
             sequence,
             warnings: Vec::new(),

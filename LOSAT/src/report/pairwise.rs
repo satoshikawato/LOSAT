@@ -100,6 +100,12 @@ pub struct PairwiseHit {
     // NCBI c++/src/objtools/align_format/showalign.cpp:3595-3598:
     // if (aln_vec_info->sum_n > 0) out << "(" << sum_n << ")";
     pub sum_n: Option<i32>,
+    /// The columns (0-based) of `subject_seq` whose letter is a stored gap character (`-`,
+    /// NCBIstdaa 0, which makeblastdb stores for a `-` of a protein FASTA): residues of the
+    /// subject that the row shows as the letter of a gap. Empty when the subject holds none.
+    /// NCBI counts the coordinates of the rows by the Dense-seg, where these columns are
+    /// residues (`write_sequence_row`).
+    pub subject_stored_gaps: Vec<u32>,
 }
 
 impl From<Hit> for PairwiseHit {
@@ -118,6 +124,7 @@ impl From<Hit> for PairwiseHit {
             subject_title: None,
             comp_adjust_method: None,
             sum_n: None,
+            subject_stored_gaps: Vec::new(),
         }
     }
 }
@@ -179,7 +186,8 @@ pub struct BlastpPairwiseReport {
     pub word_threshold: f64,
     pub window_size: i32,
     pub gapped_karlin: KarlinParams,
-    pub gumbel: BlastGumbelBlk,
+    /// None with `-searchsp` (`PrintKAParameters` without `gbp`).
+    pub gumbel: Option<BlastGumbelBlk>,
     /// Subjects in the description table and with alignments, per query (NCBI's
     /// `m_NumDescriptions` and `m_NumAlignments`).
     pub num_descriptions: usize,
@@ -838,7 +846,7 @@ pub fn write_alignment<W: Write>(
 
     // If we have actual sequences, display them
     if let (Some(ref qseq), Some(ref sseq)) = (&hit.query_seq, &hit.subject_seq) {
-        write_alignment_with_sequences(writer, h, qseq, sseq, config)?;
+        write_alignment_with_sequences(writer, h, qseq, sseq, &hit.subject_stored_gaps, config)?;
     } else {
         // No sequences available - show placeholder
         writeln!(
@@ -864,6 +872,7 @@ fn write_alignment_with_sequences<W: Write>(
     hit: &Hit,
     query_seq: &str,
     subject_seq: &str,
+    subject_stored_gaps: &[u32],
     config: &PairwiseConfig,
 ) -> io::Result<()> {
     let line_len = config.line_length;
@@ -948,6 +957,7 @@ fn write_alignment_with_sequences<W: Write>(
             writer,
             "Query",
             &q_chars[offset..end],
+            0,
             &mut q_next,
             1,
             max_start_len,
@@ -959,6 +969,7 @@ fn write_alignment_with_sequences<W: Write>(
             writer,
             "Sbjct",
             &s_chars[offset..end],
+            stored_gaps_between(subject_stored_gaps, offset, end),
             &mut s_next,
             subject_step,
             max_start_len,
@@ -1003,17 +1014,21 @@ fn write_alignment_with_sequences<W: Write>(
 /// ```
 /// A later chunk without residues ends where the previous chunk ended
 /// (`end == prev_stop`). `AddSpace` takes a `size_t`, so an omitted start gives
-/// `maxStartLen + 2` spaces.
+/// `maxStartLen + 2` spaces. The residues of the chunk are its letters other than `-` and
+/// its `stored_gaps` columns whose `-` is a stored gap character (a residue of the
+/// Dense-seg).
+#[allow(clippy::too_many_arguments)]
 fn write_sequence_row<W: Write>(
     writer: &mut W,
     label: &str,
     residues: &[char],
+    stored_gaps: usize,
     next: &mut isize,
     step: isize,
     width: usize,
     first_chunk: bool,
 ) -> io::Result<()> {
-    let count = residues.iter().filter(|&&c| c != '-').count() as isize;
+    let count = (residues.iter().filter(|&&c| c != '-').count() + stored_gaps) as isize;
     let start = *next;
     let end = start + step * (count - 1);
     let shown = !(!first_chunk && count == 0 || first_chunk && start == 1 && end == 1);
@@ -1035,6 +1050,12 @@ fn write_sequence_row<W: Write>(
     writeln!(writer)?;
     *next += step * count;
     Ok(())
+}
+
+/// The number of the sorted columns `stored_gaps` in `start..end`.
+fn stored_gaps_between(stored_gaps: &[u32], start: usize, end: usize) -> usize {
+    let below = |column: usize| stored_gaps.partition_point(|&c| (c as usize) < column);
+    below(end) - below(start)
 }
 
 /// Check if two amino acids are a positive match (similar)
@@ -1868,10 +1889,19 @@ fn write_blastp_query_footer_spacing<W: Write>(
     writer: &mut W,
     ungapped_karlin: KarlinParams,
     gapped_karlin: KarlinParams,
-    gumbel: BlastGumbelBlk,
+    gumbel: Option<BlastGumbelBlk>,
     effective_search_space: i64,
     trailing: bool,
 ) -> io::Result<()> {
+    let Some(gumbel) = gumbel else {
+        return write_nucleotide_query_footer_spacing(
+            writer,
+            Some((ungapped_karlin, gapped_karlin)),
+            true,
+            effective_search_space,
+            trailing,
+        );
+    };
     writeln!(writer)?;
     writeln!(writer, "Lambda      K        H        a         alpha")?;
     write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;
@@ -2305,6 +2335,9 @@ pub struct BlastnPairwiseReport {
     pub zero_gap_extension_formula: bool,
     /// The two-hit window (`options.GetWindowSize()`): 40 for dc-megablast.
     pub window_size: usize,
+    /// A gapped search (`options.GetGappedMode()`); an ungapped (`-ungapped`) search has no
+    /// Gapped Karlin block in a query's footer and no `Gap Penalties` line in the epilog.
+    pub gapped: bool,
     /// Subjects in the description table and with alignments, per query.
     pub num_descriptions: usize,
     pub num_alignments: usize,
@@ -2671,6 +2704,7 @@ fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io:
 fn write_nucleotide_query_footer_spacing<W: Write>(
     writer: &mut W,
     karlin: Option<(KarlinParams, KarlinParams)>,
+    gapped: bool,
     effective_search_space: i64,
     trailing: bool,
 ) -> io::Result<()> {
@@ -2683,12 +2717,18 @@ fn write_nucleotide_query_footer_spacing<W: Write>(
         writeln!(writer)?;
     }
     writeln!(writer)?;
-    if let Some((_, gapped)) = karlin {
+    // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1130-1159
+    // ```c++
+    //     if (kbp_ungap) ... PrintKAParameters(kbp_ungap->Lambda, kbp_ungap->K, kbp_ungap->H, ...,  false)
+    //     if (kbp_gap) ... PrintKAParameters(..., true)   ("Gapped")
+    // ```
+    // An ungapped search has no gapped Karlin block (`kbp_gap` is not made).
+    if let Some((_, gapped_block)) = karlin.filter(|_| gapped) {
         writeln!(writer, "Gapped")?;
         writeln!(writer, "Lambda      K        H")?;
-        write_ncbi_ka_field(writer, gapped.lambda)?;
-        write_ncbi_ka_field(writer, gapped.k)?;
-        write_ncbi_ka_field(writer, gapped.h)?;
+        write_ncbi_ka_field(writer, gapped_block.lambda)?;
+        write_ncbi_ka_field(writer, gapped_block.k)?;
+        write_ncbi_ka_field(writer, gapped_block.h)?;
         writeln!(writer)?;
     }
     writeln!(writer)?;
@@ -2775,11 +2815,13 @@ fn write_blastn_final_footer<W: Write>(
     } else {
         f64::from(report.gap_extend)
     };
-    writeln!(
-        writer,
-        "Gap Penalties: Existence: {}, Extension: {}",
-        report.gap_open, gap_extension
-    )?;
+    if report.gapped {
+        writeln!(
+            writer,
+            "Gap Penalties: Existence: {}, Extension: {}",
+            report.gap_open, gap_extension
+        )?;
+    }
     if report.window_size != 0 {
         writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
     }
@@ -2957,6 +2999,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
                 write_nucleotide_query_footer_spacing(
                     writer,
                     query.karlin,
+                    report.gapped,
                     query.effective_search_space,
                     false,
                 )?;
@@ -3035,6 +3078,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         write_nucleotide_query_footer_spacing(
             writer,
             query.karlin,
+            self.report.gapped,
             query.effective_search_space,
             false,
         )
@@ -4238,6 +4282,7 @@ mod tests {
             gap_extend: 0,
             zero_gap_extension_formula: true,
             window_size: 0,
+            gapped: true,
             num_descriptions: 500,
             num_alignments: 250,
             unsearched: vec![false; queries.len()],
@@ -5399,12 +5444,16 @@ fn write_blastx_alignment(
     };
     let mut qp = hit.hit.q_start as isize;
     let mut sp = hit.hit.s_start;
-    for (qpart, spart) in q
+    for (chunk, (qpart, spart)) in q
         .chunks(config.line_length)
         .zip(s.chunks(config.line_length))
+        .enumerate()
     {
+        let first = chunk * config.line_length;
         let qn = qpart.iter().filter(|&&c| c != b'-').count();
-        let sn = spart.iter().filter(|&&c| c != b'-').count();
+        // The stored gap characters of the subject are residues (`write_sequence_row`).
+        let sn = spart.iter().filter(|&&c| c != b'-').count()
+            + stored_gaps_between(&hit.subject_stored_gaps, first, first + spart.len());
         let qe = qp + direction * (3 * qn as isize - 1);
         let se = sp + sn.saturating_sub(1);
         write!(writer, "Query  ")?;
@@ -5543,6 +5592,7 @@ mod tblastx_tests {
             subject_title: None,
             comp_adjust_method: None,
             sum_n: Some(sum_n),
+            subject_stored_gaps: Vec::new(),
         }
     }
 

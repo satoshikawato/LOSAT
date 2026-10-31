@@ -29,6 +29,9 @@ pub(crate) mod gapalign;
 mod hsp;
 mod query_split;
 mod seqalign;
+// NCBI c++/src/objtools/align_format/tabular.cpp: the tabular reports with a field list or a
+// delimiter, and outfmt 10 and 20, through the shared writer (`report::tabular`).
+mod tabular;
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries searched in blocks of whole query batches.
 mod x_query_blocks;
 // Redone HSP lists without spare room.
@@ -41,8 +44,7 @@ mod x_redo_fit;
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod x_redo_par;
-// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the redo of a `-db` search reads each match's subject from
-// the database.
+// The redo of a `-db` search reads each match's subject from the database.
 mod x_redo_subjects;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-3691
 // ```c

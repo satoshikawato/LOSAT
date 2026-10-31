@@ -1,0 +1,20 @@
+USAGE
+  blastdbcmd [-h] [-help] [-db dbname] [-dbtype molecule_type]
+    [-entry sequence_identifier] [-entry_batch input_file] [-ipg IPG]
+    [-ipg_batch input_file] [-info] [-metadata] [-metadata_output_prefix ]
+    [-tax_info] [-range numbers] [-strand strand]
+    [-mask_sequence_with mask_algo_id] [-taxids taxonomy_ids]
+    [-taxidlist input_file] [-no_taxid_expansion] [-out output_file]
+    [-outfmt format] [-target_only] [-get_dups] [-line_length number]
+    [-ctrl_a] [-show_blastdb_search_path] [-list directory]
+    [-remove_redundant_dbs] [-recursive] [-list_outfmt format] [-exact_length]
+    [-long_seqids] [-logfile File_Name] [-version]
+
+DESCRIPTION
+   BLAST database client, version 2.17.0+
+
+Use '-help' to print detailed descriptions of command line arguments
+========================================================================
+
+Error: Argument "outfmt". Incompatible with argument:  `info'
+Error:  (CArgException::eConstraint) Argument "outfmt". Incompatible with argument:  `info'

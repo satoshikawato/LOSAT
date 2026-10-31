@@ -183,7 +183,7 @@ pub(crate) fn write_tblastx_seqalign(
             &mut hsp_records,
         )?;
         let query_record = QueryRecord {
-            id: SeqId::Local(&query.local_id),
+            id: query.seq_id(),
             searched_length: i32::try_from(query.seq().len())?,
             offset: i32::try_from(query_placements.offset(q_idx))?,
         };

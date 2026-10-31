@@ -1,0 +1,56 @@
+qp1	ref|XP_000001.1|	9606;10090	Homo sapiens;Mus musculus	human;house mouse
+qp1	gi|9002|emb|CAA90002.1|	0	N/A	N/A
+qp1	gi|123456|ref|NP_000002.1|	10116	N/A	N/A
+qp1	ref|XP_910001.1|	0	N/A	N/A
+qp1	sp|Q00003|ABC_MOUSE	0	N/A	N/A
+qp1	emb|CAA00005.1|	0	N/A	N/A
+qp1	ref|XP_920001.1|	0	N/A	N/A
+qp1	tr|A0A000|A0A000_YEAST	0	N/A	N/A
+qp1	pdb|1ABC|A	0	N/A	N/A
+qp1	dbj|BAA00006.1|	0	N/A	N/A
+qp1	pir||S00007	0	N/A	N/A
+qp1	prf||0008123A	0	N/A	N/A
+qp1	myprot9	0	N/A	N/A
+qp1	gnl|mydb|prot10	0	N/A	N/A
+qp1	ref|XP_000011.2|	0	N/A	N/A
+qp1	sp|P00012|	0	N/A	N/A
+qp1	myprot_13	0	N/A	N/A
+qp1	gb|AAA00017.1|LOCUS17	0	N/A	N/A
+qp1	gi|1818|gb|AAA00018.1|	562;9606	Escherichia coli;Homo sapiens	;human
+qp1	tpg|DAA00016.1|	0	N/A	N/A
+qp1	sp|P00019.3|NAME_HUMAN	9606	Homo sapiens	human
+qp1	unnamed	0	N/A	N/A
+qp1	pdb|5ABC|D	0	N/A	N/A
+qp1	ref|WP_100014.1|	0	N/A	N/A
+qp1	ref|NC_100013.1|	0	N/A	N/A
+qp1	tpe|BK100012.1|	0	N/A	N/A
+qp1	pdb|4ABC| 	0	N/A	N/A
+qp1	unnamed	0	N/A	N/A
+qp1	pdb|3ABC|C	0	N/A	N/A
+qp1	tpg|DAA10008.1|	0	N/A	N/A
+qp1	subject	0	N/A	N/A
+qp1	ref|NP_100006.1|	0	N/A	N/A
+qp1	pat|US|7654321|3	0	N/A	N/A
+qp1	pdb|2XYY| 	0	N/A	N/A
+qp1	pdb|2XYZ|B	0	N/A	N/A
+qp1	tpg|DAA10002.1|	0	N/A	N/A
+qp1	tpg|DAA10001.1|	0	N/A	N/A
+qp1	sp|P11111.1|ONE_HUMAN	0	N/A	N/A
+qp1	unnamed	0	N/A	N/A
+qp1	subject	0	N/A	N/A
+qp1	pat|EP|0238993|7	0	N/A	N/A
+qp1	prf|ABC|DEF	0	N/A	N/A
+qp1	pat|EP|0123456A1|7	0	N/A	N/A
+qp1	pat|US|RE33188|1	0	N/A	N/A
+qp1	gnl|ti|123	0	N/A	N/A
+qp1	long1	0	N/A	N/A
+qp1	gi|3000000000|gb|AAA00100.1|	0	N/A	N/A
+qp1	bbm|123	0	N/A	N/A
+qp1	gpp|GPP123|	0	N/A	N/A
+qp1	tpd|BK000013.1|	0	N/A	N/A
+qp1	tpe|BK000012.1|	0	N/A	N/A
+qp2	gnl|mydb|prot10	0	N/A	N/A
+qp2	gnl|mydb|prot10	0	N/A	N/A
+qp2	pir||S00007	0	N/A	N/A
+qp2	sp|P00012|	0	N/A	N/A
+qp2	sp|P00019.3|NAME_HUMAN	9606	Homo sapiens	human

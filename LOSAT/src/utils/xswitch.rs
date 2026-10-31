@@ -75,6 +75,11 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BPREDOFIT`, `LOSAT_X_BPSCANBF`, `LOSAT_X_BPSEED` and `LOSAT_X_BPUNGAP` (all always on)
 /// graduated on 2026-10-26: they left `STRICT_SET` and their old code was deleted; nothing
 /// chooses any more, so they are not in `GRADUATED`.
+/// `LOSAT_X_BPREDODBSUBJ` (the composition redo of a `-db` search reads each match's subject from
+/// the database, `blastp/x_redo_subjects.rs`) and `LOSAT_X_BPREDOWINEXPAND` (the windows of the
+/// redo expand the compact preliminary lists as they reach them, `blastp/x_redo_par.rs`) graduated
+/// on 2026-10-27 the same way: both were always on, they left `STRICT_SET`, and the copy of the
+/// listed subjects and the expansion of all lists before a windowed redo were deleted.
 /// `LOSAT_X_LINKSLICES` (the groups of the TBLASTX linking call linked as slices of its one list,
 /// `tblastx/x_link_slices.rs`) was added after the change as a switch that is off unless set and
 /// joined the set once it was verified with it on.
@@ -125,7 +130,8 @@ use std::ops::RangeInclusive;
 /// records copied out at their exact length, `tblastx/x_pair_par.rs`) was added after the change as
 /// a switch that is off unless set and joined the set once it was verified and timed with it on.
 /// `LOSAT_X_BPCLUT` (the compressed lookup table of `blastp-fast` built flat, in three passes, by
-/// the search's pool at more than one thread, `tblastx/lookup/x_clut_direct.rs`) and
+/// the search's pool at more than one thread, `tblastx/lookup/x_clut_direct.rs`; the compressed
+/// tables of TBLASTN and BLASTX take it too, built on one thread) and
 /// `LOSAT_X_BPLKPFLAT` (how that build is scheduled and where its vectors come from, which acts
 /// only where `LOSAT_X_BPCLUT` builds the table on the pool, `tblastx/lookup/x_clut_par.rs`) were
 /// added after the change as switches that are off unless set and joined the set together once
@@ -153,6 +159,24 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BNCSR` (the chains of BLASTN's contiguous lookup tables of word sizes 9 to 11 laid out
 /// as CSR and scanned through a prefetch ring, `blastn/x_bn_csr.rs`) joined the set in the pull
 /// request that added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_BNCSRPACK` (the head of a CSR table of BLASTN whose chains list their words newest
+/// first packed as presence bits, ranks and one offset per non-empty cell, `blastn/x_bn_csr.rs`)
+/// joined the set in the pull request that added it, after it was verified and timed with it on
+/// and off.
+/// `LOSAT_X_MBCSR` (megablast's tables of 4^12 cells laid out as packed CSR and scanned through the
+/// prefetch ring when the search scans at least 8 subject letters per position of the word loop
+/// and one per cell,
+/// `blastn/x_bn_csr.rs`) joined the set in the pull request that added it, after it was verified
+/// and timed with it on and off.
+/// `LOSAT_X_BNDBWIDE` (BLASTN `-db`'s window of 16 blocks per thread while few bytes of results
+/// wait for the owner, `blastn/blast_engine/x_db_stream.rs`) joined the set in the pull request
+/// that added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_MBHITPF` (BLASTN's loop over the offset pairs prefetches the query line of the hit 16
+/// places on, `blastn/blast_engine/run.rs`) joined the set in the pull request that added it, after
+/// it was verified and timed with it on and off.
+/// `LOSAT_X_BNPVONCE` (the scan of a packed CSR table of 4^11 cells or fewer tests each word once,
+/// in the head's presence bits, `blastn/blast_engine/run.rs`) joined the set in the pull request
+/// that added it, after it was verified and timed with it on and off.
 /// `LOSAT_X_QGROUPPAR` (BLASTN's preliminary gapped loop and traceback of a subject searched on one
 /// thread run per query on the pool, `blastn/blast_engine/x_qgroup_par.rs`) joined the set in the
 /// pull request that added it, after it was verified and timed with it on and off.
@@ -168,6 +192,9 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BXCAPFILL` (BLASTX's capped units fill the threads with few subjects too: tasks of
 /// fewer subjects, each query batch prepared outside the cap, `blastx/x_bx_mem.rs`) joined the set
 /// in the pull request that added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_BXCLUTCAP` (BLASTX's units with a compressed lookup table searched at most K at a time,
+/// `blastx/x_bx_mem.rs`) joined the set in the pull request that added it, after it was verified
+/// and timed with it on and off.
 /// `LOSAT_X_BXBUILDPAR` (BLASTX's lookup table of a capped unit built on the threads the cap
 /// leaves it, in parts by ranges of source cells, `blastx/x_bx_mem.rs`,
 /// `tblastx/lookup/x_lut_direct.rs`)
@@ -195,6 +222,9 @@ use std::ops::RangeInclusive;
 /// branch-free candidate loop, `blastx/x_seed_scan.rs`) graduated on 2026-10-26: it left
 /// `STRICT_SET` and the scan on the presence test was deleted (the compressed lookup table keeps
 /// its own scan, a rule of the table and not a switch).
+/// `LOSAT_X_SUMPMEMO` (the sum P-value of a linked set kept from the thread's last two calls,
+/// `stats/sum_statistics.rs`) graduated on 2026-10-27: it left `STRICT_SET` and the call that
+/// integrates every time was deleted.
 /// `LOSAT_X_QBATCHPAR` (BLASTN's query-batch slots) and the switches that acted only on the slots,
 /// `LOSAT_X_DCTWOSLOTS`, `LOSAT_X_BNEIGHTSLOTS` and `LOSAT_X_BNQSLOTS`, were removed on 2026-10-28
 /// with the slot code (Owner decision: at 16 threads the slots' max RSS rise exceeded their time
@@ -205,13 +235,17 @@ use std::ops::RangeInclusive;
 /// ignores the variable and searches the blocks one at a time, as it did with `=0`.
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNCSR",
+    "LOSAT_X_BNCSRPACK",
     "LOSAT_X_BNDBCUT",
     "LOSAT_X_BNDBSTREAM",
+    "LOSAT_X_BNDBWIDE",
     "LOSAT_X_BNDCONE",
     "LOSAT_X_BNFEWSUBJ",
+    "LOSAT_X_BNHITGROUP",
     "LOSAT_X_BNHLGROW",
     "LOSAT_X_BNLUTDROP",
     "LOSAT_X_BNMAPPED",
+    "LOSAT_X_BNPVONCE",
     "LOSAT_X_BNQDROP",
     "LOSAT_X_BNQPACK",
     "LOSAT_X_BNSEEDLISTS",
@@ -232,7 +266,9 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPFSTAGE",
     "LOSAT_X_BPGAP",
     "LOSAT_X_BPGAP16",
+    "LOSAT_X_BPGAPBAND",
     "LOSAT_X_BPHITBF",
+    "LOSAT_X_BPHITSFLAT",
     "LOSAT_X_BPIHPOOL",
     "LOSAT_X_BPLISTEDLEAN",
     "LOSAT_X_BPLK16",
@@ -247,10 +283,8 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPQBLOCKWEB",
     "LOSAT_X_BPQBLOCKXML",
     "LOSAT_X_BPQBLOCKXML2",
-    "LOSAT_X_BPREDODBSUBJ",
     "LOSAT_X_BPREDOLPT",
     "LOSAT_X_BPREDOPAR",
-    "LOSAT_X_BPREDOWINEXPAND",
     "LOSAT_X_BPSEGWIN",
     "LOSAT_X_BPSTRIPEFILL",
     "LOSAT_X_BPSUBJMETA",
@@ -260,6 +294,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXCAPFILL",
     "LOSAT_X_BXCHUNKCROSS",
     "LOSAT_X_BXCHUNKFLOW",
+    "LOSAT_X_BXCLUTCAP",
     "LOSAT_X_BXCROSS",
     "LOSAT_X_BXCROSSDEFER",
     "LOSAT_X_BXCTXONCE",
@@ -295,7 +330,9 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_FOLDLEAN",
     "LOSAT_X_GREEDYROWFUSE",
     "LOSAT_X_MB24",
+    "LOSAT_X_MBCSR",
     "LOSAT_X_MBFILL",
+    "LOSAT_X_MBHITPF",
     "LOSAT_X_MBLUTKEEP",
     "LOSAT_X_MBLUTONCE",
     "LOSAT_X_MBLUTPREFAULT",
@@ -317,7 +354,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_RPTSTREAM",
     "LOSAT_X_SEEDCOMPACT",
     "LOSAT_X_SEEDUNMAP",
-    "LOSAT_X_SUMPMEMO",
     "LOSAT_X_TBNBATCHRULE",
     "LOSAT_X_TBNDBSTREAM",
     "LOSAT_X_TBNDIAGPACK",
@@ -326,11 +362,13 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNKEEPFEW",
     "LOSAT_X_TBNLINKCTX",
     "LOSAT_X_TBNLINKSETS",
+    "LOSAT_X_TBNLUTLEAN",
     "LOSAT_X_TBNOWNPOOLS",
     "LOSAT_X_TBNPAIRCAP",
     "LOSAT_X_TBNREAPIDX",
     "LOSAT_X_TBNREDOLPT",
     "LOSAT_X_TBNSCANBYTE",
+    "LOSAT_X_TBNSCANRESUME",
     "LOSAT_X_TBNSTAGEDROP",
     "LOSAT_X_TBNSTORE",
     "LOSAT_X_TBNUNGAP",

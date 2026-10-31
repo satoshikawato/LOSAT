@@ -16,8 +16,8 @@
 //! `blastp_hsp_from_preliminary`): the one-thread redo does it query by query and drops the
 //! expanded list after the query's redo (nothing reads it afterwards, `x_prelim_free.rs`); a
 //! search with more than one thread expands every list before the redo (its parallel paths read
-//! the lists of all queries), but where the redo runs in windows (LOSAT_X_BPREDOPAR) with
-//! LOSAT_X_BPREDOWINEXPAND, the windows expand the lists as they reach them (`x_redo_par.rs`). The
+//! the lists of all queries), but where the redo runs in windows (LOSAT_X_BPREDOPAR),
+//! the windows expand the lists as they reach them (`x_redo_par.rs`). The
 //! lists of query chunks (`-query` longer than the split size) are expanded where a chunk's search
 //! ends, so the chunk merge is unchanged.
 //!

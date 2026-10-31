@@ -15,7 +15,7 @@
 //! off, at one and several threads, against the one-thread search with it off, on a set laid out
 //! as a genome database is (two long records first, then many short ones), with ambiguity codes in the long records (N blocks, single IUPAC codes, one of them in a
 //! run across a translation window), through `-subject` and through a database of the same records
-//! (`losat makedb`).
+//! (`losat makeblastdb`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -106,15 +106,15 @@ fn inputs(dir: &Path) -> (PathBuf, PathBuf) {
 fn makedb(dir: &Path, fasta_file: &Path) -> String {
     let db = dir.join("set").to_str().unwrap().to_string();
     let output = losat(&[])
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fasta_file)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run losat makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     db

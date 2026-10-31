@@ -533,7 +533,7 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
     }
 }
 
-// No NCBI counterpart (`LOSAT_X_SUMPMEMO`, docs/agents/diagnostics.md): s_BlastSumP calls
+// No NCBI counterpart (LOSAT_X_SUMPMEMO, graduated 2026-10-27, always on; docs/agents/diagnostics.md): s_BlastSumP calls
 // s_BlastSumPCalc on every call. Its value depends only on `r` and `s`, and a linking round asks
 // again for the chain that was not chosen in the round before: in TBLASTX of two ~650 kb genomes
 // at one thread, 56,780 of 59,452 calls had the arguments of one of the two calls before them.
@@ -541,10 +541,6 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
 // the same.
 /// `blast_sum_p_calc(r, s)`, from the thread's last two results when one has the same arguments.
 fn blast_sum_p_calc_reused(r: i32, s: f64) -> f64 {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_SUMPMEMO")) {
-        return blast_sum_p_calc(r, s);
-    }
     thread_local! {
         // The last two (r, bits of s, value), the later one first. r = 0 gives 0.0 for any s.
         static LAST: std::cell::Cell<[(i32, u64, f64); 2]> =

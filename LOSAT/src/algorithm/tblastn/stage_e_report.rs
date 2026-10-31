@@ -52,7 +52,7 @@ pub(super) enum ShownSubjects<'a> {
 
 impl ShownSubjects<'_> {
     /// The name after `# Database: ` (outfmt 7) and in the pairwise report of a subject set.
-    fn name(&self) -> String {
+    pub(super) fn name(&self) -> String {
         match self {
             Self::Fasta { path } => {
                 format!("User specified sequence set (Input: {})", path.display())
@@ -175,6 +175,7 @@ pub(super) fn render(
     xml_taxa: super::database::XmlTaxa,
     out: Option<&std::path::Path>,
     archive: Option<&super::archive::ArchiveRender<'_>>,
+    tabular: &super::tabular::TabularInputs,
 ) -> Result<()> {
     ensure!(
         query_records.len() == hitlists.len(),
@@ -243,11 +244,11 @@ pub(super) fn render(
     };
     // The tabular subject IDs, made before any format is written: a subject that NCBI
     // writes part of a row for and then stops at (RP-20) is rejected first
-    // (`tabular_subject_ids`).
+    // (`tabular_subject_ids`). The tabular formats 6, 7, 10 and 20 show them.
     let subject_ids = if outputs
         .formats
         .iter()
-        .any(|format| matches!(format_number(format.outfmt), 6 | 7))
+        .any(|format| matches!(format_number(format.outfmt), 6 | 7 | 10 | 20))
     {
         match shown {
             ShownSubjects::Fasta { .. } => tabular_subject_ids(hitlists, subject_records)?,
@@ -300,15 +301,43 @@ pub(super) fn render(
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
+        // A tabular report with a field list or a delimiter, or outfmt 10 or 20
+        // (`tabular::tabular_spec`); `None` for the default 6 and 7.
+        let custom_tabular = super::tabular::tabular_spec(format.outfmt);
+        // So do the warnings of the formatters of a tabular field list that shows a taxonomy
+        // name (`x_CheckTaxDB`, `tabular`).
         let mut warnings = (warning_lines.is_some()
             || xml2_kind(format.outfmt).is_some()
-            || format_number(format.outfmt) == ARCHIVE_FORMAT)
-            .then(|| crate::report::query_warnings::QueryWarnings {
-                before: warning_lines.take().unwrap_or(&[]),
-                sink: &mut *outputs.diagnostics,
-            });
+            || format_number(format.outfmt) == ARCHIVE_FORMAT
+            || custom_tabular
+                .as_ref()
+                .is_some_and(crate::report::tabular::TabularSpec::checks_taxdb))
+        .then(|| crate::report::query_warnings::QueryWarnings {
+            before: warning_lines.take().unwrap_or(&[]),
+            sink: &mut *outputs.diagnostics,
+        });
         let mut writer = format.sink.open()?;
         match format_number(format.outfmt) {
+            // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
+            // (`tabular`); never the default 6 and 7 below.
+            6 | 7 | 10 | 20 if custom_tabular.is_some() => super::tabular::write_tblastn_tabular(
+                &super::tabular::TblastnTabular {
+                    spec: custom_tabular.as_ref().expect("a custom tabular report"),
+                    inputs: tabular,
+                    queries: query_records,
+                    letters: subject_letters,
+                    subject_ids: &subject_ids,
+                    shown,
+                    query_batch_skipped,
+                    ranges,
+                    genetic_code,
+                    matrix: scoring.matrix,
+                },
+                hitlists,
+                &mut writer,
+                warnings.as_mut(),
+                probe.as_mut(),
+            )?,
             6 | 7 => write_tabular(
                 &mut writer,
                 format_number(format.outfmt) == 7,
@@ -517,7 +546,7 @@ fn write_tabular(
             //                                             kTabularFormat, rid);
             // ```
             // The title's bytes (`write_outfmt7_query_line`).
-            crate::report::outfmt6::write_outfmt7_query_line(writer, query.title())?;
+            crate::report::outfmt6::write_outfmt7_query_line(writer, &query.query_line())?;
             writeln!(writer, "# Database: {}", shown.name())?;
             if hit_count > 0 {
                 writeln!(writer, "# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score")?;
@@ -889,10 +918,13 @@ mod tests {
                     gapped: true,
                     cbs: 2,
                     db_gencode: 1,
+                    identity_warned: 0,
+                    filtered_empty: false,
                 },
                 Default::default(),
                 None,
                 None,
+                &Default::default(),
             )
             .unwrap();
             drop(outputs);
@@ -1072,7 +1104,7 @@ fn pairwise_hits(
                         0.0
                     },
                     length: payload.align_length,
-                    mismatch: payload.report_mismatches,
+                    mismatch: payload.report_mismatches as i64,
                     gapopen: payload.gap_opens,
                     q_start: usize::try_from(q_start)?,
                     q_end: usize::try_from(q_end)?,
@@ -1120,6 +1152,7 @@ fn pairwise_hits(
                     // NCBI core/link_hsps.c:1765-1810 sets the HSP
                     // linked count; showalign.cpp:3595-3598 prints sum_n.
                     sum_n: Some(linked.num),
+                    subject_stored_gaps: Vec::new(),
                 });
             }
         }
@@ -1171,8 +1204,10 @@ fn write_pairwise(
         ),
     };
     // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`).
-    let gumbel = lookup_protein_gumbel_params(&spec, subject_set.gumbel_db_length(total_nt as u64))
-        .context("TBLASTN pairwise Spouge parameters are unavailable")?;
+    let gumbel = subject_set.gumbel_block(&spec, total_nt as u64);
+    if gumbel.is_none() && subject_set.searchsp.is_none() {
+        anyhow::bail!("TBLASTN pairwise Spouge parameters are unavailable");
+    }
     let report = BlastpPairwiseReport {
         version: "2.17.0+".into(),
         database_name: shown.name(),
@@ -1182,7 +1217,7 @@ fn write_pairwise(
         matrix_name: matrix_name.to_string(),
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
-        word_threshold: f64::from(scoring.threshold),
+        word_threshold: scoring.threshold,
         window_size: scoring.window,
         gapped_karlin: lookup_protein_params(&spec),
         gumbel,
@@ -1226,7 +1261,7 @@ fn write_pairwise(
         .collect();
     let query_titles: Vec<Arc<[u8]>> = query_records
         .iter()
-        .map(|record| Arc::from(record.title()))
+        .map(|record| Arc::from(record.query_line().as_ref()))
         .collect();
     let subject_titles: Vec<Arc<[u8]>> = subject_records
         .iter()

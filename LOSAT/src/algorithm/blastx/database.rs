@@ -65,19 +65,42 @@ pub(crate) struct BlastxDatabase {
 }
 
 impl BlastxDatabase {
+    /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
+    pub(crate) fn showing_gis(mut self, show_gis: bool) -> Self {
+        self.db.set_reports_show_gis(show_gis);
+        self
+    }
+
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        let db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
+        Self::open_restricted(name, settings, None, &mut std::io::sink())
+    }
+
+    /// `open` with the database restricted to the taxid or seqid list `list` of the command
+    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
+    pub(crate) fn open_restricted(
+        name: &str,
+        settings: &ApplicationSettings,
+        list: Option<&crate::seqdb::DbList>,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<Self> {
+        let mut db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2a), unless a variable changes
         // NCBI's choice of its Seq-ids.
         let parsed_seqids = shared::check_seqids(&db, settings, PROGRAM)?;
+        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         Ok(Self {
             db,
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
             parsed_seqids,
         })
+    }
+
+    /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
+    pub(crate) fn filtered_empty(&self) -> bool {
+        self.db.filtered_empty()
     }
 
     /// Whether the database has parsed Seq-ids: a batch can then refuse one of its subjects
@@ -127,7 +150,7 @@ impl BlastxDatabase {
     /// database's) belongs to the first query batch with a valid context, which the caller
     /// fails with it.
     pub(crate) fn read_stores(&self) -> Result<StoredProteins> {
-        if self.db.num_seqs() == 0 {
+        if self.db.printed_num_seqs() == 0 {
             return Err(PreliminaryReadError("Database memory map file error").into());
         }
         let stores = shared::read_protein_stores(&self.db, PROGRAM)?;
@@ -149,7 +172,7 @@ impl BlastxDatabase {
     /// (`common::database::x_check_protein_stores`): the same reads and checks with the same
     /// errors, the residues of the longest sequence (`StoredProteins::max_length`) when they pass.
     pub(crate) fn x_check_stores(&self) -> Result<usize> {
-        if self.db.num_seqs() == 0 {
+        if self.db.printed_num_seqs() == 0 {
             return Err(PreliminaryReadError("Database memory map file error").into());
         }
         let mut longest = 0;
@@ -208,6 +231,22 @@ pub(crate) struct ReportedSubjects {
     /// `sacc` and `saccver` of the sequences with parsed Seq-ids by rank, with `tabular`
     /// (empty without them; the others' are their `sseqid`).
     tabular_accessions: Vec<Option<[String; 2]>>,
+    /// What a custom tabular field list reads beyond the default report's ids
+    /// (`read_tabular`; empty and `None` otherwise).
+    tabular: ReportedTabular,
+}
+
+/// The values of a custom tabular report's fields that read more of the reported sequences than
+/// the default report (`ReportedSubjects::read_tabular`), by rank.
+#[derive(Default)]
+struct ReportedTabular {
+    /// The ids of each definition line of a sequence with parsed Seq-ids (`sallseqid`, `sallgi`,
+    /// `sallacc`); empty for the others, whose `sall*` are their own ids.
+    all_ids: Vec<Vec<crate::report::tabular::DeflineIds>>,
+    /// `staxid` and `staxids` of the reported sequences.
+    taxonomy: Vec<crate::report::tabular::TabularTaxonomy>,
+    /// The taxonomy database's names that the rows look up (`None`: every lookup fails).
+    names: Option<crate::report::tabular::TabularNames>,
 }
 
 impl ReportedSubjects {
@@ -352,7 +391,9 @@ impl ReportedSubjects {
             }
             let encoded = subjects.read_encoded(oid)?;
             reported.records.push(FastaRecord {
-                internal_id: format!("gnl|BL_ORD_ID|{ordinal}"),
+                // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the
+                // OID (line DI-8).
+                internal_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
                 title: String::from_utf8_lossy(&title).into_owned(),
                 sequence: encoded
                     .iter()
@@ -430,6 +471,104 @@ impl ReportedSubjects {
             .filter(|list| super::report::reported(list, gapped))
             .map(|list| (self.ordinals[list.oid], self.parsed_subject(list.oid)));
         shared::prefetch_messages(&database.db, &database.taxdb, subjects, PROGRAM)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-857
+    // ```c++
+    //             	CRef<CBlast_def_line_set> bdlRef =
+    //             			CSeqDB::ExtractBlastDefline(subject_bh);
+    //             	if(setSubjectIds) {
+    //             		x_SetSubjectIds(subject_bh, bdlRef);
+    //             	}
+    //             	if(setSubjectTaxInfoAll) {
+    //             		x_SetTaxInfoAll(subject_bh, bdlRef);
+    //             	}
+    //             	if(setSubjectTaxInfo) {
+    //             		x_SetTaxInfo(subject_bh, bdlRef);
+    //             	}
+    // ```
+    /// Reads what the custom tabular report `spec` shows of the batch's reported sequences
+    /// beyond the default report's ids, before the batch's first byte: the ids of every
+    /// definition line of a sequence with parsed Seq-ids (`sall*`, with LOSAT's refusal of
+    /// `ParsedSubject::all_tabular_ids`), the taxonomy (`staxid`, `staxids`; from the definition
+    /// lines of a sequence with parsed Seq-ids, else from its stored ones, `SeqDb::defline_set`;
+    /// a header that does not decode is the reader's error) and the names of the taxonomy
+    /// database that the rows look up (`shared::tabular_names`, with its refusals). `batches`
+    /// are the batch's hit lists, renamed to ranks by `for_batch`.
+    pub(crate) fn read_tabular(
+        &mut self,
+        database: &BlastxDatabase,
+        spec: &crate::report::tabular::TabularSpec,
+        batches: &[BatchResults],
+        gapped: bool,
+    ) -> Result<()> {
+        use crate::report::tabular::TabularTaxonomy;
+        let needs = spec.needs();
+        if !needs.all_deflines && !needs.taxonomy {
+            return Ok(());
+        }
+        let ranks: std::collections::BTreeSet<usize> = batches
+            .iter()
+            .flat_map(|batch| batch.queries.iter().flatten())
+            .filter(|list| super::report::reported(list, gapped))
+            .map(|list| list.oid)
+            .collect();
+        let count = self.ordinals.len();
+        if needs.all_deflines {
+            self.tabular.all_ids = vec![Vec::new(); count];
+        }
+        if needs.taxonomy {
+            self.tabular.taxonomy = vec![TabularTaxonomy::default(); count];
+        }
+        for rank in ranks {
+            let ordinal = self.ordinals[rank];
+            let parsed = self.parsed.get(rank).and_then(Option::as_deref);
+            if let (true, Some(subject)) = (needs.all_deflines, parsed) {
+                self.tabular.all_ids[rank] = subject.all_tabular_ids(true).map_err(|problem| {
+                    shared::parsed_refusal(ordinal, &format!("has {problem}"), PROGRAM)
+                })?;
+            }
+            if needs.taxonomy {
+                self.tabular.taxonomy[rank] = match parsed {
+                    Some(subject) => TabularTaxonomy::of_deflines(subject.deflines()),
+                    None => {
+                        let set = database
+                            .db
+                            .defline_set(ordinal)
+                            .map_err(|error| shared::database_error(error, PROGRAM))?;
+                        TabularTaxonomy::of_deflines(&set.deflines)
+                    }
+                };
+            }
+        }
+        self.tabular.names = shared::tabular_names(
+            &database.db,
+            &database.taxdb,
+            spec,
+            &self.tabular.taxonomy,
+            PROGRAM,
+        )?;
+        Ok(())
+    }
+
+    /// The ids of each definition line of the sequence of rank `rank` with parsed Seq-ids
+    /// (only after `read_tabular` with an `sall*` field; empty otherwise).
+    pub(crate) fn tabular_all_ids(&self, rank: usize) -> &[crate::report::tabular::DeflineIds] {
+        self.tabular.all_ids.get(rank).map_or(&[], Vec::as_slice)
+    }
+
+    /// `staxid` and `staxids` of the sequence of rank `rank` (only after `read_tabular` with a
+    /// taxonomy field; none otherwise).
+    pub(crate) fn tabular_taxonomy(
+        &self,
+        rank: usize,
+    ) -> Option<&crate::report::tabular::TabularTaxonomy> {
+        self.tabular.taxonomy.get(rank)
+    }
+
+    /// The taxonomy database's names that the rows look up (`read_tabular`).
+    pub(crate) fn tabular_names(&self) -> Option<&crate::report::tabular::TabularNames> {
+        self.tabular.names.as_ref()
     }
 
     /// The records by rank.

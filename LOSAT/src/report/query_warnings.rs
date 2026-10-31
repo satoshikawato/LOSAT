@@ -99,8 +99,47 @@ pub fn invalid_query_warning<R: InputRecord>(program: &str, index: usize, query:
     query_warning(program, index, query, &[INVALID_QUERY_MESSAGE.to_string()])
 }
 
+/// The warning of each query of the first query batch of a search with the IDENTITY matrix and a
+/// composition mode above 0, which NCBI searches in mode 0 (blastp and tblastn; IDENTITY has no
+/// composition data; the reset stays in the options of the later batches).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:150-154
+/// ```c++
+///         ostringstream os;
+///         os << "Composition-based statistics cannot be used with the IDENTITY "
+///            << "matrix, resetting the composition-based statistics option to 0";
+///         search_messages.AddMessageAllQueries(eBlastSevWarning, 0, os.str());
+/// ```
+pub const IDENTITY_CBS_RESET_MESSAGE: &str = "Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0";
+
 /// NCBI's `kBlastErrMsg_CantCalculateUngappedKAParams` (see `invalid_query_warning`).
 pub const INVALID_QUERY_MESSAGE: &str = "Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options";
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:207-214
+// ```c++
+//     if (! BlastSeqSrcGetNumSeqs(m_InternalData->m_SeqSrc->GetPointer())) {
+//         string msg =
+//             "Filtering resulted in an empty database.";
+//
+//         m_Messages.AddMessageAllQueries(eBlastSevWarning,
+//                                         kBlastMessageNoContext,
+//                                         msg);
+//     }
+// ```
+/// The warning of each query of a searched batch when a list kept no sequence of the database
+/// (`SeqDb::filtered_empty`). NCBI adds it in the preliminary search, after the messages of the
+/// set-up are sorted, so it comes last (`sorted_query_messages`; probes C31 and D01 of line DI-8).
+/// A batch without a valid context is not searched and does not have it.
+pub const EMPTY_DATABASE_MESSAGE: &str = "Filtering resulted in an empty database.";
+
+/// The messages of a query in the order of its warning: sorted without repeats (see
+/// `query_warning`), `EMPTY_DATABASE_MESSAGE` last.
+pub fn sorted_query_messages(messages: &[String]) -> Vec<&String> {
+    let mut sorted: Vec<&String> = messages.iter().collect();
+    sorted.sort_by_key(|message| (message.as_str() == EMPTY_DATABASE_MESSAGE, *message));
+    sorted.dedup();
+    sorted
+}
 
 /// The warning line of query `index` with its warning messages, each followed by a space
 /// (`GetWarningStrings`, see `invalid_query_warning`); empty when there is none.
@@ -146,17 +185,15 @@ pub fn query_warning<R: InputRecord>(
     if messages.is_empty() {
         return Vec::new();
     }
-    let mut messages = messages.to_vec();
-    messages.sort();
-    messages.dedup();
+    let local_id = format!("Query_{}", index + 1);
     let query_id = warning_query_id(
-        format!("Query_{}", index + 1).as_bytes(),
+        query.believed_warning_id().unwrap_or(local_id.as_bytes()),
         &query.title_bytes(),
     );
     let mut warning = format!("Warning: [{program}] ").into_bytes();
     warning.extend_from_slice(&query_id);
     warning.extend_from_slice(b": ");
-    for message in &messages {
+    for message in sorted_query_messages(messages) {
         warning.extend_from_slice(message.as_bytes());
         warning.push(b' ');
     }
@@ -274,6 +311,22 @@ mod tests {
     }
 
     use super::*;
+
+    // Probes C31 and D01 of line DI-8: NCBI adds the empty-database message to the sorted
+    // messages of the set-up, though "Sequence ..." sorts after "Filtering ...".
+    #[test]
+    fn the_empty_database_message_comes_after_the_set_up_messages() {
+        let messages = [
+            EMPTY_DATABASE_MESSAGE.to_string(),
+            "Sequence contains no data".to_string(),
+            EMPTY_DATABASE_MESSAGE.to_string(),
+        ];
+        let query = FastaRecord::new("Query_2", b"empty", b"");
+        assert_eq!(
+            query_warning("blastp", 1, &query, &messages),
+            b"Warning: [blastp] Query_2 empty: Sequence contains no data Filtering resulted in an empty database. \n"
+        );
+    }
 
     // Query_1 + FASTA title is shortened after 35 bytes, then the invalid-Karlin
     // warning keeps NCBI's trailing space and newline.

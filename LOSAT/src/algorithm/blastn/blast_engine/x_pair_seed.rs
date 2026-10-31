@@ -363,8 +363,16 @@ fn plan_strips(
 /// chain hit as in `on_word` (the chain order); every pair through `seed_of_pair`.
 fn scan_strip<O: SeedOut>(x: &Inputs<'_>, job: &StripJob, out: &mut O) {
     // EXPERIMENT (LOSAT_X_BNCSR): a contiguous table laid out as CSR has no chains.
+    // EXPERIMENT (LOSAT_X_BNCSRPACK): the form of its head chosen once, each form's scan its own.
     if let Some(csr) = x.two_stage.x_mb_csr() {
-        return scan_strip_csr(x, csr, job, out);
+        // EXPERIMENT (LOSAT_X_BNPVONCE): one presence test per word on a head that fits the cache.
+        return match csr.x_packed() {
+            Some(packed) if super::x_bn_pv_once(&packed) => {
+                scan_strip_csr::<O, _, false>(x, &packed, job, out)
+            }
+            Some(packed) => scan_strip_csr::<O, _, true>(x, &packed, job, out),
+            None => scan_strip_csr::<O, _, true>(x, csr, job, out),
+        };
     }
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
@@ -401,15 +409,20 @@ fn scan_strip<O: SeedOut>(x: &Inputs<'_>, job: &StripJob, out: &mut O) {
 /// (`lookup::x_bn_csr`): the words with hits (the presence test of `for_each_hit` first), in
 /// order, each `RING` words late through `x_dc_csr::Ring` (whose prefetches bring in the cell's
 /// offsets and the ends of its run), then the cell's run, which holds the chain's offsets in the
-/// chain's order; so the same pairs reach `seed_of_pair` in the same order.
+/// chain's order; so the same pairs reach `seed_of_pair` in the same order. EXPERIMENT
+/// (LOSAT_X_BNCSRPACK): over a head of either form (`x_dc_csr::XHead`).
 #[inline(never)]
-fn scan_strip_csr<O: SeedOut>(
+fn scan_strip_csr<
+    O: SeedOut,
+    H: crate::algorithm::blastn::lookup::x_dc_csr::XHead,
+    const PV: bool,
+>(
     x: &Inputs<'_>,
-    csr: &crate::algorithm::blastn::lookup::x_dc_csr::Csr,
+    csr: &H,
     job: &StripJob,
     out: &mut O,
 ) {
-    use crate::algorithm::blastn::lookup::x_dc_csr::Ring;
+    use crate::algorithm::blastn::lookup::x_dc_csr::XRing;
     let two_stage = x.two_stage;
     let s_range = job.s_range;
     let mut emit = |(kmer_start, index): (usize, u64)| {
@@ -422,9 +435,9 @@ fn scan_strip_csr<O: SeedOut>(
             seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
         }
     };
-    let mut ring: Ring<'_, (usize, u64)> = Ring::new(csr);
+    let mut ring: H::Ring<'_, (usize, u64)> = csr.ring();
     let mut on_kmer = |kmer_start: usize, current_lut_kmer: u64| {
-        if two_stage.has_hits(current_lut_kmer) {
+        if !PV || two_stage.has_hits(current_lut_kmer) {
             ring.push((kmer_start, current_lut_kmer), |w| w.1 as usize, &mut emit);
         }
     };

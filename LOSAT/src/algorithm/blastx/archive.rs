@@ -46,6 +46,7 @@ use crate::stats::tables::KarlinParams;
 pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Blastx, &args.task);
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     inputs.evalue = Some(args.evalue);
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
@@ -209,11 +210,8 @@ fn first_context(batch: &BatchResults, gapped: Option<KarlinParams>) -> FirstCon
         karlin: valid.map(|parameters| (parameters.ungapped.clone(), gapped)),
         search_space: valid.map_or(0, |parameters| parameters.search_space),
         length_adjustment: valid.map_or(0, |parameters| i64::from(parameters.length_adjustment)),
-        context0_space: if parameters[0].valid {
-            parameters[0].search_space
-        } else {
-            0
-        },
+        // An invalid context keeps `-searchsp`, else 0 (`effective_lengths`).
+        context0_space: parameters[0].search_space,
     }
 }
 
@@ -238,6 +236,10 @@ fn defline_of(record: &FastaRecord) -> Cow<'_, [u8]> {
 fn bioseq_input<'a>(record: &'a FastaRecord, defline: &'a [u8], protein: bool) -> BioseqInput<'a> {
     BioseqInput {
         id: &record.internal_id,
+        ids: record.believed().map(|ids| ids.ids.as_slice()),
+        seq_loc: record
+            .believed()
+            .and_then(|ids| ids.seq_loc(0, record.sequence.len() as i32 - 1)),
         defline,
         title: record.title.as_bytes(),
         letters: &record.sequence,
@@ -283,6 +285,7 @@ fn results_masks(call: &ArchiveCall<'_>) -> Vec<MaskEntry> {
                 if !intervals.is_empty() {
                     masks.push(MaskEntry {
                         id: query.internal_id.clone(),
+                        best: query.believed().map(|ids| ids.best.clone()),
                         frame: frame_of(context.frame),
                         intervals,
                     });
@@ -306,6 +309,7 @@ fn lcase_masks(call: &ArchiveCall<'_>) -> Vec<MaskEntry> {
             for frame in [Frame::Plus1, Frame::Minus1] {
                 masks.push(MaskEntry {
                     id: query.internal_id.clone(),
+                    best: query.believed().map(|ids| ids.best.clone()),
                     frame,
                     intervals: vec![(from, to)],
                 });
@@ -347,7 +351,7 @@ impl<'a> AlignSource for BlastxAligns<'a> {
                     &mut hsp_records,
                 )?;
                 let query_record = QueryRecord {
-                    id: SeqId::Local(&query.internal_id),
+                    id: query.seq_id(),
                     searched_length: i32::try_from(query.sequence.len())?,
                     offset: 0,
                 };
@@ -567,6 +571,7 @@ mod tests {
                     ParamValue::Boolean(false) => "boolean:False".to_string(),
                     ParamValue::Real(value) => format!("real:{}", posix(*value)),
                     ParamValue::Str(value) => format!("string:{value}"),
+                    ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
                 };
                 format!("{}={value}", param.name)
             })

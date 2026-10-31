@@ -85,7 +85,9 @@
 //!   so with the switch a block comes after the warnings of the batches before it (the same
 //!   lines in another order).
 //!
-//! Off (the reports after the loop, as without the switch): the switch off; outputs other
+//! Off (the reports after the loop, as without the switch): the switch off; a tabular report
+//! with a field list or a delimiter, and outfmt 10 and 20 (`Off::CustomTabular`: its refusals of
+//! taxonomy names and of the stored data it reads are made in its report call); outputs other
 //! than one format of the command line's kind (the hit records and the format observer of the Web
 //! adapter, whose HSP numbers count over the whole search; file sinks, which are created when
 //! their report is written; two or more formats, which the library API allows on one stream,
@@ -171,6 +173,10 @@ pub(super) enum Off {
     Xml,
     /// A negative `CHUNK_SIZE`.
     ChunkSize,
+    /// An ungapped (`-ungapped`) search with a query of 2^30 letters or more, which LOSAT refuses
+    /// in the batch that holds it (the word cutoff's doubled length overflows NCBI's `Int4`): a
+    /// later batch's refusal would come after the first batch's reports.
+    UngappedCutoff,
     /// A database length times a query length that could overflow NCBI's 64-bit search space.
     SearchSpace,
     /// A subject of the set whose tabular id LOSAT refuses.
@@ -184,6 +190,10 @@ pub(super) enum Off {
     /// A lookup of the taxonomy database that could be refused, where the batches' prefetch
     /// reads it (outfmt 0, 6, 7 and 17 with `taxdb.bti` on the search path).
     Taxonomy,
+    /// A tabular report with a field list or a delimiter, or outfmt 10 or 20
+    /// (`BlastnOutputFormat::CustomTabular`), which is written after the loop (the module doc
+    /// has the reason).
+    CustomTabular,
 }
 
 impl Off {
@@ -195,11 +205,13 @@ impl Off {
             Off::Xml => "xml",
             Off::Scoring => "scoring",
             Off::ChunkSize => "chunk_size",
+            Off::UngappedCutoff => "ungapped_cutoff",
             Off::SearchSpace => "search_space",
             Off::SubjectIds => "subject_ids",
             Off::Titles => "titles",
             Off::Ambiguity => "ambiguity",
             Off::Taxonomy => "taxonomy",
+            Off::CustomTabular => "custom_tabular",
         }
     }
 }
@@ -455,6 +467,18 @@ fn check(
     {
         return Err(Off::Xml);
     }
+    // The custom tabular reports (line CLI C2, PR 1): their writer refuses a name of the
+    // taxonomy database for a subject with a taxid (DECISIONS 3) and reads the taxids and
+    // definition lines of the reported sequences, which a later batch's report call would do
+    // after the first batch's rows were written; and outfmt 20's header line comes with the
+    // first report. They keep the one report call after the search, where every refusal comes
+    // before the first byte, and never take the streamed path of the default 6 and 7.
+    if output_formats
+        .iter()
+        .any(|format| format.tabular_spec().is_some())
+    {
+        return Err(Off::CustomTabular);
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
     // ```c++
     //     TSeqPos size_read = 0;
@@ -501,6 +525,13 @@ fn check(
     }
     if batching.split.negative_chunk_size() {
         return Err(Off::ChunkSize);
+    }
+    if args.ungapped
+        && !lengths.iter().all(|&length| {
+            crate::algorithm::blastn::ungapped::cutoff_context_length_supported(length)
+        })
+    {
+        return Err(Off::UngappedCutoff);
     }
     // The search space of a context (`search_query_batch`): the effective database length
     // `db - n x a` (at least 1) times the effective query length `q - a` (at least 1), with the

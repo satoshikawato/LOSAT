@@ -239,6 +239,7 @@ impl Rows<'_> {
                     .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()),
                 comp_adjust_method: None,
                 sum_n: None,
+                subject_stored_gaps: Vec::new(),
             });
         }
         Ok(())

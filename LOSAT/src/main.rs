@@ -43,6 +43,25 @@ fn main() -> Result<()> {
     if startup_trace {
         eprintln!("[startup] enter main");
     }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1295-1298
+    // ```c++
+    // int main(int argc, const char* argv[] /*, const char* envp[]*/)
+    // {
+    //     return CBlastDBCmdApp().AppMain(argc, argv);
+    // }
+    // ```
+    // `losat blastdbcmd` reads its command line with NCBI's argument reader
+    // (`blastdbcmd::args`), not clap's: the words after `blastdbcmd` go to it as they are.
+    let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if argv.get(1).is_some_and(|word| word == "blastdbcmd") {
+        std::process::exit(LOSAT::blastdbcmd::run(&argv[2..]));
+    }
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` is read
+    // before the program's arguments, `cli::ncbi_version_request`).
+    if let Some(text) = LOSAT::cli::ncbi_version_request(std::env::args_os()) {
+        print!("{text}");
+        return Ok(());
+    }
     // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
     let cli: Cli = match LOSAT::cli::try_parse_from(std::env::args_os()) {
         Ok(cli) => cli,
@@ -205,8 +224,18 @@ fn main() -> Result<()> {
             // layer reads the same environment and registry files (`makeblastdb.ini`, then
             // `.ncbirc`) before `Run`, and LOSAT rejects the settings that change the output.
             // The data loaders the check reports are not used for a FASTA input.
-            LOSAT::blastinput::ncbi_environment::check_ncbi_application_settings("makeblastdb")
-                .map_err(anyhow::Error::msg)?;
+            let settings =
+                LOSAT::blastinput::ncbi_environment::check_ncbi_application_settings("makeblastdb")
+                    .map_err(anyhow::Error::msg)?;
+            LOSAT::writedb::makeblastdb::check_registry_settings(
+                &args,
+                settings
+                    .max_seqid_length
+                    .as_ref()
+                    .map(Option::as_deref)
+                    .map_err(String::as_str),
+            )
+            .map_err(anyhow::Error::msg)?;
             // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1134-1136
             // ```c++
             //     const string dont_scan_bioseq =
@@ -268,6 +297,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastn::x_subject_store_print_summary();
     LOSAT::algorithm::tblastn::x_scan_bf_print_summary();
     LOSAT::algorithm::tblastn::x_scan_byte_print_summary();
+    LOSAT::algorithm::tblastn::x_lut_lean_print_summary();
     LOSAT::algorithm::tblastn::x_link_window_print_summary();
     LOSAT::algorithm::tblastn::x_link_ctx_print_summary();
     LOSAT::algorithm::blastn::x_subject_store_print_summary();

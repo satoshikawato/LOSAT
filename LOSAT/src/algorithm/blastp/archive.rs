@@ -46,6 +46,7 @@ use crate::stats::tables::KarlinParams;
 pub(crate) fn option_inputs(args: &BlastpArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Blastp, &args.task);
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     inputs.evalue = args.evalue;
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
@@ -152,6 +153,9 @@ pub(crate) struct FirstContext {
     /// The effective search space and length adjustment of that context (0 without one).
     pub search_space: i64,
     pub length_adjustment: i64,
+    /// The `EffectiveSearchSpace` option: that of the first query's context, `-searchsp` in an
+    /// invalid one too.
+    pub context0_space: i64,
 }
 
 /// The Seq-aligns of one batch of a call (the elements of outfmt 8, without the Seq-annot).
@@ -243,6 +247,8 @@ pub(crate) fn write_blastp_archives(
                 .zip(&subject_deflines)
                 .map(|(record, defline)| BioseqInput {
                     id: &record.local_id,
+                    ids: record.believed().map(|ids| ids.ids.as_slice()),
+                    seq_loc: None,
                     defline,
                     title: &record.title,
                     letters: record.archive_letters(),
@@ -267,6 +273,8 @@ pub(crate) fn write_blastp_archives(
             .zip(&deflines)
             .map(|(record, defline)| BioseqInput {
                 id: &record.local_id,
+                ids: record.believed().map(|ids| ids.ids.as_slice()),
+                seq_loc: record.archive_seq_loc(),
                 defline,
                 title: &record.title,
                 letters: record.archive_letters(),
@@ -297,6 +305,7 @@ pub(crate) fn write_blastp_archives(
                 if !call.masks[index].is_empty() {
                     masks.push(MaskEntry {
                         id: call.queries[index].local_id.clone(),
+                        best: call.queries[index].believed().map(|ids| ids.best.clone()),
                         frame: Frame::NotSet,
                         intervals: call.masks[index].clone(),
                     });
@@ -322,7 +331,7 @@ pub(crate) fn write_blastp_archives(
             ka_blocks,
             search_space: context.search_space,
             length_adjustment: context.length_adjustment,
-            searched_space: searched.then_some(context.search_space),
+            searched_space: searched.then_some(context.context0_space),
         };
         let mut aligns = BlastpAligns {
             run,
@@ -434,6 +443,7 @@ mod tests {
                     ParamValue::Boolean(false) => "boolean:False".to_string(),
                     ParamValue::Real(value) => format!("real:{}", posix(*value)),
                     ParamValue::Str(value) => format!("string:{value}"),
+                    ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
                 };
                 format!("{}={value}", param.name)
             })

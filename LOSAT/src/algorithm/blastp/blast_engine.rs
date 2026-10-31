@@ -76,7 +76,7 @@ mod x_hits_flat;
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod x_subject_runs;
-// EXPERIMENT (LOSAT_X_BPSUBJMETA): the subjects' tabular IDs and titles of the block search made
+// EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects' tabular IDs and titles of the block search made
 // once for all blocks (held by `x_query_blocks::XBlockSubjects`).
 pub(super) mod x_subject_meta;
 // `-comp_based_stats 0`: NCBI's ordinary traceback in place of the composition-based redo.
@@ -2564,7 +2564,7 @@ fn check_tabular_subject_ids(
 
 // No NCBI counterpart: values NCBI makes per row (tabular.cpp above), made once for all blocks;
 // reuse only.
-/// EXPERIMENT (LOSAT_X_BPSUBJMETA): `tabular_subject_ids` of a block of the block search with the
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): `tabular_subject_ids` of a block of the block search with the
 /// subjects' ID results made once for all blocks (`blast_engine/x_subject_meta.rs`): the same
 /// check over the block's hit lists, with the stored results, and the shown IDs borrowed.
 /// The stored results are `tabular_subject_id_results` of the same records, a function of each
@@ -2748,7 +2748,7 @@ fn write_blastp_tabular_hit_lists(
 
     // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
     // writes no epilog (blastp_app.cpp:294-295, `PrintEpilog`). The count is every query
-    // formatted (NCBI's `m_QueriesFormatted`): EXPERIMENT (LOSAT_X_BPQBLOCKFMT) the last block of
+    // formatted (NCBI's `m_QueriesFormatted`): EXPERIMENT (LOSAT_X_BPQBLOCK) the last block of
     // the block search adds the queries of the blocks before it (`queries_before`).
     if outfmt == OutputFormat::TabularWithComments && epilog {
         writeln!(
@@ -5883,25 +5883,23 @@ fn search(
     };
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries in blocks of whole batches, each block a search
     // of its own whose report is written before the next block is searched
-    // (`x_query_blocks.rs`, exactness argument in its header), where the one report is tabular
-    // format 6, or with LOSAT_X_BPQBLOCKFMT outfmt 0 or 7 (the outfmt 0 prolog with the first
-    // block, the epilog and outfmt 7's count of the queries with the last), with
-    // LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with LOSAT_X_BPQBLOCKXML outfmt 5 (the header with the
-    // first block, the end with the last), with LOSAT_X_BPQBLOCKXML2 outfmt 13 to 16 (as outfmt 5,
-    // the framing state handed from block to block, `Xml2Carry`; not in a call of several outputs,
-    // hit records or an observer, see `x_query_block_plan`), with LOSAT_X_BPQBLOCKWEB also several
-    // of the other reports, the hit records and an observer (`run_local`); otherwise the search of
-    // all queries below. With `-db` the blocks are searched only when no definition line of the
-    // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, or
-    // `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and 5, `x_titles_taxids_allow_blocks` for 15
-    // and 16 (the titles and the taxids in one pass), for outfmt 0, 5, 6 and 7 with `taxdb.bti` on
-    // the search path also the taxids that each batch's prefetch reads and looks up, read
-    // in the block search's pool before the first block), and with outfmt 0 and `-subject` only
-    // when no subject's title is refused where the report shows it
-    // (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when the names of the database, the
-    // queries and the subjects can be written (`x_query_blocks.rs` `x_block_xml_*_allowed`);
-    // otherwise the search of all queries below.
-    let mut x_formats = Vec::new();
+    // (`x_query_blocks.rs`, exactness argument in its header). These reports take it: tabular
+    // format 6, outfmt 0 or 7 (the outfmt 0 prolog with the first block, the epilog and outfmt 7's
+    // count of the queries with the last), outfmt 8, 9, 11 or 12, outfmt 5 (the header with the
+    // first block, the end with the last), outfmt 13 to 16 (as outfmt 5, the framing state handed
+    // from block to block, `Xml2Carry`), also several of them, the hit records and an observer
+    // (`run_local`; not outfmt 11 or 13 to 16 in such a call, see `x_query_block_plan`). One block is the search of all queries below, which needs none of
+    // the checks: a refusal in it has no block's bytes before it. Where a check fails, the search
+    // of all queries below refuses as NCBI does. With `-db` the blocks are searched only when no
+    // definition line of the database can fail a batch where its titles are read
+    // (`database::x_titles_allow_blocks`, or `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and
+    // 5, `x_titles_taxids_allow_blocks` for 15 and 16 (the titles and the taxids in one pass), for
+    // outfmt 0, 5, 6 and 7 with `taxdb.bti` on the search path also the taxids that each batch's
+    // prefetch reads and looks up, read in the block search's pool before the first block), and
+    // with outfmt 0 and `-subject` only when no subject's title is refused where the report shows
+    // it (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when the names of the
+    // database, the queries and the subjects can be written (`x_query_blocks.rs`
+    // `x_block_xml_*_allowed`).
     let x_plan = x_query_block_plan(
         &args,
         &searched_queries,
@@ -5911,10 +5909,9 @@ fn search(
         outputs,
         batch_size,
         v1.is_some(),
-        &mut x_formats,
     );
     if x_plan.is_none() {
-        super::x_query_blocks::x_reach_block_search(&x_formats, false);
+        super::x_query_blocks::x_reach_block_search(false);
     }
     if let Some((x_kinds, blocks)) = x_plan {
         use super::x_query_blocks::{XBlockReport, XBlockSink, XOffsetObserver};
@@ -5925,19 +5922,18 @@ fn search(
             hits,
             observer,
         } = &mut *outputs;
-        // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the outputs' `-outfmt` values, in request order.
+        // EXPERIMENT (LOSAT_X_BPQBLOCK): the outputs' `-outfmt` values, in request order.
         let outfmts: Vec<&str> = formats.iter().map(|format| format.outfmt).collect();
-        // EXPERIMENT (LOSAT_X_BPQBLOCKFMT, LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML,
-        // LOSAT_X_BPQBLOCKXML2): the reports the
-        // blocks write, whose titles are checked below.
+        // EXPERIMENT (LOSAT_X_BPQBLOCK): the reports the blocks write, whose titles are checked
+        // below.
         let x_pairwise = x_kinds.contains(&XBlockReport::Pairwise);
-        // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the hit records of all blocks, each with the index of its
+        // EXPERIMENT (LOSAT_X_BPQBLOCK): the hit records of all blocks, each with the index of its
         // query among the call's queries (the block's index plus the block's first query), handed to
         // the caller's sink once, after the last block: one call with the final list of all
         // queries, as the search of all queries makes it.
         let x_want_records = hits.is_some();
         let mut x_records: Option<Vec<PairwiseHit>> = x_want_records.then(Vec::new);
-        // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state that the blocks of an outfmt 13 to 16
+        // EXPERIMENT (LOSAT_X_BPQBLOCK): the framing state that the blocks of an outfmt 13 to 16
         // run hand on (such a run has one output, `x_query_block_plan`).
         let x_xml2_carry = std::sync::Mutex::new(crate::report::blast_xml2::Xml2Carry::default());
         let searched_in_blocks =
@@ -5952,9 +5948,9 @@ fn search(
                 // subjects' titles (`x_block_shown_titles_allowed`), and with outfmt 5 the
                 // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the database
                 // name and queries' names (`x_block_xml_run_allowed`); with several outputs, the
-                // checks of every kind of report among them (LOSAT_X_BPQBLOCKWEB).
+                // checks of every kind of report among them.
                 if !x_block_words_fit(&args, &searched_queries, &query_input, batch_size, pool) {
-                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
+                    super::x_query_blocks::x_reach_block_search(false);
                     return Ok(false);
                 }
                 // BLASTP's outfmt 0, 5, 6 and 7 prefetch the subjects of each batch, which with
@@ -6010,10 +6006,10 @@ fn search(
                     .filter(|&(index, x_kind)| !x_kinds[..index].contains(x_kind))
                     .all(|(_, &x_kind)| titles_allowed(x_kind))
                 {
-                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
+                    super::x_query_blocks::x_reach_block_search(false);
                     return Ok(false);
                 }
-                // EXPERIMENT (LOSAT_X_BPQBLOCKXML, LOSAT_X_BPQBLOCKXML2): the XML report's refusals
+                // EXPERIMENT (LOSAT_X_BPQBLOCK): the XML report's refusals
                 // of the database name and of the queries' names, which it makes before its first
                 // byte.
                 if x_kinds.iter().any(|x_kind| x_kind.is_xml())
@@ -6023,10 +6019,10 @@ fn search(
                         pool,
                     )
                 {
-                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
+                    super::x_query_blocks::x_reach_block_search(false);
                     return Ok(false);
                 }
-                super::x_query_blocks::x_reach_block_search(&x_formats, true);
+                super::x_query_blocks::x_reach_block_search(true);
                 // EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks
                 // (`x_query_blocks::XBlockSubjects`), on the search's pool.
                 // Diagnostic (LOSAT_TIMING): the blocks' shared subject encoding for the common
@@ -6064,7 +6060,7 @@ fn search(
                             }));
                         }
                     };
-                    // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the caller's observer with the block's HSP
+                    // EXPERIMENT (LOSAT_X_BPQBLOCK): the caller's observer with the block's HSP
                     // indices moved past the blocks before.
                     let mut x_offset = observer.as_deref_mut().map(|inner| XOffsetObserver {
                         inner,
@@ -6125,7 +6121,7 @@ fn search(
                 Ok(true)
             })?;
         if searched_in_blocks {
-            // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the hit records of all queries, once.
+            // EXPERIMENT (LOSAT_X_BPQBLOCK): the hit records of all queries, once.
             if let (Some(sink), Some(records)) = (hits.as_mut(), x_records.as_ref()) {
                 sink(records);
             }
@@ -6246,21 +6242,18 @@ fn x_bp_encode_block_subjects(
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the blocks of the block search, or `None` for the search of all
 // queries. The block search is taken only where the blocks' reports written one after the other
-// are the report of the search of all queries: one output, tabular format 6 (or with
-// LOSAT_X_BPQBLOCKFMT outfmt 0 or 7, with LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with
-// LOSAT_X_BPQBLOCKXML outfmt 5, LOSAT_X_BPQBLOCKXML2 outfmt 13 to 16, `x_query_blocks.rs`; the
-// kind of report of each output is returned with the blocks), with LOSAT_X_BPQBLOCKWEB also several
-// outputs, the hit records and an observer (`run_local`, ABI v2 of the Web build) where every
-// output is a writer of the caller, no `-db` is searched and an observer comes with the hit
+// are the report of the search of all queries: tabular format 6, outfmt 0, 7, 8, 9, 12, 5 or 13 to
+// 16 (`x_query_blocks.rs`; the kind of report of each output is returned with the blocks), also
+// several outputs, the hit records and an observer (`run_local`, ABI v2 of the Web build) where
+// every output is a writer of the caller, no `-db` is searched and an observer comes with the hit
 // records (an outfmt 13 to 16 output is not taken in such a call: see the arm below), no
-// `-query_loc` (every record is
-// searched whole), every batch read, more than one block, no subject whose tabular ID the
-// reference path rejects before it writes any row (`tabular_subject_ids`, for outfmt 6 and 7;
-// with `-db`, the definition lines are checked where the blocks are searched,
-// `database::x_titles_allow_blocks` (outfmt 8, 9, 12 and 5: `x_titles_read_allow_blocks`); outfmt
-// 0's titles also there, `x_block_shown_titles_allowed`; outfmt 5's names too,
-// `x_query_blocks::x_block_xml_subjects_allowed` and `x_block_xml_run_allowed`; each check where any
-// output is of its kind),
+// `-query_loc` (every record is searched whole), every batch read, more than one block (one block
+// is the search of all queries), no subject whose tabular ID the reference path rejects before it
+// writes any row (`tabular_subject_ids`, for outfmt 6 and 7; with `-db`, the definition lines are
+// checked where the blocks are searched, `database::x_titles_allow_blocks` (outfmt 8, 9, 12 and 5:
+// `x_titles_read_allow_blocks`); outfmt 0's titles also there, `x_block_shown_titles_allowed`;
+// outfmt 5's names too, `x_query_blocks::x_block_xml_subjects_allowed` and
+// `x_block_xml_run_allowed`; each check where any output is of its kind),
 // no query whose effective search space in NCBI's `Int8` the reference path rejects
 // (`blastp_database_search_space`, with `-db` or `-dbsize`), and none of the other refusals of the
 // search of all queries that come before its rows (`x_block_search_refuses_nothing`): a block
@@ -6277,12 +6270,11 @@ fn x_query_block_plan(
     outputs: &ReportOutputs<'_>,
     batch_size: u32,
     v1: bool,
-    x_formats: &mut Vec<super::x_query_blocks::XBlockFormat>,
 ) -> Option<(
     Vec<super::x_query_blocks::XBlockReport>,
     Vec<std::ops::Range<usize>>,
 )> {
-    use super::x_query_blocks::{XBlockFormat, XBlockReport};
+    use super::x_query_blocks::XBlockReport;
     let block_letters = super::x_query_blocks::x_bp_qblock()?;
     if args.query_range.is_some()
         || outputs.formats.is_empty()
@@ -6292,19 +6284,15 @@ fn x_query_block_plan(
     {
         return None;
     }
-    // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): several outputs, the hit records or an observer. Each
+    // Several outputs, the hit records or an observer. Each
     // output of several is a writer of the caller (a sink the block search opens itself would be
     // flushed by every block, and a stream that two outputs share would get each block's formats in
     // turn); no `-db` (the records' `s_idx` of a database search rank the subjects that the call's
     // lists name); an observer only with the hit records, which count the HSPs of each block for
     // the observer's indices (`XOffsetObserver`).
     let x_web = outputs.formats.len() > 1 || outputs.hits.is_some() || outputs.observer.is_some();
-    if x_web {
-        x_formats.push(XBlockFormat::Web);
-    }
     if x_web
-        && (!super::x_query_blocks::x_bp_qblock_web()
-            || subject_source.database().is_some()
+        && (subject_source.database().is_some()
             || (outputs.observer.is_some() && outputs.hits.is_none())
             || (outputs.formats.len() > 1
                 && !outputs
@@ -6314,9 +6302,7 @@ fn x_query_block_plan(
     {
         return None;
     }
-    // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): outfmt 0 and 7 too. EXPERIMENT (LOSAT_X_BPQBLOCKSA,
-    // LOSAT_X_BPQBLOCKXML, LOSAT_X_BPQBLOCKXML2): outfmt 8, 9, 12, 5, 15 and 16, which
-    // `OutputFormat::parse` does not know.
+    // Outfmt 8, 9, 12, 5, 15 and 16 are the ones `OutputFormat::parse` does not know.
     // The custom tabular reports of outfmt 6 and 7 (a field list or a delimiter, `tabular`) as
     // the default ones: each query's lines depend only on its final list and fixed inputs (the
     // subjects' ids, lengths and titles, a `-subject` search's taxonomy database warning), outfmt
@@ -6332,62 +6318,32 @@ fn x_query_block_plan(
             subject_source.database().is_some() && (needs.all_deflines || needs.taxonomy);
         (!db_reads_more).then_some(spec.kind)
     };
-    let mut default_kind = |outfmt: &str| match OutputFormat::parse(outfmt) {
-        Ok((OutputFormat::Tabular, _)) => Some(XBlockReport::Tabular),
-        Ok((OutputFormat::TabularWithComments, _)) if super::x_query_blocks::x_bp_qblock_fmt() => {
-            x_formats.push(XBlockFormat::Fmt);
+    let default_kind = |outfmt: &str| match OutputFormat::parse(outfmt) {
+        Ok((OutputFormat::Tabular | OutputFormat::TabularWithComments, _)) => {
             Some(XBlockReport::Tabular)
         }
         // ABI v1's outfmt 0 titles of a database are not argued here.
-        Ok((OutputFormat::Pairwise, _))
-            if super::x_query_blocks::x_bp_qblock_fmt()
-                && !(v1 && subject_source.database().is_some()) =>
-        {
-            x_formats.push(XBlockFormat::Fmt);
+        Ok((OutputFormat::Pairwise, _)) if !(v1 && subject_source.database().is_some()) => {
             Some(XBlockReport::Pairwise)
         }
-        Ok((OutputFormat::TabularWithComments | OutputFormat::Pairwise, _)) => {
-            x_formats.push(XBlockFormat::Fmt);
-            None
-        }
-        Err(_)
-            if super::x_query_blocks::x_bp_qblock_sa()
-                && blastp_seqalign_format(outfmt).is_some() =>
-        {
-            x_formats.push(XBlockFormat::Seqalign);
-            Some(XBlockReport::Seqalign)
-        }
-        // Outfmt 11 (the BLAST archive, under the switch of outfmt 8, 9 and 12: one document per NCBI
-        // batch, `x_query_blocks.rs`). Only in a call of one output without hit records and
-        // observer, as outfmt 15 and 16: the run-level `ArchiveHandle` and the batches' messages
-        // were argued for the CLI's shape. In a call of several outputs, hit records or an
-        // observer (LOSAT_X_BPQBLOCKWEB) the format is recorded for the reach check as usual,
-        // and the plan is refused (Owner-delegated 2026-10-23, DECISIONS 44).
-        Err(_) if super::x_query_blocks::x_bp_qblock_sa() && blastp_is_archive(outfmt) => {
-            x_formats.push(XBlockFormat::Seqalign);
-            (!x_web).then_some(XBlockReport::Seqalign)
-        }
-        Err(_) if super::x_query_blocks::x_bp_qblock_xml() && blastp_is_xml(outfmt) => {
-            x_formats.push(XBlockFormat::Xml);
-            Some(XBlockReport::Xml)
-        }
+        Err(_) if blastp_seqalign_format(outfmt).is_some() => Some(XBlockReport::Seqalign),
+        // Outfmt 11 (the BLAST archive: one document per NCBI batch, `x_query_blocks.rs`). Only in a
+        // call of one output without hit records and observer, as outfmt 15 and 16: the run-level
+        // `ArchiveHandle` and the batches' messages were argued for the CLI's shape (Owner-delegated
+        // 2026-10-23, DECISIONS 44).
+        Err(_) if blastp_is_archive(outfmt) => (!x_web).then_some(XBlockReport::Seqalign),
+        Err(_) if blastp_is_xml(outfmt) => Some(XBlockReport::Xml),
         // Outfmt 13 to 16 (`x_xml2_kind_takes_blocks`; 13 and 14 write side files). Only in a
         // call of one output without hit records and observer (the CLI's shape): the run-level
-        // frame and carry of the XML2 document (`Xml2Carry`) were checked for that call only. In a
-        // call of several outputs, hit records or an observer (LOSAT_X_BPQBLOCKWEB) the format is
-        // recorded for the reach check as usual, and the plan is refused (Owner-delegated
-        // 2026-10-22).
-        Err(_)
-            if super::x_query_blocks::x_bp_qblock_xml2()
-                && blastp_xml2_kind(outfmt).is_some_and(x_xml2_kind_takes_blocks) =>
-        {
-            x_formats.push(XBlockFormat::Xml2);
+        // frame and carry of the XML2 document (`Xml2Carry`) were checked for that call only
+        // (Owner-delegated 2026-10-22).
+        Err(_) if blastp_xml2_kind(outfmt).is_some_and(x_xml2_kind_takes_blocks) => {
             (!x_web).then_some(XBlockReport::Xml2)
         }
         _ => None,
     };
-    // A custom tabular report of outfmt 6 or 7 takes the default one's kind (and switch).
-    let mut kind_of = |outfmt: &str| match super::tabular::custom_tabular_spec(outfmt) {
+    // A custom tabular report of outfmt 6 or 7 takes the default one's kind.
+    let kind_of = |outfmt: &str| match super::tabular::custom_tabular_spec(outfmt) {
         Some(spec) => match custom_kind(spec) {
             Some(crate::report::tabular::TabularKind::Tabular) => default_kind("6"),
             Some(crate::report::tabular::TabularKind::Commented) => default_kind("7"),
@@ -6395,13 +6351,10 @@ fn x_query_block_plan(
         },
         None => default_kind(outfmt),
     };
-    // Every output's format switch is recorded (`x_reach_block_search`), also after one refuses.
     let kinds = outputs
         .formats
         .iter()
         .map(|format| kind_of(format.outfmt))
-        .collect::<Vec<_>>()
-        .into_iter()
         .collect::<Option<Vec<_>>>()?;
     let tabular = kinds.contains(&XBlockReport::Tabular);
     match subject_source {
@@ -6577,7 +6530,7 @@ fn x_block_words_fit(
         .all(|searched| fits(&mut words, searched))
 }
 
-// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): the outfmt 0 report of the search of all queries refuses a
+// EXPERIMENT (LOSAT_X_BPQBLOCK): the outfmt 0 report of the search of all queries refuses a
 // subject title that LOSAT does not write as NCBI where the report shows the subject
 // (`check_shown_subject_titles`, and ABI v1's `check_v1_shown_subject_titles`), before it writes
 // anything; a block search would have written the reports of the blocks before. So with outfmt 0
@@ -6886,7 +6839,7 @@ fn preliminary_search_error(
         );
     }
     let written = (|| -> Result<()> {
-        // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): a block after the first of the block search follows
+        // EXPERIMENT (LOSAT_X_BPQBLOCK): a block after the first of the block search follows
         // the prolog that the first block wrote.
         if reports.x_prolog {
             write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
@@ -6910,13 +6863,13 @@ struct BlastpReports<'a> {
     reader_warnings: &'a [Vec<u8>],
     epilog: bool,
     v1_titles: bool,
-    /// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): whether the outfmt 0 report starts with the prolog
+    /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether the outfmt 0 report starts with the prolog
     /// (false for the blocks after the first of the block search, `x_query_blocks.rs`).
     x_prolog: bool,
-    /// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): the queries of the blocks before this one, which outfmt
+    /// EXPERIMENT (LOSAT_X_BPQBLOCK): the queries of the blocks before this one, which outfmt
     /// 7's last line counts with this call's (0 outside the block search).
     x_queries_before: usize,
-    /// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state of an outfmt 13 to 16 run that the
+    /// EXPERIMENT (LOSAT_X_BPQBLOCK): the framing state of an outfmt 13 to 16 run that the
     /// blocks hand on (the count of reports, the start of the document, a `-subject` run's held
     /// report; `None` outside the block search).
     x_xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
@@ -7052,7 +7005,7 @@ fn search_split_query_batches(
                     x_ordinal_base: 0,
                 },
                 // A chunk's search ends after its preliminary stage, before any report.
-                // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): a chunk of a block after the first follows the
+                // EXPERIMENT (LOSAT_X_BPQBLOCK): a chunk of a block after the first follows the
                 // first block's outfmt 0 prolog (`preliminary_search_error`).
                 &BlastpReports {
                     reader_warnings: &[],
@@ -7586,7 +7539,7 @@ fn run_resolved_in_pool(
         &x_owned_subjects
     };
     // The subjects' titles by subject index, as the reports write them. EXPERIMENT
-    // (LOSAT_X_BPSUBJMETA): the block search's titles and tabular IDs, made once for all blocks
+    // (LOSAT_X_BPQBLOCK): the block search's titles and tabular IDs, made once for all blocks
     // (`blast_engine/x_subject_meta.rs`); the same values, borrowed.
     let x_meta = super::x_query_blocks::x_block_subject_meta(blastp_parallel_pool, subject_records);
     let subject_titles: std::borrow::Cow<'_, [Arc<[u8]>]> = match x_meta {
@@ -11147,7 +11100,7 @@ fn run_resolved_in_pool(
         }
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
-    // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPSUBJMETA): the block
+    // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
     // search's IDs made once for all blocks, with the same check (`x_tabular_subject_ids_cached`).
     // `sacc` and `saccver` of the database sequences with parsed Seq-ids, by rank (empty
     // without them: the others' are their `sseqid`).
@@ -11624,7 +11577,7 @@ fn run_resolved_in_pool(
                             params,
                             args.out.as_deref(),
                         );
-                        // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): a block continues the document
+                        // EXPERIMENT (LOSAT_X_BPQBLOCK): a block continues the document
                         // of the blocks before it and hands its state on.
                         if let Some(carry) = reports.x_xml2_carry {
                             document
@@ -12000,7 +11953,7 @@ mod tests {
     use super::*;
     use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
 
-    // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): all four documents (outfmt 13 to 16) get a block plan; a
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): all four documents (outfmt 13 to 16) get a block plan; a
     // kind added to `Xml2Kind` is not admitted until `x_xml2_kind_takes_blocks` names it.
     #[test]
     fn xml2_block_plan_admits_outfmt_13_to_16() {

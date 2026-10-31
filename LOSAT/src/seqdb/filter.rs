@@ -2010,6 +2010,14 @@ impl SeqDb {
                 volume.set_defline_rule(Arc::clone(&rule));
             }
         }
+        self.empty_list_first_length = if filter.count() == 0 && num_oids > 0 {
+            Some(match self.seqtype {
+                SeqType::Protein => u64::from(self.volumes[0].protein_length(0)?),
+                SeqType::Nucleotide => self.volumes[0].nucleotide_length(0, 0)? as u64,
+            })
+        } else {
+            None
+        };
         self.num_seqs = filter.count();
         self.total_length = total_length;
         self.max_length = max_length;

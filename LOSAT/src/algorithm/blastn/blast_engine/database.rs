@@ -390,7 +390,7 @@ impl BlastnDatabase {
         // NCBI's choice of its Seq-ids.
         shared::check_seqids(&db, settings, PROGRAM)?;
         shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
-        let total = db.total_length();
+        let (total, num_seqs) = db.statistics_numbers();
         let db_len_total = usize::try_from(total)
             .ok()
             .filter(|&letters| i64::try_from(letters).is_ok())
@@ -401,7 +401,7 @@ impl BlastnDatabase {
             })?;
         let metadata = SubjectMetadata {
             db_len_total,
-            db_num_seqs: db.num_seqs() as usize,
+            db_num_seqs: num_seqs as usize,
         };
         Ok(Self {
             db,
@@ -482,6 +482,10 @@ impl BlastnDatabase {
 
     /// The number of sequences (`CSeqDB::GetNumSeqs`) and the total length
     /// (`CSeqDB::GetTotalLength`): the real numbers, also with `-dbsize`.
+    pub(super) fn filtered_empty(&self) -> bool {
+        self.db.filtered_empty()
+    }
+
     pub(super) fn metadata(&self) -> &SubjectMetadata {
         &self.metadata
     }

@@ -118,27 +118,32 @@ pub(crate) fn restrict_database(
         diagnostics.write_all(line.as_bytes())?;
         diagnostics.write_all(b"\n")?;
     }
-    restricted.map_err(|error| database_error(error, program))?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:207-214
-    // ```c++
-    //     if (! BlastSeqSrcGetNumSeqs(m_InternalData->m_SeqSrc->GetPointer())) {
-    //         string msg =
-    //             "Filtering resulted in an empty database.";
-    //
-    //         m_Messages.AddMessageAllQueries(eBlastSevWarning,
-    //                                         kBlastMessageNoContext,
-    //                                         msg);
-    //     }
-    // ```
-    // NCBI then searches nothing and reports each query without hits; LOSAT's searches need a
-    // sequence, so a list that keeps no sequence is refused (DI-8 DECISIONS 12, item DI-8c).
-    if db.num_seqs() == 0 {
-        return Err(refusal(
-            "the list excludes every sequence of the database (NCBI: \"Filtering \
-             resulted in an empty database.\" and no hits)",
-            program,
-        ));
+    restricted.map_err(|error| database_error(error, program))
+}
+
+/// Tells the BLAST archive of the run (`archive`, `None` without one) what the database's list
+/// makes of its request (`ArchiveHandle::set_database_filter`). `dbsize` is whether `-dbsize` is
+/// given: with a list that keeps no sequence the `EffectiveSearchSpace` option then counts the
+/// length adjustment with no sequence, which the searches do not compute (probes E14 and E17 of
+/// line DI-8): LOSAT refuses it.
+pub(crate) fn note_archive_database_filter(
+    archive: Option<&crate::report::archive::ArchiveHandle>,
+    filter: &crate::blastinput::db_filter::DbFilterArgs,
+    list: Option<&crate::seqdb::DbList>,
+    filtered_empty: bool,
+    searchsp: bool,
+    dbsize: bool,
+    program: &str,
+) -> Result<()> {
+    let Some(handle) = archive else {
+        return Ok(());
+    };
+    if filtered_empty && dbsize {
+        anyhow::bail!(
+            "-dbsize with -outfmt 11 and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
+        );
     }
+    handle.set_database_filter(filter.archive_parameter(list), filtered_empty && !searchsp);
     Ok(())
 }
 
@@ -1245,7 +1250,7 @@ pub(crate) fn read_protein_stores(db: &SeqDb, program: &str) -> Result<StoredPro
     Ok(StoredProteins {
         bytes,
         starts,
-        total_length: db.total_length(),
+        total_length: db.statistics_numbers().0,
         min_length: db.min_length(),
     })
 }

@@ -441,15 +441,23 @@ fn search_cli(
     let database = match args.database_name() {
         Some(name) => {
             let list = args.db_filter.resolve(&settings, outputs.diagnostics)?;
-            Some(
-                super::database::TblastnDatabase::open_restricted(
-                    name,
-                    &settings,
-                    list.as_ref(),
-                    outputs.diagnostics,
-                )?
-                .showing_gis(args.show_gis),
-            )
+            let database = super::database::TblastnDatabase::open_restricted(
+                name,
+                &settings,
+                list.as_ref(),
+                outputs.diagnostics,
+            )?
+            .showing_gis(args.show_gis);
+            crate::algorithm::common::database::note_archive_database_filter(
+                args.archive.as_ref(),
+                &args.db_filter,
+                list.as_ref(),
+                database.filtered_empty(),
+                args.searchsp.is_some(),
+                args.dbsize.is_some(),
+                "TBLASTN",
+            )?;
+            Some(database)
         }
         None => None,
     };
@@ -1027,7 +1035,7 @@ fn search(
         let mut x_stream = None;
         let (database_stores, mut stores_error) = match database {
             Some(database) => {
-                let read = if database.numbers().num_seqs == 0 {
+                let read = if database.printed_num_seqs() == 0 {
                     Err(PreliminaryReadError("Database memory map file error").into())
                 } else if super::x_db_stream::x_tbn_db_stream() {
                     database.x_stream(resolved.num_threads).map(|stream| {
@@ -1351,6 +1359,7 @@ fn search(
             ))
             .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings)
         });
+        let filtered_empty = database.is_some_and(|database| database.filtered_empty());
         let mut query_warning_lines: Vec<Vec<u8>> = queries
             .iter()
             .zip(&query_validity)
@@ -1373,6 +1382,10 @@ fn search(
                     messages.push(NO_DATA_MESSAGE.to_string());
                 } else if !valid {
                     messages.push(crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string());
+                }
+                if filtered_empty && !query_batch_skipped[index] {
+                    messages
+                        .push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
                 }
                 lines.extend(crate::report::query_warnings::query_warning(
                     "tblastn",
@@ -1602,6 +1615,7 @@ fn search(
                 },
                 db_gencode: i32::from(resolved.db_gencode),
                 identity_warned,
+                filtered_empty,
             },
             xml_taxa,
             args.out.as_deref(),

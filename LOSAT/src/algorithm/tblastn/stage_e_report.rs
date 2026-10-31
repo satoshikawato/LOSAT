@@ -919,6 +919,7 @@ mod tests {
                     cbs: 2,
                     db_gencode: 1,
                     identity_warned: 0,
+                    filtered_empty: false,
                 },
                 Default::default(),
                 None,

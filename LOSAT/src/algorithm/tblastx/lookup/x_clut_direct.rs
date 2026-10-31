@@ -1193,6 +1193,115 @@ fn x_try_build_flat_by_buckets(
     tables: &[std::ops::Range<usize>],
     overflow_cell_capacity: usize,
 ) -> XBucketBuild {
+    x_buckets_on(
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        overflow_cell_capacity,
+        false,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1318-1320,1359-1373
+// ```c
+//     lookup->backbone = (CompressedLookupBackboneCell* )calloc(
+//                                     lookup->backbone_size,
+//                                     sizeof(CompressedLookupBackboneCell));
+// ...
+// BlastCompressedAaLookupTable *BlastCompressedAaLookupTableDestruct(
+//                                  BlastCompressedAaLookupTable * lookup)
+// {
+//     ...
+//     sfree(lookup->backbone);
+// ```
+// NCBI allocates a zeroed table for each query chunk and frees it with the chunk. Buffer reuse only:
+// a kept vector is cleared and zero-filled to the new table's size as calloc gives it.
+/// EXPERIMENT (LOSAT_X_BXCLUTPOOL): whether BLASTX builds its flat compressed tables on vectors kept
+/// between builds. Every thread that built a table kept a table's worth and its build's record of
+/// the appends in its glibc arena after they were freed, about 20 MiB per thread on a split query.
+pub(crate) fn x_bx_clut_pool() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCLUTPOOL"))
+}
+
+/// No NCBI counterpart: the vectors of a flat table kept for the next build (LOSAT_X_BXCLUTPOOL).
+#[derive(Default)]
+struct XFlatTableVectors {
+    starts: Vec<u32>,
+    hits: Vec<i32>,
+    pv: Vec<u32>,
+}
+
+/// No NCBI counterpart: the record of a bucket fill's appends kept for the next build
+/// (LOSAT_X_BXCLUTPOOL).
+#[derive(Default)]
+struct XBucketTemps {
+    targets: Vec<u32>,
+    per_offset: Vec<(i32, u32)>,
+}
+
+// No NCBI counterpart: the pool holds as many sets as tables and builds were alive at once.
+static X_FLAT_TABLES: Mutex<Vec<XFlatTableVectors>> = Mutex::new(Vec::new());
+static X_BUCKET_TEMPS: Mutex<Vec<XBucketTemps>> = Mutex::new(Vec::new());
+
+// No NCBI counterpart: a kept set, or empty vectors.
+fn x_take_kept<T: Default>(pool: &Mutex<Vec<T>>) -> T {
+    pool.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .pop()
+        .unwrap_or_default()
+}
+
+// No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them). One
+// short of room is replaced by a zeroed one of `n` entries, or with `slack` (the hits, whose number
+// changes from table to table) of capacity `n + n / 4`, not the doubling of `resize`.
+fn x_zeroed_on<T: Copy + Default>(mut vector: Vec<T>, n: usize, slack: bool) -> Vec<T> {
+    if vector.capacity() < n {
+        if !slack {
+            return vec![T::default(); n];
+        }
+        vector = Vec::with_capacity(n + n / 4);
+    }
+    vector.clear();
+    vector.resize(n, T::default());
+    vector
+}
+
+// No NCBI counterpart: buffer reuse (LOSAT_X_BXCLUTPOOL); NCBI frees the vectors.
+/// Keeps the vectors of a flat `table` for the next pooled build (the table is left empty).
+pub(crate) fn x_give_back_flat(table: &mut XFlatCompressedLookup) {
+    let vectors = XFlatTableVectors {
+        starts: std::mem::take(&mut table.starts),
+        hits: std::mem::take(&mut table.hits),
+        pv: std::mem::take(&mut table.pv),
+    };
+    X_FLAT_TABLES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(vectors);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (see
+// `x_try_build_flat_by_buckets`)
+// ```c
+//         for (offset = from; offset <= to; offset++){
+//             s_CompressedAddWordHits(&info, query->sequence, offset);
+//         }
+// ```
+/// `x_try_build_flat_by_buckets`, with `pooled` on vectors kept between builds
+/// (`LOSAT_X_BXCLUTPOOL`); the table is the same.
+#[allow(clippy::too_many_arguments)]
+fn x_buckets_on(
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
+    pooled: bool,
+) -> XBucketBuild {
     if !x_bucket_packs(query.len()) {
         return XBucketBuild::Declined;
     }
@@ -1215,14 +1324,47 @@ fn x_try_build_flat_by_buckets(
     // after the appends; the record of the appends is dropped at the end, the offsets' appends
     // after the partition (they bound the list of a cell's offsets moved to the scan order: a query
     // offset appends to a cell at most twice).
+    let kept = if pooled {
+        x_take_kept(&X_FLAT_TABLES)
+    } else {
+        XFlatTableVectors::default()
+    };
     // One more entry: the number of hits.
-    let mut starts = vec![0u32; backbone_size + 1];
+    let mut starts = x_zeroed_on(kept.starts, backbone_size + 1, false);
 
     // Appends, over the segments before, inside and between NCBI's tables, recorded as the
     // count-and-fill builder records them; not counted.
     let ranges = x_count_ranges(tables, locations.len());
-    let mut targets: Vec<u32> = Vec::new();
-    let mut per_offset: Vec<(i32, u32)> = Vec::new();
+    let XBucketTemps {
+        mut targets,
+        mut per_offset,
+    } = if pooled {
+        x_take_kept(&X_BUCKET_TEMPS)
+    } else {
+        XBucketTemps::default()
+    };
+    targets.clear();
+    per_offset.clear();
+    // The vectors taken go back to the pool at the end of the build or at a refusal.
+    let give_back = |starts: Vec<u32>, hits: Vec<i32>, pv: Vec<u32>| {
+        if pooled {
+            X_FLAT_TABLES
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(XFlatTableVectors { starts, hits, pv });
+        }
+    };
+    let give_temps = |targets: Vec<u32>, per_offset: Vec<(i32, u32)>| {
+        if pooled {
+            X_BUCKET_TEMPS
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(XBucketTemps {
+                    targets,
+                    per_offset,
+                });
+        }
+    };
     for (range, is_table) in ranges {
         let range_start = targets.len();
         let mut too_large = false;
@@ -1246,11 +1388,14 @@ fn x_try_build_flat_by_buckets(
             }
             true
         });
-        if too_large {
-            return XBucketBuild::Built(Some(XFlatBuild::TooLarge));
-        }
-        if declined {
-            return XBucketBuild::Declined;
+        if too_large || declined {
+            give_back(starts, kept.hits, kept.pv);
+            give_temps(targets, per_offset);
+            return if too_large {
+                XBucketBuild::Built(Some(XFlatBuild::TooLarge))
+            } else {
+                XBucketBuild::Declined
+            };
         }
     }
     let total = targets.len();
@@ -1266,8 +1411,8 @@ fn x_try_build_flat_by_buckets(
     for b in 0..buckets {
         bucket_starts[b + 1] += bucket_starts[b];
     }
-    let mut pv = vec![0u32; (backbone_size >> PV_ARRAY_BTS) + 1];
-    let mut hits = vec![0i32; total];
+    let mut pv = x_zeroed_on(kept.pv, (backbone_size >> PV_ARRAY_BTS) + 1, false);
+    let mut hits = x_zeroed_on(kept.hits, total, pooled);
     {
         let mut cursors = bucket_starts[..buckets].to_vec();
         let out = hits.as_mut_ptr();
@@ -1290,7 +1435,9 @@ fn x_try_build_flat_by_buckets(
             at = end;
         }
     }
-    drop(per_offset);
+    if !pooled {
+        per_offset = Vec::new();
+    }
 
     // Per bucket: its appends copied into `targets` (read no more), the counts of its cells, their
     // starts, the PV bits and `finalize`'s statistics, the fill, then the scan order of the cells
@@ -1387,7 +1534,7 @@ fn x_try_build_flat_by_buckets(
         }
     }
     starts[backbone_size] = total as u32;
-    drop(targets);
+    give_temps(targets, per_offset);
     let mut pv_array_bts = PV_ARRAY_BTS;
     if (nonempty_count as f64) <= 0.01 * (backbone_size as f64) {
         pv_array_bts += ilog2(backbone_size / (8 * X_TARGET_PV_BYTES));
@@ -2269,6 +2416,60 @@ pub(crate) fn x_tbn_build_compressed_lookup(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
 ) -> Option<Result<XCompressedLookup, ()>> {
+    x_build_compressed_on(
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        false,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+// `x_tbn_build_compressed_lookup`)
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// BLASTX's compressed lookup table: `x_tbn_build_compressed_lookup`, on vectors kept between
+/// builds with `LOSAT_X_BXCLUTPOOL` (`blastx::seed::Lookup`'s drop gives them back).
+#[inline(never)]
+pub(crate) fn x_bx_build_compressed_lookup(
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+) -> Option<Result<XCompressedLookup, ()>> {
+    x_build_compressed_on(
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        x_bx_clut_pool(),
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+// `x_tbn_build_compressed_lookup`)
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// `x_tbn_build_compressed_lookup`, with `pooled` the bucket fill on vectors kept between builds
+/// (`LOSAT_X_BXCLUTPOOL`).
+fn x_build_compressed_on(
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    pooled: bool,
+) -> Option<Result<XCompressedLookup, ()>> {
     let reference = || {
         try_build_blosum62_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
             .map(|built| built.map(XCompressedLookup::Reference))
@@ -2277,13 +2478,14 @@ pub(crate) fn x_tbn_build_compressed_lookup(
         return reference();
     }
     let bucket = if x_bpffill_on() {
-        x_try_build_flat_by_buckets(
+        x_buckets_on(
             word_size,
             scaled_threshold,
             query,
             locations,
             tables,
             NCBI_OVERFLOW_CELL_CAPACITY,
+            pooled,
         )
     } else {
         XBucketBuild::Declined
@@ -3150,5 +3352,46 @@ mod tests {
         assert!(!x_dense_enough(37_968, 759_376, 500));
         assert!(x_dense_enough(0, 759_376, 0));
         assert!(!x_dense_enough(759_376, 759_376, u64::MAX));
+    }
+    // LOSAT_X_BXCLUTPOOL: a table built on vectors another table and another build left (smaller and
+    // larger tables in turn, two alive at once) equals the table built without the pool, in every
+    // field. The pool is process-wide, so other tests' vectors may be among those taken.
+    #[test]
+    fn pooled_flat_tables_equal_the_unpooled_ones_on_kept_vectors() {
+        let mut rng = XorShift(0x9E37_79B9_7F4A_7C15);
+        let build = |query: &[u8], pooled: bool| {
+            let locations = [(0, query.len() as i32 - 1)];
+            match x_buckets_on(5, 1100, query, &locations, &[0..1], usize::MAX >> 8, pooled) {
+                XBucketBuild::Built(Some(XFlatBuild::Table(table))) => table,
+                _ => panic!("the bucket fill builds this table"),
+            }
+        };
+        let mut alive = None;
+        for (round, length) in [3_000, 40, 9_000, 200, 20_000, 7, 1_500, 20_000]
+            .into_iter()
+            .enumerate()
+        {
+            let query = random_subject(&mut rng, length, 0);
+            let want = build(&query, false);
+            let got = build(&query, true);
+            x_assert_same_flat_tables(&got, &want);
+            assert_eq!(got.pv, want.pv, "round {round}");
+            assert_eq!(got.hits, want.hits, "round {round}");
+            assert_eq!(got.starts, want.starts, "round {round}");
+            assert_eq!(got.used_cells, want.used_cells, "round {round}");
+            assert_eq!(got.longest_chain, want.longest_chain, "round {round}");
+            assert_eq!(got.pv_array_bts, want.pv_array_bts, "round {round}");
+            match round % 3 {
+                0 => {
+                    if let Some(mut kept) = alive.replace(got) {
+                        x_give_back_flat(&mut kept);
+                    }
+                }
+                _ => x_give_back_flat(&mut { got }),
+            }
+        }
+        if let Some(mut kept) = alive {
+            x_give_back_flat(&mut kept);
+        }
     }
 }

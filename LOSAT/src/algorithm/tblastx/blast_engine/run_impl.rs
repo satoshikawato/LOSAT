@@ -1296,20 +1296,28 @@ fn search_cli(
     // ```
     // `-db`: the database opens after the options are processed, before `Query is Empty!`
     // (`TblastxDatabase::open`).
-    // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the database
-    // arguments reads it (`s_GetTaxIDList`) before the database opens.
+    // The taxid or seqid list (line DI-8) is read first: NCBI's handler of the database
+    // arguments reads it (`s_GetTaxIDList`, `CSeqDBFileGiList`) before the database opens.
     let database = match args.database_name() {
         Some(name) => {
-            let taxids = args.taxid_filter.resolve(&settings, outputs.diagnostics)?;
-            Some(
-                super::super::database::TblastxDatabase::open_restricted(
-                    name,
-                    &settings,
-                    taxids.as_ref(),
-                    outputs.diagnostics,
-                )?
-                .showing_gis(args.show_gis),
-            )
+            let list = args.db_filter.resolve(&settings, outputs.diagnostics)?;
+            let database = super::super::database::TblastxDatabase::open_restricted(
+                name,
+                &settings,
+                list.as_ref(),
+                outputs.diagnostics,
+            )?
+            .showing_gis(args.show_gis);
+            crate::algorithm::common::database::note_archive_database_filter(
+                args.archive.as_ref(),
+                &args.db_filter,
+                list.as_ref(),
+                database.filtered_empty(),
+                args.searchsp.is_some_and(|space| space > 0),
+                args.dbsize.is_some_and(|size| size > 0),
+                "TBLASTX",
+            )?;
+            Some(database)
         }
         None => None,
     };
@@ -1724,7 +1732,7 @@ fn search(
     let whole_subjects = Placements::default();
     let (stores, stores_error) = match &source {
         SubjectSource::Database(database) => {
-            let read = if database.numbers(None).count == 0 {
+            let read = if database.printed_num_seqs() == 0 {
                 Err(crate::algorithm::common::database::PreliminaryReadError(
                     "Database memory map file error",
                 )
@@ -1878,6 +1886,9 @@ pub(crate) struct TblastxReportRun<'a> {
     /// The per-query statistics and whether the query's batch was searched.
     pub query_stats: &'a [TblastxQueryStats],
     pub searched: &'a [bool],
+    /// A list kept no sequence of the database: the messages of the queries of the searched
+    /// batches have `EMPTY_DATABASE_MESSAGE` (`SeqDb::filtered_empty`).
+    pub filtered_empty: bool,
     /// The warnings written before each query's report (`QueryWarnings`): the reader's
     /// messages of the query's batch (before its first query) and the query's own.
     pub warnings: &'a [Vec<u8>],
@@ -2759,7 +2770,12 @@ fn run_in_pool(
         .iter()
         .map(|record| Arc::from(record.shown_id()))
         .collect();
+    let filtered_empty = match &subjects.shown {
+        ShownSubjects::Database { database, .. } => database.filtered_empty(),
+        ShownSubjects::Fasta { .. } => false,
+    };
     let reports = BatchReports {
+        filtered_empty,
         args: &args,
         query_runs,
         query_ids: &query_ids,
@@ -3419,6 +3435,9 @@ fn run_batch_loop(
             if query.seq().is_empty() {
                 messages.push(NO_DATA_MESSAGE.to_string());
             }
+            if reports.filtered_empty && batch.searched {
+                messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
+            }
             warnings[index].extend(crate::report::query_warnings::query_warning(
                 "tblastx",
                 input.ordinal(index),
@@ -3480,6 +3499,7 @@ struct SearchedBatches {
 
 /// What the reports of the batches searched so far need besides their results.
 struct BatchReports<'a> {
+    filtered_empty: bool,
     args: &'a TblastxArgs,
     query_runs: &'a QueryRuns<'a>,
     query_ids: &'a [Arc<[u8]>],
@@ -3649,6 +3669,7 @@ impl BatchReports<'_> {
                 query_ids: &self.query_ids[reported.clone()],
                 query_stats: &done.query_stats,
                 searched: &done.searched,
+                filtered_empty: self.filtered_empty,
                 warnings: &warnings[reported.clone()],
                 ranges,
                 epilog,
@@ -4124,9 +4145,12 @@ fn search_query_batch<S: TbxScore>(
     // }
     // ```
     // An unreadable database is not empty: its first batch with a valid context fails
-    // (`SubjectsUnreadable`, below).
+    // (`SubjectsUnreadable`, below). A database that a list left without sequences has
+    // statistics (`SeqDb::statistics_numbers`) and its queries are reported with them.
     if queries_raw.is_empty()
-        || (subjects.count() == 0 && !matches!(subjects, Subjects::Unreadable))
+        || (subjects.count() == 0
+            && numbers.total == 0
+            && !matches!(subjects, Subjects::Unreadable))
     {
         return Ok(TblastxBatch {
             hits: Vec::new(),

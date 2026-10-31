@@ -147,13 +147,13 @@ impl BlastpDatabase {
         Self::open_restricted(name, settings, parsed_seqids, None, &mut std::io::sink())
     }
 
-    /// `open` with the database restricted to the taxid list `list` of the command line
-    /// (`shared::restrict_database`, whose warning goes to `diagnostics`).
+    /// `open` with the database restricted to the taxid or seqid list `list` of the command
+    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
     pub(super) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
         parsed_seqids: bool,
-        list: Option<&crate::seqdb::TaxidList>,
+        list: Option<&crate::seqdb::DbList>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
@@ -189,9 +189,38 @@ impl BlastpDatabase {
         self.db.num_seqs()
     }
 
-    /// The total length (`CSeqDB::GetTotalLength`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:145-150
+    // ```c++
+    // static Int4
+    // s_SeqDbGetMinLength(void* seqdb_handle, void*)
+    // {
+    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
+    //     return seqdb.GetMinLength();
+    // }
+    // ```
+    /// The shortest sequence length of the preliminary hit cutoff (`BlastSeqSrcGetMinSeqLen`,
+    /// `min_subject_length` of `BLAST_GapAlignSetUp`): `BLAST_SEQSRC_MINLENGTH` for a whole
+    /// database, the scanned shortest length with a list (line DI-8: `SeqDb::min_length`).
+    pub(super) fn cutoff_subject_length(&self) -> i32 {
+        match self.db.min_length() {
+            Some(shortest) => i32::try_from(shortest).unwrap_or(i32::MAX),
+            None => BLAST_SEQSRC_MINLENGTH,
+        }
+    }
+
+    /// The total length the statistics read (`SeqDb::statistics_numbers`).
     pub(super) fn total_letters(&self) -> u64 {
-        self.db.total_length()
+        self.db.statistics_numbers().0
+    }
+
+    /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
+    pub(super) fn filtered_empty(&self) -> bool {
+        self.db.filtered_empty()
+    }
+
+    /// The number of sequences the statistics read (`SeqDb::statistics_numbers`).
+    pub(super) fn statistics_num_sequences(&self) -> u32 {
+        self.db.statistics_numbers().1
     }
 
     /// The number of sequences the reports print: the whole database's, also with a taxid
@@ -207,7 +236,7 @@ impl BlastpDatabase {
 
     /// The total length as the engine holds it.
     pub(super) fn total_letters_usize(&self) -> Result<usize> {
-        let total = self.db.total_length();
+        let total = self.total_letters();
         usize::try_from(total)
             .ok()
             .filter(|&letters| i64::try_from(letters).is_ok())

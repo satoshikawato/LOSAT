@@ -5002,21 +5002,29 @@ fn search_cli(
     // ```
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
-    // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the database
-    // arguments reads it (`s_GetTaxIDList`) before the database opens.
+    // The taxid or seqid list (line DI-8) is read first: NCBI's handler of the database
+    // arguments reads it (`s_GetTaxIDList`, `CSeqDBFileGiList`) before the database opens.
     let database = match resolved.db.as_deref() {
         Some(name) => {
-            let taxids = args.taxid_filter.resolve(&settings, outputs.diagnostics)?;
-            Some(
-                database::BlastpDatabase::open_restricted(
-                    name,
-                    &settings,
-                    args.app == BlastpApp::Blastp,
-                    taxids.as_ref(),
-                    outputs.diagnostics,
-                )?
-                .showing_gis(args.show_gis),
-            )
+            let list = args.db_filter.resolve(&settings, outputs.diagnostics)?;
+            let database = database::BlastpDatabase::open_restricted(
+                name,
+                &settings,
+                args.app == BlastpApp::Blastp,
+                list.as_ref(),
+                outputs.diagnostics,
+            )?
+            .showing_gis(args.show_gis);
+            crate::algorithm::common::database::note_archive_database_filter(
+                args.archive.as_ref(),
+                &args.db_filter,
+                list.as_ref(),
+                database.filtered_empty(),
+                args.searchsp.is_some_and(|space| space > 0),
+                args.dbsize.is_some_and(|size| size > 0),
+                "BLASTP",
+            )?;
+            Some(database)
         }
         None => None,
     };
@@ -7784,7 +7792,7 @@ fn run_resolved_in_pool(
     // no sequence): NCBI opens it, writes the outfmt 0 prolog, reads the first query
     // batch and fails in that batch's preliminary search, where its reader cannot map
     // the sequence file (fixture `LOSAT/tests/seqdb/db/empty`).
-    if let Some(database) = database.filter(|database| database.num_sequences() == 0) {
+    if let Some(database) = database.filter(|database| database.printed_num_sequences() == 0) {
         return Err(preliminary_search_error(
             &args,
             subject_source,
@@ -7880,7 +7888,7 @@ fn run_resolved_in_pool(
     let num_subjects = match database {
         None if total_db_len == 0 => 1,
         None => subjects.len().max(1),
-        Some(database) => database.num_sequences() as usize,
+        Some(database) => database.statistics_num_sequences() as usize,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
     // ```c
@@ -8034,11 +8042,12 @@ fn run_resolved_in_pool(
     // ```
     // A database answers `BLAST_SEQSRC_MINLENGTH` (10) for its shortest sequence (an
     // index file stores none, and the alias key `MIN_SEQ_LENGTH` is rejected by the
-    // reader), whatever its sequences are; a FASTA subject set answers its real minimum,
+    // reader), whatever its sequences are, unless a list made NCBI scan its totals (then
+    // the scanned shortest length, line DI-8); a FASTA subject set answers its real minimum,
     // raised to 10.
     let cutoff_subject_length = match database {
         None => blastp_preliminary_cutoff_subject_length(&subjects),
-        Some(_) => database::BLAST_SEQSRC_MINLENGTH,
+        Some(database) => database.cutoff_subject_length(),
     };
     let hit_cutoff_scores: Vec<i32> = contexts
         .iter()
@@ -10979,6 +10988,7 @@ fn run_resolved_in_pool(
     // its first query, `read_query_batches`), then the query's own: the O characters read
     // as X, and the message of its set-up (a query without letters) or of its
     // Karlin-Altschul parameters (an invalid query with letters).
+    let filtered_empty = database.is_some_and(|database| database.filtered_empty());
     // A Seq-annot format writes no result warnings (`ReportFormat::writes_query_warnings`);
     // the warnings go with the first format.
     let result_warnings = format_plans
@@ -10996,6 +11006,9 @@ fn run_resolved_in_pool(
                 messages.push(NO_DATA_MESSAGE.to_string());
             } else if !query_valid[q_idx] {
                 messages.push(crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string());
+            }
+            if filtered_empty && !query_batch_skipped[q_idx] {
+                messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
             }
             let mut lines = reports
                 .reader_warnings
@@ -11378,6 +11391,11 @@ fn run_resolved_in_pool(
                         } else if !query_valid[q_idx] {
                             messages.push(
                                 crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string(),
+                            );
+                        }
+                        if filtered_empty && !query_batch_skipped[q_idx] {
+                            messages.push(
+                                crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string(),
                             );
                         }
                         messages
@@ -12097,7 +12115,7 @@ mod tests {
             query: PathBuf::from("query.faa"),
             subject: Some(PathBuf::from("subject.faa")),
             db: None,
-            taxid_filter: Default::default(),
+            db_filter: Default::default(),
             dbsize: None,
             show_gis: false,
             parse_deflines: false,

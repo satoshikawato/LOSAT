@@ -377,12 +377,12 @@ impl BlastnDatabase {
         Self::open_restricted(name, settings, None, &mut std::io::sink())
     }
 
-    /// `open` with the database restricted to the taxid list `list` of the command line
-    /// (`shared::restrict_database`, whose warning goes to `diagnostics`).
+    /// `open` with the database restricted to the taxid or seqid list `list` of the command
+    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
     pub(super) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
-        list: Option<&crate::seqdb::TaxidList>,
+        list: Option<&crate::seqdb::DbList>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
@@ -390,7 +390,7 @@ impl BlastnDatabase {
         // NCBI's choice of its Seq-ids.
         shared::check_seqids(&db, settings, PROGRAM)?;
         shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
-        let total = db.total_length();
+        let (total, num_seqs) = db.statistics_numbers();
         let db_len_total = usize::try_from(total)
             .ok()
             .filter(|&letters| i64::try_from(letters).is_ok())
@@ -401,7 +401,7 @@ impl BlastnDatabase {
             })?;
         let metadata = SubjectMetadata {
             db_len_total,
-            db_num_seqs: db.num_seqs() as usize,
+            db_num_seqs: num_seqs as usize,
         };
         Ok(Self {
             db,
@@ -480,8 +480,13 @@ impl BlastnDatabase {
         &self.name
     }
 
-    /// The number of sequences (`CSeqDB::GetNumSeqs`) and the total length
-    /// (`CSeqDB::GetTotalLength`): the real numbers, also with `-dbsize`.
+    /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
+    pub(super) fn filtered_empty(&self) -> bool {
+        self.db.filtered_empty()
+    }
+
+    /// The number of sequences and the total length that the statistics read
+    /// (`SeqDb::statistics_numbers`): the real numbers, also with `-dbsize`.
     pub(super) fn metadata(&self) -> &SubjectMetadata {
         &self.metadata
     }

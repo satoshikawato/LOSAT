@@ -6026,7 +6026,18 @@ Scheduling (each value computed by one thread with the original function; order 
   subjects runs the units there too. A group boundary only decides where the concatenated query is cut, so reports do
   not change. A group build's blocks of 64 KiB or more take the capacity glibc maps
   (`x_group_capacity`): batches are built on the pool's threads, and those blocks held the arenas' high water.
-DI16_NUMBERS
+  Measured 2026-10-31 on the workstation against dev caf4c166 (a node 0 core with its HT sibling idle at 1 thread,
+  node 1 CPUs 32-39 at 8, warmed 3 s before every run, arm order rotated, one warm-up round + 8 rounds, medians of the
+  per-round ratios, time / max RSS; every report identical between the arms; with this switch come the unit path for
+  other matrices and their sentinel walks). 40 x 40 phage genomes of 43 kb (`Autographivirales.40`, BLOSUM45,
+  ViPTreeGen's options): 1 thread x0.574 / x0.743 (81.6 -> 47.0 s, NCBI 81.2 s), 8 threads x0.508 / x0.662 (13.5 -> 6.8 s,
+  NCBI 18.0 s). The same with BLOSUM62: x0.821 / x0.965, x0.582 / x0.596. `Begomovirus.40`: x0.651 / x0.905, x0.669 / x1.229.
+  MelaMJNV x 2 viruses: x0.517 / x0.572, x0.217 / x0.532. Sakai 50 kb x MG1655: x0.863 / x0.941, x0.993 / x0.901.
+  10 fly transcripts x zebrafish cDNA database: x0.742 / x0.957, x0.694 / x0.992. 3 fly transcripts x fly genome database:
+  x1.004 / x1.000, x0.878 / x0.991. 50 cDNAs x 1 Mb: BLOSUM62 x0.803 / x0.831, x0.967 / x0.554; the 8 other matrices x0.557-0.824
+  / x0.762-1.274, x0.141-0.327 / x0.730-1.603. AP027131 x AP027133 (code 4) keeps six groups: BLOSUM62 x1.008 / x0.994,
+  x1.010 / x0.996 with x0.9991 of the instructions and x1.006 of the cycles, the same with `=0` (code layout); other matrices
+  x0.526-0.844 / x0.420-0.770, x0.092-0.516 / x0.444-1.018.
 - `LOSAT_X_TBXUNGAPSENT=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-25; `=0` turns it off) the two-hit ungapped extension (TBXUNGAP's table walks, above) with
   walks that the sentinels stop instead of a bound (`two_hit_sent` in

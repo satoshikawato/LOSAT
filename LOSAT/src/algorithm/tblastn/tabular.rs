@@ -195,6 +195,7 @@ pub(super) fn write_tblastn_tabular(
     );
     let spec = tab.spec;
     let needs = spec.needs();
+    let nident_alone = nident_alone(spec);
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
     // ```c++
     //        		const CBioseq_Handle& subject_bh =
@@ -401,7 +402,7 @@ pub(super) fn write_tblastn_tabular(
                 // are 0, the rows are read and `num_ident` is the engine's.
                 let engine_ident = usize::try_from(payload.num_ident).unwrap_or(0);
                 let rows_read = needs.rows
-                    || (nident_alone(spec) && engine_ident > 0 && payload.report_num_ident == 0);
+                    || (nident_alone && engine_ident > 0 && payload.report_num_ident == 0);
                 if rows_read {
                     let translation = translation
                         .get_or_insert_with(|| TargetTranslation::of(tab.letters.nt(oid), &code));

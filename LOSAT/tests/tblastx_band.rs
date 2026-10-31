@@ -169,7 +169,7 @@ fn the_cost_gate_still_decides_at_one_thread() {
 
 const MASK_OFF: (&str, &str) = ("LOSAT_X_TBXUNITMASK", "0");
 /// The size rule's tables of at most 2 KiB (512 cells): below this query's group tables (1,024
-/// cells), so only the band batch's rule masks them.
+/// cells or more), so only the band batch's rule masks them.
 const MASK_BAND_ONLY: (&str, &str) = ("LOSAT_X_TBXUNITMASK", "2");
 
 // A subject longer than the reference table's cells (the PemoMJNVA genome): without

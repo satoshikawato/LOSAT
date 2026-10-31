@@ -279,7 +279,8 @@ their variables mean
   one block (see its entry), and
   `BPQBLOCKFMT`, `BPQBLOCKSA`, `BPQBLOCKXML`, `BPQBLOCKXML2` and `BPQBLOCKWEB` act only with `BPQBLOCK`; `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
   `TBXNEXT` only in TBLASTX's parallel subject loop (2 or more threads, several subjects; native
-  builds and the threaded Wasm module); `BPCLUT` acts on `blastp -task blastp-fast` only, and `BPLKPFLAT` only where the search's pool
+  builds and the threaded Wasm module); `TBXBOARD` in native builds with 2 or more threads (every batch: one
+  subject, or several in `TBXNEXT`'s loop); `BPCLUT` acts on `blastp -task blastp-fast` only, and `BPLKPFLAT` only where the search's pool
   builds the flat table of `BPCLUT` (`BPCLUT` on, 2 or more threads), so with `BPCLUT=0` it changes
   nothing.
 - White space around a value is ignored (`set LOSAT_X_BPSUBJRUN=0 && ...` in cmd.exe stores `0 `).
@@ -450,7 +451,9 @@ export LOSAT_X_TBNUNGAP=1
 export LOSAT_X_TBNUNITXLATE=1
 export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXBAND=1
+export LOSAT_X_TBXBOARD=1
 export LOSAT_X_TBXEXTBATCH=256
+export LOSAT_X_TBXFEWGROUPS=1
 export LOSAT_X_TBXHITBF=1
 export LOSAT_X_TBXKMERGE=1
 export LOSAT_X_TBXLUT=1
@@ -2674,6 +2677,66 @@ Rebuilding less:
   AP027133+AP027078) 3.84 / 4.17 s at 16 (294 / 330 MiB). One-batch inputs (MelaMJNV x 9 MJNV genomes at
   16 threads, a one-genome pair at 8) are equal in time and memory. The memory cost is the next batch's
   tables and HSPs while the batch before links (up to +38 MiB at 4 threads here).
+- `LOSAT_X_TBXBOARD=1` (TBLASTX, speed; in the strict set from the pull request that added it,
+  2026-10-27; `=0` turns it off; acts in a native build with two or more threads on every query batch: one
+  subject, or several in `LOSAT_X_TBXNEXT`'s loop (with `LOSAT_X_TBXNEXT=0` a batch of several subjects
+  runs as before); no size or count rule) one work board per search
+  (`tblastx/x_work_board.rs`, exactness argument in its header) hands out the batch's pure work items:
+  every linking call's groups (`x_link_slices.rs` `x_link_board`), the chunk sorts and merges of a chain's
+  stable sorts of at least the parallel size (`x_link_sort.rs` `x_board_sort`), a subject's frame merges
+  (`x_kmerge.rs`), and the subjects' units (`x_pair_par.rs` `run_units`). A thread that takes from the
+  whole board (one of the subject loop without a subject, or one that waits for a batch) takes groups,
+  sorts and merges of any batch first, then units by batch and subject index (a batch without the unit
+  path has only groups, merges and sorts). A subject's thread puts its units on the board (a batch's only
+  subject also spawns up to threads - 1 helper jobs that take its units), takes its own units only, then
+  blocks until the units others took have run (taking groups and earlier subjects' units first left it
+  blocked on its own units that others had taken: slower than without the board on 18,838 subjects of
+  100 bp at 16 threads); a thread of the subject loop without a subject takes items until the batch's
+  units are all taken, and sleeps (a condition variable, 1 ms at most) while nothing is left to take and a
+  subject has not yet put its units on the board; a chain's thread does the same with its groups and sorts,
+  with `rayon::spawn` helper jobs that take one group of any set each and are spawned one after the other
+  (at most one queued per board). An
+  item makes no pool call and waits for nothing, so a thread that waits for the items others took blocks
+  outside the pool, and no subject's chain runs nested inside an item (the caller of a batch's subject
+  loop still waits for its broadcast in the pool, as before): before, the chain of a batch that was not
+  the last one (`LOSAT_X_TBXPIPE`'s pipe chains, which link without the pool) linked its groups one after
+  the other on one thread, and on AP027131+AP027132+AP027133 x AP027133+AP027078+AP027131 at 16 threads
+  the search ended with batch 0's self pair (AP027131 x AP027131: groups of 165,637, 161,243, 131,690 and
+  122,349 HSPs) linking on one thread after every unit had run. Its units run the same function on the
+  same unit and are kept by unit index, groups are disjoint slices whose kernels read their group only, a
+  stable sort has one order (equal chunks sorted with `sort_by`, then two-way merges that take the left
+  element on ties), and frames are put together in frame order as before, so every list is the same. With
+  `LOSAT_X_TBXPIPE`, the next batch starts when every unit of the batch before has been taken (not at its
+  seed-stage end) while the HSPs held by the batches past their seed stage are below TBXPIPE's limit,
+  builds its tables and waits at a gate before its subjects until the batch before has ended its seed
+  stage and the held HSPs leave room, or every unit of the batch before has run and the records those
+  units returned (a bound on the HSPs that batch keeps) fit beside the held HSPs, or the batch before
+  returned, taking board items meanwhile; the pipe loop waits for a batch by taking board items. A wait
+  outside the pool also runs this thread's own pool jobs and its part of a `rayon::broadcast`
+  (`rayon::yield_local`): a broadcast (a later batch's subject loop) ends only after every thread ran its
+  part. wasm32 (LOSAT Web) keeps the previous loop (plan v4 line W).
+  Memory: the groups of one linking call are linked at once (as the pool path already did), so the
+  kernels' per-HSP arrays (about 203 bytes per HSP, `link_group`) of a self pair's four large groups are
+  live together instead of one at a time; and the next batch's tables are built while the batch
+  before's last units run, so two batches' tables are held for that time. A frame merge's chunk init
+  list and converted list get glibc's mapped capacity from 1 MiB on (`x_kmerge.rs` `x_frame_capacity`):
+  any of the search's threads now merges a frame, and a 1-32 MiB list freed in a thread's arena stayed
+  resident there (without it the three genomes below peaked at +161 MiB over dev at 16 threads). The
+  capacity is on every path, also at one thread and with `=0`: the three genomes at one thread take the
+  same time with 14 MiB less memory. On the workstation (node 1, 16 CPUs of one socket, 3 s warm-up per
+  run, medians of 8 rounds in rotated order with dev and `=0` in the same run, 2 ms VmHWM, every report
+  identical; dev = dev + `TBXFEWGROUPS`, 2026-10-31; the times and peaks below are with / without) the three
+  genomes took 4.81 / 5.79 s at 16 threads (x0.831; one round at 32: 3.47 / 4.75 s), 8.69 / 9.33 s at 8 and,
+  on one node-0 core, 70.5 / 70.0 s at 1 with 1.00008 x the instructions; the same queries as a database
+  (`-db`) 4.82 / 5.82 s at 16; the three queries x AP027133 4.54 / 8.23 s at 16; the 18,838 pieces 4.82 /
+  5.03 s at 16 and 9.14 / 9.84 s at 8; MelaMJNV x 9 MJNV genomes 1.402 / 1.411 s at 8 and 2.500 / 2.538 s at
+  4; AP027131 x AP027133 1.175 / 1.182 s at 16; the Autographivirales set of ViPTreeGen (BLOSUM45, 40
+  genomes, `-db`) 6.70 / 6.65 s at 8 (x1.006, the one row above dev: x1.013 in a second run with
+  1.003 x the instructions, not found in a profile of the stages); Begomovirus.40 0.29 / 0.28 s at 8
+  (runs spread +-15 %). Peak memory (MiB): the three genomes 578 / 536 at 16 (one round at 32: 777 / 657),
+  420 / 473 at 8 and 158 / 172 at 1; as a database 574 / 562 at 16; the three queries x AP027133 248 / 237 at
+  16; the 18,838 pieces 136 / 133 at 16 and 117 / 116 at 8; MelaMJNV x 9 genomes 128 / 132 and 98 / 105 at 8
+  and 4; AP027131 x AP027133 124 / 124 at 16; Autographivirales 50 / 57 at 8; Begomovirus 27 / 26 at 8.
 - `LOSAT_X_TBXRPTPAR=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads))
   the report stage after the last query batch (`write_tblastx_outputs`) runs its per-HSP work on the
@@ -5885,7 +5948,8 @@ Scheduling (each value computed by one thread with the original function; order 
   frozen NCBI bytes of the fast fixtures (at one thread the frame loop for batches under 5,000 letters,
   `LOSAT_X_PAIRPARN1`, the units above; the units at 4 threads). The tests that need the frame loop reach it at one thread
   with `LOSAT_X_PAIRPARGATE=1` (the cost rule; batches under 5,000 letters, or any below 2^18 cells with
-  `LOSAT_X_PAIRPARN1=0`), with several subjects without a dominant one, or with
+  `LOSAT_X_PAIRPARN1=0`), with several subjects without a dominant one and `LOSAT_X_TBXFEWGROUPS=0` (or a
+  batch under 5,000 letters), or with
   `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1`, and assert `units=0`.
 - `LOSAT_X_TBXBAND=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19; `=0` turns it off; acts where the unit path runs) the unit path no longer applies
@@ -5968,7 +6032,8 @@ Scheduling (each value computed by one thread with the original function; order 
   reference frame loop (`units_gain` in `tblastx/x_pair_par.rs`): the reference's diagonal table has
   2^18 cells or more (query length plus window above 131,072 letters, a translated query batch of
   more than about 65 kb), or the search has two or more threads and one subject holds more than one
-  and a half thread's share of the bases (`2 * longest * threads > 3 * total`), or the lookup
+  and a half thread's share of the bases (`2 * longest * threads > 3 * total`), or two or more threads
+  and a batch of 5,000 letters or more (`LOSAT_X_TBXFEWGROUPS`, the line of `LOSAT_X_PAIRPARN1`), or the lookup
   threshold is below TBLASTX's default of 13 (not measured; a lower threshold puts more words in
   every position, and the full table grows faster than the group tables: with `-threshold +inf`,
   which NCBI converts to INT_MIN, every word, the option-sweep inputs took 14.2 GB in the reference
@@ -6071,6 +6136,29 @@ Scheduling (each value computed by one thread with the original function; order 
   8 threads extension x0.772 (5/6), whole search x0.916 (5/6); serial reactor x0.807 (5/6), x0.913 (5/6);
   MelaMJNV x PemoMJNVA 8 threads x0.889 (6/6), x0.977 (4/6); serial reactor x0.846 (6/6), x0.957 (6/6);
   every report identical. (The method's noise: the same unchanged code read x0.92-1.02.)
+- `LOSAT_X_TBXFEWGROUPS=1` (TBLASTX, speed and memory; in the strict set from the pull request that added it,
+  2026-10-31; `=0` turns it off) the unit path takes as few context groups as the pool can use: each group
+  scans every subject frame and has its own tables, and the groups serve only parallelism. A batch wants enough
+  groups for two units per thread on the longest subject's share of the bases (`x_groups_wanted`: one at up
+  to 3 threads, three at 8 threads on one subject, one with subjects enough), and takes them where it extends over at most
+  2^17 letters (`X_FEW_GROUPS_LETTERS`); a longer batch keeps its six groups (its diagonal tables would outgrow the
+  cache: 100-300 kb queries x1.03-1.05 in one or three groups). With fewer groups several threads take the
+  one-thread line of the cost rule (`units_gain`, `LOSAT_X_PAIRPARN1`: 5,000 letters), so a search of many
+  subjects runs the units there too. A group boundary only decides where the concatenated query is cut, so reports do
+  not change. A group build's blocks of 64 KiB or more take the capacity glibc maps
+  (`x_group_capacity`): batches are built on the pool's threads, and those blocks held the arenas' high water.
+  Measured 2026-10-31 on the workstation against dev 305acb26 (a node 0 core with its HT sibling idle at 1 thread,
+  node 1 CPUs 32-39 at 8, warmed 3 s before every run, arm order rotated, one warm-up round + 8 rounds, medians of the
+  per-round ratios, time / max RSS; every report identical between the arms; with this switch come the unit path for
+  other matrices and their sentinel walks). 40 x 40 phage genomes of 43 kb (`Autographivirales.40`, BLOSUM45,
+  ViPTreeGen's options): 1 thread x0.581 / x0.746 (80.2 -> 46.7 s, NCBI 81.4 s), 8 threads x0.505 / x0.819 (13.4 -> 6.8 s,
+  NCBI 18.0 s). The same with BLOSUM62: x0.802 / x0.970, x0.566 / x0.673. `Begomovirus.40`: x0.648 / x0.906, x0.721 / x1.201.
+  MelaMJNV x 2 viruses: x0.525 / x0.581, x0.213 / x0.527. Sakai 50 kb x MG1655: x0.855 / x0.925, x0.998 / x0.898.
+  10 fly transcripts x zebrafish cDNA database: x0.738 / x0.957, x0.681 / x0.957. 3 fly transcripts x fly genome database:
+  x0.984 / x1.000, x0.894 / x0.989. 50 cDNAs x 1 Mb: BLOSUM62 x0.804 / x0.814, x0.966 / x0.626; the 8 other matrices x0.576-0.824
+  / x0.751-1.228, x0.145-0.325 / x0.732-1.527. AP027131 x AP027133 (code 4) keeps six groups: BLOSUM62 x1.008 / x0.987,
+  x1.012 / x1.005 with x0.9991 of the instructions and x1.006 of the cycles, the same with `=0` (code layout); other matrices
+  x0.510-0.849 / x0.421-0.749, x0.092-0.518 / x0.445-1.008.
 - `LOSAT_X_TBXUNGAPSENT=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-25; `=0` turns it off) the two-hit ungapped extension (TBXUNGAP's table walks, above) with
   walks that the sentinels stop instead of a bound (`two_hit_sent` in
@@ -6083,7 +6171,10 @@ Scheduling (each value computed by one thread with the original function; order 
   the reference frame loops). Acts in native builds where the batch's query contexts carry both
   sentinels (checked once per batch) and the unit's subject chunk is its whole frame (frames of at
   most 5,000,000 residues, `MAX_DBSEQ_LEN`, so subjects up to 15 Mb; a longer frame is searched in
-  chunks whose ends are residues) of at most `i32::MAX / 16` bytes (no score wraps). An X-drop
+  chunks whose ends are residues) of at most `i32::MAX / 64` bytes (no score wraps at +63, the largest
+  score of a table). A matrix other than BLOSUM62 takes the same walks on its byte table
+  (`two_hit_sent_in`, `TbxScore::sent_two_hit`, read at `q << 5 | s`; since DI-16, 2026-10-31) where code 0
+  scores -128 against every letter in it (`MatrixWalkTable::x_sentinels_stop`). An X-drop
   outside 1..=127 or a word that does not fit runs the reference, and so does the debug output. In
   the unit path the switch acts on the units of the branch-free hit loops (`LOSAT_X_TBXHITBF`): each
   unit takes one of two instances of the loop's function (`scan_unit_bf`, `scan_unit_batched_bf`,

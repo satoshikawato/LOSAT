@@ -86,6 +86,7 @@ pub use x_link_sort::print_summary as x_link_sort_print_summary;
 #[path = "../x_link_slices.rs"]
 mod x_link_slices;
 pub use x_link_slices::print_summary as x_link_slices_print_summary;
+pub(crate) use x_link_slices::x_helped as x_link_helped;
 
 // ---------------------------------------------------------------------------
 // Constants

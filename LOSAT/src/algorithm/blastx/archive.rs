@@ -571,6 +571,7 @@ mod tests {
                     ParamValue::Boolean(false) => "boolean:False".to_string(),
                     ParamValue::Real(value) => format!("real:{}", posix(*value)),
                     ParamValue::Str(value) => format!("string:{value}"),
+                    ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
                 };
                 format!("{}={value}", param.name)
             })

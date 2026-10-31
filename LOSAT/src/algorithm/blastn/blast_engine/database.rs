@@ -88,6 +88,39 @@ mod x_db_cut;
 #[path = "x_db_stream.rs"]
 mod x_db_stream;
 
+/// No NCBI counterpart (scheduling only): the heap bytes of a result of the preliminary stage
+/// while it waits for the owner of `x_db_stream.rs`'s window.
+#[cfg_attr(
+    not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )),
+    allow(dead_code)
+)]
+pub(super) trait XWaitingBytes {
+    fn x_waiting_bytes(&self) -> usize;
+}
+
+impl<T> XWaitingBytes for Vec<T> {
+    fn x_waiting_bytes(&self) -> usize {
+        self.capacity().saturating_mul(std::mem::size_of::<T>())
+    }
+}
+
+#[cfg(test)]
+impl XWaitingBytes for u32 {
+    fn x_waiting_bytes(&self) -> usize {
+        0
+    }
+}
+
+#[cfg(test)]
+impl XWaitingBytes for u64 {
+    fn x_waiting_bytes(&self) -> usize {
+        0
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:75-78
 // ```c
 // const char BLASTNA_TO_IUPACNA[BLASTNA_SIZE] = {
@@ -344,12 +377,12 @@ impl BlastnDatabase {
         Self::open_restricted(name, settings, None, &mut std::io::sink())
     }
 
-    /// `open` with the database restricted to the taxid list `list` of the command line
-    /// (`shared::restrict_database`, whose warning goes to `diagnostics`).
+    /// `open` with the database restricted to the taxid or seqid list `list` of the command
+    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
     pub(super) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
-        list: Option<&crate::seqdb::TaxidList>,
+        list: Option<&crate::seqdb::DbList>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
@@ -357,7 +390,7 @@ impl BlastnDatabase {
         // NCBI's choice of its Seq-ids.
         shared::check_seqids(&db, settings, PROGRAM)?;
         shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
-        let total = db.total_length();
+        let (total, num_seqs) = db.statistics_numbers();
         let db_len_total = usize::try_from(total)
             .ok()
             .filter(|&letters| i64::try_from(letters).is_ok())
@@ -368,7 +401,7 @@ impl BlastnDatabase {
             })?;
         let metadata = SubjectMetadata {
             db_len_total,
-            db_num_seqs: db.num_seqs() as usize,
+            db_num_seqs: num_seqs as usize,
         };
         Ok(Self {
             db,
@@ -447,8 +480,13 @@ impl BlastnDatabase {
         &self.name
     }
 
-    /// The number of sequences (`CSeqDB::GetNumSeqs`) and the total length
-    /// (`CSeqDB::GetTotalLength`): the real numbers, also with `-dbsize`.
+    /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
+    pub(super) fn filtered_empty(&self) -> bool {
+        self.db.filtered_empty()
+    }
+
+    /// The number of sequences and the total length that the statistics read
+    /// (`SeqDb::statistics_numbers`): the real numbers, also with `-dbsize`.
     pub(super) fn metadata(&self) -> &SubjectMetadata {
         &self.metadata
     }
@@ -559,7 +597,7 @@ pub(super) fn search_blocks<T, R, I, K, M>(
     merge: &mut M,
 ) -> Result<()>
 where
-    R: Send,
+    R: Send + XWaitingBytes,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R) + Send,
@@ -623,7 +661,7 @@ fn search_rounds<T, R, I, K, M>(
     merge: &mut M,
 ) -> Result<()>
 where
-    R: Send,
+    R: Send + XWaitingBytes,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R),
@@ -685,7 +723,7 @@ fn search_blocks_of<T, R, I, K, M>(
     merge: &mut M,
 ) -> Result<()>
 where
-    R: Send,
+    R: Send + XWaitingBytes,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R) + Send,

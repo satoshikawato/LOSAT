@@ -56,7 +56,7 @@ use crate::report::blast_xml::{
     XmlSubjects, REFERENCE_GAPPED_BLAST,
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
-use crate::report::query_warnings::{QueryWarnings, INVALID_QUERY_MESSAGE};
+use crate::report::query_warnings::{QueryWarnings, EMPTY_DATABASE_MESSAGE, INVALID_QUERY_MESSAGE};
 use crate::report::serial::seqalign::seqalign_evalue;
 use crate::utils::genetic_code::GeneticCode;
 
@@ -97,13 +97,16 @@ fn gap_costs(matrix: Option<&str>) -> (i32, i32) {
 /// translated query posts it only when no context of the batch is valid) and the message of a
 /// record without letters. TBLASTX posts nothing for an invalid query of a searched batch
 /// (blast_stat.c:2783-2790).
-fn query_messages(query: &FastaRecord, searched: bool) -> Vec<String> {
+fn query_messages(query: &FastaRecord, searched: bool, filtered_empty: bool) -> Vec<String> {
     let mut messages = Vec::new();
     if !searched {
         messages.push(INVALID_QUERY_MESSAGE.to_string());
     }
     if query.seq().is_empty() {
         messages.push(crate::algorithm::blastn::blast_engine::NO_DATA_MESSAGE.to_string());
+    }
+    if filtered_empty && searched {
+        messages.push(EMPTY_DATABASE_MESSAGE.to_string());
     }
     messages
 }
@@ -264,7 +267,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 query.believed(),
                 query.title(),
                 false,
-                &query_messages(query, run.searched[q_idx]),
+                &query_messages(query, run.searched[q_idx], run.filtered_empty),
                 !query_hits[q_idx].is_empty(),
             )
         })
@@ -485,13 +488,20 @@ mod tests {
     #[test]
     fn the_messages_of_a_query_follow_its_batch_and_its_letters() {
         let query = FastaRecord::new("Query_1", b"q", b"ACGTACGTA");
-        assert!(query_messages(&query, true).is_empty());
+        assert!(query_messages(&query, true, false).is_empty());
         assert_eq!(
-            query_messages(&query, false),
+            query_messages(&query, true, true),
+            vec![EMPTY_DATABASE_MESSAGE.to_string()]
+        );
+        assert!(query_messages(&query, false, true)
+            .iter()
+            .all(|message| message != EMPTY_DATABASE_MESSAGE));
+        assert_eq!(
+            query_messages(&query, false, false),
             vec![INVALID_QUERY_MESSAGE.to_string()]
         );
         let empty = FastaRecord::new("Query_2", b"e", b"");
-        assert_eq!(query_messages(&empty, true).len(), 1);
-        assert_eq!(query_messages(&empty, false).len(), 2);
+        assert_eq!(query_messages(&empty, true, false).len(), 1);
+        assert_eq!(query_messages(&empty, false, false).len(), 2);
     }
 }

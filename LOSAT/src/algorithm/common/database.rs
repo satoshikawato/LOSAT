@@ -861,6 +861,17 @@ pub(crate) fn tabular_subject_ids(
         .collect()
 }
 
+// No NCBI counterpart: bounds LOSAT's own check before the search (`reports_may_refuse`).
+/// The most sequences of a database with parsed Seq-ids whose headers a program's check before
+/// the search reads with `reports_may_refuse` (blastn's `x_parsed_refusal`, tblastx's
+/// `report_stream::check`). The check decodes each header (2.3-5.6 us at one thread with
+/// tblastx's 18S, line DBID ID4t fix 2b) and keeps 16 bytes per join key with outfmt 0, so this
+/// bounds the pass to a few seconds and some tens of MiB; a larger database (NCBI's `nt` and
+/// `core_nt`) keeps its reports after the batch loop, as before the stream took databases with
+/// parsed Seq-ids. The volumes' sequences count (`SeqDb::printed_num_seqs`), also under a taxid
+/// list: the range walks decode the excluded sequences of every range they read.
+pub(crate) const PARSED_CHECK_SEQUENCES_MAX: u32 = 1 << 20;
+
 /// Why a report of some sequence of a database could be refused (`reports_may_refuse`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ReportRefusal {

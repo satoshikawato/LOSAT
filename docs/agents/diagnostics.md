@@ -1990,7 +1990,7 @@ Rebuilding less:
   runs: `-db`, more than one thread, and a database of more blocks than 8 per thread) the window of `LOSAT_X_BPDBKEEP` is 64 blocks per thread (`X_BPDBWIDE_BLOCKS_PER_THREAD`), and past the old 8
   per thread a block is taken only while at most 1 MiB per thread of results wait for the merge (`XWindow::full`,
   `blastp/blast_engine/database/x_db_keep.rs`). The old window was shorter than the slow blocks at the start of a pass:
-  UniRef50 with blastp-fast keeps long sequences first, and a block of the first tenth took 39 ms at p99 and up to 1.2 s,
+  UniRef50 is sorted longest first (up to 47,538 residues), and with blastp-fast a block of the first tenth took 39 ms at p99 and up to 1.2 s,
   against about 38 ms of the wall clock for 64 blocks at 8 threads and a median of 4.8 ms per block. Three rounds on 16
   idle cores of node 0 (`dropin-survey-20261029/BIGDB/s3/bpab/ab.tsv`, the same output in every arm), on / `=0` / dev:
   10 queries blastp-fast x UniRef50 at 16 threads 5.46 / 7.49 / 7.40 s, max RSS 45-47 / 42-43 / 41-44 MiB; 100 queries 48.4

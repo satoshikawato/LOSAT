@@ -46,7 +46,7 @@
 //! `X_BPDBWIDE_BLOCKS_PER_THREAD` x workers blocks, and a worker takes a block past
 //! `blocks_per_thread` x workers only while at most `X_BPDBWIDE_WAITING_BYTES_PER_THREAD` x workers
 //! bytes of results wait for the merge (`XWindow::full`). A window of `blocks_per_thread` per worker
-//! was shorter than the blocks at the start of a pass, where a database of long sequences keeps
+//! was shorter than the blocks at the start of a pass, where a database sorted longest first keeps
 //! its slow blocks (UniRef50, blastp-fast, 100 queries, 8 threads: 64 blocks are about 38 ms of the
 //! wall clock, a block of the first tenth takes 39 ms at p99 and up to 1.2 s): the workers ran out
 //! of room behind them. The width and the bytes decide only when a block is taken, not what it

@@ -1,1 +1,1 @@
-- BLASTP: threads searching a large database with `-db` spend less time waiting for each other behind slow blocks.
+- BLASTP: threads searching a large database with `-db` spend less time waiting for each other behind slow blocks, at the cost of a little more memory (`blastp-fast` x UniRef50 at 16 threads: 10 queries 7.2 -> 5.3 s, 100 queries 55 -> 47 s, 0.27-0.40 of NCBI; max RSS up 4-10 %). Default `blastp` does not change, and reports do not change.

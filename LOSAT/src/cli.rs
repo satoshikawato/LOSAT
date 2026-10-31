@@ -39,12 +39,139 @@ use crate::algorithm::{blastn, blastp, blastx, psiblast, tblastn, tblastx};
 // The options follow in clap's layout.
 const NCBI_HELP_TEMPLATE: &str = "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\n{all-args}";
 
+/// The top level's `-help`: NCBI's headings, and what the entry names need.
+const LOSAT_HELP_TEMPLATE: &str =
+    "USAGE\n  {usage}\n\nDESCRIPTION\n   {about}\n\n{all-args}\n\n{after-help}";
+
+/// The names that run a program without its subcommand word (`entry_argv`), as `losat
+/// --install-shims` links them. No NCBI counterpart: NCBI has one executable per program.
+pub const ENTRY_NAMES: [&str; 8] = [
+    "blastn",
+    "blastp",
+    "blastx",
+    "tblastn",
+    "tblastx",
+    "psiblast",
+    "makeblastdb",
+    "blastdbcmd",
+];
+
+/// The program of an executable called `argv0`: its file name without `.exe`, when that is one
+/// of `ENTRY_NAMES`.
+fn entry_program(argv0: &std::ffi::OsStr) -> Option<&'static str> {
+    let path = std::path::Path::new(argv0);
+    if !path
+        .extension()
+        .map_or(true, |extension| extension.eq_ignore_ascii_case("exe"))
+    {
+        return None;
+    }
+    let stem = path.file_stem()?.to_str()?;
+    // Windows finds `blastn.exe` for the word `BLASTN`, which is then `argv[0]`.
+    #[cfg(windows)]
+    let stem = stem.to_ascii_lowercase();
+    ENTRY_NAMES.into_iter().find(|name| *name == stem)
+}
+
+/// The words of the command line as `losat PROGRAM ...` reads them: an executable called by the
+/// name of a program (`ENTRY_NAMES`) runs that program, with the texts of `losat PROGRAM`. Any
+/// other name is `losat`, and its words stay as they are.
+pub fn entry_argv<I, S>(argv: I) -> Vec<OsString>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    let mut words: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+    if let Some(program) = words.first().and_then(|argv0| entry_program(argv0)) {
+        words[0] = format!("losat{}", std::env::consts::EXE_SUFFIX).into();
+        words.insert(1, program.into());
+    }
+    words
+}
+
+/// `losat --install-shims [DIR]`: makes the `ENTRY_NAMES` in `DIR` (default: the directory of
+/// this executable) and returns their paths. Each is a symbolic link to this executable, relative
+/// when it lies in `DIR` so that the directory can move; Windows, where a link needs a privilege,
+/// gets a copy. A name that exists and is not this executable is an error and nothing is made:
+/// it may be NCBI's program. No NCBI counterpart.
+pub fn install_shims(dir: Option<&std::ffi::OsStr>) -> Result<Vec<std::path::PathBuf>, String> {
+    let exe = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .map_err(|error| format!("cannot find this executable: {error}"))?;
+    let exe_dir = exe
+        .parent()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
+    let dir = dir.map_or_else(|| exe_dir.clone(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
+    let dir = std::fs::canonicalize(&dir)
+        .map_err(|error| format!("cannot read {}: {error}", dir.display()))?;
+    let mut missing = Vec::new();
+    let mut paths = Vec::new();
+    let mut taken = Vec::new();
+    for name in ENTRY_NAMES {
+        let path = dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+        if std::fs::symlink_metadata(&path).is_err() {
+            missing.push(path.clone());
+        } else if !is_this_executable(&path, &exe) {
+            taken.push(path.display().to_string());
+        }
+        paths.push(path);
+    }
+    if !taken.is_empty() {
+        return Err(format!(
+            "these files exist and are not this executable; nothing was installed: {}",
+            taken.join(" ")
+        ));
+    }
+    for path in missing {
+        make_shim(&exe, &exe_dir == &dir, &path)
+            .map_err(|error| format!("cannot make {}: {error}", path.display()))?;
+    }
+    Ok(paths)
+}
+
+/// Whether `path` is a link to `exe`, or `exe` itself.
+#[cfg(not(windows))]
+fn is_this_executable(path: &std::path::Path, exe: &std::path::Path) -> bool {
+    std::fs::canonicalize(path).is_ok_and(|target| target == exe)
+}
+
+/// Whether `path` is a copy of `exe`.
+#[cfg(windows)]
+fn is_this_executable(path: &std::path::Path, exe: &std::path::Path) -> bool {
+    match (std::fs::read(path), std::fs::read(exe)) {
+        (Ok(shim), Ok(this)) => shim == this,
+        _ => false,
+    }
+}
+
+#[cfg(unix)]
+fn make_shim(exe: &std::path::Path, same_dir: bool, path: &std::path::Path) -> std::io::Result<()> {
+    match exe.file_name().filter(|_| same_dir) {
+        Some(file_name) => std::os::unix::fs::symlink(file_name, path),
+        None => std::os::unix::fs::symlink(exe, path),
+    }
+}
+
+#[cfg(windows)]
+fn make_shim(exe: &std::path::Path, _: bool, path: &std::path::Path) -> std::io::Result<()> {
+    std::fs::copy(exe, path).map(|_| ())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn make_shim(_: &std::path::Path, _: bool, _: &std::path::Path) -> std::io::Result<()> {
+    Err(std::io::ErrorKind::Unsupported.into())
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "losat",
     version,
     about = "Pure-Rust pairwise alignment with NCBI-verified fixtures and genetic-code exceptions",
-    help_template = NCBI_HELP_TEMPLATE
+    help_template = LOSAT_HELP_TEMPLATE,
+    after_help = "To call the programs by NCBI's names (blastn, makeblastdb, ...), link them with:\n  losat --install-shims [DIR]   (default: the directory of this executable)"
 )]
 pub struct Cli {
     #[command(subcommand)]

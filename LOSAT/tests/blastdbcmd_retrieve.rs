@@ -88,8 +88,10 @@ fn check(id: &str, words: &[&str], status: i32, out_dir: &Path) {
 
 /// The probe's cases that LOSAT answers as NCBI does: id, words, NCBI's exit status. The
 /// databases are the probe's (`db/`): without parsed Seq-ids (`p4n`, `p5n`, `n4n`, `n5n`,
-/// `pL`, `nL`), version 4 with them where no id is looked up (`-entry all`: `p4`, `n4`), and
-/// version 5 with them (`p5`, `n5`, `d5` and `e5` with an accession on many sequences).
+/// `pL`, `nL`), version 4 with them (`p4`, `n4`; `d4` with accessions on two sequences, `i4`
+/// with pdb ids of four digits, an EMBL and a GenBank id in one definition line, general ids
+/// and versions, `it4` with trace ids, `dv4` in three volumes), and version 5 with them (`p5`,
+/// `n5`, `d5` and `e5` with an accession on many sequences).
 #[rustfmt::skip]
 const MATCHES: &[(&str, &[&str], i32)] = &[
     ("F01", &["-db", "db/p5n", "-entry", "all"], 0),
@@ -274,6 +276,110 @@ const MATCHES: &[(&str, &[&str], i32)] = &[
     ("H130", &["-db", "db/pv.00", "-entry", "1819", "-outfmt", "%o %a"], 1),
     ("H110", &["-db", "db/e5", "-entry", "XP_900002", "-outfmt", "%o %a"], 0),
     ("H111", &["-db", "db/e5", "-entry", "XP_900001.599", "-outfmt", "%o %a"], 0),
+    // Version 4 databases with parsed ids (probe S and I): every spelling of an id in one batch
+    // (I895-I907), the version check of an accession, the numbers that overflow, PIGs and trace
+    // ids, the target of `-target_only`, keys on several sequences and volumes.
+    ("F09", &["-db", "db/p4", "-entry_batch", "in/pids.txt"], 1),
+    ("F11", &["-db", "db/p4", "-entry_batch", "in/pids.txt", "-get_dups"], 1),
+    ("F17", &["-db", "db/p4", "-entry", "XP_000020.1", "-target_only"], 0),
+    ("F18", &["-db", "db/p4", "-entry", "1819", "-target_only"], 0),
+    ("F20", &["-db", "db/p4", "-entry", "XP_000001.1,gi|123456,1ABC_A", "-long_seqids"], 0),
+    ("F23", &["-db", "db/n4", "-entry_batch", "in/nids.txt"], 1),
+    ("S13", &["-db", "db/p4", "-entry", "XP_000001.1,,P00012", "-outfmt", "%o %a"], 1),
+    ("S14", &["-db", "db/p4", "-entry", ""], 1),
+    ("S15", &["-db", "db/p4", "-entry", "emb|CAA00019.1|", "-target_only"], 0),
+    ("S16", &["-db", "db/p4", "-entry", "gi|1819", "-target_only"], 0),
+    ("S17", &["-db", "db/p4", "-entry", "CAA00019.1", "-target_only", "-outfmt", "%a %g"], 0),
+    ("S19", &["-db", "db/n4", "-entry", "NM_000001.1,NM_000001.1", "-long_seqids"], 1),
+    ("S04", &["-db", "db/d4", "-entry", "XP_800001", "-outfmt", "%o %a"], 0),
+    ("S06", &["-db", "db/d4", "-entry", "XP_800002", "-outfmt", "%o %a"], 0),
+    ("S08", &["-db", "db/d4", "-entry_batch", "in/dups.txt", "-outfmt", "%o %a"], 1),
+    ("S10", &["-db", "db/d4", "-entry_batch", "in/dups.txt", "-get_dups", "-outfmt", "%o %a"], 1),
+    ("S11", &["-db", "db/d4", "-entry", "XP_800001.3", "-outfmt", "%o %a"], 1),
+    ("I106", &["-db", "db/p4", "-entry", "NP_000002.2", "-outfmt", "%o %a"], 1),
+    ("I107", &["-db", "db/p4", "-entry", "np_000002.2", "-outfmt", "%o %a"], 1),
+    ("I117", &["-db", "db/p4", "-entry", "ref|NP_000002.2|", "-outfmt", "%o %a"], 1),
+    ("I172", &["-db", "db/p4", "-entry", "gi|-5", "-outfmt", "%o %a"], 1),
+    ("I173", &["-db", "db/p4", "-entry", "gi|99999999999", "-outfmt", "%o %a"], 1),
+    ("I174", &["-db", "db/p4", "-entry", "gi|4294967296", "-outfmt", "%o %a"], 1),
+    ("I183", &["-db", "db/p4", "-entry", "gnl|PIG|abc", "-outfmt", "%o %a"], 1),
+    ("I187", &["-db", "db/p4", "-entry", "gnl|ti|abc", "-outfmt", "%o %a"], 1),
+    ("I188", &["-db", "db/p4", "-entry", "gnl|ti|-5", "-outfmt", "%o %a"], 1),
+    ("I895", &["-db", "db/p4", "-entry_batch", "in/i_p_all.txt", "-outfmt", "%o %a"], 1),
+    ("I896", &["-db", "db/p4", "-entry_batch", "in/i_p_all.txt", "-get_dups", "-outfmt", "%o %a"], 1),
+    ("I897", &["-db", "db/p4", "-entry_batch", "in/i_p_all.txt", "-target_only", "-outfmt", "%o %a"], 1),
+    ("I898", &["-db", "db/p4", "-entry_batch", "in/i_p_safe.txt", "-outfmt", "%o %a"], 1),
+    ("I899", &["-db", "db/p4", "-entry_batch", "in/i_p_safe.txt", "-get_dups", "-outfmt", "%o %a"], 1),
+    ("I900", &["-db", "db/p4", "-entry_batch", "in/i_p_safe.txt", "-target_only", "-outfmt", "%o %a"], 1),
+    ("I901", &["-db", "db/p4", "-entry_batch", "in/i_p_safe.txt"], 1),
+    ("I902", &["-db", "db/p4", "-entry_batch", "in/i_p_safe.txt", "-target_only"], 1),
+    ("I299", &["-db", "db/i4", "-entry", "1914", "-outfmt", "%o %a"], 0),
+    ("I301", &["-db", "db/i4", "-entry", "pdb|1914|A", "-outfmt", "%o %a"], 0),
+    ("I303", &["-db", "db/i4", "-entry", "pdb|1914|b", "-outfmt", "%o %a"], 0),
+    ("I308", &["-db", "db/i4", "-entry", "1914A", "-outfmt", "%o %a"], 1),
+    ("I313", &["-db", "db/i4", "-entry", "X10001.1", "-outfmt", "%o %a"], 0),
+    ("I314", &["-db", "db/i4", "-entry", "U10002.1", "-outfmt", "%o %a"], 0),
+    ("I322", &["-db", "db/i4", "-entry", "U30003.1", "-outfmt", "%o %a"], 1),
+    ("I336", &["-db", "db/i4", "-entry", "gnl|PIG|77", "-outfmt", "%o %a"], 1),
+    ("I337", &["-db", "db/i4", "-entry", "gnl|ti|88", "-outfmt", "%o %a"], 0),
+    ("I338", &["-db", "db/i4", "-entry", "88", "-outfmt", "%o %a"], 1),
+    ("I347", &["-db", "db/i4", "-entry", "NP_400001", "-outfmt", "%o %a"], 0),
+    ("I350", &["-db", "db/i4", "-entry", "NP_400001.3", "-outfmt", "%o %a"], 1),
+    ("I356", &["-db", "db/i4", "-entry", "ref|NP_400002.1|", "-outfmt", "%o %a"], 1),
+    ("I365", &["-db", "db/i4", "-entry", "1914", "-target_only"], 0),
+    ("I367", &["-db", "db/i4", "-entry", "pdb|1914|A", "-target_only"], 0),
+    ("I368", &["-db", "db/i4", "-entry", "pdb|1914|a", "-target_only"], 1),
+    ("I379", &["-db", "db/i4", "-entry", "X10001.1", "-target_only"], 0),
+    ("I380", &["-db", "db/i4", "-entry", "U10002.1", "-target_only"], 1),
+    ("I382", &["-db", "db/i4", "-entry", "gb|U10002.1|", "-target_only"], 1),
+    ("I384", &["-db", "db/i4", "-entry", "X20002.1", "-target_only"], 1),
+    ("I405", &["-db", "db/i4", "-entry", "gnl|BL_ORD_ID|2", "-target_only"], 1),
+    ("I434", &["-db", "db/i4", "-entry", "pdb|1914|a", "-target_only", "-outfmt", "%o %a"], 1),
+    ("I446", &["-db", "db/i4", "-entry", "U10002.1", "-target_only", "-outfmt", "%o %a"], 0),
+    ("I471", &["-db", "db/i4", "-entry", "gnl|BL_ORD_ID|2", "-target_only", "-outfmt", "%o %a"], 1),
+    ("I903", &["-db", "db/i4", "-entry_batch", "in/i_i_all.txt", "-outfmt", "%o %a"], 1),
+    ("I904", &["-db", "db/i4", "-entry_batch", "in/i_i_all.txt", "-get_dups", "-outfmt", "%o %a"], 1),
+    ("I905", &["-db", "db/i4", "-entry_batch", "in/i_i_all.txt", "-target_only", "-outfmt", "%o %a"], 1),
+    ("I906", &["-db", "db/i4", "-entry_batch", "in/i_i_range.txt"], 1),
+    ("I907", &["-db", "db/i4", "-entry_batch", "in/i_i_range.txt", "-get_dups"], 1),
+    ("I695", &["-db", "db/it4", "-entry", "gnl|ti|12345", "-outfmt", "%o %a"], 0),
+    ("I697", &["-db", "db/it4", "-entry", "gnl|ti|99", "-outfmt", "%o %a"], 1),
+    ("I698", &["-db", "db/it4", "-entry", "12345", "-outfmt", "%o %a"], 1),
+    ("I699", &["-db", "db/it4", "-entry", "gnl|ti|abc", "-outfmt", "%o %a"], 1),
+    ("I704", &["-db", "db/it4", "-entry", "gnl|SRA|SRR1.1", "-outfmt", "%o %a"], 0),
+    ("I705", &["-db", "db/it4", "-entry", "SRA:SRR1.1", "-outfmt", "%o %a"], 0),
+    ("I707", &["-db", "db/it4", "-entry", "SRR1.1", "-outfmt", "%o %a"], 0),
+    ("I709", &["-db", "db/it4", "-entry", "TSA:T1", "-outfmt", "%o %a"], 0),
+    ("I711", &["-db", "db/n4", "-entry", "NM_000001", "-outfmt", "%o %a"], 0),
+    ("I714", &["-db", "db/n4", "-entry", "NM_000001.2", "-outfmt", "%o %a"], 1),
+    ("I724", &["-db", "db/n4", "-entry", "mydb:nuc7", "-outfmt", "%o %a"], 1),
+    ("I734", &["-db", "db/n4", "-entry", "pat|US|1234567|14", "-outfmt", "%o %a"], 0),
+    ("I741", &["-db", "db/n4", "-entry", "NM_000001", "-target_only"], 0),
+    ("I761", &["-db", "db/n4", "-entry", "LOCUS13", "-target_only"], 1),
+    ("I771", &["-db", "db/n4", "-entry", "NM_000001.1", "-range", "5-20", "-strand", "minus"], 0),
+    ("I772", &["-db", "db/n4", "-entry", "NM_000001.1", "-range", "5-20", "-long_seqids"], 0),
+    ("I773", &["-db", "db/n4", "-entry", "NM_000001.1", "-outfmt", "%s %h %l", "-strand", "minus", "-range", "3-9"], 0),
+    ("I774", &["-db", "db/n4", "-entry", "gi|654321", "-outfmt", "%s %h %l", "-strand", "minus", "-range", "3-9"], 0),
+    ("I781", &["-db", "db/d4", "-entry", "xp_800001", "-outfmt", "%o %a"], 0),
+    ("I785", &["-db", "db/d4", "-entry", "XP_800001.256", "-outfmt", "%o %a"], 1),
+    ("I786", &["-db", "db/d4", "-entry", "XP_800001", "-target_only", "-outfmt", "%o %a"], 0),
+    ("I788", &["-db", "db/d4", "-entry", "XP_800001,XP_800001", "-outfmt", "%o %a"], 0),
+    ("I789", &["-db", "db/d4", "-entry", "XP_800001,XP_800001.1", "-outfmt", "%o %a"], 0),
+    ("I790", &["-db", "db/d4", "-entry_batch", "in/dups.txt", "-target_only", "-outfmt", "%o %a"], 1),
+    ("I791", &["-db", "db/dv4", "-entry", "XP_800001", "-outfmt", "%o %a"], 0),
+    ("I792", &["-db", "db/dv4", "-entry", "XP_800002", "-outfmt", "%o %a"], 0),
+    ("I794", &["-db", "db/dv4", "-entry", "XP_800001.3", "-outfmt", "%o %a"], 1),
+    ("I796", &["-db", "db/dv4", "-entry_batch", "in/dups.txt", "-outfmt", "%o %a"], 1),
+    ("I797", &["-db", "db/dv4", "-entry_batch", "in/dups.txt", "-get_dups", "-outfmt", "%o %a"], 1),
+    ("I801", &["-db", "db/dv4.00", "-entry", "XP_800001.3", "-outfmt", "%o %a"], 1),
+    ("I805", &["-db", "db/dv4.01", "-entry", "XP_800001", "-outfmt", "%o %a"], 1),
+    ("I810", &["-db", "db/dv4.01", "-entry_batch", "in/dups.txt", "-outfmt", "%o %a"], 1),
+    ("I831", &["-db", "db/i_dvr", "-entry_batch", "in/dups.txt", "-outfmt", "%o %a"], 1),
+    ("I832", &["-db", "db/i_dvr", "-entry_batch", "in/dups.txt", "-get_dups", "-outfmt", "%o %a"], 1),
+    ("I838", &["-db", "db/i_dv1", "-entry_batch", "in/dups.txt", "-outfmt", "%o %a"], 1),
+    ("I775", &["-db", "db/p4n", "-entry", "1", "-outfmt", "%o %a"], 1),
+    ("I776", &["-db", "db/p4n", "-entry", "lcl|3", "-outfmt", "%o %a"], 1),
+    ("I777", &["-db", "db/p4n", "-entry", "gi|5", "-outfmt", "%o %a"], 1),
 ];
 
 #[test]
@@ -287,7 +393,9 @@ fn retrieval_is_ncbi_s_bytes() {
 /// The approved differences (line BDC DECISIONS 12): `-long_seqids` with `-range` on the
 /// minus strand, where NCBI writes the forward letters under its `:c` header and LOSAT the
 /// reverse complement (the letters NCBI writes for the same range with short ids: D83,
-/// D88). The expected bytes are NCBI's header with those letters.
+/// D88, I771). The expected bytes are NCBI's header with those letters. And
+/// `gnl|BL_ORD_ID|n` in a version 4 database of several volumes (I795, I830): NCBI adds `n` to
+/// the start of every volume, LOSAT writes the one sequence `n` (NCBI's first record).
 #[rustfmt::skip]
 const APPROVED: &[(&str, &[&str], i32)] = &[
     ("D82", &["-db", "db/n4", "-entry", "all", "-long_seqids", "-range", "3-9", "-strand", "minus"], 0),
@@ -295,6 +403,9 @@ const APPROVED: &[(&str, &[&str], i32)] = &[
     ("D97", &["-db", "db/n4n", "-entry", "gnl|BL_ORD_ID|1", "-range", "5-20", "-strand", "minus", "-long_seqids", "-ctrl_a"], 0),
     ("D101", &["-db", "db/n4n", "-entry", "gnl|BL_ORD_ID|1", "-long_seqids", "-range", "5-20", "-strand", "minus", "-line_length", "5"], 0),
     ("H09", &["-db", "db/n5", "-entry", "NM_000001.1", "-long_seqids", "-range", "5-20", "-strand", "minus"], 0),
+    ("S18", &["-db", "db/n4", "-entry", "NM_000001.1", "-long_seqids", "-range", "5-20", "-strand", "minus"], 0),
+    ("I795", &["-db", "db/dv4", "-entry", "gnl|BL_ORD_ID|2", "-outfmt", "%o %a"], 0),
+    ("I830", &["-db", "db/i_dvr", "-entry", "gnl|BL_ORD_ID|2", "-outfmt", "%o %a"], 0),
 ];
 
 #[test]
@@ -489,6 +600,86 @@ fn damaged_lookup_files_are_reported_as_ncbi_s_or_refused() {
     );
 }
 
+/// A damaged ISAM of a version 4 database (probe I913-I1101): a missing file is a silent miss,
+/// a string ISAM whose header does not fit its files is refused where NCBI crashes on it (the
+/// lookups that open it: an accession, not a GI or an ordinal id), and so is a header with a
+/// wrong count of lines, which NCBI does not read and LOSAT's reader refuses.
+#[test]
+fn damaged_isam_files_of_version_4_are_missed_or_refused() {
+    let dir = TestDir::new("damaged4");
+    let damaged = |case: &str, change: &dyn Fn(&Path)| {
+        let db = dir.0.join(case);
+        copy_db("p4", &db);
+        change(&db);
+        format!("{}/p4", db.display())
+    };
+    let set_byte = |db: &Path, file: &str, at: usize, value: u8| {
+        let mut bytes = fs::read(db.join(file)).unwrap();
+        bytes[at] = value;
+        fs::write(db.join(file), bytes).unwrap();
+    };
+    let run = |p4: &str, id: &str| {
+        let (stdout, stderr, code) =
+            blastdbcmd(&["-db", p4, "-entry", id, "-outfmt", "%o %a"], &dir.0);
+        (
+            String::from_utf8(stdout).unwrap(),
+            String::from_utf8(stderr).unwrap(),
+            code,
+        )
+    };
+    // OID 0 has three definition lines.
+    let oid0 = || {
+        (
+            "0 XP_000001.1\n0 P99999.2\n0 AAA00001.1\n".to_string(),
+            String::new(),
+            0,
+        )
+    };
+    let not_found = |id: &str| {
+        (
+            String::new(),
+            format!(
+                "Error: [blastdbcmd] Entry not found: {id}\nError: [blastdbcmd] Entry or entries not \
+                 found in BLAST database\n"
+            ),
+            1,
+        )
+    };
+    let refused = |(stdout, stderr, code): (String, String, i32)| {
+        stdout.is_empty()
+            && code == 1
+            && stderr.lines().count() == 1
+            && stderr.ends_with("is not supported by LOSAT's BLASTDBCMD\n")
+    };
+
+    for (case, file) in [("nopsi", "p4.psi"), ("nopsd", "p4.psd")] {
+        let p4 = damaged(case, &|db| fs::remove_file(db.join(file)).unwrap());
+        assert_eq!(run(&p4, "XP_000001.1"), not_found("XP_000001.1"), "{case}");
+        assert_eq!(run(&p4, "1819").2, 0, "{case}");
+    }
+    let empty = damaged("emptypsi", &|db| fs::write(db.join("p4.psi"), b"").unwrap());
+    let length = damaged("lenpsi", &|db| set_byte(db, "p4.psi", 11, 7));
+    let version = damaged("verpsi", &|db| set_byte(db, "p4.psi", 3, 2));
+    let terms = damaged("termspsi", &|db| set_byte(db, "p4.psi", 12, 16));
+    for p4 in [&empty, &length, &version, &terms] {
+        assert!(refused(run(p4, "XP_000001.1")), "{p4}");
+        assert!(refused(run(p4, "NOSUCH")), "{p4}");
+        let (stdout, stderr, code) = run(p4, "gnl|BL_ORD_ID|1");
+        assert_eq!(
+            (stdout.as_str(), stderr.as_str(), code),
+            ("1 NP_000002.1\n", "", 0),
+            "{p4}"
+        );
+        assert_eq!(run(p4, "gi|1819").2, 0, "{p4}");
+    }
+    let nopni = damaged("nopni", &|db| fs::remove_file(db.join("p4.pni")).unwrap());
+    assert_eq!(run(&nopni, "gi|1819"), not_found("gi|1819"));
+    assert_eq!(run(&nopni, "XP_000001.1"), oid0());
+    let badpni = damaged("badpni", &|db| set_byte(db, "p4.pni", 3, 2));
+    assert!(refused(run(&badpni, "1819")));
+    assert_eq!(run(&badpni, "XP_000001.1"), oid0());
+}
+
 /// `gnl|BL_ORD_ID|n` of a version 4 database in volumes is the one sequence `n` of the
 /// whole database (line BDC DECISIONS 12: NCBI writes the sequence `n` of every volume
 /// where `n` falls inside the database, probe S01): its FASTA is the `n`-th record of
@@ -581,28 +772,14 @@ fn out_and_logfile_take_the_retrieval_and_its_diagnostics() {
     assert_eq!(file("D84.out"), expected("D84.out"), "D84 -out");
 }
 
-/// The probe's cases that LOSAT's BLASTDBCMD does not serve: the lookup of an accession, a
-/// name or a GI in a version 4 database built with `-parse_seqids` (line BDC's BDC2c), an
-/// alias of a database with masks and several names in `-db` (DECISIONS 6), `-range ""`
-/// (NCBI crashes), and `-outfmt %d` / `%b` (DECISIONS 9).
+/// The probe's cases that LOSAT's BLASTDBCMD does not serve: an alias of a database with masks
+/// and several names in `-db` (DECISIONS 6), `-range ""` (NCBI crashes), and `-outfmt %d` /
+/// `%b` (DECISIONS 9).
 #[rustfmt::skip]
 const REFUSALS: &[(&str, &[&str])] = &[
-    ("F09", &["-db", "db/p4", "-entry_batch", "in/pids.txt"]),
-    ("F11", &["-db", "db/p4", "-entry_batch", "in/pids.txt", "-get_dups"]),
-    ("F17", &["-db", "db/p4", "-entry", "XP_000020.1", "-target_only"]),
-    ("F18", &["-db", "db/p4", "-entry", "1819", "-target_only"]),
-    ("F20", &["-db", "db/p4", "-entry", "XP_000001.1,gi|123456,1ABC_A", "-long_seqids"]),
-    ("F23", &["-db", "db/n4", "-entry_batch", "in/nids.txt"]),
     ("F32", &["-db", "db/palias", "-entry", "all", "-outfmt", "%o %a %t"]),
     ("F33", &["-db", "db/palias", "-entry", "P10001.1,XP_000001.1"]),
     ("F34", &["-db", "db/p5 db/pm5", "-entry", "all", "-outfmt", "%o %a"]),
-    ("S13", &["-db", "db/p4", "-entry", "XP_000001.1,,P00012", "-outfmt", "%o %a"]),
-    ("S14", &["-db", "db/p4", "-entry", ""]),
-    ("S15", &["-db", "db/p4", "-entry", "emb|CAA00019.1|", "-target_only"]),
-    ("S16", &["-db", "db/p4", "-entry", "gi|1819", "-target_only"]),
-    ("S17", &["-db", "db/p4", "-entry", "CAA00019.1", "-target_only", "-outfmt", "%a %g"]),
-    ("S18", &["-db", "db/n4", "-entry", "NM_000001.1", "-long_seqids", "-range", "5-20", "-strand", "minus"]),
-    ("S19", &["-db", "db/n4", "-entry", "NM_000001.1,NM_000001.1", "-long_seqids"]),
     ("D61", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-range", ""]),
     ("asn-d", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-outfmt", "%d"]),
     ("asn-b", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-outfmt", "%b"]),

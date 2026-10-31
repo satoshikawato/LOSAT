@@ -108,8 +108,9 @@
 //!   index of such a volume; its result is never used and is not computed.
 //! - The warnings that `CSeq_id` posts while parsing a user's id (`ERR_POST` to the diagnostics
 //!   stream) are dropped.
-//! - Exceptions of `SeqDB_SimplifyAccession` that are not NCBI's text (an out-of-range number in
-//!   a `ti` tag, a string tag of `BL_ORD_ID`) are [`SimplifyError::Exception`] with LOSAT's text.
+//! - Exceptions of `SeqDB_SimplifyAccession` that are not a `CSeqIdException` (a `ti` tag that is
+//!   not a number, a string tag of `BL_ORD_ID` or `PIG`) are [`SimplifyError::Exception`] with
+//!   the message NCBI's exception holds.
 //! - The functions assume the C locale (`tolower`, `toupper`, `isdigit`, `atoi`).
 
 use std::path::{Path, PathBuf};
@@ -3188,8 +3189,8 @@ pub struct SimplifiedAccession {
 pub enum SimplifyError {
     /// A `CSeqIdException` of `CSeq_id(element)` or of the `db:tag` id.
     SeqId(SeqIdError),
-    /// Another exception (LOSAT's text): a string tag read as a number, an integer read from a
-    /// string tag.
+    /// Another exception, with its message: a string tag read as a number, an integer read from
+    /// a string tag.
     Exception(String),
 }
 
@@ -3225,12 +3226,14 @@ fn string_to_int8(s: &[u8]) -> Option<i64> {
     i64::try_from(n).ok()
 }
 
-/// `CObject_id::GetId()`.
+/// `CObject_id::GetId()`: a string tag is NCBI's `CInvalidChoiceSelection` (probe D11 of line
+/// BDC).
 fn object_id_id(tag: &ObjectId) -> Result<i64, SimplifyError> {
     match tag {
         ObjectId::Id(n) => Ok(i64::from(*n)),
         ObjectId::Str(_) => Err(SimplifyError::Exception(
-            "Object-id::GetId: wrong choice selection (str)".to_string(),
+            "CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str"
+                .to_string(),
         )),
     }
 }
@@ -3447,9 +3450,13 @@ fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccessio
                 out.simpler = true;
                 out.num_id = match &dbt.tag {
                     ObjectId::Str(text) => string_to_int8(text).ok_or_else(|| {
+                        let digits = text.strip_prefix(b"-").or(text.strip_prefix(b"+"));
+                        let digits = digits.unwrap_or(text);
+                        let overflow = !digits.is_empty() && digits.iter().all(u8::is_ascii_digit);
                         SimplifyError::Exception(format!(
-                            "Cannot convert string '{}' to Int8",
-                            String::from_utf8_lossy(text)
+                            "Cannot convert string '{}' to Int8{}",
+                            String::from_utf8_lossy(text),
+                            if overflow { ", overflow" } else { "" }
                         ))
                     })?,
                     ObjectId::Id(n) => i64::from(*n),

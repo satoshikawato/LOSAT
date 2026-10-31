@@ -162,6 +162,46 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 // No NCBI counterpart: counters for LOSAT_X_STATS; they do not change any value NCBI computes.
 static LINKINGS: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+thread_local! {
+    // The kernel scratch of a pool thread (module doc, item 4): one per worker thread, made on
+    // first use, shared by the pool path and the helped path.
+    static POOLS: RefCell<Option<BufferPools>> = const { RefCell::new(None) };
+}
+
+// EXPERIMENT (LOSAT_X_TBXBOARD): whether this thread's linking calls are a TBXPIPE chain that
+// must not wait in the pool (tblastx/x_batch_pipe.rs, item 6). No NCBI counterpart (scheduling
+// only).
+thread_local! {
+    static HELPED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The calling thread's helped mode until the guard drops (it restores the mode before).
+pub(crate) struct XHelped(bool);
+
+impl Drop for XHelped {
+    fn drop(&mut self) {
+        HELPED.with(|helped| helped.set(self.0));
+    }
+}
+
+// EXPERIMENT (LOSAT_X_TBXBOARD): the linking calls and score sorts that follow on this thread
+// are a chain of the batch pipe that must not wait in the pool: its groups are linked on the
+// search's board (`x_link_board`), and its sorts are sorted there or stay on the thread
+// (x_link_sort.rs `x_board_sort`, `pool_allowed`). No NCBI counterpart.
+/// Sets this thread's helped mode to `on` until the guard drops.
+pub(crate) fn x_helped(on: bool) -> XHelped {
+    XHelped(HELPED.with(|helped| helped.replace(on)))
+}
+
+/// Whether this thread's linking calls are in the helped mode.
+pub(super) fn x_helped_now() -> bool {
+    HELPED.with(std::cell::Cell::get)
+}
 static GROUPS: AtomicU64 = AtomicU64::new(0);
 static PARALLEL_LINKINGS: AtomicU64 = AtomicU64::new(0);
 
@@ -318,14 +358,27 @@ fn link_slices(
     kernel_times: &KernelTimes,
     on_pool: bool,
 ) -> bool {
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the groups on the search's board (tblastx/x_work_board.rs),
+    // taken before any unit, for a call on the pool and for a pipe chain (`x_helped_now`).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if (on_pool || x_helped_now())
+        && groups.len() > 1
+        && rayon::current_thread_index().is_some()
+        && rayon::current_num_threads() > 1
+    {
+        if let Some((board, _)) = crate::algorithm::tblastx::x_work_board::current() {
+            x_link_board(board, groups, args, &scratch, kernel_times);
+            return on_pool;
+        }
+    }
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     if on_pool {
-        thread_local! {
-            static POOLS: RefCell<Option<BufferPools>> = const { RefCell::new(None) };
-        }
         groups.into_par_iter().for_each(|group| {
             POOLS.with(|pools| {
                 let mut pools_opt = pools.borrow_mut();
@@ -351,6 +404,52 @@ fn link_slices(
         kernel_times.time(|| link_one_slice(group, args, &mut pools));
     }
     false
+}
+
+// EXPERIMENT (LOSAT_X_TBXBOARD): the groups of a linking call on the search's board, the largest
+// first (tblastx/x_work_board.rs). No NCBI counterpart: the groups are disjoint and each kernel's
+// result depends on its group alone (module doc, items 2-4), so which thread links which group,
+// and when, changes nothing. No thread waits in the pool: the board's takers and this call's
+// helper jobs take groups, and this thread blocks until the groups others took are linked (the
+// kernels make no pool call).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_link_board(
+    board: &crate::algorithm::tblastx::x_work_board::XBoard,
+    mut groups: Vec<&mut [UngappedHit]>,
+    args: &GroupArgs<'_>,
+    scratch: &Scratch,
+    kernel_times: &KernelTimes,
+) {
+    // The largest group first (equal sizes in group order): the call ends when its largest group
+    // is linked.
+    groups.sort_by_key(|group| std::cmp::Reverse(group.len()));
+    let n = groups.len();
+    let slices: Vec<(usize, usize)> = groups
+        .iter_mut()
+        .map(|group| (group.as_mut_ptr() as usize, group.len()))
+        .collect();
+    let run = |i: usize, _: &mut crate::algorithm::tblastx::x_work_board::XTaker| {
+        let (ptr, len) = slices[i];
+        // SAFETY: the slices are disjoint parts of the list this call borrows mutably (`groups`
+        // came from `split_at_mut`); the board runs index `i` once, and `run_groups` returns only
+        // after every index has run.
+        let group = unsafe { std::slice::from_raw_parts_mut(ptr as *mut UngappedHit, len) };
+        POOLS.with(|pools| {
+            let mut pools_opt = pools.borrow_mut();
+            let pool = pools_opt.get_or_insert_with(|| {
+                buffer_pools(
+                    scratch.initial_lh_size,
+                    scratch.total_hits,
+                    scratch.literal_port,
+                )
+            });
+            kernel_times.time(|| link_one_slice(group, args, pool));
+        });
+    };
+    board.run_groups(n, &run);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531

@@ -171,6 +171,9 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_MBHITPF` (BLASTN's loop over the offset pairs prefetches the query line of the hit 16
 /// places on, `blastn/blast_engine/run.rs`) joined the set in the pull request that added it, after
 /// it was verified and timed with it on and off.
+/// `LOSAT_X_BNPVONCE` (the scan of a packed CSR table of 4^11 cells or fewer tests each word once,
+/// in the head's presence bits, `blastn/blast_engine/run.rs`) joined the set in the pull request
+/// that added it, after it was verified and timed with it on and off.
 /// `LOSAT_X_QGROUPPAR` (BLASTN's preliminary gapped loop and traceback of a subject searched on one
 /// thread run per query on the pool, `blastn/blast_engine/x_qgroup_par.rs`) joined the set in the
 /// pull request that added it, after it was verified and timed with it on and off.
@@ -238,6 +241,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNHLGROW",
     "LOSAT_X_BNLUTDROP",
     "LOSAT_X_BNMAPPED",
+    "LOSAT_X_BNPVONCE",
     "LOSAT_X_BNQDROP",
     "LOSAT_X_BNQPACK",
     "LOSAT_X_BNSEEDLISTS",

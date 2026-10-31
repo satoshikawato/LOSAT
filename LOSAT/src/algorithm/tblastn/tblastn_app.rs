@@ -1383,8 +1383,9 @@ fn search(
                 lines
             })
             .collect();
-        // `-db`: the reported sequences by rank, with their records and packed subjects; the
-        // database's other sequences are dropped before the reports.
+        // `-db`: the reported sequences by rank, with their records and lengths, and their packed
+        // subjects where a report reads their letters; the database's other sequences are dropped
+        // before the reports.
         let reported = match database {
             Some(database) => Some(
                 super::database::reported_subjects(
@@ -1392,6 +1393,10 @@ fn search(
                     &titles,
                     &mut results,
                     search_letters,
+                    super::stage_e_report::reads_subject_letters(
+                        outputs.hits.is_some(),
+                        outputs.formats.iter().map(|format| format.outfmt),
+                    ),
                     parsed_shown(&outputs.formats),
                 )
                 // EXPERIMENT (LOSAT_X_TBNDBSTREAM): a read of a reported sequence that
@@ -1528,7 +1533,7 @@ fn search(
         let (report_records, report_letters, shown) = match (&reported, database) {
             (Some(reported), Some(database)) => (
                 reported.records.as_slice(),
-                SubjectLetters::Packed(&reported.stores),
+                reported.letters(),
                 ShownSubjects::Database {
                     name: database.name(),
                     pairwise: pairwise_database

@@ -66,6 +66,15 @@ const PROGRAM: &str = "TBLASTN";
 /// The `# TBLASTN 2.17.0+` line of outfmt 7 (`NStr::ToUpper(m_Program) + " " + version`).
 const PROGRAM_VERSION: &str = "TBLASTN 2.17.0+";
 
+/// Whether a report of `spec` can read the rows of an HSP (`write_tblastn_tabular`: the letters of
+/// its subject): its fields read them, or `nident` is the only field of the counts' block, which
+/// reads them for some HSPs.
+pub(super) fn reads_rows(spec: &TabularSpec) -> bool {
+    spec.needs().rows
+        || (spec.has(TabularField::NumIdentical)
+            && !spec.fields.iter().any(|field| COUNTS_BLOCK.contains(field)))
+}
+
 /// What the custom tabular reports of a run need beyond `render`'s other inputs, made by the
 /// search before the reports.
 #[derive(Default)]

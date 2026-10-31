@@ -1,0 +1,1 @@
+- `tblastn -db` no longer reads the reported subjects again for the reports that show none of their letters (the default columns of outfmt 6 and 7, outfmt 8 to 12): it keeps their lengths instead of a copy of each reported chromosome, as `blastn` does, with the same output.

@@ -7093,8 +7093,8 @@ pub fn run(
     //         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
     //                                              mol_type));
     // ```
-    // With `-db` the handler of the database arguments only keeps the name: the database
-    // is opened after every option handler has run (`search_cli`). With `-subject` it
+    // With `-db` the handler of the database arguments keeps the name and reads the list: the
+    // database is opened after every option handler has run (`search_cli`). With `-subject` it
     // reads the subjects here, before the query and the output are opened.
     let archive = args.archive.clone();
     let mut stderr = std::io::stderr();
@@ -7105,6 +7105,22 @@ pub fn run(
             &mut archive_tee
         }
         None => &mut stderr,
+    };
+    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
+    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
+    // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
+    // and before `CStdCmdLineArgs`, which opens the query and the output: its warning before
+    // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
+    // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
+    let list = match args.database_name() {
+        Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
+            Ok(list) => list,
+            Err(error) => {
+                write_run_error_archive(&args, archive.as_ref(), &error);
+                return Err(error);
+            }
+        },
+        None => None,
     };
     let cli_subjects = if args.db.is_some() {
         None
@@ -7172,6 +7188,7 @@ pub fn run(
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut *diagnostics);
         search_cli(
             args,
+            list,
             query_file,
             cli_subjects.as_ref().map(|read| {
                 (
@@ -7248,6 +7265,10 @@ fn write_run_error_archive(
     let Some(handle) = archive else {
         return;
     };
+    // `-outfmt "11 qseqid"`: NCBI's `PrintErrorArchive` stops at the number before it opens `-out`.
+    if !handle.error_archive_enabled() {
+        return;
+    }
     let Some(lines) = archive::error_lines(error, true) else {
         return;
     };
@@ -7392,24 +7413,17 @@ fn read_cli_subjects(
 /// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`,
 /// `-window_masker_db`), the
 /// processing of the options, the opening of the database of `-db`, `Query is Empty!`, the
-/// reading of the queries and the search. `subjects` are those of `-subject` (`None` with
-/// `-db`).
+/// reading of the queries and the search. `list` is the taxid or seqid list of `-db`, read
+/// before the output is opened; `subjects` are those of `-subject` (`None` with `-db`).
 fn search_cli(
     mut args: BlastnArgs,
+    list: Option<crate::seqdb::DbList>,
     query_file: std::fs::File,
     subjects: Option<(Subjects<'_>, SubjectRanges<'_>)>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
-    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
-    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
-    // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65),
-    // so its warning before theirs (probe F04 of line DI-8).
-    let list = match args.database_name() {
-        Some(_) => args.db_filter.resolve(&settings, outputs.diagnostics)?,
-        None => None,
-    };
     args.resolve_dust()?;
     args.resolve_window_masker()?;
     let query_range = parse_query_range(&args)?;

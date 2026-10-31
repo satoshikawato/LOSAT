@@ -177,6 +177,9 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BNDBWIDE` (BLASTN `-db`'s window of 16 blocks per thread while few bytes of results
 /// wait for the owner, `blastn/blast_engine/x_db_stream.rs`) joined the set in the pull request
 /// that added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_BPDBWIDE` (BLASTP `-db`'s window of 64 blocks per thread while few bytes of results
+/// wait for the merge, `blastp/blast_engine/database/x_db_keep.rs`) joined the set in the pull
+/// request that added it, after it was verified and timed with it on and off.
 /// `LOSAT_X_MBHITPF` (BLASTN's loop over the offset pairs prefetches the query line of the hit 16
 /// places on, `blastn/blast_engine/run.rs`) joined the set in the pull request that added it, after
 /// it was verified and timed with it on and off.
@@ -236,6 +239,14 @@ use std::ops::RangeInclusive;
 /// of the exact extension stays as the reference of a unit test, and the binary search over the
 /// contexts still answers where the layout does not allow the constant-time form, a rule of the
 /// layout and not a switch).
+/// `LOSAT_X_BXDBSTREAM` (BLASTX's `-db` read in blocks where it is searched, with the block size
+/// as its value, `blastx/x_db_stream.rs`), `LOSAT_X_BXEVALEMPTY` (a subject without HSPs gets its
+/// empty list at once in the gapped evaluation, `blastx/statistics.rs`) and `LOSAT_X_BXLUTPOOL`
+/// (BLASTX's lookup tables built on shared neighbour lists and kept vectors,
+/// `tblastx/lookup/x_lut_direct.rs`; the one-thread build without the pool stays, chosen by
+/// `LOSAT_X_BXPOOLN1`) graduated on 2026-10-27: they left `STRICT_SET` and their previous code
+/// was deleted (the copy of the whole database and the shadow modes of the first two went with
+/// them; a pass reads blocks of 256 KiB).
 /// `LOSAT_X_DISPTABLE` (the displayed residues of TBLASTX's and TBLASTN's rows read from a per-code
 /// table of 4-bit codons, `tblastx/report.rs`) and `LOSAT_X_TBXMASKSEEK` (the scan of a frame's SEG
 /// masks in an outfmt 0 row starts at the first mask range that reaches the row,
@@ -276,6 +287,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPCLUTSCANBF",
     "LOSAT_X_BPDBCUT",
     "LOSAT_X_BPDBKEEP",
+    "LOSAT_X_BPDBWIDE",
     "LOSAT_X_BPDEFER",
     "LOSAT_X_BPDIAG",
     "LOSAT_X_BPFFILL",
@@ -310,16 +322,13 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXCROSS",
     "LOSAT_X_BXCROSSDEFER",
     "LOSAT_X_BXCTXONCE",
-    "LOSAT_X_BXDBSTREAM",
     "LOSAT_X_BXDEFER",
     "LOSAT_X_BXDIAG",
     "LOSAT_X_BXDIAGKEEP",
-    "LOSAT_X_BXEVALEMPTY",
     "LOSAT_X_BXFLOW",
     "LOSAT_X_BXHITBF",
     "LOSAT_X_BXKAONCE",
     "LOSAT_X_BXKAPPAFIT",
-    "LOSAT_X_BXLUTPOOL",
     "LOSAT_X_BXPOOLN1",
     "LOSAT_X_BXSCANBYTE",
     "LOSAT_X_BXSUBJFLOW",

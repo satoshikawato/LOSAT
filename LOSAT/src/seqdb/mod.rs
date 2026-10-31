@@ -1189,7 +1189,7 @@ impl SeqDb {
         volume.read_block(range.first, range.end, range.first_ordinal)
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the length and the ambiguity data that
+    /// The length and the ambiguity data that
     /// `read_block(range)` gives the one nucleotide of `range`, read without its 2-bit data, with
     /// the errors of `read_block` (`Volume::x_nucleotide_check`).
     pub fn x_nucleotide_check(

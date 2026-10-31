@@ -238,7 +238,10 @@ fn write_parsed<E: Encoder>(id: &ParsedSeqId, enc: &mut E) {
         ParsedSeqId::Pdb(id) => {
             enc.begin_sequence("PDB-seq-id");
             enc.member("mol", 0);
+            // `mol PDB-mol-id` (seqloc.asn), a named VisibleString (`begin_named`).
+            enc.begin_named("PDB-mol-id");
             enc.visible_str(&id.mol);
+            enc.end_named();
             enc.end_member();
             let chain = match id.chain {
                 Some(chain) => Some(chain),

@@ -453,6 +453,49 @@ impl TaxDb {
             .then_some(taxid))
     }
 
+    // No NCBI counterpart: LOSAT's check, from the index alone, of whether `names` (the port of
+    // `GetTaxNames` above) can fail; it changes no value NCBI computes.
+    /// Whether [`Self::names`] could fail (`Err`) for some taxid, decided by one sequential pass
+    /// over the index alone (the report streams' check before the search,
+    /// `algorithm::common::database::reports_may_refuse`). Besides a read error, a lookup fails
+    /// only where it reads the record `offset[i]..offset[i+1]` of the entry `i` that its search
+    /// ends on (below the search's last `high_index`; one that ends on it reads to the end of
+    /// `taxdb.btd`, which cannot fail) and that record, of positive size, reaches past the mapped
+    /// end of `taxdb.btd`. So `Ok(false)`, whatever the order of the index, when no two
+    /// consecutive entries make such a record; a database that NCBI treats as missing finds
+    /// nothing. The index is read in blocks of 64 Ki entries.
+    pub fn any_lookup_may_fail(&self) -> Result<bool, SeqDbError> {
+        const INDEX_BLOCK: u64 = 1 << 16;
+        let Some(files) = &self.files else {
+            return Ok(false);
+        };
+        let mapped = files.data.len().div_ceil(MAP_PAGE) * MAP_PAGE;
+        let count = files.count as u64;
+        let mut previous: Option<u32> = None;
+        let mut block: Vec<u8> = Vec::new();
+        let mut i = 0u64;
+        while i < count {
+            let n = INDEX_BLOCK.min(count - i);
+            block.resize((n * ENTRY_LEN) as usize, 0);
+            files
+                .index
+                .read_exact_at(&mut block, HEADER_LEN + ENTRY_LEN * i)?;
+            for entry in block.chunks_exact(ENTRY_LEN as usize) {
+                let offset = be32(&entry[4..8]);
+                if let Some(begin) = previous {
+                    // `names`: `int(m_End - m_Begin)` of the wrapped `Uint4` difference.
+                    let size = offset.wrapping_sub(begin) as i32;
+                    if size > 0 && u64::from(begin) + size as u64 > mapped {
+                        return Ok(true);
+                    }
+                }
+                previous = Some(offset);
+            }
+            i += n;
+        }
+        Ok(false)
+    }
+
     /// Whether [`Self::names`] could refuse some taxid, or give a scientific name for which
     /// `unwritable` is true, decided by one sequential pass over the two files instead of a
     /// lookup per taxid (OF5b BLASTX, `taxdb_may_refuse`): `Ok(false)` means that no lookup of
@@ -690,6 +733,12 @@ impl LazyTaxDb {
     /// [`TaxDb::entry_count`] of the lazily opened database (this opens it).
     pub fn entry_count(&self) -> Result<u64, SeqDbError> {
         Ok(self.open_into(&mut Vec::new())?.entry_count())
+    }
+
+    /// [`TaxDb::any_lookup_may_fail`] of the lazily opened database (this opens it). An open that
+    /// was refused or a file that cannot be read is an `Err`.
+    pub fn any_lookup_may_fail(&self) -> Result<bool, SeqDbError> {
+        self.open_into(&mut Vec::new())?.any_lookup_may_fail()
     }
 
     /// [`TaxDb::any_lookup_may_refuse`] of the lazily opened database (this opens it). An open
@@ -1294,6 +1343,55 @@ mod tests {
         entries
             .windows(2)
             .all(|pair| pair[0].0 < pair[1].0 && pair[0].1 <= pair[1].1)
+    }
+
+    /// The pass over the index answers as the lookups do on every fixture variant: never `false`
+    /// where the lookup of a taxid of the index, of a taxid next to one, or of the extremes fails;
+    /// and exactly the lookups' answer on the taxids of the index when the index is sorted. Of the
+    /// variants, `btd_empty` fails (every record past the mapped end); a record cut by the end of
+    /// the file inside its last page does not (`btd_truncated`, `offset_next_past_end`).
+    #[test]
+    fn the_pass_over_the_index_agrees_with_the_failing_lookups_on_every_variant() {
+        let (mut failing, mut clean) = (Vec::new(), 0);
+        let mut dirs: Vec<_> = std::fs::read_dir(fixture_dir())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.is_dir())
+            .collect();
+        dirs.sort();
+        for dir in dirs {
+            let variant = dir.file_name().unwrap().to_string_lossy().to_string();
+            let Ok(db) = open_fixture(&variant) else {
+                continue;
+            };
+            let pass = db.any_lookup_may_fail().unwrap();
+            let fails = |taxid: i32| db.names(taxid, &mut Vec::new()).is_err();
+            let indexed: Vec<i32> = db.files.as_ref().map_or(Vec::new(), |files| {
+                (0..files.count)
+                    .map(|i| TaxDb::entry(files, i).unwrap().0)
+                    .collect()
+            });
+            let near = indexed
+                .iter()
+                .flat_map(|&taxid| [taxid.wrapping_sub(1), taxid.wrapping_add(1)])
+                .chain([i32::MIN, -1, 0, 1, i32::MAX]);
+            assert!(
+                pass || !indexed.iter().copied().chain(near).any(fails),
+                "{variant}: the pass says no, a lookup fails"
+            );
+            if regular_layout(&db) {
+                assert_eq!(pass, indexed.iter().copied().any(fails), "{variant}");
+            }
+            if pass {
+                failing.push(variant);
+            } else {
+                clean += 1;
+            }
+        }
+        assert!(
+            failing.iter().any(|variant| variant == "btd_empty") && clean >= 20,
+            "{failing:?} {clean}"
+        );
     }
 
     /// The one pass over the files answers as the lookup of every taxid does on every fixture

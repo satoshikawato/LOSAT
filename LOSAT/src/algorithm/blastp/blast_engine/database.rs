@@ -218,6 +218,11 @@ impl BlastpDatabase {
         self.db.filtered_empty()
     }
 
+    /// The taxids of the search's list (`SeqDb::list_taxids`).
+    pub(super) fn list_taxids(&self) -> &[i32] {
+        self.db.list_taxids()
+    }
+
     /// The number of sequences the statistics read (`SeqDb::statistics_numbers`).
     pub(super) fn statistics_num_sequences(&self) -> u32 {
         self.db.statistics_numbers().1
@@ -1412,7 +1417,7 @@ fn x_all_header_ranges(
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether every sequence of the database has one definition line
 /// that reads, holds no byte outside ' ' ..= '~' and gives a tabular subject id as NCBI writes
-/// it, or with `pairwise` (an outfmt 0 report, LOSAT_X_BPQBLOCKFMT, which writes no tabular id) a
+/// it, or with `pairwise` (an outfmt 0 report, which writes no tabular id) a
 /// title that the outfmt 0 report writes as NCBI, and with `taxids` (the batches' prefetch reads
 /// the taxonomy database) a taxid that decodes, where no lookup of the taxonomy database can be
 /// refused. Read in `pool` over the ordinal ids; a reader error is `false` (the search of all
@@ -1510,7 +1515,7 @@ pub(super) fn x_titles_allow_blocks(
     titles && (!taxids || x_taxids_allow_blocks(database, false, pool))
 }
 
-// EXPERIMENT (LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): the block search of outfmt 8, 9, 12 and 5.
+// EXPERIMENT (LOSAT_X_BPQBLOCK): the block search of outfmt 8, 9, 12 and 5.
 // These reports show no tabular id and no outfmt 0 title, so of the failures that
 // `x_titles_allow_blocks` rules out only those of the definition lines' reading remain: NCBI's
 // reader error (`HeaderReadError`), more than one definition line, and a stored title with a byte
@@ -1519,7 +1524,7 @@ pub(super) fn x_titles_allow_blocks(
 // `x_titles_allow_blocks` and the per-definition-line code of the outfmt 0, 6 and 7 path stay as
 // they are.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): whether every sequence of the database has
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): whether every sequence of the database has
 /// one definition line that reads and holds no byte outside ' ' ..= '~'. Read in `pool` as
 /// `x_titles_allow_blocks` reads it; a reader error is `false`.
 pub(super) fn x_titles_read_allow_blocks(
@@ -1572,7 +1577,7 @@ pub(super) fn x_titles_read_allow_blocks(
     (0..db.num_seqs()).all(allowed)
 }
 
-// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the block search of outfmt 15 and 16. Besides what outfmt 5
+// EXPERIMENT (LOSAT_X_BPQBLOCK): the block search of outfmt 15 and 16. Besides what outfmt 5
 // reads (`x_titles_read_allow_blocks`) they read, for each subject with hits, the Blast-def-line
 // taxid (`SeqDb::defline_taxids`, a decode apart from the titles') and, when `taxdb.bti` is on the
 // search path, the taxonomy database (`shared::read_reported_taxids`): its opening, the lookup of
@@ -1590,7 +1595,7 @@ pub(super) fn x_titles_read_allow_blocks(
 // one read per `HEADER_RANGE_SEQS` sequences, as `x_titles_read_allow_blocks` reads them); no set of
 // taxids is built here.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): `x_titles_read_allow_blocks` and `x_taxids_allow_blocks`
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): `x_titles_read_allow_blocks` and `x_taxids_allow_blocks`
 /// in one pass over the headers: whether every sequence of the database has one definition line
 /// that reads and holds no byte outside ' ' ..= '~', its taxid reads, and no lookup of the
 /// taxonomy database can be refused (`shared::taxdb_may_refuse`; with `names`, the outfmt 15 and
@@ -1641,7 +1646,7 @@ pub(super) fn x_titles_taxids_allow_blocks(
     readable && !shared::taxdb_may_refuse(db, names)
 }
 
-/// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): whether every sequence's taxid reads and no lookup of the
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): whether every sequence's taxid reads and no lookup of the
 /// taxonomy database can be refused (`shared::taxdb_may_refuse` with `names`, which is `false`
 /// where `taxdb.bti` is not found). One sequence at a time (`LOSAT_X_DBIDXREAD=0`); see
 /// `x_titles_taxids_allow_blocks`.
@@ -3319,7 +3324,7 @@ mod tests {
         assert_eq!(renamed, [(0, 0), (2, 2)]);
     }
 
-    // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the one pass over the headers (`SeqDb::visit_deflines_taxids`)
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): the one pass over the headers (`SeqDb::visit_deflines_taxids`)
     // gives the answer of the two checks it replaces (`x_titles_read_allow_blocks`, then
     // `x_taxids_allow_blocks` one sequence at a time), for a database whose headers read, one with
     // taxids, an alias of volumes, and one whose header file is missing, at one thread and in a pool.
@@ -3392,7 +3397,7 @@ mod tests {
                 .unwrap()
             })
         };
-        // EXPERIMENT (LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): the same databases for the
+        // EXPERIMENT (LOSAT_X_BPQBLOCK): the same databases for the
         // read-only check of outfmt 8, 9, 12 and 5.
         let read_allowed = |database: &BlastpDatabase| -> [bool; 2] {
             [1, 4].map(|threads| {

@@ -387,7 +387,8 @@ fn damaged_lookup_files_are_reported_as_ncbi_s_or_refused() {
         let db = dir.0.join(case);
         copy_db("p5", &db);
         change(&db);
-        format!("{}/p5", db.display())
+        // The platform's separator: NCBI's message writes the path with `\` on Windows.
+        db.join("p5").display().to_string()
     };
     let open_error = |p5: &str, words: &[&str], message: String| {
         let mut all = vec!["-db", p5, "-dbtype", "prot"];

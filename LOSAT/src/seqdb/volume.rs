@@ -389,7 +389,7 @@ impl Volume {
         Ok(block)
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): what `read_block(first, end, first_ordinal)` of one
+    /// What `read_block(first, end, first_ordinal)` of one
     /// nucleotide (`end == first + 1`) gives `nucleotide_len(0)` and `ambiguity_runs(0)`, without
     /// its 2-bit data: the index reads and checks of `read_block` in its order and the checks of
     /// the file range it reads (`DbFile::x_check_range`), then the last byte of the 2-bit data and
@@ -1270,7 +1270,7 @@ impl SequenceBlock {
         self.data
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the bytes of a block of one nucleotide cut to its 2-bit
+    /// The bytes of a block of one nucleotide cut to its 2-bit
     /// data (`nucleotide_packed(0)`, which starts the block), in the block's buffer with its
     /// capacity. No NCBI counterpart: only where the bytes are kept.
     pub fn x_into_nucleotide_packed(mut self) -> Vec<u8> {

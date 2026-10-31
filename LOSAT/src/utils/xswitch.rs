@@ -75,6 +75,12 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BPREDOFIT`, `LOSAT_X_BPSCANBF`, `LOSAT_X_BPSEED` and `LOSAT_X_BPUNGAP` (all always on)
 /// graduated on 2026-10-26: they left `STRICT_SET` and their old code was deleted; nothing
 /// chooses any more, so they are not in `GRADUATED`.
+/// `LOSAT_X_TBNFRAMEREUSE` (a dropped subject plan gives its frames to the next plan of its thread,
+/// `tblastn/x_subject_translate.rs`) and `LOSAT_X_TBNDBSTREAM` (TBLASTN `-db` sequences read where
+/// they are searched, `tblastn/x_db_stream.rs`; its shadow variable `LOSAT_X_TBNDBSTREAMSHADOW` went
+/// with it) graduated on 2026-10-27 the same way: both were always on, they left `STRICT_SET`, and
+/// the frames allocated new for every plan and the copy of the whole database
+/// (`TblastnDatabase::read_stores`) were deleted.
 /// `LOSAT_X_BPQBLOCKFMT`, `LOSAT_X_BPQBLOCKSA`, `LOSAT_X_BPQBLOCKWEB`, `LOSAT_X_BPQBLOCKXML`,
 /// `LOSAT_X_BPQBLOCKXML2` and `LOSAT_X_BPSUBJMETA` (which reports and calls the block search of
 /// `LOSAT_X_BPQBLOCK` takes, and its subjects' IDs and titles made once) were folded into it on
@@ -374,10 +380,8 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_SEEDCOMPACT",
     "LOSAT_X_SEEDUNMAP",
     "LOSAT_X_TBNBATCHRULE",
-    "LOSAT_X_TBNDBSTREAM",
     "LOSAT_X_TBNDIAGPACK",
     "LOSAT_X_TBNFLOWHELP",
-    "LOSAT_X_TBNFRAMEREUSE",
     "LOSAT_X_TBNKEEPFEW",
     "LOSAT_X_TBNLINKCTX",
     "LOSAT_X_TBNLINKSETS",

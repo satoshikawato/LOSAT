@@ -324,6 +324,8 @@ pub(crate) fn write_blastn_archives(
                 .zip(&subject_deflines)
                 .map(|(record, defline)| BioseqInput {
                     id: &record.local_id,
+                    ids: record.believed().map(|ids| ids.ids.as_slice()),
+                    seq_loc: None,
                     defline,
                     title: &record.title,
                     letters: record.archive_letters(),
@@ -348,6 +350,8 @@ pub(crate) fn write_blastn_archives(
             .zip(&deflines)
             .map(|(record, defline)| BioseqInput {
                 id: &record.local_id,
+                ids: record.believed().map(|ids| ids.ids.as_slice()),
+                seq_loc: record.archive_seq_loc(),
                 defline,
                 title: &record.title,
                 letters: record.archive_letters(),
@@ -383,6 +387,7 @@ pub(crate) fn write_blastn_archives(
                 if !shown.is_empty() {
                     masks.push(MaskEntry {
                         id: record.local_id.clone(),
+                        best: record.believed().map(|ids| ids.best.clone()),
                         frame: Frame::Plus1,
                         intervals: shown,
                     });
@@ -402,6 +407,7 @@ pub(crate) fn write_blastn_archives(
             if !intervals.is_empty() {
                 lcase_masks.push(MaskEntry {
                     id: record.local_id.clone(),
+                    best: record.believed().map(|ids| ids.best.clone()),
                     frame: Frame::Plus1,
                     intervals,
                 });
@@ -564,6 +570,7 @@ mod tests {
         record.source = Some(Box::new(RecordSource {
             defline: b">q".to_vec(),
             uncut: Some(whole),
+            ..RecordSource::default()
         }));
         assert_eq!(
             lcase_mask_intervals(&record, &[], 29, true, false, true, false),

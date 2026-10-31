@@ -1416,6 +1416,22 @@ fn culling_limit_is_read_as_ncbi_does() {
     }
 }
 
+// NCBI blast_args.cpp:1961: -parse_deflines is a flag of every search program.
+#[test]
+fn parse_deflines_is_a_flag_of_every_search_program() {
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        assert!(parse(program, &["-parse_deflines"]).is_ok(), "{program}");
+        assert!(
+            parse(program, &["-parse_deflines", "true"]).is_err(),
+            "{program}"
+        );
+    }
+    let Commands::Blastn(args) = parse("blastn", &["-parse_deflines"]).unwrap().command else {
+        panic!("blastn");
+    };
+    assert!(args.parse_deflines);
+}
+
 // NCBI blast_args.cpp:2663: -show_gis is a flag of every search program.
 #[test]
 fn show_gis_is_a_flag_of_every_search_program() {

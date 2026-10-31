@@ -1,0 +1,38 @@
+>:5-10 ref|XP_000001.1| alpha protein [Homo sapiens] sp|P99999.2|TEST_HUMAN alpha-like protein gb|AAA00001.1| hypothetical protein, partial
+HSVLKA
+>:5-10 gi|123456|ref|NP_000002.1| gi plus ref protein
+HSVLKA
+>:5-10 sp|Q00003|ABC_MOUSE swissprot without version
+HSVLKA
+>:5-10 tr|A0A000|A0A000_YEAST trembl entry
+HSVLKA
+>:5-10 pdb|1ABC|A Chain A, test structure
+HSVLKA
+>:5-10 emb|CAA00005.1| emb protein
+HSVLKA
+>:5-10 dbj|BAA00006.1| dbj protein
+HSVLKA
+>:5-10 pir||S00007 pir protein
+HSVLKA
+>:5-10 prf||0008123A prf protein
+HSVLKA
+>:5-10 lcl|myprot9 local id protein
+HSVLKA
+>:5-10 gnl|mydb|prot10 general id protein
+HSVLKA
+>:5-10 XP_000011.2 bare refseq accession
+HSVLKA
+>:5-10 P00012 bare uniprot-like accession
+HSVLKA
+>:5-10 myprot_13 bare non-accession word
+HSVLKA
+>:5-10 gi|1414 gi only
+HSVLKA
+>:5-10 tpg|DAA00016.1| third-party protein
+HSVLKA
+>:5-10 gb|AAA00017.1|LOCUS17 gb with a locus name
+HSVLKA
+>:5-10 gi|1818|gb|AAA00018.1| gi|1819|emb|CAA00019.1| second defline gi|1820|ref|XP_000020.1| third defline
+HSVLKA
+>:5-10 sp|P00019.3|NAME_HUMAN with taxid
+HSVLKA

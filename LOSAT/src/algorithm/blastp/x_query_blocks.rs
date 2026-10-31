@@ -565,7 +565,7 @@ pub(crate) fn x_block_xml_run_allowed(
             queries[range].iter().all(|record| {
                 names::xml_query_title(&record.title, true).is_ok()
                     && names::check_text(&crate::report::query_warnings::warning_query_id(
-                        record.local_id.as_bytes(),
+                        record.warning_id(),
                         &record.title,
                     ))
                     .is_ok()

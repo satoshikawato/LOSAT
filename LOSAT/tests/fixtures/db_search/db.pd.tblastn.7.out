@@ -1,0 +1,73 @@
+# TBLASTN 2.17.0+
+# Query: NP_000042.1 query gi ref
+# Database: tests/db_search/tslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+NP_000042.1	m_plus	63.478	230	84	0	125	354	1640	2329	5.10e-101	283
+NP_000042.1	m_plus	42.857	105	27	1	56	127	1243	1557	5.10e-101	93.6
+NP_000042.1	m_plus	89.091	55	6	0	1	55	933	1097	8.06e-27	103
+NP_000042.1	m_minus	28.000	50	26	2	19	60	1679	1536	7.5	18.9
+# TBLASTN 2.17.0+
+# Query: q2 query local
+# Database: tests/db_search/tslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+q2	m_plus	39.130	138	73	3	48	178	7175	7576	1.09e-17	71.2
+q2	v_mut_8pct	60.000	15	6	0	91	105	1706	1750	3.2	18.9
+q2	v_slice	36.364	33	19	1	145	177	1396	1304	4.2	18.5
+q2	v_slice	44.444	18	10	0	145	162	1591	1538	6.1	18.1
+q2	v_slice	39.130	23	14	0	140	162	2179	2111	9.2	17.7
+# TBLASTN 2.17.0+
+# Query: qdb:q3 query general
+# Database: tests/db_search/tslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+qdb:q3	m_minus	59.811	739	275	12	1	729	2579	399	0.0	768
+qdb:q3	v_slice	54.138	737	294	12	1	730	13822	15921	0.0	711
+qdb:q3	m_plus	40.000	15	9	0	410	424	4932	4888	4.4	20.8
+# TBLASTN 2.17.0+
+# Query: P12345.1 query sp
+# Database: tests/db_search/tslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+P12345.1	v_slice	99.404	671	4	0	1	671	2397	385	0.0	1290
+P12345.1	v_slice	69.697	66	8	3	1	59	2891	2709	7.04e-18	79.0
+P12345.1	v_slice	31.250	32	22	0	527	558	4376	4471	4.2	20.8
+P12345.1	v_slice	33.333	27	18	0	527	553	4595	4675	6.8	20.0
+P12345.1	v_mut_8pct	31.250	32	22	0	517	548	1796	1701	0.11	25.8
+# TBLASTN 2.17.0+
+# Query: Query_1
+# Database: tests/db_search/tslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+Query_1	v_slice	100.000	188	0	0	1	188	3203	3766	1.32e-114	350
+Query_1	v_slice	27.586	29	21	0	80	108	14636	14550	2.9	19.2
+Query_1	v_slice	30.612	49	26	2	57	97	12564	12418	2.9	19.2
+Query_1	v_slice	30.000	50	26	2	57	97	12684	12535	3.0	19.2
+Query_1	m_plus	52.632	19	9	0	154	172	2211	2267	0.21	23.1
+Query_1	m_plus	40.909	22	12	1	82	102	5268	5203	3.6	18.9
+# TBLASTN 2.17.0+
+# Query: plain6 query plain
+# Database: tests/db_search/tslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 11 hits found
+plain6	v_slice	99.328	595	4	0	165	759	7709	9493	0.0	1144
+plain6	v_slice	100.000	42	0	0	128	169	7410	7535	7.51e-13	62.8
+plain6	v_slice	100.000	106	0	0	22	127	6961	7278	1.89e-09	46.6
+plain6	v_slice	100.000	10	0	0	2	11	6816	6845	1.89e-09	24.6
+plain6	v_slice	30.769	26	18	0	530	555	13841	13764	9.4	20.0
+plain6	v_mut_8pct	81.324	589	105	4	165	753	209	1960	0.0	832
+plain6	v_mut_8pct	91.667	12	1	0	159	170	3	38	0.002	32.0
+plain6	v_far_22pct	58.953	592	243	0	169	760	221	1996	0.0	571
+plain6	v_far_22pct	63.636	11	4	0	159	169	3	35	0.90	23.1
+plain6	m_plus	24.074	54	37	1	551	604	7578	7429	0.11	26.2
+plain6	m_minus	72.727	11	3	0	367	377	1491	1459	7.3	20.0
+# TBLASTN 2.17.0+
+# Query: 1ABC_A query pdb
+# Database: tests/db_search/tslice
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+1ABC_A	v_slice	100.000	212	0	0	1	212	17708	17073	8.66e-144	434
+1ABC_A	v_slice	32.143	28	19	0	21	48	13999	13916	2.0	20.0
+1ABC_A	v_mut_8pct	24.138	29	22	0	90	118	1454	1368	7.9	18.1
+# BLAST processed 7 queries

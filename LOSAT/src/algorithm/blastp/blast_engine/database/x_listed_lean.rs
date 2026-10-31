@@ -7,8 +7,8 @@
 //! for outfmt 0 (`subject_titles`) and once for the `stitle` field (`ListedTitles::stitles`). With
 //! the UniRef50 database, the first query batch (91 queries) of 100 at 32 threads lists 70,701
 //! subjects of 50.8 MB of letters: the records added 41 MiB and the two title copies 10 MiB of
-//! anonymous memory on top of the listed sequences (`ListedSubjects::encoded`, which the redo reads
-//! and the reports keep without `LOSAT_X_BPREDODBSUBJ`), all in the main heap in about 0.2 s (v4-D12
+//! anonymous memory on top of the listed sequences (`ListedSubjects::encoded`, which the redo read
+//! and the reports kept before `LOSAT_X_BPREDODBSUBJ` graduated), all in the main heap in about 0.2 s (v4-D12
 //! s3 probe, workstation).
 //!
 //! With the switch on, `ListedSubjects::x_read_titles_lean` reads the same titles, in the same

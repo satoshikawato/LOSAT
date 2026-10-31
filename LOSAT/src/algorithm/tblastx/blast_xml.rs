@@ -260,7 +260,8 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         .map(|(q_idx, query)| {
             names::query_text(
                 PROGRAM,
-                &query.local_id,
+                query.warning_id(),
+                query.believed(),
                 query.title(),
                 false,
                 &query_messages(query, run.searched[q_idx]),

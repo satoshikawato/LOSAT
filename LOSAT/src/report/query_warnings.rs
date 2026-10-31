@@ -162,8 +162,9 @@ pub fn query_warning<R: InputRecord>(
     let mut messages = messages.to_vec();
     messages.sort();
     messages.dedup();
+    let local_id = format!("Query_{}", index + 1);
     let query_id = warning_query_id(
-        format!("Query_{}", index + 1).as_bytes(),
+        query.believed_warning_id().unwrap_or(local_id.as_bytes()),
         &query.title_bytes(),
     );
     let mut warning = format!("Warning: [{program}] ").into_bytes();

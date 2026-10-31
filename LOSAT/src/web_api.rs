@@ -254,6 +254,7 @@ fn parse_blastn_args(
         taxid_filter: Default::default(),
         dbsize: None,
         show_gis: false,
+        parse_deflines: false,
         searchsp: None,
         task: "megablast".to_string(),
         template_type: None,
@@ -397,6 +398,7 @@ fn parse_tblastx_args(
         taxid_filter: Default::default(),
         dbsize: None,
         show_gis: false,
+        parse_deflines: false,
         searchsp: None,
         evalue: 10.0,
         // The frozen web ABI v1 (plan TD-1) has no -threshold, -matrix or -window_size: BLOSUM62's
@@ -417,6 +419,7 @@ fn parse_tblastx_args(
         // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
         seg: "yes".to_string(),
         soft_masking: None,
+        lcase_masking: false,
         window_size: None,
         outfmt: "6".to_string(),
         culling_limit: None,
@@ -561,6 +564,7 @@ fn parse_blastp_args(
         taxid_filter: Default::default(),
         dbsize: None,
         show_gis: false,
+        parse_deflines: false,
         searchsp: None,
         task: "blastp".to_string(),
         evalue: None,

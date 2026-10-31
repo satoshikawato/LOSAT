@@ -1,0 +1,1 @@
+- `blastn` is much faster with many queries against a database of many subjects: a subject's HSPs no longer make and visit a list per query of the batch (`LOSAT_X_BNHITGROUP=0` runs the previous path). Reports do not change.

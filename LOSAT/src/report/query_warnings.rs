@@ -312,6 +312,22 @@ mod tests {
 
     use super::*;
 
+    // Probes C31 and D01 of line DI-8: NCBI adds the empty-database message to the sorted
+    // messages of the set-up, though "Sequence ..." sorts after "Filtering ...".
+    #[test]
+    fn the_empty_database_message_comes_after_the_set_up_messages() {
+        let messages = [
+            EMPTY_DATABASE_MESSAGE.to_string(),
+            "Sequence contains no data".to_string(),
+            EMPTY_DATABASE_MESSAGE.to_string(),
+        ];
+        let query = FastaRecord::new("Query_2", b"empty", b"");
+        assert_eq!(
+            query_warning("blastp", 1, &query, &messages),
+            b"Warning: [blastp] Query_2 empty: Sequence contains no data Filtering resulted in an empty database. \n"
+        );
+    }
+
     // Query_1 + FASTA title is shortened after 35 bytes, then the invalid-Karlin
     // warning keeps NCBI's trailing space and newline.
     #[test]

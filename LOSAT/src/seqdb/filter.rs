@@ -2443,6 +2443,35 @@ mod tests {
         }
     }
 
+    // Probes T08-T12, C01-C97 of line DI-8: 0 OIDs, NCBI's statistics read OID 0 and one sequence.
+    #[test]
+    fn a_list_without_a_kept_sequence_has_the_statistics_of_oid_zero() {
+        for (name, seqtype) in [
+            ("prot_v5", SeqType::Protein),
+            ("nucl_v5", SeqType::Nucleotide),
+        ] {
+            let mut db = ids_db(name, seqtype);
+            let first = match seqtype {
+                SeqType::Protein => u64::from(db.protein_length(0).unwrap()),
+                SeqType::Nucleotide => db.nucleotide_length(0).unwrap() as u64,
+            };
+            let whole = (db.total_length(), db.num_seqs());
+            assert!(!db.filtered_empty());
+            assert_eq!(db.statistics_numbers(), whole, "{name}");
+            let mut warnings = Vec::new();
+            db.restrict(
+                &DbList::Seqids(list_of(b"UNKNOWN1\n", false)),
+                &mut warnings,
+            )
+            .unwrap();
+            assert!(db.filtered_empty(), "{name}");
+            assert_eq!((db.num_seqs(), db.total_length()), (0, 0), "{name}");
+            assert_eq!(db.statistics_numbers(), (first, 1), "{name}");
+            assert_eq!(db.printed_num_seqs(), whole.1, "{name}");
+            assert!(db.next_block(0, 1 << 20).is_none(), "{name}");
+        }
+    }
+
     #[test]
     fn a_binary_list_selects_what_its_text_list_selects() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/seqidlist");

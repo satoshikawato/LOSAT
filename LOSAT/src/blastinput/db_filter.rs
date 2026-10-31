@@ -579,6 +579,31 @@ fn string_to_int(token: &[u8]) -> Option<i32> {
 mod tests {
     use super::*;
 
+    // Probes E01-E08, F01-F04 of line DI-8 (`search_strategy.cpp:458-469`).
+    #[test]
+    fn the_archive_parameter_follows_the_list_option() {
+        use crate::report::archive::options::ParamValue;
+        let ids = BTreeSet::from([10090, 9606]);
+        let filter = |taxids: bool, negative: bool| DbFilterArgs {
+            taxids: (taxids && !negative).then(|| "1".to_string()),
+            negative_taxids: (taxids && negative).then(|| "1".to_string()),
+            seqidlist: (!taxids && !negative).then(|| "f".to_string()),
+            negative_seqidlist: (!taxids && negative).then(|| "f".to_string()),
+            ..DbFilterArgs::default()
+        };
+        let list = DbList::Taxids(TaxidList::Positive(ids.clone()));
+        let param = filter(true, false).archive_parameter(Some(&list)).unwrap();
+        assert_eq!(param.name, "TaxidList");
+        assert_eq!(param.value, ParamValue::IntegerList(vec![9606, 10090]));
+        // A missing taxonomy file: the list object of NCBI has no id.
+        let param = filter(true, false).archive_parameter(None).unwrap();
+        assert_eq!(param.value, ParamValue::IntegerList(Vec::new()));
+        let param = filter(false, true).archive_parameter(None).unwrap();
+        assert_eq!(param.name, "NegativeTaxidList");
+        assert_eq!(param.value, ParamValue::IntegerList(Vec::new()));
+        assert!(DbFilterArgs::default().archive_parameter(None).is_none());
+    }
+
     #[test]
     fn lines_end_as_ncbis_stream_reader_ends_them() {
         let lines = |text: &str| -> Vec<String> {

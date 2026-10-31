@@ -64,12 +64,14 @@
 //!   (`tabular_subject_ids`), and with `-db` every sequence's stored data as the reports read it
 //!   (`TblastxDatabase::reports_may_refuse`: the header, the stored title, the tabular id, the
 //!   parsed Seq-ids, two sequences that the reports would join, the prefetch's taxids and
-//!   taxonomy database). The refusals that depend on the arguments only (the matrix, the
-//!   `-seg` value) come in the first batch, where nothing of the stream is written yet. With one
-//!   batch (the first batch takes every query record) nothing can come after it, so the stream
-//!   does not act and nothing is checked. LOSAT's internal invariant errors and panics are not
-//!   argued; a write error of the output stops the run where it happens (at the end without the
-//!   stream).
+//!   taxonomy database; a database with parsed Seq-ids of more than
+//!   `common::database::PARSED_CHECK_SEQUENCES_MAX` sequences is not read and keeps its reports
+//!   after the loop, `Off::LargeParsed`, as blastn's does). The refusals that depend on the
+//!   arguments only (the matrix, the `-seg` value) come in the first batch, where nothing of the
+//!   stream is written yet. With one batch (the first batch takes every query record) nothing can
+//!   come after it, so the stream does not act and nothing is checked. LOSAT's internal
+//!   invariant errors and panics are not argued; a write error of the output stops the run where
+//!   it happens (at the end without the stream).
 //! - what the report path writes to standard error (the query warnings) keeps its bytes and its
 //!   place before each query's report. `LOSAT_TIMING`'s blocks are printed when the loop takes a
 //!   batch, as before, so with the stream a block comes after the warnings of the batches before
@@ -84,8 +86,8 @@
 //! reports with a field list or a delimiter and outfmt 10 and 20 (`Off::CustomTabular`: their
 //! refusals of a subject, a name of the taxonomy database or a definition line's ids, must come
 //! before the first byte, DECISIONS 5 of line CLI C2); ABI v1's outfmt 0, which refuses a
-//! reported subject's title (`check_shown_subject_titles`); the debugging output; and the
-//! refusals above.
+//! reported subject's title (`check_shown_subject_titles`); the debugging output; the refusals
+//! above; and a database with parsed Seq-ids too large for the check (`Off::LargeParsed`).
 //!
 //! Diagnostics: with `LOSAT_X_STATS`, `[X_STATS] TBXRPTSTREAM off= check_s=` before the search
 //! (`off`: `none` when the loop writes each batch's reports, else the reason, `Off::name`;
@@ -132,6 +134,9 @@ pub(super) enum Off {
     /// errors where NCBI's read error stops the run, at the first batch with a valid context,
     /// which may follow a batch without one (`run_batch_loop`).
     Unreadable,
+    /// A database with parsed Seq-ids of more sequences than the check reads
+    /// (`common::database::PARSED_CHECK_SEQUENCES_MAX`, `TblastxDatabase::parsed_beyond`).
+    LargeParsed,
     /// A database sequence whose report could be refused (`ReportRefusal`).
     Database(crate::algorithm::common::database::ReportRefusal),
 }
@@ -151,6 +156,7 @@ impl Off {
             Off::SearchSpace => "search_space",
             Off::SubjectIds => "subject_ids",
             Off::Unreadable => "unreadable",
+            Off::LargeParsed => "large_parsed",
             Off::Database(ReportRefusal::Headers) => "database_headers",
             Off::Database(ReportRefusal::Joined) => "database_joined",
             Off::Database(ReportRefusal::Taxonomy) => "database_taxonomy",
@@ -160,7 +166,8 @@ impl Off {
 
 /// Whether the loop writes each batch's reports when it takes the batch (`Ok`), or why not.
 /// With `-db` it reads every header of the database in `pool`
-/// (`TblastxDatabase::reports_may_refuse`), unless an earlier condition is off.
+/// (`TblastxDatabase::reports_may_refuse`), unless an earlier condition is off or the database
+/// has parsed Seq-ids and more sequences than the check reads (`Off::LargeParsed`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn check(
     args: &TblastxArgs,
@@ -247,20 +254,40 @@ pub(super) fn check(
             }
             Ok(())
         }
-        ShownSubjects::Database { database, .. } => {
-            let shown = crate::algorithm::common::database::ParsedShown {
-                tabular: format.is_tabular(),
-                pairwise,
-                joined: pairwise,
-                sam: false,
-            };
-            // The batches' prefetch reads the taxonomy database (`run_batch_loop`).
-            let prefetch = format.prefetches_subjects() && database.taxdb_found();
-            match database.reports_may_refuse(shown, prefetch, pool) {
-                Some(refusal) => Err(Off::Database(refusal)),
-                None => Ok(()),
-            }
-        }
+        ShownSubjects::Database { database, .. } => database_check(
+            database,
+            format,
+            crate::algorithm::common::database::PARSED_CHECK_SEQUENCES_MAX,
+            pool,
+        ),
+    }
+}
+
+/// The `-db` part of `check` for the report `format` (0, 6 or 7): a database with parsed Seq-ids
+/// of more than `max_parsed` sequences in its volumes is not read (`Off::LargeParsed`, NCBI's
+/// `nt` and `core_nt` with `common::database::PARSED_CHECK_SEQUENCES_MAX`: the reports after the
+/// loop, as blastn's), else every header is read in `pool` (`TblastxDatabase::reports_may_refuse`).
+fn database_check(
+    database: &crate::algorithm::tblastx::database::TblastxDatabase,
+    format: report::TblastxOutputFormat,
+    max_parsed: u32,
+    pool: &SearchPool<'_>,
+) -> Result<(), Off> {
+    if database.parsed_beyond(max_parsed) {
+        return Err(Off::LargeParsed);
+    }
+    let pairwise = format == report::TblastxOutputFormat::Pairwise;
+    let shown = crate::algorithm::common::database::ParsedShown {
+        tabular: format.is_tabular(),
+        pairwise,
+        joined: pairwise,
+        sam: false,
+    };
+    // The batches' prefetch reads the taxonomy database (`run_batch_loop`).
+    let prefetch = format.prefetches_subjects() && database.taxdb_found();
+    match database.reports_may_refuse(shown, prefetch, pool) {
+        Some(refusal) => Err(Off::Database(refusal)),
+        None => Ok(()),
     }
 }
 
@@ -277,5 +304,56 @@ pub(super) fn batch_input(input: &QueryInput, searched: std::ops::Range<usize>) 
         input_lengths: Vec::new(),
         skipped: Vec::new(),
         range_length: input.range_length,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::algorithm::common::database::ReportRefusal;
+
+    // Line DBID, DECISIONS 19: the `-db` part of `check` does not read a database with parsed
+    // Seq-ids of more than its bound (`Off::LargeParsed`, before any header is read: nrefuse_v5,
+    // whose headers refuse the reports, is not read above its bound), and reads it up to the
+    // bound, at one thread and in a pool, for outfmt 6 and 0.
+    #[test]
+    fn a_database_with_parsed_seqids_beyond_the_bound_keeps_its_reports_after_the_loop() {
+        let open = |name: &str| {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/ids")
+                .join(name);
+            crate::algorithm::tblastx::database::TblastxDatabase::open(
+                path.to_str().unwrap(),
+                &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
+            )
+            .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+        };
+        let formats = [
+            report::TblastxOutputFormat::Tabular,
+            report::TblastxOutputFormat::Pairwise,
+        ];
+        let answers = |pool: &SearchPool<'_>| {
+            ["nucl_v5", "nrefuse_v5"].map(|name| {
+                let database = open(name);
+                let count = database.printed_num_seqs();
+                formats.map(|format| {
+                    [count, count - 1].map(|max| database_check(&database, format, max, pool))
+                })
+            })
+        };
+        let headers = Err(Off::Database(ReportRefusal::Headers));
+        let large = Err(Off::LargeParsed);
+        let serial = answers(&SearchPool::x_serial());
+        assert_eq!(
+            serial,
+            [
+                [[Ok(()), large], [Ok(()), large]],
+                [[headers, large], [headers, large]],
+            ]
+        );
+        let parallel =
+            crate::utils::threading::with_search_pool(4, "TBLASTX", |pool| Ok(answers(pool)))
+                .unwrap();
+        assert_eq!(serial, parallel);
     }
 }

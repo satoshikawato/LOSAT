@@ -572,7 +572,18 @@ pub(crate) fn read_header(
     query: usize,
     program: &str,
 ) -> Result<ReportedHeader> {
-    match db.read_header(ordinal) {
+    reported_header(db, db.read_header(ordinal), ordinal, query, program)
+}
+
+/// The `read_header` of the header `header` of the sequence `ordinal` of `db`.
+fn reported_header(
+    db: &SeqDb,
+    header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>,
+    ordinal: u32,
+    query: usize,
+    program: &str,
+) -> Result<ReportedHeader> {
+    match header {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set, db.is_version5())
                 .map_err(|reason| parsed_refusal(ordinal, &reason, program))
@@ -710,18 +721,20 @@ pub(crate) fn check_shown_parsed_subject(
     ordinal: u32,
     program: &str,
 ) -> Result<()> {
-    let (start, title) = subject.description(protein);
     let generated = subject.heading_generates_title();
-    let heading_reads_past_end = generated
-        && subject
-            .bioseq_title(protein, false)
-            .is_ok_and(|defline| defline.reads_past_end);
-    if protein && (title.reads_past_end || heading_reads_past_end) {
-        return Err(parsed_refusal(
-            ordinal,
-            "has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0)",
-            program,
-        ));
+    if protein {
+        let (_, title) = subject.description(protein);
+        let heading_reads_past_end = generated
+            && subject
+                .bioseq_title(protein, false)
+                .is_ok_and(|defline| defline.reads_past_end);
+        if title.reads_past_end || heading_reads_past_end {
+            return Err(parsed_refusal(
+                ordinal,
+                "has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0)",
+                program,
+            ));
+        }
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:913-916
     // ```c++
@@ -733,7 +746,7 @@ pub(crate) fn check_shown_parsed_subject(
     // ```
     // The unsigned length wraps for an id longer than 65 bytes: NCBI 2.17.0 then pads the
     // line with spaces without end (probe of the ID2a review, `tests/db_search/ids/refuse.faa`).
-    if start.len() > 65 {
+    if subject.description_start().len() > 65 {
         return Err(parsed_refusal(
             ordinal,
             "has an outfmt 0 description id longer than 65 bytes (NCBI BLAST+ 2.17.0 pads the description line without end)",
@@ -801,7 +814,7 @@ pub(crate) fn check_reported_parsed(
     }
     if shown.tabular {
         subject
-            .tabular_ids(protein)
+            .check_tabular_ids(protein)
             .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program))?;
     }
     Ok(())
@@ -833,13 +846,9 @@ pub(crate) fn tabular_subject_ids(
         .enumerate()
         .map(
             |(rank, (record, &ordinal))| match parsed.get(rank).and_then(Option::as_deref) {
-                Some(subject) => {
-                    let [_, _, accession_version] =
-                        subject.tabular_ids(protein).map_err(|problem| {
-                            parsed_refusal(ordinal, &format!("has {problem}"), program)
-                        })?;
-                    Ok(std::sync::Arc::from(accession_version))
-                }
+                Some(subject) => subject
+                    .tabular_saccver(protein)
+                    .map_err(|problem| parsed_refusal(ordinal, &format!("has {problem}"), program)),
                 None => tabular_subject_id(&record.title, ordinal, protein, program)
                     .map(std::sync::Arc::from),
             },
@@ -897,8 +906,11 @@ pub(crate) fn reports_may_refuse(
             Ok(self)
         }
     }
-    let check = |mut kept: Kept, ordinal: u32| -> std::result::Result<Kept, ReportRefusal> {
-        match read_header(db, ordinal, 0, program) {
+    let check = |kept: &mut Kept,
+                 ordinal: u32,
+                 header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>|
+     -> std::result::Result<(), ReportRefusal> {
+        match reported_header(db, header, ordinal, 0, program) {
             Ok(ReportedHeader::Stored(stored)) => {
                 check_reported_title(stored.replaced_bytes, ordinal, program)
                     .map_err(|_| ReportRefusal::Headers)?;
@@ -935,8 +947,19 @@ pub(crate) fn reports_may_refuse(
             }
             Err(_) => return Err(ReportRefusal::Headers),
         }
-        Ok(kept)
+        Ok(())
     };
+    let check_range = |mut kept: Kept,
+                       range: &crate::seqdb::BlockRange|
+     -> std::result::Result<Kept, ReportRefusal> {
+        let mut refusal = None;
+        db.visit_sequence_headers(*range, |ordinal, header| {
+            refusal = check(&mut kept, ordinal, header).err();
+            refusal.is_none()
+        });
+        refusal.map_or(Ok(kept), Err)
+    };
+    let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
     let all = || -> std::result::Result<Kept, ReportRefusal> {
         #[cfg(all(
             feature = "parallel",
@@ -945,15 +968,14 @@ pub(crate) fn reports_may_refuse(
         if pool.enabled() {
             use rayon::prelude::*;
             return pool.install(|| {
-                (0..db.num_seqs())
-                    .into_par_iter()
-                    .with_min_len(4096)
-                    .try_fold(Kept::default, check)
+                ranges
+                    .par_iter()
+                    .try_fold(Kept::default, check_range)
                     .try_reduce(Kept::default, Kept::join)
             });
         }
         let _ = pool;
-        (0..db.num_seqs()).try_fold(Kept::default(), check)
+        ranges.iter().try_fold(Kept::default(), check_range)
     };
     let mut kept = match all() {
         Ok(kept) => kept,
@@ -989,18 +1011,22 @@ pub(crate) fn reports_may_refuse(
 
 /// Whether the lookup of one of `taxids` in the taxonomy database on the search path of `db`
 /// could be refused, as the batches' prefetch looks them up (`prefetch_messages`); `false`
-/// without `taxdb.bti` there. Each one is looked up once with a taxonomy handle of its own
-/// (as `taxdb_may_refuse`'s database side does), so the run's handle and messages are as they
-/// would be without this call. The prefetch's refusal of NCBI's cache
+/// without `taxdb.bti` there. One pass over the index usually finds that no lookup of any taxid
+/// can fail (`TaxDb::any_lookup_may_fail`); else each one is looked up once. Both use a taxonomy
+/// handle of their own (as `taxdb_may_refuse`'s database side does), so the run's handle and
+/// messages are as they would be without this call. The prefetch's refusal of NCBI's cache
 /// (`TaxdbRun::cache_collision`) comes at the run's first prefetch, before any report.
 fn taxids_may_refuse(db: &SeqDb, taxids: &[i32]) -> bool {
-    if !db.taxdb_found() {
+    if !db.taxdb_found() || taxids.is_empty() {
         return false;
     }
     let Some(search_path) = db.search_path() else {
         return false;
     };
     let taxdb = crate::seqdb::taxdb::LazyTaxDb::new(search_path.clone());
+    if matches!(taxdb.any_lookup_may_fail(), Ok(false)) {
+        return false;
+    }
     let mut messages = Vec::new();
     taxids
         .iter()

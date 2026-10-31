@@ -1,0 +1,122 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/sm3_comp_s.fna).
+           2 sequences; 1,580 total letters
+
+
+
+Query= comp1
+
+Length=1200
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+cs1                                                                   57.2    1e-11
+
+
+> cs1
+Length=1280
+
+ Score = 57.2 bits (62),  Expect = 1e-11
+ Identities = 31/31 (100%), Gaps = 0/31 (0%)
+ Strand=Plus/Plus
+
+Query  157  CGCGGGAACGCGGAACGCCGACCCCGGCCAG  187
+            |||||||||||||||||||||||||||||||
+Sbjct  197  CGCGGGAACGCGGAACGCCGACCCCGGCCAG  227
+
+
+ Score = 52.7 bits (57),  Expect = 5e-10
+ Identities = 30/31 (97%), Gaps = 0/31 (0%)
+ Strand=Plus/Plus
+
+Query  1014  GACCGGCCCCAGCCGCAAGGCGCAAGGGCGC  1044
+             ||| |||||||||||||||||||||||||||
+Sbjct  1054  GACTGGCCCCAGCCGCAAGGCGCAAGGGCGC  1084
+
+
+ Score = 43.7 bits (47),  Expect = 2e-07
+ Identities = 25/26 (96%), Gaps = 0/26 (0%)
+ Strand=Plus/Plus
+
+Query  1175  AAGGCGCAGCCCCCGGGGCGCCCGCC  1200
+             ||||||| ||||||||||||||||||
+Sbjct  1215  AAGGCGCTGCCCCCGGGGCGCCCGCC  1240
+
+
+ Score = 41.0 bits (44),  Expect = 9e-07
+ Identities = 22/22 (100%), Gaps = 0/22 (0%)
+ Strand=Plus/Plus
+
+Query  5   CCGCGGGGCCCCCGACGCGGAA  26
+           ||||||||||||||||||||||
+Sbjct  45  CCGCGGGGCCCCCGACGCGGAA  66
+
+
+ Score = 30.1 bits (32),  Expect = 0.002
+ Identities = 16/16 (100%), Gaps = 0/16 (0%)
+ Strand=Plus/Plus
+
+Query  313  GGGAAAGGCCGACCAA  328
+            ||||||||||||||||
+Sbjct  353  GGGAAAGGCCGACCAA  368
+
+
+ Score = 30.1 bits (32),  Expect = 0.002
+ Identities = 16/16 (100%), Gaps = 0/16 (0%)
+ Strand=Plus/Plus
+
+Query  873  AACCAGCCGGAAAGGG  888
+            ||||||||||||||||
+Sbjct  913  AACCAGCCGGAAAGGG  928
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 1836750
+
+
+Query= comp2
+
+Length=700
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 1064672
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/sm3_comp_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 1,580
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

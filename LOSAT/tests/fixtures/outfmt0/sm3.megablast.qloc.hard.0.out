@@ -1,0 +1,74 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/mask_subject.fasta).
+           1 sequences; 500 total letters
+
+
+
+Query= q_mask query with lowercase runs and a CA-repeat block
+
+Length=400
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+subj_mask subject with a CA-repeat low-complexity block               147     5e-40
+
+
+> subj_mask subject with a CA-repeat low-complexity block
+Length=500
+
+ Score = 147 bits (79),  Expect = 5e-40
+ Identities = 81/82 (99%), Gaps = 0/82 (0%)
+ Strand=Plus/Plus
+
+Query  219  TATGATACCGTGATGACATGTCCGTGCCAGTCTAGATTACCCGTCATTATTGTTACAGAG  278
+            |||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||
+Sbjct  269  TATGATACCGTGATGACATGTCCGTGCCAGTCTAGATTACCCCTCATTATTGTTACAGAG  328
+
+Query  279  GATGGGTGGGTAGTGCCCTGTT  300
+            ||||||||||||||||||||||
+Sbjct  329  GATGGGTGGGTAGTGCCCTGTT  350
+
+
+ Score = 128 bits (69),  Expect = 2e-34
+ Identities = 69/69 (100%), Gaps = 0/69 (0%)
+ Strand=Plus/Plus
+
+Query  100  TGGGACTGGTCCGGATGAGTGTGGCAGTGTGAATATTGTAGTTTACAATATGCTGTTATA  159
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  150  TGGGACTGGTCCGGATGAGTGTGGCAGTGTGAATATTGTAGTTTACAATATGCTGTTATA  209
+
+Query  160  TCGTGCTAG  168
+            |||||||||
+Sbjct  210  TCGTGCTAG  218
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 93590
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/mask_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 500
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

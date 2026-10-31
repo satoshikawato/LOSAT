@@ -467,6 +467,22 @@ fn run_inner(
     // The formatting handler raises NCBI's errors for the formats of other programs (SAM,
     // AIRR rearrangement, FASTA) before its warning. The deferred errors of `resolve` are
     // those of the composition-based statistics handler and of `Validate`, which come later.
+    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
+    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the formatting handler, so its warning
+    // before theirs (probe F04 of line DI-8). NCBI's application layer has read its environment
+    // and registry files by then; LOSAT reads them for `-db` (the registry's `BLASTDB`), as its
+    // other programs with `-db`, and leaves `-subject`'s path as it was.
+    let db_settings = match args.database_name() {
+        Some(_) => Some(
+            crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
+                .map_err(anyhow::Error::msg)?,
+        ),
+        None => None,
+    };
+    let list = match &db_settings {
+        Some(settings) => args.db_filter.resolve(settings, &mut stderr)?,
+        None => None,
+    };
     app::formatting_handler_check(&choice, Program::Blastx)?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
@@ -495,24 +511,15 @@ fn run_inner(
     // ```
     // The database of `-db` opens after the arguments (the query and output files) and the
     // options are processed and before the query is read, as NCBI's `InitializeSubject`.
-    // NCBI's application layer has read its environment and registry files by then; LOSAT
-    // reads them for `-db` (the registry's `BLASTDB`), as its other programs with `-db`, and
-    // leaves `-subject`'s path as it was.
-    let database = match args.database_name() {
-        Some(name) => {
-            let settings =
-                crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
-                    .map_err(anyhow::Error::msg)?;
-            // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the
-            // database arguments reads it (`s_GetTaxIDList`) before the database opens.
-            let list = args.db_filter.resolve(&settings, &mut stderr)?;
+    let database = match (args.database_name(), &db_settings) {
+        (Some(name), Some(settings)) => {
             let database =
-                BlastxDatabase::open_restricted(name, &settings, list.as_ref(), &mut stderr)?
+                BlastxDatabase::open_restricted(name, settings, list.as_ref(), &mut stderr)?
                     .showing_gis(args.show_gis);
             crate::algorithm::common::database::note_archive_database_filter(
                 archive.as_ref(),
                 &args.db_filter,
-                list.as_ref(),
+                database.list_taxids(),
                 database.filtered_empty(),
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
@@ -520,7 +527,7 @@ fn run_inner(
             )?;
             Some(database)
         }
-        None => None,
+        _ => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
     // ```c++

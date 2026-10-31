@@ -57,6 +57,8 @@ pub struct TaskConfig {
     /// The ungapped X-dropoff in bits (`-xdrop_ungap`, else 20; 0 for megablast, whose raw
     /// X-drop is then the word cutoff of the context, blast_parameters.c:378-381).
     pub x_drop_ungapped: f64,
+    /// The raw hit-saving cutoff that replaces the e-value's (`-min_raw_gapped_score` above 0).
+    pub min_raw_gapped_score: Option<i32>,
     /// The off-diagonal range of the second hit (`-off_diagonal_range`, else 0).
     pub scan_range: usize,
     pub min_diag_separation: i32, // NCBI reference: blast_nucl_options.cpp:239,259 (blastn: 50, megablast: 6)
@@ -593,6 +595,15 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     // ```
     let x_drop_ungapped = args.xdrop_ungap.unwrap_or(defaults.x_drop_ungapped);
 
+    // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:876-877
+    // ```c
+    //    if (options->cutoff_score > 0) {
+    //       Int4 new_cutoff = options->cutoff_score * (Int4) sbp->scale_factor;
+    // ```
+    // 0 and below are the options' unset value (the handles' `SetCutoffScore(0)`,
+    // blast_nucl_options.cpp:243,263).
+    let min_raw_gapped_score = args.min_raw_gapped_score.filter(|&score| score > 0);
+
     let scan_step = calculate_initial_scan_step(effective_word_size, args.scan_step);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:163-168
@@ -651,6 +662,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         x_drop_gapped,
         x_drop_final,
         x_drop_ungapped,
+        min_raw_gapped_score,
         scan_range,
         min_diag_separation,
         window_size: determine_window_size(args),
@@ -1506,6 +1518,30 @@ mod tests {
     // ...
     //     SetGapExtnAlgorithm(eDynProgScoreOnly);
     // ```
+    // DI-6b: a value above 0 replaces the cutoff of the e-value; 0 and below are unset
+    // (blast_parameters.c:876), in every task.
+    #[test]
+    fn min_raw_gapped_score_above_zero_is_kept() {
+        for task in ["megablast", "dc-megablast", "blastn", "blastn-short"] {
+            let config = configure_task(&blastn_args(&["-task", task]));
+            assert_eq!(config.min_raw_gapped_score, None, "{task}");
+            for (value, expected) in [
+                ("15", Some(15)),
+                ("2147483647", Some(i32::MAX)),
+                ("0", None),
+                ("-5", None),
+            ] {
+                let config = configure_task(&blastn_args(&[
+                    "-task",
+                    task,
+                    "-min_raw_gapped_score",
+                    value,
+                ]));
+                assert_eq!(config.min_raw_gapped_score, expected, "{task} {value}");
+            }
+        }
+    }
+
     // DI-6: the given options replace the task's values; the defaults stay the handles'
     // (api/blast_nucl_options.cpp:163-193, blast_args.cpp:276-286,487-489,518-522,681-685).
     #[test]

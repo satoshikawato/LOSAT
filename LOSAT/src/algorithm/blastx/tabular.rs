@@ -324,7 +324,11 @@ pub(super) fn write_blastx_tabular(
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            stderr.write_all(&query_warning(query, batch.search_skipped))?;
+            stderr.write_all(&query_warning(
+                query,
+                batch.search_skipped,
+                options.filtered_empty,
+            ))?;
             // NCBI makes a formatter for each query's report, and it warns when the field list
             // asks for a plural name of the taxonomy database that it cannot find
             // (tabular.cpp:139-158, `x_CheckTaxDB`).
@@ -356,7 +360,7 @@ pub(super) fn write_blastx_tabular(
                 let mut buf: Vec<u8> = Vec::new();
                 table.query_header(
                     &mut buf,
-                    query.title.as_bytes(),
+                    query.query_line().as_bytes(),
                     &database,
                     (!batch.search_skipped).then_some(count),
                 )?;
@@ -369,10 +373,11 @@ pub(super) fn write_blastx_tabular(
                 // ```
                 // BLASTX has no `-query_loc`: the searched query is the record.
                 let searched_length = query.sequence.len();
-                let tabular_query = TabularQuery {
-                    id: local_id(query).as_bytes(),
-                    length: searched_length,
-                };
+                let tabular_query = TabularQuery::of_ids(
+                    query.believed(),
+                    local_id(query).as_bytes(),
+                    searched_length,
+                );
                 for list in lists {
                     let shown_hsps = || {
                         list.hsps

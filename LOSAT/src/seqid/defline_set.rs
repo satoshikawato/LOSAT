@@ -1027,6 +1027,45 @@ pub fn match_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:1502
+// ```c++
+//     TSeq_id2TSE_Set::const_iterator tse_set = m_TSE_seq.find(idh);
+// ```
+// The handle of a text Seq-id is its accession and version in any alternative, in any case (probe
+// of the DI-7 review: `NM_1.1` and `NM_1.2`, `NM_1` and `NM_1.1`, `pdb|1ABC|A` and `|B` are two
+// sequences to NCBI's scope; `gb|X.1|` and `emb|X.1|`, `abc` and `ABC` are one).
+/// Adds to `keys` the keys of `id` as NCBI's scope finds a sequence by it: two ids that the scope
+/// finds as one share a key. Other than `match_keys`, a version and a PDB chain tell ids apart.
+pub fn scope_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
+    use std::hash::{Hash, Hasher};
+    let mut key = |parts: &[&[u8]]| {
+        let mut hasher = std::hash::DefaultHasher::new();
+        parts.hash(&mut hasher);
+        keys.push(hasher.finish());
+    };
+    if let ParsedSeqId::Pdb(pdb) = id {
+        key(&[
+            b"pdb",
+            &pdb.mol.to_ascii_uppercase(),
+            &pdb.chain.unwrap_or(32).to_le_bytes(),
+            pdb.chain_id.as_deref().unwrap_or_default(),
+        ]);
+    } else if let Some(text) = id.textseq() {
+        let version = text
+            .version
+            .map_or(Vec::new(), |v| v.to_le_bytes().to_vec());
+        match (&text.accession, &text.name) {
+            (Some(accession), _) => {
+                key(&[b"accession", &accession.to_ascii_uppercase(), &version]);
+            }
+            (None, Some(name)) => key(&[b"name", &name.to_ascii_uppercase()]),
+            (None, None) => {}
+        }
+    } else {
+        match_keys(id, keys);
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Patent_seq_id.cpp:53-56
 // ```c++
 // bool CPatent_seq_id::Match(const CPatent_seq_id& psip2) const

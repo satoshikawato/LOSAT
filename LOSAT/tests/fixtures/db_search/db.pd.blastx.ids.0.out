@@ -1,0 +1,949 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: prot_v5 (parsed Seq-ids)
+           51 sequences; 4,677 total letters
+
+
+
+Query= NM_000142.1 q one
+
+Length=420
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+XP_000001.1 alpha protein [Homo sapiens]                              255     1e-92
+CAA90002.1 second defline with a gi                                   251     3e-91
+NP_000002.1 gi plus ref protein                                       251     3e-91
+XP_910001.1 long title number 01 with many words so that it is lo...  247     2e-89
+Q00003 swissprot without version                                      247     2e-89
+CAA00005.1 emb protein                                                241     3e-87
+XP_920001.1 has a title                                               240     8e-87
+A0A000 trembl entry                                                   240     8e-87
+1ABC_A Chain A, test structure                                        237     1e-85
+BAA00006.1 dbj protein                                                233     8e-84
+pir||S00007 pir protein                                               223     4e-80
+prf||0008123A prf protein                                             217     2e-77
+myprot9 local id protein                                              213     4e-76
+mydb:prot10 general id protein                                        209     2e-74
+XP_000011.2 bare refseq accession                                     204     1e-72
+P00012 bare uniprot-like accession                                    201     4e-71
+myprot_13 bare non-accession word                                     195     5e-69
+AAA00017.1 gb with a locus name                                       195     5e-69
+AAA00018.1 unnamed protein product                                    186     2e-65
+DAA00016.1 third-party protein                                        184     2e-64
+P00019.3 with taxid                                                   173     3e-60
+unnamed protein product                                               121     1e-40
+5ABC_D Chain D                                                        121     1e-40
+WP_100014.1 unnamed protein product                                   121     1e-40
+NC_100013.1                                                           121     1e-40
+BK100012.1 tpe titled                                                 121     1e-40
+4ABC no chain four                                                    121     1e-40
+unnamed protein product                                               121     1e-40
+3ABC_C Chain C                                                        121     1e-40
+DAA10008.1 tpa with subject                                           121     1e-40
+subject seven title                                                   121     1e-40
+NP_100006.1 unnamed protein product                                   121     1e-40
+US7654321_3 Sequence 3 from Patent US 7654321                         121     1e-40
+2XYY unnamed protein product                                          121     1e-40
+2XYZ_B Chain B                                                        121     1e-40
+DAA10002.1 unnamed protein product                                    121     1e-40
+DAA10001.1 tpa titled protein                                         121     1e-40
+P11111.1 titled first                                                 121     1e-40
+unnamed protein product                                               121     1e-40
+subject seven                                                         121     1e-40
+EP0238993_7 pre-grant patent                                          121     1e-40
+prf|ABC|DEF prf two fields                                            121     1e-40
+EP0123456A1_7 patent with letters                                     121     1e-40
+USRE33188_1 patent reissue                                            121     1e-40
+ti:123 trace id                                                       121     1e-40
+long1 long title word long title word long title word long title ...  121     1e-40
+AAA00100.1 big gi                                                     121     1e-40
+123 gibbmt                                                            121     1e-40
+GPP123 genome pipeline                                                121     1e-40
+BK000013.1 third party ddbj                                           121     1e-40
+BK000012.1 third party embl                                           121     1e-40
+
+
+>XP_000001.1 alpha protein [Homo sapiens]
+ P99999.2 alpha-like protein
+ AAA00001.1 hypothetical protein, partial
+Length=137
+
+ Score = 255 bits (652),  Expect = 1e-92, Method: Compositional matrix adjust.
+ Identities = 125/140 (89%), Positives = 128/140 (91%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WICWIPKE  TPGWW TDTLHM+EMGLWMHKYPKCMCVMVR TDQSLRHW+I  DAN
+Sbjct  61   ---WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDAN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI H+MVGHGRTASEG
+Sbjct  118  FEKLKILHHMVGHGRTASEG  137
+
+
+>XP_900001.1 first defline without a gi
+ CAA90002.1 second defline with a gi
+ P90003.1 third defline swissprot
+Length=137
+
+ Score = 251 bits (642),  Expect = 3e-91, Method: Compositional matrix adjust.
+ Identities = 123/140 (88%), Positives = 126/140 (90%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WICWIPKE  TPGWW TDT HM+E GLWMHKYPKCMCVMVR TDQSLRHW+I  DAN
+Sbjct  61   ---WICWIPKEQQTPGWWKTDTQHMAEAGLWMHKYPKCMCVMVRYTDQSLRHWEINTDAN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI H+MVGHGRTASEG
+Sbjct  118  FEKLKILHHMVGHGRTASEG  137
+
+
+>NP_000002.1 gi plus ref protein
+Length=137
+
+ Score = 251 bits (642),  Expect = 3e-91, Method: Compositional matrix adjust.
+ Identities = 123/140 (88%), Positives = 126/140 (90%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WICWIPKE  TPGWW TDT HM+E GLWMHKYPKCMCVMVR TDQSLRHW+I  DAN
+Sbjct  61   ---WICWIPKEQQTPGWWKTDTQHMAEAGLWMHKYPKCMCVMVRYTDQSLRHWEINTDAN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI H+MVGHGRTASEG
+Sbjct  118  FEKLKILHHMVGHGRTASEG  137
+
+
+>XP_910001.1 long title number 01 with many words so that it is longer than 
+sixty characters in total
+ XP_910002.1 long title number 02 with many words so that it is longer than 
+sixty characters in total
+ XP_910003.1 long title number 03 with many words so that it is longer than 
+sixty characters in total
+ XP_910004.1 long title number 04 with many words so that it is longer than 
+sixty characters in total
+ XP_910005.1 long title number 05 with many words so that it is longer than 
+sixty characters in total
+ XP_910006.1 long title number 06 with many words so that it is longer than 
+sixty characters in total
+ XP_910007.1 long title number 07 with many words so that it is longer than 
+sixty characters in total
+ XP_910008.1 long title number 08 with many words so that it is longer than 
+sixty characters in total
+ XP_910009.1 long title number 09 with many words so that it is longer than 
+sixty characters in total
+ XP_910010.1 long title number 10 with many words so that it is longer than 
+sixty characters in total
+ XP_910011.1 long title number 11 with many words so that it is longer than 
+sixty characters in total
+ XP_910012.1 long title number 12 with many words so that it is longer than 
+sixty characters in total
+Length=137
+
+ Score = 247 bits (630),  Expect = 2e-89, Method: Compositional matrix adjust.
+ Identities = 121/140 (86%), Positives = 124/140 (89%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLM YEFSSDI P
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMIYEFSSDIQP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               W CWIPKE  T GWW TDTLHM+EMGLWMHKYPKCMCVMVR TDQSLRHW+I  DAN
+Sbjct  61   ---WACWIPKEQQTQGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDAN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI H+MVGHGRTASEG
+Sbjct  118  FEKLKILHHMVGHGRTASEG  137
+
+
+>Q00003 swissprot without version
+Length=137
+
+ Score = 247 bits (630),  Expect = 2e-89, Method: Compositional matrix adjust.
+ Identities = 121/140 (86%), Positives = 124/140 (89%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLM YEFSSDI P
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMIYEFSSDIQP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               W CWIPKE  T GWW TDTLHM+EMGLWMHKYPKCMCVMVR TDQSLRHW+I  DAN
+Sbjct  61   ---WACWIPKEQQTQGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDAN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI H+MVGHGRTASEG
+Sbjct  118  FEKLKILHHMVGHGRTASEG  137
+
+
+>CAA00005.1 emb protein
+Length=137
+
+ Score = 241 bits (616),  Expect = 3e-87, Method: Compositional matrix adjust.
+ Identities = 119/140 (85%), Positives = 123/140 (88%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMD PK+RDGPMAVMKGWENYCWPANMS KVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDFPKMRDGPMAVMKGWENYCWPANMSTKVLMKYEFSSDIHP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WICWIPKE  TPGWW TDTLH  EMGLWMHKYPKCMCVMVR TDQ+LRHW+I  DAN
+Sbjct  61   ---WICWIPKEQQTPGWWKTDTLHPQEMGLWMHKYPKCMCVMVRYTDQALRHWEINRDAN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEK KI H+MVGHGRTASEG
+Sbjct  118  FEKYKILHHMVGHGRTASEG  137
+
+
+>XP_920001.1 has a title
+ CAA92002.1 has a title
+ BAA92003.1 third has a title
+Length=137
+
+ Score = 240 bits (613),  Expect = 8e-87, Method: Compositional matrix adjust.
+ Identities = 119/140 (85%), Positives = 123/140 (88%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA F V RKVMDDPKIR GPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFDVRRKVMDDPKIRSGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WI WIPKE  TPGWW TDTLHM+EMGLWMH YPKCMC MVR TDQSLRHW+I  DAN
+Sbjct  61   ---WIEWIPKEQQTPGWWKTDTLHMAEMGLWMHCYPKCMCYMVRYTDQSLRHWEINTDAN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI H++VGHGRTASEG
+Sbjct  118  FEKLKILHHIVGHGRTASEG  137
+
+
+>A0A000 trembl entry
+Length=137
+
+ Score = 240 bits (613),  Expect = 8e-87, Method: Compositional matrix adjust.
+ Identities = 119/140 (85%), Positives = 123/140 (88%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA F V RKVMDDPKIR GPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFDVRRKVMDDPKIRSGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WI WIPKE  TPGWW TDTLHM+EMGLWMH YPKCMC MVR TDQSLRHW+I  DAN
+Sbjct  61   ---WIEWIPKEQQTPGWWKTDTLHMAEMGLWMHCYPKCMCYMVRYTDQSLRHWEINTDAN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI H++VGHGRTASEG
+Sbjct  118  FEKLKILHHIVGHGRTASEG  137
+
+
+>1ABC_A Chain A, test structure
+Length=137
+
+ Score = 237 bits (605),  Expect = 1e-85, Method: Compositional matrix adjust.
+ Identities = 118/140 (84%), Positives = 123/140 (88%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPK+  GP AV KGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKMCCGPFAVPKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WICWIPKE  TPGWW TDTLHM+EMGLWMHKYPKCMCVMVR TD+S RHW+I  DAN
+Sbjct  61   ---WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDKSKRHWEIGTDAN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI H+MVGHGRTASEG
+Sbjct  118  FEKLKILHHMVGHGRTASEG  137
+
+
+>BAA00006.1 dbj protein
+Length=137
+
+ Score = 233 bits (594),  Expect = 8e-84, Method: Compositional matrix adjust.
+ Identities = 116/140 (83%), Positives = 120/140 (86%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMA+MKGWENYCWPA MSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAMMKGWENYCWPAMMSWKVLMKYEFSSDIHP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WICW PKE  TPGWW T TLH +EMGLWMHKY  CMCVM R TDQ LRHW+I  DAN
+Sbjct  61   ---WICWHPKEQQTPGWWKTKTLHKAEMGLWMHKYAACMCVMKRYTDQMLRHWEIDPDAN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI H+MVGHGRTASEG
+Sbjct  118  FEKLKILHHMVGHGRTASEG  137
+
+
+>pir||S00007 pir protein
+Length=137
+
+ Score = 223 bits (569),  Expect = 4e-80, Method: Compositional matrix adjust.
+ Identities = 112/140 (80%), Positives = 117/140 (84%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV  KVMD PKIRDGPM VMKGWE +CWPANM WKVLMKYEFSSD HP
+Sbjct  1    MWMEHSVLKAVFAVRVKVMDVPKIRDGPMGVMKGWELHCWPANMKWKVLMKYEFSSDDHP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WICWIPKE  TPGWW TDTL M+EMGL MHKYPKC+CVMV   DQSLRHW+I   AN
+Sbjct  61   ---WICWIPKEQQTPGWWKTDTLSMAEMGLVMHKYPKCICVMVGYVDQSLRHWEINTAAN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI H+MVGHGRTASEG
+Sbjct  118  FEKLKILHHMVGHGRTASEG  137
+
+
+>prf||0008123A prf protein
+Length=137
+
+ Score = 217 bits (552),  Expect = 2e-77, Method: Compositional matrix adjust.
+ Identities = 110/140 (79%), Positives = 115/140 (82%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RK MDDPKIRDGPMAV+ GWENYCWPANMS K L KYEFSS  H 
+Sbjct  1    MWMEHSVLKAVFAVRRKFMDDPKIRDGPMAVIWGWENYCWPANMSRKFLRKYEFSSSSH-  59
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+              +WICWIPKE  T GWW TDTLHM+EMGLWMHK PKCMCVMVR TDQSLR W+I  DA 
+Sbjct  60   --IWICWIPKEQQTVGWWPTDTLHMAEMGLWMHKDPKCMCVMVRYTDQSLRLWEINTDAT  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKL   H+MVGHGRTASEG
+Sbjct  118  FEKLINLHHMVGHGRTASEG  137
+
+
+>myprot9 local id protein
+Length=137
+
+ Score = 213 bits (543),  Expect = 4e-76, Method: Compositional matrix adjust.
+ Identities = 109/140 (78%), Positives = 115/140 (82%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV  KV+DDPKI  GPMAVMKGWEN CWPANMSWKVLM  EFSSDI+P
+Sbjct  1    MWMEHSVLKAVFAVRVKVIDDPKIELGPMAVMKGWENNCWPANMSWKVLMYNEFSSDINP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WICWIPKE  TPGWW  DTLHM+EM LWMHKYPKC CVMVR TDQSL  ++   D N
+Sbjct  61   ---WICWIPKEQQTPGWWKLDTLHMAEMWLWMHKYPKCKCVMVRYTDQSLHRFEWNTDYN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI H+MVGHGRTASEG
+Sbjct  118  FEKLKILHHMVGHGRTASEG  137
+
+
+>mydb:prot10 general id protein
+Length=137
+
+ Score = 209 bits (532),  Expect = 2e-74, Method: Compositional matrix adjust.
+ Identities = 108/140 (77%), Positives = 113/140 (81%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA   V RKV DDPKIR GPMAVM G ENYCWPA MSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVNHVRRKVDDDPKIRLGPMAVMCGSENYCWPACMSWKVLMKYEFSSDIHP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WI W PKE  TPGWW TDT  M+EMGL M KYPKCMCVMVR TD+SLRHW+   DA 
+Sbjct  61   ---WITWKPKEQQTPGWWKTDTGQMAEMGLIMQKYPKCMCVMVRYTDKSLRHWEGNTDAC  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI H++VGHGRTASEG
+Sbjct  118  FEKLKILHHLVGHGRTASEG  137
+
+
+>XP_000011.2 bare refseq accession
+Length=137
+
+ Score = 204 bits (520),  Expect = 1e-72, Method: Compositional matrix adjust.
+ Identities = 105/140 (75%), Positives = 111/140 (79%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMD PKI DGPM VMKGWENYCW AN+SWK LMKYEFS DIH 
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDSPKIFDGPMKVMKGWENYCWQANLSWKELMKYEFSQDIH-  59
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WICW  KE  T GWW TDT+H +EMGL M+K P+CM VMVR TDQSL HW+I  DA 
+Sbjct  60   --WWICWNIKEQQTIGWWKTDTIHRAEMGLDMYKRPECMDVMVRYTDQSLFHWEINTDAM  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI H MVGHGRTASEG
+Sbjct  118  FEKLKILHNMVGHGRTASEG  137
+
+
+>P00012 bare uniprot-like accession
+Length=137
+
+ Score = 201 bits (510),  Expect = 4e-71, Method: Compositional matrix adjust.
+ Identities = 106/140 (76%), Positives = 111/140 (79%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FA  RKVM D KI DG MAVMKGWENY WPANMSWKVLMK EFSSD HP
+Sbjct  1    MWMEHSVLKAVFAQRRKVMWDHKIIDGKMAVMKGWENYVWPANMSWKVLMKREFSSDEHP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WICWI KE  TPG   TDTL+++E  LWMHK PKCMCVMVR  DQSLRHW+I  DAN
+Sbjct  61   ---WICWIIKEQQTPGHPYTDTLYVAENSLWMHKQPKCMCVMVRYLDQSLRHWEIKTDAN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            F KLKI H+ VGHGRTASEG
+Sbjct  118  FLKLKILHWKVGHGRTASEG  137
+
+
+>myprot_13 bare non-accession word
+Length=137
+
+ Score = 195 bits (496),  Expect = 5e-69, Method: Compositional matrix adjust.
+ Identities = 104/140 (74%), Positives = 109/140 (78%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA F V  KVMD P IR GP  +MKGWENYCWPANMS+KVLMKY FSSDI P
+Sbjct  1    MWMEHSVLKAWFQVRMKVMDLPGIRWGPKYMMKGWENYCWPANMSYKVLMKYLFSSDIPP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+                IC IPKE  TP WW TDT  M+EM LWMHKY KC CVMVR TDQSLR W+I  DAN
+Sbjct  61   R---ICDIPKEQQTPEWWKTDTPMMAEMSLWMHKYGKCNCVMVRYTDQSLRDWEIATDAN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI H+ VGHGRTASEG
+Sbjct  118  FEKLKILHHGVGHGRTASEG  137
+
+
+>AAA00017.1 gb with a locus name
+Length=137
+
+ Score = 195 bits (496),  Expect = 5e-69, Method: Compositional matrix adjust.
+ Identities = 102/140 (73%), Positives = 107/140 (76%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FA  RKV DD  IRDGPMAVMK +E+ CWPA MSWK  MKY FSSDIHP
+Sbjct  1    MWMEHSVLKAVFATKRKVSDDEDIRDGPMAVMKLFEHRCWPARMSWKQSMKYCFSSDIHP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               W CWIP E  T GW    TLHM+ MG WMHKYPKCMCVMVR TDQ+L HW+I  DAN
+Sbjct  61   ---WHCWIPPEQQTDGWLKYHTLHMAAMGCWMHKYPKCMCVMVRFTDQTLYHWEINTDAN  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEKLKI   MVGHGRTASEG
+Sbjct  118  FEKLKIKPNMVGHGRTASEG  137
+
+
+>AAA00018.1 unnamed protein product
+ CAA00019.1 second defline
+ XP_000020.1 third defline
+Length=137
+
+ Score = 186 bits (473),  Expect = 2e-65, Method: Compositional matrix adjust.
+ Identities = 96/140 (69%), Positives = 101/140 (72%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA  A  RKV D+PKIRD P+ V K WEN C PANMSWKVLM  EFS DIHP
+Sbjct  1    MWMEHSVLKAVPAKRRKVPDEPKIRDVPIVVEKNWENTCQPANMSWKVLMSSEFSRDIHP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WICWIPKE   PG W TDT HM+EMG W HKYPKCM VMV    +SLRHW+I   A 
+Sbjct  61   ---WICWIPKEQQQPGHWKTDTAHMAEMGQWFHKYPKCMMVMVSYVARSLRHWEINTQAY  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEK K    MVGHGRTASEG
+Sbjct  118  FEKKKGLETMVGHGRTASEG  137
+
+
+>DAA00016.1 third-party protein
+Length=137
+
+ Score = 184 bits (466),  Expect = 2e-64, Method: Compositional matrix adjust.
+ Identities = 102/141 (72%), Positives = 107/141 (76%), Gaps = 5/141 (4%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENY-CWPANMSWKVLMKYEFSSDIH  177
+            MWMEHSVLKA FAV  KVMD  KIRDGPMAV KGWENY CW ANM WK+LMKYEFSSD H
+Sbjct  1    MWMEHSVLKACFAVRFKVMDCMKIRDGPMAVWKGWENYGCW-ANMKWKILMKYEFSSDSH  59
+
+Query  178  PCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDA  357
+                WICWI     TP  W T TLH +EMGLW+ KYPK  C MVR  DQS RHW+I  DA
+Sbjct  60   T---WICWIKWWQQTPFVWKTVTLHCAEMGLWIAKYPKHWCCMVRYWDQSNRHWEINTDA  116
+
+Query  358  NFEKLKIFHYMVGHGRTASEG  420
+            NFEKLK+ HYMVGHGRTASEG
+Sbjct  117  NFEKLKLLHYMVGHGRTASEG  137
+
+
+>P00019.3 with taxid
+Length=137
+
+ Score = 173 bits (438),  Expect = 3e-60, Method: Compositional matrix adjust.
+ Identities = 94/140 (67%), Positives = 103/140 (74%), Gaps = 3/140 (2%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FA  RKVMD   IRD PMAVM GWENYC  +N  +KV MKYEFSS I+P
+Sbjct  1    MWMEHSVLKAEFAARRKVMDWDMIRDMPMAVMPGWENYCKCSNYHYKVQMKYEFSSFIYP  60
+
+Query  181  CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  360
+               WI   PKE   PGW+ TDT HM  +GLWM KYPKC+ VMVR T+QSLRHW+I     
+Sbjct  61   ---WIDANPKEQQWPGWFTTDTDHMYGIGLWMSKYPKCVSVMVRYTEQSLRHWEINTVPL  117
+
+Query  361  FEKLKIFHYMVGHGRTASEG  420
+            FEK KI H+MVGHGRTASEG
+Sbjct  118  FEKKKILHHMVGHGRTASEG  137
+
+
+>Subject_36 unnamed protein product
+ DAA10016.1 tpa second
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>5ABC_D Chain D
+ XP_100015.1 second
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>WP_100014.1 unnamed protein product
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>NC_100013.1 
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>BK100012.1 tpe titled
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>4ABC no chain four
+ 4ABC_AA two chain four
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>Subject_30 unnamed protein product
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>3ABC_C Chain C
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>DAA10008.1 tpa with subject
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>Subject_27 subject seven title
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>NP_100006.1 unnamed protein product
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>US7654321_3 Sequence 3 from Patent US 7654321
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>2XYY unnamed protein product
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>2XYZ_B Chain B
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>DAA10002.1 TPA: unnamed protein product
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>DAA10001.1 tpa titled protein
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>P11111.1 titled first
+ Subject_9 second line
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>Subject_8 unnamed protein product
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>Subject_7 subject seven
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>EP0238993_7 pre-grant patent
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>prf|ABC|DEF prf two fields
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>EP0123456A1_7 patent with letters
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>USRE33188_1 patent reissue
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>ti:123 trace id
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>long1 long title word long title word long title word long title word 
+long title word long title word long title word long title 
+word long title word long title word long title word long 
+title word long title word long title word long title word long 
+title word long title word long title word long title word 
+long title word 
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>AAA00100.1 big gi
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>123 gibbmt
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>GPP123 genome pipeline
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>BK000013.1 third party ddbj
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+>BK000012.1 third party embl
+Length=60
+
+ Score = 121 bits (303),  Expect = 1e-40, Method: Compositional matrix adjust.
+ Identities = 58/60 (97%), Positives = 58/60 (97%), Gaps = 0/60 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  180
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 295464
+
+
+Query= q2 q two
+
+Length=135
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 117360
+
+
+Query= plain3 q three
+
+Length=80
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+  Database: prot_v5 (parsed Seq-ids)
+    Posted date:  Oct 26, 2026  9:07 PM
+  Number of letters in database: 4,677
+  Number of sequences in database:  51
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

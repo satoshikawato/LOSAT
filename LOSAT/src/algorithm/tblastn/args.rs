@@ -68,7 +68,7 @@ pub struct TblastnArgs {
     /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
     /// `-no_taxid_expansion` (line DI-8).
     #[command(flatten)]
-    pub taxid_filter: crate::blastinput::db_filter::TaxidFilterArgs,
+    pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // ```c++
     //     // DB size
@@ -93,6 +93,17 @@ pub struct TblastnArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
+    // ```c++
+    //     arg_desc.AddDefaultKey(kArgParseDeflines, "TF", "Should the query and "
+    // ```
+    // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
+    #[arg(
+        long = "parse_deflines",
+        default_value_t = false,
+        help = "Should the query and subject defline(s) be parsed?"
+    )]
+    pub parse_deflines: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
     // ```c++
     //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
@@ -180,7 +191,7 @@ pub struct TblastnArgs {
     #[arg(
         long = "subject_loc",
         value_name = "RANGE",
-        conflicts_with_all = crate::blastinput::db_filter::TAXID_OPTIONS,
+        conflicts_with_all = crate::blastinput::db_filter::DB_FILTER_OPTIONS,
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,

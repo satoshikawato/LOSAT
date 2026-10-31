@@ -12,7 +12,8 @@ mod run_local_support;
 use std::process::Command;
 
 use run_local_support::{
-    assert_observer_ranges, fixture_sequence, reader_records, run_formats, Run, TempFasta,
+    assert_observer_ranges, cli_out_path, fixture_sequence, reader_records, run_formats, Run,
+    TempFasta,
 };
 use LOSAT::algorithm::blastn::BlastnArgs;
 use LOSAT::api::local_blast::{run_local_blastn, FormatOutput, OutputSink, ReportOutputs};
@@ -147,7 +148,7 @@ impl Inputs {
 
     /// The CLI output file and standard error of one single-format run, as written.
     fn cli_raw(&self, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
-        let out = self.query.0.with_extension(format!("cli{outfmt}.out"));
+        let out = cli_out_path(&self.query.0, outfmt);
         let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("blastn")
             .arg("-query")
@@ -196,11 +197,7 @@ fn the_cli_writes_a_cl_tag_and_the_library_none() {
                 env!("CARGO_BIN_EXE_losat")
             )) && line.ends_with(&format!(
                 " -outfmt {outfmt} -out {} \tPN:blastn",
-                inputs
-                    .query
-                    .0
-                    .with_extension(format!("cli{outfmt}.out"))
-                    .display()
+                cli_out_path(&inputs.query.0, outfmt).display()
             )),
             "{line}"
         );

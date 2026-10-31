@@ -935,13 +935,28 @@ fn integer_value(name: &str, value: &str) -> Result<i64, ArgsError> {
 // ```
 // The `CStringException` adds its position (`m_Pos = N`, ncbistr.hpp:4438) to the message.
 /// `NStr::StringToInt8(value)` in base 10 with no flags: the number, or the message of
-/// NCBI's exception.
+/// NCBI's exception as the argument reader reports it (with the exception's position).
 fn string_to_int8(value: &str) -> Result<i64, String> {
+    string_to_int8_at(value).map_err(|(message, pos)| format!("{message} (m_Pos = {pos})"))
+}
+
+/// `NStr::StringToInt8(value)`: the number, or the message of NCBI's exception as
+/// `GetMsg` gives it (without the position).
+pub(super) fn string_to_int8_message(value: &str) -> Result<i64, String> {
+    string_to_int8_at(value).map_err(|(message, _)| message)
+}
+
+/// `NStr::StringToInt8(value)`: the number, or the message of NCBI's exception and the
+/// position the exception holds (`m_Pos`).
+fn string_to_int8_at(value: &str) -> Result<i64, (String, usize)> {
     let bytes = value.as_bytes();
     let error = |extra: &str, pos: usize| {
-        format!(
-            "Cannot convert string '{}' to Int8{extra} (m_Pos = {pos})",
-            printable_string(value)
+        (
+            format!(
+                "Cannot convert string '{}' to Int8{extra}",
+                printable_string(value)
+            ),
+            pos,
         )
     };
     let mut pos = 0;
@@ -1023,7 +1038,7 @@ fn string_to_int8(value: &str) -> Result<i64, String> {
 /// `NStr::PrintableString(str)`: C escapes for the quotes, the backslash, the control
 /// characters and `??` (trigraphs), and octal for the other bytes that are not printable
 /// ASCII, in as few digits as the next byte allows.
-fn printable_string(text: &str) -> String {
+pub(super) fn printable_string(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = String::with_capacity(bytes.len());
     for (i, &byte) in bytes.iter().enumerate() {

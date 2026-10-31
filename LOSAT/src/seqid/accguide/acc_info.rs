@@ -136,6 +136,8 @@ pub(super) const fn acc(seq_id: u32, division: u32, mol: u32) -> u32 {
 
 /// `eAcc_unknown`.
 pub const UNKNOWN: u32 = acc(SEQID_NOT_SET, OTHER, SEQ);
+/// `eAcc_local`.
+pub const LOCAL: u32 = acc(SEQID_LOCAL, OTHER, SEQ);
 /// `eAcc_general`, `eAcc_general_nuc`.
 pub const GENERAL: u32 = acc(SEQID_GENERAL, OTHER, SEQ);
 pub const GENERAL_NUC: u32 = acc(SEQID_GENERAL, OTHER, NUC);

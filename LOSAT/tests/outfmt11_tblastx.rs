@@ -258,6 +258,49 @@ fn cases() -> Vec<Case> {
             subject: "does_not_exist.fa",
             ..case("nosubject", &[], "arch_tbx_q.fna", &[], 1)
         },
+        // `-lcase_masking`: a one-letter run on the first letter of a SEG interval (the order of
+        // the merge, `mask_lcase`).
+        Case {
+            subject: "arch_tbx_lcase_tie_s.fna",
+            ..case(
+                "lcase_tie_sub",
+                &[],
+                "arch_tbx_lcase_tie_q.fna",
+                &["-lcase_masking"],
+                0,
+            )
+        },
+        // `-lcase_masking`: the `LCaseMask` parameters, the results' masks, a subject's lower case.
+        Case {
+            subject: "arch_tbx_lcase_s.fna",
+            ..case(
+                "lcase_sub",
+                &[],
+                "arch_tbx_lcase_q.fna",
+                &["-lcase_masking"],
+                0,
+            )
+        },
+        Case {
+            subject: "arch_tbx_lcase_s.fna",
+            ..case(
+                "lcase_qloc_sub",
+                &[],
+                "arch_tbx_lcase_q.fna",
+                &["-lcase_masking", "-query_loc", "110-355"],
+                0,
+            )
+        },
+        Case {
+            subject: "arch_tbx_lcase_s.fna",
+            ..case(
+                "lcase_soft_sub",
+                &[],
+                "arch_tbx_lcase_q.fna",
+                &["-lcase_masking", "-soft_masking", "true", "-seg", "no"],
+                0,
+            )
+        },
         case("noquery_sub", &[], "no_such_query.fna", &[], 1),
         case("empty_query", &[], "arch_tbx_empty.fna", &[], 0),
         case("emptyonly", &[], "arch_tbx_emptyonly.fna", &[], 3),
@@ -338,18 +381,16 @@ fn cases() -> Vec<Case> {
 /// on `batches_sub`) or the switch acts on every run (class `always`); the `=0` run then takes a
 /// path other than the default one. The seed stage's switches (`PAIRPARGATE`, `SEEDCOMPACT`,
 /// `TBXHITBF`, `TBXKMERGE`, `TBXSCANBF`), the pool's (`TBXNEXT`, `TBXQFRAMES`, `TBXRPTPAR`,
-/// `TBXPIPE`: the next batch starts while the batch before links) and the always-on ones
-/// (`SUMPMEMO`) change what the search does, not what the
-/// archive reads: the first query's block, search space and masks and the final hits.
+/// `TBXPIPE`: the next batch starts while the batch before links) change what the search does,
+/// not what the archive reads: the first query's block, search space and masks and the final hits.
 /// `DISPTABLE` (graduated 2026-10-27) was not here: it acted only where a format reads displayed
 /// counts, which outfmt 11 never builds, so its `=0` run was the default run. `lenbatch_sub` x
 /// `TBXPIPE` is not here for the same reason (4 threads take the reference side on that case).
 /// `TBXEXTBATCH`, `TBXLUT`, `TBXPREFETCH`, `TBXQSLICE`, `TBXUNITMASK` and `SEEDUNMAP` are not
 /// needed: they change only the seed scan of the PAIRPAR units (value switches reach their new side
 /// with a small value on a 200 kb pair), and the archive reads the final hits and the batch
-/// set-up's query statistics, which are made before the seed stage.
-/// The review sweep (26 switches, `ERFABSORB`, `TBXFRAMES`
-/// and `TBXUNGAP` since graduated, against 26 archive
+/// set-up's query statistics, which are made before the seed stage. The review sweep (26 switches,
+/// `ERFABSORB`, `SUMPMEMO`, `TBXFRAMES` and `TBXUNGAP` since graduated, against 26 archive
 /// cases, `S/of8/logs/RESULTS_impl_b3.md`) covers every switch.
 const STRICT_SET_RUNS: &[(&str, &str)] = &[
     ("batches_sub", "LOSAT_X_PAIRPARGATE"),
@@ -363,7 +404,6 @@ const STRICT_SET_RUNS: &[(&str, &str)] = &[
     ("batches_sub", "LOSAT_X_TBXSCANBF"),
     ("segbatch_sub", "LOSAT_X_TBXQFRAMES"),
     ("stop1batch_sub", "LOSAT_X_TBXPIPE"),
-    ("batches_sub", "LOSAT_X_SUMPMEMO"),
 ];
 
 fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {

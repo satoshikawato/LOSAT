@@ -3087,7 +3087,7 @@ impl<'a> ShownSubjects<'a> {
             Self::Records(records) => records
                 .get(s_idx)
                 .map(|record| ShownLetters::Ascii(record.seq())),
-            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a subject without residues has no O and no HSP with
+            // A subject without residues has no O and no HSP with
             // a query that has one; no report reads its letters (`ListedSubjects::x_read_shown`).
             Self::Listed { subjects, .. } => subjects.get(s_idx).map(|subject| {
                 ShownLetters::Stored(subject.aa_seq.get(1..=subject.aa_len).unwrap_or_default())
@@ -5002,21 +5002,29 @@ fn search_cli(
     // ```
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
-    // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the database
-    // arguments reads it (`s_GetTaxIDList`) before the database opens.
+    // The taxid or seqid list (line DI-8) is read first: NCBI's handler of the database
+    // arguments reads it (`s_GetTaxIDList`, `CSeqDBFileGiList`) before the database opens.
     let database = match resolved.db.as_deref() {
         Some(name) => {
-            let taxids = args.taxid_filter.resolve(&settings, outputs.diagnostics)?;
-            Some(
-                database::BlastpDatabase::open_restricted(
-                    name,
-                    &settings,
-                    args.app == BlastpApp::Blastp,
-                    taxids.as_ref(),
-                    outputs.diagnostics,
-                )?
-                .showing_gis(args.show_gis),
-            )
+            let list = args.db_filter.resolve(&settings, outputs.diagnostics)?;
+            let database = database::BlastpDatabase::open_restricted(
+                name,
+                &settings,
+                args.app == BlastpApp::Blastp,
+                list.as_ref(),
+                outputs.diagnostics,
+            )?
+            .showing_gis(args.show_gis);
+            crate::algorithm::common::database::note_archive_database_filter(
+                args.archive.as_ref(),
+                &args.db_filter,
+                list.as_ref(),
+                database.filtered_empty(),
+                args.searchsp.is_some_and(|space| space > 0),
+                args.dbsize.is_some_and(|size| size > 0),
+                "BLASTP",
+            )?;
+            Some(database)
         }
         None => None,
     };
@@ -5090,11 +5098,17 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
+    crate::blastinput::fasta_reader::believed::refuse_with_subject(
+        args.parse_deflines,
+        args.subject.is_some(),
+        args.app.name(),
+    )?;
     let mut query_source = FastaInputSource::from_argument(
         &args.query,
         query_file,
         ReaderConfig::query(args.app.name(), true, settings.data_loaders)
-            .with_defline(args.archive.is_some()),
+            .with_defline(args.archive.is_some())
+            .with_parse_deflines(args.parse_deflines),
     );
     if !shared_standard_input && query_source.stream_is_empty() {
         // psiblast_app.cpp:461-464 is the same test, with psiblast's prefix.
@@ -7508,7 +7522,7 @@ fn run_resolved_in_pool(
         .collect();
     let query_titles: Vec<Arc<[u8]>> = query_records
         .iter()
-        .map(|record| Arc::from(record.title()))
+        .map(|record| Arc::from(record.query_line().as_ref()))
         .collect();
     let query_lengths: Vec<usize> = query_records
         .iter()
@@ -7825,7 +7839,7 @@ fn run_resolved_in_pool(
     // no sequence): NCBI opens it, writes the outfmt 0 prolog, reads the first query
     // batch and fails in that batch's preliminary search, where its reader cannot map
     // the sequence file (fixture `LOSAT/tests/seqdb/db/empty`).
-    if let Some(database) = database.filter(|database| database.num_sequences() == 0) {
+    if let Some(database) = database.filter(|database| database.printed_num_sequences() == 0) {
         return Err(preliminary_search_error(
             &args,
             subject_source,
@@ -7921,7 +7935,7 @@ fn run_resolved_in_pool(
     let num_subjects = match database {
         None if total_db_len == 0 => 1,
         None => subjects.len().max(1),
-        Some(database) => database.num_sequences() as usize,
+        Some(database) => database.statistics_num_sequences() as usize,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
     // ```c
@@ -8075,11 +8089,12 @@ fn run_resolved_in_pool(
     // ```
     // A database answers `BLAST_SEQSRC_MINLENGTH` (10) for its shortest sequence (an
     // index file stores none, and the alias key `MIN_SEQ_LENGTH` is rejected by the
-    // reader), whatever its sequences are; a FASTA subject set answers its real minimum,
+    // reader), whatever its sequences are, unless a list made NCBI scan its totals (then
+    // the scanned shortest length, line DI-8); a FASTA subject set answers its real minimum,
     // raised to 10.
     let cutoff_subject_length = match database {
         None => blastp_preliminary_cutoff_subject_length(&subjects),
-        Some(_) => database::BLAST_SEQSRC_MINLENGTH,
+        Some(database) => database.cutoff_subject_length(),
     };
     let hit_cutoff_scores: Vec<i32> = contexts
         .iter()
@@ -9495,18 +9510,11 @@ fn run_resolved_in_pool(
     // and stand for the subject set in the redo; the hit lists name them by their rank
     // among the listed ordinal ids from here on (`database::ListedSubjects`). Their
     // definition lines are read after the redo (`ListedSubjects::read_titles`).
-    // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the listed subjects without a copy of their residues
-    // (`ListedSubjects::x_list`); the redo reads each match's subject from the database.
+    // The listed subjects have no copy of their residues (`ListedSubjects::x_list`); the redo
+    // reads each match's subject from the database.
     let t_search = crate::utils::xtiming::clock();
     let mut listed_subjects = match database {
-        Some(database) if super::x_redo_subjects::x_bp_redo_db_subj() => {
-            Some(database::ListedSubjects::x_list(
-                database,
-                &mut preliminary_hit_lists,
-                &mut x_compact_hit_lists,
-            )?)
-        }
-        Some(database) => Some(database::ListedSubjects::read(
+        Some(database) => Some(database::ListedSubjects::x_list(
             database,
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
@@ -9538,7 +9546,7 @@ fn run_resolved_in_pool(
         );
     }
     // The redo reads lists of full HSPs. With more than one thread its parallel paths read the
-    // lists of all queries, so all are expanded here (but for LOSAT_X_BPREDOWINEXPAND below); the
+    // lists of all queries, so all are expanded here (but for the windows of the redo below); the
     // one-thread loop below expands each query's list when it reaches it.
     #[cfg(all(
         feature = "parallel",
@@ -9550,16 +9558,14 @@ fn run_resolved_in_pool(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_compact_expand_all = false;
-    // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): where the redo in windows (LOSAT_X_BPREDOPAR) may run,
+    // Where the redo in windows (LOSAT_X_BPREDOPAR) may run,
     // its windows expand the compact lists as they reach them (`x_redo_par.rs`); where it does not
     // run, every list is expanded below before the other paths.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let x_win_expand = x_compact_expand_all
-        && super::x_redo_par::x_bp_redo_par()
-        && super::x_redo_par::x_bp_redo_win_expand();
+    let x_win_expand = x_compact_expand_all && super::x_redo_par::x_bp_redo_par();
     #[cfg(any(
         not(feature = "parallel"),
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
@@ -9906,7 +9912,7 @@ fn run_resolved_in_pool(
             args.num_threads,
             blastp_num_threads,
             subjects.len(),
-            // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the compact lists count while not expanded.
+            // The compact lists count while not expanded.
             super::x_redo_par::x_matches(
                 &preliminary_hit_lists,
                 if x_win_expand {
@@ -9934,7 +9940,7 @@ fn run_resolved_in_pool(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_redo_par_run = false;
-    // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the other paths read the expanded lists of all queries.
+    // The other paths read the expanded lists of all queries.
     if x_win_expand && !x_redo_par_run {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
@@ -9970,8 +9976,8 @@ fn run_resolved_in_pool(
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         {
-            // The parallel paths read the expanded lists of all queries (above), or with
-            // LOSAT_X_BPREDOWINEXPAND the windows expand the compact lists as they reach them.
+            // The parallel paths read the expanded lists of all queries (above), or the windows
+            // expand the compact lists as they reach them.
             debug_assert!(x_win_expand || x_compact_hit_lists.iter().all(Option::is_none));
             let released = super::x_redo_par::x_redo_par_run(
                 &x_redo_par_search,
@@ -10056,7 +10062,7 @@ fn run_resolved_in_pool(
 
                             let s_idx = local_match.oid;
                             let redo_align_params = build_redo_align_params(q_idx)?;
-                            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here.
+                            // Read from the database here.
                             let subject = subjects.read(s_idx)?;
                             let subject_raw = subject.residues();
                             let query_workspace = query_workspace.get_or_init(|| {
@@ -10336,7 +10342,7 @@ fn run_resolved_in_pool(
                                     &mut kappa_subject_range_cache,
                                 );
                             }
-                            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after
+                            // Read from the database here, after
                             // the test (a query alone in its batch; the others ahead of the replay),
                             // as NCBI reads it, and after the first Newton problems, which read it
                             // ahead and drop it; an error is kept for the replay as the redo's own
@@ -10608,7 +10614,7 @@ fn run_resolved_in_pool(
                         &mut kappa_subject_range_cache,
                     );
                 }
-                // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after the test, as
+                // Read from the database here, after the test, as
                 // NCBI reads it, and after the first Newton problems, which read it ahead and drop it.
                 let subject = subjects.read(s_idx)?;
                 let subject_raw = subject.residues();
@@ -10745,7 +10751,7 @@ fn run_resolved_in_pool(
     if listed_subjects.is_some() && database.is_some() && database::x_bp_listed_lean() {
         crate::utils::xreach::x_reach!("LOSAT_X_BPLISTEDLEAN", !reports.v1_titles);
     }
-    // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the residues that the reports read, read from the
+    // The residues that the reports read, read from the
     // database again after the redo (`ListedSubjects::x_read_shown`): every listed subject's for
     // the records; where every report is tabular rows of the default fields or Seq-aligns, which
     // read the letters only to recount the HSPs whose query or subject has an O, those of the
@@ -11029,6 +11035,7 @@ fn run_resolved_in_pool(
     // its first query, `read_query_batches`), then the query's own: the O characters read
     // as X, and the message of its set-up (a query without letters) or of its
     // Karlin-Altschul parameters (an invalid query with letters).
+    let filtered_empty = database.is_some_and(|database| database.filtered_empty());
     // A Seq-annot format writes no result warnings (`ReportFormat::writes_query_warnings`);
     // the warnings go with the first format.
     let result_warnings = format_plans
@@ -11046,6 +11053,9 @@ fn run_resolved_in_pool(
                 messages.push(NO_DATA_MESSAGE.to_string());
             } else if !query_valid[q_idx] {
                 messages.push(crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string());
+            }
+            if filtered_empty && !query_batch_skipped[q_idx] {
+                messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
             }
             let mut lines = reports
                 .reader_warnings
@@ -11428,6 +11438,11 @@ fn run_resolved_in_pool(
                         } else if !query_valid[q_idx] {
                             messages.push(
                                 crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string(),
+                            );
+                        }
+                        if filtered_empty && !query_batch_skipped[q_idx] {
+                            messages.push(
+                                crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string(),
                             );
                         }
                         messages
@@ -11819,6 +11834,7 @@ fn run_resolved_in_pool(
                     iteration: (args.app == BlastpApp::Psiblast).then_some(1),
                     matrix: args.scoring.matrix,
                     query_ids: &query_ids,
+                    query_records,
                     query_titles: &query_titles,
                     searched_lengths: &query_lengths,
                     range_length: ranges.query_input.range_length,
@@ -12146,9 +12162,10 @@ mod tests {
             query: PathBuf::from("query.faa"),
             subject: Some(PathBuf::from("subject.faa")),
             db: None,
-            taxid_filter: Default::default(),
+            db_filter: Default::default(),
             dbsize: None,
             show_gis: false,
+            parse_deflines: false,
             searchsp: None,
             task: "blastp".to_string(),
             evalue: None,

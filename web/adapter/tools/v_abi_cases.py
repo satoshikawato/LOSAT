@@ -124,7 +124,7 @@ def fasta_input() -> list[dict]:
     LOSAT/tests/fasta_input_fixtures.py that NCBI runs on files (no standard input, no
     environment, one thread) and completes in every format of the search, whose inputs
     `register` accepts (no `>?` gap line: maintainer decision 3), without the
-    `-lcase_masking` rows that LOSAT's TBLASTX and BLASTP reject. One search per program,
+    `-lcase_masking` rows that LOSAT's BLASTP rejects. One search per program,
     task, inputs and options, with NCBI's frozen hash of each fixture's format; per program
     FASTA_INPUT_SEARCHES of them, taken in turn from each family of inputs (the variant
     name's first word, and the BLASTN task), and the first-batch failure."""
@@ -142,7 +142,7 @@ def fasta_input() -> list[dict]:
         paths = [fixtures.ENGINE / fixtures.rp(query), fixtures.ENGINE / fixtures.rp(subject)]
         if not all(path.is_file() for path in paths) or any(b">?" in path.read_bytes() for path in paths):
             continue
-        if "-lcase_masking" in args and program in ("tblastx", "blastp"):
+        if "-lcase_masking" in args and program == "blastp":
             continue
         argv = [program, "-query", fixtures.rp(query), "-subject", fixtures.rp(subject)]
         argv += ["-task", task] if task else []

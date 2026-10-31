@@ -90,48 +90,60 @@ pub(crate) fn open_database(
     })
 }
 
-/// Restricts the search's database `db` to the taxid list of the command line (line DI-8,
-/// `TaxidFilterArgs::resolve`; none: the whole database), as NCBI's `CSeqDB` opened with the
-/// list (`SeqDb::restrict_taxids`): NCBI's errors are `BLAST Database error: <text>` with exit
-/// status 2 (`database_error`), and the warning of a negative list that excludes nothing is
-/// written to `diagnostics` (`LOG_POST(Warning << ...)`: the text alone).
+/// Restricts the search's database `db` to the taxid or seqid list of the command line
+/// (line DI-8, `DbFilterArgs::resolve`; none: the whole database), as NCBI's `CSeqDB` opened
+/// with the list (`SeqDb::restrict`): NCBI's errors are `BLAST Database error: <text>` with
+/// exit status 2 (`database_error`), and the warnings NCBI writes go to `diagnostics`
+/// (`LOG_POST(Warning << ...)`: the text alone; `ERR_POST`: `Warning: [<program>] <text>`,
+/// the program in lower case as `SetDiagPostPrefix` names it; an `ERR_POST` of an error
+/// before a throw: `Error: [<program>] <text>`), before an error too.
 pub(crate) fn restrict_database(
     db: &mut SeqDb,
-    list: Option<&crate::seqdb::TaxidList>,
+    list: Option<&crate::seqdb::DbList>,
     diagnostics: &mut dyn std::io::Write,
     program: &str,
 ) -> Result<()> {
     let Some(list) = list else {
         return Ok(());
     };
-    match db.restrict_taxids(list) {
-        Ok(Some(warning)) => {
-            diagnostics.write_all(warning.as_bytes())?;
-            diagnostics.write_all(b"\n")?;
-        }
-        Ok(None) => {}
-        Err(error) => return Err(database_error(error, program)),
+    let mut warnings = Vec::new();
+    let restricted = db.restrict(list, &mut warnings);
+    let prefix = program.to_ascii_lowercase();
+    for warning in warnings {
+        let line = match warning {
+            crate::seqdb::ListWarning::Log(text) => text,
+            crate::seqdb::ListWarning::Posted(text) => format!("Warning: [{prefix}] {text}"),
+            crate::seqdb::ListWarning::Error(text) => format!("Error: [{prefix}] {text}"),
+        };
+        diagnostics.write_all(line.as_bytes())?;
+        diagnostics.write_all(b"\n")?;
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:207-214
-    // ```c++
-    //     if (! BlastSeqSrcGetNumSeqs(m_InternalData->m_SeqSrc->GetPointer())) {
-    //         string msg =
-    //             "Filtering resulted in an empty database.";
-    //
-    //         m_Messages.AddMessageAllQueries(eBlastSevWarning,
-    //                                         kBlastMessageNoContext,
-    //                                         msg);
-    //     }
-    // ```
-    // NCBI then searches nothing and reports each query without hits; LOSAT's searches need a
-    // sequence, so a negative list that excludes every sequence is refused.
-    if db.num_seqs() == 0 {
-        return Err(refusal(
-            "the taxid list excludes every sequence of the database (NCBI: \"Filtering \
-             resulted in an empty database.\" and no hits)",
-            program,
-        ));
+    restricted.map_err(|error| database_error(error, program))
+}
+
+/// Tells the BLAST archive of the run (`archive`, `None` without one) what the database's list
+/// makes of its request (`ArchiveHandle::set_database_filter`). `dbsize` is whether `-dbsize` is
+/// given: with a list that keeps no sequence the `EffectiveSearchSpace` option then counts the
+/// length adjustment with no sequence, which the searches do not compute (probes E14 and E17 of
+/// line DI-8): LOSAT refuses it.
+pub(crate) fn note_archive_database_filter(
+    archive: Option<&crate::report::archive::ArchiveHandle>,
+    filter: &crate::blastinput::db_filter::DbFilterArgs,
+    list: Option<&crate::seqdb::DbList>,
+    filtered_empty: bool,
+    searchsp: bool,
+    dbsize: bool,
+    program: &str,
+) -> Result<()> {
+    let Some(handle) = archive else {
+        return Ok(());
+    };
+    if filtered_empty && dbsize {
+        anyhow::bail!(
+            "-dbsize with -outfmt 11 and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
+        );
     }
+    handle.set_database_filter(filter.archive_parameter(list), filtered_empty && !searchsp);
     Ok(())
 }
 
@@ -563,18 +575,44 @@ pub(crate) fn read_header(
     match db.read_header(ordinal) {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set, db.is_version5())
-                .map(|subject| {
-                    ReportedHeader::Parsed(std::sync::Arc::new(
-                        subject.showing_gis(db.reports_show_gis()),
-                    ))
-                })
                 .map_err(|reason| parsed_refusal(ordinal, &reason, program))
+                .and_then(|subject| {
+                    refuse_id_of_a_query(&subject, ordinal, program)?;
+                    Ok(ReportedHeader::Parsed(std::sync::Arc::new(
+                        subject.showing_gis(db.reports_show_gis()),
+                    )))
+                })
         }
         Ok(crate::seqdb::SequenceHeader::Ordinal(deflines)) => {
             stored_title(Ok(deflines), ordinal, query, program).map(ReportedHeader::Stored)
         }
         Err(error) => Err(header_read_error(error, query, program)),
     }
+}
+
+/// With `-parse_deflines`, LOSAT's refusal of a reported database sequence whose Seq-align id is
+/// the id of a query: NCBI's scope finds the query instead, so its reports show the query's title
+/// and letters for the database sequence (`dropin-survey-20261029/DI7/DECISIONS.md` 8).
+fn refuse_id_of_a_query(
+    subject: &crate::report::db_subject::ParsedSubject,
+    ordinal: u32,
+    program: &str,
+) -> Result<()> {
+    use crate::blastinput::fasta_reader::believed::{query_has_key, query_keys_kept};
+    if !query_keys_kept() {
+        return Ok(());
+    }
+    let mut keys = Vec::new();
+    crate::report::db_subject::scope_keys(subject, &mut keys);
+    if query_has_key(&keys) {
+        return Err(parsed_refusal(
+            ordinal,
+            "has the Seq-id of a query read with -parse_deflines (NCBI BLAST+ shows the query \
+             for it)",
+            program,
+        ));
+    }
+    Ok(())
 }
 
 /// LOSAT's refusal of a reported database sequence with parsed Seq-ids (`parsed_refusal`,
@@ -1128,6 +1166,9 @@ pub(crate) struct StoredProteins {
     starts: Vec<usize>,
     /// The total length of the index files (`CSeqDB::GetTotalLength`).
     total_length: u64,
+    /// The scanned shortest length with a list (`SeqDb::min_length`, line DI-8), `None`
+    /// for a whole database.
+    min_length: Option<u32>,
 }
 
 impl StoredProteins {
@@ -1160,6 +1201,12 @@ impl StoredProteins {
     /// The total length of the index files.
     pub(crate) fn total_length(&self) -> u64 {
         self.total_length
+    }
+
+    /// The scanned shortest length with a list (`CSeqDB::GetMinLength`), `None` for a whole
+    /// database (which answers `BLAST_SEQSRC_MINLENGTH`).
+    pub(crate) fn min_length(&self) -> Option<u32> {
+        self.min_length
     }
 
     /// The length of the longest sequence (0 for an empty database).
@@ -1203,7 +1250,8 @@ pub(crate) fn read_protein_stores(db: &SeqDb, program: &str) -> Result<StoredPro
     Ok(StoredProteins {
         bytes,
         starts,
-        total_length: db.total_length(),
+        total_length: db.statistics_numbers().0,
+        min_length: db.min_length(),
     })
 }
 

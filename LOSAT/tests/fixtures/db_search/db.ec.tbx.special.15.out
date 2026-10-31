@@ -1,0 +1,120 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/taxfilter/tfn"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "alln only N",
+          "query_len": 48,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 16,
+            "db_len": 10937,
+            "hsp_len": 0,
+            "eff_space": 0,
+            "kappa": -1,
+            "lambda": -1,
+            "entropy": -1
+          },
+          "message": "Query_1 alln only N:  Query_1 alln only N: Filtering resulted in an empty database.  No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/taxfilter/tfn"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "nothing",
+          "query_len": 0,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 16,
+            "db_len": 10937,
+            "hsp_len": 0,
+            "eff_space": 0,
+            "kappa": -1,
+            "lambda": -1,
+            "entropy": -1
+          },
+          "message": "Query_2 nothing:  Query_2 nothing: Sequence contains no data Filtering resulted in an empty database.  No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/taxfilter/tfn"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "valid after them",
+          "query_len": 96,
+          "query_masking": [
+            {
+              "from": 17,
+              "to": 68
+            }
+          ],
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 16,
+            "db_len": 10937,
+            "hsp_len": 12,
+            "eff_space": 3600,
+            "kappa": 0.125620590285332,
+            "lambda": 0.309660099565771,
+            "entropy": 0.371791218555114
+          },
+          "message": "Query_3 valid after them:  Query_3 valid after them: Filtering resulted in an empty database.  No hits found"
+        }
+      }
+    }
+  }
+]
+}

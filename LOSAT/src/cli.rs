@@ -361,8 +361,8 @@ pub fn render_message(error: &clap::Error) -> String {
 // ```
 // The options of NCBI blastn 2.17.0+ (-help) that LOSAT's BLASTN does not implement
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
-// (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range` and
-// `-no_greedy` (DI-6); the database masks and `-min_raw_gapped_score` are not.
+// (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range`, `-no_greedy`
+// (DI-6) and `-min_raw_gapped_score` (DI-6b); the database masks are not.
 fn is_unported_blastn_arg(name: &str) -> bool {
     matches!(
         name,
@@ -378,11 +378,8 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "import_search_strategy"
             | "index_name"
             | "line_length"
-            | "min_raw_gapped_score"
             | "negative_gilist"
-            | "negative_seqidlist"
             | "remote"
-            | "seqidlist"
             | "sorthits"
             | "sorthsps"
             | "version"
@@ -419,9 +416,7 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "line_length"
             | "negative_gilist"
             | "negative_ipglist"
-            | "negative_seqidlist"
             | "remote"
-            | "seqidlist"
             | "sorthits"
             | "sorthsps"
             | "subject_besthit"
@@ -467,9 +462,11 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
             | "save_pssm_after_last_round"
             | "sum_stats"
             // Line DI-8 ported these to BLASTP's database search, not to PSIBLAST's.
+            | "negative_seqidlist"
             | "negative_taxidlist"
             | "negative_taxids"
             | "no_taxid_expansion"
+            | "seqidlist"
             | "taxidlist"
             | "taxids"
     ) || (is_unported_blastp_arg(name) && !matches!(name, "db_hard_mask" | "db_soft_mask"))
@@ -730,9 +727,7 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "in_pssm"
             | "line_length"
             | "negative_gilist"
-            | "negative_seqidlist"
             | "remote"
-            | "seqidlist"
             | "sorthits"
             | "sorthsps"
             | "subject_besthit"
@@ -769,9 +764,7 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "line_length"
             | "max_intron_length"
             | "negative_gilist"
-            | "negative_seqidlist"
             | "remote"
-            | "seqidlist"
             | "sorthits"
             | "sorthsps"
             | "strand"
@@ -801,9 +794,7 @@ fn is_unported_blastx_arg(name: &str) -> bool {
             | "sorthits"
             | "sorthsps"
             | "gilist"
-            | "seqidlist"
             | "negative_gilist"
-            | "negative_seqidlist"
             | "entrez_query"
             | "db_soft_mask"
             | "db_hard_mask"

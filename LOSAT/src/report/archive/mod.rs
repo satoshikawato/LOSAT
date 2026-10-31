@@ -459,8 +459,9 @@ impl std::error::Error for TitleRefusal {}
 /// it (`PrintErrorArchive` after its `CATCH_ALL`): the errors of the application's `Run`,
 /// i.e. NCBI's own error texts, one message per diagnostic, severity `eDiag_Error`. LOSAT's own
 /// refusals (and the argument errors raised before the application runs) write none.
-/// `subject_file` is whether the error came from opening the `-query` file or reading the
-/// `-subject` file, whose "Command line argument error" NCBI raises inside `Run`.
+/// `subject_file` is whether the error came before the output was opened (the taxid or seqid
+/// list, opening the `-query` file, reading the `-subject` file); NCBI raises the "Command line
+/// argument error" of those files inside `Run`.
 pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Message>> {
     let native = error.downcast_ref::<crate::cli::NativeError>()?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251

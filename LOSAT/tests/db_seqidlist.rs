@@ -271,6 +271,22 @@ fn list_error_leaves_no_out_file() {
         assert!(archive.contains(accessible), "{program}: {archive}");
         fs::remove_file(out).unwrap();
 
+        // Outfmt 11 with fields: `PrintErrorArchive` stops at the number, before it opens the output.
+        let mut argv = vec![
+            "-db",
+            db,
+            "-query",
+            query,
+            "-outfmt",
+            "11 qseqid",
+            "-out",
+            out,
+        ];
+        argv.extend(taxid_list);
+        let (stderr, status) = run_with_out(program, &argv);
+        assert_eq!(status, 1, "{program}: {stderr}");
+        assert!(!Path::new(out).exists(), "{program}: {stderr}");
+
         // The database opens after the output: its error leaves the file empty (probe E15, E18).
         let argv = [
             "-db",

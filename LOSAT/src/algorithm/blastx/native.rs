@@ -1605,8 +1605,8 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     result
 }
 
-/// The error archive of a run that stopped in `Run` before its output was opened (the files of
-/// `-subject` and `-query`, the subjects): into `-out`, or standard output; nothing when that
+/// The error archive of a run that stopped in `Run` before its output was opened (the taxid or
+/// seqid list, the files of `-subject` and `-query`, the subjects): into `-out`, or standard output; nothing when that
 /// cannot be opened (NCBI's call swallows that).
 fn write_run_error_archive(
     args: &BlastxArgs,
@@ -1616,6 +1616,10 @@ fn write_run_error_archive(
     let Some(handle) = archive else {
         return;
     };
+    // `-outfmt "11 qseqid"`: NCBI's `PrintErrorArchive` stops at the number before it opens `-out`.
+    if !handle.error_archive_enabled() {
+        return;
+    }
     let Some(lines) = archive::error_lines(error, true) else {
         return;
     };

@@ -4654,8 +4654,8 @@ pub fn run(
     //         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
     //                                              mol_type));
     // ```
-    // With `-db` the handler of the database arguments only keeps the name: the database
-    // is opened after every option handler has run (`search_cli`). With `-subject` it
+    // With `-db` the handler of the database arguments keeps the name and reads the list: the
+    // database is opened after every option handler has run (`search_cli`). With `-subject` it
     // reads the subjects here, before the query and the output are opened.
     let archive = args.archive.clone();
     let mut stderr = std::io::stderr();
@@ -4826,6 +4826,10 @@ fn write_run_error_archive(
     let Some(handle) = archive else {
         return;
     };
+    // `-outfmt "11 qseqid"`: NCBI's `PrintErrorArchive` stops at the number before it opens `-out`.
+    if !handle.error_archive_enabled() {
+        return;
+    }
     let Some(lines) = super::archive::error_lines(error, true) else {
         return;
     };

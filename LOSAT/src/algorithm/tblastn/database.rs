@@ -321,7 +321,10 @@ pub(super) struct ReportedSubjects {
     /// The record of each rank: the id `gnl|BL_ORD_ID|n` and the stored title (a sequence with
     /// parsed Seq-ids: the title of its first definition line), no letters.
     pub(super) records: Vec<FastaRecord>,
-    /// The packed subject of each rank (its letters for the reports).
+    /// The number of bases of each rank.
+    pub(super) lengths: Vec<usize>,
+    /// The packed subject of each rank (its letters for the reports); empty when no report reads
+    /// them.
     pub(super) stores: Vec<PackedNucleotide>,
     /// The sequences with parsed Seq-ids by rank (empty when none is reported): their ids and
     /// titles come from their definition lines (`report::db_subject`).
@@ -333,14 +336,27 @@ impl ReportedSubjects {
     pub(super) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
         self.parsed.get(rank).and_then(Option::as_deref)
     }
+
+    /// The subjects as the reports read them, by rank: their stores, or without stores (no report
+    /// reads their letters) their lengths.
+    pub(super) fn letters(&self) -> super::x_subject_store::SubjectLetters<'_> {
+        use super::x_subject_store::SubjectLetters;
+        if self.stores.is_empty() {
+            SubjectLetters::Lengths(&self.lengths)
+        } else {
+            SubjectLetters::Packed(&self.stores)
+        }
+    }
 }
 
 /// The reported database sequences of `hitlists` (the final hit lists of all query batches,
 /// subjects named by ordinal id; their HSPs of score 0 are dropped first, as the report
 /// drops them): the hit lists name them by rank from here on (the rank grows with the
 /// ordinal id, so every comparison that breaks a tie by the subject index gives the same
-/// order), and their records (`titles`) and packed subjects (`stores`, by ordinal id) are
-/// kept for the reports. A reported sequence whose stored title LOSAT does not report as
+/// order), and their records (`titles`) and lengths are kept for the reports, with their packed
+/// subjects (`stores`, by ordinal id) when `letters` (`stage_e_report::reads_subject_letters`:
+/// outfmt 0, the XML family and the tabular rows read them, the other reports the lengths alone).
+/// A reported sequence whose stored title LOSAT does not report as
 /// NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the reports `shown` do
 /// not write as NCBI (`common::database::check_reported_parsed`, and with `shown.joined`
 /// `refuse_joined_hits`). EXPERIMENT (LOSAT_X_TBNDBSTREAM): the packed subjects are read
@@ -350,6 +366,7 @@ pub(super) fn reported_subjects(
     titles: &DatabaseTitles,
     hitlists: &mut [KappaResultHitList],
     stores: super::x_subject_store::SubjectLetters<'_>,
+    letters: bool,
     shown: ParsedShown,
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
@@ -371,7 +388,8 @@ pub(super) fn reported_subjects(
         }
     }
     let mut records = Vec::with_capacity(ordinals.len());
-    let mut kept = Vec::with_capacity(ordinals.len());
+    let mut lengths = Vec::with_capacity(ordinals.len());
+    let mut kept = Vec::new();
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
     // Whether `taxdb.bti` is on the search path, looked up at the first sequence with parsed
     // Seq-ids that outfmt 0 shows.
@@ -405,14 +423,25 @@ pub(super) fn reported_subjects(
             warnings: Vec::new(),
             source: Default::default(),
         });
-        kept.push(match stores {
-            SubjectLetters::Stream(stream) => stream.read(ordinal as usize)?,
+        lengths.push(match stores {
+            SubjectLetters::Stream(stream) => stream.length(ordinal as usize),
             SubjectLetters::Packed(stores) => stores
                 .get(ordinal as usize)
                 .with_context(|| format!("database sequence {ordinal} was not read"))?
-                .clone(),
-            SubjectLetters::Records(_) => unreachable!("a -db search holds no records"),
+                .len(),
+            SubjectLetters::Records(_) | SubjectLetters::Lengths(_) => {
+                unreachable!("a -db search holds its sequences")
+            }
         });
+        if letters {
+            kept.push(match stores {
+                SubjectLetters::Stream(stream) => stream.read(ordinal as usize)?,
+                SubjectLetters::Packed(stores) => stores[ordinal as usize].clone(),
+                SubjectLetters::Records(_) | SubjectLetters::Lengths(_) => {
+                    unreachable!("a -db search holds its sequences")
+                }
+            });
+        }
     }
     if shown.joined && !parsed.is_empty() {
         for (query, hitlist) in hitlists.iter().enumerate() {
@@ -433,6 +462,7 @@ pub(super) fn reported_subjects(
     Ok(ReportedSubjects {
         ordinals,
         records,
+        lengths,
         stores: kept,
         parsed,
     })
@@ -533,6 +563,52 @@ mod tests {
         hitlist
     }
 
+    // Reports that read no letters get the lengths of the reported sequences and no store; the
+    // others get both, by rank.
+    #[test]
+    fn the_reported_sequences_are_read_only_for_reports_of_letters() {
+        use super::super::x_subject_store::SubjectLetters;
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-tblastn-db-reported-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let database = open_with_taxdb("x16_ntaxid", None, &cwd);
+        let stores = database.read_stores().unwrap();
+        let of = |letters: bool| {
+            let mut hitlists = vec![hitlist(&[(1, 50), (0, 40)])];
+            let mut titles = DatabaseTitles::new();
+            read_titles(&database, &hitlists, 0, &mut titles).unwrap();
+            reported_subjects(
+                &database,
+                &titles,
+                &mut hitlists,
+                SubjectLetters::Packed(&stores),
+                letters,
+                ParsedShown::default(),
+            )
+            .unwrap()
+        };
+        let whole = [stores[0].len(), stores[1].len()];
+        let reported = of(false);
+        assert_eq!(reported.lengths, whole);
+        assert!(reported.stores.is_empty());
+        let letters = reported.letters();
+        assert!(matches!(letters, SubjectLetters::Lengths(_)));
+        assert_eq!(letters.count(), 2);
+        assert_eq!(letters.length(1), whole[1]);
+        let reported = of(true);
+        assert_eq!(reported.lengths, whole);
+        assert_eq!(reported.stores.len(), 2);
+        assert_eq!(reported.stores[0].len(), whole[0]);
+        assert_eq!(reported.stores[1].len(), whole[1]);
+        let letters = reported.letters();
+        assert!(matches!(letters, SubjectLetters::Packed(_)));
+        assert_eq!(letters.length(1), whole[1]);
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
     // DBID item T: a batch's prefetch looks up the sequences that its reports show (an HSP with a
     // Seq-align), once per volume and taxid over the batches of a run, and opens the taxonomy
     // database at the run's first lookup; nothing without `taxdb.bti`. `x16_ntaxid_99990` (two
@@ -560,6 +636,7 @@ mod tests {
                 &titles,
                 &mut hitlists,
                 SubjectLetters::Packed(&stores),
+                true,
                 ParsedShown::default(),
             )
             .unwrap();

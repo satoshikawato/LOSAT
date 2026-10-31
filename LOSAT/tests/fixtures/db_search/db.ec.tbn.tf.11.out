@@ -1,0 +1,379 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "tblastn",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">first protein query with a title long enough to
+ be cut"
+                  }
+                }
+              },
+              title "first protein query with a title long enough to be cut"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 142,
+              seq-data ncbieaa "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPH
+FDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHA
+SLDKFLASVSTVLTSKYR"
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">second"
+                  }
+                }
+              },
+              title "second"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 147,
+              seq-data ncbieaa "MVHLTPEEKSAVTALWGKVNVDEVGGEALGRLLVVYPWTQRFFESF
+GDLSTPDAVMGNPKVKAHGKKVLGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVLVCVLAHHFGKEFT
+PPVQAAYQKVVAGVANALAHKYH"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/taxfilter/tfn",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "DbGeneticCode",
+          value integer 1
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 13
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 0
+        }
+      },
+      program-options {
+        {
+          name "NegativeTaxidList",
+          value integer-list {
+            2759,
+            6072,
+            6656,
+            6960,
+            7147,
+            7203,
+            7214,
+            7215,
+            7227,
+            7496,
+            7711,
+            7742,
+            7776,
+            7898,
+            7952,
+            7953,
+            7954,
+            7955,
+            7956,
+            7957,
+            8006,
+            8015,
+            8028,
+            8030,
+            8224,
+            8234,
+            8237,
+            8287,
+            8292,
+            8342,
+            8352,
+            8353,
+            8355,
+            8360,
+            8457,
+            8459,
+            8464,
+            8486,
+            8487,
+            8492,
+            8495,
+            8496,
+            8504,
+            8509,
+            8570,
+            8602,
+            8638,
+            8782,
+            8825,
+            8826,
+            8830,
+            8835,
+            8839,
+            8929,
+            8930,
+            8976,
+            9005,
+            9030,
+            9031,
+            9072,
+            9254,
+            9255,
+            9256,
+            9257,
+            9258,
+            9347,
+            9443,
+            9479,
+            9480,
+            9486,
+            9490,
+            9498,
+            9526,
+            9527,
+            9528,
+            9539,
+            9542,
+            9543,
+            9577,
+            9578,
+            9580,
+            9592,
+            9593,
+            9595,
+            9596,
+            9598,
+            9604,
+            9605,
+            9606,
+            9608,
+            9611,
+            9612,
+            9615,
+            9681,
+            9682,
+            9685,
+            9845,
+            9850,
+            9871,
+            9874,
+            9875,
+            9881,
+            9895,
+            9903,
+            9913,
+            9989,
+            10066,
+            10088,
+            10090,
+            10114,
+            10116,
+            27592,
+            30319,
+            30727,
+            32341,
+            32346,
+            32351,
+            32443,
+            32519,
+            32523,
+            32524,
+            32525,
+            32561,
+            33154,
+            33208,
+            33213,
+            33317,
+            33340,
+            33392,
+            33511,
+            33554,
+            34915,
+            34989,
+            35500,
+            35670,
+            36242,
+            36243,
+            39107,
+            40674,
+            41665,
+            41666,
+            41705,
+            42168,
+            43733,
+            43738,
+            43741,
+            43746,
+            43845,
+            46877,
+            50557,
+            66189,
+            85512,
+            88770,
+            89593,
+            91561,
+            117570,
+            117571,
+            123365,
+            123366,
+            123367,
+            123368,
+            123369,
+            186623,
+            186625,
+            186626,
+            186627,
+            186634,
+            186745,
+            186749,
+            197562,
+            197563,
+            207598,
+            262014,
+            314145,
+            314146,
+            314147,
+            314293,
+            314294,
+            314295,
+            337687,
+            338152,
+            376913,
+            379583,
+            379584,
+            436486,
+            436489,
+            436491,
+            436492,
+            480117,
+            480118,
+            504568,
+            862507,
+            904181,
+            1137846,
+            1206794,
+            1294634,
+            1294636,
+            1329799,
+            1329911,
+            1329912,
+            1329950,
+            1329961,
+            1338369,
+            1437010,
+            1489341,
+            1489388,
+            1489872,
+            1489885,
+            1489894,
+            1549675,
+            1579337,
+            1963758,
+            2068716,
+            2743694,
+            2743709,
+            2743711,
+            2841271,
+            3073799,
+            3078114,
+            3701028,
+            3701030,
+            3701061,
+            3701062,
+            3701063
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 318984985166634, 10, -15 },
+        k { 130238418667706, 10, -15 },
+        h { 384901552979004, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 21576",
+      "Effective search space used: 21576",
+      "Length adjustment: 18"
+    }
+  }
+}

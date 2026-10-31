@@ -53,9 +53,9 @@
 //!                                        m_Config.GetSeqLenThreshold2Guess()));
 //!     }
 //! ```
-//! `-parse_deflines` (`fParseRawID`) is rejected by LOSAT's programs; `fSkipCheck` is not
-//! set by the BLAST programs.
+//! `-parse_deflines` (`fParseRawID`) is `believed`; `fSkipCheck` is not set by the BLAST programs.
 
+pub mod believed;
 pub(crate) mod reader;
 mod seq_id;
 pub(crate) mod stream;
@@ -87,12 +87,29 @@ pub struct ReaderConfig {
     pub role: &'static str,
     /// Keep the defline line of each record (`FastaRecord::source`), for the BLAST archive.
     pub keep_defline: bool,
+    /// `-parse_deflines` (`believed`).
+    pub parse_deflines: bool,
+    /// The strand of a query's Seq-loc (`CBlastInputSourceConfig::GetStrand`), read with
+    /// `-parse_deflines`.
+    pub strand: crate::report::archive::bioseq::SeqLocStrand,
 }
 
 impl ReaderConfig {
     /// The same reader, keeping the defline lines (`-outfmt 11`).
     pub fn with_defline(mut self, keep: bool) -> Self {
         self.keep_defline = keep;
+        self
+    }
+
+    /// The reader with `-parse_deflines` or without it (`believed`).
+    pub fn with_parse_deflines(mut self, parse_deflines: bool) -> Self {
+        self.parse_deflines = parse_deflines;
+        self
+    }
+
+    /// The reader of a nucleotide query with `-strand value`.
+    pub fn with_strand(mut self, value: &str) -> Self {
+        self.strand = crate::report::archive::bioseq::SeqLocStrand::of_option(value);
         self
     }
 
@@ -117,6 +134,12 @@ impl ReaderConfig {
             program,
             role: "query",
             keep_defline: false,
+            parse_deflines: false,
+            strand: if protein {
+                crate::report::archive::bioseq::SeqLocStrand::Unknown
+            } else {
+                crate::report::archive::bioseq::SeqLocStrand::Both
+            },
         }
     }
 
@@ -141,6 +164,12 @@ impl ReaderConfig {
             program,
             role: "subject",
             keep_defline: false,
+            parse_deflines: false,
+            strand: if protein {
+                crate::report::archive::bioseq::SeqLocStrand::Unknown
+            } else {
+                crate::report::archive::bioseq::SeqLocStrand::Both
+            },
         }
     }
 }
@@ -175,6 +204,10 @@ pub struct RecordSource {
     pub defline: Vec<u8>,
     /// The record's letters before a cut to a range (`FastaRecord::cut`).
     pub uncut: Option<Vec<u8>>,
+    /// The Seq-ids `-parse_deflines` read (`believed`).
+    pub believed: Option<std::sync::Arc<believed::BelievedIds>>,
+    /// The start of the letters after a cut to a range, in the record.
+    pub cut_from: usize,
 }
 
 impl FastaRecord {
@@ -199,12 +232,69 @@ impl FastaRecord {
         &self.title
     }
 
+    /// The Seq-ids `-parse_deflines` read, `None` without the option.
+    pub fn believed(&self) -> Option<&believed::BelievedIds> {
+        self.source.as_ref()?.believed.as_deref()
+    }
+
+    /// What `Query=` and `# Query:` show: the title, and with `-parse_deflines` the id before it
+    /// (`local_id`, `BelievedIds::bare_id`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:732-734
+    /// ```c++
+    ///     string all_id_str = GetSeqIdString(cbs, believe_query);
+    ///     all_id_str += " ";
+    ///     all_id_str = NStr::TruncateSpaces(all_id_str + GetSeqDescrString(cbs));
+    /// ```
+    pub fn query_line(&self) -> Cow<'_, [u8]> {
+        if self.believed().is_none() {
+            return Cow::Borrowed(&self.title);
+        }
+        let mut line = self.local_id.clone().into_bytes();
+        if !self.title.is_empty() {
+            line.push(b' ');
+            line.extend_from_slice(&self.title);
+        }
+        Cow::Owned(line)
+    }
+
+    /// The id of the record in NCBI's warnings (`report::query_warnings::warning_query_id`).
+    pub fn warning_id(&self) -> &[u8] {
+        match self.believed() {
+            Some(ids) => &ids.warning_id,
+            None => self.local_id.as_bytes(),
+        }
+    }
+
+    /// The Seq-id of the record in the Seq-aligns and the archive.
+    pub fn seq_id(&self) -> crate::report::seqid::SeqId<'_> {
+        match self.believed() {
+            Some(ids) => crate::report::seqid::SeqId::Db(&ids.best),
+            None => crate::report::seqid::SeqId::Local(&self.local_id),
+        }
+    }
+
+    /// The record as the Seq-loc of the archive's `seq-loc-list` (`-parse_deflines`, an id that is
+    /// not local): the searched interval (`x_FastaToSeqLoc`; the `to` of an empty record is -1).
+    pub fn archive_seq_loc(&self) -> Option<crate::report::archive::bioseq::QuerySeqLoc<'_>> {
+        let source = self.source.as_ref()?;
+        let from = source.cut_from as i32;
+        source
+            .believed
+            .as_ref()?
+            .seq_loc(from, from + self.sequence.len() as i32 - 1)
+    }
+
     /// The ID that the tabular formats and the reports show for a record with a local
-    /// ID: the title up to its first space, or the local ID when there is no title.
+    /// ID: the title up to its first space, or the local ID when there is no title. With
+    /// `-parse_deflines` the `qaccver` of its ids.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
     /// (`s_ReplaceLocalId`; see `report::` for its callers)
     pub fn shown_id(&self) -> &[u8] {
+        if let Some(ids) = self.believed() {
+            return &ids.tabular[2];
+        }
         if self.title.is_empty() {
             self.local_id.as_bytes()
         } else {
@@ -250,6 +340,8 @@ impl FastaRecord {
                             .clone()
                             .unwrap_or_else(|| self.sequence.clone()),
                     ),
+                    believed: source.believed.clone(),
+                    cut_from: source.cut_from + from,
                 })
             }),
         }
@@ -278,6 +370,7 @@ impl FastaRecord {
     pub fn cut_in_place(&mut self, from: usize, to_exclusive: usize) {
         if let Some(source) = self.source.as_mut() {
             source.uncut.get_or_insert_with(|| self.sequence.clone());
+            source.cut_from += from;
         }
         self.sequence.truncate(to_exclusive);
         self.sequence.drain(..from);
@@ -311,6 +404,9 @@ pub trait InputRecord: Sized {
     ///             		title = (*desc)->GetTitle();
     /// ```
     fn title_bytes(&self) -> Cow<'_, [u8]>;
+
+    /// The id of the record in NCBI's warnings when `-parse_deflines` read it.
+    fn believed_warning_id(&self) -> Option<&[u8]>;
 }
 
 impl InputRecord for FastaRecord {
@@ -324,6 +420,10 @@ impl InputRecord for FastaRecord {
 
     fn title_bytes(&self) -> Cow<'_, [u8]> {
         Cow::Borrowed(&self.title)
+    }
+
+    fn believed_warning_id(&self) -> Option<&[u8]> {
+        self.believed().map(|ids| ids.warning_id.as_slice())
     }
 }
 
@@ -716,7 +816,8 @@ pub fn read_all<R: Read>(
 /// `BLAST query/options error: ...` (`seq_range::record_interval`, `app::options_error`); a
 /// reader exception is `BLAST query error: ...` (`ReadError::into_app_error`). The source's
 /// `ReaderConfig::subject` carries `read_proteins` and the data loaders of `dlconfig`;
-/// `-parse_deflines` is rejected by the programs and `gaps_to_Ns` is the mapper's; LOSAT keeps
+/// `-parse_deflines` with `-subject` is refused by the programs and `gaps_to_Ns` is the mapper's;
+/// LOSAT keeps
 /// the lowercase mask in every record (`FastaRecord::sequence`).
 pub fn read_subjects<R: Read>(
     source: &mut FastaInputSource<R>,

@@ -111,7 +111,7 @@ impl<'a> XStreamDb<'a> {
         Self {
             db,
             count: db.num_seqs() as usize,
-            total_length: db.total_length(),
+            total_length: db.statistics_numbers().0,
             longest,
             block_bytes,
             x_task_starts: std::sync::Mutex::new(Vec::new()),

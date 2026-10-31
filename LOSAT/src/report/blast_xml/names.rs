@@ -81,6 +81,23 @@ pub fn xml_query_title(title: &[u8], protein: bool) -> Result<Vec<u8>, Refusal> 
     generated(title, protein)
 }
 
+/// `xml_query_title` of a query whose ids `-parse_deflines` read: the parts of the title that
+/// come from the Seq-ids (`GenerateDefline`, `report::defline::BioseqIds`).
+fn believed_query_title(
+    title: &[u8],
+    protein: bool,
+    believed: &crate::blastinput::fasta_reader::believed::BelievedIds,
+) -> Result<Vec<u8>, Refusal> {
+    let ids = crate::report::db_subject::bioseq_ids(&believed.ids);
+    let defline = crate::report::defline::generate_bioseq_defline(title, protein, false, &ids)
+        .map_err(|_| Refusal::UnknownEncoding)?;
+    if defline.reads_past_end {
+        return Err(Refusal::ReadsPastEnd);
+    }
+    check_text(&defline.text)?;
+    Ok(defline.text)
+}
+
 /// The `Hit_id` and the title of a `-subject` record: the first word of the generated
 /// definition line (`CShowBlastDefline::GetSeqIdList`, showdefline.cpp:218-242), or the local
 /// ID `Subject_N` when that is empty; the definition line as generated (empty for an empty
@@ -141,9 +158,6 @@ pub fn xml_db_title(stored_title: &[u8]) -> Result<Vec<u8>, Refusal> {
 pub fn xml_message(query_id: &[u8], warnings: &[String], has_hits: bool) -> Option<Vec<u8>> {
     let mut message: Vec<u8> = Vec::new();
     if !warnings.is_empty() {
-        let mut sorted: Vec<&String> = warnings.iter().collect();
-        sorted.sort();
-        sorted.dedup();
         // GetErrorStrings(): the id and ": "
         message.extend_from_slice(query_id);
         message.extend_from_slice(b": ");
@@ -151,7 +165,7 @@ pub fn xml_message(query_id: &[u8], warnings: &[String], has_hits: bool) -> Opti
         message.push(b' ');
         message.extend_from_slice(query_id);
         message.extend_from_slice(b": ");
-        for warning in sorted {
+        for warning in crate::report::query_warnings::sorted_query_messages(warnings) {
             message.extend_from_slice(warning.as_bytes());
             message.push(b' ');
         }
@@ -173,19 +187,23 @@ pub struct QueryText {
 }
 
 /// The `QueryText` of one query (`program` names the program in a refusal): its record's
-/// `local_id` (`Query_N`) and FASTA `title`, the query's warning messages and whether it has
-/// Seq-aligns.
+/// `warning_id` (`FastaRecord::warning_id`: `Query_N` without `-parse_deflines`) and FASTA `title`,
+/// the query's warning messages and whether it has Seq-aligns.
 pub fn query_text(
     program: &str,
-    local_id: &str,
+    warning_id: &[u8],
+    believed: Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
     title: &[u8],
     protein: bool,
     warnings: &[String],
     has_hits: bool,
 ) -> anyhow::Result<QueryText> {
-    let generated = xml_query_title(title, protein)
-        .map_err(|refusal| refusal.error(program, "a query title"))?;
-    let id = crate::report::query_warnings::warning_query_id(local_id.as_bytes(), title);
+    let generated = match believed {
+        Some(ids) => believed_query_title(title, protein, ids),
+        None => xml_query_title(title, protein),
+    }
+    .map_err(|refusal| refusal.error(program, "a query title"))?;
+    let id = crate::report::query_warnings::warning_query_id(warning_id, title);
     let message = xml_message(&id, warnings, has_hits);
     if let Some(message) = &message {
         check_text(message).map_err(|refusal| refusal.error(program, "a query title"))?;
@@ -211,7 +229,8 @@ pub fn query_texts(
         .map(|(q_idx, record)| {
             query_text(
                 program,
-                &record.local_id,
+                record.warning_id(),
+                record.believed(),
                 &record.title,
                 protein,
                 &warnings[q_idx],

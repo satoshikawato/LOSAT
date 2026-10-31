@@ -62,7 +62,7 @@ SEED = 20261008
 REJECT_RE = re.compile(rb"not supported by LOSAT's (BLASTN|TBLASTX|TBLASTN|BLASTP)")
 # The explicit rejections LOSAT keeps after the port (message fragments; AUTHORITY.md section J):
 #   J-1 Seq-id lines (G4), J-2 -parse_deflines, J-4 records over 2^31-1 letters, J-6 titles of `Subject_` words with
-#   non-UTF-8 bytes in a subject's tabular report (RP-20), J-7 -lcase_masking of TBLASTX and BLASTP and a BATCH_SIZE
+#   non-UTF-8 bytes in a subject's tabular report (RP-20), J-7 -lcase_masking of BLASTP and a BATCH_SIZE
 #   that is no integer, and BLASTP's punctuation-only subject title in outfmt 0 (NCBI crashes; kept as an explicit
 #   rejection while the Owner decides whether approved exception 2 extends to BLASTP: S7 decision 4).
 LISTED_REJECTIONS = (rb"may be a sequence identifier", rb"-parse_deflines", rb"longer than 2147483647 letters",

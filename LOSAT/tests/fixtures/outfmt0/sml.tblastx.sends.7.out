@@ -1,0 +1,36 @@
+# TBLASTX 2.17.0+
+# Query: q_mask query with lowercase runs and a CA-repeat block
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/sml_tx_s_ends.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 30 hits found
+q_mask	sml_upper	96.721	61	2	0	400	218	450	268	3.12e-66	135
+q_mask	sml_upper	98.214	56	1	0	169	2	219	52	3.12e-66	118
+q_mask	sml_upper	96.667	60	2	0	219	398	269	448	2.11e-65	138
+q_mask	sml_upper	98.182	55	1	0	1	165	51	215	2.11e-65	113
+q_mask	sml_upper	98.361	61	1	0	218	400	268	450	2.18e-62	129
+q_mask	sml_upper	100.000	56	0	0	2	169	52	219	2.18e-62	111
+q_mask	sml_upper	96.721	61	2	0	399	217	449	267	6.26e-60	120
+q_mask	sml_upper	98.148	54	1	0	164	3	214	53	6.26e-60	112
+q_mask	sml_upper	98.214	56	1	0	168	1	218	51	2.12e-52	107
+q_mask	sml_upper	96.667	60	2	0	398	219	448	269	2.12e-52	100
+q_mask	sml_upper	98.214	56	1	0	3	170	53	220	1.61e-49	105
+q_mask	sml_upper	98.333	60	1	0	220	399	270	449	1.61e-49	92.7
+q_mask	sml_upper	71.429	7	2	0	149	129	183	203	0.26	18.0
+q_mask	sml_upper	71.429	7	2	0	133	153	199	179	0.26	18.0
+q_mask	sml_upper	35.714	14	9	0	315	274	179	138	0.36	17.6
+q_mask	sml_ends	96.721	61	2	0	400	218	450	268	3.12e-66	135
+q_mask	sml_ends	98.214	56	1	0	169	2	219	52	3.12e-66	118
+q_mask	sml_ends	96.667	60	2	0	219	398	269	448	2.11e-65	138
+q_mask	sml_ends	98.182	55	1	0	1	165	51	215	2.11e-65	113
+q_mask	sml_ends	98.361	61	1	0	218	400	268	450	2.18e-62	129
+q_mask	sml_ends	100.000	56	0	0	2	169	52	219	2.18e-62	111
+q_mask	sml_ends	96.721	61	2	0	399	217	449	267	6.26e-60	120
+q_mask	sml_ends	98.148	54	1	0	164	3	214	53	6.26e-60	112
+q_mask	sml_ends	98.214	56	1	0	168	1	218	51	2.12e-52	107
+q_mask	sml_ends	96.667	60	2	0	398	219	448	269	2.12e-52	100
+q_mask	sml_ends	98.214	56	1	0	3	170	53	220	1.61e-49	105
+q_mask	sml_ends	98.333	60	1	0	220	399	270	449	1.61e-49	92.7
+q_mask	sml_ends	71.429	7	2	0	149	129	183	203	0.26	18.0
+q_mask	sml_ends	71.429	7	2	0	133	153	199	179	0.26	18.0
+q_mask	sml_ends	35.714	14	9	0	315	274	179	138	0.36	17.6
+# BLAST processed 1 queries

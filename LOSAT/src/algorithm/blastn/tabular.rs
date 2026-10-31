@@ -224,13 +224,13 @@ pub(crate) fn write_blastn_tabular(
         //             	m_QueryLength = query_bh.GetBioseqLength();
         // ```
         let query_length = tab.range_length.unwrap_or(searched_length);
-        let query = TabularQuery {
-            id: tab
-                .query_ids
+        let query = TabularQuery::of_ids(
+            tab.queries.get(q_idx).and_then(FastaRecord::believed),
+            tab.query_ids
                 .get(q_idx)
                 .map_or(&b"unknown"[..], |id| id.as_ref()),
-            length: query_length,
-        };
+            query_length,
+        );
         buf.clear();
         // A query of a batch that NCBI did not search has no count (`write_query_header`).
         table.query_header(

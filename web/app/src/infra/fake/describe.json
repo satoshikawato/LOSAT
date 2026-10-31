@@ -24,6 +24,16 @@
     "takes_value": true
    },
    {
+    "flag": "-seqidlist",
+    "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_seqidlist",
+    "help": "Restrict search of database to everything except the specified SeqIDs",
+    "takes_value": true
+   },
+   {
     "flag": "-taxids",
     "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
     "takes_value": true
@@ -60,6 +70,16 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -164,6 +184,11 @@
     ]
    },
    {
+    "flag": "-soft_masking",
+    "help": "Apply filtering locations as soft masks [default: true]",
+    "takes_value": true
+   },
+   {
     "flag": "-window_masker_db",
     "help": "Enable WindowMasker filtering using this repeats database.",
     "takes_value": true
@@ -238,6 +263,11 @@
     ]
    },
    {
+    "flag": "-min_raw_gapped_score",
+    "help": "Minimum raw gapped score to keep an alignment in the preliminary gapped and traceback stages",
+    "takes_value": true
+   },
+   {
     "flag": "-window_size",
     "help": "Multiple hits window size, use 0 to specify 1-hit algorithm (default: 40 for dc-megablast, 0 for the other tasks)",
     "takes_value": true
@@ -271,6 +301,16 @@
    {
     "flag": "-db",
     "help": "BLAST database name (a protein database, with or without parsed Seq-ids)",
+    "takes_value": true
+   },
+   {
+    "flag": "-seqidlist",
+    "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_seqidlist",
+    "help": "Restrict search of database to everything except the specified SeqIDs",
     "takes_value": true
    },
    {
@@ -310,6 +350,16 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -468,6 +518,16 @@
     "takes_value": true
    },
    {
+    "flag": "-seqidlist",
+    "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_seqidlist",
+    "help": "Restrict search of database to everything except the specified SeqIDs",
+    "takes_value": true
+   },
+   {
     "flag": "-taxids",
     "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
     "takes_value": true
@@ -504,6 +564,16 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -717,6 +787,16 @@
     "takes_value": true
    },
    {
+    "flag": "-seqidlist",
+    "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_seqidlist",
+    "help": "Restrict search of database to everything except the specified SeqIDs",
+    "takes_value": true
+   },
+   {
     "flag": "-taxids",
     "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
     "takes_value": true
@@ -753,6 +833,16 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -833,6 +923,15 @@
     "flag": "-soft_masking",
     "help": "Apply filtering locations as soft masks [default: false]",
     "takes_value": true
+   },
+   {
+    "flag": "-lcase_masking",
+    "help": "",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
    },
    {
     "flag": "-window_size",

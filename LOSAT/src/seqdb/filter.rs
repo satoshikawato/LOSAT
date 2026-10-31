@@ -1003,7 +1003,9 @@ impl LmdbEntry {
             if oid >= max_oid {
                 skipped += skipped_oids;
             } else {
-                return (skipped_oids == 0).then(|| oid + self.oid_start - skipped);
+                return (skipped_oids == 0)
+                    .then(|| oid.checked_add(self.oid_start)?.checked_sub(skipped))
+                    .flatten();
             }
         }
         None
@@ -1384,8 +1386,8 @@ pub(super) fn entries_accessions_to_oids(
 // 	"MDB_VERSION_MISMATCH: Database environment version mismatch",
 // 	"MDB_INVALID: File is not an LMDB file",
 // ```
-/// The error of an LMDB file that does not open. NCBI's text for an empty file (probe SR4), a
-/// file of another format (SR3) and another LMDB version; LOSAT's for the rest.
+/// The error of an LMDB file that opens but is not read: NCBI's text for an empty file (probe
+/// SR4), a file of another format (SR3) and another LMDB version; LOSAT's for the rest.
 fn lmdb_open_error(file: &DbFile, message: String) -> SeqDbError {
     let what = if file.is_empty() {
         "Bad file descriptor"
@@ -1400,6 +1402,24 @@ fn lmdb_open_error(file: &DbFile, message: String) -> SeqDbError {
         };
     };
     SeqDbError::NotFound(format!("LMDB runtime error: mdb_env_open: {what}"))
+}
+
+/// The error of an LMDB file that does not open: the system's text in NCBI's words (a file
+/// without read permission gives `Permission denied`, checked with NCBI on 2026-10-31).
+fn lmdb_file_error(error: SeqDbError) -> SeqDbError {
+    if let SeqDbError::Open { source, .. } = &error {
+        if let Some(code) = source.raw_os_error() {
+            let text = source.to_string();
+            if let Some(strerror) = text.strip_suffix(&format!(" (os error {code})")) {
+                if cfg!(unix) && !strerror.contains("Too many open files") {
+                    return SeqDbError::NotFound(format!(
+                        "LMDB runtime error: mdb_env_open: {strerror}"
+                    ));
+                }
+            }
+        }
+    }
+    error
 }
 
 fn missing_file(path: &Path) -> SeqDbError {
@@ -1508,7 +1528,7 @@ impl SeqDb {
         }
         let mut entries = Vec::with_capacity(groups.len());
         for (lmdb, range) in groups {
-            let file = DbFile::open(&lmdb)?;
+            let file = DbFile::open(&lmdb).map_err(lmdb_file_error)?;
             let env = Env::open(&file).map_err(|message| lmdb_open_error(&file, message))?;
             let listed = tax_files::volumes(&env).map_err(|message| {
                 if tax_files::is_ncbi_volume_error(&message) {

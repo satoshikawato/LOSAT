@@ -337,8 +337,9 @@ impl NumericIsam {
     }
 }
 
+/// The byte offset of a row; past every file when a damaged header gives a row beyond 64 bits.
 fn row_offset(term_size: u64, start: i64, index: i64) -> u64 {
-    (start + index) as u64 * term_size
+    ((start + index) as u64).saturating_mul(term_size)
 }
 
 #[cfg(test)]

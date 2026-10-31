@@ -419,6 +419,24 @@ fn damaged_lookup_files_are_reported_as_ncbi_s_or_refused() {
         "BLAST Database error: Input db vol does not match lmdb vol".to_string(),
     );
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let unreadable = damaged("unreadable", &|db| {
+            let mode = fs::Permissions::from_mode(0o000);
+            fs::set_permissions(db.join("p5.pdb"), mode).unwrap();
+        });
+        // A superuser reads the file all the same.
+        if fs::read(format!("{unreadable}.pdb")).is_err() {
+            open_error(
+                &unreadable,
+                &["-entry", "all"],
+                "BLAST Database error: LMDB runtime error: mdb_env_open: Permission denied"
+                    .to_string(),
+            );
+        }
+    }
+
     // NCBI stops with a bus error on a truncated LMDB file (H82).
     let trunc = damaged("trunc", &|db| {
         let bytes = fs::read(db.join("p5.pdb")).unwrap();

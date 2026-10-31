@@ -508,7 +508,20 @@ fn write_database_subject_alignments_part<'h, W: Write>(
 #[derive(Clone, Copy)]
 pub enum DatabaseHeading<'a> {
     Title(&'a [u8]),
-    Parsed(&'a crate::report::db_subject::ParsedSubject),
+    /// With whether every definition line is shown (`ParsedSubject::heading`).
+    Parsed(&'a crate::report::db_subject::ParsedSubject, bool),
+}
+
+impl<'a> DatabaseHeading<'a> {
+    /// The heading of a subject with parsed Seq-ids and `hsps` HSPs in a search that is
+    /// `gapped` or not (`ParsedSubject::heading`).
+    fn parsed(
+        subject: &'a crate::report::db_subject::ParsedSubject,
+        gapped: bool,
+        hsps: usize,
+    ) -> Self {
+        DatabaseHeading::Parsed(subject, !gapped && hsps > 1)
+    }
 }
 
 impl<'a> From<&'a [u8]> for DatabaseHeading<'a> {
@@ -541,8 +554,8 @@ fn write_database_subject_heading<'h, W: Write>(
 ) -> io::Result<()> {
     let title = match title.into() {
         DatabaseHeading::Title(title) => title,
-        DatabaseHeading::Parsed(subject) => {
-            writer.write_all(&subject.heading(protein))?;
+        DatabaseHeading::Parsed(subject, every_line) => {
+            writer.write_all(&subject.heading(protein, every_line))?;
             if let Some(length) = length {
                 writeln!(writer, "Length={length}")?;
             }
@@ -2242,7 +2255,9 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         let config = self.config;
         if self.database.is_some() {
             let heading = match parsed_subject(self.parsed_subjects, s_idx) {
-                Some(subject) => DatabaseHeading::Parsed(subject),
+                Some(subject) => {
+                    DatabaseHeading::parsed(subject, true, group.subject_hits[&s_idx].len())
+                }
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
             return write_database_subject_alignments_part(
@@ -3040,7 +3055,11 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         // of the definition lines of one with parsed Seq-ids.
         if self.report.database.is_some() {
             let heading = match parsed_subject(&self.report.parsed_subjects, s_idx) {
-                Some(subject) => DatabaseHeading::Parsed(subject),
+                Some(subject) => DatabaseHeading::parsed(
+                    subject,
+                    self.report.gapped,
+                    group.subject_hits[&s_idx].len(),
+                ),
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
             return write_database_subject_alignments_part(
@@ -3707,7 +3726,9 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         // with parsed Seq-ids.
         if self.database.is_some() {
             let heading = match parsed_subject(&self.report.parsed_subjects, s_idx) {
-                Some(subject) => DatabaseHeading::Parsed(subject),
+                Some(subject) => {
+                    DatabaseHeading::parsed(subject, false, group.subject_hits[&s_idx].len())
+                }
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
             return write_database_subject_alignments_part(
@@ -4587,7 +4608,9 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             // parsed Seq-ids.
             if database.is_some() {
                 let heading = match parsed_subject(parsed_subjects, s_idx) {
-                    Some(subject) => DatabaseHeading::Parsed(subject),
+                    Some(subject) => {
+                        DatabaseHeading::parsed(subject, true, subject_hits[&s_idx].len())
+                    }
                     None => DatabaseHeading::Title(&subject_titles[&s_idx]),
                 };
                 write_database_subject_alignments(
@@ -5061,7 +5084,9 @@ pub fn write_blastx_pairwise_report<W: Write>(
                     Some((_, titles, parsed)) => write_database_subject_heading(
                         &mut writer,
                         match parsed_subject(parsed, *oid) {
-                            Some(subject) => DatabaseHeading::Parsed(subject),
+                            Some(subject) => {
+                                DatabaseHeading::parsed(subject, options.gapped, shits.len())
+                            }
                             None => DatabaseHeading::Title(&titles[*oid as usize]),
                         },
                         true,

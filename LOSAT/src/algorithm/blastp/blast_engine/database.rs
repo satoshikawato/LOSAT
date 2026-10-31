@@ -218,6 +218,11 @@ impl BlastpDatabase {
         self.db.filtered_empty()
     }
 
+    /// The taxids of the search's list (`SeqDb::list_taxids`).
+    pub(super) fn list_taxids(&self) -> &[i32] {
+        self.db.list_taxids()
+    }
+
     /// The number of sequences the statistics read (`SeqDb::statistics_numbers`).
     pub(super) fn statistics_num_sequences(&self) -> u32 {
         self.db.statistics_numbers().1

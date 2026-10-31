@@ -468,6 +468,10 @@ pub struct SeqDb {
     search_path: Option<SearchPath>,
     /// `-show_gis` of the search that reads the headers for its reports.
     reports_show_gis: bool,
+    /// Whether the database was opened with a positive list (`SeqDb::restrict`).
+    positive_list: bool,
+    /// `SeqDb::list_taxids`.
+    list_taxids: Vec<i32>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1093-1102
@@ -532,6 +536,29 @@ impl SeqDb {
     /// Sets `reports_show_gis`.
     pub fn set_reports_show_gis(&mut self, show_gis: bool) {
         self.reports_show_gis = show_gis;
+    }
+
+    /// Whether the database was opened with a positive list (`CSeqDB::GetGiList` is set), whatever
+    /// the list then selects: a list of GIs alone also searches the whole database of version 5.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:87-90
+    /// ```c++
+    /// bool CSeqDbSeqInfoSrc::HasGiList() const
+    /// {
+    ///     return !! m_iSeqDb->GetGiList();
+    /// }
+    /// ```
+    pub fn has_positive_list(&self) -> bool {
+        self.positive_list
+    }
+
+    /// The taxids of the search's list object after the volumes opened, ascending, which the
+    /// BLAST archive writes (`DbFilterArgs::archive_parameter`): of a positive list those the
+    /// database holds (`CSeqDBLMDBSet::TaxIdsToOids`, `tax_ids.swap(rv_tax_ids)`), of a negative
+    /// list all (`CSearchDatabase::x_InitializeDb` opens the database with a copy of it). Empty
+    /// without a taxid list.
+    pub fn list_taxids(&self) -> &[i32] {
+        &self.list_taxids
     }
 
     /// The search path the database was opened with (`open_in`), none for a database opened
@@ -822,6 +849,8 @@ impl SeqDb {
             filter: None,
             search_path: None,
             reports_show_gis: false,
+            positive_list: false,
+            list_taxids: Vec::new(),
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.

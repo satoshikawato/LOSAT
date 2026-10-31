@@ -313,12 +313,14 @@ export LOSAT_X_BNCSR=1
 export LOSAT_X_BNCSRPACK=1
 export LOSAT_X_BNDBCUT=1
 export LOSAT_X_BNDBSTREAM=1
+export LOSAT_X_BNDBWIDE=1
 export LOSAT_X_BNDCONE=1
 export LOSAT_X_BNFEWSUBJ=1
 export LOSAT_X_BNHITGROUP=1
 export LOSAT_X_BNHLGROW=1
 export LOSAT_X_BNLUTDROP=1
 export LOSAT_X_BNMAPPED=1
+export LOSAT_X_BNPVONCE=1
 export LOSAT_X_BNQDROP=1
 export LOSAT_X_BNQPACK=1
 export LOSAT_X_BNSEEDLISTS=1
@@ -1042,6 +1044,14 @@ Same values, faster computation:
   31,168 cDNAs against the same subject x0.822 at one thread, x0.939 at 16; blastn of the same x0.949
   / x0.960; max RSS unchanged. `=0` x1.000-1.005 of the binary before (1.6 % more instructions on
   blastn-short: the binary search moved out of line behind the check for this form).
+- `LOSAT_X_BNPVONCE=1` (BLASTN, the serial scan and the strip scan of a contiguous table laid out as packed CSR
+  of 4^11 cells or fewer, speed; in the strict set from the pull request that added it, 2026-10-31
+  (perf/abr-pv-once); `=0` tests the presence vector first) tests each word once, in the head's presence bits
+  (`x_bn_pv_once`). The head has one bit per cell; the presence vector's bit stands for four cells of 4^11, so at the
+  15 % of filled cells of ABRicate's form it is set for about half of the words, which then test again. A larger head
+  (megablast's 4^12 cells, 4 MiB of bits) keeps the presence vector in front. Evidence (ws, one core of node 0, eight rounds, against the
+  previous `dev` in the same run): ABRicate's ncbi DB x its assembly x0.950, Sakai draft 200 contigs x the same DB x0.973,
+  ECTyper x0.979, Easyfig ex2a x0.996; megablast instructions x1.00000; the same reports, the same memory.
 - `LOSAT_X_BNUNGAPCOUNT=1` (blastn, speed; in the strict set from the pull request that added it,
   2026-10-22; `=0` runs the ported loops) the exact ungapped extension
   (`s_NuclUngappedExtendExact`: blastn-short and other word sizes below 11, and the exact pass after the
@@ -1322,7 +1332,7 @@ Rebuilding less:
   acts only where a `-db` search runs its preliminary stage on the pool: more than one thread) the parallel preliminary
   stage of `-db` has no rounds: the threads claim the blocks once each in ordinal order, and one of them hands each
   block's results to the hit lists in that order while the others search the next blocks, at most 2 blocks per thread
-  past the last one handed over (`blastn/blast_engine/x_db_stream.rs`, exactness argument in its header; the driver is
+  past the last one handed over (16 with `LOSAT_X_BNDBWIDE`; `blastn/blast_engine/x_db_stream.rs`, exactness argument in its header; the driver is
   `x_bnstream::search_in_order`, that of the `-subject` path's `LOSAT_X_BNSTREAM`, here with its `assist`: a thread
   that waits for room in the window, or the owner for the next block, runs the pool's pending jobs first, such as the
   chunks of a long sequence that another thread's search hands out). The blocks are listed 65,536 at a time. Without
@@ -1353,6 +1363,36 @@ Rebuilding less:
   (9 pairs, 0.971-1.033) at 16 threads and x1.001 (8 pairs) at 8, dc-megablast x0.995 (7 pairs) at 16; max RSS equal
   with and without the switch (blastn at 16 threads 568-640 / 572-629 MiB, which is above NCBI's 382 MiB either way: a
   per-thread excess this switch does not touch).
+- `LOSAT_X_BNDBWIDE=1` (BLASTN, every task, speed; in the strict set from the pull request that added it
+  (perf/bn-db-wide2, evidence at the end of this entry): on unless it is `0`; acts only where `LOSAT_X_BNDBSTREAM`'s
+  window runs: `-db`, more than one thread, and a list of more blocks than 2 per thread) the window of
+  `LOSAT_X_BNDBSTREAM` is 16 blocks per thread (`X_BNDBWIDE_BLOCKS_PER_THREAD`), and it narrows to the old 2 per thread
+  while more than 1 MiB per thread of results wait for the owner (`x_bnstream::WaitingBound`, the same 2 per thread
+  keep the head moving; `blastn/blast_engine/x_db_stream.rs`). The old window was shorter than the blocks: on core_nt
+  at 16 threads its 32 blocks were about 24 ms of the wall clock, and a block took 54 ms at p99, so the threads ran out
+  of room behind every slow block. They waited 3,344 s of 10,860 s of thread time, evenly over the run (11.8 of the 16
+  CPUs busy in every 30 s bin; 15.8 for a window of 16 per thread without the bytes, and for NCBI), and the owner's merges took only 11.9 s (probe
+  perf/mb-wait-probe, `dropin-survey-20261029/BIGDB/STATE.md`). Which thread searches a block changes, and the order of
+  the merges does not, so reports are unchanged for the reason given under `LOSAT_X_BNDBSTREAM`. A list of 2 blocks per
+  thread or fewer behaves as without the switch. Reach: recorded with the window; the fixtures' databases do not reach
+  the new side, `LOSAT/tests/blastn_db_stream.rs` checks both sides and the reports at 2, 4 and 8 threads, and
+  `x_bnstream`'s `the_bytes_narrow_the_window_to_its_floor` the bound.
+  Evidence (ws, node 1, booked CPUs with their siblings idle, one booking per round, three rounds with the arm order
+  rotated, medians, every output equal per case and equal to NCBI's where it ran; dev caf4c166e against `=0` and on, both
+  built from da1f0db42; `dropin-survey-20261029/BIGDB/s2/ab1.tsv`), `draft200` with the options of BlobToolKit's
+  megablast, dev / `=0` / on (max RSS, MiB, dev / `=0` / on): core_nt (92 volumes, 298 GB, 575,156 blocks) at 16 threads
+  651.9 / 657.6 / 451.0 s (844-960 / 861-924 / 841-852), against NCBI 2.17.0 516.8 s (x0.873 of NCBI; 257 GiB), with user
+  7,580 -> 7,068 s and system 277 -> 94 s; ref_prok_rep_genomes (27 volumes) at 16 threads 45.95 / 47.35 / 42.29 s
+  (549-559 / 549-577 / 452-459), against NCBI 48.59 s (x0.870; 25 GiB); at 8 threads 87.38 / 87.25 / 82.28 s (322-353 /
+  331-351 / 283-297); at 32 threads 30.02 / 30.00 / 27.25 s (908-974 / 964-981 / 759-779); its first volume at 2 threads
+  14.11 / 14.11 / 13.83 s (129-135 / 129-135 / 130-133). A small database, 100 16S queries x the 28,036 16S at 16 threads,
+  is the same within the rounds' spread: megablast 4.43 / 4.42 / 4.44 s (68-70 / 68-69 / 68-72), dc-megablast 9.68 / 9.70 /
+  9.61 s (62-63 / 61-63 / 61-67), blastn 9.94 / 9.95 / 9.97 s (48-49 / 47-49 / 48-51). RSS falls where the waits fall.
+  Results pile up only behind a stall: untimed on node 0 (`perf/bn-db-wide-tune`, two rounds, 5 arms, 16 threads), the
+  results waiting at their peak were 28-36 MiB on the 16S with the old window as well, and max RSS was flat across
+  windows of 2, 8 and 16 blocks per thread with budgets of 1 MiB, 4 MiB and none. The bytes are the guarantee for a
+  database of 1 MiB blocks dense with hits, which no run measured; a window of the count alone could hold GiBs there. One thread does not run the window: one core of node 0, the first volume
+  dev / `=0` / on 27.45 / 27.20 / 27.34 s, 110 MiB in each arm (three rounds; `dropin-survey-20261029/BIGDB/s2/n1_ab.tsv`).
 - `LOSAT_X_BNDCONE=1` (BLASTN `-task dc-megablast`, speed; in the strict set from the pull request that added it
   (perf/dc-one-thread, evidence at the end of this entry): on unless it is `0`; acts only where a chunk in scope has
   no pool of two threads or more: a search on one thread; nothing while

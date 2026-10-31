@@ -331,6 +331,7 @@ export LOSAT_X_BPCLUT=1
 export LOSAT_X_BPCLUTSCANBF=1
 export LOSAT_X_BPDBCUT=1
 export LOSAT_X_BPDBKEEP=1
+export LOSAT_X_BPDBWIDE=1
 export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
 export LOSAT_X_BPFFILL=1
@@ -1953,6 +1954,19 @@ Rebuilding less:
   `bp_wssv` cycles x0.994 (8 of 8; A/A x1.003); instructions x0.9992, x0.9983, x1.0003; 16 threads (node 1 CPUs
   32-47 warmed, 16 rounds rotated with an A/A arm) Swiss-Prot q100 wall x0.991 (15 of 16; A/A x0.999), cycles x0.990
   (16 of 16), `bp_hsap` wall x0.980 (16 of 16; A/A x1.000), cycles x0.985.
+- `LOSAT_X_BPDBWIDE=1` (BLASTP, every task, speed; in the strict set from the pull request that added it
+  (perf/bp-db-wide, evidence at the end of this entry): on unless it is `0`; acts only where `LOSAT_X_BPDBKEEP`'s window
+  runs: `-db`, more than one thread, and a database of more blocks than 8 per thread) the window of `LOSAT_X_BPDBKEEP` is 64 blocks per thread (`X_BPDBWIDE_BLOCKS_PER_THREAD`), and past the old 8
+  per thread a block is taken only while at most 1 MiB per thread of results wait for the merge (`XWindow::full`,
+  `blastp/blast_engine/database/x_db_keep.rs`). The old window was shorter than the slow blocks at the start of a pass:
+  UniRef50 is sorted longest first (up to 47,538 residues), and with blastp-fast a block of the first tenth took 39 ms at p99 and up to 1.2 s,
+  against about 38 ms of the wall clock for 64 blocks at 8 threads and a median of 4.8 ms per block. Three rounds on 16
+  idle cores of node 0 (`dropin-survey-20261029/BIGDB/s3/bpab/ab.tsv`, the same output in every arm), on / `=0` / dev:
+  10 queries blastp-fast x UniRef50 at 16 threads 5.46 / 7.49 / 7.40 s, max RSS 45-47 / 42-43 / 41-44 MiB; 100 queries 48.4
+  / 57.8 / 56.3 s, 123-126 / 113-116 / 113-117 MiB; at 8 threads 9.45 / 11.1 / 11.1 s and 88.5 / 95.5 / 95.5 s. Default
+  blastp, where the waits are few, within the spread: 10 queries 73.7 / 74.9 / 71.1 s. A database of 7 proteomes (69 MB)
+  blastp-fast 15.6 / 16.8 / 16.8 s, 164-166 / 155-169 / 165-172 MiB. NCBI: 14.4, 177.9 and 57.9 s for the three blastp-fast
+  cases at 16 threads. One thread does not run the window.
 - `LOSAT_X_BPDBKEEP=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-db-thresh):
   on unless it is `0`; the preliminary stage of every BLASTP task with `-db`, at any thread count; also the chains of
   every BLASTP lookup build, `-subject` too, and the reads of the index check and the title checks wherever a program

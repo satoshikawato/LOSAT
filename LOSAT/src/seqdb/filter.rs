@@ -1592,6 +1592,7 @@ impl SeqDb {
                 words[word] |= 1u64 << bit;
             }
         }
+        self.list_taxids = found.iter().copied().collect();
         let rule = if negative {
             (!found.is_empty()).then(|| DeflineRule::NegativeTaxids(found))
         } else {
@@ -1608,6 +1609,10 @@ impl SeqDb {
         list: &DbList,
         warnings: &mut Vec<ListWarning>,
     ) -> Result<(), SeqDbError> {
+        self.positive_list = match list {
+            DbList::Taxids(list) => matches!(list, TaxidList::Positive(_)),
+            DbList::Seqids(list) => !list.negative,
+        };
         match list {
             DbList::Taxids(list) => {
                 warnings.extend(self.restrict_taxids(list)?.map(ListWarning::Log));

@@ -445,6 +445,15 @@ The `v4` rows search `x16_taxid` and `x16_ntaxid` (version 4 databases with taxi
 
 ## Seqid lists (DI-8b)
 
+Rows `db.sa8.*`: the `ext` `use_this_seqid` of a positive list on the Seq-align formats and what it limits, on
+`taxfilter/tfp`, `taxfilter/tfn` and `useseqid/`. `useseqid/` holds `p5m`, `p5mt` (protein, version 5, the records of
+`p_m.fa`: a text id and a local id on one OID, a GI that is the Seq-align id, a local id first, a PRF name, PDB ids) and
+`n5m` (nucleotide, `n_m.fa`), written by NCBI BLAST+ 2.17.0:
+`makeblastdb -in p_m.fa -dbtype prot -out p5m -parse_seqids -blastdb_version 5 -taxid 9606 -title p5m`,
+`makeblastdb -in p_m.fa -dbtype prot -out p5mt -parse_seqids -blastdb_version 5 -taxid_map p_m.map -title p5mt`,
+`makeblastdb -in n_m.fa -dbtype nucl -out n5m -parse_seqids -blastdb_version 5 -taxid 562 -title n5m`;
+`q.faa`, `q.fna`, `qx.fna` are the queries and `sl_m.txt` a seqid list.
+
 Rows `db.sl.*`: `-seqidlist` and `-negative_seqidlist` with `-db`, five programs, on `taxfilter/tfp`, `taxfilter/tfn`
 (two volumes), `ids/prot_v5`, `ids/nucl_v5` (version 5) and `ids/prot_v4`, `ids/nucl_v4` (version 4, string ISAM).
 `seqidlist/` holds the lists, written by `seqidlist/make_seqidlist.py`:

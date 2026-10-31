@@ -133,6 +133,11 @@ impl TblastnDatabase {
         self.db.filtered_empty()
     }
 
+    /// The taxids of the list that the database holds (`SeqDb::list_taxids`).
+    pub(super) fn list_taxids(&self) -> &[i32] {
+        self.db.list_taxids()
+    }
+
     /// The number of sequences of the volumes (`SeqDb::printed_num_seqs`): none is the database
     /// whose first query batch fails, also with a list.
     pub(super) fn printed_num_seqs(&self) -> u32 {

@@ -103,6 +103,11 @@ impl BlastxDatabase {
         self.db.filtered_empty()
     }
 
+    /// The taxids of the list that the database holds (`SeqDb::list_taxids`).
+    pub(crate) fn list_taxids(&self) -> &[i32] {
+        self.db.list_taxids()
+    }
+
     /// Whether the database has parsed Seq-ids: a batch can then refuse one of its subjects
     /// (`ReportedSubjects::for_batch`).
     pub(crate) fn parsed_seqids(&self) -> bool {

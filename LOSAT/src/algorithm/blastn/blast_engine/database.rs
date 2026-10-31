@@ -485,6 +485,11 @@ impl BlastnDatabase {
         self.db.filtered_empty()
     }
 
+    /// The taxids of the list that the database holds (`SeqDb::list_taxids`).
+    pub(super) fn list_taxids(&self) -> &[i32] {
+        self.db.list_taxids()
+    }
+
     /// The number of sequences and the total length that the statistics read
     /// (`SeqDb::statistics_numbers`): the real numbers, also with `-dbsize`.
     pub(super) fn metadata(&self) -> &SubjectMetadata {

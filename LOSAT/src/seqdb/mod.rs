@@ -465,6 +465,10 @@ pub struct SeqDb {
     search_path: Option<SearchPath>,
     /// `-show_gis` of the search that reads the headers for its reports.
     reports_show_gis: bool,
+    /// Whether the database was opened with a positive list (`SeqDb::restrict`).
+    positive_list: bool,
+    /// The taxids of the list that the database holds (`SeqDb::restrict_taxids`), ascending.
+    list_taxids: Vec<i32>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1093-1102
@@ -529,6 +533,27 @@ impl SeqDb {
     /// Sets `reports_show_gis`.
     pub fn set_reports_show_gis(&mut self, show_gis: bool) {
         self.reports_show_gis = show_gis;
+    }
+
+    /// Whether the database was opened with a positive list (`CSeqDB::GetGiList` is set), whatever
+    /// the list then selects: a list of GIs alone also searches the whole database of version 5.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:87-90
+    /// ```c++
+    /// bool CSeqDbSeqInfoSrc::HasGiList() const
+    /// {
+    ///     return !! m_iSeqDb->GetGiList();
+    /// }
+    /// ```
+    pub fn has_positive_list(&self) -> bool {
+        self.positive_list
+    }
+
+    /// The taxids of the list that the database holds, ascending: what NCBI's list object has
+    /// after the volumes opened (`CSeqDBLMDBSet::TaxIdsToOids`, `tax_ids.swap(rv_tax_ids)`), and
+    /// the BLAST archive writes (`DbFilterArgs::archive_parameter`). Empty without a taxid list.
+    pub fn list_taxids(&self) -> &[i32] {
+        &self.list_taxids
     }
 
     /// The search path the database was opened with (`open_in`), none for a database opened
@@ -820,6 +845,8 @@ impl SeqDb {
             filter: None,
             search_path: None,
             reports_show_gis: false,
+            positive_list: false,
+            list_taxids: Vec::new(),
         };
         Ok(db)
     }

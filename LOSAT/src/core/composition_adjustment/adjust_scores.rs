@@ -76,14 +76,22 @@ const E_JCHAR: usize = 27;
 // ```
 const LAMBDA_RATIO_LOWER_BOUND: f64 = 0.5;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:36-42
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:38-47
 // ```c
+// /** 180 degrees in half a circle */
+// #define HALF_CIRCLE_DEGREES 180
+// /** some digits of PI */
+// #define PI 3.1415926543
 // #define QUERY_MATCH_DISTANCE_THRESHOLD 0.16
 // #define LENGTH_RATIO_THRESHOLD 3.0
 // #define ANGLE_DEGREE_THRESHOLD 70.0
 // #define HIGH_PAIR_THRESHOLD 0.4
 // #define LENGTH_LOWER_THRESHOLD 50
 // ```
+const HALF_CIRCLE_DEGREES: f64 = 180.0;
+// NCBI's digits, not `std::f64::consts::PI` (3.14159265358979...): the rule's angle must be NCBI's
+// to the last bit at the 70-degree threshold.
+const PI: f64 = 3.1415926543;
 const QUERY_MATCH_DISTANCE_THRESHOLD: f64 = 0.16;
 const LENGTH_RATIO_THRESHOLD: f64 = 3.0;
 const ANGLE_DEGREE_THRESHOLD: f64 = 70.0;
@@ -3401,6 +3409,22 @@ fn high_pair_either_seq(
         || high_pair_frequencies(match_prob, match_length)
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:200-204
+// ```c
+//     angle =
+//         acos((D_m_mat * D_m_mat + D_q_mat * D_q_mat -
+//               D_m_q * D_m_q) / 2.0 / D_m_mat / D_q_mat);
+//     /* convert from radians to degrees */
+//     angle = angle * HALF_CIRCLE_DEGREES / PI;
+// ```
+// No clamp and no zero guard: a cosine rounded below -1 or above 1, or a zero distance, gives
+// NaN, and `angle > ANGLE_DEGREE_THRESHOLD` is then false (the relative-entropy rule), as in NCBI.
+fn matrix_adjust_rule_angle(d_m_mat: f64, d_q_mat: f64, d_m_q: f64) -> f64 {
+    let angle =
+        ((d_m_mat * d_m_mat + d_q_mat * d_q_mat - d_m_q * d_m_q) / 2.0 / d_m_mat / d_q_mat).acos();
+    angle * HALF_CIRCLE_DEGREES / PI
+}
+
 fn blast_choose_matrix_adjust_rule(
     length1: i32,
     length2: i32,
@@ -3444,21 +3468,25 @@ fn blast_choose_matrix_adjust_rule(
             let d_q_mat = blast_get_relative_entropy(prob_array1, p_matrix);
             let d_m_q = blast_get_relative_entropy(prob_array2, prob_array1);
 
-            let angle = if d_m_mat > 0.0 && d_q_mat > 0.0 {
-                let cos_angle = ((d_m_mat * d_m_mat) + (d_q_mat * d_q_mat) - (d_m_q * d_m_q))
-                    / (2.0 * d_m_mat * d_q_mat);
-                cos_angle.clamp(-1.0, 1.0).acos().to_degrees()
-            } else {
-                0.0
-            };
+            let angle = matrix_adjust_rule_angle(d_m_mat, d_q_mat, d_m_q);
 
             let len_large = (length1.max(length2)) as f64;
             let len_small = (length1.min(length2)) as f64;
             let _ = corr_factor;
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:215-225
+            // ```c
+            //     if (s_HighPairEitherSeq(P_query, Len_query, P_match, Len_match)) {
+            //         which_rule = eUserSpecifiedRelEntropy;
+            //     } else {
+            //       if ((D_m_q > QUERY_MATCH_DISTANCE_THRESHOLD) &&
+            //         (len_large / len_small > LENGTH_RATIO_THRESHOLD) &&
+            //         (angle > ANGLE_DEGREE_THRESHOLD)) {
+            // ```
+            // The length ratio is not guarded either: a zero length divides to inf or NaN as in C
+            // (and `blast_adjust_scores` returns before a sequence without true amino acids).
             if high_pair_either_seq(prob_array1, length1, prob_array2, length2) {
                 Ok(EMatrixAdjustRule::UserSpecifiedRelEntropy)
             } else if d_m_q > QUERY_MATCH_DISTANCE_THRESHOLD
-                && len_small > 0.0
                 && len_large / len_small > LENGTH_RATIO_THRESHOLD
                 && angle > ANGLE_DEGREE_THRESHOLD
             {
@@ -3814,6 +3842,90 @@ mod tests {
         assert_eq!(
             rule(ScoringMatrix::Identity).unwrap_err().to_string(),
             "matrix IDENTITY is not supported for RE based adjustment"
+        );
+    }
+
+    #[test]
+    fn matrix_adjust_rule_angle_follows_the_ncbi_expression() {
+        // compo_mode_condition.c:200-204. NCBI's PI (3.1415926543) is above pi, so its degrees
+        // are a little smaller: a right angle is not 90 and a straight one is not 180.
+        assert_eq!(matrix_adjust_rule_angle(0.3, 0.4, 0.5), 89.99999997965406);
+        assert_eq!(matrix_adjust_rule_angle(0.3, 0.2, 0.5), 179.99999995930813);
+        // A cosine below -1 (a collapsed triangle) and a zero distance give NaN, not 180 or 0.
+        assert!(matrix_adjust_rule_angle(0.3, 0.2, 0.5000000001).is_nan());
+        assert!(matrix_adjust_rule_angle(0.3, 0.0, 0.3).is_nan());
+        assert!(matrix_adjust_rule_angle(0.0, 0.0, 0.0).is_nan());
+    }
+
+    // The query and match distances of the rule, and the cosine of its angle.
+    fn matrix_adjust_rule_cosine(
+        query: &[f64; COMPO_NUM_TRUE_AA],
+        subject: &[f64; COMPO_NUM_TRUE_AA],
+    ) -> f64 {
+        let d_m_mat = blast_get_relative_entropy(subject, &BLOSUM62_BG);
+        let d_q_mat = blast_get_relative_entropy(query, &BLOSUM62_BG);
+        let d_m_q = blast_get_relative_entropy(subject, query);
+        (d_m_mat * d_m_mat + d_q_mat * d_q_mat - d_m_q * d_m_q) / 2.0 / d_m_mat / d_q_mat
+    }
+
+    #[test]
+    fn matrix_adjust_rule_takes_ncbi_degrees_at_the_threshold() {
+        // A query shifted from BLOSUM62's background (letter 11 up, letter 2 down) against the
+        // distant, four times longer match of the test above. At the first shift the angle is
+        // 70.0000000079 degrees with the true pi but 69.9999999921 with NCBI's PI, so NCBI takes
+        // the relative-entropy rule; past NCBI's crossing it takes the scaling rule.
+        let mut subject = [0.8 / 19.0; COMPO_NUM_TRUE_AA];
+        subject[11] = 0.2;
+        let at = |shift: f64| {
+            let mut query = BLOSUM62_BG;
+            query[11] += shift;
+            query[2] -= shift;
+            let degrees = matrix_adjust_rule_cosine(&query, &subject)
+                .acos()
+                .to_degrees();
+            let rule = blast_choose_matrix_adjust_rule(
+                100,
+                400,
+                &query,
+                &subject,
+                ScoringMatrix::Blosum62,
+                BlastCompoAdjustMode::CompositionMatrixAdjust,
+            )
+            .unwrap();
+            (degrees, rule)
+        };
+        let (degrees, rule) = at(0.03708335181724542);
+        assert!(degrees > ANGLE_DEGREE_THRESHOLD, "{degrees}");
+        assert_eq!(rule, EMatrixAdjustRule::UserSpecifiedRelEntropy);
+        let (_, rule) = at(0.03708335187554269);
+        assert_eq!(rule, EMatrixAdjustRule::CompoScaleOldMatrix);
+    }
+
+    #[test]
+    fn matrix_adjust_rule_collapsed_triangle_takes_relative_entropy() {
+        // The query lies just past BLOSUM62's background on the line from the match, so the
+        // background is between the two and the triangle of distances collapses: the cosine
+        // rounds to -1.6. NCBI's acos is then NaN (the relative-entropy rule); a clamp to -1
+        // (180 degrees) would take the scaling rule. The -1.6 is the rounding of `a / temp` in
+        // the 2e-9 query distance (IEEE division, the same on every platform); a libm's log
+        // error there is about 1e-24, six orders below the squared distance.
+        let mut subject = [0.8 / 19.0; COMPO_NUM_TRUE_AA];
+        subject[11] = 0.2;
+        let query: [f64; COMPO_NUM_TRUE_AA] =
+            std::array::from_fn(|i| BLOSUM62_BG[i] - 1.4e-8 * (subject[i] - BLOSUM62_BG[i]));
+        let cosine = matrix_adjust_rule_cosine(&query, &subject);
+        assert!(cosine < -1.0, "{cosine}");
+        assert_eq!(
+            blast_choose_matrix_adjust_rule(
+                100,
+                400,
+                &query,
+                &subject,
+                ScoringMatrix::Blosum62,
+                BlastCompoAdjustMode::CompositionMatrixAdjust,
+            )
+            .unwrap(),
+            EMatrixAdjustRule::UserSpecifiedRelEntropy
         );
     }
 

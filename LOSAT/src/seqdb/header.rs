@@ -150,8 +150,8 @@ fn decode_ordinal_deflines(record: &[u8], want_taxid: bool) -> Result<Vec<Deflin
 fn decode_defline(ber: &mut Reader<'_>, want_taxid: bool) -> Result<Defline, HeaderError> {
     ber.expect_tag(TAG_SEQUENCE, "Blast-def-line")?;
     let defline_end = ber.open()?;
-    let mut title = Vec::new();
-    let mut replaced_title_bytes = 0;
+    // Made after the ids: a record with parsed Seq-ids gets no title here.
+    let mut stored_title: &[u8] = &[];
     let mut volume_ordinal = None;
     let mut taxid = 0;
     let mut next_member = DEFLINE_TITLE;
@@ -170,9 +170,7 @@ fn decode_defline(ber: &mut Reader<'_>, want_taxid: bool) -> Result<Defline, Hea
         let member_end = ber.open()?;
         match member {
             DEFLINE_TITLE => {
-                let stored = ber.visible_string()?;
-                replaced_title_bytes = replaced_bytes(stored);
-                title = fix_visible_chars(stored);
+                stored_title = ber.visible_string()?;
                 ber.close(member_end, "the title")?;
             }
             DEFLINE_SEQID => {
@@ -203,9 +201,9 @@ fn decode_defline(ber: &mut Reader<'_>, want_taxid: bool) -> Result<Defline, Hea
         return Err(HeaderError::ParsedSeqIds);
     };
     Ok(Defline {
-        title,
+        title: fix_visible_chars(stored_title),
         volume_ordinal,
-        replaced_title_bytes,
+        replaced_title_bytes: replaced_bytes(stored_title),
         taxid,
     })
 }

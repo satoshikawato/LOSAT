@@ -2845,6 +2845,15 @@ fn run_in_pool(
         | TblastxMatrix::Aborts => None,
         TblastxMatrix::Table(matrix) => Some(MatrixScores::new(matrix)),
     };
+    // EXPERIMENT (LOSAT_X_TBXBOARD): one board for the search's batches (tblastx/x_work_board.rs).
+    // Only when the batches use it (`search_query_batch`, `x_board_batch`): with the serial chunk
+    // scan, or several subjects without TBXNEXT's loop, the batches and the pipe run as before.
+    let x_board = (crate::algorithm::tblastx::x_work_board::on()
+        && parallel_pool.enabled()
+        && parallel_pool.threads() > 1
+        && std::env::var_os("LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS").is_none()
+        && (search_subjects.count() == 1 || x_subject_next::on()))
+    .then(crate::algorithm::tblastx::x_work_board::XBoard::default);
     let search: &x_batch_pipe::XSearch<'_, TblastxBatch> = &|range, seed_end| match &matrix_scores {
         None => search_query_batch(
             Blosum62Score,
@@ -2854,6 +2863,7 @@ fn run_in_pool(
             numbers,
             parallel_pool,
             seed_end,
+            x_board.as_ref(),
         ),
         Some(scores) => search_query_batch(
             scores.scorer(),
@@ -2863,6 +2873,7 @@ fn run_in_pool(
             numbers,
             parallel_pool,
             seed_end,
+            x_board.as_ref(),
         ),
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:203-209
@@ -2907,7 +2918,9 @@ fn run_in_pool(
     };
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     if let Some(plan) = x_plan {
-        if let Some(pipe) = x_batch_pipe::XPipe::new(plan, search_subjects.count(), search) {
+        if let Some(pipe) =
+            x_batch_pipe::XPipe::new(plan, search_subjects.count(), search, x_board.as_ref())
+        {
             let result = rayon::in_place_scope(|scope| {
                 let _closer = pipe.closer();
                 batch_loop(&mut |range| pipe.take(scope, range))
@@ -3747,6 +3760,29 @@ impl std::fmt::Display for ErrorAfterBatchReports {
 
 impl std::error::Error for ErrorAfterBatchReports {}
 
+// EXPERIMENT (LOSAT_X_TBXBOARD): closes subject `.1`'s units on the board when its search returns
+// (a no-op once it put its units there). No NCBI counterpart.
+struct XCloseUnits<'a>(&'a crate::algorithm::tblastx::x_work_board::XBatch, usize);
+
+impl Drop for XCloseUnits<'_> {
+    fn drop(&mut self) {
+        self.0.close_without_units(self.1);
+    }
+}
+
+// EXPERIMENT (LOSAT_X_TBXBOARD): the batch leaves the board on every return of its search. No NCBI
+// counterpart.
+struct XEndBatch<'a>(
+    &'a crate::algorithm::tblastx::x_work_board::XBoard,
+    &'a std::sync::Arc<crate::algorithm::tblastx::x_work_board::XBatch>,
+);
+
+impl Drop for XEndBatch<'_> {
+    fn drop(&mut self) {
+        self.0.end_batch(self.1);
+    }
+}
+
 fn search_query_batch<S: TbxScore>(
     // The scores of the search's matrix (`scoring.rs`).
     sc: S,
@@ -3758,6 +3794,9 @@ fn search_query_batch<S: TbxScore>(
     // EXPERIMENT (LOSAT_X_TBXPIPE): the batch pipe's view of this search's seed stage, `None`
     // without the pipe (tblastx/x_batch_pipe.rs).
     x_seed_end: Option<&x_batch_pipe::XSeedEnd<'_>>,
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the search's board of units and link groups, `None` without it
+    // (tblastx/x_work_board.rs).
+    x_board: Option<&crate::algorithm::tblastx::x_work_board::XBoard>,
 ) -> Result<TblastxBatch> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-582
     // ```c
@@ -4032,12 +4071,10 @@ fn search_query_batch<S: TbxScore>(
     // BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
     //                           query, lookup_segments, 0);
     // ```
-    // The tables of TBXLUT, PAIRLUT and PAIRPAR hold BLOSUM62's scores: another matrix's
-    // search builds NCBI's lookup table with its scores (`build_ncbi_lookup_for_profile`) and
-    // runs the frame loop.
-    let mut x_pair_lut_batch = if !S::BLOSUM62 {
-        None
-    } else {
+    // PAIRLUT builds the group tables with the search's matrix (SC7b; `XLutEarly::sc`). The
+    // batch's table of TBXLUT holds BLOSUM62's scores: another matrix's search without the
+    // stub builds NCBI's lookup table with its scores (`build_ncbi_lookup_for_profile`).
+    let mut x_pair_lut_batch = {
         x_pair_par::lut_build(x_pair_par::XLutEarly {
             query_frames: &query_frames,
             threshold: crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
@@ -4052,6 +4089,7 @@ fn search_query_batch<S: TbxScore>(
             requested_parallel,
             use_serial_scan_chunks,
             pool: parallel_pool,
+            sc,
         })
     };
     let x_pair_lut_stub = x_pair_lut_batch
@@ -4064,9 +4102,19 @@ fn search_query_batch<S: TbxScore>(
     // from the chain builder (`build_ncbi_lookup`) or filled in place from per-cell counts; the
     // same table.
     let (lookup, contexts) = match x_pair_lut_stub {
-        Some(stub) => {
+        Some(stub) if S::BLOSUM62 => {
             crate::algorithm::tblastx::lookup::x_tbxlut_reach_stub();
             stub
+        }
+        Some((lookup, mut contexts)) => {
+            crate::algorithm::tblastx::lookup::x_tbxlut_reach_stub();
+            // Another matrix's contexts (SC7b): the alpha and beta of its ungapped row, as in the
+            // reference branch below (`blast_setup.c:812-822`).
+            for ctx in contexts.iter_mut().filter(|ctx| ctx.is_valid) {
+                ctx.karlin_params.alpha = ungapped_params_for_xdrop.alpha;
+                ctx.karlin_params.beta = ungapped_params_for_xdrop.beta;
+            }
+            (lookup, contexts)
         }
         None if !S::BLOSUM62 => {
             // NCBI reference: c++/src/algo/blast/core/blast_setup.c:812-822 (the alpha and beta
@@ -4364,9 +4412,7 @@ fn search_query_batch<S: TbxScore>(
     // The guards compare the subject lengths (and, without LOSAT_X_TBXBAND, the context lengths)
     // with the slack of this table (size above minus query_length); the per-context tables use the
     // layout above.
-    let x_pair_par_batch = if !S::BLOSUM62 {
-        None
-    } else {
+    let x_pair_par_batch = {
         x_pair_par::XPairPar::prepare(x_pair_par::XBatch {
             lookup: &lookup,
             contexts: &contexts,
@@ -4385,6 +4431,7 @@ fn search_query_batch<S: TbxScore>(
             // LOSAT_X_PAIRPARGATE: the thread count and threshold dispatch point 0 decided with.
             threads: parallel_pool.threads(),
             threshold: crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
+            sc,
         })
     };
     // The reference frame loop scans the batch's table (LOSAT_X_TBXSCANBF's choice above).
@@ -4414,14 +4461,43 @@ fn search_query_batch<S: TbxScore>(
     // ```
     // NCBI keeps its lookup table and diagonal table through the subject loop; when LOSAT
     // frees its copies is not a value NCBI computes (x_seed_release.rs).
+    // EXPERIMENT (LOSAT_X_TBXBOARD): every batch of a search with a board (2+ threads) uses it: its
+    // units (the unit path), link groups, frame merges and chain sorts go on the search's board
+    // (tblastx/x_work_board.rs). Several subjects run in TBXNEXT's loop (the other subject loop
+    // waits in the pool); one subject runs on this thread and its units bring their own helpers.
+    let x_board_batch = x_board
+        .filter(|_| {
+            use_parallel
+                && !use_serial_scan_chunks
+                && (subjects.count() == 1 || x_subject_next::on())
+        })
+        .map(|board| (board, board.batch(subjects.count())));
+    let _x_board_end = x_board_batch
+        .as_ref()
+        .map(|(board, batch)| XEndBatch(board, batch));
+    // A batch without the unit path puts no units on the board: its subjects' slots are closed
+    // now, so the subject loop's threads without a subject return at once (`XBoard::help`).
+    if let Some((_, batch)) = x_board_batch
+        .as_ref()
+        .filter(|_| x_pair_par_batch.is_none())
+    {
+        for s in 0..subjects.count() {
+            batch.close_without_units(s);
+        }
+    }
+    if crate::algorithm::tblastx::x_work_board::on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXBOARD", x_board_batch.is_some());
+    }
+    // Whether the batch puts units on the board (`x_board_help` below).
+    let x_board_unit_path = x_pair_par_batch.is_some();
     let x_seed_batch = x_seed_release::XSeedBatch::new(lookup, x_pair_par_batch, subjects.count());
     let x_worker_diag_cells = x_seed_batch.worker_table_cells(diag_array_size as usize);
 
     let contexts_ref = &contexts;
     // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the reference frame loops' extensions may take the walks
-    // the sentinels stop (not with the debug output of `extend_hit_two_hit`). The sentinel walks
-    // hold BLOSUM62's byte table: another matrix takes `extend_hit_two_hit_with` with its scores.
-    let tbx_sent = S::BLOSUM62
+    // the sentinels stop (not with the debug output of `extend_hit_two_hit`); another matrix's
+    // need its byte table (`TbxScore::x_sent_walks`).
+    let tbx_sent = sc.x_sent_walks()
         && !extension_debug_enabled
         && x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice()));
 
@@ -4859,6 +4935,14 @@ fn search_query_batch<S: TbxScore>(
         // No NCBI counterpart: the clock of this subject for LOSAT_TIMING. The first local of
         // the closure, so it is dropped last and its last stage includes the drops of the rest.
         let mut x_lap = x_times.subject();
+        // EXPERIMENT (LOSAT_X_TBXBOARD): this thread searches a subject of the board's batch; a
+        // subject that returns before its units puts none on the board.
+        let _x_board_subject = x_board_batch.as_ref().map(|(board, batch)| {
+            (
+                crate::algorithm::tblastx::x_work_board::enter(board, batch),
+                XCloseUnits(batch, s_idx),
+            )
+        });
         // The scores of the search's matrix, an argument of the closures below.
         let sc = st.sc;
         // EXPERIMENT (LOSAT_X_TBXPIPE): this subject's part of the batch's seed-stage end, ended at
@@ -4884,11 +4968,7 @@ fn search_query_batch<S: TbxScore>(
         let x_units_stage = x_seed_batch.units.enter(s_idx);
         let lookup_ref: &crate::algorithm::tblastx::lookup::BlastAaLookupTable =
             x_seed_stage.tables();
-        let x_pair_par_ref: Option<&x_pair_par::XPairPar> = if !S::BLOSUM62 {
-            None
-        } else {
-            x_units_stage.tables().as_ref()
-        };
+        let x_pair_par_ref: Option<&x_pair_par::XPairPar<S>> = x_units_stage.tables().as_ref();
         // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
         // return word_length * 3 + 2;
         // if (subject->length < min_subj_seq_length) { ... continue; }
@@ -5063,9 +5143,17 @@ fn search_query_batch<S: TbxScore>(
                 x_lap.lap(XStage::Prepare);
                 let x_units = x.run_subject_units(&x_subject, parallel_pool);
                 x_lap.lap(XStage::Units);
+                x_pipe_seed.units_done(x_units.records());
+                // EXPERIMENT (LOSAT_X_TBXBOARD): every unit of the batch taken: the next batch
+                // may build its tables (tblastx/x_batch_pipe.rs `XSeedEnd::units_taken`).
+                if let (Some((_, batch)), Some(seed_end)) = (x_board_batch.as_ref(), x_seed_end) {
+                    if batch.drained() {
+                        seed_end.units_taken();
+                    }
+                }
                 x_units_stage.end();
                 x_lap.lap(XStage::UnitsRelease);
-                let x_hits = x_pair_par::XPairPar::merge_subject(x_units, &x_subject);
+                let x_hits = x_pair_par::XPairPar::<S>::merge_subject(x_units, &x_subject);
                 x_lap.lap(XStage::Merge);
                 combined_ungapped_hits = x_hits;
                 &[]
@@ -5506,11 +5594,11 @@ fn search_query_batch<S: TbxScore>(
                                         extension_debug_enabled,
                                     )
                                 } else {
-                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent,
-                                    // BLOSUM62 only) and `x_tbx_sent_subject` accepted the chunk
+                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent)
+                                    // and `x_tbx_sent_subject` accepted the chunk
                                     // (`subject_sent`).
                                     unsafe {
-                                        extend_hit_two_hit_sent(
+                                        sc.sent_two_hit(
                                             query_full,
                                             subject_full,
                                             (last_hit + wordsize) as usize,
@@ -6021,11 +6109,11 @@ fn search_query_batch<S: TbxScore>(
                                         extension_debug_enabled,
                                     )
                                 } else {
-                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent,
-                                    // BLOSUM62 only) and `x_tbx_sent_subject` accepted the chunk
+                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent)
+                                    // and `x_tbx_sent_subject` accepted the chunk
                                     // (`subject_sent`).
                                     unsafe {
-                                        extend_hit_two_hit_sent(
+                                        sc.sent_two_hit(
                                             query_full,
                                             subject_full,
                                             (last_hit + wordsize) as usize,
@@ -6749,6 +6837,12 @@ fn search_query_batch<S: TbxScore>(
         // later batch may run, the two linking calls below do not use the pool (`x_link_on_pool`,
         // tblastx/x_batch_pipe.rs item 6); the lists are the same with or without it.
         let x_link_on_pool = use_parallel && x_pipe_seed.end(combined_ungapped_hits.len());
+        // EXPERIMENT (LOSAT_X_TBXBOARD): a chain that links without the pool puts its groups and
+        // sorts on the search's board instead of running them on this thread
+        // (tblastx/x_link_slices.rs `x_helped`); the guard ends with the subject.
+        let _x_helped = crate::algorithm::tblastx::sum_stats_linking::x_link_helped(
+            use_parallel && !x_link_on_pool && x_board_batch.is_some(),
+        );
         x_lap.lap(XStage::SeedRelease);
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:561-584
@@ -7489,6 +7583,7 @@ fn search_query_batch<S: TbxScore>(
                         sc,
                     },
                     &process_subject,
+                    None,
                 );
             });
         } else {
@@ -7544,6 +7639,23 @@ fn search_query_batch<S: TbxScore>(
         );
     }
 
+    // EXPERIMENT (LOSAT_X_TBXBOARD): a thread of the subject loop without a subject helps with the
+    // batch's units (tblastx/x_work_board.rs `XBoard::help`).
+    let x_board_help = x_board_batch.as_ref().map(|(board, batch)| {
+        move |stopped: &std::sync::atomic::AtomicBool| {
+            board.help(batch, stopped);
+            // Every unit of the batch has been taken: the next batch may build its tables. A batch
+            // without the unit path has no units; its next batch starts at its seed-stage end.
+            if let Some(seed_end) = x_seed_end.filter(|_| x_board_unit_path) {
+                seed_end.units_taken();
+            }
+        }
+    });
+    // EXPERIMENT (LOSAT_X_TBXBOARD): a batch started early waits here, after its tables, until the
+    // batch before has ended its seed stage (tblastx/x_batch_pipe.rs `XGateView`).
+    if let Some(seed_end) = x_seed_end {
+        seed_end.wait_gate(x_board);
+    }
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 && x_subject_next::on() {
         // EXPERIMENT (LOSAT_X_TBXNEXT): each thread of the pool takes the next subject when it is
@@ -7571,6 +7683,9 @@ fn search_query_batch<S: TbxScore>(
                     sc,
                 },
                 &process_subject,
+                x_board_help
+                    .as_ref()
+                    .map(|help| help as &(dyn Fn(&std::sync::atomic::AtomicBool) + Sync)),
             );
         });
     } else if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {
@@ -7650,6 +7765,9 @@ fn search_query_batch<S: TbxScore>(
     }
 
     // No NCBI counterpart: LOSAT_TIMING, the clock after the subject loop (x_search_timing.rs).
+    if let Some((board, batch)) = &x_board_batch {
+        board.end_batch(batch);
+    }
     let x_t_collect = x_times.now();
     // Close channel so the writer can exit.
     if let Some(tx) = tx_opt {

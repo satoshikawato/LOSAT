@@ -12,7 +12,7 @@
 //! (printed with `LOSAT_X_STATS`, when a counter is not zero) at exit: `blocks` (blocks searched
 //! where the switch acts), `prebuilt` (blocks that took values built ahead), `dropped` (builds
 //! ahead that gave none). That the values built ahead are the values the block builds itself is a
-//! unit test of `x_lookup_ahead.rs`. Every run states `LOSAT_X_BPQBLOCK`, and
+//! unit test of `x_lookup_ahead.rs`. Every run but one case of the built-in block states `LOSAT_X_BPQBLOCK`, and
 //! `LOSAT_X_BPCLUT` and `LOSAT_X_BPLKPFLAT` (blastp-fast),
 //! itself, so that the tests do not depend on the defaults of the strict set. Each test writes its
 //! files to a directory of its own.

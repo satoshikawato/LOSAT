@@ -196,7 +196,9 @@ fn blastp_gives_one_report_with_the_switches_on_and_off() {
         "-num_threads",
         "4",
     ];
-    one_report(&fast, &[], &[], BLASTP);
+    // The first (default) run of each search also writes the reach rows (S2: no extra run).
+    let reach_fast = reach_support::Reach::new("blastp_fast");
+    one_report(&fast, &[], &[reach_fast.var()], BLASTP);
     let db = protein_database("blastp");
     let db = db.to_str().unwrap();
     let exact = [
@@ -212,12 +214,17 @@ fn blastp_gives_one_report_with_the_switches_on_and_off() {
         "-num_threads",
         "4",
     ];
-    // The first (default) run of this search also writes the reach rows (S2: no extra run).
     let reach_db = reach_support::Reach::new("blastp_db");
     one_report(&exact, &[], &[reach_db.var()], BLASTP);
     // The rows come from the default runs whose reports every `=0` arm above matched, so the
     // equalities compare these paths (a later change of scope or input would otherwise make
-    // them vacuous). BPLKPAHEAD: the look-ahead build was chosen for exact blastp's blocks.
+    // them vacuous). BPQBLOCK: the blastp-fast `-subject` search took blocks. BPLKPAHEAD: the
+    // look-ahead build was chosen for exact blastp's blocks.
+    let sides = reach_fast.sides("LOSAT_X_BPQBLOCK");
+    assert!(
+        sides.0,
+        "LOSAT_X_BPQBLOCK: sides {sides:?}: its path did not run"
+    );
     let sides = reach_db.sides("LOSAT_X_BPLKPAHEAD");
     assert!(
         sides.0,

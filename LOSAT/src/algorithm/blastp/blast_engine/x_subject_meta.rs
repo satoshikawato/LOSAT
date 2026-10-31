@@ -10,7 +10,7 @@
 //! IDs and part of the 0.13 s of drops at the blocks' ends, of 6.9 s (perf-mb-20261014
 //! `logs/split2_report.md`).
 //!
-//! With the switch on, the block search's subjects (`x_query_blocks::XBlockSubjects::new`, made
+//! The block search's subjects (`x_query_blocks::XBlockSubjects::new`, made
 //! once per search with the subjects' encoding) also hold an `XSubjectMeta`: each subject's
 //! `tabular_subject_id` result (`None` where NCBI's `GenerateDefline` would throw; not an error
 //! until a row needs it), the shown IDs (empty for `None`, as `tabular_subject_ids` shows them) and

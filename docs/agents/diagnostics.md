@@ -2750,7 +2750,7 @@ Rebuilding less:
   and 6.51 against 6.56 s at 4; against 89 SicyWSV proteins x0.931-0.939 at 4 threads. A subject set made once for
   all blocks: human x yeast blastp-fast `-subject` (254 blocks of 50,000 letters) at 16 threads x0.952 of the
   per-block form. The per-format switches `LOSAT_X_BPQBLOCKFMT`, `SA`, `XML`, `XML2`, `WEB` and `LOSAT_X_BPSUBJMETA`
-  were folded into this one on 2026-10-31 (structural line S3): they only cut the block search off.
+  were folded into this one on 2026-10-31 (structural line S3): they only cut the block search off (`LOSAT_X_BPSUBJMETA` made the IDs and titles once per block instead).
   The output file is created when the first block's rows are written; a run that fails in a later block leaves
   the rows of the blocks before.
   With `LOSAT_TIMING=1` each block prints its own `[TIMING]` lines.

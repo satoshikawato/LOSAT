@@ -5875,13 +5875,12 @@ fn search(
     };
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries in blocks of whole batches, each block a search
     // of its own whose report is written before the next block is searched
-    // (`x_query_blocks.rs`, exactness argument in its header). Every report takes it: tabular
+    // (`x_query_blocks.rs`, exactness argument in its header). These reports take it: tabular
     // format 6, outfmt 0 or 7 (the outfmt 0 prolog with the first block, the epilog and outfmt 7's
     // count of the queries with the last), outfmt 8, 9, 11 or 12, outfmt 5 (the header with the
     // first block, the end with the last), outfmt 13 to 16 (as outfmt 5, the framing state handed
-    // from block to block, `Xml2Carry`; not in a call of several outputs, hit records or an
-    // observer, see `x_query_block_plan`), also several of the other reports, the hit records and
-    // an observer (`run_local`). One block is the search of all queries below, which needs none of
+    // from block to block, `Xml2Carry`), also several of them, the hit records and an observer
+    // (`run_local`; not outfmt 11 or 13 to 16 in such a call, see `x_query_block_plan`). One block is the search of all queries below, which needs none of
     // the checks: a refusal in it has no block's bytes before it. Where a check fails, the search
     // of all queries below refuses as NCBI does. With `-db` the blocks are searched only when no
     // definition line of the database can fail a batch where its titles are read

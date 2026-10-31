@@ -78,8 +78,9 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BPQBLOCKFMT`, `LOSAT_X_BPQBLOCKSA`, `LOSAT_X_BPQBLOCKWEB`, `LOSAT_X_BPQBLOCKXML`,
 /// `LOSAT_X_BPQBLOCKXML2` and `LOSAT_X_BPSUBJMETA` (which reports and calls the block search of
 /// `LOSAT_X_BPQBLOCK` takes, and its subjects' IDs and titles made once) were folded into it on
-/// 2026-10-31 (structural line S3): they only cut the block search off, so they left `STRICT_SET`
-/// and nothing chooses any more; the refusals of the writers stay as rules of its plan.
+/// 2026-10-31 (structural line S3): they only cut the block search off (`LOSAT_X_BPSUBJMETA` made
+/// the IDs and titles once per block instead), so they left `STRICT_SET` and nothing chooses any
+/// more; the refusals of the writers stay as rules of its plan.
 /// `LOSAT_X_BPREDODBSUBJ` (the composition redo of a `-db` search reads each match's subject from
 /// the database, `blastp/x_redo_subjects.rs`) and `LOSAT_X_BPREDOWINEXPAND` (the windows of the
 /// redo expand the compact preliminary lists as they reach them, `blastp/x_redo_par.rs`) graduated

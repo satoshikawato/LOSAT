@@ -1048,9 +1048,9 @@ Same values, faster computation:
   (perf/abr-pv-once); `=0` tests the presence vector first) tests each word once, in the head's presence bits
   (`x_bn_pv_once`). The head has one bit per cell; the presence vector's bit stands for four cells of 4^11, so at the
   15 % of filled cells of ABRicate's form it is set for about half of the words, which then test again. A larger head
-  (megablast's 4^12 cells, 4 MiB of bits) keeps the presence vector in front. Evidence (ws, one core of node 0, eight rounds, against `=0` in the same binary):
-  ABRicate's ncbi DB x its assembly x0.961, Sakai draft 200 contigs x the same DB x0.989, Easyfig ex2a x0.997, ECTyper
-  x0.975; the same reports, the same memory.
+  (megablast's 4^12 cells, 4 MiB of bits) keeps the presence vector in front. Evidence (ws, one core of node 0, eight rounds, against the
+  previous `dev` in the same run): ABRicate's ncbi DB x its assembly x0.950, Sakai draft 200 contigs x the same DB x0.973,
+  ECTyper x0.979, Easyfig ex2a x0.996; megablast instructions x1.00000; the same reports, the same memory.
 - `LOSAT_X_BNUNGAPCOUNT=1` (blastn, speed; in the strict set from the pull request that added it,
   2026-10-22; `=0` runs the ported loops) the exact ungapped extension
   (`s_NuclUngappedExtendExact`: blastn-short and other word sizes below 11, and the exact pass after the

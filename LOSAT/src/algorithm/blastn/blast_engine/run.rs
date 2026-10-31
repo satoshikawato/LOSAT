@@ -10066,25 +10066,14 @@ fn write_reports_untimed(
                     .iter()
                     .filter_map(|format| format.tabular_spec())
                     .any(|spec| spec.needs().rows);
-            let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
-            let shown = crate::algorithm::common::database::ParsedShown {
-                tabular: output_formats.iter().any(|format| format.is_tabular()),
-                pairwise,
-                joined: pairwise
-                    || output_formats
-                        .iter()
-                        .any(|format| format.is_structured_xml()),
-                sam: output_formats
-                    .iter()
-                    .any(|format| matches!(format, BlastnOutputFormat::Sam(_))),
-            };
             Some(database::reported_subjects(
                 database,
                 subjects.titles,
                 &mut hit_lists,
                 letters,
-                shown,
+                database::parsed_shown(output_formats),
                 written.queries,
+                x_pool,
             )?)
         }
     };

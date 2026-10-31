@@ -5253,10 +5253,11 @@ pub fn write_blastx_epilog(
         )?;
     }
     if options.word_threshold != 0.0 {
+        // `GetWordThreshold()` is a double, written with the stream's default format.
         writeln!(
             writer,
             "Neighboring words threshold: {}",
-            options.word_threshold
+            cpp_default_double(options.word_threshold)
         )?;
     }
     if report.window_size != 0 {

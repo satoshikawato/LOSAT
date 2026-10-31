@@ -104,11 +104,12 @@
 //!    element for element, and every later step (`get_ungapped_hsp_list`, chunk merge, frame
 //!    append and sort) is the reference's code on the same input.
 //!
-//! Contexts of a multi-query batch are taken in at most `X_MAX_GROUPS` contiguous groups (one
-//! context per group for one query). A group is one unit: inside it the diagonals of its contexts
+//! Contexts of a multi-query batch are taken in at most `X_MAX_GROUPS` contiguous groups (without
+//! LOSAT_X_TBXFEWGROUPS, one context per group for one query). A group is one unit: inside it the diagonals of its contexts
 //! share unit cells exactly as reference cells without aliasing, and items 1-4 apply to its
-//! boundaries. Units depend only on the inputs, never on the thread count; with one thread they
-//! run in order on the calling thread.
+//! boundaries. The groups depend on the inputs and, with LOSAT_X_TBXFEWGROUPS, on the units the pool
+//! can use (`x_groups_wanted`, `group_starts`), which changes no output: a group boundary only decides
+//! where the concatenation above is cut; with one thread they run in order on the calling thread.
 //!
 //! `LOSAT_X_TBXBAND` (in the strict set: on unless `LOSAT_X_TBXBAND` is `0`)
 //! : `decide` does not apply `guard` (item 3) to a batch whose longest subject
@@ -183,7 +184,7 @@
 //! last context, `x_group_extents`) plus the window, and the cell of hit (q, s) is
 //! (q - s - lo) & (P - 1) (`XMasked`), where its unmasked table (`x_unit_width`) has at least four
 //! times P cells and P is at most the switch's KiB at eight threads or more, at most 4,096 cells at
-//! two to seven, never at one (`x_mask_max_cells`), or, in a batch that `guard` rejects
+//! two to seven, at most 8,192 at one (`x_mask_max_cells`), or, in a batch that `guard` rejects
 //! (LOSAT_X_TBXBAND), where its subject chunk is longer than the reference table has cells
 //! (`x_unit_mask_for`). Measured (workstation node 1): a unit's hit loop
 //! does one more instruction per hit on a masked table and saves the clearing of the unmasked
@@ -303,6 +304,50 @@ const OFFSET_ARRAY_SIZE: i32 = 4096;
 //     hits = scansub(lookup_wrap, subject,
 //                               offset_pairs, array_size, scan_range);
 // ```
+// No NCBI counterpart: how many units a batch takes (`group_starts`, scheduling only).
+/// LOSAT_X_TBXFEWGROUPS: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
+fn few_groups() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXFEWGROUPS"))
+}
+
+/// No NCBI counterpart: LOSAT_X_TBXFEWGROUPS asks for this many units per thread of the pool: the
+/// groups serve only parallelism, and each scans every subject frame and has its tables.
+const X_UNITS_PER_THREAD: usize = 2;
+
+/// No NCBI counterpart: the frames of a subject (`XUnit::f`), which are the units of one group.
+const X_SUBJECT_FRAMES: usize = 6;
+
+/// No NCBI counterpart: the groups a batch needs for `threads`: enough for `X_UNITS_PER_THREAD`
+/// units per thread on the longest subject's share of the bases (its frames are all the units a
+/// chromosome among plasmids can split into), so one group at one thread or with subjects enough.
+fn x_groups_wanted(
+    threads: usize,
+    subjects: crate::algorithm::tblastx::subjects::Subjects<'_>,
+) -> usize {
+    if !few_groups() {
+        return X_MAX_GROUPS;
+    }
+    let (longest, total) = subjects
+        .lengths()
+        .fold((0u128, 0u128), |(longest, total), length| {
+            (longest.max(length as u128), total + length as u128)
+        });
+    let shares = usize::try_from(total / longest.max(1))
+        .unwrap_or(usize::MAX)
+        .max(1);
+    (threads * X_UNITS_PER_THREAD)
+        .div_ceil(shares.saturating_mul(X_SUBJECT_FRAMES))
+        .clamp(1, X_MAX_GROUPS)
+}
+
+/// No NCBI counterpart: LOSAT_X_TBXFEWGROUPS takes fewer groups up to this many letters of a batch
+/// (a nucleotide query of about 65 kb). Measured (workstation, one thread, 2026-10-31): 60 kb x 1 Mb
+/// x0.94; 40 x 40 phages of 43 kb x0.81; 50 kb x 4.6 Mb x0.87; 50 cDNAs x 1 Mb x0.77. Above it the
+/// group's diagonal table outgrows the cache: 100-300 kb queries x1.03-1.05 in one or three groups,
+/// x1.05-1.11 for 291 kb x 590 kb (BLOSUM45), so those batches keep their six groups.
+const X_FEW_GROUPS_LETTERS: usize = 1 << 17;
+
 // No NCBI counterpart: a LOSAT variable that chooses, per batch, between two LOSAT paths with the
 // same result (the unit path and the reference frame loop, module doc items 1-4); NCBI has one path.
 /// LOSAT_X_PAIRPARGATE: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
@@ -367,14 +412,18 @@ const X_UNITMASK_MANY_THREADS: usize = 8;
 /// rule at 2 to `X_UNITMASK_MANY_THREADS - 1` threads (module doc).
 const X_UNITMASK_FEW_THREADS_CELLS: usize = 1 << 12;
 
+/// No NCBI counterpart: the largest masked table, in cells (32 KiB), of LOSAT_X_TBXUNITMASK's size
+/// rule at one thread (module doc).
+const X_UNITMASK_ONE_THREAD_CELLS: usize = 1 << 13;
+
 // No NCBI counterpart: the size limit of LOSAT_X_TBXUNITMASK's rule (module doc).
 /// The largest masked table, in cells, that a unit takes for its size at `threads` threads, for
-/// the switch's `kib`: none at one thread, at most `X_UNITMASK_FEW_THREADS_CELLS` below
-/// `X_UNITMASK_MANY_THREADS`, the switch's KiB from there.
+/// the switch's `kib`: at most `X_UNITMASK_ONE_THREAD_CELLS` at one thread,
+/// `X_UNITMASK_FEW_THREADS_CELLS` below `X_UNITMASK_MANY_THREADS`, the switch's KiB from there.
 fn x_mask_max_cells(kib: usize, threads: usize) -> usize {
     let cells = kib.saturating_mul(1024) / std::mem::size_of::<DiagStruct>();
     match threads {
-        0 | 1 => 0,
+        0 | 1 => cells.min(X_UNITMASK_ONE_THREAD_CELLS),
         t if t < X_UNITMASK_MANY_THREADS => cells.min(X_UNITMASK_FEW_THREADS_CELLS),
         _ => cells,
     }
@@ -493,8 +542,8 @@ fn x_unit_mask_for(
 // No NCBI counterpart: the groups' query offsets as LOSAT_X_TBXQSLICE reads them (from the first
 // context of a group to the first of the next, the last one to the end of its last context).
 /// The number of query offsets each group of `contexts` extends over (`group_starts`).
-fn x_group_extents(contexts: &[QueryContext]) -> Vec<usize> {
-    x_tbx_qslice::x_group_spans(contexts, &group_starts(contexts))
+fn x_group_extents(contexts: &[QueryContext], wanted: usize) -> Vec<usize> {
+    x_tbx_qslice::x_group_spans(contexts, &group_starts(contexts, wanted))
         .into_iter()
         .map(|(a, b)| (b - a) as usize)
         .collect()
@@ -788,7 +837,7 @@ const X_GATE_N1_LETTERS: i32 = 5_000;
 const X_GATE_MIN_THRESHOLD: i32 = 13;
 
 /// The per-batch inputs of `XPairPar::prepare`.
-pub(super) struct XBatch<'a> {
+pub(super) struct XBatch<'a, M: TbxScore = Blosum62Score> {
     pub lookup: &'a BlastAaLookupTable,
     pub contexts: &'a [QueryContext],
     pub query_length: i32,
@@ -804,6 +853,8 @@ pub(super) struct XBatch<'a> {
     pub threads: usize,
     /// The lookup threshold, as the build site reads it (`XLutEarly::threshold`).
     pub threshold: i32,
+    /// The search's matrix (`-matrix`; no data for BLOSUM62's instance).
+    pub sc: M,
 }
 
 /// What the unit path does with a batch (`decide`).
@@ -920,12 +971,18 @@ fn x_band_fits(longest_subject_chunk: usize, diag_array_size: i32) -> bool {
 // table (`x_unit_mask_for`: `x_masked_cells`, at most the reference's), so `x_band_fits` holds for
 // every unit that keeps an unmasked one. The scan in slices of LOSAT_X_TBXQSLICE never takes a
 // masked table (module doc), so a batch whose groups its rule cuts keeps `x_band_fits`.
-// `rule_cuts` reads only the contexts, the thread count and process-wide switches (not the
+// `rule_cuts` reads only the contexts, the thread count, the subjects' lengths (through the
+// groups, `x_groups_wanted`) and process-wide switches (not the
 // diagnostics ones), so the lookup build site and `prepare` agree, with and without diagnostics.
 /// LOSAT_X_TBXBAND with LOSAT_X_TBXUNITMASK: the switch is on and LOSAT_X_TBXQSLICE's rule cuts
 /// no group of the batch.
 fn x_band_masked(g: &XGates<'_>) -> bool {
-    g.unit_mask && !x_tbx_qslice::rule_cuts(g.contexts, &group_starts(g.contexts), g.threads)
+    g.unit_mask
+        && !x_tbx_qslice::rule_cuts(
+            g.contexts,
+            &group_starts(g.contexts, x_groups_wanted(g.threads, g.subjects)),
+            g.threads,
+        )
 }
 
 // No NCBI counterpart: the lengths the guards compare, from the batch's contexts and subjects (a
@@ -953,9 +1010,10 @@ fn x_guard_lengths(
 /// LOSAT_X_PAIRPARN1, the batch has at least `X_GATE_N1_LETTERS` letters, or the search has several
 /// threads and one subject holds more than one and a half thread's share of the bases
 /// (`2 * longest * threads > 3 * total`): the reference loop searches a subject on one thread, the
-/// units split it over the pool. Several threads without such a subject keep the reference loop
-/// below `X_GATE_DIAG_CELLS`: with the subjects spread over the pool the units used less CPU there
-/// but lost wall time on many short subjects (x1.02-1.06 at eight threads, session 9 of line A).
+/// units split it over the pool. With LOSAT_X_TBXFEWGROUPS several threads take the one-thread line
+/// too: one group for spread subjects, as at one thread. Without it they keep the reference loop
+/// below `X_GATE_DIAG_CELLS`: the six groups used less CPU there but lost wall time on many short
+/// subjects (x1.02-1.06 at eight threads, session 9 of line A).
 fn units_gain(g: &XGates<'_>) -> bool {
     if g.threshold < X_GATE_MIN_THRESHOLD || g.diag_array_size >= X_GATE_DIAG_CELLS {
         return true;
@@ -969,6 +1027,12 @@ fn units_gain(g: &XGates<'_>) -> bool {
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARN1", gain);
         return gain;
     }
+    // LOSAT_X_TBXFEWGROUPS: the one-thread line, as the batch takes the groups the pool needs
+    // (one with subjects enough) and no more scans of each frame than at one thread.
+    if few_groups() && g.query_length >= X_GATE_N1_LETTERS {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXFEWGROUPS", true);
+        return true;
+    }
     let (longest, total) = g
         .subjects
         .lengths()
@@ -979,7 +1043,7 @@ fn units_gain(g: &XGates<'_>) -> bool {
 }
 
 /// The inputs of `lut_build`: what the lookup build site of the batch has (RI:2311).
-pub(super) struct XLutEarly<'a> {
+pub(super) struct XLutEarly<'a, M: TbxScore = Blosum62Score> {
     pub query_frames: &'a [Vec<QueryFrame>],
     /// The lookup threshold (`lookup->threshold`).
     pub threshold: i32,
@@ -991,6 +1055,9 @@ pub(super) struct XLutEarly<'a> {
     pub requested_parallel: bool,
     pub use_serial_scan_chunks: bool,
     pub pool: &'a crate::utils::threading::SearchPool<'a>,
+    /// The search's matrix (`-matrix`; no data for BLOSUM62's instance): the groups' tables hold
+    /// its neighbour words.
+    pub sc: M,
 }
 
 /// The direct groups of a batch, made at the lookup build site and handed to `prepare`.
@@ -1066,7 +1133,7 @@ fn early_chunk_switches(
 // (`XPairLutQuery::x_prepare`), a gate or the guard (`decide`), or a lookup location outside one
 // group.
 /// The direct groups of the batch, or None (the reference builder runs).
-pub(super) fn lut_build(e: XLutEarly<'_>) -> Option<XLutBatch> {
+pub(super) fn lut_build<M: TbxScore>(e: XLutEarly<'_, M>) -> Option<XLutBatch> {
     let t0 = timing().then(Instant::now);
     let built = lut_direct(&e);
     add_ns(&NS_LUT_DIRECT, t0);
@@ -1095,9 +1162,14 @@ pub(super) fn lut_build(e: XLutEarly<'_>) -> Option<XLutBatch> {
 // The early decision: the inputs of `decide` from the prepared query, by the expressions RI uses
 // after the lookup build (RI:2502-2510 `query_length`, `check_diag_table_window`,
 // `diag_array_size`), then the groups and the stub.
-fn lut_direct(e: &XLutEarly<'_>) -> Option<XLutBatch> {
-    // The reference query preparation (contexts, concatenated query, lookup locations).
-    let q = XPairLutQuery::x_prepare(e.query_frames, e.threshold, true)?;
+fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
+    // The reference query preparation (contexts, concatenated query, lookup locations), with
+    // another matrix's scores that of `build_ncbi_lookup_for_profile` (SC7b).
+    let q = if M::BLOSUM62 {
+        XPairLutQuery::x_prepare(e.query_frames, e.threshold, true)?
+    } else {
+        XPairLutQuery::x_prepare_for(e.query_frames, e.threshold, true, e.sc.matrix())?
+    };
     let contexts = q.contexts();
     let query_length: i32 = contexts
         .last()
@@ -1134,9 +1206,11 @@ fn lut_direct(e: &XLutEarly<'_>) -> Option<XLutBatch> {
     }
     // EXPERIMENT (LOSAT_X_TBXQSLICE): the tables of the slices of the groups the switch cuts,
     // built directly as the groups are (x_tbx_qslice.rs).
-    let starts = group_starts(contexts);
-    let (groups, sliced) = match x_tbx_qslice::partition(contexts, &starts, e.pool.threads()) {
-        None => (lut_direct_groups(&q, e.pool, lut_on_pool())?, None),
+    let threads = e.pool.threads();
+    let wanted = x_groups_wanted(threads, e.subjects);
+    let starts = group_starts(contexts, wanted);
+    let (groups, sliced) = match x_tbx_qslice::partition(contexts, &starts, threads) {
+        None => (lut_direct_groups(&q, wanted, e.pool, lut_on_pool())?, None),
         Some(parts) => {
             let sliced =
                 x_tbx_qslice::lut_direct_sliced(&q, &starts, &parts, e.pool, lut_on_pool())?;
@@ -1180,10 +1254,11 @@ fn lut_direct(e: &XLutEarly<'_>) -> Option<XLutBatch> {
 /// when a lookup location does not lie inside one group.
 fn lut_direct_groups(
     q: &XPairLutQuery,
+    wanted: usize,
     pool: &crate::utils::threading::SearchPool<'_>,
     on_pool: bool,
 ) -> Option<Vec<XGroup>> {
-    let starts = group_starts(q.contexts());
+    let starts = group_starts(q.contexts(), wanted);
     let locations = q.x_group_locations(&starts)?;
     Some(lut_direct_tables(q, &locations, pool, on_pool))
 }
@@ -1199,12 +1274,9 @@ fn lut_direct_tables(
     pool: &crate::utils::threading::SearchPool<'_>,
     on_pool: bool,
 ) -> Vec<XGroup> {
-    let to_group = |g: XPairLutGroup| XGroup {
-        scan_bf: crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&g.table),
-        lookup: g.table,
-        q_min: g.q_min,
-        q_max: g.q_max,
-    };
+    let to_group = XGroup::from_direct;
+    // A cut group's slices are many tables (x_tbx_qslice.rs), each a region of address space.
+    let mapped = locations.len() <= X_MAX_GROUPS;
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1213,14 +1285,14 @@ fn lut_direct_tables(
         return pool.install(|| {
             locations
                 .par_iter()
-                .map(|group_locations| to_group(q.x_build_group(group_locations)))
+                .map(|group_locations| to_group(q.x_build_group(group_locations, mapped)))
                 .collect()
         });
     }
     let _ = (pool, on_pool);
     locations
         .iter()
-        .map(|group_locations| to_group(q.x_build_group(group_locations)))
+        .map(|group_locations| to_group(q.x_build_group(group_locations, mapped)))
         .collect()
 }
 
@@ -1242,6 +1314,17 @@ pub(super) struct XSubjectUnits {
     frame_chunks: Vec<Vec<SubjectChunk>>,
     units: Vec<XUnit>,
     outputs: XUnitOutputs,
+}
+
+impl XSubjectUnits {
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the records the units returned (a bound on the HSPs the
+    // subject's merge keeps; tblastx/x_batch_pipe.rs `XGate`).
+    pub(super) fn records(&self) -> usize {
+        match &self.outputs {
+            XUnitOutputs::Full(lists) => lists.iter().map(Vec::len).sum(),
+            XUnitOutputs::Compact(lists) => lists.iter().map(Vec::len).sum(),
+        }
+    }
 }
 
 // No NCBI counterpart: the two forms of the units' saved init HSPs (section above `XUnitHsp`),
@@ -1270,11 +1353,117 @@ pub(super) struct XSubject<'a> {
 
 /// One unit-context group: its contexts' lookup entries and their query-offset bounds.
 struct XGroup {
+    /// The group's table. With `rank` not empty its backbone holds only the cells with entries
+    /// (`x_scan_bf::x_compact`): it is read through `scan` and `hits`, never by index.
     lookup: BlastAaLookupTable,
     q_min: u32,
     q_max: u32,
     /// EXPERIMENT (LOSAT_X_TBXSCANBF): `x_scan_bf_for(&lookup)`, decided once per table.
     scan_bf: bool,
+    /// The presence-vector rank of a compacted table, empty for a table of the full backbone.
+    rank: Vec<u32>,
+}
+
+impl XGroup {
+    // No NCBI counterpart: the layout of a group table (`x_scan_bf::x_compact`); its cells,
+    // entries and presence bits are those of `lookup`.
+    /// The group of `lookup`. A table the branch-free scan takes (`x_scan_bf_for`: fewer than
+    /// half of its cells have entries) keeps only the cells with entries.
+    fn new(mut lookup: BlastAaLookupTable, q_min: u32, q_max: u32) -> Self {
+        let scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup);
+        let rank = if scan_bf {
+            crate::algorithm::tblastx::x_scan_bf::x_compact(&mut lookup)
+        } else {
+            Vec::new()
+        };
+        Self {
+            lookup,
+            q_min,
+            q_max,
+            scan_bf,
+            rank,
+        }
+    }
+
+    // No NCBI counterpart: as `new`, for a table `x_build_group` laid out (compacted there where
+    // `new` would compact it).
+    /// The group of a direct table (`XPairLutQuery::x_build_group`).
+    fn from_direct(g: XPairLutGroup) -> Self {
+        let scan_bf = if g.rank.is_empty() {
+            crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&g.table)
+        } else {
+            crate::algorithm::tblastx::x_scan_bf::x_reach_scan_bf(true);
+            true
+        };
+        Self {
+            lookup: g.table,
+            q_min: g.q_min,
+            q_max: g.q_max,
+            scan_bf,
+            rank: g.rank,
+        }
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:509-511
+    // ```c
+    // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+    // ```
+    /// One scan call of this group's table: `x_scan_subject` (LOSAT_X_TBXSCANBF's choice), or
+    /// `x_scan_subject_compact` on a compacted table. The offset array holds
+    /// `x_offset_pairs_len(array_size)` entries.
+    #[inline(always)]
+    fn scan(
+        &self,
+        subject: &[u8],
+        seq_ranges: &[(i32, i32)],
+        offset_pairs: &mut [OffsetPair],
+        array_size: i32,
+        scan_range: &mut [i32; 3],
+    ) -> i32 {
+        if self.rank.is_empty() {
+            crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
+                self.scan_bf,
+                &self.lookup,
+                subject,
+                seq_ranges,
+                offset_pairs,
+                array_size,
+                scan_range,
+            )
+        } else {
+            crate::algorithm::tblastx::x_scan_bf::x_scan_subject_compact(
+                &self.lookup,
+                &self.rank,
+                subject,
+                seq_ranges,
+                offset_pairs,
+                array_size,
+                scan_range,
+            )
+        }
+    }
+
+    /// The entries of cell `index` (none for a cell without its presence bit).
+    #[cfg(test)]
+    fn hits(&self, index: usize) -> &[i32] {
+        if self.rank.is_empty() {
+            return self.lookup.get_hits(index);
+        }
+        let word = index >> crate::algorithm::tblastx::lookup::PV_ARRAY_BTS;
+        let bit = index & crate::algorithm::tblastx::lookup::PV_ARRAY_MASK;
+        if (self.lookup.pv[word] >> bit) & 1 == 0 {
+            return &[];
+        }
+        let below = self.lookup.pv[word] & ((1u32 << bit) - 1);
+        let cell = &self.lookup.backbone[self.rank[word] as usize + below.count_ones() as usize];
+        let num = cell.num_used as usize;
+        if num <= AA_HITS_PER_CELL {
+            &cell.entries[..num]
+        } else {
+            let cursor = cell.entries[0] as usize;
+            &self.lookup.overflow[cursor..cursor + num]
+        }
+    }
 }
 
 /// One unit: subject frame `f`, its chunk number `k`, context group `g`.
@@ -1488,7 +1677,7 @@ fn x_unit_width(group: &XGroup, chunk: &SubjectChunk) -> usize {
 }
 
 /// The read-only values of the per-hit body (`x_hit`).
-struct XHitCtx<'a> {
+struct XHitCtx<'a, M: TbxScore = Blosum62Score> {
     diag_offset: i32,
     window: i32,
     wordsize: i32,
@@ -1504,6 +1693,9 @@ struct XHitCtx<'a> {
     s_frame: i8,
     s_idx: usize,
     s_len: usize,
+    /// The search's matrix (`-matrix`; no data for BLOSUM62's instance): another matrix's
+    /// extensions take its table walks (`extend_hit_two_hit_with`).
+    sc: M,
 }
 
 /// Which branch of the two-hit test a hit took (tests read it; the unit loop ignores it).
@@ -1775,7 +1967,7 @@ impl<'a, 'b> XExpand<'a, 'b> {
 }
 
 /// The unit path of one batch: the sub-lookups of its context groups.
-pub(super) struct XPairPar {
+pub(super) struct XPairPar<M: TbxScore = Blosum62Score> {
     /// The groups' tables. Empty when LOSAT_X_TBXQSLICE cuts a group of the batch (`sliced`).
     groups: Vec<XGroup>,
     /// PAIRLUT: the groups were built directly and the batch's table is a stub without
@@ -1792,10 +1984,13 @@ pub(super) struct XPairPar {
     extents: Vec<usize>,
     /// EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the batch's extensions may take the walks the
     /// sentinels stop (`x_tbx_sent_contexts`); a unit takes them where its chunk is the whole frame.
+    /// Another matrix's needs its byte table (`TbxScore::x_sent_walks`).
     sent: bool,
+    /// The search's matrix (`-matrix`; no data for BLOSUM62's instance).
+    sc: M,
 }
 
-impl XPairPar {
+impl<M: TbxScore> XPairPar<M> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:337-360
     // ```c
     // for (i = 0; i < lookup->backbone_size; i++) {
@@ -1811,7 +2006,8 @@ impl XPairPar {
     // (`lut_build`). None means the reference loop runs for every subject of the batch.
     /// The unit path for this batch, or None (a gate, the guard or the cost rule sends it to the
     /// reference loop).
-    pub(super) fn prepare(b: XBatch<'_>) -> Option<Self> {
+    pub(super) fn prepare(b: XBatch<'_, M>) -> Option<Self> {
+        let wanted = x_groups_wanted(b.threads, b.subjects);
         let decision = decide(&XGates {
             contexts: b.contexts,
             query_length: b.query_length,
@@ -1843,6 +2039,11 @@ impl XPairPar {
         // with the reference loop.
         let units = decision == XDecision::Units;
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", units);
+        if units {
+            if let Some(few) = x_takes_few_groups(b.contexts, wanted) {
+                crate::utils::xreach::x_reach!("LOSAT_X_TBXFEWGROUPS", few);
+            }
+        }
         if seed_compact() {
             crate::utils::xreach::x_reach!("LOSAT_X_SEEDCOMPACT", units);
         }
@@ -1872,11 +2073,11 @@ impl XPairPar {
                 let t0 = timing().then(Instant::now);
                 // EXPERIMENT (LOSAT_X_TBXQSLICE): the slices filtered out of the batch's table, as
                 // the groups are; the whole groups only where no group is cut.
-                let starts = group_starts(b.contexts);
+                let starts = group_starts(b.contexts, wanted);
                 let sliced = x_tbx_qslice::partition(b.contexts, &starts, b.threads)
                     .map(|parts| x_tbx_qslice::build_sliced(b.lookup, &parts));
                 let groups = if sliced.is_none() {
-                    build_groups(b.lookup, b.contexts)
+                    build_groups(b.lookup, b.contexts, wanted)
                 } else {
                     Vec::new()
                 };
@@ -1906,7 +2107,11 @@ impl XPairPar {
         let mask_rule = unit_mask_kib()
             .filter(|_| {
                 let ungrouped = sliced.is_none()
-                    && !x_tbx_qslice::rule_cuts(b.contexts, &group_starts(b.contexts), b.threads);
+                    && !x_tbx_qslice::rule_cuts(
+                        b.contexts,
+                        &group_starts(b.contexts, wanted),
+                        b.threads,
+                    );
                 // A batch with cut groups keeps the unmasked tables.
                 if !ungrouped {
                     crate::utils::xreach::x_reach!("LOSAT_X_TBXUNITMASK", false);
@@ -1919,13 +2124,14 @@ impl XPairPar {
                 band_cells: band.then_some(b.diag_array_size),
             });
         let extents = if mask_rule.is_some() {
-            x_group_extents(b.contexts)
+            x_group_extents(b.contexts, wanted)
         } else {
             Vec::new()
         };
         debug_assert!(extents.is_empty() || extents.len() == groups.len());
         // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): checked once for the batch's contexts.
-        let sent = x_tbx_sent_contexts(b.contexts.iter().map(|c| c.aa_seq.as_slice()));
+        let sent = b.sc.x_sent_walks()
+            && x_tbx_sent_contexts(b.contexts.iter().map(|c| c.aa_seq.as_slice()));
         Some(Self {
             groups,
             stub,
@@ -1933,6 +2139,7 @@ impl XPairPar {
             mask_rule,
             extents,
             sent,
+            sc: b.sc,
         })
     }
 
@@ -2338,7 +2545,7 @@ impl XPairPar {
     // above `X_MAPPED_BYTES`, rule 3: at one thread nothing is retained, mapping only costs).
     // EXPERIMENT (LOSAT_X_TBXKMERGE, x_kmerge.rs item 1): with `sort` each unit's list is sorted
     // in the unit's own task, after its scan, by the comparator of the chunk's init sort.
-    fn run_units<T: Send + x_kmerge::XUnitSort>(
+    fn run_units<T: Send + Sync + x_kmerge::XUnitSort>(
         &self,
         units: &[XUnit],
         inp: &XSubject<'_>,
@@ -2359,6 +2566,29 @@ impl XPairPar {
         ))]
         if pool.enabled() {
             let unmap = seed_unmap_active();
+            // EXPERIMENT (LOSAT_X_TBXBOARD): the units on the search's board, by batch and subject
+            // order (tblastx/x_work_board.rs); the same unit function on each unit, so the same
+            // lists in unit order.
+            if let Some((board, batch)) = crate::algorithm::tblastx::x_work_board::current() {
+                let results: Vec<OnceLock<T>> = (0..units.len()).map(|_| OnceLock::new()).collect();
+                let item =
+                    |i: usize, taker: &mut crate::algorithm::tblastx::x_work_board::XTaker| {
+                        let scratch = taker
+                            .scratch
+                            .get_or_insert_with(|| Box::new(XScratch::new(unmap)))
+                            .downcast_mut::<XScratch>()
+                            .expect("a board taker's scratch is the unit path's");
+                        let list = run(&units[i], scratch);
+                        if results[i].set(list).is_err() {
+                            unreachable!("a unit is taken once");
+                        }
+                    };
+                board.run_units(batch, inp.s_idx, units.len(), &item);
+                return results
+                    .into_iter()
+                    .map(|cell| cell.into_inner().expect("every unit ran"))
+                    .collect();
+            }
             return pool.install(|| {
                 units
                     .par_iter()
@@ -2701,6 +2931,7 @@ impl XPairPar {
             s_frame: s_frame.frame,
             s_idx: inp.s_idx,
             s_len: inp.s_len,
+            sc: self.sc,
         };
 
         let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
@@ -2723,7 +2954,7 @@ impl XPairPar {
             // [C] while (scan_range[1] <= scan_range[2])
             while scan_range[1] <= scan_range[2] {
                 // One batch per call (`x_unit_batch`: its own function on wasm32 only).
-                if !x_unit_batch::<S, P, C, PF, BF, SENT>(
+                if !x_unit_batch::<S, P, C, _, PF, BF, SENT>(
                     group,
                     subject,
                     &seq_ranges,
@@ -2770,6 +3001,7 @@ fn x_unit_batch<
     S: XInitSink,
     P: XProbe,
     C: XCells,
+    M: TbxScore,
     const PF: bool,
     const BF: bool,
     const SENT: bool,
@@ -2782,16 +3014,14 @@ fn x_unit_batch<
     scratch: &mut XScratch,
     cells: C,
     width: usize,
-    h: &XHitCtx<'_>,
+    h: &XHitCtx<'_, M>,
     init_hsps: &mut S,
     probe: &mut P,
 ) -> bool {
     let prev_scan_left = scan_range[1];
     // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
     // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
-    let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
-        group.scan_bf,
-        &group.lookup,
+    let hits = group.scan(
         subject,
         seq_ranges,
         &mut scratch.offset_pairs[..],
@@ -2821,7 +3051,7 @@ fn x_unit_batch<
                 h.window,
                 h.wordsize,
                 |cell, query_offset, subject_offset| {
-                    x_hit::<S, P, SENT>(
+                    x_hit::<S, P, _, SENT>(
                         &mut *diag_ptr.add(cell),
                         query_offset,
                         subject_offset,
@@ -2868,7 +3098,7 @@ fn x_unit_batch<
         // a masked one is at most the mask, width - 1.
         let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
         probe.at(diag_coord, subject_offset);
-        let outcome = x_hit::<S, P, SENT>(
+        let outcome = x_hit::<S, P, _, SENT>(
             diag_entry,
             query_offset,
             subject_offset,
@@ -2971,11 +3201,11 @@ fn x_unit_batch<
 /// The two-hit test and extension of one hit on its cell (`SENT`: LOSAT_X_TBXUNGAPSENT, the
 /// extension of `extend_hit_two_hit_sent`).
 #[inline(always)]
-fn x_hit<S: XInitSink, P: XProbe, const SENT: bool>(
+fn x_hit<S: XInitSink, P: XProbe, M: TbxScore, const SENT: bool>(
     diag_entry: &mut DiagStruct,
     query_offset: u32,
     subject_offset: u32,
-    h: &XHitCtx<'_>,
+    h: &XHitCtx<'_, M>,
     init_hsps: &mut S,
     probe: &mut P,
 ) -> XHit {
@@ -3039,31 +3269,44 @@ fn x_hit<S: XInitSink, P: XProbe, const SENT: bool>(
         // (x_unit_probe.rs; `XNoProbe` does nothing). No NCBI counterpart.
         let mark = probe.ext_begin();
         // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): with `SENT` the walks the sentinels stop.
-        let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) = if !SENT {
-            extend_hit_two_hit(
-                query,
-                h.subject,
-                (last_hit + wordsize) as usize,
-                subject_offset as usize,
-                q_raw,
-                x_dropoff,
-                false,
-            )
-        } else {
-            // SAFETY: `SENT` runs on the units `x_unit_sent` accepts (`scan_unit_cells`): the
-            // batch's contexts passed `x_tbx_sent_contexts` (XPairPar::sent), and `h.subject_sent`
-            // is the buffer of a frame `x_tbx_sent_subject` accepted.
-            unsafe {
-                extend_hit_two_hit_sent(
-                    query_full,
-                    h.subject_sent,
+        // Another matrix's extension takes its table walks (`extend_hit_two_hit_with`).
+        let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
+            if !M::BLOSUM62 && !SENT {
+                extend_hit_two_hit_with(
+                    h.sc,
+                    query,
+                    h.subject,
                     (last_hit + wordsize) as usize,
                     subject_offset as usize,
                     q_raw,
                     x_dropoff,
+                    false,
                 )
-            }
-        };
+            } else if !SENT {
+                extend_hit_two_hit(
+                    query,
+                    h.subject,
+                    (last_hit + wordsize) as usize,
+                    subject_offset as usize,
+                    q_raw,
+                    x_dropoff,
+                    false,
+                )
+            } else {
+                // SAFETY: `SENT` runs on the units `x_unit_sent` accepts (`scan_unit_cells`): the
+                // batch's contexts passed `x_tbx_sent_contexts` (XPairPar::sent), and `h.subject_sent`
+                // is the buffer of a frame `x_tbx_sent_subject` accepted.
+                unsafe {
+                    h.sc.sent_two_hit(
+                        query_full,
+                        h.subject_sent,
+                        (last_hit + wordsize) as usize,
+                        subject_offset as usize,
+                        q_raw,
+                        x_dropoff,
+                    )
+                }
+            };
         probe.ext_end(
             mark,
             query,
@@ -3117,21 +3360,41 @@ fn x_hit<S: XInitSink, P: XProbe, const SENT: bool>(
     }
 }
 
+// No NCBI counterpart: LOSAT_X_TBXFEWGROUPS's decision for a batch (scheduling only; module doc).
+/// Whether a batch that `wanted` would cut less than `X_MAX_GROUPS` does extends over at most
+/// `X_FEW_GROUPS_LETTERS` letters; None where `wanted` changes nothing.
+fn x_takes_few_groups(contexts: &[QueryContext], wanted: usize) -> Option<bool> {
+    let n = contexts.len();
+    if wanted >= X_MAX_GROUPS || n <= wanted {
+        return None;
+    }
+    let letters =
+        contexts[n - 1].frame_base + contexts[n - 1].aa_len as i32 - contexts[0].frame_base;
+    Some(letters as usize <= X_FEW_GROUPS_LETTERS)
+}
+
 // No NCBI counterpart: how the contexts are grouped into units (scheduling only; module doc).
 /// The first context of each group: one group per context up to `X_MAX_GROUPS` contexts, else
-/// `X_MAX_GROUPS` contiguous groups balanced by length.
-fn group_starts(contexts: &[QueryContext]) -> Vec<usize> {
+/// `X_MAX_GROUPS` contiguous groups balanced by length; `wanted` groups in place of `X_MAX_GROUPS`
+/// for a batch that extends over at most `X_FEW_GROUPS_LETTERS` letters (LOSAT_X_TBXFEWGROUPS,
+/// `x_groups_wanted`).
+fn group_starts(contexts: &[QueryContext], wanted: usize) -> Vec<usize> {
     let n = contexts.len();
-    if n <= X_MAX_GROUPS {
+    let max_groups = if x_takes_few_groups(contexts, wanted) == Some(true) {
+        wanted
+    } else {
+        X_MAX_GROUPS
+    };
+    if n <= max_groups {
         return (0..n).collect();
     }
     let total: usize = contexts.iter().map(|c| c.aa_len + 1).sum();
     let mut starts = vec![0usize];
     let mut cumulative = 0usize;
     for (c, ctx) in contexts.iter().enumerate() {
-        if c > 0 && cumulative * X_MAX_GROUPS >= starts.len() * total {
+        if c > 0 && cumulative * max_groups >= starts.len() * total {
             starts.push(c);
-            if starts.len() == X_MAX_GROUPS {
+            if starts.len() == max_groups {
                 break;
             }
         }
@@ -3172,8 +3435,12 @@ fn group_starts(contexts: &[QueryContext]) -> Vec<usize> {
 // One table per context group in the layout above: each backbone chain of the batch table
 // filtered to the group's contexts (`BSearchContextInfo` ranges of `frame_bases`), order kept;
 // pv bit, inline entries or overflow cursor (cells in index order), and longest_chain rebuilt.
-fn build_groups(lookup: &BlastAaLookupTable, contexts: &[QueryContext]) -> Vec<XGroup> {
-    let starts = group_starts(contexts);
+fn build_groups(
+    lookup: &BlastAaLookupTable,
+    contexts: &[QueryContext],
+    wanted: usize,
+) -> Vec<XGroup> {
+    let starts = group_starts(contexts, wanted);
     let bounds: Vec<i32> = starts.iter().map(|&c| lookup.frame_bases[c]).collect();
     build_tables(lookup, &bounds)
 }
@@ -3259,12 +3526,11 @@ fn build_tables(lookup: &BlastAaLookupTable, bounds: &[i32]) -> Vec<XGroup> {
                 threshold: lookup.threshold,
                 row_max: lookup.row_max.clone(),
             };
-            XGroup {
-                q_min: if b.longest_chain > 0 { b.q_min } else { 0 },
-                q_max: b.q_max,
-                scan_bf: crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup),
+            XGroup::new(
                 lookup,
-            }
+                if b.longest_chain > 0 { b.q_min } else { 0 },
+                b.q_max,
+            )
         })
         .collect()
 }
@@ -3506,6 +3772,7 @@ mod tests {
                     s_frame: s_frame.frame,
                     s_idx: 0,
                     s_len: 999,
+                    sc: Blosum62Score,
                 };
                 let seq_ranges = [(0, subject.len() as i32)];
                 let mut scan_range = [0, 0, subject.len() as i32 - wordsize];
@@ -3527,7 +3794,7 @@ mod tests {
                         {
                             aliased += 1;
                         }
-                        let outcome = x_hit::<_, _, false>(
+                        let outcome = x_hit::<_, _, _, false>(
                             &mut diag_array[cell],
                             pair.q_off,
                             pair.s_off,
@@ -3591,9 +3858,10 @@ mod tests {
         let cutoff_scores = vec![12; contexts.len()];
         let x_dropoff_per_context = vec![16; contexts.len()];
         let pp = XPairPar {
-            groups: build_groups(&lookup, &contexts),
+            groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
             stub: false,
             sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+            sc: Blosum62Score,
             sliced: None,
             mask_rule: None,
             extents: Vec::new(),
@@ -3656,8 +3924,14 @@ mod tests {
             .map(|&f| frame(f, &random_residues(&mut rng, 300, &alphabet)))
             .collect();
         let (lookup, contexts) = lookup_for(&frames);
-        let groups = build_groups(&lookup, &contexts);
+        let groups = build_groups(&lookup, &contexts, X_MAX_GROUPS);
         assert_eq!(groups.len(), 6);
+        // The tables of 300-letter contexts are sparse: with LOSAT_X_TBXSCANBF they keep only
+        // their cells with entries (`XGroup::new`), read here through `XGroup::hits`.
+        assert_eq!(
+            groups.iter().all(|g| !g.rank.is_empty()),
+            crate::algorithm::tblastx::x_scan_bf::x_tbx_scan_bf()
+        );
         for idx in 0..lookup.backbone.len() {
             let full = lookup.get_hits(idx);
             let rank = |q: i32| {
@@ -3667,7 +3941,7 @@ mod tests {
             };
             let mut merged: Vec<i32> = Vec::new();
             for (g, group) in groups.iter().enumerate() {
-                let sub = group.lookup.get_hits(idx);
+                let sub = group.hits(idx);
                 assert_eq!(
                     crate::algorithm::tblastx::lookup::pv_test(&group.lookup.pv, idx),
                     !sub.is_empty()
@@ -3981,9 +4255,10 @@ mod tests {
                 s_len: 999,
             };
             let pp = XPairPar {
-                groups: build_groups(&lookup, &contexts),
+                groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc: Blosum62Score,
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
@@ -4115,33 +4390,36 @@ mod tests {
                 s_len: 999,
             };
             let plain = XPairPar {
-                groups: build_groups(&lookup, &contexts),
+                groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc: Blosum62Score,
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
             };
             // Ratio 1: every unit whose unmasked table is at least the masked one's size.
             let pp = XPairPar {
-                groups: build_groups(&lookup, &contexts),
+                groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc: Blosum62Score,
                 sliced: None,
                 mask_rule: Some(XMaskRule {
                     max_cells: usize::MAX,
                     ratio: 1,
                     band_cells: None,
                 }),
-                extents: x_group_extents(&contexts),
+                extents: x_group_extents(&contexts, X_MAX_GROUPS),
             };
             assert_eq!(pp.extents.len(), pp.groups.len());
             // Negative control: tables of half the masked size (below extent + window, against
             // the module doc's condition), where the units may differ.
             let control = XPairPar {
-                groups: build_groups(&lookup, &contexts),
+                groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc: Blosum62Score,
                 sliced: None,
                 mask_rule: pp.mask_rule,
                 extents: pp
@@ -4173,7 +4451,8 @@ mod tests {
                 // The masked table covers the group's extent plus the window (module doc).
                 assert!(mask as usize + 1 >= pp.extents[g] + window as usize);
                 exact_fits += usize::from(mask as usize + 1 == pp.extents[g] + window as usize);
-                wide_groups += usize::from(group_starts(&contexts).len() < contexts.len());
+                wide_groups +=
+                    usize::from(group_starts(&contexts, X_MAX_GROUPS).len() < contexts.len());
                 let mut want: Vec<InitHSP> = Vec::new();
                 plain.scan_unit_hits::<_, XNoProbe, false, false, false>(
                     &unit,
@@ -4381,8 +4660,9 @@ mod tests {
             x_unit_mask_for(&rule(0, None), 24, 40, 1 << 20, 1 << 20),
             None
         );
-        // The size limit by thread count: none at one, 4,096 cells at 2-7, the switch's KiB at 8+.
-        assert_eq!(x_mask_max_cells(256, 1), 0);
+        // The size limit by thread count: 8,192 cells at one, 4,096 at 2-7, the switch's KiB at 8+.
+        assert_eq!(x_mask_max_cells(256, 1), 8192);
+        assert_eq!(x_mask_max_cells(2, 1), 512);
         assert_eq!(x_mask_max_cells(256, 2), 4096);
         assert_eq!(x_mask_max_cells(256, 7), 4096);
         assert_eq!(x_mask_max_cells(256, 8), 65536);
@@ -4396,7 +4676,7 @@ mod tests {
             .map(|(&len, f)| frame(f, &vec![aa("A")[0]; len]))
             .collect();
         let (_, contexts) = lookup_for(&frames);
-        let extents = x_group_extents(&contexts);
+        let extents = x_group_extents(&contexts, X_MAX_GROUPS);
         assert_eq!(extents.len(), 3);
         assert_eq!(
             extents[0],
@@ -4484,10 +4764,11 @@ mod tests {
     ) -> (usize, usize) {
         let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
         let (full, contexts) = build_ncbi_lookup(queries, threshold, &params, true);
-        let reference = build_groups(&full, &contexts);
+        let reference = build_groups(&full, &contexts, X_MAX_GROUPS);
         let q = XPairLutQuery::x_prepare(queries, threshold, true).expect("direct builder applies");
         // On the pool when the caller has one, else in order on this thread.
-        let direct = lut_direct_groups(&q, pool, true).expect("every location inside one group");
+        let direct = lut_direct_groups(&q, X_MAX_GROUPS, pool, true)
+            .expect("every location inside one group");
         let stub = q.x_into_stub(direct.iter().map(|g| &g.lookup));
         let lut = XLutBatch {
             groups: direct,
@@ -4663,8 +4944,8 @@ mod tests {
         }
         let q = XPairLutQuery::x_prepare(std::slice::from_ref(&frames), 13, true)
             .expect("direct builder applies");
-        let groups =
-            lut_direct_groups(&q, &serial, false).expect("every location inside one group");
+        let groups = lut_direct_groups(&q, X_MAX_GROUPS, &serial, false)
+            .expect("every location inside one group");
         for g in [1usize, 2, 3] {
             assert_eq!(groups[g].lookup.longest_chain, 0);
             assert_eq!((groups[g].q_min, groups[g].q_max), (0, 0));
@@ -4933,9 +5214,56 @@ mod tests {
         assert_eq!(decision(256, &long, false, 1, true), XDecision::Guard);
     }
 
+    // No NCBI counterpart: LOSAT_X_TBXFEWGROUPS's groups: two units per thread on the longest
+    // subject's share of the bases, at most six groups, and only up to the letters' line.
+    #[test]
+    fn a_batch_takes_the_groups_the_pool_needs() {
+        let subjects = |lengths: &[usize]| -> Vec<FastaRecord> {
+            lengths
+                .iter()
+                .map(|&length| FastaRecord::new("", b"s", &vec![b'A'; length]))
+                .collect()
+        };
+        let wanted = |threads: usize, records: &[FastaRecord]| {
+            x_groups_wanted(
+                threads,
+                crate::algorithm::tblastx::subjects::Subjects::Fasta(records),
+            )
+        };
+        let one = subjects(&[900]);
+        assert_eq!(wanted(1, &one), 1);
+        assert_eq!(wanted(2, &one), 1);
+        assert_eq!(wanted(3, &one), 1);
+        assert_eq!(wanted(4, &one), 2);
+        assert_eq!(wanted(8, &one), 3);
+        assert_eq!(wanted(16, &one), 6);
+        assert_eq!(wanted(48, &one), 6);
+        let equal = subjects(&[900; 40]);
+        assert_eq!(wanted(8, &equal), 1);
+        assert_eq!(wanted(48, &equal), 1);
+        // A chromosome among plasmids needs the units of a subject alone.
+        let chromosome = subjects(&[50_000, 500, 500, 500, 500, 500]);
+        assert_eq!(wanted(16, &chromosome), 6);
+        assert_eq!(wanted(8, &chromosome), 3);
+        let mut rng = Rng(5);
+        let alphabet = aa("ACDEKW");
+        let frames: Vec<QueryFrame> = (0..6)
+            .map(|k| frame(1 + k, &random_residues(&mut rng, 30, &alphabet)))
+            .collect();
+        let (_, contexts) = lookup_for(&frames);
+        assert_eq!(group_starts(&contexts, 1), vec![0]);
+        assert_eq!(group_starts(&contexts, 3), vec![0, 2, 4]);
+        assert_eq!(
+            group_starts(&contexts, X_MAX_GROUPS),
+            vec![0, 1, 2, 3, 4, 5]
+        );
+        assert_eq!(x_takes_few_groups(&contexts, 3), Some(true));
+        assert_eq!(x_takes_few_groups(&contexts, X_MAX_GROUPS), None);
+    }
+
     // No NCBI counterpart: LOSAT_X_PAIRPARN1 moves the one-thread line of LOSAT_X_PAIRPARGATE from
-    // 2^18 cells to batches of 5,000 letters; the rule of several threads, the threshold rule and
-    // the gates before them are unchanged.
+    // 2^18 cells to batches of 5,000 letters, and LOSAT_X_TBXFEWGROUPS takes the same line at several
+    // threads; the threshold rule and the gates before them are unchanged.
     #[test]
     fn the_one_thread_line_keeps_the_units_from_5000_letters() {
         let mut rng = Rng(11);
@@ -4985,15 +5313,15 @@ mod tests {
             decision(140_000, &one, 1, 13, false, false),
             XDecision::Units
         );
-        // Several threads keep their rule: spread subjects below 2^18 cells take the reference loop.
+        // Several threads, LOSAT_X_TBXFEWGROUPS: the same line for spread subjects.
         for threads in [2, 8] {
             assert_eq!(
-                decision(5_000, &spread, threads, 13, true, false),
+                decision(4_999, &spread, threads, 13, true, false),
                 XDecision::Cost
             );
             assert_eq!(
-                decision(100_000, &spread, threads, 13, true, false),
-                XDecision::Cost
+                decision(5_000, &spread, threads, 13, true, false),
+                XDecision::Units
             );
             assert_eq!(
                 decision(5_000, &one, threads, 13, true, false),
@@ -5023,8 +5351,8 @@ mod tests {
         ]];
         let batch = || {
             let q = XPairLutQuery::x_prepare(&queries, 11, true).expect("direct builder applies");
-            let groups =
-                lut_direct_groups(&q, &serial, false).expect("every location inside one group");
+            let groups = lut_direct_groups(&q, X_MAX_GROUPS, &serial, false)
+                .expect("every location inside one group");
             let stub = q.x_into_stub(groups.iter().map(|g| &g.lookup));
             XLutBatch {
                 groups,
@@ -5055,7 +5383,7 @@ mod tests {
             .collect();
         let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
         let (_lookup, contexts) = build_ncbi_lookup(&queries, 11, &params, true);
-        let starts = group_starts(&contexts);
+        let starts = group_starts(&contexts, X_MAX_GROUPS);
         assert_eq!(starts.len(), X_MAX_GROUPS);
         assert_eq!(starts[0], 0);
         assert!(starts.windows(2).all(|w| w[0] < w[1]));
@@ -5105,9 +5433,10 @@ mod tests {
             }
             Self {
                 pp: XPairPar {
-                    groups: build_groups(&lookup, &contexts),
+                    groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
                     stub: false,
                     sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                    sc: Blosum62Score,
                     sliced: None,
                     mask_rule: None,
                     extents: Vec::new(),
@@ -5257,7 +5586,7 @@ mod tests {
         sorted_compact
             .iter_mut()
             .for_each(|records| records.x_sort_in(&mut scratch));
-        let today = XPairPar::merge_subject_listed(
+        let today = XPairPar::<Blosum62Score>::merge_subject_listed(
             XSubjectUnits {
                 frame_chunks: frame_chunks.clone(),
                 units: units.clone(),
@@ -5265,7 +5594,7 @@ mod tests {
             },
             &inp,
         );
-        let with_switch = XPairPar::merge_subject_listed(
+        let with_switch = XPairPar::<Blosum62Score>::merge_subject_listed(
             XSubjectUnits {
                 frame_chunks: frame_chunks.clone(),
                 units: units.clone(),
@@ -5623,9 +5952,10 @@ mod tests {
         let shifted: String = block.chars().cycle().skip(200).take(s_len).collect();
         CompactCase {
             pp: XPairPar {
-                groups: build_groups(&lookup, &contexts),
+                groups: build_groups(&lookup, &contexts, X_MAX_GROUPS),
                 stub: false,
                 sent: x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice())),
+                sc: Blosum62Score,
                 sliced: None,
                 mask_rule: None,
                 extents: Vec::new(),
@@ -5707,7 +6037,7 @@ mod tests {
         }
         assert!(today.diag.capacity() < x_mapped_len::<DiagStruct>(0));
         assert!(today.records.capacity() < x_mapped_len::<XUnitHsp>(0));
-        let today_hits = XPairPar::merge_subject_listed(
+        let today_hits = XPairPar::<Blosum62Score>::merge_subject_listed(
             XSubjectUnits {
                 frame_chunks: frame_chunks.clone(),
                 units: units.clone(),
@@ -5715,7 +6045,7 @@ mod tests {
             },
             &inp,
         );
-        let mapped_hits = XPairPar::merge_subject_listed(
+        let mapped_hits = XPairPar::<Blosum62Score>::merge_subject_listed(
             XSubjectUnits {
                 frame_chunks,
                 units,

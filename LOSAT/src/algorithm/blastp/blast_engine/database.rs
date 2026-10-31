@@ -147,13 +147,13 @@ impl BlastpDatabase {
         Self::open_restricted(name, settings, parsed_seqids, None, &mut std::io::sink())
     }
 
-    /// `open` with the database restricted to the taxid list `list` of the command line
-    /// (`shared::restrict_database`, whose warning goes to `diagnostics`).
+    /// `open` with the database restricted to the taxid or seqid list `list` of the command
+    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
     pub(super) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
         parsed_seqids: bool,
-        list: Option<&crate::seqdb::TaxidList>,
+        list: Option<&crate::seqdb::DbList>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
@@ -187,6 +187,25 @@ impl BlastpDatabase {
     /// The number of sequences (`CSeqDB::GetNumSeqs`).
     pub(super) fn num_sequences(&self) -> u32 {
         self.db.num_seqs()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:145-150
+    // ```c++
+    // static Int4
+    // s_SeqDbGetMinLength(void* seqdb_handle, void*)
+    // {
+    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
+    //     return seqdb.GetMinLength();
+    // }
+    // ```
+    /// The shortest sequence length of the preliminary hit cutoff (`BlastSeqSrcGetMinSeqLen`,
+    /// `min_subject_length` of `BLAST_GapAlignSetUp`): `BLAST_SEQSRC_MINLENGTH` for a whole
+    /// database, the scanned shortest length with a list (line DI-8: `SeqDb::min_length`).
+    pub(super) fn cutoff_subject_length(&self) -> i32 {
+        match self.db.min_length() {
+            Some(shortest) => i32::try_from(shortest).unwrap_or(i32::MAX),
+            None => BLAST_SEQSRC_MINLENGTH,
+        }
     }
 
     /// The total length (`CSeqDB::GetTotalLength`).

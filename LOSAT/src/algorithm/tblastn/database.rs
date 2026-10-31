@@ -74,12 +74,12 @@ impl TblastnDatabase {
         Self::open_restricted(name, settings, None, &mut std::io::sink())
     }
 
-    /// `open` with the database restricted to the taxid list `list` of the command line
-    /// (`shared::restrict_database`, whose warning goes to `diagnostics`).
+    /// `open` with the database restricted to the taxid or seqid list `list` of the command
+    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
     pub(super) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
-        list: Option<&crate::seqdb::TaxidList>,
+        list: Option<&crate::seqdb::DbList>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
@@ -123,6 +123,7 @@ impl TblastnDatabase {
         DatabaseNumbers {
             total_length: self.db.total_length(),
             num_seqs: u64::from(self.db.num_seqs()),
+            min_length: self.db.min_length(),
         }
     }
 

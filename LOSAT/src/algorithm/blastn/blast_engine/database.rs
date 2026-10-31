@@ -1428,7 +1428,8 @@ pub(super) fn x_streaming_refusal(
 /// header (2.3-5.6 us at one thread with tblastx's 18S, line DBID ID4t fix 2b) and keeps 16 bytes
 /// per join key with outfmt 0, so this bounds the pass to a few seconds and some tens of MiB; a
 /// larger database (NCBI's `nt` and `core_nt`) keeps its reports after the loop, as before the
-/// stream took databases with parsed Seq-ids (`Off::LargeParsed`).
+/// stream took databases with parsed Seq-ids (`Off::LargeParsed`). The volumes' sequences count,
+/// also under a taxid list: the range walks decode a range's excluded sequences too.
 const X_PARSED_CHECK_SEQUENCES_MAX: u32 = 1 << 20;
 
 /// EXPERIMENT (LOSAT_X_RPTSTREAM): `x_streaming_refusal` of a database with parsed Seq-ids: with at
@@ -1446,7 +1447,7 @@ fn x_parsed_refusal(
 ) -> Option<super::x_rpt_stream::Off> {
     use super::x_rpt_stream::Off;
     let db = &database.db;
-    if db.num_seqs() > max_sequences {
+    if db.printed_num_seqs() > max_sequences {
         return Some(Off::LargeParsed);
     }
     let refusal = shared::reports_may_refuse(
@@ -2442,7 +2443,8 @@ mod tests {
     }
 
     // Line DBID: the check of a database with parsed Seq-ids reads at most `max_sequences`
-    // sequences (`X_PARSED_CHECK_SEQUENCES_MAX`; a larger one keeps the reports after the loop),
+    // sequences (`X_PARSED_CHECK_SEQUENCES_MAX`; a larger one keeps the reports after the loop,
+    // also where a taxid list leaves fewer: the walk decodes the excluded ones too),
     // reads the stored titles of an alias's volumes without parsed Seq-ids as the reports read
     // them, and reads the ambiguity data of every sequence: `nambig_v4`'s second sequence with
     // its ambiguity count raised by one (the traceback's decoding refuses it), at one thread and
@@ -2468,6 +2470,20 @@ mod tests {
         assert_eq!(refusal(&nucl, pairwise, count), [None; 2]);
         assert_eq!(
             refusal(&nucl, pairwise, count - 1),
+            [Some(Off::LargeParsed); 2]
+        );
+        let mut restricted = open_with_taxdb("ids/nucl_v5", None, &cwd);
+        restricted
+            .db
+            .restrict_taxids(&crate::seqdb::TaxidList::Positive(
+                [9606].into_iter().collect(),
+            ))
+            .unwrap();
+        let included = restricted.db.num_seqs();
+        assert!(included > 0 && included < count);
+        assert_eq!(refusal(&restricted, pairwise, count), [None; 2]);
+        assert_eq!(
+            refusal(&restricted, pairwise, count - 1),
             [Some(Off::LargeParsed); 2]
         );
         let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");

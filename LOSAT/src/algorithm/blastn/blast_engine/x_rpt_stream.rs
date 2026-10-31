@@ -110,8 +110,9 @@
 //! Outfmt 17 (SAM) streams also where a stored title or ambiguity data of the database could be
 //! refused in a later batch (`Off::Titles`, `Off::Ambiguity`; `Ready::sam_despite`): the document
 //! is written only by `SamDocument::finish`, which no refusal of LOSAT's follows, and a SAM report
-//! call writes nothing to standard error (`writes_query_warnings`), so a refusal in a later batch
-//! still finds nothing written, as in the one call after the loop. Not with `taxdb.bti` on the
+//! call writes to standard error only its batch's query warnings, which the one call after the
+//! loop writes before the same refusal, so a refusal in a later batch finds the same bytes written
+//! as in the one call after the loop. Not with `taxdb.bti` on the
 //! search path: each batch's report call then writes the taxonomy database's messages of its
 //! prefetch (DBID item T, above).
 //! `finish_sam` at NCBI's five error sites writes the document of the batches before as in the off
@@ -620,10 +621,10 @@ fn check(
             let shown = database::parsed_shown(output_formats);
             match database::x_streaming_refusal(db, shown, prefetch, pool) {
                 // Outfmt 17 writes no byte before its end (`SamDocument::finish`, which no
-                // refusal of LOSAT's follows) and nothing to standard error with its report calls
-                // (a SAM format writes no query warnings, `writes_query_warnings`), so a
-                // refusal in a later batch (a stored title, ambiguity data) still finds nothing
-                // written, as in the one call after the loop: the stream acts. Not where the
+                // refusal of LOSAT's follows) and to standard error with its report calls only
+                // the batch's query warnings, which the one call after the loop writes before
+                // the same refusal, so a refusal in a later batch (a stored title, ambiguity
+                // data) finds the same bytes written: the stream acts. Not where the
                 // prefetch reads the taxonomy database: its messages are written with each
                 // batch's report call, which a title's refusal in a later batch's report call
                 // (`database::reported_subjects`) would follow, where the one call after the

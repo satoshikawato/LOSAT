@@ -719,6 +719,57 @@ fn a_database_with_parsed_seqids_gives_the_off_bytes() {
             assert_eq!(batches, 0, "{what}");
         }
     }
+    // `-parse_deflines`: the same queries under ids of their own stream; under their own ids (the
+    // database's) a later batch's report would refuse them (`refuse_id_of_a_query`), so the check
+    // finds it first and the reports stay after the loop.
+    let renamed = dir.path("renamed.fa");
+    let mut at = 0;
+    let text = std::fs::read_to_string(late).unwrap();
+    let lines: Vec<String> = text
+        .lines()
+        .map(|line| {
+            if !line.starts_with('>') {
+                return line.to_string();
+            }
+            at += 1;
+            format!(">query{at}")
+        })
+        .collect();
+    std::fs::write(&renamed, lines.join("\n") + "\n").unwrap();
+    let renamed = renamed.to_str().unwrap();
+    for (queries, outfmt, threads, expected) in [
+        (renamed, "6", 4, "none"),
+        (renamed, "0", 1, "none"),
+        (renamed, "17", 4, "none"),
+        (late, "7", 4, "titles"),
+        (late, "0", 1, "titles"),
+    ] {
+        let path = ids("nucl_v5");
+        let args = [
+            "-task",
+            "megablast",
+            "-query",
+            queries,
+            "-db",
+            &path,
+            "-outfmt",
+            outfmt,
+            "-max_target_seqs",
+            "3",
+            "-parse_deflines",
+        ];
+        let what = format!("-parse_deflines {queries} outfmt {outfmt}");
+        let (off, (batches, reason)) =
+            same_two(&what, &args, threads, &[("BATCH_SIZE", "1500")], None);
+        assert_eq!(reason, expected, "{what}");
+        if expected == "none" {
+            assert_eq!(off.status, Some(0), "{what}: {off:?}");
+            assert!(batches >= 8 && off.report.len() > 1000, "{what}");
+        } else {
+            assert_ne!(off.status, Some(0), "{what}: the refusal");
+            assert_eq!(batches, 0, "{what}");
+        }
+    }
 }
 
 /// Where the switch must not act, it does not, and the bytes are the off path's: a subject whose

@@ -222,6 +222,12 @@ use std::ops::RangeInclusive;
 /// branch-free candidate loop, `blastx/x_seed_scan.rs`) graduated on 2026-10-26: it left
 /// `STRICT_SET` and the scan on the presence test was deleted (the compressed lookup table keeps
 /// its own scan, a rule of the table and not a switch).
+/// `LOSAT_X_DISPTABLE` (the displayed residues of TBLASTX's and TBLASTN's rows read from a per-code
+/// table of 4-bit codons, `tblastx/report.rs`) and `LOSAT_X_TBXMASKSEEK` (the scan of a frame's SEG
+/// masks in an outfmt 0 row starts at the first mask range that reaches the row,
+/// `tblastx/report.rs`) graduated on 2026-10-27: they left `STRICT_SET` and their previous code was
+/// deleted (the scan of each codon's bases and the scan of all the ranges stay as the references of
+/// unit tests).
 /// `LOSAT_X_SUMPMEMO` (the sum P-value of a linked set kept from the thread's last two calls,
 /// `stats/sum_statistics.rs`) graduated on 2026-10-27: it left `STRICT_SET` and the call that
 /// integrates every time was deleted.
@@ -321,7 +327,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_DIAGLV",
     "LOSAT_X_DIAGLV2",
     "LOSAT_X_DISCLUTPAR",
-    "LOSAT_X_DISPTABLE",
     "LOSAT_X_DPEMASK",
     "LOSAT_X_DPNEON2",
     "LOSAT_X_DPNIBBLE",
@@ -381,7 +386,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXHITBF",
     "LOSAT_X_TBXKMERGE",
     "LOSAT_X_TBXLUT",
-    "LOSAT_X_TBXMASKSEEK",
     "LOSAT_X_TBXNEXT",
     "LOSAT_X_TBXPIPE",
     "LOSAT_X_TBXPREFETCH",

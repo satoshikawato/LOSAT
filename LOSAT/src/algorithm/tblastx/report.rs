@@ -3,7 +3,7 @@
 //! blocks of outfmt 7, and the data of the pairwise report.
 
 use std::io::{self, Write};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -57,6 +57,7 @@ pub(crate) const NCBI_TBLASTX_VERSION: &str = "2.17.0+";
 ///     sm_BaseToIdx [(int) 'X'] = eBase_N;
 ///     sm_BaseToIdx [(int) 'x'] = eBase_N;
 /// ```
+#[cfg(test)]
 fn display_base(base: u8) -> u8 {
     match base.to_ascii_uppercase() {
         b'U' => 8,
@@ -70,7 +71,7 @@ fn display_base(base: u8) -> u8 {
 
 // No NCBI counterpart (the arrangement): `display_base` of every byte, on the plus strand and
 // complemented for the minus strand (the bits reversed, as in `display_residue_scan`), for the
-// display table (`LOSAT_X_DISPTABLE`). NCBI's `sm_BaseToIdx` (above) is the plus-strand table.
+// display table (`display_table`). NCBI's `sm_BaseToIdx` (above) is the plus-strand table.
 const fn display_base_table(minus: bool) -> [u8; 256] {
     let codes = b"-ACMGRSVTWYHKDBN";
     let mut table = [0u8; 256];
@@ -104,15 +105,6 @@ const fn display_base_table(minus: bool) -> [u8; 256] {
 const DISPLAY_BASE_PLUS: [u8; 256] = display_base_table(false);
 const DISPLAY_BASE_MINUS: [u8; 256] = display_base_table(true);
 
-// No NCBI counterpart: reads the LOSAT_X_DISPTABLE variable once; it does not change any value
-// NCBI computes.
-/// EXPERIMENT (LOSAT_X_DISPTABLE): a switch of the strict set (`utils/xswitch.rs`): on unless it
-/// is `0`.
-fn x_display_table() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DISPTABLE"))
-}
-
 // NCBI reference: c++/src/objects/seqfeat/Genetic_code_table.cpp:155-160,228-231 (quoted at
 // `blastx::report::display_codon`): NCBI's display reads the residue of a codon's state from a
 // table (`m_AminoAcid`) that it fills once per code; `alnvec.cpp:911-918` (at
@@ -133,27 +125,24 @@ fn display_table(code: &GeneticCode) -> &'static [u8; 4096] {
     })
 }
 
-/// A genetic code as the display translates with it (`display_residue`): with
-/// `LOSAT_X_DISPTABLE` the code's table (`display_table`), looked up once for many residues.
+/// A genetic code as the display translates with it (`display_residue`): the code's table
+/// (`display_table`; graduated 2026-10-27, the switch was `LOSAT_X_DISPTABLE`), looked up once for
+/// many residues.
 #[derive(Clone, Copy)]
-pub(crate) struct DisplayCode<'a> {
-    code: &'a GeneticCode,
-    table: Option<&'static [u8; 4096]>,
+pub(crate) struct DisplayCode {
+    table: &'static [u8; 4096],
 }
 
-impl<'a> DisplayCode<'a> {
-    pub(crate) fn new(code: &'a GeneticCode) -> Self {
+impl DisplayCode {
+    pub(crate) fn new(code: &GeneticCode) -> Self {
         Self {
-            code,
-            table: x_display_table().then(|| display_table(code)),
+            table: display_table(code),
         }
     }
 
     /// `display_residue` with this code.
     pub(crate) fn residue(&self, sequence: &[u8], frame: i8, offset: usize) -> u8 {
-        let Some(table) = self.table else {
-            return display_residue_scan(sequence, frame, offset, self.code);
-        };
+        let table = self.table;
         let first = 3 * offset + frame.unsigned_abs() as usize - 1;
         let base = |i: usize| -> usize {
             if frame > 0 {
@@ -207,8 +196,10 @@ pub(crate) fn display_residue(sequence: &[u8], frame: i8, offset: usize, code: &
     DisplayCode::new(code).residue(sequence, frame, offset)
 }
 
-/// `display_residue` without the display table (`LOSAT_X_DISPTABLE=0`): each base's code found
-/// in the IUPAC letters and the codon translated by `display_codon`.
+/// `display_residue` without the display table (what the display did before `LOSAT_X_DISPTABLE`
+/// graduated): each base's code found in the IUPAC letters and the codon translated by
+/// `display_codon`; the reference of the unit test of the table.
+#[cfg(test)]
 fn display_residue_scan(sequence: &[u8], frame: i8, offset: usize, code: &GeneticCode) -> u8 {
     let first = 3 * offset + frame.unsigned_abs() as usize - 1;
     let masks = std::array::from_fn(|i| {
@@ -891,17 +882,12 @@ pub(crate) fn xml_query_masks(
 /// gives the same letters: NCBI then shows a mask of another frame on the row (`locFrame ==
 /// frame`), and so does LOSAT.
 ///
-/// With `seek` (`LOSAT_X_TBXMASKSEEK`) the scan of a frame's ranges starts at the first range
-/// whose end, or the end of a range before it, reaches `low`, and stops at the first range
-/// that starts after `high`; the ranges it leaves out are the ones the full scan skips.
-fn lowercase_query_row(
-    row: &mut [u8],
-    frame: i8,
-    low: i32,
-    high: i32,
-    masks: &[FrameMasks],
-    seek: bool,
-) {
+/// The scan of a frame's ranges (graduated 2026-10-27, the switch was `LOSAT_X_TBXMASKSEEK`)
+/// starts at the first range whose end, or the end of a range before it, reaches `low`, and stops
+/// at the first range that starts after `high`; the ranges it leaves out are the ones a scan of
+/// all the ranges skips (that scan is the reference of the unit test
+/// `mask_seek_lowercases_the_letters_of_the_full_scan`).
+fn lowercase_query_row(row: &mut [u8], frame: i8, low: i32, high: i32, masks: &[FrameMasks]) {
     let columns = row.len() as i32;
     let column = |nt: i32| -> i32 {
         let column = if frame > 0 {
@@ -922,16 +908,12 @@ fn lowercase_query_row(
         column.clamp(0, columns - 1)
     };
     for frame_masks in masks.iter().filter(|masks| masks.frame == frame) {
-        let first_range = if seek {
-            frame_masks.ends_max.partition_point(|&end| end < low)
-        } else {
-            0
-        };
+        let first_range = frame_masks.ends_max.partition_point(|&end| end < low);
         for &(from, to) in &frame_masks.ranges[first_range..] {
-            if seek && from > high {
+            if from > high {
                 break;
             }
-            if to < low || from > high {
+            if to < low {
                 continue;
             }
             let (first, last) = if frame > 0 {
@@ -1027,8 +1009,9 @@ pub(crate) fn set_row_positives(hits: &mut [PairwiseHit], matrix: ScoringMatrix)
 // No NCBI counterpart: the masks of `shown_query_masks` arranged for `lowercase_query_row`. The
 // lowercase letters of a row do not depend on the order of the ranges, so a frame's ranges are
 // sorted by start, and the running maximum of their ends lets the row's scan start at the first
-// range that can reach it (`LOSAT_X_TBXMASKSEEK`). Before, every row scanned all ranges of its
-// frame: in TBLASTX of two ~650 kb genomes that scan was most of the row's time.
+// range that can reach it (`LOSAT_X_TBXMASKSEEK`, graduated 2026-10-27). Before, every row
+// scanned all ranges of its frame: in TBLASTX of two ~650 kb genomes that scan was most of the
+// row's time.
 /// The shown SEG masks of one frame of a query, sorted by start.
 struct FrameMasks {
     frame: i8,
@@ -1062,7 +1045,6 @@ pub(crate) struct PairwiseRows<'a> {
     subjects: &'a [FastaRecord],
     subject_letters: SubjectLetters<'a>,
     query_masks: Vec<Vec<FrameMasks>>,
-    mask_seek: bool,
     query_code: &'a GeneticCode,
     db_code: &'a GeneticCode,
     query_placements: &'a Placements,
@@ -1101,7 +1083,6 @@ impl<'a> PairwiseRows<'a> {
             subjects,
             subject_letters,
             query_masks,
-            mask_seek: crate::utils::xswitch::on("LOSAT_X_TBXMASKSEEK"),
             query_code,
             db_code,
             query_placements,
@@ -1166,7 +1147,6 @@ impl<'a> PairwiseRows<'a> {
             low,
             high,
             &self.query_masks[q_idx],
-            self.mask_seek,
         );
         hit.num_ident = identities;
         hit.num_positives = positives;
@@ -1887,8 +1867,8 @@ mod tests {
         assert_eq!(display_base(b'*'), 0);
     }
 
-    // The display table (LOSAT_X_DISPTABLE) holds the scan's answers: each byte's code on both
-    // strands, each codon of 4-bit codes of each genetic code, and so each residue of a row.
+    // The display table (graduated `LOSAT_X_DISPTABLE`) holds the scan's answers: each byte's code
+    // on both strands, each codon of 4-bit codes of each genetic code, and so each residue of a row.
     #[test]
     fn display_table_gives_the_residues_of_the_scan() {
         let reversed = |mask: u8| {
@@ -1929,10 +1909,7 @@ mod tests {
                     crate::algorithm::blastx::report::display_codon(masks, &code)
                 );
             }
-            let display = DisplayCode {
-                code: &code,
-                table: Some(table),
-            };
+            let display = DisplayCode { table };
             for frame in [1i8, 2, 3, -1, -2, -3] {
                 for offset in 0..(sequence.len() + 1 - frame.unsigned_abs() as usize) / 3 {
                     assert_eq!(
@@ -2086,15 +2063,58 @@ mod tests {
             .into_iter()
             .map(|(frame, ranges)| FrameMasks::new(frame, ranges))
             .collect();
-        for seek in [false, true] {
-            let mut plus = b"AAAAAAAAAA".to_vec();
-            lowercase_query_row(&mut plus, 1, 0, 29, &masks, seek);
-            assert_eq!(&plus, b"AAaaaAAAAA");
-            // Frame -1 residue i covers 0-based nucleotides 27-3i..29-3i: the mask 18-23 covers
-            // residues 2 and 3 only.
-            let mut minus = b"AAAAAAAAAA".to_vec();
-            lowercase_query_row(&mut minus, -1, 0, 29, &masks, seek);
-            assert_eq!(&minus, b"AAaaAAAAAA");
+        let mut plus = b"AAAAAAAAAA".to_vec();
+        lowercase_query_row(&mut plus, 1, 0, 29, &masks);
+        assert_eq!(&plus, b"AAaaaAAAAA");
+        // Frame -1 residue i covers 0-based nucleotides 27-3i..29-3i: the mask 18-23 covers
+        // residues 2 and 3 only.
+        let mut minus = b"AAAAAAAAAA".to_vec();
+        lowercase_query_row(&mut minus, -1, 0, 29, &masks);
+        assert_eq!(&minus, b"AAaaAAAAAA");
+    }
+
+    // The scan of all the ranges of a frame, which every row made before `LOSAT_X_TBXMASKSEEK`
+    // graduated: the reference of `mask_seek_lowercases_the_letters_of_the_full_scan`.
+    fn lowercase_query_row_full_scan(
+        row: &mut [u8],
+        frame: i8,
+        low: i32,
+        high: i32,
+        masks: &[FrameMasks],
+    ) {
+        let columns = row.len() as i32;
+        let column = |nt: i32| -> i32 {
+            let column = if frame > 0 {
+                if nt < low {
+                    0
+                } else if nt > high {
+                    columns - 1
+                } else {
+                    (nt - low) / 3
+                }
+            } else if nt > high {
+                0
+            } else if nt < low {
+                columns - 1
+            } else {
+                columns - 1 - (nt - low) / 3
+            };
+            column.clamp(0, columns - 1)
+        };
+        for frame_masks in masks.iter().filter(|masks| masks.frame == frame) {
+            for &(from, to) in &frame_masks.ranges {
+                if to < low || from > high {
+                    continue;
+                }
+                let (first, last) = if frame > 0 {
+                    (column(from), column(to))
+                } else {
+                    (column(to), column(from))
+                };
+                for residue in &mut row[first as usize..=last as usize] {
+                    *residue = residue.to_ascii_lowercase();
+                }
+            }
         }
     }
 
@@ -2123,13 +2143,11 @@ mod tests {
             let low = next(55);
             let high = low + 2 + next(58 - low);
             for frame in [1, -1] {
-                let mut rows = [false, true].map(|seek| {
-                    let mut row = vec![b'A'; ((high - low + 1) / 3) as usize];
-                    lowercase_query_row(&mut row, frame, low, high, &masks, seek);
-                    row
-                });
-                let seek = rows[1].split_off(0);
-                assert_eq!(seek, rows[0], "frame {frame} low {low} high {high}");
+                let mut full = vec![b'A'; ((high - low + 1) / 3) as usize];
+                let mut seek = full.clone();
+                lowercase_query_row_full_scan(&mut full, frame, low, high, &masks);
+                lowercase_query_row(&mut seek, frame, low, high, &masks);
+                assert_eq!(seek, full, "frame {frame} low {low} high {high}");
             }
         }
     }

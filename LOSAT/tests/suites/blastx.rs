@@ -11,6 +11,10 @@ mod blastx_db_stream;
 mod blastx_diag;
 #[path = "../blastx_diag_bitfield.rs"]
 mod blastx_diag_bitfield;
+#[path = "../blastx_fast.rs"]
+mod blastx_fast;
+#[path = "../blastx_fast_flat.rs"]
+mod blastx_fast_flat;
 #[path = "../blastx_flow.rs"]
 mod blastx_flow;
 #[path = "../blastx_hitbf.rs"]

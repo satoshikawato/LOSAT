@@ -6,12 +6,18 @@
 
 #[path = "../blastdbcmd_info.rs"]
 mod blastdbcmd_info;
+#[path = "../blastdbcmd_retrieve.rs"]
+mod blastdbcmd_retrieve;
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;
 #[path = "../cli_v2.rs"]
 mod cli_v2;
 #[path = "../compressed_lookup.rs"]
 mod compressed_lookup;
+#[path = "../db_seqidlist.rs"]
+mod db_seqidlist;
+#[path = "../db_taxid_root.rs"]
+mod db_taxid_root;
 #[path = "../default_bundle.rs"]
 mod default_bundle;
 #[path = "../newton_lanes8_default.rs"]

@@ -19,7 +19,9 @@ use super::search_gapped::{
     full_translation_traceback_with_matrix_and_events_with_mask_mode_owned, GappedHsp,
     PreliminaryProfile, TargetTranslation, TracebackOwnedHsp,
 };
-use super::stage_d_kappa_params::{local_extension_final_xdrop, local_kappa_redo_params};
+use super::stage_d_kappa_params::{
+    local_extension_final_xdrop, local_kappa_redo_params, use_matrix_workspace,
+};
 use super::stage_d_linking::{
     compare_preliminary_lists_for_kappa, link_preliminary_hsps, link_preliminary_hsps_on,
     reap_by_evalue, LinkedHsp, LinkedHspList,
@@ -94,6 +96,9 @@ pub(super) struct LocalStageDProfile<'a> {
 pub(super) struct DatabaseNumbers {
     pub total_length: u64,
     pub num_seqs: u64,
+    /// The scanned shortest length in nucleotides with a list (`SeqDb::min_length`,
+    /// line DI-8), `None` for a whole database.
+    pub min_length: Option<u32>,
 }
 
 /// The numbers of the subject set behind the statistics: a database's (`database`), or,
@@ -103,6 +108,9 @@ pub(super) struct DatabaseNumbers {
 pub(super) struct SubjectSetNumbers {
     pub database: Option<DatabaseNumbers>,
     pub dbsize: Option<i64>,
+    /// `-searchsp`: the effective search space when above 0, and at any value no Gumbel block
+    /// (`gumbel_block`).
+    pub searchsp: Option<i64>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:131-136
@@ -181,12 +189,40 @@ impl SubjectSetNumbers {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
+    // ```c++
+    //     if (args.Exist(kArgEffSearchSpace) && args[kArgEffSearchSpace]) {
+    //         CNcbiEnvironment env;
+    //         env.Set("OLD_FSC", "true");
+    //         opt.SetEffectiveSearchSpace(args[kArgEffSearchSpace].AsInt8());
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:921-923
+    // ```c
+    //     use_old_fsc = getenv("OLD_FSC");
+    //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
+    // ```
+    /// The Gumbel block of the database length `total_nt`, none with `-searchsp`.
+    pub(super) fn gumbel_block(
+        &self,
+        spec: &ProteinScoringSpec,
+        total_nt: u64,
+    ) -> Option<BlastGumbelBlk> {
+        if self.searchsp.is_some() {
+            return None;
+        }
+        lookup_protein_gumbel_params(spec, self.gumbel_db_length(total_nt))
+    }
+
     /// The shortest subject length of the hit-saving cutoff, in residues
-    /// (`BlastSeqSrcGetMinSeqLen / 3`): a database answers `BLAST_SEQSRC_MINLENGTH`, a FASTA
-    /// set its shortest record raised to it.
+    /// (`BlastSeqSrcGetMinSeqLen / 3`): a database answers `BLAST_SEQSRC_MINLENGTH` (with a
+    /// list, its scanned shortest length: line DI-8), a FASTA set its shortest record raised
+    /// to it.
     pub(super) fn min_subject_length(&self, subjects: &SubjectLetters<'_>) -> usize {
         let shortest = match self.database {
-            Some(_) => Self::MIN_LENGTH,
+            Some(database) => database
+                .min_length
+                .map_or(Self::MIN_LENGTH, |shortest| shortest as usize),
             None => subjects
                 .lengths()
                 .min()
@@ -1057,7 +1093,12 @@ fn run_local_search_with_pool(
     // The local `-subject` sequences are a multi-sequence source: the shortest record (an
     // empty one counts as 0, in nucleotides) is raised to 10 before the division. A database
     // answers 10 (`SubjectSetNumbers::min_subject_length`).
-    let min_subject_length = profile.subject_set.min_subject_length(&subjects);
+    // Without a Gumbel block it is the average, in nucleotides (blast_setup.c:975).
+    let min_subject_length = if profile.subject_set.searchsp.is_some() {
+        total_nt / num_subjects.max(1)
+    } else {
+        profile.subject_set.min_subject_length(&subjects)
+    };
     let query_lengths: Vec<i32> = queries
         .iter()
         .map(|query| i32::try_from(query.len()))
@@ -1074,17 +1115,13 @@ fn run_local_search_with_pool(
         protein_scoring_supported(&spec),
         "unsupported TBLASTN protein scoring scheme"
     );
-    ensure!(
-        !composition_mode2 || scoring.matrix == ScoringMatrix::Blosum62,
-        "TBLASTN composition redo matrix is unimplemented"
-    );
     let gapped = lookup_protein_params(&spec);
     let ungapped = lookup_protein_params_ungapped(scoring.matrix);
     // NCBI c++/src/algo/blast/core/blast_stat.c:4091-4171;
     // core/blast_hits.c:1870-1895: gbp is optional; absent gbp selects
     // BLAST_KarlinStoE_simple with the context's effective search space.
-    let gumbel =
-        lookup_protein_gumbel_params(&spec, profile.subject_set.gumbel_db_length(total_nt as u64));
+    let gumbel = profile.subject_set.gumbel_block(&spec, total_nt as u64);
+    let options_searchsp = profile.subject_set.searchsp;
     let QuerySetSetup {
         working_frames,
         contexts,
@@ -1105,9 +1142,27 @@ fn run_local_search_with_pool(
             composition_mode2,
             do_sum_stats,
         },
-        None,
+        options_searchsp.as_ref().map(std::slice::from_ref),
         true,
     )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+    // ```c
+    //    if (sbp->gbp) {
+    //    ...
+    //    } else {
+    //        min_subject_length = (Int4) (total_length/num_seqs);
+    //    }
+    //
+    //    if(min_subject_length <=0) {
+    // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
+    //    }
+    // ```
+    // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
+    // length is too short"; LOSAT refuses the search instead.
+    ensure!(
+        profile.subject_set.searchsp.is_none() || !valid_contexts.iter().any(|&valid| valid) || min_subject_length > 0,
+        "-searchsp with subjects of an average length below one letter is not supported by LOSAT's TBLASTN"
+    );
     let batch_setup = LocalBatchSetup {
         parameters: parameters.clone(),
         // NCBI c++/src/algo/blast/api/blast_results.cpp:72-115:
@@ -1324,13 +1379,11 @@ fn run_local_search_with_pool(
         .collect();
     // NCBI c++/src/algo/blast/core/blast_kappa.c:2439-2479:
     // do_link_hsps and cutoff_s follow the actual sum-statistics option.
-    let gumbel = gumbel
-        .as_ref()
-        .context("TBLASTN composition Spouge state is missing")?;
+    let gumbel = gumbel.as_ref();
     let redo_params = local_kappa_redo_params(
-        ScoringMatrix::Blosum62,
-        11,
-        1,
+        scoring.matrix,
+        scoring.gap_open,
+        scoring.gap_extend,
         &gapped_by_context,
         &valid_contexts,
         &parameters,
@@ -1364,6 +1417,9 @@ fn run_local_search_with_pool(
     let mut owned_lists = HashMap::new();
     let mut scratch = GapAlignScratch::new();
     let mut workspace = BlastCompositionWorkspace::new_blosum62();
+    if scoring.matrix != ScoringMatrix::Blosum62 {
+        use_matrix_workspace(&mut workspace, scoring.matrix)?;
+    }
     // Everything one (query, subject) match needs
     // between the early-termination test and the heap insertion, as a function of
     // the match alone.  NCBI c++/src/algo/blast/core/blast_kappa.c:3525-3736 keeps
@@ -1409,7 +1465,7 @@ fn run_local_search_with_pool(
             profile.genetic_code,
             redo_params,
             scaled.lambda,
-            ScoringMatrix::Blosum62,
+            scoring.matrix,
             scratch,
             workspace,
             &mut matrix_state,
@@ -1449,7 +1505,7 @@ fn run_local_search_with_pool(
                 i32::try_from(subject.len())?,
                 &scaled_by_context,
                 &parameters.lengths,
-                Some(gumbel),
+                gumbel,
             )
         };
         reap_by_evalue(&mut postredo, profile.expect_value);
@@ -1473,7 +1529,12 @@ fn run_local_search_with_pool(
                     .take()
                     .context("TBLASTN Kappa source owner reused")?;
                 let (ident, positives, length, mismatches, gap_opens, gap_letters) =
-                    postredo_converted_stats(&converted, &encoded[context], &mut target)?;
+                    postredo_converted_stats_with_matrix(
+                        &converted,
+                        &encoded[context],
+                        &mut target,
+                        scoring.matrix,
+                    )?;
                 // With the Seq-aligns requested, NCBI's engine positives: by the matrix of the
                 // match's last adjustment (`postredo_engine_positives`).
                 let positives = match matrix_state.as_ref().filter(|_| profile.engine_positives) {
@@ -1489,7 +1550,12 @@ fn run_local_search_with_pool(
                 // objtools/align_format/tabular.cpp:983-1021 recomputes the
                 // report counts from the original aligned query sequence.
                 let (report_ident, report_positives, _, report_mismatches, _, _) =
-                    postredo_converted_stats(&converted, &report_queries[context], &mut target)?;
+                    postredo_converted_stats_with_matrix(
+                        &converted,
+                        &report_queries[context],
+                        &mut target,
+                        scoring.matrix,
+                    )?;
                 Ok(KappaHspPayload {
                     bit_score: bits[index],
                     num_ident: i32::try_from(ident)?,
@@ -1578,9 +1644,9 @@ fn run_local_search_with_pool(
             let pool = pool.expect("parallel pool selected");
             let make_params = || {
                 local_kappa_redo_params(
-                    ScoringMatrix::Blosum62,
-                    11,
-                    1,
+                    scoring.matrix,
+                    scoring.gap_open,
+                    scoring.gap_extend,
                     &gapped_by_context,
                     &valid_contexts,
                     &parameters,
@@ -1599,11 +1665,15 @@ fn run_local_search_with_pool(
             };
             let states = (0..pool.threads())
                 .map(|_| {
-                    Ok(std::sync::Mutex::new(XRedoWorker {
+                    let mut worker = XRedoWorker {
                         params: make_params()?,
                         scratch: GapAlignScratch::new(),
                         workspace: BlastCompositionWorkspace::new_blosum62(),
-                    }))
+                    };
+                    if scoring.matrix != ScoringMatrix::Blosum62 {
+                        use_matrix_workspace(&mut worker.workspace, scoring.matrix)?;
+                    }
+                    Ok(std::sync::Mutex::new(worker))
                 })
                 .collect::<Result<Vec<_>>>()?;
             let batch_size = pool.threads().saturating_mul(32).max(64);
@@ -2661,9 +2731,7 @@ fn run_preliminary_subjects_into(
                 inputs.lengths,
                 i32::try_from(subject.len())?,
                 inputs.gapped_by_context,
-                inputs
-                    .gumbel
-                    .context("TBLASTN sum-statistics Spouge state is missing")?,
+                inputs.gumbel,
                 &link,
             )?
         } else {
@@ -3049,7 +3117,7 @@ fn finish_local_mode0_no_sum_stats(
                 lengths,
                 stat_length,
                 gapped_params,
-                gumbel.context("TBLASTN sum-statistics Spouge state is missing")?,
+                gumbel,
                 &post_link,
             )?
         } else {

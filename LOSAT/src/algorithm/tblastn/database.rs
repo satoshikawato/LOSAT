@@ -51,6 +51,12 @@ pub(super) struct TblastnDatabase {
 }
 
 impl TblastnDatabase {
+    /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
+    pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
+        self.db.set_reports_show_gis(show_gis);
+        self
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:188-194
     // ```c++
     //         /*** Initialize the database/subject ***/
@@ -65,10 +71,22 @@ impl TblastnDatabase {
     /// the command line's errors. The total length is NCBI's `Int8`; one that the engine
     /// cannot hold in a `usize` (a 32-bit target) is LOSAT's refusal.
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        let db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
+        Self::open_restricted(name, settings, None, &mut std::io::sink())
+    }
+
+    /// `open` with the database restricted to the taxid or seqid list `list` of the command
+    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
+    pub(super) fn open_restricted(
+        name: &str,
+        settings: &ApplicationSettings,
+        list: Option<&crate::seqdb::DbList>,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<Self> {
+        let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
         shared::check_seqids(&db, settings, PROGRAM)?;
+        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
             .ok()
@@ -102,10 +120,23 @@ impl TblastnDatabase {
     /// The number of sequences (`CSeqDB::GetNumSeqs`) and the total length
     /// (`CSeqDB::GetTotalLength`): the real numbers, also with `-dbsize`.
     pub(super) fn numbers(&self) -> DatabaseNumbers {
+        let (total_length, num_seqs) = self.db.statistics_numbers();
         DatabaseNumbers {
-            total_length: self.db.total_length(),
-            num_seqs: u64::from(self.db.num_seqs()),
+            total_length,
+            num_seqs: u64::from(num_seqs),
+            min_length: self.db.min_length(),
         }
+    }
+
+    /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
+    pub(super) fn filtered_empty(&self) -> bool {
+        self.db.filtered_empty()
+    }
+
+    /// The number of sequences of the volumes (`SeqDb::printed_num_seqs`): none is the database
+    /// whose first query batch fails, also with a list.
+    pub(super) fn printed_num_seqs(&self) -> u32 {
+        self.db.printed_num_seqs()
     }
 
     /// What the `Database:` lines of the pairwise report show
@@ -173,6 +204,21 @@ impl TblastnDatabase {
     /// (`prefetch_messages`).
     pub(super) fn taxdb_found(&self) -> bool {
         self.taxdb.found(&self.db)
+    }
+
+    /// The names of the taxonomy database that the rows of `spec` look up for the subjects
+    /// `taxonomy` (`shared::tabular_names`).
+    pub(super) fn tabular_names(
+        &self,
+        spec: &crate::report::tabular::TabularSpec,
+        taxonomy: &[crate::report::tabular::TabularTaxonomy],
+    ) -> Result<Option<crate::report::tabular::TabularNames>> {
+        shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
+    }
+
+    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
+    pub(super) fn open_for_tabular_rows(&self) -> Result<()> {
+        self.taxdb.open_for_rows(&self.db, PROGRAM)
     }
 
     /// NCBI's messages about the taxonomy database when the query batch whose final hit lists
@@ -346,7 +392,9 @@ pub(super) fn reported_subjects(
             }
         };
         records.push(FastaRecord {
-            local_id: format!("gnl|BL_ORD_ID|{ordinal}"),
+            // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
+            // (line DI-8).
+            local_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
             title,
             sequence: Vec::new(),
             warnings: Vec::new(),

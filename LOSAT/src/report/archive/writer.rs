@@ -19,7 +19,7 @@ use std::io::Write;
 
 use anyhow::Result;
 
-use super::bioseq::{write_bioseq, BioseqInput};
+use super::bioseq::{write_bioseq, write_seq_loc, BioseqInput};
 use super::masks::{write_mask, MaskEntry};
 use super::options::{Param, ParamValue};
 use super::{ArchiveEncoding, ArchiveHandle};
@@ -181,6 +181,15 @@ fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
             enc.variant("Blast4-value", "string", 11);
             enc.visible_str(value.as_bytes());
         }
+        ParamValue::IntegerList(values) => {
+            enc.variant("Blast4-value", "integer-list", 16);
+            enc.begin_list(false);
+            for &value in values {
+                enc.element();
+                enc.int(value);
+            }
+            enc.end_list();
+        }
     }
     enc.end_variant();
     enc.end_member();
@@ -228,6 +237,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     request: &super::ArchiveRequest,
     batch: &BatchArchive<'_>,
     search_space_option: Option<i64>,
+    database_list: Option<&Param>,
     messages: &[Message],
     aligns: &mut A,
 ) -> Result<()> {
@@ -249,21 +259,57 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out.enc.end_member();
 
     out.enc.member("queries", 2);
-    out.enc.variant("Blast4-queries", "bioseq-set", 2);
-    out.enc.begin_sequence("Bioseq-set");
-    out.enc.member("seq-set", 7);
-    out.enc.begin_list(false);
-    for query in batch.queries {
-        out.enc.element();
-        out.enc.variant("Seq-entry", "seq", 0);
-        write_bioseq(&mut out.enc, query);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:609-617,648-655
+    // ```c++
+    //         ITERATE(IRemoteQueryData::TSeqLocs, itr, seqloc_list)
+    //         {
+    //             if (IsLocalId((*itr)->GetId()))
+    //             {
+    //                 has_local_ids = true;
+    //                 break;
+    //             }
+    //         }
+    //     ...
+    //     if (has_local_ids)
+    //     {
+    //         Q->SetBioseq_set(*bioseq_set);
+    //     }
+    //     else
+    //     {
+    //     	Q->SetSeq_loc_list() = seqloc_list;
+    //     }
+    // ```
+    if batch.queries.iter().all(|query| query.seq_loc.is_some()) {
+        out.enc.variant("Blast4-queries", "seq-loc-list", 1);
+        out.enc.begin_list(false);
+        for loc in batch
+            .queries
+            .iter()
+            .filter_map(|query| query.seq_loc.as_ref())
+        {
+            out.enc.element();
+            write_seq_loc(&mut out.enc, loc);
+            out.flush_if_large();
+        }
+        out.enc.end_list();
         out.enc.end_variant();
-        out.flush_if_large();
+    } else {
+        out.enc.variant("Blast4-queries", "bioseq-set", 2);
+        out.enc.begin_sequence("Bioseq-set");
+        out.enc.member("seq-set", 7);
+        out.enc.begin_list(false);
+        for query in batch.queries {
+            out.enc.element();
+            out.enc.variant("Seq-entry", "seq", 0);
+            write_bioseq(&mut out.enc, query);
+            out.enc.end_variant();
+            out.flush_if_large();
+        }
+        out.enc.end_list();
+        out.enc.end_member();
+        out.enc.end_sequence();
+        out.enc.end_variant();
     }
-    out.enc.end_list();
-    out.enc.end_member();
-    out.enc.end_sequence();
-    out.enc.end_variant();
     out.enc.end_member();
 
     out.enc.member("subject", 3);
@@ -291,9 +337,19 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out.enc.begin_list(false);
     let mut written_search_space = false;
     for param in &request.algorithm {
-        if param.name == "EffectiveSearchSpace" {
+        // `-searchsp` holds the option's place; its value is the batch's (`-searchsp 0` too).
+        if let ("EffectiveSearchSpace", Some(space)) = (param.name, search_space_option) {
             written_search_space = true;
+            write_param(
+                &mut out.enc,
+                &Param {
+                    name: param.name,
+                    value: ParamValue::BigInteger(space),
+                },
+            );
+            continue;
         }
+        written_search_space |= param.name == "EffectiveSearchSpace";
         write_param(&mut out.enc, param);
     }
     if let (Some(space), false) = (search_space_option, written_search_space) {
@@ -309,7 +365,7 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out.enc.end_named();
     out.enc.end_member();
 
-    if batch.required.is_some() || !batch.lcase_masks.is_empty() {
+    if batch.required.is_some() || !batch.lcase_masks.is_empty() || database_list.is_some() {
         out.enc.member("program-options", 6);
         out.enc.begin_named("Blast4-parameters");
         out.enc.begin_list(false);
@@ -336,6 +392,16 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
             out.enc.end_variant();
             out.enc.end_member();
             out.enc.end_sequence();
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:318-320
+        // ```c++
+        //     x_Process_BlastOptions(opts_handle);
+        //     x_Process_Query(query);
+        //     x_Process_SearchDb(db);
+        // ```
+        // The database's list comes after the parameters of the query.
+        if let Some(param) = database_list {
+            write_param(&mut out.enc, param);
         }
         out.enc.end_list();
         out.enc.end_named();
@@ -436,6 +502,7 @@ pub fn write_archive<A: AlignSource>(
 ) -> Result<()> {
     let messages = handle.take_messages();
     let space = handle.search_space_option(batch.searched_space);
+    let list = handle.database_list();
     let request = handle.request();
     match handle.encoding() {
         ArchiveEncoding::Nothing => Ok(()),
@@ -446,7 +513,15 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(&mut out, request, batch, space, &messages, aligns)?;
+            write_search_archive(
+                &mut out,
+                request,
+                batch,
+                space,
+                list.as_ref(),
+                &messages,
+                aligns,
+            )?;
             out.finish()
         }
         ArchiveEncoding::Text => {
@@ -456,7 +531,15 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(&mut out, request, batch, space, &messages, aligns)?;
+            write_search_archive(
+                &mut out,
+                request,
+                batch,
+                space,
+                list.as_ref(),
+                &messages,
+                aligns,
+            )?;
             out.finish()
         }
         ArchiveEncoding::Binary => {
@@ -466,7 +549,15 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 io_error: None,
             };
-            write_search_archive(&mut out, request, batch, space, &messages, aligns)?;
+            write_search_archive(
+                &mut out,
+                request,
+                batch,
+                space,
+                list.as_ref(),
+                &messages,
+                aligns,
+            )?;
             out.finish()
         }
     }

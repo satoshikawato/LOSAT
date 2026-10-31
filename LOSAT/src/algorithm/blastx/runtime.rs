@@ -1087,7 +1087,7 @@ impl PreliminarySink for Runtime<'_> {
             // /** The core of the BLAST search: comparison between the (concatenated)
             // ```
             let reap_cutoff = self.options.evalue
-                * if self.options.composition > 0 {
+                * if self.options.composition > 0 && !self.options.old_fsc {
                     5.0
                 } else {
                     1.0
@@ -1460,7 +1460,7 @@ impl PreliminarySink for Runtime<'_> {
             &mut full,
             self.options,
             self.db_length,
-            self.subjects.len() as i64,
+            self.subjects.statistics_len() as i64,
             self.subjects.shortest_length(),
             None,
         )?;

@@ -255,6 +255,38 @@ fn reports_with_the_window_are_the_reports_with_rounds() {
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
 
+// `LOSAT_X_BNDBWIDE` (the window of 16 blocks per thread while few bytes of results wait) changes no
+// report: on and off at 2, 4 and 8 threads, for each task. Its own side runs where the list of
+// blocks is longer than 2 blocks per thread (4 per thread of the cut), its reference side where
+// the database is one block (blocks of 1 MiB).
+#[test]
+fn reports_with_the_wide_window_are_the_reports_with_the_narrow_one() {
+    const WIDE_OFF: (&str, &str) = ("LOSAT_X_BNDBWIDE", "0");
+    let db = database("wide", 0, 10_000, &[]);
+    for task in ["megablast", "blastn", "dc-megablast"] {
+        let one_thread = blastn(task, &db, 1, &[], "6");
+        for threads in [2u32, 4, 8] {
+            let what = format!("{task} threads {threads}");
+            let off = blastn(task, &db, threads, &[WIDE_OFF], "6");
+            assert!(off.stdout == one_thread.stdout, "{what}: off differs");
+            let reach = reach_support::Reach::new("bndbwide");
+            let on = blastn(task, &db, threads, &[reach.var()], "6");
+            assert!(on.stdout == one_thread.stdout, "{what}: on differs");
+            assert_eq!(on.stderr, off.stderr, "{what}: standard error differs");
+            assert_eq!(reach.sides("LOSAT_X_BNDBWIDE"), (true, false), "{what}");
+        }
+    }
+    let reach = reach_support::Reach::new("bndbwide-one-block");
+    let on = blastn("megablast", &db, 4, &[CUT_OFF, reach.var()], "6");
+    assert_eq!(
+        reach.sides("LOSAT_X_BNDBWIDE"),
+        (false, true),
+        "{}",
+        on.stderr
+    );
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
 // At one thread the blocks are searched one after another: the switch's decision takes its
 // reference side only.
 #[test]

@@ -42,7 +42,8 @@ pub struct BlastxArgs {
     //                      "Input file name",
     //                      CArgDescriptions::eInputFile, kDfltArgQuery);
     // ```
-    #[arg(long, value_name = "PATH")]
+    // The default `-` is standard input (`input_files::open_input`).
+    #[arg(long, value_name = "PATH", default_value = "-")]
     pub query: PathBuf,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2366
     // ```c++
@@ -77,6 +78,10 @@ pub struct BlastxArgs {
         help = "BLAST database name (a protein database, with or without parsed Seq-ids)"
     )]
     pub db: Option<String>,
+    /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
+    /// `-no_taxid_expansion` (line DI-8).
+    #[command(flatten)]
+    pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // ```c++
     //     // DB size
@@ -90,6 +95,35 @@ pub struct BlastxArgs {
     // No constraint and no dependency: read with `-db` and with `-subject`.
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
+    // ```c++
+    //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
+    // ```
+    #[arg(
+        long = "show_gis",
+        default_value_t = false,
+        help = "Show NCBI GIs in deflines?"
+    )]
+    pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
+    // ```c++
+    //     arg_desc.AddDefaultKey(kArgParseDeflines, "TF", "Should the query and "
+    // ```
+    // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
+    #[arg(
+        long = "parse_deflines",
+        default_value_t = false,
+        help = "Should the query and subject defline(s) be parsed?"
+    )]
+    pub parse_deflines: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    // ```
+    #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
     // ```c++
     //     arg_desc.AddDefaultKey(kArgOutput, "output_file",
@@ -103,7 +137,7 @@ pub struct BlastxArgs {
     //         arg_desc.AddDefaultKey(kTask, "task_name", "Task to execute",
     //                                CArgDescriptions::eString, m_DefaultTask);
     // ```
-    #[arg(long, default_value = "blastx", value_parser = ["blastx"])]
+    #[arg(long, default_value = "blastx", value_parser = ["blastx", "blastx-fast"])]
     pub task: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:146-146
     // ```c++
@@ -563,15 +597,6 @@ fn boolean(value: &str) -> std::result::Result<bool, String> {
         _ => Err("invalid boolean".into()),
     }
 }
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-41
-// ```c++
-// const char* kDfltArgTabularOutputFmt =
-//     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-//     "evalue bitscore";
-// const char* kDfltArgTabularOutputFmtTag("std");
-// ```
-pub const STD_FIELDS: &str =
-    "qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore";
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:43-49
 // ```c++
 // const size_t kNumTabularOutputFormatSpecifiers = 50;
@@ -582,48 +607,14 @@ pub const STD_FIELDS: &str =
 //     SFormatSpec("qgi",
 //                 "Query GI",
 // ```
+/// The fields that ABI v1 accepts (`web::v1_outfmt`, frozen, plan TD-1): the custom fields
+/// of BLASTX's report before it wrote them through the shared tabular writer.
 pub const FIELDS: &[&str] = &[
     "qseqid", "qacc", "qaccver", "qlen", "sseqid", "sacc", "saccver", "slen", "qstart", "qend",
     "sstart", "send", "qseq", "sseq", "evalue", "bitscore", "score", "length", "pident", "nident",
     "mismatch", "positive", "gapopen", "gaps", "ppos", "qframe", "sframe", "frames", "btop",
     "stitle",
 ];
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:76-91
-// ```c++
-//     vector<string> format_tokens;
-//     NStr::Split(format, " ", format_tokens);
-//
-//     if (format_tokens.empty())
-//         x_AddDefaultFieldsToShow();
-//
-//     ITERATE (vector<string>, iter, format_tokens) {
-//         if (*iter == kDfltArgTabularOutputFmtTag)
-//             x_AddDefaultFieldsToShow();
-//         else if ((*iter)[0] == '-') {
-//             string field = (*iter).substr(1);
-//             if (m_FieldMap.count(field) > 0)
-//                 x_DeleteFieldToShow(m_FieldMap[field]);
-//         } else {
-//             if (m_FieldMap.count(*iter) > 0)
-// ```
-/// The field tokens of a custom specification that NCBI keeps (`parse_formatting_string`):
-/// the words between single spaces (an empty word names no field).
-pub(crate) fn spec_tokens(spec: &str) -> impl Iterator<Item = &str> {
-    spec.split(' ').filter(|token| !token.is_empty())
-}
-
-/// LOSAT's check of the custom fields of a format that BLASTX writes, before the inputs are
-/// read (`native::run`): every word must be `std` or a field of `FIELDS`. NCBI ignores a
-/// word that names no field and removes a field named with a leading `-` (tabular.cpp
-/// above); BLASTX rejects both.
-pub(crate) fn check_custom_fields(choice: &crate::blastinput::app::FormatChoice) -> Result<()> {
-    for field in spec_tokens(&choice.spec) {
-        if field != "std" && !FIELDS.contains(&field) {
-            bail!("unsupported BLASTX outfmt field '{field}'");
-        }
-    }
-    Ok(())
-}
 
 #[derive(Debug, Clone)]
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blastx_options.cpp:57-70
@@ -738,6 +729,9 @@ pub struct ResolvedOptions {
     // ```
     pub db_length: i64,
     pub effective_search_space: i64,
+    /// Whether `-searchsp` was given, at any value: NCBI then has no Gumbel block
+    /// (`gumbel_block`).
+    pub old_fsc: bool,
 
     pub evalue: f64,
     pub sum_stats: bool,
@@ -751,7 +745,21 @@ pub struct ResolvedOptions {
     pub num_descriptions: i32,
     pub num_alignments: i32,
     pub outfmt: u8,
+    /// The fields of the default tabular report (outfmt 6 and 7 without `tabular`: the `std`
+    /// fields), by name; empty for outfmt 0.
     pub fields: Vec<String>,
+    /// The tabular report with a field list or a delimiter (outfmt 6 and 7), or outfmt 10 or
+    /// 20 (`TabularSpec::of`), which the shared writer writes (`tabular.rs`); `None` for the
+    /// default outfmt 6 and 7 and the other formats.
+    pub tabular: Option<&'static crate::report::tabular::TabularSpec>,
+    /// Whether `taxdb.bti` is on NCBI's search path, for a `tabular` field list that shows a
+    /// plural name of the taxonomy database (its formatters warn without it); set by
+    /// `native::run` (`-db`: the database's search path, `-subject`: NCBI's). False otherwise,
+    /// as Web reads it (DECISIONS 7 of line CLI C2).
+    pub taxdb_found: bool,
+    /// A list kept no sequence of the database (`SeqDb::filtered_empty`): the queries of the
+    /// searched batches have `EMPTY_DATABASE_MESSAGE`.
+    pub filtered_empty: bool,
     pub num_threads: i32,
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3642
@@ -834,24 +842,21 @@ impl BlastxArgs {
         // ```
         // The format as NCBI reads it (`native::run` reads it first, with NCBI's errors).
         let choice = crate::blastinput::app::parse_formatting_string(&self.outfmt)?;
-        let outfmt = u8::try_from(choice.number)?;
-        self.resolve_with_format(outfmt, spec_tokens(&choice.spec))
+        self.resolve_with_format(&choice)
     }
 
-    /// `resolve` with the format number and the custom field words already read (Web ABI
-    /// v1 reads them its own way, `web.rs`).
-    pub(crate) fn resolve_with_format<'a>(
+    /// `resolve` with the format already read (Web ABI v1 reads it its own way, `web.rs`).
+    pub(crate) fn resolve_with_format(
         &self,
-        outfmt: u8,
-        spec: impl Iterator<Item = &'a str>,
+        choice: &crate::blastinput::app::FormatChoice,
     ) -> Result<ResolvedOptions> {
-        if self.query.as_os_str() == "-"
-            || self
-                .subject
-                .as_deref()
-                .is_some_and(|subject| subject.as_os_str() == "-")
+        let outfmt = u8::try_from(choice.number)?;
+        if self
+            .subject
+            .as_deref()
+            .is_some_and(|subject| subject.as_os_str() == "-")
         {
-            bail!("unsupported BLASTX stdin query/subject");
+            bail!("unsupported BLASTX stdin subject");
         }
         if self.matrix.as_deref().is_some_and(|m| m != "BLOSUM62") {
             bail!("unsupported BLASTX matrix: use BLOSUM62");
@@ -940,31 +945,61 @@ impl BlastxArgs {
             )
             .into());
         }
-        let word_size = self.word_size.unwrap_or(3);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:429-433
+        // ```c++
+        //         if (task == "blastx-fast") {
+        //             opts->SetWordSize(5);
+        //             opts->SetOptions().SetLookupTableType(eCompressedAaLookupTable);
+        //             opts->SetWordThreshold(BLAST_WORD_THRESHOLD_BLASTP_FAST);
+        //         }
+        // ```
+        let fast = self.task == "blastx-fast";
+        let word_size = self.word_size.unwrap_or(if fast { 5 } else { 3 });
+        // The word size given on the command line sets its own threshold (19.3 for 5, the citation
+        // at `word_size` below) and word size 3 leaves the task's: `-task blastx-fast -word_size 3`
+        // is the standard table with threshold 20 (api/blast_options_local_priv.hpp:612-619).
+        let task_threshold = if fast { 20.0 } else { 12.0 };
         // The counts are at most `i32::MAX` (the options are `Int4`).
         let hitlist_size = counts.hitlist_size as i32;
-        let mut fields = Vec::new();
-        let spec: Vec<_> = spec.collect();
-        if outfmt != 0 {
-            let spec = if spec.is_empty() { vec!["std"] } else { spec };
-            for token in spec {
-                let expanded: Vec<_> = if token == "std" {
-                    STD_FIELDS.split_whitespace().collect()
-                } else {
-                    vec![token]
-                };
-                for field in expanded {
-                    if !fields.iter().any(|f| f == field) {
-                        fields.push(field.to_string());
-                    }
-                }
-            }
-        }
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:76-99
+        // ```c++
+        //     vector<string> format_tokens;
+        //     NStr::Split(format, " ", format_tokens);
+        //
+        //     if (format_tokens.empty())
+        //         x_AddDefaultFieldsToShow();
+        //
+        //     ITERATE (vector<string>, iter, format_tokens) {
+        //         if (*iter == kDfltArgTabularOutputFmtTag)
+        //             x_AddDefaultFieldsToShow();
+        //         else if ((*iter)[0] == '-') {
+        // ...
+        //     if (m_FieldsToShow.empty()) {
+        //         x_AddDefaultFieldsToShow();
+        //     }
+        // ```
+        // The fields as NCBI reads them (`report::tabular::parse_fields`: unknown words are
+        // dropped, `-name` removes a field). A list that is not the `std` fields with a tab, and
+        // outfmt 10 and 20, are written by the shared writer (`tabular`); the default report
+        // writes the `std` fields (`fields`).
+        let fields = if outfmt != 0 {
+            crate::report::tabular::parse_fields(&choice.spec)
+                .into_iter()
+                .map(|field| field.name().to_string())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let tabular = crate::blastinput::app::ReportFormat::from_number(choice.number)
+            .and_then(|format| crate::report::tabular::TabularSpec::of(format, choice))
+            .map(crate::report::tabular::TabularSpec::intern);
         Ok(ResolvedOptions {
             word_size,
-            threshold: self
-                .threshold
-                .unwrap_or(if word_size == 5 { 19.3 } else { 12.0 }),
+            threshold: self.threshold.unwrap_or(if self.word_size == Some(5) {
+                19.3
+            } else {
+                task_threshold
+            }),
             lookup_type: if word_size == 5 { 4 } else { 3 },
             matrix: "BLOSUM62".into(),
             gap_open: 11,
@@ -1037,7 +1072,8 @@ impl BlastxArgs {
             // ```
             // `-dbsize` (`CBlastOptions::SetDbLength`, blast_args.cpp:2570-2572).
             db_length: self.dbsize.unwrap_or(0),
-            effective_search_space: 0,
+            effective_search_space: self.searchsp.unwrap_or(0),
+            old_fsc: self.searchsp.is_some(),
             window_size: self.window_size.unwrap_or(40),
             evalue: self.evalue,
             sum_stats: self.sum_stats.unwrap_or(true),
@@ -1051,6 +1087,9 @@ impl BlastxArgs {
             num_alignments: counts.num_alignments as i32,
             outfmt,
             fields,
+            tabular,
+            taxdb_found: false,
+            filtered_empty: false,
             num_threads: self.num_threads,
         })
     }
@@ -1249,45 +1288,52 @@ mod tests {
         assert_eq!(error.to_string(), "No hits are being saved");
     }
 
-    // NCBI blast_args.cpp:2801-2855: BLASTX reads -outfmt as NCBI (a specification counts
-    // only for the tabular formats); its custom fields are LOSAT's list (`FIELDS`).
+    // NCBI blast_args.cpp:2801-2855 and tabular.cpp:76-99: BLASTX reads -outfmt and its
+    // fields as NCBI (a specification counts only for the tabular formats; unknown words are
+    // dropped, `-name` removes a field); a list other than the `std` fields with a tab, and
+    // outfmt 10 and 20, go to the shared writer (`tabular`).
     #[test]
-    fn outfmt_is_read_as_ncbi_and_fields_are_checked() {
-        use crate::blastinput::app::parse_formatting_string;
+    fn outfmt_and_fields_are_read_as_ncbi() {
+        use crate::report::tabular::{TabularKind, STD_FIELDS};
         let fields = |outfmt: &str| {
             let resolved = parse(&["-outfmt", outfmt]).resolve().unwrap();
             (resolved.outfmt, resolved.fields)
         };
-        let std: Vec<String> = STD_FIELDS.split(' ').map(String::from).collect();
+        let std: Vec<String> = STD_FIELDS.iter().map(|f| f.name().to_string()).collect();
         assert_eq!(fields("0 std"), (0, Vec::new()));
         assert_eq!(fields("0 foo"), (0, Vec::new()));
         assert_eq!(fields(" 6 delim="), (6, std.clone()));
         assert_eq!(fields("7"), (7, std.clone()));
+        assert_eq!(fields("6 foo"), (6, std.clone()));
         // Words between single spaces; an empty word names no field.
         let mut listed = vec!["qseqid".to_string(), "sseqid".to_string()];
         listed.extend(std.iter().cloned());
         assert_eq!(fields("7 qseqid  sseqid std"), (7, listed));
         // The XInclude formats to standard output fail later (`native::run`).
         assert_eq!(fields("13").0, 13);
-        let check = |outfmt: &str| {
-            check_custom_fields(&parse_formatting_string(outfmt).unwrap())
-                .map_err(|error| error.to_string())
+        let tabular = |outfmt: &str| {
+            parse(&["-outfmt", outfmt])
+                .resolve()
+                .unwrap()
+                .tabular
+                .map(|spec| (spec.kind, spec.fields.len(), spec.delimiter.clone()))
         };
-        assert!(check("6 std qseqid stitle btop").is_ok());
-        assert!(check("6 qseqid  sseqid").is_ok());
-        assert!(check("0 foo").is_ok());
-        for (outfmt, field) in [
-            ("7 qaccver foo", "foo"),
-            ("6 -qseqid", "-qseqid"),
-            ("6 qseqid\tsseqid", "qseqid\tsseqid"),
-            ("6 staxids", "staxids"),
-        ] {
-            assert_eq!(
-                check(outfmt).unwrap_err(),
-                format!("unsupported BLASTX outfmt field '{field}'"),
-                "{outfmt:?}"
-            );
+        for outfmt in ["6", "7 std", "6 foo", "6 -qseqid", "0 qseqid", "5"] {
+            assert_eq!(tabular(outfmt), None, "{outfmt:?}");
         }
+        assert_eq!(
+            tabular("6 std -evalue staxids"),
+            Some((TabularKind::Tabular, 12, "\t".to_string()))
+        );
+        assert_eq!(
+            tabular("7 delim=| std"),
+            Some((TabularKind::Commented, 12, "|".to_string()))
+        );
+        assert_eq!(tabular("10"), Some((TabularKind::Csv, 12, ",".to_string())));
+        assert_eq!(
+            tabular("20 qseqid"),
+            Some((TabularKind::CsvWithHeader, 1, ",".to_string()))
+        );
     }
 }
 

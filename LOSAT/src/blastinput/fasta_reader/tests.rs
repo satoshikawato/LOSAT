@@ -1331,6 +1331,7 @@ fn cut_in_place_keeps_the_whole_letters_of_a_kept_source_as_cut_does() {
     record.source = Some(Box::new(RecordSource {
         defline: b">t".to_vec(),
         uncut: None,
+        ..RecordSource::default()
     }));
     let cut = record.cut(2, 7);
     let mut in_place = record.clone();

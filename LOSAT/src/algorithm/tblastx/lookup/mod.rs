@@ -37,8 +37,9 @@ pub use backbone::{
 // counterpart: it prints counters and changes no value NCBI computes.
 pub use backbone::x_tbn_lut_print_summary;
 pub(crate) use backbone::{
-    build_ncbi_lookup_for_profile, prepare_blosum62_lookup_query_for_word_size,
-    x_lookup_contexts_for_profile, x_lookup_query_for_profile, x_lookup_table_for_profile,
+    build_ncbi_lookup_for_profile, ideal_karlin_params_of,
+    prepare_blosum62_lookup_query_for_word_size, x_lookup_contexts_for_profile,
+    x_lookup_query_for_profile, x_lookup_table_for_profile,
 };
 
 use crate::stats::KarlinParams;

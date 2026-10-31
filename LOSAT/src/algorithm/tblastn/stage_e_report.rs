@@ -546,7 +546,7 @@ fn write_tabular(
             //                                             kTabularFormat, rid);
             // ```
             // The title's bytes (`write_outfmt7_query_line`).
-            crate::report::outfmt6::write_outfmt7_query_line(writer, query.title())?;
+            crate::report::outfmt6::write_outfmt7_query_line(writer, &query.query_line())?;
             writeln!(writer, "# Database: {}", shown.name())?;
             if hit_count > 0 {
                 writeln!(writer, "# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score")?;
@@ -918,6 +918,8 @@ mod tests {
                     gapped: true,
                     cbs: 2,
                     db_gencode: 1,
+                    identity_warned: 0,
+                    filtered_empty: false,
                 },
                 Default::default(),
                 None,
@@ -1202,8 +1204,10 @@ fn write_pairwise(
         ),
     };
     // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`).
-    let gumbel = lookup_protein_gumbel_params(&spec, subject_set.gumbel_db_length(total_nt as u64))
-        .context("TBLASTN pairwise Spouge parameters are unavailable")?;
+    let gumbel = subject_set.gumbel_block(&spec, total_nt as u64);
+    if gumbel.is_none() && subject_set.searchsp.is_none() {
+        anyhow::bail!("TBLASTN pairwise Spouge parameters are unavailable");
+    }
     let report = BlastpPairwiseReport {
         version: "2.17.0+".into(),
         database_name: shown.name(),
@@ -1257,7 +1261,7 @@ fn write_pairwise(
         .collect();
     let query_titles: Vec<Arc<[u8]>> = query_records
         .iter()
-        .map(|record| Arc::from(record.title()))
+        .map(|record| Arc::from(record.query_line().as_ref()))
         .collect();
     let subject_titles: Vec<Arc<[u8]>> = subject_records
         .iter()

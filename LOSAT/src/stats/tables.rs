@@ -253,7 +253,7 @@ fn blast_gcd(a: i32, b: i32) -> i32 {
 ///     return beta;
 /// }
 /// ```
-fn ungapped_beta(reward: i32, penalty: i32) -> f64 {
+pub(crate) fn ungapped_beta(reward: i32, penalty: i32) -> f64 {
     if (reward, penalty) == (1, -1) || (reward, penalty) == (2, -3) {
         -2.0
     } else {

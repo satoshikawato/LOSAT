@@ -54,6 +54,7 @@ use crate::utils::seg::SegParams;
 pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Tblastn, &args.task);
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     inputs.evalue = args.evalue;
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
@@ -151,10 +152,12 @@ struct FirstContext {
     /// The effective search space and length adjustment of that context (0 without one).
     search_space: i64,
     length_adjustment: i64,
+    /// The `EffectiveSearchSpace` option: `-searchsp` in an invalid context too.
+    context0_space: i64,
 }
 
 /// The runs of lower-case letters of a record (inclusive 0-based positions).
-fn lowercase_runs(letters: &[u8]) -> Vec<(i32, i32)> {
+pub(crate) fn lowercase_runs(letters: &[u8]) -> Vec<(i32, i32)> {
     let mut runs = Vec::new();
     let mut start = None;
     for (index, letter) in letters.iter().enumerate() {
@@ -246,7 +249,7 @@ impl<'a> AlignSource for TblastnAligns<'a> {
             }
             let query = &self.queries[q_idx];
             let query = QueryRecord {
-                id: SeqId::Local(&query.local_id),
+                id: query.seq_id(),
                 searched_length: i32::try_from(query.seq().len())?,
                 offset: i32::try_from(self.ranges.queries.offset(q_idx))?,
             };
@@ -310,6 +313,8 @@ pub(super) fn write_tblastn_archives(
             .zip(&subject_deflines)
             .map(|(record, defline)| BioseqInput {
                 id: &record.local_id,
+                ids: record.believed().map(|ids| ids.ids.as_slice()),
+                seq_loc: None,
                 defline,
                 title: &record.title,
                 letters: record.archive_letters(),
@@ -335,6 +340,8 @@ pub(super) fn write_tblastn_archives(
             .zip(&deflines)
             .map(|(record, defline)| BioseqInput {
                 id: &record.local_id,
+                ids: record.believed().map(|ids| ids.ids.as_slice()),
+                seq_loc: record.archive_seq_loc(),
                 defline,
                 title: &record.title,
                 letters: record.archive_letters(),
@@ -370,6 +377,7 @@ pub(super) fn write_tblastn_archives(
                 if !intervals.is_empty() {
                     results_masks.push(MaskEntry {
                         id: records[offset].local_id.clone(),
+                        best: records[offset].believed().map(|ids| ids.best.clone()),
                         frame: Frame::NotSet,
                         intervals,
                     });
@@ -385,6 +393,7 @@ pub(super) fn write_tblastn_archives(
                 if !runs.is_empty() {
                     lcase_masks.push(MaskEntry {
                         id: record.local_id.clone(),
+                        best: record.believed().map(|ids| ids.best.clone()),
                         frame: Frame::NotSet,
                         intervals: runs,
                     });
@@ -398,12 +407,14 @@ pub(super) fn write_tblastn_archives(
                 karlin: Some((data.ungapped_karlin[first].clone(), data.gapped.clone())),
                 search_space: length.eff_searchsp,
                 length_adjustment: length.length_adjustment,
+                context0_space: length.eff_searchsp,
             }
         } else {
             FirstContext {
                 karlin: None,
                 search_space: 0,
                 length_adjustment: 0,
+                context0_space: data.parameters.lengths[first].eff_searchsp,
             }
         };
         let ka_blocks = match &context.karlin {
@@ -419,7 +430,7 @@ pub(super) fn write_tblastn_archives(
             ka_blocks,
             search_space: context.search_space,
             length_adjustment: context.length_adjustment,
-            searched_space: searched.then_some(context.search_space),
+            searched_space: searched.then_some(context.context0_space),
         };
         let mut aligns = TblastnAligns {
             run: RunRecord {
@@ -552,6 +563,7 @@ mod tests {
                     ParamValue::Boolean(false) => "boolean:False".to_string(),
                     ParamValue::Real(value) => format!("real:{}", posix(*value)),
                     ParamValue::Str(value) => format!("string:{value}"),
+                    ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
                 };
                 format!("{}={value}", param.name)
             })

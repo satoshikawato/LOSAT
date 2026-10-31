@@ -436,8 +436,29 @@ fn search_cli(
     // ```
     // The database of `-db` is opened after the options are processed, before
     // `Query is Empty!` (as BLASTN's).
+    // The taxid or seqid list (line DI-8) is read first: NCBI's handler of the database
+    // arguments reads it (`s_GetTaxIDList`, `CSeqDBFileGiList`) before the database opens.
     let database = match args.database_name() {
-        Some(name) => Some(super::database::TblastnDatabase::open(name, &settings)?),
+        Some(name) => {
+            let list = args.db_filter.resolve(&settings, outputs.diagnostics)?;
+            let database = super::database::TblastnDatabase::open_restricted(
+                name,
+                &settings,
+                list.as_ref(),
+                outputs.diagnostics,
+            )?
+            .showing_gis(args.show_gis);
+            crate::algorithm::common::database::note_archive_database_filter(
+                args.archive.as_ref(),
+                &args.db_filter,
+                list.as_ref(),
+                database.filtered_empty(),
+                args.searchsp.is_some_and(|space| space > 0),
+                args.dbsize.is_some_and(|size| size > 0),
+                "TBLASTN",
+            )?;
+            Some(database)
+        }
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
@@ -459,7 +480,7 @@ fn search_cli(
     {
         args.tabular_taxdb = Some(match database.as_ref() {
             Some(database) => database.taxdb_found(),
-            None => crate::algorithm::common::tabular::subject_taxdb_found(&settings, "TBLASTN")?,
+            None => crate::algorithm::common::database::subject_taxdb_found(&settings, "TBLASTN")?,
         });
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
@@ -525,11 +546,17 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
+    crate::blastinput::fasta_reader::believed::refuse_with_subject(
+        args.parse_deflines,
+        args.subject.is_some(),
+        "TBLASTN",
+    )?;
     let mut query_source = FastaInputSource::from_argument(
         &args.query,
         query_file,
         ReaderConfig::query("TBLASTN", true, settings.data_loaders)
-            .with_defline(args.archive.is_some()),
+            .with_defline(args.archive.is_some())
+            .with_parse_deflines(args.parse_deflines),
     );
     if !shared_standard_input && query_source.stream_is_empty() {
         outputs
@@ -859,8 +886,34 @@ fn search(
     };
     let SearchSettings {
         composition_mode2,
+        identity_cbs_reset,
         scoring,
     } = search_settings(&resolved)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_memento_priv.hpp:64-74
+    // ```c++
+    //     CBlastOptionsMemento(CBlastOptionsLocal* local_opts)
+    //     {
+    //         m_ProgramType = local_opts->GetProgramType();
+    //         m_QueryOpts = local_opts->m_QueryOpts;
+    // ...
+    //         m_ExtnOpts = local_opts->m_ExtnOpts;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:288
+    // ```c++
+    //                 CLocalBlast lcl_blast(query_factory, opt_handle, db_adapter);
+    // ```
+    // IDENTITY's reset (`search_settings`) writes through the memento's pointers into the options
+    // that every query batch reuses: the first batch resets the mode and warns its queries, and
+    // the later batches start in mode 0 without the warning. These are the searched queries of
+    // the first batch.
+    let identity_warned = if identity_cbs_reset {
+        query_input
+            .batches(batch_size)
+            .first()
+            .map_or(0, |batch| batch.searched.end)
+    } else {
+        0
+    };
     app::check_unsupported_environment("TBLASTN")?;
     app::check_old_fsc("TBLASTN")?;
     app::check_query_split_environment("TBLASTN", false)??;
@@ -891,6 +944,7 @@ fn search(
     let subject_set = SubjectSetNumbers {
         database: database.map(TblastnDatabase::numbers),
         dbsize: args.dbsize,
+        searchsp: args.searchsp,
     };
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
     // BLAST XML (5, and the XML2 documents of 16 and 15) cannot carry a database name outside
@@ -981,7 +1035,7 @@ fn search(
         let mut x_stream = None;
         let (database_stores, mut stores_error) = match database {
             Some(database) => {
-                let read = if database.numbers().num_seqs == 0 {
+                let read = if database.printed_num_seqs() == 0 {
                     Err(PreliminaryReadError("Database memory map file error").into())
                 } else if super::x_db_stream::x_tbn_db_stream() {
                     database.x_stream(resolved.num_threads).map(|stream| {
@@ -1305,6 +1359,7 @@ fn search(
             ))
             .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings)
         });
+        let filtered_empty = database.is_some_and(|database| database.filtered_empty());
         let mut query_warning_lines: Vec<Vec<u8>> = queries
             .iter()
             .zip(&query_validity)
@@ -1318,10 +1373,19 @@ fn search(
                 messages.extend(crate::report::query_warnings::replaced_o_message(
                     query.seq(),
                 ));
+                if index < identity_warned {
+                    messages.push(
+                        crate::report::query_warnings::IDENTITY_CBS_RESET_MESSAGE.to_string(),
+                    );
+                }
                 if query.seq().is_empty() {
                     messages.push(NO_DATA_MESSAGE.to_string());
                 } else if !valid {
                     messages.push(crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string());
+                }
+                if filtered_empty && !query_batch_skipped[index] {
+                    messages
+                        .push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
                 }
                 lines.extend(crate::report::query_warnings::query_warning(
                     "tblastn",
@@ -1403,8 +1467,26 @@ fn search(
                 ))
             }) && database.taxdb_found()
             {
+                // A custom tabular report with a plural name looks every taxid of its rows up,
+                // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
+                // the taxonomy database before a later batch's prefetch
+                // (`TaxdbRun::open_for_rows`).
+                let plural_names = outputs
+                    .formats
+                    .first()
+                    .and_then(|format| super::tabular::tabular_spec(format.outfmt))
+                    .is_some_and(|spec| spec.checks_taxdb());
                 for span in &batch_spans {
-                    let messages = database.prefetch_messages(reported, &results[span.clone()])?;
+                    let hitlists = &results[span.clone()];
+                    let messages = database.prefetch_messages(reported, hitlists)?;
+                    if plural_names
+                        && hitlists
+                            .iter()
+                            .flat_map(super::stage_d_results::KappaResultHitList::lists)
+                            .any(|list| !list.hsps.hsps.is_empty())
+                    {
+                        database.open_for_tabular_rows()?;
+                    }
                     if messages.is_empty() {
                         continue;
                     }
@@ -1427,23 +1509,30 @@ fn search(
             _ => Default::default(),
         };
         // The custom tabular reports (`tabular`): whether `taxdb.bti` was found, the taxids of the
-        // reported database sequences where a field shows them (read here, before any byte), and
-        // the `-query_loc` range's length (`qlen`, `qcovs`).
+        // reported database sequences where a field shows them and the taxonomy database's names
+        // that the rows look up (read here, before any byte, so that their refusals come before
+        // it), and the `-query_loc` range's length (`qlen`, `qcovs`).
         let tabular_specs: Vec<_> = outputs
             .formats
             .iter()
             .filter_map(|format| super::tabular::tabular_spec(format.outfmt))
             .collect();
+        let taxonomy = match (&reported, database) {
+            (Some(reported), Some(database))
+                if tabular_specs.iter().any(|spec| spec.needs().taxonomy) =>
+            {
+                database.tabular_taxonomy(reported, &results)?
+            }
+            _ => Vec::new(),
+        };
+        let names = match (tabular_specs.first(), database) {
+            (Some(spec), Some(database)) => database.tabular_names(spec, &taxonomy)?,
+            _ => None,
+        };
         let tabular_inputs = super::tabular::TabularInputs {
             taxdb_found: args.tabular_taxdb.unwrap_or(false),
-            taxonomy: match (&reported, database) {
-                (Some(reported), Some(database))
-                    if tabular_specs.iter().any(|spec| spec.needs().taxonomy) =>
-                {
-                    database.tabular_taxonomy(reported, &results)?
-                }
-                _ => Vec::new(),
-            },
+            taxonomy,
+            names,
             range_length: resolved
                 .query_range
                 .as_ref()
@@ -1518,8 +1607,15 @@ fn search(
                 expect: resolved.evalue,
                 soft_masking: resolved.soft_masking,
                 gapped: resolved.gapped,
-                cbs: resolved.composition_mode as i32,
+                // IDENTITY's reset is NCBI's option of the search (`search_settings`).
+                cbs: if identity_cbs_reset {
+                    0
+                } else {
+                    resolved.composition_mode as i32
+                },
                 db_gencode: i32::from(resolved.db_gencode),
+                identity_warned,
+                filtered_empty,
             },
             xml_taxa,
             args.out.as_deref(),

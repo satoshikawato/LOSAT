@@ -301,7 +301,7 @@ pub(super) fn link_preliminary_hsps(
     lengths: &[LocalContextLength],
     subject_nt_length: i32,
     gapped_params: &[KarlinParams],
-    gumbel: &BlastGumbelBlk,
+    gumbel: Option<&BlastGumbelBlk>,
     link: &LocalLinkParameters,
 ) -> Result<LinkedHspList> {
     link_preliminary_hsps_on(
@@ -326,7 +326,7 @@ pub(super) fn link_preliminary_hsps_on(
     lengths: &[LocalContextLength],
     subject_nt_length: i32,
     gapped_params: &[KarlinParams],
-    gumbel: &BlastGumbelBlk,
+    gumbel: Option<&BlastGumbelBlk>,
     link: &LocalLinkParameters,
 ) -> Result<LinkedHspList> {
     // NCBI c++/src/algo/blast/core/link_hsps.c:1774-1777:
@@ -376,7 +376,7 @@ fn x_link_values(
     lengths: &[LocalContextLength],
     subject_nt_length: i32,
     gapped_params: &[KarlinParams],
-    gumbel: &BlastGumbelBlk,
+    gumbel: Option<&BlastGumbelBlk>,
     link: &LocalLinkParameters,
 ) -> Vec<LinkedHsp> {
     let mut work: Vec<WorkHsp> = input
@@ -384,13 +384,19 @@ fn x_link_values(
         .enumerate()
         .map(|(source_index, &(context, hsp))| {
             let kbp = &gapped_params[context];
-            let evalue = blast_spouge_stoe(
-                hsp.score,
-                kbp,
-                gumbel,
-                query_lengths[context],
-                subject_nt_length / 3,
-            ) / gap_decay_divisor(link.gap_decay_rate, 1);
+            let evalue = match gumbel {
+                Some(gumbel) => blast_spouge_stoe(
+                    hsp.score,
+                    kbp,
+                    gumbel,
+                    query_lengths[context],
+                    subject_nt_length / 3,
+                ),
+                None => {
+                    lengths[context].eff_searchsp as f64
+                        * (-kbp.lambda * hsp.score as f64 + kbp.k.ln()).exp()
+                }
+            } / gap_decay_divisor(link.gap_decay_rate, 1);
             WorkHsp {
                 value: LinkedHsp {
                     context,
@@ -622,7 +628,7 @@ mod tests {
             longest_intron: 40,
             cutoff_small_gap: 25,
         };
-        let result = link_preliminary_hsps(&[], &[], &[], 360, &[], &gumbel, &link).unwrap();
+        let result = link_preliminary_hsps(&[], &[], &[], 360, &[], Some(&gumbel), &link).unwrap();
         assert!(result.hsps.is_empty());
         assert_eq!(result.best_evalue.to_bits(), 0.0f64.to_bits());
     }
@@ -773,7 +779,7 @@ mod tests {
                 &parameters.lengths,
                 subject_nt_length as i32,
                 &vec![gapped; query_contexts.len()],
-                &gumbel,
+                Some(&gumbel),
                 &parameters.link.unwrap(),
             )
             .unwrap();
@@ -943,7 +949,7 @@ mod tests {
                 &parameters.lengths,
                 6_377,
                 &[scaled; 3],
-                &gumbel,
+                Some(&gumbel),
                 &parameters.link.unwrap(),
             )
             .unwrap();
@@ -1253,7 +1259,7 @@ mod tests {
                 &parameters.lengths,
                 subject.len() as i32,
                 &[gapped],
-                &gumbel,
+                Some(&gumbel),
                 parameters.link.as_ref().unwrap(),
             )
             .unwrap();
@@ -1655,7 +1661,7 @@ mod tests {
                 &parameters.lengths,
                 subject.len() as i32,
                 &[scaled],
-                &gumbel,
+                Some(&gumbel),
                 &post_link,
             )
             .unwrap();

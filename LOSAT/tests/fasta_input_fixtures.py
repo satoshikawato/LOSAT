@@ -7,7 +7,7 @@ input, query batches (BATCH_SIZE), -lcase_masking, for BLASTN (megablast, blastn
 blastn-short), TBLASTX, TBLASTN (protein query, nucleotide subject) and BLASTP, with outfmt 0, 6
 and 7 and, on a core subset, -num_threads 2 and 4. Rows of kind `losat-rejection` (first lines
 that NCBI would parse as a Seq-id and fetch over the network) and the `-lcase_masking` rows of
-TBLASTX and BLASTP are never run on NCBI: LOSAT rejects them explicitly (a Seq-id first line:
+BLASTP are never run on NCBI: LOSAT rejects them explicitly (a Seq-id first line:
 AUTHORITY.md section G4 of docs/evidence/losat_web_e2h/, exit 1, "not supported by LOSAT's <PROGRAM>";
 `-lcase_masking`: E2e, AUTHORITY.md section A of docs/evidence/losat_web_e2e/, exit 2, "the NCBI BLAST+
 option -lcase_masking is not supported by LOSAT's <PROGRAM>"). The expectation of such a row is that
@@ -33,7 +33,7 @@ rejection: its exit code and the SHA-256 of the stdout, stderr and combined stre
   rejection where NCBI reads the input: the port must turn it into `same`), `rejection` (a row of kind
   `losat-rejection` with LOSAT's frozen explicit rejection: expected), `pending` (the expectation is not
   filled yet) or `error`. A last column `group` marks the rows whose option LOSAT rejects
-  (`-lcase_masking` of TBLASTX/BLASTP) and the summary counts them apart. The exit status is 0 only when every
+  (`-lcase_masking` of BLASTP) and the summary counts them apart. The exit status is 0 only when every
   selected row is `same` or `rejection`; `pending`, `rejects`, `differs` and `error` fail.
 
 NCBI is run without ~/.ncbirc, with BLASTDB, BATCH_SIZE, CHUNK_SIZE, OVERLAP_CHUNK_SIZE and
@@ -748,9 +748,9 @@ def build_rows() -> list[Row]:
                         for fmt in fmts:
                             rid = f"{program}{'.' + task if task else ''}.{name}{tag}.{role}.o{fmt}"
                             note = v["note"]
-                            if args and program in ("tblastx", "blastp"):
+                            if args and program == "blastp":
                                 note = (note + "; " if note else "") + "-lcase_masking: " + OPTION_NOTE
-                            lcm_rejected = bool(args) and program in ("tblastx", "blastp")
+                            lcm_rejected = bool(args) and program == "blastp"
                             rows.append(make_row(rid, program, task, query, subject, args, fmt, note=note, tier=v["tier"],
                                                  kind="losat-rejection" if lcm_rejected else "ncbi"))
                             if v["threads"] and not args and (fmt == 0 or (fmt == 6 and task == "megablast")) \

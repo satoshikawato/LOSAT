@@ -219,6 +219,17 @@ pub struct CompressedNeighborInfo {
 //                                   word_size) + 1;
 // lookup->backbone = calloc(lookup->backbone_size, sizeof(...));
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1292
+// ```c
+//     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
+// ```
+/// The threshold of a compressed table in NCBI's matrix units, for a caller of the builders that
+/// take it converted (BLASTX, `blastx/seed.rs`).
+pub(crate) fn x_compressed_scaled_threshold(threshold: f64) -> i32 {
+    // `(Int4)` as the x86-64 build converts it (`INT_MIN` past `Int4`).
+    crate::core::blast_util::ncbi_int4_from_double(100.0 * threshold)
+}
+
 impl BlastCompressedAaLookupTable {
     pub fn new(word_size: usize, threshold: f64) -> Option<Self> {
         let (compressed_alphabet_size, reciprocal_alphabet_size) =
@@ -232,8 +243,7 @@ impl BlastCompressedAaLookupTable {
             .checked_add(1)?;
 
         Some(Self {
-            // `(Int4)` as the x86-64 build converts it (`INT_MIN` past `Int4`).
-            threshold: crate::core::blast_util::ncbi_int4_from_double(100.0 * threshold),
+            threshold: x_compressed_scaled_threshold(threshold),
             word_length: word_size as i32,
             alphabet_size: BLASTAA_SIZE as i32,
             compressed_alphabet_size: compressed_alphabet_size as i32,

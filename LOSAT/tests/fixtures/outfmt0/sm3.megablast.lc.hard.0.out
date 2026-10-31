@@ -1,0 +1,107 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x16n_lcase_s.fna).
+           2 sequences; 965 total letters
+
+
+
+Query= qn1 lcase
+
+Length=480
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 subject nucleotide alpha                                          268     5e-76
+sn2 subject nucleotide beta reverse                                   222     4e-62
+
+
+> sn1 subject nucleotide alpha
+Length=488
+
+ Score = 268 bits (145),  Expect = 5e-76
+ Identities = 155/160 (97%), Gaps = 0/160 (0%)
+ Strand=Plus/Plus
+
+Query  41   AACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAA  100
+            |||||||||||||| |||||| ||||||||||||||||||||||||||||||||||||||
+Sbjct  56   AACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAA  115
+
+Query  101  TACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATA  160
+            ||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||
+Sbjct  116  TACGGGATGGGCCCATGGCTGCAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATA  175
+
+Query  161  TGAGCTGGAAAGTCCTTATGAAGTATGAGTTTTCCTCCGA  200
+            | |||||||||||||||||||||| |||||||||||||||
+Sbjct  176  TAAGCTGGAAAGTCCTTATGAAGTTTGAGTTTTCCTCCGA  215
+
+
+> sn2 subject nucleotide beta reverse
+Length=477
+
+ Score = 222 bits (120),  Expect = 4e-62
+ Identities = 181/210 (86%), Gaps = 6/210 (3%)
+ Strand=Plus/Minus
+
+Query  231  GATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGTTGCATATGGCAGA  290
+            |||||||||| ||||||||  |||||||| | ||||| || |||||| |     | ||||
+Sbjct  254  GATCCCTAAGTAGATGGCACTCCCAGGATTGGGGAAGTCGAATACGT-G-----GTCAGA  201
+
+Query  291  AATGGGTCTGTGGATGCATAAGTATCCCAAGTGTATGTGTGTAATGGTGAGATTCACAGA  350
+            ||  |||| |||||||||||||||||||||||||| |||||||  |||| |||||||| |
+Sbjct  200  AAACGGTCCGTGGATGCATAAGTATCCCAAGTGTAAGTGTGTACAGGTGTGATTCACAAA  141
+
+Query  351  TCAATCTCTCCGGCATTGGAAAATTAACCATGACGCTAACTTTGAGAAACTTAAGATCTT  410
+            | | |||||| |||| |||||||||| |||||||||||||| |||||||||||||||| |
+Sbjct  140  TTACTCTCTCTGGCAATGGAAAATTAGCCATGACGCTAACTGTGAGAAACTTAAGATCCT  81
+
+Query  411  CCACTACATGGTGGGTCATGGGAGAACAGC  440
+            ||||||||||||||||||||||||||||||
+Sbjct  80   CCACTACATGGTGGGTCATGGGAGAACAGC  51
+
+
+ Score = 171 bits (92),  Expect = 1e-46
+ Identities = 140/163 (86%), Gaps = 3/163 (2%)
+ Strand=Plus/Minus
+
+Query  41   AACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAA  100
+            |||||||||||||||||||||||||||||| |||| || ||||||||||||| || ||||
+Sbjct  447  AACACTCCGTGCTAAAAGCAAATTTTGCCGGGCTTAGTGAAGTGATGGACGATCCCAAAA  388
+
+Query  101  TACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATA  160
+            ||| | ||||||| ||||||||||||||||||  |||| ||||||||  |||||| ||| 
+Sbjct  387  TACAGTATGGGCCAATGGCTGTAATGAAGGGCATGGAGCACTATTGCCCGCCCGCTAATC  328
+
+Query  161  TGAGCTGGAAAGTCCTTATGA--AGTA-TGAGTTTTCCTCCGA  200
+            ||||||||||||||| ||||   |||  || |||||| |||||
+Sbjct  327  TGAGCTGGAAAGTCCGTATGTTTAGTTTTGGGTTTTCATCCGA  285
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 440388
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x16n_lcase_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 965
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

@@ -1,0 +1,6 @@
+>P69905.2
+# human; mouse without a version; horse in FASTA form; two per line
+P01942
+sp|P01935.1|
+Q9TS35 P63107.2
+UNKNOWN1

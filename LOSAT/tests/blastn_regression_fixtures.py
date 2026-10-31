@@ -487,6 +487,21 @@ _CASES = [
     ("wm.fmt5", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 5", ""),
     ("wm.fmt16", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 16", ""),
     ("wm.fmt15", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 15", ""),
+    # Line NP, SM-3: -soft_masking false writes the masks of WindowMasker into the searched query, as those of
+    # DUST and of the lower case (blast_setup.c:621-624).
+    ("wm.hard_megablast", f"{WM} -window_masker_db {WMC} -soft_masking false -outfmt 6", ""),
+    ("wm.hard_blastn", f"{WM} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 6", ""),
+    ("wm.hard_soft", f"{WM} -task blastn -window_masker_db {WMC} -soft_masking true -outfmt 6", ""),
+    ("wm.hard_dc", f"{WM} -task dc-megablast -window_masker_db {WMC} -soft_masking false -outfmt 6", ""),
+    ("wm.hard_short", f"{WM3} -task blastn-short -window_masker_db {WMC} -soft_masking false -evalue 1 -outfmt 6", ""),
+    ("wm.hard_lc_dust", f"{WM} -task blastn -window_masker_db {WMC} -lcase_masking -dust yes -soft_masking false -outfmt 6", ""),
+    ("wm.hard_fmt0", f"{WM} -task blastn -window_masker_db {WMC} -soft_masking false -max_hsps 2 -outfmt 0", ""),
+    ("wm.hard_minus", f"{WM} -task blastn -window_masker_db {WMC} -strand minus -soft_masking false -outfmt 6", ""),
+    ("wm.hard_plus", f"{WM} -task blastn -window_masker_db {WMC} -strand plus -soft_masking false -outfmt 6", ""),
+    ("wm.hard_qloc", f"{P} -task blastn -window_masker_db {WMC} -query_loc 101-2500 -soft_masking false -outfmt 6", ""),
+    ("wm.hard_fmt5", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 5", ""),
+    ("wm.hard_fmt11", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 11", ""),
+    ("wm.hard_fmt15", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 15", ""),
 ]
 
 

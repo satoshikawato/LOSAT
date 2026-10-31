@@ -174,7 +174,12 @@ pub(super) fn chosen(
 ) -> Option<usize> {
     // Dispatch point (LOSAT_X_BXCAPFILL, in the strict set): inside the capped batch flow, tasks of
     // fewer subjects (x_bx_mem::flow_subjects_per_task).
-    let k = super::x_bx_mem::flow_subjects_per_task(pool, subjects.len(), subjects_per_task()?);
+    let k = super::x_bx_mem::flow_subjects_per_task(
+        pool,
+        options,
+        subjects.len(),
+        subjects_per_task()?,
+    );
     let own = fits(k, pool, diagnostics, options, subjects);
     crate::utils::xreach::x_reach!("LOSAT_X_BXSUBJFLOW", own);
     own.then_some(k)

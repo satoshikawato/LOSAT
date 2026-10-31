@@ -80,6 +80,7 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
                 linker: linker as u32 as i32,
             },
         });
+    inputs.soft_masking = Some(args.soft_masking());
     inputs.window_masker_db = args.window_masker_db.clone();
     inputs.culling_limit = args.culling_limit;
     inputs.subject_besthit = args.subject_besthit;
@@ -324,6 +325,8 @@ pub(crate) fn write_blastn_archives(
                 .zip(&subject_deflines)
                 .map(|(record, defline)| BioseqInput {
                     id: &record.local_id,
+                    ids: record.believed().map(|ids| ids.ids.as_slice()),
+                    seq_loc: None,
                     defline,
                     title: &record.title,
                     letters: record.archive_letters(),
@@ -348,6 +351,8 @@ pub(crate) fn write_blastn_archives(
             .zip(&deflines)
             .map(|(record, defline)| BioseqInput {
                 id: &record.local_id,
+                ids: record.believed().map(|ids| ids.ids.as_slice()),
+                seq_loc: record.archive_seq_loc(),
                 defline,
                 title: &record.title,
                 letters: record.archive_letters(),
@@ -383,6 +388,7 @@ pub(crate) fn write_blastn_archives(
                 if !shown.is_empty() {
                     masks.push(MaskEntry {
                         id: record.local_id.clone(),
+                        best: record.believed().map(|ids| ids.best.clone()),
                         frame: Frame::Plus1,
                         intervals: shown,
                     });
@@ -402,6 +408,7 @@ pub(crate) fn write_blastn_archives(
             if !intervals.is_empty() {
                 lcase_masks.push(MaskEntry {
                     id: record.local_id.clone(),
+                    best: record.believed().map(|ids| ids.best.clone()),
                     frame: Frame::Plus1,
                     intervals,
                 });
@@ -463,9 +470,15 @@ mod tests {
     ("di6_xdrops", &["-xdrop_ungap", "5", "-xdrop_gap", "12.5", "-xdrop_gap_final", "150", "-window_size", "40"], "EvalueThreshold=cutoff:e-value:10 GapXDropoff=real:12.5 GapXDropoffFinal=real:150 MaskAtHash=boolean:True UngappedMode=boolean:False WindowSize=integer:40 HitlistSize=integer:500"),
     ("di6_dc_win0", &["-task", "dc-megablast", "-window_size", "0"], "EvalueThreshold=cutoff:e-value:10 MBTemplateType=integer:0 MBTemplateLength=integer:18 WordSize=integer:11 WindowSize=integer:0 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("di6_anib", &["-task", "blastn", "-xdrop_gap_final", "150", "-dust", "no", "-evalue", "1e-15", "-max_target_seqs", "1"], "EvalueThreshold=cutoff:e-value:1e-15 GapXDropoffFinal=real:150 MaskAtHash=boolean:True DustFiltering=boolean:False UngappedMode=boolean:False HitlistSize=integer:1"),
+    // DI-6b (the frozen archives minraw.*.11): the value is not recorded (the remote options'
+    // eBlastOpt_CutoffScore is `if (0)`, api/blast_options_cxx.cpp:435-442).
+    ("di6b_minraw", &["-min_raw_gapped_score", "15"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("e_n_badpair_fmt11", &["-reward", "2", "-penalty", "-7"], "EvalueThreshold=cutoff:e-value:10 MismatchPenalty=integer:-7 MatchReward=integer:2 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("in_n_dust_minus_fmt11", &["-strand", "minus"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("in_n_lcase_mask_fmt11", &["-lcase_masking"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
+    // SM-3 (the frozen archives sm3.*.11 of tests/outfmt0_manifest.tsv): the value as given.
+    ("sm3_hard", &["-soft_masking", "false"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:False UngappedMode=boolean:False HitlistSize=integer:500"),
+    ("sm3_soft", &["-soft_masking", "true"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("in_n_mts1_fmt11", &["-task", "blastn", "-max_target_seqs", "1"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:1"),
     ("in_n_qloc_fmt11", &["-query_loc", "10-300"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
     ("in_n_qloc_full_fmt11", &["-query_loc", "1-480"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
@@ -511,6 +524,7 @@ mod tests {
                     ParamValue::Boolean(false) => "boolean:False".to_string(),
                     ParamValue::Real(value) => format!("real:{}", posix(*value)),
                     ParamValue::Str(value) => format!("string:{value}"),
+                    ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
                 };
                 format!("{}={value}", param.name)
             })
@@ -564,6 +578,7 @@ mod tests {
         record.source = Some(Box::new(RecordSource {
             defline: b">q".to_vec(),
             uncut: Some(whole),
+            ..RecordSource::default()
         }));
         assert_eq!(
             lcase_mask_intervals(&record, &[], 29, true, false, true, false),

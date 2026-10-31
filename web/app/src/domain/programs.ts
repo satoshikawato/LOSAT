@@ -183,6 +183,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
         placement: 'algorithm',
         fields: [
           { flag: '-dust', label: 'Low complexity regions filter (DUST)', kind: 'text', suggestions: ['no', 'yes'] },
+          softMasking,
           lcaseMasking,
         ],
       },
@@ -306,7 +307,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
       },
       // TBLASTX is ungapped: NCBI's page has the matrix and no gap costs.
       { title: 'Scoring Parameters', placement: 'algorithm', fields: [matrix] },
-      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking] },
+      { title: 'Filters and Masking', placement: 'algorithm', fields: [seg, softMasking, lcaseMasking] },
       { title: OTHER, placement: 'algorithm', fields: [numDescriptions, numAlignments, threshold, windowSize] },
     ],
   },

@@ -183,7 +183,9 @@ fn check_scoring_options_with(
         // check comes before the e-value's (the message of `ReportCounts::validate`, which
         // is not called because this check has its place among the others).
         "No hits are being saved".to_string()
-    } else if super::coordination::determine_evalue(args) <= 0.0 {
+    } else if super::coordination::determine_evalue(args) <= 0.0
+        && args.min_raw_gapped_score.unwrap_or(0) <= 0
+    {
         "expect value or cutoff score must be greater than zero".to_string()
     } else if spec.gap_open == 0 && spec.gap_extend == 0 && !greedy {
         "Greedy extension must be used if gap existence and extension options are zero".to_string()
@@ -772,6 +774,27 @@ mod tests {
             "101"
         ])))
         .contains("Word-size must be less than"));
+    }
+
+    // NCBI blast_options.c:1518: the e-value check needs a cutoff score of 0 or below too.
+    #[test]
+    fn min_raw_gapped_score_above_zero_allows_an_evalue_of_zero() {
+        const REFUSED: &str = "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n";
+        for words in [
+            &["-evalue", "0"][..],
+            &["-evalue", "0", "-min_raw_gapped_score", "0"],
+            &["-evalue", "-1", "-min_raw_gapped_score", "-5"],
+        ] {
+            assert_eq!(message(check_scoring_options(&args(words))), REFUSED);
+        }
+        for words in [
+            &["-evalue", "0", "-min_raw_gapped_score", "1"][..],
+            &["-evalue", "-1", "-min_raw_gapped_score", "40"],
+            &["-min_raw_gapped_score", "0"],
+            &["-min_raw_gapped_score", "-5"],
+        ] {
+            assert!(check_scoring_options(&args(words)).is_ok(), "{words:?}");
+        }
     }
 
     #[test]

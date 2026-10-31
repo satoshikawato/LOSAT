@@ -1,0 +1,10 @@
+gnl|BL_ORD_ID|3
+gnl|BL_ORD_ID|1 2-10
+gnl|BL_ORD_ID|2 5
+nosuch
+7
+
+gnl|BL_ORD_ID|8 1-5 21
+gnl|BL_ORD_ID|4	3-	
+   gnl|BL_ORD_ID|5
+gnl|BL_ORD_ID|6 minus

@@ -43,8 +43,8 @@ const IGNORED_PROBLEMS: [Problem; 3] = [
 
 /// A `CObjReaderParseException` of the reader: its message (`GetMsg()`).
 #[derive(Debug)]
-pub(super) struct ParseError {
-    pub(super) message: String,
+pub(crate) struct ParseError {
+    pub(crate) message: String,
 }
 
 /// What ends `ReadOneSeq` without a record.

@@ -660,9 +660,50 @@ fn defaults_and_task_overrides_remain_distinct() {
     // TBLASTN takes both of its tasks (tblastn-fast: the compressed lookup table).
     parse("tblastn", &["-task", "tblastn"]).unwrap();
     parse("tblastn", &["-task", "tblastn-fast"]).unwrap();
+    // NCBI api/blast_options_handle.cpp:429-433: blastx-fast is word size 5 (the compressed
+    // lookup table, lookup type 4) with threshold 20; -word_size 5 sets its own threshold over
+    // the task's, -word_size 3 keeps the task's on the standard table
+    // (blast_args.cpp:291-297, blast_options_local_priv.hpp:612-619).
+    for (extra, word_size, threshold, lookup_type) in [
+        (&["-task", "blastx"][..], 3, 12.0, 3),
+        (&["-task", "blastx-fast"][..], 5, 20.0, 4),
+        (&["-word_size", "5"][..], 5, 19.3, 4),
+        (&["-task", "blastx-fast", "-word_size", "5"][..], 5, 19.3, 4),
+        (&["-task", "blastx-fast", "-word_size", "3"][..], 3, 20.0, 3),
+        (
+            &["-task", "blastx-fast", "-threshold", "15"][..],
+            5,
+            15.0,
+            4,
+        ),
+        (
+            &[
+                "-task",
+                "blastx-fast",
+                "-word_size",
+                "3",
+                "-threshold",
+                "14",
+            ][..],
+            3,
+            14.0,
+            3,
+        ),
+    ] {
+        let Commands::Blastx(a) = parse("blastx", extra).unwrap().command else {
+            panic!()
+        };
+        let resolved = a.resolve().unwrap();
+        assert_eq!(
+            (resolved.word_size, resolved.threshold, resolved.lookup_type),
+            (word_size, threshold, lookup_type),
+            "{extra:?}"
+        );
+    }
     // A task that is not an NCBI task keeps clap's list of the accepted names.
     for (program, other, listed) in [
         ("blastp", "blastp-x", "blastp-fast"),
+        ("blastx", "blastx-x", "blastx-fast"),
         ("tblastn", "tblastn-x", "tblastn-fast"),
     ] {
         let text = LOSAT::cli::render_message(&parse(program, &["-task", other]).unwrap_err());
@@ -1014,7 +1055,7 @@ fn numeric_values_are_validated_before_io() {
                 .contains("Word-size must be less than or equal to 100"));
         }
     }
-    for program in ["blastp", "tblastx"] {
+    for program in ["blastn", "blastp", "tblastx"] {
         assert!(parse(program, &["-outfmt", "6", "-window_size", "2147483648"]).is_err());
         parse(program, &["-outfmt", "6", "-window_size", "0"]).unwrap();
     }
@@ -1424,6 +1465,22 @@ fn culling_limit_is_read_as_ncbi_does() {
     }
 }
 
+// NCBI blast_args.cpp:1961: -parse_deflines is a flag of every search program.
+#[test]
+fn parse_deflines_is_a_flag_of_every_search_program() {
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        assert!(parse(program, &["-parse_deflines"]).is_ok(), "{program}");
+        assert!(
+            parse(program, &["-parse_deflines", "true"]).is_err(),
+            "{program}"
+        );
+    }
+    let Commands::Blastn(args) = parse("blastn", &["-parse_deflines"]).unwrap().command else {
+        panic!("blastn");
+    };
+    assert!(args.parse_deflines);
+}
+
 // NCBI blast_args.cpp:2663: -show_gis is a flag of every search program.
 #[test]
 fn show_gis_is_a_flag_of_every_search_program() {
@@ -1446,14 +1503,10 @@ fn show_gis_is_a_flag_of_every_search_program() {
 #[test]
 fn unported_ncbi_options_are_rejected_explicitly() {
     for (program, words) in [
-        ("blastn", &["-searchsp", "1000"][..]),
-        ("blastn", &["-db_soft_mask", "11"]),
+        ("blastn", &["-db_soft_mask", "11"][..]),
         ("blastn", &["-db_hard_mask", "11"]),
-        ("tblastn", &["-searchsp", "1000"]),
         ("tblastn", &["-db_soft_mask", "11"]),
-        ("tblastx", &["-searchsp", "1000"]),
         ("tblastx", &["-db_soft_mask", "11"]),
-        ("blastp", &["-searchsp", "1000"]),
         ("blastp", &["-gilist", "ids.gil"]),
         // Line DI-8 ported the taxid and seqid list options to BLASTP's database search, not to
         // PSIBLAST's.

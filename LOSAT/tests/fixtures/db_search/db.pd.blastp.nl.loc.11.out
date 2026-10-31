@@ -1,0 +1,1715 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries seq-loc-list {
+        int {
+          from 4,
+          to 199,
+          strand unknown,
+          id gi 42
+        },
+        int {
+          from 4,
+          to 199,
+          strand unknown,
+          id other {
+            accession "YP_000043",
+            version 1
+          }
+        },
+        int {
+          from 4,
+          to 199,
+          strand unknown,
+          id swissprot {
+            name "ABC_X",
+            accession "P12345",
+            release "reviewed",
+            version 1
+          }
+        },
+        int {
+          from 4,
+          to 199,
+          strand unknown,
+          id pdb {
+            mol "1ABC",
+            chain 65,
+            chain-id "A"
+          }
+        },
+        int {
+          from 4,
+          to 199,
+          strand unknown,
+          id tpg {
+            accession "DAA00005",
+            version 1
+          }
+        }
+      },
+      subject database "tests/db_search/bslice",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 1863372
+        }
+      },
+      program-options {
+        {
+          name "RequiredStart",
+          value integer 4
+        },
+        {
+          name "RequiredEnd",
+          value integer 199
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 44
+          },
+          {
+            id str "blast_score",
+            value int 44
+          },
+          {
+            id str "e_value",
+            value real { 551813034512575, 10, -15 }
+          },
+          {
+            id str "bit_score",
+            value real { 215570136204075, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 9
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 22
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 188673469387755, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            gi 42,
+            general {
+              db "BL_ORD_ID",
+              tag id 28
+            }
+          },
+          starts {
+            157,
+            100
+          },
+          lens {
+            36
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 43
+          },
+          {
+            id str "blast_score",
+            value int 43
+          },
+          {
+            id str "e_value",
+            value real { 839222572628077, 10, -15 }
+          },
+          {
+            id str "bit_score",
+            value real { 211718140444902, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 9
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 21
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 178469387755102, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            gi 42,
+            general {
+              db "BL_ORD_ID",
+              tag id 28
+            }
+          },
+          starts {
+            123,
+            100
+          },
+          lens {
+            34
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 37
+          },
+          {
+            id str "blast_score",
+            value int 37
+          },
+          {
+            id str "e_value",
+            value real { 43951620618548, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 188606165889861, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 9
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 13
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 968367346938776, 10, -14 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            gi 42,
+            general {
+              db "BL_ORD_ID",
+              tag id 33
+            }
+          },
+          starts {
+            52,
+            3,
+            -1,
+            10,
+            59,
+            12
+          },
+          lens {
+            7,
+            2,
+            11
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 35
+          },
+          {
+            id str "blast_score",
+            value int 35
+          },
+          {
+            id str "e_value",
+            value real { 67822968574696, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 180902174371514, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 6
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 12
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 968367346938776, 10, -14 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            gi 42,
+            general {
+              db "BL_ORD_ID",
+              tag id 12
+            }
+          },
+          starts {
+            7,
+            449
+          },
+          lens {
+            18
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 46
+          },
+          {
+            id str "blast_score",
+            value int 46
+          },
+          {
+            id str "e_value",
+            value real { 301542053585701, 10, -15 }
+          },
+          {
+            id str "bit_score",
+            value real { 223274127722423, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 24
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 35
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 362142857142857, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 7,
+          ids {
+            other {
+              accession "YP_000043",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 31
+            }
+          },
+          starts {
+            8,
+            119,
+            27,
+            -1,
+            33,
+            138,
+            -1,
+            150,
+            45,
+            152,
+            -1,
+            157,
+            50,
+            161
+          },
+          lens {
+            19,
+            6,
+            12,
+            2,
+            5,
+            4,
+            28
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 41
+          },
+          {
+            id str "blast_score",
+            value int 41
+          },
+          {
+            id str "e_value",
+            value real { 15959508225746, 10, -13 }
+          },
+          {
+            id str "bit_score",
+            value real { 204014148926555, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 9
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 14
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 12234693877551, 10, -12 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            other {
+              accession "YP_000043",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 32
+            }
+          },
+          starts {
+            159,
+            369
+          },
+          lens {
+            23
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 38
+          },
+          {
+            id str "blast_score",
+            value int 38
+          },
+          {
+            id str "e_value",
+            value real { 314658903243456, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 192458161649034, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 7
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 12
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 713265306122449, 10, -14 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            other {
+              accession "YP_000043",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 16
+            }
+          },
+          starts {
+            91,
+            543
+          },
+          lens {
+            13
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 36
+          },
+          {
+            id str "blast_score",
+            value int 36
+          },
+          {
+            id str "e_value",
+            value real { 442661322539867, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 184754170130687, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 8
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 17
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 142755102040816, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            other {
+              accession "YP_000043",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 25
+            }
+          },
+          starts {
+            75,
+            148
+          },
+          lens {
+            27
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 34
+          },
+          {
+            id str "blast_score",
+            value int 34
+          },
+          {
+            id str "e_value",
+            value real { 958558630201639, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 17705017861234, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 8
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 13
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 12234693877551, 10, -12 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            other {
+              accession "YP_000043",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          starts {
+            73,
+            350
+          },
+          lens {
+            23
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 529
+          },
+          {
+            id str "blast_score",
+            value int 529
+          },
+          {
+            id str "e_value",
+            value real { 188966256019058, 10, -83 }
+          },
+          {
+            id str "bit_score",
+            value real { 208378807940324, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 98
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 153
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 7,
+          ids {
+            swissprot {
+              name "ABC_X",
+              accession "P12345",
+              release "reviewed",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          starts {
+            4,
+            4,
+            19,
+            -1,
+            20,
+            19,
+            87,
+            -1,
+            88,
+            86,
+            105,
+            -1,
+            107,
+            103
+          },
+          lens {
+            15,
+            1,
+            67,
+            1,
+            17,
+            2,
+            93
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 36
+          },
+          {
+            id str "blast_score",
+            value int 36
+          },
+          {
+            id str "e_value",
+            value real { 609109431829972, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 184754170130687, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 6
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 17
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 173367346938776, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            swissprot {
+              name "ABC_X",
+              accession "P12345",
+              release "reviewed",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          starts {
+            74,
+            855
+          },
+          lens {
+            33
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 35
+          },
+          {
+            id str "blast_score",
+            value int 35
+          },
+          {
+            id str "e_value",
+            value real { 662354885896926, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 180902174371514, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 7
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 13
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 866326530612245, 10, -14 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            swissprot {
+              name "ABC_X",
+              accession "P12345",
+              release "reviewed",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 22
+            }
+          },
+          starts {
+            58,
+            479,
+            67,
+            -1,
+            69,
+            488
+          },
+          lens {
+            9,
+            2,
+            5
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 35
+          },
+          {
+            id str "blast_score",
+            value int 35
+          },
+          {
+            id str "e_value",
+            value real { 709368572863873, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 180902174371514, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 13
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 28
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 336632653061224, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            swissprot {
+              name "ABC_X",
+              accession "P12345",
+              release "reviewed",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 20
+            }
+          },
+          starts {
+            111,
+            187,
+            129,
+            -1,
+            148,
+            205
+          },
+          lens {
+            18,
+            19,
+            28
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 49
+          },
+          {
+            id str "blast_score",
+            value int 49
+          },
+          {
+            id str "e_value",
+            value real { 110573780864348, 10, -15 }
+          },
+          {
+            id str "bit_score",
+            value real { 234830114999943, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 11
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 19
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 193775510204082, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            pdb {
+              mol "1ABC",
+              chain 65,
+              chain-id "A"
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 11
+            }
+          },
+          starts {
+            118,
+            154
+          },
+          lens {
+            37
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 48
+          },
+          {
+            id str "blast_score",
+            value int 48
+          },
+          {
+            id str "e_value",
+            value real { 160424234929369, 10, -15 }
+          },
+          {
+            id str "bit_score",
+            value real { 23097811924077, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 13
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 22
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 203979591836735, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            pdb {
+              mol "1ABC",
+              chain 65,
+              chain-id "A"
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 26
+            }
+          },
+          starts {
+            108,
+            222,
+            138,
+            -1,
+            143,
+            252
+          },
+          lens {
+            30,
+            5,
+            4
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 43
+          },
+          {
+            id str "blast_score",
+            value int 43
+          },
+          {
+            id str "e_value",
+            value real { 746945371085182, 10, -15 }
+          },
+          {
+            id str "bit_score",
+            value real { 211718140444902, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 12
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 16
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 13765306122449, 10, -12 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            pdb {
+              mol "1ABC",
+              chain 65,
+              chain-id "A"
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          starts {
+            84,
+            198
+          },
+          lens {
+            26
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 37
+          },
+          {
+            id str "blast_score",
+            value int 37
+          },
+          {
+            id str "e_value",
+            value real { 395539914757386, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 188606165889861, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 8
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 17
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 132551020408163, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            pdb {
+              mol "1ABC",
+              chain 65,
+              chain-id "A"
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 5
+            }
+          },
+          starts {
+            174,
+            95,
+            181,
+            -1,
+            183,
+            102
+          },
+          lens {
+            7,
+            2,
+            16
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 36
+          },
+          {
+            id str "blast_score",
+            value int 36
+          },
+          {
+            id str "e_value",
+            value real { 533062752326025, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 184754170130687, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 5
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 7
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 407142857142857, 10, -14 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            pdb {
+              mol "1ABC",
+              chain 65,
+              chain-id "A"
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 34
+            }
+          },
+          starts {
+            70,
+            297
+          },
+          lens {
+            7
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 35
+          },
+          {
+            id str "blast_score",
+            value int 35
+          },
+          {
+            id str "e_value",
+            value real { 795510098322611, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 180902174371514, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 9
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 17
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 152959183673469, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            pdb {
+              mol "1ABC",
+              chain 65,
+              chain-id "A"
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 24
+            }
+          },
+          starts {
+            75,
+            207
+          },
+          lens {
+            29
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 52
+          },
+          {
+            id str "blast_score",
+            value int 52
+          },
+          {
+            id str "e_value",
+            value real { 608190577954886, 10, -16 }
+          },
+          {
+            id str "bit_score",
+            value real { 246386102277464, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 13
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 29
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 280510204081633, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            tpg {
+              accession "DAA00005",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 33
+            }
+          },
+          starts {
+            18,
+            1,
+            58,
+            -1,
+            59,
+            41
+          },
+          lens {
+            40,
+            1,
+            13
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 45
+          },
+          {
+            id str "blast_score",
+            value int 45
+          },
+          {
+            id str "e_value",
+            value real { 266266666825697, 10, -15 }
+          },
+          {
+            id str "bit_score",
+            value real { 219422131963249, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 12
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 34
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 285612244897959, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            tpg {
+              accession "DAA00005",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 14
+            }
+          },
+          starts {
+            110,
+            8,
+            153,
+            -1,
+            156,
+            51
+          },
+          lens {
+            43,
+            3,
+            9
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 35
+          },
+          {
+            id str "blast_score",
+            value int 35
+          },
+          {
+            id str "e_value",
+            value real { 808092386987848, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 180902174371514, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 9
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 17
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 188673469387755, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            tpg {
+              accession "DAA00005",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 6
+            }
+          },
+          starts {
+            55,
+            711
+          },
+          lens {
+            36
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 34
+          },
+          {
+            id str "blast_score",
+            value int 34
+          },
+          {
+            id str "e_value",
+            value real { 846556453168282, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 17705017861234, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 10
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 29
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 285612244897959, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            tpg {
+              accession "DAA00005",
+              version 1
+            },
+            general {
+              db "BL_ORD_ID",
+              tag id 4
+            }
+          },
+          starts {
+            15,
+            46
+          },
+          lens {
+            55
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 296648925634077, 10, -15 },
+        k { 119062668189741, 10, -15 },
+        h { 291779413053178, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 1863372",
+      "Effective search space used: 1863372",
+      "Length adjustment: 49"
+    }
+  }
+}

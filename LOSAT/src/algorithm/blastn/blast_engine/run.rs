@@ -3222,6 +3222,34 @@ fn x_bn_mapped() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNMAPPED"))
 }
 
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_MBHITPF, in the strict set: on unless it is `0`) the
+/// first extension of a hit reads the query at a place the hit's cell chose, a cache miss for a
+/// query of megabases; the loop over the offset pairs prefetches the line of the hit `X_HIT_AHEAD`
+/// places on. It changes no value.
+fn x_mb_hit_prefetch() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        let on = crate::utils::xswitch::on("LOSAT_X_MBHITPF");
+        crate::utils::xreach::x_reach!("LOSAT_X_MBHITPF", on);
+        on
+    })
+}
+const X_HIT_AHEAD: usize = 16;
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNPVONCE, in the strict set: on unless it is `0`) the
+/// scan of a table laid out as packed CSR tests each word once, in the head's presence bits, when
+/// those fit the second-level cache (4^11 cells or fewer); a larger head keeps the small presence
+/// vector in front. The words it keeps are the words with hits either way (the presence vector
+/// only skips words without hits). It changes no value.
+fn x_bn_pv_once(head: &x_dc_csr::XPacked<'_>) -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let on = *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNPVONCE"));
+    let once = on && head.x_bits_bytes() <= X_PV_ONCE_MAX_BITS;
+    crate::utils::xreach::x_reach!("LOSAT_X_BNPVONCE", once);
+    once
+}
+const X_PV_ONCE_MAX_BITS: usize = 1 << 20;
+
 /// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNTBRANGE) the traceback of a database search decodes
 /// a sequence of at least `x_tb_range_min` bases in the ranges of its HSPs only, as NCBI's partial
 /// fetch does (`database::traceback_listed`).
@@ -3998,12 +4026,29 @@ fn x_bnstream() -> bool {
 /// No NCBI counterpart: the subjects per thread of the window of `LOSAT_X_BNSTREAM`.
 const X_BNSTREAM_SUBJECTS_PER_THREAD: usize = 64;
 
+/// EXPERIMENT (LOSAT_X_BNHITGROUP, a strict-set switch: on unless it is `0`): a subject's HSPs
+/// go to lists kept by the collector and only the queries of those HSPs are visited, instead of a
+/// new list per query of the batch, each visited: that cost a 24-byte cell and a visit per query
+/// for every subject with an HSP, on the thread that takes the subjects in OID order (reads 1e6 x
+/// 16S, 33,000 queries per batch x 28,036 subjects: 53 % of the cycles at 8 threads). The hit
+/// lists are the same.
+// No NCBI counterpart: reads the switch once; it does not change any value NCBI computes. NCBI
+// visits every query per subject (hspfilter_collector.c, above); AGENTS.md rule 9 allows less work.
+fn x_bnhitgroup() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNHITGROUP"))
+}
+
 /// The preliminary hit lists of a batch filled one subject at a time, in OID order
 /// (`collect_prelim_hit_lists`), so that only the HSP lists the hit lists keep stay in memory
 /// instead of those of every subject.
 struct PrelimHitCollector {
     hit_lists: PrelimHitLists,
     prelim_hitlist_size: usize,
+    /// LOSAT_X_BNHITGROUP: one empty list per query from the first subject with an HSP, and the
+    /// queries of the subject being added.
+    x_slots: Vec<Vec<PrelimHit>>,
+    x_touched: Vec<u32>,
 }
 
 impl PrelimHitCollector {
@@ -4013,6 +4058,8 @@ impl PrelimHitCollector {
         Self {
             hit_lists,
             prelim_hitlist_size,
+            x_slots: Vec::new(),
+            x_touched: Vec::new(),
         }
     }
 
@@ -4021,23 +4068,59 @@ impl PrelimHitCollector {
         if hits.is_empty() {
             return;
         }
+        if x_bnhitgroup() {
+            self.x_add_grouped(oid, hits);
+        } else {
+            self.add_per_query(oid, hits);
+        }
+    }
+
+    /// `LOSAT_X_BNHITGROUP=0`: a list per query of the batch, as NCBI's `hsp_list_array`.
+    fn add_per_query(&mut self, oid: usize, hits: Vec<PrelimHit>) {
         let mut per_query: Vec<Vec<PrelimHit>> = vec![Vec::new(); self.hit_lists.len()];
         for hit in hits {
             per_query[hit.query_idx as usize].push(hit);
         }
         for (query, hsps) in per_query.into_iter().enumerate() {
-            if hsps.is_empty() {
-                continue;
+            if !hsps.is_empty() {
+                self.update(query, oid, hsps);
             }
-            let prelim_hitlist_size = self.prelim_hitlist_size;
-            self.hit_lists[query]
-                .get_or_insert_with(|| HitList::new(prelim_hitlist_size))
-                .update(PrelimHspList {
-                    oid: oid as u32,
-                    hsps,
-                    best_evalue: 0.0,
-                });
         }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNHITGROUP): the same lists, made in the collector's slots: only the
+    /// queries of the subject's HSPs are visited. A query's hit list does not read another's, so
+    /// that the queries may come in the order of their first HSPs; the HSPs of a query keep their
+    /// order. A slot gives its list away, so that the lists grow as those of `add_per_query`.
+    fn x_add_grouped(&mut self, oid: usize, hits: Vec<PrelimHit>) {
+        if self.x_slots.is_empty() {
+            self.x_slots.resize_with(self.hit_lists.len(), Vec::new);
+        }
+        let mut touched = std::mem::take(&mut self.x_touched);
+        for hit in hits {
+            let slot = &mut self.x_slots[hit.query_idx as usize];
+            if slot.is_empty() {
+                touched.push(hit.query_idx);
+            }
+            slot.push(hit);
+        }
+        for &query in &touched {
+            let hsps = std::mem::take(&mut self.x_slots[query as usize]);
+            self.update(query as usize, oid, hsps);
+        }
+        touched.clear();
+        self.x_touched = touched;
+    }
+
+    fn update(&mut self, query: usize, oid: usize, hsps: Vec<PrelimHit>) {
+        let prelim_hitlist_size = self.prelim_hitlist_size;
+        self.hit_lists[query]
+            .get_or_insert_with(|| HitList::new(prelim_hitlist_size))
+            .update(PrelimHspList {
+                oid: oid as u32,
+                hsps,
+                best_evalue: 0.0,
+            });
     }
 }
 
@@ -5600,12 +5683,13 @@ fn archive_first_context(
         });
     };
     let search_space = report.query_eff_searchsp[2 * first + report.first_context];
-    let (length_adjustment, _) = context_lengths(
+    let length_adjustment = compute_length_adjustment_ncbi(
         query_lengths[first] as i64,
         report.eff_db_length,
         report.db_num_seqs as i64,
         &blocks.gapped,
-    )?;
+    )
+    .length_adjustment;
     Ok(archive::FirstContext {
         karlin: Some(blocks),
         search_space,
@@ -5629,16 +5713,13 @@ fn blastn_xml_stats(
                 return Ok(crate::report::blast_xml::XmlStats::NONE);
             };
             let eff_space = report.query_eff_searchsp[2 * q_idx + report.first_context];
-            let (length_adjustment, searched_space) = context_lengths(
+            let length_adjustment = compute_length_adjustment_ncbi(
                 query_lengths[q_idx] as i64,
                 report.eff_db_length,
                 report.db_num_seqs as i64,
                 &blocks.gapped,
-            )?;
-            debug_assert_eq!(
-                searched_space, eff_space,
-                "the search's own effective space"
-            );
+            )
+            .length_adjustment;
             Ok(crate::report::blast_xml::XmlStats {
                 hsp_len: length_adjustment as i32,
                 eff_space,
@@ -7379,7 +7460,7 @@ fn search_cli(
         &args.query,
         &query_file,
         shared_standard_input,
-        x_rpt_stream::switch_on(),
+        x_rpt_stream::switch_on() && !args.parse_deflines,
         x_rule,
     );
     // EXPERIMENT (LOSAT_X_BNQDROP): whether the records read before the search move into a store
@@ -7397,8 +7478,15 @@ fn search_cli(
     if x_drop_rule && x_query_drop::pack_on() {
         crate::utils::xreach::x_reach!("LOSAT_X_BNQPACK", x_pack);
     }
+    crate::blastinput::fasta_reader::believed::refuse_with_subject(
+        args.parse_deflines,
+        args.subject.is_some(),
+        "BLASTN",
+    )?;
     let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders)
-        .with_defline(args.archive.is_some());
+        .with_defline(args.archive.is_some())
+        .with_parse_deflines(args.parse_deflines)
+        .with_strand(&args.strand);
     let mut query_source = FastaInputSource::from_argument(&args.query, query_file, query_config);
     if !shared_standard_input && query_source.stream_is_empty() {
         outputs
@@ -9038,6 +9126,7 @@ fn run_in_pool(
             return Err(crate::cli::NativeError { exit: 3, message }.into());
         }
         warnings[start].extend(batch_title_warnings);
+        check_batch_window(&args, batch_records.batch_queries().records())?;
         // The batch's search, on the whole pool. EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps
         // its megablast table from batch to batch.
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:929
@@ -10025,7 +10114,10 @@ fn write_reports_untimed(
         .iter()
         .map(|record| Arc::from(record.shown_id()))
         .collect();
-    let query_titles: Vec<Arc<[u8]>> = query_records.iter().map(record_title).collect();
+    let query_titles: Vec<Arc<[u8]>> = query_records
+        .iter()
+        .map(|record| Arc::from(record.query_line().as_ref()))
+        .collect();
     // `User specified sequence set (Input: PATH)` for a subject set, the `-db` value for a
     // database (`ShownSubjects`).
     let subject_title = subjects.shown.name.as_str();
@@ -10070,8 +10162,8 @@ fn reborrow_outputs<'o, 'r>(outputs: &'o mut BatchOutputs<'_, 'r>) -> BatchOutpu
 /// The length adjustment and the effective search space of a valid query context of `query_len`
 /// letters against a database of `db_len` letters in `db_num_seqs` sequences
 /// (`BLAST_CalcEffLengths`), with the context's gapped Karlin-Altschul block. The search space
-/// is the context's `eff_searchsp` (the search calls this for it; the XML report calls it again
-/// for the length adjustment, which the search does not keep).
+/// is the context's `eff_searchsp` when no `-searchsp` replaces it. The reports compute the
+/// length adjustment again, which the search does not keep.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:821-846
 /// ```c
@@ -10126,6 +10218,29 @@ fn window_masker_rejection(
 /// diagonal table of the batch, as NCBI's `CLocalBlast` does for each batch that
 /// `run_in_pool` reads. `x_keep`: the batch loop's keep of LOSAT_X_MBLUTKEEP, which the batch's
 /// megablast table is built on and goes back to (`lookup::x_mb_lut_keep`).
+/// `blastinput::app::check_diag_table_window` for a query batch (DI-6, `-window_size`), before
+/// `search_query_batch`, whose code a check inside would change (its inlining; the default
+/// search's code must stay the same). The concatenated length is that of the batch's contexts
+/// (`search_query_batch`): each searched strand of a query with letters takes its letters and
+/// a sentinel, and the searched block leaves out the last sentinel.
+#[inline(never)]
+fn check_batch_window(args: &BlastnArgs, records: &[FastaRecord]) -> Result<()> {
+    let window = super::super::coordination::determine_window_size(args);
+    let (plus_on, minus_on) = QueryStrand::from_option(&args.strand).searched();
+    let strands = usize::from(plus_on) + usize::from(minus_on);
+    let rooms: usize = records
+        .iter()
+        .map(|record| record.sequence.len())
+        .filter(|&length| length > 0)
+        .map(|length| strands * (length + 1))
+        .sum();
+    crate::blastinput::app::check_diag_table_window(
+        i32::try_from(rooms.saturating_sub(1)).unwrap_or(i32::MAX),
+        i32::try_from(window).unwrap_or(i32::MAX),
+        "BLASTN",
+    )
+}
+
 fn search_query_batch<const UNGAPPED: bool>(
     args: &BlastnArgs,
     mut query_records: x_query_drop::BatchQueries<'_>,
@@ -10774,7 +10889,8 @@ fn search_query_batch<const UNGAPPED: bool>(
     //             s_BlastDiagTableNew(query_length, multiple_hits,
     //                               word_params->options->window_size);
     // ```
-    // The two-hit window of the task (`configure_task`).
+    // The two-hit window of the task or of `-window_size` (`configure_task`; a window whose sum
+    // with the query would pass 2^30 is refused before this search, `check_batch_window`).
     let window_size = config.window_size;
     let diag_array_length = {
         let mut diag_array_length = 1usize;
@@ -11103,7 +11219,7 @@ fn search_query_batch<const UNGAPPED: bool>(
         .enumerate()
         .map(|(index, ((ctx, blocks), &valid))| {
             let options_searchsp = match stage {
-                BatchStage::Search { .. } => 0,
+                BatchStage::Search { .. } => args.options_searchsp(),
                 BatchStage::ChunkPrelim {
                     batch_eff_searchsp, ..
                 } => batch_eff_searchsp[index],
@@ -11218,6 +11334,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             subject_packed_cache_ref,
             approx_table_entries,
             x_keep,
+            Some(subjects.metadata().db_len_total as u64),
         );
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
         tables
@@ -11541,17 +11658,17 @@ fn search_query_batch<const UNGAPPED: bool>(
     // SetMBInitialWordOptionsDefaults() { SetWindowSize(BLAST_WINDOW_SIZE_NUCL); }
     // NCBI reference: c++/src/algo/blast/api/disc_nucl_options.cpp:66-73
     // SetMBInitialWordOptionsDefaults() { SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_NUCL); ... }
-    // Traditional megablast retains the zero-initialized X-drop option. Its
-    // raw X-drop is the subject's word cutoff in ParametersUpdate below.
+    // Traditional megablast retains the zero-initialized X-drop option (0 bits, so 0 here):
+    // its raw X-drop is the subject's word cutoff in ParametersUpdate below. `-xdrop_ungap`
+    // replaces the task's bits (`configure_task`).
+    let x_drop_ungapped_bits = config.x_drop_ungapped;
     let x_dropoff_init: Vec<i32> = search_karlin
         .iter()
         .map(|blocks| {
-            if megablast {
+            if x_drop_ungapped_bits == 0.0 {
                 0
             } else {
-                ((super::super::constants::X_DROP_UNGAPPED as f64 * NCBIMATH_LN2)
-                    / blocks.ungapped.lambda)
-                    .ceil() as i32
+                ((x_drop_ungapped_bits * NCBIMATH_LN2) / blocks.ungapped.lambda).ceil() as i32
             }
         })
         .collect();
@@ -12424,6 +12541,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     // if (hitsfound == 0) continue;
                     // hits_extended += extend(offset_pairs, hitsfound, ...);
                     // ```
+                    let x_hit_prefetch = x_mb_hit_prefetch();
                     let mut process_offset_pairs =
                         |offset_pairs: &[OffsetPair],
                          offset_pairs_len: &mut usize,
@@ -12431,6 +12549,15 @@ fn search_query_batch<const UNGAPPED: bool>(
                          track_scan_pause: bool| {
                             let hitsfound = *offset_pairs_len;
                             for idx in 0..hitsfound {
+                                // EXPERIMENT (LOSAT_X_MBHITPF): the query's letters of a hit
+                                // `X_HIT_AHEAD` places on.
+                                if x_hit_prefetch && idx + X_HIT_AHEAD < hitsfound {
+                                    x_dc_csr::prefetch(
+                                        encoded_query_concat_blastna_with_sentinels
+                                            .as_ptr()
+                                            .wrapping_add(offset_pairs[idx + X_HIT_AHEAD].q_off),
+                                    );
+                                }
                                 let pair = offset_pairs[idx];
                                 let q_off0 = pair.q_off;
                                 let kmer_start = pair.s_off;
@@ -13866,8 +13993,12 @@ fn search_query_batch<const UNGAPPED: bool>(
                         // once (`x_dc_csr::XHead`), and `x_scan_csr!` expands to each form's scan,
                         // so the scan of a head of one element per cell is the one without the
                         // switch.
+                        // EXPERIMENT (LOSAT_X_BNPVONCE): a packed head's presence bits hold one bit
+                        // per cell, so its scan (`$pv` false) tests the word there only, not first
+                        // in the coarser presence vector, whose bit stands for several cells; for
+                        // a head whose bits fit the cache (`x_bn_pv_once`).
                         macro_rules! x_scan_csr {
-                            ($head:expr) => {{
+                            ($head:expr, $pv:expr) => {{
                                 use x_dc_csr::{XHead, XRing};
                                 let head = $head;
                             let mut x_on_word_csr =
@@ -13924,7 +14055,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                                     if debug_enabled {
                                         dbg_total_s_positions += 1;
                                     }
-                                    if two_stage.has_hits(current_lut_kmer) {
+                                    if !$pv || two_stage.has_hits(current_lut_kmer) {
                                         ring.push(
                                             (kmer_start, s_range, current_lut_kmer),
                                             |w| w.2 as usize,
@@ -13937,8 +14068,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                             }};
                         }
                         match csr.x_packed() {
-                            Some(packed) => x_scan_csr!(packed),
-                            None => x_scan_csr!(csr),
+                            Some(packed) if x_bn_pv_once(&packed) => x_scan_csr!(packed, false),
+                            Some(packed) => x_scan_csr!(packed, true),
+                            None => x_scan_csr!(csr, true),
                         }
                     } else {
                         let mb_scan_kind =
@@ -20154,6 +20286,50 @@ mod tests {
         let mut query1 = hit_lists[1].take().unwrap();
         query1.sort_by_evalue();
         assert_eq!(prelim_scores(&query1), vec![(0, vec![90])]);
+    }
+
+    // `LOSAT_X_BNHITGROUP`: the lists made from a subject's HSPs alone equal the lists made with
+    // one list per query of the batch, in every hit list, with the HSPs of a list in their order
+    // (each HSP has its own score). Queries in random order, in runs and all in one query.
+    #[test]
+    fn grouped_hit_lists_equal_the_lists_per_query() {
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = move |below: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % below
+        };
+        for round in 0..200u64 {
+            let num_queries = 1 + next(40) as usize;
+            let size = 1 + next(5) as usize;
+            let mut per_query = PrelimHitCollector::new(num_queries, size);
+            let mut grouped = PrelimHitCollector::new(num_queries, size);
+            let mut score = 0;
+            for oid in 0..30 {
+                let count = next(25);
+                let run = 1 + next(4);
+                let mut hits = Vec::new();
+                for i in 0..count {
+                    let query = match round % 3 {
+                        0 => next(num_queries as u64),
+                        1 => (i / run).min(num_queries as u64 - 1),
+                        _ => num_queries as u64 - 1,
+                    };
+                    score += 1;
+                    hits.push(query_prelim_hit(query as u32, score));
+                }
+                if hits.is_empty() {
+                    continue;
+                }
+                per_query.add_per_query(oid, hits.clone());
+                grouped.x_add_grouped(oid, hits);
+            }
+            for (a, b) in per_query.hit_lists.iter().zip(&grouped.hit_lists) {
+                assert_eq!(a.as_ref().map(prelim_scores), b.as_ref().map(prelim_scores));
+                assert_eq!(a.is_some(), b.is_some());
+            }
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2163-2210

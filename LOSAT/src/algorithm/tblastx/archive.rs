@@ -33,11 +33,11 @@ use std::ops::Range;
 use anyhow::Result;
 
 use super::blast_engine::{TblastxHsp, TblastxQueryStats};
-use super::ncbi_cutoffs::try_compute_eff_lengths_tblastx;
 use super::report::SubjectLetters;
 use super::seqalign::{query_records_of, SeqalignSubjects};
 use super::subjects::SubjectSetNumbers;
 use super::TblastxArgs;
+use crate::algorithm::tblastn::archive::lowercase_runs;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
@@ -57,10 +57,11 @@ use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 /// The recorded options of a TBLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
 /// always sets it (`S/DESIGN_OF8.md` 2.2). TBLASTX has one task, and the options it does not
-/// accept (`-strand`, `-lcase_masking`, ...) are never recorded.
+/// accept (`-strand`, ...) are never recorded.
 pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Tblastx, "tblastx");
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     // `-evalue` replaces the handle's value in place: the same list whether it was given.
     inputs.evalue = Some(args.evalue);
     inputs.word_size = args.word_size;
@@ -168,6 +169,7 @@ fn query_results_masks(
                 .collect();
             (!intervals.is_empty()).then(|| MaskEntry {
                 id: query.local_id.clone(),
+                best: query.believed().map(|ids| ids.best.clone()),
                 frame: frame_of(frame),
                 intervals,
             })
@@ -193,6 +195,8 @@ pub(super) struct ArchiveData<'a> {
     pub numbers: &'a SubjectSetNumbers,
     /// The queries of each batch written, in order.
     pub spans: &'a [Range<usize>],
+    /// `-lcase_masking`.
+    pub lcase_masking: bool,
 }
 
 /// The Seq-aligns of one batch: the elements of outfmt 8, one query at a time.
@@ -231,7 +235,7 @@ impl<'a> AlignSource for TblastxAligns<'a> {
             )?;
             let query = &data.queries[q_idx];
             let query = QueryRecord {
-                id: SeqId::Local(&query.local_id),
+                id: query.seq_id(),
                 searched_length: i32::try_from(query.seq().len())?,
                 offset: i32::try_from(data.query_placements.offset(q_idx))?,
             };
@@ -277,6 +281,8 @@ pub(super) fn write_tblastx_archives(
         .zip(&subject_deflines)
         .map(|(record, defline)| BioseqInput {
             id: &record.local_id,
+            ids: record.believed().map(|ids| ids.ids.as_slice()),
+            seq_loc: None,
             defline,
             title: &record.title,
             letters: record.archive_letters(),
@@ -299,6 +305,8 @@ pub(super) fn write_tblastx_archives(
             .zip(&deflines)
             .map(|(record, defline)| BioseqInput {
                 id: &record.local_id,
+                ids: record.believed().map(|ids| ids.ids.as_slice()),
+                seq_loc: record.archive_seq_loc(),
                 defline,
                 title: &record.title,
                 letters: record.archive_letters(),
@@ -338,13 +346,10 @@ pub(super) fn write_tblastx_archives(
         let stats = &data.query_stats[first];
         let (ka_blocks, search_space, length_adjustment) = match &stats.karlin {
             Some(karlin) => {
-                let adjustment = try_compute_eff_lengths_tblastx(
-                    stats.aa_len as i64,
-                    data.numbers.effective_length(),
-                    data.numbers.count,
-                    karlin,
-                )
-                .map_or(0, |lengths| lengths.length_adjustment);
+                let adjustment = data
+                    .numbers
+                    .context_lengths(stats.aa_len as i64, karlin)
+                    .map_or(0, |lengths| lengths.length_adjustment);
                 (
                     [ka_block(karlin, false), KaBlock::missing(true)],
                     stats.eff_searchsp,
@@ -353,11 +358,28 @@ pub(super) fn write_tblastx_archives(
             }
             None => ([KaBlock::missing(false), KaBlock::missing(true)], 0, 0),
         };
+        // `-lcase_masking`: the `LCaseMask` parameters of the request are the lower-case runs of
+        // each whole query record, each one for both strands (as BLASTX's `lcase_masks`).
+        let mut lcase_masks: Vec<MaskEntry> = Vec::new();
+        if data.lcase_masking {
+            for record in records {
+                for run in lowercase_runs(record.archive_letters()) {
+                    for frame in [Frame::Plus1, Frame::Minus1] {
+                        lcase_masks.push(MaskEntry {
+                            id: record.local_id.clone(),
+                            best: record.believed().map(|ids| ids.best.clone()),
+                            frame,
+                            intervals: vec![run],
+                        });
+                    }
+                }
+            }
+        }
         let batch = BatchArchive {
             queries: &queries,
             subjects: &subjects_input,
             required,
-            lcase_masks: &[],
+            lcase_masks: &lcase_masks,
             masks: &results_masks,
             ka_blocks,
             search_space,

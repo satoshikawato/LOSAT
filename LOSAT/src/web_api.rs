@@ -254,6 +254,8 @@ fn parse_blastn_args(
         db_filter: Default::default(),
         dbsize: None,
         show_gis: false,
+        parse_deflines: false,
+        searchsp: None,
         task: "megablast".to_string(),
         template_type: None,
         template_length: None,
@@ -294,8 +296,15 @@ fn parse_blastn_args(
         subject_loc: None,
         subject_besthit: false,
         culling_limit: None,
-        // The frozen web ABI v1 has no `-ungapped` (it is refused below as an unknown flag).
+        // The frozen web ABI v1 has no `-ungapped`, X-drops, `-no_greedy`, `-window_size` or
+        // `-off_diagonal_range` (they are refused below as unknown flags).
         ungapped: false,
+        xdrop_ungap: None,
+        xdrop_gap: None,
+        xdrop_gap_final: None,
+        no_greedy: false,
+        window_size: None,
+        off_diagonal_range: None,
         verbose: false,
         scan_step: 0,
         outfmt: "6".to_string(),
@@ -389,6 +398,8 @@ fn parse_tblastx_args(
         db_filter: Default::default(),
         dbsize: None,
         show_gis: false,
+        parse_deflines: false,
+        searchsp: None,
         evalue: 10.0,
         // The frozen web ABI v1 (plan TD-1) has no -threshold, -matrix or -window_size: BLOSUM62's
         // suggestions, 13 and 40.
@@ -408,6 +419,7 @@ fn parse_tblastx_args(
         // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
         seg: "yes".to_string(),
         soft_masking: None,
+        lcase_masking: false,
         window_size: None,
         outfmt: "6".to_string(),
         culling_limit: None,
@@ -552,6 +564,8 @@ fn parse_blastp_args(
         db_filter: Default::default(),
         dbsize: None,
         show_gis: false,
+        parse_deflines: false,
+        searchsp: None,
         task: "blastp".to_string(),
         evalue: None,
         threshold: None,

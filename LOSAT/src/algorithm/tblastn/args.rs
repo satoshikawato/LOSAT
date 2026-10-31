@@ -93,6 +93,25 @@ pub struct TblastnArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
+    // ```c++
+    //     arg_desc.AddDefaultKey(kArgParseDeflines, "TF", "Should the query and "
+    // ```
+    // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
+    #[arg(
+        long = "parse_deflines",
+        default_value_t = false,
+        help = "Should the query and subject defline(s) be parsed?"
+    )]
+    pub parse_deflines: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    // ```
+    #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
     // `tblastn-fast`: word size 5, the compressed lookup table and threshold 20 (`resolve`).
     #[arg(long, default_value = "tblastn", value_parser = task_parser(&["tblastn", "tblastn-fast"], &[]))]
     pub task: String,

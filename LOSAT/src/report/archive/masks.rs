@@ -59,6 +59,8 @@ impl Frame {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MaskEntry {
     pub id: String,
+    /// With `-parse_deflines`: the record's Seq-align id, written instead of `id`.
+    pub best: Option<crate::seqid::ParsedSeqId>,
     pub frame: Frame,
     pub intervals: Vec<(i32, i32)>,
 }
@@ -82,7 +84,10 @@ pub fn write_mask<E: Encoder>(enc: &mut E, mask: &MaskEntry) {
         enc.int(to);
         enc.end_member();
         enc.member("id", 3);
-        SeqId::Local(&mask.id).write(enc);
+        match &mask.best {
+            Some(id) => SeqId::Db(id).write(enc),
+            None => SeqId::Local(&mask.id).write(enc),
+        }
         enc.end_member();
         enc.end_sequence();
     }

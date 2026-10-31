@@ -155,6 +155,25 @@ pub struct BlastnArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
+    // ```c++
+    //     arg_desc.AddDefaultKey(kArgParseDeflines, "TF", "Should the query and "
+    // ```
+    // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
+    #[arg(
+        long = "parse_deflines",
+        default_value_t = false,
+        help = "Should the query and subject defline(s) be parsed?"
+    )]
+    pub parse_deflines: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    // ```
+    #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
     #[arg(long, default_value = "megablast", help = "Task to execute: megablast, blastn, dc-megablast or blastn-short", long_help = "Implemented tasks: megablast, blastn, dc-megablast and blastn-short. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2; dc-megablast uses the 11-of-18 coding template, reward 2, penalty -3, gaps 5/2 and two hits in a window of 40; blastn-short uses word size 7, reward 1, penalty -3, gaps 5/2, e-value 1000 and no DUST. An omitted option takes the default of the task.", value_parser = blastn_task)]
     pub task: String,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:708-730
@@ -491,6 +510,102 @@ pub struct BlastnArgs {
     /// Perform ungapped alignment only.
     #[arg(long)]
     pub ungapped: bool,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:212-229,276-286
+    // ```c++
+    //         arg_desc.AddOptionalKey(kArgUngappedXDropoff, "float_value",
+    //                             "X-dropoff value (in bits) for ungapped extensions",
+    //                             CArgDescriptions::eDouble);
+    // ...
+    //             arg_desc.AddOptionalKey(kArgGappedXDropoff, "float_value",
+    //                  "X-dropoff value (in bits) for preliminary gapped extensions",
+    //                  CArgDescriptions::eDouble);
+    // ...
+    //             arg_desc.AddOptionalKey(kArgFinalGappedXDropoff, "float_value",
+    //                          "X-dropoff value (in bits) for final gapped alignment",
+    //                          CArgDescriptions::eDouble);
+    // ...
+    //     if (args.Exist(kArgUngappedXDropoff) && args[kArgUngappedXDropoff]) {
+    //         opt.SetXDropoff(args[kArgUngappedXDropoff].AsDouble());
+    //     }
+    //
+    //     if (args.Exist(kArgGappedXDropoff) && args[kArgGappedXDropoff]) {
+    //         opt.SetGapXDropoff(args[kArgGappedXDropoff].AsDouble());
+    //     }
+    //
+    //     if (args.Exist(kArgFinalGappedXDropoff) && args[kArgFinalGappedXDropoff]) {
+    //         opt.SetGapXDropoffFinal(args[kArgFinalGappedXDropoff].AsDouble());
+    //     }
+    // ```
+    // An omitted value keeps the default of the task (`coordination.rs` `task_defaults`: the
+    // nucleotide handles of api/blast_nucl_options.cpp:163-193 and disc_nucl_options.cpp:66-84).
+    // The ungapped X-drop of megablast is 0 (its handle sets the window only, and the options
+    // are calloc'd, api/blast_options_local_priv.cpp:54): the raw X-drop is then the word cutoff
+    // (blast_parameters.c:378-381). The values are bits; NCBI converts them to raw scores once,
+    // with the smallest Lambda of the batch (`scoring.rs` `gap_x_dropoffs`, `run.rs`
+    // `x_dropoff_init`).
+    #[arg(long, value_parser = blastn_real, help = "X-dropoff value (in bits) for ungapped extensions (default: 20 for blastn, dc-megablast and blastn-short; megablast uses the ungapped cutoff score)")]
+    pub xdrop_ungap: Option<f64>,
+    #[arg(long, value_parser = blastn_real, help = "X-dropoff value (in bits) for preliminary gapped extensions (default: 25 for megablast, 30 for the other tasks)")]
+    pub xdrop_gap: Option<f64>,
+    #[arg(long, value_parser = blastn_real, help = "X-dropoff value (in bits) for final gapped alignment (default: 100)")]
+    pub xdrop_gap_final: Option<f64>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:663-665,681-685
+    // ```c++
+    //     arg_desc.AddFlag(kArgNoGreedyExtension,
+    //                      "Use non-greedy dynamic programming extension",
+    //                      true);
+    // ...
+    //     if (cmd_line_args.Exist(kArgNoGreedyExtension) &&
+    //         cmd_line_args[kArgNoGreedyExtension]) {
+    //         options.SetGapExtnAlgorithm(eDynProgScoreOnly);
+    //         options.SetGapTracebackAlgorithm(eDynProgTbck);
+    //     }
+    // ```
+    // The X-drops keep the task's defaults (megablast's greedy 25 bits). With the gap costs
+    // 0/0 of megablast NCBI refuses the search (`scoring.rs` `check_scoring_options`).
+    /// Use non-greedy dynamic programming extension.
+    #[arg(long)]
+    pub no_greedy: bool,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:475-481,487-497
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgWindowSize, "int_value",
+    //                             "Multiple hits window size, use 0 to specify "
+    //                             "1-hit algorithm",
+    //                             CArgDescriptions::eInteger);
+    //     arg_desc.SetConstraint(kArgWindowSize,
+    //                            new CArgAllowValuesGreaterThanOrEqual(0));
+    // ...
+    //     if (args[kArgWindowSize]) {
+    //         opt.SetWindowSize(args[kArgWindowSize].AsInteger());
+    //     } else {
+    //         int window = -1;
+    //         BLAST_GetSuggestedWindowSize(opt.GetProgramType(),
+    //                                      opt.GetMatrixName(),
+    //                                      &window);
+    // ```
+    // BLASTN has no matrix (no suggested window), so an omitted value keeps the default of the
+    // task (`coordination.rs` `determine_window_size`).
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm (default: 40 for dc-megablast, 0 for the other tasks)")]
+    pub window_size: Option<i32>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:505-511,518-522
+    // ```c++
+    //     arg_desc.AddDefaultKey(kArgOffDiagonalRange, "int_value",
+    //                             "Number of off-diagonals to search for the 2nd hit, "
+    //                             "use 0 to turn off",
+    //                             CArgDescriptions::eInteger,
+    //                             NStr::IntToString(kDfltOffDiagonalRange));
+    //     arg_desc.SetConstraint(kArgOffDiagonalRange,
+    //                            new CArgAllowValuesGreaterThanOrEqual(0));
+    // ...
+    //     if (args[kArgOffDiagonalRange]) {
+    //         opt.SetOffDiagonalRange(args[kArgOffDiagonalRange].AsInteger());
+    //     } else {
+    //         opt.SetOffDiagonalRange(0);
+    //     }
+    // ```
+    // NCBI refuses a range without a window (`scoring.rs` `check_scoring_options`).
+    #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Number of off-diagonals to search for the 2nd hit, use 0 to turn off (default: 0)")]
+    pub off_diagonal_range: Option<i32>,
     // NCBI blastn has no such option (the LOSAT-only option was removed, AGENTS.md rule 5).
     #[arg(skip = false)]
     pub verbose: bool,
@@ -599,6 +714,11 @@ impl BlastnArgs {
     /// whether it was given (`culling_limit`).
     pub fn culling_limit_value(&self) -> i32 {
         self.culling_limit.unwrap_or(0)
+    }
+
+    /// `-searchsp`, 0 without it (`CBlastOptions::SetEffectiveSearchSpace`).
+    pub fn options_searchsp(&self) -> i64 {
+        self.searchsp.unwrap_or(0)
     }
 
     pub fn db_length(&self) -> i64 {

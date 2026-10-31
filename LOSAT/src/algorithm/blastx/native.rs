@@ -406,8 +406,7 @@ fn run_inner(
     if args.db.is_none() && subjects.is_empty() {
         return Err(early_archive_error(engine("Empty CBlastQueryVector")));
     }
-    let query_file = File::open(&args.query)
-        .map_err(|_| inaccessible("query", &args.query))
+    let query_file = crate::blastinput::input_files::open_input(&args.query, "query", "BLASTX")
         .map_err(early_archive_error)?;
     let destination: Box<dyn Write> = match args.out.as_deref().filter(|p| *p != Path::new("-")) {
         Some(path) => Box::new(File::create(path).map_err(|_| inaccessible("out", path))?),
@@ -566,9 +565,10 @@ fn run_inner(
     // too). Only with outfmt 5 and 13 to 16; the other formats read the file once.
     if let Some(held) = &held {
         // A query that is not a regular file (a pipe, `<(...)`, `/dev/stdin` from a pipe, a
-        // FIFO) cannot be read a second time: the read before the search would take every
-        // byte (DECISIONS 22). Refused as `-query -` is (`args.rs`), before the search.
-        if !query_file.metadata().is_ok_and(|m| m.is_file())
+        // FIFO) or `-query -` cannot be read a second time: the read before the search would
+        // take every byte (DECISIONS 22). Refused before the search.
+        if args.query.as_os_str() == "-"
+            || !query_file.metadata().is_ok_and(|m| m.is_file())
             || !crate::blastinput::input_files::has_stream_position(&query_file)
         {
             bail!(
@@ -629,8 +629,15 @@ fn run_inner(
     // ```
     // The prescan of the titles of outfmt 11 (below) reads the query file a second time: whether it
     // is a regular file is decided here, on the handle already open, before any second open.
-    let query_is_regular = archive::query_is_regular(&query_file);
+    let query_is_regular = args.query.as_os_str() != "-" && archive::query_is_regular(&query_file);
+    crate::blastinput::fasta_reader::believed::refuse_with_subject(
+        args.parse_deflines,
+        args.subject.is_some(),
+        "BLASTX",
+    )?;
     let mut query_stream = FastaStream::from_file(query_file);
+    query_stream.parse_deflines = args.parse_deflines;
+    query_stream.strand = crate::report::archive::bioseq::SeqLocStrand::of_option(&args.strand);
     if stream_is_empty(&mut query_stream) {
         stderr.write_all(b"Warning: [blastx] Query is Empty!\n")?;
         // NCBI returns before the formatter exists: no archive carries the message.
@@ -1131,7 +1138,10 @@ fn run_inner(
                 }
             }
             #[cfg(feature = "parallel")]
-            if let Some(pool) = x_pool.filter(|pool| pool.enabled()) {
+            // With `-parse_deflines` a batch is searched and reported before the next is read: a
+            // reported database sequence is refused by the ids of the queries read so far
+            // (`common::database::read_header`), which must not depend on the threads.
+            if let Some(pool) = x_pool.filter(|pool| pool.enabled() && !args.parse_deflines) {
                 use rayon::prelude::*;
                 enum XEvent {
                     Warn(Vec<u8>),
@@ -1727,8 +1737,10 @@ pub(crate) fn reader_warning(warning: &InputWarning, stderr: &mut dyn Write) -> 
                 let mut ranges:Vec<(usize,usize)>=Vec::new();
                 for &p in &warning.positions {if let Some(last)=ranges.last_mut().filter(|r|r.1+1==p){last.1=p;}else{if ranges.len()>=1000{break;}ranges.push((p,p));}}
                 let text=ranges.iter().map(|&(a,b)|if a==b{a.to_string()}else{format!("{a}-{b}")}).collect::<Vec<_>>().join(", ");
-                format!("FASTA-Reader: Ignoring invalid residues at position(s): On line {}: {text}",warning.line)
-            },_=>unreachable!("source-registered FASTA warning"),
+                format!("FASTA-Reader: Ignoring invalid {}residues at position(s): On line {}: {text}",String::from_utf8_lossy(&warning.text),warning.line)
+            },
+            "defline_id"=>String::from_utf8_lossy(&warning.text).into_owned(),
+            _=>unreachable!("source-registered FASTA warning"),
         };
     writeln!(stderr, "{message}")?;
     Ok(())

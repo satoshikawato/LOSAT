@@ -163,6 +163,7 @@ impl TblastxDatabase {
             total: i64::try_from(self.db.total_length()).expect("checked when opened"),
             count: i64::from(self.db.num_seqs()),
             dbsize,
+            searchsp: None,
         }
     }
 

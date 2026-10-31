@@ -356,7 +356,7 @@ pub(super) fn write_blastx_tabular(
                 let mut buf: Vec<u8> = Vec::new();
                 table.query_header(
                     &mut buf,
-                    query.title.as_bytes(),
+                    query.query_line().as_bytes(),
                     &database,
                     (!batch.search_skipped).then_some(count),
                 )?;
@@ -369,10 +369,11 @@ pub(super) fn write_blastx_tabular(
                 // ```
                 // BLASTX has no `-query_loc`: the searched query is the record.
                 let searched_length = query.sequence.len();
-                let tabular_query = TabularQuery {
-                    id: local_id(query).as_bytes(),
-                    length: searched_length,
-                };
+                let tabular_query = TabularQuery::of_ids(
+                    query.believed(),
+                    local_id(query).as_bytes(),
+                    searched_length,
+                );
                 for list in lists {
                     let shown_hsps = || {
                         list.hsps

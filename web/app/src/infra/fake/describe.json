@@ -78,6 +78,21 @@
     ]
    },
    {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
+   },
+   {
     "flag": "-task",
     "help": "Task to execute: megablast, blastn, dc-megablast or blastn-short",
     "takes_value": true,
@@ -217,6 +232,40 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-xdrop_ungap",
+    "help": "X-dropoff value (in bits) for ungapped extensions (default: 20 for blastn, dc-megablast and blastn-short; megablast uses the ungapped cutoff score)",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap",
+    "help": "X-dropoff value (in bits) for preliminary gapped extensions (default: 25 for megablast, 30 for the other tasks)",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap_final",
+    "help": "X-dropoff value (in bits) for final gapped alignment (default: 100)",
+    "takes_value": true
+   },
+   {
+    "flag": "-no_greedy",
+    "help": "Use non-greedy dynamic programming extension",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-window_size",
+    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm (default: 40 for dc-megablast, 0 for the other tasks)",
+    "takes_value": true
+   },
+   {
+    "flag": "-off_diagonal_range",
+    "help": "Number of off-diagonals to search for the 2nd hit, use 0 to turn off (default: 0)",
+    "takes_value": true
    }
   ]
  },
@@ -297,6 +346,21 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
    },
    {
     "flag": "-task",
@@ -496,6 +560,21 @@
      "true",
      "false"
     ]
+   },
+   {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
    },
    {
     "flag": "-task",
@@ -752,6 +831,21 @@
     ]
    },
    {
+    "flag": "-parse_deflines",
+    "help": "Should the query and subject defline(s) be parsed?",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-searchsp",
+    "help": "Effective length of the search space",
+    "takes_value": true
+   },
+   {
     "flag": "-evalue",
     "help": "",
     "takes_value": true,
@@ -819,6 +913,15 @@
     "flag": "-soft_masking",
     "help": "Apply filtering locations as soft masks [default: false]",
     "takes_value": true
+   },
+   {
+    "flag": "-lcase_masking",
+    "help": "",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
    },
    {
     "flag": "-window_size",

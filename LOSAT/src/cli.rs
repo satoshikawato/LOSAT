@@ -361,7 +361,8 @@ pub fn render_message(error: &clap::Error) -> String {
 // ```
 // The options of NCBI blastn 2.17.0+ (-help) that LOSAT's BLASTN does not implement
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
-// (`blastn/args.rs`); the database masks and `-searchsp` are not.
+// (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range` and
+// `-no_greedy` (DI-6); the database masks and `-min_raw_gapped_score` are not.
 fn is_unported_blastn_arg(name: &str) -> bool {
     matches!(
         name,
@@ -379,20 +380,12 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "line_length"
             | "min_raw_gapped_score"
             | "negative_gilist"
-            | "no_greedy"
-            | "off_diagonal_range"
-            | "parse_deflines"
             | "remote"
-            | "searchsp"
             | "soft_masking"
             | "sorthits"
             | "sorthsps"
             | "version"
             | "window_masker_taxid"
-            | "window_size"
-            | "xdrop_gap"
-            | "xdrop_gap_final"
-            | "xdrop_ungap"
     )
 }
 
@@ -425,9 +418,7 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "line_length"
             | "negative_gilist"
             | "negative_ipglist"
-            | "parse_deflines"
             | "remote"
-            | "searchsp"
             | "sorthits"
             | "sorthsps"
             | "subject_besthit"
@@ -738,9 +729,7 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "in_pssm"
             | "line_length"
             | "negative_gilist"
-            | "parse_deflines"
             | "remote"
-            | "searchsp"
             | "sorthits"
             | "sorthsps"
             | "subject_besthit"
@@ -774,13 +763,10 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "gilist"
             | "html"
             | "import_search_strategy"
-            | "lcase_masking"
             | "line_length"
             | "max_intron_length"
             | "negative_gilist"
-            | "parse_deflines"
             | "remote"
-            | "searchsp"
             | "sorthits"
             | "sorthsps"
             | "strand"
@@ -818,13 +804,11 @@ fn is_unported_blastx_arg(name: &str) -> bool {
             | "negative_ipglist"
             | "best_hit_overhang"
             | "best_hit_score_edge"
-            | "searchsp"
             | "import_search_strategy"
             | "export_search_strategy"
             | "xdrop_ungap"
             | "xdrop_gap"
             | "xdrop_gap_final"
-            | "parse_deflines"
             | "remote"
             | "use_sw_tback"
     )

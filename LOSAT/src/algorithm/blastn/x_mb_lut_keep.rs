@@ -41,7 +41,8 @@
 //! on the batch's letters, only on its table's cells (4^11 or 4^12), so one kept table serves the
 //! search's batches whichever layout each one takes: `CBatchSizeMixer`'s full batches are laid out
 //! as CSR and its probe batches as chains (dc-megablast of 31,168 cDNAs: 18 CSR builds and 19
-//! chain builds of 4^11 cells). A fresh table has room for two elements more than its cells, so a
+//! chain builds of 4^11 cells; at 4^12 cells LOSAT_X_MBCSR's size rule can take the small batches
+//! and leave the full ones as chains). A fresh table has room for two elements more than its cells, so a
 //! later CSR can take it.
 //!
 //! Why it matters for memory. glibc maps a block of at least its mmap threshold (128 KiB at the
@@ -85,7 +86,8 @@
 //! table, the probe batch's `next_pos` and the rest of a small batch) stays below the full
 //! batch's (the same table, a full batch's `next_pos` and the rest), so the search's peak is the
 //! full batch's as before. With LOSAT_X_BNLUTDROP a batch drops its tables before its traceback,
-//! and the kept table stays resident through it (16 MiB of 4^11 cells, 64 MiB of 4^12); the
+//! and the kept table stays resident through it (16 MiB of 4^11 cells, 64 MiB of 4^12; what a
+//! packed CSR wrote, less); the
 //! peaks above are measured with it.
 //!
 //! Timing: with LOSAT_TIMING, `[TIMING] x_mb_lut_keep: kept= fresh= csr= zero=` gives the loop's
@@ -351,6 +353,49 @@ mod tests {
         }
     }
 
+    // LOSAT_X_MBCSR: the batches of a search can take either side of its size rule at 4^12 cells, so
+    // a chains build can follow a CSR build on one keep; it is the fresh build.
+    #[test]
+    fn chains_after_a_csr_of_4_12_cells_are_the_fresh_build() {
+        let mut rng = Lcg(0x6b65_6571);
+        let keep = Arc::new(Keep::default());
+        let (queries, offsets, masks, word_length, _) = random_case(&mut rng);
+        let word_length = word_length.max(12);
+        let refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+        let build = |keep: Option<&Arc<Keep>>, letters: Option<u64>| {
+            build_mb_lookup(
+                &refs,
+                &offsets,
+                word_length,
+                12,
+                &masks,
+                None,
+                0,
+                1_000_000,
+                false,
+                keep,
+                letters,
+            )
+        };
+        drop(build(Some(&keep), None));
+        let csr = build(Some(&keep), Some(u64::MAX));
+        assert_eq!(
+            csr.x_csr.is_some(),
+            super::super::x_bn_csr::x_will_pack(false) && super::super::x_bn_csr::x_mb12_on()
+        );
+        drop(csr);
+        let fresh = build(None, None);
+        let built = build(Some(&keep), None);
+        let next_pos_len = queries
+            .iter()
+            .zip(&offsets)
+            .map(|(q, &o)| o.max(0) as usize + q.len())
+            .max()
+            .unwrap_or(0)
+            + 1;
+        assert_same(&built, &fresh, 1 << 24, next_pos_len, "chains after a CSR");
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1262
     // ```c
     //    mb_lt->hashtable = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
@@ -398,6 +443,7 @@ mod tests {
                         1_000_000,
                         ascending,
                         None,
+                        None,
                     );
                     let next_pos_len = queries
                         .iter()
@@ -433,6 +479,7 @@ mod tests {
                         1_000_000,
                         ascending,
                         Some(&keep),
+                        None,
                     );
                     let dirty = match before {
                         Some((len, dirty, written)) if len >= cells => {

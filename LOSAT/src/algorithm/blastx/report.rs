@@ -816,6 +816,9 @@ pub(crate) fn alignment(
 //     return id_string;
 // ```
 pub(super) fn local_id(record: &FastaRecord) -> &str {
+    if let Some(ids) = record.believed() {
+        return std::str::from_utf8(&ids.tabular[2]).unwrap_or_default();
+    }
     record
         .title
         .split(' ')
@@ -1329,7 +1332,7 @@ pub fn render_queries(
                         //     if (tabular) {
                         //         out << all_id_str;
                         // ```
-                        &query.title
+                        query.query_line()
                     )?;
                     match shown {
                         ShownSubjects::Fasta { path } => writeln!(
@@ -1479,7 +1482,7 @@ fn write_pairwise(
                 //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
                 //             out << "\nLength=";
                 // ```
-                query_name: query.title.clone(),
+                query_name: query.query_line().into_owned(),
                 query_length: query.sequence.len(),
                 ungapped_karlin: stat.map_or(batch.parameters[qidx * 6].ungapped, |p| p.ungapped),
                 effective_search_space: stat.map_or(0, |p| p.search_space),
@@ -1656,8 +1659,10 @@ fn pairwise_metadata(
         word_threshold: 0.0,
         window_size: options.window_size,
         gapped_karlin: lookup_protein_params(&scoring),
-        gumbel: lookup_protein_gumbel_params(&scoring, total as i64)
-            .expect("pinned BLOSUM62 gap11/1 Gumbel block"),
+        gumbel: (!options.old_fsc).then(|| {
+            lookup_protein_gumbel_params(&scoring, total as i64)
+                .expect("pinned BLOSUM62 gap11/1 Gumbel block")
+        }),
         // BLASTX writes its own description table and alignments (`write_blastx_report`).
         num_descriptions: usize::MAX,
         num_alignments: usize::MAX,
@@ -1904,7 +1909,7 @@ pub(super) fn query_warning(query: &FastaRecord, search_skipped: bool) -> Vec<u8
     if !query.sequence.is_empty() && !search_skipped {
         return Vec::new();
     }
-    let mut id = query.internal_id.as_bytes().to_vec();
+    let mut id = query.warning_id().to_vec();
     if !query.title.is_empty() {
         id.push(b' ');
         id.extend_from_slice(query.title.as_bytes());

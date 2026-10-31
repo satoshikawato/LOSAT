@@ -94,6 +94,25 @@ pub struct TblastxArgs {
         help = "Show NCBI GIs in deflines?"
     )]
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
+    // ```c++
+    //     arg_desc.AddDefaultKey(kArgParseDeflines, "TF", "Should the query and "
+    // ```
+    // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
+    #[arg(
+        long = "parse_deflines",
+        default_value_t = false,
+        help = "Should the query and subject defline(s) be parsed?"
+    )]
+    pub parse_deflines: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    // ```
+    #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
     #[arg(long, default_value_t = 10.0, value_parser = tblastx_real)]
     pub evalue: f64,
     // NCBI blast_args.cpp:578-583: a double of at least 0; the lookup table takes its
@@ -215,6 +234,12 @@ pub struct TblastxArgs {
     // by `soft_masking`.
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
+    // arg_desc.AddFlag(kArgUseLCaseMasking,
+    //     "Use lower case filtering in query and subject sequence(s)?", true);
+    // ReadSequencesToBlast(..., use_lcase_masks, subjects, ...);
+    #[arg(long)]
+    pub lcase_masking: bool,
 
     /// Two-hit window size for triggering ungapped extension (default: 40, or the matrix's
     /// suggestion; `window`). Smaller values are more strict, larger values are more sensitive.

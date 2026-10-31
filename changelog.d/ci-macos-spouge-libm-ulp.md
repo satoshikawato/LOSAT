@@ -1,0 +1,1 @@
+- Tests: on macOS the pinned `blast_spouge_stoe` rows of `stats::spouge` accept a few ULP (observed 2 on arm64, 4 on x64) because Apple's libm `exp` differs from glibc's (`PD-LOSAT-PLATFORM-LIBM`); the ErfC rows and every other OS stay exact. No engine change.

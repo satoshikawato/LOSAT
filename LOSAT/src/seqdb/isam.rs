@@ -37,7 +37,8 @@
 //! - `SeqDB_SimplifyAccession`, `SeqDB_SimplifySeqid`, `PreprocessIdsForISAMSiLookup`:
 //!   [`seqdb_simplify_accession`], [`simplify_accession_for_isam`].
 //!
-//! Not ported, because nothing reaches it: the numeric ISAM (`.pni`, `.nni`, ...), `x_GetIndexKeyOffset`
+//! The numeric ISAM of GIs (`.pni`, `.nni`) is [`super::isam_num`]. Not ported, because nothing
+//! reaches it: the other numeric ISAMs, `x_GetIndexKeyOffset`
 //! and `x_GetIndexString` (used only behind `short_match` and `follow_match`, two constants that
 //! are `false`), `x_SparseStringToOids` (`_TROUBLE`), `HashToOids`, and the numeric
 //! `x_SearchNegativeMulti`.

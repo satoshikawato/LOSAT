@@ -419,8 +419,9 @@ pub fn extend_hit_two_hit(
 }
 
 /// `extend_hit_two_hit` with the scores of `sc`: BLOSUM62's instance is `extend_hit_two_hit`,
-/// another matrix's runs the reference walks with its table (the table walks of TBXUNGAP hold
-/// BLOSUM62's scores and bounds).
+/// another matrix's takes the table walks of TBXUNGAP with its byte table
+/// (`TbxScore::table_two_hit`), and the reference walks with its scores for the calls those do
+/// not cover.
 #[inline(always)]
 pub(crate) fn extend_hit_two_hit_with<S: TbxScore>(
     sc: S,
@@ -442,6 +443,13 @@ pub(crate) fn extend_hit_two_hit_with<S: TbxScore>(
             x_drop,
             debug_ext,
         );
+    }
+    if !debug_ext {
+        if let Some(r) =
+            sc.table_two_hit(q_seq, s_seq, s_left_off, s_right_off, q_right_off, x_drop)
+        {
+            return r;
+        }
     }
     extend_hit_two_hit_reference(
         sc,

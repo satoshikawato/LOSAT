@@ -72,6 +72,9 @@ pub(super) fn for_each_subject<S>(
     n: usize,
     init: &(impl Fn() -> S + Sync),
     search: &(impl Fn(&mut S, usize) + Sync),
+    // EXPERIMENT (LOSAT_X_TBXBOARD): what a thread does once no subject is left to take (it helps
+    // with the batch's units, tblastx/x_work_board.rs `XBoard::help`), given the loop's stop flag.
+    help: Option<&(dyn Fn(&AtomicBool) + Sync)>,
 ) {
     if n == 0 {
         return;
@@ -83,9 +86,17 @@ pub(super) fn for_each_subject<S>(
     if rayon::current_thread_index().is_some() && rayon::current_num_threads() > 1 {
         let next = AtomicUsize::new(0);
         let stopped = AtomicBool::new(false);
-        rayon::broadcast(|_| take_subjects(n, &next, &stopped, init, search));
+        rayon::broadcast(|_| {
+            take_subjects(n, &next, &stopped, init, search);
+            if let Some(help) = help {
+                if !stopped.load(Ordering::Relaxed) {
+                    help(&stopped);
+                }
+            }
+        });
         return;
     }
+    let _ = help;
     let next = AtomicUsize::new(0);
     let stopped = AtomicBool::new(false);
     take_subjects(n, &next, &stopped, init, search);
@@ -168,6 +179,7 @@ mod tests {
                             .unwrap()
                             .insert(rayon::current_thread_index());
                     },
+                    None,
                 );
             });
             let seen = seen.into_inner().unwrap();
@@ -194,24 +206,29 @@ mod tests {
         let all_started = std::sync::Condvar::new();
         let owner = Mutex::new(vec![None; 64]);
         pool(threads).install(|| {
-            for_each_subject(64, &|| (), &|_: &mut (), i| {
-                if i < threads {
-                    let mut count = started.lock().unwrap();
-                    *count += 1;
-                    all_started.notify_all();
-                    let (count, timeout) = all_started
-                        .wait_timeout_while(count, std::time::Duration::from_secs(60), |c| {
-                            *c < threads
-                        })
-                        .unwrap();
-                    assert!(
-                        !timeout.timed_out(),
-                        "{} of the first subjects started",
-                        *count
-                    );
-                }
-                owner.lock().unwrap()[i] = rayon::current_thread_index();
-            });
+            for_each_subject(
+                64,
+                &|| (),
+                &|_: &mut (), i| {
+                    if i < threads {
+                        let mut count = started.lock().unwrap();
+                        *count += 1;
+                        all_started.notify_all();
+                        let (count, timeout) = all_started
+                            .wait_timeout_while(count, std::time::Duration::from_secs(60), |c| {
+                                *c < threads
+                            })
+                            .unwrap();
+                        assert!(
+                            !timeout.timed_out(),
+                            "{} of the first subjects started",
+                            *count
+                        );
+                    }
+                    owner.lock().unwrap()[i] = rayon::current_thread_index();
+                },
+                None,
+            );
         });
         let owner = owner.into_inner().unwrap();
         let first: std::collections::BTreeSet<_> = owner[..threads].iter().collect();
@@ -223,20 +240,25 @@ mod tests {
         let searched = AtomicUsize::new(0);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             pool(4).install(|| {
-                for_each_subject(100_000, &|| (), &|_: &mut (), i| {
-                    searched.fetch_add(1, Ordering::Relaxed);
-                    if i == 10 {
-                        panic!("subject 10");
-                    }
-                    // About 50 µs a subject: the other threads take subjects until the panicking
-                    // one has printed its message and unwound to `take_subjects`, and with
-                    // subjects of about 1 µs (`work(i + 4)`) they took all of them on a Windows
-                    // runner at opt-level 3 (2026-10-23). All of them now take seconds.
-                    std::hint::black_box(
-                        (0..50_000u64)
-                            .fold(i as u64, |acc, x| acc.wrapping_mul(31).wrapping_add(x)),
-                    );
-                });
+                for_each_subject(
+                    100_000,
+                    &|| (),
+                    &|_: &mut (), i| {
+                        searched.fetch_add(1, Ordering::Relaxed);
+                        if i == 10 {
+                            panic!("subject 10");
+                        }
+                        // About 50 µs a subject: the other threads take subjects until the panicking
+                        // one has printed its message and unwound to `take_subjects`, and with
+                        // subjects of about 1 µs (`work(i + 4)`) they took all of them on a Windows
+                        // runner at opt-level 3 (2026-10-23). All of them now take seconds.
+                        std::hint::black_box(
+                            (0..50_000u64)
+                                .fold(i as u64, |acc, x| acc.wrapping_mul(31).wrapping_add(x)),
+                        );
+                    },
+                    None,
+                );
             })
         }));
         assert!(result.is_err());
@@ -246,7 +268,12 @@ mod tests {
     #[test]
     fn outside_a_pool_the_subjects_run_in_order_on_this_thread() {
         let order = Mutex::new(Vec::new());
-        for_each_subject(5, &|| (), &|_: &mut (), i| order.lock().unwrap().push(i));
+        for_each_subject(
+            5,
+            &|| (),
+            &|_: &mut (), i| order.lock().unwrap().push(i),
+            None,
+        );
         assert_eq!(order.into_inner().unwrap(), vec![0, 1, 2, 3, 4]);
     }
 }

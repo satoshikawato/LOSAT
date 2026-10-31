@@ -314,22 +314,16 @@ impl DbFilterArgs {
     // ```
     /// The `program-options` parameter of the BLAST archive for the list option of the command
     /// line: NCBI's list object is there for each option, so the parameter is written also when
-    /// no id came of it, or the list is a seqid list (`resolved`: `resolve`'s answer), without
-    /// ids. The ids are those of NCBI's `set`, ascending.
+    /// no id came of it, or the list is a seqid list, without ids. `taxids` are the ids of NCBI's
+    /// `set` after the database opened (`SeqDb::list_taxids`), ascending.
     pub fn archive_parameter(
         &self,
-        resolved: Option<&DbList>,
+        taxids: &[i32],
     ) -> Option<crate::report::archive::options::Param> {
         use crate::report::archive::options::{Param, ParamValue};
         let negative = match (self.seqid_list(), self.list()) {
             (Some((_, negative)), _) | (None, Some((_, _, negative))) => negative,
             (None, None) => return None,
-        };
-        let ids = match resolved {
-            Some(DbList::Taxids(TaxidList::Positive(ids) | TaxidList::Negative(ids))) => {
-                ids.iter().copied().collect()
-            }
-            _ => Vec::new(),
         };
         Some(Param {
             name: if negative {
@@ -337,7 +331,7 @@ impl DbFilterArgs {
             } else {
                 "TaxidList"
             },
-            value: ParamValue::IntegerList(ids),
+            value: ParamValue::IntegerList(taxids.to_vec()),
         })
     }
 
@@ -350,6 +344,9 @@ impl DbFilterArgs {
         settings: &ApplicationSettings,
         warnings: &mut dyn Write,
     ) -> Result<Option<DbList>> {
+        if self.seqid_list().is_none() && self.list().is_none() {
+            return Ok(None);
+        }
         // The registry's errors are the database's: `open_search_database` reports them.
         let registry = settings.blastdb.clone().unwrap_or(None);
         let path = SearchPath::from_environment(registry.as_deref())
@@ -583,7 +580,6 @@ mod tests {
     #[test]
     fn the_archive_parameter_follows_the_list_option() {
         use crate::report::archive::options::ParamValue;
-        let ids = BTreeSet::from([10090, 9606]);
         let filter = |taxids: bool, negative: bool| DbFilterArgs {
             taxids: (taxids && !negative).then(|| "1".to_string()),
             negative_taxids: (taxids && negative).then(|| "1".to_string()),
@@ -591,17 +587,18 @@ mod tests {
             negative_seqidlist: (!taxids && negative).then(|| "f".to_string()),
             ..DbFilterArgs::default()
         };
-        let list = DbList::Taxids(TaxidList::Positive(ids.clone()));
-        let param = filter(true, false).archive_parameter(Some(&list)).unwrap();
+        let param = filter(true, false)
+            .archive_parameter(&[9606, 10090])
+            .unwrap();
         assert_eq!(param.name, "TaxidList");
         assert_eq!(param.value, ParamValue::IntegerList(vec![9606, 10090]));
         // A missing taxonomy file: the list object of NCBI has no id.
-        let param = filter(true, false).archive_parameter(None).unwrap();
+        let param = filter(true, false).archive_parameter(&[]).unwrap();
         assert_eq!(param.value, ParamValue::IntegerList(Vec::new()));
-        let param = filter(false, true).archive_parameter(None).unwrap();
+        let param = filter(false, true).archive_parameter(&[]).unwrap();
         assert_eq!(param.name, "NegativeTaxidList");
         assert_eq!(param.value, ParamValue::IntegerList(Vec::new()));
-        assert!(DbFilterArgs::default().archive_parameter(None).is_none());
+        assert!(DbFilterArgs::default().archive_parameter(&[]).is_none());
     }
 
     #[test]

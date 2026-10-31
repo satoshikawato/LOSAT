@@ -372,6 +372,28 @@ fn run_inner(
         }
         None => Box::new(io::stderr()),
     };
+    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
+    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the formatting handler and before
+    // `CStdCmdLineArgs`, which opens the query and the output: its warning before theirs (probe
+    // F04 of line DI-8), and a list error leaves no `-out`, only the error archive that NCBI's
+    // `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8). NCBI's application layer
+    // has read its environment and registry files by then; LOSAT reads them for `-db` (the
+    // registry's `BLASTDB`), as its other programs with `-db`, and leaves `-subject`'s path as it
+    // was.
+    let db_settings = match args.database_name() {
+        Some(_) => Some(
+            crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
+                .map_err(anyhow::Error::msg)?,
+        ),
+        None => None,
+    };
+    let list = match &db_settings {
+        Some(settings) => args
+            .db_filter
+            .resolve(settings, &mut stderr)
+            .map_err(early_archive_error)?,
+        None => None,
+    };
     // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
     // counterpart.
     let x_t_read_fasta = crate::utils::xtiming::clock();
@@ -495,24 +517,15 @@ fn run_inner(
     // ```
     // The database of `-db` opens after the arguments (the query and output files) and the
     // options are processed and before the query is read, as NCBI's `InitializeSubject`.
-    // NCBI's application layer has read its environment and registry files by then; LOSAT
-    // reads them for `-db` (the registry's `BLASTDB`), as its other programs with `-db`, and
-    // leaves `-subject`'s path as it was.
-    let database = match args.database_name() {
-        Some(name) => {
-            let settings =
-                crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
-                    .map_err(anyhow::Error::msg)?;
-            // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the
-            // database arguments reads it (`s_GetTaxIDList`) before the database opens.
-            let list = args.db_filter.resolve(&settings, &mut stderr)?;
+    let database = match (args.database_name(), &db_settings) {
+        (Some(name), Some(settings)) => {
             let database =
-                BlastxDatabase::open_restricted(name, &settings, list.as_ref(), &mut stderr)?
+                BlastxDatabase::open_restricted(name, settings, list.as_ref(), &mut stderr)?
                     .showing_gis(args.show_gis);
             crate::algorithm::common::database::note_archive_database_filter(
                 archive.as_ref(),
                 &args.db_filter,
-                list.as_ref(),
+                database.list_taxids(),
                 database.filtered_empty(),
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
@@ -520,7 +533,7 @@ fn run_inner(
             )?;
             Some(database)
         }
-        None => None,
+        _ => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
     // ```c++
@@ -1592,8 +1605,8 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     result
 }
 
-/// The error archive of a run that stopped in `Run` before its output was opened (the files of
-/// `-subject` and `-query`, the subjects): into `-out`, or standard output; nothing when that
+/// The error archive of a run that stopped in `Run` before its output was opened (the taxid or
+/// seqid list, the files of `-subject` and `-query`, the subjects): into `-out`, or standard output; nothing when that
 /// cannot be opened (NCBI's call swallows that).
 fn write_run_error_archive(
     args: &BlastxArgs,
@@ -1603,6 +1616,10 @@ fn write_run_error_archive(
     let Some(handle) = archive else {
         return;
     };
+    // `-outfmt "11 qseqid"`: NCBI's `PrintErrorArchive` stops at the number before it opens `-out`.
+    if !handle.error_archive_enabled() {
+        return;
+    }
     let Some(lines) = archive::error_lines(error, true) else {
         return;
     };

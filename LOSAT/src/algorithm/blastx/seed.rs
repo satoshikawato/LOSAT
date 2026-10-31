@@ -10,7 +10,7 @@ use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
     x_bx_build_compressed_lookup, x_bx_clut_pool, x_give_back_flat, XCompressedLookup, X_BLASTX,
 };
 use crate::algorithm::tblastx::lookup::compressed::{
-    build_blosum62_compressed_lookup, x_compressed_scaled_threshold, BlastCompressedAaLookupTable,
+    x_compressed_scaled_threshold, BlastCompressedAaLookupTable,
 };
 use crate::algorithm::tblastx::lookup::{
     build_ncbi_lookup_from_prepared, BlastAaLookupTable, QueryContext,
@@ -312,26 +312,29 @@ fn x_give_back_compressed(table: &mut XCompressedLookup) {
 //     s_CompressedLookupFinalize(lookup);
 // ```
 /// EXPERIMENT (LOSAT_X_BPCLUT): the compressed table of a query batch (`-word_size 5`), flat as
-/// TBLASTN's (`x_bx_build_compressed_lookup`), on one thread. One table for the batch, so its one
-/// range is all the segments. Where the flat build refuses, the reference builder runs and ends as
-/// it ends. Cold and not inlined, so that the standard table's build keeps its code.
+/// TBLASTN's (`x_bx_build_compressed_lookup`, on vectors kept between builds with
+/// `LOSAT_X_BXCLUTPOOL`), on one thread. One table for the batch, so its one
+/// range is all the segments. Words that fill NCBI's overflow banks are refused, as BLASTP's
+/// (NCBI writes past its banks). Cold and not inlined, so that the standard table's build keeps
+/// its code.
 #[cold]
 #[inline(never)]
 fn x_compressed_lookup(query: &[u8], segments: &[(i32, i32)], threshold: f64) -> Result<Lookup> {
-    let flat = x_bx_build_compressed_lookup(
+    x_bx_build_compressed_lookup(
         5,
         x_compressed_scaled_threshold(threshold),
         query,
         segments,
         &[0..segments.len()],
-    );
-    match flat {
-        Some(Ok(table)) => Ok(Lookup::Compressed(table)),
-        Some(Err(())) | None => Ok(Lookup::Compressed(XCompressedLookup::Reference(
-            build_blosum62_compressed_lookup(5, threshold, query, segments)
-                .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?,
-        ))),
-    }
+    )
+    .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?
+    .map(Lookup::Compressed)
+    .map_err(|()| {
+        anyhow::anyhow!(
+            "-threshold {} with the compressed lookup table of -word_size 5 is not supported by LOSAT's BLASTX: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
+            threshold
+        )
+    })
 }
 
 /// No NCBI counterpart: the word length of either form of the compressed table. Not inlined, so
@@ -457,7 +460,9 @@ impl Lookup {
                 query,
                 batch.lookup_segments.clone(),
                 contexts,
-                options.threshold as i32,
+                // `lookup->threshold = (Int4)opt->threshold` (blast_aalookup.c:241), converted as
+                // the x86-64 build does (`INT_MIN` past `Int4`).
+                crate::core::blast_util::ncbi_int4_from_double(options.threshold),
                 pooled,
                 parts,
             ),

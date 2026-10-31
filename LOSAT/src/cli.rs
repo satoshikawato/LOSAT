@@ -361,8 +361,8 @@ pub fn render_message(error: &clap::Error) -> String {
 // ```
 // The options of NCBI blastn 2.17.0+ (-help) that LOSAT's BLASTN does not implement
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
-// (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range` and
-// `-no_greedy` (DI-6); the database masks and `-min_raw_gapped_score` are not.
+// (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range`, `-no_greedy`
+// (DI-6) and `-min_raw_gapped_score` (DI-6b); the database masks are not.
 fn is_unported_blastn_arg(name: &str) -> bool {
     matches!(
         name,
@@ -378,7 +378,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "import_search_strategy"
             | "index_name"
             | "line_length"
-            | "min_raw_gapped_score"
             | "negative_gilist"
             | "remote"
             | "soft_masking"

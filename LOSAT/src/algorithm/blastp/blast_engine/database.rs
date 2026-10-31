@@ -208,9 +208,19 @@ impl BlastpDatabase {
         }
     }
 
-    /// The total length (`CSeqDB::GetTotalLength`).
+    /// The total length the statistics read (`SeqDb::statistics_numbers`).
     pub(super) fn total_letters(&self) -> u64 {
-        self.db.total_length()
+        self.db.statistics_numbers().0
+    }
+
+    /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
+    pub(super) fn filtered_empty(&self) -> bool {
+        self.db.filtered_empty()
+    }
+
+    /// The number of sequences the statistics read (`SeqDb::statistics_numbers`).
+    pub(super) fn statistics_num_sequences(&self) -> u32 {
+        self.db.statistics_numbers().1
     }
 
     /// The number of sequences the reports print: the whole database's, also with a taxid
@@ -226,7 +236,7 @@ impl BlastpDatabase {
 
     /// The total length as the engine holds it.
     pub(super) fn total_letters_usize(&self) -> Result<usize> {
-        let total = self.db.total_length();
+        let total = self.total_letters();
         usize::try_from(total)
             .ok()
             .filter(|&letters| i64::try_from(letters).is_ok())

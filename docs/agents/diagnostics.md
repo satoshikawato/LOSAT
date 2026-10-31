@@ -2692,8 +2692,10 @@ Rebuilding less:
   blocks until the units others took have run (taking groups and earlier subjects' units first left it
   blocked on its own units that others had taken: slower than without the board on 18,838 subjects of
   100 bp at 16 threads); a thread of the subject loop without a subject takes items until the batch's
-  units are all taken; a chain's thread does the same with its groups and sorts, with `rayon::spawn`
-  helpers that take one item each and are spawned one after the other (at most one queued per set). An
+  units are all taken, and sleeps (a condition variable, 1 ms at most) while nothing is left to take and a
+  subject has not yet put its units on the board; a chain's thread does the same with its groups and sorts,
+  with `rayon::spawn` helper jobs that take one group of any set each and are spawned one after the other
+  (at most one queued per board). An
   item makes no pool call and waits for nothing, so a thread that waits for the items others took blocks
   outside the pool, and no subject's chain runs nested inside an item (the caller of a batch's subject
   loop still waits for its broadcast in the pool, as before): before, the chain of a batch that was not
@@ -2721,22 +2723,20 @@ Rebuilding less:
   any of the search's threads now merges a frame, and a 1-32 MiB list freed in a thread's arena stayed
   resident there (without it the three genomes below peaked at +161 MiB over dev at 16 threads). The
   capacity is on every path, also at one thread and with `=0`: the three genomes at one thread take the
-  same time with 38 % more page faults (269.8k / 195.6k) and 21 MiB less memory. On the workstation
-  (node 1, 16 CPUs of one socket, 3 s warm-up per run, medians of 3-5 alternating runs, every report
-  identical; dev 4403cc12; one thread on one node-0 core against dev 05d74972) the three genomes took
-  4.85 s with it and 5.88 s without at 16 threads (x0.825), 8.69 / 9.35 s at 8, 16.20 / 16.79 s at 4 and
-  61.3 / 61.9 s at 1; the same queries as a database (`-db`) 4.87 / 5.75 s at 16; the three queries x
-  AP027133 4.60 / 8.41 s at 16 and 5.92 / 9.09 s at 8; the three queries x the three subjects cut into
-  18,838 pieces of 100 bp 4.90 / 5.07 s at 16 and 9.26 / 10.06 s at 8; MelaMJNV x 9 MJNV genomes 0.855 /
-  0.892 s at 16, 1.423 / 1.444 s at 8 and 2.491 / 2.538 s at 4; AP027131 x AP027133 1.145 / 1.162 s at 16
-  and 7.35 / 7.39 s at 1; Sakai x 1 Mb of MG1655 11.62 / 11.72 s at 8. Peak memory (max RSS, MiB, with /
-  without): the three genomes 596 / 544 at 16 threads (the rest is the link kernels' arrays freed in 16
-  threads' arenas: 396 / 380 with `MALLOC_ARENA_MAX=1` in an earlier run of the board), 450 / 470 at 8,
-  296 / 346 at 4 and 169 / 190 at 1; as a database 611 / 505 at 16; the three queries x AP027133 302 /
-  268 at 16 and 310 / 255 at 8; the 18,838 pieces 278 / 301 at 16 and 212 / 265 at 8; MelaMJNV x 9
-  genomes 149 / 163, 120 / 133 and 92 / 108 at 16 / 8 / 4; AP027131 x AP027133 118 / 126 at 16 and 78 /
-  78 at 1; Sakai x 1 Mb of MG1655 748 / 743 at 8; Sakai x MG1655 (genetic code 11, untimed, 16 node-0
-  CPUs) 1,980 / 1,965 at 16.
+  same time with 14 MiB less memory. On the workstation (node 1, 16 CPUs of one socket, 3 s warm-up per
+  run, medians of 8 rounds in rotated order with dev and `=0` in the same run, 2 ms VmHWM, every report
+  identical; dev = dev + `TBXFEWGROUPS`, 2026-10-31; the times and peaks below are with / without) the three
+  genomes took 4.81 / 5.79 s at 16 threads (x0.831; one round at 32: 3.47 / 4.75 s), 8.69 / 9.33 s at 8 and,
+  on one node-0 core, 70.5 / 70.0 s at 1 with 1.00008 x the instructions; the same queries as a database
+  (`-db`) 4.82 / 5.82 s at 16; the three queries x AP027133 4.54 / 8.23 s at 16; the 18,838 pieces 4.82 /
+  5.03 s at 16 and 9.14 / 9.84 s at 8; MelaMJNV x 9 MJNV genomes 1.402 / 1.411 s at 8 and 2.500 / 2.538 s at
+  4; AP027131 x AP027133 1.175 / 1.182 s at 16; the Autographivirales set of ViPTreeGen (BLOSUM45, 40
+  genomes, `-db`) 6.70 / 6.65 s at 8 (x1.006, the one row above dev: x1.013 in a second run with
+  1.003 x the instructions, not found in a profile of the stages); Begomovirus.40 0.29 / 0.28 s at 8
+  (runs spread +-15 %). Peak memory (MiB): the three genomes 578 / 536 at 16 (one round at 32: 777 / 657),
+  420 / 473 at 8 and 158 / 172 at 1; as a database 574 / 562 at 16; the three queries x AP027133 248 / 237 at
+  16; the 18,838 pieces 136 / 133 at 16 and 117 / 116 at 8; MelaMJNV x 9 genomes 128 / 132 and 98 / 105 at 8
+  and 4; AP027131 x AP027133 124 / 124 at 16; Autographivirales 50 / 57 at 8; Begomovirus 27 / 26 at 8.
 - `LOSAT_X_TBXRPTPAR=1` (TBLASTX, speed; in the strict set from the pull request that added it,
   2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads))
   the report stage after the last query batch (`write_tblastx_outputs`) runs its per-HSP work on the

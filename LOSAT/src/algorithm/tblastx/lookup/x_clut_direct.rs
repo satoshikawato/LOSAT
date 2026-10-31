@@ -1234,24 +1234,27 @@ struct XFlatTableVectors {
     pv: Vec<u32>,
 }
 
-/// No NCBI counterpart: the record of a bucket fill's appends kept for the next build
-/// (LOSAT_X_BXCLUTPOOL).
-#[derive(Default)]
-struct XBucketTemps {
-    targets: Vec<u32>,
-    per_offset: Vec<(i32, u32)>,
-}
-
-// No NCBI counterpart: the pool holds as many sets as tables and builds were alive at once.
+// No NCBI counterpart: the pool holds as many sets as tables were alive at once.
 static X_FLAT_TABLES: Mutex<Vec<XFlatTableVectors>> = Mutex::new(Vec::new());
-static X_BUCKET_TEMPS: Mutex<Vec<XBucketTemps>> = Mutex::new(Vec::new());
 
-// No NCBI counterpart: a kept set, or empty vectors.
-fn x_take_kept<T: Default>(pool: &Mutex<Vec<T>>) -> T {
-    pool.lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .pop()
-        .unwrap_or_default()
+// No NCBI counterpart for the size: the record of a bucket fill's appends, one entry per hit of the
+// table, is needed only during the build. Kept between builds, three builds side by side held three
+// records through the search (ABRicate's call at 8 threads: 48 MiB instead of 40); freed from a
+// thread's arena, it stayed resident there, as the tables did. glibc maps an allocation of at least
+// its mmap threshold, but it raises the threshold to the size of each mapped block that is freed (up
+// to 32 MiB), so its capacity is above that ceiling: it is always mapped and returned when dropped,
+// and the pages beyond its length are never touched and are not resident (as
+// `tblastn/x_subject_translate.rs` `x_frame_capacity`). Other allocators return large blocks on their
+// own, and a wasm memory would keep the capacity.
+/// EXPERIMENT (LOSAT_X_BXCLUTPOOL): the capacity, in entries, of the record of a pooled bucket fill.
+const fn x_mapped_record_entries() -> usize {
+    if cfg!(all(target_os = "linux", target_env = "gnu")) {
+        // glibc's largest dynamic mmap threshold (DEFAULT_MMAP_THRESHOLD_MAX on 64-bit), and one
+        // page more
+        ((32 << 20) + 4096) / std::mem::size_of::<u32>()
+    } else {
+        0
+    }
 }
 
 // No NCBI counterpart: `vector` cleared and zero-filled to `n` entries (as calloc gives them). One
@@ -1325,7 +1328,11 @@ fn x_buckets_on(
     // after the partition (they bound the list of a cell's offsets moved to the scan order: a query
     // offset appends to a cell at most twice).
     let kept = if pooled {
-        x_take_kept(&X_FLAT_TABLES)
+        X_FLAT_TABLES
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pop()
+            .unwrap_or_default()
     } else {
         XFlatTableVectors::default()
     };
@@ -1335,34 +1342,19 @@ fn x_buckets_on(
     // Appends, over the segments before, inside and between NCBI's tables, recorded as the
     // count-and-fill builder records them; not counted.
     let ranges = x_count_ranges(tables, locations.len());
-    let XBucketTemps {
-        mut targets,
-        mut per_offset,
-    } = if pooled {
-        x_take_kept(&X_BUCKET_TEMPS)
+    let mut targets: Vec<u32> = if pooled {
+        Vec::with_capacity(x_mapped_record_entries())
     } else {
-        XBucketTemps::default()
+        Vec::new()
     };
-    targets.clear();
-    per_offset.clear();
-    // The vectors taken go back to the pool at the end of the build or at a refusal.
+    let mut per_offset: Vec<(i32, u32)> = Vec::new();
+    // The kept vectors taken go back to the pool at a refusal.
     let give_back = |starts: Vec<u32>, hits: Vec<i32>, pv: Vec<u32>| {
         if pooled {
             X_FLAT_TABLES
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(XFlatTableVectors { starts, hits, pv });
-        }
-    };
-    let give_temps = |targets: Vec<u32>, per_offset: Vec<(i32, u32)>| {
-        if pooled {
-            X_BUCKET_TEMPS
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(XBucketTemps {
-                    targets,
-                    per_offset,
-                });
         }
     };
     for (range, is_table) in ranges {
@@ -1390,7 +1382,6 @@ fn x_buckets_on(
         });
         if too_large || declined {
             give_back(starts, kept.hits, kept.pv);
-            give_temps(targets, per_offset);
             return if too_large {
                 XBucketBuild::Built(Some(XFlatBuild::TooLarge))
             } else {
@@ -1435,9 +1426,7 @@ fn x_buckets_on(
             at = end;
         }
     }
-    if !pooled {
-        per_offset = Vec::new();
-    }
+    drop(per_offset);
 
     // Per bucket: its appends copied into `targets` (read no more), the counts of its cells, their
     // starts, the PV bits and `finalize`'s statistics, the fill, then the scan order of the cells
@@ -1534,7 +1523,7 @@ fn x_buckets_on(
         }
     }
     starts[backbone_size] = total as u32;
-    give_temps(targets, per_offset);
+    drop(targets);
     let mut pv_array_bts = PV_ARRAY_BTS;
     if (nonempty_count as f64) <= 0.01 * (backbone_size as f64) {
         pv_array_bts += ilog2(backbone_size / (8 * X_TARGET_PV_BYTES));

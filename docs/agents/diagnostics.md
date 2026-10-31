@@ -6509,11 +6509,13 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_BXCLUTPOOL=1` (BLASTX `-task blastx-fast` and `-word_size 5`, memory; in the strict set from the pull
   request that added it, 2026-10-31: on unless `=0` or `LOSAT_X_DEFAULT=0`): the flat compressed lookup tables are
   built on vectors kept between builds: a table's starts, hits and pv when the table is dropped
-  (`blastx::seed::Lookup`'s drop) and the bucket fill's record of the appends after the build, each cleared and
-  zero-filled to the new table's sizes as calloc gives them; the hits grow to n + n/4 where short
-  (`tblastx/lookup/x_clut_direct.rs`). A split query builds a table per chunk on whichever thread needs it, and each
-  of those threads kept a table's worth and the record in its glibc arena after they were freed, about 20 MiB per
-  thread (`MALLOC_ARENA_MAX=1` removed it). The pool holds as many sets as tables and builds were alive at once.
+  (`blastx::seed::Lookup`'s drop), each cleared and zero-filled to the new table's sizes as calloc gives them; the
+  hits grow to n + n/4 where short (`tblastx/lookup/x_clut_direct.rs`). A split query builds a table per chunk on
+  whichever thread needs it, and each of those threads kept a table's worth and the build's record of the appends in
+  its glibc arena after they were freed, about 20 MiB per thread (`MALLOC_ARENA_MAX=1` removed it). The pool holds as
+  many sets as tables were alive at once. The record of the appends is not kept (three builds side by side would hold
+  three records through the search): on Linux with glibc its capacity is above glibc's largest mmap threshold, so it is
+  always mapped and unmapped when dropped, and only the pages written are resident.
   The table equals the unpooled one in every field (unit test
   `pooled_flat_tables_equal_the_unpooled_ones_on_kept_vectors`); reports: `tests/blastx_fast_flat.rs`.
 - `LOSAT_X_BXENDMEM=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-31: on unless

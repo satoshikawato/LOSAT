@@ -308,6 +308,12 @@ pub(super) fn prepare(
             ShownSubjects::Fasta { .. } => Xml2Target::Subjects(subject_records.len()),
             ShownSubjects::Database { .. } => Xml2Target::Database,
         },
+        subject_names: match shown {
+            ShownSubjects::Fasta { .. } => crate::report::blast_xml2::subject_names(
+                subject_records.iter().map(FastaRecord::believed),
+            ),
+            ShownSubjects::Database { .. } => None,
+        },
         gapped: values.gapped,
         cbs: values.cbs,
         query_gencode: None,
@@ -373,7 +379,7 @@ fn query_masks(
 impl PreparedXml {
     /// What the XML2 and JSON documents need of the run beyond outfmt 5's (`Xml2Writer::new`).
     pub(super) fn xml2_run(&self) -> Xml2Run {
-        self.xml2
+        self.xml2.clone()
     }
 
     /// Writes the document of every query of `hitlists` (indexed by query) through `document`

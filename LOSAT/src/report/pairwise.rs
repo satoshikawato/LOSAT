@@ -2569,12 +2569,16 @@ fn write_description_table<W: Write>(
     writeln!(writer)
 }
 
-/// The subject of `s_idx` among `parsed` when it has parsed Seq-ids.
+/// The subject of `s_idx` among `parsed` when it has parsed Seq-ids (not a `-subject` record shown
+/// as one without `-parse_deflines`, `ParsedSubject::shown_as_record`).
 fn parsed_subject(
     parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     s_idx: u32,
 ) -> Option<&crate::report::db_subject::ParsedSubject> {
-    parsed.get(s_idx as usize).and_then(Option::as_deref)
+    parsed
+        .get(s_idx as usize)
+        .and_then(Option::as_deref)
+        .filter(|subject| !subject.shown_as_record())
 }
 
 /// The description-table label of a database sequence (before the cut to the line): the title

@@ -634,6 +634,12 @@ pub(super) fn xml2_writer(
             ShownSubjects::Fasta { .. } => Xml2Target::Subjects(subjects.len()),
             ShownSubjects::Database { .. } => Xml2Target::Database,
         },
+        subject_names: match shown {
+            ShownSubjects::Fasta { .. } => {
+                crate::report::blast_xml2::subject_names(subjects.iter().map(FastaRecord::believed))
+            }
+            ShownSubjects::Database { .. } => None,
+        },
         // `-ungapped` writes no gap costs; it needs `-comp_based_stats 0`, so no `cbs` either.
         gapped: options.gapped,
         cbs: i32::from(options.composition),

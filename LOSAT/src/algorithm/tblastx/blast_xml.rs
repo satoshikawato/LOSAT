@@ -157,6 +157,12 @@ pub(crate) fn xml2_run(run: &TblastxReportRun<'_>) -> Xml2Run {
             Some(_) => Xml2Target::Database,
             None => Xml2Target::Subjects(run.subjects.len()),
         },
+        subject_names: match &run.database {
+            Some(_) => None,
+            None => crate::report::blast_xml2::subject_names(
+                run.subjects.iter().map(FastaRecord::believed),
+            ),
+        },
         gapped: false,
         cbs: 0,
         query_gencode: Some(i32::from(run.args.query_gencode)),

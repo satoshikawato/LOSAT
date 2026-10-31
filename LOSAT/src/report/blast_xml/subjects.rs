@@ -107,13 +107,17 @@ impl SubjectNames {
     }
 
     /// The names of a `-subject` record whose ids `-parse_deflines` read (`ParsedSubject::of_record`):
-    /// its id list, its generated title and the accession of its best id. Like a record without the
-    /// option it has one `HitDescr` of these (no definition lines).
+    /// its id list, its generated title and the accession of its best id; those of `of_record` for a
+    /// record shown as one without the option (`ParsedSubject::shown_as_record`). Like a record
+    /// without the option it has one `HitDescr` of these (no definition lines).
     pub fn of_believed(
         ids: &crate::blastinput::fasta_reader::believed::BelievedIds,
         title: &[u8],
         protein: bool,
     ) -> Result<Self, Refusal> {
+        if ids.subject_local() {
+            return Self::of_record(ids.bare_id().as_bytes(), title, protein);
+        }
         let subject = ParsedSubject::of_record(ids, title);
         let (id, accession) = subject.record_xml_ids();
         let title = subject

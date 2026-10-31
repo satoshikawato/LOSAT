@@ -2540,15 +2540,7 @@ fn record_tabular_ids(
 fn tabular_subject_id_results(subjects: &[FastaRecord]) -> Vec<Option<Arc<[u8]>>> {
     subjects
         .iter()
-        .map(|subject| {
-            crate::report::defline::tabular_subject_id(
-                subject.local_id.as_bytes(),
-                &subject.title,
-                true,
-            )
-            .ok()
-            .map(Arc::from)
-        })
+        .map(|subject| subject.subject_tabular_id(true).ok().map(Arc::from))
         .collect()
 }
 
@@ -6430,14 +6422,9 @@ fn x_query_block_plan(
     match subject_source {
         BlastpSubjectSource::Fasta(subjects) => {
             if tabular
-                && subjects.iter().any(|subject| {
-                    crate::report::defline::tabular_subject_id(
-                        subject.local_id.as_bytes(),
-                        &subject.title,
-                        true,
-                    )
-                    .is_err()
-                })
+                && subjects
+                    .iter()
+                    .any(|subject| subject.subject_tabular_id(true).is_err())
             {
                 return None;
             }
@@ -11657,6 +11644,13 @@ fn run_resolved_in_pool(
                             } else {
                                 crate::report::blast_xml2::Xml2Target::Subjects(
                                     subject_records.len(),
+                                )
+                            },
+                            subject_names: if database.is_some() {
+                                None
+                            } else {
+                                crate::report::blast_xml2::subject_names(
+                                    subject_records.iter().map(FastaRecord::believed),
                                 )
                             },
                             gapped: !args.ungapped,

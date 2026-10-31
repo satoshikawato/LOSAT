@@ -17,7 +17,7 @@
 //! two queries with one id it searches the first's letters twice, and it shows a database
 //! sequence with the id of a query as that query (probe of 2026-10-30).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 
 use crate::report::archive::bioseq::{QuerySeqLoc, SeqLocStrand};
@@ -136,8 +136,12 @@ impl BelievedIds {
     }
 }
 
-/// The keys of every query id read in this process under `-parse_deflines`.
+/// The keys of every query id read in this process under `-parse_deflines` (`scope_keys`, and
+/// `version_keys`' own key).
 static QUERY_KEYS: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
+
+/// `QUERY_KEYS` of the `-subject` records.
+static SUBJECT_KEYS: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
 
 /// Whether a query was read under `-parse_deflines`.
 pub(crate) fn query_keys_kept() -> bool {
@@ -152,70 +156,6 @@ pub(crate) fn query_has_key(keys: &[u64]) -> bool {
         let seen = seen.lock().unwrap_or_else(|error| error.into_inner());
         keys.iter().any(|key| seen.contains(key))
     })
-}
-
-/// The records read so far by the keys of their ids, for each of the roles query and subject.
-type ScopeRecords = [HashMap<u64, u64>; 2];
-
-/// `ScopeRecords` of this process.
-static SCOPE_RECORDS: OnceLock<Mutex<ScopeRecords>> = OnceLock::new();
-
-/// LOSAT's refusal of a record whose id a record of the other role has with another title or other
-/// letters, or `None`. NCBI keeps queries and subjects in one scope, so one of the two shows the
-/// title and letters of the other (`dropin-survey-20261029/DI7/DECISIONS.md` 12); of one record
-/// given as both, nothing shows. A query of another batch counts too (`query_has_key`). Queries
-/// and subjects may be read in either order.
-pub(crate) fn scope_clash(
-    ids: &[ParsedSeqId],
-    title: &[u8],
-    letters: &[u8],
-    role: &str,
-    program: &str,
-) -> Option<anyhow::Error> {
-    // A unit test's records must not reach the other tests of the process.
-    if cfg!(test) {
-        return None;
-    }
-    let scope = SCOPE_RECORDS.get_or_init(Mutex::default);
-    let mut scope = scope.lock().unwrap_or_else(|error| error.into_inner());
-    scope_clash_in(&mut scope, ids, title, letters, role, program)
-}
-
-fn scope_clash_in(
-    scope: &mut ScopeRecords,
-    ids: &[ParsedSeqId],
-    title: &[u8],
-    letters: &[u8],
-    role: &str,
-    program: &str,
-) -> Option<anyhow::Error> {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::hash::DefaultHasher::new();
-    title.hash(&mut hasher);
-    for letter in letters {
-        letter.to_ascii_uppercase().hash(&mut hasher);
-    }
-    let record = hasher.finish();
-    let (own, other) = if role == "query" { (0, 1) } else { (1, 0) };
-    let mut keys = Vec::new();
-    for id in ids {
-        keys.clear();
-        scope_keys(id, &mut keys);
-        for key in &keys {
-            if scope[other].get(key).is_some_and(|seen| *seen != record) {
-                let mut fasta = Vec::new();
-                label::fasta(id, &mut fasta);
-                return Some(anyhow::anyhow!(
-                    "a query and a subject record have the Seq-id {} with another title or other \
-                     letters under -parse_deflines (NCBI BLAST+ shows the one for the other); \
-                     this is not supported by LOSAT's {program}",
-                    String::from_utf8_lossy(&fasta)
-                ));
-            }
-            scope[own].insert(*key, record);
-        }
-    }
-    None
 }
 
 /// A record's defline as `-parse_deflines` reads it: where its title starts, and its ids.
@@ -310,8 +250,11 @@ pub(crate) fn parse_believed_defline(
     })
 }
 
-/// LOSAT's refusal of the ids of a record, or `None`: a `gnl|BL_ORD_ID|n` id, and an id that a
-/// query or a subject read before has. Adds the keys of the ids.
+/// LOSAT's refusal of the ids of a record, or `None`: a `gnl|BL_ORD_ID|n` id, an id that a record
+/// of the role read before has, and an id that a record of the other role has (a query and a
+/// subject: `dropin-survey-20261029/DI7/DECISIONS.md` 12). An accession with a version and the
+/// same accession without one count as one id for two subjects, a query and a subject, and in
+/// BLASTN two queries (DECISIONS 11, 12). Adds the keys of the ids.
 pub(crate) fn duplicate_id(
     ids: &[ParsedSeqId],
     seen: &mut HashSet<u64>,
@@ -353,7 +296,7 @@ pub(crate) fn duplicate_id(
             });
         }
         seen.extend(keys.iter().copied());
-        if program == "BLASTN" {
+        if program == "BLASTN" || role == "subject" {
             if let Some((own, other)) = version_keys(id) {
                 if seen.contains(&other) {
                     return Some(anyhow::anyhow!(
@@ -368,14 +311,50 @@ pub(crate) fn duplicate_id(
         }
     }
     // A unit test's ids must not reach the searches of the other tests of the process.
-    if role == "query" && !cfg!(test) {
-        let shared = QUERY_KEYS.get_or_init(|| Mutex::new(HashSet::new()));
-        let mut shared = shared.lock().unwrap_or_else(|error| error.into_inner());
-        for id in ids {
-            keys.clear();
-            scope_keys(id, &mut keys);
-            shared.extend(keys.iter().copied());
+    if cfg!(test) {
+        return None;
+    }
+    let (own, other) = if role == "query" {
+        (&QUERY_KEYS, &SUBJECT_KEYS)
+    } else {
+        (&SUBJECT_KEYS, &QUERY_KEYS)
+    };
+    let other = other.get_or_init(Mutex::default);
+    let other = other.lock().unwrap_or_else(|error| error.into_inner());
+    let own = own.get_or_init(Mutex::default);
+    let mut own = own.lock().unwrap_or_else(|error| error.into_inner());
+    shared_with_other_role(ids, &mut own, &other, program)
+}
+
+/// LOSAT's refusal of ids `ids` of a record when a record of the other role has one of them
+/// (`other`: its `scope_keys` and `version_keys`' own keys), or `None`; adds the keys of `ids` to
+/// `own`. NCBI keeps queries and subjects in one scope: a subject with the id of a query is shown
+/// with the query's title, and a record given as both shows the query's masks at the subject's
+/// places (probe `DI7/ws/pd_sub.py`, 2026-11-01).
+fn shared_with_other_role(
+    ids: &[ParsedSeqId],
+    own: &mut HashSet<u64>,
+    other: &HashSet<u64>,
+    program: &str,
+) -> Option<anyhow::Error> {
+    let mut keys = Vec::new();
+    for id in ids {
+        keys.clear();
+        scope_keys(id, &mut keys);
+        let versions = version_keys(id);
+        if keys.iter().any(|key| other.contains(key))
+            || versions.is_some_and(|(_, kind)| other.contains(&kind))
+        {
+            let mut fasta = Vec::new();
+            label::fasta(id, &mut fasta);
+            return Some(anyhow::anyhow!(
+                "a query and a subject record have the Seq-id {} under -parse_deflines (NCBI \
+                 BLAST+ shows them as one sequence); this is not supported by LOSAT's {program}",
+                String::from_utf8_lossy(&fasta)
+            ));
         }
+        own.extend(keys.iter().copied());
+        own.extend(versions.map(|(kind, _)| kind));
     }
     None
 }
@@ -710,10 +689,61 @@ mod tests {
         assert_eq!((loc.from, loc.to), (2, 5));
     }
 
+    // A query and a subject share no id, nor one accession with and without a version
+    // (`shared_with_other_role`, DECISIONS 12).
     #[test]
-    fn subject_with_the_option_is_refused() {
-        assert!(refuse_with_subject(true, true, "BLASTN").is_err());
-        assert!(refuse_with_subject(true, false, "BLASTN").is_ok());
-        assert!(refuse_with_subject(false, true, "BLASTN").is_ok());
+    fn a_query_and_a_subject_do_not_share_an_id() {
+        let ids = |text: &str| {
+            read(format!(">{text} t\nACGT\n").as_bytes(), false).unwrap()[0]
+                .believed()
+                .unwrap()
+                .ids
+                .clone()
+        };
+        let mut queries = HashSet::new();
+        let mut subjects = HashSet::new();
+        for query in ["q1", "NM_000001", "ref|NM_000002.1|"] {
+            assert!(
+                shared_with_other_role(&ids(query), &mut queries, &subjects, "BLASTN").is_none()
+            );
+        }
+        for (subject, refused) in [
+            ("s1", false),
+            ("NM_000002.2", false),
+            ("lcl|q1", true),
+            ("NM_000001.1", true),
+            ("NM_000002", true),
+            ("NM_000002.1", true),
+        ] {
+            let refusal = shared_with_other_role(&ids(subject), &mut subjects, &queries, "BLASTN");
+            assert_eq!(refusal.is_some(), refused, "{subject}");
+        }
+    }
+
+    // NCBI BLAST+ 2.17.0 (probe `DI7/ws/pd_sub.py` `subjname`, `noid`): a `-subject` record with a
+    // local id `Subject_N`, written or generated, is shown as one read without the option.
+    #[test]
+    fn subject_local_ids_are_shown_as_records() {
+        for (defline, local) in [
+            (&b">lcl|Subject_1 x"[..], true),
+            (b">Subject_x x", true),
+            (b">", true),
+            (b">Subjectx x", false),
+            (b">plain1 x", false),
+            (b">NM_000003.1 x", false),
+        ] {
+            let mut fasta = defline.to_vec();
+            fasta.extend_from_slice(b"\nACGT\n");
+            let config = ReaderConfig::subject("BLASTN", false, false).with_parse_deflines(true);
+            let mut source = FastaInputSource::from_bytes(&fasta, config);
+            let records = read_all(&mut source, &mut |_| Ok(())).unwrap();
+            let ids = records[0].believed().unwrap();
+            assert_eq!(
+                ids.subject_local(),
+                local,
+                "{}",
+                String::from_utf8_lossy(defline)
+            );
+        }
     }
 }

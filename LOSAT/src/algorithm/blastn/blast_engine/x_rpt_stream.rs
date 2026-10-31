@@ -554,15 +554,7 @@ fn check(
             let ids: Option<Vec<Arc<[u8]>>> = prepared
                 .records
                 .iter()
-                .map(|subject| {
-                    crate::report::defline::tabular_subject_id(
-                        subject.local_id.as_bytes(),
-                        &subject.title,
-                        false,
-                    )
-                    .ok()
-                    .map(Arc::from)
-                })
+                .map(|subject| subject.subject_tabular_id(false).ok().map(Arc::from))
                 .collect();
             let ids = ids.ok_or(Off::SubjectIds)?;
             let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);

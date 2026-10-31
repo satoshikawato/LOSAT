@@ -44,6 +44,9 @@ pub struct ParsedSubject {
     show_gis: bool,
     /// Whether this is a `-subject` record (`of_record`): a Bioseq without definition lines.
     record: bool,
+    /// Whether it is a record that the reports show as a record without `-parse_deflines`
+    /// (`BelievedIds::subject_local`): only its tabular ids are its own (`shown_as_record`).
+    local_record: bool,
 }
 
 /// `AdjustSeqIdType` with `eGetId_ForceAcc` (`ParsedSubject::sam_id`) of a Bioseq with the ids
@@ -137,6 +140,7 @@ impl ParsedSubject {
             unfetchable,
             show_gis: false,
             record: false,
+            local_record: false,
         })
     }
 
@@ -177,7 +181,25 @@ impl ParsedSubject {
             unfetchable: false,
             show_gis: false,
             record: true,
+            local_record: ids.subject_local(),
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:484-498
+    // ```c++
+    //     if (sid_in->IsLocal()) {
+    //         string id_token;
+    //         vector<string> title_tokens;
+    //         title_tokens = NStr::Split(CAlignFormatUtil::GetTitle(bh), " ", title_tokens);
+    //         ...
+    //         if (id_token == NcbiEmptyString || parse_local) {
+    //             const CObject_id& obj_id = sid_in->GetLocal();
+    // ```
+    /// Whether the outfmt 0, XML and archive reports show this `-subject` record as one read
+    /// without `-parse_deflines` (a local id `Subject_N`, `BelievedIds::subject_local`); its
+    /// `sall*` are still its own ids (`s_ReplaceLocalId` keeps a local id with `parse_local`).
+    pub fn shown_as_record(&self) -> bool {
+        self.local_record
     }
 
     /// The subject as the outfmt 0 report of a run with or without `-show_gis` shows it.
@@ -639,7 +661,7 @@ pub fn parsed_records<'a>(
                 return Ok(None);
             };
             let subject = ParsedSubject::of_record(ids, title).showing_gis(show_gis);
-            if pairwise {
+            if pairwise && !subject.shown_as_record() {
                 check_pairwise_record(&subject, protein, program)?;
             }
             Ok(Some(std::sync::Arc::new(subject)))
@@ -1122,6 +1144,87 @@ mod tests {
                 from_source,
                 "{accession}"
             );
+        }
+    }
+    /// The subject of a `-subject` record read with `-parse_deflines` (`ParsedSubject::of_record`).
+    fn record_subject(defline: &str, protein: bool) -> ParsedSubject {
+        use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
+        let fasta = format!("{defline}\n{}\n", if protein { "MKV" } else { "ACGT" });
+        let config = ReaderConfig::subject("BLASTN", protein, false).with_parse_deflines(true);
+        let mut source = FastaInputSource::from_bytes(fasta.as_bytes(), config);
+        let record = read_all(&mut source, &mut |_| Ok(())).unwrap().remove(0);
+        ParsedSubject::of_record(record.believed().unwrap(), &record.title)
+    }
+
+    // NCBI BLAST+ 2.17.0 -parse_deflines -subject (probe `DI7/ws/pd_sub.py`, 2026-11-01): `sseqid`,
+    // `sacc`, `saccver`, `sallseqid`, the outfmt 0 heading and description of a record.
+    #[test]
+    fn records_read_with_parse_deflines_follow_the_ncbi_oracle() {
+        for (defline, protein, ids, all, heading, local) in [
+            (
+                ">NM_000003.1 x y",
+                false,
+                ["ref|NM_000003.1|", "NM_000003", "NM_000003.1"],
+                "ref|NM_000003.1|",
+                ">NM_000003.1 x y\n",
+                false,
+            ),
+            (
+                ">plain1 a",
+                false,
+                ["plain1", "plain1", "plain1"],
+                "plain1",
+                ">plain1 a\n",
+                false,
+            ),
+            (
+                ">tpg|BK000001.1| y",
+                false,
+                ["tpg|BK000001.1|", "BK000001", "BK000001.1"],
+                "tpg|BK000001.1|",
+                ">BK000001.1 TPA: y\n",
+                false,
+            ),
+            (">s1", false, ["s1", "s1", "s1"], "s1", ">s1 \n", false),
+            (
+                ">lcl|Subject_1 x y",
+                false,
+                ["x", "x", "x"],
+                "Subject_1",
+                "",
+                true,
+            ),
+            (
+                ">",
+                false,
+                ["Subject_1", "Subject_1", "Subject_1"],
+                "Subject_1",
+                "",
+                true,
+            ),
+            (
+                ">",
+                true,
+                ["unnamed", "unnamed", "unnamed"],
+                "Subject_1",
+                "",
+                true,
+            ),
+        ] {
+            let subject = record_subject(defline, protein);
+            let shown = subject.tabular_ids(protein).unwrap();
+            assert_eq!(
+                shown.map(|id| String::from_utf8(id).unwrap()),
+                ids,
+                "{defline}"
+            );
+            let all_ids = subject.all_tabular_ids(protein).unwrap();
+            assert_eq!(text(&all_ids[0].id), all, "{defline}");
+            assert_eq!(subject.shown_as_record(), local, "{defline}");
+            if !local {
+                assert_eq!(text(&subject.heading(protein)), heading, "{defline}");
+                assert!(subject.first_title().is_empty() || defline.contains(' '));
+            }
         }
     }
 }

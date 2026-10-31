@@ -2037,31 +2037,16 @@ impl<R: Read> FastaReader<R> {
                 }
             }
         }
-        let believed = match self.believed.take() {
-            Some(believed) => {
-                if let Some(refusal) = super::believed::scope_clash(
-                    &believed.ids,
-                    &self.title,
-                    &sequence,
-                    self.config.role,
-                    self.config.program,
-                ) {
-                    return Err(ReadError::Unsupported(refusal));
-                }
-                (self.config.role != "subject" || !believed.subject_local()).then_some(believed)
-            }
-            None => None,
-        };
         Ok(FastaRecord {
             local_id: self.local_id.take().unwrap_or_default(),
             title: std::mem::take(&mut self.title),
             sequence,
             warnings: Vec::new(),
-            source: (self.config.keep_defline || believed.is_some()).then(|| {
+            source: (self.config.keep_defline || self.believed.is_some()).then(|| {
                 Box::new(super::RecordSource {
                     defline: std::mem::take(&mut self.defline),
                     uncut: None,
-                    believed,
+                    believed: self.believed.take(),
                     cut_from: 0,
                 })
             }),

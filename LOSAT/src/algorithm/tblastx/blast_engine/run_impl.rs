@@ -2665,9 +2665,7 @@ fn report_counts<S: TbxScore>(
 /// The subject ID of the tabular formats of the subject record `subject`, `None` where
 /// `tabular_subject_ids` refuses it.
 fn subject_tabular_id(subject: &FastaRecord) -> Option<Arc<[u8]>> {
-    crate::report::defline::tabular_subject_id(subject.local_id.as_bytes(), &subject.title, false)
-        .ok()
-        .map(Arc::from)
+    subject.subject_tabular_id(false).ok().map(Arc::from)
 }
 
 /// The subject ID of the tabular formats of every subject, by subject index

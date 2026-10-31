@@ -827,6 +827,26 @@ pub(super) fn local_id(record: &FastaRecord) -> &str {
         .filter(|s| !s.is_empty())
         .unwrap_or(&record.internal_id)
 }
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3884-3889 (`x_SetTitleFromProtein`
+// without a protein feature; `GenerateDefline` of a protein Bioseq without a title)
+// ```c++
+//     if (m_MainTitle.empty() && m_IsAA) {
+//         m_MainTitle = "unnamed protein product";
+// ```
+/// The id and the rest of the title that BLASTX's reports show for a `-subject` record read as one
+/// without `-parse_deflines` (outfmt 0, and the tabular `sseqid`, `report::defline::
+/// tabular_subject_id`): the first word of its title and what follows it, or for a record without
+/// a title those of the title that `GenerateDefline` makes of none.
+pub(super) fn subject_label(record: &FastaRecord) -> (&str, Option<&str>) {
+    if record.title.is_empty() {
+        return ("unnamed", Some("protein product"));
+    }
+    match record.title.split_once(' ') {
+        Some((id, rest)) => (id, Some(rest)),
+        None => (&record.title, None),
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:169-191
 // ```c++
 //     string id_str = NcbiEmptyString;
@@ -1067,6 +1087,15 @@ pub(crate) struct RecordTabularIds {
 }
 
 impl RecordsParsed {
+    /// The subject of record `index` as outfmt 0 shows it, `None` for one shown as a record read
+    /// without `-parse_deflines` (`ParsedSubject::shown_as_record`).
+    pub(crate) fn shown(&self, index: usize) -> Option<&crate::report::db_subject::ParsedSubject> {
+        self.subjects
+            .get(index)
+            .and_then(Option::as_deref)
+            .filter(|subject| !subject.shown_as_record())
+    }
+
     /// The records of `records`, with LOSAT's refusals of outfmt 0 with `pairwise`.
     pub(crate) fn of(records: &[FastaRecord], show_gis: bool, pairwise: bool) -> Result<Self> {
         let subjects = crate::report::db_subject::parsed_records(
@@ -1116,7 +1145,7 @@ impl ShownSubjects<'_> {
             ShownSubjects::Fasta { parsed, .. } => {
                 match parsed.tabular.get(oid).and_then(Option::as_ref) {
                     Some(ids) => [&ids.ids[0], &ids.ids[1], &ids.ids[2]],
-                    None => [local_id(subject); 3],
+                    None => [subject_label(subject).0; 3],
                 }
             }
             ShownSubjects::Database { reported, .. } => reported.tabular_ids(oid),
@@ -1617,8 +1646,13 @@ fn write_pairwise(
                         // A database sequence's description line is made from its stored
                         // title alone (`ReportedSubjects::descriptions`).
                         subject_title: match shown {
+                            ShownSubjects::Fasta { parsed, .. }
+                                if parsed.shown(usize::try_from(list.oid)?).is_some() =>
+                            {
+                                None
+                            }
                             ShownSubjects::Fasta { .. } => {
-                                subject.title.split_once(' ').map(|(_, t)| t.to_owned())
+                                subject_label(subject).1.map(str::to_owned)
                             }
                             ShownSubjects::Database { .. } => None,
                         },
@@ -1635,19 +1669,17 @@ fn write_pairwise(
         ShownSubjects::Fasta { parsed, .. } => subjects
             .iter()
             .enumerate()
-            .map(
-                |(index, s)| match parsed.subjects.get(index).and_then(Option::as_deref) {
-                    Some(subject) => {
-                        let label = crate::report::pairwise::database_description_label(
-                            b"",
-                            Some(subject),
-                            true,
-                        );
-                        std::sync::Arc::from(String::from_utf8_lossy(&label).as_ref())
-                    }
-                    None => std::sync::Arc::from(local_id(s)),
-                },
-            )
+            .map(|(index, s)| match parsed.shown(index) {
+                Some(subject) => {
+                    let label = crate::report::pairwise::database_description_label(
+                        b"",
+                        Some(subject),
+                        true,
+                    );
+                    std::sync::Arc::from(String::from_utf8_lossy(&label).as_ref())
+                }
+                None => std::sync::Arc::from(subject_label(s).0),
+            })
             .collect(),
         ShownSubjects::Database { reported, .. } => reported.descriptions(),
     };

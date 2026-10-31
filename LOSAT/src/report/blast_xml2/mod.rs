@@ -14,7 +14,7 @@ pub mod writer;
 
 pub use files::{base_name, FsSideFiles};
 pub use framing::{NoSideFiles, RunSideFiles, SideFiles, Xml2Carry, Xml2Document, Xml2Kind};
-pub use records::{Xml2Run, Xml2Target};
+pub use records::{subject_names, Xml2Run, Xml2Target};
 pub use writer::Xml2Writer;
 
 #[cfg(test)]

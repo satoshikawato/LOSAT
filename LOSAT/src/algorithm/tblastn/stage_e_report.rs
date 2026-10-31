@@ -760,15 +760,7 @@ fn tabular_subject_ids(
 ) -> Result<Vec<Arc<[u8]>>> {
     let ids: Vec<Option<Arc<[u8]>>> = subjects
         .iter()
-        .map(|subject| {
-            crate::report::defline::tabular_subject_id(
-                subject.local_id.as_bytes(),
-                &subject.title,
-                false,
-            )
-            .ok()
-            .map(Arc::from)
-        })
+        .map(|subject| subject.subject_tabular_id(false).ok().map(Arc::from))
         .collect();
     for list in hitlists.iter().flat_map(KappaResultHitList::lists) {
         if list.hsps.hsps.is_empty() {
@@ -901,7 +893,10 @@ mod tests {
                 &queries,
                 &subjects,
                 crate::algorithm::tblastn::x_subject_store::SubjectLetters::Records(&subject_seqs),
-                &ShownSubjects::Fasta { path: subject_path },
+                &ShownSubjects::Fasta {
+                    path: subject_path,
+                    parsed: &[],
+                },
                 SubjectSetNumbers::default(),
                 &mut results,
                 &parameters,

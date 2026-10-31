@@ -11,8 +11,22 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// `fs::canonicalize` without the `\\?\` prefix that Windows puts on its result: a verbatim path
+/// takes `/` as a character of a name (`{O}/D70.out` below is not a file of the directory then),
+/// and the product prints the paths it lists without the prefix (as `blastdbcmd_info.rs`).
+fn canonical(path: &Path) -> PathBuf {
+    let path = fs::canonicalize(path).unwrap();
+    #[cfg(windows)]
+    if let Some(plain) = path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
+        if plain.as_bytes().get(1) == Some(&b':') {
+            return PathBuf::from(plain);
+        }
+    }
+    path
+}
+
 fn tests_dir() -> PathBuf {
-    fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests")).unwrap()
+    canonical(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests"))
 }
 
 /// A directory of its own for one test (the tests of a binary run in parallel), removed at
@@ -30,7 +44,7 @@ impl TestDir {
             std::process::id()
         ));
         fs::create_dir_all(&dir).unwrap();
-        TestDir(fs::canonicalize(dir).unwrap())
+        TestDir(canonical(&dir))
     }
 }
 
@@ -67,6 +81,12 @@ fn expected(name: &str) -> Vec<u8> {
     let tests = tests_dir();
     let text = fs::read(tests.join("blastdbcmd/expected").join(name)).unwrap();
     let text = String::from_utf8(text).unwrap();
+    // NCBI's files come from Linux; on Windows the name in "database [name]" has the platform's
+    // separator and the search path is split at `;` (`SeqDB_ConvertOSPath`, as `blastdbcmd_info.rs`).
+    #[cfg(windows)]
+    let text = text
+        .replace("database [db/", "database [db\\")
+        .replace("{R}::]", "{R};;]");
     text.replace("{R}", tests.join("blastdbcmd").to_str().unwrap())
         .into_bytes()
 }

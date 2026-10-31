@@ -1,0 +1,1 @@
+- With `-db`, `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` read the taxid or seqid list before they open the query and `-out`, as NCBI BLAST+ does. An unreadable or invalid list no longer leaves an empty `-out` file or truncates an existing one, and its error comes before the errors of the query and of `-out`. Plain outfmt 11 still writes NCBI's error archive to `-out`.

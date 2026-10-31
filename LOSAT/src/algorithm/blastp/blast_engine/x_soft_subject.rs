@@ -165,7 +165,9 @@ fn scan_standard<K: XCell>(
 /// The word finders' scan over `ranges`: each word hit in NCBI's order. `clamps_scan_end` is the
 /// two-hit search's raise of the first range's end, which scans one word of a first range too short
 /// for it; the one-hit search scans nothing at all then, later ranges included. A subject longer
-/// than `MAX_DBSEQ_LEN` is scanned over the words of NCBI's chunks ([`chunk_scans`]).
+/// than `MAX_DBSEQ_LEN` is scanned over the words of NCBI's chunks ([`chunk_scans`]);
+/// `visit(pair, fresh)` then says whether the pair's word is the raised word of a chunk after the
+/// first, which NCBI tests on that chunk's fresh diagonals.
 #[cold]
 #[inline(never)]
 pub(super) fn x_for_each_hit(
@@ -175,19 +177,20 @@ pub(super) fn x_for_each_hit(
     ranges: &[(i32, i32)],
     offset_pairs: &mut [OffsetPair],
     clamps_scan_end: bool,
-    visit: &mut dyn FnMut(OffsetPair),
+    visit: &mut dyn FnMut(OffsetPair, bool),
 ) {
     let word_size = lookup.word_length();
     if subject_length > MAX_DBSEQ_LEN {
-        for (first, last) in chunk_scans(ranges, subject_length as i32, word_size, clamps_scan_end)
-        {
+        let (scans, raised) =
+            chunk_scans(ranges, subject_length as i32, word_size, clamps_scan_end);
+        for (first, last) in scans {
             scan(
                 lookup,
                 subject,
                 &[(first, last + word_size)],
                 [0, first, last],
                 offset_pairs,
-                visit,
+                &mut |pair| visit(pair, raised.contains(&(pair.s_off as i32))),
             );
         }
         return;
@@ -196,7 +199,14 @@ pub(super) fn x_for_each_hit(
     if clamps_scan_end && scan_range[2] < scan_range[1] {
         scan_range[2] = scan_range[1];
     }
-    scan(lookup, subject, ranges, scan_range, offset_pairs, visit);
+    scan(
+        lookup,
+        subject,
+        ranges,
+        scan_range,
+        offset_pairs,
+        &mut |pair| visit(pair, false),
+    );
 }
 
 /// The scanner of `lookup` over `ranges` from `scan_range` on, as the word finders call it until
@@ -274,16 +284,19 @@ const DBSEQ_CHUNK_OVERLAP: i32 = 100;
 //         subject->seq_ranges[len-1].right = subject->length;
 // ```
 /// The words that NCBI's word finder scans in the chunks of a subject of `length` letters with the
-/// scan ranges `ranges`, as `(first, last)` word starts of the subject, in order and merged. Each
-/// chunk takes its own ranges and its own start of the scan (the two-hit raise, or nothing at all
-/// for the one-hit search when its first range is shorter than a word). The words of the overlap
-/// of two chunks are scanned once here, as LOSAT scans a subject without lower case once.
+/// scan ranges `ranges`, as `(first, last)` word starts of the subject, in order and merged, and the
+/// raised words of the chunks after the first. Each chunk takes its own ranges and its own start of
+/// the scan (the two-hit raise, or nothing at all for the one-hit search when its first range is
+/// shorter than a word). The words of the overlap of two chunks are scanned once here, as LOSAT
+/// scans a subject without lower case once. A raised word is never a word of the chunk before
+/// (that chunk's scan ends a word before the run that makes the range short).
 fn chunk_scans(
     ranges: &[(i32, i32)],
     length: i32,
     word_size: i32,
     clamps_scan_end: bool,
-) -> Vec<(i32, i32)> {
+) -> (Vec<(i32, i32)>, Vec<i32>) {
+    let mut raised = Vec::new();
     let mut scans: Vec<(i32, i32)> = Vec::new();
     let mut push = |first: i32, last: i32| match scans.last_mut() {
         Some(previous) if first <= previous.1 + 1 => previous.1 = previous.1.max(last),
@@ -322,6 +335,9 @@ fn chunk_scans(
         let mut range = [0, chunk[0].0, chunk[0].1 - word_size];
         if clamps_scan_end && range[2] < range[1] {
             range[2] = range[1];
+            if offset > 0 {
+                raised.push(range[1] + offset);
+            }
         }
         if range[1] > range[2] {
             continue;
@@ -342,7 +358,7 @@ fn chunk_scans(
             }
         }
     }
-    scans
+    (scans, raised)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-552 (quoted at
@@ -372,10 +388,22 @@ pub(super) fn x_scan_two_hit_ranges<F>(
         ranges,
         offset_pairs,
         true,
-        &mut |pair| {
+        &mut |pair, fresh| {
             let query_offset = pair.q_off as i32;
             let subject_offset = pair.s_off as i32;
             let entry = &mut diag_array[((query_offset - subject_offset) & diag_mask) as usize];
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:172
+            // ```c
+            //         ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+            // ```
+            // A chunk's diagonals start past every hit of the chunk before, so the raised word of
+            // a later chunk only becomes its diagonal's last hit (`x_test_hit` with a hit a window
+            // or more back, or a flag that it clears).
+            if fresh {
+                entry.set_last_hit(subject_offset.wrapping_add(diag_offset));
+                entry.set_flag(0);
+                return;
+            }
             if let Some((last_hit, diff)) =
                 x_test_hit(entry, subject_offset, diag_offset, window, word_size)
             {
@@ -511,18 +539,39 @@ mod tests {
         for raise in [false, true] {
             assert_eq!(
                 chunk_scans(&wide, length, 3, raise),
-                [(0, 4_999_887), (5_000_050, length - 3)]
+                (vec![(0, 4_999_887), (5_000_050, length - 3)], vec![])
             );
         }
         // A run of 4,999,902..=5,000,001: the second chunk's first range is its letters 0..2.
         let short = [(0, 4_999_902), (5_000_001, length)];
         assert_eq!(
             chunk_scans(&short, length, 3, false),
-            [(0, 4_999_899), (9_999_800, length - 3)]
+            (vec![(0, 4_999_899), (9_999_800, length - 3)], vec![])
         );
         assert_eq!(
             chunk_scans(&short, length, 3, true),
-            [(0, 4_999_900), (5_000_001, length - 3)]
+            (
+                vec![(0, 4_999_900), (5_000_001, length - 3)],
+                vec![4_999_900]
+            )
+        );
+        // A run of 4,999,800..=9,999,999 covers the second chunk (SUBJECT_SPLIT_NO_RANGE).
+        let covered = [(0, 4_999_800), (9_999_999, length)];
+        for raise in [false, true] {
+            assert_eq!(
+                chunk_scans(&covered, length, 3, raise),
+                (vec![(0, 4_999_797), (9_999_999, length - 3)], vec![])
+            );
+        }
+        // 5,000,001 letters: a second chunk of 101 letters, whose first range is 0..2.
+        let tail = [(0, 4_999_902), (5_000_000, 5_000_001)];
+        assert_eq!(
+            chunk_scans(&tail, 5_000_001, 3, false),
+            (vec![(0, 4_999_899)], vec![])
+        );
+        assert_eq!(
+            chunk_scans(&tail, 5_000_001, 3, true),
+            (vec![(0, 4_999_900)], vec![4_999_900])
         );
     }
 }

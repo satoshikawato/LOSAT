@@ -6996,6 +6996,7 @@ fn check_blastp_environment(app_name: &str) -> Result<()> {
 fn search_split_query_batches(
     args: &ResolvedBlastpArgs,
     query_records: &[FastaRecord],
+    input_records: &[FastaRecord],
     subject_source: BlastpSubjectSource<'_>,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
@@ -7007,7 +7008,7 @@ fn search_split_query_batches(
     x_prolog: bool,
 ) -> Result<()> {
     use crate::algorithm::common::protein_query_split::{
-        protein_chunk_part, protein_chunk_would_be_split, split_protein_batch,
+        protein_chunk_part_in_record, protein_chunk_would_be_split, split_protein_batch,
     };
     let sizes = crate::blastinput::app::protein_query_split_sizes(args.app.name(), 10000)?;
     let batch_size = args.query_batch_size()?;
@@ -7053,15 +7054,15 @@ fn search_split_query_batches(
                     //             TMaskedQueryRegions split_mask =
                     //                 m_UserSpecifiedMasks[qindex].RestrictToSeqInt(mask_query_loc->GetInt());
                     // ```
-                    // `-lcase_masking`: the chunk's lower case is the query's runs restricted
-                    // to the part as NCBI restricts them (each run one letter longer, and with
-                    // `-query_loc` in the part's coordinates without the interval's start).
+                    // `-lcase_masking`: the chunk's lower case is the runs of the query's whole
+                    // record restricted to the part as NCBI restricts them (each run one letter
+                    // longer, and with `-query_loc` in the part's coordinates without the
+                    // interval's start).
                     if args.lcase_masking {
-                        cut.sequence = protein_chunk_part(
-                            query_records[query].seq(),
-                            part,
-                            true,
+                        cut.sequence = protein_chunk_part_in_record(
+                            input_records[query_input.ordinal(query)].seq(),
                             query_input.placements.offset(query),
+                            part,
                         );
                     }
                     cut
@@ -8743,7 +8744,7 @@ fn run_resolved_in_pool(
                     ranges,
                     &mut scratch.offset_pairs,
                     false,
-                    &mut x_one_hit,
+                    &mut |pair, _| x_one_hit(pair),
                 );
             } else {
                 blastp_for_each_offset_pair(
@@ -9575,6 +9576,7 @@ fn run_resolved_in_pool(
     search_split_query_batches(
         &args,
         query_records,
+        ranges.input_records,
         subject_source,
         subject_label,
         outputs,

@@ -57,7 +57,10 @@
 //! Memory: the units' lists of a chunk live until its merge ends (with the switch off each is
 //! dropped once it is expanded); the chunk's init list is made at its length; the frame merge holds
 //! the combined list grown by the frame list's length and the frame list, as the append does, and
-//! no index array or sort buffer.
+//! no index array or sort buffer. The chunk's init list and its converted list are given glibc's
+//! mapped capacity from 1 MiB on (`x_frame_capacity`): they are made and freed by whichever thread
+//! merges the frame (with LOSAT_X_TBXBOARD, any of the search's threads), and a block of 1 to 32 MiB
+//! freed in a thread's arena stays resident there.
 //!
 //! With `LOSAT_X_STATS` the counters of the items above are printed (`print_summary`) whenever the
 //! switch is on, with zeros where no unit path ran.
@@ -254,11 +257,19 @@ fn x_merge_pass<T: Copy>(
     }
 }
 
+/// No NCBI counterpart: the capacity of a frame merge's list of `n` elements of `T` (the chunk's
+/// init list and its converted list), mapped by glibc from 1 MiB on so that its free returns it to
+/// the OS whichever thread made it (module documentation, "Memory"; `utils/x_mapped.rs`). It
+/// chooses only the capacity; every list keeps its length and elements.
+fn x_frame_capacity<T>(n: usize) -> usize {
+    crate::utils::x_mapped::x_mapped_capacity(n, std::mem::size_of::<T>())
+}
+
 /// The stable merge of `lists`, each sorted by `R::cmp`, ties to the lower list (item 2), each
-/// record expanded by `unit`, in a Vec of their total length.
+/// record expanded by `unit`, in a Vec of their total length (and `x_frame_capacity`).
 fn x_kway<R: XRecord>(lists: Vec<Vec<R>>, unit: &XExpand<'_, '_>) -> Vec<InitHSP> {
     let total = lists.iter().map(Vec::len).sum();
-    let mut merged = Vec::with_capacity(total);
+    let mut merged = Vec::with_capacity(x_frame_capacity::<InitHSP>(total));
     // The empty lists are left out; the others keep their order, so a tie still goes to the lower
     // unit.
     let mut lists: Vec<std::vec::IntoIter<R>> = lists
@@ -387,53 +398,146 @@ fn x_merge_frame(combined: &mut Vec<UngappedHit>, mut frame: Vec<UngappedHit>) {
 
 /// `combined_ungapped_hits` of one subject from its units' sorted lists (items 2-4); adds the init
 /// HSPs to the `[X_STATS] PAIRPAR` counter.
-fn x_merge<R: XRecord>(
+fn x_merge<R: XRecord + Send>(
     frame_chunks: &[Vec<SubjectChunk>],
     units: &[XUnit],
     lists: Vec<Vec<R>>,
     inp: &XSubject<'_>,
 ) -> Vec<UngappedHit> {
+    // The lists of each frame's units, in unit order (the units are listed frame by frame).
+    let mut per_frame: Vec<Vec<Vec<R>>> = (0..frame_chunks.len()).map(|_| Vec::new()).collect();
+    let mut lists = lists.into_iter();
+    let mut next_unit = 0usize;
+    for (f, frame_lists) in per_frame.iter_mut().enumerate() {
+        while next_unit < units.len() && units[next_unit].f == f {
+            frame_lists.push(lists.next().expect("one output per unit"));
+            next_unit += 1;
+        }
+    }
+    let first_unit: Vec<usize> = {
+        let mut starts = Vec::with_capacity(frame_chunks.len());
+        let mut u = 0usize;
+        for f in 0..frame_chunks.len() {
+            starts.push(u);
+            while u < units.len() && units[u].f == f {
+                u += 1;
+            }
+        }
+        starts
+    };
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the frames on the search's board (tblastx/x_work_board.rs).
+    // No NCBI counterpart: a frame's list depends on that frame's units only, and the frames are
+    // put together below in frame order as before, so the list is the same.
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    if frame_chunks.len() > 1 {
+        if let Some((board, _)) = crate::algorithm::tblastx::x_work_board::current() {
+            let inputs: Vec<std::sync::Mutex<Option<Vec<Vec<R>>>>> = per_frame
+                .into_iter()
+                .map(|frame_lists| std::sync::Mutex::new(Some(frame_lists)))
+                .collect();
+            let outputs: Vec<std::sync::OnceLock<Vec<UngappedHit>>> = (0..frame_chunks.len())
+                .map(|_| std::sync::OnceLock::new())
+                .collect();
+            let run = |f: usize, _: &mut crate::algorithm::tblastx::x_work_board::XTaker| {
+                let frame_lists = inputs[f]
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .take()
+                    .expect("a frame is merged once");
+                let frame = x_merge_one_frame(
+                    f,
+                    &frame_chunks[f],
+                    &units[first_unit[f]..first_unit[f] + frame_lists.len()],
+                    frame_lists,
+                    inp,
+                );
+                if outputs[f].set(frame).is_err() {
+                    unreachable!("a frame is merged once");
+                }
+            };
+            board.run_groups(
+                frame_chunks.len(),
+                &run,
+                frame_chunks.len().min(rayon::current_num_threads()) - 1,
+            );
+            let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
+            for frame in outputs {
+                x_merge_frame(
+                    &mut combined_ungapped_hits,
+                    frame.into_inner().expect("every frame ran"),
+                );
+            }
+            return combined_ungapped_hits;
+        }
+    }
+    let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
+    for (f, frame_lists) in per_frame.into_iter().enumerate() {
+        let n = frame_lists.len();
+        let frame = x_merge_one_frame(
+            f,
+            &frame_chunks[f],
+            &units[first_unit[f]..first_unit[f] + n],
+            frame_lists,
+            inp,
+        );
+        x_merge_frame(&mut combined_ungapped_hits, frame);
+    }
+    combined_ungapped_hits
+}
+
+/// The list of subject frame `f`: its chunks' k-way merges, converted, and the chunks put together
+/// (the body of `x_merge`'s frame loop; `units` and `lists` are the frame's, in unit order).
+fn x_merge_one_frame<R: XRecord>(
+    f: usize,
+    chunks: &[SubjectChunk],
+    units: &[XUnit],
+    lists: Vec<Vec<R>>,
+    inp: &XSubject<'_>,
+) -> Vec<UngappedHit> {
+    let unit = XExpand::new(f, inp);
     let mut lists = lists.into_iter();
     let mut next_unit = 0usize;
     let mut chunks_merged = 0u64;
-    let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
-    for (f, chunks) in frame_chunks.iter().enumerate() {
-        let unit = XExpand::new(f, inp);
-        let mut frame_ungapped_hits: Vec<UngappedHit> = Vec::new();
-        for (k, chunk) in chunks.iter().enumerate() {
-            let mut chunk_lists = Vec::new();
-            while next_unit < units.len() && units[next_unit].f == f && units[next_unit].k == k {
-                chunk_lists.push(lists.next().expect("one output per unit"));
-                next_unit += 1;
-            }
-            let init_hsps = x_kway(chunk_lists, &unit);
-            chunks_merged += 1;
-            INIT_HSPS.fetch_add(init_hsps.len() as u64, AtomicOrdering::Relaxed);
-            let mut hits = if init_hsps.is_empty() {
-                Vec::new()
-            } else {
-                let exact = Vec::with_capacity(init_hsps.len());
-                let mut hits =
-                    convert_init_hsps_unsorted(init_hsps, inp.contexts, inp.s_frames, exact);
-                x_sort_k1_runs(&mut hits);
-                hits
-            };
-            adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
-            if !hits.is_empty() && frame_ungapped_hits.is_empty() {
-                frame_ungapped_hits = hits;
-            } else if !hits.is_empty() {
-                merge_tblastx_subject_chunk_hits(
-                    &mut frame_ungapped_hits,
-                    hits,
-                    chunk.offset,
-                    chunk.overlap,
-                );
-            }
+    let mut frame_ungapped_hits: Vec<UngappedHit> = Vec::new();
+    for (k, chunk) in chunks.iter().enumerate() {
+        let mut chunk_lists = Vec::new();
+        while next_unit < units.len() && units[next_unit].f == f && units[next_unit].k == k {
+            chunk_lists.push(lists.next().expect("one output per unit"));
+            next_unit += 1;
         }
-        x_merge_frame(&mut combined_ungapped_hits, frame_ungapped_hits);
+        let init_hsps = x_kway(chunk_lists, &unit);
+        chunks_merged += 1;
+        INIT_HSPS.fetch_add(init_hsps.len() as u64, AtomicOrdering::Relaxed);
+        let mut hits = if init_hsps.is_empty() {
+            Vec::new()
+        } else {
+            let exact = Vec::with_capacity(x_frame_capacity::<UngappedHit>(init_hsps.len()));
+            let mut hits = convert_init_hsps_unsorted(init_hsps, inp.contexts, inp.s_frames, exact);
+            x_sort_k1_runs(&mut hits);
+            hits
+        };
+        adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
+        if !hits.is_empty() && frame_ungapped_hits.is_empty() {
+            frame_ungapped_hits = hits;
+        } else if !hits.is_empty() {
+            merge_tblastx_subject_chunk_hits(
+                &mut frame_ungapped_hits,
+                hits,
+                chunk.offset,
+                chunk.overlap,
+            );
+        }
     }
     KM_CHUNKS.fetch_add(chunks_merged, AtomicOrdering::Relaxed);
-    combined_ungapped_hits
+    // The frame's own sort of `x_merge_frame` (a no-op when sorted), here so that it runs with the
+    // frame on the board.
+    if !frame_ungapped_hits.is_empty()
+        && !ungapped_hits_is_sorted_by_score_ncbi(&frame_ungapped_hits)
+    {
+        KM_FRAME_UNSORTED.fetch_add(1, AtomicOrdering::Relaxed);
+        sort_ungapped_hits_by_score_ncbi(&mut frame_ungapped_hits);
+    }
+    frame_ungapped_hits
 }
 
 /// `XPairPar::merge_subject` with the switch on (the units sorted their lists).
@@ -599,6 +703,51 @@ mod tests {
             };
             assert_eq!(unit_free(sorted), expected, "case {case}");
         }
+    }
+
+    // No NCBI counterpart: the merged list's capacity (module documentation, "Memory"). A list of
+    // 1 MiB or more gets glibc's mapped capacity (on 64-bit glibc; elsewhere its length) and the
+    // same elements as the stable sort.
+    #[test]
+    fn the_kway_merge_of_a_large_frame_has_the_mapped_capacity() {
+        let mut rng = Rng(0x5851_f42d_4c95_7f2d);
+        let n = (1usize << 20).div_ceil(std::mem::size_of::<InitHSP>()) / 2 + 1;
+        let lists: Vec<Vec<InitHSP>> = (0..2)
+            .map(|_| {
+                let mut list: Vec<InitHSP> = (0..n).map(|_| init(&record(&mut rng))).collect();
+                list.sort_by(score_compare_init_hsps_ncbi);
+                list
+            })
+            .collect();
+        let mut expected: Vec<InitHSP> = lists.concat();
+        expected.sort_by(score_compare_init_hsps_ncbi);
+        let frames: [QueryFrame; 0] = [];
+        let inp = XSubject {
+            s_frames_preliminary: &frames,
+            s_frames: &frames,
+            contexts: &[],
+            cutoff_scores: &[],
+            x_dropoff_per_context: &[],
+            window: 40,
+            wordsize: 3,
+            s_idx: 0,
+            s_len: 0,
+        };
+        let unit = XExpand {
+            f: 0,
+            s_frame: 1,
+            s_idx: 0,
+            inp: &inp,
+        };
+        let merged = x_kway(lists, &unit);
+        assert_eq!(merged, expected);
+        let bytes = merged.capacity() * std::mem::size_of::<InitHSP>();
+        if crate::utils::x_mapped::X_MAPPED_ALLOCATOR {
+            assert!(bytes > 32 << 20, "{bytes}");
+        } else {
+            assert_eq!(merged.capacity(), 2 * n);
+        }
+        assert_eq!(x_frame_capacity::<InitHSP>(3), 3);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-310

@@ -33,19 +33,33 @@
 //!    subjects has ended its seed stage (`XSeedEnd`, at dispatch point 5 of `process_subject`,
 //!    where the seed release (`x_seed_release.rs`) has freed the batch's lookup and unit tables),
 //!    if the admission rule lets it. That search is a job of the loop's scope
-//!    (`rayon::in_place_scope`) and runs on the pool like any other.
+//!    (`rayon::in_place_scope`) and runs on the pool like any other. With `LOSAT_X_TBXBOARD`
+//!    (tblastx/x_work_board.rs) a batch whose units are on the board starts the next one earlier,
+//!    when every one of its units has been taken (`XSeedEnd::units_taken`, while the HSPs held are
+//!    below the limit): the next batch builds its tables while the last units run, then waits at a
+//!    gate before its subjects (`XGateView`) until the batch before has ended its seed stage and
+//!    the HSPs held leave room, or every unit of the batch before has run and the records they
+//!    returned (a bound on the HSPs that batch's merges keep) fit beside the HSPs held, or the
+//!    batch before has returned, or the pipe stopped, taking the board's items meanwhile.
 //! 3. The loop takes a started batch's result from its slot. Until the slot is filled the loop's
 //!    thread runs the pool's jobs (`rayon::yield_now`), and sleeps 50 us when there is none, so
 //!    no thread waits for a condition outside rayon's latches and no job waits at all (plan v4
-//!    §5: a waiting helper that a nested wait runs deadlocks).
+//!    §5: a waiting helper that a nested wait runs deadlocks). With the board the loop's thread
+//!    and a gate's thread take the board's items instead, then their own pool jobs and their
+//!    part of a broadcast (`rayon::yield_local`; a later batch's subject loop is a
+//!    `rayon::broadcast`, which ends only after every thread has run its part), so they never
+//!    run another thread's jobs, such as a batch's search, nested.
 //! 4. Admission: a subject holds its HSP list from its seed-stage end until it returns (its chain
 //!    links it, re-evaluates it and converts it). The next batch starts early only while the
 //!    subjects past their seed stage hold at most `HSP_LIMIT` HSPs (4 Mi: 352 MiB of 88-byte
 //!    records); otherwise
 //!    the loop starts it when it reaches it, as before. The genome 3 x 3 batches hold 1.2-1.4 M
 //!    HSPs; one 5 Mb by 5 Mb pair holds about 23 M, so a query file of such genomes keeps today's
-//!    peak. The tables of two batches are never held at once: the next batch builds its own after
-//!    the batch before has freed its tables.
+//!    peak. Without the board the tables of two batches are never held at once: the next batch
+//!    builds its own after the batch before has freed its tables. With the board the next batch's
+//!    tables are built while the batch before's last units run, so both batches' tables are held
+//!    for that time (one batch ahead at most: a batch starts the next only once its own units are
+//!    all taken).
 //! 5. A search that returns an error stops the early starts. The loop then meets that batch's
 //!    error where it met it before; batches started after it are discarded unread. So does the
 //!    loop's end (its own errors, as a database's titles that cannot be read): the scope then
@@ -59,7 +73,9 @@
 //!    (genome 3 x 3, 16 threads: the last batch's tail 1.43 s, against 0.91 s without the pipe).
 //!    A chain without a wait never runs other work. The other threads run the next batch's units
 //!    meanwhile. The subjects of the plan's last batch, and of a batch whose subjects hold more
-//!    HSPs than the limit (no batch starts early then), link on the pool as before.
+//!    HSPs than the limit (no batch starts early then), link on the pool as before. With the
+//!    board, such a chain puts its link groups and sorts on the board instead of running them on
+//!    its own thread (`x_link_slices.rs` `x_helped`), where no thread waits in the pool.
 //!
 //! # Why the output is the loop's
 //!
@@ -84,8 +100,8 @@
 //!
 //! Diagnostics: with `LOSAT_X_STATS`, `[X_STATS] TBXPIPE planned= taken= early= loop= waited=
 //! key_mismatch= max_held_hsps=` at the end of the search (early: started at the batch before's
-//! seed-stage end; loop: searched by the loop when it reached them; waited: taken after the loop
-//! waited for the slot).
+//! seed-stage end, or with the board when its units were all taken; loop: searched by the loop
+//! when it reached them; waited: taken after the loop waited for the slot).
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -163,6 +179,51 @@ pub(super) struct XSeedEnd<'a> {
     held: &'a XHeld,
     /// The batch is the plan's last: no batch can start while it links.
     last: bool,
+    // EXPERIMENT (LOSAT_X_TBXBOARD): what to do once every unit of the batch has been taken
+    // (start the next batch's setup), once; and the gate this batch's subjects wait at when the
+    // batch was started that early.
+    units_taken: Option<&'a (dyn Fn() + Sync)>,
+    units_taken_once: AtomicBool,
+    gate: Option<XGateView<'a>>,
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the subjects whose units have not all run, the records their
+    // units returned (a bound on the HSPs the merges keep), and what to do when the last one ends.
+    units_left: AtomicUsize,
+    unit_records: AtomicU64,
+    units_done: Option<&'a (dyn Fn(u64) + Sync)>,
+}
+
+// EXPERIMENT (LOSAT_X_TBXBOARD): a batch started when the batch before had all its units taken
+// builds its tables, then its subjects wait here until the batch before has ended its seed stage
+// and the HSPs held leave room (module header, item 4), or every unit of the batch before has run
+// and its units' records fit beside the HSPs held, or the batch before has returned, or the pipe
+// stopped. No NCBI counterpart (scheduling only).
+#[derive(Default)]
+pub(super) struct XGate {
+    prev_seed_done: AtomicBool,
+    prev_returned: AtomicBool,
+    /// Every unit of the batch before has run; `prev_bound` is the records they returned, which
+    /// bounds the HSPs the batch before will hold from its seed-stage end.
+    prev_units_done: AtomicBool,
+    prev_bound: AtomicU64,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct XGateView<'a> {
+    gate: &'a XGate,
+    held: &'a XHeld,
+    stop: &'a AtomicBool,
+}
+
+impl XGateView<'_> {
+    fn open(&self) -> bool {
+        self.stop.load(Ordering::SeqCst)
+            || self.gate.prev_returned.load(Ordering::SeqCst)
+            || (self.gate.prev_seed_done.load(Ordering::SeqCst) && self.held.room())
+            || (self.gate.prev_units_done.load(Ordering::SeqCst)
+                && self.held.now.load(Ordering::SeqCst)
+                    + self.gate.prev_bound.load(Ordering::SeqCst)
+                    <= self.held.limit)
+    }
 }
 
 impl<'a> XSeedEnd<'a> {
@@ -180,6 +241,69 @@ impl<'a> XSeedEnd<'a> {
             on_end,
             held,
             last,
+            units_taken: None,
+            units_taken_once: AtomicBool::new(false),
+            gate: None,
+            units_left: AtomicUsize::new(subjects),
+            unit_records: AtomicU64::new(0),
+            units_done: None,
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXBOARD): see the fields.
+    fn with_early(
+        mut self,
+        units_taken: &'a (dyn Fn() + Sync),
+        units_done: &'a (dyn Fn(u64) + Sync),
+        gate: Option<XGateView<'a>>,
+    ) -> Self {
+        self.units_taken = Some(units_taken);
+        self.units_done = Some(units_done);
+        self.gate = gate;
+        self
+    }
+
+    /// One subject's units have all run and returned `records` records (its HSPs for a subject
+    /// without units); the last one tells the pipe the batch's bound.
+    fn subject_units_done(&self, records: u64) {
+        let total = self.unit_records.fetch_add(records, Ordering::SeqCst) + records;
+        if self.units_left.fetch_sub(1, Ordering::SeqCst) == 1 {
+            if let Some(units_done) = self.units_done {
+                units_done(total);
+            }
+        }
+    }
+
+    /// Every unit of this batch has been taken (from the board): the next batch may build its
+    /// tables. Once per batch.
+    pub(super) fn units_taken(&self) {
+        if let Some(units_taken) = self.units_taken {
+            if !self.units_taken_once.swap(true, Ordering::SeqCst) {
+                units_taken();
+            }
+        }
+    }
+
+    /// Before this batch's subjects: waits at the gate when the batch started early, running the
+    /// board's items meanwhile (no pool wait).
+    pub(super) fn wait_gate(
+        &self,
+        board: Option<&crate::algorithm::tblastx::x_work_board::XBoard>,
+    ) {
+        let Some(gate) = self.gate else {
+            return;
+        };
+        let mut taker = crate::algorithm::tblastx::x_work_board::XTaker::default();
+        while !gate.open() {
+            if board.is_some_and(|board| board.take_one(&mut taker)) {
+                continue;
+            }
+            // This thread's own pool jobs and broadcast parts (see `XPipe::wait`).
+            #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+            if matches!(rayon::yield_local(), Some(rayon::Yield::Executed)) {
+                continue;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(50));
         }
     }
 
@@ -203,6 +327,7 @@ pub(super) struct XSeedGuard<'a> {
     seed_end: Option<&'a XSeedEnd<'a>>,
     ended: bool,
     hsps: u64,
+    units_reported: bool,
 }
 
 impl<'a> XSeedGuard<'a> {
@@ -211,6 +336,19 @@ impl<'a> XSeedGuard<'a> {
             seed_end,
             ended: false,
             hsps: 0,
+            units_reported: false,
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXBOARD): this subject's units have all run and returned `records`
+    // records (`XSeedEnd::subject_units_done`); once.
+    pub(super) fn units_done(&mut self, records: usize) {
+        if self.units_reported {
+            return;
+        }
+        self.units_reported = true;
+        if let Some(seed_end) = self.seed_end {
+            seed_end.subject_units_done(records as u64);
         }
     }
 
@@ -223,6 +361,8 @@ impl<'a> XSeedGuard<'a> {
         if self.ended {
             return true;
         }
+        // A subject that ran no units reports its HSPs as its bound.
+        self.units_done(hsps);
         self.ended = true;
         match self.seed_end {
             Some(seed_end) => {
@@ -288,6 +428,13 @@ pub(super) struct XPipe<'s, R> {
     stop: AtomicBool,
     held: XHeld,
     counts: Counts,
+    /// EXPERIMENT (LOSAT_X_TBXBOARD): one gate per planned batch; `gated[i]` when batch i was
+    /// started at the batch before's units-taken point.
+    gates: Vec<XGate>,
+    gated: Vec<AtomicBool>,
+    /// EXPERIMENT (LOSAT_X_TBXBOARD): the search's board; the loop waits for a slot by taking its
+    /// items instead of the pool's jobs (it never runs a batch's search nested).
+    board: Option<&'s crate::algorithm::tblastx::x_work_board::XBoard>,
 }
 
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -298,8 +445,12 @@ impl<'s, R: Send> XPipe<'s, R> {
         plan: Vec<std::ops::Range<usize>>,
         subjects: usize,
         search: &'s XSearch<'s, R>,
+        board: Option<&'s crate::algorithm::tblastx::x_work_board::XBoard>,
     ) -> Option<Self> {
-        Self::with_limit(plan, subjects, search, hsp_limit())
+        Self::with_limit(plan, subjects, search, hsp_limit()).map(|mut pipe| {
+            pipe.board = board;
+            pipe
+        })
     }
 
     fn with_limit(
@@ -323,6 +474,9 @@ impl<'s, R: Send> XPipe<'s, R> {
             stop: AtomicBool::new(false),
             held: XHeld::with_limit(limit),
             counts: Counts::default(),
+            gates: (0..n).map(|_| XGate::default()).collect(),
+            gated: (0..n).map(|_| AtomicBool::new(false)).collect(),
+            board: None,
         })
     }
 
@@ -361,6 +515,8 @@ impl<'s, R: Send> XPipe<'s, R> {
     /// meanwhile. A panic of that search is raised again here.
     fn wait(&self, i: usize) -> Result<R> {
         let mut waited = false;
+        // One taker for the whole wait: the units it runs keep one scratch (`XTaker`).
+        let mut taker = crate::algorithm::tblastx::x_work_board::XTaker::default();
         loop {
             if let Some(result) = self.slots[i]
                 .lock()
@@ -373,6 +529,17 @@ impl<'s, R: Send> XPipe<'s, R> {
                 return result.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
             }
             waited = true;
+            if let Some(board) = self.board {
+                // The board's items, then this thread's own pool jobs and its part of a broadcast
+                // (a later batch's subject loop waits until every thread has run its part), never
+                // another thread's jobs.
+                if !board.take_one(&mut taker)
+                    && !matches!(rayon::yield_local(), Some(rayon::Yield::Executed))
+                {
+                    std::thread::sleep(std::time::Duration::from_micros(50));
+                }
+                continue;
+            }
             match rayon::yield_now() {
                 Some(rayon::Yield::Executed) => {}
                 _ => std::thread::sleep(std::time::Duration::from_micros(50)),
@@ -383,13 +550,54 @@ impl<'s, R: Send> XPipe<'s, R> {
     /// Searches batch `i` with its seed-stage end, which may start batch `i + 1`.
     fn run(&'s self, scope: &rayon::Scope<'s>, i: usize) -> Result<R> {
         let on_end = |_: u64| self.seed_ended(scope, i);
+        let units_taken = || self.units_taken(scope, i);
+        let units_done = |bound: u64| {
+            if let Some(next) = self.gates.get(i + 1) {
+                next.prev_bound.store(bound, Ordering::SeqCst);
+                next.prev_units_done.store(true, Ordering::SeqCst);
+            }
+        };
         let last = i + 1 == self.plan.len();
-        let seed_end = XSeedEnd::new(self.subjects, &on_end, &self.held, last);
+        let gate = self.gated[i].load(Ordering::SeqCst).then(|| XGateView {
+            gate: &self.gates[i],
+            held: &self.held,
+            stop: &self.stop,
+        });
+        let seed_end = XSeedEnd::new(self.subjects, &on_end, &self.held, last).with_early(
+            &units_taken,
+            &units_done,
+            gate,
+        );
         let result = (self.search)(self.plan[i].clone(), Some(&seed_end));
         if result.is_err() {
             self.stop.store(true, Ordering::SeqCst);
         }
+        if let Some(next) = self.gates.get(i + 1) {
+            next.prev_returned.store(true, Ordering::SeqCst);
+        }
         result
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXBOARD): every unit of batch `i` has been taken: batch i + 1 starts
+    // now, builds its tables and waits at its gate (`XGateView::open`) before its subjects.
+    fn units_taken(&'s self, scope: &rayon::Scope<'s>, i: usize) {
+        let next = i + 1;
+        // Batch i's own HSPs are not counted yet (they are at its seed-stage end): the start needs
+        // room left below the limit (item 4).
+        if next >= self.plan.len()
+            || self.stop.load(Ordering::SeqCst)
+            || self.started[next].load(Ordering::SeqCst)
+            || self.held.now.load(Ordering::SeqCst) >= self.held.limit
+        {
+            return;
+        }
+        self.gated[next].store(true, Ordering::SeqCst);
+        if self.started[next].swap(true, Ordering::SeqCst) {
+            return;
+        }
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXPIPE", true);
+        self.counts.early.fetch_add(1, Ordering::Relaxed);
+        self.spawn(scope, next);
     }
 
     /// Batch `i` has ended its seed stage: batch `i + 1` starts now if the HSPs held leave room
@@ -399,6 +607,9 @@ impl<'s, R: Send> XPipe<'s, R> {
         if next >= self.plan.len() {
             return;
         }
+        self.gates[next]
+            .prev_seed_done
+            .store(true, Ordering::SeqCst);
         if !self.held.room() {
             // The HSPs held leave no room: the loop starts the next batch itself.
             crate::utils::xreach::x_reach!("LOSAT_X_TBXPIPE", false);
@@ -409,6 +620,10 @@ impl<'s, R: Send> XPipe<'s, R> {
         }
         crate::utils::xreach::x_reach!("LOSAT_X_TBXPIPE", true);
         self.counts.early.fetch_add(1, Ordering::Relaxed);
+        self.spawn(scope, next);
+    }
+
+    fn spawn(&'s self, scope: &rayon::Scope<'s>, next: usize) {
         scope.spawn(move |scope| {
             // The loop waits for this slot: a panic fills it too (item 5).
             let result =

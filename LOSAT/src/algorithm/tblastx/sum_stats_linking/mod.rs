@@ -79,4 +79,5 @@ pub use linking::x_link_sort_print_summary;
 //    hp_start->next = hp_frame_start[frame_index];
 // ```
 // No NCBI counterpart for the summary: it prints counters.
+pub(crate) use linking::x_link_helped;
 pub use linking::x_link_slices_print_summary;

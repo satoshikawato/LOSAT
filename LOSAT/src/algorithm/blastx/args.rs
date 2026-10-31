@@ -81,7 +81,7 @@ pub struct BlastxArgs {
     /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
     /// `-no_taxid_expansion` (line DI-8).
     #[command(flatten)]
-    pub taxid_filter: crate::blastinput::db_filter::TaxidFilterArgs,
+    pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // ```c++
     //     // DB size
@@ -755,6 +755,9 @@ pub struct ResolvedOptions {
     /// `native::run` (`-db`: the database's search path, `-subject`: NCBI's). False otherwise,
     /// as Web reads it (DECISIONS 7 of line CLI C2).
     pub taxdb_found: bool,
+    /// A list kept no sequence of the database (`SeqDb::filtered_empty`): the queries of the
+    /// searched batches have `EMPTY_DATABASE_MESSAGE`.
+    pub filtered_empty: bool,
     pub num_threads: i32,
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3629-3642
@@ -1084,6 +1087,7 @@ impl BlastxArgs {
             fields,
             tabular,
             taxdb_found: false,
+            filtered_empty: false,
             num_threads: self.num_threads,
         })
     }

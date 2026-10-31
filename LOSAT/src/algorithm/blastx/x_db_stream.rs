@@ -137,7 +137,7 @@ impl<'a> XStreamDb<'a> {
         let stream = Self {
             db,
             count: db.num_seqs() as usize,
-            total_length: db.total_length(),
+            total_length: db.statistics_numbers().0,
             longest,
             block_bytes,
             shadow,

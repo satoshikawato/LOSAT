@@ -77,12 +77,12 @@ impl BlastxDatabase {
         Self::open_restricted(name, settings, None, &mut std::io::sink())
     }
 
-    /// `open` with the database restricted to the taxid list `list` of the command line
-    /// (`shared::restrict_database`, whose warning goes to `diagnostics`).
+    /// `open` with the database restricted to the taxid or seqid list `list` of the command
+    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
     pub(crate) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
-        list: Option<&crate::seqdb::TaxidList>,
+        list: Option<&crate::seqdb::DbList>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
@@ -96,6 +96,11 @@ impl BlastxDatabase {
             taxdb: shared::TaxdbRun::default(),
             parsed_seqids,
         })
+    }
+
+    /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
+    pub(crate) fn filtered_empty(&self) -> bool {
+        self.db.filtered_empty()
     }
 
     /// Whether the database has parsed Seq-ids: a batch can then refuse one of its subjects
@@ -145,7 +150,7 @@ impl BlastxDatabase {
     /// database's) belongs to the first query batch with a valid context, which the caller
     /// fails with it.
     pub(crate) fn read_stores(&self) -> Result<StoredProteins> {
-        if self.db.num_seqs() == 0 {
+        if self.db.printed_num_seqs() == 0 {
             return Err(PreliminaryReadError("Database memory map file error").into());
         }
         let stores = shared::read_protein_stores(&self.db, PROGRAM)?;
@@ -167,7 +172,7 @@ impl BlastxDatabase {
     /// (`common::database::x_check_protein_stores`): the same reads and checks with the same
     /// errors, the residues of the longest sequence (`StoredProteins::max_length`) when they pass.
     pub(crate) fn x_check_stores(&self) -> Result<usize> {
-        if self.db.num_seqs() == 0 {
+        if self.db.printed_num_seqs() == 0 {
             return Err(PreliminaryReadError("Database memory map file error").into());
         }
         let mut longest = 0;

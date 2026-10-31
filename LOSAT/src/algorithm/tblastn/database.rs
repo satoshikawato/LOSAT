@@ -74,12 +74,12 @@ impl TblastnDatabase {
         Self::open_restricted(name, settings, None, &mut std::io::sink())
     }
 
-    /// `open` with the database restricted to the taxid list `list` of the command line
-    /// (`shared::restrict_database`, whose warning goes to `diagnostics`).
+    /// `open` with the database restricted to the taxid or seqid list `list` of the command
+    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
     pub(super) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
-        list: Option<&crate::seqdb::TaxidList>,
+        list: Option<&crate::seqdb::DbList>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
@@ -120,10 +120,23 @@ impl TblastnDatabase {
     /// The number of sequences (`CSeqDB::GetNumSeqs`) and the total length
     /// (`CSeqDB::GetTotalLength`): the real numbers, also with `-dbsize`.
     pub(super) fn numbers(&self) -> DatabaseNumbers {
+        let (total_length, num_seqs) = self.db.statistics_numbers();
         DatabaseNumbers {
-            total_length: self.db.total_length(),
-            num_seqs: u64::from(self.db.num_seqs()),
+            total_length,
+            num_seqs: u64::from(num_seqs),
+            min_length: self.db.min_length(),
         }
+    }
+
+    /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
+    pub(super) fn filtered_empty(&self) -> bool {
+        self.db.filtered_empty()
+    }
+
+    /// The number of sequences of the volumes (`SeqDb::printed_num_seqs`): none is the database
+    /// whose first query batch fails, also with a list.
+    pub(super) fn printed_num_seqs(&self) -> u32 {
+        self.db.printed_num_seqs()
     }
 
     /// What the `Database:` lines of the pairwise report show

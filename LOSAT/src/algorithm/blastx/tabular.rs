@@ -324,7 +324,11 @@ pub(super) fn write_blastx_tabular(
             //         ERR_POST(Warning << results.GetWarningStrings());
             //     }
             // ```
-            stderr.write_all(&query_warning(query, batch.search_skipped))?;
+            stderr.write_all(&query_warning(
+                query,
+                batch.search_skipped,
+                options.filtered_empty,
+            ))?;
             // NCBI makes a formatter for each query's report, and it warns when the field list
             // asks for a plural name of the taxonomy database that it cannot find
             // (tabular.cpp:139-158, `x_CheckTaxDB`).

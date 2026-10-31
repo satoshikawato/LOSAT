@@ -62,7 +62,8 @@ use crate::report::blast_xml::{
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
 use crate::report::query_warnings::{
-    replaced_o_message, QueryWarnings, IDENTITY_CBS_RESET_MESSAGE, INVALID_QUERY_MESSAGE,
+    replaced_o_message, QueryWarnings, EMPTY_DATABASE_MESSAGE, IDENTITY_CBS_RESET_MESSAGE,
+    INVALID_QUERY_MESSAGE,
 };
 use crate::report::serial::seqalign::seqalign_evalue;
 use crate::stats::tables::lookup_protein_params;
@@ -88,6 +89,9 @@ pub(super) struct XmlValues {
     /// this index, the first query batch's, have the warning (`IDENTITY_CBS_RESET_MESSAGE`,
     /// `tblastn_app::search`).
     pub identity_warned: usize,
+    /// A list kept no sequence of the database: the messages of the queries of the searched
+    /// batches have `EMPTY_DATABASE_MESSAGE`.
+    pub filtered_empty: bool,
 }
 
 /// The document's texts, made (and refused) before the first byte of any format is written:
@@ -151,7 +155,12 @@ pub(super) fn unsupported_matrix(matrix_name: &str, has_queries: bool) -> Result
 /// The messages of a query's result (the warnings the other formats write to standard error,
 /// `report::query_warning`): the O characters read as X, a record without letters, a query
 /// without a valid context, IDENTITY's reset of the composition mode.
-fn query_messages(query: &FastaRecord, valid: bool, identity_cbs_reset: bool) -> Vec<String> {
+fn query_messages(
+    query: &FastaRecord,
+    valid: bool,
+    identity_cbs_reset: bool,
+    empty_database: bool,
+) -> Vec<String> {
     let mut messages = Vec::new();
     messages.extend(replaced_o_message(query.seq()));
     if identity_cbs_reset {
@@ -161,6 +170,9 @@ fn query_messages(query: &FastaRecord, valid: bool, identity_cbs_reset: bool) ->
         messages.push(crate::algorithm::blastn::blast_engine::NO_DATA_MESSAGE.to_string());
     } else if !valid {
         messages.push(INVALID_QUERY_MESSAGE.to_string());
+    }
+    if empty_database {
+        messages.push(EMPTY_DATABASE_MESSAGE.to_string());
     }
     messages
 }
@@ -229,7 +241,12 @@ pub(super) fn prepare(
                 query.believed(),
                 query.title(),
                 true,
-                &query_messages(query, valid, q_idx < values.identity_warned),
+                &query_messages(
+                    query,
+                    valid,
+                    q_idx < values.identity_warned,
+                    values.filtered_empty && !query_batch_skipped[q_idx],
+                ),
                 has_hits(hitlist),
             )
         })

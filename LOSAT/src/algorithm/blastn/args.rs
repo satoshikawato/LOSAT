@@ -130,7 +130,7 @@ pub struct BlastnArgs {
     /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
     /// `-no_taxid_expansion` (line DI-8).
     #[command(flatten)]
-    pub taxid_filter: crate::blastinput::db_filter::TaxidFilterArgs,
+    pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // ```c++
     //     // DB size
@@ -480,7 +480,7 @@ pub struct BlastnArgs {
     #[arg(
         long = "subject_loc",
         value_name = "RANGE",
-        conflicts_with_all = crate::blastinput::db_filter::TAXID_OPTIONS,
+        conflicts_with_all = crate::blastinput::db_filter::DB_FILTER_OPTIONS,
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
@@ -566,6 +566,21 @@ pub struct BlastnArgs {
     /// Use non-greedy dynamic programming extension.
     #[arg(long)]
     pub no_greedy: bool,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:701-704,739-741
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgMinRawGappedScore, "int_value",
+    //                             "Minimum raw gapped score to keep an alignment "
+    //                             "in the preliminary gapped and traceback stages",
+    //                             CArgDescriptions::eInteger);
+    // ...
+    //     if (args[kArgMinRawGappedScore]) {
+    //         options.SetCutoffScore(args[kArgMinRawGappedScore].AsInteger());
+    //     }
+    // ```
+    // No constraint on the value: 0 and below keep the cutoff of the e-value
+    // (`coordination.rs` `configure_task`).
+    #[arg(long, value_parser = ncbi_integer, help = "Minimum raw gapped score to keep an alignment in the preliminary gapped and traceback stages")]
+    pub min_raw_gapped_score: Option<i32>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:475-481,487-497
     // ```c++
     //     arg_desc.AddOptionalKey(kArgWindowSize, "int_value",

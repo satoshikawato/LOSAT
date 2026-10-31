@@ -1,0 +1,70 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/mask_subject.fasta).
+           1 sequences; 500 total letters
+
+
+
+Query= q_mask query with lowercase runs and a CA-repeat block
+
+Length=400
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+subj_mask subject with a CA-repeat low-complexity block               178     2e-49
+
+
+> subj_mask subject with a CA-repeat low-complexity block
+Length=500
+
+ Score = 178 bits (197),  Expect = 2e-49
+ Identities = 200/201 (99%), Gaps = 0/201 (0%)
+ Strand=Plus/Plus
+
+Query  100  TGGGACTGGTCCGGATGAGTGTGGCAGTGTGAATATTGTAGTTTACAATATGCTGTTATA  159
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  150  TGGGACTGGTCCGGATGAGTGTGGCAGTGTGAATATTGTAGTTTACAATATGCTGTTATA  209
+
+Query  160  TCGTGCTAGcacacacacacacacacacacacacacacacacacacacacacacacacaT  219
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  210  TCGTGCTAGCACACACACACACACACACACACACACACACACACACACACACACACACAT  269
+
+Query  220  ATGATACCGTGATGACATGTCCGTGCCAGTCTAGATTACCCGTCATTATTGTTACAGAGG  279
+            ||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||
+Sbjct  270  ATGATACCGTGATGACATGTCCGTGCCAGTCTAGATTACCCCTCATTATTGTTACAGAGG  329
+
+Query  280  ATGGGTGGGTAGTGCCCTGTT  300
+            |||||||||||||||||||||
+Sbjct  330  ATGGGTGGGTAGTGCCCTGTT  350
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 92910
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/mask_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 500
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

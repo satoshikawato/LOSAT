@@ -383,7 +383,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "negative_seqidlist"
             | "remote"
             | "seqidlist"
-            | "soft_masking"
             | "sorthits"
             | "sorthsps"
             | "version"

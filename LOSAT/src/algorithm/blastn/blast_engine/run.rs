@@ -4818,6 +4818,68 @@ fn build_query_blastna_buffer<L: QueryLetters + ?Sized>(
     with_sentinels
 }
 
+/// `-soft_masking false`: writes the masks of the contexts into the searched BLASTNA copy of the
+/// query (the buffer with its sentinels) and returns the copy without them, or `None` without
+/// masks. Identities are counted on the returned letters, everything else reads the buffer,
+/// where a masked letter is an N like one of the input: its word is not in the lookup table, the
+/// extensions and the Karlin blocks read N, and the small table's compressed query reads it as
+/// a base (`build_compressed_query`).
+///
+/// A context's own list of masks is cleared: of the lookup tables that keep `masked_locations`
+/// for `s_TypeOfWord`, only the small one does so without `mask_at_hash`, and the seed loops take
+/// that table's checks from `small_na_word`. `query_context_masks` (the lookup table's words)
+/// stays.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1369-1405
+/// ```c
+///     query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
+///     query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
+///     query_blk->nomask_allocated = TRUE;
+///     ...
+///         Blast_MaskTheResidues(buffer, query_length, kIsNucl,
+///                               filter_maskloc->seqloc_array[context],
+///                               BlastIsReverseStrand(kIsNucl, context), 0);
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:407-411,1269-1272
+/// ```c
+///     if (locations &&
+///         lookup->word_length > lookup->lut_word_length ) {
+///         /* because we use compressed query, we must always check masked location*/
+///         lookup->masked_locations = s_SeqLocListInvert(locations, query->length);
+///     }
+///     ...
+///    if (location &&
+///        mb_lt->word_length > mb_lt->lut_word_length &&
+///        s_HasMaskAtHashEnabled(query_options)) {
+///        mb_lt->masked_locations = s_SeqLocListInvert(location, query->length);
+///    }
+/// ```
+#[cold]
+#[inline(never)]
+fn mask_query_letters(
+    buffer: &mut [u8],
+    contexts: &mut [QueryContext],
+    context_masks: &[Vec<MaskedInterval>],
+) -> Option<Vec<u8>> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:38
+    // ```c
+    // const Uint1 kNuclMask = 14;     /* N in BLASTNA */
+    // ```
+    const BLASTNA_N: u8 = 14;
+    if context_masks.iter().all(Vec::is_empty) {
+        return None;
+    }
+    let nomask = buffer.to_vec();
+    for (ctx, masks) in contexts.iter_mut().zip(context_masks) {
+        let first = ctx.query_offset.max(0) as usize + 1;
+        for mask in masks {
+            buffer[first + mask.start..first + mask.end].fill(BLASTNA_N);
+        }
+        ctx.masks.clear();
+    }
+    Some(nomask)
+}
+
 /// The query buffer of a search of one strand (`-strand plus` or `minus`): as
 /// `build_query_blastna_buffer`, but a context is written only when its length is above 0,
 /// with its own length (the strand that is not searched has a context of length 0 and takes no
@@ -5546,6 +5608,8 @@ struct BlastnReportInputs<'a> {
     dust: Option<(i32, i32, i32)>,
     /// `-window_masker_db` as given (the filter string's `W -d <name>;`).
     window_masker_db: Option<&'a str>,
+    /// `-soft_masking` (the filter string's `m;`).
+    soft_masking: bool,
     /// The database length behind the effective lengths (`-dbsize`, or the total of the
     /// subjects), for the length adjustment that BLAST XML's `Statistics_hsp-len` shows.
     eff_db_length: i64,
@@ -6596,7 +6660,7 @@ fn post_process_hits_and_write(
                 report
                     .window_masker_db
                     .map(crate::report::blast_xml::filter::WindowMasker::Database),
-                true,
+                report.soft_masking,
             );
             let subject_records = report.subjects.records();
             let database_length = |rank: usize| report.subjects.len(rank);
@@ -8332,6 +8396,7 @@ fn ungapped_subject_stage(
     hits: &mut Vec<PrelimHit>,
     s_blastna: &[u8],
     queries_blastna: &[&[u8]],
+    queries_nomask: &[&[u8]],
     score_matrix: &[i32; 256],
     word_cutoffs: &[i32],
     percent_identity: f64,
@@ -8360,7 +8425,7 @@ fn ungapped_subject_stage(
         hit.prelim_se = reevaluated.s_end;
         let align_length = hit.prelim_qe - hit.prelim_qs;
         let identities = ungapped::count_identities_ungapped(
-            query,
+            queries_nomask[context_idx],
             s_blastna,
             hit.prelim_qs,
             hit.prelim_ss,
@@ -10079,6 +10144,7 @@ fn write_reports_untimed(
             (level as i32, window as u32 as i32, linker as u32 as i32)
         }),
         window_masker_db: args.window_masker_db.as_deref(),
+        soft_masking: args.soft_masking(),
         eff_db_length: if args.db_length() > 0 {
             args.db_length()
         } else {
@@ -10733,7 +10799,7 @@ fn search_query_batch<const UNGAPPED: bool>(
     let t_encode = crate::utils::xtiming::clock();
     // `-strand plus` or `minus` builds the buffer serially from the contexts that are searched
     // (`build_strand_query_blastna_buffer`); `both` is the code of the search without the option.
-    let encoded_query_buffer = if strand == QueryStrand::Both {
+    let mut encoded_query_buffer = if strand == QueryStrand::Both {
         x_query_prep_par::query_buffer(
             &letters,
             &query_context_offsets,
@@ -10749,6 +10815,27 @@ fn search_query_batch<const UNGAPPED: bool>(
         )
     };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:609-619
+    // ```c
+    // mask_at_hash = SBlastFilterOptionsMaskAtHash(filter_options);
+    // ...
+    // if (!mask_at_hash) {
+    //     BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
+    //                          program_number);
+    // }
+    // ```
+    // With `-soft_masking true` (the default) the DUST, lower-case and WindowMasker masks only
+    // restrict the lookup table through query_context_masks below, and there is one copy of the
+    // query. `false` searches a copy with the masks written into it.
+    let nomask_buffer = if args.soft_masking() {
+        None
+    } else {
+        mask_query_letters(
+            &mut encoded_query_buffer,
+            &mut query_contexts,
+            &query_context_masks,
+        )
+    };
     let encoded_query_concat_blastna_with_sentinels: &[u8] = &encoded_query_buffer;
     let encoded_query_concat_blastna: &[u8] = &encoded_query_buffer[1..query_concat_length + 1];
     let encoded_queries_blastna: Vec<&[u8]> = query_contexts
@@ -10763,18 +10850,26 @@ fn search_query_batch<const UNGAPPED: bool>(
             }
         })
         .collect();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:609-619
-    // ```c
-    // mask_at_hash = SBlastFilterOptionsMaskAtHash(filter_options);
-    // ...
-    // if (!mask_at_hash) {
-    //     BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
-    //                          program_number);
-    // }
-    // ```
-    // LOSATN currently exposes the NCBI soft-query-masking path: DUST/lcase
-    // masks restrict lookup-table entries through query_context_masks below,
-    // while the encoded traceback/scoring sequence remains unmodified.
+    // The letters identities are counted on (NCBI's `sequence_nomask`); without masks written,
+    // the searched contexts themselves.
+    let nomask_contexts: Option<Vec<&[u8]>> = nomask_buffer.as_ref().map(|buffer| {
+        encoded_queries_blastna
+            .iter()
+            .zip(&query_contexts)
+            .map(|(searched, ctx)| {
+                let start = ctx.query_offset.max(0) as usize + 1;
+                // The offset of an empty context can be past the block.
+                if searched.is_empty() {
+                    &[][..]
+                } else {
+                    &buffer[start..start + searched.len()]
+                }
+            })
+            .collect()
+    });
+    let encoded_queries_nomask: &[&[u8]] = nomask_contexts
+        .as_deref()
+        .unwrap_or(&encoded_queries_blastna);
 
     // Finalize configuration with query-dependent parameters (adaptive lookup table selection)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:46-47
@@ -16415,6 +16510,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                         &mut combined_prelim_hits,
                         s_blastna,
                         encoded_queries_blastna.as_slice(),
+                        encoded_queries_nomask,
                         &score_matrix,
                         cutoff_scores,
                         percent_identity,
@@ -16514,7 +16610,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                 let context_idx = prelim.context_idx as usize;
                 let length = prelim.prelim_qe - prelim.prelim_qs;
                 let matches = ungapped::count_identities_ungapped(
-                    encoded_queries_blastna[context_idx],
+                    encoded_queries_nomask[context_idx],
                     s_seq_blastna,
                     prelim.prelim_qs,
                     prelim.prelim_ss,
@@ -17157,7 +17253,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                             let q_seq_blastna =
                                 encoded_queries_blastna[prelim.context_idx as usize];
                             let q_seq_nomask_blastna =
-                                encoded_queries_blastna[prelim.context_idx as usize];
+                                encoded_queries_nomask[prelim.context_idx as usize];
 
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405
                             // ```c
@@ -17595,8 +17691,8 @@ fn search_query_batch<const UNGAPPED: bool>(
                             //        adjusted_subject, hsp, score_options, &align_length, sbp);
                             // ```
                             // Traceback scoring uses query_blk->sequence; identity/length
-                            // reporting uses query_blk->sequence_nomask. In LOSATN's
-                            // current soft-query-masking path these slices alias.
+                            // reporting uses query_blk->sequence_nomask. Without masks written
+                            // into the query (`mask_query_letters`) these slices alias.
                             let (matches, mismatches, gaps, gap_letters, aln_len) = if use_dp {
                                 let (matches, mismatches, gaps, gap_letters) = stats_from_edit_ops(
                                     q_seq_nomask_blastna,
@@ -17947,7 +18043,7 @@ fn search_query_batch<const UNGAPPED: bool>(
 
                 // NCBI reference: blast_traceback.c:653-665 (reevaluate with blastna sequences)
                 let q_seq_blastna = encoded_queries_blastna[context_idx];
-                let q_seq_nomask_blastna = encoded_queries_blastna[context_idx];
+                let q_seq_nomask_blastna = encoded_queries_nomask[context_idx];
                 let s_seq_eval = s_seq_blastna;
                 let reeval_start = if timing_enabled {
                     Some(std::time::Instant::now())
@@ -18716,6 +18812,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                     hits,
                     s_blastna,
                     encoded_queries_blastna.as_slice(),
+                    encoded_queries_nomask,
                     &score_matrix,
                     &x_batch_cutoffs.0,
                     percent_identity,
@@ -19427,6 +19524,35 @@ fn merge_prelim_hit_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // `-soft_masking false`: each context's masks become Ns in the buffer (the minus context's
+    // are its own, already reversed), the returned copy keeps the letters, and the contexts no
+    // longer hold their masks; without any mask nothing is copied and nothing changes.
+    #[test]
+    fn the_masks_are_written_into_the_searched_query() {
+        let context = |offset: i32, len: usize, masks: Vec<MaskedInterval>| QueryContext {
+            query_idx: 0,
+            frame: if offset == 0 { 1 } else { -1 },
+            query_offset: offset,
+            len,
+            masks,
+        };
+        let plus = vec![MaskedInterval::new(1, 3)];
+        let minus = reverse_mask_intervals(&plus, 5);
+        let buffer = vec![15, 0, 1, 2, 3, 0, 15, 3, 2, 1, 0, 3, 15];
+        let mut searched = buffer.clone();
+        let mut contexts = vec![context(0, 5, plus.clone()), context(6, 5, minus.clone())];
+        let nomask = mask_query_letters(&mut searched, &mut contexts, &[plus, minus]);
+        assert_eq!(nomask.as_deref(), Some(buffer.as_slice()));
+        assert_eq!(searched, [15, 0, 14, 14, 3, 0, 15, 3, 2, 14, 14, 3, 15]);
+        assert!(contexts.iter().all(|context| context.masks.is_empty()));
+
+        let mut searched = buffer.clone();
+        let mut contexts = vec![context(0, 5, Vec::new()), context(6, 5, Vec::new())];
+        let nomask = mask_query_letters(&mut searched, &mut contexts, &[Vec::new(), Vec::new()]);
+        assert!(nomask.is_none());
+        assert_eq!(searched, buffer);
+    }
 
     // QueryContextIndex answers the value of `direct_map` at every offset, through whichever form
     // the switches choose (by default LOSAT_X_CTXO1: division, or the block table, here with the

@@ -2010,13 +2010,14 @@ impl SeqDb {
                 volume.set_defline_rule(Arc::clone(&rule));
             }
         }
-        self.empty_list_first_length = if filter.count() == 0 && num_oids > 0 {
-            Some(match self.seqtype {
-                SeqType::Protein => u64::from(self.volumes[0].protein_length(0)?),
-                SeqType::Nucleotide => self.volumes[0].nucleotide_length(0, 0)? as u64,
-            })
-        } else {
-            None
+        // OID 0 is the first OID of the first volume that has any.
+        let first_volume = self.volumes.iter().find(|volume| volume.num_oids() > 0);
+        self.empty_list_first_length = match first_volume {
+            Some(volume) if filter.count() == 0 => Some(match self.seqtype {
+                SeqType::Protein => u64::from(volume.protein_length(0)?),
+                SeqType::Nucleotide => volume.nucleotide_length(0, 0)? as u64,
+            }),
+            _ => None,
         };
         self.num_seqs = filter.count();
         self.total_length = total_length;

@@ -5020,8 +5020,8 @@ fn search_cli(
                 &args.db_filter,
                 list.as_ref(),
                 database.filtered_empty(),
-                args.searchsp.is_some(),
-                args.dbsize.is_some(),
+                args.searchsp.is_some_and(|space| space > 0),
+                args.dbsize.is_some_and(|size| size > 0),
                 "BLASTP",
             )?;
             Some(database)

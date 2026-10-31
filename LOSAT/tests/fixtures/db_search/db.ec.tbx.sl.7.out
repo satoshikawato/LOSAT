@@ -1,0 +1,9 @@
+# TBLASTX 2.17.0+
+# Query: first nucleotide query with a title long enough to be cut
+# Database: tests/db_search/taxfilter/tfn
+# 0 hits found
+# TBLASTX 2.17.0+
+# Query: second
+# Database: tests/db_search/taxfilter/tfn
+# 0 hits found
+# BLAST processed 2 queries

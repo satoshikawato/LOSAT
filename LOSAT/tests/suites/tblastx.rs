@@ -13,6 +13,8 @@ mod tblastx_batch_pipe;
 mod tblastx_db_search;
 #[path = "../tblastx_extbatch.rs"]
 mod tblastx_extbatch;
+#[path = "../tblastx_few_groups.rs"]
+mod tblastx_few_groups;
 #[path = "../tblastx_hitbf.rs"]
 mod tblastx_hitbf;
 #[path = "../tblastx_kmerge.rs"]

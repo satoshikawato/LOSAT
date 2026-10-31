@@ -5,8 +5,8 @@
 //! 50,000 query letters, unless its variable is `0`; a positive number in the variable sets the
 //! size of a block. With it on, a search
 //! whose only report is tabular format 6 searches its queries block by block and writes each
-//! block's rows before it searches the next block (with `LOSAT_X_BPQBLOCKFMT`, also outfmt 0 and
-//! 7: `blastp_query_blocks_fmt.rs`). Every test states the default it runs with:
+//! block's rows before it searches the next block (also outfmt 0 and 7 and the other formats:
+//! `blastp_query_blocks_fmt.rs`). Every test states the default it runs with:
 //! these tests compare the rows with the search of all queries (`LOSAT_X_BPQBLOCK=0`) and check,
 //! from the `[TIMING] blastp_total` lines that each search of a query set prints with
 //! `LOSAT_TIMING`, that the block path ran (a search per block, more than the reference's) or did
@@ -235,19 +235,18 @@ fn blocks_write_the_rows_to_one_output_file() {
     std::fs::remove_dir_all(query.parent().unwrap()).unwrap();
 }
 
-// outfmt 7 with `LOSAT_X_BPQBLOCKFMT=0` (with it on, `blastp_query_blocks_fmt.rs`, which also has
-// outfmt 0 with it `0`), and one block, take the search of all queries.
+// One block (a block size above the queries' letters) takes the search of all queries, for outfmt
+// 6 and 7 (the block search of outfmt 7 with several blocks: `blastp_query_blocks_fmt.rs`).
 #[test]
-fn other_reports_and_one_block_take_the_search_of_all_queries() {
-    let fmt_off = ("LOSAT_X_BPQBLOCKFMT", "0");
+fn one_block_takes_the_search_of_all_queries() {
     let query = queries("other");
-    for (letters, outfmt) in [("1", "7"), ("100000000", "6")] {
+    for (letters, outfmt) in [("100000000", "6"), ("100000000", "7")] {
         let (reference, reference_searches) =
             blastp(&query, 1, &[BATCH, SWITCH_OFF], &["-outfmt", outfmt]);
         let (report, searches) = blastp(
             &query,
             1,
-            &[BATCH, ("LOSAT_X_BPQBLOCK", letters), fmt_off],
+            &[BATCH, ("LOSAT_X_BPQBLOCK", letters)],
             &["-outfmt", outfmt],
         );
         assert!(

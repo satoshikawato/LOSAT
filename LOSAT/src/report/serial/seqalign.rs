@@ -954,7 +954,8 @@ fn write_score_id<E: Encoder>(enc: &mut E, name: &str) {
 ///     return;
 /// }
 /// ```
-/// The `seqid_list` entries exist only with a GI or Seq-id list, which LOSAT does not have.
+/// Every caller passes an empty `seqid_list` (`emptyList` in the callers below; the list goes to
+/// `write_use_this_seqid`).
 fn write_score_list<E: Encoder>(enc: &mut E, hsp: &HspRecord<'_>, query_length: i32) {
     if hsp.score != 0 {
         write_score_int(enc, "score", hsp.score);
@@ -1533,7 +1534,7 @@ fn ungapped_interval(offset: i32, end: i32, frame: i8, length: i32) -> (i32, i32
 ///     s_AddUserObjectToSeqAlign(seqalign, seqid_list);
 ///     sa_vector.push_back(seqalign);
 /// ```
-/// (`s_AddUserObjectToSeqAlign` adds nothing without a Seq-id list.)
+/// (`write_use_this_seqid` is `s_AddUserObjectToSeqAlign`.)
 fn write_seq_align_diags<E: Encoder>(
     enc: &mut E,
     query: &QueryRecord<'_>,
@@ -1588,7 +1589,64 @@ fn write_seq_align_diags<E: Encoder>(
     enc.end_list();
     enc.end_variant();
     enc.end_member();
+    write_use_this_seqid(enc, subject.use_this_seqid);
     enc.end_sequence();
+}
+
+/// The `ext` of a Seq-align under a positive list (`seqids`, `SubjectRecord::use_this_seqid`):
+/// nothing when `seqids` is empty.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1234-1245
+/// ```c++
+/// static void
+/// s_AddUserObjectToSeqAlign(CRef<CSeq_align>  & seqalign,
+/// 		const vector<string> & seqid_list)
+/// {
+/// 	if (seqid_list.empty())
+/// 		return;
+///
+/// 	CRef<CUser_object> userObject(new CUser_object());
+/// 	userObject->SetType().SetStr("use_this_seqid");
+/// 	userObject->AddField("SEQIDS", seqid_list);
+/// 	seqalign->SetExt().push_back(userObject);
+/// }
+/// ```
+/// (`num` is the number of the strings, `CUser_field::SetValue`; `data`: `strs` 6,
+/// general.asn:136-147.)
+fn write_use_this_seqid<E: Encoder>(enc: &mut E, seqids: &[Vec<u8>]) {
+    if seqids.is_empty() {
+        return;
+    }
+    enc.member("ext", 6);
+    enc.begin_list(false);
+    enc.element();
+    enc.begin_sequence("User-object");
+    enc.member("type", 1);
+    enc.variant("Object-id", "str", 1);
+    enc.visible_str(b"use_this_seqid");
+    enc.end_variant();
+    enc.end_member();
+    enc.member("data", 2);
+    enc.begin_list(false);
+    enc.element();
+    enc.begin_sequence("User-field");
+    enc.member("label", 0);
+    enc.variant("Object-id", "str", 1);
+    enc.visible_str(b"SEQIDS");
+    enc.end_variant();
+    enc.end_member();
+    enc.member("num", 1);
+    enc.int(seqids.len() as i32);
+    enc.end_member();
+    enc.member("data", 2);
+    enc.variant_string_list("User-field_data", "strs", 6, seqids);
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_list();
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_list();
+    enc.end_member();
 }
 
 /// The Seq-align of one HSP of a gapped search, or nothing for an HSP of score 0.
@@ -1727,6 +1785,7 @@ fn write_seq_align_gapped<E: Encoder>(
     }
     enc.end_variant();
     enc.end_member();
+    write_use_this_seqid(enc, subject.use_this_seqid);
     enc.end_sequence();
 }
 

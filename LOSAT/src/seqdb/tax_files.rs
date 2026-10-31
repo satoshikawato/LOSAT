@@ -161,6 +161,13 @@ pub fn volumes<R: ReadAt + ?Sized>(ndb: &Env<R>) -> Result<Vec<(Vec<u8>, u32)>, 
     Ok(out)
 }
 
+/// Whether an error of [`volumes`] is one of NCBI's exceptions (the rest are errors of the file).
+pub fn is_ncbi_volume_error(message: &str) -> bool {
+    message == NO_VOLUME_INFO
+        || message == "Volinfo error "
+        || message.starts_with("No volinfo for ")
+}
+
 /// `m_NumOids` of NCBI: the sum of the OID counts of all volumes of the entry.
 pub fn total_oids(vols: &[(Vec<u8>, u32)]) -> u64 {
     vols.iter().map(|v| v.1 as u64).sum()

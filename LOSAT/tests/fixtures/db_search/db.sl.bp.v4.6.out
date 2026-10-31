@@ -1,0 +1,22 @@
+qp1	myprot9	myprot9	local id protein	4.84e-77	213
+qp1	ref|XP_000011.2|	ref|XP_000011.2|	bare refseq accession	1.40e-73	204
+qp1	sp|P00012|	sp|P00012|	bare uniprot-like accession	4.58e-72	201
+qp1	tpg|DAA10008.1|	tpg|DAA10008.1|	tpa with subject	1.82e-41	121
+qp1	ref|NP_100006.1|	ref|NP_100006.1|	N/A	1.82e-41	121
+qp1	pdb|2XYZ|B	pdb|2XYZ|B	N/A	1.82e-41	121
+qp1	tpg|DAA10001.1|	tpg|DAA10001.1|	tpa titled protein	1.82e-41	121
+qp2	sp|P00012|	sp|P00012|	bare uniprot-like accession	0.098	16.5
+qp2	sp|P00012|	sp|P00012|	bare uniprot-like accession	1.5	13.5
+qp2	sp|P00012|	sp|P00012|	bare uniprot-like accession	5.0	12.3
+qp2	ref|XP_000011.2|	ref|XP_000011.2|	bare refseq accession	2.3	13.1
+qp2	ref|XP_000011.2|	ref|XP_000011.2|	bare refseq accession	3.7	12.3
+qp2	ref|XP_000011.2|	ref|XP_000011.2|	bare refseq accession	4.8	12.3
+qp2	tpg|DAA10008.1|	tpg|DAA10008.1|	tpa with subject	2.9	12.7
+qp2	tpg|DAA10008.1|	tpg|DAA10008.1|	tpa with subject	3.0	12.7
+qp2	ref|NP_100006.1|	ref|NP_100006.1|	N/A	2.9	12.7
+qp2	ref|NP_100006.1|	ref|NP_100006.1|	N/A	3.0	12.7
+qp2	pdb|2XYZ|B	pdb|2XYZ|B	N/A	2.9	12.7
+qp2	pdb|2XYZ|B	pdb|2XYZ|B	N/A	3.0	12.7
+qp2	tpg|DAA10001.1|	tpg|DAA10001.1|	tpa titled protein	2.9	12.7
+qp2	tpg|DAA10001.1|	tpg|DAA10001.1|	tpa titled protein	3.0	12.7
+qp2	myprot9	myprot9	local id protein	4.7	12.3

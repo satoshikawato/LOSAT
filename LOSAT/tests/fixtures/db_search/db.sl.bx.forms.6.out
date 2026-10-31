@@ -1,0 +1,15 @@
+qn1	myprot9	myprot9	6.52e-77	213
+qn1	gnl|mydb|prot10	gnl|mydb|prot10	3.26e-75	209
+qn1	ref|XP_000011.2|	ref|XP_000011.2|	1.89e-73	204
+qn1	sp|P00012|	sp|P00012|	6.16e-72	201
+qn1	tpg|DAA10008.1|	tpg|DAA10008.1|	2.45e-41	121
+qn1	ref|NP_100006.1|	ref|NP_100006.1|	2.45e-41	121
+qn1	pdb|2XYZ|B	pdb|2XYZ|B	2.45e-41	121
+qn1	tpg|DAA10001.1|	tpg|DAA10001.1|	2.45e-41	121
+qn2	sp|P00012|	sp|P00012|	2.1	13.5
+qn2	sp|P00012|	sp|P00012|	2.2	13.5
+qn2	tpg|DAA10008.1|	tpg|DAA10008.1|	4.1	12.7
+qn2	ref|NP_100006.1|	ref|NP_100006.1|	4.1	12.7
+qn2	pdb|2XYZ|B	pdb|2XYZ|B	4.1	12.7
+qn2	tpg|DAA10001.1|	tpg|DAA10001.1|	4.1	12.7
+qn2	ref|XP_000011.2|	ref|XP_000011.2|	5.0	12.3

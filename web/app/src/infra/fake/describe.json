@@ -24,6 +24,16 @@
     "takes_value": true
    },
    {
+    "flag": "-seqidlist",
+    "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_seqidlist",
+    "help": "Restrict search of database to everything except the specified SeqIDs",
+    "takes_value": true
+   },
+   {
     "flag": "-taxids",
     "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
     "takes_value": true
@@ -289,6 +299,16 @@
     "takes_value": true
    },
    {
+    "flag": "-seqidlist",
+    "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_seqidlist",
+    "help": "Restrict search of database to everything except the specified SeqIDs",
+    "takes_value": true
+   },
+   {
     "flag": "-taxids",
     "help": "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')",
     "takes_value": true
@@ -490,6 +510,16 @@
    {
     "flag": "-db",
     "help": "BLAST database name (a nucleotide database without parsed Seq-ids)",
+    "takes_value": true
+   },
+   {
+    "flag": "-seqidlist",
+    "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_seqidlist",
+    "help": "Restrict search of database to everything except the specified SeqIDs",
     "takes_value": true
    },
    {
@@ -749,6 +779,16 @@
    {
     "flag": "-db",
     "help": "BLAST database name (a nucleotide database without parsed Seq-ids)",
+    "takes_value": true
+   },
+   {
+    "flag": "-seqidlist",
+    "help": "Restrict search of database to list of SeqIDs",
+    "takes_value": true
+   },
+   {
+    "flag": "-negative_seqidlist",
+    "help": "Restrict search of database to everything except the specified SeqIDs",
     "takes_value": true
    },
    {

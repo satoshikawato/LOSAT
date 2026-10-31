@@ -25,7 +25,8 @@
 //! - The composition redo and the traceback of `-comp_based_stats 0` read a subject of their
 //!   lists when they first align it and hold it until the stage has done its last match
 //!   (`XStageSubjects`, LOSAT_X_TBNSTAGEDROP; with `=0` until the stage ends); the reports read
-//!   the sequences they show (`database::reported_subjects`), one read each.
+//!   the sequences they show, one read each, when a report reads their letters
+//!   (`database::reported_subjects`; the other reports read the lengths of the stream).
 //! - A long sequence (a block of its own) is read once while anything holds it: the stages and
 //!   the query batches that run at the same time share it, and a thread that asks for it while
 //!   another reads it waits for that read (`XDbStream::read_shared`). With more than one thread

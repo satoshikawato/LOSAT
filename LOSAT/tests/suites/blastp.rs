@@ -7,6 +7,8 @@
 mod blastp_culling;
 #[path = "../blastp_db_cut.rs"]
 mod blastp_db_cut;
+#[path = "../blastp_db_wide.rs"]
+mod blastp_db_wide;
 #[path = "../blastp_diag_batch.rs"]
 mod blastp_diag_batch;
 #[path = "../blastp_diag_defer.rs"]

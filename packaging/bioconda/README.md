@@ -86,3 +86,7 @@ This upstream repository PR prepares the recipe source-of-truth only. It does
 not claim that Bioconda has already built or published all four platforms.
 Four-platform publication becomes true only after the downstream Bioconda PR
 passes its platform builds and is merged.
+
+## Program names
+
+`build.sh` links NCBI's program names (`blastn`, `makeblastdb`, ...) to `losat` in `$PREFIX/bin`. They clash with the files of the `blast` package when both are installed in one environment.

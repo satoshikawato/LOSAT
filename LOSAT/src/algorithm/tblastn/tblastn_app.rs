@@ -92,6 +92,22 @@ impl TblastnArgs {
             }
             None => &mut stderr,
         };
+        // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
+        // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
+        // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
+        // and before `CStdCmdLineArgs`, which opens the query and the output: its warning before
+        // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
+        // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
+        let list = match args.database_name() {
+            Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
+                Ok(list) => list,
+                Err(error) => {
+                    write_run_error_archive(&args, archive.as_ref(), &error);
+                    return Err(error);
+                }
+            },
+            None => None,
+        };
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2553-2562
         // ```c
         //         CRef<blast::CBlastQueryVector> subjects;
@@ -305,6 +321,7 @@ impl TblastnArgs {
                 ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
             search_cli(
                 args,
+                list,
                 query_file,
                 &subjects,
                 &subject_placements,
@@ -369,6 +386,10 @@ fn write_run_error_archive(
     let Some(handle) = archive else {
         return;
     };
+    // `-outfmt "11 qseqid"`: NCBI's `PrintErrorArchive` stops at the number before it opens `-out`.
+    if !handle.error_archive_enabled() {
+        return;
+    }
     let Some(lines) = super::archive::error_lines(error, true) else {
         return;
     };
@@ -413,6 +434,7 @@ fn cli_report_stream(
 #[allow(clippy::too_many_arguments)]
 fn search_cli(
     mut args: TblastnArgs,
+    list: Option<crate::seqdb::DbList>,
     query_file: std::fs::File,
     subjects: &[FastaRecord],
     subject_placements: &crate::blastinput::seq_range::Placements,
@@ -424,14 +446,6 @@ fn search_cli(
 ) -> Result<()> {
     use crate::blastinput::fasta_reader::{
         read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
-    };
-    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
-    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
-    // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65),
-    // so its warning before theirs (probe F04 of line DI-8).
-    let list = match args.database_name() {
-        Some(_) => args.db_filter.resolve(&settings, outputs.diagnostics)?,
-        None => None,
     };
     let resolved = args.check_options(outputs.diagnostics)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193
@@ -1399,8 +1413,9 @@ fn search(
                 lines
             })
             .collect();
-        // `-db`: the reported sequences by rank, with their records and packed subjects; the
-        // database's other sequences are dropped before the reports.
+        // `-db`: the reported sequences by rank, with their records and lengths, and their packed
+        // subjects where a report reads their letters; the database's other sequences are dropped
+        // before the reports.
         let reported = match database {
             Some(database) => Some(
                 super::database::reported_subjects(
@@ -1408,6 +1423,10 @@ fn search(
                     &titles,
                     &mut results,
                     search_letters,
+                    super::stage_e_report::reads_subject_letters(
+                        outputs.hits.is_some(),
+                        outputs.formats.iter().map(|format| format.outfmt),
+                    ),
                     parsed_shown(&outputs.formats),
                 )
                 // A read of a reported sequence that
@@ -1543,7 +1562,7 @@ fn search(
         let (report_records, report_letters, shown) = match (&reported, database) {
             (Some(reported), Some(database)) => (
                 reported.records.as_slice(),
-                SubjectLetters::Packed(&reported.stores),
+                reported.letters(),
                 ShownSubjects::Database {
                     name: database.name(),
                     pairwise: pairwise_database

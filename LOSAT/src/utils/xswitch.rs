@@ -231,6 +231,14 @@ use std::ops::RangeInclusive;
 /// branch-free candidate loop, `blastx/x_seed_scan.rs`) graduated on 2026-10-26: it left
 /// `STRICT_SET` and the scan on the presence test was deleted (the compressed lookup table keeps
 /// its own scan, a rule of the table and not a switch).
+/// `LOSAT_X_BXDBSTREAM` (BLASTX's `-db` read in blocks where it is searched, with the block size
+/// as its value, `blastx/x_db_stream.rs`), `LOSAT_X_BXEVALEMPTY` (a subject without HSPs gets its
+/// empty list at once in the gapped evaluation, `blastx/statistics.rs`) and `LOSAT_X_BXLUTPOOL`
+/// (BLASTX's lookup tables built on shared neighbour lists and kept vectors,
+/// `tblastx/lookup/x_lut_direct.rs`; the one-thread build without the pool stays, chosen by
+/// `LOSAT_X_BXPOOLN1`) graduated on 2026-10-27: they left `STRICT_SET` and their previous code
+/// was deleted (the copy of the whole database and the shadow modes of the first two went with
+/// them; a pass reads blocks of 256 KiB).
 /// `LOSAT_X_DISPTABLE` (the displayed residues of TBLASTX's and TBLASTN's rows read from a per-code
 /// table of 4-bit codons, `tblastx/report.rs`) and `LOSAT_X_TBXMASKSEEK` (the scan of a frame's SEG
 /// masks in an outfmt 0 row starts at the first mask range that reaches the row,
@@ -308,16 +316,13 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXCROSS",
     "LOSAT_X_BXCROSSDEFER",
     "LOSAT_X_BXCTXONCE",
-    "LOSAT_X_BXDBSTREAM",
     "LOSAT_X_BXDEFER",
     "LOSAT_X_BXDIAG",
     "LOSAT_X_BXDIAGKEEP",
-    "LOSAT_X_BXEVALEMPTY",
     "LOSAT_X_BXFLOW",
     "LOSAT_X_BXHITBF",
     "LOSAT_X_BXKAONCE",
     "LOSAT_X_BXKAPPAFIT",
-    "LOSAT_X_BXLUTPOOL",
     "LOSAT_X_BXPOOLN1",
     "LOSAT_X_BXSCANBYTE",
     "LOSAT_X_BXSUBJFLOW",

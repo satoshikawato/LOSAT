@@ -435,7 +435,7 @@ impl Volume {
         Ok((length as usize, ambiguity))
     }
 
-    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the numbers of residues of the proteins `first..end`
+    /// The numbers of residues of the proteins `first..end`
     /// (volume-relative, non-empty), read from the index alone with one read of their offsets:
     /// `read_block(first, end, _)`'s `protein(i).len()`.
     pub fn x_protein_lengths(&self, first: u32, end: u32) -> Result<Vec<u32>, SeqDbError> {

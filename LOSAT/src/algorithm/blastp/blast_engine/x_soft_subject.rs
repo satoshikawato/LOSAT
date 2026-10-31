@@ -164,22 +164,51 @@ fn scan_standard<K: XCell>(
 // ```
 /// The word finders' scan over `ranges`: each word hit in NCBI's order. `clamps_scan_end` is the
 /// two-hit search's raise of the first range's end, which scans one word of a first range too short
-/// for it; the one-hit search scans nothing at all then, later ranges included.
+/// for it; the one-hit search scans nothing at all then, later ranges included. A subject longer
+/// than `MAX_DBSEQ_LEN` is scanned over the words of NCBI's chunks ([`chunk_scans`]).
 #[cold]
 #[inline(never)]
 pub(super) fn x_for_each_hit(
     lookup: &BlastpRuntimeLookup,
     subject: &[u8],
+    subject_length: usize,
     ranges: &[(i32, i32)],
     offset_pairs: &mut [OffsetPair],
     clamps_scan_end: bool,
     visit: &mut dyn FnMut(OffsetPair),
 ) {
     let word_size = lookup.word_length();
+    if subject_length > MAX_DBSEQ_LEN {
+        for (first, last) in chunk_scans(ranges, subject_length as i32, word_size, clamps_scan_end)
+        {
+            scan(
+                lookup,
+                subject,
+                &[(first, last + word_size)],
+                [0, first, last],
+                offset_pairs,
+                visit,
+            );
+        }
+        return;
+    }
     let mut scan_range = [0, ranges[0].0, ranges[0].1 - word_size];
     if clamps_scan_end && scan_range[2] < scan_range[1] {
         scan_range[2] = scan_range[1];
     }
+    scan(lookup, subject, ranges, scan_range, offset_pairs, visit);
+}
+
+/// The scanner of `lookup` over `ranges` from `scan_range` on, as the word finders call it until
+/// the ranges end.
+fn scan(
+    lookup: &BlastpRuntimeLookup,
+    subject: &[u8],
+    ranges: &[(i32, i32)],
+    mut scan_range: [i32; 3],
+    offset_pairs: &mut [OffsetPair],
+    visit: &mut dyn FnMut(OffsetPair),
+) {
     let array_size =
         i32::try_from(offset_pairs.len()).expect("NCBI BLAST offset pair array size must fit Int4");
     match lookup {
@@ -215,6 +244,107 @@ pub(super) fn x_for_each_hit(
     }
 }
 
+/// NCBI's longest subject chunk (`MAX_DBSEQ_LEN`, blast_gapalign.h:54).
+const MAX_DBSEQ_LEN: usize = 5_000_000;
+/// NCBI's overlap of two subject chunks (`DBSEQ_CHUNK_OVERLAP`, blast_hits.h:192).
+const DBSEQ_CHUNK_OVERLAP: i32 = 100;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310 (`s_GetNextSubjectChunk`)
+// ```c
+//     if (backup->offset + MAX_DBSEQ_LEN <
+//         backup->hard_ranges[backup->hm_index].right) {
+//         subject->length = MAX_DBSEQ_LEN;
+//         backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
+//     } else {
+//         subject->length = backup->hard_ranges[backup->hm_index].right
+//                         - backup->offset;
+//     ...
+//     while (backup->soft_ranges[i].right < start) ++i;
+//     start = i;
+//     while (i < backup->num_soft_ranges
+//         && backup->soft_ranges[i].left < len) ++i;
+//     len = i - start;
+//     backup->sm_index = i - 1;
+//     ...
+//     if (len == 0) return SUBJECT_SPLIT_NO_RANGE;
+//     ...
+//     if (subject->seq_ranges[0].left < 0)
+//         subject->seq_ranges[0].left = 0;
+//     if (subject->seq_ranges[len-1].right > subject->length)
+//         subject->seq_ranges[len-1].right = subject->length;
+// ```
+/// The words that NCBI's word finder scans in the chunks of a subject of `length` letters with the
+/// scan ranges `ranges`, as `(first, last)` word starts of the subject, in order and merged. Each
+/// chunk takes its own ranges and its own start of the scan (the two-hit raise, or nothing at all
+/// for the one-hit search when its first range is shorter than a word). The words of the overlap
+/// of two chunks are scanned once here, as LOSAT scans a subject without lower case once.
+fn chunk_scans(
+    ranges: &[(i32, i32)],
+    length: i32,
+    word_size: i32,
+    clamps_scan_end: bool,
+) -> Vec<(i32, i32)> {
+    let mut scans: Vec<(i32, i32)> = Vec::new();
+    let mut push = |first: i32, last: i32| match scans.last_mut() {
+        Some(previous) if first <= previous.1 + 1 => previous.1 = previous.1.max(last),
+        _ => scans.push((first, last)),
+    };
+    let mut next = 0;
+    let mut sm_index = 0;
+    while next < length {
+        let offset = next;
+        let chunk_length = if offset + (MAX_DBSEQ_LEN as i32) < length {
+            next = offset + MAX_DBSEQ_LEN as i32 - DBSEQ_CHUNK_OVERLAP;
+            MAX_DBSEQ_LEN as i32
+        } else {
+            next = length;
+            length - offset
+        };
+        let mut i = sm_index;
+        while ranges[i].1 < offset {
+            i += 1;
+        }
+        let first = i;
+        while i < ranges.len() && ranges[i].0 < offset + chunk_length {
+            i += 1;
+        }
+        sm_index = i - 1;
+        if i == first {
+            continue;
+        }
+        let mut chunk: Vec<(i32, i32)> = ranges[first..i]
+            .iter()
+            .map(|&(left, right)| (left - offset, right - offset))
+            .collect();
+        chunk[0].0 = chunk[0].0.max(0);
+        let end = chunk.len() - 1;
+        chunk[end].1 = chunk[end].1.min(chunk_length);
+        let mut range = [0, chunk[0].0, chunk[0].1 - word_size];
+        if clamps_scan_end && range[2] < range[1] {
+            range[2] = range[1];
+        }
+        if range[1] > range[2] {
+            continue;
+        }
+        loop {
+            push(range[1] + offset, range[2] + offset);
+            range[1] = range[2] + 1;
+            while range[1] > range[2] {
+                range[0] += 1;
+                let Some(&(left, right)) = chunk.get(range[0] as usize) else {
+                    break;
+                };
+                range[1] = left;
+                range[2] = right - word_size;
+            }
+            if range[1] > range[2] {
+                break;
+            }
+        }
+    }
+    scans
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-552 (quoted at
 // `x_seed_fused::x_test_hit`)
 /// The two-hit test of each hit of [`x_for_each_hit`], in scan order; `candidate(query_offset,
@@ -223,6 +353,7 @@ pub(super) fn x_for_each_hit(
 pub(super) fn x_scan_two_hit_ranges<F>(
     lookup: &BlastpRuntimeLookup,
     subject: &[u8],
+    subject_length: usize,
     ranges: &[(i32, i32)],
     offset_pairs: &mut [OffsetPair],
     diag_array: &mut [DiagStruct],
@@ -234,16 +365,24 @@ pub(super) fn x_scan_two_hit_ranges<F>(
 ) where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
-    x_for_each_hit(lookup, subject, ranges, offset_pairs, true, &mut |pair| {
-        let query_offset = pair.q_off as i32;
-        let subject_offset = pair.s_off as i32;
-        let entry = &mut diag_array[((query_offset - subject_offset) & diag_mask) as usize];
-        if let Some((last_hit, diff)) =
-            x_test_hit(entry, subject_offset, diag_offset, window, word_size)
-        {
-            candidate(query_offset, subject_offset, last_hit, diff, entry);
-        }
-    });
+    x_for_each_hit(
+        lookup,
+        subject,
+        subject_length,
+        ranges,
+        offset_pairs,
+        true,
+        &mut |pair| {
+            let query_offset = pair.q_off as i32;
+            let subject_offset = pair.s_off as i32;
+            let entry = &mut diag_array[((query_offset - subject_offset) & diag_mask) as usize];
+            if let Some((last_hit, diff)) =
+                x_test_hit(entry, subject_offset, diag_offset, window, word_size)
+            {
+                candidate(query_offset, subject_offset, last_hit, diff, entry);
+            }
+        },
+    );
 }
 
 // NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
@@ -356,5 +495,34 @@ mod tests {
         assert_eq!(scan_ranges(b"mKVvA"), [(0, 0), (0, 3), (3, 5)]);
         assert_eq!(scan_ranges(b"MKv"), [(0, 2), (2, 3)]);
         assert_eq!(scan_ranges(b"mkv"), [(0, 0), (2, 3)]);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310 (quoted at
+    // `chunk_scans`): an 11,200,000-letter subject is cut at 4,999,900 and 9,999,800. A chunk
+    // starts with the last range of the chunk before; when that range reaches into it by fewer
+    // letters than a word, its one-hit scan stops at once (aa_ungapped.c:762-766) and its two-hit
+    // scan takes one word (`:499-500`).
+    #[test]
+    fn each_chunk_starts_its_own_scan() {
+        let length = 11_200_000;
+        // A run of 4,999,890..=5,000,050: the second chunk's first range starts 150 letters in,
+        // and the scan is that of the whole subject.
+        let wide = [(0, 4_999_890), (5_000_050, length)];
+        for raise in [false, true] {
+            assert_eq!(
+                chunk_scans(&wide, length, 3, raise),
+                [(0, 4_999_887), (5_000_050, length - 3)]
+            );
+        }
+        // A run of 4,999,902..=5,000,001: the second chunk's first range is its letters 0..2.
+        let short = [(0, 4_999_902), (5_000_001, length)];
+        assert_eq!(
+            chunk_scans(&short, length, 3, false),
+            [(0, 4_999_899), (9_999_800, length - 3)]
+        );
+        assert_eq!(
+            chunk_scans(&short, length, 3, true),
+            [(0, 4_999_900), (5_000_001, length - 3)]
+        );
     }
 }

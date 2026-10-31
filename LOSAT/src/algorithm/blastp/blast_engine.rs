@@ -7007,7 +7007,7 @@ fn search_split_query_batches(
     x_prolog: bool,
 ) -> Result<()> {
     use crate::algorithm::common::protein_query_split::{
-        protein_chunk_would_be_split, split_protein_batch,
+        protein_chunk_part, protein_chunk_would_be_split, split_protein_batch,
     };
     let sizes = crate::blastinput::app::protein_query_split_sizes(args.app.name(), 10000)?;
     let batch_size = args.query_batch_size()?;
@@ -7043,7 +7043,29 @@ fn search_split_query_batches(
             let parts: Vec<FastaRecord> = chunk
                 .queries
                 .iter()
-                .map(|part| query_records[range.start + part.query].cut(part.from, part.to))
+                .map(|part| {
+                    let query = range.start + part.query;
+                    let mut cut = query_records[query].cut(part.from, part.to);
+                    // NCBI reference: c++/src/algo/blast/api/split_query_cxx.cpp:278-281
+                    // ```c
+                    //             CRef<CSeq_loc> mask_query_loc(new CSeq_loc);
+                    //             s_SetSplitQuerySeqInterval(chunk, query_range, 0, mask_query_loc);
+                    //             TMaskedQueryRegions split_mask =
+                    //                 m_UserSpecifiedMasks[qindex].RestrictToSeqInt(mask_query_loc->GetInt());
+                    // ```
+                    // `-lcase_masking`: the chunk's lower case is the query's runs restricted
+                    // to the part as NCBI restricts them (each run one letter longer, and with
+                    // `-query_loc` in the part's coordinates without the interval's start).
+                    if args.lcase_masking {
+                        cut.sequence = protein_chunk_part(
+                            query_records[query].seq(),
+                            part,
+                            true,
+                            query_input.placements.offset(query),
+                        );
+                    }
+                    cut
+                })
                 .collect();
             let mut chunk_lists = Vec::new();
             let part_input = seq_range::QueryInput::whole(&parts);
@@ -8531,6 +8553,7 @@ fn run_resolved_in_pool(
                 x_soft_subject::x_scan_two_hit_ranges(
                     &lookup,
                     subject_sequence,
+                    subject.aa_len,
                     ranges,
                     &mut scratch.offset_pairs,
                     &mut scratch.diag_array,
@@ -8716,6 +8739,7 @@ fn run_resolved_in_pool(
                 x_soft_subject::x_for_each_hit(
                     &lookup,
                     subject_sequence,
+                    subject.aa_len,
                     ranges,
                     &mut scratch.offset_pairs,
                     false,

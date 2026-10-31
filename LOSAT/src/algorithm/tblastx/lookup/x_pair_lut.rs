@@ -466,7 +466,9 @@ impl XPairLutQuery {
             let mut overflow: Vec<i32> =
                 Vec::with_capacity(x_group_capacity::<i32>(overflow_size, mapped));
             overflow.resize(overflow_size, 0);
-            let mut base: Vec<u32> = x_group_zeroed(backbone_size, mapped);
+            // Where the fill pass writes each cell's next offset: 0 in the cell, the start of its
+            // run in the overflow array.
+            let mut next: Vec<u32> = x_group_zeroed(backbone_size, mapped);
             let mut overflow_cursor = 0usize;
             let mut kept = 0usize;
             for (idx, &count) in counts.iter().enumerate() {
@@ -484,13 +486,12 @@ impl XPairLutQuery {
                 backbone[at].num_used = count as i32;
                 if count as usize > AA_HITS_PER_CELL {
                     backbone[at].entries[0] = overflow_cursor as i32;
-                    base[idx] = overflow_cursor as u32;
+                    next[idx] = overflow_cursor as u32;
                     overflow_cursor += count as usize;
                 }
             }
 
             // Fill pass: the reference's appends of this group, in the reference's order.
-            let mut fill: Vec<u32> = x_group_zeroed(backbone_size, mapped);
             for idx in 0..backbone_size {
                 let Some(offset_list) = exact_backbone[idx].as_deref() else {
                     continue;
@@ -500,15 +501,14 @@ impl XPairLutQuery {
                 let list = lists[idx].as_deref().expect("listed in the count pass");
                 for &w in list {
                     let w = w as usize;
-                    let at = fill[w] as usize;
+                    let at = next[w] as usize;
                     if counts[w] as usize <= AA_HITS_PER_CELL {
                         let cell = if compact { slot[w] as usize } else { w };
                         backbone[cell].entries[at..at + offsets.len()].copy_from_slice(offsets);
                     } else {
-                        let start = base[w] as usize + at;
-                        overflow[start..start + offsets.len()].copy_from_slice(offsets);
+                        overflow[at..at + offsets.len()].copy_from_slice(offsets);
                     }
-                    fill[w] += offsets.len() as u32;
+                    next[w] += offsets.len() as u32;
                 }
             }
 

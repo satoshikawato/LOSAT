@@ -46,6 +46,8 @@ const PROGRAM: &str = "TBLASTX";
 pub(crate) struct TblastxDatabase {
     db: SeqDb,
     name: String,
+    /// Whether the first header of some volume holds parsed Seq-ids (`shared::check_seqids`).
+    parsed: bool,
     /// The taxonomy database of the run and the taxids its volumes have looked up (XML2 and
     /// JSON, and the batches' prefetch of outfmt 0, 5, 6 and 7), kept across the query batches
     /// of the run.
@@ -77,7 +79,7 @@ impl TblastxDatabase {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
-        shared::check_seqids(&db, settings, PROGRAM)?;
+        let parsed = shared::check_seqids(&db, settings, PROGRAM)?;
         shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
@@ -91,6 +93,7 @@ impl TblastxDatabase {
         Ok(Self {
             db,
             name: name.to_string(),
+            parsed,
             taxdb: shared::TaxdbRun::default(),
         })
     }
@@ -120,6 +123,14 @@ impl TblastxDatabase {
     /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
     pub(crate) fn open_for_tabular_rows(&self) -> Result<()> {
         self.taxdb.open_for_rows(&self.db, PROGRAM)
+    }
+
+    /// Whether the database has parsed Seq-ids and more than `max_sequences` sequences in its
+    /// volumes (`SeqDb::printed_num_seqs`, also under a taxid list: the range walks of
+    /// `reports_may_refuse` decode a list's excluded sequences of every range they read): the
+    /// check before the search does not read its headers (`shared::PARSED_CHECK_SEQUENCES_MAX`).
+    pub(crate) fn parsed_beyond(&self, max_sequences: u32) -> bool {
+        self.parsed && self.db.printed_num_seqs() > max_sequences
     }
 
     /// Whether a report that names any sequence of the database could be refused by LOSAT
@@ -480,8 +491,10 @@ mod tests {
         let search =
             SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
         let path = tests.join("db_search").join(name);
+        let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
         TblastxDatabase {
-            db: SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap(),
+            parsed: db.has_parsed_seqids().unwrap(),
+            db,
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
         }
@@ -607,5 +620,42 @@ mod tests {
             crate::utils::threading::with_search_pool(4, "TBLASTX", |pool| Ok(answers(pool)))
                 .unwrap();
         assert_eq!(serial, parallel);
+    }
+
+    // Line DBID, DECISIONS 19: a database with parsed Seq-ids is beyond a bound of fewer
+    // sequences than its volumes hold (`report_stream::Off::LargeParsed`), also where a taxid list
+    // keeps fewer (the range walks decode the excluded ones of every range they read); a database
+    // without parsed Seq-ids is never beyond it (read whatever its size, as blastn's).
+    #[test]
+    fn a_database_with_parsed_seqids_is_beyond_a_bound_below_its_volumes_sequences() {
+        let open = |name: &str| {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join(name);
+            TblastxDatabase::open(path.to_str().unwrap(), &ApplicationSettings::default())
+                .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+        };
+        for name in ["db_search/ids/nucl_v5", "db_search/ids/nucl_v4"] {
+            let database = open(name);
+            let count = database.db.num_seqs();
+            assert!(count > 1, "{name}");
+            assert!(!database.parsed_beyond(count), "{name}");
+            assert!(database.parsed_beyond(count - 1), "{name}");
+        }
+        let mut restricted = open("db_search/ids/nucl_v5");
+        let count = restricted.db.num_seqs();
+        restricted
+            .db
+            .restrict_taxids(&crate::seqdb::TaxidList::Positive(
+                [9606].into_iter().collect(),
+            ))
+            .unwrap();
+        let included = restricted.db.num_seqs();
+        assert!(included > 0 && included < count);
+        assert!(!restricted.parsed_beyond(count));
+        assert!(restricted.parsed_beyond(included));
+        let stored = open("seqdb/db/nucl_v4");
+        assert!(stored.db.num_seqs() > 0);
+        assert!(!stored.parsed_beyond(0));
     }
 }

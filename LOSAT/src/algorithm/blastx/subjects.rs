@@ -166,15 +166,17 @@ impl<'a> Subjects<'a> {
     }
 
     /// The shortest subject length that the hit-saving cutoff reads before it is raised
-    /// to 10 (`BlastSeqSrcGetMinSeqLen`): the shortest record, or 10 for a database
-    /// (D1; BLASTX translates the query, so the value is not divided by 3,
-    /// blast_setup.c:968-975).
+    /// to 10 (`BlastSeqSrcGetMinSeqLen`): the shortest record, the shortest sequence NCBI
+    /// scans in a database restricted by a list (`x_ScanTotals`, DI-8b DECISIONS 21), or 10
+    /// for an unrestricted database (D1; BLASTX translates the query, so the value is not
+    /// divided by 3, blast_setup.c:968-975).
     pub(crate) fn shortest_length(&self) -> usize {
         match self {
             Subjects::Fasta(records) => records.iter().map(|s| s.sequence.len()).min().unwrap_or(0),
-            Subjects::Database(_) | Subjects::Stream(_) | Subjects::Unreadable => {
-                BLAST_SEQSRC_MINLENGTH
-            }
+            Subjects::Database(stores) => stores
+                .min_length()
+                .map_or(BLAST_SEQSRC_MINLENGTH, |shortest| shortest as usize),
+            Subjects::Stream(_) | Subjects::Unreadable => BLAST_SEQSRC_MINLENGTH,
         }
     }
 

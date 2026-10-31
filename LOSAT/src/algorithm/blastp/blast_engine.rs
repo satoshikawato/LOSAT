@@ -5002,17 +5002,17 @@ fn search_cli(
     // ```
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
-    // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the database
-    // arguments reads it (`s_GetTaxIDList`) before the database opens.
+    // The taxid or seqid list (line DI-8) is read first: NCBI's handler of the database
+    // arguments reads it (`s_GetTaxIDList`, `CSeqDBFileGiList`) before the database opens.
     let database = match resolved.db.as_deref() {
         Some(name) => {
-            let taxids = args.taxid_filter.resolve(&settings, outputs.diagnostics)?;
+            let list = args.db_filter.resolve(&settings, outputs.diagnostics)?;
             Some(
                 database::BlastpDatabase::open_restricted(
                     name,
                     &settings,
                     args.app == BlastpApp::Blastp,
-                    taxids.as_ref(),
+                    list.as_ref(),
                     outputs.diagnostics,
                 )?
                 .showing_gis(args.show_gis),
@@ -8081,11 +8081,12 @@ fn run_resolved_in_pool(
     // ```
     // A database answers `BLAST_SEQSRC_MINLENGTH` (10) for its shortest sequence (an
     // index file stores none, and the alias key `MIN_SEQ_LENGTH` is rejected by the
-    // reader), whatever its sequences are; a FASTA subject set answers its real minimum,
+    // reader), whatever its sequences are, unless a list made NCBI scan its totals (then
+    // the scanned shortest length, line DI-8); a FASTA subject set answers its real minimum,
     // raised to 10.
     let cutoff_subject_length = match database {
         None => blastp_preliminary_cutoff_subject_length(&subjects),
-        Some(_) => database::BLAST_SEQSRC_MINLENGTH,
+        Some(database) => database.cutoff_subject_length(),
     };
     let hit_cutoff_scores: Vec<i32> = contexts
         .iter()
@@ -12144,7 +12145,7 @@ mod tests {
             query: PathBuf::from("query.faa"),
             subject: Some(PathBuf::from("subject.faa")),
             db: None,
-            taxid_filter: Default::default(),
+            db_filter: Default::default(),
             dbsize: None,
             show_gis: false,
             parse_deflines: false,

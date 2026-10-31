@@ -322,7 +322,7 @@ impl PsiblastArgs {
             subject: self.subject,
             db: self.db,
             // PSIBLAST's parser refuses the taxid options (line DI-8 ported them to BLASTP).
-            taxid_filter: Default::default(),
+            db_filter: Default::default(),
             dbsize: self.dbsize,
             show_gis: false,
             parse_deflines: false,

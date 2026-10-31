@@ -231,6 +231,14 @@ use std::ops::RangeInclusive;
 /// branch-free candidate loop, `blastx/x_seed_scan.rs`) graduated on 2026-10-26: it left
 /// `STRICT_SET` and the scan on the presence test was deleted (the compressed lookup table keeps
 /// its own scan, a rule of the table and not a switch).
+/// `LOSAT_X_BNLUTDROP` (a query batch's lookup tables dropped when its preliminary stage ends,
+/// `blastn/blast_engine/x_lut_drop.rs`), `LOSAT_X_BNUNGAPCOUNT` (the exact ungapped extension with
+/// its step counts worked out first, `blastn/x_ungap_count.rs`) and `LOSAT_X_CTXO1` (the query
+/// context of a lookup hit in constant time, `blastn/blast_engine/x_ctx_o1.rs`) graduated on
+/// 2026-10-27: they left `STRICT_SET` and their previous code was deleted (the loop-for-loop port
+/// of the exact extension stays as the reference of a unit test, and the binary search over the
+/// contexts still answers where the layout does not allow the constant-time form, a rule of the
+/// layout and not a switch).
 /// `LOSAT_X_BXDBSTREAM` (BLASTX's `-db` read in blocks where it is searched, with the block size
 /// as its value, `blastx/x_db_stream.rs`), `LOSAT_X_BXEVALEMPTY` (a subject without HSPs gets its
 /// empty list at once in the gapped evaluation, `blastx/statistics.rs`) and `LOSAT_X_BXLUTPOOL`
@@ -266,7 +274,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNFEWSUBJ",
     "LOSAT_X_BNHITGROUP",
     "LOSAT_X_BNHLGROW",
-    "LOSAT_X_BNLUTDROP",
     "LOSAT_X_BNMAPPED",
     "LOSAT_X_BNPVONCE",
     "LOSAT_X_BNQDROP",
@@ -276,7 +283,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNSTREAM",
     "LOSAT_X_BNTABPAR",
     "LOSAT_X_BNTBRANGE",
-    "LOSAT_X_BNUNGAPCOUNT",
     "LOSAT_X_BPCLUT",
     "LOSAT_X_BPCLUTSCANBF",
     "LOSAT_X_BPDBCUT",
@@ -329,7 +335,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXTASKRES",
     "LOSAT_X_BXUNGAPSENT",
     "LOSAT_X_BXUNITCAP",
-    "LOSAT_X_CTXO1",
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
     "LOSAT_X_DCSEEDLEAN",

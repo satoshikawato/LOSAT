@@ -29,9 +29,17 @@
 // Each atomic instruction becomes a call of a helper with the same bound check as the bulk
 // helpers, one helper per opcode and memarg, whose only effect is that refresh (on V8 the
 // helper's entry stack check usually handles the interrupt first; the compare does not depend
-// on that). The instruction itself runs unchanged, once. V8 bounds checks plain multi-byte
-// stores the same way on ARM64 outside macOS (compilation-environment.h,
-// kPartialOOBWritesAreNoops); this guard does not cover those.
+// on that). The instruction itself runs unchanged, once.
+//
+// V8 compares plain multi-byte stores too on ARM64 outside macOS, in both tiers
+// (wasm/compilation-environment.h, kPartialOOBWritesAreNoops): real blastp at 16 threads trapped
+// in dlmalloc in 11 and 29 of 100 runs on ubuntu-24.04-arm (Node 26.8.2, 24.21). A module has
+// about 200,000 such stores, too many to wrap. But a thread learns an address in pages that
+// another thread grew only from what that thread wrote, and an atomic read (a lock, or the atomic
+// that published the address) is what orders the two. So memory.grow also raises GROWN_PAGES,
+// before the grower can publish anything, and each atomic instruction that reads memory compares
+// memory.size with GROWN_PAGES afterwards: smaller means that this instance's bound is stale, and
+// memory.grow(0) refreshes it before the thread goes on.
 //
 // memory.init stays as it is: only __wasm_init_memory (the module's start) and __wasm_init_tls
 // use it, the latter in the spawning thread, called from pthread_create right after the malloc
@@ -51,9 +59,11 @@ const fs = require("node:fs");
 
 const GUARD_SECTION = "losat.shared_memory_guard";
 const GUARD_VERSION = 3;
-// The last memory size that a thread of the guest grew the memory to, in pages (0 = none yet).
-// LLVM leaves addresses below 1024 unused (wasm-ld's global base); a wrong value here costs one
-// more memory.grow(0) or leaves the bound check of the helpers as the only refresh.
+// Address of the largest memory size, in pages, that a thread of the guest grew the memory to
+// (0 = none yet). Addresses below 1024 are unused (wasm-ld's default global base) or, with
+// --stack-first as rustc links this target, the last bytes of the main thread's stack, reached
+// only at the end of an overflow (docs/evidence/wasm_oob_20261101/). A wrong value here costs
+// one more memory.grow(0), or leaves the bound check of the helpers as the only refresh.
 const GROWN_PAGES = 16;
 const WASM_HEADER = Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]);
 
@@ -210,7 +220,7 @@ function signedLeb(value) {
   }
 }
 
-// The instructions that can observe another thread's write: everything but a store and a notify.
+// The atomic instructions that read memory: all but the stores and notify.
 const atomicAcquires = (sub) => sub !== 0 && !(sub >= 0x17 && sub <= 0x1d);
 
 function atomicBody({ sub, align, offset }) {
@@ -236,7 +246,7 @@ function atomicBody({ sub, align, offset }) {
   ]);
 }
 
-// memory.grow, then GROWN_PAGES = max(GROWN_PAGES, memory.size) when it succeeded.
+// The original memory.grow, then GROWN_PAGES = max(GROWN_PAGES, memory.size) when it succeeded.
 const GROW_TYPE = Buffer.from([0x60, 1, 0x7f, 1, 0x7f]);
 function growBody() {
   // (param pages i32) (local old i32) (local seen i32)
@@ -480,7 +490,7 @@ function verifyGuarded(bytes) {
     });
   }
   if (calls[0] !== record.fill || calls[1] !== record.copy || calls[2] !== record.grow || calls[3] !== record.atomic) {
-    throw new Error(`the record counts ${record.fill} fills, ${record.copy} copies and ${record.atomic} atomics, the code calls the helpers ${calls.join(", ")} times`);
+    throw new Error(`the record counts ${record.fill} fills, ${record.copy} copies, ${record.grow} grows and ${record.atomic} atomics, the code calls the helpers ${calls.join(", ")} times`);
   }
   return record;
 }
@@ -500,7 +510,7 @@ function main(argv) {
     const bytes = fs.readFileSync(input);
     const result = guardSharedMemory(bytes);
     if (result.record === null) {
-      throw new Error(`${input}: no memory.fill, memory.copy or atomic instruction to guard (is it a threaded module?)`);
+      throw new Error(`${input}: no memory.fill, memory.copy, memory.grow or atomic instruction to guard (is it a threaded module?)`);
     }
     verifyGuarded(result.bytes);
     const temp = `${output}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`;

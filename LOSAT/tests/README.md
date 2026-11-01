@@ -159,9 +159,15 @@ helper per opcode and memarg. V8's baseline compiler
 [checks each atomic access](https://github.com/nodejs/node/blob/v26.8.2/deps/v8/src/wasm/baseline/liftoff-compiler.cc)
 against the same per-instance bound, where it leaves plain accesses to the trap
 handler: a rayon worker trapped at its first `Stealer::steal`, in `Arc::clone`, on
-memory that existed (1 of 483 runs; `docs/evidence/wasm_oob_20261101/`). A plain
-multi-byte store has the same check on ARM64 outside macOS, and the guard does not
-cover it (the same evidence directory says what was measured there).
+memory that existed (1 of 483 runs; `docs/evidence/wasm_oob_20261101/`).
+
+On ARM64 outside macOS V8 checks plain multi-byte stores against that bound too: real
+blastp at 16 threads trapped in `dlmalloc` in 11 and 29 of 100 runs on `ubuntu-24.04-arm`.
+A module has about 200,000 such stores, so they stay as they are. Instead `memory.grow`
+goes through a helper that records the new size in low memory, and each atomic instruction
+that reads memory (all but the stores and notify) compares `memory.size` with the
+record afterwards and refreshes a stale bound. A thread that takes a lock or reads a
+published address therefore has the new bound before it uses the address.
 
 The build applies the same guard to the threaded artifacts, so that hosts other
 than this runner (browsers) get guarded bytes too (release v0.2.0 DECISIONS 52):

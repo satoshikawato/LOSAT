@@ -443,7 +443,7 @@ test("the host runs an artifact guarded at build time as it is, without a guard 
     const result = runThreaded(built, [], { LOSAT_WASI_GUARD_CACHE: cache, LOSAT_WASI_THREADS_DEBUG: "1" });
     assert.equal(result.status, 3, result.stderr);
     assert.equal(result.stdout, reference.stdout);
-    assert.match(result.stderr, /shared-memory guards: 1 fills, 1 copies, \d+ atomics \(guarded at build time\)/);
+    assert.match(result.stderr, /shared-memory guards: 1 fills, 1 copies, \d+ grows, \d+ atomics \(guarded at build time\)/);
     assert.doesNotMatch(result.stderr, /guard cache (miss|hit|invalid)/);
     assert.equal(fs.existsSync(cache), false);
     // A second run finds no index either (none was written).
@@ -919,13 +919,13 @@ test("LOSAT_WASI_GUARD_CACHE returns the guard's bytes and rebuilds a bad entry"
     for (const [bytes, bulk] of [[spawner(1, { bulk: true }), [1, 1]], [spawner(1), [0, 0]], [nothingToGuard(), [0, 0]]]) {
       const expected = guardSharedMemory(bytes);
       assert.deepEqual([expected.fill, expected.copy], bulk);
-      const guards = expected.fill + expected.copy + expected.atomic;
+      const guards = expected.fill + expected.copy + expected.grow + expected.atomic;
       assert.equal(expected.bytes.equals(bytes), guards === 0);
       const check = (state) => {
         const result = guardSharedMemoryCached(bytes);
         assert.equal(result.cache, state);
         assert.ok(result.bytes.equals(expected.bytes), state);
-        assert.deepEqual([result.fill, result.copy, result.atomic], [expected.fill, expected.copy, expected.atomic], state);
+        assert.deepEqual([result.fill, result.copy, result.grow, result.atomic], [expected.fill, expected.copy, expected.grow, expected.atomic], state);
       };
       check("miss");
       check("hit");

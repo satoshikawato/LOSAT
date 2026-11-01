@@ -326,9 +326,9 @@ function guardSharedMemoryCached(bytes, inputSha256 = sha256(bytes)) {
 // Host diagnostics only (LOSAT_WASI_THREADS_DEBUG): the guard counts of this run, or of the build.
 function guardSummary(guarded) {
   if (guarded.fill + guarded.copy + guarded.grow + guarded.atomic === 0 && guarded.record) {
-    return `shared-memory guards: ${guarded.record.fill} fills, ${guarded.record.copy} copies, ${guarded.record.atomic} atomics (guarded at build time)`;
+    return `shared-memory guards: ${guarded.record.fill} fills, ${guarded.record.copy} copies, ${guarded.record.grow} grows, ${guarded.record.atomic} atomics (guarded at build time)`;
   }
-  return `shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies, ${guarded.atomic} atomics`;
+  return `shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies, ${guarded.grow} grows, ${guarded.atomic} atomics`;
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
@@ -543,7 +543,7 @@ async function prepareThreadHost(wasmPath, kind, compiling = () => {}) {
     const identity = prepareArtifact(indexed.input, kind, indexed.module, indexed.inputSha256).identity;
     freeBytes(indexed.buffer);
     const timings = { read_and_hash_seconds: 0, guard_seconds: 0, guarded_compile_seconds: (performance.now()-start)/1000 };
-    debug(`shared-memory guards: ${indexed.fill} fills, ${indexed.copy} copies, ${indexed.atomic} atomics`);
+    debug(`shared-memory guards: ${indexed.fill} fills, ${indexed.copy} copies, ${indexed.grow} grows, ${indexed.atomic} atomics`);
     const { module } = indexed;
     return { identity, timings, create: (argv = [], options = {}) =>
       instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) };

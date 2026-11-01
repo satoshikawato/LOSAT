@@ -102,7 +102,7 @@ def main():
                                f"the rustflags ask for {expected_maximum}")
         if guard is not None:
             identity["shared_memory_guard"] = {"unguarded_sha256": guard["input_sha256"], "version": guard["version"],
-                                               "fill": guard["fill"], "copy": guard["copy"], "atomic": guard["atomic"],
+                                               "fill": guard["fill"], "copy": guard["copy"], "grow": guard["grow"], "atomic": guard["atomic"],
                                                "atomic_helpers": guard["atomic_helpers"], "guard_sha256": guard["guard_sha256"]}
         recorded[built] = digest(built)
         identity.update(target=triple, features=features, rust=rust, node=json.loads(node),

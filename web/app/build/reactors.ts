@@ -96,7 +96,7 @@ export function findReactors(env: NodeJS.ProcessEnv = process.env): Reactors | u
       bytes: guarded.bytes,
       sha256,
       artifactSha256,
-      transform: `shared-memory guard (${where}: ${guarded.record.fill} fills, ${guarded.record.copy} copies, ${guarded.record.atomic} atomics)`,
+      transform: `shared-memory guard (${where}: ${guarded.record.fill} fills, ${guarded.record.copy} copies, ${guarded.record.grow} grows, ${guarded.record.atomic} atomics)`,
     };
   };
   return { dir, serial: file('serial'), threads: file('threads') };

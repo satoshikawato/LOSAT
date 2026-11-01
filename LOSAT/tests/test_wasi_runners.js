@@ -426,6 +426,83 @@ test("the default guard cache directory follows each platform's convention", () 
   assert.equal(defaultGuardCacheDir({}, "win32"), path.join(home, "AppData", "Local", "losat", "wasi-guard"));
 });
 
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
+// An artifact guarded at build time (`wasi_shared_memory.js guard`) runs as it is: the host
+// does not guard it again and writes nothing to the guard cache.
+test("the host runs an artifact guarded at build time as it is, without a guard cache entry", () => {
+  const { guardSharedMemory } = require("./wasi_shared_memory");
+  const { guardSharedMemoryCached } = require("./wasi_thread_host");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-built-"));
+  try {
+    const bytes = spawner(2, { bulk: true });
+    const built = guardSharedMemory(bytes).bytes;
+    const reference = runThreaded(bytes, [], { LOSAT_WASI_GUARD_CACHE: "0" });
+    assert.equal(reference.status, 3, reference.stderr);
+    const cache = path.join(directory, "cache");
+    const result = runThreaded(built, [], { LOSAT_WASI_GUARD_CACHE: cache, LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(result.status, 3, result.stderr);
+    assert.equal(result.stdout, reference.stdout);
+    assert.match(result.stderr, /shared-memory guards: 1 fills, 1 copies \(guarded at build time\)/);
+    assert.doesNotMatch(result.stderr, /guard cache (miss|hit|invalid)/);
+    assert.equal(fs.existsSync(cache), false);
+    // A second run finds no index either (none was written).
+    const second = runThreaded(built, [], { LOSAT_WASI_GUARD_CACHE: cache, LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(second.stdout, reference.stdout);
+    assert.doesNotMatch(second.stderr, /guard cache index hit/);
+    assert.equal(fs.existsSync(cache), false);
+    const cached = guardSharedMemoryCached(built);
+    assert.deepEqual([cached.cache, cached.bytes, cached.fill, cached.copy], ["guarded", built, 0, 0]);
+    // The variable is checked as for any other module.
+    const invalid = runThreaded(built, [], { LOSAT_WASI_GUARD_CACHE: "" });
+    assert.notEqual(invalid.status, 3);
+    assert.match(invalid.stderr, /LOSAT_WASI_GUARD_CACHE must name a directory or be 0/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// prepareThreadHost frees the module's bytes once the compile has copied them (freeBytes): a view
+// of a whole ArrayBuffer is detached at once; a part of Node's Buffer pool or of a larger buffer
+// is left as it is.
+test("prepareThreadHost frees the buffer of a module guarded at build time", async () => {
+  const { prepareThreadHost } = require("./wasi_thread_host");
+  const { guardSharedMemory } = require("./wasi_shared_memory");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-free-"));
+  const { transfer } = ArrayBuffer.prototype;
+  const saved = process.env.LOSAT_WASI_GUARD_CACHE;
+  const freed = [];
+  try {
+    process.env.LOSAT_WASI_GUARD_CACHE = "0";
+    ArrayBuffer.prototype.transfer = function (...args) { freed.push(this.byteLength); return transfer.apply(this, args); };
+    const file = path.join(directory, "command.wasm");
+    fs.writeFileSync(file, guardSharedMemory(spawner(2, { bulk: true })).bytes);
+    await prepareThreadHost(file, "threaded-command");
+    assert.deepEqual(freed, [33 << 20]);
+  } finally {
+    ArrayBuffer.prototype.transfer = transfer;
+    if (saved === undefined) delete process.env.LOSAT_WASI_GUARD_CACHE; else process.env.LOSAT_WASI_GUARD_CACHE = saved;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("freeBytes frees only a view of a whole ArrayBuffer", () => {
+  const { freeBytes } = require("./wasi_thread_host");
+  const whole = Buffer.allocUnsafeSlow(1 << 20).fill(1);
+  freeBytes(whole);
+  assert.equal(whole.length, 0);
+  assert.equal(whole.buffer.byteLength, 0);
+  freeBytes(whole);
+  const pooled = Buffer.from("abc");
+  assert.ok(pooled.buffer.byteLength > pooled.length);
+  freeBytes(pooled);
+  assert.equal(pooled.toString(), "abc");
+  const part = Buffer.allocUnsafeSlow(4096).fill(2).subarray(0, 100);
+  freeBytes(part);
+  assert.equal(part.length, 100);
+  assert.equal(part.buffer.byteLength, 4096);
+});
+
 test("the guard cache keeps the entries used last", () => {
   const { guardSharedMemoryCached } = require("./wasi_thread_host");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-keep-"));

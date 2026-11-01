@@ -6,8 +6,10 @@ const { inspectArtifact, prepareArtifact, createSharedMemory } = require("./wasi
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Keep the parallel command's memory operations valid across V8 isolates (wasi_shared_memory.js,
-// loaded when a module is guarded here, not when the guard cache has the guarded bytes).
+// loaded when a module is guarded or checked for the build's guard here, not when the guard cache
+// has the guarded bytes).
 const guardSharedMemory = bytes => require("./wasi_shared_memory").guardSharedMemory(bytes);
+const guardRecord = bytes => require("./wasi_shared_memory").guardRecord(bytes);
 // The table of the files the command opens (wasi_files.js).
 const { sharedFileTable, sharedFileViews } = require("./wasi_files");
 // What every thread of the command runs on, and the file that a thread worker loads.
@@ -199,6 +201,16 @@ function readInto(file, into) {
   }
 }
 
+// Frees the memory of `view` at once, not at a garbage collection, which the main thread of a
+// command may not run before it exits. Only a view of a whole ArrayBuffer is freed (never a part
+// of Node's Buffer pool); the ArrayBuffer is detached (ArrayBuffer.prototype.transfer), and a
+// later read of the view sees 0 bytes.
+function freeBytes(view) {
+  const buffer = view.buffer;
+  if (view.byteOffset === 0 && view.byteLength === buffer.byteLength && buffer.byteLength > 0
+    && typeof buffer.transfer === "function") buffer.transfer(0);
+}
+
 function writeAtomic(file, data) {
   const temp = `${file}.${process.pid}.${crypto().randomBytes(6).toString("hex")}.tmp`;
   try {
@@ -268,6 +280,9 @@ function guardCacheDir() {
 function guardSharedMemoryCached(bytes, inputSha256 = sha256(bytes)) {
   const named = process.env.LOSAT_WASI_GUARD_CACHE;
   const dir = guardCacheDir();
+  // An artifact guarded at build time (`wasi_shared_memory.js guard`) runs as it is: there is
+  // nothing to compute, and nothing is written to the cache.
+  if (guardRecord(bytes) !== null) return { ...guardSharedMemory(bytes), cache: "guarded" };
   if (dir === null) return { ...guardSharedMemory(bytes), cache: "off" };
   // The default directory may be unusable (no home, read-only, a file in the way).
   const unusable = (err) => {
@@ -308,6 +323,16 @@ function guardSharedMemoryCached(bytes, inputSha256 = sha256(bytes)) {
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
+// Host diagnostics only (LOSAT_WASI_THREADS_DEBUG): the guard counts of this run, or of the build.
+function guardSummary(guarded) {
+  if (guarded.fill + guarded.copy === 0 && guarded.record) {
+    return `shared-memory guards: ${guarded.record.fill} fills, ${guarded.record.copy} copies (guarded at build time)`;
+  }
+  return `shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies`;
+}
+
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
 // Host-only (LOSAT_WASI_GUARD_CACHE): the cache's index. An entry is named by the SHA-256 of the
 // input, so finding it reads and hashes the whole input before the compile can start, and the
 // hit then hashes the cached bytes too (the 9-10 MB command: about 40 ms on ws, where the compile
@@ -340,9 +365,20 @@ function writeGuardIndex(stat, inputSha256) {
   }
 }
 
-// The module compiled from the cached guarded bytes that the input's index names, with the input
-// and its SHA-256, or null when there is no index, no entry, or a check fails. `compileStarted`
-// runs once the compile has started (createThreadHost's early workers).
+// The buffer that compileIndexedGuard reads the module into is freed once the compile has copied
+// the bytes (V8 keeps its own copy with the module) and the identity is read; it used to stay to
+// the end of a command (10 MB of RSS). It is at least 33 MiB, of which only the module's pages
+// are touched: glibc's free() of a mapped block of up to 32 MiB raises the mmap threshold to that
+// size, and later blocks below it come from the arenas and stay there once freed. On ws (16
+// threads on 4 CPUs, 2 runs each) the peak RSS of a blastx, blastp, megablast and tblastx command
+// rose by 7, 12, 22 and 30 MiB with a 10 MB buffer freed, and fell by 9, 11 and 13 MiB (tblastx:
+// within its spread) with the buffer at 33 MiB.
+const INDEX_BUFFER_BYTES = 33 << 20;
+
+// The module compiled from the cached guarded bytes that the input's index names, with the input,
+// the buffer it was read into (INDEX_BUFFER_BYTES) and its SHA-256, or null when there is no
+// index, no entry, or a check fails. `compileStarted` runs once the compile has started
+// (createThreadHost's early workers).
 async function compileIndexedGuard(wasmPath, compileStarted) {
   let dir, stat, index, stem, record, buffer, cached;
   try {
@@ -359,7 +395,7 @@ async function compileIndexedGuard(wasmPath, compileStarted) {
       || record.output_bytes > 2 * Number(stat.size) + 65536) return null;
     // One buffer for the cached bytes and then the input: V8 copies the bytes when the compile
     // starts, and a new 10 MB buffer costs its page faults (about 6 ms on ws).
-    buffer = Buffer.allocUnsafe(Math.max(record.output_bytes, Number(stat.size)));
+    buffer = Buffer.allocUnsafeSlow(Math.max(record.output_bytes, Number(stat.size), INDEX_BUFFER_BYTES));
     cached = readInto(`${stem}.wasm`, buffer);
   } catch (err) {
     debug(`guard cache index not used (${err.message})`);
@@ -396,7 +432,7 @@ async function compileIndexedGuard(wasmPath, compileStarted) {
     fs.utimesSync(guardIndexFile(dir, stat), now, now);
   } catch { /* only the order of pruning */ }
   debug(`guard cache index hit: ${stem}.wasm`);
-  return { module, input, inputSha256, fill: record.fill, copy: record.copy };
+  return { module, buffer, input, inputSha256, fill: record.fill, copy: record.copy };
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
@@ -405,7 +441,7 @@ async function compileIndexedGuard(wasmPath, compileStarted) {
 // compilation. Workers normally receive this already compiled module.
 async function compileThreadedModule(wasmPath) {
   const guarded = guardSharedMemory(fs.readFileSync(wasmPath));
-  debug(`shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies`);
+  debug(guardSummary(guarded));
   return WebAssembly.compile(guarded.bytes);
 }
 
@@ -505,15 +541,19 @@ async function prepareThreadHost(wasmPath, kind, compiling = () => {}) {
   const indexed = await compileIndexedGuard(wasmPath, compileStarted);
   if (indexed) {
     const identity = prepareArtifact(indexed.input, kind, indexed.module, indexed.inputSha256).identity;
+    freeBytes(indexed.buffer);
     const timings = { read_and_hash_seconds: 0, guard_seconds: 0, guarded_compile_seconds: (performance.now()-start)/1000 };
     debug(`shared-memory guards: ${indexed.fill} fills, ${indexed.copy} copies`);
     const { module } = indexed;
     return { identity, timings, create: (argv = [], options = {}) =>
       instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) };
   }
-  const bytes = fs.readFileSync(wasmPath);
   let stat = null;
   try { stat = fs.statSync(wasmPath, { bigint: true }); } catch { /* no index for this run */ }
+  // Freed below, as in compileIndexedGuard (INDEX_BUFFER_BYTES). An artifact guarded at build
+  // time never has an index, so this is the path by which it keeps none of its bytes.
+  const buffer = stat === null ? fs.readFileSync(wasmPath) : Buffer.allocUnsafeSlow(Math.max(Number(stat.size), INDEX_BUFFER_BYTES));
+  const bytes = stat === null ? buffer : readInto(wasmPath, buffer);
   // One compile: the identity (imports, exports) is read from the guarded module, whose imports
   // and exports are the input's (the guard rewrites only memory.fill and memory.copy), instead of
   // compiling the input too (about 40 ms for the 9 MB command). An input that cannot be guarded
@@ -532,10 +572,12 @@ async function prepareThreadHost(wasmPath, kind, compiling = () => {}) {
     throw err;
   }
   const identity = prepareArtifact(bytes, kind, module, inputSha256).identity;
-  if (guarded.cache !== "off") writeGuardIndex(stat, inputSha256);
+  freeBytes(buffer);
+  // An artifact guarded at build time has no cache entry for an index to name.
+  if (guarded.cache !== "off" && guarded.cache !== "guarded") writeGuardIndex(stat, inputSha256);
   const timings = { read_and_hash_seconds: (inspected-start)/1000, guard_seconds: (guardedAt-inspected)/1000,
     guarded_compile_seconds: (performance.now()-guardedAt)/1000 };
-  debug(`shared-memory guards: ${guarded.fill} fills, ${guarded.copy} copies`);
+  debug(guardSummary(guarded));
   return { identity, timings, create: (argv = [], options = {}) =>
     instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) };
 }
@@ -777,4 +819,4 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     },
   };
 }
-module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir };
+module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir, freeBytes };

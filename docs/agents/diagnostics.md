@@ -354,6 +354,7 @@ export LOSAT_X_BPREDOPAR=1
 export LOSAT_X_BPSEGWIN=4096
 export LOSAT_X_BPSTRIPEFILL=1
 export LOSAT_X_BPSUBJRUN=1
+export LOSAT_X_BPTREECELLS=1
 export LOSAT_X_BPUNGAPSENT=1
 export LOSAT_X_BXBUILDPAR=1
 export LOSAT_X_BXCAPFILL=4
@@ -399,6 +400,7 @@ export LOSAT_X_MBHITPF=1
 export LOSAT_X_MBLUTKEEP=1
 export LOSAT_X_MBLUTONCE=1
 export LOSAT_X_MBLUTPREFAULT=1
+export LOSAT_X_NEWTONBATCH=1
 export LOSAT_X_NEWTONDROP=1
 export LOSAT_X_PAIRPARDISC=1
 export LOSAT_X_PAIRPARDISCARR=1
@@ -1907,6 +1909,37 @@ Rebuilding less:
   (`=0` x0.9984); 16 threads (node 1 CPUs 32-47 warmed 3 s, 8 rounds) Swiss-Prot q100 instructions x1.0005, cycles
   x0.9980 (8 of 8 below 1; `=0` x0.9963), wall x0.9966; human instructions x1.0003, cycles x0.9972 (`=0` x0.9966), wall
   x0.9956.
+- `LOSAT_X_BPTREECELLS=1` (BLASTP, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
+  added it (perf/bp-tree-cells, v4-D12 s28): on unless it is `0`) the grid index of blastp's preliminary interval tree
+  takes at most 1 << 14 cells per subject (`X_BP_TREE_MAX_CELLS` in `blastp/blast_engine.rs`, through
+  `BlastIntervalTree::reset_with_bounds_cells`) instead of the tree's own limit of 1 << 16 (`X_MAX_CELLS` in
+  `blastn/interval_tree.rs`; blastn keeps it through the unchanged `reset_with_bounds`). The grid is LOSAT's side index
+  of the tree (ITREEFAST); NCBI walks the tree (`BlastIntervalTreeContainsHSP`, `blast_itree.c`) and has no grid. The
+  subject scratch keeps the tree, and the grid's per-cell heads (4 bytes each) stay as large as the largest grid the
+  thread has needed, so the limit bounds them at 64 KiB per thread instead of 256 KiB. A grid that would exceed the
+  limit gets cells twice as wide in both offsets, as often as needed; the cell of a start point still lists every leaf
+  whose box holds that point, and the unchanged predicate tests them, so the index answers as before (lib test
+  `x_side_indexes_agree_with_tree_walk_on_random_hsps` runs the grid at 1 << 16, 1 << 14 and 64 cells against the walk).
+  Subjects whose grid had fewer than 1 << 14 cells keep the same grid (probe exp/d12s27-tree-hist, 8 threads, subjects
+  with HSPs: human x `BlastDBSpecies6` 89.6 %, Swiss-Prot q100 98.0 %, UniRef50 q100 `-evalue 0.001` 87.95 %, q100
+  against a third of UniRef50 100 %). Every report is unchanged.
+  Evidence 2026-11-01 (v4-D12 s28, workstation, head b20c3448 on dev b94e9844f; arms default, `=0`, and the dev base
+  built the same way, rotated, peak RssAnon from 2 ms samples; every report identical across arms): UniRef50 q100
+  `-evalue 0.001` at 32 threads (node 1, membind 1, 8 rounds) 118.5 [116.2-119.9] MiB against the dev base 130.8
+  [128.9-133.7] and `=0` 130.2 [128.6-133.2] (11.4-14.4 MiB lower in 8 of 8 rounds; wall x0.9973 [0.9926-1.0051]); q100
+  against a third of UniRef50 at 16 threads (two runs side by side, 12 slots, no subject with HSPs above the limit in the
+  probe): the highest sample of the preliminary plateau (30-110 s) 39.9 [39.8-40.1] against 39.9 [39.9-40.0] and `=0` 40.0
+  [39.9-40.2], and the peak 69.6 [63.1-73.9] against 71.2 [63.9-86.0] and `=0` 69.5 [60.4-78.5], so no effect shows; 3,000 human x
+  `BlastDBSpecies6` at 16 threads (8 rounds) 35.5 [35.3-35.6] against 37.7 [37.2-38.3] and `=0` 37.5 [37.2-37.9]
+  (1.7-3.0 MiB lower in 8 of 8); one thread (node 0, 8 rounds) human 12.9 against 13.0, OrthoFinder Blast0_6 19.1
+  against 19.3 MiB (8 of 8 lower in both).
+  Time: one thread (`perf stat` `:u`, node 0, 8 rounds) instructions human x0.99997 of the dev base (`=0` x1.00000),
+  Blast0_6 x0.99999 (`=0` x1.00001), cycles human x0.9943 (`=0` x0.9941), Blast0_6 x0.9985 (`=0` x0.9982); 16 threads
+  (node 1 CPUs 32-47 warmed 3 s, 8 rounds) Swiss-Prot q100 instructions x1.0000, cycles x0.9961 (`=0` x0.9964), wall
+  x0.9949; human instructions x0.99997, cycles x0.9966 (`=0` x0.9962), wall x0.9955. blastn's machine code does not
+  change: the 729 functions of the two binaries named for blastn or the tree disassemble alike with addresses
+  normalized (only a blastp closure and 3 `OnceLock` helpers differ); megablast Sakai x MG1655 at one thread: instructions
+  within 1,200 of 4.52 G (the run-to-run spread).
 - `LOSAT_X_BPLK16=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-lk16, v4-D12 s19-s20,
   `DECISIONS` 59-61): on unless it is `0`; recorded for `LOSAT_X_REACH` once per table, taken where the table has 16-bit
   hits): exact blastp's block tables (`-task blastp`, the table built
@@ -5425,6 +5458,39 @@ Scheduling (each value computed by one thread with the original function; order 
   `=0` in the PR's binary): AP027131 `-subject` at 1 / 16 / 32 threads x0.9992 / x1.0000 / x0.9956 (8, 6, 7 of 12
   faster), against `=0` x0.9992 / x1.0000 / x1.0043; `dmel_b4.faa` at 1 / 8 / 16 / 32 x0.9998 / x0.9989 / x1.0006 /
   x1.0011 (5 of 8, 7, 5, 5 of 12 faster), against `=0` x0.9984 / x0.9983 / x0.9986 / x0.9989.
+- `LOSAT_X_NEWTONBATCH=1` blastp, tblastn (memory; in the strict set from the pull request that added it, 2026-11-01;
+  `=0` turns it off; `core/composition_adjustment/x_newton_lanes.rs` `prefetch` / `take`): with NEWTONDROP the results
+  a thread solved ahead are the ones of its last prefetch only, so a prefetch keeps them in the input and output
+  vectors they were solved in (one batch a thread; `take` searches it from the first result not taken, and the batch
+  goes when its last result is taken or at the next prefetch) instead of copying each into a box of the store (6,736
+  bytes a result). The copies held the caller's inputs, the outputs and the boxes at once at the end of every prefetch
+  (about 13.2 KiB a problem; TBLASTN's redo solves the problems of the coming windows of a match until 32 or more are
+  gathered), and this transient set the high water of most threads' heaps in the redo. The results taken are the
+  same (`[X_STATS] NEWTONLANES prefetched= hits= misses=` and `[X_STATS] NEWTONDROP dropped=` equal with and without
+  the switch, unless one prefetch solves more than the 512 results the store holds: the store keeps the last 512 of
+  them, the batch all, and more are taken; `[X_STATS] NEWTONBATCH kept=` counts the prefetches kept as their batch);
+  with `LOSAT_X_NEWTONDROP=0` the results are stored (the batch holds one prefetch). The search of the batch and its comparison of an input are
+  functions of their own: inlined into `composition_matrix_adjust` they changed its code on every path (one-thread
+  instructions x1.001 with the switch off), and the comparison inlined into the search kept the index of its loop
+  over `q` on the stack (twice the instructions of the store's search). Unit tests
+  `x_newton_batch_gives_each_result_once_and_goes_when_all_are_taken` (any order, a repeated input, the store empty,
+  the batch gone with its last result) and `x_newton_drop_empties_the_store_at_the_next_prefetch` (both forms in one
+  process); `tests/tblastn_newton_drop.rs`: the same report as `=0` at one and four threads, the same counts of
+  results solved ahead, taken and dropped, batches kept by default and none with `=0` or `LOSAT_X_NEWTONDROP=0`.
+  Always: every prefetch (where NEWTONLANES runs, with NEWTONDROP).
+  Measured 2026-11-01 on the workstation (2x Xeon Gold 6338; base dev 7a835d1f; every output of a case the same
+  bytes in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16
+  CPUs for every run, medians in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): `dmel_b4.faa` x zebrafish
+  cDNAs (`-db`, `-evalue 1e-5 -max_target_seqs 5`) at 16 / 32 / 40 / 48 threads 55 / 84 / 96 / 110 -> 54 / 81 / 92 /
+  106 MiB (x0.981 / x0.966 / x0.959 / x0.963, 16 rounds, lower in 13, 15, 16, 16; NCBI 128 / 139 / 145 / 151); the
+  595 proteins of AP027131 x AP027133 (`-db_gencode 4`) `-subject` at 1 / 16 / 32 / 40 / 48 x0.998 / x0.992 / x1.002 /
+  x1.002 / x0.989 (8 rounds; 74 MiB at 48, NCBI 81 at one thread), `-db` at 48 x0.994 (93 MiB, NCBI 114); BLASTP WSSV
+  x PajaWSV `-subject` at 16 x0.992; `=0` in the same binary x0.999-1.005 of the base. At one thread x0.99922 of the
+  instructions (AP027131 `-subject`) and x0.99999 (`dmel_b4.faa`); BLASTP x0.99960, BLASTX and TBLASTX x1.00000.
+  Time (node 1, cores warmed 3 s before each run, arms alternating in order; the PR's binary against the base, and
+  `=0` in the PR's binary): AP027131 `-subject` at 1 / 16 / 32 threads x0.9954 / x0.9942 / x0.9941 (12, 6, 8 of 12
+  faster), against `=0` x0.9961 / x0.9986 / x1.0015; `dmel_b4.faa` at 1 / 8 / 16 / 32 x0.9992 / x0.9984 / x1.0008 /
+  x0.9992 (5 of 8, 10, 6, 6 of 12 faster), against `=0` x1.0003 / x0.9999 / x1.0001 / x1.0004.
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list
@@ -6609,7 +6675,7 @@ Scheduling (each value computed by one thread with the original function; order 
   and no `[X_SHADOW] TBNDBSTREAM` line; always on; every `-db` search) (TBLASTN `-db`, memory): the search reads each
   database sequence where it searches it instead of the copy of
   the whole database that `TblastnDatabase::read_stores` made before the first query batch (`read_stores` is deleted;
-  `common::database::read_nucleotide_stores` stays for TBLASTX; `tblastn/x_db_stream.rs`, exactness argument in its header). The database is checked once before the first batch
+  `common::database::read_nucleotide_stores` stays for TBLASTX; `common/x_db_stream.rs`, exactness argument in its header). The database is checked once before the first batch
   with the blocks and checks of the copy (`common::database::x_check_nucleotide_stores`: the same error fails the
   same batch with the same text; a block of one sequence, a long one, is checked from its last 2-bit byte and its
   ambiguity data, `SeqDb::x_nucleotide_check`) and only the lengths of its sequences are kept. The preliminary search reads a

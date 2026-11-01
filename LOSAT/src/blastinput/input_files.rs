@@ -209,7 +209,15 @@ pub fn write_empty_subject_warnings_by_length(
 ) -> std::io::Result<()> {
     for (index, record) in records.iter().enumerate() {
         if length(index) == 0 {
-            let mut warning = format!("Warning: [{program}] Subject_{} ", index + 1).into_bytes();
+            let mut warning = match record.believed() {
+                Some(ids) => {
+                    let mut warning = format!("Warning: [{program}] ").into_bytes();
+                    warning.extend_from_slice(&ids.warning_id);
+                    warning.push(b' ');
+                    warning
+                }
+                None => format!("Warning: [{program}] Subject_{} ", index + 1).into_bytes(),
+            };
             warning.extend_from_slice(&record.title);
             warning.extend_from_slice(b": Subject sequence contains no data\n");
             diagnostics.write_all(&warning)?;

@@ -657,7 +657,7 @@ fn open<'a>(
 ) -> Result<&'a SeqDb, ListStop> {
     if opened.is_none() {
         let name = String::from_utf8_lossy(&db.quoted).into_owned();
-        *opened = Some(SeqDb::open_in(&name, db.seqtype, path)?);
+        *opened = Some(SeqDb::open_in_with_masks(&name, db.seqtype, path)?);
     }
     Ok(opened.as_ref().expect("opened above"))
 }

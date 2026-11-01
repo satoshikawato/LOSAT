@@ -116,6 +116,17 @@ impl BelievedIds {
         })
     }
 
+    /// Whether these are the ids of a `-subject` record that the reports show as a record without
+    /// `-parse_deflines` shows (a local id `Subject_N`, written or generated): the branch of
+    /// `CShowBlastDefline::GetSeqIdList` on `lcl|Subject_` puts the first word of the title in its
+    /// place. A `gnl|BL_ORD_ID|n` subject takes that branch too, and `duplicate_id` refuses it.
+    pub(crate) fn subject_local(&self) -> bool {
+        matches!(
+            self.ids.as_slice(),
+            [ParsedSeqId::Local(ObjectId::Str(name))] if name.starts_with(b"Subject_")
+        )
+    }
+
     pub(crate) fn bare_id(&self) -> String {
         let mut out = Vec::new();
         if let Some(id) = find_best(&self.ids, text_score) {
@@ -125,8 +136,12 @@ impl BelievedIds {
     }
 }
 
-/// The keys of every query id read in this process under `-parse_deflines`.
+/// The keys of every query id read in this process under `-parse_deflines` (`scope_keys`, and
+/// `version_keys`' own key).
 static QUERY_KEYS: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
+
+/// `QUERY_KEYS` of the `-subject` records.
+static SUBJECT_KEYS: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
 
 /// Whether a query was read under `-parse_deflines`.
 pub(crate) fn query_keys_kept() -> bool {
@@ -235,8 +250,11 @@ pub(crate) fn parse_believed_defline(
     })
 }
 
-/// LOSAT's refusal of the ids of a record, or `None`: a `gnl|BL_ORD_ID|n` id, and an id that a
-/// query or a subject read before has. Adds the keys of the ids.
+/// LOSAT's refusal of the ids of a record, or `None`: a `gnl|BL_ORD_ID|n` id, an id that a record
+/// of the role read before has, and an id that a record of the other role has (a query and a
+/// subject: `dropin-survey-20261029/DI7/DECISIONS.md` 12). An accession with a version and the
+/// same accession without one count as one id for two subjects, a query and a subject, and in
+/// BLASTN two queries (DECISIONS 11, 12). Adds the keys of the ids.
 pub(crate) fn duplicate_id(
     ids: &[ParsedSeqId],
     seen: &mut HashSet<u64>,
@@ -262,21 +280,33 @@ pub(crate) fn duplicate_id(
         keys.clear();
         scope_keys(id, &mut keys);
         if keys.iter().any(|key| seen.contains(key)) {
-            return Some(anyhow::anyhow!(
-                "two {role} records have the Seq-id {} under -parse_deflines (in one query batch \
-                 NCBI BLAST+ searches the letters of the first for both); this is not supported \
-                 by LOSAT's {program}",
-                fasta(id)
-            ));
+            return Some(if role == "query" {
+                anyhow::anyhow!(
+                    "two query records have the Seq-id {} under -parse_deflines (in one query \
+                     batch NCBI BLAST+ searches the letters of the first for both); this is not \
+                     supported by LOSAT's {program}",
+                    fasta(id)
+                )
+            } else {
+                anyhow::anyhow!(
+                    "two subject records have the Seq-id {} under -parse_deflines (NCBI BLAST+ \
+                     shows the first for both); this is not supported by LOSAT's {program}",
+                    fasta(id)
+                )
+            });
         }
         seen.extend(keys.iter().copied());
-        if program == "BLASTN" {
+        if program == "BLASTN" || role == "subject" {
             if let Some((own, other)) = version_keys(id) {
                 if seen.contains(&other) {
+                    let why = if role == "query" {
+                        "NCBI BLAST+'s BLASTN writes a warning of its scope"
+                    } else {
+                        "NCBI BLAST+ shows them as one sequence"
+                    };
                     return Some(anyhow::anyhow!(
-                        "two query records have the accession of {} with and without a version \
-                         under -parse_deflines (NCBI BLAST+'s BLASTN writes a warning of its \
-                         scope); this is not supported by LOSAT's BLASTN",
+                        "two {role} records have the accession of {} with and without a version \
+                         under -parse_deflines ({why}); this is not supported by LOSAT's {program}",
                         fasta(id)
                     ));
                 }
@@ -285,14 +315,53 @@ pub(crate) fn duplicate_id(
         }
     }
     // A unit test's ids must not reach the searches of the other tests of the process.
-    if role == "query" && !cfg!(test) {
-        let shared = QUERY_KEYS.get_or_init(|| Mutex::new(HashSet::new()));
-        let mut shared = shared.lock().unwrap_or_else(|error| error.into_inner());
-        for id in ids {
-            keys.clear();
-            scope_keys(id, &mut keys);
-            shared.extend(keys.iter().copied());
+    if cfg!(test) {
+        return None;
+    }
+    // The two sets are always locked in one order (queries, then subjects).
+    let lock = |keys: &'static OnceLock<Mutex<HashSet<u64>>>| {
+        keys.get_or_init(Mutex::default)
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    };
+    let mut queries = lock(&QUERY_KEYS);
+    let mut subjects = lock(&SUBJECT_KEYS);
+    if role == "query" {
+        shared_with_other_role(ids, &mut queries, &subjects, program)
+    } else {
+        shared_with_other_role(ids, &mut subjects, &queries, program)
+    }
+}
+
+/// LOSAT's refusal of ids `ids` of a record when a record of the other role has one of them
+/// (`other`: its `scope_keys` and `version_keys`' own keys), or `None`; adds the keys of `ids` to
+/// `own`. NCBI keeps queries and subjects in one scope: a subject with the id of a query is shown
+/// with the query's title, and a record given as both shows the query's masks at the subject's
+/// places (probe `DI7/ws/pd_sub.py`, 2026-11-01).
+fn shared_with_other_role(
+    ids: &[ParsedSeqId],
+    own: &mut HashSet<u64>,
+    other: &HashSet<u64>,
+    program: &str,
+) -> Option<anyhow::Error> {
+    let mut keys = Vec::new();
+    for id in ids {
+        keys.clear();
+        scope_keys(id, &mut keys);
+        let versions = version_keys(id);
+        if keys.iter().any(|key| other.contains(key))
+            || versions.is_some_and(|(_, kind)| other.contains(&kind))
+        {
+            let mut fasta = Vec::new();
+            label::fasta(id, &mut fasta);
+            return Some(anyhow::anyhow!(
+                "a query and a subject record have the Seq-id {} under -parse_deflines (NCBI \
+                 BLAST+ shows them as one sequence); this is not supported by LOSAT's {program}",
+                String::from_utf8_lossy(&fasta)
+            ));
         }
+        own.extend(keys.iter().copied());
+        own.extend(versions.map(|(kind, _)| kind));
     }
     None
 }
@@ -413,18 +482,6 @@ pub(crate) fn refuse_range_in_archive(role: &str, program: &str) -> anyhow::Erro
         "a {role} Seq-id with a range under -parse_deflines in the BLAST archive is not supported \
          by LOSAT's {program}"
     )
-}
-
-/// LOSAT's refusal of `-parse_deflines` with `-subject` (`program` names the program).
-pub fn refuse_with_subject(
-    parse_deflines: bool,
-    subject: bool,
-    program: &str,
-) -> anyhow::Result<()> {
-    if parse_deflines && subject {
-        anyhow::bail!("-parse_deflines with -subject is not supported by LOSAT's {program}");
-    }
-    Ok(())
 }
 
 /// The local id `id_prefix` + `n` that `GenerateID` makes for a record without ids.
@@ -639,10 +696,61 @@ mod tests {
         assert_eq!((loc.from, loc.to), (2, 5));
     }
 
+    // A query and a subject share no id, nor one accession with and without a version
+    // (`shared_with_other_role`, DECISIONS 12).
     #[test]
-    fn subject_with_the_option_is_refused() {
-        assert!(refuse_with_subject(true, true, "BLASTN").is_err());
-        assert!(refuse_with_subject(true, false, "BLASTN").is_ok());
-        assert!(refuse_with_subject(false, true, "BLASTN").is_ok());
+    fn a_query_and_a_subject_do_not_share_an_id() {
+        let ids = |text: &str| {
+            read(format!(">{text} t\nACGT\n").as_bytes(), false).unwrap()[0]
+                .believed()
+                .unwrap()
+                .ids
+                .clone()
+        };
+        let mut queries = HashSet::new();
+        let mut subjects = HashSet::new();
+        for query in ["q1", "NM_000001", "ref|NM_000002.1|"] {
+            assert!(
+                shared_with_other_role(&ids(query), &mut queries, &subjects, "BLASTN").is_none()
+            );
+        }
+        for (subject, refused) in [
+            ("s1", false),
+            ("NM_000002.2", false),
+            ("lcl|q1", true),
+            ("NM_000001.1", true),
+            ("NM_000002", true),
+            ("NM_000002.1", true),
+        ] {
+            let refusal = shared_with_other_role(&ids(subject), &mut subjects, &queries, "BLASTN");
+            assert_eq!(refusal.is_some(), refused, "{subject}");
+        }
+    }
+
+    // NCBI BLAST+ 2.17.0 (probe `DI7/ws/pd_sub.py` `subjname`, `noid`): a `-subject` record with a
+    // local id `Subject_N`, written or generated, is shown as one read without the option.
+    #[test]
+    fn subject_local_ids_are_shown_as_records() {
+        for (defline, local) in [
+            (&b">lcl|Subject_1 x"[..], true),
+            (b">Subject_x x", true),
+            (b">", true),
+            (b">Subjectx x", false),
+            (b">plain1 x", false),
+            (b">NM_000003.1 x", false),
+        ] {
+            let mut fasta = defline.to_vec();
+            fasta.extend_from_slice(b"\nACGT\n");
+            let config = ReaderConfig::subject("BLASTN", false, false).with_parse_deflines(true);
+            let mut source = FastaInputSource::from_bytes(&fasta, config);
+            let records = read_all(&mut source, &mut |_| Ok(())).unwrap();
+            let ids = records[0].believed().unwrap();
+            assert_eq!(
+                ids.subject_local(),
+                local,
+                "{}",
+                String::from_utf8_lossy(defline)
+            );
+        }
     }
 }

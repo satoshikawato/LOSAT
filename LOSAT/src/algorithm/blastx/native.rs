@@ -399,7 +399,11 @@ fn run_inner(
     let x_t_read_fasta = crate::utils::xtiming::clock();
     let subjects = match subject_file {
         Some(subject_file) => parse_fasta_stream_keeping(
-            &mut FastaStream::from_file(subject_file),
+            &mut {
+                let mut stream = FastaStream::from_file(subject_file);
+                stream.parse_deflines = args.parse_deflines;
+                stream
+            },
             true,
             args.lcase_masking,
             usize::MAX,
@@ -655,11 +659,6 @@ fn run_inner(
     // The prescan of the titles of outfmt 11 (below) reads the query file a second time: whether it
     // is a regular file is decided here, on the handle already open, before any second open.
     let query_is_regular = args.query.as_os_str() != "-" && archive::query_is_regular(&query_file);
-    crate::blastinput::fasta_reader::believed::refuse_with_subject(
-        args.parse_deflines,
-        args.subject.is_some(),
-        "BLASTX",
-    )?;
     let mut query_stream = FastaStream::from_file(query_file);
     query_stream.parse_deflines = args.parse_deflines;
     query_stream.strand = crate::report::archive::bioseq::SeqLocStrand::of_option(&args.strand);
@@ -726,7 +725,8 @@ fn run_inner(
         writeln!(
             stderr,
             "Warning: [blastx] {} {}: Subject sequence contains no data",
-            s.internal_id, s.title
+            String::from_utf8_lossy(s.warning_id()),
+            s.title
         )?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:251-254
@@ -746,6 +746,11 @@ fn run_inner(
     }
     let pairwise_database = database.as_ref().map(BlastxDatabase::pairwise_database);
     let no_reported = ReportedSubjects::default();
+    let records_parsed = if args.parse_deflines {
+        report::RecordsParsed::of(&subjects, args.show_gis, options.outfmt == 0)?
+    } else {
+        report::RecordsParsed::default()
+    };
     let shown_run = match (&database, &pairwise_database) {
         (Some(database), Some(pairwise)) => ShownSubjects::Database {
             name: database.name(),
@@ -754,6 +759,7 @@ fn run_inner(
         },
         _ => ShownSubjects::Fasta {
             path: subject_path.expect("a subject file without -db"),
+            parsed: &records_parsed,
         },
     };
     super::x_timing::run(XRun::Startup, x_t_run);

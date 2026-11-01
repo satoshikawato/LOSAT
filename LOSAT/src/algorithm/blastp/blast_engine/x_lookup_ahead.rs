@@ -1024,6 +1024,7 @@ mod tests {
             comp_based_stats: "2".to_string(),
             seg: Some("yes".to_string()),
             soft_masking: None,
+            lcase_masking: false,
             use_sw_tback: false,
             query_loc: None,
             subject_loc: None,

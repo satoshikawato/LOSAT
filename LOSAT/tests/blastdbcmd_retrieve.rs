@@ -793,11 +793,10 @@ fn out_and_logfile_take_the_retrieval_and_its_diagnostics() {
     assert_eq!(file("D84.out"), expected("D84.out"), "D84 -out");
 }
 
-/// The probe's cases that LOSAT's BLASTDBCMD does not serve: several names in `-db` (DECISIONS
-/// 6), `-range ""` (NCBI crashes), and `-outfmt %d` / `%b` (DECISIONS 9).
+/// The probe's cases that LOSAT's BLASTDBCMD does not serve: `-range ""` (NCBI crashes), and
+/// `-outfmt %d` / `%b` (DECISIONS 9).
 #[rustfmt::skip]
 const REFUSALS: &[(&str, &[&str])] = &[
-    ("F34", &["-db", "db/p5 db/pm5", "-entry", "all", "-outfmt", "%o %a"]),
     ("D61", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-range", ""]),
     ("asn-d", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-outfmt", "%d"]),
     ("asn-b", &["-db", "db/p4n", "-entry", "gnl|BL_ORD_ID|3", "-outfmt", "%b"]),

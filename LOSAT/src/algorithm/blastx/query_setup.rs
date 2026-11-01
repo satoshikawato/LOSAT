@@ -455,7 +455,7 @@ pub fn prepare_queries(
         if !context.is_valid {
             continue;
         }
-        let mut masks = context.lowercase_masks.clone();
+        let mut masks = Vec::new();
         if let Some(masker) = seg_masker.as_ref() {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
             // ```c
@@ -489,6 +489,10 @@ pub fn prepare_queries(
                 crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
             }
         }
+        // SEG's intervals first, as `BlastSeqLocAppend(filter_out, lcase_mask_slp)`: the sort of
+        // `BlastSeqLocCombine` compares only the left ends, and a one-letter run on the first letter
+        // of a SEG interval is merged only in this order (the results' masks).
+        masks.extend_from_slice(&context.lowercase_masks);
         context.masks = combine_masks(masks);
         if !options.soft_masking {
             for &(from, to) in &context.masks {

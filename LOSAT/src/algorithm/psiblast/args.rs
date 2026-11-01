@@ -326,6 +326,7 @@ impl PsiblastArgs {
             dbsize: self.dbsize,
             show_gis: false,
             parse_deflines: false,
+            id_scope: None,
             searchsp: None,
             // PSIBLAST's parser refuses `-lcase_masking` (line NP ported it to BLASTP).
             lcase_masking: false,

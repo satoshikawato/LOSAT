@@ -5,6 +5,8 @@ use super::{
     preliminary::{sort_by_score, PreliminaryHsp},
     query_setup::{prepare_queries, PreparedQueryBatch},
 };
+use crate::algorithm::blastn::query_split::{restrict_masks, ChunkQuery};
+use crate::utils::dust::MaskedInterval;
 use anyhow::{ensure, Result};
 use std::ops::Range;
 
@@ -424,14 +426,28 @@ pub fn split_queries(
         };
         let mut record = records[0].clone();
         record.sequence = record.sequence[start..end].to_vec();
-        record.lowercase_masks = record
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:278-281
+        // ```c++
+        //             CRef<CSeq_loc> mask_query_loc(new CSeq_loc);
+        //             s_SetSplitQuerySeqInterval(chunk, query_range, 0, mask_query_loc);
+        //             TMaskedQueryRegions split_mask =
+        //                 m_UserSpecifiedMasks[qindex].RestrictToSeqInt(mask_query_loc->GetInt());
+        // ```
+        // Each run is one letter longer inside a chunk, and a run that starts on the chunk's last
+        // letter is dropped (`restrict_masks`).
+        let runs: Vec<MaskedInterval> = record
             .lowercase_masks
             .iter()
-            .filter_map(|&(a, b)| {
-                let left = a.max(start as i32);
-                let right = b.min(end as i32 - 1);
-                (left <= right).then_some((left - start as i32, right - start as i32))
-            })
+            .map(|&(a, b)| MaskedInterval::new(a as usize, b as usize + 1))
+            .collect();
+        let part = ChunkQuery {
+            query: 0,
+            from: start,
+            to: end,
+        };
+        record.lowercase_masks = restrict_masks(&runs, &part, 0)
+            .into_iter()
+            .map(|mask| (mask.start as i32, mask.end as i32 - 1))
             .collect();
         let prepared = prepare_queries(&[record], options)?;
         let shift = match length % 3 {

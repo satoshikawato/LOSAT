@@ -773,6 +773,7 @@ pub fn run(
     mut args: TblastxArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
+    args.id_scope = args.parse_deflines.then(Default::default);
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:106-111
     // ```c
     // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
@@ -1085,6 +1086,7 @@ fn read_subject_set(
             .with_defline(args.archive.is_some())
             .with_parse_deflines(args.parse_deflines),
     );
+    subject_source.set_id_scope(args.id_scope.clone());
     // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs); with
     // LOSAT_X_TBXSTORE the packing of each record is in this interval too. No NCBI counterpart.
     let t_read_fasta = crate::utils::xtiming::clock();
@@ -1327,7 +1329,8 @@ fn search_cli(
                 list.as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .in_id_scope(args.id_scope.clone());
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
@@ -1438,6 +1441,7 @@ fn search_cli(
             .with_defline(args.archive.is_some())
             .with_parse_deflines(args.parse_deflines),
     );
+    query_source.set_id_scope(args.id_scope.clone());
     if !shared_standard_input && query_source.stream_is_empty() {
         outputs
             .diagnostics
@@ -2064,6 +2068,18 @@ fn write_tblastx_outputs(
         .iter()
         .map(|format| report::output_format(format.outfmt))
         .collect();
+    if args.parse_deflines && output_formats.contains(&report::TblastxOutputFormat::Pairwise) {
+        crate::blastinput::fasta_reader::believed::refuse_shared_masks(
+            run.queries,
+            |query| {
+                run.query_stats
+                    .get(query)
+                    .is_some_and(|stats| stats.seg_masks.iter().any(|(_, masks)| !masks.is_empty()))
+            },
+            args.lcase_masking,
+            "TBLASTX",
+        )?;
+    }
     // The records of a subject set whose ids `-parse_deflines` read, by subject index.
     let records_parsed = if args.parse_deflines && run.database.is_none() {
         crate::report::db_subject::parsed_records(

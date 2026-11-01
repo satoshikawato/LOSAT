@@ -77,7 +77,9 @@ authoritative, current guidance for agent behavior in LOSAT.
      split again (CHUNK_SIZE/OVERLAP_CHUNK_SIZE; NCBI stops with a
      CCoreException) is searched once. BLASTN, TBLASTX and TBLASTN: outfmt 0
      titles made only of punctuation stop at the end of the string (NCBI
-     reads past it and crashes). BLASTP: a one-hit gapped start whose window
+     reads past it and crashes), and so does the tabular first word of such a
+     title for an `lcl|Subject_N` id of a database (version 1.10). BLASTP: a
+     one-hit gapped start whose window
      of 11 letters passes the end of a sequence reads the letters past it as
      the sentinel (NCBI reads past its buffer and can crash; LOSAT's output
      equals NCBI's under valgrind). Taxid lists with `-db`: a taxid whose
@@ -91,7 +93,15 @@ authoritative, current guidance for agent behavior in LOSAT.
      reproduced, not excepted; NCBI failures without a checkable valid result
      are explicit rejections. A sequence that a seqid list keeps without a
      definition line (NCBI drops its hits from every report without notice)
-     is an explicit rejection too (PD-LOSAT-NCBI-DEFECTS 1.7).
+     is an explicit rejection too (PD-LOSAT-NCBI-DEFECTS 1.7), and so are the
+     results of a database with parsed Seq-ids that PD-LOSAT-NCBI-DEFECTS 1.10
+     lists, such as a reported sequence that NCBI's lookup by id finds as another
+     sequence and following hits whose ids NCBI takes for one sequence. Approved
+     difference: a `gb`, `emb` or `dbj` id prints the stored type, where NCBI's
+     process-wide id table can print the type of another id of the same prefix,
+     digit count and version (maintainer, 2026-10-21, for the tabular `sseqid`
+     with `-db`; the other places under the standing delegation,
+     PD-LOSAT-NCBI-DEFECTS 1.10).
 
 4. NCBI code comments are mandatory for modifications.
    - Every code change must include NCBI C/C++ reference comments with file path

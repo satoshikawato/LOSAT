@@ -1,0 +1,1 @@
+- BLASTX holds less memory with many threads. A long query's chunks are no longer each prepared from a copy of the whole query, and the composition-based statistics' speculative results no longer hold a full score matrix in every slot. Reports do not change.

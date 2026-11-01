@@ -7,6 +7,7 @@
 use crate::algorithm::blastn::query_split::{
     calculate_num_chunks, restrict_masks, ChunkQuery, SplitSizes, QUERY_CHUNK_OVERLAP,
 };
+use crate::algorithm::tblastn::archive::lowercase_runs;
 use crate::utils::dust::MaskedInterval;
 
 /// The query chunk size of blastp (10000) or tblastn (20000) when the environment variable
@@ -346,6 +347,42 @@ pub fn protein_chunk_part(
     residues
 }
 
+/// `protein_chunk_part` with lower-case masking for a query whose searched letters start at
+/// `offset` in `record`, its whole record (`-query_loc`; `offset` 0 and the query itself without a
+/// range). NCBI's masks are the lower-case runs of the whole record, so a run that ends on the
+/// letter before the interval reaches the interval's first letter through the restriction's
+/// extra residue (`restrict_masks`, whose steps this takes in record coordinates).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:383-384
+/// ```c++
+///         if (m_ReadProteins || m_LowerCaseMask)
+///             m_InputReader.SaveMask();
+/// ```
+pub fn protein_chunk_part_in_record(record: &[u8], offset: usize, part: &ChunkQuery) -> Vec<u8> {
+    let mut residues: Vec<u8> = record[offset + part.from..offset + part.to]
+        .iter()
+        .map(u8::to_ascii_uppercase)
+        .collect();
+    let last = part.to - 1;
+    let (interval_from, interval_to) = (part.from + offset, last + offset);
+    for (start, end) in lowercase_runs(record) {
+        // The run is [start, end] in the record; `loc` is [from, to - 1) in the searched letters.
+        let left = (start as usize).max(part.from);
+        let right_open = (end as usize + 1).min(last);
+        if left >= right_open {
+            continue;
+        }
+        let restricted_left = left.saturating_sub(interval_from);
+        let restricted_right = right_open.min(interval_to) as isize - interval_from as isize;
+        if restricted_left as isize <= restricted_right {
+            for residue in &mut residues[restricted_left..=restricted_right as usize] {
+                *residue = residue.to_ascii_lowercase();
+            }
+        }
+    }
+    residues
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -421,5 +458,34 @@ mod tests {
         };
         assert_eq!(protein_chunk_part(query, &part, true, 0), b"fghI".to_vec());
         assert_eq!(protein_chunk_part(query, &part, false, 0), b"fgHI".to_vec());
+        assert_eq!(
+            protein_chunk_part_in_record(query, 0, &part),
+            b"fghI".to_vec()
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:278-281 (quoted at
+    // `protein_chunk_part`): with `-query_loc 5-` of `MKVa...`, the run [3, 3] of the record grows
+    // to [3, 4] and masks the first searched letter in the first chunk; a run ending two letters
+    // before the interval does not reach it.
+    #[test]
+    fn a_run_before_the_interval_reaches_its_first_letter() {
+        let part = ChunkQuery {
+            query: 0,
+            from: 0,
+            to: 6,
+        };
+        assert_eq!(
+            protein_chunk_part_in_record(b"MKVaWCDEFG", 4, &part),
+            b"wCDEFG".to_vec()
+        );
+        assert_eq!(
+            protein_chunk_part_in_record(b"MKaVWCDEFG", 4, &part),
+            b"WCDEFG".to_vec()
+        );
+        assert_eq!(
+            protein_chunk_part_in_record(b"MKVAWCDEFG", 4, &part),
+            b"WCDEFG".to_vec()
+        );
     }
 }

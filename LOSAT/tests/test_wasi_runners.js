@@ -197,6 +197,13 @@ test("worker memory trap terminates the command while its main thread waits", ()
   assert.match(result.stderr, /RuntimeError: memory access out of bounds/);
 });
 
+test("serial runner reports a rejected artifact and exits 1", () => {
+  const result = run({ threaded: false, bytes: command({ threaded: true }) });
+  assert.equal(result.signal, null, result.stderr);
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /expected serial-command, got threaded-command/);
+});
+
 test("missing thread entry is rejected before starting the command", () => {
   const result = run({ threaded: true, worker: "missing-export" });
   assert.equal(result.signal, null, result.stderr);
@@ -419,6 +426,83 @@ test("the default guard cache directory follows each platform's convention", () 
   assert.equal(defaultGuardCacheDir({}, "win32"), path.join(home, "AppData", "Local", "losat", "wasi-guard"));
 });
 
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
+// An artifact guarded at build time (`wasi_shared_memory.js guard`) runs as it is: the host
+// does not guard it again and writes nothing to the guard cache.
+test("the host runs an artifact guarded at build time as it is, without a guard cache entry", () => {
+  const { guardSharedMemory } = require("./wasi_shared_memory");
+  const { guardSharedMemoryCached } = require("./wasi_thread_host");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-built-"));
+  try {
+    const bytes = spawner(2, { bulk: true });
+    const built = guardSharedMemory(bytes).bytes;
+    const reference = runThreaded(bytes, [], { LOSAT_WASI_GUARD_CACHE: "0" });
+    assert.equal(reference.status, 3, reference.stderr);
+    const cache = path.join(directory, "cache");
+    const result = runThreaded(built, [], { LOSAT_WASI_GUARD_CACHE: cache, LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(result.status, 3, result.stderr);
+    assert.equal(result.stdout, reference.stdout);
+    assert.match(result.stderr, /shared-memory guards: 1 fills, 1 copies \(guarded at build time\)/);
+    assert.doesNotMatch(result.stderr, /guard cache (miss|hit|invalid)/);
+    assert.equal(fs.existsSync(cache), false);
+    // A second run finds no index either (none was written).
+    const second = runThreaded(built, [], { LOSAT_WASI_GUARD_CACHE: cache, LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(second.stdout, reference.stdout);
+    assert.doesNotMatch(second.stderr, /guard cache index hit/);
+    assert.equal(fs.existsSync(cache), false);
+    const cached = guardSharedMemoryCached(built);
+    assert.deepEqual([cached.cache, cached.bytes, cached.fill, cached.copy], ["guarded", built, 0, 0]);
+    // The variable is checked as for any other module.
+    const invalid = runThreaded(built, [], { LOSAT_WASI_GUARD_CACHE: "" });
+    assert.notEqual(invalid.status, 3);
+    assert.match(invalid.stderr, /LOSAT_WASI_GUARD_CACHE must name a directory or be 0/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// prepareThreadHost frees the module's bytes once the compile has copied them (freeBytes): a view
+// of a whole ArrayBuffer is detached at once; a part of Node's Buffer pool or of a larger buffer
+// is left as it is.
+test("prepareThreadHost frees the buffer of a module guarded at build time", async () => {
+  const { prepareThreadHost } = require("./wasi_thread_host");
+  const { guardSharedMemory } = require("./wasi_shared_memory");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-free-"));
+  const { transfer } = ArrayBuffer.prototype;
+  const saved = process.env.LOSAT_WASI_GUARD_CACHE;
+  const freed = [];
+  try {
+    process.env.LOSAT_WASI_GUARD_CACHE = "0";
+    ArrayBuffer.prototype.transfer = function (...args) { freed.push(this.byteLength); return transfer.apply(this, args); };
+    const file = path.join(directory, "command.wasm");
+    fs.writeFileSync(file, guardSharedMemory(spawner(2, { bulk: true })).bytes);
+    await prepareThreadHost(file, "threaded-command");
+    assert.deepEqual(freed, [33 << 20]);
+  } finally {
+    ArrayBuffer.prototype.transfer = transfer;
+    if (saved === undefined) delete process.env.LOSAT_WASI_GUARD_CACHE; else process.env.LOSAT_WASI_GUARD_CACHE = saved;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("freeBytes frees only a view of a whole ArrayBuffer", () => {
+  const { freeBytes } = require("./wasi_thread_host");
+  const whole = Buffer.allocUnsafeSlow(1 << 20).fill(1);
+  freeBytes(whole);
+  assert.equal(whole.length, 0);
+  assert.equal(whole.buffer.byteLength, 0);
+  freeBytes(whole);
+  const pooled = Buffer.from("abc");
+  assert.ok(pooled.buffer.byteLength > pooled.length);
+  freeBytes(pooled);
+  assert.equal(pooled.toString(), "abc");
+  const part = Buffer.allocUnsafeSlow(4096).fill(2).subarray(0, 100);
+  freeBytes(part);
+  assert.equal(part.length, 100);
+  assert.equal(part.buffer.byteLength, 4096);
+});
+
 test("the guard cache keeps the entries used last", () => {
   const { guardSharedMemoryCached } = require("./wasi_thread_host");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-keep-"));
@@ -456,6 +540,85 @@ test("the guard cache keeps the entries used last", () => {
   } finally {
     if (saved === undefined) delete process.env.LOSAT_WASI_GUARD_CACHE;
     else process.env.LOSAT_WASI_GUARD_CACHE = saved;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
+// The guard cache's index: a run compiles the cached bytes that the input file's index names at
+// once, and the checks that fail (cached bytes changed, another input's entry under this file's
+// index, an index that is not JSON) send it the way without the index, to its own input's output.
+// A file rewritten in place has another index name. At most GUARD_CACHE_KEEP index files stay.
+test("LOSAT_WASI_GUARD_CACHE's index compiles the cached bytes at once and keeps every check", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-index-"));
+  try {
+    // Two modules of the same length (a custom section pads each), with different outputs.
+    const pad = (bytes, length) => {
+      const payload = length - bytes.length - 4;
+      assert.ok(payload >= 0 && payload + 2 < 128);
+      return Buffer.concat([bytes, Buffer.from([0, payload + 2, 1, 112, ...new Array(payload).fill(0)])]);
+    };
+    const [rawA, rawB] = [spawner(2, { bulk: true }), spawner(3, { bulk: true })];
+    const length = Math.max(rawA.length, rawB.length) + 8;
+    const [a, b] = [pad(rawA, length), pad(rawB, length)];
+    const [refA, refB] = [runThreaded(a, []), runThreaded(b, [])];
+    assert.notEqual(refA.stdout, refB.stdout);
+    const cache = path.join(directory, "cache"), fixture = path.join(directory, "command.wasm");
+    const env = { LOSAT_WASI_GUARD_CACHE: cache, LOSAT_WASI_PRESPAWN: "2", LOSAT_WASI_THREADS_DEBUG: "1" };
+    const run = (file, expected, patterns, label) => {
+      const result = runFixture(file, [], env);
+      assert.equal(result.status, expected.status, `${label}\n${result.stderr}`);
+      assert.equal(result.stdout, expected.stdout, label);
+      for (const pattern of patterns) assert.match(result.stderr, pattern, label);
+      assert.match(result.stderr, /shared-memory guards: 1 fills, 1 copies/, label);
+      return result;
+    };
+    const indexOf = (file) => {
+      const stat = fs.statSync(file, { bigint: true });
+      return path.join(cache, `index-${stat.dev}-${stat.ino}-${stat.size}-${stat.mtimeNs}-${stat.ctimeNs}.json`);
+    };
+    const indexes = () => fs.readdirSync(cache).filter((name) => /^index-.*\.json$/.test(name));
+    fs.writeFileSync(fixture, a);
+    run(fixture, refA, [/guard cache miss: /], "cold");
+    assert.deepEqual(indexes(), [path.basename(indexOf(fixture))]);
+    run(fixture, refA, [/guard cache index hit: /], "indexed");
+    for (const file of fs.readdirSync(cache).filter((name) => name.endsWith(".wasm"))) {
+      const data = fs.readFileSync(path.join(cache, file));
+      data[data.length - 1] ^= 1;
+      fs.writeFileSync(path.join(cache, file), data);
+    }
+    run(fixture, refA, [/guard cache index stale: /, /guard cache invalid: /], "cached bytes changed");
+    run(fixture, refA, [/guard cache index hit: /], "rebuilt");
+    const other = path.join(directory, "other.wasm");
+    fs.writeFileSync(other, b);
+    run(other, refB, [/guard cache miss: /], "other input");
+    fs.copyFileSync(indexOf(other), indexOf(fixture));
+    run(fixture, refA, [/guard cache index stale: /, /guard cache hit: /], "another input's entry");
+    run(fixture, refA, [/guard cache index hit: /], "index written again");
+    const { atime, mtime } = fs.statSync(fixture);
+    fs.writeFileSync(fixture, b);
+    fs.utimesSync(fixture, atime, mtime);
+    // The old index (or, where the timestamps are coarse, the same name with the old input's
+    // SHA-256) does not serve the new input: this run takes the entry without the index and then
+    // writes the index of the file as it is now.
+    const rewritten = run(fixture, refB, [/guard cache hit: /], "rewritten in place");
+    assert.doesNotMatch(rewritten.stderr, /guard cache index hit: /, "rewritten in place");
+    assert.ok(fs.existsSync(indexOf(fixture)), "index of the rewritten file");
+    run(fixture, refB, [/guard cache index hit: /], "rewritten in place, indexed");
+    fs.writeFileSync(indexOf(fixture), "{");
+    run(fixture, refB, [/guard cache index not used /, /guard cache hit: /], "index not JSON");
+    const old = new Date(Date.now() - 86_400_000);
+    for (let i = 0; i < 10; i++) {
+      const file = path.join(cache, `index-1-${i}-1-1-1.json`);
+      fs.writeFileSync(file, "{}");
+      fs.utimesSync(file, old, old);
+    }
+    fs.writeFileSync(fixture, a);
+    run(fixture, refA, [/guard cache hit: /], "pruned");
+    assert.equal(indexes().length, 8);
+    assert.ok(indexes().includes(path.basename(indexOf(fixture))));
+  } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
@@ -538,14 +701,17 @@ function hostEnv(extra = {}) {
 
 // The command runner, or with `options` a driver that passes the test-only host options
 // (fault, startTimeoutMs, rejectAt) through createThreadHost as check_wasi_fault.js does.
+// `startDelayMs` waits that long between the host's creation and _start (its standby workers
+// have booted and wait for their threads by then).
 const DRIVER = `"use strict";
 const { createThreadHost } = require(${JSON.stringify(path.join(__dirname, "wasi_thread_host.js"))});
 (async () => {
   const [wasm, json, ...argv] = process.argv.slice(2);
-  const { rejectAt, ...options } = JSON.parse(json);
+  const { rejectAt, startDelayMs, ...options } = JSON.parse(json);
   if (rejectAt) options.rejectSpawn = attempt => attempt === rejectAt;
   const host = await createThreadHost(wasm, "threaded-command", argv, options);
   try {
+    if (startDelayMs) await new Promise(resolve => setTimeout(resolve, startDelayMs));
     process.exitCode = host.start();
     await host.waitForWorkers();
   } finally { await host.close(); }
@@ -557,16 +723,21 @@ function runThreaded(bytes, argv, env = {}, options = null) {
     const fixture = path.join(directory, "command.wasm");
     assert.ok(WebAssembly.validate(bytes));
     fs.writeFileSync(fixture, bytes);
-    let script = path.join(__dirname, "run_losat_wasi_threads.js");
-    if (options) fs.writeFileSync(script = path.join(directory, "driver.js"), DRIVER);
-    const result = spawnSync(process.execPath, [script, fixture, ...(options ? [JSON.stringify(options)] : []), ...argv], {
-      env: hostEnv(env), encoding: "utf8", timeout: 20000, killSignal: "SIGKILL",
-    });
-    assert.ifError(result.error);
-    return result;
+    return runFixture(fixture, argv, env, options, directory);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+}
+
+// runThreaded for a module file that the caller keeps (`directory` receives the driver).
+function runFixture(fixture, argv, env = {}, options = null, directory = path.dirname(fixture)) {
+  let script = path.join(__dirname, "run_losat_wasi_threads.js");
+  if (options) fs.writeFileSync(script = path.join(directory, "driver.js"), DRIVER);
+  const result = spawnSync(process.execPath, [script, fixture, ...(options ? [JSON.stringify(options)] : []), ...argv], {
+    env: hostEnv(env), encoding: "utf8", timeout: 20000, killSignal: "SIGKILL",
+  });
+  assert.ifError(result.error);
+  return result;
 }
 
 const hostEvents = (stderr) => [...stderr.matchAll(/^\[losat-wasi-event\] (.+)$/gm)].map((m) => JSON.parse(m[1]));
@@ -659,15 +830,46 @@ for (const [fault, message] of [
   ["abnormal-exit", /WASI worker 1 exited unexpectedly with code 23/],
 ]) {
   test(`fault ${fault} has the same result with LOSAT_WASI_PRESPAWN`, () => {
-    for (const env of [{ LOSAT_WASI_PRESPAWN: "0" }, {}, { LOSAT_WASI_PRESPAWN: "auto" }, { LOSAT_WASI_PRESPAWN: "3" }]) {
-      const result = runThreaded(spawner(1), ["-num_threads", "2"], env, { fault, startTimeoutMs: 1000 });
-      const label = `${fault} ${JSON.stringify(env)}`;
+    // The last run starts the guest after its standby worker waits, so its spawn returns without
+    // the start confirmation (startStandby): a `ready` event with `waiting: true` shows that path.
+    for (const [env, startDelayMs] of [[{ LOSAT_WASI_PRESPAWN: "0" }], [{}], [{ LOSAT_WASI_PRESPAWN: "auto" }],
+      [{ LOSAT_WASI_PRESPAWN: "3" }], [{}, 1500]]) {
+      const noWait = startDelayMs && (fault === "trap" || fault === "abnormal-exit");
+      const result = runThreaded(spawner(1), ["-num_threads", "2"], noWait ? { ...env, LOSAT_WASI_THREADS_DEBUG: "1" } : env,
+        { fault, startTimeoutMs: 1000, startDelayMs });
+      const label = `${fault} ${JSON.stringify(env)} ${startDelayMs ?? 0}`;
       assert.equal(result.signal, "SIGTERM", `${label}\n${result.stderr}`);
       assert.equal(result.stdout, "", label);
       assert.match(result.stderr, message, label);
+      if (noWait) {
+        assert.ok(hostEvents(result.stderr).some((e) => e.event === "ready" && e.waiting && e.tid === 1), label);
+      }
     }
   });
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
+// ```c++
+//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+//         (*thread)->Run();
+//     }
+// ```
+// A spawn that takes a standby worker which already waits for its thread returns the tid without
+// waiting for the start confirmation; the threads, the output and the lifecycle are the same.
+test("a spawn returns at once when its standby worker waits, with the same threads and output", () => {
+  const bytes = spawner(3);
+  const argv = ["-num_threads", "4"];
+  const reference = runThreaded(bytes, argv, { LOSAT_WASI_PRESPAWN: "0" });
+  for (const startDelayMs of [3000, 0]) {
+    const result = runThreaded(bytes, argv, { LOSAT_WASI_THREADS_DEBUG: "1" }, { startDelayMs });
+    assert.equal(result.status, reference.status, result.stderr);
+    assert.equal(result.stdout, reference.stdout);
+    const events = hostEvents(result.stderr);
+    checkLifecycle(events, 3, 3, `delay ${startDelayMs}`);
+    // After 3 s all three standby workers wait; without the delay a spawn may still wait for one.
+    if (startDelayMs) assert.deepEqual(events.filter((e) => e.event === "ready" && e.waiting).map((e) => e.tid), [1, 2, 3]);
+  }
+});
 
 test("a rejected spawn has the same result with LOSAT_WASI_PRESPAWN", () => {
   const bytes = spawner(3);

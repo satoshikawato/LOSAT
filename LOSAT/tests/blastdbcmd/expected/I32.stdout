@@ -1,0 +1,15 @@
+Database: two protein dbs
+	21 sequences; 3,031 total residues
+
+Date: Oct 29, 2026  7:13 PM	Longest sequence: 225 residues
+
+BLASTDB Version: 5
+
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+21           seg                                     window=12; locut=2.2; hicut=2.5         
+
+Volumes:
+	{R}/db/p5
+	{R}/db/pm5

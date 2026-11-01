@@ -196,11 +196,14 @@ fn subject_names(
     oid: usize,
 ) -> Result<SubjectNames> {
     match shown {
-        ShownSubjects::Fasta { .. } => SubjectNames::of_record(
-            subject.internal_id.as_bytes(),
-            subject.title.as_bytes(),
-            true,
-        )
+        ShownSubjects::Fasta { .. } => match subject.believed() {
+            Some(ids) => SubjectNames::of_believed(ids, subject.title.as_bytes(), true),
+            None => SubjectNames::of_record(
+                subject.internal_id.as_bytes(),
+                subject.title.as_bytes(),
+                true,
+            ),
+        }
         .map_err(|refusal| refuse(refusal, "a subject title")),
         ShownSubjects::Database { reported, .. } => match reported.parsed_subject(oid) {
             Some(parsed) => SubjectNames::of_parsed(parsed, reported.parsed_taxonomy(oid)),
@@ -630,6 +633,12 @@ pub(super) fn xml2_writer(
         target: match shown {
             ShownSubjects::Fasta { .. } => Xml2Target::Subjects(subjects.len()),
             ShownSubjects::Database { .. } => Xml2Target::Database,
+        },
+        subject_names: match shown {
+            ShownSubjects::Fasta { .. } => {
+                crate::report::blast_xml2::subject_names(subjects.iter().map(FastaRecord::believed))
+            }
+            ShownSubjects::Database { .. } => None,
         },
         // `-ungapped` writes no gap costs; it needs `-comp_based_stats 0`, so no `cbs` either.
         gapped: options.gapped,

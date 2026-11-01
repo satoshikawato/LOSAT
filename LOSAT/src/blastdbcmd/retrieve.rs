@@ -6,13 +6,14 @@
 //! `gnl|BL_ORD_ID|n` read without a file, and the answers of a database built without
 //! `-parse_seqids`.
 
+use std::collections::BTreeSet;
 use std::io::{BufWriter, Write};
 
 use crate::seqdb::isam::{seqdb_simplify_accession, SimplifyError};
 use crate::seqdb::lookup::{IdLookup, ID_OVERFLOWS};
 use crate::seqdb::tax_files::NO_ACCESSION_INFO;
 use crate::seqdb::taxdb::{LazyTaxDb, TaxNames};
-use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
+use crate::seqdb::{MaskRanges, SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::seqid::accguide::parse_flags::{ANY_LOCAL, DEFAULT, PARTIAL_OK, RAW_TEXT};
 use crate::seqid::label::{content, fasta};
 use crate::seqid::parse::{seq_id_from_text, string_to_non_negative_int};
@@ -46,7 +47,7 @@ impl Stop {
         Stop::Io
     }
 
-    fn refused(reason: String) -> Stop {
+    pub fn refused(reason: String) -> Stop {
         Stop::Refused(super::refusal(&reason))
     }
 }
@@ -63,8 +64,8 @@ impl From<SeqDbError> for Stop {
     }
 }
 
-/// `CBlastDB_FormatterConfig`, the part LOSAT serves (`m_FiltAlgoId` and `m_FmtAlgoId`
-/// never reach a formatter: a database without masks refuses every mask algorithm).
+/// `CBlastDB_FormatterConfig`. `m_FmtAlgoId` is in the `%` formatter, one id per `%m`
+/// (line BDC DECISIONS 12).
 #[derive(Clone, Debug)]
 pub(super) struct Config {
     /// `m_SeqRange`.
@@ -73,6 +74,8 @@ pub(super) struct Config {
     pub strand_minus: bool,
     /// `m_UseCtrlA`.
     pub ctrl_a: bool,
+    /// `m_FiltAlgoId`: the filtering algorithm whose masks are in lower case, -1 for none.
+    pub filt_algo: i32,
 }
 
 impl Default for Config {
@@ -81,6 +84,7 @@ impl Default for Config {
             range: NO_RANGE,
             strand_minus: false,
             ctrl_a: false,
+            filt_algo: -1,
         }
     }
 }
@@ -88,16 +92,20 @@ impl Default for Config {
 /// The database as the formatters read it.
 pub(super) struct Source<'a> {
     pub db: &'a SeqDb,
-    /// `m_DbIsProtein`.
+    /// Whether the database is one of proteins.
     pub protein: bool,
+    /// `m_DbIsProtein`: `protein`, but for a taxid list whether `-dbtype` is `prot`
+    /// (`x_InitBlastDB_TaxIdList`). It decides whether `-strand minus` is taken.
+    dbtype_protein: bool,
     taxdb: LazyTaxDb,
 }
 
 impl<'a> Source<'a> {
-    fn new(db: &'a SeqDb, path: &SearchPath) -> Self {
+    fn new(db: &'a SeqDb, path: &SearchPath, dbtype_protein: bool) -> Self {
         Source {
             db,
             protein: db.seqtype() == SeqType::Protein,
+            dbtype_protein,
             taxdb: LazyTaxDb::new(path.clone()),
         }
     }
@@ -158,6 +166,34 @@ impl<'a> Source<'a> {
         Ok(self.db.nucleotide_iupac_range(oid, from, to)?)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2234-2242
+    // ```c++
+    // int CSeqDB_IdRemapper::GetVolAlgo(int vol_idx, int algo_id)
+    // {
+    //     if (algo_id != m_CacheRealAlgo || vol_idx != m_CacheVolIndex) {
+    //         m_CacheVolIndex = vol_idx;
+    //         m_CacheRealAlgo = algo_id;
+    //         m_CacheVolAlgo = RealToVol(vol_idx, algo_id);
+    //     }
+    //     return m_CacheVolAlgo;
+    // }
+    // ```
+    // `RealToVol` throws for an algorithm the volume does not know, after the cache's key was
+    // written, and `GetMaskData` catches it: that sequence has no masks, and the next one of
+    // the volume reads the masks of the id cached before, or of an uninitialised one.
+    /// `GetMaskData(oid, algo)`: the stored ranges of the sequence, or the refusal of a volume
+    /// that has masks but not this algorithm (line NP's M/DECISIONS 9).
+    pub fn masks(&self, oid: u32, algo: i32) -> Result<Vec<(u32, u32)>, Stop> {
+        match self.db.mask_ranges(oid, algo)? {
+            MaskRanges::Ranges(ranges) => Ok(ranges),
+            MaskRanges::AlgorithmNotInVolume { volume } => Err(Stop::refused(format!(
+                "filtering algorithm {algo} in {}, a volume of an alias with masks of other \
+                 algorithms (NCBI reads the masks of another algorithm there)",
+                volume.display()
+            ))),
+        }
+    }
+
     /// `CSeqDB::GetTaxInfo(taxid)`: the names of the taxonomy database on the search path,
     /// `None` where NCBI's lookup throws (no database, no such taxid).
     pub fn tax_names(&self, taxid: i32) -> Result<Option<TaxNames>, Stop> {
@@ -188,6 +224,36 @@ enum Formatter {
 }
 
 impl Formatter {
+    /// Whether the formatter writes the letters of the sequence (the FASTA, `%s`).
+    fn reads_letters(&self) -> bool {
+        match self {
+            Formatter::Fasta(_) => true,
+            Formatter::Fields(spec) => spec.writes_letters(),
+            Formatter::Refused(_) => false,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:618-628
+    // ```c++
+    //     int vol_oid = 0;
+    //
+    //     if (CSeqDBVol * vol = m_VolSet.FindVol(oid, vol_oid)) {
+    //         ...
+    //     }
+    //
+    //     NCBI_THROW(CSeqDBException, eArgErr, CSeqDB::kOidNotFound);
+    // ```
+    /// `Write(-1, config)`: the OID of a PIG that no volume holds. The FASTA formatter's
+    /// `GetBioseq` throws `OID not found`; the `%` formatter's first read does
+    /// (`FormatSpec::write_missing_oid`).
+    fn write_missing(&mut self, out: &mut dyn Write) -> Result<(), Stop> {
+        match self {
+            Formatter::Fasta(_) => Err(Stop::Ncbi(OID_NOT_FOUND.to_string())),
+            Formatter::Fields(spec) => spec.write_missing_oid(out),
+            Formatter::Refused(reason) => Err(Stop::Refused(reason.clone())),
+        }
+    }
+
     fn write(
         &mut self,
         source: &Source,
@@ -204,6 +270,9 @@ impl Formatter {
     }
 }
 
+/// `CSeqDB::kOidNotFound` (seqdb.cpp:53).
+pub(super) const OID_NOT_FOUND: &str = "OID not found";
+
 /// `NStr::StringToNumeric<Int8>(text, fConvErr_NoThrow)` with `errno` clear: the number of
 /// a text that is one (an optional sign and digits that fit 64 bits).
 pub(super) fn numeric_target(text: &str) -> Option<i64> {
@@ -218,17 +287,21 @@ pub(super) fn parse_target(text: &str) -> Result<ParsedSeqId, Stop> {
 }
 
 /// Runs the retrieval of `args` on the open database `db` (`x_ProcessSearchRequest`), the
-/// output to `out`, the diagnostics through `diag`; the exit status.
+/// output to `out`, the diagnostics through `diag`; the exit status. `tax_ids` is the list of
+/// `-taxids` / `-taxidlist` (`m_TaxIdList`; with `-target_only` the database is restricted to
+/// it), `dbtype_protein` NCBI's `m_DbIsProtein`.
 pub(super) fn process(
     db: &SeqDb,
     args: &Args,
     path: &SearchPath,
     diag: &mut Diag,
     out: &mut dyn Write,
+    tax_ids: Option<&BTreeSet<i32>>,
+    dbtype_protein: bool,
 ) -> i32 {
-    let source = Source::new(db, path);
+    let source = Source::new(db, path, dbtype_protein);
     let mut sink = BufWriter::new(out);
-    let status = match request(args, &source, diag, &mut sink) {
+    let status = match request(args, &source, tax_ids, diag, &mut sink) {
         Ok(false) => 0,
         Ok(true) => 1,
         Err(Stop::Ncbi(message)) => {
@@ -284,6 +357,7 @@ pub(super) fn process(
 fn request(
     args: &Args,
     source: &Source,
+    tax_ids: Option<&BTreeSet<i32>>,
     diag: &mut Diag,
     out: &mut dyn Write,
 ) -> Result<bool, Stop> {
@@ -299,7 +373,7 @@ fn request(
         OutputKind::Bioseq => Formatter::Refused(super::refusal(
             "-outfmt %b (the Bioseq as ASN.1 text) is not served",
         )),
-        OutputKind::Fields(spec) => match FormatSpec::parse(&spec) {
+        OutputKind::Fields(spec, mask_algos) => match FormatSpec::parse(&spec, mask_algos) {
             Ok(spec) if spec.asks_asn_text() => Formatter::Refused(super::refusal(
                 "-outfmt %d (the definition lines as ASN.1 text) is not served",
             )),
@@ -333,12 +407,20 @@ fn request(
     // 	else if (args["entry"].HasValue() || args["ipg"].HasValue()) {
     // 		return x_ProcessEntry(fmt);
     // 	}
-    // 	...
+    // 	else if (args["ipg_batch"].HasValue()) {
+    // 		return x_ProcessBatchPig(fmt);
+    // 	}
+    // 	else if(args[kArgTaxIdList].HasValue()||
+    // 			args[kArgTaxIdListFile].HasValue()) {
+    // 		 return x_ProcessTaxIdList(fmt);
+    // 	}
     // 	else {
     // 		NCBI_THROW(CInputException, eInvalidInput,
     // 		       	   "Must specify query type: one of 'entry', 'entry_batch', or 'pig'");
     // 	}
     // ```
+    // A taxid list excludes `-entry` and `-entry_batch` but not `-ipg` and `-ipg_batch`
+    // (its exclusion names `pig`, which is no argument): those then go first.
     match (args.value("entry"), args.value("entry_batch")) {
         (Some("all"), _) => {
             run.dump_all(&config)?;
@@ -352,9 +434,23 @@ fn request(
             }
         }
         (Some(entry), None) => run.entry(entry, &config),
-        (None, None) => Err(Stop::Ncbi(
-            "Must specify query type: one of 'entry', 'entry_batch', or 'pig'".to_string(),
-        )),
+        (None, None) => {
+            if let Some(pig) = args.value("ipg") {
+                // The reader took a value of `int` (`AsInteger`).
+                let pig = pig
+                    .parse::<i32>()
+                    .map_err(|_| Stop::refused(format!("-ipg {pig} is not a number of 32 bits")))?;
+                run.ipg(pig, &config)
+            } else if let Some(file) = args.value("ipg_batch") {
+                run.batch_pig(file, &mut config)
+            } else if let Some(tax_ids) = tax_ids {
+                run.tax_id_list(tax_ids, &config)
+            } else {
+                Err(Stop::Ncbi(
+                    "Must specify query type: one of 'entry', 'entry_batch', or 'pig'".to_string(),
+                ))
+            }
+        }
     }
 }
 
@@ -363,7 +459,8 @@ fn request(
 enum OutputKind {
     Fasta,
     Bioseq,
-    Fields(String),
+    /// The format text without the digits of its `%m`, and the algorithm of each `%m`.
+    Fields(String, Vec<i32>),
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:736-816
@@ -467,9 +564,87 @@ enum OutputKind {
 // 	return true;
 // }
 // ```
-/// `x_InitSearchRequest`: the configuration and the kind of output. Every mask algorithm id
-/// is invalid: LOSAT's reader refuses the databases that have masks (the column files), so
-/// the database here has none, and NCBI's answers for it are reproduced.
+/// `s_IsMaskAlgoIdValid`: whether the database has the algorithm `id` (a negative id is not
+/// looked up), with NCBI's error line for one it does not have.
+fn is_mask_algo_id_valid(source: &Source, id: i32, diag: &mut Diag) -> Result<bool, Stop> {
+    if id < 0 || source.db.mask_algorithms()?.ids().contains(&id) {
+        return Ok(true);
+    }
+    diag.err_post(&format!("Invalid filtering algorithm ID: {id}"));
+    Ok(false)
+}
+
+/// The number of the digits at `at` of `outfmt` (`None` without a digit), which it removes.
+/// NCBI adds them up in an `int` and overflows; LOSAT refuses a number that does not fit.
+fn take_mask_algo_id(outfmt: &mut String, at: usize) -> Result<Option<i32>, Stop> {
+    let end = outfmt[at..]
+        .find(|c: char| !c.is_ascii_digit())
+        .map_or(outfmt.len(), |len| at + len);
+    if end == at {
+        return Ok(None);
+    }
+    let id = outfmt[at..end].bytes().try_fold(0i32, |id, digit| {
+        id.checked_mul(10)?.checked_add(i32::from(digit - b'0'))
+    });
+    let Some(id) = id else {
+        return Err(Stop::refused(format!(
+            "-outfmt %m{} (an algorithm id that overflows NCBI's int)",
+            &outfmt[at..end]
+        )));
+    };
+    outfmt.replace_range(at..end, "");
+    Ok(Some(id))
+}
+
+/// The algorithm of each `%m` of `outfmt`, whose digits it removes. NCBI reads the first
+/// `%m` of the text only, also inside `%%m`, and takes its algorithm for every `%m`; the
+/// digits of the others stay in the text. Each `%m<digits>` has its own algorithm here, as
+/// in the runs with one `%m` each (line BDC DECISIONS 12,
+/// `PD-LOSAT-BLASTDBCMD-DEVIATIONS` item 4); a `%m` without digits has the first one's.
+fn read_mask_specifiers(
+    outfmt: &mut String,
+    source: &Source,
+    diag: &mut Diag,
+) -> Result<Vec<i32>, Stop> {
+    let Some(first_at) = outfmt.find("%m") else {
+        return Ok(Vec::new());
+    };
+    let invalid = || Stop::Ncbi("Invalid filtering algorithm ID for outfmt %m.".to_string());
+    let Some(first) = take_mask_algo_id(outfmt, first_at + 2)? else {
+        return Err(Stop::Ncbi(
+            "The option '-outfmt %m' is not followed by a masking algo ID.".to_string(),
+        ));
+    };
+    if !is_mask_algo_id_valid(source, first, diag)? {
+        return Err(invalid());
+    }
+    let mut algos = Vec::new();
+    let mut at = 0;
+    while at < outfmt.len() {
+        let percent = at;
+        if outfmt.as_bytes()[percent] != b'%' {
+            at += 1;
+            continue;
+        }
+        at += 2;
+        if outfmt.as_bytes().get(percent + 1) != Some(&b'm') {
+            continue;
+        }
+        if percent == first_at {
+            algos.push(first);
+        } else if let Some(id) = take_mask_algo_id(outfmt, at)? {
+            if !is_mask_algo_id_valid(source, id, diag)? {
+                return Err(invalid());
+            }
+            algos.push(id);
+        } else {
+            algos.push(first);
+        }
+    }
+    Ok(algos)
+}
+
+/// `x_InitSearchRequest`: the configuration and the kind of output.
 fn init_search_request(
     args: &Args,
     source: &Source,
@@ -487,7 +662,7 @@ fn init_search_request(
                 "The %f, %b, %d output format options cannot be specified together.".to_string(),
             ));
         }
-        kind = OutputKind::Fields(String::new());
+        kind = OutputKind::Fields(String::new(), Vec::new());
         if has(&outfmt, "%b") {
             outfmt = "%b".to_string();
             kind = OutputKind::Bioseq;
@@ -499,66 +674,47 @@ fn init_search_request(
         if has(&outfmt, "%d") {
             outfmt = "%d".to_string();
         }
-        if let Some(at) = outfmt.find("%m") {
-            let digits_start = at + 2;
-            let digits_end = outfmt[digits_start..]
-                .find(|c: char| !c.is_ascii_digit())
-                .map_or(outfmt.len(), |len| digits_start + len);
-            if digits_end == digits_start {
-                return Err(Stop::Ncbi(
-                    "The option '-outfmt %m' is not followed by a masking algo ID.".to_string(),
-                ));
-            }
-            let algo_id = outfmt[digits_start..digits_end]
-                .bytes()
-                .fold(0i64, |id, digit| {
-                    id.wrapping_mul(10).wrapping_add(i64::from(digit - b'0'))
-                });
-            outfmt.replace_range(digits_start..digits_end, "");
-            if algo_id >= 0 {
-                diag.err_post(&format!("Invalid filtering algorithm ID: {algo_id}"));
-                return Err(Stop::Ncbi(
-                    "Invalid filtering algorithm ID for outfmt %m.".to_string(),
-                ));
-            }
-        }
-        if let OutputKind::Fields(text) = &mut kind {
+        let mask_algos = read_mask_specifiers(&mut outfmt, source, diag)?;
+        if let OutputKind::Fields(text, algos) = &mut kind {
             *text = outfmt;
+            *algos = mask_algos;
         }
     }
-    if !source.protein && args.value("strand") == Some("minus") {
+    if !source.dbtype_protein && args.value("strand") == Some("minus") {
         config.strand_minus = true;
     }
     config.ctrl_a = args.given("ctrl_a");
     if let Some(value) = args.value("mask_sequence_with") {
-        match args::string_to_int8_message(value)
+        let id = args::string_to_int8_message(value)
             .ok()
-            .and_then(|id| i32::try_from(id).ok())
-        {
-            Some(id) if id >= 0 => {
-                diag.err_post(&format!("Invalid filtering algorithm ID: {id}"));
-                return Err(Stop::Ncbi(
-                    "Invalid filtering algorithm ID for mask_sequence_with.".to_string(),
-                ));
-            }
-            Some(id) => {
-                return Err(Stop::refused(format!(
-                    "-mask_sequence_with {id} (a negative algorithm id, which NCBI accepts \
-                     and then looks up) is not served"
-                )));
-            }
-            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2219-2224
-            // ```c++
-            //     if (algo_id_map.find(algo_name) == algo_id_map.end()) {
-            //         NCBI_THROW(CSeqDBException, eArgErr, "Cannot find string algorithm id in algorithm map.");
-            //     }
-            // ```
-            None => {
-                return Err(Stop::Ncbi(
-                    "Cannot find string algorithm id in algorithm map.".to_string(),
-                ));
-            }
+            .and_then(|id| i32::try_from(id).ok());
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2261-2267
+        // ```c++
+        // int CSeqDB_IdRemapper::GetAlgoId(const string & id)
+        // {
+        //     if (! s_Contains(m_DescToId, id)) {
+        //         NCBI_THROW(CSeqDBException, eArgErr,
+        //                    "Cannot find string algorithm id in algorithm map.");
+        //     }
+        // ```
+        let id = match id {
+            Some(id) => id,
+            None => source.db.mask_algorithms()?.id_of(value).ok_or_else(|| {
+                Stop::Ncbi("Cannot find string algorithm id in algorithm map.".to_string())
+            })?,
+        };
+        if !is_mask_algo_id_valid(source, id, diag)? {
+            return Err(Stop::Ncbi(
+                "Invalid filtering algorithm ID for mask_sequence_with.".to_string(),
+            ));
         }
+        if id < -1 {
+            return Err(Stop::refused(format!(
+                "-mask_sequence_with {id} (a negative algorithm id, which NCBI accepts \
+                 and then looks up) is not served"
+            )));
+        }
+        config.filt_algo = id;
     }
     if let Some(value) = args.value("range") {
         if value.is_empty() {
@@ -585,8 +741,10 @@ struct DbIds<'a> {
 impl<'a> DbIds<'a> {
     fn of(source: &Source<'a>, args: &Args) -> Result<Self, Stop> {
         let db = source.db;
-        let looks_up =
-            args.given("entry_batch") || args.value("entry").is_some_and(|entry| entry != "all");
+        let looks_up = args.given("entry_batch")
+            || args.value("entry").is_some_and(|entry| entry != "all")
+            || args.given("ipg")
+            || args.given("ipg_batch");
         Ok(DbIds {
             lookup: if looks_up {
                 Some(db.id_lookup()?)
@@ -779,17 +937,11 @@ fn accession_to_oids_v4(lookup: &IdLookup, id: &str) -> Result<Vec<u32>, Stop> {
         .ok_or_else(|| Stop::Ncbi(ID_OVERFLOWS.to_string()))
 }
 
-/// The lines of an `-entry_batch` file: the id and the rest of the line
+/// The lines of an `-entry_batch` (`-ipg_batch`) file: the id and the rest of the line
 /// (`NStr::SplitInTwo(line, " \t", id, format, fSplit_MergeDelimiters | fSplit_Truncate)`),
 /// empty lines and lines without an id left out. The line's `\r` stays, as in NCBI's reading.
-fn read_batch(file: &str) -> Result<Vec<(String, String)>, Stop> {
-    let bytes = std::fs::read(file).map_err(|_| {
-        Stop::Ncbi(args::arg_message(
-            "entry_batch",
-            "File is not accessible",
-            file,
-        ))
-    })?;
+fn read_batch(argument: &str, file: &str) -> Result<Vec<(String, String)>, Stop> {
+    let bytes = args::read_input_file(argument, file).map_err(Stop::Ncbi)?;
     let text = String::from_utf8(bytes)
         .map_err(|_| Stop::refused(format!("{file}: a batch file that is not UTF-8 text")))?;
     let delimiter = |c: char| c == ' ' || c == '\t';
@@ -819,7 +971,27 @@ struct Run<'a, 'b> {
 }
 
 impl Run<'_, '_> {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:457-462
+    // ```c++
+    // 	if(config.m_Strand == eNa_strand_minus) {
+    // 		m_fasta.SetFlag(CFastaOstream::fReverseStrand);
+    // 	}
+    // 	else {
+    // 		m_fasta.ResetFlag(CFastaOstream::fReverseStrand);
+    // 	}
+    // ```
+    // The minus strand reaches a protein database only through a taxid list read with
+    // `-dbtype guess` (`m_DbIsProtein` false): NCBI then writes the protein letters of the
+    // FASTA in reverse order (probe J114 of line BDC), and reverse-complements them as
+    // nucleotides for `%s`. LOSAT refuses those; the other `%` formats do not read the
+    // strand (K08).
     fn write(&mut self, oid: u32, config: &Config, target: Option<&str>) -> Result<(), Stop> {
+        if config.strand_minus && self.source.protein && self.formatter.reads_letters() {
+            return Err(Stop::refused(
+                "-strand minus on a protein database read with a taxid list and -dbtype                  guess (NCBI writes the protein letters reversed)"
+                    .to_string(),
+            ));
+        }
         self.formatter
             .write(self.source, oid, config, target, self.out)
     }
@@ -970,7 +1142,7 @@ impl Run<'_, '_> {
     /// the ids keep what the LMDB files before it answered; in a version 4 database the first
     /// OID of each id), a GI after that.
     fn batch_entry_no_dup(&mut self, file: &str, config: &mut Config) -> Result<bool, Stop> {
-        let lines = read_batch(file)?;
+        let lines = read_batch("entry_batch", file)?;
         let ids: Vec<String> = lines
             .iter()
             .map(|(id, _)| {
@@ -1026,7 +1198,7 @@ impl Run<'_, '_> {
                 self.diag.err_post(&format!("Skipped {id}"));
                 continue;
             };
-            if self.modify_config_for_batch_entry(&lines[i].1, config) != 0 {
+            if self.modify_config_for_batch_entry(&lines[i].1, config)? != 0 {
                 err_found = true;
                 self.diag.err_post(&format!("Skipped {id}"));
                 continue;
@@ -1079,10 +1251,10 @@ impl Run<'_, '_> {
     // ```
     /// `-entry_batch -get_dups`: line by line, every sequence of each id.
     fn batch_entry(&mut self, file: &str, config: &mut Config) -> Result<bool, Stop> {
-        let lines = read_batch(file)?;
+        let lines = read_batch("entry_batch", file)?;
         let mut err_found = false;
         for (id, format) in &lines {
-            if self.modify_config_for_batch_entry(format, config) != 0 {
+            if self.modify_config_for_batch_entry(format, config)? != 0 {
                 err_found = true;
                 self.diag.err_post(&format!("Skipped {id}"));
                 continue;
@@ -1102,6 +1274,149 @@ impl Run<'_, '_> {
             }
         }
         Ok(err_found)
+    }
+
+    /// The OID lookup of a PIG (`PigToOid`): `Ok(None)` for NCBI's -1, a refusal where NCBI's
+    /// OID stays uninitialised (no volume has PIG files: probes J204, J205, J212, J214 of line
+    /// BDC, where the stack's value happened to be no OID).
+    fn pig_to_oid(&self, pig: i32) -> Result<Option<u32>, Stop> {
+        let lookup = self
+            .ids
+            .lookup
+            .as_ref()
+            .expect("an IPG request looks ids up");
+        lookup.pig_to_oid(pig)?.ok_or_else(|| {
+            Stop::refused(
+                "-ipg and -ipg_batch on a database without PIG files (.ppi, .ppd): NCBI \
+                 writes an OID it never set"
+                    .to_string(),
+            )
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:219-222
+    // ```c++
+    //    	if (args["ipg"].HasValue()) {
+    //     	CSeqDB::TOID oid;
+    //     	m_BlastDb->PigToOid(args["ipg"].AsInteger(),oid);
+    //    		fmt.Write(oid, m_Config);
+    //     }
+    // ```
+    // A PIG no volume holds is written as the OID -1 (probes J200-J202).
+    /// `-ipg`: the sequence of the PIG `pig`.
+    fn ipg(&mut self, pig: i32, config: &Config) -> Result<bool, Stop> {
+        match self.pig_to_oid(pig)? {
+            Some(oid) => self.write(oid, config, None)?,
+            None => self.formatter.write_missing(self.out)?,
+        }
+        Ok(false)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:488-520
+    // ```c++
+    //     CNcbiIstream& input = args["ipg_batch"].AsInputFile();
+    //
+    //     while (input) {
+    //         string line;
+    //         NcbiGetlineEOL(input, line);
+    //         if ( !line.empty() ) {
+    //         	string id, format;
+    //         	NStr::SplitInTwo(line, " \t", id, format, NStr::fSplit_MergeDelimiters | NStr::fSplit_Truncate);
+    //         	if(id.empty()) {
+    //         		continue;
+    //         	}
+    //         	if(x_ModifyConfigForBatchEntry(format))  {
+    //         		err_found ++;
+    //         		ERR_POST (Error << "Skipped IPG : " << id);
+    //         		continue;
+    //         	}
+    //    			int oid;
+    //    			int pig = NStr::StringToInt(id, NStr::fConvErr_NoThrow );
+    //    			m_BlastDb->PigToOid(pig,oid);
+    //    			if (oid == -1) {
+    //          		err_found ++;
+    //         		ERR_POST (Error << "Skipped IPG: " << id);
+    //         		continue;
+    //          	}
+    //
+    //    			fmt.Write(oid, m_Config);
+    //         }
+    //     }
+    //     return (err_found) ? 1 : 0;
+    // ```
+    // An id that is not an `int` is the PIG 0 (`fConvErr_NoThrow`; a `\r` of a CRLF line
+    // stays on the id: J207).
+    /// `-ipg_batch`: the sequence of the PIG of each line of `file`, with the line's range,
+    /// strand and mask algorithm.
+    fn batch_pig(&mut self, file: &str, config: &mut Config) -> Result<bool, Stop> {
+        if self.source.db.is_restricted() {
+            // NCBI writes the volume OID of each PIG through the database opened with the
+            // list, whose header read drops the lines without the list's taxids (probe K38).
+            return Err(Stop::refused(
+                "-ipg_batch with -target_only and a taxid list".to_string(),
+            ));
+        }
+        let lines = read_batch("ipg_batch", file)?;
+        let mut err_found = false;
+        for (id, format) in &lines {
+            if self.modify_config_for_batch_entry(format, config)? != 0 {
+                err_found = true;
+                self.diag.err_post(&format!("Skipped IPG : {id}"));
+                continue;
+            }
+            let pig = args::string_to_int8_message(id)
+                .ok()
+                .and_then(|pig| i32::try_from(pig).ok())
+                .unwrap_or(0);
+            match self.pig_to_oid(pig)? {
+                Some(oid) => self.write(oid, config, None)?,
+                None => {
+                    err_found = true;
+                    self.diag.err_post(&format!("Skipped IPG: {id}"));
+                }
+            }
+        }
+        Ok(err_found)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:304-318
+    // ```c++
+    // int
+    // CBlastDBCmdApp::x_ProcessTaxIdList(CBlastDB_Formatter & fmt)
+    // {
+    //     vector<blastdb::TOid> oids;
+    //     m_BlastDb->TaxIdsToOids(m_TaxIdList, oids);
+    //     if(oids.size() == 0) {
+    // 		ERR_POST (Error << "No seq found in db for taxonomy list");
+    // 		return 1;
+    //     }
+    //     for(unsigned i=0; i < oids.size(); i++) {
+    //     	fmt.Write(oids[i], m_Config);
+    //     }
+    //     return  0;
+    // }
+    // ```
+    // With `-target_only` the database was opened with the list (`SeqDb::restrict_taxids`):
+    // its OIDs are those of the list and its definition lines those with one of the list's
+    // taxids; the formatters read the ordinal ids `0..n`, whose OIDs (`%o`) `SeqDb::oid`
+    // gives. Without it every definition line of a sequence is written (probes T01-T09,
+    // J101-J139, S33-S37 of line BDC).
+    /// `-taxids` / `-taxidlist`: the sequences of the taxids `tax_ids`, by OID.
+    fn tax_id_list(&mut self, tax_ids: &BTreeSet<i32>, config: &Config) -> Result<bool, Stop> {
+        let db = self.source.db;
+        let oids: Vec<u32> = if db.is_restricted() {
+            (0..db.num_seqs()).collect()
+        } else {
+            db.tax_id_lookup()?.tax_ids_to_oids(tax_ids)?
+        };
+        if oids.is_empty() {
+            self.diag.err_post("No seq found in db for taxonomy list");
+            return Ok(true);
+        }
+        for oid in oids {
+            self.write(oid, config, None)?;
+        }
+        Ok(false)
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:271-300
@@ -1139,31 +1454,34 @@ impl Run<'_, '_> {
     // }
     // ```
     /// The range, strand and mask algorithm of a batch line (`id [range] [minus] [algo]`):
-    /// 1 when the algorithm id is invalid (every one is, in a database without masks; a word
-    /// that is not a number is the id -1, which NCBI does not check).
-    fn modify_config_for_batch_entry(&mut self, format: &str, config: &mut Config) -> i32 {
+    /// 1 when the algorithm id is invalid (a word that is not a number is the id -1, which
+    /// NCBI does not check).
+    fn modify_config_for_batch_entry(
+        &mut self,
+        format: &str,
+        config: &mut Config,
+    ) -> Result<i32, Stop> {
         let mut status = 0;
-        if !self.source.protein {
+        if !self.source.dbtype_protein {
             config.strand_minus = false;
         }
         config.range = NO_RANGE;
+        config.filt_algo = -1;
         for token in format.split([' ', '\t']).filter(|token| !token.is_empty()) {
             if token.contains('-') {
                 if let Ok(range) = parse_sequence_range_open_end(token) {
                     config.range = range;
                 }
-            } else if !self.source.protein && token.eq_ignore_ascii_case("minus") {
+            } else if !self.source.dbtype_protein && token.eq_ignore_ascii_case("minus") {
                 config.strand_minus = true;
             } else {
-                let algo_id = string_to_non_negative_int(token.as_bytes());
-                if algo_id >= 0 {
-                    self.diag
-                        .err_post(&format!("Invalid filtering algorithm ID: {algo_id}"));
+                config.filt_algo = string_to_non_negative_int(token.as_bytes());
+                if !is_mask_algo_id_valid(self.source, config.filt_algo, self.diag)? {
                     status = 1;
                 }
             }
         }
-        status
+        Ok(status)
     }
 }
 
@@ -1251,7 +1569,7 @@ mod tests {
             "gnl|BL_ORD_ID|3\n  gnl|BL_ORD_ID|4\t3-\t\n\n   \nx 1-5 21\r\n",
         )
         .unwrap();
-        let lines = read_batch(file.to_str().unwrap()).unwrap();
+        let lines = read_batch("entry_batch", file.to_str().unwrap()).unwrap();
         assert_eq!(
             lines,
             [
@@ -1262,7 +1580,7 @@ mod tests {
         );
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(
-            matches!(read_batch("in/nosuch.txt"), Err(Stop::Ncbi(message))
+            matches!(read_batch("entry_batch", "in/nosuch.txt"), Err(Stop::Ncbi(message))
             if message == "Argument \"entry_batch\". File is not accessible:  `in/nosuch.txt'")
         );
     }

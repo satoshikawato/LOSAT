@@ -1301,12 +1301,16 @@ fn open_new_database(
         Some(off) => &new_db[off + 1..],
         None => new_db,
     };
-    let lmdb = (version == DbVersion::V5).then(|| build_lmdb_file_name(new_db, is_protein));
+    let lmdb: Vec<String> = (version == DbVersion::V5)
+        .then(|| build_lmdb_file_name(new_db, is_protein))
+        .into_iter()
+        .collect();
     let (bytes_total, bytes_to_cache, files) = db_files_metadata(
         &located.volumes,
         &located.alias_files,
-        lmdb.as_deref(),
+        &lmdb,
         is_protein,
+        "",
     );
     let metadata = DbMetadata {
         dbname: dbname.as_bytes().to_vec(),

@@ -194,9 +194,8 @@ pub struct BlastpPairwiseReport {
     pub num_alignments: usize,
 }
 
-/// The database of a `-db` search as the pairwise report shows it (NCBI's `SDbInfo` of a
-/// BLAST database). A search of a FASTA subject set has none: its `Database:` lines are
-/// `BlastpPairwiseReport::database_name` with a period, and its date is `Unknown`.
+/// One database of a `-db` list as the reports show it (NCBI's `SDbInfo` of a BLAST
+/// database, `seqdb::NameRecord`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:385-391
 /// ```c++
@@ -209,8 +208,8 @@ pub struct BlastpPairwiseReport {
 ///     info.number_seqs = seqdb->GetNumSeqs();
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PairwiseDatabase {
-    /// `definition`: the title of the database, or the name as given for an empty title.
+pub struct DatabaseInfo {
+    /// `definition`: the title of the database, or its name for an empty title.
     pub definition: Vec<u8>,
     /// `date`.
     pub date: String,
@@ -218,6 +217,65 @@ pub struct PairwiseDatabase {
     pub num_sequences: u64,
     /// `total_length`.
     pub total_letters: u64,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:511-523
+// ```c++
+//     if (top) {
+//         const CAlignFormatUtil::SDbInfo* dbinfo = &(dbinfo_list.front());
+//         out << "Database: ";
+//
+//         string db_titles = dbinfo->definition;
+//         Int8 tot_num_seqs = static_cast<Int8>(dbinfo->number_seqs);
+//         Int8 tot_length = dbinfo->total_length;
+//
+//         for (size_t i = 1; i < dbinfo_list.size(); i++) {
+//             db_titles += "; " + dbinfo_list[i].definition;
+//             tot_num_seqs += static_cast<Int8>(dbinfo_list[i].number_seqs);
+//             tot_length += dbinfo_list[i].total_length;
+//         }
+// ```
+/// The database of a `-db` search as the pairwise report shows it: one `DatabaseInfo` per
+/// name of the list (NCBI's `m_DbInfo`), and the values that the `Database:` line of the
+/// prolog, the database counts of XML and JSON and the title of the Seq-annot formats take
+/// of them all. A search of a FASTA subject set has none: its `Database:` lines are
+/// `BlastpPairwiseReport::database_name` with a period, and its date is `Unknown`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairwiseDatabase {
+    /// The definitions of the databases joined with `"; "`.
+    pub definition: Vec<u8>,
+    /// The sum of their numbers of sequences.
+    pub num_sequences: u64,
+    /// The sum of their total lengths.
+    pub total_letters: u64,
+    /// The databases in the order of the list, a name given twice twice: the blocks of the
+    /// epilog.
+    pub databases: Vec<DatabaseInfo>,
+}
+
+impl PairwiseDatabase {
+    /// The report's database for the databases `databases` of the list.
+    pub fn new(databases: Vec<DatabaseInfo>) -> Self {
+        let mut definition = Vec::new();
+        for (at, database) in databases.iter().enumerate() {
+            if at > 0 {
+                definition.extend_from_slice(b"; ");
+            }
+            definition.extend_from_slice(&database.definition);
+        }
+        Self {
+            definition,
+            num_sequences: databases
+                .iter()
+                .map(|database| database.num_sequences)
+                .sum(),
+            total_letters: databases
+                .iter()
+                .map(|database| database.total_letters)
+                .sum(),
+            databases,
+        }
+    }
 }
 
 // =============================================================================
@@ -949,16 +1007,16 @@ fn write_alignment_with_sequences<W: Write>(
             .iter()
             .zip(s_chars[offset..end].iter())
             .map(|(q, s)| {
-                let q = &q.to_ascii_uppercase();
+                let (q, s) = (q.to_ascii_uppercase(), s.to_ascii_uppercase());
                 if nucleotide {
-                    if q.eq_ignore_ascii_case(s) {
+                    if q == s {
                         '|'
                     } else {
                         ' '
                     }
                 } else if q == s {
-                    *q // Identity: show the character
-                } else if is_positive_match(*q, *s, config.protein_matrix) {
+                    q // Identity: show the character
+                } else if is_positive_match(q, s, config.protein_matrix) {
                     '+' // Positive: show +
                 } else {
                     ' ' // Mismatch: show space
@@ -1676,8 +1734,9 @@ pub fn write_blastp_pairwise_prolog<W: Write>(
 //         return;
 //     }
 // ```
-/// The `Database:` lines of the prolog for a database (one database per search): its
-/// title as stored, wrapped at 68, then the counts and one blank line.
+/// The `Database:` lines of the prolog for the database of a `-db` search: the titles of the
+/// databases of its list joined with `; ` (`PairwiseDatabase::new`), wrapped at 68, then the
+/// summed counts and one blank line.
 fn write_blast_database_header<W: Write>(
     writer: &mut W,
     database: &PairwiseDatabase,
@@ -1709,27 +1768,47 @@ fn write_blast_database_header<W: Write>(
 //             out << "  Number of sequences in database:  ";
 //             out << NStr::IntToString(dbinfo->number_seqs,
 //                                      NStr::fWithCommas) << "\n";
+//             ...
+//         }
+//         out << "\n";
+//     }
 // ```
-/// The database block of the epilog for a database, and the blank lines before the
-/// matrix line (as `write_final_database_report`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2255-2266
+// ```c++
+//     if ( !m_IsBl2Seq || m_IsDbScan) {
+//         CBlastFormatUtil::PrintDbReport(m_DbInfo, kFormatLineLength,
+//                                         m_Outfile, false);
+//     }
+//
+//     if (m_Program == "blastn" || m_Program == "megablast") {
+//         m_Outfile << "\n\nMatrix: " << "blastn matrix " <<
+//     ...
+//     else {
+//         m_Outfile << "\n\nMatrix: " << options.GetMatrixName() << "\n";
+//     }
+// ```
+/// The database blocks of the epilog, one per database of the list, and the blank lines
+/// before the matrix line (as `write_final_database_report`).
 fn write_final_database_block<W: Write>(
     writer: &mut W,
     database: &PairwiseDatabase,
 ) -> io::Result<()> {
-    write!(writer, "  Database: ")?;
-    write_flatfile_wrapped(writer, &database.definition, 68)?;
-    writeln!(writer, "    Posted date:  {}", database.date)?;
-    writeln!(
-        writer,
-        "  Number of letters in database: {}",
-        format_count_with_commas(i64::try_from(database.total_letters).unwrap_or(i64::MAX))
-    )?;
-    writeln!(
-        writer,
-        "  Number of sequences in database:  {}",
-        format_count_with_commas(i64::try_from(database.num_sequences).unwrap_or(i64::MAX))
-    )?;
-    writeln!(writer)?;
+    for database in &database.databases {
+        write!(writer, "  Database: ")?;
+        write_flatfile_wrapped(writer, &database.definition, 68)?;
+        writeln!(writer, "    Posted date:  {}", database.date)?;
+        writeln!(
+            writer,
+            "  Number of letters in database: {}",
+            format_count_with_commas(i64::try_from(database.total_letters).unwrap_or(i64::MAX))
+        )?;
+        writeln!(
+            writer,
+            "  Number of sequences in database:  {}",
+            format_count_with_commas(i64::try_from(database.num_sequences).unwrap_or(i64::MAX))
+        )?;
+        writeln!(writer)?;
+    }
     writeln!(writer)?;
     writeln!(writer)
 }
@@ -2253,8 +2332,9 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         part: std::ops::Range<usize>,
     ) -> io::Result<()> {
         let config = self.config;
-        if self.database.is_some() {
-            let heading = match parsed_subject(self.parsed_subjects, s_idx) {
+        let parsed = parsed_subject(self.parsed_subjects, s_idx);
+        if self.database.is_some() || parsed.is_some() {
+            let heading = match parsed {
                 Some(subject) => {
                     DatabaseHeading::parsed(subject, true, group.subject_hits[&s_idx].len())
                 }
@@ -2583,12 +2663,16 @@ fn write_description_table<W: Write>(
     writeln!(writer)
 }
 
-/// The subject of `s_idx` among `parsed` when it has parsed Seq-ids.
+/// The subject of `s_idx` among `parsed` when it has parsed Seq-ids (not a `-subject` record shown
+/// as one without `-parse_deflines`, `ParsedSubject::shown_as_record`).
 fn parsed_subject(
     parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     s_idx: u32,
 ) -> Option<&crate::report::db_subject::ParsedSubject> {
-    parsed.get(s_idx as usize).and_then(Option::as_deref)
+    parsed
+        .get(s_idx as usize)
+        .and_then(Option::as_deref)
+        .filter(|subject| !subject.shown_as_record())
 }
 
 /// The description-table label of a database sequence (before the cut to the line): the title
@@ -3053,8 +3137,9 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         // A database sequence's heading is its stored title after `>` (a `BL_ORD_ID`
         // id is not shown), as BLASTP's (`write_database_subject_alignments`), or the lines
         // of the definition lines of one with parsed Seq-ids.
-        if self.report.database.is_some() {
-            let heading = match parsed_subject(&self.report.parsed_subjects, s_idx) {
+        let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
+        if self.report.database.is_some() || parsed.is_some() {
+            let heading = match parsed {
                 Some(subject) => DatabaseHeading::parsed(
                     subject,
                     self.report.gapped,
@@ -3724,8 +3809,9 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         // A database sequence's heading is its stored title after `>` (as BLASTP's,
         // BLASTN's and TBLASTN's `-db` reports), or the lines of the definition lines of one
         // with parsed Seq-ids.
-        if self.database.is_some() {
-            let heading = match parsed_subject(&self.report.parsed_subjects, s_idx) {
+        let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
+        if self.database.is_some() || parsed.is_some() {
+            let heading = match parsed {
                 Some(subject) => {
                     DatabaseHeading::parsed(subject, false, group.subject_hits[&s_idx].len())
                 }
@@ -3925,7 +4011,7 @@ mod tests {
     use super::*;
 
     fn long_titled_database() -> PairwiseDatabase {
-        PairwiseDatabase {
+        PairwiseDatabase::new(vec![DatabaseInfo {
             definition: [
                 &b"a database title that is much longer than sixty-eight letters, with commas, "[..],
                 b"hyphen-ated words and a-very-long-unbroken-token-",
@@ -3936,7 +4022,7 @@ mod tests {
             date: "Oct 13, 2026  1:18 PM".to_string(),
             num_sequences: 17,
             total_letters: 2287,
-        }
+        }])
     }
 
     // NCBI BLAST+ 2.17.0 `blastp -db longtitle -query hba.faa -num_threads 1` (campaign
@@ -3958,12 +4044,12 @@ mod tests {
         let mut written = Vec::new();
         write_blast_database_header(
             &mut written,
-            &PairwiseDatabase {
+            &PairwiseDatabase::new(vec![DatabaseInfo {
                 definition: b"Swiss-Prot".to_vec(),
                 date: "Oct 12, 2026  1:01 AM".to_string(),
                 num_sequences: 575_748,
                 total_letters: 209_017_843,
-            },
+            }]),
         )
         .unwrap();
         assert_eq!(
@@ -4606,8 +4692,9 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             // A database sequence's heading is its stored title after `>` (as BLASTP's
             // and BLASTN's `-db` reports), or the lines of the definition lines of one with
             // parsed Seq-ids.
-            if database.is_some() {
-                let heading = match parsed_subject(parsed_subjects, s_idx) {
+            let parsed = parsed_subject(parsed_subjects, s_idx);
+            if database.is_some() || parsed.is_some() {
+                let heading = match parsed {
                     Some(subject) => {
                         DatabaseHeading::parsed(subject, true, subject_hits[&s_idx].len())
                     }
@@ -5018,6 +5105,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         &[Arc<[u8]>],
         &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     )>,
+    records_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
 ) -> io::Result<()> {
     let mut writer = io::BufWriter::new(writer);
     let mut by_query: Vec<Vec<&PairwiseHit>> = vec![Vec::new(); queries.len()];
@@ -5092,12 +5180,20 @@ pub fn write_blastx_pairwise_report<W: Write>(
                         true,
                         first.subject_length,
                     )?,
-                    None => write_subject_header(
-                        &mut writer,
-                        subject_ids[*oid as usize].as_bytes(),
-                        first.subject_title.as_deref().map(str::as_bytes),
-                        first.subject_length,
-                    )?,
+                    None => match parsed_subject(records_parsed, *oid) {
+                        Some(subject) => write_database_subject_heading(
+                            &mut writer,
+                            DatabaseHeading::parsed(subject, options.gapped, shits.len()),
+                            true,
+                            first.subject_length,
+                        )?,
+                        None => write_subject_header(
+                            &mut writer,
+                            subject_ids[*oid as usize].as_bytes(),
+                            first.subject_title.as_deref().map(str::as_bytes),
+                            first.subject_length,
+                        )?,
+                    },
                 }
                 for hit in shits {
                     write_tblastn_hsp_info(&mut writer, hit)?;

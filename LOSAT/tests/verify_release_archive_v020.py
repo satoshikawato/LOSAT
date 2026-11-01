@@ -105,6 +105,8 @@ def verify(
             script = runner if runner is not None else repo_root / str(spec["runner_script"])
             if not script.is_file():
                 raise rc.ReleaseFailure(f"WASI runner script is missing: {script}")
+            if target == "wasm32-wasip1-threads":
+                result["shared_memory_guard"] = rc.threaded_guard_record(node, repo_root, binary)
             prefix = rc.wasm_command_prefix(node, script.resolve(), binary)
         result["version"] = rc.version_output(prefix, repo_root, contract)
         result["smoke"] = rc.run_smoke(prefix, repo_root, contract)

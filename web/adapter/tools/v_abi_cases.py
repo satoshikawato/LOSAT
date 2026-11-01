@@ -103,6 +103,9 @@ def outfmt0_fixtures() -> list[dict]:
         # SAM (outfmt 17) is not a format of ABI v1 (DECISIONS 10 of the outfmt line).
         if run_oracle.is_sam_outfmt(outfmt):
             continue
+        # -parse_deflines works in the CLI only: the adapter refuses it (`run::parse`).
+        if "-parse_deflines" in argv:
+            continue
         assert argv[-2:] == ["-outfmt", outfmt], row["fixture_id"]
         key = (row["program"], tuple(argv[:-2]))
         search = searches.setdefault(key, {"program": row["program"], "argv": [row["program"], *argv[:-2]],
@@ -123,8 +126,7 @@ def fasta_input() -> list[dict]:
     """SF fixture inputs through the ABI (gate NOTES open item 3): the rows of
     LOSAT/tests/fasta_input_fixtures.py that NCBI runs on files (no standard input, no
     environment, one thread) and completes in every format of the search, whose inputs
-    `register` accepts (no `>?` gap line: maintainer decision 3), without the
-    `-lcase_masking` rows that LOSAT's BLASTP rejects. One search per program,
+    `register` accepts (no `>?` gap line: maintainer decision 3). One search per program,
     task, inputs and options, with NCBI's frozen hash of each fixture's format; per program
     FASTA_INPUT_SEARCHES of them, taken in turn from each family of inputs (the variant
     name's first word, and the BLASTN task), and the first-batch failure."""
@@ -141,8 +143,6 @@ def fasta_input() -> list[dict]:
     for (program, task, query, subject, args), rows in sorted(grouped.items()):
         paths = [fixtures.ENGINE / fixtures.rp(query), fixtures.ENGINE / fixtures.rp(subject)]
         if not all(path.is_file() for path in paths) or any(b">?" in path.read_bytes() for path in paths):
-            continue
-        if "-lcase_masking" in args and program == "blastp":
             continue
         argv = [program, "-query", fixtures.rp(query), "-subject", fixtures.rp(subject)]
         argv += ["-task", task] if task else []

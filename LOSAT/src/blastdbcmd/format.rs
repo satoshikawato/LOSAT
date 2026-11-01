@@ -15,6 +15,8 @@ use super::retrieve::{numeric_target, parse_target, Config, Source, Stop};
 
 /// `NOT_AVAILABLE`.
 const NOT_AVAILABLE: &str = "N/A";
+/// `kNoMasksFound`.
+const NO_MASKS_FOUND: &str = "none";
 /// `SEPARATOR`.
 const SEPARATOR: &str = ";";
 
@@ -23,6 +25,8 @@ const SEPARATOR: &str = ";";
 #[derive(Debug)]
 pub(super) struct FormatSpec {
     types: Vec<u8>,
+    /// The filtering algorithm of each `%m` of `types`.
+    mask_algos: Vec<i32>,
     separators: Vec<Vec<u8>>,
     /// `m_GetDefline`: a specifier reads the definition lines.
     get_defline: bool,
@@ -61,9 +65,10 @@ impl FormatSpec {
     //     }
     // ```
     /// Reads the format `spec` (the `-outfmt` value after blastdbcmd's handling of `%f`,
-    /// `%b`, `%d` and `%m`); `Err` is the message of NCBI's exception. A `%` that ends the
-    /// text reads the string's terminating NUL as its specifier, as NCBI's loop does.
-    pub fn parse(spec: &str) -> Result<Self, String> {
+    /// `%b`, `%d` and `%m`, whose algorithms are `mask_algos`); `Err` is the message of NCBI's
+    /// exception. A `%` that ends the text reads the string's terminating NUL as its
+    /// specifier, as NCBI's loop does.
+    pub fn parse(spec: &str, mask_algos: Vec<i32>) -> Result<Self, String> {
         let bytes = spec.as_bytes();
         let mut types = Vec::new();
         let mut separators = Vec::new();
@@ -93,9 +98,15 @@ impl FormatSpec {
             need_seq: types.contains(&b's'),
             need_hash: types.contains(&b'h'),
             types,
+            mask_algos,
             separators,
             get_defline,
         })
+    }
+
+    /// Whether a specifier writes the letters of the sequence (`%s`).
+    pub fn writes_letters(&self) -> bool {
+        self.need_seq
     }
 
     /// Whether a specifier asks for the ASN.1 text of a definition line (`%d`), which LOSAT
@@ -165,11 +176,16 @@ impl FormatSpec {
         if self.need_hash {
             hash = hash_text(sequence_hash(&source.string_letters(oid, None)?));
         }
+        let masks = self
+            .mask_algos
+            .iter()
+            .map(|&algo| Ok(masks_string(&source.masks(oid, algo)?)))
+            .collect::<Result<Vec<String>, Stop>>()?;
         let length = source.length(oid)?;
         let mut line = Vec::new();
         let mut print = |defline: Option<&BlastDefline>, line: &mut Vec<u8>| -> Result<(), Stop> {
             line.clear();
-            let printed = self.x_print(source, oid, length, defline, &seq, &hash, line);
+            let printed = self.x_print(source, oid, length, defline, &seq, &hash, &masks, line);
             out.write_all(line).map_err(Stop::io)?;
             printed
         };
@@ -192,6 +208,56 @@ impl FormatSpec {
                 print(Some(defline), &mut line)
             }
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:187-201
+    // ```c++
+    //         case 'o':
+    //             m_Out << NStr::NumericToString(oid);
+    //             break;
+    //         ...
+    //         case 'l':
+    //             m_Out << NStr::NumericToString(m_BlastDb.GetSeqLength(oid));
+    //             break;
+    // ```
+    // `Write(-1, config)` (`-ipg` of a PIG no volume holds): the sequence, its hash and the
+    // definition lines are read before the line (`x_GetSeq`, `x_GetSeqHash`, `GetHdr`), and
+    // each read throws `OID not found`; without them the line is written up to `%l`, whose
+    // length throws, and `%o` is `-1`.
+    /// NCBI's `Write` of the OID -1: the part of the line it writes, then `OID not found`
+    /// where it reads the database.
+    pub fn write_missing_oid(&self, out: &mut dyn Write) -> Result<(), Stop> {
+        let missing = || Stop::Ncbi(super::retrieve::OID_NOT_FOUND.to_string());
+        if self.need_seq || self.need_hash || self.get_defline || !self.mask_algos.is_empty() {
+            return Err(missing());
+        }
+        let mut line = Vec::new();
+        for (i, &kind) in self.types.iter().enumerate() {
+            line.extend_from_slice(&self.separators[i]);
+            match kind {
+                b'o' => line.extend_from_slice(b"-1"),
+                b'l' => {
+                    out.write_all(&line).map_err(Stop::io)?;
+                    return Err(missing());
+                }
+                b'd' => {
+                    return Err(Stop::Refused(format!(
+                        "the -outfmt specifier %d is not supported by LOSAT's {}",
+                        super::PROGRAM
+                    )));
+                }
+                other => {
+                    out.write_all(&line).map_err(Stop::io)?;
+                    let mut message = b"Unrecognized format specification: '%".to_vec();
+                    message.push(other);
+                    message.push(b'\'');
+                    return Err(Stop::NcbiBytes(message));
+                }
+            }
+        }
+        line.extend_from_slice(&self.separators[self.types.len()]);
+        line.push(b'\n');
+        out.write_all(&line).map_err(Stop::io)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:165-262
@@ -226,6 +292,7 @@ impl FormatSpec {
         defline: Option<&BlastDefline>,
         seq: &[u8],
         hash: &str,
+        masks: &[String],
         line: &mut Vec<u8>,
     ) -> Result<(), Stop> {
         let fields = match defline {
@@ -234,6 +301,7 @@ impl FormatSpec {
         };
         let empty = DeflineFields::default();
         let fields = fields.as_ref().unwrap_or(&empty);
+        let mut masks = masks.iter();
         for (i, &kind) in self.types.iter().enumerate() {
             line.extend_from_slice(&self.separators[i]);
             match kind {
@@ -241,7 +309,7 @@ impl FormatSpec {
                 b'a' => line.extend_from_slice(&fields.accession),
                 b'i' => line.extend_from_slice(&fields.seq_id),
                 b'g' => line.extend_from_slice(fields.gi.as_bytes()),
-                b'o' => line.extend_from_slice(oid.to_string().as_bytes()),
+                b'o' => line.extend_from_slice(source.db.oid(oid).to_string().as_bytes()),
                 b't' => line.extend_from_slice(&fields.title),
                 b'h' => line.extend_from_slice(hash.as_bytes()),
                 b'l' => line.extend_from_slice(length.to_string().as_bytes()),
@@ -256,13 +324,15 @@ impl FormatSpec {
                 b'N' => line.extend_from_slice(&fields.leaf_node_scientific_names),
                 b'e' => line.extend_from_slice(fields.membership.as_bytes()),
                 b'n' => line.extend_from_slice(fields.links.as_bytes()),
-                b'm' | b'd' => {
-                    // `%m` never reaches the formatter (blastdbcmd refuses the mask
-                    // algorithm of a database without masks first); `%d` is refused before
-                    // the first line.
+                b'm' => {
+                    if let Some(mask) = masks.next() {
+                        line.extend_from_slice(mask.as_bytes());
+                    }
+                }
+                // `%d` is refused before the first line.
+                b'd' => {
                     return Err(Stop::Refused(format!(
-                        "the -outfmt specifier %{} is not supported by LOSAT's {}",
-                        kind as char,
+                        "the -outfmt specifier %d is not supported by LOSAT's {}",
                         super::PROGRAM
                     )));
                 }
@@ -304,12 +374,109 @@ impl FormatSpec {
 // 	}
 // }
 // ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:1077-1088
+// ```c++
+// string CBlastSeqUtil::GetMasksString(const CSeqDB::TSequenceRanges & masks)
+// {
+// 	if (masks.empty()) {
+// 		return kNoMasksFound;
+// 	}
+// 	CNcbiOstrstream out;
+// 	ITERATE(CSeqDB::TSequenceRanges, range, masks) {
+// 		out << range->first << "-" << range->second << SEPARATOR;
+// 	}
+// ```
+/// The text of `%m`: the stored ranges of the sequence, or `none`.
+fn masks_string(masks: &[(u32, u32)]) -> String {
+    if masks.is_empty() {
+        return NO_MASKS_FOUND.to_string();
+    }
+    masks
+        .iter()
+        .map(|(first, second)| format!("{first}-{second}{SEPARATOR}"))
+        .collect()
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:282-313
+// ```c++
+// void CBlastDB_SeqFormatter::x_GetSeq(CSeqDB::TOID oid, const CBlastDB_FormatterConfig & config, string & seq)
+// {
+// 	...
+// 	if(config.m_FiltAlgoId >= 0) {
+// 	    CSeqDB::TSequenceRanges masks;
+// 	    s_GetSeqMask(m_BlastDb, oid, config.m_FiltAlgoId, masks);
+// 	    if(!masks.empty()) {
+// 	    	if(r.Empty()) {
+// 	    		CBlastSeqUtil::ApplySeqMask(seq, masks);
+// 	    	}
+// 	    	else {
+// 	    		CBlastSeqUtil::ApplySeqMask(seq, masks, r);
+// 	    	}
+// 	    }
+// 	}
+// 	if(config.m_Strand == eNa_strand_minus) {
+// 		CBlastSeqUtil::GetReverseStrandSeq(seq);
+// 	}
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:1048-1070
+// ```c++
+// void CBlastSeqUtil::ApplySeqMask(string & seq, const CSeqDB::TSequenceRanges & masks, const TSeqRange r)
+// {
+// 	if(r.Empty()) {
+// 		ITERATE(CSeqDB::TSequenceRanges, itr, masks) {
+// 			transform(&seq[itr->first], &seq[itr->second],
+// 			                      &seq[itr->first], (int (*)(int))::tolower);
+// 		}
+// 	}
+// 	else {
+// 		const TSeqPos r_from = r.GetFrom();
+// 		ITERATE(CSeqDB::TSequenceRanges, itr, masks) {
+// 			TSeqRange mask (*itr);
+// 			if(mask.GetFrom() > r.GetTo()) {
+// 				break;
+// 			}
+// 			TSeqRange  tmp = r.IntersectionWith(mask);
+// 			if(!tmp.Empty()) {
+// 				transform(&seq[tmp.GetFrom() -r_from], &seq[tmp.GetToOpen() - r_from],
+// 		                  &seq[tmp.GetFrom() -r_from], (int (*)(int))::tolower);
+// 			}
+// 		}
+// 	}
+// }
+// ```
+// Without a range the stored offsets index the string as they are: a range past the end, or
+// one that ends before it starts, runs off the string (NCBI crashed, probes M786, M886, M896
+// of line BDC). LOSAT refuses those.
 /// The letters of `%s`: the range's (the whole sequence when the range is empty once
-/// clipped), reverse-complemented for `-strand minus` (nucleotide databases: `Config` never
-/// holds the minus strand for a protein one).
+/// clipped), with the masks of `-mask_sequence_with` in lower case, reverse-complemented for
+/// `-strand minus` (nucleotide databases: `Config` never holds the minus strand for a protein
+/// one).
 fn x_get_seq(source: &Source, oid: u32, config: &Config) -> Result<Vec<u8>, Stop> {
     let range = config.range.clipped(source.length(oid)?);
     let mut seq = source.string_letters(oid, range)?;
+    if config.filt_algo >= 0 {
+        let masks = source.masks(oid, config.filt_algo)?;
+        let used = match range {
+            Some((_, to)) => {
+                let past = masks.iter().position(|&(first, _)| first > to);
+                &masks[..past.unwrap_or(masks.len())]
+            }
+            None => {
+                let outside =
+                    |&(first, second): &(u32, u32)| first > second || second as usize > seq.len();
+                if masks.iter().any(outside) {
+                    return Err(Stop::refused(format!(
+                        "-outfmt %s with a stored mask outside the sequence at OID {} \
+                         (NCBI writes past the letters)",
+                        source.db.oid(oid)
+                    )));
+                }
+                &masks[..]
+            }
+        };
+        super::letters::apply_masks(&mut seq, used, range);
+    }
     if config.strand_minus {
         super::letters::reverse_complement(&mut seq);
     }
@@ -655,28 +822,31 @@ mod tests {
 
     #[test]
     fn the_spec_is_split_as_ncbi_s_loop_does() {
-        let spec = FormatSpec::parse("%a%%%l|%%").unwrap();
+        let spec = FormatSpec::parse("%a%%%l|%%", Vec::new()).unwrap();
         assert_eq!(spec.types, b"al");
         assert_eq!(
             spec.separators,
             [b"".to_vec(), b"%".to_vec(), b"|%".to_vec()]
         );
         assert!(spec.get_defline);
-        let spec = FormatSpec::parse("%o %l %h").unwrap();
+        let spec = FormatSpec::parse("%o %l %h", Vec::new()).unwrap();
         assert!(!spec.get_defline && spec.need_hash && !spec.need_seq);
         // A `%` at the end reads the terminating NUL.
-        assert_eq!(FormatSpec::parse("a%").unwrap().types, [0]);
-        assert_eq!(FormatSpec::parse("%").unwrap().separators.len(), 2);
+        assert_eq!(FormatSpec::parse("a%", Vec::new()).unwrap().types, [0]);
         assert_eq!(
-            FormatSpec::parse("no spec").unwrap_err(),
+            FormatSpec::parse("%", Vec::new()).unwrap().separators.len(),
+            2
+        );
+        assert_eq!(
+            FormatSpec::parse("no spec", Vec::new()).unwrap_err(),
             "Invalid format specification"
         );
         assert_eq!(
-            FormatSpec::parse("%%").unwrap_err(),
+            FormatSpec::parse("%%", Vec::new()).unwrap_err(),
             "Invalid format specification"
         );
         assert_eq!(
-            FormatSpec::parse("").unwrap_err(),
+            FormatSpec::parse("", Vec::new()).unwrap_err(),
             "Invalid format specification"
         );
     }

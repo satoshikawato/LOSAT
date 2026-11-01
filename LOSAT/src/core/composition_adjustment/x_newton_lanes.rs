@@ -114,6 +114,8 @@ static BUSY_LANE_ROUNDS: AtomicU64 = AtomicU64::new(0);
 static BATCHES8: AtomicU64 = AtomicU64::new(0);
 static ROUNDS8: AtomicU64 = AtomicU64::new(0);
 static TAIL_ROUNDS: AtomicU64 = AtomicU64::new(0);
+static DROPPED: AtomicU64 = AtomicU64::new(0);
+static KEPT: AtomicU64 = AtomicU64::new(0);
 
 // No NCBI counterpart: prints the counters at exit; it does not change any value NCBI computes.
 pub(crate) fn print_stats() {
@@ -130,6 +132,16 @@ pub(crate) fn print_stats() {
             LANE_ROUNDS.load(Ordering::Relaxed),
             BUSY_LANE_ROUNDS.load(Ordering::Relaxed),
         );
+        if prefetched > 0 {
+            eprintln!(
+                "[X_STATS] NEWTONDROP dropped={}",
+                DROPPED.load(Ordering::Relaxed)
+            );
+            eprintln!(
+                "[X_STATS] NEWTONBATCH kept={}",
+                KEPT.load(Ordering::Relaxed)
+            );
+        }
         if eight_lanes() {
             eprintln!(
                 "[X_STATS] NEWTONLANES8 batches8={} rounds8={} tail_rounds={}",
@@ -1481,16 +1493,78 @@ thread_local! {
     static STORE: RefCell<VecDeque<Box<StoredResult>>> = const { RefCell::new(VecDeque::new()) };
 }
 
+// No NCBI counterpart: the results of this thread's last prefetch as it solved them
+// (LOSAT_X_NEWTONBATCH): `taken` marks the ones taken, `next` is the first one not taken and `left`
+// counts the ones not taken. It does not change any value NCBI computes.
+struct KeptBatch {
+    inputs: Vec<NewtonInput>,
+    outputs: Vec<NewtonOutput>,
+    taken: Vec<bool>,
+    next: usize,
+    left: usize,
+}
+
+// No NCBI counterpart: per-thread batch computed ahead (LOSAT_X_NEWTONBATCH; the next prefetch drops
+// it, and it goes when its last result is taken); it does not change any value NCBI computes.
+thread_local! {
+    static BATCH: RefCell<Option<KeptBatch>> = const { RefCell::new(None) };
+}
+
 // No NCBI counterpart: solves a batch of inputs gathered ahead of their calls and keeps the results
 // for `take`; it does not change any value NCBI computes.
-/// Solves `inputs` and keeps the results in this thread's store.
+/// Solves `inputs` and keeps the results for this thread's calls.
 pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
+    // Dispatch point (LOSAT_X_NEWTONDROP, in the strict set; `=0` keeps the results not taken;
+    // LOSAT_X_NEWTONBATCH, in the strict set; `=0` stores the results one by one).
+    x_prefetch(inputs, x_newton_drop(), x_newton_batch());
+}
+
+// No NCBI counterpart: `prefetch`, with `drop` for LOSAT_X_NEWTONDROP and `batch` for
+// LOSAT_X_NEWTONBATCH; it does not change any value NCBI computes.
+/// A call comes after the windows (TBLASTN) or the matches (BLASTP: the next matches of a query, or
+/// a job's matches in the windowed redo) of this thread's earlier calls were walked, so their
+/// results not taken are not asked for again; with `drop` they are dropped before this batch is
+/// solved, without it they stay until the store holds `STORE_CAPACITY` results. A dropped result
+/// asked for after all would be solved by the caller with the same bits (`take` returns `None`).
+/// With `drop` and `batch` the results stay in the vectors they were solved in (one batch a
+/// thread) instead of one box each in the store: no copy, so the caller's inputs, the outputs and
+/// the boxes are never held at once. The batch keeps every result of a prefetch; the store keeps
+/// the last `STORE_CAPACITY` of one that solves more (then more of them are taken from the batch,
+/// with the same bits).
+#[inline]
+fn x_prefetch(inputs: Vec<NewtonInput>, drop: bool, batch: bool) {
+    if drop {
+        STORE.with(|store| {
+            let mut store = store.borrow_mut();
+            DROPPED.fetch_add(store.len() as u64, Ordering::Relaxed);
+            store.clear();
+        });
+        BATCH.with(|kept| {
+            if let Some(old) = kept.borrow_mut().take() {
+                DROPPED.fetch_add(old.left as u64, Ordering::Relaxed);
+            }
+        });
+    }
     if inputs.is_empty() {
         return;
     }
     let mut outputs = vec![NewtonOutput::new(); inputs.len()];
     solve_batch(&inputs, &mut outputs);
     PREFETCHED.fetch_add(inputs.len() as u64, Ordering::Relaxed);
+    if drop && batch {
+        KEPT.fetch_add(1, Ordering::Relaxed);
+        let n = inputs.len();
+        BATCH.with(|kept| {
+            *kept.borrow_mut() = Some(KeptBatch {
+                inputs,
+                outputs,
+                taken: vec![false; n],
+                next: 0,
+                left: n,
+            });
+        });
+        return;
+    }
     STORE.with(|store| {
         let mut store = store.borrow_mut();
         for (input, output) in inputs.into_iter().zip(outputs) {
@@ -1504,6 +1578,78 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
             }));
         }
     });
+}
+
+// No NCBI counterpart (memory only; the results kept are the ones `prefetch` solved):
+// LOSAT_X_NEWTONDROP, in the strict set (on unless `LOSAT_X_NEWTONDROP=0`).
+/// Whether `prefetch` drops the results of this thread's earlier calls that were not taken.
+fn x_newton_drop() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_NEWTONDROP"))
+}
+
+// No NCBI counterpart (memory only; the results kept are the ones `prefetch` solved):
+// LOSAT_X_NEWTONBATCH, in the strict set (on unless `LOSAT_X_NEWTONBATCH=0`).
+/// Whether `prefetch` keeps its batch as the vectors it was solved in (with LOSAT_X_NEWTONDROP; the
+/// batch holds one prefetch).
+fn x_newton_batch() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_NEWTONBATCH"))
+}
+
+// No NCBI counterpart: the result of this thread's kept batch for this input (LOSAT_X_NEWTONBATCH):
+// the first one not taken, from `next` on, whose input equals this one by bits; the batch goes when
+// its last result is taken. It does not change any value NCBI computes.
+// Not inlined: inlined into `take`'s caller (`composition_matrix_adjust`) it changed that function's
+// code on every path (one-thread instructions x1.001 with the switch off).
+#[inline(never)]
+fn x_take_batch(
+    x: &mut [f64],
+    q: &[f64],
+    row: &[f64; N],
+    col: &[f64; N],
+    relative_entropy: f64,
+) -> Option<i32> {
+    BATCH.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        let batch = kept.as_mut()?;
+        let i = (batch.next..batch.inputs.len()).find(|&i| {
+            !batch.taken[i] && x_same_input(&batch.inputs[i], q, row, col, relative_entropy)
+        })?;
+        x.copy_from_slice(&batch.outputs[i].x);
+        let status = batch.outputs[i].status;
+        batch.taken[i] = true;
+        batch.left -= 1;
+        let last = batch.left == 0;
+        if !last {
+            // a result not taken is left at `next` or after it
+            while batch.taken[batch.next] {
+                batch.next += 1;
+            }
+        }
+        if last {
+            *kept = None;
+        }
+        Some(status)
+    })
+}
+
+// No NCBI counterpart: whether `input` is this input by bits (relative entropy, column and row
+// probabilities, q); it does not change any value NCBI computes.
+// Not inlined: inlined into the search of the kept batch, the loop over `q` kept its index on the
+// stack (twice the instructions of the store's search, whose closure is a function of its own).
+#[inline(never)]
+fn x_same_input(
+    input: &NewtonInput,
+    q: &[f64],
+    row: &[f64; N],
+    col: &[f64; N],
+    relative_entropy: f64,
+) -> bool {
+    input.relative_entropy.to_bits() == relative_entropy.to_bits()
+        && same_bits(&input.col, col)
+        && same_bits(&input.row, row)
+        && same_bits(&input.q, q)
 }
 
 // No NCBI counterpart: bitwise equality of two f64 slices.
@@ -1525,7 +1671,8 @@ fn same_bits(a: &[f64], b: &[f64]) -> bool {
 // No NCBI counterpart: looks up a result computed ahead for exactly this input (relative entropy,
 // column and row probabilities, q compared by bits); on a hit `x` receives the stored final iterate
 // and the stored status is returned. It does not change any value NCBI computes.
-/// The stored result for this input, if any (removed from the store).
+/// The stored result for this input, if any (each result is given once): this thread's kept batch
+/// (LOSAT_X_NEWTONBATCH) first, then its store (empty while a batch is kept).
 pub(crate) fn take(
     x: &mut [f64],
     q: &[f64],
@@ -1533,6 +1680,10 @@ pub(crate) fn take(
     col: &[f64; N],
     relative_entropy: f64,
 ) -> Option<i32> {
+    if let Some(status) = x_take_batch(x, q, row, col, relative_entropy) {
+        HITS.fetch_add(1, Ordering::Relaxed);
+        return Some(status);
+    }
     STORE.with(|store| {
         let mut store = store.borrow_mut();
         let position = store.iter().position(|entry| {
@@ -1910,6 +2061,120 @@ mod tests {
             assert!(same_bits(&x, &want[i].x));
             assert_eq!(take(&mut x, &p.q, &p.row, &p.col, p.relative_entropy), None);
         }
+    }
+
+    // No NCBI counterpart: LOSAT_X_NEWTONDROP; a prefetch drops this thread's results of earlier
+    // prefetches not taken (with `=0` they stay); it does not change any value NCBI computes.
+    #[test]
+    fn x_newton_drop_empties_the_store_at_the_next_prefetch() {
+        let problems = test_problems();
+        let want = expected(&problems[..8]);
+        let mut x = [0.0f64; NN];
+        let take_at = |x: &mut [f64; NN], i: usize| {
+            let p = &problems[i];
+            take(x, &p.q, &p.row, &p.col, p.relative_entropy)
+        };
+        // the same calls with the switch (`drop`) and with `=0`, in this process, with the results
+        // kept as their batch (LOSAT_X_NEWTONBATCH, only with `drop`) or stored one by one
+        for (drop, batch) in [(true, true), (true, false), (false, true), (false, false)] {
+            x_prefetch(Vec::new(), true, true);
+            x_prefetch(problems[..5].to_vec(), drop, batch);
+            assert_eq!(
+                BATCH.with(|kept| kept.borrow().is_some()),
+                drop && batch,
+                "a batch is kept only with drop, drop {drop} batch {batch}"
+            );
+            for i in [0usize, 2, 4] {
+                assert_eq!(
+                    take_at(&mut x, i),
+                    Some(want[i].status),
+                    "drop {drop} batch {batch}"
+                );
+                assert!(same_bits(&x, &want[i].x));
+            }
+            x_prefetch(problems[5..8].to_vec(), drop, batch);
+            // problems 1 and 3 were not taken before the second prefetch
+            for i in [1usize, 3] {
+                let kept = take_at(&mut x, i);
+                if drop {
+                    assert_eq!(kept, None, "problem {i} dropped, batch {batch}");
+                } else {
+                    assert_eq!(
+                        kept,
+                        Some(want[i].status),
+                        "problem {i} kept with =0, batch {batch}"
+                    );
+                    assert!(same_bits(&x, &want[i].x));
+                }
+            }
+            for i in 5..8 {
+                assert_eq!(
+                    take_at(&mut x, i),
+                    Some(want[i].status),
+                    "drop {drop} batch {batch}"
+                );
+                assert!(same_bits(&x, &want[i].x));
+            }
+            // an empty prefetch drops what is left as well
+            x_prefetch(problems[..2].to_vec(), drop, batch);
+            assert_eq!(
+                take_at(&mut x, 0),
+                Some(want[0].status),
+                "drop {drop} batch {batch}"
+            );
+            x_prefetch(Vec::new(), drop, batch);
+            assert_eq!(
+                take_at(&mut x, 1).is_none(),
+                drop,
+                "problem 1 after an empty prefetch, drop {drop} batch {batch}"
+            );
+        }
+    }
+
+    // No NCBI counterpart: LOSAT_X_NEWTONBATCH; the kept batch gives each result once, in any order,
+    // to the call with its input's bits (also a repeated input), searches on from its first result
+    // not taken, stays out of the store, and goes when its last result is taken; it does not change
+    // any value NCBI computes.
+    #[test]
+    fn x_newton_batch_gives_each_result_once_and_goes_when_all_are_taken() {
+        let problems = test_problems();
+        let mut inputs = problems[..5].to_vec();
+        // problem 2 twice: both calls with its bits get its result
+        inputs.push(problems[2].clone());
+        let want = expected(&inputs);
+        let mut x = [0.0f64; NN];
+        let take_at = |x: &mut [f64; NN], i: usize| {
+            let p = &inputs[i];
+            take(x, &p.q, &p.row, &p.col, p.relative_entropy)
+        };
+        x_prefetch(Vec::new(), true, true);
+        x_prefetch(inputs.clone(), true, true);
+        assert!(
+            STORE.with(|store| store.borrow().is_empty()),
+            "the store stays empty"
+        );
+        let next = || BATCH.with(|kept| kept.borrow().as_ref().map(|batch| batch.next));
+        for i in [1usize, 2, 3] {
+            assert_eq!(take_at(&mut x, i), Some(want[i].status), "problem {i}");
+            assert!(same_bits(&x, &want[i].x));
+            assert_eq!(next(), Some(0), "problem 0 is not taken yet");
+        }
+        // results 0 to 3 taken: the search starts at 4
+        assert_eq!(take_at(&mut x, 0), Some(want[0].status));
+        assert!(same_bits(&x, &want[0].x));
+        assert_eq!(next(), Some(4));
+        // the second call with the bits of problem 2 gets the repeated one
+        assert_eq!(take_at(&mut x, 5), Some(want[5].status));
+        assert!(same_bits(&x, &want[5].x));
+        assert_eq!(take_at(&mut x, 2), None, "no result of problem 2 is left");
+        assert_eq!(next(), Some(4), "problem 4 is left");
+        assert_eq!(take_at(&mut x, 4), Some(want[4].status));
+        assert!(same_bits(&x, &want[4].x));
+        assert!(
+            BATCH.with(|kept| kept.borrow().is_none()),
+            "the batch goes with its last result"
+        );
+        assert_eq!(take_at(&mut x, 1), None);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696

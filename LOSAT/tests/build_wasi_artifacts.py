@@ -33,6 +33,21 @@ def declared_maximum_pages(rustflags):
     return int(sizes[-1]) // 65536 if sizes else None
 
 
+# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+# (*thread)->Run(); (*thread)->Join(&result);
+# Host compatibility only: the threaded modules are written with the shared-memory guard
+# (wasi_shared_memory.js), so that every host, browsers included, runs guarded bytes (release
+# v0.2.0 DECISIONS 52). The guard exits 1, and the build fails, when it declines an encoding,
+# finds nothing to guard or cannot verify its output; nothing unguarded is written.
+def write_artifact(node, kind, built, destination):
+    """Writes the artifact of `kind` to `destination`; returns the guard's record of a threaded one, else None."""
+    if kind.startswith("threaded-"):
+        return json.loads(subprocess.check_output(
+            [node, str(CRATE / "tests/wasi_shared_memory.js"), "guard", str(built), str(destination)], text=True))
+    shutil.copyfile(built, destination)
+    return None
+
+
 # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
 # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
 # Artifact identity belongs to the host ABI, not to any NCBI implementation.
@@ -77,13 +92,17 @@ def main():
                 raise RuntimeError(f"build overwrote another artifact: {previous}")
         # A reactor is the cdylib of the library crate `LOSAT`; a command is the `losat` binary.
         built = target / kind / triple / "release" / ("LOSAT.wasm" if kind.endswith("reactor") else "losat.wasm")
-        identity = json.loads(subprocess.check_output([args.node, str(CRATE / "tests/wasi_artifact.js"), str(built), kind], text=True))
+        destination = out / f"losat-{kind}.wasm"
+        guard = write_artifact(args.node, kind, built, destination)
+        # The identity is the written artifact's (the guard keeps the imports, exports and memory).
+        identity = json.loads(subprocess.check_output([args.node, str(CRATE / "tests/wasi_artifact.js"), str(destination), kind], text=True))
         expected_maximum = declared_maximum_pages(config["target"][triple]["rustflags"])
         if expected_maximum is not None and identity["memory"]["maximum"] != expected_maximum:
             raise RuntimeError(f"{kind}: the module declares a memory maximum of {identity['memory']['maximum']} pages, "
                                f"the rustflags ask for {expected_maximum}")
-        destination = out / f"losat-{kind}.wasm"
-        shutil.copyfile(built, destination)
+        if guard is not None:
+            identity["shared_memory_guard"] = {"unguarded_sha256": guard["input_sha256"], "version": guard["version"],
+                                               "fill": guard["fill"], "copy": guard["copy"], "guard_sha256": guard["guard_sha256"]}
         recorded[built] = digest(built)
         identity.update(target=triple, features=features, rust=rust, node=json.loads(node),
                         argv=argv, cwd=str(CRATE), target_rustflags=config["target"][triple]["rustflags"],
@@ -97,7 +116,7 @@ def main():
     runtime_files = {}
     # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
     # (*thread)->Run(); (*thread)->Join(&result);
-    runtime_names = ["run_losat_wasi_threads.js", "wasi_thread_host.js", "wasi_artifact.js", "wasi_shared_memory.js", "wasi_files.js"]
+    runtime_names = ["run_losat_wasi_threads.js", "wasi_thread_host.js", "wasi_thread_worker.js", "wasi_artifact.js", "wasi_shared_memory.js", "wasi_files.js"]
     if args.include_serial:
         runtime_names.append("run_losat_wasi.js")
     for name in runtime_names:

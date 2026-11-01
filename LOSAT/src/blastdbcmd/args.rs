@@ -415,6 +415,50 @@ pub(super) fn arg_message(name: &str, what: &str, attr: &str) -> String {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-735
+// ```c++
+//     if (AsString() == "-") {
+// #if defined(NCBI_OS_MSWIN)
+//         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+// #endif
+//         m_Ios  = &cin;
+//     } else if ( !AsString().empty() ) {
+//         if (!fstrm) {
+//             fstrm = new CNcbiIfstream;
+//         }
+//         if (fstrm) {
+//             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
+//             if ( !fstrm->is_open() ) {
+//                 delete fstrm;
+//                 fstrm = NULL;
+//             } else {
+//                 m_DeleteFlag = true;
+//             }
+//         }
+//         m_Ios = fstrm;
+//     }
+// ```
+// `-` is the standard input (probes K30-K32 of line BDC). On Linux the stream of a
+// directory opens and reads nothing (K33-K35); an empty name opens nothing (K39).
+/// The bytes of the input file `value` of the argument `name` (`AsInputFile`): `Err` with
+/// NCBI's message (`File is not accessible`) when it does not open.
+pub(super) fn read_input_file(name: &str, value: &str) -> Result<Vec<u8>, String> {
+    let not_accessible = || arg_message(name, "File is not accessible", value);
+    if value == "-" {
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut bytes)
+            .map_err(|_| not_accessible())?;
+        return Ok(bytes);
+    }
+    if value.is_empty() {
+        return Err(not_accessible());
+    }
+    if cfg!(unix) && std::path::Path::new(value).is_dir() {
+        return Ok(Vec::new());
+    }
+    std::fs::read(value).map_err(|_| not_accessible())
+}
+
 /// The arguments of one command line: those given and the defaults NCBI adds.
 #[derive(Debug)]
 pub(super) struct Args {

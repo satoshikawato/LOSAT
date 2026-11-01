@@ -20,7 +20,7 @@
    },
    {
     "flag": "-db",
-    "help": "BLAST database name (a nucleotide database without parsed Seq-ids)",
+    "help": "BLAST database name (a nucleotide database, with or without parsed Seq-ids)",
     "takes_value": true
    },
    {
@@ -70,16 +70,6 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
-   },
-   {
-    "flag": "-parse_deflines",
-    "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -358,16 +348,6 @@
     ]
    },
    {
-    "flag": "-parse_deflines",
-    "help": "Should the query and subject defline(s) be parsed?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
-   },
-   {
     "flag": "-searchsp",
     "help": "Effective length of the search space",
     "takes_value": true
@@ -473,6 +453,15 @@
     "takes_value": true
    },
    {
+    "flag": "-lcase_masking",
+    "help": "",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-use_sw_tback",
     "help": "",
     "takes_value": false,
@@ -514,7 +503,7 @@
    },
    {
     "flag": "-db",
-    "help": "BLAST database name (a nucleotide database without parsed Seq-ids)",
+    "help": "BLAST database name (a nucleotide database, with or without parsed Seq-ids)",
     "takes_value": true
    },
    {
@@ -564,16 +553,6 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
-   },
-   {
-    "flag": "-parse_deflines",
-    "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
     "default": "false",
     "choices": [
@@ -783,7 +762,7 @@
    },
    {
     "flag": "-db",
-    "help": "BLAST database name (a nucleotide database without parsed Seq-ids)",
+    "help": "BLAST database name (a nucleotide database, with or without parsed Seq-ids)",
     "takes_value": true
    },
    {
@@ -833,16 +812,6 @@
    {
     "flag": "-show_gis",
     "help": "Show NCBI GIs in deflines?",
-    "takes_value": false,
-    "default": "false",
-    "choices": [
-     "true",
-     "false"
-    ]
-   },
-   {
-    "flag": "-parse_deflines",
-    "help": "Should the query and subject defline(s) be parsed?",
     "takes_value": false,
     "default": "false",
     "choices": [

@@ -47,6 +47,7 @@
 //! residues= buffers= freed=` when a plan without residues was made.
 
 use super::search_seed::{translated_chunk_scan_ranges, TranslatedChunk, XSubjectPlan};
+use crate::algorithm::common::x_db_stream::x_frames_pooled;
 use crate::algorithm::tblastx::constants::SENTINEL_BYTE;
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::core::blast_encoding::{iupacna_to_ncbi4na, NcbiRandom};
@@ -607,7 +608,7 @@ thread_local! {
 fn x_frame_buffer(length: usize) -> Vec<u8> {
     let kept = if length <= X_REUSED_FRAME {
         X_FRAMES.with(|frames| frames.borrow_mut().pop())
-    } else if length >= X_MAPPED_FRAME && super::x_db_stream::x_frames_pooled() {
+    } else if length >= X_MAPPED_FRAME && x_frames_pooled() {
         crate::utils::x_mapped::X_BYTES.x_take_near(length)
     } else {
         None
@@ -642,7 +643,7 @@ fn x_frame_buffer(length: usize) -> Vec<u8> {
 /// buffers beyond its bound).
 pub(super) fn x_reuse_frame(mut frame: Vec<u8>) {
     if frame.capacity() == 0 || frame.capacity() > X_REUSED_FRAME {
-        if frame.capacity() >= X_MAPPED_FRAME && super::x_db_stream::x_frames_pooled() {
+        if frame.capacity() >= X_MAPPED_FRAME && x_frames_pooled() {
             crate::utils::x_mapped::X_BYTES.give(&mut frame);
         }
         return;

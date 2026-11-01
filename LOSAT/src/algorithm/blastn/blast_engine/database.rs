@@ -507,7 +507,7 @@ impl BlastnDatabase {
     /// What the `Database:` lines of the pairwise report show
     /// (`algorithm::common::database::pairwise_database`).
     pub(super) fn pairwise_database(&self) -> PairwiseDatabase {
-        shared::pairwise_database(&self.db, &self.name)
+        shared::pairwise_database(&self.db)
     }
 }
 
@@ -1138,6 +1138,7 @@ pub(super) fn read_titles(
     hit_lists: &[Option<BlastnHitList>],
     titles: &mut DatabaseTitles,
 ) -> Result<()> {
+    let headers = shared::HeaderReader::new(&database.db);
     for (query, hit_list) in hit_lists.iter().enumerate() {
         let Some(hit_list) = hit_list else {
             continue;
@@ -1147,7 +1148,7 @@ pub(super) fn read_titles(
             if titles.contains_key(&hsp_list.oid) {
                 continue;
             }
-            let title = shared::read_header(&database.db, hsp_list.oid, query, PROGRAM)?;
+            let title = shared::read_header(&headers, hsp_list.oid, query, PROGRAM)?;
             titles.insert(hsp_list.oid, title);
         }
     }
@@ -1693,7 +1694,7 @@ mod tests {
         assert_eq!(database.metadata().db_len_total, 850);
         let shown = database.pairwise_database();
         assert_eq!(shown.definition, b"nucleotide in volumes");
-        assert_eq!(shown.date, "Oct 12, 2026  4:12 PM");
+        assert_eq!(shown.databases[0].date, "Oct 12, 2026  4:12 PM");
         assert_eq!((shown.num_sequences, shown.total_letters), (12, 850));
         assert_eq!(database.name(), fixture("nucl_mv"));
     }
@@ -2329,7 +2330,8 @@ mod tests {
         let search =
             SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
         let path = tests.join("db_search").join(name);
-        let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+        let mut db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+        db.read_name_records(path.to_str().unwrap()).unwrap();
         BlastnDatabase {
             metadata: SubjectMetadata {
                 db_len_total: db.total_length() as usize,

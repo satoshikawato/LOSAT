@@ -9,6 +9,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -848,6 +849,8 @@ class AggregateTests(unittest.TestCase):
             else:
                 sidecar["artifact_sha256"] = digest
                 sidecar["extracted_artifact"] = {"smoke": smoke}
+            if spec["target"] == "wasm32-wasip1-threads":
+                sidecar["binary"] = {"sha256": "b" * 64, "shared_memory_guard": {"sha256": "b" * 64}}
             release.write_json(inputs / f"{artifact.name}.metadata.json", sidecar)
 
     def run_aggregate(self, contract: dict, inputs: Path, outputs: Path) -> None:
@@ -932,6 +935,19 @@ class AggregateTests(unittest.TestCase):
             with self.assertRaisesRegex(release.ReleaseFailure, "differs from the eight"):
                 self.run_aggregate(contract, root / "inputs", root / "outputs")
 
+    def test_aggregate_rejects_a_threaded_sidecar_without_the_guard(self) -> None:
+        contract = filled_contract("d" * 40)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.populate(root / "inputs", contract)
+            spec = next(item for item in contract["artifacts"] if item["target"] == "wasm32-wasip1-threads")
+            path = root / "inputs" / f"{spec['filename']}.metadata.json"
+            sidecar = json.loads(path.read_text(encoding="utf-8"))
+            del sidecar["binary"]["shared_memory_guard"]
+            release.write_json(path, sidecar)
+            with self.assertRaisesRegex(release.ReleaseFailure, "does not record the shared-memory guard"):
+                self.run_aggregate(contract, root / "inputs", root / "outputs")
+
     def test_aggregate_rejects_checksum_and_smoke_drift(self) -> None:
         contract = filled_contract("d" * 40)
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -950,6 +966,124 @@ class AggregateTests(unittest.TestCase):
             release.write_json(path, sidecar)
             with self.assertRaisesRegex(release.ReleaseFailure, "smoke record"):
                 self.run_aggregate(contract, root / "inputs", root / "outputs")
+
+
+# A module with an imported shared memory and one memory.fill (WebAssembly Core binary format).
+def _section(section_id: int, payload: bytes) -> bytes:
+    return bytes([section_id, len(payload)]) + payload
+
+
+_FILL_MODULE = (
+    b"\x00asm\x01\x00\x00\x00"
+    + _section(1, bytes([1, 0x60, 3, 0x7F, 0x7F, 0x7F, 0]))
+    + _section(2, bytes([1, 3]) + b"env" + bytes([6]) + b"memory" + bytes([2, 3, 1, 4]))
+    + _section(3, bytes([1, 0]))
+    + _section(10, bytes([1, 11, 0, 0x20, 0, 0x20, 1, 0x20, 2, 0xFC, 11, 0, 0x0B]))
+)
+
+
+@unittest.skipUnless(shutil.which("node"), "needs Node.js")
+class ThreadedGuardTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.raw, self.guarded = self.root / "raw.wasm", self.root / "guarded.wasm"
+        self.raw.write_bytes(_FILL_MODULE)
+        subprocess.run(
+            ["node", str(REPO_ROOT / "LOSAT/tests/wasi_shared_memory.js"), "guard", str(self.raw), str(self.guarded)],
+            check=True,
+            capture_output=True,
+        )
+
+    def assemble(self, binary: Path, unguarded: Path | None, target: str = "wasm32-wasip1-threads") -> dict:
+        contract = release.load_contract(REPO_ROOT)
+        spec = release.artifact_spec(contract, "wasm", target)
+        args = argparse.Namespace(
+            repo_root=REPO_ROOT,
+            candidate_sha="a" * 40,
+            target=target,
+            binary=binary,
+            unguarded_binary=unguarded,
+            node="node",
+            output_dir=self.root / "output",
+            allow_unfilled_lineage=True,
+        )
+        real_run = subprocess.run
+
+        # The fixture is not a whole command: wasi_artifact.js would reject it.
+        def run(argv, **kwargs):
+            if str(argv[1]).endswith("wasi_artifact.js"):
+                return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
+            return real_run(argv, **kwargs)
+
+        with (
+            mock.patch.object(release, "validate_candidate", return_value=False),
+            mock.patch.object(release, "capture_toolchain", return_value={}),
+            mock.patch.object(release, "version_output", return_value="losat 0.2.0"),
+            mock.patch.object(release, "run_smoke", return_value={"status": "PASS", "cases": []}),
+            mock.patch.object(release.subprocess, "run", side_effect=run),
+        ):
+            release.assemble_binary(args, "wasm")
+        return json.loads(
+            (self.root / "output" / f"{spec['filename']}.metadata.json").read_text(encoding="utf-8")
+        )
+
+    def test_threaded_artifact_must_carry_a_verified_shared_memory_guard(self) -> None:
+        with self.assertRaisesRegex(release.ReleaseFailure, "no verified shared-memory guard"):
+            release.threaded_guard_record("node", REPO_ROOT, self.raw)
+        record = release.threaded_guard_record("node", REPO_ROOT, self.guarded)
+        self.assertEqual((record["version"], record["fill"], record["copy"]), (1, 1, 0))
+        self.assertEqual(record["sha256"], hashlib.sha256(self.guarded.read_bytes()).hexdigest())
+
+    def test_assembly_refuses_an_unguarded_threaded_artifact(self) -> None:
+        with self.assertRaisesRegex(release.ReleaseFailure, "no verified shared-memory guard"):
+            self.assemble(self.raw, self.raw)
+
+    def test_assembly_needs_the_module_that_the_artifact_guards(self) -> None:
+        with self.assertRaisesRegex(release.ReleaseFailure, "needs --unguarded-binary"):
+            self.assemble(self.guarded, None)
+        other = self.root / "other.wasm"
+        other.write_bytes(_FILL_MODULE.replace(b"memory", b"memorz"))
+        with self.assertRaisesRegex(release.ReleaseFailure, "not the guard's output"):
+            self.assemble(self.guarded, other)
+        with self.assertRaisesRegex(release.ReleaseFailure, "not the guard's output"):
+            self.assemble(self.guarded, self.guarded)
+
+    def test_assembly_records_the_guard_and_the_unguarded_module(self) -> None:
+        guard = self.assemble(self.guarded, self.raw)["binary"]["shared_memory_guard"]
+        self.assertEqual(guard["sha256"], hashlib.sha256(self.guarded.read_bytes()).hexdigest())
+        self.assertEqual(guard["unguarded_sha256"], hashlib.sha256(self.raw.read_bytes()).hexdigest())
+        self.assertEqual(
+            guard["guard_sha256"],
+            hashlib.sha256((REPO_ROOT / "LOSAT/tests/wasi_shared_memory.js").read_bytes()).hexdigest(),
+        )
+
+    def test_serial_assembly_has_no_guard(self) -> None:
+        binary = self.assemble(self.raw, None, "wasm32-wasip1")["binary"]
+        self.assertNotIn("shared_memory_guard", binary)
+
+    def test_artifact_build_guards_threaded_modules_and_copies_serial_ones(self) -> None:
+        build_spec = importlib.util.spec_from_file_location(
+            "build_wasi_artifacts", REPO_ROOT / "LOSAT/tests/build_wasi_artifacts.py"
+        )
+        build = importlib.util.module_from_spec(build_spec)
+        build_spec.loader.exec_module(build)
+        for kind in ("threaded-command", "threaded-reactor"):
+            written = self.root / f"{kind}.wasm"
+            record = build.write_artifact("node", kind, self.raw, written)
+            self.assertEqual((record["fill"], record["output_sha256"]), (1, hashlib.sha256(written.read_bytes()).hexdigest()))
+            self.assertEqual(written.read_bytes(), self.guarded.read_bytes())
+        serial = self.root / "command.wasm"
+        self.assertIsNone(build.write_artifact("node", "command", self.raw, serial))
+        self.assertEqual(serial.read_bytes(), self.raw.read_bytes())
+        # Nothing to guard: the build fails and writes nothing.
+        empty = self.root / "empty.wasm"
+        empty.write_bytes(b"\x00asm\x01\x00\x00\x00")
+        unwritten = self.root / "unwritten.wasm"
+        with self.assertRaises(subprocess.CalledProcessError):
+            build.write_artifact("node", "threaded-command", empty, unwritten)
+        self.assertFalse(unwritten.exists())
 
 
 class WorkflowTests(unittest.TestCase):
@@ -974,6 +1108,10 @@ class WorkflowTests(unittest.TestCase):
         ):
             self.assertIn(target, workflow)
         self.assertIn("prepare_release_candidate_v020.py", workflow)
+        # The threaded artifact is assembled from the guarded module.
+        self.assertIn("node LOSAT/tests/wasi_shared_memory.js guard", workflow)
+        self.assertIn("--binary .tmp/release-readiness/threaded-guarded/losat.wasm", workflow)
+        self.assertIn("--unguarded-binary LOSAT/target/wasm32-wasip1-threads/release/losat.wasm", workflow)
 
 
 if __name__ == "__main__":

@@ -398,6 +398,20 @@ no hit. TBLASTN and TBLASTX run with `-max_hsps 1` to keep the frozen files smal
 Rows `db.id.blastn.stream.q25.*` (line DBID, blastn's report stream of these databases): the 25 records of
 `ids/nucl.fna` as queries in batches of `BATCH_SIZE=1500`, each batch with hits.
 
+Seq-align ids by which NCBI's formatters find another sequence (line DBID N1; rows `db.id.*.found.*`):
+`make_ids.py` writes, from the FASTA of `ids/make_found_fasta.py`, `ids/pfound_v5` and `ids/pfound_v4` from
+`ids/pfound.faa` (five pairs of unrelated proteins, each hit by its query `ids/pfound_q<k>.faa`;
+`ids/pfound_q1.fna` and `ids/pfound_q4.fna` for BLASTX), `ids/nfound_v5` and `ids/nfound_v4` from
+`ids/nfound.fna` (`gb|AF000050.1|`, then `gb|AF000050|`; queries `qnucl.fa` and `qprot.fa`), and the aliases
+`ids/pdup_ab.pal` (two databases with the same record `gb|EEE00005.1|`) and `ids/pdup_ac.pal` (the second
+copy with another title). NCBI looks the Seq-align id of a reported sequence up again in the database and
+takes the first sequence the lookup gives: by `gb|AAA00001|` it finds `gb|AAA00001.1|` before it, by
+`emb|BBB00002.1|` the `gb|BBB00002.1|` before it, by `lcl|CCC00003` the `gb|CCC00003.1|` before it (whose ids
+do not compare equal, so NCBI finds no sequence); `gb|DDD00004|` before `gb|DDD00004.1|` and `pdb|2XYZ|` before
+`pdb|2XYZ|AA` each find their own. LOSAT refuses such a sequence in the formats that read its Bioseq, unless the
+sequence found holds the same definition lines and letters (`pdup_ab`); `-negative_seqidlist
+seqidlist/sl_pfound_neg.txt` leaves `gb|AAA00001.1|` out of the search, and NCBI's lookup with it.
+
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 
 Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTDB=tests/seqdb/taxdb/offset_last_past_end`
@@ -516,3 +530,32 @@ rows `db.minraw.*` (DI-6b: `-min_raw_gapped_score`; the queries
     rm tests/db_search/mejo.njs
 
 The rows `db.blastn.ungapped_rej.*` (outfmt 8, 11, 17 with `-ungapped`) are refusals until O4a-2.
+
+## Several databases in -db (DI-8f)
+
+Rows `db.mdb.*`: `-db "a b"` searches the databases `a` and `b` as one virtual database, as NCBI's `CSeqDB` does (the `db` cell
+of a row is one argument, so a cell with spaces is a list of names). `multidb/` holds the databases and what
+`make_multidb.py MAKEBLASTDB` builds them from (makeblastdb 2.17.0; the records and taxids are those of `taxfilter/tfp.faa`,
+`tfp.map`, `tfn.fna` and `tfn.map`, definition lines kept; `.pjs` and `.njs` dropped; the whole directory is about 0.5 MB):
+
+- `pa` / `pb`: version 5 protein, `-parse_seqids`, taxid map; records 1-12 of `tfp.faa`, and records 13-23 plus `Q00001.1`, an
+  exact copy of record 2's sequence (taxid 9606), so that two databases hold an identical sequence. `p4a` / `p4b`: the same
+  records as version 4 without `-parse_seqids`.
+- `na` / `nb`: version 5 nucleotide, `-parse_seqids`, taxid map; records 1-8 of `tfn.fna`, and records 9-16 plus
+  `ENSTTEST0001.1`, a copy of record 1's sequence (taxid 9606). `n4a` / `n4b`: version 4 without `-parse_seqids`; `nnp`:
+  the records of `nb` as version 5 without `-parse_seqids`.
+- `d1/g` and `d2/g`: the records of `na` and `nb` under one base name in two directories. `et`: the records of `na` with an
+  empty title. `al.nal`: an alias file (`TITLE multidb alias of na`, `DBLIST na`). `sl.txt`: a seqid list of the first
+  accession of `na`, `nb`, `pa` and `pb`.
+
+The ncbi rows search `taxfilter/q.fna` (BLASTN, BLASTX, TBLASTX) or `taxfilter/q.faa` (BLASTP, TBLASTN, PSIBLAST) and cover:
+two names in outfmt 0, 5, 6, 7, 8, 11, 15 and 16 (`bn`), the other order (`bn.rev`), a name twice (`dup`), Galaxy's call with
+each name in double quotes (`galaxy`), extra spaces around the names (`space`), an alias file (`alias`), one base name in two
+directories (`samename`), two version 4 databases (`v4`, `bp.v4`), a version 4 and a version 5 database (`v4v5`: NCBI exits 2,
+`DB list contains both Version 4 and Version 5 dbs`), an empty title (`title`), `-taxids` and `-seqidlist` over both names
+(`tx`, `sl`), the five other programs (`bp`, `bx`, `tbn`, `tbx`; `ps` searches the version 4 pair, because LOSAT's PSIBLAST
+refuses databases with parsed Seq-ids). The three `losat-rejection` rows are LOSAT's refusals of a version 5 pair with and
+without the accession table (`bn.mixed.6`: NCBI stops at the first hit of a parsed sequence), of an alias that lists the
+volume of another name (`bn.aliasdup.0`), and of a negative seqid list (`multidb/sl_negpartial.txt`, FBtr0083245 of the
+second volume) on `taxfilter/tfn.00`, the first of the two volumes of one LMDB file (`bn.negpartial.6`: NCBI clears bit -1 of
+its OID mask and crashes).

@@ -26,6 +26,12 @@ export interface HarnessServerOptions {
   readonly isolated?: boolean;
   /** Generated files, served under /__extra/<name> (inputs of measurements). */
   readonly extra?: ReadonlyMap<string, Uint8Array>;
+  /**
+   * Serves every response `Cache-Control: no-store`. Chromium fails a fetch
+   * (net::ERR_CACHE_WRITE_FAILURE) when workers that run at the same time write the same
+   * engine module into its HTTP cache.
+   */
+  readonly noStore?: boolean;
 }
 
 /** Starts a server for the harness files under /__harness/ and repository files under /__files/. */
@@ -41,7 +47,7 @@ export async function startHarnessServer(files: HarnessFiles, options: HarnessSe
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     const path = decodeURIComponent(new URL(request.url ?? '/', 'http://localhost').pathname);
     const send = (status: number, type: string, body: string | Uint8Array, extra: Record<string, string> = {}) => {
-      response.writeHead(status, { ...headers, ...extra, 'Content-Type': type });
+      response.writeHead(status, { ...headers, ...extra, ...(options.noStore === true ? { 'Cache-Control': 'no-store' } : {}), 'Content-Type': type });
       response.end(body);
     };
     if (path.startsWith('/__harness/')) {

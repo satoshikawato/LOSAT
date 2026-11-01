@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "gapdb",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "gapdb.faa",
+  "number-of-letters": 7356,
+  "number-of-sequences": 30,
+  "last-updated": "2026-10-30T00:29:00",
+  "number-of-volumes": 1,
+  "bytes-total": 55121,
+  "bytes-to-cache": 7715,
+  "files": [
+    "gapdb.pdb",
+    "gapdb.phr",
+    "gapdb.pin",
+    "gapdb.pot",
+    "gapdb.psq",
+    "gapdb.ptf",
+    "gapdb.pto"
+  ]
+}

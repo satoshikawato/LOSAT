@@ -6,11 +6,9 @@ deflines, sequence lines, line ends, text before the first defline, empty record
 input, query batches (BATCH_SIZE), -lcase_masking, for BLASTN (megablast, blastn, dc-megablast,
 blastn-short), TBLASTX, TBLASTN (protein query, nucleotide subject) and BLASTP, with outfmt 0, 6
 and 7 and, on a core subset, -num_threads 2 and 4. Rows of kind `losat-rejection` (first lines
-that NCBI would parse as a Seq-id and fetch over the network) and the `-lcase_masking` rows of
-BLASTP are never run on NCBI: LOSAT rejects them explicitly (a Seq-id first line:
-AUTHORITY.md section G4 of docs/evidence/losat_web_e2h/, exit 1, "not supported by LOSAT's <PROGRAM>";
-`-lcase_masking`: E2e, AUTHORITY.md section A of docs/evidence/losat_web_e2e/, exit 2, "the NCBI BLAST+
-option -lcase_masking is not supported by LOSAT's <PROGRAM>"). The expectation of such a row is that
+that NCBI would parse as a Seq-id and fetch over the network) are never run on NCBI: LOSAT rejects
+them explicitly (AUTHORITY.md section G4 of docs/evidence/losat_web_e2h/, exit 1, "not supported by
+LOSAT's <PROGRAM>"). The expectation of such a row is that
 rejection: its exit code and the SHA-256 of the stdout, stderr and combined streams of the final LOSAT.
 
 - generate: writes the inputs to LOSAT/tests/fixtures/fasta_input/ (deterministic; the files are
@@ -32,8 +30,7 @@ rejection: its exit code and the SHA-256 of the stdout, stderr and combined stre
   files of --expected are present), `rejects` (LOSAT's explicit "not supported by LOSAT"
   rejection where NCBI reads the input: the port must turn it into `same`), `rejection` (a row of kind
   `losat-rejection` with LOSAT's frozen explicit rejection: expected), `pending` (the expectation is not
-  filled yet) or `error`. A last column `group` marks the rows whose option LOSAT rejects
-  (`-lcase_masking` of BLASTP) and the summary counts them apart. The exit status is 0 only when every
+  filled yet) or `error`. The exit status is 0 only when every
   selected row is `same` or `rejection`; `pending`, `rejects`, `differs` and `error` fail.
 
 NCBI is run without ~/.ncbirc, with BLASTDB, BATCH_SIZE, CHUNK_SIZE, OVERLAP_CHUNK_SIZE and
@@ -73,7 +70,6 @@ FIXTURES = ENGINE / "tests/fixtures/fasta_input"
 REL = "tests/fixtures/fasta_input"
 MANIFEST_DIR = ENGINE / "tests/fasta_input_fixtures"      # one <program>.tsv per program
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
-OPTION_NOTE = "option rejected explicitly by LOSAT (E2e, AUTHORITY.md section A of losat_web_e2e)"
 TIMEOUT = 180
 # NCBI reads these and each one changes the batches or the report.
 REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE", "ADAPTIVE_CBS",
@@ -747,12 +743,8 @@ def build_rows() -> list[Row]:
                             continue
                         for fmt in fmts:
                             rid = f"{program}{'.' + task if task else ''}.{name}{tag}.{role}.o{fmt}"
-                            note = v["note"]
-                            if args and program == "blastp":
-                                note = (note + "; " if note else "") + "-lcase_masking: " + OPTION_NOTE
-                            lcm_rejected = bool(args) and program == "blastp"
-                            rows.append(make_row(rid, program, task, query, subject, args, fmt, note=note, tier=v["tier"],
-                                                 kind="losat-rejection" if lcm_rejected else "ncbi"))
+                            rows.append(make_row(rid, program, task, query, subject, args, fmt, note=v["note"], tier=v["tier"],
+                                                 kind="ncbi"))
                             if v["threads"] and not args and (fmt == 0 or (fmt == 6 and task == "megablast")) \
                                     and task in ("", "megablast"):
                                 for n in (2, 4):
@@ -1223,10 +1215,7 @@ def freeze_one(ncbi_bin: Path, out: Path, row: Row, netns: bool) -> tuple[Row, s
 
 def rejection_rule(row: Row) -> tuple[int, str]:
     """(exit code, text of stderr) that a row of kind losat-rejection must give."""
-    name = f"LOSAT's {row.program.upper()}"
-    if "-lcase_masking" in row.args:
-        return 2, f"the NCBI BLAST+ option -lcase_masking is not supported by {name}"
-    return 1, f"not supported by {name}"
+    return 1, f"not supported by LOSAT's {row.program.upper()}"
 
 
 def freeze_rejection(losat: Path, row: Row) -> tuple[Row, str]:
@@ -1379,24 +1368,14 @@ def command_check(args) -> int:
     rows = filter_rows(read_manifest(), args.rows, args.match, args.tier)
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         results = list(pool.map(lambda r: check_one(losat, expected_dir, r), rows))
-    def group(row: Row) -> str:
-        return "option-rejected" if OPTION_NOTE in row.note else ""
-
-    lines = ["row_id\tprogram\tkind\ttier\tresult\tdetail\tgroup"] + [
-        f"{row.row_id}\t{row.program}\t{row.kind}\t{row.tier}\t{verdict}\t{detail}\t{group(row)}" for row, verdict, detail in results]
+    lines = ["row_id\tprogram\tkind\ttier\tresult\tdetail"] + [
+        f"{row.row_id}\t{row.program}\t{row.kind}\t{row.tier}\t{verdict}\t{detail}" for row, verdict, detail in results]
     if args.out:
         Path(args.out).write_text("\n".join(lines) + "\n")
     counts: dict[str, int] = {}
     for _, verdict, _ in results:
         counts[verdict] = counts.get(verdict, 0) + 1
     print(" ".join(f"{k}={v}" for k, v in sorted(counts.items())), f"rows={len(results)}")
-    grouped: dict[str, int] = {}
-    for row, verdict, _ in results:
-        if group(row):
-            grouped[verdict] = grouped.get(verdict, 0) + 1
-    if grouped:
-        print(f"separate group, {OPTION_NOTE}: " + " ".join(f"{k}={v}" for k, v in sorted(grouped.items())),
-              f"rows={sum(grouped.values())}")
     return 0 if set(counts) <= {"same", "rejection"} else 1
 
 

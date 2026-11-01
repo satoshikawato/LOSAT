@@ -24,6 +24,7 @@ use anyhow::Result;
 use super::args::BlastpArgs;
 use super::hsp::BlastpHitList;
 use super::seqalign::{query_records, EngineCounts};
+use crate::algorithm::tblastn::archive::lowercase_runs;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
@@ -149,8 +150,11 @@ pub(crate) struct ArchiveCall<'a> {
     pub subject_placements: &'a Placements,
     pub hit_lists: &'a [Option<BlastpHitList>],
     pub engine_counts: &'a EngineCounts,
-    /// The SEG masks of each query, in record coordinates (`query_record_masks`).
+    /// The SEG masks and, with `-lcase_masking`, the lower-case runs of each query, in record
+    /// coordinates (`query_record_masks`).
     pub masks: &'a [Vec<(i32, i32)>],
+    /// `-lcase_masking`.
+    pub lcase_masking: bool,
     /// Whether the query's batch was not searched (every query of it invalid).
     pub unsearched: &'a [bool],
     /// The queries of each NCBI batch of the call, in order.
@@ -310,8 +314,7 @@ pub(crate) fn write_blastp_archives(
         };
 
         // The results' masks are those of the search, so only a searched batch has them: one
-        // `notset` mask per query with the SEG intervals (a protein query). BLASTP has no
-        // `LCaseMask` parameter (`-lcase_masking` is not supported); SEG is never one.
+        // `notset` mask per query with the SEG intervals and lower-case runs (a protein query).
         let mut masks: Vec<MaskEntry> = Vec::new();
         if searched {
             for index in span.clone() {
@@ -321,6 +324,23 @@ pub(crate) fn write_blastp_archives(
                         best: call.queries[index].believed().map(|ids| ids.best.clone()),
                         frame: Frame::NotSet,
                         intervals: call.masks[index].clone(),
+                    });
+                }
+            }
+        }
+
+        // `-lcase_masking`: the `LCaseMask` parameters of the request are the lower-case runs of
+        // each whole query record, one `notset` mask per query that has any (SEG is never one).
+        let mut lcase_masks: Vec<MaskEntry> = Vec::new();
+        if call.lcase_masking {
+            for record in records {
+                let runs = lowercase_runs(record.archive_letters());
+                if !runs.is_empty() {
+                    lcase_masks.push(MaskEntry {
+                        id: record.local_id.clone(),
+                        best: record.believed().map(|ids| ids.best.clone()),
+                        frame: Frame::NotSet,
+                        intervals: runs,
                     });
                 }
             }
@@ -339,7 +359,7 @@ pub(crate) fn write_blastp_archives(
             queries: &queries,
             subjects: &subjects_input,
             required,
-            lcase_masks: &[],
+            lcase_masks: &lcase_masks,
             masks: &masks,
             ka_blocks,
             search_space: context.search_space,

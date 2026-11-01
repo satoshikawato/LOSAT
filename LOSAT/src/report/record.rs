@@ -210,7 +210,7 @@ impl<'a> SubjectNames<'a> {
     pub fn record(&self, index: usize, offset: usize, database_length: i32) -> SubjectRecord<'a> {
         match *self {
             SubjectNames::Records(records) => SubjectRecord {
-                id: SeqId::Local(&records[index].local_id),
+                id: records[index].seq_id(),
                 searched_length: records[index].seq().len() as i32,
                 offset: offset as i32,
                 use_this_seqid: &[],

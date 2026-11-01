@@ -467,6 +467,12 @@ pub struct BlastpArgs {
     // ```
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
+    // arg_desc.AddFlag(kArgUseLCaseMasking,
+    //     "Use lower case filtering in query and subject sequence(s)?", true);
+    // ReadSequencesToBlast(..., use_lcase_masks, subjects, ...);
+    #[arg(long)]
+    pub lcase_masking: bool,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:803-806
     // ```c
     //     arg_desc.AddFlag(kArgUseSWTraceback,
@@ -656,6 +662,10 @@ impl BlastpTaskOptions {
 pub struct ResolvedBlastpArgs {
     pub query: PathBuf,
     pub subject: PathBuf,
+    /// `-parse_deflines`, for the reports of the `-subject` records whose ids it read.
+    pub parse_deflines: bool,
+    /// `-show_gis`, for the same reports.
+    pub show_gis: bool,
     /// The `-db` value as NCBI keeps it (`db_name`), when the search is of a database.
     pub db: Option<String>,
     /// `-dbsize` (`eff_len_options->db_length`; 0 when it is not given).
@@ -697,6 +707,10 @@ pub struct ResolvedBlastpArgs {
     /// `-soft_masking` (`mask_at_hash`): the SEG intervals keep words out of the lookup table
     /// but the searched query keeps its letters (`encoding.rs` `encode_query_frame`).
     pub soft_masking: bool,
+    /// `-lcase_masking`: the query's lower-case letters join the SEG intervals
+    /// (`encoding.rs` `encode_protein_query_frame_lcase`), and those of a `-subject` leave its
+    /// word scan (`x_soft_subject.rs`).
+    pub lcase_masking: bool,
     pub use_sw_tback: bool,
     pub chaining: bool,
     /// The `-query_loc` range, as given.
@@ -1034,6 +1048,8 @@ impl BlastpArgs {
         let mut resolved = ResolvedBlastpArgs {
             query: self.query.clone(),
             subject: self.subject.clone().unwrap_or_default(),
+            parse_deflines: self.parse_deflines,
+            show_gis: self.show_gis,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
             // ```c++
             //     if (args.Exist(kArgDb) && args[kArgDb]) {
@@ -1104,6 +1120,7 @@ impl BlastpArgs {
             },
             seg: options.seg,
             soft_masking,
+            lcase_masking: self.lcase_masking,
             use_sw_tback: self.use_sw_tback,
             chaining: options.chaining,
             query_range,

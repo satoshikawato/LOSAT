@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // The compatibility outputs of a run, byte for byte as the engine wrote them, with the CLI
 // command of each format and their export (plan §5.8; the view filters never apply here).
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { toShellCommand } from '../domain/argv';
+import { outputChunks } from '../domain/output-chunks';
 import { OUTPUT_FORMATS, type OutputFormat } from '../domain/output-format';
 
 const props = defineProps<{ coordinator: Coordinator; run: RunView }>();
@@ -11,6 +12,7 @@ const format = ref<OutputFormat>(6);
 const text = ref('');
 /** Which run and format `text` shows ("<number>:<format>"), once it is read. */
 const shown = ref('');
+const chunks = computed(() => outputChunks(text.value));
 
 watch(
   [() => props.run, format],
@@ -43,7 +45,7 @@ watch(
     <p class="command">
       Command: <code data-testid="result-command">{{ toShellCommand(run.snapshot.argv, format) }}</code>
     </p>
-    <pre class="output" data-testid="result-output" :data-shown="shown">{{ text }}</pre>
+    <pre class="output" data-testid="result-output" :data-shown="shown"><span v-for="(chunk, index) in chunks" :key="index" class="output-chunk" :style="{ '--output-chunk-lines': chunk.lines }">{{ chunk.text }}</span></pre>
     <button data-testid="export-output" @click="coordinator.exportOutput(run.snapshot.runId, format)">
       Export outfmt {{ format }}
     </button>

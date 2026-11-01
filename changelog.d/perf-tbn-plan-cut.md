@@ -1,0 +1,1 @@
+- `tblastn`: with `-db` and several threads, a thread reads the sequence file no further than the chunk of subjects it searches and lets that block go with the chunk, which lowers peak memory by up to about 10 % on databases of many short sequences; reports are unchanged.

@@ -425,6 +425,7 @@ export LOSAT_X_TBNLINKSETS=1
 export LOSAT_X_TBNLUTLEAN=1
 export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNPAIRCAP=1
+export LOSAT_X_TBNPLANCUT=1
 export LOSAT_X_TBNREAPIDX=1
 export LOSAT_X_TBNREDOLPT=1
 export LOSAT_X_TBNSCANBYTE=1
@@ -5265,6 +5266,17 @@ Scheduling (each value computed by one thread with the original function; order 
   every subject, about 800), the 16S set 134 -> 19 and 152 -> 38 MiB (NCBI 9 and 11), the 5,000
   cDNAs at 8 threads 70 -> 37 MiB (NCBI 16). Before (dev 23db0a4f, `TBNSSIDE=0` (a variable that graduated 2026-10-22) against the
   default, 38 pairs): x0.980-0.994 at 4, 8 and 16 threads on the two large sets, no pair slower.
+- `LOSAT_X_TBNPLANCUT=1` tblastn (memory; in the strict set from the pull request that added it, 2026-11-01; `=0`
+  turns it off; `common/x_db_stream.rs` `x_plan_chunk`, `XDbStream::plan_with`; `tblastn/x_oid_flow.rs` `search_chunk`):
+  a thread that searches a chunk of subjects of a `-db` stream reads its block of 256 KiB of the sequence file no
+  further than the chunk, and the block goes when the chunk is searched. A chunk holds the file's bytes / (16 x the
+  threads), about 40 KiB at 48 threads on a 30 MB sequence file, and a thread's next chunk is about the number of threads
+  chunks further on, so the rest of the block was read for nothing and the last block stayed in the thread's heap through
+  the redo (48 threads: 11 MiB live at the peak; in the recorder the block raised the heaps' summed high water by 21 MiB).
+  The sequences are the same bytes wherever the block ends, so no report changes; outside a chunk (one thread, one
+  subject) nothing changes. Unit test `a_block_ends_with_the_chunk_of_its_thread_and_goes_with_it`;
+  `tests/tblastn_db_stream.rs` `a_block_that_ends_with_its_chunk_gives_the_same_reports`.
+  Always: every chunk of a `-db` search on the pool.
 - `LOSAT_X_TBNPAIRCAP=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-26;
   `=0` turns it off; `tblastn/search_seed.rs` `x_scan_plan`, `X_PAIR_ROOM`): the offset-pair array that a unit's scan
   calls fill (one per running unit; the units a thread runs one after another share theirs, `XUnitBuffers`) holds

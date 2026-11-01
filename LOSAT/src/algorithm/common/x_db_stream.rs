@@ -14,7 +14,8 @@
 //!   error is the error that the copy gave, which fails the same query batch with the same text.
 //! - Each thread keeps the last block of 256 KiB of the sequence file it read
 //!   (`XDbStream::plan_with`), from whose bytes the search of the next short subjects makes what
-//!   it needs, without a store.
+//!   it needs, without a store. A thread that searches chunks of subjects (`x_plan_chunk`) reads
+//!   no further than its chunk and lets the block go with it.
 //! - A long sequence (a block of its own) is read once while anything holds it: the stages and
 //!   the query batches that run at the same time share it, and a thread that asks for it while
 //!   another reads it waits for that read (`XDbStream::read_shared`). With more than one thread
@@ -41,7 +42,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, Weak};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 
 use anyhow::Result;
 
@@ -196,7 +197,12 @@ impl<'a> XDbStream<'a> {
         if !held(&kept) {
             kept = None;
             match self.db.next_block(ordinal, PLAN_BLOCK_BYTES) {
-                Some(range) if range.len() > 1 => {
+                Some(mut range) if range.len() > 1 => {
+                    // LOSAT_X_TBNPLANCUT: nothing after this thread's chunk is read.
+                    let end = X_PLAN_END.with(std::cell::Cell::get);
+                    if end > ordinal && end < range.end_ordinal() {
+                        range.end = range.first + (end - ordinal);
+                    }
                     let block = self.db.read_block(range).map_err(|error| {
                         XReadError(shared::search_read_error(error, self.program))
                     })?;
@@ -272,4 +278,88 @@ struct XPlanBlock {
 thread_local! {
     /// This thread's block.
     static X_PLAN_BLOCK: std::cell::Cell<Option<XPlanBlock>> = const { std::cell::Cell::new(None) };
+    /// The ordinal id after the last sequence of the chunk this thread searches (`x_plan_chunk`).
+    static X_PLAN_END: std::cell::Cell<u32> = const { std::cell::Cell::new(u32::MAX) };
+}
+
+// No NCBI counterpart (memory only; every sequence is made from the same bytes): reads the
+// LOSAT_X_TBNPLANCUT variable once.
+/// LOSAT_X_TBNPLANCUT, in the strict set (on unless `=0`): whether a thread's block ends with the
+/// chunk of subjects the thread searches (`x_plan_chunk`).
+fn x_plan_cut() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNPLANCUT"))
+}
+
+/// A thread's search of a chunk of subjects (`x_plan_chunk`), until it is dropped.
+pub(crate) struct XPlanChunk {
+    before: u32,
+}
+
+impl Drop for XPlanChunk {
+    fn drop(&mut self) {
+        X_PLAN_END.with(|end| end.set(self.before));
+        let _ = X_PLAN_BLOCK.try_with(std::cell::Cell::take);
+    }
+}
+
+/// The calling thread searches a chunk of subjects that ends before ordinal id `end`, until the
+/// value returned is dropped: its next blocks (`XDbStream::plan_with`) stop at `end`, and the block
+/// it holds then goes with the chunk. The next chunk a thread takes is another thread's distance
+/// away in the file, so the rest of a block was read for nothing, and a thread kept the last
+/// block through the later stages of the search. Chunks nest when a thread that waits runs another
+/// flow's loop (query batches side by side): the inner one's end lets the outer block go, and the
+/// outer chunk reads its next sequence again. `None` with `LOSAT_X_TBNPLANCUT=0`.
+pub(crate) fn x_plan_chunk(end: usize) -> Option<XPlanChunk> {
+    x_plan_cut().then(|| XPlanChunk {
+        before: X_PLAN_END.with(|cell| cell.replace(u32::try_from(end).unwrap_or(u32::MAX))),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::seqdb::SeqType;
+
+    /// The first ordinal id and the sequences of this thread's block.
+    fn held() -> Option<(u32, usize)> {
+        let kept = X_PLAN_BLOCK.with(std::cell::Cell::take);
+        let seen = kept.as_ref().map(|kept| (kept.first, kept.block.len()));
+        X_PLAN_BLOCK.with(|cell| cell.set(kept));
+        seen
+    }
+
+    #[test]
+    fn a_block_ends_with_the_chunk_of_its_thread_and_goes_with_it() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db/nucl_v4");
+        let db = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+        let stream = XDbStream::new(&db, 2, "TBLASTN").unwrap();
+        let count = stream.count();
+        assert!(count >= 3, "{count} sequences");
+        let bytes = |oid| {
+            stream
+                .plan_with(oid, |packed, length| Ok((packed.to_vec(), length)))
+                .unwrap()
+        };
+        // Outside a chunk the block runs on, and stays.
+        let whole: Vec<_> = (0..count).map(bytes).collect();
+        assert_eq!(held(), Some((0, count)));
+        X_PLAN_BLOCK.with(std::cell::Cell::take);
+        // `None` with LOSAT_X_TBNPLANCUT=0, as in the gate's arm of the switches off.
+        let Some(chunk) = x_plan_chunk(2) else {
+            return;
+        };
+        assert_eq!(bytes(0), whole[0]);
+        assert_eq!(held(), Some((0, 2)));
+        assert_eq!(bytes(1), whole[1]);
+        assert_eq!(held(), Some((0, 2)));
+        // A sequence past the end, asked for by a job the thread runs meanwhile: no end to cut at.
+        assert_eq!(bytes(2), whole[2]);
+        assert_eq!(held(), Some((2, count - 2)));
+        drop(chunk);
+        assert_eq!(held(), None);
+        assert_eq!(bytes(0), whole[0]);
+        assert_eq!(held(), Some((0, count)));
+        X_PLAN_BLOCK.with(std::cell::Cell::take);
+    }
 }

@@ -167,6 +167,33 @@ fn a_stage_lets_a_subject_go_after_its_last_match_with_the_same_reports() {
 // local_blast.cpp:177-224 (`CheckInternalData`): NCBI does not search a query batch without a
 // valid context, so the sequence file is read by the first batch with one (as
 // `tblastn_db_search.rs` `the_sequence_file_is_read_by_the_first_batch_with_a_valid_context`).
+/// `LOSAT_X_TBNPLANCUT`: a thread's block ends with its chunk of subjects; the reports are those
+/// of the block of 256 KiB kept to the next read, in one query batch and in several, with
+/// composition-based statistics and without.
+#[test]
+fn a_block_that_ends_with_its_chunk_gives_the_same_reports() {
+    let dir = temp_dir("plan-cut");
+    let (db, query) = inputs(&dir);
+    for threads in [1, 2, 4, 8] {
+        for args in [
+            &["-outfmt", "6"][..],
+            &["-outfmt", "6", "-comp_based_stats", "0"],
+        ] {
+            for batch in [&[][..], &[("BATCH_SIZE", "2000")]] {
+                let run = |off: &[(&str, &str)]| {
+                    let env: Vec<_> = batch.iter().chain(off).copied().collect();
+                    tblastn(&query, &db, args, threads, &env)
+                };
+                let (cut, kept) = (run(&[]), run(&[("LOSAT_X_TBNPLANCUT", "0")]));
+                assert_eq!(cut.0, Some(0), "{}", cut.2);
+                assert!(!cut.1.is_empty());
+                assert_eq!(cut.1, kept.1, "threads {threads} {args:?} {batch:?}");
+            }
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn an_unreadable_database_fails_the_same_batch_with_the_same_error() {
     let dir = temp_dir("unreadable");

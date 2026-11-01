@@ -140,6 +140,7 @@ LOSAT_X_TBNOIDNEXT	tblastn	conditional	required	required	2+ threads, several sub
 LOSAT_X_TBNOIDUNITS	tblastn	conditional	required	required	2+ threads, several subjects, subject longer than chunk budget
 LOSAT_X_TBNOWNPOOLS	tblastn	conditional	required	required	native only; <2 subjects per thread; 2..threads-1 batches (<=24 Mb) else 2..threads/2
 LOSAT_X_TBNPAIRCAP	tblastn	always			every tblastn scan plan whose lookup table's longest chain is 33 or more: offset array of 32768 + the longest chain instead of 1024 x it (NCBI 4096 + it)
+LOSAT_X_TBNPLANCUT	tblastn	always			acts wherever a thread of the pool searches a chunk of subjects of a -db stream (2+ threads, several subjects): its block of 256 KiB stops at the chunk's end and goes with the chunk
 LOSAT_X_TBNREAPIDX	tblastn	conditional	required	required	the HSPs one composition-based redo gives a match: 32 (X_REAP_INDEX_FROM) or more -> the reap of contained HSPs (s_HitlistReapContained) from an index by subject start (x_reach! once per match); ref: 2 to 31
 LOSAT_X_TBNREDOLPT	tblastn	conditional	required	required	composition-based redo (-comp_based_stats 2, the default) on the search pool: 2+ threads, 2+ (query, subject) matches, a chunk with 2+ matches to redo; ref: one thread (also each query batch searched side by side), one match, or a chunk with fewer than 2 to redo
 LOSAT_X_TBNSCANBYTE	tblastn	platform			AVX2 CPUs only (nothing elsewhere); word size 3, 5-bit letters tables

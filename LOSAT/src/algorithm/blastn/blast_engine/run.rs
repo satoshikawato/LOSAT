@@ -83,9 +83,9 @@ use super::super::filtering::{
     subject_best_hit, subject_best_hit_by, BestHitKey, ReevalParams,
 };
 use super::super::hsp::{
-    evalue_comp, get_prelim_hitlist_size, sort_hsplist_by_evalue,
-    sort_hsps_by_score, trim_by_max_hsps, update_best_evalue, BlastnHitList, BlastnHsp,
-    BlastnHspList, BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
+    evalue_comp, get_prelim_hitlist_size, sort_hsplist_by_evalue, sort_hsps_by_score,
+    trim_by_max_hsps, update_best_evalue, BlastnHitList, BlastnHsp, BlastnHspList,
+    BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{
@@ -4157,7 +4157,11 @@ fn prelim_hits_by_subject(hit_lists: PrelimHitLists, num_subjects: usize) -> Vec
     // No NCBI counterpart: each subject's list is made at its size, so that it is not copied as it
     // grows (with one subject, every kept HSP of the batch was copied again at each doubling).
     let mut sizes = vec![0usize; num_subjects];
-    for list in hit_lists.iter().flatten().flat_map(|hit_list| &hit_list.hsplist_array) {
+    for list in hit_lists
+        .iter()
+        .flatten()
+        .flat_map(|hit_list| &hit_list.hsplist_array)
+    {
         sizes[list.oid as usize] += list.hsps.len();
     }
     let mut by_subject: Vec<Vec<PrelimHit>> = sizes.into_iter().map(Vec::with_capacity).collect();
@@ -5501,6 +5505,9 @@ fn update_hitlists_with_subject_hits(
                 if q_idx >= hit_lists.len() {
                     continue;
                 }
+                // The kept list holds its exact count, as the `Mixed` path below gives it (the
+                // final tree and the e-value reap drop HSPs after `x_final_list` sized it).
+                hsps.shrink_to_fit();
                 sort_hsps_by_score(&mut hsps);
                 let hsp_list = BlastnHspList {
                     oid,

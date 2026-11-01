@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::blastinput::fasta_reader::{FastaInputSource, FastaRecord};
 use crate::sequence::packed_subject::PackedNucleotide;
-use crate::utils::threading::SearchPool;
 use crate::utils::dust::MaskedInterval;
+use crate::utils::threading::SearchPool;
 
 use super::coordination::collect_lowercase_masks;
 

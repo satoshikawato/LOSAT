@@ -247,8 +247,10 @@ def freeze(args) -> int:
         if row["check"].startswith("contains:"):
             row["stdout_sha256"], row["stdout_bytes"], row["files"] = "", "", ""
             continue
-        (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
-        row["stdout_sha256"], row["stdout_bytes"] = sha256(run.stdout), str(len(run.stdout))
+        # `-version`'s second line holds the build of that copy of NCBI, and `line1` does not compare it.
+        stdout = run.stdout.split(b"\n")[0] + b"\n" if row["check"] == "line1" else run.stdout
+        (FROZEN / f"{row['row_id']}.out").write_bytes(stdout)
+        row["stdout_sha256"], row["stdout_bytes"] = sha256(stdout), str(len(stdout))
         if not is_database_row(argv):
             for name, data in run.files.items():
                 (FROZEN / f"{row['row_id']}--{name}").write_bytes(data)

@@ -11,7 +11,7 @@ M07		bytes	0	53d4c1d85c02ce3da2399448d847e3f3f9192cc24efe153054afec432f40d7ae	97
 M08		bytes	0	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	yes	pq.faa.pdb:41cbd53de33d97f3cdf6d66964e435548678f7658b6977fa12813cb2ddcd69ba,pq.faa.phd:1b9fa8dbff8901fded08570c27e355fca2d909d33810d3424c1b73c09266f633,pq.faa.phi:7a84c67f8ea3780baa71d694044c8cb9a7e3a66fa4a00ffc79316a3a510bba0c,pq.faa.phr:926a900b82697cbed12a82fc9ade7ed9b613709a9c185f85417770e14afb3612,pq.faa.pin:78fba5c979a7b9ff42d9c63840aef1f7a9d59c8ff87aa08de293a080dda2a9d0,pq.faa.pjs:5bac17d39a7906501efa95939f714349e0a652541fd748260e12d0348af848a0,pq.faa.pog:e00c0b5a75fea0c44431bca4b8ada3973165624768349f666f0221aa8d70a574,pq.faa.pot:07d6a68779643f11e384fbe5c8aae0d82b72671a69dba2d5e1c30f98abe70f47,pq.faa.psq:006a911a5f27d5bb6401bd2dad1e78b068d0ebb562a3c935cc5eb22862d00f79,pq.faa.ptf:67982e4d7b1490b09cce06e7c29175c6bd011cd542cfacb1a1c310084a50821a,pq.faa.pto:26ae608eb67e13ad72163fc6b95d26e09ec0348aab1f618b4a40feb1d8c4b878	makeblastdb -hash_index -dbtype prot -in pq.faa -logfile /dev/null	Prokka --setupdb
 M09		bytes	0	53d4c1d85c02ce3da2399448d847e3f3f9192cc24efe153054afec432f40d7ae	97	yes	ns.fna.ndb:4b19ba5b67a02521c6157a4f3892d1e7e78b3494dbb496eb3e18a324765972bc,ns.fna.nhr:4703635f306effaaaa8a3a6ac1bf42ddf9788d31775d2bd6fe9d61c05a544465,ns.fna.nin:e3c39255b40b2ab08552eb11116c289a0f618134fc22e443f417715cbf100d36,ns.fna.njs:bd79c04129631022015115bca3d7161ec204c2fdf3cbed019c790e2de950fd4b,ns.fna.not:eb90c3f5171d2f6b54240e79df365c1055a317cd096e3c928ffbc71cc2256899,ns.fna.nsq:3e376155f12ab4f43fe3ff922b08361ff93a88405c86d5e63599f5df5fed7bed,ns.fna.ntf:67982e4d7b1490b09cce06e7c29175c6bd011cd542cfacb1a1c310084a50821a,ns.fna.nto:1ff4dcc0d13d46df32e525f97d772fe4b0502a80e3377f19bd4f6c0fbac40192	makeblastdb -in ns.fna -dbtype nucl	no -out: DB next to the input
 M10		bytes	0	39d9ef2b043aadd839a6489ebc3517364a963fa78e9cd63310d22c5c37cc46bd	94	yes	db.phr:926a900b82697cbed12a82fc9ade7ed9b613709a9c185f85417770e14afb3612,db.pin:465f79c6f8ba116b7975e4ad06cd6c2c80d1d3b8d87476d6681b7a40440d29b7,db.pjs:6425f04ba4b827f98d667ff0e9985173580c7e54293cf05a70d9526be54ff98f,db.psq:006a911a5f27d5bb6401bd2dad1e78b068d0ebb562a3c935cc5eb22862d00f79	makeblastdb -in pq.faa -dbtype prot -blastdb_version 4 -out db	explicit v4
-M11		line1	0	f546a0ec87393461d6091b07c8390acd2571e218ef0d22952ee0d73804b8b465	72	yes		makeblastdb -version	version check
+M11		line1	0	c1461e99336a9ad4ac87bdf1399c4dde50737e28914fa60633d50f472f99219d	21	yes		makeblastdb -version	version check
 N01		bytes	0	438c9eb5e9e5d2f0cbf55e3950aaae8f4c1cfca7a6fb039be0367fc712f2188c	31129	yes		blastn -query nq.fna -db ndb	default outfmt 0
 N02		bytes	0	9f87af195ca5cb51f1c18778ea6799c0c0c6beb537670c046308af052862f00b	340	yes		blastn -query nq.fna -db ndb -outfmt 6	
 N03		bytes	0	e946fdde5748b07dd69769ab7ee256295341c42d08fd63e71c0754692483ce01	1269	yes		blastn -query nq.fna -db ndb -outfmt 7	
@@ -33,7 +33,7 @@ N18		bytes	0	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	
 N19		bytes	0	e8a2b533f6c16530b41e7024b8cdb38d98a71d98241a5829499644013b70cfa1	468	yes		blastn -task blastn -dust no -perc_identity 80 -db ndb -outfmt "6 qseqid qstart qend qlen sseqid sstart send slen sstrand evalue length pident gaps gapopen stitle" -num_threads 1 -evalue 1E-20 -culling_limit 1 -max_target_seqs 10000 -query nq.fna	ABRicate nucleotide DB
 N20		bytes	0	c4881fd708c71eaa2771de3883cd8fa60b5b0de6ed66d48203bc0d422854f057	115	yes		blastn -query nq.fna -db ndbp -outfmt "6 qseqid sseqid staxids"	taxid field on a parsed DB
 N21		bytes	0	a2171216ae0c4e3c1a2422207acc9131afe99a2b88fbf1356cc832f0343770c5	4830	yes		blastn -query nq.fna -db ndb -word_size 11 -outfmt 6	
-N22		line1	0	9fea3106182fc8eafc3097428535a12dd7295c3b3a41cc9d7b930482b985dcba	67	yes		blastn -version	version check
+N22		line1	0	3786b59507f374c4726f8d6226680071c5000ef876ac8bba4571289e04e51808	16	yes		blastn -version	version check
 N23	nq.fna	bytes	0	9f87af195ca5cb51f1c18778ea6799c0c0c6beb537670c046308af052862f00b	340	yes		blastn -query - -db ndb -outfmt 6	query from stdin
 P01		bytes	0	d82fc425de039bfc12f72d4ceb88f88f2df586dcbf33359c400a97f60ab70fc5	22068	yes		blastp -query pq.faa -db pdb	default outfmt 0
 P02		bytes	0	2fb9fbccd8fc7e9bc6c60512bf923d8b64df7e81f2d987a90cd7930f64b2ea18	1635	yes		blastp -query pq.faa -db pdb -outfmt 6	
@@ -48,7 +48,7 @@ P10		bytes	0	b199f94b1a9a212ce3c8a9d999cb270edf7ded42d4a01b8a6e2002791a30ad27	29
 P11		bytes	0	2fb9fbccd8fc7e9bc6c60512bf923d8b64df7e81f2d987a90cd7930f64b2ea18	1635	yes		blastp -query pq.faa -db pdb -matrix BLOSUM62 -outfmt 6	
 P12		bytes	0	698fff3c45bfde9b00375d2852a7b7e955b0fa8fb9218cada1b62b07abbbf6e9	972	no		blastp -query pq.faa -db pdbp -outfmt "6 qseqid sseqid staxids sscinames"	taxid fields on a parsed DB
 P13		bytes	0	8f4a73098488ccd2b66aa955baeecc4bdf62360aa7366f70033967de56ba1231	1635	yes		blastp -query pq.faa -db pdb -outfmt 10	CSV
-P14		line1	0	421981d4ba94ed9a2e451e5a4636a45bfb1c97bdde972f23a38db73652b3047f	67	yes		blastp -version	Prokka version check
+P14		line1	0	e5f51476d6e8ee96fc857671ba9e6e64a41a889f05b730105686c6fadec9ab8d	16	yes		blastp -version	Prokka version check
 X01		bytes	0	3cb56a778d3320057371a9535116cf63b774844de9fc254c586fd51b4913b0e1	14704	yes		blastx -query tq.fna -db pdb	default outfmt 0
 X02		bytes	0	e1632cf7458031caef99c2d73488ba3427daac7d892c10aad6e76bc2c8f77ee9	780	yes		blastx -query tq.fna -db pdb -outfmt 6	
 X03		bytes	0	c3096cff413b5623c42dd5ed0ceba032d2e29a23b85308e357180612a09f6449	539	yes		blastx -query tq.fna -db pdb -outfmt "6 qseqid sseqid pident length evalue bitscore qframe"	
@@ -56,21 +56,21 @@ X04		bytes	0	0cea22cda239559bc170d4e4b8bd10f0549d6936f7cdd790a9d928f868353582	93
 X05		bytes	0	e1632cf7458031caef99c2d73488ba3427daac7d892c10aad6e76bc2c8f77ee9	780	yes		blastx -query tq.fna -db pdb -query_gencode 11 -outfmt 6	
 X06		bytes	0	e1632cf7458031caef99c2d73488ba3427daac7d892c10aad6e76bc2c8f77ee9	780	yes		blastx -query tq.fna -db pdb -num_threads 4 -outfmt 6	
 X07		bytes	0	e1632cf7458031caef99c2d73488ba3427daac7d892c10aad6e76bc2c8f77ee9	780	yes		blastx -query tq.fna -subject pq.faa -outfmt 6	two FASTA files
-X08		line1	0	d3155d016a12d4a51b5a2395e48365308656aa71e9a828b9dc0a7a49274dd5c5	67	yes		blastx -version	
+X08		line1	0	47525da1936b26ce2f630c000350a456aa18084dded74e18f80be73f9366afca	16	yes		blastx -version	
 T01		bytes	0	845a57a4260a310fcb6356827d4fade640885b07b676a4584197c0423b373810	16830	yes		tblastn -query pq.faa -db tdb	default outfmt 0
 T02		bytes	0	cc4da4cc1943079734208bca5827dc53a52b05cc98cad7707f220f00ae49cb57	1022	yes		tblastn -query pq.faa -db tdb -outfmt 6	
 T03		bytes	0	168099cb1ebf6674f0258b279fbab70da0759c048f7dbd82b57fe0d53577a481	1061	yes		tblastn -query pq.faa -db tdb -outfmt "6 std sframe"	
 T04		bytes	0	cc4da4cc1943079734208bca5827dc53a52b05cc98cad7707f220f00ae49cb57	1022	yes		tblastn -query pq.faa -db tdb -db_gencode 11 -outfmt 6	
 T05		bytes	0	cc4da4cc1943079734208bca5827dc53a52b05cc98cad7707f220f00ae49cb57	1022	yes		tblastn -query pq.faa -subject tq.fna -outfmt 6	two FASTA files
 T06		bytes	0	e4d2d5ad8e8e52b3f78e6fa7fbaea69e8a05cdb27a7b3836ba3ed094765e9ad3	404	yes		tblastn -query pq.faa -db tdb -evalue 1e-5 -max_hsps 1 -outfmt 6	
-T07		line1	0	a01d6ae35584a73d4420f46525f8f5bbf8af5bebc40e5e494978423a01764e15	68	yes		tblastn -version	
+T07		line1	0	bbd5efab34cdd39e58bc819562b8e19bd37bdccc9224d36c4510c8215b5539e7	17	yes		tblastn -version	
 TX01		bytes	0	1d335973654531d49dbb62c333c67b11709e4bf2198713a35e28c704f8cb36ea	173882	yes		tblastx -query nq.fna -db ndb	default outfmt 0
 TX02		bytes	0	c5c7e5dfa7d7d794271001da7909dd184eb64982202fe57cfc304fa95e55555a	26373	yes		tblastx -query nq.fna -db ndb -outfmt 6	
 TX03		bytes	0	6deb94aa0464a67cf648e3d9c11fa527dfb5b9479fb5a4b7e128de6d4798dfef	28693	yes		tblastx -query nq.fna -db ndb -outfmt "6 std qframe sframe"	
 TX04		bytes	0	c5c7e5dfa7d7d794271001da7909dd184eb64982202fe57cfc304fa95e55555a	26373	yes		tblastx -query nq.fna -subject ns.fna -outfmt 6	two FASTA files
-TX05		line1	0	0ce19aba4c293afd80de87cdbe604215511d324d687ee55c93bf7b8e30a747a6	68	yes		tblastx -version	
+TX05		line1	0	aef29c68931cdc6b0a6d3a1dc1c751d00549959a19edb2e84c370387a1ad2bb6	17	yes		tblastx -version	
 PS01		bytes	0	247ca3a89a77c413f07df6e26c67cbbbda47c123eadf8f42ce9c9e82ed9b8db3	425	yes		psiblast -query pq1.faa -db pdb -outfmt 6	one round
-PS02		line1	0	6841e777cdb785ae6af79d816ec0dd6c677551fa24582075818d78c5cc78adf0	69	yes		psiblast -version	
+PS02		line1	0	29279827036d441c09780154b8dc401675d29e2ffc7a5ba413f32cc44f9001b2	18	yes		psiblast -version	
 N24	nq.fna	bytes	0	e8a2b533f6c16530b41e7024b8cdb38d98a71d98241a5829499644013b70cfa1	468	yes		blastn -task blastn -dust no -perc_identity 80 -db ndb -outfmt "6 qseqid qstart qend qlen sseqid sstart send slen sstrand evalue length pident gaps gapopen stitle" -num_threads 1 -evalue 1E-20 -culling_limit 1 -max_target_seqs 10000	ABRicate as it runs: query on stdin, no -query
 N25		bytes	0	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	yes	amr.tsv:c13c49174b9eb1d075c6e83929cbbbdcacabf2256b9697db1e22d893322403e8	blastn -query nq.fna -db ndb -evalue 1e-20 -dust no -max_target_seqs 10000 -outfmt "6 sseqid qseqid sstart send slen qstart qend qlen sseq qseq" -out amr.tsv	AMRFinderPlus point mutations (blastn)
 N26		bytes	0	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	yes	brig.tsv:c313177eeb964e576f940b90682663f2d85847138ab52e693306ffb96f469eff	blastn -outfmt 6 -query nq.fna -db brig_ref.fna -out brig.tsv -task blastn	BRIG (DB named after the FASTA)

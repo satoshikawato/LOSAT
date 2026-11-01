@@ -329,6 +329,13 @@ fn x_kappa_workers(threads: usize, matches: usize) -> usize {
     threads.min(matches)
 }
 
+// No NCBI counterpart: a placement of the same value. Boxed because a result slot of a speculative
+// batch holds it: inline, each slot of `batch_end`'s `speculated` took 3.2 KiB, one batch's 512
+// slots at 16 threads 1.6 MiB, and a slot written at each 3.2 KiB touches every page of the block.
+// That block stayed resident in the glibc arena of each thread that ends a batch.
+/// The matrix a match leaves for the match after it.
+type XMatrixLeft = Box<crate::core::composition_adjustment::adjust_scores::AdjustedProteinMatrix>;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1234
 // ```c
 //                 if (compo_adjust_mode != eNoCompositionBasedStats &&
@@ -348,7 +355,6 @@ fn x_kappa_workers(threads: usize, matches: usize) -> usize {
 /// would have used that matrix (it is then redone in order); otherwise the finished list, its best
 /// score, and the matrix this match leaves (`None` if it leaves the old one).
 #[cfg(feature = "parallel")]
-#[allow(clippy::type_complexity)]
 fn x_speculate_match(
     worker: &mut KappaState,
     list: &HspList,
@@ -357,11 +363,7 @@ fn x_speculate_match(
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
     db_length: i64,
-) -> Option<(
-    HspList,
-    i32,
-    Option<crate::core::composition_adjustment::adjust_scores::AdjustedProteinMatrix>,
-)> {
+) -> Option<(HspList, i32, Option<XMatrixLeft>)> {
     use crate::core::composition_adjustment::redo_alignment::X_REDO_PROBE;
     worker.x_set_matrix(None);
     X_REDO_PROBE.with(|probe| probe.set(0));
@@ -387,7 +389,7 @@ fn x_speculate_match(
     )
     .ok()?;
     let matrix = if probe & 1 != 0 {
-        worker.x_take_matrix()
+        worker.x_take_matrix().map(Box::new)
     } else {
         None
     };
@@ -1762,7 +1764,7 @@ impl PreliminarySink for Runtime<'_> {
             // used only if the match did not read the matrix of its predecessor; every other match
             // is redone in stream order (see x_speculate_match).
             #[cfg(feature = "parallel")]
-            let mut speculated: Vec<Option<(HspList, i32, Option<_>)>> = Vec::new();
+            let mut speculated: Vec<Option<(HspList, i32, Option<XMatrixLeft>)>> = Vec::new();
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3499-3502
             // ```c
             //         if ((int) compo_adjust_mode > 1 && !positionBased) {
@@ -1913,7 +1915,7 @@ impl PreliminarySink for Runtime<'_> {
                     speculated[match_index % x_batch].take()
                 };
                 #[cfg(not(feature = "parallel"))]
-                let x_ready: Option<(HspList, i32, Option<_>)> = None;
+                let x_ready: Option<(HspList, i32, Option<XMatrixLeft>)> = None;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3626
                 // ```c
                 //                                 Blast_RedoOneMatch(
@@ -1931,8 +1933,8 @@ impl PreliminarySink for Runtime<'_> {
                 // leaves one, is handed on.
                 let (output, best_score) = if let Some((output, best_score, matrix)) = x_ready {
                     x_reused += 1;
-                    if matrix.is_some() {
-                        state.x_set_matrix(matrix);
+                    if let Some(matrix) = matrix {
+                        state.x_set_matrix(Some(*matrix));
                     }
                     (output, best_score)
                 } else {

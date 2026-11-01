@@ -327,11 +327,18 @@ pub fn diagnostics_enabled() -> bool {
         .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
+// Diagnostic lines go out as one write, so a line another thread or the host
+// writes at the same time (stderr is unbuffered) never lands inside it.
+pub(crate) fn write_diagnostic_line(line: String) {
+    use std::io::Write;
+    let _ = std::io::stderr().write_all(line.as_bytes());
+}
+
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:147,177-188
 // TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Join(&result);
 fn report_pool(program: &str, requested: usize, pool: usize) {
     if diagnostics_enabled() {
-        eprintln!("[losat-thread-pool] program={program} requested_threads={requested} pool_threads={pool} caller_participates={} measured_activity=null", pool > 0);
+        write_diagnostic_line(format!("[losat-thread-pool] program={program} requested_threads={requested} pool_threads={pool} caller_participates={} measured_activity=null\n", pool > 0));
     }
 }
 
@@ -340,7 +347,7 @@ fn report_pool(program: &str, requested: usize, pool: usize) {
 // Record stage selection separately from the already verified pool size.
 pub fn report_stage(program: &str, stage: &str, work_items: usize, parallel: bool) {
     if diagnostics_enabled() {
-        eprintln!("[losat-thread-stage] program={program} stage={stage} work_items={work_items} parallel_selected={parallel} measured_activity=null");
+        write_diagnostic_line(format!("[losat-thread-stage] program={program} stage={stage} work_items={work_items} parallel_selected={parallel} measured_activity=null\n"));
     }
 }
 

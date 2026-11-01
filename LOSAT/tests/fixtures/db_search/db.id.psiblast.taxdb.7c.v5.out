@@ -1,0 +1,74 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: qp1 query protein one
+# Database: tests/db_search/ids/prot_v5
+# Fields: query acc.ver, subject id, subject acc., subject acc.ver, subject title, subject tax ids, subject sci names, evalue, bit score
+# 51 hits found
+qp1	ref|XP_000001.1|	XP_000001	XP_000001.1	alpha protein [Homo sapiens]	9606;10090	Homo sapiens;Mus musculus	8.89e-93	255
+qp1	gi|9002|emb|CAA90002.1|	CAA90002	CAA90002.1	first defline without a gi	0	N/A	2.82e-91	251
+qp1	gi|123456|ref|NP_000002.1|	NP_000002	NP_000002.1	gi plus ref protein	10116	N/A	2.82e-91	251
+qp1	ref|XP_910001.1|	XP_910001	XP_910001.1	long title number 01 with many words so that it is longer than sixty characters in total	0	N/A	1.86e-89	247
+qp1	sp|Q00003|ABC_MOUSE	Q00003	Q00003	swissprot without version	0	N/A	1.86e-89	247
+qp1	emb|CAA00005.1|	CAA00005	CAA00005.1	emb protein	0	N/A	2.87e-87	241
+qp1	ref|XP_920001.1|	XP_920001	XP_920001.1	has a title	0	N/A	7.61e-87	240
+qp1	tr|A0A000|A0A000_YEAST	A0A000	A0A000	trembl entry	0	N/A	7.61e-87	240
+qp1	pdb|1ABC|A	1ABC_A	1ABC_A	Chain A, test structure	0	N/A	1.32e-85	237
+qp1	dbj|BAA00006.1|	BAA00006	BAA00006.1	dbj protein	0	N/A	6.77e-84	233
+qp1	pir||S00007	S00007	S00007	pir protein	0	N/A	3.33e-80	223
+qp1	prf||0008123A	0008123A	0008123A	prf protein	0	N/A	1.46e-77	217
+qp1	myprot9	myprot9	myprot9	local id protein	0	N/A	3.48e-76	213
+qp1	gnl|mydb|prot10	mydb:prot10	mydb:prot10	general id protein	0	N/A	1.74e-74	209
+qp1	ref|XP_000011.2|	XP_000011	XP_000011.2	bare refseq accession	0	N/A	1.01e-72	204
+qp1	sp|P00012|	P00012	P00012	bare uniprot-like accession	0	N/A	3.29e-71	201
+qp1	myprot_13	myprot_13	myprot_13	bare non-accession word	0	N/A	4.56e-69	195
+qp1	gb|AAA00017.1|LOCUS17	AAA00017	AAA00017.1	gb with a locus name	0	N/A	4.66e-69	195
+qp1	gi|1818|gb|AAA00018.1|	AAA00018	AAA00018.1	N/A	562;9606	Escherichia coli;Homo sapiens	1.79e-65	186
+qp1	tpg|DAA00016.1|	DAA00016	DAA00016.1	third-party protein	0	N/A	1.63e-64	184
+qp1	sp|P00019.3|NAME_HUMAN	P00019	P00019.3	with taxid	9606	Homo sapiens	2.83e-60	173
+qp1	unnamed	unnamed	unnamed	N/A	0	N/A	1.31e-40	121
+qp1	pdb|5ABC|D	5ABC_D	5ABC_D	N/A	0	N/A	1.31e-40	121
+qp1	ref|WP_100014.1|	WP_100014	WP_100014.1	N/A	0	N/A	1.31e-40	121
+qp1	ref|NC_100013.1|	NC_100013	NC_100013.1	N/A	0	N/A	1.31e-40	121
+qp1	tpe|BK100012.1|	BK100012	BK100012.1	tpe titled	0	N/A	1.31e-40	121
+qp1	pdb|4ABC| 	4ABC	4ABC	no chain four	0	N/A	1.31e-40	121
+qp1	unnamed	unnamed	unnamed	N/A	0	N/A	1.31e-40	121
+qp1	pdb|3ABC|C	3ABC_C	3ABC_C	N/A	0	N/A	1.31e-40	121
+qp1	tpg|DAA10008.1|	DAA10008	DAA10008.1	tpa with subject	0	N/A	1.31e-40	121
+qp1	subject	subject	subject	subject seven title	0	N/A	1.31e-40	121
+qp1	ref|NP_100006.1|	NP_100006	NP_100006.1	N/A	0	N/A	1.31e-40	121
+qp1	pat|US|7654321|3	US7654321_3	US7654321_3	N/A	0	N/A	1.31e-40	121
+qp1	pdb|2XYY| 	2XYY	2XYY	N/A	0	N/A	1.31e-40	121
+qp1	pdb|2XYZ|B	2XYZ_B	2XYZ_B	N/A	0	N/A	1.31e-40	121
+qp1	tpg|DAA10002.1|	DAA10002	DAA10002.1	N/A	0	N/A	1.31e-40	121
+qp1	tpg|DAA10001.1|	DAA10001	DAA10001.1	tpa titled protein	0	N/A	1.31e-40	121
+qp1	sp|P11111.1|ONE_HUMAN	P11111	P11111.1	titled first	0	N/A	1.31e-40	121
+qp1	unnamed	unnamed	unnamed	N/A	0	N/A	1.31e-40	121
+qp1	subject	subject	subject	subject seven	0	N/A	1.31e-40	121
+qp1	pat|EP|0238993|7	EP0238993_7	EP0238993_7	pre-grant patent	0	N/A	1.31e-40	121
+qp1	prf|ABC|DEF	ABC	ABC	prf two fields	0	N/A	1.31e-40	121
+qp1	pat|EP|0123456A1|7	EP0123456A1_7	EP0123456A1_7	patent with letters	0	N/A	1.31e-40	121
+qp1	pat|US|RE33188|1	USRE33188_1	USRE33188_1	patent reissue	0	N/A	1.31e-40	121
+qp1	gnl|ti|123	ti:123	ti:123	trace id	0	N/A	1.31e-40	121
+qp1	long1	long1	long1	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	0	N/A	1.31e-40	121
+qp1	gi|3000000000|gb|AAA00100.1|	AAA00100	AAA00100.1	big gi	0	N/A	1.31e-40	121
+qp1	bbm|123	123	123	gibbmt	0	N/A	1.31e-40	121
+qp1	gpp|GPP123|	GPP123	GPP123	genome pipeline	0	N/A	1.31e-40	121
+qp1	tpd|BK000013.1|	BK000013	BK000013.1	third party ddbj	0	N/A	1.31e-40	121
+qp1	tpe|BK000012.1|	BK000012	BK000012.1	third party embl	0	N/A	1.31e-40	121
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: qp2 unrelated protein
+# Database: tests/db_search/ids/prot_v5
+# Fields: query acc.ver, subject id, subject acc., subject acc.ver, subject title, subject tax ids, subject sci names, evalue, bit score
+# 5 hits found
+qp2	gnl|mydb|prot10	mydb:prot10	mydb:prot10	general id protein	0	N/A	0.43	17.3
+qp2	gnl|mydb|prot10	mydb:prot10	mydb:prot10	general id protein	0	N/A	4.9	14.2
+qp2	pir||S00007	S00007	S00007	pir protein	0	N/A	0.62	16.5
+qp2	sp|P00012|	P00012	P00012	bare uniprot-like accession	0	N/A	0.70	16.5
+qp2	sp|P00019.3|NAME_HUMAN	P00019	P00019.3	with taxid	9606	Homo sapiens	3.6	14.6
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: qnone no hits
+# Database: tests/db_search/ids/prot_v5
+# 0 hits found
+# BLAST processed 3 queries

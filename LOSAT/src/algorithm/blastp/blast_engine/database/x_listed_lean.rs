@@ -89,6 +89,7 @@ impl ListedSubjects {
             shown: ListedShown::Lean(titles),
             replaced_title_bytes,
             parsed: parsed.by_rank,
+            program: database.program,
         })
     }
 }

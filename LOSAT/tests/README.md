@@ -169,8 +169,9 @@ guard cache). `guard` exits 1 and writes nothing when the reader declines an
 instruction encoding, when the module has no `memory.fill` or `memory.copy`, or
 when its output does not verify; `verify` exits 1 unless the two helpers, the
 call sites and the counts are the guard's own. Adapter parsing
-and compilation are included in the measured startup time. Keep `wasi_shared_memory.js`, `wasi_artifact.js`, and `wasi_thread_host.js`
-beside `run_losat_wasi_threads.js` when copying the runner; set
+and compilation are included in the measured startup time. Keep `run_losat_wasi_threads.js`,
+`wasi_thread_host.js`, `wasi_thread_worker.js`, `wasi_artifact.js`,
+`wasi_shared_memory.js`, and `wasi_files.js` together when copying the runner; set
 `LOSAT_WASI_THREADS_DEBUG=1` to log the number of guarded instructions.
 Unsupported module encodings fail explicitly. This guard addresses the observed
 copy/fill bounds race; it does not suppress other memory faults or fix OOM.
@@ -300,16 +301,20 @@ give the runner of before).
   a number, below 2, or above the guest's limit of 255 threads); an integer from
   0 to 254 sets the count, and any other value is an error before the command
   starts. Each worker instantiates the module with the shared memory and waits.
-  `thread-spawn` hands the next waiting worker its tid and start argument and
-  returns the tid after the same start confirmation and timeout as a new worker;
-  when none is left, `auto` boots the next N workers together (the most one set
+  `thread-spawn` hands the next standby worker its tid and start argument. A
+  worker that already waits for its order has instantiated the module, so the
+  spawn returns the tid without waiting for its start confirmation, as
+  `pthread_create` returns before the new thread runs; a failure of that thread
+  still ends the command. A worker that still boots is waited for as for a new
+  worker, with the same timeout and message. When none is left, `auto` boots the next N workers together (the most one set
   of threads asks for: a pool whose threads are all new, such as blastn's
   query-batch slots, `standby_refill` event) and an integer creates one worker
   per spawn as before. Unused workers are terminated
   when the run ends and never keep the process alive. With
   `LOSAT_WASI_THREADS_DEBUG=1`, spawn-attempt, spawned, ready and exit events keep
   their meaning for the guest's threads (`spawned` of a prebooted worker carries
-  its `standby` index), and prebooted workers have their own `standby_spawned`,
+  its `standby` index; the `ready` of a worker that already waited carries
+  `waiting: true` and is written at the hand-over, before the thread starts), and prebooted workers have their own `standby_spawned`,
   `standby_unused` and `standby_exited` events (`standby_rejected` when a worker
   cannot be created). The test-only startup faults act at worker boot, so with
   this variable an injected startup error ends the command as soon as a
@@ -340,8 +345,19 @@ give the runner of before).
   SHA-256 covers the key and the fill/copy counts; otherwise it recomputes the
   guard and replaces the entry through a temporary file and a rename. A write
   keeps the 8 entries used last. The stored bytes are the guard's output, byte
-  for byte. With `LOSAT_WASI_THREADS_DEBUG=1` the runner logs `guard cache hit`,
-  `miss`, `invalid` or `unusable`. Measured on the i9 (threaded command, 6.8 MB):
+  for byte. An index file `index-<dev>-<ino>-<size>-<mtimeNs>-<ctimeNs>.json`,
+  named by the identity of the input file, records the input's SHA-256 and the
+  guard version, so that a later run compiles the cached guarded bytes at once;
+  index files are kept and pruned like entries (8). Every check of a hit still
+  runs, during the compile: the input's SHA-256 from the input read again, the
+  guard version, the sidecar, and the length and SHA-256 of the cached bytes. A
+  check that fails discards the compiled module, and the run takes the path
+  without the index, which writes the index again. With
+  `LOSAT_WASI_THREADS_DEBUG=1` the runner logs `guard cache hit`, `miss`,
+  `invalid` or `unusable`, and for the index `guard cache index hit: <path>`,
+  `guard cache index stale: <path>`, `guard cache index not used (<reason>)`,
+  `guard cache index: cached bytes did not compile (<reason>)` and
+  `guard cache index not written (<reason>)`. Measured on the i9 (threaded command, 6.8 MB):
   the guard takes 150-220 ms and a hit 9-13 ms; TBLASTX p03 at 8 threads took
   0.83-1.05 s instead of 0.95-1.18 s (8 pairs). `test_wasi_runners.js` keeps
   its own cache directory.

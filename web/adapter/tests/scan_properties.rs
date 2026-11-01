@@ -210,7 +210,11 @@ fn check(input: &[u8], random: &mut Random, context: &str, coverage: &mut Covera
         for &byte in bio.seq() {
             counts[byte as usize] += 1;
         }
-        assert_eq!(record.residue_counts.table(), counts, "{context}: residue counts");
+        assert_eq!(
+            record.residue_counts.table(),
+            counts,
+            "{context}: residue counts"
+        );
         match &record.layout {
             LineLayout::Uniform { width, .. } if *width > 0 => coverage.uniform += 1,
             LineLayout::Checkpoints { .. } => coverage.checkpoints += 1,

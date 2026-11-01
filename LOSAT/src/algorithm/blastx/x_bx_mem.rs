@@ -2,7 +2,8 @@
 //! (`LOSAT_X_BXDIAGKEEP`), and at most K query batches or chunks searched at a time
 //! (`LOSAT_X_BXUNITCAP[=K]`). Both are in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`);
 //! the third part, the lookup tables' neighbour lists shared by all threads and their vectors
-//! kept between builds, is `LOSAT_X_BXLUTPOOL` (`tblastx/lookup/x_lut_direct.rs`).
+//! kept between builds, was `LOSAT_X_BXLUTPOOL` (graduated 2026-10-27, no variable;
+//! `tblastx/lookup/x_lut_direct.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-271
 //! ```c
@@ -543,7 +544,7 @@ pub(super) fn chunk_subjects_on_pool(
         .map(|task| {
             crate::algorithm::blastx::seed::x_seed_diag::x_take_table_ratio(lookup, ratio);
             let (first, end) = (task * k, n.min((task + 1) * k));
-            // EXPERIMENT (LOSAT_X_BXDBSTREAM): the task's subjects read as one block.
+            // The task's subjects read as one block.
             let block = subjects.x_read_range(first, end)?;
             let subjects = subjects.x_with_block(block.as_ref());
             let mut slot = XDiagSlot::new(length, options.window_size);

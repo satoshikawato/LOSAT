@@ -73,6 +73,7 @@ pub fn build_nucl_score_table(reward: i32, penalty: i32) -> [i32; 256] {
 /// ```c
 /// #define NCBI2NA_UNPACK_BASE(x, N) (((x)>>(2*(N))) & NCBI2NA_MASK)
 /// ```
+#[cfg(test)]
 #[inline]
 fn ncbi2na_unpack_base(byte: u8, n: u8) -> u8 {
     (byte >> (2 * n)) & 0x03
@@ -102,8 +103,9 @@ fn ncbi2na_unpack_base(byte: u8, n: u8) -> u8 {
 /// }
 /// ```
 ///
-/// With `LOSAT_X_BNUNGAPCOUNT` (in the strict set) the same loops run with their step counts
-/// worked out first (`x_ungap_count.rs`); `=0` runs the ported loops below.
+/// LOSAT_X_BNUNGAPCOUNT (graduated 2026-10-27, always on): the same loops run with their step
+/// counts worked out first (`x_ungap_count.rs`). The loop-for-loop port below stays as the
+/// reference of that module's unit test.
 #[inline(always)]
 pub fn extend_hit_ungapped_exact_ncbi(
     q_seq: &[u8],        // BLASTNA (1 byte/base)
@@ -114,30 +116,20 @@ pub fn extend_hit_ungapped_exact_ncbi(
     x_dropoff: i32,
     matrix: &[i32; BLASTNA_SIZE * BLASTNA_SIZE],
 ) -> UngappedData {
-    if super::x_ungap_count::on() {
-        super::x_ungap_count::extend_hit_ungapped_exact_counted(
-            q_seq,
-            s_seq_packed,
-            q_off,
-            s_off,
-            subject_len,
-            x_dropoff,
-            matrix,
-        )
-    } else {
-        extend_hit_ungapped_exact_ported(
-            q_seq,
-            s_seq_packed,
-            q_off,
-            s_off,
-            subject_len,
-            x_dropoff,
-            matrix,
-        )
-    }
+    super::x_ungap_count::extend_hit_ungapped_exact_counted(
+        q_seq,
+        s_seq_packed,
+        q_off,
+        s_off,
+        subject_len,
+        x_dropoff,
+        matrix,
+    )
 }
 
-/// The port of `s_NuclUngappedExtendExact` above, loop for loop (`LOSAT_X_BNUNGAPCOUNT=0`).
+/// The port of `s_NuclUngappedExtendExact` above, loop for loop: the reference of the unit test of
+/// `x_ungap_count.rs` (it was the path of `LOSAT_X_BNUNGAPCOUNT=0`).
+#[cfg(test)]
 #[inline(never)]
 pub(crate) fn extend_hit_ungapped_exact_ported(
     q_seq: &[u8],        // BLASTNA (1 byte/base)

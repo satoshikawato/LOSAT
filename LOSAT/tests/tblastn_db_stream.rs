@@ -1,16 +1,16 @@
-//! EXPERIMENT (LOSAT_X_TBNDBSTREAM): TBLASTN's `-db` search with each database sequence read where
+//! TBLASTN's `-db` search with each database sequence read where
 //! it is searched (`tblastn/x_db_stream.rs`) on a whole run of the binary.
 //!
-//! The properties under test are LOSAT's own: the reports are those of the search on the copy of
-//! the whole database (`LOSAT_X_TBNDBSTREAM=0`) at one and four threads, with composition-based
-//! statistics (the redo reads its subjects) and without (`-comp_based_stats 0`: the traceback reads
-//! them), in one query batch and in several (`BATCH_SIZE`: the plans kept between batches are not
-//! read again), on a database of several volumes with ambiguity codes and a subject long enough to
-//! be split into units across the threads; the shadow mode (`LOSAT_X_TBNDBSTREAMSHADOW=1`) finds
-//! every read identical to the copy, with no more reads at four threads than at one; the stages
-//! that let a subject go after its last match (`LOSAT_X_TBNSTAGEDROP`) give the reports of those
-//! that hold it to their end, with the same reads; and a database that cannot be read fails with
-//! the same error.
+//! The stream graduated on 2026-10-27 (the switch was `LOSAT_X_TBNDBSTREAM`, with a shadow mode
+//! that compared every read with a copy of the database; the copy and the shadow are deleted, and
+//! the frozen NCBI `-db` fixtures hold the reports). The properties under test are LOSAT's own: the
+//! reports of the search at four threads are those of the search at one thread, with
+//! composition-based statistics (the redo reads its subjects) and without (`-comp_based_stats 0`:
+//! the traceback reads them), in one query batch and in several (`BATCH_SIZE`: the plans kept
+//! between batches are not read again), on a database of several volumes with ambiguity codes and
+//! a subject long enough to be split into units across the threads; the stages that let a subject
+//! go after its last match (`LOSAT_X_TBNSTAGEDROP`) give the reports of those that hold it to their
+//! end; and a database that cannot be read fails with the same error.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -113,7 +113,7 @@ fn tblastn(
 }
 
 #[test]
-fn the_stream_gives_the_reports_of_the_copy() {
+fn the_reports_do_not_depend_on_the_threads_or_the_query_batches() {
     let dir = temp_dir("reports");
     let (db, query) = inputs(&dir);
     for args in [
@@ -121,109 +121,47 @@ fn the_stream_gives_the_reports_of_the_copy() {
         &["-outfmt", "0"][..],
         &["-outfmt", "6", "-comp_based_stats", "0"][..],
     ] {
+        let reference = tblastn(&query, &db, args, 1, &[]);
+        assert_eq!(reference.0, Some(0), "{args:?}: {}", reference.2);
+        assert!(
+            reference.1.split(|&byte| byte == b'\n').count() > 20,
+            "{args:?}: too few lines"
+        );
         for batch in [None, Some("2000")] {
             let batch_env: Vec<(&str, &str)> =
                 batch.map(|b| ("BATCH_SIZE", b)).into_iter().collect();
-            let mut copy_env = batch_env.clone();
-            copy_env.push(("LOSAT_X_TBNDBSTREAM", "0"));
             for threads in [1, 4] {
-                let copy = tblastn(&query, &db, args, threads, &copy_env);
-                assert_eq!(copy.0, Some(0), "{args:?} {batch:?} {threads}: {}", copy.2);
+                let run = tblastn(&query, &db, args, threads, &batch_env);
                 assert!(
-                    copy.1.split(|&byte| byte == b'\n').count() > 20,
-                    "{args:?}: too few lines"
+                    run == reference,
+                    "{args:?} batch {batch:?} {threads} threads"
                 );
-                let stream = tblastn(&query, &db, args, threads, &batch_env);
-                assert!(stream == copy, "{args:?} batch {batch:?} {threads} threads");
             }
         }
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// `LOSAT_X_TBNSTAGEDROP`: the redo and the traceback of `-comp_based_stats 0` let a subject go
+/// after its last match; the reports are those of the stages that hold every subject until they
+/// end, at one and four threads. The 27 queries align with the same subjects, so most subjects
+/// have several matches.
 #[test]
-fn the_shadow_mode_finds_every_read_identical() {
-    let dir = temp_dir("shadow");
-    let (db, query) = inputs(&dir);
-    for (args, batch) in [
-        (&["-outfmt", "6"][..], None),
-        (
-            &["-outfmt", "6", "-comp_based_stats", "0"][..],
-            Some("2000"),
-        ),
-    ] {
-        let batch_env: Vec<(&str, &str)> = batch.map(|b| ("BATCH_SIZE", b)).into_iter().collect();
-        let mut copy_env = batch_env.clone();
-        copy_env.push(("LOSAT_X_TBNDBSTREAM", "0"));
-        let mut shadow_env = batch_env.clone();
-        shadow_env.push(("LOSAT_X_TBNDBSTREAMSHADOW", "1"));
-        let mut reads_at = Vec::new();
-        for threads in [1, 4] {
-            let copy = tblastn(&query, &db, args, threads, &copy_env);
-            let shadow = tblastn(&query, &db, args, threads, &shadow_env);
-            assert_eq!(shadow.0, Some(0), "{}", shadow.2);
-            assert_eq!(shadow.1, copy.1, "{args:?} {threads} threads");
-            let reads =
-                shadow_reads(&shadow.2).unwrap_or_else(|| panic!("no shadow line: {}", shadow.2));
-            assert!(reads > 0, "{}", shadow.2);
-            reads_at.push(reads);
-            // Without the shadow variable, nothing is printed.
-            assert!(!tblastn(&query, &db, args, threads, &batch_env)
-                .2
-                .contains("TBNDBSTREAM"));
-        }
-        // Threads that ask for a sequence at once share one read (`XDbStream::read_shared`).
-        assert!(
-            reads_at[1] <= reads_at[0],
-            "{args:?}: reads at 1 / 4 threads {reads_at:?}"
-        );
-    }
-    std::fs::remove_dir_all(&dir).unwrap();
-}
-
-/// EXPERIMENT (LOSAT_X_TBNSTAGEDROP): the redo and the traceback of `-comp_based_stats 0` let a
-/// subject go after its last match; the reports and the number of reads (the shadow mode counts
-/// them) are those of the stages that hold every subject until they end, at one and four threads.
-/// The 27 queries align with the same subjects, so most subjects have several matches.
-#[test]
-fn a_stage_lets_a_subject_go_after_its_last_match_without_reading_it_again() {
+fn a_stage_lets_a_subject_go_after_its_last_match_with_the_same_reports() {
     let dir = temp_dir("stagedrop");
     let (db, query) = inputs(&dir);
-    let reads = |run: &(Option<i32>, Vec<u8>, String)| {
-        assert_eq!(run.0, Some(0), "{}", run.2);
-        shadow_reads(&run.2).unwrap_or_else(|| panic!("no shadow line: {}", run.2))
-    };
     for args in [
         &["-outfmt", "6"][..],
         &["-outfmt", "6", "-comp_based_stats", "0"][..],
     ] {
         for threads in [1, 4] {
-            let shadow = ("LOSAT_X_TBNDBSTREAMSHADOW", "1");
-            let held = tblastn(
-                &query,
-                &db,
-                args,
-                threads,
-                &[shadow, ("LOSAT_X_TBNSTAGEDROP", "0")],
-            );
-            let dropped = tblastn(&query, &db, args, threads, &[shadow]);
-            assert_eq!(reads(&dropped), reads(&held), "{args:?} {threads} threads");
-            assert!(dropped.1 == held.1, "{args:?} {threads} threads");
+            let held = tblastn(&query, &db, args, threads, &[("LOSAT_X_TBNSTAGEDROP", "0")]);
+            assert_eq!(held.0, Some(0), "{}", held.2);
+            let dropped = tblastn(&query, &db, args, threads, &[]);
+            assert!(dropped == held, "{args:?} {threads} threads");
         }
     }
     std::fs::remove_dir_all(&dir).unwrap();
-}
-
-/// The reads of `[X_SHADOW] TBNDBSTREAM sequences=6 reads=N bases=B identical`, the last line of
-/// `stderr`.
-fn shadow_reads(stderr: &str) -> Option<u64> {
-    let line = stderr.lines().last()?;
-    let rest = line.strip_prefix("[X_SHADOW] TBNDBSTREAM sequences=6 reads=")?;
-    let (reads, rest) = rest.split_once(" bases=")?;
-    let (bases, rest) = rest.split_once(' ')?;
-    bases.parse::<u64>().ok()?;
-    (rest == "identical").then_some(())?;
-    reads.parse().ok()
 }
 
 // local_blast.cpp:177-224 (`CheckInternalData`): NCBI does not search a query batch without a
@@ -249,12 +187,12 @@ fn an_unreadable_database_fails_the_same_batch_with_the_same_error() {
     let query = dir.join("xx.faa");
     std::fs::write(&query, both).unwrap();
     let env = [("BATCH_SIZE", "1")];
-    let copy = tblastn(&query, &db, &[], 1, &[env[0], ("LOSAT_X_TBNDBSTREAM", "0")]);
-    assert_ne!(copy.0, Some(0), "{}", copy.2);
-    assert!(copy.2.contains("passes the end of the file"), "{}", copy.2);
-    for threads in [1, 4] {
+    let one = tblastn(&query, &db, &[], 1, &env);
+    assert_ne!(one.0, Some(0), "{}", one.2);
+    assert!(one.2.contains("passes the end of the file"), "{}", one.2);
+    for threads in [2, 4] {
         assert!(
-            tblastn(&query, &db, &[], threads, &env) == copy,
+            tblastn(&query, &db, &[], threads, &env) == one,
             "{threads} threads"
         );
     }
@@ -265,7 +203,7 @@ fn an_unreadable_database_fails_the_same_batch_with_the_same_error() {
 // its 2-bit data (`common::database::x_check_nucleotide_stores`, `SeqDb::x_nucleotide_check`): only
 // the last 2-bit byte and the ambiguity data.
 #[test]
-fn a_damaged_sequence_of_its_own_block_fails_or_reports_as_the_copy() {
+fn a_damaged_sequence_of_its_own_block_fails_or_reports_the_same_at_every_thread_count() {
     let dir = temp_dir("damaged");
     let (_, query) = inputs(&dir);
     // The MelaMJNV genome with an ambiguity code every 1000 bases (runs of one, the old format),
@@ -334,7 +272,7 @@ fn a_damaged_sequence_of_its_own_block_fails_or_reports_as_the_copy() {
         ),
     ] {
         std::fs::write(&last, bytes).unwrap();
-        let copy = tblastn(&query, &db, &[], 1, &[env[0], ("LOSAT_X_TBNDBSTREAM", "0")]);
+        let copy = tblastn(&query, &db, &[], 1, &env);
         match error {
             Some(error) => {
                 assert_ne!(copy.0, Some(0), "{what}: {}", copy.2);
@@ -345,26 +283,12 @@ fn a_damaged_sequence_of_its_own_block_fails_or_reports_as_the_copy() {
                 assert!(!copy.1.is_empty(), "{what}");
             }
         }
-        for threads in [1, 4] {
+        for threads in [2, 4] {
             assert!(
                 tblastn(&query, &db, &[], threads, &env) == copy,
                 "{what}: {threads} threads"
             );
         }
-        let shadow = tblastn(
-            &query,
-            &db,
-            &[],
-            1,
-            &[env[0], ("LOSAT_X_TBNDBSTREAMSHADOW", "1")],
-        );
-        assert_eq!(
-            (shadow.0, &shadow.1),
-            (copy.0, &copy.1),
-            "{what}: {}",
-            shadow.2
-        );
-        assert!(shadow.2.contains(&copy.2), "{what}: {}", shadow.2);
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -551,37 +551,141 @@ impl ReportedHeader {
     }
 }
 
+/// The reader of the headers of a search's reported database sequences (`read_header`): the
+/// database, with NCBI's lookup of the Seq-align ids of those with parsed Seq-ids
+/// (`SeqDb::seqid_lookup`), made at the first of them and kept for the reader's other reads.
+pub(crate) struct HeaderReader<'a> {
+    db: &'a SeqDb,
+    lookup: std::cell::OnceCell<crate::seqdb::lookup::SeqidLookup<'a>>,
+}
+
+impl<'a> HeaderReader<'a> {
+    /// The reader of the headers of `db`.
+    pub(crate) fn new(db: &'a SeqDb) -> Self {
+        Self {
+            db,
+            lookup: std::cell::OnceCell::new(),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:213-221
+    // ```c++
+    //             // Try to open the BLAST database even for remote searches, as if
+    //             // it is available locally, it will be better to fetch the
+    //             // sequence data for formatting from this (local) source
+    //             CRef<CSeqDB> seqdb = search_db->GetSeqDb();
+    //             db_adapter.Reset(new CLocalDbAdapter(*search_db));
+    //             dl = RegisterOMDataLoader(seqdb);
+    //             scope->AddDataLoader(dl);
+    // ```
+    /// What NCBI's lookup of the Seq-align id of the sequence `ordinal`, `subject`, finds in the
+    /// database where that is not the sequence (`ParsedSubject::found_instead`): NCBI's
+    /// formatters look it up in the search's own database, list included
+    /// (`SeqidLookup::seqid_to_oid`). Another sequence that holds the same definition lines and
+    /// letters is shown as the subject itself (the same record in two volumes or two databases
+    /// of an alias). A lookup that fails is kept for the formats that read the Bioseq; the
+    /// others never look the id up. A subject that no lookup finds (`unfetchable`) is not
+    /// looked up.
+    fn found_instead(
+        &self,
+        subject: &crate::report::db_subject::ParsedSubject,
+        ordinal: u32,
+    ) -> Option<crate::report::db_subject::FoundInstead> {
+        use crate::report::db_subject::FoundInstead;
+        if subject.unfetchable() {
+            return None;
+        }
+        let failed = |error: SeqDbError| {
+            Some(FoundInstead::Failed(
+                error.ncbi_message().unwrap_or_else(|| error.to_string()),
+            ))
+        };
+        let lookup = match self.lookup.get() {
+            Some(lookup) => lookup,
+            None => match self.db.seqid_lookup() {
+                Ok(lookup) => {
+                    let _ = self.lookup.set(lookup);
+                    self.lookup.get().expect("set above")
+                }
+                Err(error) => return failed(error),
+            },
+        };
+        match lookup.seqid_to_oid(subject.alignment_id()) {
+            Ok(Some(oid)) if oid == self.db.oid(ordinal) => None,
+            Ok(Some(oid)) => {
+                let other = self.db.ordinal_of(oid);
+                (!self.same_record(ordinal, other)).then_some(FoundInstead::Sequence(other))
+            }
+            Ok(None) => Some(FoundInstead::Nothing),
+            Err(error) => failed(error),
+        }
+    }
+
+    /// Whether the sequences `a` and `b` hold the same definition lines, as the reports read
+    /// them, and the same letters: NCBI's formatters then show `b` for `a` as `a` itself.
+    fn same_record(&self, a: u32, b: u32) -> bool {
+        let (Ok(header_a), Ok(header_b)) = (self.db.read_header(a), self.db.read_header(b)) else {
+            return false;
+        };
+        if header_a != header_b {
+            return false;
+        }
+        let (Ok(block_a), Ok(block_b)) = (self.db.read_sequence(a), self.db.read_sequence(b))
+        else {
+            return false;
+        };
+        if self.db.seqtype() == SeqType::Protein {
+            return block_a.protein(0) == block_b.protein(0);
+        }
+        matches!(
+            (block_a.nucleotide_iupac(0), block_b.nucleotide_iupac(0)),
+            (Ok(letters_a), Ok(letters_b)) if letters_a == letters_b
+        )
+    }
+}
+
 /// `read_title` of a program that also reads databases with parsed Seq-ids: the header of the
 /// sequence `ordinal`, read as `read_title` reads it, or with every Seq-id where the record has
-/// parsed ones (`SeqDb::read_header`). A parsed subject that LOSAT does not write as NCBI
-/// (`ParsedSubject::new`) is LOSAT's refusal.
+/// parsed ones (`SeqDb::read_header`), with what NCBI's lookup of its Seq-align id finds
+/// (`HeaderReader`). A parsed subject that LOSAT does not write as NCBI (`ParsedSubject::new`)
+/// is LOSAT's refusal.
 pub(crate) fn read_header(
-    db: &SeqDb,
+    headers: &HeaderReader<'_>,
     ordinal: u32,
     query: usize,
     program: &str,
 ) -> Result<ReportedHeader> {
-    reported_header(db, db.read_header(ordinal), ordinal, query, program)
+    reported_header(
+        headers,
+        headers.db.read_header(ordinal),
+        ordinal,
+        query,
+        program,
+    )
 }
 
-/// The `read_header` of the header `header` of the sequence `ordinal` of `db`.
+/// The `read_header` of the header `header` of the sequence `ordinal` of the database of
+/// `headers`.
 fn reported_header(
-    db: &SeqDb,
+    headers: &HeaderReader<'_>,
     header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>,
     ordinal: u32,
     query: usize,
     program: &str,
 ) -> Result<ReportedHeader> {
+    let db = headers.db;
     match header {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set, db.is_version5())
                 .map_err(|reason| parsed_refusal(ordinal, &reason, program))
                 .and_then(|subject| {
                     refuse_id_of_a_query(&subject, ordinal, program)?;
+                    let found = headers.found_instead(&subject, ordinal);
                     Ok(ReportedHeader::Parsed(std::sync::Arc::new(
                         subject
                             .showing_gis(db.reports_show_gis())
-                            .under_positive_list(db.has_positive_list()),
+                            .under_positive_list(db.has_positive_list())
+                            .found_instead(found),
                     )))
                 })
         }
@@ -954,10 +1058,11 @@ pub(crate) fn reports_may_refuse(
         }
     }
     let check = |kept: &mut Kept,
+                 headers: &HeaderReader<'_>,
                  ordinal: u32,
                  header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>|
      -> std::result::Result<(), ReportRefusal> {
-        match reported_header(db, header, ordinal, 0, program) {
+        match reported_header(headers, header, ordinal, 0, program) {
             Ok(ReportedHeader::Stored(stored)) => {
                 check_reported_title(stored.replaced_bytes, ordinal, program)
                     .map_err(|_| ReportRefusal::Headers)?;
@@ -999,13 +1104,17 @@ pub(crate) fn reports_may_refuse(
     let check_range = |mut kept: Kept,
                        range: &crate::seqdb::BlockRange|
      -> std::result::Result<Kept, ReportRefusal> {
+        let headers = HeaderReader::new(db);
         let mut refusal = None;
         db.visit_sequence_headers(*range, |ordinal, header| {
-            refusal = check(&mut kept, ordinal, header).err();
+            refusal = check(&mut kept, &headers, ordinal, header).err();
             refusal.is_none()
         });
         refusal.map_or(Ok(kept), Err)
     };
+    // The database's lookup files, opened once before the ranges look the ids up in parallel
+    // (`HeaderReader`); an error comes again at the first lookup.
+    let _ = db.seqid_lookup();
     let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
     let all = || -> std::result::Result<Kept, ReportRefusal> {
         #[cfg(all(
@@ -1029,6 +1138,7 @@ pub(crate) fn reports_may_refuse(
         Err(refusal) => return Some(refusal),
     };
     kept.keys.sort_unstable();
+    let headers = HeaderReader::new(db);
     for shared_key in kept.keys.chunk_by(|a, b| a.0 == b.0) {
         let mut ordinals: Vec<u32> = shared_key.iter().map(|&(_, ordinal)| ordinal).collect();
         ordinals.dedup();
@@ -1037,7 +1147,7 @@ pub(crate) fn reports_may_refuse(
         }
         let mut subjects = Vec::with_capacity(ordinals.len());
         for ordinal in ordinals {
-            match read_header(db, ordinal, 0, program) {
+            match read_header(&headers, ordinal, 0, program) {
                 Ok(ReportedHeader::Parsed(subject)) => subjects.push(subject),
                 _ => return Some(ReportRefusal::Headers),
             }
@@ -2315,6 +2425,38 @@ mod taxdb_prepass_tests {
         let search = SearchPath::new(cwd, taxdb.map(Path::as_os_str), None).unwrap();
         let path = root().join("db_search").join(name);
         SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap()
+    }
+
+    #[test]
+    fn a_reported_sequence_whose_seq_align_id_finds_another_record_first() {
+        // tests/db_search/ids/make_ids.py (line DBID N1): the second database of an alias holds
+        // the record of the first, which NCBI shows for it (`pdup_ab`), or the record with another
+        // title, which it shows in its place (`pdup_ac`).
+        let cwd = empty_cwd("found_instead");
+        for (name, want) in [
+            ("ids/pdup_ab", None),
+            (
+                "ids/pdup_ac",
+                Some("lookup gives database sequence 0 first"),
+            ),
+            (
+                "ids/pfound_v5",
+                Some("lookup gives database sequence 0 first"),
+            ),
+        ] {
+            let db = db_search(name, None, &cwd);
+            let headers = HeaderReader::new(&db);
+            let ReportedHeader::Parsed(subject) = read_header(&headers, 1, 0, "BLASTP").unwrap()
+            else {
+                panic!("{name}: a sequence with parsed Seq-ids");
+            };
+            match (subject.fetched(), want) {
+                (Ok(()), None) => {}
+                (Err(error), Some(text)) => assert!(error.contains(text), "{name}: {error}"),
+                (got, _) => panic!("{name}: {got:?}"),
+            }
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
     }
 
     #[test]

@@ -915,6 +915,7 @@ impl ListedSubjects {
     ) -> Result<ListedTitles<'_>> {
         let mut titles: Vec<Option<(Vec<u8>, bool)>> = vec![None; self.ordinals.len()];
         let mut parsed = ParsedSubjects::default();
+        let headers = shared::HeaderReader::new(&database.db);
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
                 continue;
@@ -926,8 +927,14 @@ impl ListedSubjects {
                     continue;
                 }
                 let ordinal = self.ordinals[rank];
-                titles[rank] =
-                    Some(parsed.read(database, rank, ordinal, query, self.ordinals.len())?);
+                titles[rank] = Some(parsed.read(
+                    database,
+                    &headers,
+                    rank,
+                    ordinal,
+                    query,
+                    self.ordinals.len(),
+                )?);
             }
         }
         let mut records = Vec::with_capacity(self.ordinals.len());
@@ -1046,19 +1053,20 @@ pub(super) struct ParsedSubjects {
 }
 
 impl ParsedSubjects {
-    /// Reads the header of the subject `ordinal` of rank `rank` (of `ranks`), where the hit list
-    /// of query `query` reaches it (`shared::read_header`): its stored title and whether it held
-    /// a replaced byte, or for a sequence with parsed Seq-ids, kept here, the title of its first
-    /// definition line.
+    /// Reads the header of the subject `ordinal` of rank `rank` (of `ranks`) of `database` with
+    /// `headers` (its reader), where the hit list of query `query` reaches it
+    /// (`shared::read_header`): its stored title and whether it held a replaced byte, or for a
+    /// sequence with parsed Seq-ids, kept here, the title of its first definition line.
     pub(super) fn read(
         &mut self,
         database: &BlastpDatabase,
+        headers: &shared::HeaderReader<'_>,
         rank: usize,
         ordinal: u32,
         query: usize,
         ranks: usize,
     ) -> Result<(Vec<u8>, bool)> {
-        match shared::read_header(&database.db, ordinal, query, database.program)? {
+        match shared::read_header(headers, ordinal, query, database.program)? {
             shared::ReportedHeader::Stored(stored) => Ok((stored.title, stored.replaced_bytes)),
             shared::ReportedHeader::Parsed(subject) => {
                 let title = subject.first_title().to_vec();

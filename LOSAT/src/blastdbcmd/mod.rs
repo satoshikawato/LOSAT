@@ -627,6 +627,16 @@ fn open_database(
     dbtype: &str,
     path: &SearchPath,
 ) -> Result<(SeqDb, Vec<String>), SeqDbError> {
+    // The search programs search the databases of several names as one; LOSAT's BLASTDBCMD
+    // keeps one database (line BDC DECISIONS 6).
+    if crate::seqdb::alias::lists_several_names(name) {
+        return Err(SeqDbError::Unsupported {
+            path: std::path::PathBuf::from(name),
+            message: "the name lists several databases; LOSAT's BLASTDBCMD reads one database \
+                      (a name with spaces goes between double quotes)"
+                .to_string(),
+        });
+    }
     let types: &[SeqType] = match dbtype {
         "prot" => &[SeqType::Protein],
         "nucl" => &[SeqType::Nucleotide],

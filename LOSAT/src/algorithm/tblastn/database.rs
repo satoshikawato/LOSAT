@@ -147,7 +147,7 @@ impl TblastnDatabase {
     /// What the `Database:` lines of the pairwise report show
     /// (`algorithm::common::database::pairwise_database`).
     pub(super) fn pairwise_database(&self) -> PairwiseDatabase {
-        shared::pairwise_database(&self.db, &self.name)
+        shared::pairwise_database(&self.db)
     }
 
     /// The Blast-def-line taxid of each reported sequence by rank and what the taxonomy

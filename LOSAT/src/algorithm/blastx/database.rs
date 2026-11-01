@@ -144,7 +144,7 @@ impl BlastxDatabase {
 
     /// What the `Database:` lines of outfmt 0 show (title, date, real totals).
     pub(crate) fn pairwise_database(&self) -> PairwiseDatabase {
-        shared::pairwise_database(&self.db, &self.name)
+        shared::pairwise_database(&self.db)
     }
 
     // A database without sequences (makeblastdb builds none; a volume whose index holds no

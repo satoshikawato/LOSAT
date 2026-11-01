@@ -15,7 +15,7 @@ use anyhow::{bail, Result};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
-use crate::report::pairwise::PairwiseDatabase;
+use crate::report::pairwise::{DatabaseInfo, PairwiseDatabase};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::sequence::packed_subject::PackedNucleotide;
 
@@ -64,7 +64,10 @@ pub(crate) fn open_search_database(
         Err(reason) => return Err(DatabaseOpenError::Registry(reason.clone())),
     };
     let path = SearchPath::from_environment(registry).map_err(DatabaseOpenError::Reader)?;
-    SeqDb::open_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)
+    let db = SeqDb::open_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)?;
+    db.check_accession_tables()
+        .map_err(DatabaseOpenError::Reader)?;
+    Ok(db)
 }
 
 /// Why `open_search_database` could not open a database.
@@ -436,22 +439,25 @@ impl std::error::Error for HeaderReadError {}
 //     info.total_length = seqdb->GetTotalLength();
 //     info.number_seqs = seqdb->GetNumSeqs();
 // ```
-/// What the `Database:` lines of the pairwise report show of the database `db` opened by
-/// the name `name`: the title (the name as given for an empty title), the date and the
-/// real totals, also with `-dbsize`.
-pub(crate) fn pairwise_database(db: &SeqDb, name: &str) -> PairwiseDatabase {
-    let title = db.title();
-    PairwiseDatabase {
-        definition: if title.is_empty() {
-            name.as_bytes().to_vec()
-        } else {
-            title.to_vec()
-        },
-        date: db.date().to_string(),
-        // The whole database's, also with a taxid list (`SeqDb::printed_num_seqs`).
-        num_sequences: u64::from(db.printed_num_seqs()),
-        total_letters: db.printed_total_length(),
-    }
+/// What the `Database:` lines of the pairwise report show of the database `db`: for each
+/// name of its `-db` list (`SeqDb::name_records`), that database's title (its name for an
+/// empty title), date and real totals, also with `-dbsize` or a list.
+pub(crate) fn pairwise_database(db: &SeqDb) -> PairwiseDatabase {
+    PairwiseDatabase::new(
+        db.name_records()
+            .iter()
+            .map(|record| DatabaseInfo {
+                definition: if record.title.is_empty() {
+                    record.name.as_bytes().to_vec()
+                } else {
+                    record.title.clone()
+                },
+                date: record.date.clone(),
+                num_sequences: u64::from(record.num_seqs),
+                total_letters: record.total_length,
+            })
+            .collect(),
+    )
 }
 
 /// The stored title of a database sequence, as the reports read it (`read_title`).

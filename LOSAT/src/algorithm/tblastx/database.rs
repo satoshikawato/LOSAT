@@ -197,7 +197,7 @@ impl TblastxDatabase {
 
     /// The `Database:` lines of the pairwise report.
     pub(crate) fn pairwise_database(&self) -> PairwiseDatabase {
-        shared::pairwise_database(&self.db, &self.name)
+        shared::pairwise_database(&self.db)
     }
 
     /// The Blast-def-line taxid of each reported sequence by rank (`reported`: the ordinal id of

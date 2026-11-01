@@ -1923,16 +1923,21 @@ Rebuilding less:
   against a third of UniRef50 100 %). Every report is unchanged.
   Evidence 2026-11-01 (v4-D12 s28, workstation, head b20c3448 on dev b94e9844f; arms default, `=0`, and the dev base
   built the same way, rotated, peak RssAnon from 2 ms samples; every report identical across arms): UniRef50 q100
-  `-evalue 0.001` at 32 threads (node 1, membind 1, 4 rounds) 119.0 [117.7-119.9] MiB against the dev base 131.3
-  [129.6-133.7] and `=0` 131.1 [130.3-133.2] (11.9-13.9 MiB lower in 4 of 4 rounds; wall x0.9960); 3,000 human x
+  `-evalue 0.001` at 32 threads (node 1, membind 1, 8 rounds) 118.5 [116.2-119.9] MiB against the dev base 130.8
+  [128.9-133.7] and `=0` 130.2 [128.6-133.2] (11.4-14.4 MiB lower in 8 of 8 rounds; wall x0.9973 [0.9926-1.0051]); q100
+  against a third of UniRef50 at 16 threads (two runs side by side, 12 slots, no subject with HSPs above the limit in the
+  probe): the highest sample of the preliminary plateau (30-110 s) 39.9 [39.8-40.1] against 39.9 [39.9-40.0] and `=0` 40.0
+  [39.9-40.2], and the peak 69.6 [63.1-73.9] against 71.2 [63.9-86.0] and `=0` 69.5 [60.4-78.5], so no effect shows; 3,000 human x
   `BlastDBSpecies6` at 16 threads (8 rounds) 35.5 [35.3-35.6] against 37.7 [37.2-38.3] and `=0` 37.5 [37.2-37.9]
   (1.7-3.0 MiB lower in 8 of 8); one thread (node 0, 8 rounds) human 12.9 against 13.0, OrthoFinder Blast0_6 19.1
   against 19.3 MiB (8 of 8 lower in both).
   Time: one thread (`perf stat` `:u`, node 0, 8 rounds) instructions human x0.99997 of the dev base (`=0` x1.00000),
   Blast0_6 x0.99999 (`=0` x1.00001), cycles human x0.9943 (`=0` x0.9941), Blast0_6 x0.9985 (`=0` x0.9982); 16 threads
   (node 1 CPUs 32-47 warmed 3 s, 8 rounds) Swiss-Prot q100 instructions x1.0000, cycles x0.9961 (`=0` x0.9964), wall
-  x0.9949; human instructions x0.99997, cycles x0.9966 (`=0` x0.9962), wall x0.9955. blastn megablast Sakai x MG1655
-  at one thread: instructions of the branch and the dev base within 1,200 of 4.52 G (the run-to-run spread).
+  x0.9949; human instructions x0.99997, cycles x0.9966 (`=0` x0.9962), wall x0.9955. blastn's machine code does not
+  change: the 729 functions of the two binaries named for blastn or the tree disassemble alike with addresses
+  normalized (only a blastp closure and 3 `OnceLock` helpers differ); megablast Sakai x MG1655 at one thread: instructions
+  within 1,200 of 4.52 G (the run-to-run spread).
 - `LOSAT_X_BPLK16=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-lk16, v4-D12 s19-s20,
   `DECISIONS` 59-61): on unless it is `0`; recorded for `LOSAT_X_REACH` once per table, taken where the table has 16-bit
   hits): exact blastp's block tables (`-task blastp`, the table built

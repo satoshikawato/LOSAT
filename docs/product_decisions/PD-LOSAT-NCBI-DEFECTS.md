@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.7
+- Version: 1.8
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -9,7 +9,9 @@
   1.5 2026-10-30 (exception 5, the expansion of a taxid whose ancestors form a cycle, line DI-8a);
   1.6 2026-10-30 (exception 6, an accession stored under more than about 500 sequences of a
   version 5 database, and the seqid-list items of rules 2 and 3, line DI-8b);
-  1.7 2026-10-31 (exception 6 also for the id lookups of `losat blastdbcmd`, line BDC's BDC2b)
+  1.7 2026-10-31 (exception 6 also for the id lookups of `losat blastdbcmd`, line BDC's BDC2b);
+  1.8 2026-11-01 (a version 5 database list that mixes databases with and without accession
+  tables, rule 3, line DI-8f)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -264,6 +266,19 @@ defects are fixed and presented as differences); its PR (DI-8b) asks the maintai
   `DECISIONS.md` 17 and 22). The result is deterministic, but it loses hits without a
   word, which no report can show; a user who wants NCBI's report names the chain or the
   stored id.
+
+- A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
+  mixes databases with and without the accession table (`acc2oid`) of `makeblastdb
+  -parse_seqids`: NCBI searches it, and before it writes a batch's reports (every format but
+  the archive) its BlastDb data loader looks each hit's Seq-id up in every LMDB file of the
+  list (`BlastFormatter_PreFetchSequenceData`, `CSeqDBLMDBSet::AccessionToOids`); a hit with
+  a parsed Seq-id then stops the run with `BLAST Database error: DB contains no accession
+  info.` (exit 2), after the outfmt 0 header and the earlier batches. Without such a hit, and
+  for outfmt 11, NCBI runs to the end; a taxid list stops it up front. LOSAT refuses the list
+  before the search (`the databases mix version 5 files with the accession table of
+  makeblastdb -parse_seqids ... and without it`; version 1.8, line DI-8 `DECISIONS.md` 31,
+  probe DI-8f F42, P14, H09, H15-H19): whether NCBI fails depends on the hits, and
+  reproducing that would need the lookup before every batch's reports in every program.
 
 ## Ported (rule 4)
 

@@ -1734,8 +1734,9 @@ pub fn write_blastp_pairwise_prolog<W: Write>(
 //         return;
 //     }
 // ```
-/// The `Database:` lines of the prolog for a database (one database per search): its
-/// title as stored, wrapped at 68, then the counts and one blank line.
+/// The `Database:` lines of the prolog for the database of a `-db` search: the titles of the
+/// databases of its list joined with `; ` (`PairwiseDatabase::new`), wrapped at 68, then the
+/// summed counts and one blank line.
 fn write_blast_database_header<W: Write>(
     writer: &mut W,
     database: &PairwiseDatabase,

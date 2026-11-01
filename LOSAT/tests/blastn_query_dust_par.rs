@@ -1,5 +1,7 @@
-//! The DUST masks of a query batch on the search pool (`LOSAT_X_QDUSTPAR`,
-//! `src/algorithm/blastn/x_query_dust_par.rs`) on whole searches.
+//! The DUST masks of a query batch on the search pool (`LOSAT_X_QPREPPAR`,
+//! `src/algorithm/blastn/x_query_dust_par.rs`) on whole searches. The masks had a switch of their
+//! own, `LOSAT_X_QDUSTPAR`, until 2026-11-01, when it was folded into `LOSAT_X_QPREPPAR` (same
+//! rule: a pool of two or more threads and two or more queries).
 //!
 //! The switch is in the strict set (on unless it is `0`). It chooses between
 //! two LOSAT code paths with the same result: the queries of a batch masked one after the other,
@@ -7,18 +9,19 @@
 //! test is that the report does not depend on it: for megablast, blastn and dc-megablast with
 //! several queries (pieces of LC738874 with microsatellites, runs of `N`, a poly-A query and a
 //! query shorter than a triplet) at 1 and 4 threads, the searches without the switch and with it
-//! give the same bytes, and `-dust no` is not acted on (the switch's own path does not run). The
+//! give the same bytes, and `-dust no` makes no masks (no `[X_STATS] QDUSTPAR` line). The
 //! same holds with several query batches (`BATCH_SIZE`) and when a batch is split into query
-//! chunks (`CHUNK_SIZE`, which reaches `chunk_query_masks`). That the masks are made on the pool's threads is checked by the unit
-//! test `masks_are_made_on_the_pool_threads` in `x_query_dust_par.rs`; here the sides of the
-//! switch's decision (`LOSAT_X_REACH`) show that the pool path ran at 4 threads and not at one.
-//! That those bytes equal NCBI's is the business of the blastn fixtures.
+//! chunks (`CHUNK_SIZE`, which reaches `chunk_query_masks`). That the masks are made on the
+//! pool's threads is checked by the unit test `masks_are_made_on_the_pool_threads` in
+//! `x_query_dust_par.rs`; here the `pool=` count of the `[X_STATS] QDUSTPAR` line (the DUST calls
+//! whose masks were made on the pool) shows that the pool path ran at 4 threads and not at one
+//! (QPREPPAR's reach marks also fire for the encoding and the Karlin blocks of the same searches,
+//! so they cannot tell the masks apart). That those bytes equal NCBI's is the business of the
+//! blastn fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
-
-mod reach_support;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
 /// `0`, the default before, unless the search sets it: every search here runs as it was written,
@@ -31,12 +34,11 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
-    ("LOSAT_X_QDUSTPAR", "0"),
     ("LOSAT_X_QPREPPAR", "0"),
     ("LOSAT_X_RPTSTREAM", "0"),
 ];
 
-const SWITCH: (&str, &str) = ("LOSAT_X_QDUSTPAR", "1");
+const SWITCH: (&str, &str) = ("LOSAT_X_QPREPPAR", "1");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -168,8 +170,8 @@ fn blastn(
 }
 
 /// For one task: the search without the switch at one thread, then off and on at 1 and 4 threads,
-/// all with the same bytes and no standard error; the masks are made on the pool only at 4 threads
-/// (the sides of the switch's decision).
+/// all with the same bytes and no standard error but the stats lines; the masks are made on the
+/// pool only at 4 threads (`pool=` of the stats line).
 fn check_task(task: &str, extra: &[&str]) {
     let queries = Queries::new();
     let mut args = vec!["-task", task];
@@ -181,20 +183,23 @@ fn check_task(task: &str, extra: &[&str]) {
         let (report, stderr) = blastn(&queries, &args, threads, &[]);
         assert!(report == expected, "{task} threads {threads}: off differs");
         assert_eq!(stderr, "", "{task} threads {threads}");
-        let reach = reach_support::Reach::new("qdustpar");
-        let (report, stderr) = blastn(&queries, &args, threads, &[SWITCH, reach.var()]);
+        let (report, stderr) = blastn(&queries, &args, threads, &[SWITCH, STATS]);
         assert!(report == expected, "{task} threads {threads}: on differs");
-        assert_eq!(stderr, "", "{task} threads {threads}");
-        let sides = reach.sides("LOSAT_X_QDUSTPAR");
-        assert_eq!(sides.0, threads > 1, "{task} threads {threads}: {sides:?}");
+        assert_eq!(
+            without_stats(&stderr),
+            "",
+            "{task} threads {threads}: {stderr}"
+        );
+        let pool = dust_pool_calls(&stderr);
+        assert_eq!(pool > 0, threads > 1, "{task} threads {threads}: {stderr}");
     }
 }
 
 type Var = (&'static str, &'static str);
 
 /// The searches of `env` (`BATCH_SIZE` and `CHUNK_SIZE` values), megablast: the report without
-/// the switch at one thread, then off, and with the switch, at 4 threads, all the same bytes and no standard error. Returns whether the masks were made on the pool (the switch's
-/// decision's new side).
+/// the switch at one thread, then off, and with the switch, at 4 threads, all the same bytes and no
+/// standard error but the stats lines. Returns whether the masks were made on the pool (`pool=`).
 fn check_env(env: &[Var]) -> bool {
     let queries = Queries::new();
     let args = ["-task", "megablast"];
@@ -205,13 +210,35 @@ fn check_env(env: &[Var]) -> bool {
     let (report, stderr) = blastn(&queries, &args, 4, &with(&[]));
     assert!(report == expected, "{env:?}: off differs");
     assert_eq!(stderr, "", "{env:?}");
-    let reach = reach_support::Reach::new("qdustpar-env");
-    let mut on: Vec<(&str, &str)> = with(&[SWITCH]);
-    on.push(reach.var());
-    let (report, stderr) = blastn(&queries, &args, 4, &on);
+    let (report, stderr) = blastn(&queries, &args, 4, &with(&[SWITCH, STATS]));
     assert!(report == expected, "{env:?}: on differs");
-    assert_eq!(stderr, "", "{env:?}");
-    reach.sides("LOSAT_X_QDUSTPAR").0
+    assert_eq!(without_stats(&stderr), "", "{env:?}: {stderr}");
+    dust_pool_calls(&stderr) > 0
+}
+
+const STATS: Var = ("LOSAT_X_STATS", "1");
+
+/// Standard error without the `[X_STATS]` lines.
+fn without_stats(stderr: &str) -> String {
+    stderr
+        .lines()
+        .filter(|line| !line.starts_with("[X_STATS]"))
+        .map(|line| format!("{line}\n"))
+        .collect()
+}
+
+/// The `pool=` of the `[X_STATS] QDUSTPAR` line: the DUST calls whose masks were made on the
+/// search pool (the switch's own path); 0 without the line.
+fn dust_pool_calls(stderr: &str) -> u64 {
+    stderr
+        .lines()
+        .find(|line| line.starts_with("[X_STATS] QDUSTPAR "))
+        .and_then(|line| {
+            line.split_whitespace()
+                .find_map(|field| field.strip_prefix("pool="))
+        })
+        .map(|value| value.parse().expect("pool= is a count"))
+        .unwrap_or(0)
 }
 
 // Several batches (a batch size of 10,000 letters): each batch's DUST masks are made on the pool,
@@ -252,7 +279,9 @@ fn dust_parameters_and_lowercase_masking() {
     check_task("megablast", &["-dust", "10 32 2", "-lcase_masking"]);
 }
 
-// `-dust no` makes no masks: the switch's own path does not run, and the report is the same.
+// `-dust no` makes no masks: the report is the same, and no DUST mask is made (QPREPPAR's other
+// marks fire at 4 threads, so the proof is the absence of the `[X_STATS] QDUSTPAR` line, which a
+// masked batch prints; the same search with DUST on prints it).
 #[test]
 fn dust_no_is_not_acted_on() {
     let queries = Queries::new();
@@ -260,12 +289,17 @@ fn dust_no_is_not_acted_on() {
     let (expected, _) = blastn(&queries, &args, 1, &[]);
     assert!(!expected.is_empty());
     for threads in [1, 4] {
-        let reach = reach_support::Reach::new("qdustpar-no");
-        let (report, _) = blastn(&queries, &args, threads, &[SWITCH, reach.var()]);
+        let (report, stderr) = blastn(&queries, &args, threads, &[SWITCH, ("LOSAT_X_STATS", "1")]);
         assert!(report == expected, "threads {threads}: on differs");
-        let sides = reach.sides("LOSAT_X_QDUSTPAR");
-        assert!(!sides.0, "threads {threads}: sides {sides:?}");
+        assert!(!stderr.contains("QDUSTPAR"), "threads {threads}: {stderr}");
     }
+    let (_, stderr) = blastn(
+        &queries,
+        &["-task", "megablast"],
+        4,
+        &[SWITCH, ("LOSAT_X_STATS", "1")],
+    );
+    assert!(stderr.contains("[X_STATS] QDUSTPAR "), "{stderr}");
 }
 
 // With LOSAT_TIMING (or LOSAT_X_STATS) the DUST step prints its summed wall time at exit, with or
@@ -293,10 +327,19 @@ fn timing_line_is_printed() {
         .lines()
         .find(|line| line.starts_with("[X_STATS] QDUSTPAR dust_s="))
         .unwrap_or_else(|| panic!("no stats line:\n{stderr}"));
+    let mut fields = line["[X_STATS] QDUSTPAR ".len()..].split_whitespace();
     assert!(
-        line["[X_STATS] QDUSTPAR dust_s=".len()..]
-            .parse::<f64>()
-            .is_ok(),
+        fields
+            .next()
+            .and_then(|field| field.strip_prefix("dust_s="))
+            .is_some_and(|value| value.parse::<f64>().is_ok()),
+        "{line}"
+    );
+    assert!(
+        fields
+            .next()
+            .and_then(|field| field.strip_prefix("pool="))
+            .is_some_and(|value| value.parse::<u64>().is_ok_and(|calls| calls > 0)),
         "{line}"
     );
     assert!(!stderr.contains("[TIMING] query_dust"), "{stderr}");

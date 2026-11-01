@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "pfound_v4",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "pfound_v4 (parsed Seq-ids)",
+  "number-of-letters": 2200,
+  "number-of-sequences": 10,
+  "last-updated": "2026-11-01T12:29:00",
+  "number-of-volumes": 1,
+  "bytes-total": 3498,
+  "bytes-to-cache": 2379,
+  "files": [
+    "pfound_v4.phr",
+    "pfound_v4.pin",
+    "pfound_v4.pog",
+    "pfound_v4.psd",
+    "pfound_v4.psi",
+    "pfound_v4.psq"
+  ]
+}

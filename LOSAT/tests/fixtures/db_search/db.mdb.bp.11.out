@@ -1,0 +1,1624 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">P69905.2 RecName: Full=Hemoglobin subunit
+ alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+ Contains: RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName:
+ Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+ Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan
+ paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+ Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName:
+ Full=Hemopressin [Pan troglodytes]"
+                  }
+                }
+              },
+              title "P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+ Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName:
+ Full=Hemopressin [Homo sapiens] >P69906.2 RecName: Full=Hemoglobin subunit
+ alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+ Contains: RecName: Full=Hemopressin [Pan paniscus] >P69907.2 RecName:
+ Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+ Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan
+ troglodytes]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 142,
+              seq-data ncbieaa "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPH
+FDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHA
+SLDKFLASVSTVLTSKYR"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/multidb/pa tests/db_search/multidb/pb",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 269240
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 733
+          },
+          {
+            id str "blast_score",
+            value int 733
+          },
+          {
+            id str "e_value",
+            value real { 364127315742203, 10, -119 }
+          },
+          {
+            id str "bit_score",
+            value real { 286959521427464, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 142
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 142
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P69905",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 721
+          },
+          {
+            id str "blast_score",
+            value int 721
+          },
+          {
+            id str "e_value",
+            value real { 195470856425116, 10, -117 }
+          },
+          {
+            id str "bit_score",
+            value real { 282337126516456, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 140
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 141
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 992957746478873, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "Q00001",
+              release "reviewed",
+              version 1
+            }
+          },
+          starts {
+            1,
+            0
+          },
+          lens {
+            141
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 721
+          },
+          {
+            id str "blast_score",
+            value int 721
+          },
+          {
+            id str "e_value",
+            value real { 195470856425116, 10, -117 }
+          },
+          {
+            id str "bit_score",
+            value real { 282337126516456, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 140
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 141
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 992957746478873, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P01923",
+              release "reviewed",
+              version 1
+            }
+          },
+          starts {
+            1,
+            0
+          },
+          lens {
+            141
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 719
+          },
+          {
+            id str "blast_score",
+            value int 719
+          },
+          {
+            id str "e_value",
+            value real { 436049300421397, 10, -117 }
+          },
+          {
+            id str "bit_score",
+            value real { 281566727364621, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 140
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 141
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "Q9TS35",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 712
+          },
+          {
+            id str "blast_score",
+            value int 712
+          },
+          {
+            id str "e_value",
+            value real { 607427008713947, 10, -116 }
+          },
+          {
+            id str "bit_score",
+            value real { 2788703303332, 10, -10 }
+          },
+          {
+            id str "num_ident",
+            value int 138
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 141
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P63107",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 702
+          },
+          {
+            id str "blast_score",
+            value int 702
+          },
+          {
+            id str "e_value",
+            value real { 182222018568132, 10, -114 }
+          },
+          {
+            id str "bit_score",
+            value real { 275018334574026, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 136
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 140
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 992957746478873, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P67818",
+              release "reviewed",
+              version 1
+            }
+          },
+          starts {
+            1,
+            0
+          },
+          lens {
+            141
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 679
+          },
+          {
+            id str "blast_score",
+            value int 679
+          },
+          {
+            id str "e_value",
+            value real { 640507273900221, 10, -111 }
+          },
+          {
+            id str "bit_score",
+            value real { 266158744327927, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 125
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 138
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 992957746478873, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P01935",
+              release "reviewed",
+              version 1
+            }
+          },
+          starts {
+            1,
+            0
+          },
+          lens {
+            141
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 645
+          },
+          {
+            id str "blast_score",
+            value int 645
+          },
+          {
+            id str "e_value",
+            value real { 969984971614382, 10, -106 }
+          },
+          {
+            id str "bit_score",
+            value real { 253061958746737, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 122
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 135
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P01942",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 643
+          },
+          {
+            id str "blast_score",
+            value int 643
+          },
+          {
+            id str "e_value",
+            value real { 169734253790615, 10, -105 }
+          },
+          {
+            id str "bit_score",
+            value real { 252291559594902, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 125
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 135
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P01966",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 640
+          },
+          {
+            id str "blast_score",
+            value int 640
+          },
+          {
+            id str "e_value",
+            value real { 450324546289681, 10, -105 }
+          },
+          {
+            id str "bit_score",
+            value real { 25113596086715, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 120
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 138
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 992957746478873, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P07405",
+              release "reviewed",
+              version 1
+            }
+          },
+          starts {
+            1,
+            0
+          },
+          lens {
+            141
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 619
+          },
+          {
+            id str "blast_score",
+            value int 619
+          },
+          {
+            id str "e_value",
+            value real { 748696489322237, 10, -102 }
+          },
+          {
+            id str "bit_score",
+            value real { 243046769772886, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 118
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 133
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 992957746478873, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P60529",
+              release "reviewed",
+              version 1
+            }
+          },
+          starts {
+            1,
+            0
+          },
+          lens {
+            141
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 531
+          },
+          {
+            id str "blast_score",
+            value int 531
+          },
+          {
+            id str "e_value",
+            value real { 222589032052568, 10, -88 }
+          },
+          {
+            id str "bit_score",
+            value real { 209149207092159, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 111
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 129
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P01946",
+              release "reviewed",
+              version 3
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 528
+          },
+          {
+            id str "blast_score",
+            value int 528
+          },
+          {
+            id str "e_value",
+            value real { 552871055345453, 10, -88 }
+          },
+          {
+            id str "bit_score",
+            value real { 207993608364407, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 100
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 121
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P01994",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 521
+          },
+          {
+            id str "blast_score",
+            value int 521
+          },
+          {
+            id str "e_value",
+            value real { 616420036871113, 10, -87 }
+          },
+          {
+            id str "bit_score",
+            value real { 205297211332985, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 95
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 123
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P01999",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 496
+          },
+          {
+            id str "blast_score",
+            value int 496
+          },
+          {
+            id str "e_value",
+            value real { 466389837871103, 10, -83 }
+          },
+          {
+            id str "bit_score",
+            value real { 195667221935051, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 91
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 117
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P83135",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 470
+          },
+          {
+            id str "blast_score",
+            value int 470
+          },
+          {
+            id str "e_value",
+            value real { 419227929551343, 10, -79 }
+          },
+          {
+            id str "bit_score",
+            value real { 1856520329612, 10, -10 }
+          },
+          {
+            id str "num_ident",
+            value int 90
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 111
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P06638",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 461
+          },
+          {
+            id str "blast_score",
+            value int 461
+          },
+          {
+            id str "e_value",
+            value real { 113282767259919, 10, -77 }
+          },
+          {
+            id str "bit_score",
+            value real { 182185236777944, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 88
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 114
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P09105",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 446
+          },
+          {
+            id str "blast_score",
+            value int 446
+          },
+          {
+            id str "e_value",
+            value real { 212484813689706, 10, -75 }
+          },
+          {
+            id str "bit_score",
+            value real { 176407243139184, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 85
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 110
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P02008",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 439
+          },
+          {
+            id str "blast_score",
+            value int 439
+          },
+          {
+            id str "e_value",
+            value real { 24707505181538, 10, -73 }
+          },
+          {
+            id str "bit_score",
+            value real { 173710846107762, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 87
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 107
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 992957746478873, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "Q9PRL9",
+              release "reviewed",
+              version 1
+            }
+          },
+          starts {
+            1,
+            0
+          },
+          lens {
+            141
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 438
+          },
+          {
+            id str "blast_score",
+            value int 438
+          },
+          {
+            id str "e_value",
+            value real { 290860992415184, 10, -74 }
+          },
+          {
+            id str "bit_score",
+            value real { 173325646531845, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 78
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 110
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P06467",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            142
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 393
+          },
+          {
+            id str "blast_score",
+            value int 393
+          },
+          {
+            id str "e_value",
+            value real { 185313513858152, 10, -67 }
+          },
+          {
+            id str "bit_score",
+            value real { 155991665615564, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 78
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 101
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 990915492957746, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P11748",
+              release "reviewed",
+              version 1
+            }
+          },
+          starts {
+            2,
+            2,
+            -1,
+            47,
+            47,
+            48
+          },
+          lens {
+            45,
+            1,
+            95
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 388
+          },
+          {
+            id str "blast_score",
+            value int 388
+          },
+          {
+            id str "e_value",
+            value real { 120438323179116, 10, -66 }
+          },
+          {
+            id str "bit_score",
+            value real { 154065667735977, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 75
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 108
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 990915492957746, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P02018",
+              release "reviewed",
+              version 1
+            }
+          },
+          starts {
+            2,
+            1,
+            -1,
+            46,
+            47,
+            47
+          },
+          lens {
+            45,
+            1,
+            95
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 385
+          },
+          {
+            id str "blast_score",
+            value int 385
+          },
+          {
+            id str "e_value",
+            value real { 391580933771727, 10, -66 }
+          },
+          {
+            id str "bit_score",
+            value real { 152910069008225, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 76
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 106
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "Q90487",
+              release "reviewed",
+              version 3
+            }
+          },
+          starts {
+            0,
+            0,
+            -1,
+            47,
+            47,
+            48
+          },
+          lens {
+            47,
+            1,
+            95
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 379
+          },
+          {
+            id str "blast_score",
+            value int 379
+          },
+          {
+            id str "e_value",
+            value real { 274118366260973, 10, -65 }
+          },
+          {
+            id str "bit_score",
+            value real { 150598871552721, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 82
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 107
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "Query_1",
+            swissprot {
+              accession "P11251",
+              release "reviewed",
+              version 2
+            }
+          },
+          starts {
+            0,
+            0,
+            -1,
+            47,
+            47,
+            48
+          },
+          lens {
+            47,
+            1,
+            95
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 318984985166634, 10, -15 },
+        k { 130238418667706, 10, -15 },
+        h { 384901552979004, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 269240",
+      "Effective search space used: 269240",
+      "Length adjustment: 36"
+    }
+  }
+}

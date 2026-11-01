@@ -7,7 +7,7 @@ use crate::algorithm::tblastx::blast_aascan::s_blast_aa_scan_subject_one_range;
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair as OffsetPair;
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_tbn_build_compressed_lookup, XCompressedLookup, X_BLASTX,
+    x_bx_build_compressed_lookup, x_bx_clut_pool, x_give_back_flat, XCompressedLookup, X_BLASTX,
 };
 use crate::algorithm::tblastx::lookup::compressed::{
     x_compressed_scaled_threshold, BlastCompressedAaLookupTable,
@@ -282,10 +282,26 @@ pub enum Lookup {
 // LOSAT_X_BXPOOLN1 in a search on one thread) and no panic unwinds.
 impl Drop for Lookup {
     fn drop(&mut self) {
-        if let Self::Standard(table, kept) = self {
-            if kept.pooled && !std::thread::panicking() {
-                crate::algorithm::tblastx::lookup::x_give_back_pooled(table);
+        match self {
+            Self::Standard(table, kept) => {
+                if kept.pooled && !std::thread::panicking() {
+                    crate::algorithm::tblastx::lookup::x_give_back_pooled(table);
+                }
             }
+            Self::Compressed(table) => x_give_back_compressed(table),
+        }
+    }
+}
+
+// No NCBI counterpart: buffer reuse only (LOSAT_X_BXCLUTPOOL, tblastx/lookup/x_clut_direct.rs): a
+// dropped flat table's vectors are kept for the next build. Not inlined, so that a standard table's
+// drop keeps its code.
+#[cold]
+#[inline(never)]
+fn x_give_back_compressed(table: &mut XCompressedLookup) {
+    if let XCompressedLookup::Flat(flat) = table {
+        if x_bx_clut_pool() && !std::thread::panicking() {
+            x_give_back_flat(flat);
         }
     }
 }
@@ -296,14 +312,15 @@ impl Drop for Lookup {
 //     s_CompressedLookupFinalize(lookup);
 // ```
 /// EXPERIMENT (LOSAT_X_BPCLUT): the compressed table of a query batch (`-word_size 5`), flat as
-/// TBLASTN's (`x_tbn_build_compressed_lookup`), on one thread. One table for the batch, so its one
+/// TBLASTN's (`x_bx_build_compressed_lookup`, on vectors kept between builds with
+/// `LOSAT_X_BXCLUTPOOL`), on one thread. One table for the batch, so its one
 /// range is all the segments. Words that fill NCBI's overflow banks are refused, as BLASTP's
 /// (NCBI writes past its banks). Cold and not inlined, so that the standard table's build keeps
 /// its code.
 #[cold]
 #[inline(never)]
 fn x_compressed_lookup(query: &[u8], segments: &[(i32, i32)], threshold: f64) -> Result<Lookup> {
-    x_tbn_build_compressed_lookup(
+    x_bx_build_compressed_lookup(
         5,
         x_compressed_scaled_threshold(threshold),
         query,

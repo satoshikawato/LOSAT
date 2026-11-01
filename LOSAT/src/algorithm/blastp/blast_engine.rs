@@ -5036,7 +5036,7 @@ fn search_cli(
             let database = database::BlastpDatabase::open_restricted(
                 name,
                 &settings,
-                args.app == BlastpApp::Blastp,
+                args.app.name(),
                 list.as_ref(),
                 outputs.diagnostics,
             )?
@@ -5048,7 +5048,7 @@ fn search_cli(
                 database.filtered_empty(),
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
-                "BLASTP",
+                args.app.name(),
             )?;
             Some(database)
         }
@@ -5484,10 +5484,13 @@ impl<'a> BlastpSubjectSource<'a> {
                 records.len(),
                 records.iter().map(|record| record.seq().len()).sum(),
             ),
-            Self::Database(database) => (
-                database.printed_num_sequences() as usize,
-                usize::try_from(database.printed_total_letters()).unwrap_or(usize::MAX),
-            ),
+            Self::Database(database) => {
+                let shown = database.pairwise_database();
+                (
+                    usize::try_from(shown.num_sequences).unwrap_or(usize::MAX),
+                    usize::try_from(shown.total_letters).unwrap_or(usize::MAX),
+                )
+            }
         }
     }
 }
@@ -6861,7 +6864,8 @@ fn preliminary_search_error(
 ) -> anyhow::Error {
     if !first_batch_searched {
         return anyhow::anyhow!(
-            "the database {database_name} cannot be searched ({text}) and the first query batch is one that NCBI BLAST+ does not search; this is not supported by LOSAT's BLASTP"
+            "the database {database_name} cannot be searched ({text}) and the first query batch is one that NCBI BLAST+ does not search; this is not supported by LOSAT's {}",
+            args.app.name()
         );
     }
     let written = (|| -> Result<()> {
@@ -8011,6 +8015,7 @@ fn run_resolved_in_pool(
                     eff_db_length,
                     num_subjects as i64,
                     &gapped_params,
+                    args.app.name(),
                 )?;
                 exact_search_spaces.push(Some(exact));
                 return Ok(space);
@@ -10831,6 +10836,12 @@ fn run_resolved_in_pool(
     // the `# N hits found` line of -outfmt 7 counts them all, and the formatter keeps the first
     // `max_target_seqs` subjects that have one (the pairwise report shows at most as many, its
     // numbers of descriptions and alignments).
+    // NCBI's cut counts the Seq-aligns of subjects whose Seq-align ids match as those of one
+    // subject (`PruneSeqalign`, quoted at `refuse_joined_cut`): where it keeps another subject
+    // than the cut below, the run is LOSAT's refusal before any format is written.
+    if let (BlastpApp::Psiblast, Some(titles)) = (args.app, listed_titles.as_ref()) {
+        titles.check_joined_cut(&hit_lists, args.max_target_seqs)?;
+    }
     let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {
         hit_lists
             .iter_mut()
@@ -10858,15 +10869,17 @@ fn run_resolved_in_pool(
         subject_label.to_string()
     };
     let subject_input_label = blastp_subject_tag(&args, subject_label);
-    // The number of sequences that the `Database:` lines show: the real count of the
-    // database, or the records of the subject set. With a taxid list the reports show the
-    // whole database's totals and the statistics read the list's (line DI-8).
-    let shown_num_sequences = match database {
-        Some(database) => database.printed_num_sequences() as usize,
+    // The number of sequences that the `Database:` lines show: the sums over the names of the
+    // `-db` list (`PairwiseDatabase`, a name given twice twice), or the records of the subject
+    // set. With a taxid list the reports show the whole database's totals and the statistics
+    // read the list's (line DI-8).
+    let shown_database = database.map(|database| database.pairwise_database());
+    let shown_num_sequences = match &shown_database {
+        Some(shown) => usize::try_from(shown.num_sequences).unwrap_or(usize::MAX),
         None => subject_records.len(),
     };
-    let shown_total_letters = match database {
-        Some(database) => usize::try_from(database.printed_total_letters()).unwrap_or(usize::MAX),
+    let shown_total_letters = match &shown_database {
+        Some(shown) => usize::try_from(shown.total_letters).unwrap_or(usize::MAX),
         None => total_db_len,
     };
     let context = ReportContext {

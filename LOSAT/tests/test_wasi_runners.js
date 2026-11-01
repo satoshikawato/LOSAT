@@ -197,6 +197,13 @@ test("worker memory trap terminates the command while its main thread waits", ()
   assert.match(result.stderr, /RuntimeError: memory access out of bounds/);
 });
 
+test("serial runner reports a rejected artifact and exits 1", () => {
+  const result = run({ threaded: false, bytes: command({ threaded: true }) });
+  assert.equal(result.signal, null, result.stderr);
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /expected serial-command, got threaded-command/);
+});
+
 test("missing thread entry is rejected before starting the command", () => {
   const result = run({ threaded: true, worker: "missing-export" });
   assert.equal(result.signal, null, result.stderr);

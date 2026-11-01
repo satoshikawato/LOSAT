@@ -1,6 +1,7 @@
 //! EXPERIMENT (LOSAT_X_QPREPPAR): the BLASTNA encoding of a query
 //! batch and the ungapped Karlin blocks of its contexts made on the search pool, as ordered
-//! parallel maps.
+//! parallel maps. The switch also makes the batch's DUST masks on the pool
+//! (`algorithm/blastn/x_query_dust_par.rs`, formerly LOSAT_X_QDUSTPAR, folded in on 2026-11-01).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603
 //! ```c++

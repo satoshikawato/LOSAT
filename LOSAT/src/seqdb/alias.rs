@@ -842,15 +842,23 @@ impl SearchPath {
 //     }
 // }
 // ```
-// `keep_quote` is false for a `DBLIST` (seqdbalias.cpp:85-88).
-fn split_quoted(dbname: &[u8]) -> Vec<&[u8]> {
+// `keep_quote` is false for a `DBLIST` and for the names the reader opens
+// (seqdbalias.cpp:85-88), true for the names of the reports (`report_names`).
+// With `keep_quote`, the closing quote stays in the name and NCBI's `i++` also
+// skips the character after it (`"a"b` gives `"a"` alone).
+fn split_quoted(dbname: &[u8], keep_quote: bool) -> Vec<&[u8]> {
     let mut dbs = Vec::new();
     let mut quoted = false;
     let mut begin = 0;
-    for (i, &ch) in dbname.iter().enumerate() {
+    let mut i = 0;
+    while i < dbname.len() {
+        let ch = dbname[i];
         if quoted {
             if ch == b'"' {
                 if begin < i {
+                    if keep_quote {
+                        i += 1;
+                    }
                     dbs.push(&dbname[begin..i]);
                 }
                 begin = i + 1;
@@ -865,14 +873,50 @@ fn split_quoted(dbname: &[u8]) -> Vec<&[u8]> {
             if begin < i {
                 dbs.push(&dbname[begin..i]);
             }
-            begin = i + 1;
+            begin = if keep_quote { i } else { i + 1 };
             quoted = true;
         }
+        i += 1;
     }
     if begin < dbname.len() {
         dbs.push(&dbname[begin..]);
     }
     dbs
+}
+
+/// Whether `dbname` names several databases (`x_Tokenize`: more than one name).
+pub(crate) fn lists_several_names(dbname: &str) -> bool {
+    split_quoted(dbname.as_bytes(), false).len() > 1
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:479-500
+// ```c++
+//     vector<CTempString> dbs;
+//     SeqDB_SplitQuoted(blastdb_names, dbs, true);
+//     retval.reserve(dbs.size());
+//
+//     ITERATE(vector<CTempString>, i, dbs) {
+//         CAlignFormatUtil::SDbInfo info;
+//         info.is_protein = is_protein;
+//         bool success = false;
+// 	// Unsafe OK as kDbName only used in this loop.
+//         const string kDbName = NStr::TruncateSpaces_Unsafe(*i);
+//         if (kDbName.empty())
+//             continue;
+//
+//         success = s_FillDbInfoLocally(kDbName, info, dbfilt_algorithm);
+// ```
+// `TruncateSpaces` drops `isspace` bytes at both ends (`db_argument_name`).
+/// The names of the `-db` value `dbname` as NCBI's reports take them, one per database of
+/// the list, each of which they open alone (`CAlignFormatUtil::GetBlastDbInfo`): split at
+/// spaces with the double quotes kept, without white space at the ends, empty names left
+/// out.
+pub(crate) fn report_names(dbname: &str) -> Vec<String> {
+    split_quoted(dbname.as_bytes(), true)
+        .into_iter()
+        .map(|name| super::db_argument_name(&String::from_utf8_lossy(name)).to_string())
+        .filter(|name| !name.is_empty())
+        .collect()
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:689-710
@@ -1148,7 +1192,7 @@ impl Resolver<'_> {
             }
         }
         let mut entries = Vec::new();
-        for entry in split_quoted(dblist) {
+        for entry in split_quoted(dblist, false) {
             let entry = std::str::from_utf8(entry)
                 .map_err(|_| unsupported("a DBLIST name is not valid UTF-8".to_string()))?;
             entries.push(fix_delimiters(entry));
@@ -1402,10 +1446,12 @@ fn collect_volumes(node: &AliasNode, out: &mut Vec<String>) {
 // The volumes are opened, and ordinal ids are given, in the sorted order of
 // the volume names, not in `DBLIST` order.
 //
-// Two cases are rejected because LOSAT does not reproduce what NCBI derives
-// from them: a volume reached more than once (NCBI's alias walk counts it
-// once per mention, seqdbalias.cpp:1588-1592), and two volumes of the same
-// base name in different directories.
+// A volume reached more than once is rejected because LOSAT does not
+// reproduce what NCBI derives from it: NCBI's alias walk counts it once per
+// mention (seqdbalias.cpp:1588-1592) in the statistics of a search that reads
+// it once. Volumes of the same base name in different directories (two
+// databases of one name, `-db "d1/g d2/g"`) are opened in the order above,
+// each with the LMDB file of its own directory (`lmdb_entries`), as NCBI does.
 /// The volumes of the alias tree `root` in NCBI's order.
 fn volumes_in_order(root: AliasNode) -> Result<AliasTree, SeqDbError> {
     let mut mentions = Vec::new();
@@ -1429,15 +1475,6 @@ fn volumes_in_order(root: AliasNode) -> Result<AliasTree, SeqDbError> {
         return Err(unsupported(
             repeated,
             "the volume is listed more than once by the alias files",
-        ));
-    }
-    if let Some(pair) = volumes.windows(2).find(|pair| {
-        path_base_name(&pair[0]) == path_base_name(&pair[1])
-            && dir_name(&pair[0]) != dir_name(&pair[1])
-    }) {
-        return Err(unsupported(
-            &pair[1],
-            "two volumes of the database have the same name in different directories",
         ));
     }
     Ok(AliasTree { root, volumes })
@@ -1548,13 +1585,27 @@ fn volumes_in_order(root: AliasNode) -> Result<AliasTree, SeqDbError> {
 //
 //     // Reduce common length to length of min db path.
 //     for(i = 1; common && (i < m_DBList.size()); i++) {
-//         ...
+//         if (m_DBList[i].GetBasePathS().size() < common) {
+//             common = m_DBList[i].GetBasePathS().size();
+//         }
 //     }
 //
 //     if (common) {
 //         --common;
 //     }
-//     ...
+//
+//     // Reduce common length to largest universal prefix.
+//     const string & first = m_DBList[0].GetBasePathS();
+//
+//     for(i = 1; common && (i < m_DBList.size()); i++) {
+//         // Reduce common prefix length until match is found.
+//         while(memcmp(first.c_str(),
+//                      m_DBList[i].GetBasePathS().c_str(),
+//                      common)) {
+//             --common;
+//         }
+//     }
+//
 //     // Adjust back to whole path component.
 //     while(common && (first[common-1] != CFile::GetPathSeparator())) {
 //         --common;
@@ -1586,8 +1637,10 @@ fn volumes_in_order(root: AliasNode) -> Result<AliasTree, SeqDbError> {
 // ```
 // The name is a list (`x_Tokenize`, quoted at `resolve_one_name`): spaces
 // separate databases and double quotes keep a name with spaces together.
-// LOSAT searches one database, so a list of several names is an explicit
-// error. A name carries no extension: `db.pin` is looked for as `db.pin.pal`
+// Several names are the databases of one search, the entries of the top
+// alias node "-" as the names of a `DBLIST` are; a volume that two names give
+// is opened once (`push_unique`), one that a name and an alias file give is
+// refused (`volumes_in_order`). A name carries no extension: `db.pin` is looked for as `db.pin.pal`
 // and `db.pin.pin`. A name with a path separator is joined to every
 // directory of the search path like any other (an absolute name stays as it
 // is, `combine_path`); it only turns off the look for a volume of the same
@@ -1605,70 +1658,83 @@ pub(super) fn resolve_in(
             "Database name is required.".to_string(),
         ));
     }
-    let names = split_quoted(dbname.as_bytes());
-    let name = match names.as_slice() {
-        // `x_ExpandAliases` on an empty list (quoted at `Resolver::expand`).
-        [] => {
-            return Err(SeqDbError::NotFound(
-                "No database names were passed to CSeqDB::CSeqDB().".to_string(),
-            ));
-        }
-        [name] => fix_delimiters(&String::from_utf8_lossy(name)),
-        _ => {
-            return Err(SeqDbError::Unsupported {
-                path: Path::new(dbname).to_path_buf(),
-                message: "the name lists several databases; LOSAT searches one database \
-                          (a name with spaces goes between double quotes)"
-                    .to_string(),
-            });
-        }
-    };
+    let names = split_quoted(dbname.as_bytes(), false);
+    // `x_ExpandAliases` on an empty list (quoted at `Resolver::expand`).
+    if names.is_empty() {
+        return Err(SeqDbError::NotFound(
+            "No database names were passed to CSeqDB::CSeqDB().".to_string(),
+        ));
+    }
     let mut resolver = Resolver {
         seqtype,
         recurse: Vec::new(),
         local_dir: Some(search.cwd.clone()),
         search: Some(search),
     };
-    let skip_local = name.contains(MAIN_SEPARATOR);
 
-    // `db_path` is the name with the extension of an alias file, and
-    // `db_path.FindBasePath()` takes that extension off again.
-    let db_path = resolver.alias_path(&name);
-    let db_path = db_path.to_string_lossy();
-    resolver.reject_group_alias(&db_path)?;
-    let Some(resolved) = search.find(remove_extn(&db_path), Some(seqtype)) else {
-        return Err(SeqDbError::NotFound(format!(
-            "No alias or index file found for {} database [{name}] in search path [{}]. \
-             Please verify the spelling of the BLAST database and its molecule type.",
-            seqtype.name(),
-            search.as_str()
-        )));
-    };
-    // `resolved_path` is the resolved name with the extension of an alias
-    // file; its directory is normalised and its base name loses the extension.
-    let resolved_path = resolver.alias_path(&resolved);
-    let resolved_path = resolved_path.to_string_lossy();
-    let first = format!(
-        "{}{MAIN_SEPARATOR}{}",
-        normalize_path(dir_name(&resolved_path))?,
-        remove_extn(base_name(&resolved_path))
-    );
+    // Every name is resolved before any is expanded; the first one not found
+    // is the error.
+    let mut resolved_names = Vec::with_capacity(names.len());
+    let mut skip_local = Vec::with_capacity(names.len());
+    for name in names {
+        let name = fix_delimiters(&String::from_utf8_lossy(name));
+        skip_local.push(name.contains(MAIN_SEPARATOR));
 
-    // One name: the common prefix is its directory, separator included.
-    let bytes = first.as_bytes();
-    let mut common = bytes.len().saturating_sub(1);
-    while common > 0 && char::from(bytes[common - 1]) != MAIN_SEPARATOR {
+        // `db_path` is the name with the extension of an alias file, and
+        // `db_path.FindBasePath()` takes that extension off again.
+        let db_path = resolver.alias_path(&name);
+        let db_path = db_path.to_string_lossy();
+        resolver.reject_group_alias(&db_path)?;
+        let Some(resolved) = search.find(remove_extn(&db_path), Some(seqtype)) else {
+            return Err(SeqDbError::NotFound(format!(
+                "No alias or index file found for {} database [{name}] in search path [{}]. \
+                 Please verify the spelling of the BLAST database and its molecule type.",
+                seqtype.name(),
+                search.as_str()
+            )));
+        };
+        // `resolved_path` is the resolved name with the extension of an alias
+        // file; its directory is normalised and its base name loses the extension.
+        let resolved_path = resolver.alias_path(&resolved);
+        let resolved_path = resolved_path.to_string_lossy();
+        resolved_names.push(format!(
+            "{}{MAIN_SEPARATOR}{}",
+            normalize_path(dir_name(&resolved_path))?,
+            remove_extn(base_name(&resolved_path))
+        ));
+    }
+
+    // The common prefix of the resolved names, cut back to a whole directory
+    // (a separator included), is the directory of the top node.
+    let first = resolved_names[0].as_bytes();
+    let mut common = resolved_names.iter().map(String::len).min().unwrap_or(0);
+    common = common.saturating_sub(1);
+    for other in &resolved_names[1..] {
+        while common > 0 && first[..common] != other.as_bytes()[..common] {
+            common -= 1;
+        }
+    }
+    while common > 0 && char::from(first[common - 1]) != MAIN_SEPARATOR {
         common -= 1;
     }
-    let (db_dir, entry) = if common > 1 {
-        first.split_at(common)
+    let db_dir = if common > 1 {
+        &resolved_names[0][..common]
     } else {
-        (".", first.as_str())
+        "."
     };
 
     let mut root = AliasNode::default();
-    // The top node is named "-" (seqdbalias.cpp:106, 127).
-    resolver.expand(&mut root, db_dir, "-", &[entry.to_string()], skip_local)?;
+    // The top node is named "-" (seqdbalias.cpp:106, 127). One `expand` per
+    // name: each has its own `m_SkipLocal`, and `expand` keeps no state from
+    // one entry to the next but the node's volume list.
+    for (name, skip_local) in resolved_names.iter().zip(skip_local) {
+        let entry = if common > 1 {
+            &name[common..]
+        } else {
+            name.as_str()
+        };
+        resolver.expand(&mut root, db_dir, "-", &[entry.to_string()], skip_local)?;
+    }
     volumes_in_order(root)
 }
 
@@ -2069,6 +2135,6 @@ pub(super) fn info_volumes(
 }
 
 #[cfg(test)]
-pub(super) fn test_split_quoted(dbname: &[u8]) -> Vec<&[u8]> {
-    split_quoted(dbname)
+pub(super) fn test_split_quoted(dbname: &[u8], keep_quote: bool) -> Vec<&[u8]> {
+    split_quoted(dbname, keep_quote)
 }

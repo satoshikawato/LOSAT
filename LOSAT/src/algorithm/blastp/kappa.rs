@@ -2174,6 +2174,7 @@ pub(crate) fn x_newton_lanes_prefetch_matches(
         return;
     }
     let query_info = &query_workspace.redo_query_info;
+    crate::core::composition_adjustment::x_newton_lanes::x_probe_release_before_gathering();
     let mut inputs = Vec::new();
     for local_match in local_matches {
         if local_match.hsps.is_empty()

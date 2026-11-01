@@ -2798,6 +2798,7 @@ fn x_newton_lanes_prefetch_windows<'seq>(
     composition_workspace: &BlastCompositionWorkspace,
     ranges: &mut Vec<(XLaneRangeKey, BlastRedoRangeResult)>,
 ) -> usize {
+    super::x_newton_lanes::x_probe_release_before_gathering();
     let mut inputs = Vec::new();
     let mut window_index = first_window;
     while window_index < windows.len() && inputs.len() < X_LANES_PREFETCH_INPUTS {
@@ -3413,6 +3414,11 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
             in_align = current.next.as_deref();
             hsp_index += 1;
         }
+    }
+    // No NCBI counterpart (probe D14 s6q): LOSAT_PROBE_NLREL=2 drops the kept Newton batch here; it
+    // does not change any value NCBI computes.
+    if x_lanes_on {
+        super::x_newton_lanes::x_probe_release_after_windows();
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1272-1274

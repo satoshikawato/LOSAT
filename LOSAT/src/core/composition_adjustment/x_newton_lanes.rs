@@ -1551,6 +1551,10 @@ fn x_prefetch(inputs: Vec<NewtonInput>, drop: bool, batch: bool) {
     PREFETCHED.fetch_add(inputs.len() as u64, Ordering::Relaxed);
     if drop && batch {
         KEPT.fetch_add(1, Ordering::Relaxed);
+        let mut inputs = inputs;
+        if x_probe_nlshrink() {
+            inputs.shrink_to_fit();
+        }
         let n = inputs.len();
         BATCH.with(|kept| {
             *kept.borrow_mut() = Some(KeptBatch {
@@ -1593,6 +1597,46 @@ fn x_newton_drop() -> bool {
 fn x_newton_batch() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_NEWTONBATCH"))
+}
+
+// No NCBI counterpart (probe D14 s6q, exp branch only): LOSAT_PROBE_NLREL=1 drops this thread's kept
+// batch when its caller starts gathering the next inputs (the windows or matches of the batch were
+// walked), =2 also when TBLASTN's window loop of a match ends; LOSAT_PROBE_NLSHRINK=1 gives the kept
+// inputs their length as capacity. It does not change any value NCBI computes.
+fn x_probe_nlrel() -> u8 {
+    static ON: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| match std::env::var("LOSAT_PROBE_NLREL").as_deref() {
+        Ok("1") => 1,
+        Ok("2") => 2,
+        _ => 0,
+    })
+}
+
+fn x_probe_nlshrink() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_PROBE_NLSHRINK").is_some_and(|v| v == "1"))
+}
+
+fn x_probe_drop_batch() {
+    BATCH.with(|kept| {
+        if let Some(old) = kept.borrow_mut().take() {
+            DROPPED.fetch_add(old.left as u64, Ordering::Relaxed);
+        }
+    });
+}
+
+/// Probe: called where a caller starts gathering the inputs of its next prefetch.
+pub(crate) fn x_probe_release_before_gathering() {
+    if x_probe_nlrel() >= 1 && x_newton_drop() && x_newton_batch() {
+        x_probe_drop_batch();
+    }
+}
+
+/// Probe: called where TBLASTN's window loop of a match ends.
+pub(crate) fn x_probe_release_after_windows() {
+    if x_probe_nlrel() >= 2 && x_newton_drop() && x_newton_batch() {
+        x_probe_drop_batch();
+    }
 }
 
 // No NCBI counterpart: the result of this thread's kept batch for this input (LOSAT_X_NEWTONBATCH):

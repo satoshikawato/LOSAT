@@ -515,7 +515,7 @@ impl SeqDb {
     /// separate names, double quotes keep one name together), of which LOSAT
     /// accepts one name; it carries no file extension.
     ///
-    /// A database that stores parsed Seq-ids opens; `check_ordinal_ids` tells
+    /// A database that stores parsed Seq-ids opens; `has_parsed_seqids` tells
     /// it from one that holds only the ordinal ids.
     pub fn open_in(name: &str, seqtype: SeqType, path: &SearchPath) -> Result<Self, SeqDbError> {
         let mut db = Self::open_tree(alias::resolve_in(name, seqtype, path)?, name, seqtype)?;
@@ -884,29 +884,13 @@ impl SeqDb {
     // (`x_GetHdrAsn1Binary`, seqdbvol.cpp:2302-2310): a search program reads
     // the first one after its search, so a header file that is missing or
     // cannot be opened fails there, not here (`Volume::lazy_file`).
-    /// Checks that the database holds the ordinal ids of a database built without
-    /// `-parse_seqids`: the first header of every volume is decoded with the
-    /// ordinal-id decoder (`deflines`), whose error for any other Seq-id is
-    /// `SeqDbError::Unsupported`; the first error is returned. A volume whose
-    /// header file cannot be opened (missing, or an `open` that fails) is not
-    /// checked: NCBI opens a header file at its first read, and the error comes
-    /// there. A search program that reads only ordinal ids calls this right
-    /// after opening the database.
-    pub fn check_ordinal_ids(&self) -> Result<(), SeqDbError> {
-        for (at, volume) in self.volumes.iter().enumerate() {
-            if volume.num_oids() > 0 {
-                match self.first_deflines(at) {
-                    Ok(_) | Err(SeqDbError::NotFound(_) | SeqDbError::Open { .. }) => {}
-                    Err(error) => return Err(error),
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// `check_ordinal_ids` of a program that reads parsed Seq-ids too: `Ok(true)` when the first
-    /// header of some volume holds parsed Seq-ids, any other error as `check_ordinal_ids` gives
-    /// it.
+    /// Whether the database holds parsed Seq-ids, which a search program asks right after
+    /// opening it: the first header of every volume is decoded with the ordinal-id decoder
+    /// (`deflines`), whose error for any other Seq-id is `SeqDbError::Unsupported`
+    /// (`SeqDbError::is_parsed_seqids`). `Ok(true)` when some volume's first header holds
+    /// parsed Seq-ids; any other error of a first header is returned. A volume whose header
+    /// file cannot be opened (missing, or an `open` that fails) is not checked: NCBI opens a
+    /// header file at its first read, and the error comes there.
     pub fn has_parsed_seqids(&self) -> Result<bool, SeqDbError> {
         let mut parsed = false;
         for (at, volume) in self.volumes.iter().enumerate() {

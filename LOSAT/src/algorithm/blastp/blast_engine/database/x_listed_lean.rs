@@ -80,7 +80,7 @@ impl ListedSubjects {
                     continue;
                 }
                 let (title, replaced) =
-                    parsed.read(&headers, rank, self.ordinals[rank], query, ranks)?;
+                    parsed.read(database, &headers, rank, self.ordinals[rank], query, ranks)?;
                 titles[rank] = Arc::from(title);
                 replaced_title_bytes[rank] = replaced;
             }
@@ -90,6 +90,7 @@ impl ListedSubjects {
             shown: ListedShown::Lean(titles),
             replaced_title_bytes,
             parsed: parsed.by_rank,
+            program: database.program,
         })
     }
 }

@@ -69,5 +69,9 @@ const wasi = new WASI({
   process.exitCode = wasi.start(instance);
 })().catch((error) => {
   console.error(error && error.stack ? error.stack : String(error));
-  process.exit(1);
+  // process.exitCode, not process.exit(): Node's exit handler shuts down V8's worker threads
+  // before it frees the main isolate, so a background compile there that waits for a garbage
+  // collection on this thread waits forever (a threaded runner that called process.exit()
+  // after its command, 2026-10-29: 10 of 300 tblastn runs hung that way).
+  process.exitCode = 1;
 });

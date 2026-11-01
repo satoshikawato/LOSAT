@@ -5036,7 +5036,7 @@ fn search_cli(
             let database = database::BlastpDatabase::open_restricted(
                 name,
                 &settings,
-                args.app == BlastpApp::Blastp,
+                args.app.name(),
                 list.as_ref(),
                 outputs.diagnostics,
             )?
@@ -5048,7 +5048,7 @@ fn search_cli(
                 database.filtered_empty(),
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
-                "BLASTP",
+                args.app.name(),
             )?;
             Some(database)
         }
@@ -6861,7 +6861,8 @@ fn preliminary_search_error(
 ) -> anyhow::Error {
     if !first_batch_searched {
         return anyhow::anyhow!(
-            "the database {database_name} cannot be searched ({text}) and the first query batch is one that NCBI BLAST+ does not search; this is not supported by LOSAT's BLASTP"
+            "the database {database_name} cannot be searched ({text}) and the first query batch is one that NCBI BLAST+ does not search; this is not supported by LOSAT's {}",
+            args.app.name()
         );
     }
     let written = (|| -> Result<()> {
@@ -8011,6 +8012,7 @@ fn run_resolved_in_pool(
                     eff_db_length,
                     num_subjects as i64,
                     &gapped_params,
+                    args.app.name(),
                 )?;
                 exact_search_spaces.push(Some(exact));
                 return Ok(space);
@@ -10831,6 +10833,12 @@ fn run_resolved_in_pool(
     // the `# N hits found` line of -outfmt 7 counts them all, and the formatter keeps the first
     // `max_target_seqs` subjects that have one (the pairwise report shows at most as many, its
     // numbers of descriptions and alignments).
+    // NCBI's cut counts the Seq-aligns of subjects whose Seq-align ids match as those of one
+    // subject (`PruneSeqalign`, quoted at `refuse_joined_cut`): where it keeps another subject
+    // than the cut below, the run is LOSAT's refusal before any format is written.
+    if let (BlastpApp::Psiblast, Some(titles)) = (args.app, listed_titles.as_ref()) {
+        titles.check_joined_cut(&hit_lists, args.max_target_seqs)?;
+    }
     let psiblast_hits_found: Option<Vec<usize>> = (args.app == BlastpApp::Psiblast).then(|| {
         hit_lists
             .iter_mut()

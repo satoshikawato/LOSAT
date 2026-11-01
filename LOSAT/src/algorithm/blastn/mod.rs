@@ -36,8 +36,8 @@ pub(crate) mod x_subject_store;
 // NCBI c++/src/algo/blast/api/dust_filter.cpp:92-102,171-180: the DUST masks of a query batch, one
 // fresh masker per query. EXPERIMENT (LOSAT_X_QPREPPAR): made on the search pool, in query order.
 pub(crate) mod x_query_dust_par;
-// NCBI c++/src/algo/blast/core/na_ungapped.c:149-242 (`s_NuclUngappedExtendExact`). EXPERIMENT
-// (LOSAT_X_BNUNGAPCOUNT): the same loops with their step counts worked out first.
+// NCBI c++/src/algo/blast/core/na_ungapped.c:149-242 (`s_NuclUngappedExtendExact`). The same
+// loops with their step counts worked out first (LOSAT_X_BNUNGAPCOUNT, graduated 2026-10-27).
 pub(crate) mod x_ungap_count;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-166
 // ```c

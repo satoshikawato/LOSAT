@@ -571,12 +571,14 @@ fn open_error(name: &str, seqtype: SeqType) -> SeqDbError {
 
 #[test]
 fn databases_that_need_unread_data_are_rejected() {
-    // A database with parsed Seq-ids opens; the check of the search programs
-    // that read ordinal ids only refuses it, as the reader's open did before.
+    // A database with parsed Seq-ids opens and says so; the decoder of the ordinal ids
+    // refuses its headers, as the reader's open did before.
     for name in ["prot_ids_v4", "prot_ids_v5"] {
         let db =
             SeqDb::open(&db_name(name), SeqType::Protein).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let error = db.check_ordinal_ids().expect_err("parsed Seq-ids");
+        assert!(db.has_parsed_seqids().unwrap(), "{name}");
+        let error = db.deflines(0).expect_err("parsed Seq-ids");
+        assert!(error.is_parsed_seqids(), "{name}: {error}");
         assert!(
             matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("parsed Seq-ids")),
             "{name}: {error}"
@@ -584,16 +586,15 @@ fn databases_that_need_unread_data_are_rejected() {
         assert!(
             error.to_string().ends_with(&format!(
                 "{name}.phr: unsupported database: the database stores parsed Seq-ids \
-                 (makeblastdb -parse_seqids, or a database distributed by NCBI); LOSAT's search \
-                 programs read them, its psiblast reads databases built without -parse_seqids \
-                 only"
+                 (makeblastdb -parse_seqids, or a database distributed by NCBI), which the \
+                 decoder of the ordinal ids does not read"
             )),
             "{name}: {error}"
         );
         assert_eq!(db.defline_set(0).unwrap().deflines.len(), 1, "{name}");
     }
     let db = SeqDb::open(&db_name("prot_v4"), SeqType::Protein).unwrap();
-    db.check_ordinal_ids().unwrap();
+    assert!(!db.has_parsed_seqids().unwrap());
     for (name, key) in [("alias_gilist", "GILIST")] {
         let error = open_error(name, SeqType::Protein);
         assert!(
@@ -1300,7 +1301,7 @@ fn ambiguity_data_that_do_not_fit_the_sequence() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `SeqDb::x_nucleotide_check` of a block of one sequence and
+/// `SeqDb::x_nucleotide_check` of a block of one sequence and
 /// `read_block` of the same block give the same length and ambiguity runs, or the same errors.
 /// Returns whether they failed.
 fn check_as_read_block(db: &SeqDb, range: BlockRange, what: &str) -> bool {
@@ -1655,11 +1656,21 @@ fn check_search_path_row(
         (&row[0], &row[1], &row[2], &row[3], &row[4], &row[5]);
     // The tables hold the value of blastp's `-db`, which the program trims. A
     // search program reads the first header of each volume right after it opens the
-    // database (`algorithm::common::database::refuse_parsed_seqids`, or `check_seqids`
-    // where it reads parsed Seq-ids too); the tables' databases have none.
+    // database (`algorithm::common::database::check_seqids`).
     let name = db_argument_name(name);
     let opened = SeqDb::open_in(name, SeqType::Protein, search)
-        .and_then(|db| db.check_ordinal_ids().map(|()| db));
+        .and_then(|db| db.has_parsed_seqids().map(|parsed| (db, parsed)));
+    // A database with parsed Seq-ids, which the search programs read (line DBID); NCBI's
+    // outcome is that of its formatters (an `other` row).
+    if losat == "parsed" {
+        let (_, parsed) = opened.unwrap_or_else(|e| panic!("{id}: LOSAT does not open it: {e:?}"));
+        assert!(parsed, "{id}: parsed Seq-ids");
+        return;
+    }
+    let opened = opened.map(|(db, parsed)| {
+        assert!(!parsed, "{id}: parsed Seq-ids");
+        db
+    });
 
     // A volume without its sequence file: NCBI's search fails when it reads
     // the first sequence, with the search stage's own text and exit status.

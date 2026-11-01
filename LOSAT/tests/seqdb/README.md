@@ -25,7 +25,8 @@ Small NCBI BLAST databases for the unit tests in `LOSAT/src/seqdb/tests.rs`.
     "Volumes:" list of `blastdbcmd -info` (names separated by ` | `). `error`: the text after
     `BLAST Database error: ` and the exit status. `other`: NCBI failed in another way (its
     message). Column `losat`: what LOSAT's reader does where it refuses the database on purpose
-    (`unsupported:TEXT`, `format:TEXT`), empty where it must do as NCBI.
+    (`unsupported:TEXT`, `format:TEXT`), `parsed` where it opens a database with parsed Seq-ids
+    (which the search programs read), empty where it must do as NCBI.
   - `relative.tsv`: runs from the crate root with relative directories in `BLASTDB` and in the
     registry value (`{P}`: the crate root).
   - `registry.tsv`: the value of `[BLAST] BLASTDB` that NCBI's registry gives for an environment

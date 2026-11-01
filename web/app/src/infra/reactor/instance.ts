@@ -138,7 +138,8 @@ export async function instantiateThread(
   // (LOSAT/tests/wasi_thread_host.js), such a worker's view of the memory still ended below
   // them and the thread's first atomic store trapped "memory access out of bounds" in about
   // 0.3 % of runs of one 16-thread check; memory.grow(0) updates the worker's view. Not
-  // measured in a browser (docs/evidence/wasm_oob_20261025/).
+  // measured in a browser (docs/evidence/wasm_oob_20261025/). Later atomic accesses are
+  // covered by the build's guard (web/app/build/reactors.ts, docs/evidence/wasm_oob_20261101/).
   return {
     start: (tid, startArg) => {
       memory.grow(0);

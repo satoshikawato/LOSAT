@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8"><title>WO refresh</title>
+<script>
+// One worker runs probe, another grows the memory through the module; the main thread only waits.
+async function run(rounds) {
+  const compile = async (file) => WebAssembly.compile(await (await fetch(file)).arrayBuffer());
+  const arms = { original: await compile("refresh_original.wasm"), guarded: await compile("refresh_guarded.wasm") };
+  const counts = { original: {}, guarded: {} };
+  for (let r = 0; r < rounds; r += 1) for (const [arm, module] of Object.entries(arms)) {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 4, shared: true });
+    const grower = new Worker("refresh_grower.js"), worker = new Worker("refresh_worker.js");
+    await Promise.all([grower, worker].map(w => new Promise(resolve => { w.onmessage = resolve; })));
+    const done = new Promise(resolve => { worker.onmessage = e => resolve(e.data); });
+    grower.postMessage({ module, memory });
+    worker.postMessage({ module, memory });
+    const outcome = await Promise.race([done, new Promise(resolve => setTimeout(resolve, 30000, "no outcome in 30 s"))]);
+    grower.terminate(); worker.terminate();
+    counts[arm][outcome] = (counts[arm][outcome] || 0) + 1;
+  }
+  return { ua: navigator.userAgent, isolated: crossOriginIsolated, rounds, counts };
+}
+</script>

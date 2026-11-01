@@ -8,7 +8,8 @@
 //! `-list_outfmt`, `-recursive`, `-remove_redundant_dbs`), `-show_blastdb_search_path`, `-h`,
 //! `-help` and `-version`. Its command line is NCBI's (`args`, NCBI's argument reader), not
 //! clap's: `main` hands it the words after `blastdbcmd`. The masks of `makeblastdb -mask_data`
-//! are read (`-info`, `-mask_sequence_with`, `%m`); a `-db` of several names is refused.
+//! are read (`-info`, `-mask_sequence_with`, `%m`). A `-db` of several names is read as NCBI's
+//! reader reads it, as one database (`SeqDb::open_in_with_masks`).
 
 mod args;
 mod fasta;
@@ -662,9 +663,9 @@ fn refusal(reason: &str) -> String {
 //     CSeqDB::ESeqType seqtype = ParseMoleculeTypeString(args[kArgDbType].AsString());
 //     m_BlastDb.Reset(new CSeqDBExpert(args[kArgDb].AsString(), seqtype));
 // ```
-/// Opens the database `name` (the `-db` value as given: blastdbcmd does not trim it) of the
-/// type `dbtype` (`prot`, `nucl`, or `guess`: protein first, then nucleotide), with the list of
-/// its volumes for `-info`, and `prepare`s it (the taxid list of `-target_only`, which NCBI's
+/// Opens the database `name` (the `-db` value as given, one name or several: blastdbcmd does not
+/// trim it) of the type `dbtype` (`prot`, `nucl`, or `guess`: protein first, then nucleotide),
+/// with the list of its volumes for `-info`, and `prepare`s it (the taxid list of `-target_only`, which NCBI's
 /// constructor applies). With `guess`, an error that NCBI raises too (`ncbi_message`) moves
 /// on to the nucleotide database, and the nucleotide error is the one reported; an error of
 /// LOSAT's is reported at once, since NCBI may open that protein database.
@@ -674,16 +675,6 @@ fn open_database(
     path: &SearchPath,
     prepare: &dyn Fn(&mut SeqDb) -> Result<(), SeqDbError>,
 ) -> Result<(SeqDb, Vec<String>), SeqDbError> {
-    // The search programs search the databases of several names as one; LOSAT's BLASTDBCMD
-    // keeps one database (line BDC DECISIONS 6).
-    if crate::seqdb::alias::lists_several_names(name) {
-        return Err(SeqDbError::Unsupported {
-            path: std::path::PathBuf::from(name),
-            message: "the name lists several databases; LOSAT's BLASTDBCMD reads one database \
-                      (a name with spaces goes between double quotes)"
-                .to_string(),
-        });
-    }
     let types: &[SeqType] = match dbtype {
         "prot" => &[SeqType::Protein],
         "nucl" => &[SeqType::Nucleotide],

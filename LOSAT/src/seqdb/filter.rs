@@ -1556,16 +1556,10 @@ impl TaxIdLookup<'_> {
         if oids.is_empty() {
             return Err(SeqDbError::NotFound(tax_ids_not_found(&self.entries)));
         }
+        // `x_CheckOrFindOID` keeps the OIDs of the database (and of its list, which a
+        // database opened without one does not have).
         let num_oids = self.db.volume_starts[self.db.volumes.len()];
-        if let Some(&oid) = oids.iter().find(|&&oid| oid >= num_oids) {
-            return Err(SeqDbError::Format {
-                path: self.entries[0].lmdb.clone(),
-                message: format!(
-                    "the taxid lookup gives OID {oid} of a database of {num_oids} sequences"
-                ),
-            });
-        }
-        Ok(oids)
+        Ok(oids.into_iter().filter(|&oid| oid < num_oids).collect())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1307-1323

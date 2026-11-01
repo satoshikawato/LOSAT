@@ -9,7 +9,7 @@ the taxonomy, the metadata, the lists of databases and the search path (`-taxids
 `LOSAT/tests/blastdbcmd_discovery.rs`). Frozen on
 2026-10-29 and 2026-10-30 by line BDC's probe on the workstation (cases `I01`-`I38`,
 `B01`-`B61`, `C01`-`C20`, `F01`-`F34`, `S01`-`S46`, `D01`-`D112`, on 2026-10-31 `H01`-`H119`,
-on 2026-11-01 `I101`-`I1195`, `J101`-`J222` and `K01`-`K25`; NCBI was not run on this tree).
+on 2026-11-01 `I101`-`I1195`, `J101`-`J222` and `K01`-`K39`; NCBI was not run on this tree).
 
 - `db/`: databases of that probe. `p5` (version 5, `-parse_seqids`) and `p4` (version 4)
   are proteins with every Seq-id type, `n5` / `n4` the nucleotides, `p5n` / `p4n` / `n5n` /

@@ -84,7 +84,7 @@ pub(super) fn tax_id_list(
         (Some(""), _) => Vec::new(),
         (Some(input), _) => input.split(',').map(|id| id.as_bytes().to_vec()).collect(),
         (None, Some(file)) => {
-            let Ok(bytes) = std::fs::read(file) else {
+            let Ok(bytes) = args::read_input_file("taxidlist", file) else {
                 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
                 // ```c++
                 //     catch (const CArgException& e) {                                        \

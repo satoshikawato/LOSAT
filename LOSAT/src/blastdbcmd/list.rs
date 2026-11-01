@@ -109,7 +109,17 @@ fn path_of(bytes: &[u8]) -> std::path::PathBuf {
 /// `FindFilesInDir(CDir(dir), masks, {"*"}, finder, fFF_File | recursive)`: the databases of
 /// the files of `dir` whose names end with one of `extensions` (`.pin` ...).
 fn find_files(dir: &[u8], extensions: &[&str], recursive: bool, found: &mut Vec<FoundDb>) {
-    let Ok(entries) = std::fs::read_dir(path_of(dir)) else {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3879
+    // ```c++
+    //     string base_path =  AddTrailingPathSeparator(GetPath().empty() ? DIR_CURRENT : GetPath());
+    // ```
+    // An empty directory is the current one, its names without a prefix (probes K36, K37).
+    let read = if dir.is_empty() {
+        std::fs::read_dir(".")
+    } else {
+        std::fs::read_dir(path_of(dir))
+    };
+    let Ok(entries) = read else {
         return;
     };
     let mut prefix = dir.to_vec();

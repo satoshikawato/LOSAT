@@ -850,8 +850,7 @@ fn accession_to_oids_v4(lookup: &IdLookup, id: &str) -> Result<Vec<u32>, Stop> {
 /// (`NStr::SplitInTwo(line, " \t", id, format, fSplit_MergeDelimiters | fSplit_Truncate)`),
 /// empty lines and lines without an id left out. The line's `\r` stays, as in NCBI's reading.
 fn read_batch(argument: &str, file: &str) -> Result<Vec<(String, String)>, Stop> {
-    let bytes = std::fs::read(file)
-        .map_err(|_| Stop::Ncbi(args::arg_message(argument, "File is not accessible", file)))?;
+    let bytes = args::read_input_file(argument, file).map_err(Stop::Ncbi)?;
     let text = String::from_utf8(bytes)
         .map_err(|_| Stop::refused(format!("{file}: a batch file that is not UTF-8 text")))?;
     let delimiter = |c: char| c == ' ' || c == '\t';
@@ -1259,6 +1258,13 @@ impl Run<'_, '_> {
     /// `-ipg_batch`: the sequence of the PIG of each line of `file`, with the line's range,
     /// strand and mask algorithm.
     fn batch_pig(&mut self, file: &str, config: &mut Config) -> Result<bool, Stop> {
+        if self.source.db.is_restricted() {
+            // NCBI writes the volume OID of each PIG through the database opened with the
+            // list, whose header read drops the lines without the list's taxids (probe K38).
+            return Err(Stop::refused(
+                "-ipg_batch with -target_only and a taxid list".to_string(),
+            ));
+        }
         let lines = read_batch("ipg_batch", file)?;
         let mut err_found = false;
         for (id, format) in &lines {

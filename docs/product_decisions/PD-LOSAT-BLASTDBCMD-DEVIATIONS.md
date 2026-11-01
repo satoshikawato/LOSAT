@@ -30,8 +30,9 @@ empty, blank, too large or not a number: J101, J102, J107, J108, J131; a databas
 NCBI's `CTime` does not read, for `-metadata`: J189, J190), NCBI's crash on an empty index
 file of `-list` with `%t` (J168), the reversed protein letters NCBI writes for `-strand
 minus` on a protein database read with a taxid list and `-dbtype guess` (J114: NCBI then
-takes the database as nucleotide for the strand), and `-ipg` / `-ipg_batch` on a database
-without PIG files, where NCBI writes an OID it never set (J204, J205, J212, J214). `-taxids
+takes the database as nucleotide for the strand), `-ipg` / `-ipg_batch` on a database
+without PIG files, where NCBI writes an OID it never set (J204, J205, J212, J214), and
+`-ipg_batch` on a database opened with `-target_only` and a taxid list (K38). `-taxids
 1` follows [`PD-LOSAT-NCBI-DEFECTS`](PD-LOSAT-NCBI-DEFECTS.md) exception 5.
 
 ## Decision

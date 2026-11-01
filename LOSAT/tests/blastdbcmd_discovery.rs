@@ -59,12 +59,23 @@ impl Drop for TestDir {
 
 /// One run of `losat blastdbcmd words...` in `cwd`: stdout, stderr, exit status. `BLASTDB` is
 /// `blastdb` (a directory of `tests/blastdbcmd`) or unset; no registry file (`NCBI_CONFIG_PATH`
-/// names `config` alone), no LOSAT variable.
+/// names `config` alone), no LOSAT variable, nothing on the standard input.
 fn blastdbcmd(
     words: &[&str],
     cwd: &Path,
     blastdb: Option<&str>,
     config: &Path,
+) -> (Vec<u8>, Vec<u8>, i32) {
+    blastdbcmd_input(words, cwd, blastdb, config, None)
+}
+
+/// `blastdbcmd` with the file `stdin` (of `tests/blastdbcmd`) on the standard input.
+fn blastdbcmd_input(
+    words: &[&str],
+    cwd: &Path,
+    blastdb: Option<&str>,
+    config: &Path,
+    stdin: Option<&str>,
 ) -> (Vec<u8>, Vec<u8>, i32) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
@@ -76,8 +87,13 @@ fn blastdbcmd(
     if let Some(dir) = blastdb {
         command.env("BLASTDB", run_dir().join(dir));
     }
+    let input = match stdin {
+        Some(name) => std::process::Stdio::from(fs::File::open(run_dir().join(name)).unwrap()),
+        None => std::process::Stdio::null(),
+    };
     let output = command
         .env("NCBI_CONFIG_PATH", config)
+        .stdin(input)
         .current_dir(cwd)
         .arg("blastdbcmd")
         .args(words)
@@ -270,5 +286,39 @@ fn the_walk_lists_files_links_and_directories_as_ncbi_s() {
             String::from_utf8_lossy(&stderr)
         );
         assert_eq!(code, 0, "{id}");
+    }
+}
+
+/// A run (stdout, stderr, exit status) against the frozen `id` of `tests/blastdbcmd/expected`.
+fn check(id: &str, (stdout, stderr, code): (Vec<u8>, Vec<u8>, i32), status: i32) {
+    assert_eq!(
+        String::from_utf8_lossy(&stdout),
+        String::from_utf8_lossy(&expected(&format!("{id}.stdout"))),
+        "{id}: stdout"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&stderr),
+        String::from_utf8_lossy(&expected(&format!("{id}.stderr"))),
+        "{id}: stderr"
+    );
+    assert_eq!(code, status, "{id}: exit status");
+}
+
+// Probe K3 of line BDC: an input file `-` is the standard input (`CArg_InputFile::x_Open`), an
+// empty name opens nothing, a directory opens and reads nothing (Linux's stream), and `-list ""`
+// lists the current directory without a prefix (`CDir::GetEntriesPtr`).
+#[test]
+fn input_files_and_the_current_directory_are_read_as_ncbi_s() {
+    let config = TestDir::new("inputs");
+    let words = ["-db", "db/p4", "-entry_batch", "-", "-outfmt", "%o %a"];
+    let run = blastdbcmd_input(&words, &run_dir(), None, &config.0, Some("in/i_p_safe.txt"));
+    check("K32", run, 1);
+    let words = ["-db", "j/lst/p5", "-taxidlist", "", "-no_taxid_expansion"];
+    check("K39", blastdbcmd(&words, &run_dir(), None, &config.0), 1);
+    if cfg!(unix) {
+        let words = ["-db", "db/p5", "-entry_batch", "in"];
+        check("K35", blastdbcmd(&words, &run_dir(), None, &config.0), 0);
+        let lst = run_dir().join("j").join("lst");
+        check("K36", blastdbcmd(&["-list", ""], &lst, None, &config.0), 0);
     }
 }

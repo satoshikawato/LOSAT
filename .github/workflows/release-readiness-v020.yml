@@ -308,6 +308,19 @@ jobs:
       - name: Build exact threaded-Wasm release artifact
         run: cd LOSAT && cargo build --release --target wasm32-wasip1-threads --features wasm-threads --locked
 
+      # The published threaded module carries the shared-memory guard (LOSAT/tests/wasi_shared_memory.js),
+      # so that every host, browsers included, runs guarded bytes (release v0.2.0 DECISIONS 52). The
+      # guard fails this step, and writes nothing, on an encoding that it declines.
+      - name: Guard the threaded-Wasm release artifact
+        run: |
+          # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+          # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
+          # The guard is host compatibility only; it implements no BLAST behavior.
+          mkdir -p .tmp/release-readiness/threaded-guarded
+          node LOSAT/tests/wasi_shared_memory.js guard \
+            LOSAT/target/wasm32-wasip1-threads/release/losat.wasm \
+            .tmp/release-readiness/threaded-guarded/losat.wasm
+
       - name: Assemble, extract, and smoke threaded-Wasm artifact
         run: |
           # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -317,7 +330,8 @@ jobs:
             --repo-root . \
             --candidate-sha "$CANDIDATE_SHA" \
             --target wasm32-wasip1-threads \
-            --binary LOSAT/target/wasm32-wasip1-threads/release/losat.wasm \
+            --binary .tmp/release-readiness/threaded-guarded/losat.wasm \
+            --unguarded-binary LOSAT/target/wasm32-wasip1-threads/release/losat.wasm \
             --output-dir .tmp/release-readiness/threaded-wasm
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

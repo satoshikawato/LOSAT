@@ -12,12 +12,16 @@ import io
 import sys
 import tarfile
 import tempfile
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import verify_release_archive_v020 as verify  # noqa: E402
+from test_prepare_release_candidate_v020 import _FILL_MODULE  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NATIVE_TARGET = "x86_64-unknown-linux-gnu"
@@ -139,6 +143,35 @@ class VerifyReleaseArchiveTests(unittest.TestCase):
         code, message = run_main(self.argv(archive))
         self.assertEqual(code, 1)
         self.assertIn("has no losat", message)
+
+    @unittest.skipUnless(shutil.which("node"), "needs Node.js")
+    def test_threaded_archive_must_carry_a_verified_shared_memory_guard(self) -> None:
+        target = "wasm32-wasip1-threads"
+        contract = verify.rc.load_contract(REPO_ROOT)
+        spec = next(item for item in contract["artifacts"] if item["target"] == target)
+        root = spec["filename"].removesuffix(".tar.gz")
+        raw, guarded = self.temp / "raw.wasm", self.temp / "guarded.wasm"
+        raw.write_bytes(_FILL_MODULE)
+        subprocess.run(
+            ["node", str(REPO_ROOT / "LOSAT/tests/wasi_shared_memory.js"), "guard", str(raw), str(guarded)],
+            check=True,
+            capture_output=True,
+        )
+        archive = self.temp / spec["filename"]
+        write_tar(archive, {f"{root}/{spec['binary_name']}": raw.read_bytes()})
+        write_sidecar(archive)
+        code, message = run_main(self.argv(archive, target))
+        self.assertEqual(code, 1)
+        self.assertIn("no verified shared-memory guard", message)
+        write_tar(archive, {f"{root}/{spec['binary_name']}": guarded.read_bytes()})
+        write_sidecar(archive)
+        with (
+            mock.patch.object(verify.rc, "version_output", return_value="losat 0.2.0"),
+            mock.patch.object(verify.rc, "run_smoke", return_value={"status": "PASS", "cases": []}),
+        ):
+            result = verify.verify(REPO_ROOT, archive, target, "node", None)
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["shared_memory_guard"]["fill"], 1)
 
     def test_source_crate_hash_and_layout_pass(self) -> None:
         archive = self.temp / "LOSAT-0.2.0.crate"

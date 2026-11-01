@@ -398,6 +398,7 @@ export LOSAT_X_MBHITPF=1
 export LOSAT_X_MBLUTKEEP=1
 export LOSAT_X_MBLUTONCE=1
 export LOSAT_X_MBLUTPREFAULT=1
+export LOSAT_X_NEWTONBATCH=1
 export LOSAT_X_NEWTONDROP=1
 export LOSAT_X_PAIRPARDISC=1
 export LOSAT_X_PAIRPARDISCARR=1
@@ -5424,6 +5425,25 @@ Scheduling (each value computed by one thread with the original function; order 
   `=0` in the PR's binary): AP027131 `-subject` at 1 / 16 / 32 threads x0.9992 / x1.0000 / x0.9956 (8, 6, 7 of 12
   faster), against `=0` x0.9992 / x1.0000 / x1.0043; `dmel_b4.faa` at 1 / 8 / 16 / 32 x0.9998 / x0.9989 / x1.0006 /
   x1.0011 (5 of 8, 7, 5, 5 of 12 faster), against `=0` x0.9984 / x0.9983 / x0.9986 / x0.9989.
+- `LOSAT_X_NEWTONBATCH=1` blastp, tblastn (memory; in the strict set from the pull request that added it, 2026-11-01;
+  `=0` turns it off; `core/composition_adjustment/x_newton_lanes.rs` `prefetch` / `take`): with NEWTONDROP the results
+  a thread solved ahead are the ones of its last prefetch only, so a prefetch keeps them in the input and output
+  vectors they were solved in (one batch a thread; `take` searches it from the first result not taken, and the batch
+  goes when its last result is taken or at the next prefetch) instead of copying each into a box of the store (6,736
+  bytes a result). The copies held the caller's inputs, the outputs and the boxes at once at the end of every prefetch
+  (about 13.4 KiB a problem; TBLASTN's redo solves the problems of the coming windows of a match until 32 or more are
+  gathered), and this transient set the high water of most threads' heaps in the redo. The results taken are the
+  same (`[X_STATS] NEWTONLANES prefetched= hits= misses=` and `[X_STATS] NEWTONDROP dropped=` equal with and without
+  the switch; `[X_STATS] NEWTONBATCH kept=` counts the prefetches kept as their batch); with `LOSAT_X_NEWTONDROP=0`
+  the results are stored (the batch holds one prefetch). The search of the batch and its comparison of an input are
+  functions of their own: inlined into `composition_matrix_adjust` they changed its code on every path (one-thread
+  instructions x1.001 with the switch off), and the comparison inlined into the search kept the index of its loop
+  over `q` on the stack (twice the instructions of the store's search). Unit tests
+  `x_newton_batch_gives_each_result_once_and_goes_when_all_are_taken` (any order, a repeated input, the store empty,
+  the batch gone with its last result) and `x_newton_drop_empties_the_store_at_the_next_prefetch` (both forms in one
+  process); `tests/tblastn_newton_drop.rs`: the same report as `=0` at one and four threads, the same counts of
+  results solved ahead, taken and dropped, batches kept by default and none with `=0` or `LOSAT_X_NEWTONDROP=0`.
+  Always: every prefetch (where NEWTONLANES runs, with NEWTONDROP).
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

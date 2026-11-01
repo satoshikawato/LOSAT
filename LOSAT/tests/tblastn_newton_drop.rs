@@ -1,6 +1,7 @@
 //! The Newton results computed ahead and not taken, dropped at the next prefetch
 //! (`LOSAT_X_NEWTONDROP`, in the strict set; `src/core/composition_adjustment/x_newton_lanes.rs`
-//! `prefetch`), on whole TBLASTN searches.
+//! `prefetch`), and the results of a prefetch kept as the vectors they were solved in
+//! (`LOSAT_X_NEWTONBATCH`, in the strict set), on whole TBLASTN searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1143-1143
 //! ```c
@@ -11,9 +12,11 @@
 //! bits, and a call whose result is missing solves its problem itself with the same bits. The
 //! results of earlier windows not taken when the next windows are solved ahead (HSPs found
 //! contained in the redo) are never asked for again: with the switch they are dropped then, with
-//! `=0` they stay in the thread's store until it holds 512. These tests compare the reports and
-//! read the `[X_STATS] NEWTONLANES` and `[X_STATS] NEWTONDROP` lines (`LOSAT_X_STATS=1`): the same
-//! results taken in both, and only the default drops any.
+//! `=0` they stay in the thread's store until it holds 512. By default a prefetch's results stay in
+//! its vectors (one batch a thread), with `LOSAT_X_NEWTONBATCH=0` one box each in the store. These
+//! tests compare the reports and read the `[X_STATS] NEWTONLANES`, `[X_STATS] NEWTONDROP` and
+//! `[X_STATS] NEWTONBATCH` lines (`LOSAT_X_STATS=1`): the same results taken in every arm, only the
+//! default and `LOSAT_X_NEWTONBATCH=0` drop any, and only the default keeps batches.
 //!
 //! The queries are the 115 proteins of `tests/fasta/PemoMJNVA.faa`; the subject is
 //! `tests/fasta/MelaMJNV.fasta` (63 of the 2,999 results computed ahead are not taken).
@@ -104,6 +107,42 @@ fn dropping_results_not_taken_keeps_the_report() {
             counts(&keep_err, "[X_STATS] NEWTONDROP ", ["dropped"]),
             [0],
             "=0 drops none"
+        );
+        // the batch holds one prefetch: without the drop the results are stored
+        assert_eq!(
+            counts(&keep_err, "[X_STATS] NEWTONBATCH ", ["kept"]),
+            [0],
+            "=0 keeps no batch"
+        );
+    }
+}
+
+/// The default's report is `LOSAT_X_NEWTONBATCH=0`'s at one and four threads, with the same results
+/// computed ahead, taken and dropped; only the default keeps batches.
+#[test]
+fn keeping_the_batch_keeps_the_report() {
+    for threads in [1, 4] {
+        let (batch, batch_err) = tblastn(threads, &[]);
+        let (store, store_err) = tblastn(threads, &[("LOSAT_X_NEWTONBATCH", "0")]);
+        assert!(!batch.is_empty(), "the search finds hits");
+        assert_eq!(batch, store, "{threads} threads: the reports differ");
+        let lanes = ["prefetched", "hits", "misses", "unused"];
+        assert_eq!(
+            counts(&batch_err, "[X_STATS] NEWTONLANES ", lanes),
+            counts(&store_err, "[X_STATS] NEWTONLANES ", lanes),
+            "{threads} threads: the results computed ahead and taken differ"
+        );
+        assert_eq!(
+            counts(&batch_err, "[X_STATS] NEWTONDROP ", ["dropped"]),
+            counts(&store_err, "[X_STATS] NEWTONDROP ", ["dropped"]),
+            "{threads} threads: the results dropped differ"
+        );
+        let [kept] = counts(&batch_err, "[X_STATS] NEWTONBATCH ", ["kept"]);
+        assert!(kept > 0, "{threads} threads: the default keeps batches");
+        assert_eq!(
+            counts(&store_err, "[X_STATS] NEWTONBATCH ", ["kept"]),
+            [0],
+            "{threads} threads: =0 keeps none"
         );
     }
 }

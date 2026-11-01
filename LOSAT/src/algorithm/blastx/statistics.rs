@@ -14,74 +14,7 @@ use crate::{
     },
 };
 use anyhow::{ensure, Result};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
 
-// No NCBI counterpart: reads the LOSAT_X_BXEVALEMPTY / LOSAT_X_BXEVALEMPTYSHADOW switches once; it
-// does not change any value NCBI computes.
-/// LOSAT_X_BXEVALEMPTY (a strict-set switch, on unless `0`)
-/// : `Some(shadow)` when `evaluate_gapped` returns the empty list of a subject without HSPs at
-/// once, `shadow` with `LOSAT_X_BXEVALEMPTYSHADOW` set (the full evaluation is run too and
-/// compared).
-fn x_eval_empty() -> Option<bool> {
-    static MODE: OnceLock<Option<bool>> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        crate::utils::xswitch::on("LOSAT_X_BXEVALEMPTY")
-            .then(|| std::env::var_os("LOSAT_X_BXEVALEMPTYSHADOW").is_some())
-    })
-}
-
-/// LOSAT_X_BXEVALEMPTYSHADOW: the empty lists compared with the full evaluation.
-static X_EVAL_EMPTY_COMPARED: AtomicU64 = AtomicU64::new(0);
-
-/// LOSAT_X_BXEVALEMPTYSHADOW: the full evaluation of no input, which must give `empty`.
-#[cold]
-#[inline(never)]
-fn x_eval_empty_shadow(
-    empty: &LinkedHspList,
-    batch: &PreparedQueryBatch,
-    parameters: &[ContextParameters],
-    options: &ResolvedOptions,
-    subject_length: i32,
-    db_length: i64,
-    scale: f64,
-) {
-    let full = x_evaluate_gapped_full(
-        &[],
-        batch,
-        parameters,
-        options,
-        subject_length,
-        db_length,
-        scale,
-    )
-    .expect("the full evaluation of no input");
-    if !(full.hsps.is_empty() && full.best_evalue.to_bits() == empty.best_evalue.to_bits()) {
-        eprintln!("{}", x_eval_empty_line());
-        panic!(
-            "LOSAT_X_BXEVALEMPTYSHADOW: no input evaluates to {} HSPs, best e-value {}",
-            full.hsps.len(),
-            full.best_evalue
-        );
-    }
-    X_EVAL_EMPTY_COMPARED.fetch_add(1, Ordering::Relaxed);
-}
-
-/// LOSAT_X_BXEVALEMPTYSHADOW: the shadow line.
-fn x_eval_empty_line() -> String {
-    format!(
-        "[X_SHADOW] BXEVALEMPTY lists_compared={} identical",
-        X_EVAL_EMPTY_COMPARED.load(Ordering::Relaxed)
-    )
-}
-
-/// LOSAT_X_BXEVALEMPTYSHADOW: the shadow line at exit (`x_seed_scan::print_shadow_stats`), after
-/// a comparison.
-pub(crate) fn x_print_eval_empty_summary() {
-    if X_EVAL_EMPTY_COMPARED.load(Ordering::Relaxed) > 0 {
-        eprintln!("{}", x_eval_empty_line());
-    }
-}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1811-1839
 // ```c++
 // Int2 Blast_HSPListGetEvalues(EBlastProgramType program_number,
@@ -127,54 +60,17 @@ pub fn evaluate_gapped(
         options.gapped,
         "BLASTX even-gap ungapped linking is not implemented"
     );
-    // Speed (LOSAT_X_BXEVALEMPTY, in the strict set): a subject without HSPs gets at once the list
-    // that both ways below give for no input (`link_uneven`'s first lines, and the loop below: no
-    // HSP, best e-value 0), without their tables; the sink evaluates every subject, and most
-    // subjects of a database have no HSP. No NCBI counterpart: it does not change any value NCBI
-    // computes.
+    // Speed (graduated 2026-10-27; the switch was `LOSAT_X_BXEVALEMPTY`): a subject without HSPs
+    // gets at once the list that both ways below give for no input (`link_uneven`'s first lines,
+    // and the loop below: no HSP, best e-value 0), without their tables; the sink evaluates every
+    // subject, and most subjects of a database have no HSP. No NCBI counterpart: it does not change
+    // any value NCBI computes.
     if input.is_empty() {
-        if let Some(shadow) = x_eval_empty() {
-            let empty = LinkedHspList {
-                hsps: Vec::new(),
-                best_evalue: 0.0,
-            };
-            if shadow {
-                x_eval_empty_shadow(
-                    &empty,
-                    batch,
-                    parameters,
-                    options,
-                    subject_length,
-                    db_length,
-                    scale,
-                );
-            }
-            return Ok(empty);
-        }
+        return Ok(LinkedHspList {
+            hsps: Vec::new(),
+            best_evalue: 0.0,
+        });
     }
-    x_evaluate_gapped_full(
-        input,
-        batch,
-        parameters,
-        options,
-        subject_length,
-        db_length,
-        scale,
-    )
-}
-
-/// `evaluate_gapped` after its check, for any input (LOSAT_X_BXEVALEMPTY's shadow evaluates no
-/// input here).
-#[inline]
-fn x_evaluate_gapped_full(
-    input: &[PreliminaryHsp],
-    batch: &PreparedQueryBatch,
-    parameters: &[ContextParameters],
-    options: &ResolvedOptions,
-    subject_length: i32,
-    db_length: i64,
-    scale: f64,
-) -> Result<LinkedHspList> {
     let spec = ProteinScoringSpec {
         matrix: ScoringMatrix::Blosum62,
         gap_open: options.gap_open,
@@ -182,11 +78,7 @@ fn x_evaluate_gapped_full(
     };
     let mut ka = lookup_protein_params(&spec);
     ka.lambda /= scale;
-    let gumbel = lookup_protein_gumbel_params(
-        &spec,
-        super::parameters::gumbel_db_length(options, db_length),
-    )
-    .expect("validated BLASTX Gumbel");
+    let gumbel = super::parameters::gumbel_block(options, db_length);
     let query_lengths: Vec<_> = batch.contexts.iter().map(|c| c.length as i32).collect();
     if let Some(link) = link_parameters(options) {
         return link_uneven(
@@ -195,7 +87,7 @@ fn x_evaluate_gapped_full(
             parameters,
             subject_length,
             &vec![ka; parameters.len()],
-            Some(&gumbel),
+            gumbel.as_ref(),
             &link,
         );
     }
@@ -240,13 +132,19 @@ fn x_evaluate_gapped_full(
         .map(|(source_index, h)| LinkedHsp {
             hsp: h.clone(),
             num: 0,
-            evalue: blast_spouge_stoe(
-                h.score,
-                &ka,
-                &gumbel,
-                query_lengths[h.context],
-                subject_length,
-            ),
+            evalue: match &gumbel {
+                Some(gumbel) => blast_spouge_stoe(
+                    h.score,
+                    &ka,
+                    gumbel,
+                    query_lengths[h.context],
+                    subject_length,
+                ),
+                None => {
+                    parameters[h.context].search_space as f64
+                        * (-ka.lambda * h.score as f64 + ka.k.ln()).exp()
+                }
+            },
             source_index,
         })
         .collect();
@@ -313,7 +211,13 @@ fn x_evaluate_gapped_full(
 //    }
 // ```
 pub fn reap_preliminary(list: &mut LinkedHspList, options: &ResolvedOptions) -> Vec<LinkedHsp> {
-    let cutoff = options.evalue * if options.composition > 0 { 5.0 } else { 1.0 };
+    // `params->prelim_evalue = evalue` without a Gumbel block (blast_parameters.c:931-935).
+    let cutoff = options.evalue
+        * if options.composition > 0 && !options.old_fsc {
+            5.0
+        } else {
+            1.0
+        };
     let mut deleted = Vec::new();
     list.hsps.retain(|h| {
         if h.evalue > cutoff {

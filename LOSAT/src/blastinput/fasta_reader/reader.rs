@@ -1,5 +1,6 @@
 //! NCBI's `CFastaReader` with the flags of `CBlastFastaInputSource`
-//! (`fNoParseID | fDLOptional`, `fAssumeNuc` or `fAssumeProt`, `fNoSplit`,
+//! (`fNoParseID | fDLOptional` or, with `-parse_deflines`, `fParseRawID`, `fAssumeNuc` or
+//! `fAssumeProt`, `fNoSplit`,
 //! `fHyphensIgnoreAndWarn`, `fDisableNoResidues`, `fQuickIDCheck`), as overridden by
 //! `CCustomizedFastaReader` and `CBlastInputReader`.
 
@@ -503,8 +504,15 @@ pub(crate) struct FastaReader<R: Read> {
     titles: Vec<LineText>,
     /// The title of the record (`x_ApplyMods`' `processed_title`).
     title: Vec<u8>,
-    /// The local ID of the record (`GenerateID`), once its defline is read.
+    /// The local ID of the record (`GenerateID`), once its defline is read; with
+    /// `-parse_deflines` the id that `Query=` shows.
     local_id: Option<String>,
+    /// The Seq-ids of the record under `-parse_deflines`, once its defline is read.
+    believed: Option<std::sync::Arc<super::believed::BelievedIds>>,
+    /// Whether the ids of the record name a protein (`believed::named_molecule`).
+    believed_molecule: Option<bool>,
+    /// The keys of the ids read so far (`believed::duplicate_id`).
+    believed_keys: std::collections::HashSet<u64>,
     /// The defline line as read, kept when the configuration asks for it
     /// (`ReaderConfig::keep_defline`).
     defline: Vec<u8>,
@@ -552,6 +560,9 @@ impl<R: Read> FastaReader<R> {
             titles: Vec::new(),
             title: Vec::new(),
             local_id: None,
+            believed: None,
+            believed_molecule: None,
+            believed_keys: std::collections::HashSet::new(),
             defline: Vec::new(),
             bad_positions: Vec::new(),
             x_pack: false,
@@ -811,6 +822,8 @@ impl<R: Read> FastaReader<R> {
         self.titles.clear();
         self.title.clear();
         self.local_id = None;
+        self.believed = None;
+        self.believed_molecule = None;
 
         let mut need_defline = true;
         while !self.lines.at_eof() {
@@ -839,8 +852,14 @@ impl<R: Read> FastaReader<R> {
                     self.lines.put_line(raw);
                     self.lines.unget_line();
                 } else if need_defline {
-                    self.parse_def_line(next_line);
+                    let parsed = if self.config.parse_deflines {
+                        self.parse_believed_def_line(next_line, warn)
+                    } else {
+                        self.parse_def_line(next_line);
+                        Ok(())
+                    };
                     self.lines.put_line(raw);
+                    parsed?;
                     need_defline = false;
                     continue;
                 } else {
@@ -857,6 +876,17 @@ impl<R: Read> FastaReader<R> {
                 continue;
             }
             if need_defline {
+                if self.config.parse_deflines {
+                    let line_number = self.line_number();
+                    self.lines.put_line(raw);
+                    return Err(self.fasta_error(
+                        super::ParseErrorCode::Format,
+                        format!(
+                            "CFastaReader: Input doesn't start with a defline or comment around \
+                             line {line_number}"
+                        ),
+                    ));
+                }
                 self.parse_def_line(b">");
                 need_defline = false;
             }
@@ -984,6 +1014,82 @@ impl<R: Read> FastaReader<R> {
             }
         }
         self.local_id = Some(self.generate_id());
+    }
+
+    /// `ParseDefLine` with `fParseRawID` (`-parse_deflines`, `believed`): the ids of the first word
+    /// (a generated local id for none, and for a word with a range), and the title after it.
+    fn parse_believed_def_line(&mut self, defline: &[u8], warn: Warn<'_>) -> Result<(), ReadError> {
+        use super::believed::{
+            duplicate_id, generated_ids, named_molecule, parse_believed_defline,
+            refuse_range_in_archive, BelievedIds,
+        };
+        self.titles.clear();
+        if self.config.keep_defline {
+            self.defline.clear();
+            self.defline.extend_from_slice(defline);
+        }
+        let line_number = self.line_number();
+        let mut written = Ok(());
+        let parsed = parse_believed_defline(
+            defline,
+            self.config.protein,
+            self.config.program,
+            line_number,
+            &mut |message: &[u8]| {
+                let mut line = message.to_vec();
+                line.push(b'\n');
+                if written.is_ok() {
+                    written = warn(&line);
+                }
+            },
+        );
+        written.map_err(ReadError::Write)?;
+        let parsed = parsed.map_err(|message| ReadError::Parse {
+            code: super::ParseErrorCode::Format,
+            message,
+            line: line_number,
+        })?;
+        let len = defline.len();
+        let mut title_start = parsed.title_search;
+        while title_start < len && input_space(defline[title_start]) {
+            title_start += 1;
+        }
+        if title_start < len {
+            let end = title_start
+                + 1
+                + defline[title_start + 1..]
+                    .iter()
+                    .position(|&byte| byte < b' ')
+                    .unwrap_or(len - title_start - 1);
+            self.titles.push(LineText {
+                text: defline[title_start..end].to_vec(),
+                line: line_number,
+            });
+        }
+        if parsed.range && self.config.keep_defline {
+            return Err(ReadError::Unsupported(refuse_range_in_archive(
+                self.config.role,
+                self.config.program,
+            )));
+        }
+        self.believed_molecule = named_molecule(&parsed.ids);
+        let ids = if parsed.ids.is_empty() || parsed.range {
+            generated_ids(&self.generate_id())
+        } else {
+            parsed.ids
+        };
+        if let Some(refusal) = duplicate_id(
+            &ids,
+            &mut self.believed_keys,
+            self.config.role,
+            self.config.program,
+        ) {
+            return Err(ReadError::Unsupported(refusal));
+        }
+        let believed = BelievedIds::new(ids, self.config.strand);
+        self.local_id = Some(believed.bare_id());
+        self.believed = Some(std::sync::Arc::new(believed));
+        Ok(())
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:466-483
@@ -1187,6 +1293,20 @@ impl<R: Read> FastaReader<R> {
             return self.parse_gap_line(s, warn);
         }
         self.check_data_line(s)?;
+        if self
+            .believed_molecule
+            .is_some_and(|named| named != self.config.protein)
+            && !super::believed::reads_the_same_in_both(s)
+        {
+            return Err(ReadError::Unsupported(anyhow::anyhow!(
+                "the Seq-id of the {} on line {} names the other molecule under -parse_deflines \
+                 (NCBI BLAST+ reads its letters as that molecule); this is not supported by \
+                 LOSAT's {}",
+                self.config.role,
+                self.line_number(),
+                self.config.program
+            )));
+        }
         let (types, residues, masked) = if self.config.protein {
             (&PROTEIN_CHAR_TYPES, &PROTEIN_RESIDUES, &PROTEIN_MASKED)
         } else {
@@ -1252,7 +1372,11 @@ impl<R: Read> FastaReader<R> {
             )?;
         }
         if !self.bad_positions.is_empty() {
-            let mut message = b"FASTA-Reader: Ignoring invalid residues at position(s): ".to_vec();
+            let mut message = format!(
+                "FASTA-Reader: Ignoring invalid {}residues at position(s): ",
+                super::believed::nuc_or_prot(self.believed_molecule)
+            )
+            .into_bytes();
             convert_bad_indexes_to_string(&mut message, self.line_number(), &self.bad_positions);
             self.post_warning(Problem::InvalidResidue, &message, warn)?;
         }
@@ -1918,10 +2042,12 @@ impl<R: Read> FastaReader<R> {
             title: std::mem::take(&mut self.title),
             sequence,
             warnings: Vec::new(),
-            source: self.config.keep_defline.then(|| {
+            source: (self.config.keep_defline || self.believed.is_some()).then(|| {
                 Box::new(super::RecordSource {
                     defline: std::mem::take(&mut self.defline),
                     uncut: None,
+                    believed: self.believed.take(),
+                    cut_from: 0,
                 })
             }),
         })

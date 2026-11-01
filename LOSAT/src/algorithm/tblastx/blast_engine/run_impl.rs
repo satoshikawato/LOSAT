@@ -3,6 +3,7 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c
 
 use super::*;
+use crate::algorithm::tblastn::search_seed::{translated_chunk_scan_ranges, TranslatedChunk};
 use crate::algorithm::tblastx::database::DatabaseTitles;
 use crate::algorithm::tblastx::hit_collector::HitCollector;
 use crate::algorithm::tblastx::subjects::{
@@ -315,6 +316,77 @@ fn clip_tblastx_seq_ranges_for_scan_interior(
         }
     }
     clipped
+}
+
+// NCBI reference: c++/src/algo/blast/core/blast_engine.c:816-831 (the ranges of context 0 serve the
+// positive frames, those of context 3, by `subject->length` of frame -1, the negative ones) and
+// :259-310 (one list per chunk; SUBJECT_SPLIT_NO_RANGE skips the chunk's WordFinder). The same
+// ranges as TBLASTN's (`translated_chunk_scan_ranges`): a nucleotide subject's lower-case runs in
+// `seq_ranges`, entered for both strands (blast_aux_priv.cpp:436-454).
+/// The chunks of one frame of subject `s_idx` that have ranges, with their ranges, when the subject
+/// has a lower-case letter. Cold and out of line (no NCBI counterpart: code placement only).
+#[cold]
+#[inline(never)]
+fn x_soft_subject_calls(
+    subjects: Subjects<'_>,
+    s_idx: usize,
+    frame: &QueryFrame,
+    frames: &[QueryFrame],
+) -> Option<Vec<(TranslatedChunk, Vec<(i32, i32)>)>> {
+    let Subjects::Fasta(records) = subjects else {
+        return None;
+    };
+    let letters = records[s_idx].seq();
+    if !letters.iter().any(u8::is_ascii_lowercase) {
+        return None;
+    }
+    // `translated_chunk_scan_ranges` lists the chunks of NCBI's MAX_DBSEQ_LEN.
+    debug_assert_eq!(tblastx_max_dbseq_len_for_run(), MAX_DBSEQ_LEN);
+    let negative_first_length = frames
+        .iter()
+        .find(|frame| frame.frame == -1)
+        .map_or(0, |frame| frame.aa_len);
+    Some(
+        translated_chunk_scan_ranges(
+            letters,
+            frame.frame,
+            frame.aa_len,
+            negative_first_length,
+            true,
+        )
+        .expect("the ranges of a soft-masked subject have their sentinel"),
+    )
+}
+
+// No NCBI counterpart: looks up what `x_soft_subject_calls` computed.
+/// The ranges of `chunk`; `None` for a chunk without ranges (SUBJECT_SPLIT_NO_RANGE).
+#[cold]
+#[inline(never)]
+fn x_soft_chunk<'a>(
+    calls: &'a [(TranslatedChunk, Vec<(i32, i32)>)],
+    chunk: &SubjectChunk,
+) -> Option<&'a [(i32, i32)]> {
+    calls
+        .iter()
+        .find(|(call, _)| call.offset == chunk.offset)
+        .map(|(_, ranges)| ranges.as_slice())
+}
+
+// NCBI reference: c++/src/algo/blast/core/blast_engine.c:816-831. A shorter frame takes the ranges
+// of the longest frame of its strand, so the last word NCBI scans can end on the NULLB after the
+// frame (blast_util.c:438-453, BLAST_GetAllTranslations).
+/// The letters the scan reads: `subject`, and the sentinel after it with `x_soft` ranges.
+#[inline(always)]
+fn x_soft_scan_letters<'a>(
+    x_soft: Option<&[(i32, i32)]>,
+    subject: &'a [u8],
+    subject_full: &'a [u8],
+    chunk: &SubjectChunk,
+) -> &'a [u8] {
+    match x_soft {
+        Some(_) => &subject_full[1 + chunk.offset..=1 + chunk.offset + chunk.length],
+        None => subject,
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:190-192
@@ -753,6 +825,22 @@ pub fn run(
         }
         None => &mut stderr,
     };
+    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
+    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
+    // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
+    // and before `CStdCmdLineArgs`, which opens the query and the output: its warning before
+    // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
+    // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
+    let list = match args.database_name() {
+        Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
+            Ok(list) => list,
+            Err(error) => {
+                write_run_error_archive(&args, archive.as_ref(), &error);
+                return Err(error);
+            }
+        },
+        None => None,
+    };
     // `-db`: no subject file; the database is opened after the options are processed
     // (`search_cli`), where NCBI's `InitializeSubject` opens it (tblastx_app.cpp:113-119).
     let subjects_read = if args.db.is_some() {
@@ -817,6 +905,7 @@ pub fn run(
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
         search_cli(
             args,
+            list,
             query_file,
             &subjects,
             &subject_placements,
@@ -892,6 +981,10 @@ fn write_run_error_archive(
     let Some(handle) = archive else {
         return;
     };
+    // `-outfmt "11 qseqid"`: NCBI's `PrintErrorArchive` stops at the number before it opens `-out`.
+    if !handle.error_archive_enabled() {
+        return;
+    }
     let Some(lines) = super::super::archive::error_lines(error, true) else {
         return;
     };
@@ -1001,10 +1094,11 @@ fn read_subject_set(
     // bases keeps every record's letters. The archive of `-subject` writes every subject's whole
     // letters (and its deflines) in every batch, which the packed stores do not keep (they hold
     // the interval of a `-subject_loc` and no letters), so a run that writes it reads the records
-    // as the switch's `=0` side does (as TBLASTN's `x_tbn_store`).
+    // as the switch's `=0` side does (as TBLASTN's `x_tbn_store`). So does `-lcase_masking`: the
+    // scan reads the case of the letters (`x_soft_subject_calls`).
     let mut warn = |message: &[u8]| std::io::Write::write_all(&mut *diagnostics, message);
     let (subjects, subject_placements, stores) =
-        if super::super::subjects::x_tbx_store() && args.archive.is_none() {
+        if super::super::subjects::x_tbx_store() && args.archive.is_none() && !args.lcase_masking {
             let (subjects, stores, placements) =
                 crate::blastinput::x_packed_subjects::x_read_packed_subjects(
                     &mut subject_source,
@@ -1202,6 +1296,7 @@ pub fn check_options(args: &TblastxArgs) -> Result<()> {
 /// reading of the queries and the search.
 fn search_cli(
     mut args: TblastxArgs,
+    list: Option<crate::seqdb::DbList>,
     query_file: std::fs::File,
     subjects: &[FastaRecord],
     subject_placements: &Placements,
@@ -1224,9 +1319,25 @@ fn search_cli(
     // `-db`: the database opens after the options are processed, before `Query is Empty!`
     // (`TblastxDatabase::open`).
     let database = match args.database_name() {
-        Some(name) => Some(super::super::database::TblastxDatabase::open(
-            name, &settings,
-        )?),
+        Some(name) => {
+            let database = super::super::database::TblastxDatabase::open_restricted(
+                name,
+                &settings,
+                list.as_ref(),
+                outputs.diagnostics,
+            )?
+            .showing_gis(args.show_gis);
+            crate::algorithm::common::database::note_archive_database_filter(
+                args.archive.as_ref(),
+                &args.db_filter,
+                database.list_taxids(),
+                database.filtered_empty(),
+                args.searchsp.is_some_and(|space| space > 0),
+                args.dbsize.is_some_and(|size| size > 0),
+                "TBLASTX",
+            )?;
+            Some(database)
+        }
         None => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
@@ -1248,7 +1359,7 @@ fn search_cli(
     }) {
         args.tabular_taxdb = Some(match database.as_ref() {
             Some(database) => database.taxdb_found(),
-            None => crate::algorithm::common::tabular::subject_taxdb_found(&settings, "TBLASTX")?,
+            None => crate::algorithm::common::database::subject_taxdb_found(&settings, "TBLASTX")?,
         });
     }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
@@ -1319,11 +1430,17 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
+    crate::blastinput::fasta_reader::believed::refuse_with_subject(
+        args.parse_deflines,
+        args.subject.is_some(),
+        "TBLASTX",
+    )?;
     let mut query_source = FastaInputSource::from_argument(
         &args.query,
         query_file,
         ReaderConfig::query("TBLASTX", false, settings.data_loaders)
-            .with_defline(args.archive.is_some()),
+            .with_defline(args.archive.is_some())
+            .with_parse_deflines(args.parse_deflines),
     );
     if !shared_standard_input && query_source.stream_is_empty() {
         outputs
@@ -1634,7 +1751,7 @@ fn search(
     let whole_subjects = Placements::default();
     let (stores, stores_error) = match &source {
         SubjectSource::Database(database) => {
-            let read = if database.numbers(None).count == 0 {
+            let read = if database.printed_num_seqs() == 0 {
                 Err(crate::algorithm::common::database::PreliminaryReadError(
                     "Database memory map file error",
                 )
@@ -1669,6 +1786,7 @@ fn search(
                     total: stores.iter().map(|store| store.len() as i64).sum(),
                     count: records.len() as i64,
                     dbsize: args.dbsize,
+                    searchsp: args.searchsp,
                 },
                 shown: ShownSubjects::Fasta {
                     records,
@@ -1684,7 +1802,8 @@ fn search(
         } => (
             RunSubjects {
                 subjects: Subjects::Fasta(records),
-                numbers: SubjectSetNumbers::of_records(records, args.dbsize),
+                numbers: SubjectSetNumbers::of_records(records, args.dbsize)
+                    .with_searchsp(args.searchsp),
                 shown: ShownSubjects::Fasta {
                     records,
                     x_stored: None,
@@ -1699,7 +1818,7 @@ fn search(
                 } else {
                     Subjects::Stored(&stores)
                 },
-                numbers: database.numbers(args.dbsize),
+                numbers: database.numbers(args.dbsize).with_searchsp(args.searchsp),
                 shown: ShownSubjects::Database {
                     database,
                     pairwise: database.pairwise_database(),
@@ -1786,6 +1905,9 @@ pub(crate) struct TblastxReportRun<'a> {
     /// The per-query statistics and whether the query's batch was searched.
     pub query_stats: &'a [TblastxQueryStats],
     pub searched: &'a [bool],
+    /// A list kept no sequence of the database: the messages of the queries of the searched
+    /// batches have `EMPTY_DATABASE_MESSAGE` (`SeqDb::filtered_empty`).
+    pub filtered_empty: bool,
     /// The warnings written before each query's report (`QueryWarnings`): the reader's
     /// messages of the query's batch (before its first query) and the query's own.
     pub warnings: &'a [Vec<u8>],
@@ -1806,6 +1928,10 @@ pub(crate) struct TblastxReportRun<'a> {
     /// `-db`, a custom tabular report that shows a taxonomy field: the taxonomy of each reported
     /// sequence by rank (`TblastxDatabase::tabular_taxonomy`; empty otherwise).
     pub tabular_taxonomy: &'a [crate::report::tabular::TabularTaxonomy],
+    /// `-db`: the names of the taxonomy database that the rows of the run's custom report (the
+    /// command line's one `-outfmt`) look up (`TblastxDatabase::tabular_names`); `None`: every
+    /// lookup fails (no name field, no `taxdb.bti`, `-subject`).
+    pub tabular_names: Option<&'a crate::report::tabular::TabularNames>,
     /// Whether ABI v1's rejection of outfmt 0 titles applies (`V1Checks`).
     pub v1_titles: bool,
     /// The queries of each batch searched, in order (the documents of the BLAST archive).
@@ -2034,7 +2160,9 @@ fn write_tblastx_outputs(
         None => tblastx_database_name(args),
     };
     // The `Query=` and `# Query:` text of each query: its title bytes.
-    let query_titles: Vec<&[u8]> = run.queries.iter().map(|query| query.title()).collect();
+    let query_lines: Vec<std::borrow::Cow<'_, [u8]>> =
+        run.queries.iter().map(|query| query.query_line()).collect();
+    let query_titles: Vec<&[u8]> = query_lines.iter().map(|line| line.as_ref()).collect();
     let unsearched: Vec<bool> = run.searched.iter().map(|&searched| !searched).collect();
     // The warnings of each query are written before its report, once, with the first format
     // (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the
@@ -2293,6 +2421,7 @@ fn write_tblastx_outputs(
                         query_placements: &run.ranges.input.placements,
                         numbers: run.numbers,
                         spans: run.archive_spans,
+                        lcase_masking: args.lcase_masking,
                     },
                     warnings.as_mut(),
                     &mut writer,
@@ -2660,7 +2789,12 @@ fn run_in_pool(
         .iter()
         .map(|record| Arc::from(record.shown_id()))
         .collect();
+    let filtered_empty = match &subjects.shown {
+        ShownSubjects::Database { database, .. } => database.filtered_empty(),
+        ShownSubjects::Fasta { .. } => false,
+    };
     let reports = BatchReports {
+        filtered_empty,
         args: &args,
         query_runs,
         query_ids: &query_ids,
@@ -2730,6 +2864,15 @@ fn run_in_pool(
         | TblastxMatrix::Aborts => None,
         TblastxMatrix::Table(matrix) => Some(MatrixScores::new(matrix)),
     };
+    // EXPERIMENT (LOSAT_X_TBXBOARD): one board for the search's batches (tblastx/x_work_board.rs).
+    // Only when the batches use it (`search_query_batch`, `x_board_batch`): with the serial chunk
+    // scan, or several subjects without TBXNEXT's loop, the batches and the pipe run as before.
+    let x_board = (crate::algorithm::tblastx::x_work_board::on()
+        && parallel_pool.enabled()
+        && parallel_pool.threads() > 1
+        && std::env::var_os("LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS").is_none()
+        && (search_subjects.count() == 1 || x_subject_next::on()))
+    .then(crate::algorithm::tblastx::x_work_board::XBoard::default);
     let search: &x_batch_pipe::XSearch<'_, TblastxBatch> = &|range, seed_end| match &matrix_scores {
         None => search_query_batch(
             Blosum62Score,
@@ -2739,6 +2882,7 @@ fn run_in_pool(
             numbers,
             parallel_pool,
             seed_end,
+            x_board.as_ref(),
         ),
         Some(scores) => search_query_batch(
             scores.scorer(),
@@ -2748,6 +2892,7 @@ fn run_in_pool(
             numbers,
             parallel_pool,
             seed_end,
+            x_board.as_ref(),
         ),
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:203-209
@@ -2792,7 +2937,9 @@ fn run_in_pool(
     };
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     if let Some(plan) = x_plan {
-        if let Some(pipe) = x_batch_pipe::XPipe::new(plan, search_subjects.count(), search) {
+        if let Some(pipe) =
+            x_batch_pipe::XPipe::new(plan, search_subjects.count(), search, x_board.as_ref())
+        {
             let result = rayon::in_place_scope(|scope| {
                 let _closer = pipe.closer();
                 batch_loop(&mut |range| pipe.take(scope, range))
@@ -2937,6 +3084,15 @@ fn run_batch_loop(
         .formats
         .first()
         .is_some_and(|format| report::output_format(format.outfmt).prefetches_subjects());
+    // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0 too,
+    // which the prefetch does not: the rows of a batch with hits may open the taxonomy database
+    // before a later batch's prefetch (`TaxdbRun::open_for_rows`).
+    let plural_names = outputs.formats.first().is_some_and(|format| {
+        matches!(
+            report::output_format(format.outfmt),
+            report::TblastxOutputFormat::CustomTabular(spec) if spec.checks_taxdb()
+        )
+    });
     // A batch is read from the input records (`input_start..input_end`); its searched
     // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
     // whole records, and a record whose range starts past its end is skipped
@@ -3265,6 +3421,9 @@ fn run_batch_loop(
                     ordered,
                     &reports.titles.borrow(),
                 )?;
+                if plural_names && !ordered.is_empty() {
+                    database.open_for_tabular_rows()?;
+                }
                 warnings[start].extend(messages);
             }
         }
@@ -3307,6 +3466,9 @@ fn run_batch_loop(
             }
             if query.seq().is_empty() {
                 messages.push(NO_DATA_MESSAGE.to_string());
+            }
+            if reports.filtered_empty && batch.searched {
+                messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
             }
             warnings[index].extend(crate::report::query_warnings::query_warning(
                 "tblastx",
@@ -3369,6 +3531,7 @@ struct SearchedBatches {
 
 /// What the reports of the batches searched so far need besides their results.
 struct BatchReports<'a> {
+    filtered_empty: bool,
     args: &'a TblastxArgs,
     query_runs: &'a QueryRuns<'a>,
     query_ids: &'a [Arc<[u8]>],
@@ -3511,6 +3674,21 @@ impl BatchReports<'_> {
             }
             _ => Vec::new(),
         };
+        // And the names of the taxonomy database that its rows look up (with their refusals,
+        // before any byte).
+        let custom_tabular = outputs
+            .formats
+            .iter()
+            .find_map(|format| match report::output_format(format.outfmt) {
+                report::TblastxOutputFormat::CustomTabular(spec) => Some(spec),
+                _ => None,
+            });
+        let tabular_names = match (&self.subjects, custom_tabular) {
+            (ShownSubjects::Database { database, .. }, Some(spec)) => {
+                database.tabular_names(spec, &tabular_taxonomy)?
+            }
+            _ => None,
+        };
         let written = write_tblastx_outputs(
             hits,
             outputs,
@@ -3523,6 +3701,7 @@ impl BatchReports<'_> {
                 query_ids: &self.query_ids[reported.clone()],
                 query_stats: &done.query_stats,
                 searched: &done.searched,
+                filtered_empty: self.filtered_empty,
                 warnings: &warnings[reported.clone()],
                 ranges,
                 epilog,
@@ -3530,6 +3709,7 @@ impl BatchReports<'_> {
                 numbers: self.numbers,
                 xml_taxa: &xml_taxa,
                 tabular_taxonomy: &tabular_taxonomy,
+                tabular_names: tabular_names.as_ref(),
                 v1_titles: self.v1_titles,
                 archive_spans: &done.spans,
                 x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
@@ -3599,6 +3779,29 @@ impl std::fmt::Display for ErrorAfterBatchReports {
 
 impl std::error::Error for ErrorAfterBatchReports {}
 
+// EXPERIMENT (LOSAT_X_TBXBOARD): closes subject `.1`'s units on the board when its search returns
+// (a no-op once it put its units there). No NCBI counterpart.
+struct XCloseUnits<'a>(&'a crate::algorithm::tblastx::x_work_board::XBatch, usize);
+
+impl Drop for XCloseUnits<'_> {
+    fn drop(&mut self) {
+        self.0.close_without_units(self.1);
+    }
+}
+
+// EXPERIMENT (LOSAT_X_TBXBOARD): the batch leaves the board on every return of its search. No NCBI
+// counterpart.
+struct XEndBatch<'a>(
+    &'a crate::algorithm::tblastx::x_work_board::XBoard,
+    &'a std::sync::Arc<crate::algorithm::tblastx::x_work_board::XBatch>,
+);
+
+impl Drop for XEndBatch<'_> {
+    fn drop(&mut self) {
+        self.0.end_batch(self.1);
+    }
+}
+
 fn search_query_batch<S: TbxScore>(
     // The scores of the search's matrix (`scoring.rs`).
     sc: S,
@@ -3610,6 +3813,9 @@ fn search_query_batch<S: TbxScore>(
     // EXPERIMENT (LOSAT_X_TBXPIPE): the batch pipe's view of this search's seed stage, `None`
     // without the pipe (tblastx/x_batch_pipe.rs).
     x_seed_end: Option<&x_batch_pipe::XSeedEnd<'_>>,
+    // EXPERIMENT (LOSAT_X_TBXBOARD): the search's board of units and link groups, `None` without it
+    // (tblastx/x_work_board.rs).
+    x_board: Option<&crate::algorithm::tblastx::x_work_board::XBoard>,
 ) -> Result<TblastxBatch> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-582
     // ```c
@@ -3789,7 +3995,21 @@ fn search_query_batch<S: TbxScore>(
 
     // NCBI blast_args.cpp:404-406: opt.SetSegFilteringWindow(...);
     // opt.SetSegFilteringLocut(...); opt.SetSegFilteringHicut(...);
-    if let Some(params) = args.seg_spec()?.params() {
+    if args.lcase_masking {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1239-1256 (see
+        // `mask_lcase`): the lower-case runs join the SEG intervals of each frame.
+        let seg = args
+            .seg_spec()?
+            .params()
+            .map(|params| SegMasker::new(params.window, params.locut, params.hicut));
+        x_query_frames::mask_lcase(
+            &mut query_frames,
+            queries_raw,
+            seg.as_ref(),
+            args.soft_masking(),
+            parallel_pool,
+        );
+    } else if let Some(params) = args.seg_spec()?.params() {
         // Diagnostic (LOSAT_TIMING): the queries' SEG for the common line (utils/xtiming.rs). No
         // NCBI counterpart.
         let t_seg = crate::utils::xtiming::clock();
@@ -3842,6 +4062,17 @@ fn search_query_batch<S: TbxScore>(
     // ```
     // The x86-64 conversion: `INT_MIN` for a threshold beyond `Int4` (every word).
     //
+    // NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
+    // ```c
+    //     BlastSeqBlkSetSeqRanges(subj, (SSeqRange*) masked_ranges.get_data(),
+    //                              masked_ranges.size() + 1, true, eSoftSubjMasking);
+    // ```
+    // `-lcase_masking` with a lower-case letter in a subject: only the reference frame loop scans
+    // ranges (`x_soft_subject_calls`), so the batch takes it as a debugging run does. A `-db`
+    // subject has no case.
+    let x_soft_subjects = args.lcase_masking
+        && matches!(subjects, Subjects::Fasta(records)
+            if records.iter().any(|record| record.seq().iter().any(u8::is_ascii_lowercase)));
     // EXPERIMENT (PAIRLUT, graduated on 2026-10-22), dispatch point 0 (per batch, at the
     // lookup build): when PAIRPAR will run the seed stage of every subject of this batch
     // as units, the units' tables (one per query-context group) are built directly from the
@@ -3859,12 +4090,10 @@ fn search_query_batch<S: TbxScore>(
     // BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
     //                           query, lookup_segments, 0);
     // ```
-    // The tables of TBXLUT, PAIRLUT and PAIRPAR hold BLOSUM62's scores: another matrix's
-    // search builds NCBI's lookup table with its scores (`build_ncbi_lookup_for_profile`) and
-    // runs the frame loop.
-    let mut x_pair_lut_batch = if !S::BLOSUM62 {
-        None
-    } else {
+    // PAIRLUT builds the group tables with the search's matrix (SC7b; `XLutEarly::sc`). The
+    // batch's table of TBXLUT holds BLOSUM62's scores: another matrix's search without the
+    // stub builds NCBI's lookup table with its scores (`build_ncbi_lookup_for_profile`).
+    let mut x_pair_lut_batch = {
         x_pair_par::lut_build(x_pair_par::XLutEarly {
             query_frames: &query_frames,
             threshold: crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
@@ -3874,10 +4103,12 @@ fn search_query_batch<S: TbxScore>(
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
                 || diag_enabled
-                || debug_hsp_saving,
+                || debug_hsp_saving
+                || x_soft_subjects,
             requested_parallel,
             use_serial_scan_chunks,
             pool: parallel_pool,
+            sc,
         })
     };
     let x_pair_lut_stub = x_pair_lut_batch
@@ -3890,9 +4121,19 @@ fn search_query_batch<S: TbxScore>(
     // from the chain builder (`build_ncbi_lookup`) or filled in place from per-cell counts; the
     // same table.
     let (lookup, contexts) = match x_pair_lut_stub {
-        Some(stub) => {
+        Some(stub) if S::BLOSUM62 => {
             crate::algorithm::tblastx::lookup::x_tbxlut_reach_stub();
             stub
+        }
+        Some((lookup, mut contexts)) => {
+            crate::algorithm::tblastx::lookup::x_tbxlut_reach_stub();
+            // Another matrix's contexts (SC7b): the alpha and beta of its ungapped row, as in the
+            // reference branch below (`blast_setup.c:812-822`).
+            for ctx in contexts.iter_mut().filter(|ctx| ctx.is_valid) {
+                ctx.karlin_params.alpha = ungapped_params_for_xdrop.alpha;
+                ctx.karlin_params.beta = ungapped_params_for_xdrop.beta;
+            }
+            (lookup, contexts)
         }
         None if !S::BLOSUM62 => {
             // NCBI reference: c++/src/algo/blast/core/blast_setup.c:812-822 (the alpha and beta
@@ -3971,9 +4212,12 @@ fn search_query_batch<S: TbxScore>(
     // }
     // ```
     // An unreadable database is not empty: its first batch with a valid context fails
-    // (`SubjectsUnreadable`, below).
+    // (`SubjectsUnreadable`, below). A database that a list left without sequences has
+    // statistics (`SeqDb::statistics_numbers`) and its queries are reported with them.
     if queries_raw.is_empty()
-        || (subjects.count() == 0 && !matches!(subjects, Subjects::Unreadable))
+        || (subjects.count() == 0
+            && numbers.total == 0
+            && !matches!(subjects, Subjects::Unreadable))
     {
         return Ok(TblastxBatch {
             hits: Vec::new(),
@@ -4187,9 +4431,7 @@ fn search_query_batch<S: TbxScore>(
     // The guards compare the subject lengths (and, without LOSAT_X_TBXBAND, the context lengths)
     // with the slack of this table (size above minus query_length); the per-context tables use the
     // layout above.
-    let x_pair_par_batch = if !S::BLOSUM62 {
-        None
-    } else {
+    let x_pair_par_batch = {
         x_pair_par::XPairPar::prepare(x_pair_par::XBatch {
             lookup: &lookup,
             contexts: &contexts,
@@ -4200,13 +4442,15 @@ fn search_query_batch<S: TbxScore>(
                 || scan_debug_range.is_some()
                 || extension_debug_enabled
                 || diag_enabled
-                || debug_hsp_saving,
+                || debug_hsp_saving
+                || x_soft_subjects,
             chunk_switches: use_serial_scan_chunks || use_parallel_chunks,
             // PAIRLUT: the groups built at dispatch point 0.
             lut: x_pair_lut_batch,
             // LOSAT_X_PAIRPARGATE: the thread count and threshold dispatch point 0 decided with.
             threads: parallel_pool.threads(),
             threshold: crate::core::blast_util::ncbi_int4_from_double(args.word_threshold()),
+            sc,
         })
     };
     // The reference frame loop scans the batch's table (LOSAT_X_TBXSCANBF's choice above).
@@ -4236,14 +4480,43 @@ fn search_query_batch<S: TbxScore>(
     // ```
     // NCBI keeps its lookup table and diagonal table through the subject loop; when LOSAT
     // frees its copies is not a value NCBI computes (x_seed_release.rs).
+    // EXPERIMENT (LOSAT_X_TBXBOARD): every batch of a search with a board (2+ threads) uses it: its
+    // units (the unit path), link groups, frame merges and chain sorts go on the search's board
+    // (tblastx/x_work_board.rs). Several subjects run in TBXNEXT's loop (the other subject loop
+    // waits in the pool); one subject runs on this thread and its units bring their own helpers.
+    let x_board_batch = x_board
+        .filter(|_| {
+            use_parallel
+                && !use_serial_scan_chunks
+                && (subjects.count() == 1 || x_subject_next::on())
+        })
+        .map(|board| (board, board.batch(subjects.count())));
+    let _x_board_end = x_board_batch
+        .as_ref()
+        .map(|(board, batch)| XEndBatch(board, batch));
+    // A batch without the unit path puts no units on the board: its subjects' slots are closed
+    // now, so the subject loop's threads without a subject return at once (`XBoard::help`).
+    if let Some((_, batch)) = x_board_batch
+        .as_ref()
+        .filter(|_| x_pair_par_batch.is_none())
+    {
+        for s in 0..subjects.count() {
+            batch.close_without_units(s);
+        }
+    }
+    if crate::algorithm::tblastx::x_work_board::on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXBOARD", x_board_batch.is_some());
+    }
+    // Whether the batch puts units on the board (`x_board_help` below).
+    let x_board_unit_path = x_pair_par_batch.is_some();
     let x_seed_batch = x_seed_release::XSeedBatch::new(lookup, x_pair_par_batch, subjects.count());
     let x_worker_diag_cells = x_seed_batch.worker_table_cells(diag_array_size as usize);
 
     let contexts_ref = &contexts;
     // EXPERIMENT (LOSAT_X_TBXUNGAPSENT): the reference frame loops' extensions may take the walks
-    // the sentinels stop (not with the debug output of `extend_hit_two_hit`). The sentinel walks
-    // hold BLOSUM62's byte table: another matrix takes `extend_hit_two_hit_with` with its scores.
-    let tbx_sent = S::BLOSUM62
+    // the sentinels stop (not with the debug output of `extend_hit_two_hit`); another matrix's
+    // need its byte table (`TbxScore::x_sent_walks`).
+    let tbx_sent = sc.x_sent_walks()
         && !extension_debug_enabled
         && x_tbx_sent_contexts(contexts.iter().map(|c| c.aa_seq.as_slice()));
 
@@ -4449,7 +4722,7 @@ fn search_query_batch<S: TbxScore>(
         if !ctx.is_valid || ctx.aa_len == 0 {
             cutoff_scores[ctx_idx] = i32::MAX;
             length_adj_per_context.push(0);
-            eff_searchsp_per_context.push(0);
+            eff_searchsp_per_context.push(numbers.searchsp.unwrap_or(0));
             continue;
         }
         // NCBI: per-context kbp_std[context] is used throughout cutoff/length calcs.
@@ -4471,16 +4744,15 @@ fn search_query_batch<S: TbxScore>(
         // =======================================================================
         // `-dbsize` replaces the database length here only (`SubjectSetNumbers`).
         let eff_db_length_nucl = numbers.effective_length();
-        let eff_lengths = crate::algorithm::tblastx::ncbi_cutoffs::try_compute_eff_lengths_tblastx(
-            query_len_aa,
-            eff_db_length_nucl,
-            db_num_seqs,
-            ctx_params, // tblastx uses per-context ungapped params (kbp_gap is NULL)
-        )
-        .ok_or(SearchSpaceOverflow {
-            db_length: eff_db_length_nucl,
-            query_length: ctx.aa_len,
-        })?;
+        let eff_lengths = numbers
+            .context_lengths(
+                query_len_aa,
+                ctx_params, // tblastx uses per-context ungapped params (kbp_gap is NULL)
+            )
+            .ok_or(SearchSpaceOverflow {
+                db_length: eff_db_length_nucl,
+                query_length: ctx.aa_len,
+            })?;
         let eff_searchsp = eff_lengths.eff_searchsp;
         length_adj_per_context.push(eff_lengths.length_adjustment);
         eff_searchsp_per_context.push(eff_searchsp);
@@ -4682,6 +4954,14 @@ fn search_query_batch<S: TbxScore>(
         // No NCBI counterpart: the clock of this subject for LOSAT_TIMING. The first local of
         // the closure, so it is dropped last and its last stage includes the drops of the rest.
         let mut x_lap = x_times.subject();
+        // EXPERIMENT (LOSAT_X_TBXBOARD): this thread searches a subject of the board's batch; a
+        // subject that returns before its units puts none on the board.
+        let _x_board_subject = x_board_batch.as_ref().map(|(board, batch)| {
+            (
+                crate::algorithm::tblastx::x_work_board::enter(board, batch),
+                XCloseUnits(batch, s_idx),
+            )
+        });
         // The scores of the search's matrix, an argument of the closures below.
         let sc = st.sc;
         // EXPERIMENT (LOSAT_X_TBXPIPE): this subject's part of the batch's seed-stage end, ended at
@@ -4707,11 +4987,7 @@ fn search_query_batch<S: TbxScore>(
         let x_units_stage = x_seed_batch.units.enter(s_idx);
         let lookup_ref: &crate::algorithm::tblastx::lookup::BlastAaLookupTable =
             x_seed_stage.tables();
-        let x_pair_par_ref: Option<&x_pair_par::XPairPar> = if !S::BLOSUM62 {
-            None
-        } else {
-            x_units_stage.tables().as_ref()
-        };
+        let x_pair_par_ref: Option<&x_pair_par::XPairPar<S>> = x_units_stage.tables().as_ref();
         // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
         // return word_length * 3 + 2;
         // if (subject->length < min_subj_seq_length) { ... continue; }
@@ -4886,9 +5162,17 @@ fn search_query_batch<S: TbxScore>(
                 x_lap.lap(XStage::Prepare);
                 let x_units = x.run_subject_units(&x_subject, parallel_pool);
                 x_lap.lap(XStage::Units);
+                x_pipe_seed.units_done(x_units.records());
+                // EXPERIMENT (LOSAT_X_TBXBOARD): every unit of the batch taken: the next batch
+                // may build its tables (tblastx/x_batch_pipe.rs `XSeedEnd::units_taken`).
+                if let (Some((_, batch)), Some(seed_end)) = (x_board_batch.as_ref(), x_seed_end) {
+                    if batch.drained() {
+                        seed_end.units_taken();
+                    }
+                }
                 x_units_stage.end();
                 x_lap.lap(XStage::UnitsRelease);
-                let x_hits = x_pair_par::XPairPar::merge_subject(x_units, &x_subject);
+                let x_hits = x_pair_par::XPairPar::<S>::merge_subject(x_units, &x_subject);
                 x_lap.lap(XStage::Merge);
                 combined_ungapped_hits = x_hits;
                 &[]
@@ -4963,6 +5247,13 @@ fn search_query_batch<S: TbxScore>(
             let mut frame_ungapped_hits: Vec<UngappedHit> = Vec::new();
             let mut split_state = SubjectSplitState::new(s_aa_len);
             let max_dbseq_len = tblastx_max_dbseq_len_for_run();
+            // `-lcase_masking`: the scan ranges of this frame's chunks, `None` for a subject
+            // without lower-case letters.
+            let x_soft_calls = if x_soft_subjects {
+                x_soft_subject_calls(subjects, s_idx, s_frame, s_frames_preliminary)
+            } else {
+                None
+            };
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
             // ```c
@@ -5009,18 +5300,41 @@ fn search_query_batch<S: TbxScore>(
                 // References: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:509-511,
                 // ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
                 let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
-                let scan_interiors = tblastx_scan_interiors(chunk.length, scan_chunk_size);
+                // `-lcase_masking`: this chunk's ranges, whole (`x_soft_chunk`).
+                let x_soft = x_soft_calls
+                    .as_ref()
+                    .map(|calls| x_soft_chunk(calls, &chunk));
+                if let Some(None) = x_soft {
+                    return TblastxChunkScanResult {
+                        chunk,
+                        hits: Vec::new(),
+                        stats,
+                    };
+                }
+                let x_soft = x_soft.flatten();
+                let x_scan_letters = x_soft_scan_letters(x_soft, subject, subject_full, &chunk);
+                let scan_interiors = tblastx_scan_interiors(
+                    chunk.length,
+                    if x_soft.is_some() {
+                        None
+                    } else {
+                        scan_chunk_size
+                    },
+                );
                 let mut previous_seed_s_off: Option<u32> = None;
                 for (_scan_chunk_index, (interior_start, interior_end)) in
                     scan_interiors.into_iter().enumerate()
                 {
-                    let seq_ranges = clip_tblastx_seq_ranges_for_scan_interior(
-                        &base_seq_ranges,
-                        interior_start,
-                        interior_end,
-                        wordsize as usize,
-                        subject.len(),
-                    );
+                    let seq_ranges = match x_soft {
+                        Some(ranges) => ranges.to_vec(),
+                        None => clip_tblastx_seq_ranges_for_scan_interior(
+                            &base_seq_ranges,
+                            interior_start,
+                            interior_end,
+                            wordsize as usize,
+                            subject.len(),
+                        ),
+                    };
                     if seq_ranges.is_empty() {
                         continue;
                     }
@@ -5028,6 +5342,18 @@ fn search_query_batch<S: TbxScore>(
                     // [C] scan_range[1] = subject->seq_ranges[0].left;
                     // [C] scan_range[2] = subject->seq_ranges[0].right - wordsize;
                     let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
+                    // [C] if (scan_range[2] < scan_range[1]) scan_range[2] = scan_range[1];
+                    // (aa_ungapped.c:499-500: only a masked subject's first range can be so short.)
+                    // A first range on the last letter of a chunk's frame has no word within the
+                    // frame and its NULLB: NCBI reads the next frame's letter there, and such a
+                    // word, the only one of the chunk, can only set a `last_hit` that the next
+                    // chunk's diagonal offset hides, so it is not scanned.
+                    if x_soft.is_some() && scan_range[2] < scan_range[1] {
+                        scan_range[2] = scan_range[1];
+                        if scan_range[1] + wordsize > x_scan_letters.len() as i32 {
+                            scan_range[2] = scan_range[1] - 1;
+                        }
+                    }
 
                     // [C] while (scan_range[1] <= scan_range[2])
                     while scan_range[1] <= scan_range[2] {
@@ -5042,7 +5368,7 @@ fn search_query_batch<S: TbxScore>(
                         let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
                             x_scan_bf,
                             lookup_ref,
-                            subject,
+                            x_scan_letters,
                             &seq_ranges,
                             offset_pairs,
                             offset_array_size,
@@ -5287,11 +5613,11 @@ fn search_query_batch<S: TbxScore>(
                                         extension_debug_enabled,
                                     )
                                 } else {
-                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent,
-                                    // BLOSUM62 only) and `x_tbx_sent_subject` accepted the chunk
+                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent)
+                                    // and `x_tbx_sent_subject` accepted the chunk
                                     // (`subject_sent`).
                                     unsafe {
-                                        extend_hit_two_hit_sent(
+                                        sc.sent_two_hit(
                                             query_full,
                                             subject_full,
                                             (last_hit + wordsize) as usize,
@@ -5802,11 +6128,11 @@ fn search_query_batch<S: TbxScore>(
                                         extension_debug_enabled,
                                     )
                                 } else {
-                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent,
-                                    // BLOSUM62 only) and `x_tbx_sent_subject` accepted the chunk
+                                    // SAFETY: the contexts passed `x_tbx_sent_contexts` (tbx_sent)
+                                    // and `x_tbx_sent_subject` accepted the chunk
                                     // (`subject_sent`).
                                     unsafe {
-                                        extend_hit_two_hit_sent(
+                                        sc.sent_two_hit(
                                             query_full,
                                             subject_full,
                                             (last_hit + wordsize) as usize,
@@ -6236,6 +6562,7 @@ fn search_query_batch<S: TbxScore>(
                 let x_debugging = scan_debug_range.is_some() || trace_hsp_target().is_some();
                 if crate::algorithm::tblastx::x_seed_bucket::bucketed(diag_array.len())
                     && !x_debugging
+                    && x_soft_calls.is_none()
                 {
                     scan_chunk_bucketed(
                         chunk,
@@ -6529,6 +6856,12 @@ fn search_query_batch<S: TbxScore>(
         // later batch may run, the two linking calls below do not use the pool (`x_link_on_pool`,
         // tblastx/x_batch_pipe.rs item 6); the lists are the same with or without it.
         let x_link_on_pool = use_parallel && x_pipe_seed.end(combined_ungapped_hits.len());
+        // EXPERIMENT (LOSAT_X_TBXBOARD): a chain that links without the pool puts its groups and
+        // sorts on the search's board instead of running them on this thread
+        // (tblastx/x_link_slices.rs `x_helped`); the guard ends with the subject.
+        let _x_helped = crate::algorithm::tblastx::sum_stats_linking::x_link_helped(
+            use_parallel && !x_link_on_pool && x_board_batch.is_some(),
+        );
         x_lap.lap(XStage::SeedRelease);
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:561-584
@@ -7269,6 +7602,7 @@ fn search_query_batch<S: TbxScore>(
                         sc,
                     },
                     &process_subject,
+                    None,
                 );
             });
         } else {
@@ -7324,6 +7658,23 @@ fn search_query_batch<S: TbxScore>(
         );
     }
 
+    // EXPERIMENT (LOSAT_X_TBXBOARD): a thread of the subject loop without a subject helps with the
+    // batch's units (tblastx/x_work_board.rs `XBoard::help`).
+    let x_board_help = x_board_batch.as_ref().map(|(board, batch)| {
+        move |stopped: &std::sync::atomic::AtomicBool| {
+            board.help(batch, stopped);
+            // Every unit of the batch has been taken: the next batch may build its tables. A batch
+            // without the unit path has no units; its next batch starts at its seed-stage end.
+            if let Some(seed_end) = x_seed_end.filter(|_| x_board_unit_path) {
+                seed_end.units_taken();
+            }
+        }
+    });
+    // EXPERIMENT (LOSAT_X_TBXBOARD): a batch started early waits here, after its tables, until the
+    // batch before has ended its seed stage (tblastx/x_batch_pipe.rs `XGateView`).
+    if let Some(seed_end) = x_seed_end {
+        seed_end.wait_gate(x_board);
+    }
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 && x_subject_next::on() {
         // EXPERIMENT (LOSAT_X_TBXNEXT): each thread of the pool takes the next subject when it is
@@ -7351,6 +7702,9 @@ fn search_query_batch<S: TbxScore>(
                     sc,
                 },
                 &process_subject,
+                x_board_help
+                    .as_ref()
+                    .map(|help| help as &(dyn Fn(&std::sync::atomic::AtomicBool) + Sync)),
             );
         });
     } else if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {
@@ -7430,6 +7784,9 @@ fn search_query_batch<S: TbxScore>(
     }
 
     // No NCBI counterpart: LOSAT_TIMING, the clock after the subject loop (x_search_timing.rs).
+    if let Some((board, batch)) = &x_board_batch {
+        board.end_batch(batch);
+    }
     let x_t_collect = x_times.now();
     // Close channel so the writer can exit.
     if let Some(tx) = tx_opt {

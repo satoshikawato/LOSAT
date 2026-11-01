@@ -521,7 +521,7 @@ pub(crate) fn search_core(
     prep: Option<UnitPrep>,
 ) -> Result<Vec<BatchStage>> {
     ensure!(
-        !subjects.is_empty() || subjects.is_unreadable(),
+        !subjects.is_empty() || subjects.is_unreadable() || options.filtered_empty,
         "BLASTX preliminary requires a protein subject"
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
@@ -552,7 +552,7 @@ pub(crate) fn search_core(
         "BLASTX preliminary protein-subject splitting above 5000000 residues is not implemented"
     );
     let db_length = subjects.total_length()?;
-    let db_count = i64::try_from(subjects.len())?;
+    let db_count = i64::try_from(subjects.statistics_len())?;
     let min_subject_length = subjects.shortest_length();
     let mut result = Vec::new();
     let mut call = 0;
@@ -1071,13 +1071,13 @@ pub(crate) fn search_core(
             } else {
                 subjects.len().div_ceil(wave_size)
             };
-            // EXPERIMENT (LOSAT_X_BXDBSTREAM): the blocks of the serial pass.
+            // The blocks of the serial pass.
             let mut x_pass = subjects.x_pass();
             for wave_index in 0..x_waves {
                 let wave_start = wave_index * wave_size;
                 let wave: Vec<usize> =
                     (wave_start..subjects.len().min(wave_start + wave_size)).collect();
-                // EXPERIMENT (LOSAT_X_BXDBSTREAM): the subjects of a wave that the pool searches,
+                // The subjects of a wave that the pool searches,
                 // read before its fork.
                 let x_wave_block = if pool.enabled() {
                     subjects.x_read_range(wave_start, wave_start + wave.len())?
@@ -1450,7 +1450,7 @@ fn x_compute_chunk(
     // without a hit. The sink gets the others as empty computations (`SubjectComputation::
     // empty`), so it sees the same calls as from the serial chunk loop.
     let mut results = Vec::new();
-    // EXPERIMENT (LOSAT_X_BXDBSTREAM): the blocks of the chunk's pass.
+    // The blocks of the chunk's pass.
     let mut x_pass = subjects.x_pass();
     for oid in 0..subjects.len() {
         let mut computed = compute_subject(
@@ -1551,7 +1551,7 @@ fn compute_subject(
     };
     let encoded: &[u8] = &x_buffer[usize::from(x_lead)..];
     // `subjects.length(oid)` for every kind of subjects: the residues before the sentinel byte (a
-    // database read in blocks then looks the subject up once, LOSAT_X_BXDBSTREAM).
+    // database read in blocks then looks the subject up once).
     let subject_length = encoded.len() - 1;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
     // ```c++

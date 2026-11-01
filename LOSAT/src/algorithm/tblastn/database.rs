@@ -4,8 +4,8 @@
 //!
 //! What differs from the search of a FASTA subject set (`-subject`):
 //!
-//! - the subjects are the database's sequences, read once, in ordinal order, as packed
-//!   subjects (`TblastnDatabase::read_stores`): the preliminary stage translates the stored
+//! - the subjects are the database's sequences, each read where it is searched, as packed
+//!   subjects (`TblastnDatabase::x_stream`, `x_db_stream.rs`): the preliminary stage translates the stored
 //!   2-bit data (makeblastdb's bases for the ambiguous ones, NCBI's preliminary input) and
 //!   the traceback and the reports read the stored ambiguity codes; the search's subject
 //!   index is the ordinal id;
@@ -51,6 +51,12 @@ pub(super) struct TblastnDatabase {
 }
 
 impl TblastnDatabase {
+    /// `-show_gis` for the subjects of the reports (`ParsedSubject::showing_gis`).
+    pub(super) fn showing_gis(mut self, show_gis: bool) -> Self {
+        self.db.set_reports_show_gis(show_gis);
+        self
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:188-194
     // ```c++
     //         /*** Initialize the database/subject ***/
@@ -65,10 +71,22 @@ impl TblastnDatabase {
     /// the command line's errors. The total length is NCBI's `Int8`; one that the engine
     /// cannot hold in a `usize` (a 32-bit target) is LOSAT's refusal.
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        let db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
+        Self::open_restricted(name, settings, None, &mut std::io::sink())
+    }
+
+    /// `open` with the database restricted to the taxid or seqid list `list` of the command
+    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
+    pub(super) fn open_restricted(
+        name: &str,
+        settings: &ApplicationSettings,
+        list: Option<&crate::seqdb::DbList>,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<Self> {
+        let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b), unless a variable changes
         // NCBI's choice of its Seq-ids.
         shared::check_seqids(&db, settings, PROGRAM)?;
+        shared::restrict_database(&mut db, list, diagnostics, PROGRAM)?;
         let total = db.total_length();
         usize::try_from(total)
             .ok()
@@ -102,10 +120,28 @@ impl TblastnDatabase {
     /// The number of sequences (`CSeqDB::GetNumSeqs`) and the total length
     /// (`CSeqDB::GetTotalLength`): the real numbers, also with `-dbsize`.
     pub(super) fn numbers(&self) -> DatabaseNumbers {
+        let (total_length, num_seqs) = self.db.statistics_numbers();
         DatabaseNumbers {
-            total_length: self.db.total_length(),
-            num_seqs: u64::from(self.db.num_seqs()),
+            total_length,
+            num_seqs: u64::from(num_seqs),
+            min_length: self.db.min_length(),
         }
+    }
+
+    /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
+    pub(super) fn filtered_empty(&self) -> bool {
+        self.db.filtered_empty()
+    }
+
+    /// The taxids of the search's list (`SeqDb::list_taxids`).
+    pub(super) fn list_taxids(&self) -> &[i32] {
+        self.db.list_taxids()
+    }
+
+    /// The number of sequences of the volumes (`SeqDb::printed_num_seqs`): none is the database
+    /// whose first query batch fails, also with a list.
+    pub(super) fn printed_num_seqs(&self) -> u32 {
+        self.db.printed_num_seqs()
     }
 
     /// What the `Database:` lines of the pairwise report show
@@ -175,6 +211,21 @@ impl TblastnDatabase {
         self.taxdb.found(&self.db)
     }
 
+    /// The names of the taxonomy database that the rows of `spec` look up for the subjects
+    /// `taxonomy` (`shared::tabular_names`).
+    pub(super) fn tabular_names(
+        &self,
+        spec: &crate::report::tabular::TabularSpec,
+        taxonomy: &[crate::report::tabular::TabularTaxonomy],
+    ) -> Result<Option<crate::report::tabular::TabularNames>> {
+        shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
+    }
+
+    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
+    pub(super) fn open_for_tabular_rows(&self) -> Result<()> {
+        self.taxdb.open_for_rows(&self.db, PROGRAM)
+    }
+
     /// NCBI's messages about the taxonomy database when the query batch whose final hit lists
     /// are `hitlists` (subjects named by rank, `reported_subjects`) prefetches the subjects it
     /// reports (`shared::prefetch_messages`): the sequences with HSPs in them, the ones
@@ -197,16 +248,10 @@ impl TblastnDatabase {
         shared::prefetch_messages(&self.db, &self.taxdb, subjects, PROGRAM)
     }
 
-    /// Every sequence of the database by ordinal id, packed
-    /// (`algorithm::common::database::read_nucleotide_stores`).
-    pub(super) fn read_stores(&self) -> Result<Vec<PackedNucleotide>> {
-        shared::read_nucleotide_stores(&self.db, PROGRAM)
-    }
-
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the database read where it is searched by `threads`
-    /// threads, after the checks of `read_stores` (`x_db_stream.rs`).
+    /// The database read where it is searched by `threads` threads, after the checks of
+    /// `common::database::x_check_nucleotide_stores` (`x_db_stream.rs`).
     pub(super) fn x_stream(&self, threads: usize) -> Result<super::x_db_stream::XDbStream<'_>> {
-        super::x_db_stream::XDbStream::new(&self.db, threads, || self.read_stores())
+        super::x_db_stream::XDbStream::new(&self.db, threads)
     }
 }
 
@@ -270,7 +315,10 @@ pub(super) struct ReportedSubjects {
     /// The record of each rank: the id `gnl|BL_ORD_ID|n` and the stored title (a sequence with
     /// parsed Seq-ids: the title of its first definition line), no letters.
     pub(super) records: Vec<FastaRecord>,
-    /// The packed subject of each rank (its letters for the reports).
+    /// The number of bases of each rank.
+    pub(super) lengths: Vec<usize>,
+    /// The packed subject of each rank (its letters for the reports); empty when no report reads
+    /// them.
     pub(super) stores: Vec<PackedNucleotide>,
     /// The sequences with parsed Seq-ids by rank (empty when none is reported): their ids and
     /// titles come from their definition lines (`report::db_subject`).
@@ -282,23 +330,37 @@ impl ReportedSubjects {
     pub(super) fn parsed_subject(&self, rank: usize) -> Option<&ParsedSubject> {
         self.parsed.get(rank).and_then(Option::as_deref)
     }
+
+    /// The subjects as the reports read them, by rank: their stores, or without stores (no report
+    /// reads their letters) their lengths.
+    pub(super) fn letters(&self) -> super::x_subject_store::SubjectLetters<'_> {
+        use super::x_subject_store::SubjectLetters;
+        if self.stores.is_empty() {
+            SubjectLetters::Lengths(&self.lengths)
+        } else {
+            SubjectLetters::Packed(&self.stores)
+        }
+    }
 }
 
 /// The reported database sequences of `hitlists` (the final hit lists of all query batches,
 /// subjects named by ordinal id; their HSPs of score 0 are dropped first, as the report
 /// drops them): the hit lists name them by rank from here on (the rank grows with the
 /// ordinal id, so every comparison that breaks a tie by the subject index gives the same
-/// order), and their records (`titles`) and packed subjects (`stores`, by ordinal id) are
-/// kept for the reports. A reported sequence whose stored title LOSAT does not report as
+/// order), and their records (`titles`) and lengths are kept for the reports, with their packed
+/// subjects (`stores`, by ordinal id) when `letters` (`stage_e_report::reads_subject_letters`:
+/// outfmt 0, the XML family and the tabular rows read them, the other reports the lengths alone).
+/// A reported sequence whose stored title LOSAT does not report as
 /// NCBI does is LOSAT's refusal, and so is one with parsed Seq-ids that the reports `shown` do
 /// not write as NCBI (`common::database::check_reported_parsed`, and with `shown.joined`
-/// `refuse_joined_hits`). EXPERIMENT (LOSAT_X_TBNDBSTREAM): the packed subjects are read
+/// `refuse_joined_hits`). The packed subjects are read
 /// from the database (`SubjectLetters::Stream`, one read each) instead of cloned from the copy.
 pub(super) fn reported_subjects(
     database: &TblastnDatabase,
     titles: &DatabaseTitles,
     hitlists: &mut [KappaResultHitList],
     stores: super::x_subject_store::SubjectLetters<'_>,
+    letters: bool,
     shown: ParsedShown,
 ) -> Result<ReportedSubjects> {
     use super::x_subject_store::SubjectLetters;
@@ -320,7 +382,8 @@ pub(super) fn reported_subjects(
         }
     }
     let mut records = Vec::with_capacity(ordinals.len());
-    let mut kept = Vec::with_capacity(ordinals.len());
+    let mut lengths = Vec::with_capacity(ordinals.len());
+    let mut kept = Vec::new();
     let mut parsed: Vec<Option<Arc<ParsedSubject>>> = Vec::new();
     // Whether `taxdb.bti` is on the search path, looked up at the first sequence with parsed
     // Seq-ids that outfmt 0 shows.
@@ -346,20 +409,33 @@ pub(super) fn reported_subjects(
             }
         };
         records.push(FastaRecord {
-            local_id: format!("gnl|BL_ORD_ID|{ordinal}"),
+            // A taxid list's ordinal ids are its included OIDs in order; NCBI prints the OID
+            // (line DI-8).
+            local_id: format!("gnl|BL_ORD_ID|{}", database.db.oid(ordinal)),
             title,
             sequence: Vec::new(),
             warnings: Vec::new(),
             source: Default::default(),
         });
-        kept.push(match stores {
-            SubjectLetters::Stream(stream) => stream.read(ordinal as usize)?,
+        lengths.push(match stores {
+            SubjectLetters::Stream(stream) => stream.length(ordinal as usize),
             SubjectLetters::Packed(stores) => stores
                 .get(ordinal as usize)
                 .with_context(|| format!("database sequence {ordinal} was not read"))?
-                .clone(),
-            SubjectLetters::Records(_) => unreachable!("a -db search holds no records"),
+                .len(),
+            SubjectLetters::Records(_) | SubjectLetters::Lengths(_) => {
+                unreachable!("a -db search holds its sequences")
+            }
         });
+        if letters {
+            kept.push(match stores {
+                SubjectLetters::Stream(stream) => stream.read(ordinal as usize)?,
+                SubjectLetters::Packed(stores) => stores[ordinal as usize].clone(),
+                SubjectLetters::Records(_) | SubjectLetters::Lengths(_) => {
+                    unreachable!("a -db search holds its sequences")
+                }
+            });
+        }
     }
     if shown.joined && !parsed.is_empty() {
         for (query, hitlist) in hitlists.iter().enumerate() {
@@ -380,6 +456,7 @@ pub(super) fn reported_subjects(
     Ok(ReportedSubjects {
         ordinals,
         records,
+        lengths,
         stores: kept,
         parsed,
     })
@@ -480,6 +557,52 @@ mod tests {
         hitlist
     }
 
+    // Reports that read no letters get the lengths of the reported sequences and no store; the
+    // others get both, by rank.
+    #[test]
+    fn the_reported_sequences_are_read_only_for_reports_of_letters() {
+        use super::super::x_subject_store::SubjectLetters;
+        let cwd = std::env::temp_dir().join(format!(
+            "losat-tblastn-db-reported-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let database = open_with_taxdb("x16_ntaxid", None, &cwd);
+        let stream = database.x_stream(1).unwrap();
+        let of = |letters: bool| {
+            let mut hitlists = vec![hitlist(&[(1, 50), (0, 40)])];
+            let mut titles = DatabaseTitles::new();
+            read_titles(&database, &hitlists, 0, &mut titles).unwrap();
+            reported_subjects(
+                &database,
+                &titles,
+                &mut hitlists,
+                SubjectLetters::Stream(&stream),
+                letters,
+                ParsedShown::default(),
+            )
+            .unwrap()
+        };
+        let whole = [stream.length(0), stream.length(1)];
+        let reported = of(false);
+        assert_eq!(reported.lengths, whole);
+        assert!(reported.stores.is_empty());
+        let letters = reported.letters();
+        assert!(matches!(letters, SubjectLetters::Lengths(_)));
+        assert_eq!(letters.count(), 2);
+        assert_eq!(letters.length(1), whole[1]);
+        let reported = of(true);
+        assert_eq!(reported.lengths, whole);
+        assert_eq!(reported.stores.len(), 2);
+        assert_eq!(reported.stores[0].len(), whole[0]);
+        assert_eq!(reported.stores[1].len(), whole[1]);
+        let letters = reported.letters();
+        assert!(matches!(letters, SubjectLetters::Packed(_)));
+        assert_eq!(letters.length(1), whole[1]);
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
     // DBID item T: a batch's prefetch looks up the sequences that its reports show (an HSP with a
     // Seq-align), once per volume and taxid over the batches of a run, and opens the taxonomy
     // database at the run's first lookup; nothing without `taxdb.bti`. `x16_ntaxid_99990` (two
@@ -497,7 +620,7 @@ mod tests {
         // The reports of one batch of `queries` (the lists of each query), as the run makes them:
         // the titles, the reported sequences by rank, then the batch's prefetch.
         let text = |database: &TblastnDatabase, queries: &[&[(i32, i32)]]| -> String {
-            let stores = database.read_stores().unwrap();
+            let stream = database.x_stream(1).unwrap();
             let mut hitlists: Vec<KappaResultHitList> =
                 queries.iter().map(|&lists| hitlist(lists)).collect();
             let mut titles = DatabaseTitles::new();
@@ -506,7 +629,8 @@ mod tests {
                 database,
                 &titles,
                 &mut hitlists,
-                SubjectLetters::Packed(&stores),
+                SubjectLetters::Stream(&stream),
+                true,
                 ParsedShown::default(),
             )
             .unwrap();

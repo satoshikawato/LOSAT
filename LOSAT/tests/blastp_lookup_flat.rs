@@ -199,18 +199,16 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     assert_hits_recycled(&counts, &what);
 }
 
-// The search of all queries (a pairwise report with `LOSAT_X_BPQBLOCKFMT=0` is not written in blocks):
-// one build, by the pool; no earlier table.
+// The search of all queries: one build, by the pool; no earlier table. `LOSAT_X_BPQBLOCK=0`, and a
+// block larger than the 101 queries (77,448 letters, above the built-in 50,000), which is one block
+// with the block switch on (`x_query_block_plan` takes the search of all queries for it).
+// The pairwise report is written in blocks, so only the block size makes the search of all queries.
 #[test]
 fn search_of_all_queries_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    for letters in ["1", "0"] {
-        let base = [
-            ("LOSAT_X_BPCLUT", "1"),
-            ("LOSAT_X_BPQBLOCK", letters),
-            ("LOSAT_X_BPQBLOCKFMT", "0"),
-        ];
+    for letters in ["100000000", "0"] {
+        let base = [("LOSAT_X_BPCLUT", "1"), ("LOSAT_X_BPQBLOCK", letters)];
         let counts = same_reports(&subject, 4, &base, "0").printed("BPLKPFLAT");
         let what = format!("blocks {letters}: {counts:?}");
         assert_eq!(counts["tables"], 1, "{what}");

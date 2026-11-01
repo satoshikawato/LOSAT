@@ -11,7 +11,7 @@ use super::constants::{
     LUT_WIDTH_11_THRESHOLD_10, LUT_WIDTH_11_THRESHOLD_8, MAX_DIRECT_LOOKUP_WORD_SIZE,
     MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN,
     MIN_UNGAPPED_SCORE_MEGABLAST, SCAN_RANGE_BLASTN, SCAN_RANGE_MEGABLAST, X_DROP_GAPPED_FINAL,
-    X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_NUCL,
+    X_DROP_GAPPED_GREEDY, X_DROP_GAPPED_NUCL, X_DROP_UNGAPPED,
 };
 use super::disc_lookup::DiscWordType;
 use super::lookup::{
@@ -49,11 +49,21 @@ pub struct TaskConfig {
     /// list query offsets newest first; the small and standard tables list them in
     /// ascending order.
     pub mb_lookup: bool,
-    pub x_drop_gapped: i32, // Task-specific gapped X-dropoff (blastn: 30, megablast: 25)
-    pub x_drop_final: i32,  // Final traceback X-dropoff (100 for all nucleotide tasks)
-    pub scan_range: usize,  // Off-diagonal scan range (BLAST_SCAN_RANGE_NUCL: 0 for every task)
+    /// The gapped X-dropoff in bits (`-xdrop_gap`, else the task's: blastn 30, megablast 25),
+    /// converted to a raw score once per batch (`scoring.rs` `gap_x_dropoffs`).
+    pub x_drop_gapped: f64,
+    /// The final (traceback) X-dropoff in bits (`-xdrop_gap_final`, else 100 for every task).
+    pub x_drop_final: f64,
+    /// The ungapped X-dropoff in bits (`-xdrop_ungap`, else 20; 0 for megablast, whose raw
+    /// X-drop is then the word cutoff of the context, blast_parameters.c:378-381).
+    pub x_drop_ungapped: f64,
+    /// The raw hit-saving cutoff that replaces the e-value's (`-min_raw_gapped_score` above 0).
+    pub min_raw_gapped_score: Option<i32>,
+    /// The off-diagonal range of the second hit (`-off_diagonal_range`, else 0).
+    pub scan_range: usize,
     pub min_diag_separation: i32, // NCBI reference: blast_nucl_options.cpp:239,259 (blastn: 50, megablast: 6)
-    /// The two-hit window (`window_size`): 40 for dc-megablast, 0 (one hit) otherwise.
+    /// The two-hit window (`-window_size`, else the task's: 40 for dc-megablast, 0 (one hit)
+    /// otherwise).
     pub window_size: usize,
     /// The discontiguous template (`mb_template_type`, `mb_template_length`); a length
     /// of 0 is a contiguous word.
@@ -289,7 +299,8 @@ struct TaskDefaults {
     evalue: f64,
     dust: bool,
     greedy: bool,
-    x_drop_gapped: i32,
+    x_drop_gapped: f64,
+    x_drop_ungapped: f64,
     min_diag_separation: i32,
     window_size: usize,
     template_type: DiscWordType,
@@ -307,7 +318,10 @@ fn task_defaults(task: &str) -> TaskDefaults {
             evalue: 10.0,
             dust: true,
             greedy: true,
-            x_drop_gapped: X_DROP_GAPPED_GREEDY,
+            x_drop_gapped: f64::from(X_DROP_GAPPED_GREEDY),
+            // `SetMBInitialWordOptionsDefaults` sets the window only; the calloc'd X-drop
+            // (api/blast_options_local_priv.cpp:54) stays 0.
+            x_drop_ungapped: 0.0,
             min_diag_separation: MIN_DIAG_SEPARATION_MEGABLAST,
             window_size: 0,
             template_type: DiscWordType::Coding,
@@ -322,7 +336,8 @@ fn task_defaults(task: &str) -> TaskDefaults {
             evalue: 10.0,
             dust: true,
             greedy: false,
-            x_drop_gapped: X_DROP_GAPPED_NUCL,
+            x_drop_gapped: f64::from(X_DROP_GAPPED_NUCL),
+            x_drop_ungapped: f64::from(X_DROP_UNGAPPED),
             min_diag_separation: MIN_DIAG_SEPARATION_MEGABLAST,
             window_size: 40,
             template_type: DiscWordType::Coding,
@@ -337,7 +352,8 @@ fn task_defaults(task: &str) -> TaskDefaults {
             evalue: 1000.0,
             dust: false,
             greedy: false,
-            x_drop_gapped: X_DROP_GAPPED_NUCL,
+            x_drop_gapped: f64::from(X_DROP_GAPPED_NUCL),
+            x_drop_ungapped: f64::from(X_DROP_UNGAPPED),
             min_diag_separation: MIN_DIAG_SEPARATION_BLASTN,
             window_size: 0,
             template_type: DiscWordType::Coding,
@@ -352,7 +368,8 @@ fn task_defaults(task: &str) -> TaskDefaults {
             evalue: 10.0,
             dust: true,
             greedy: false,
-            x_drop_gapped: X_DROP_GAPPED_NUCL,
+            x_drop_gapped: f64::from(X_DROP_GAPPED_NUCL),
+            x_drop_ungapped: f64::from(X_DROP_UNGAPPED),
             min_diag_separation: MIN_DIAG_SEPARATION_BLASTN,
             window_size: 0,
             template_type: DiscWordType::Coding,
@@ -505,6 +522,31 @@ pub fn calculate_initial_scan_step(effective_word_size: usize, user_scan_step: u
     }
 }
 
+/// The two-hit window of a run: `-window_size` when given, else the task's (40 for
+/// dc-megablast, 0 otherwise; `task_defaults`).
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:487-497
+/// ```c++
+///     if (args[kArgWindowSize]) {
+///         opt.SetWindowSize(args[kArgWindowSize].AsInteger());
+///     } else {
+///         int window = -1;
+///         BLAST_GetSuggestedWindowSize(opt.GetProgramType(),
+///                                      opt.GetMatrixName(),
+///                                      &window);
+///         if (window != -1) {
+///             opt.SetWindowSize(window);
+///         }
+///     }
+/// ```
+/// BLASTN has no matrix, so no suggested window replaces the task's.
+pub fn determine_window_size(args: &BlastnArgs) -> usize {
+    args.window_size
+        .map_or(task_defaults(&args.task).window_size, |window| {
+            window as usize
+        })
+}
+
 /// Configure task-specific parameters
 pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     let effective_word_size = determine_effective_word_size(args);
@@ -521,18 +563,46 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     // - blastn, blastn-short, dc-megablast: eDynProgScoreOnly (dynamic programming)
     // Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:182, 192;
     // disc_nucl_options.cpp:76-84
-    let use_dp = !defaults.greedy;
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:681-685
+    // ```c++
+    //     if (cmd_line_args.Exist(kArgNoGreedyExtension) &&
+    //         cmd_line_args[kArgNoGreedyExtension]) {
+    //         options.SetGapExtnAlgorithm(eDynProgScoreOnly);
+    //         options.SetGapTracebackAlgorithm(eDynProgTbck);
+    //     }
+    // ```
+    let use_dp = !defaults.greedy || args.no_greedy;
 
-    // NCBI BLAST: Task-specific gapped X-dropoff (`task_defaults`)
+    // NCBI BLAST: Task-specific gapped X-dropoff (`task_defaults`), in bits
     // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:122-148
-    // DP (blastn, blastn-short, dc-megablast): 30, greedy (megablast): 25
-    let x_drop_gapped = defaults.x_drop_gapped;
+    // DP (blastn, blastn-short, dc-megablast): 30, greedy (megablast): 25; `-xdrop_gap`
+    // replaces it (blast_args.cpp:280-282).
+    let x_drop_gapped = args.xdrop_gap.unwrap_or(defaults.x_drop_gapped);
 
-    // NCBI BLAST: Final traceback X-dropoff (100 for all nucleotide tasks)
+    // NCBI BLAST: Final traceback X-dropoff (100 for all nucleotide tasks), in bits
     // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:146
-    // BLAST_GAP_X_DROPOFF_FINAL_NUCL = 100
-    // Used in traceback phase to extend alignments further than preliminary extension
-    let x_drop_final = X_DROP_GAPPED_FINAL; // 100
+    // BLAST_GAP_X_DROPOFF_FINAL_NUCL = 100; `-xdrop_gap_final` replaces it
+    // (blast_args.cpp:284-286). The raw value is at least the gapped one (`gap_x_dropoffs`).
+    let x_drop_final = args
+        .xdrop_gap_final
+        .unwrap_or(f64::from(X_DROP_GAPPED_FINAL));
+
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:276-278
+    // ```c++
+    //     if (args.Exist(kArgUngappedXDropoff) && args[kArgUngappedXDropoff]) {
+    //         opt.SetXDropoff(args[kArgUngappedXDropoff].AsDouble());
+    //     }
+    // ```
+    let x_drop_ungapped = args.xdrop_ungap.unwrap_or(defaults.x_drop_ungapped);
+
+    // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:876-877
+    // ```c
+    //    if (options->cutoff_score > 0) {
+    //       Int4 new_cutoff = options->cutoff_score * (Int4) sbp->scale_factor;
+    // ```
+    // 0 and below are the options' unset value (the handles' `SetCutoffScore(0)`,
+    // blast_nucl_options.cpp:243,263).
+    let min_raw_gapped_score = args.min_raw_gapped_score.filter(|&score| score > 0);
 
     let scan_step = calculate_initial_scan_step(effective_word_size, args.scan_step);
 
@@ -541,10 +611,21 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
     // SetWindowSize(BLAST_WINDOW_SIZE_NUCL);
     // SetOffDiagonalRange(BLAST_SCAN_RANGE_NUCL);
     // ```
-    let scan_range = match args.task.as_str() {
-        "megablast" => SCAN_RANGE_MEGABLAST, // 0
-        _ => SCAN_RANGE_BLASTN,              // 0
-    };
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:518-522
+    // ```c++
+    //     if (args[kArgOffDiagonalRange]) {
+    //         opt.SetOffDiagonalRange(args[kArgOffDiagonalRange].AsInteger());
+    //     } else {
+    //         opt.SetOffDiagonalRange(0);
+    //     }
+    // ```
+    let scan_range = args.off_diagonal_range.map_or(
+        match args.task.as_str() {
+            "megablast" => SCAN_RANGE_MEGABLAST, // 0
+            _ => SCAN_RANGE_BLASTN,              // 0
+        },
+        |range| range as usize,
+    );
 
     // NCBI reference: blast_nucl_options.cpp:239, 259
     // Minimum diagonal separation for HSP containment checking
@@ -580,9 +661,11 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         mb_lookup: false,
         x_drop_gapped,
         x_drop_final,
+        x_drop_ungapped,
+        min_raw_gapped_score,
         scan_range,
         min_diag_separation,
-        window_size: defaults.window_size,
+        window_size: determine_window_size(args),
         mb_template_type,
         mb_template_length,
     }
@@ -1079,6 +1162,7 @@ pub fn build_lookup_tables<R: InputRecord>(
     subjects_packed: Option<&[Vec<u8>]>,
     approx_table_entries: usize,
     x_keep: Option<&std::sync::Arc<x_mb_lut_keep::Keep>>,
+    x_scan_letters: Option<u64>,
 ) -> (LookupTables, usize) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1231-1344
     // ```c
@@ -1191,6 +1275,7 @@ pub fn build_lookup_tables<R: InputRecord>(
             approx_table_entries,
             !config.mb_lookup,
             x_keep,
+            x_scan_letters,
         ))
     } else {
         None
@@ -1433,6 +1518,90 @@ mod tests {
     // ...
     //     SetGapExtnAlgorithm(eDynProgScoreOnly);
     // ```
+    // DI-6b: a value above 0 replaces the cutoff of the e-value; 0 and below are unset
+    // (blast_parameters.c:876), in every task.
+    #[test]
+    fn min_raw_gapped_score_above_zero_is_kept() {
+        for task in ["megablast", "dc-megablast", "blastn", "blastn-short"] {
+            let config = configure_task(&blastn_args(&["-task", task]));
+            assert_eq!(config.min_raw_gapped_score, None, "{task}");
+            for (value, expected) in [
+                ("15", Some(15)),
+                ("2147483647", Some(i32::MAX)),
+                ("0", None),
+                ("-5", None),
+            ] {
+                let config = configure_task(&blastn_args(&[
+                    "-task",
+                    task,
+                    "-min_raw_gapped_score",
+                    value,
+                ]));
+                assert_eq!(config.min_raw_gapped_score, expected, "{task} {value}");
+            }
+        }
+    }
+
+    // DI-6: the given options replace the task's values; the defaults stay the handles'
+    // (api/blast_nucl_options.cpp:163-193, blast_args.cpp:276-286,487-489,518-522,681-685).
+    #[test]
+    fn xdrop_window_and_greedy_options_replace_the_task_values() {
+        let config = configure_task(&blastn_args(&[]));
+        assert_eq!(
+            (
+                config.x_drop_gapped,
+                config.x_drop_final,
+                config.x_drop_ungapped
+            ),
+            (25.0, 100.0, 0.0)
+        );
+        assert_eq!(
+            (config.window_size, config.scan_range, config.use_dp),
+            (0, 0, false)
+        );
+        let config = configure_task(&blastn_args(&[
+            "-xdrop_gap",
+            "12.5",
+            "-xdrop_gap_final",
+            "150",
+            "-xdrop_ungap",
+            "7",
+            "-window_size",
+            "40",
+            "-off_diagonal_range",
+            "2",
+            "-no_greedy",
+            "-gapopen",
+            "5",
+            "-gapextend",
+            "2",
+        ]));
+        assert_eq!(
+            (
+                config.x_drop_gapped,
+                config.x_drop_final,
+                config.x_drop_ungapped
+            ),
+            (12.5, 150.0, 7.0)
+        );
+        assert_eq!(
+            (config.window_size, config.scan_range, config.use_dp),
+            (40, 2, true)
+        );
+        let config = configure_task(&blastn_args(&[
+            "-task",
+            "dc-megablast",
+            "-window_size",
+            "0",
+        ]));
+        assert_eq!((config.window_size, config.x_drop_ungapped), (0, 20.0));
+        assert_eq!(
+            determine_window_size(&blastn_args(&["-task", "dc-megablast"])),
+            40
+        );
+        assert_eq!(determine_window_size(&blastn_args(&["-task", "blastn"])), 0);
+    }
+
     #[test]
     fn task_defaults_follow_ncbi_handles() {
         let config = configure_task(&blastn_args(&["-task", "dc-megablast"]));
@@ -1442,7 +1611,8 @@ mod tests {
         );
         assert_eq!((config.gap_open, config.gap_extend), (5, 2));
         assert!(config.use_dp);
-        assert_eq!((config.x_drop_gapped, config.x_drop_final), (30, 100));
+        assert_eq!((config.x_drop_gapped, config.x_drop_final), (30.0, 100.0));
+        assert_eq!(config.x_drop_ungapped, 20.0);
         assert_eq!(config.min_diag_separation, 6);
         assert_eq!(config.window_size, 40);
         assert_eq!(

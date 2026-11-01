@@ -66,6 +66,9 @@ mod database;
 // EXPERIMENT (LOSAT_X_BPIHPOOL): the arrays of initial hits past NCBI's first size in one pool
 // shared by the threads.
 mod x_ih_pool;
+// EXPERIMENT (LOSAT_X_BPHITSFLAT): a subject's preliminary HSPs grouped by query through one array
+// of their positions.
+mod x_hits_flat;
 // EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel `-subject` loop in runs of subjects, one diagonal
 // table fill per run.
 #[cfg(all(
@@ -73,9 +76,11 @@ mod x_ih_pool;
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod x_subject_runs;
-// EXPERIMENT (LOSAT_X_BPSUBJMETA): the subjects' tabular IDs and titles of the block search made
+// EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects' tabular IDs and titles of the block search made
 // once for all blocks (held by `x_query_blocks::XBlockSubjects`).
 pub(super) mod x_subject_meta;
+// `-comp_based_stats 0`: NCBI's ordinary traceback in place of the composition-based redo.
+mod traceback;
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{
@@ -274,6 +279,14 @@ struct BlastpSubjectScratch {
     // Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
     // ```
     preliminary_hits_by_query: Vec<Vec<BlastpPreliminaryHsp>>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:112
+    // ```c
+    //       hsp_list_array = calloc(results->num_queries, sizeof(BlastHSPList*));
+    // ```
+    // EXPERIMENT (LOSAT_X_BPHITSFLAT): in place of `preliminary_hits_by_query`, the positions of
+    // the HSPs in query order and each query's start (`x_hits_flat.rs`).
+    x_hits_order: Vec<u32>,
+    x_hits_starts: Vec<u32>,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3748-3786
     // ```c
     // found[query_index] = TRUE;
@@ -555,6 +568,8 @@ impl BlastpSubjectScratch {
             preliminary_hsp_list: Vec::new(),
             preliminary_hsp_counts_by_query: Vec::new(),
             preliminary_hits_by_query: Vec::new(),
+            x_hits_order: Vec::new(),
+            x_hits_starts: Vec::new(),
             restricted_align_found: Vec::new(),
             restricted_align_array: Vec::new(),
             preliminary_gap_scratch: GapAlignScratch::new(),
@@ -907,15 +922,30 @@ fn blastp_cutoff_score_max(
     subject_length_for_hit_cutoff: i32,
     comp_based_stats: BlastpCompositionMode,
     gapped_params: &crate::stats::KarlinParams,
-    gumbel_params: &crate::stats::BlastGumbelBlk,
+    gumbel_params: Option<&crate::stats::BlastGumbelBlk>,
+    search_space: i64,
 ) -> i32 {
-    blast_spouge_etos(
-        blastp_prelim_evalue(expect_value, comp_based_stats),
-        gapped_params,
-        gumbel_params,
-        query_length,
-        subject_length_for_hit_cutoff,
-    )
+    match gumbel_params {
+        Some(gumbel_params) => blast_spouge_etos(
+            blastp_prelim_evalue(expect_value, comp_based_stats),
+            gapped_params,
+            gumbel_params,
+            query_length,
+            subject_length_for_hit_cutoff,
+        ),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:943-945
+        // ```c
+        //          } else {
+        //              BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
+        //          }
+        // ```
+        None => crate::algorithm::tblastx::ncbi_cutoffs::cutoff_score_from_evalue(
+            expect_value,
+            search_space,
+            gapped_params,
+        )
+        .max(1),
+    }
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:825-886
@@ -1312,7 +1342,8 @@ fn blastp_hit_cutoff_score_for_context(
     subject_length: i32,
     mode: BlastpCompositionMode,
     gapped_params: &KarlinParams,
-    gapped_gumbel: &BlastGumbelBlk,
+    gapped_gumbel: Option<&BlastGumbelBlk>,
+    search_space: i64,
 ) -> i32 {
     if !ctx.is_valid {
         return i32::MAX;
@@ -1324,6 +1355,7 @@ fn blastp_hit_cutoff_score_for_context(
         mode,
         gapped_params,
         gapped_gumbel,
+        search_space,
     )
 }
 
@@ -1430,28 +1462,37 @@ fn blastp_preliminary_cutoff_subject_length(subjects: &[EncodedProtein]) -> i32 
 // The preliminary HSP list of a subject for a query with the compact element, with the E-values
 // `Blast_HSPListGetEvalues` gives (`x_prelim_compact.rs`).
 #[allow(clippy::too_many_arguments)]
-fn x_build_compact_preliminary_hsp_list(
-    preliminary_hits: &[BlastpPreliminaryHsp],
+fn x_build_compact_preliminary_hsp_list<'h>(
+    preliminary_hits: impl ExactSizeIterator<Item = &'h BlastpPreliminaryHsp>,
     oid: u32,
     query_index: u32,
     query_length: usize,
     subject_length: usize,
     karlin_params: &KarlinParams,
-    gumbel_params: &BlastGumbelBlk,
+    gumbel_params: Option<&BlastGumbelBlk>,
+    search_space: f64,
 ) -> BlastpHspList<XPrelimHsp> {
-    let hsps: Vec<XPrelimHsp> = preliminary_hits
-        .iter()
-        .map(|hit| XPrelimHsp {
-            hsp: *hit,
-            e_value: blast_spouge_stoe(
-                hit.raw_score,
-                karlin_params,
-                gumbel_params,
-                query_length as i32,
-                subject_length as i32,
-            ),
-        })
-        .collect();
+    let hsps: Vec<XPrelimHsp> = match gumbel_params {
+        Some(gumbel_params) => preliminary_hits
+            .map(|hit| XPrelimHsp {
+                hsp: *hit,
+                e_value: blast_spouge_stoe(
+                    hit.raw_score,
+                    karlin_params,
+                    gumbel_params,
+                    query_length as i32,
+                    subject_length as i32,
+                ),
+            })
+            .collect(),
+        None => preliminary_hits
+            .map(|hit| XPrelimHsp {
+                hsp: *hit,
+                e_value: search_space
+                    * (-karlin_params.lambda * hit.raw_score as f64 + karlin_params.k.ln()).exp(),
+            })
+            .collect(),
+    };
     let mut hsp_list = BlastpHspList {
         oid,
         query_index,
@@ -2232,7 +2273,11 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's {program} (NCBI BLAST+ 2.17.0 gives different reports for the same search)"
         );
     }
-    if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust {
+    // Mode 0 runs BLASTP's ordinary traceback (`traceback.rs`); psiblast's rounds keep mode 2.
+    if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust
+        && !(args.app == BlastpApp::Blastp
+            && args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats)
+    {
         bail!(
             "-comp_based_stats {} is not supported by LOSAT's {program}",
             args.comp_based_stats.to_ncbi_cli_string()
@@ -2241,170 +2286,17 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     Ok(())
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:39-45
-// ```c
-// const char* kDfltArgTabularOutputFmt =
-//     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-//     "evalue bitscore";
-// const char* kDfltArgTabularOutputFmtTag("std");
-// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BlastpTabularField {
-    QuerySeqId,
-    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1132-1135,1146-1149
-    // case eQueryAccession: ... "query acc."; case eQueryAccessionVersion: ... "query acc.ver";
-    QueryAccession,
-    QueryAccessionVersion,
-    QueryLength,
-    SubjectSeqId,
-    SubjectAccession,
-    SubjectAccessionVersion,
-    SubjectLength,
-    QueryStart,
-    QueryEnd,
-    SubjectStart,
-    SubjectEnd,
-    QuerySeq,
-    SubjectSeq,
-    Evalue,
-    BitScore,
-    Score,
-    AlignmentLength,
-    PercentIdentical,
-    NumIdentical,
-    Mismatches,
-    Positives,
-    GapOpenings,
-    Gaps,
-    PercentPositives,
-    QueryFrame,
-    SubjectFrame,
-    Frames,
-    Btop,
-    SubjectTitle,
-}
-
-// NCBI reference: c++/src/objtools/align_format/tabular.cpp:1111-1217
-// case eQuerySeqId: m_Ostream << "query id"; break;
-// case eBitScore: m_Ostream << "bit score"; break;
-impl BlastpTabularField {
-    fn header_name(self) -> &'static str {
-        match self {
-            Self::QuerySeqId => "query id",
-            Self::QueryAccession => "query acc.",
-            Self::QueryAccessionVersion => "query acc.ver",
-            Self::QueryLength => "query length",
-            Self::SubjectSeqId => "subject id",
-            Self::SubjectAccession => "subject acc.",
-            Self::SubjectAccessionVersion => "subject acc.ver",
-            Self::SubjectLength => "subject length",
-            Self::QueryStart => "q. start",
-            Self::QueryEnd => "q. end",
-            Self::SubjectStart => "s. start",
-            Self::SubjectEnd => "s. end",
-            Self::QuerySeq => "query seq",
-            Self::SubjectSeq => "subject seq",
-            Self::Evalue => "evalue",
-            Self::BitScore => "bit score",
-            Self::Score => "score",
-            Self::AlignmentLength => "alignment length",
-            Self::PercentIdentical => "% identity",
-            Self::NumIdentical => "identical",
-            Self::Mismatches => "mismatches",
-            Self::Positives => "positives",
-            Self::GapOpenings => "gap opens",
-            Self::Gaps => "gaps",
-            Self::PercentPositives => "% positives",
-            Self::QueryFrame => "query frame",
-            Self::SubjectFrame => "sbjct frame",
-            Self::Frames => "query/sbjct frames",
-            Self::Btop => "BTOP",
-            Self::SubjectTitle => "subject title",
-        }
-    }
-}
-
-const DEFAULT_BLASTP_TABULAR_FIELDS: [BlastpTabularField; 12] = [
-    BlastpTabularField::QueryAccessionVersion,
-    BlastpTabularField::SubjectAccessionVersion,
-    BlastpTabularField::PercentIdentical,
-    BlastpTabularField::AlignmentLength,
-    BlastpTabularField::Mismatches,
-    BlastpTabularField::GapOpenings,
-    BlastpTabularField::QueryStart,
-    BlastpTabularField::QueryEnd,
-    BlastpTabularField::SubjectStart,
-    BlastpTabularField::SubjectEnd,
-    BlastpTabularField::Evalue,
-    BlastpTabularField::BitScore,
-];
-
-#[inline]
-fn default_blastp_tabular_fields() -> &'static [BlastpTabularField] {
-    &DEFAULT_BLASTP_TABULAR_FIELDS
-}
-
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:900-990
-// ```c
-// if (x_IsFieldRequested(eQuerySeq) ||
-//     x_IsFieldRequested(eSubjectSeq) ||
-//     x_IsFieldRequested(eBTOP) || ...) {
-//     alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
-//     alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
-// }
-// ```
-//
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1448-1480
-// ```c
-// case eQuerySeq:
-// case eSubjectSeq:
-// case eBTOP:
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-993
-// ```c++
-//     if (x_IsFieldRequested(eQuerySeq) ||
-//         x_IsFieldRequested(eSubjectSeq) ||
-//         x_IsFieldRequested(ePositives) ||
-//         x_IsFieldRequested(ePercentPositives) ||
-//         x_IsFieldRequested(eBTOP) ||
-//         (x_IsFieldRequested(eNumIdentical) && !kNoFetchSequence) ||
-//         (x_IsFieldRequested(eMismatches) && !kNoFetchSequence) ||
-//         (x_IsFieldRequested(ePercentIdentical) && !kNoFetchSequence)) {
-//
-//         alnVec->SetGapChar('-');
-//         alnVec->SetGenCode(m_QueryGeneticCode, 0);
-//         alnVec->SetGenCode(m_DbGeneticCode, 1);
-//         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
-//         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
-//
-//         if (x_IsFieldRequested(ePositives) ||
-//             x_IsFieldRequested(ePercentPositives) ||
-//             x_IsFieldRequested(eBTOP) ||
-//             x_IsFieldRequested(eNumIdentical) ||
-//             x_IsFieldRequested(eMismatches) ||
-//             x_IsFieldRequested(ePercentIdentical)) {
-// ```
-#[inline]
-fn blastp_tabular_fields_require_rendered_alignment(fields: &[BlastpTabularField]) -> bool {
-    fields.iter().any(|field| {
-        matches!(
-            field,
-            BlastpTabularField::QuerySeq
-                | BlastpTabularField::SubjectSeq
-                | BlastpTabularField::Btop
-                | BlastpTabularField::Positives
-                | BlastpTabularField::PercentPositives
-        )
-    })
-}
-
-/// The report of one requested BLASTP format: one of LOSAT's text reports (outfmt 0, 6 and
-/// 7, with the custom fields of the tabular ones), the Seq-annot of Seq-aligns of each
-/// query (outfmt 8, 9, 12; `seqalign`), BLAST XML (outfmt 5; `blast_xml`), or the XML2 / JSON
-/// documents (outfmt 15 and 16; `blast_xml2`).
+/// The report of one requested BLASTP format: one of LOSAT's text reports (outfmt 0, and the
+/// default outfmt 6 and 7), the tabular reports with a field list or a delimiter and outfmt 10
+/// and 20 (`tabular`), the Seq-annot of Seq-aligns of each query (outfmt 8, 9, 12;
+/// `seqalign`), BLAST XML (outfmt 5; `blast_xml`), or the XML2 / JSON documents (outfmt 15 and
+/// 16; `blast_xml2`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BlastpReport {
     Text(OutputFormat),
+    /// NCBI's `CBlastTabularInfo` with a field list or a delimiter (`TabularSpec::of`), through
+    /// the shared writer (`report::tabular`, `tabular::write_blastp_tabular`).
+    CustomTabular(&'static crate::report::tabular::TabularSpec),
     Seqalign(crate::report::serial::SerialFormat),
     Xml,
     Xml2(crate::report::blast_xml2::Xml2Kind),
@@ -2416,7 +2308,7 @@ impl BlastpReport {
     /// Whether NCBI writes a query's result warnings with its report
     /// (`ReportFormat::writes_query_warnings`): not for the Seq-annot formats.
     fn writes_query_warnings(self) -> bool {
-        matches!(self, BlastpReport::Text(_))
+        matches!(self, BlastpReport::Text(_) | BlastpReport::CustomTabular(_))
     }
 
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
@@ -2426,6 +2318,13 @@ impl BlastpReport {
     fn prefetches_subjects(self) -> bool {
         crate::algorithm::common::database::prefetches_subjects(match self {
             BlastpReport::Text(outfmt) => Some(outfmt as i32),
+            // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and 20):
+            // they read the subjects as 6 and 7 do; the rows' own lookups of the taxonomy names
+            // come with the rows (`report::tabular::TabularNames`).
+            BlastpReport::CustomTabular(spec) => Some(match spec.kind {
+                crate::report::tabular::TabularKind::Commented => 7,
+                _ => 6,
+            }),
             BlastpReport::Xml => Some(5),
             // The Seq-annots and the archive fetch nothing; XML2 and JSON write the messages
             // at each `Hit` (`TaxdbPrinter`).
@@ -2433,11 +2332,13 @@ impl BlastpReport {
         })
     }
 
-    /// Whether the report is tabular (outfmt 6 and 7), which reads the tabular subject IDs.
+    /// Whether the report is tabular (outfmt 6, 7, 10 and 20), which reads the tabular subject
+    /// IDs.
     fn is_tabular(self) -> bool {
         matches!(
             self,
             BlastpReport::Text(OutputFormat::Tabular | OutputFormat::TabularWithComments)
+                | BlastpReport::CustomTabular(_)
         )
     }
 }
@@ -2492,202 +2393,6 @@ fn x_xml2_kind_takes_blocks(kind: crate::report::blast_xml2::Xml2Kind) -> bool {
     )
 }
 
-// NCBI blast_args.cpp:2657-2660; tabular.cpp:1100-1108:
-// ITERATE(list<ETabularField>, iter, m_FieldsToShow) { x_PrintField(*iter); }
-// Validate the CLI specification before loading any input sequences.
-pub(crate) fn validate_cli_outfmt(spec: &str) -> Result<String, String> {
-    // outfmt 5, 8, 9, 12, 15 and 16 have no fields (`report_format` has accepted them for
-    // BLASTP).
-    if blastp_seqalign_format(spec).is_some()
-        || blastp_is_xml(spec)
-        || blastp_xml2_kind(spec).is_some()
-        || blastp_is_archive(spec)
-    {
-        return Ok(spec.into());
-    }
-    let (format, fields) = OutputFormat::parse(spec)?;
-    if let Some(fields) = fields {
-        if format == OutputFormat::Pairwise {
-            return Err("blastp outfmt 0 does not accept custom field lists".into());
-        }
-        parse_blastp_tabular_fields(&fields).map_err(|error| error.to_string())?;
-    }
-    Ok(spec.into())
-}
-
-// NCBI reference: c++/src/objtools/align_format/tabular.cpp:70-99
-// ```c
-// void CBlastTabularInfo::x_SetFieldsToShow(const string& format)
-// {
-// ...
-//     vector<string> format_tokens;
-//     NStr::Split(format, " ", format_tokens);
-//
-//     if (format_tokens.empty())
-//         x_AddDefaultFieldsToShow();
-//
-//     ITERATE (vector<string>, iter, format_tokens) {
-//         if (*iter == kDfltArgTabularOutputFmtTag)
-//             x_AddDefaultFieldsToShow();
-//         else if ((*iter)[0] == '-') {
-//             string field = (*iter).substr(1);
-//             if (m_FieldMap.count(field) > 0)
-//                 x_DeleteFieldToShow(m_FieldMap[field]);
-//         } else {
-//             if (m_FieldMap.count(*iter) > 0)
-//                 x_AddFieldToShow(m_FieldMap[*iter]);
-//         }
-//     }
-//
-//     if (m_FieldsToShow.empty()) {
-//         x_AddDefaultFieldsToShow();
-//     }
-// }
-// ```
-// NCBI reference: c++/src/objtools/align_format/tabular.cpp:1393-1408
-// ```c
-// CBlastTabularInfo::x_AddFieldToShow(ETabularField field)
-// {
-//     if ( !x_IsFieldRequested(field) ) {
-//         m_FieldsToShow.push_back(field);
-//     }
-// }
-// ...
-//     while ((iter = find(m_FieldsToShow.begin(), m_FieldsToShow.end(), field))
-//            != m_FieldsToShow.end())
-//         m_FieldsToShow.erase(iter);
-// ```
-// The tokens are split at single spaces and matched exactly; NCBI ignores a token that is
-// not a field name. A field that NCBI writes and LOSAT's BLASTP does not is rejected.
-fn parse_blastp_tabular_fields(spec: &str) -> Result<Vec<BlastpTabularField>> {
-    let mut fields = Vec::new();
-    for token in spec.split(' ') {
-        if token == "std" {
-            for field in DEFAULT_BLASTP_TABULAR_FIELDS {
-                if !fields.contains(&field) {
-                    fields.push(field);
-                }
-            }
-        } else if let Some(name) = token.strip_prefix('-') {
-            if let Some(field) = blastp_tabular_field(name)? {
-                fields.retain(|shown| *shown != field);
-            }
-        } else if let Some(field) = blastp_tabular_field(token)? {
-            if !fields.contains(&field) {
-                fields.push(field);
-            }
-        }
-    }
-    if fields.is_empty() {
-        fields = DEFAULT_BLASTP_TABULAR_FIELDS.to_vec();
-    }
-    Ok(fields)
-}
-
-// NCBI reference: c++/src/objtools/align_format/format_flags.cpp:41-195
-// ```c
-// const char* kDfltArgTabularOutputFmtTag("std");
-//
-// const size_t kNumTabularOutputFormatSpecifiers = 50;
-// const SFormatSpec sc_FormatSpecifiers[kNumTabularOutputFormatSpecifiers] = {
-//     SFormatSpec("qseqid",
-//                 "Query Seq-id",
-//                 eQuerySeqId),
-// ...
-//     SFormatSpec("qcovus",
-//                 "Query Coverage Per Unique Subject (blastn only)",
-//                 eQueryCovUniqSubject),
-// };
-// ```
-/// The field of a field name: `None` for a name that is not one of NCBI's field names, an
-/// error for a field that NCBI writes and LOSAT's BLASTP does not.
-pub(crate) fn blastp_tabular_field(name: &str) -> Result<Option<BlastpTabularField>> {
-    Ok(Some(match name {
-        "qseqid" => BlastpTabularField::QuerySeqId,
-        // NCBI reference: c++/src/objtools/align_format/tabular.cpp:175-186,1132-1149
-        // eAccession uses GetLabel(...,0), eAccVersion uses fLabel_Version.
-        // Local FASTA IDs retain their spelling in both fields; fields remain distinct.
-        "qacc" => BlastpTabularField::QueryAccession,
-        "qaccver" => BlastpTabularField::QueryAccessionVersion,
-        "qlen" => BlastpTabularField::QueryLength,
-        "sseqid" => BlastpTabularField::SubjectSeqId,
-        "sacc" => BlastpTabularField::SubjectAccession,
-        "saccver" => BlastpTabularField::SubjectAccessionVersion,
-        "slen" => BlastpTabularField::SubjectLength,
-        "qstart" => BlastpTabularField::QueryStart,
-        "qend" => BlastpTabularField::QueryEnd,
-        "sstart" => BlastpTabularField::SubjectStart,
-        "send" => BlastpTabularField::SubjectEnd,
-        "qseq" => BlastpTabularField::QuerySeq,
-        "sseq" => BlastpTabularField::SubjectSeq,
-        "evalue" => BlastpTabularField::Evalue,
-        "bitscore" => BlastpTabularField::BitScore,
-        "score" => BlastpTabularField::Score,
-        "length" => BlastpTabularField::AlignmentLength,
-        "pident" => BlastpTabularField::PercentIdentical,
-        "nident" => BlastpTabularField::NumIdentical,
-        "mismatch" => BlastpTabularField::Mismatches,
-        "positive" => BlastpTabularField::Positives,
-        "gapopen" => BlastpTabularField::GapOpenings,
-        "gaps" => BlastpTabularField::Gaps,
-        "ppos" => BlastpTabularField::PercentPositives,
-        "qframe" => BlastpTabularField::QueryFrame,
-        "sframe" => BlastpTabularField::SubjectFrame,
-        "frames" => BlastpTabularField::Frames,
-        "btop" => BlastpTabularField::Btop,
-        "stitle" => BlastpTabularField::SubjectTitle,
-        "qgi" | "sallseqid" | "sgi" | "sallgi" | "sallacc" | "staxid" | "ssciname" | "scomname"
-        | "sblastname" | "sskingdom" | "staxids" | "sscinames" | "scomnames" | "sblastnames"
-        | "sskingdoms" | "salltitles" | "sstrand" | "qcovs" | "qcovhsp" | "qcovus" => {
-            bail!("the output field {name} is not supported by LOSAT's BLASTP")
-        }
-        _ => return Ok(None),
-    }))
-}
-
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:985-1027
-// ```c
-// if (m_QuerySeq[i] == m_SubjectSeq[i]) {
-//     ++num_ident;
-//     ++num_positives;
-//     ++num_matches;
-// } else {
-//     if (num_matches > 0) {
-//         btop_string += NStr::Int8ToString(num_matches);
-//         num_matches = 0;
-//     }
-//     btop_string += m_QuerySeq[i];
-//     btop_string += m_SubjectSeq[i];
-// }
-// ```
-fn build_btop(query_seq: &str, subject_seq: &str) -> String {
-    let mut btop = String::new();
-    let mut matches = 0usize;
-
-    for (q, s) in query_seq.chars().zip(subject_seq.chars()) {
-        if q == s {
-            matches += 1;
-        } else {
-            if matches > 0 {
-                btop.push_str(&matches.to_string());
-                matches = 0;
-            }
-            btop.push(q);
-            btop.push(s);
-        }
-    }
-
-    if matches > 0 {
-        btop.push_str(&matches.to_string());
-    }
-
-    btop
-}
-
-fn blastp_frame_value(frame: Option<i8>) -> i8 {
-    frame.unwrap_or(1)
-}
-
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1283
 // ```c
 // if (num_hits != 0) {
@@ -2699,7 +2404,7 @@ fn write_blastp_outfmt7_header<W: Write>(
     writer: &mut W,
     context: &ReportContext,
     query_title: &[u8],
-    fields: &[BlastpTabularField],
+    fields: &[crate::report::tabular::TabularField],
     num_hits: usize,
     batch_skipped: bool,
 ) -> std::io::Result<()> {
@@ -2859,7 +2564,7 @@ fn check_tabular_subject_ids(
 
 // No NCBI counterpart: values NCBI makes per row (tabular.cpp above), made once for all blocks;
 // reuse only.
-/// EXPERIMENT (LOSAT_X_BPSUBJMETA): `tabular_subject_ids` of a block of the block search with the
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): `tabular_subject_ids` of a block of the block search with the
 /// subjects' ID results made once for all blocks (`blast_engine/x_subject_meta.rs`): the same
 /// check over the block's hit lists, with the stored results, and the shown IDs borrowed.
 /// The stored results are `tabular_subject_id_results` of the same records, a function of each
@@ -2909,317 +2614,6 @@ impl<'a> SubjectIdFields<'a> {
     }
 }
 
-fn blastp_tabular_field_text(
-    field: BlastpTabularField,
-    hit: &PairwiseHit,
-    query_id: &[u8],
-    subject_id: SubjectIdFields<'_>,
-    subject_stitle: &[u8],
-) -> Vec<u8> {
-    let h = &hit.hit;
-    let positives = hit.positives.unwrap_or(h.num_positives);
-    let gaps = hit.gaps.unwrap_or_else(|| h.gap_letters());
-    let query_frame = blastp_frame_value(hit.query_frame);
-    let subject_frame = blastp_frame_value(hit.subject_frame);
-
-    // The IDs are written as bytes (`FastaRecord::shown_id`, `tabular_subject_ids`).
-    let text = match field {
-        BlastpTabularField::QuerySeqId
-        | BlastpTabularField::QueryAccession
-        | BlastpTabularField::QueryAccessionVersion => return query_id.to_vec(),
-        BlastpTabularField::QueryLength => h.query_length.to_string(),
-        BlastpTabularField::SubjectSeqId => return subject_id.seq_id.to_vec(),
-        BlastpTabularField::SubjectAccession => return subject_id.accession.to_vec(),
-        BlastpTabularField::SubjectAccessionVersion => {
-            return subject_id.accession_version.to_vec()
-        }
-        BlastpTabularField::SubjectLength => hit.subject_length.unwrap_or_default().to_string(),
-        BlastpTabularField::QueryStart => h.q_start.to_string(),
-        BlastpTabularField::QueryEnd => h.q_end.to_string(),
-        BlastpTabularField::SubjectStart => h.s_start.to_string(),
-        BlastpTabularField::SubjectEnd => h.s_end.to_string(),
-        BlastpTabularField::QuerySeq => hit.query_seq.clone().unwrap_or_default(),
-        BlastpTabularField::SubjectSeq => hit.subject_seq.clone().unwrap_or_default(),
-        BlastpTabularField::Evalue => format_evalue_ncbi_tabular(h.e_value),
-        BlastpTabularField::BitScore => format_bitscore_ncbi(h.bit_score),
-        BlastpTabularField::Score => h.raw_score.to_string(),
-        BlastpTabularField::AlignmentLength => h.length.to_string(),
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/objtools/align_format/tabular.hpp:437-441
-        // ```c
-        // double perc_ident =
-        //     (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
-        // m_Ostream << NStr::DoubleToString(perc_ident, 3);
-        // ```
-        BlastpTabularField::PercentIdentical => {
-            format_percent_identity_ncbi(h.num_ident, h.length, 3)
-        }
-        BlastpTabularField::NumIdentical => h.num_ident.to_string(),
-        BlastpTabularField::Mismatches => h.mismatch.to_string(),
-        BlastpTabularField::Positives => positives.to_string(),
-        BlastpTabularField::GapOpenings => h.gapopen.to_string(),
-        BlastpTabularField::Gaps => gaps.to_string(),
-        BlastpTabularField::PercentPositives => {
-            let ppos = if h.length > 0 {
-                (positives as f64 / h.length as f64) * 100.0
-            } else {
-                0.0
-            };
-            format!("{:.2}", ppos)
-        }
-        BlastpTabularField::QueryFrame => query_frame.to_string(),
-        BlastpTabularField::SubjectFrame => subject_frame.to_string(),
-        BlastpTabularField::Frames => format!("{query_frame}/{subject_frame}"),
-        BlastpTabularField::Btop => {
-            let query_seq = hit.query_seq.as_deref().unwrap_or("");
-            let subject_seq = hit.subject_seq.as_deref().unwrap_or("");
-            build_btop(query_seq, subject_seq)
-        }
-        // NCBI reference: c++/src/objtools/align_format/tabular.cpp:415-439,845-859
-        // m_SubjectDefline.Reset(); if (bdlRef.NotEmpty()) m_SubjectDefline = bdlRef;
-        // NCBI reference: c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1234-1258
-        // if (!(*iter)->IsUser()) continue; ... return failure;
-        // Local FASTA has no ASN BLAST defline user object, even when it has a title; a
-        // database sequence has its stored title (`blastp_subject_stitle`).
-        BlastpTabularField::SubjectTitle => return subject_stitle.to_vec(),
-    };
-    text.into_bytes()
-}
-
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// void CBlastTabularInfo::Print()
-// {
-//     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//         if (iter != m_FieldsToShow.begin())
-//             m_Ostream << m_FieldDelimiter;
-//         x_PrintField(*iter);
-//     }
-//     m_Ostream << "\n";
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:415-435
-// ```c++
-// void CBlastTabularInfo::x_PrintSubjectTitle()
-// {
-// 	if(m_SubjectDefline.NotEmpty() && m_SubjectDefline->CanGet() &&
-// 	   m_SubjectDefline->IsSet() && !m_SubjectDefline->Get().empty())
-// 	{
-// 		const list<CRef<CBlast_def_line> > & defline = m_SubjectDefline->Get();
-//
-// 		if(defline.empty())
-// 			m_Ostream << NA;
-// 		else
-// 		{
-// 			if(defline.front()->IsSetTitle())
-// 			{
-// 				if(defline.front()->GetTitle().empty())
-// 					m_Ostream << NA;
-// 				else
-// 					m_Ostream << defline.front()->GetTitle();
-// 			}
-// 			else
-// 				m_Ostream << NA;
-// 		}
-// 	}
-// ```
-/// The `stitle` text of the subject `s_idx`: the title of its first BLAST definition
-/// line (`stitles`, a database's by subject), or `N/A` for an empty one and for a subject
-/// without a definition line (every record of a FASTA subject set: `stitles` is empty).
-fn blastp_subject_stitle(stitles: &[Arc<[u8]>], s_idx: usize) -> &[u8] {
-    match stitles.get(s_idx) {
-        Some(title) if !title.is_empty() => title,
-        _ => b"N/A",
-    }
-}
-
-fn write_blastp_hsp_tabular_field<W: Write>(
-    writer: &mut W,
-    field: BlastpTabularField,
-    hsp: &BlastpHsp,
-    query_id: &[u8],
-    subject_id: SubjectIdFields<'_>,
-    subject_stitle: &[u8],
-    subject_length: usize,
-) -> std::io::Result<()> {
-    match field {
-        BlastpTabularField::QuerySeqId
-        | BlastpTabularField::QueryAccession
-        | BlastpTabularField::QueryAccessionVersion => writer.write_all(query_id),
-        BlastpTabularField::QueryLength => write!(writer, "{}", hsp.query_length),
-        BlastpTabularField::SubjectSeqId => writer.write_all(subject_id.seq_id),
-        BlastpTabularField::SubjectAccession => writer.write_all(subject_id.accession),
-        BlastpTabularField::SubjectAccessionVersion => {
-            writer.write_all(subject_id.accession_version)
-        }
-        BlastpTabularField::SubjectLength => write!(writer, "{subject_length}"),
-        BlastpTabularField::QueryStart => write!(writer, "{}", hsp.q_start),
-        BlastpTabularField::QueryEnd => write!(writer, "{}", hsp.q_end),
-        BlastpTabularField::SubjectStart => write!(writer, "{}", hsp.s_start),
-        BlastpTabularField::SubjectEnd => write!(writer, "{}", hsp.s_end),
-        BlastpTabularField::QuerySeq
-        | BlastpTabularField::SubjectSeq
-        | BlastpTabularField::Btop => Ok(()),
-        BlastpTabularField::Evalue => {
-            writer.write_all(format_evalue_ncbi_tabular(hsp.e_value).as_bytes())
-        }
-        BlastpTabularField::BitScore => {
-            writer.write_all(format_bitscore_ncbi(hsp.bit_score).as_bytes())
-        }
-        BlastpTabularField::Score => write!(writer, "{}", hsp.raw_score),
-        BlastpTabularField::AlignmentLength => write!(writer, "{}", hsp.length),
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/objtools/align_format/tabular.hpp:437-441
-        // ```c
-        // double perc_ident =
-        //     (m_AlignLength > 0 ? ((double)m_NumIdent)/m_AlignLength * 100 : 0);
-        // m_Ostream << NStr::DoubleToString(perc_ident, 3);
-        // ```
-        BlastpTabularField::PercentIdentical => {
-            writer.write_all(format_percent_identity_ncbi(hsp.num_ident, hsp.length, 3).as_bytes())
-        }
-        BlastpTabularField::NumIdentical => write!(writer, "{}", hsp.num_ident),
-        BlastpTabularField::Mismatches => write!(writer, "{}", hsp.mismatch),
-        BlastpTabularField::Positives => write!(writer, "{}", hsp.num_positives),
-        BlastpTabularField::GapOpenings => write!(writer, "{}", hsp.gapopen),
-        BlastpTabularField::Gaps => write!(
-            writer,
-            "{}",
-            hsp.length as i64 - hsp.num_ident as i64 - hsp.mismatch
-        ),
-        BlastpTabularField::PercentPositives => {
-            let ppos = if hsp.length > 0 {
-                (hsp.num_positives as f64 / hsp.length as f64) * 100.0
-            } else {
-                0.0
-            };
-            write!(writer, "{ppos:.2}")
-        }
-        BlastpTabularField::QueryFrame => writer.write_all(b"1"),
-        BlastpTabularField::SubjectFrame => writer.write_all(b"1"),
-        BlastpTabularField::Frames => writer.write_all(b"1/1"),
-        BlastpTabularField::SubjectTitle => {
-            // NCBI reference: c++/src/objtools/align_format/tabular.cpp:415-439,845-859
-            // m_SubjectDefline.Reset(); if (bdlRef.NotEmpty()) m_SubjectDefline = bdlRef;
-            // Local FASTA has no BLAST defline object (seqdbvol.cpp:1234-1258): `N/A`; a
-            // database sequence has its stored title (`blastp_subject_stitle`).
-            writer.write_all(subject_stitle)
-        }
-    }
-}
-
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// void CBlastTabularInfo::Print()
-// {
-//     ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//         if (iter != m_FieldsToShow.begin())
-//             m_Ostream << m_FieldDelimiter;
-//         x_PrintField(*iter);
-//     }
-//     m_Ostream << "\n";
-// }
-// ```
-fn write_blastp_tabular_output(
-    hits: &[PairwiseHit],
-    fields: &[BlastpTabularField],
-    outfmt: OutputFormat,
-    writer: &mut impl Write,
-    query_ids: &[Arc<[u8]>],
-    query_titles: &[Arc<[u8]>],
-    subject_ids: &[Arc<[u8]>],
-    subject_accessions: &[Option<[Arc<[u8]>; 2]>],
-    subject_stitles: &[Arc<[u8]>],
-    query_batch_skipped: &[bool],
-    hits_found: Option<&[usize]>,
-    context: &ReportContext,
-    mut probe: Option<&mut FormatProbe<'_>>,
-    mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
-    epilog: bool,
-    queries_before: usize,
-) -> Result<()> {
-    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1264-1283,1322-1325
-    // PrintHeader(..., const CBioseq& bioseq, ..., const CSeq_align_set* align_set, ...);
-    // m_Ostream << "# BLAST processed " << num_queries << " queries\n";
-    let mut start = 0;
-    for (q_idx, query_title) in query_titles.iter().enumerate() {
-        // The query's warnings come before its lines (`QueryWarnings`).
-        if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, &mut *writer)?;
-        }
-        let mut end = start;
-        while end < hits.len() && hits[end].hit.q_idx as usize == q_idx {
-            end += 1;
-        }
-        if outfmt == OutputFormat::TabularWithComments {
-            write_blastp_outfmt7_header(
-                writer,
-                context,
-                query_title,
-                fields,
-                hits_found.map_or(end - start, |found| found[q_idx]),
-                query_batch_skipped[q_idx],
-            )?;
-        }
-        for (hsp_index, hit) in hits.iter().enumerate().take(end).skip(start) {
-            // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
-            // ```c
-            // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-            //     // Add tab in front of field, except for the first field.
-            //     if (iter != m_FieldsToShow.begin())
-            //         m_Ostream << m_FieldDelimiter;
-            //     x_PrintField(*iter);
-            // }
-            // m_Ostream << "\n";
-            // ```
-            // One row per HSP; the probe marks the row without changing its bytes.
-            if let Some(probe) = probe.as_mut() {
-                writer.flush()?;
-                probe.begin(hsp_index);
-            }
-            let query_id = query_ids
-                .get(hit.hit.q_idx as usize)
-                .map_or(&b""[..], |id| id.as_ref());
-            let subject_id =
-                SubjectIdFields::of(subject_ids, subject_accessions, hit.hit.s_idx as usize);
-            let frames_set = blastp_tabular_sets_frames(fields, hit.hit.num_ident);
-            for (index, field) in fields.iter().enumerate() {
-                if index > 0 {
-                    writer.write_all(b"\t")?;
-                }
-                if let Some(unset) = blastp_unset_frame_field(*field, frames_set) {
-                    writer.write_all(unset)?;
-                    continue;
-                }
-                let value = blastp_tabular_field_text(
-                    *field,
-                    hit,
-                    query_id,
-                    subject_id,
-                    blastp_subject_stitle(subject_stitles, hit.hit.s_idx as usize),
-                );
-                writer.write_all(&value)?;
-            }
-            writer.write_all(b"\n")?;
-            if let Some(probe) = probe.as_mut() {
-                writer.flush()?;
-                probe.end(hsp_index);
-            }
-        }
-        start = end;
-    }
-    // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
-    // writes no epilog (blastp_app.cpp:294-295, `PrintEpilog`). The count is every query
-    // formatted (NCBI's `m_QueriesFormatted`): EXPERIMENT (LOSAT_X_BPQBLOCKFMT) the last block of
-    // the block search adds the queries of the blocks before it (`queries_before`).
-    if outfmt == OutputFormat::TabularWithComments && epilog {
-        writeln!(
-            writer,
-            "# BLAST processed {} queries",
-            queries_before + query_titles.len()
-        )?;
-    }
-    Ok(())
-}
-
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:271-327
 // ```c
 // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
@@ -3251,18 +2645,16 @@ fn blastp_hit_list_hsp_count(hit_lists: &[Option<BlastpHitList>]) -> usize {
 // }
 // m_Ostream << "\n";
 // ```
+/// The default tabular reports (outfmt 6 and 7 with the `std` fields and a tab), from the final
+/// hit lists; the others are written by `tabular::write_blastp_tabular`.
 fn write_blastp_tabular_hit_lists(
     hit_lists: &[Option<BlastpHitList>],
-    fields: &[BlastpTabularField],
     outfmt: OutputFormat,
     writer: &mut impl Write,
     query_ids: &[Arc<[u8]>],
     query_titles: &[Arc<[u8]>],
     subject_ids: &[Arc<[u8]>],
     subject_accessions: &[Option<[Arc<[u8]>; 2]>],
-    subject_stitles: &[Arc<[u8]>],
-    subjects: &[EncodedProtein],
-    subject_placements: &seq_range::Placements,
     query_batch_skipped: &[bool],
     hits_found: Option<&[usize]>,
     context: &ReportContext,
@@ -3272,7 +2664,6 @@ fn write_blastp_tabular_hit_lists(
     queries_before: usize,
 ) -> Result<()> {
     let config = OutputConfig::ncbi_compat();
-    let use_default_fields = fields == default_blastp_tabular_fields();
     // Index of the next HSP in the final hit list (collect_hits_from_hit_lists order).
     let mut hsp_index = 0;
     // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1264-1283,1322-1325
@@ -3288,7 +2679,7 @@ fn write_blastp_tabular_hit_lists(
                 writer,
                 context,
                 &query_titles[q_idx],
-                fields,
+                &crate::report::tabular::STD_FIELDS,
                 hits_found.map_or_else(
                     || blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt)),
                     |found| found[q_idx],
@@ -3328,37 +2719,24 @@ fn write_blastp_tabular_hit_lists(
                     .map_or(&b""[..], |id| id.as_ref());
                 let subject_id =
                     SubjectIdFields::of(subject_ids, subject_accessions, hsp.s_idx as usize);
-                if use_default_fields {
-                    crate::report::outfmt6::write_hit_fields_bytes(
-                        writer,
-                        query_id,
-                        // The default fields' subject is `saccver`.
-                        subject_id.accession_version,
-                        hsp.identity,
-                        hsp.num_ident,
-                        hsp.length,
-                        hsp.mismatch,
-                        hsp.gapopen,
-                        hsp.q_start,
-                        hsp.q_end,
-                        hsp.s_start,
-                        hsp.s_end,
-                        hsp.e_value,
-                        hsp.bit_score,
-                        &config,
-                    )?;
-                } else {
-                    write_blastp_hsp_tabular_row(
-                        writer,
-                        fields,
-                        hsp,
-                        query_id,
-                        subject_id,
-                        blastp_subject_stitle(subject_stitles, hsp.s_idx as usize),
-                        subjects,
-                        subject_placements,
-                    )?;
-                }
+                crate::report::outfmt6::write_hit_fields_bytes(
+                    writer,
+                    query_id,
+                    // The default fields' subject is `saccver`.
+                    subject_id.accession_version,
+                    hsp.identity,
+                    hsp.num_ident,
+                    hsp.length,
+                    hsp.mismatch,
+                    hsp.gapopen,
+                    hsp.q_start,
+                    hsp.q_end,
+                    hsp.s_start,
+                    hsp.s_end,
+                    hsp.e_value,
+                    hsp.bit_score,
+                    &config,
+                )?;
                 if let Some(probe) = probe.as_mut() {
                     writer.flush()?;
                     probe.end(hsp_index);
@@ -3370,7 +2748,7 @@ fn write_blastp_tabular_hit_lists(
 
     // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
     // writes no epilog (blastp_app.cpp:294-295, `PrintEpilog`). The count is every query
-    // formatted (NCBI's `m_QueriesFormatted`): EXPERIMENT (LOSAT_X_BPQBLOCKFMT) the last block of
+    // formatted (NCBI's `m_QueriesFormatted`): EXPERIMENT (LOSAT_X_BPQBLOCK) the last block of
     // the block search adds the queries of the blocks before it (`queries_before`).
     if outfmt == OutputFormat::TabularWithComments && epilog {
         writeln!(
@@ -3379,122 +2757,6 @@ fn write_blastp_tabular_hit_lists(
             queries_before + query_titles.len()
         )?;
     }
-    Ok(())
-}
-
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//     // Add tab in front of field, except for the first field.
-//     if (iter != m_FieldsToShow.begin())
-//         m_Ostream << m_FieldDelimiter;
-//     x_PrintField(*iter);
-// }
-// m_Ostream << "\n";
-// ```
-/// Whether NCBI's tabular writer computes the alignment of an HSP, and with it the frames
-/// (`SetCounts`): only when one of these fields is requested. Otherwise the frames keep the
-/// 0 of `x_ResetFields`, and `sframe` and `frames` print 0 and 0/0.
-///
-/// NCBI reference: c++/src/objtools/align_format/tabular.cpp:900-908
-/// ```c++
-///     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
-///         x_IsFieldRequested(eSubjectStart) || x_IsFieldRequested(eSubjectEnd) ||
-///         x_IsFieldRequested(eAlignmentLength) || x_IsFieldRequested(eGaps) ||
-///         x_IsFieldRequested(eGapOpenings) || x_IsFieldRequested(eQuerySeq) ||
-///         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
-///         x_IsFieldRequested(ePositives) || x_IsFieldRequested(eMismatches) ||
-///         x_IsFieldRequested(ePercentPositives) || x_IsFieldRequested(ePercentIdentical) ||
-///         x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eBTOP) ||
-///         x_IsFieldRequested(eSubjectStrand)) {
-/// ```
-/// NCBI reference: c++/src/objtools/align_format/tabular.cpp:101-106
-/// ```c++
-/// void CBlastTabularInfo::x_ResetFields()
-/// {
-///     m_QueryLength = m_SubjectLength = 0U;
-///     m_Score = m_AlignLength = m_NumGaps = m_NumGapOpens = m_NumIdent =
-///     m_NumPositives = m_QueryStart = m_QueryEnd = m_SubjectStart =
-///     m_SubjectEnd = m_QueryFrame = m_SubjectFrame = 0;
-/// ```
-fn blastp_tabular_sets_frames(fields: &[BlastpTabularField], num_ident: usize) -> bool {
-    fields.iter().any(|field| match field {
-        BlastpTabularField::NumIdentical => num_ident > 0,
-        BlastpTabularField::QueryStart
-        | BlastpTabularField::QueryEnd
-        | BlastpTabularField::SubjectStart
-        | BlastpTabularField::SubjectEnd
-        | BlastpTabularField::AlignmentLength
-        | BlastpTabularField::Gaps
-        | BlastpTabularField::GapOpenings
-        | BlastpTabularField::QuerySeq
-        | BlastpTabularField::SubjectSeq
-        | BlastpTabularField::Positives
-        | BlastpTabularField::Mismatches
-        | BlastpTabularField::PercentPositives
-        | BlastpTabularField::PercentIdentical
-        | BlastpTabularField::QueryFrame
-        | BlastpTabularField::Btop => true,
-        _ => false,
-    })
-}
-
-/// The text of `sframe` or `frames` when NCBI does not set the frames
-/// (`blastp_tabular_sets_frames`), or `None`.
-fn blastp_unset_frame_field(field: BlastpTabularField, frames_set: bool) -> Option<&'static [u8]> {
-    match (field, frames_set) {
-        (BlastpTabularField::SubjectFrame, false) => Some(b"0"),
-        (BlastpTabularField::Frames, false) => Some(b"0/0"),
-        _ => None,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn write_blastp_hsp_tabular_row(
-    writer: &mut impl Write,
-    fields: &[BlastpTabularField],
-    hsp: &BlastpHsp,
-    query_id: &[u8],
-    subject_id: SubjectIdFields<'_>,
-    subject_stitle: &[u8],
-    subjects: &[EncodedProtein],
-    subject_placements: &seq_range::Placements,
-) -> Result<()> {
-    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:837-842
-    // ```c++
-    //        		const CBioseq_Handle& subject_bh =
-    //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-    //             ...
-    //             m_SubjectLength = subject_bh.GetBioseqLength();
-    // ```
-    // The subject record's length, also with `-subject_loc`.
-    let subject_length = subject_placements.length(
-        hsp.s_idx as usize,
-        subjects
-            .get(hsp.s_idx as usize)
-            .map(|subject| subject.aa_len)
-            .unwrap_or_default(),
-    );
-    let frames_set = blastp_tabular_sets_frames(fields, hsp.num_ident);
-    for (index, field) in fields.iter().enumerate() {
-        if index > 0 {
-            writer.write_all(b"\t")?;
-        }
-        if let Some(unset) = blastp_unset_frame_field(*field, frames_set) {
-            writer.write_all(unset)?;
-            continue;
-        }
-        write_blastp_hsp_tabular_field(
-            writer,
-            *field,
-            hsp,
-            query_id,
-            subject_id,
-            subject_stitle,
-            subject_length,
-        )?;
-    }
-    writer.write_all(b"\n")?;
     Ok(())
 }
 
@@ -3825,7 +3087,7 @@ impl<'a> ShownSubjects<'a> {
             Self::Records(records) => records
                 .get(s_idx)
                 .map(|record| ShownLetters::Ascii(record.seq())),
-            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a subject without residues has no O and no HSP with
+            // A subject without residues has no O and no HSP with
             // a query that has one; no report reads its letters (`ListedSubjects::x_read_shown`).
             Self::Listed { subjects, .. } => subjects.get(s_idx).map(|subject| {
                 ShownLetters::Stored(subject.aa_seq.get(1..=subject.aa_len).unwrap_or_default())
@@ -5371,12 +4633,9 @@ pub fn run(
     // ```
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
     // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
-    // there too, and the custom tabular fields are checked (LOSAT's own list).
+    // there too.
     let choice = app::parse_formatting_string(&args.outfmt)?;
     let format = app::report_format(&choice, app::Program::Blastp, args.out.as_deref())?;
-    if format.is_some() {
-        validate_cli_outfmt(&choice.normalized()).map_err(anyhow::Error::msg)?;
-    }
     // The BLAST archive (outfmt 11): its request, and the refusals of what LOSAT cannot write,
     // before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -5395,8 +4654,8 @@ pub fn run(
     //         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
     //                                              mol_type));
     // ```
-    // With `-db` the handler of the database arguments only keeps the name: the database
-    // is opened after every option handler has run (`search_cli`). With `-subject` it
+    // With `-db` the handler of the database arguments keeps the name and reads the list: the
+    // database is opened after every option handler has run (`search_cli`). With `-subject` it
     // reads the subjects here, before the query and the output are opened.
     let archive = args.archive.clone();
     let mut stderr = std::io::stderr();
@@ -5407,6 +4666,22 @@ pub fn run(
             &mut archive_tee
         }
         None => &mut stderr,
+    };
+    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
+    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
+    // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
+    // and before `CStdCmdLineArgs`, which opens the query and the output: its warning before
+    // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
+    // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
+    let list = match &args.db {
+        Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
+            Ok(list) => list,
+            Err(error) => {
+                write_run_error_archive(&args, archive.as_ref(), &error);
+                return Err(error);
+            }
+        },
+        None => None,
     };
     let subjects = match args.db {
         Some(_) => SubjectSet {
@@ -5454,13 +4729,51 @@ pub fn run(
     };
     let out_file = open_out_file(&args)?;
     let pairwise = format == Some(crate::blastinput::app::ReportFormat::Pairwise);
-    // LOSAT's reports read the format number and the custom fields that NCBI keeps.
-    let outfmt = choice.normalized();
+    // LOSAT's reports read the format number and the custom fields that NCBI keeps; blastp's
+    // custom tabular report of a delimiter, which `normalized` drops, reads the value as given, as
+    // NCBI does (`tabular::custom_tabular_spec`).
+    //
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:245-249
+    // ```c++
+    //         formatter.SetQueryRange(query_opts->GetRange());
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    //         formatter.SetCustomDelimiter(fmt_args->GetCustomDelimiter());
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:501-505
+    // ```c++
+    //         formatter.SetQueryRange(query_opts->GetRange());
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
+    //         	formatter.SetBaseFile(args[kArgOutput].AsString());
+    //         }
+    // ```
+    // psiblast's formatter gets no custom delimiter (its fields are checked against it,
+    // `formatting_handler_check`): its reports read the value without it.
+    let custom_delimiter = args.app == BlastpApp::Blastp
+        && !choice.delimiter.is_empty()
+        && format.is_some_and(|format| {
+            crate::report::tabular::TabularSpec::of(format, &choice).is_some()
+        });
+    let outfmt = if custom_delimiter {
+        args.outfmt.clone()
+    } else {
+        choice.normalized()
+    };
     let mut stream = cli_report_stream(out_file);
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
-        search_cli(args, query_file, &subjects, &mut outputs, choice, settings)
+        search_cli(
+            args,
+            list,
+            query_file,
+            &subjects,
+            &mut outputs,
+            choice,
+            settings,
+        )
     };
     // NCBI writes an error archive after the archives of the batches before when the
     // application stops with one of its own errors, and when the run ends with messages that
@@ -5513,6 +4826,10 @@ fn write_run_error_archive(
     let Some(handle) = archive else {
         return;
     };
+    // `-outfmt "11 qseqid"`: NCBI's `PrintErrorArchive` stops at the number before it opens `-out`.
+    if !handle.error_archive_enabled() {
+        return;
+    }
     let Some(lines) = super::archive::error_lines(error, true) else {
         return;
     };
@@ -5682,6 +4999,7 @@ pub fn check_options(args: &BlastpArgs) -> Result<()> {
 /// `Query is Empty!`, the reading of the queries and the search.
 fn search_cli(
     args: BlastpArgs,
+    list: Option<crate::seqdb::DbList>,
     query_file: std::fs::File,
     subjects: &SubjectSet<'_>,
     outputs: &mut ReportOutputs<'_>,
@@ -5691,7 +5009,7 @@ fn search_cli(
     use crate::blastinput::fasta_reader::{
         read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
     };
-    let resolved = args.check_options(outputs.diagnostics)?;
+    let mut resolved = args.check_options(outputs.diagnostics)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:194-199
     // ```c++
     //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
@@ -5714,13 +5032,50 @@ fn search_cli(
     // The database of `-db` is opened here: after the option handlers (the query file is
     // open and the output file exists) and before the test for an empty query.
     let database = match resolved.db.as_deref() {
-        Some(name) => Some(database::BlastpDatabase::open(
-            name,
-            &settings,
-            args.app == BlastpApp::Blastp,
-        )?),
+        Some(name) => {
+            let database = database::BlastpDatabase::open_restricted(
+                name,
+                &settings,
+                args.app == BlastpApp::Blastp,
+                list.as_ref(),
+                outputs.diagnostics,
+            )?
+            .showing_gis(args.show_gis);
+            crate::algorithm::common::database::note_archive_database_filter(
+                args.archive.as_ref(),
+                &args.db_filter,
+                database.list_taxids(),
+                database.filtered_empty(),
+                args.searchsp.is_some_and(|space| space > 0),
+                args.dbsize.is_some_and(|size| size > 0),
+                "BLASTP",
+            )?;
+            Some(database)
+        }
         None => None,
     };
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
+    // ```c++
+    // void CBlastTabularInfo::x_CheckTaxDB()
+    // {
+    //    	if( x_IsFieldRequested(eSubjectSciNames) ||
+    //     ...
+    //    		string resolved = SeqDB_ResolveDbPath("taxdb.bti");
+    // ```
+    // A custom tabular field list that shows a name of the taxonomy database asks whether
+    // `taxdb.bti` is on the search path: its formatters warn without it (the plural names). A
+    // `-db` search asks its database; a `-subject` search the search path of NCBI's databases,
+    // as BLASTN's (`algorithm::blastn::tabular`).
+    if database.is_none()
+        && outputs
+            .formats
+            .iter()
+            .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt))
+            .any(|spec| spec.needs().taxonomy_names)
+    {
+        resolved.subject_taxdb_found =
+            crate::algorithm::common::database::subject_taxdb_found(&settings, args.app.name())?;
+    }
     // LOSAT's refusals of a database for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
     if let (Some(database), Some(serial)) = (
@@ -5769,11 +5124,17 @@ fn search_cli(
             .subject
             .as_deref()
             .is_some_and(|path| path.as_os_str() == "-");
+    crate::blastinput::fasta_reader::believed::refuse_with_subject(
+        args.parse_deflines,
+        args.subject.is_some(),
+        args.app.name(),
+    )?;
     let mut query_source = FastaInputSource::from_argument(
         &args.query,
         query_file,
         ReaderConfig::query(args.app.name(), true, settings.data_loaders)
-            .with_defline(args.archive.is_some()),
+            .with_defline(args.archive.is_some())
+            .with_parse_deflines(args.parse_deflines),
     );
     if !shared_standard_input && query_source.stream_is_empty() {
         // psiblast_app.cpp:461-464 is the same test, with psiblast's prefix.
@@ -6124,8 +5485,8 @@ impl<'a> BlastpSubjectSource<'a> {
                 records.iter().map(|record| record.seq().len()).sum(),
             ),
             Self::Database(database) => (
-                database.num_sequences() as usize,
-                usize::try_from(database.total_letters()).unwrap_or(usize::MAX),
+                database.printed_num_sequences() as usize,
+                usize::try_from(database.printed_total_letters()).unwrap_or(usize::MAX),
             ),
         }
     }
@@ -6183,7 +5544,8 @@ fn resolve_for_formats(
             crate::blastinput::app::formatting_handler_check(&choice, program)?;
             crate::blastinput::app::xinclude_check(&choice)?;
         }
-        validate_cli_outfmt(&choice.normalized()).map_err(anyhow::Error::msg)?;
+        // The options handlers of every format (`check_options`, also through `resolve`) make
+        // the formatting handler's checks, the custom delimiter's among them.
         resolved_formats.push(if index == 0 {
             requested.check_options(&mut *outputs.diagnostics)?
         } else {
@@ -6422,6 +5784,26 @@ fn search(
     if let Some(choice) = xinclude {
         crate::blastinput::app::xinclude_check(choice)?;
     }
+    // `PrintProlog`: outfmt 20's formatter warns here when its field list asks for a name of the
+    // taxonomy database that it cannot find (`tabular::write_tabular_prolog_warning`); its line
+    // of the field names comes with the first report (or `write_pairwise_prologs`), after LOSAT's
+    // refusals.
+    for format in outputs.formats.iter() {
+        if let Some(spec) =
+            super::tabular::custom_tabular_spec(format.outfmt).filter(|spec| spec.checks_taxdb())
+        {
+            let taxdb_found = match database {
+                Some(database) => database.taxdb_found(),
+                None => args.subject_taxdb_found,
+            };
+            super::tabular::write_tabular_prolog_warning(
+                spec,
+                taxdb_found,
+                args.app.ncbi_name(),
+                &mut *outputs.diagnostics,
+            )?;
+        }
+    }
     // ABI v1's checks of its `bio` records come where they came before the records of
     // NCBI's reader (plan TD-1).
     if let Some(v1) = v1 {
@@ -6527,25 +5909,23 @@ fn search(
     };
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries in blocks of whole batches, each block a search
     // of its own whose report is written before the next block is searched
-    // (`x_query_blocks.rs`, exactness argument in its header), where the one report is tabular
-    // format 6, or with LOSAT_X_BPQBLOCKFMT outfmt 0 or 7 (the outfmt 0 prolog with the first
-    // block, the epilog and outfmt 7's count of the queries with the last), with
-    // LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with LOSAT_X_BPQBLOCKXML outfmt 5 (the header with the
-    // first block, the end with the last), with LOSAT_X_BPQBLOCKXML2 outfmt 13 to 16 (as outfmt 5,
-    // the framing state handed from block to block, `Xml2Carry`; not in a call of several outputs,
-    // hit records or an observer, see `x_query_block_plan`), with LOSAT_X_BPQBLOCKWEB also several
-    // of the other reports, the hit records and an observer (`run_local`); otherwise the search of
-    // all queries below. With `-db` the blocks are searched only when no definition line of the
-    // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, or
-    // `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and 5, `x_titles_taxids_allow_blocks` for 15
-    // and 16 (the titles and the taxids in one pass), for outfmt 0, 5, 6 and 7 with `taxdb.bti` on
-    // the search path also the taxids that each batch's prefetch reads and looks up, read
-    // in the block search's pool before the first block), and with outfmt 0 and `-subject` only
-    // when no subject's title is refused where the report shows it
-    // (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when the names of the database, the
-    // queries and the subjects can be written (`x_query_blocks.rs` `x_block_xml_*_allowed`);
-    // otherwise the search of all queries below.
-    let mut x_formats = Vec::new();
+    // (`x_query_blocks.rs`, exactness argument in its header). These reports take it: tabular
+    // format 6, outfmt 0 or 7 (the outfmt 0 prolog with the first block, the epilog and outfmt 7's
+    // count of the queries with the last), outfmt 8, 9, 11 or 12, outfmt 5 (the header with the
+    // first block, the end with the last), outfmt 13 to 16 (as outfmt 5, the framing state handed
+    // from block to block, `Xml2Carry`), also several of them, the hit records and an observer
+    // (`run_local`; not outfmt 11 or 13 to 16 in such a call, see `x_query_block_plan`). One block is the search of all queries below, which needs none of
+    // the checks: a refusal in it has no block's bytes before it. Where a check fails, the search
+    // of all queries below refuses as NCBI does. With `-db` the blocks are searched only when no
+    // definition line of the database can fail a batch where its titles are read
+    // (`database::x_titles_allow_blocks`, or `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and
+    // 5, `x_titles_taxids_allow_blocks` for 15 and 16 (the titles and the taxids in one pass), for
+    // outfmt 0, 5, 6 and 7 with `taxdb.bti` on the search path also the taxids that each batch's
+    // prefetch reads and looks up, read in the block search's pool before the first block), and
+    // with outfmt 0 and `-subject` only when no subject's title is refused where the report shows
+    // it (`x_block_shown_titles_allowed`), with outfmt 5, 15 and 16 only when the names of the
+    // database, the queries and the subjects can be written (`x_query_blocks.rs`
+    // `x_block_xml_*_allowed`).
     let x_plan = x_query_block_plan(
         &args,
         &searched_queries,
@@ -6555,10 +5935,9 @@ fn search(
         outputs,
         batch_size,
         v1.is_some(),
-        &mut x_formats,
     );
     if x_plan.is_none() {
-        super::x_query_blocks::x_reach_block_search(&x_formats, false);
+        super::x_query_blocks::x_reach_block_search(false);
     }
     if let Some((x_kinds, blocks)) = x_plan {
         use super::x_query_blocks::{XBlockReport, XBlockSink, XOffsetObserver};
@@ -6569,19 +5948,18 @@ fn search(
             hits,
             observer,
         } = &mut *outputs;
-        // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the outputs' `-outfmt` values, in request order.
+        // EXPERIMENT (LOSAT_X_BPQBLOCK): the outputs' `-outfmt` values, in request order.
         let outfmts: Vec<&str> = formats.iter().map(|format| format.outfmt).collect();
-        // EXPERIMENT (LOSAT_X_BPQBLOCKFMT, LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML,
-        // LOSAT_X_BPQBLOCKXML2): the reports the
-        // blocks write, whose titles are checked below.
+        // EXPERIMENT (LOSAT_X_BPQBLOCK): the reports the blocks write, whose titles are checked
+        // below.
         let x_pairwise = x_kinds.contains(&XBlockReport::Pairwise);
-        // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the hit records of all blocks, each with the index of its
+        // EXPERIMENT (LOSAT_X_BPQBLOCK): the hit records of all blocks, each with the index of its
         // query among the call's queries (the block's index plus the block's first query), handed to
         // the caller's sink once, after the last block: one call with the final list of all
         // queries, as the search of all queries makes it.
         let x_want_records = hits.is_some();
         let mut x_records: Option<Vec<PairwiseHit>> = x_want_records.then(Vec::new);
-        // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state that the blocks of an outfmt 13 to 16
+        // EXPERIMENT (LOSAT_X_BPQBLOCK): the framing state that the blocks of an outfmt 13 to 16
         // run hand on (such a run has one output, `x_query_block_plan`).
         let x_xml2_carry = std::sync::Mutex::new(crate::report::blast_xml2::Xml2Carry::default());
         let searched_in_blocks =
@@ -6596,9 +5974,9 @@ fn search(
                 // subjects' titles (`x_block_shown_titles_allowed`), and with outfmt 5 the
                 // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the database
                 // name and queries' names (`x_block_xml_run_allowed`); with several outputs, the
-                // checks of every kind of report among them (LOSAT_X_BPQBLOCKWEB).
+                // checks of every kind of report among them.
                 if !x_block_words_fit(&args, &searched_queries, &query_input, batch_size, pool) {
-                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
+                    super::x_query_blocks::x_reach_block_search(false);
                     return Ok(false);
                 }
                 // BLASTP's outfmt 0, 5, 6 and 7 prefetch the subjects of each batch, which with
@@ -6654,10 +6032,10 @@ fn search(
                     .filter(|&(index, x_kind)| !x_kinds[..index].contains(x_kind))
                     .all(|(_, &x_kind)| titles_allowed(x_kind))
                 {
-                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
+                    super::x_query_blocks::x_reach_block_search(false);
                     return Ok(false);
                 }
-                // EXPERIMENT (LOSAT_X_BPQBLOCKXML, LOSAT_X_BPQBLOCKXML2): the XML report's refusals
+                // EXPERIMENT (LOSAT_X_BPQBLOCK): the XML report's refusals
                 // of the database name and of the queries' names, which it makes before its first
                 // byte.
                 if x_kinds.iter().any(|x_kind| x_kind.is_xml())
@@ -6667,10 +6045,10 @@ fn search(
                         pool,
                     )
                 {
-                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
+                    super::x_query_blocks::x_reach_block_search(false);
                     return Ok(false);
                 }
-                super::x_query_blocks::x_reach_block_search(&x_formats, true);
+                super::x_query_blocks::x_reach_block_search(true);
                 // EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks
                 // (`x_query_blocks::XBlockSubjects`), on the search's pool.
                 // Diagnostic (LOSAT_TIMING): the blocks' shared subject encoding for the common
@@ -6708,7 +6086,7 @@ fn search(
                             }));
                         }
                     };
-                    // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the caller's observer with the block's HSP
+                    // EXPERIMENT (LOSAT_X_BPQBLOCK): the caller's observer with the block's HSP
                     // indices moved past the blocks before.
                     let mut x_offset = observer.as_deref_mut().map(|inner| XOffsetObserver {
                         inner,
@@ -6769,7 +6147,7 @@ fn search(
                 Ok(true)
             })?;
         if searched_in_blocks {
-            // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): the hit records of all queries, once.
+            // EXPERIMENT (LOSAT_X_BPQBLOCK): the hit records of all queries, once.
             if let (Some(sink), Some(records)) = (hits.as_mut(), x_records.as_ref()) {
                 sink(records);
             }
@@ -6890,21 +6268,18 @@ fn x_bp_encode_block_subjects(
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the blocks of the block search, or `None` for the search of all
 // queries. The block search is taken only where the blocks' reports written one after the other
-// are the report of the search of all queries: one output, tabular format 6 (or with
-// LOSAT_X_BPQBLOCKFMT outfmt 0 or 7, with LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with
-// LOSAT_X_BPQBLOCKXML outfmt 5, LOSAT_X_BPQBLOCKXML2 outfmt 13 to 16, `x_query_blocks.rs`; the
-// kind of report of each output is returned with the blocks), with LOSAT_X_BPQBLOCKWEB also several
-// outputs, the hit records and an observer (`run_local`, ABI v2 of the Web build) where every
-// output is a writer of the caller, no `-db` is searched and an observer comes with the hit
+// are the report of the search of all queries: tabular format 6, outfmt 0, 7, 8, 9, 12, 5 or 13 to
+// 16 (`x_query_blocks.rs`; the kind of report of each output is returned with the blocks), also
+// several outputs, the hit records and an observer (`run_local`, ABI v2 of the Web build) where
+// every output is a writer of the caller, no `-db` is searched and an observer comes with the hit
 // records (an outfmt 13 to 16 output is not taken in such a call: see the arm below), no
-// `-query_loc` (every record is
-// searched whole), every batch read, more than one block, no subject whose tabular ID the
-// reference path rejects before it writes any row (`tabular_subject_ids`, for outfmt 6 and 7;
-// with `-db`, the definition lines are checked where the blocks are searched,
-// `database::x_titles_allow_blocks` (outfmt 8, 9, 12 and 5: `x_titles_read_allow_blocks`); outfmt
-// 0's titles also there, `x_block_shown_titles_allowed`; outfmt 5's names too,
-// `x_query_blocks::x_block_xml_subjects_allowed` and `x_block_xml_run_allowed`; each check where any
-// output is of its kind),
+// `-query_loc` (every record is searched whole), every batch read, more than one block (one block
+// is the search of all queries), no subject whose tabular ID the reference path rejects before it
+// writes any row (`tabular_subject_ids`, for outfmt 6 and 7; with `-db`, the definition lines are
+// checked where the blocks are searched, `database::x_titles_allow_blocks` (outfmt 8, 9, 12 and 5:
+// `x_titles_read_allow_blocks`); outfmt 0's titles also there, `x_block_shown_titles_allowed`;
+// outfmt 5's names too, `x_query_blocks::x_block_xml_subjects_allowed` and
+// `x_block_xml_run_allowed`; each check where any output is of its kind),
 // no query whose effective search space in NCBI's `Int8` the reference path rejects
 // (`blastp_database_search_space`, with `-db` or `-dbsize`), and none of the other refusals of the
 // search of all queries that come before its rows (`x_block_search_refuses_nothing`): a block
@@ -6921,12 +6296,11 @@ fn x_query_block_plan(
     outputs: &ReportOutputs<'_>,
     batch_size: u32,
     v1: bool,
-    x_formats: &mut Vec<super::x_query_blocks::XBlockFormat>,
 ) -> Option<(
     Vec<super::x_query_blocks::XBlockReport>,
     Vec<std::ops::Range<usize>>,
 )> {
-    use super::x_query_blocks::{XBlockFormat, XBlockReport};
+    use super::x_query_blocks::XBlockReport;
     let block_letters = super::x_query_blocks::x_bp_qblock()?;
     if args.query_range.is_some()
         || outputs.formats.is_empty()
@@ -6936,19 +6310,15 @@ fn x_query_block_plan(
     {
         return None;
     }
-    // EXPERIMENT (LOSAT_X_BPQBLOCKWEB): several outputs, the hit records or an observer. Each
+    // Several outputs, the hit records or an observer. Each
     // output of several is a writer of the caller (a sink the block search opens itself would be
     // flushed by every block, and a stream that two outputs share would get each block's formats in
     // turn); no `-db` (the records' `s_idx` of a database search rank the subjects that the call's
     // lists name); an observer only with the hit records, which count the HSPs of each block for
     // the observer's indices (`XOffsetObserver`).
     let x_web = outputs.formats.len() > 1 || outputs.hits.is_some() || outputs.observer.is_some();
-    if x_web {
-        x_formats.push(XBlockFormat::Web);
-    }
     if x_web
-        && (!super::x_query_blocks::x_bp_qblock_web()
-            || subject_source.database().is_some()
+        && (subject_source.database().is_some()
             || (outputs.observer.is_some() && outputs.hits.is_none())
             || (outputs.formats.len() > 1
                 && !outputs
@@ -6958,70 +6328,59 @@ fn x_query_block_plan(
     {
         return None;
     }
-    // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): outfmt 0 and 7 too. EXPERIMENT (LOSAT_X_BPQBLOCKSA,
-    // LOSAT_X_BPQBLOCKXML, LOSAT_X_BPQBLOCKXML2): outfmt 8, 9, 12, 5, 15 and 16, which
-    // `OutputFormat::parse` does not know.
-    let mut kind_of = |outfmt: &str| match OutputFormat::parse(outfmt) {
-        Ok((OutputFormat::Tabular, _)) => Some(XBlockReport::Tabular),
-        Ok((OutputFormat::TabularWithComments, _)) if super::x_query_blocks::x_bp_qblock_fmt() => {
-            x_formats.push(XBlockFormat::Fmt);
+    // Outfmt 8, 9, 12, 5, 15 and 16 are the ones `OutputFormat::parse` does not know.
+    // The custom tabular reports of outfmt 6 and 7 (a field list or a delimiter, `tabular`) as
+    // the default ones: each query's lines depend only on its final list and fixed inputs (the
+    // subjects' ids, lengths and titles, a `-subject` search's taxonomy database warning), outfmt
+    // 7's last line counts the queries before (`BlastpReports::x_queries_before`). With `-db`, a
+    // field list that reads more of the definition lines than the default report (`sall*`) or
+    // the taxonomy (`staxid`, `staxids`, the names) can be refused after the rows of some blocks
+    // (`tabular::write_blastp_tabular`, `ListedTitles::tabular_taxonomy`,
+    // `BlastpDatabase::tabular_names`): those take the reference path, as outfmt 10 and 20 (whose
+    // header line is the run's).
+    let custom_kind = |spec: &crate::report::tabular::TabularSpec| {
+        let needs = spec.needs();
+        let db_reads_more =
+            subject_source.database().is_some() && (needs.all_deflines || needs.taxonomy);
+        (!db_reads_more).then_some(spec.kind)
+    };
+    let default_kind = |outfmt: &str| match OutputFormat::parse(outfmt) {
+        Ok((OutputFormat::Tabular | OutputFormat::TabularWithComments, _)) => {
             Some(XBlockReport::Tabular)
         }
         // ABI v1's outfmt 0 titles of a database are not argued here.
-        Ok((OutputFormat::Pairwise, _))
-            if super::x_query_blocks::x_bp_qblock_fmt()
-                && !(v1 && subject_source.database().is_some()) =>
-        {
-            x_formats.push(XBlockFormat::Fmt);
+        Ok((OutputFormat::Pairwise, _)) if !(v1 && subject_source.database().is_some()) => {
             Some(XBlockReport::Pairwise)
         }
-        Ok((OutputFormat::TabularWithComments | OutputFormat::Pairwise, _)) => {
-            x_formats.push(XBlockFormat::Fmt);
-            None
-        }
-        Err(_)
-            if super::x_query_blocks::x_bp_qblock_sa()
-                && blastp_seqalign_format(outfmt).is_some() =>
-        {
-            x_formats.push(XBlockFormat::Seqalign);
-            Some(XBlockReport::Seqalign)
-        }
-        // Outfmt 11 (the BLAST archive, under the switch of outfmt 8, 9 and 12: one document per NCBI
-        // batch, `x_query_blocks.rs`). Only in a call of one output without hit records and
-        // observer, as outfmt 15 and 16: the run-level `ArchiveHandle` and the batches' messages
-        // were argued for the CLI's shape. In a call of several outputs, hit records or an
-        // observer (LOSAT_X_BPQBLOCKWEB) the format is recorded for the reach check as usual,
-        // and the plan is refused (Owner-delegated 2026-10-23, DECISIONS 44).
-        Err(_) if super::x_query_blocks::x_bp_qblock_sa() && blastp_is_archive(outfmt) => {
-            x_formats.push(XBlockFormat::Seqalign);
-            (!x_web).then_some(XBlockReport::Seqalign)
-        }
-        Err(_) if super::x_query_blocks::x_bp_qblock_xml() && blastp_is_xml(outfmt) => {
-            x_formats.push(XBlockFormat::Xml);
-            Some(XBlockReport::Xml)
-        }
+        Err(_) if blastp_seqalign_format(outfmt).is_some() => Some(XBlockReport::Seqalign),
+        // Outfmt 11 (the BLAST archive: one document per NCBI batch, `x_query_blocks.rs`). Only in a
+        // call of one output without hit records and observer, as outfmt 15 and 16: the run-level
+        // `ArchiveHandle` and the batches' messages were argued for the CLI's shape (Owner-delegated
+        // 2026-10-23, DECISIONS 44).
+        Err(_) if blastp_is_archive(outfmt) => (!x_web).then_some(XBlockReport::Seqalign),
+        Err(_) if blastp_is_xml(outfmt) => Some(XBlockReport::Xml),
         // Outfmt 13 to 16 (`x_xml2_kind_takes_blocks`; 13 and 14 write side files). Only in a
         // call of one output without hit records and observer (the CLI's shape): the run-level
-        // frame and carry of the XML2 document (`Xml2Carry`) were checked for that call only. In a
-        // call of several outputs, hit records or an observer (LOSAT_X_BPQBLOCKWEB) the format is
-        // recorded for the reach check as usual, and the plan is refused (Owner-delegated
-        // 2026-10-22).
-        Err(_)
-            if super::x_query_blocks::x_bp_qblock_xml2()
-                && blastp_xml2_kind(outfmt).is_some_and(x_xml2_kind_takes_blocks) =>
-        {
-            x_formats.push(XBlockFormat::Xml2);
+        // frame and carry of the XML2 document (`Xml2Carry`) were checked for that call only
+        // (Owner-delegated 2026-10-22).
+        Err(_) if blastp_xml2_kind(outfmt).is_some_and(x_xml2_kind_takes_blocks) => {
             (!x_web).then_some(XBlockReport::Xml2)
         }
         _ => None,
     };
-    // Every output's format switch is recorded (`x_reach_block_search`), also after one refuses.
+    // A custom tabular report of outfmt 6 or 7 takes the default one's kind.
+    let kind_of = |outfmt: &str| match super::tabular::custom_tabular_spec(outfmt) {
+        Some(spec) => match custom_kind(spec) {
+            Some(crate::report::tabular::TabularKind::Tabular) => default_kind("6"),
+            Some(crate::report::tabular::TabularKind::Commented) => default_kind("7"),
+            _ => None,
+        },
+        None => default_kind(outfmt),
+    };
     let kinds = outputs
         .formats
         .iter()
         .map(|format| kind_of(format.outfmt))
-        .collect::<Vec<_>>()
-        .into_iter()
         .collect::<Option<Vec<_>>>()?;
     let tabular = kinds.contains(&XBlockReport::Tabular);
     match subject_source {
@@ -7197,7 +6556,7 @@ fn x_block_words_fit(
         .all(|searched| fits(&mut words, searched))
 }
 
-// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): the outfmt 0 report of the search of all queries refuses a
+// EXPERIMENT (LOSAT_X_BPQBLOCK): the outfmt 0 report of the search of all queries refuses a
 // subject title that LOSAT does not write as NCBI where the report shows the subject
 // (`check_shown_subject_titles`, and ABI v1's `check_v1_shown_subject_titles`), before it writes
 // anything; a block search would have written the reports of the blocks before. So with outfmt 0
@@ -7283,8 +6642,9 @@ fn blastp_scan_mode_definition(tag: &str) -> String {
 // {
 //     m_Outfile.exceptions(NcbiBadbit);
 // ```
-/// Writes and flushes the prolog of every outfmt 0, 15 and 16 format (`PrintProlog`), for a
-/// run that stops at its first query batch.
+/// Writes and flushes the prolog of every outfmt 0, 15, 16 and 20 format (`PrintProlog`), for a
+/// run that stops at its first query batch (outfmt 20's line of the field names; its formatter's
+/// warning came before the search, `search`).
 fn write_pairwise_prologs(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
@@ -7312,6 +6672,12 @@ fn write_pairwise_prologs(
             // The XML2 and JSON documents start with their prolog too.
             let mut writer = format.sink.open()?;
             writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+            writer.flush()?;
+        } else if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt)
+            .filter(|spec| spec.kind == crate::report::tabular::TabularKind::CsvWithHeader)
+        {
+            let mut writer = format.sink.open()?;
+            super::tabular::write_tabular_prolog(spec, &mut writer)?;
             writer.flush()?;
         }
     }
@@ -7360,6 +6726,25 @@ fn write_reports_without_queries(
             writer.flush()?;
             continue;
         }
+        // The custom tabular reports: outfmt 20's line of the field names, outfmt 7's count of 0
+        // queries (`tabular::write_tabular_without_queries`).
+        if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt) {
+            let taxdb_found = spec.checks_taxdb()
+                && match subject_source.database() {
+                    Some(database) => database.taxdb_found(),
+                    None => args.subject_taxdb_found,
+                };
+            let mut writer = format.sink.open()?;
+            super::tabular::write_tabular_without_queries(
+                spec,
+                taxdb_found,
+                args.app.ncbi_name(),
+                &mut writer,
+                &mut *outputs.diagnostics,
+            )?;
+            writer.flush()?;
+            continue;
+        }
         // The XML2 and JSON documents write the prolog and the epilog without a query
         // (`PrintProlog`, `PrintEpilog`: an empty pipe), and nothing for a query file that is
         // empty (`Query is Empty!`, before the formatter).
@@ -7387,8 +6772,16 @@ fn write_reports_without_queries(
                     word_threshold: args.threshold,
                     window_size: args.window_size as i32,
                     gapped_karlin: lookup_protein_params(&args.scoring),
-                    gumbel: lookup_protein_gumbel_params(&args.scoring, total_db_len as i64)
-                        .context("missing NCBI gumbel parameters for supported blastp scoring")?,
+                    gumbel: if args.searchsp.is_none() {
+                        Some(
+                            lookup_protein_gumbel_params(&args.scoring, total_db_len as i64)
+                                .context(
+                                    "missing NCBI gumbel parameters for supported blastp scoring",
+                                )?,
+                        )
+                    } else {
+                        None
+                    },
                     num_descriptions: args.num_descriptions,
                     num_alignments: args.num_alignments,
                 };
@@ -7472,7 +6865,7 @@ fn preliminary_search_error(
         );
     }
     let written = (|| -> Result<()> {
-        // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): a block after the first of the block search follows
+        // EXPERIMENT (LOSAT_X_BPQBLOCK): a block after the first of the block search follows
         // the prolog that the first block wrote.
         if reports.x_prolog {
             write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
@@ -7496,13 +6889,13 @@ struct BlastpReports<'a> {
     reader_warnings: &'a [Vec<u8>],
     epilog: bool,
     v1_titles: bool,
-    /// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): whether the outfmt 0 report starts with the prolog
+    /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether the outfmt 0 report starts with the prolog
     /// (false for the blocks after the first of the block search, `x_query_blocks.rs`).
     x_prolog: bool,
-    /// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): the queries of the blocks before this one, which outfmt
+    /// EXPERIMENT (LOSAT_X_BPQBLOCK): the queries of the blocks before this one, which outfmt
     /// 7's last line counts with this call's (0 outside the block search).
     x_queries_before: usize,
-    /// EXPERIMENT (LOSAT_X_BPQBLOCKXML2): the framing state of an outfmt 13 to 16 run that the
+    /// EXPERIMENT (LOSAT_X_BPQBLOCK): the framing state of an outfmt 13 to 16 run that the
     /// blocks hand on (the count of reports, the start of the document, a `-subject` run's held
     /// report; `None` outside the block search).
     x_xml2_carry: Option<&'a std::sync::Mutex<crate::report::blast_xml2::Xml2Carry>>,
@@ -7638,7 +7031,7 @@ fn search_split_query_batches(
                     x_ordinal_base: 0,
                 },
                 // A chunk's search ends after its preliminary stage, before any report.
-                // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): a chunk of a block after the first follows the
+                // EXPERIMENT (LOSAT_X_BPQBLOCK): a chunk of a block after the first follows the
                 // first block's outfmt 0 prolog (`preliminary_search_error`).
                 &BlastpReports {
                     reader_warnings: &[],
@@ -8062,32 +7455,31 @@ fn run_resolved_in_pool(
     let requested_formats = outputs
         .formats
         .iter()
-        .map(
-            |format| -> Result<(BlastpReport, Option<Vec<BlastpTabularField>>)> {
-                if let Some(serial) = blastp_seqalign_format(format.outfmt) {
-                    return Ok((BlastpReport::Seqalign(serial), None));
-                }
-                if blastp_is_xml(format.outfmt) {
-                    return Ok((BlastpReport::Xml, None));
-                }
-                if blastp_is_archive(format.outfmt) {
-                    return Ok((BlastpReport::Archive, None));
-                }
-                if let Some(kind) = blastp_xml2_kind(format.outfmt) {
-                    return Ok((BlastpReport::Xml2(kind), None));
-                }
-                let (outfmt, custom_fields) =
-                    OutputFormat::parse(format.outfmt).map_err(anyhow::Error::msg)?;
-                if outfmt == OutputFormat::Pairwise && custom_fields.is_some() {
-                    bail!("blastp outfmt 0 does not accept custom field lists");
-                }
-                let custom_fields = custom_fields
-                    .as_deref()
-                    .map(parse_blastp_tabular_fields)
-                    .transpose()?;
-                Ok((BlastpReport::Text(outfmt), custom_fields))
-            },
-        )
+        .map(|format| -> Result<BlastpReport> {
+            // The tabular reports with a field list or a delimiter, and outfmt 10 and 20.
+            if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt) {
+                return Ok(BlastpReport::CustomTabular(spec));
+            }
+            if let Some(serial) = blastp_seqalign_format(format.outfmt) {
+                return Ok(BlastpReport::Seqalign(serial));
+            }
+            if blastp_is_xml(format.outfmt) {
+                return Ok(BlastpReport::Xml);
+            }
+            if blastp_is_archive(format.outfmt) {
+                return Ok(BlastpReport::Archive);
+            }
+            if let Some(kind) = blastp_xml2_kind(format.outfmt) {
+                return Ok(BlastpReport::Xml2(kind));
+            }
+            // Outfmt 0, and outfmt 6 and 7 of the `std` fields and a tab (`TabularSpec::of`).
+            let (outfmt, custom_fields) =
+                OutputFormat::parse(format.outfmt).map_err(anyhow::Error::msg)?;
+            if outfmt == OutputFormat::Pairwise && custom_fields.is_some() {
+                bail!("blastp outfmt 0 does not accept custom field lists");
+            }
+            Ok(BlastpReport::Text(outfmt))
+        })
         .collect::<Result<Vec<_>>>()?;
     // What the requested formats need beyond outfmt 0, 6 and 7, decided once for the search
     // (`ReportNeeds`): the engine's identities and positives of the HSPs whose counts the
@@ -8096,7 +7488,7 @@ fn run_resolved_in_pool(
         // The archive's Seq-aligns are those of outfmt 8.
         seqalign: requested_formats
             .iter()
-            .any(|(report, _)| matches!(report, BlastpReport::Seqalign(_) | BlastpReport::Archive)),
+            .any(|report| matches!(report, BlastpReport::Seqalign(_) | BlastpReport::Archive)),
     };
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
@@ -8109,7 +7501,7 @@ fn run_resolved_in_pool(
         .collect();
     let query_titles: Vec<Arc<[u8]>> = query_records
         .iter()
-        .map(|record| Arc::from(record.title()))
+        .map(|record| Arc::from(record.query_line().as_ref()))
         .collect();
     let query_lengths: Vec<usize> = query_records
         .iter()
@@ -8173,7 +7565,7 @@ fn run_resolved_in_pool(
         &x_owned_subjects
     };
     // The subjects' titles by subject index, as the reports write them. EXPERIMENT
-    // (LOSAT_X_BPSUBJMETA): the block search's titles and tabular IDs, made once for all blocks
+    // (LOSAT_X_BPQBLOCK): the block search's titles and tabular IDs, made once for all blocks
     // (`blast_engine/x_subject_meta.rs`); the same values, borrowed.
     let x_meta = super::x_query_blocks::x_block_subject_meta(blastp_parallel_pool, subject_records);
     let subject_titles: std::borrow::Cow<'_, [Arc<[u8]>]> = match x_meta {
@@ -8426,7 +7818,7 @@ fn run_resolved_in_pool(
     // no sequence): NCBI opens it, writes the outfmt 0 prolog, reads the first query
     // batch and fails in that batch's preliminary search, where its reader cannot map
     // the sequence file (fixture `LOSAT/tests/seqdb/db/empty`).
-    if let Some(database) = database.filter(|database| database.num_sequences() == 0) {
+    if let Some(database) = database.filter(|database| database.printed_num_sequences() == 0) {
         return Err(preliminary_search_error(
             &args,
             subject_source,
@@ -8486,8 +7878,14 @@ fn run_resolved_in_pool(
     } else {
         total_db_len as i64
     };
-    let gapped_gumbel = lookup_protein_gumbel_params(&args.scoring, gumbel_db_length)
-        .context("missing NCBI gumbel parameters for supported blastp scoring")?;
+    let gapped_gumbel = if args.searchsp.is_none() {
+        Some(
+            lookup_protein_gumbel_params(&args.scoring, gumbel_db_length)
+                .context("missing NCBI gumbel parameters for supported blastp scoring")?,
+        )
+    } else {
+        None
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:163-168
     // ```c++
     // static Int4
@@ -8516,7 +7914,7 @@ fn run_resolved_in_pool(
     let num_subjects = match database {
         None if total_db_len == 0 => 1,
         None => subjects.len().max(1),
-        Some(database) => database.num_sequences() as usize,
+        Some(database) => database.statistics_num_sequences() as usize,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
     // ```c
@@ -8536,7 +7934,30 @@ fn run_resolved_in_pool(
     // The `-subject` search without `-dbsize` keeps its computation (`f64` products of
     // numbers that it holds exactly); a database or `-dbsize` can pass 2^53, so their
     // effective search space is computed in NCBI's `Int8` (`blastp_database_search_space`).
-    let exact_search_space = database.is_some() || args.dbsize > 0;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+    // ```c
+    //    if (sbp->gbp) {
+    //    ...
+    //    } else {
+    //        min_subject_length = (Int4) (total_length/num_seqs);
+    //    }
+    //
+    //    if(min_subject_length <=0) {
+    // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
+    //    }
+    // ```
+    // NCBI writes the start of its outfmt 0 report, then the engine error "The average subject
+    // length is too short"; LOSAT refuses the search instead.
+    if args.searchsp.is_some()
+        && contexts.iter().any(|ctx| ctx.is_valid)
+        && total_db_len / num_subjects.max(1) == 0
+    {
+        anyhow::bail!(
+            "-searchsp with subjects of an average length below one letter is not supported by LOSAT's BLASTP"
+        );
+    }
+    let exact_search_space = database.is_some() || args.dbsize > 0 || args.searchsp.is_some();
+    let options_searchsp = args.searchsp.unwrap_or(0);
     // NCBI reference: c++/src/algo/blast/core/blast_setup.c:729-732
     // ```c
     //    if (db_length == 0 &&
@@ -8550,6 +7971,31 @@ fn run_resolved_in_pool(
     let search_spaces: Vec<SearchSpace> = contexts
         .iter()
         .map(|ctx| -> Result<SearchSpace> {
+            if options_searchsp != 0 {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:826-846
+                // ```c
+                //          if (effective_search_space == 0) {
+                //          ...
+                //       query_info->contexts[index].eff_searchsp = effective_search_space;
+                // ```
+                exact_search_spaces.push(Some(options_searchsp));
+                return Ok(SearchSpace {
+                    effective_query_len: ctx.aa_len as f64,
+                    effective_db_len: eff_db_length as f64,
+                    effective_space: options_searchsp as f64,
+                    length_adjustment: if ctx.aa_len > 0 {
+                        crate::stats::length_adjustment::compute_length_adjustment_ncbi(
+                            ctx.aa_len as i64,
+                            eff_db_length,
+                            num_subjects as i64,
+                            &gapped_params,
+                        )
+                        .length_adjustment
+                    } else {
+                        0
+                    },
+                });
+            }
             if eff_db_length == 0 {
                 exact_search_spaces.push(None);
                 return Ok(SearchSpace {
@@ -8622,22 +8068,25 @@ fn run_resolved_in_pool(
     // ```
     // A database answers `BLAST_SEQSRC_MINLENGTH` (10) for its shortest sequence (an
     // index file stores none, and the alias key `MIN_SEQ_LENGTH` is rejected by the
-    // reader), whatever its sequences are; a FASTA subject set answers its real minimum,
+    // reader), whatever its sequences are, unless a list made NCBI scan its totals (then
+    // the scanned shortest length, line DI-8); a FASTA subject set answers its real minimum,
     // raised to 10.
     let cutoff_subject_length = match database {
         None => blastp_preliminary_cutoff_subject_length(&subjects),
-        Some(_) => database::BLAST_SEQSRC_MINLENGTH,
+        Some(database) => database.cutoff_subject_length(),
     };
     let hit_cutoff_scores: Vec<i32> = contexts
         .iter()
-        .map(|ctx| {
+        .enumerate()
+        .map(|(context_idx, ctx)| {
             blastp_hit_cutoff_score_for_context(
                 ctx,
                 args.evalue,
                 cutoff_subject_length,
                 args.comp_based_stats.mode,
                 &gapped_params,
-                &gapped_gumbel,
+                gapped_gumbel.as_ref(),
+                exact_search_spaces[context_idx].unwrap_or(0),
             )
         })
         .collect();
@@ -8678,7 +8127,12 @@ fn run_resolved_in_pool(
     // int cbs_stretch = (compositionBasedStats > 1) ? 5 : 1;
     // params->prelim_evalue = cbs_stretch*evalue;
     // ```
-    let prelim_evalue = blastp_prelim_evalue(args.evalue, args.comp_based_stats.mode);
+    // `params->prelim_evalue = evalue` without a Gumbel block (blast_parameters.c:931-935).
+    let prelim_evalue = if gapped_gumbel.is_some() {
+        blastp_prelim_evalue(args.evalue, args.comp_based_stats.mode)
+    } else {
+        args.evalue
+    };
     // `x_prelim_free.rs`.
     let mut x_prelim_freed = 0usize;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3074-3077
@@ -9683,66 +9137,85 @@ fn run_resolved_in_pool(
                 endpoint_duplicates_purged,
             );
         }
-        let mut preliminary_hits_by_query = std::mem::take(&mut scratch.preliminary_hits_by_query);
-        split_preliminary_hits_by_query_into(
-            &mut preliminary_hsp_list,
-            &contexts,
-            query_ids.len(),
-            &mut preliminary_hits_by_query,
-        );
-        for (q_idx, preliminary_hits) in preliminary_hits_by_query
-            .iter_mut()
-            .take(query_ids.len())
-            .enumerate()
-        {
-            if preliminary_hits.is_empty() {
-                continue;
-            }
-            let ctx = &contexts[q_idx as usize];
-            // The compact list, with the E-values of `Blast_HSPListGetEvalues` and the reap by the
-            // preliminary E-value (`x_prelim_compact.rs`); a list that keeps HSPs gives back the
-            // room of the reaped ones (`x_prelim_free.rs`).
-            let mut compact_hsp_list = x_build_compact_preliminary_hsp_list(
-                preliminary_hits.as_slice(),
+        if x_hits_flat::x_bphitsflat() {
+            x_hits_flat::x_lists_by_query(
+                &mut preliminary_hsp_list,
+                &contexts,
+                query_ids.len(),
+                &mut scratch.x_hits_order,
+                &mut scratch.x_hits_starts,
                 s_idx as u32,
-                q_idx as u32,
-                ctx.aa_len,
                 subject.aa_len,
                 &gapped_params,
-                &gapped_gumbel,
+                gapped_gumbel.as_ref(),
+                &search_spaces,
+                prelim_evalue,
+                subject_result,
             );
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1523-1539
-            // ```c
-            // Blast_HSPListGetEvalues(program_number, query_info,
-            //                         stat_length, hsp_list,
-            //                         gapped_calculation, FALSE,
-            //                         sbp, 0, 1.0);
-            // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
-            // ```
-            //
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:640-670
-            // ```c
-            // cutoff = hit_params->prelim_evalue;
-            // ...
-            // if (hsp->evalue > cutoff) {
-            //     hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-            // }
-            // ```
-            reap_hsplist_by_evalue(&mut compact_hsp_list, prelim_evalue);
-            if !compact_hsp_list.hsps.is_empty() {
-                compact_hsp_list.hsps.shrink_to_fit();
-                subject_result
-                    .x_compact_hsp_lists
-                    .push((q_idx, compact_hsp_list));
+        } else {
+            let mut preliminary_hits_by_query =
+                std::mem::take(&mut scratch.preliminary_hits_by_query);
+            split_preliminary_hits_by_query_into(
+                &mut preliminary_hsp_list,
+                &contexts,
+                query_ids.len(),
+                &mut preliminary_hits_by_query,
+            );
+            for (q_idx, preliminary_hits) in preliminary_hits_by_query
+                .iter_mut()
+                .take(query_ids.len())
+                .enumerate()
+            {
+                if preliminary_hits.is_empty() {
+                    continue;
+                }
+                let ctx = &contexts[q_idx as usize];
+                // The compact list, with the E-values of `Blast_HSPListGetEvalues` and the reap by the
+                // preliminary E-value (`x_prelim_compact.rs`); a list that keeps HSPs gives back the
+                // room of the reaped ones (`x_prelim_free.rs`).
+                let mut compact_hsp_list = x_build_compact_preliminary_hsp_list(
+                    preliminary_hits.iter(),
+                    s_idx as u32,
+                    q_idx as u32,
+                    ctx.aa_len,
+                    subject.aa_len,
+                    &gapped_params,
+                    gapped_gumbel.as_ref(),
+                    search_spaces[q_idx].effective_space,
+                );
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1523-1539
+                // ```c
+                // Blast_HSPListGetEvalues(program_number, query_info,
+                //                         stat_length, hsp_list,
+                //                         gapped_calculation, FALSE,
+                //                         sbp, 0, 1.0);
+                // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
+                // ```
+                //
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:640-670
+                // ```c
+                // cutoff = hit_params->prelim_evalue;
+                // ...
+                // if (hsp->evalue > cutoff) {
+                //     hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+                // }
+                // ```
+                reap_hsplist_by_evalue(&mut compact_hsp_list, prelim_evalue);
+                if !compact_hsp_list.hsps.is_empty() {
+                    compact_hsp_list.hsps.shrink_to_fit();
+                    subject_result
+                        .x_compact_hsp_lists
+                        .push((q_idx, compact_hsp_list));
+                }
+                preliminary_hits.clear();
             }
-            preliminary_hits.clear();
+            scratch.preliminary_hits_by_query = preliminary_hits_by_query;
         }
         scratch.restricted_align_array = restricted_align_array;
         scratch.restricted_align_array.clear();
         scratch.preliminary_hsp_counts_by_query = preliminary_hsp_counts_by_query;
         scratch.preliminary_hsp_counts_by_query.clear();
         scratch.preliminary_hsp_list = preliminary_hsp_list;
-        scratch.preliminary_hits_by_query = preliminary_hits_by_query;
     };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1498
@@ -10016,18 +9489,11 @@ fn run_resolved_in_pool(
     // and stand for the subject set in the redo; the hit lists name them by their rank
     // among the listed ordinal ids from here on (`database::ListedSubjects`). Their
     // definition lines are read after the redo (`ListedSubjects::read_titles`).
-    // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the listed subjects without a copy of their residues
-    // (`ListedSubjects::x_list`); the redo reads each match's subject from the database.
+    // The listed subjects have no copy of their residues (`ListedSubjects::x_list`); the redo
+    // reads each match's subject from the database.
     let t_search = crate::utils::xtiming::clock();
     let mut listed_subjects = match database {
-        Some(database) if super::x_redo_subjects::x_bp_redo_db_subj() => {
-            Some(database::ListedSubjects::x_list(
-                database,
-                &mut preliminary_hit_lists,
-                &mut x_compact_hit_lists,
-            )?)
-        }
-        Some(database) => Some(database::ListedSubjects::read(
+        Some(database) => Some(database::ListedSubjects::x_list(
             database,
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
@@ -10059,7 +9525,7 @@ fn run_resolved_in_pool(
         );
     }
     // The redo reads lists of full HSPs. With more than one thread its parallel paths read the
-    // lists of all queries, so all are expanded here (but for LOSAT_X_BPREDOWINEXPAND below); the
+    // lists of all queries, so all are expanded here (but for the windows of the redo below); the
     // one-thread loop below expands each query's list when it reaches it.
     #[cfg(all(
         feature = "parallel",
@@ -10071,22 +9537,23 @@ fn run_resolved_in_pool(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_compact_expand_all = false;
-    // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): where the redo in windows (LOSAT_X_BPREDOPAR) may run,
+    // Where the redo in windows (LOSAT_X_BPREDOPAR) may run,
     // its windows expand the compact lists as they reach them (`x_redo_par.rs`); where it does not
     // run, every list is expanded below before the other paths.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let x_win_expand = x_compact_expand_all
-        && super::x_redo_par::x_bp_redo_par()
-        && super::x_redo_par::x_bp_redo_win_expand();
+    let x_win_expand = x_compact_expand_all && super::x_redo_par::x_bp_redo_par();
     #[cfg(any(
         not(feature = "parallel"),
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_win_expand = false;
-    if x_compact_expand_all && !x_win_expand {
+    // `-comp_based_stats 0`: the ordinary traceback below reads the compact lists as they are.
+    let ordinary_traceback =
+        args.comp_based_stats.mode == BlastpCompositionMode::NoCompositionBasedStats;
+    if x_compact_expand_all && !x_win_expand && !ordinary_traceback {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
 
@@ -10107,6 +9574,32 @@ fn run_resolved_in_pool(
     // hits are freed, as the subject loop's scratches freed theirs.
     x_ih_pool::release();
     let kappa_redo_start = blastp_timing_start(timing_enabled);
+    // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
+    // preliminary list here, so the composition-based redo below finds none; its hit lists
+    // replace the redo's after it.
+    let ordinary_hit_lists = if ordinary_traceback {
+        let ordinary = traceback::OrdinaryTraceback {
+            contexts: &contexts,
+            total_query_span,
+            subjects,
+            matrix: args.scoring.matrix,
+            gap_open: args.scoring.gap_open,
+            gap_extend: args.scoring.gap_extend,
+            x_drop_final: x_drop_gapped_final,
+            karlin: &gapped_params,
+            gumbel: gapped_gumbel.as_ref(),
+            search_spaces: &search_spaces,
+            expect_value: args.evalue,
+            hitlist_size: args.traceback_hitlist_size(),
+        };
+        Some(ordinary.run(
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            blastp_parallel_pool,
+        )?)
+    } else {
+        None
+    };
     // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:2228-2236
     // self->ungappedLambda = sbp->kbp_ideal->Lambda / scale_factor;
     // status = s_GetStartFreqRatios(self->startFreqRatios, matrixName);
@@ -10377,7 +9870,7 @@ fn run_resolved_in_pool(
         query_batches: &kappa_query_batches,
         matrix: args.scoring.matrix,
         gapped_params: &gapped_params,
-        gapped_gumbel: &gapped_gumbel,
+        gapped_gumbel: gapped_gumbel.as_ref(),
         evalue: args.evalue,
         build_redo_align_params: &build_redo_align_params,
         timing: timing_enabled,
@@ -10398,7 +9891,7 @@ fn run_resolved_in_pool(
             args.num_threads,
             blastp_num_threads,
             subjects.len(),
-            // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the compact lists count while not expanded.
+            // The compact lists count while not expanded.
             super::x_redo_par::x_matches(
                 &preliminary_hit_lists,
                 if x_win_expand {
@@ -10413,7 +9906,7 @@ fn run_resolved_in_pool(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if x_redo_par_switch {
+    if x_redo_par_switch && !ordinary_traceback {
         crate::utils::xreach::x_reach!("LOSAT_X_BPREDOPAR", x_redo_par_on);
     }
     #[cfg(all(
@@ -10426,7 +9919,7 @@ fn run_resolved_in_pool(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_redo_par_run = false;
-    // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the other paths read the expanded lists of all queries.
+    // The other paths read the expanded lists of all queries.
     if x_win_expand && !x_redo_par_run {
         x_finish_compact_lists(&mut preliminary_hit_lists, &mut x_compact_hit_lists);
     }
@@ -10436,21 +9929,24 @@ fn run_resolved_in_pool(
     // one-thread loop shares none.
     // The serial and the query-parallel redo loops solve the first Newton problems of the next
     // `X_NEWTON_LANES_MATCHES` matches ahead (Newton lanes); the match-parallel redo solves none.
-    crate::utils::xreach::x_reach!(
-        "LOSAT_X_SEGSHARE",
-        x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
-    );
-    crate::utils::xreach::x_reach!(
-        "LOSAT_X_NEWTONLANES",
-        x_redo_par_run || !use_parallel_kappa_match_redo
-    );
+    // With `-comp_based_stats 0` no redo runs, so neither side is reached.
+    if !ordinary_traceback {
+        crate::utils::xreach::x_reach!(
+            "LOSAT_X_SEGSHARE",
+            x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
+        );
+        crate::utils::xreach::x_reach!(
+            "LOSAT_X_NEWTONLANES",
+            x_redo_par_run || !use_parallel_kappa_match_redo
+        );
+    }
     // EXPERIMENT (LOSAT_X_BPSEGWIN): a redo not in windows empties no store; the windows record
     // their side (`x_redo_par::x_redo`).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if super::x_redo_par::x_bp_seg_win().is_some() && !x_redo_par_on {
+    if super::x_redo_par::x_bp_seg_win().is_some() && !x_redo_par_on && !ordinary_traceback {
         crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", false);
     }
     if x_redo_par_run {
@@ -10459,8 +9955,8 @@ fn run_resolved_in_pool(
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         {
-            // The parallel paths read the expanded lists of all queries (above), or with
-            // LOSAT_X_BPREDOWINEXPAND the windows expand the compact lists as they reach them.
+            // The parallel paths read the expanded lists of all queries (above), or the windows
+            // expand the compact lists as they reach them.
             debug_assert!(x_win_expand || x_compact_hit_lists.iter().all(Option::is_none));
             let released = super::x_redo_par::x_redo_par_run(
                 &x_redo_par_search,
@@ -10545,7 +10041,7 @@ fn run_resolved_in_pool(
 
                             let s_idx = local_match.oid;
                             let redo_align_params = build_redo_align_params(q_idx)?;
-                            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here.
+                            // Read from the database here.
                             let subject = subjects.read(s_idx)?;
                             let subject_raw = subject.residues();
                             let query_workspace = query_workspace.get_or_init(|| {
@@ -10570,7 +10066,7 @@ fn run_resolved_in_pool(
                                 subject_raw,
                                 args.scoring.matrix,
                                 &gapped_params,
-                                &gapped_gumbel,
+                                gapped_gumbel.as_ref(),
                                 &redo_align_params,
                                 args.evalue,
                                 kappa_gap_scratch,
@@ -10825,7 +10321,7 @@ fn run_resolved_in_pool(
                                     &mut kappa_subject_range_cache,
                                 );
                             }
-                            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after
+                            // Read from the database here, after
                             // the test (a query alone in its batch; the others ahead of the replay),
                             // as NCBI reads it, and after the first Newton problems, which read it
                             // ahead and drop it; an error is kept for the replay as the redo's own
@@ -10847,7 +10343,7 @@ fn run_resolved_in_pool(
                                 subject_raw,
                                 args.scoring.matrix,
                                 &gapped_params,
-                                &gapped_gumbel,
+                                gapped_gumbel.as_ref(),
                                 &redo_align_params,
                                 args.evalue,
                                 &mut kappa_gap_scratch,
@@ -11097,7 +10593,7 @@ fn run_resolved_in_pool(
                         &mut kappa_subject_range_cache,
                     );
                 }
-                // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after the test, as
+                // Read from the database here, after the test, as
                 // NCBI reads it, and after the first Newton problems, which read it ahead and drop it.
                 let subject = subjects.read(s_idx)?;
                 let subject_raw = subject.residues();
@@ -11109,7 +10605,7 @@ fn run_resolved_in_pool(
                     subject_raw,
                     args.scoring.matrix,
                     &gapped_params,
-                    &gapped_gumbel,
+                    gapped_gumbel.as_ref(),
                     &redo_align_params,
                     args.evalue,
                     &mut kappa_gap_scratch,
@@ -11146,6 +10642,9 @@ fn run_resolved_in_pool(
     }
     let mut hit_lists =
         fill_results_from_compo_heaps(args.traceback_hitlist_size(), &mut redone_matches);
+    if let Some(ordinary_hit_lists) = ordinary_hit_lists {
+        hit_lists = ordinary_hit_lists;
+    }
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(
             &timing.kappa_redo_ns,
@@ -11231,7 +10730,7 @@ fn run_resolved_in_pool(
     if listed_subjects.is_some() && database.is_some() && database::x_bp_listed_lean() {
         crate::utils::xreach::x_reach!("LOSAT_X_BPLISTEDLEAN", !reports.v1_titles);
     }
-    // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the residues that the reports read, read from the
+    // The residues that the reports read, read from the
     // database again after the redo (`ListedSubjects::x_read_shown`): every listed subject's for
     // the records; where every report is tabular rows of the default fields or Seq-aligns, which
     // read the letters only to recount the HSPs whose query or subject has an O, those of the
@@ -11240,9 +10739,15 @@ fn run_resolved_in_pool(
         let residues = if !x_listed_lean {
             database::XShownResidues::Listed
         } else if outputs.hits.is_none()
-            && requested_formats.iter().all(|(outfmt, custom_fields)| {
-                matches!(outfmt, BlastpReport::Seqalign(_) | BlastpReport::Archive)
-                    || (outfmt.is_tabular() && custom_fields.is_none())
+            && requested_formats.iter().all(|outfmt| {
+                matches!(
+                    outfmt,
+                    BlastpReport::Seqalign(_)
+                        | BlastpReport::Archive
+                        | BlastpReport::Text(
+                            OutputFormat::Tabular | OutputFormat::TabularWithComments
+                        )
+                )
             })
         {
             database::XShownResidues::WithO
@@ -11354,10 +10859,15 @@ fn run_resolved_in_pool(
     };
     let subject_input_label = blastp_subject_tag(&args, subject_label);
     // The number of sequences that the `Database:` lines show: the real count of the
-    // database, or the records of the subject set.
+    // database, or the records of the subject set. With a taxid list the reports show the
+    // whole database's totals and the statistics read the list's (line DI-8).
     let shown_num_sequences = match database {
-        Some(database) => database.num_sequences() as usize,
+        Some(database) => database.printed_num_sequences() as usize,
         None => subject_records.len(),
+    };
+    let shown_total_letters = match database {
+        Some(database) => usize::try_from(database.printed_total_letters()).unwrap_or(usize::MAX),
+        None => total_db_len,
     };
     let context = ReportContext {
         query_name: None,
@@ -11377,41 +10887,14 @@ fn run_resolved_in_pool(
             None => format!("User specified sequence set (Input: {subject_input_label})"),
         }),
         database_num_sequences: Some(shown_num_sequences),
-        database_total_letters: Some(total_db_len),
+        database_total_letters: Some(shown_total_letters),
         program: args.app.ncbi_name().to_string(),
         version: Some(NCBI_BLASTP_VERSION.to_string()),
     };
 
-    // Per requested output format: its tabular field list, and whether its tabular rows
-    // stream directly from the hit lists (they do unless the fields need the rendered
-    // alignment). Only the reporting depends on the format; the search above does not.
-    let format_plans: Vec<(BlastpReport, Option<&[BlastpTabularField]>, bool)> = requested_formats
-        .iter()
-        .map(|(outfmt, custom_fields)| {
-            let tabular_fields: Option<&[BlastpTabularField]> = if outfmt.is_tabular() {
-                Some(if let Some(fields) = custom_fields.as_ref() {
-                    fields.as_slice()
-                } else {
-                    default_blastp_tabular_fields()
-                })
-            } else {
-                None
-            };
-            let render_alignment = matches!(outfmt, BlastpReport::Text(OutputFormat::Pairwise))
-                || tabular_fields.is_some_and(blastp_tabular_fields_require_rendered_alignment);
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-            // ```c
-            // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-            //     // Add tab in front of field, except for the first field.
-            //     if (iter != m_FieldsToShow.begin())
-            //         m_Ostream << m_FieldDelimiter;
-            //     x_PrintField(*iter);
-            // }
-            // ```
-            let stream_tabular_hit_lists = outfmt.is_tabular() && !render_alignment;
-            (*outfmt, tabular_fields, stream_tabular_hit_lists)
-        })
-        .collect();
+    // The requested output formats; only the reporting depends on the format, the search above
+    // does not.
+    let format_plans: &[BlastpReport] = &requested_formats;
     // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:973-986
     // ```c
     // if (x_IsFieldRequested(eQuerySeq) ||
@@ -11426,15 +10909,15 @@ fn run_resolved_in_pool(
     // ```c++
     // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
     // ```
-    // Rendered hits are needed by outfmt 0, by tabular fields that need the alignment,
-    // and by the caller's hit records. Every consumer needs the alignment rendered, so
-    // they are built once from the final hit list.
+    // Rendered hits are needed by outfmt 0, by tabular fields that need the alignment
+    // (`TabularNeeds::rows`), and by the caller's hit records. Every consumer needs the
+    // alignment rendered, so they are built once from the final hit list.
     let needs_pairwise_hits = outputs.hits.is_some()
-        || format_plans
-            .iter()
-            .any(|(outfmt, _, stream_tabular_hit_lists)| {
-                matches!(outfmt, BlastpReport::Text(_)) && !stream_tabular_hit_lists
-            });
+        || format_plans.iter().any(|outfmt| match outfmt {
+            BlastpReport::Text(OutputFormat::Pairwise) => true,
+            BlastpReport::CustomTabular(spec) => spec.needs().rows,
+            _ => false,
+        });
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:271-327
     // ```c
     // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
@@ -11531,11 +11014,12 @@ fn run_resolved_in_pool(
     // its first query, `read_query_batches`), then the query's own: the O characters read
     // as X, and the message of its set-up (a query without letters) or of its
     // Karlin-Altschul parameters (an invalid query with letters).
+    let filtered_empty = database.is_some_and(|database| database.filtered_empty());
     // A Seq-annot format writes no result warnings (`ReportFormat::writes_query_warnings`);
     // the warnings go with the first format.
     let result_warnings = format_plans
         .first()
-        .is_none_or(|(outfmt, _, _)| outfmt.writes_query_warnings());
+        .is_none_or(|outfmt| outfmt.writes_query_warnings());
     let mut query_warning_lines: Vec<Vec<u8>> = query_records
         .iter()
         .enumerate()
@@ -11548,6 +11032,9 @@ fn run_resolved_in_pool(
                 messages.push(NO_DATA_MESSAGE.to_string());
             } else if !query_valid[q_idx] {
                 messages.push(crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string());
+            }
+            if filtered_empty && !query_batch_skipped[q_idx] {
+                messages.push(crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string());
             }
             let mut lines = reports
                 .reader_warnings
@@ -11574,10 +11061,10 @@ fn run_resolved_in_pool(
         // id; outfmt 0, 5 and 13 to 16 join the hits of matching Seq-align ids).
         titles.check_parsed_reports(
             &hit_lists,
-            format_plans.iter().any(|(outfmt, _, _)| {
-                !matches!(outfmt, BlastpReport::Seqalign(_) | BlastpReport::Archive)
-            }),
-            format_plans.iter().any(|(outfmt, _, _)| {
+            format_plans
+                .iter()
+                .any(|outfmt| !matches!(outfmt, BlastpReport::Seqalign(_) | BlastpReport::Archive)),
+            format_plans.iter().any(|outfmt| {
                 matches!(
                     outfmt,
                     BlastpReport::Text(OutputFormat::Pairwise)
@@ -11608,12 +11095,27 @@ fn run_resolved_in_pool(
         if args.app == BlastpApp::Blastp
             && format_plans
                 .first()
-                .is_some_and(|(outfmt, _, _)| outfmt.prefetches_subjects())
+                .is_some_and(|outfmt| outfmt.prefetches_subjects())
             && database.taxdb_found()
         {
+            // A custom tabular report with a plural name looks every taxid of its rows up, taxid 0
+            // too, which the prefetch does not: the rows of a batch with hits may open the
+            // taxonomy database before a later batch's prefetch (`TaxdbRun::open_for_rows`).
+            let plural_names = matches!(
+                format_plans.first(),
+                Some(BlastpReport::CustomTabular(spec)) if spec.checks_taxdb()
+            );
             for batch in &query_batches {
-                let messages =
-                    titles.prefetch_messages(database, &hit_lists[batch.searched.clone()])?;
+                let lists = &hit_lists[batch.searched.clone()];
+                let messages = titles.prefetch_messages(database, lists)?;
+                if plural_names
+                    && lists
+                        .iter()
+                        .flatten()
+                        .any(|hit_list| hit_list.hsplist_count > 0)
+                {
+                    database.open_for_tabular_rows(args.app.name())?;
+                }
                 if messages.is_empty() {
                     continue;
                 }
@@ -11624,39 +11126,43 @@ fn run_resolved_in_pool(
         }
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
-    // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPSUBJMETA): the block
+    // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
     // search's IDs made once for all blocks, with the same check (`x_tabular_subject_ids_cached`).
     // `sacc` and `saccver` of the database sequences with parsed Seq-ids, by rank (empty
     // without them: the others' are their `sseqid`).
     let mut subject_accessions: Vec<Option<[Arc<[u8]>; 2]>> = Vec::new();
-    let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> = if format_plans
-        .iter()
-        .any(|(outfmt, _, _)| outfmt.is_tabular())
-    {
-        match (listed_titles.as_ref(), x_meta) {
-            (Some(titles), _) => {
-                let (ids, accessions) = titles.tabular_subject_ids(&hit_lists)?;
-                subject_accessions = accessions;
-                ids.into()
+    let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> =
+        if format_plans.iter().any(|outfmt| outfmt.is_tabular()) {
+            match (listed_titles.as_ref(), x_meta) {
+                (Some(titles), _) => {
+                    let (ids, accessions) = titles.tabular_subject_ids(&hit_lists)?;
+                    subject_accessions = accessions;
+                    ids.into()
+                }
+                (None, Some(meta)) => {
+                    x_tabular_subject_ids_cached(&hit_lists, subject_records, meta)?.into()
+                }
+                (None, None) => tabular_subject_ids(&hit_lists, subject_records)?.into(),
             }
-            (None, Some(meta)) => {
-                x_tabular_subject_ids_cached(&hit_lists, subject_records, meta)?.into()
-            }
-            (None, None) => tabular_subject_ids(&hit_lists, subject_records)?.into(),
-        }
-    } else {
-        Vec::new().into()
-    };
-    // The `stitle` text of the tabular formats by subject: the stored titles of a
-    // database; none for the records of a subject set, which have no BLAST definition
-    // line (`N/A`, `blastp_subject_stitle`).
+        } else {
+            Vec::new().into()
+        };
+    // The `stitle` text of the custom tabular reports by subject: the stored titles of a
+    // database (the first definition line's of a sequence with parsed Seq-ids); none for the
+    // records of a subject set, which have no BLAST definition line (`N/A`).
     // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the titles that outfmt 0 borrows too.
     let subject_stitles: std::borrow::Cow<'_, [Arc<[u8]>]> = match listed_titles.as_ref() {
-        Some(titles) => match &titles.shown {
-            database::ListedShown::Lean(titles) => std::borrow::Cow::Borrowed(&titles[..]),
-            database::ListedShown::Records(_) => titles.stitles().into(),
-        },
-        None => Vec::new().into(),
+        Some(titles)
+            if format_plans
+                .iter()
+                .any(|outfmt| matches!(outfmt, BlastpReport::CustomTabular(_))) =>
+        {
+            match &titles.shown {
+                database::ListedShown::Lean(titles) => std::borrow::Cow::Borrowed(&titles[..]),
+                database::ListedShown::Records(_) => titles.stitles().into(),
+            }
+        }
+        _ => Vec::new().into(),
     };
     let pairwise_database = database.map(database::BlastpDatabase::pairwise_database);
     // The reported database sequences with parsed Seq-ids by rank (empty without them).
@@ -11667,7 +11173,7 @@ fn run_resolved_in_pool(
     // Each requested format prints the same final result without searching again.
     let mut output_result: Result<()> = Ok(());
     let observer = &mut outputs.observer;
-    for (format_index, (format, &(outfmt, tabular_fields, stream_tabular_hit_lists))) in outputs
+    for (format_index, (format, &outfmt)) in outputs
         .formats
         .iter_mut()
         .zip(format_plans.iter())
@@ -11786,16 +11292,19 @@ fn run_resolved_in_pool(
                             karlin: None,
                             search_space: 0,
                             length_adjustment: 0,
+                            context0_space: args.searchsp.unwrap_or(0),
                         };
                     }
+                    let search_space = exact_search_spaces[first]
+                        .unwrap_or(search_spaces[first].effective_space.round() as i64);
                     super::archive::FirstContext {
                         karlin: Some((
                             contexts[first].karlin_params,
                             (!args.ungapped).then_some(gapped_params),
                         )),
-                        search_space: exact_search_spaces[first]
-                            .unwrap_or(search_spaces[first].effective_space.round() as i64),
+                        search_space,
                         length_adjustment: search_spaces[first].length_adjustment,
+                        context0_space: search_space,
                     }
                 };
                 super::archive::write_blastp_archives(
@@ -11910,6 +11419,11 @@ fn run_resolved_in_pool(
                                 crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string(),
                             );
                         }
+                        if filtered_empty && !query_batch_skipped[q_idx] {
+                            messages.push(
+                                crate::report::query_warnings::EMPTY_DATABASE_MESSAGE.to_string(),
+                            );
+                        }
                         messages
                     })
                     .collect();
@@ -12004,7 +11518,7 @@ fn run_resolved_in_pool(
                             0
                         },
                         db_len: if database.is_some() {
-                            total_db_len as i64
+                            shown_total_letters as i64
                         } else {
                             0
                         },
@@ -12089,7 +11603,7 @@ fn run_resolved_in_pool(
                             params,
                             args.out.as_deref(),
                         );
-                        // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): a block continues the document
+                        // EXPERIMENT (LOSAT_X_BPQBLOCK): a block continues the document
                         // of the blocks before it and hands its state on.
                         if let Some(carry) = reports.x_xml2_carry {
                             document
@@ -12163,7 +11677,7 @@ fn run_resolved_in_pool(
                     version: NCBI_BLASTP_VERSION.to_string(),
                     database_name: blastp_scan_mode_definition(&subject_input_label),
                     database_num_sequences: shown_num_sequences,
-                    database_total_letters: total_db_len,
+                    database_total_letters: shown_total_letters,
                     // NCBI blast_format.cpp:2267: options.GetMatrixName(), as typed.
                     matrix_name: args.matrix_name.clone(),
                     gap_open: args.scoring.gap_open,
@@ -12235,77 +11749,135 @@ fn run_resolved_in_pool(
                 )?;
                 Ok(())
             })(),
+            BlastpReport::CustomTabular(spec) => (|| -> Result<()> {
+                // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
+                // (`tabular`); never the default 6 and 7 below.
+                let mut writer = format.sink.open()?;
+                let needs = spec.needs();
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
+                // ```c++
+                //        		const CBioseq_Handle& subject_bh =
+                //                 scope.GetBioseqHandle(align.GetSeq_id(1));
+                //             ...
+                //             m_SubjectLength = subject_bh.GetBioseqLength();
+                // ```
+                // `slen` is the length of the subject's Bioseq: the whole record with
+                // `-subject_loc`, as the outfmt 0 `Length=` line.
+                let subject_length = |s_idx: usize| {
+                    ranges.subject_placements.length(
+                        s_idx,
+                        subjects.get(s_idx).map_or(0, |subject| subject.aa_len),
+                    )
+                };
+                // The taxids of the reported database sequences where a field shows them, and
+                // the taxonomy database's names that the rows look up (read before the report's
+                // first byte, so that their refusals come before it).
+                let taxonomy = match (listed_titles.as_ref(), database) {
+                    (Some(titles), Some(database)) if needs.taxonomy => {
+                        titles.tabular_taxonomy(database, &hit_lists)?
+                    }
+                    _ => Vec::new(),
+                };
+                let names = match database {
+                    Some(database) => database.tabular_names(spec, &taxonomy, args.app.name())?,
+                    None => None,
+                };
+                let tabular_subjects = match (listed_subjects.as_ref(), database) {
+                    (Some(listed), Some(_)) => super::tabular::TabularSubjects::Database {
+                        ids: &subject_ids,
+                        accessions: &subject_accessions,
+                        ordinals: &listed.ordinals,
+                        titles: &subject_stitles,
+                        parsed: listed_parsed,
+                        length: &subject_length,
+                        taxonomy: &taxonomy,
+                    },
+                    _ => super::tabular::TabularSubjects::Records {
+                        ids: &subject_ids,
+                        length: &subject_length,
+                    },
+                };
+                let program_version = format!(
+                    "{} {NCBI_BLASTP_VERSION}",
+                    args.app.ncbi_name().to_uppercase()
+                );
+                let tab = super::tabular::BlastpTabular {
+                    spec,
+                    app: args.app,
+                    program_version: &program_version,
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1458
+                    // ```c++
+                    //         x_PrintTabularReport(results, itr_num);
+                    // ```
+                    // LOSAT's psiblast runs its first round only.
+                    iteration: (args.app == BlastpApp::Psiblast).then_some(1),
+                    matrix: args.scoring.matrix,
+                    query_ids: &query_ids,
+                    query_records,
+                    query_titles: &query_titles,
+                    searched_lengths: &query_lengths,
+                    range_length: ranges.query_input.range_length,
+                    database: context
+                        .database_name
+                        .as_deref()
+                        .or(context.subject_name.as_deref())
+                        .unwrap_or_default(),
+                    subjects: tabular_subjects,
+                    unsearched: &query_batch_skipped,
+                    hits_found: psiblast_hits_found.as_deref(),
+                    rows: needs.rows.then_some(pairwise_hits.as_deref()).flatten(),
+                    prolog: reports.x_prolog,
+                    epilog: reports
+                        .epilog
+                        .then_some(reports.x_queries_before + query_titles.len()),
+                    taxdb_found: match database {
+                        Some(database) => database.taxdb_found(),
+                        None => args.subject_taxdb_found,
+                    },
+                    names: names.as_ref(),
+                };
+                super::tabular::write_blastp_tabular(
+                    &tab,
+                    &hit_lists,
+                    &mut writer,
+                    warnings.as_mut(),
+                    probe.as_mut(),
+                )?;
+                // Flushed when written, as the default tabular report is (below).
+                writer.flush()?;
+                Ok(())
+            })(),
             BlastpReport::Text(
                 outfmt @ (OutputFormat::Tabular | OutputFormat::TabularWithComments),
             ) => (|| -> Result<()> {
-                let fields =
-                    tabular_fields.expect("tabular fields prepared for blastp tabular output");
                 let mut writer = format.sink.open()?;
-                if stream_tabular_hit_lists {
-                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-                    // ```c
-                    // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-                    //     // Add tab in front of field, except for the first field.
-                    //     if (iter != m_FieldsToShow.begin())
-                    //         m_Ostream << m_FieldDelimiter;
-                    //     x_PrintField(*iter);
-                    // }
-                    // ```
-                    write_blastp_tabular_hit_lists(
-                        &hit_lists,
-                        fields,
-                        outfmt,
-                        &mut writer,
-                        // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1295-1309
-                        // AcknowledgeBlastQuery(bioseq, ..., kTabularFormat, rid);
-                        &query_ids,
-                        &query_titles,
-                        &subject_ids,
-                        &subject_accessions,
-                        &subject_stitles,
-                        &subjects,
-                        ranges.subject_placements,
-                        &query_batch_skipped,
-                        psiblast_hits_found.as_deref(),
-                        &context,
-                        probe.as_mut(),
-                        warnings.as_mut(),
-                        reports.epilog,
-                        reports.x_queries_before,
-                    )?;
-                } else {
-                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-                    // ```c
-                    // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-                    //     // Add tab in front of field, except for the first field.
-                    //     if (iter != m_FieldsToShow.begin())
-                    //         m_Ostream << m_FieldDelimiter;
-                    //     x_PrintField(*iter);
-                    // }
-                    // ```
-                    write_blastp_tabular_output(
-                        pairwise_hits
-                            .as_ref()
-                            .expect("pairwise hits prepared for blastp tabular outfmt"),
-                        fields,
-                        outfmt,
-                        &mut writer,
-                        // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1295-1309
-                        // AcknowledgeBlastQuery(bioseq, ..., kTabularFormat, rid);
-                        &query_ids,
-                        &query_titles,
-                        &subject_ids,
-                        &subject_accessions,
-                        &subject_stitles,
-                        &query_batch_skipped,
-                        psiblast_hits_found.as_deref(),
-                        &context,
-                        probe.as_mut(),
-                        warnings.as_mut(),
-                        reports.epilog,
-                        reports.x_queries_before,
-                    )?;
-                }
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+                // ```c
+                // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                //     // Add tab in front of field, except for the first field.
+                //     if (iter != m_FieldsToShow.begin())
+                //         m_Ostream << m_FieldDelimiter;
+                //     x_PrintField(*iter);
+                // }
+                // ```
+                write_blastp_tabular_hit_lists(
+                    &hit_lists,
+                    outfmt,
+                    &mut writer,
+                    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1295-1309
+                    // AcknowledgeBlastQuery(bioseq, ..., kTabularFormat, rid);
+                    &query_ids,
+                    &query_titles,
+                    &subject_ids,
+                    &subject_accessions,
+                    &query_batch_skipped,
+                    psiblast_hits_found.as_deref(),
+                    &context,
+                    probe.as_mut(),
+                    warnings.as_mut(),
+                    reports.epilog,
+                    reports.x_queries_before,
+                )?;
                 // NCBI reference: ncbi-blast/c++/src/corelib/ncbidiag.cpp:4086
                 // ```c
                 //         CDiagHandler* handler = new CStreamDiagHandler(&NcbiCerr, true, kLogName_Stderr);
@@ -12407,7 +11979,7 @@ mod tests {
     use super::*;
     use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
 
-    // EXPERIMENT (LOSAT_X_BPQBLOCKXML2): all four documents (outfmt 13 to 16) get a block plan; a
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): all four documents (outfmt 13 to 16) get a block plan; a
     // kind added to `Xml2Kind` is not admitted until `x_xml2_kind_takes_blocks` names it.
     #[test]
     fn xml2_block_plan_admits_outfmt_13_to_16() {
@@ -12483,35 +12055,6 @@ mod tests {
         assert!(listed.letters(1).is_none());
     }
 
-    #[test]
-    fn frames_are_set_only_with_the_alignment_fields() {
-        // NCBI tabular.cpp:900-908: sframe and frames keep 0 unless a field makes NCBI
-        // compute the alignment.
-        use BlastpTabularField as F;
-        assert!(!blastp_tabular_sets_frames(
-            &[F::SubjectSeqId, F::SubjectFrame, F::Frames],
-            5
-        ));
-        assert!(!blastp_tabular_sets_frames(
-            &[F::NumIdentical, F::Frames],
-            0
-        ));
-        assert!(blastp_tabular_sets_frames(&[F::NumIdentical, F::Frames], 1));
-        assert!(blastp_tabular_sets_frames(
-            &[F::QueryFrame, F::SubjectFrame],
-            0
-        ));
-        assert_eq!(
-            blastp_unset_frame_field(F::Frames, false),
-            Some(&b"0/0"[..])
-        );
-        assert_eq!(
-            blastp_unset_frame_field(F::SubjectFrame, false),
-            Some(&b"0"[..])
-        );
-        assert_eq!(blastp_unset_frame_field(F::QueryFrame, false), None);
-        assert_eq!(blastp_unset_frame_field(F::Frames, true), None);
-    }
     use crate::algorithm::blastp::args::{BlastpCompBasedStats, BlastpSegSpec};
     use crate::stats::KarlinParams;
     use crate::utils::matrix::ncbistdaa;
@@ -12598,7 +12141,11 @@ mod tests {
             query: PathBuf::from("query.faa"),
             subject: Some(PathBuf::from("subject.faa")),
             db: None,
+            db_filter: Default::default(),
             dbsize: None,
+            show_gis: false,
+            parse_deflines: false,
+            searchsp: None,
             task: "blastp".to_string(),
             evalue: None,
             threshold: None,
@@ -12627,52 +12174,6 @@ mod tests {
             archive: None,
             app: BlastpApp::Blastp,
             inclusion_ethresh: None,
-        }
-    }
-
-    fn make_pairwise_hit() -> PairwiseHit {
-        PairwiseHit {
-            hit: Hit {
-                identity: 75.0,
-                length: 4,
-                mismatch: 1,
-                gapopen: 1,
-                q_start: 2,
-                q_end: 5,
-                s_start: 7,
-                s_end: 10,
-                e_value: 1.0e-25,
-                bit_score: 42.5,
-                num_ident: 3,
-                query_frame: 0,
-                query_length: 12,
-                q_idx: 0,
-                s_idx: 0,
-                raw_score: 80,
-                // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
-                // BlastHSP stores query/subject BlastSeg offsets used by HSP comparators.
-                sort_query_offset: 0,
-                sort_query_end: 0,
-                sort_subject_offset: 0,
-                sort_subject_end: 0,
-                has_sort_offsets: false,
-                gap_info: None,
-                num_positives: 3,
-            },
-            query_seq: Some("AB-C".to_string()),
-            subject_seq: Some("ABDC".to_string()),
-            query_frame: Some(1),
-            subject_frame: Some(1),
-            positives: Some(3),
-            gaps: Some(1),
-            subject_length: Some(30),
-            subject_title: Some("subject description".to_string()),
-            // NCBI core/blast_kappa.c:331-342: BLASTP method is handled by its writer.
-            comp_adjust_method: None,
-            // NCBI showalign.cpp:3595-3598: this optional Stage E field is
-            // consumed only by the TBLASTN writer; BLASTP keeps its writer.
-            sum_n: None,
-            subject_stored_gaps: Vec::new(),
         }
     }
 
@@ -13495,196 +12996,6 @@ mod tests {
         assert_eq!(lookup.query_length + 1, 8);
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:39-45
-    // ```c
-    // const char* kDfltArgTabularOutputFmt =
-    //     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-    //     "evalue bitscore";
-    // const char* kDfltArgTabularOutputFmtTag("std");
-    // ```
-    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1132-1135,1146-1149
-    // case eQueryAccession: ... "query acc."; case eQueryAccessionVersion: ... "query acc.ver";
-    #[test]
-    fn accession_and_version_columns_remain_distinct() {
-        let fields = parse_blastp_tabular_fields("qacc qaccver sacc saccver").unwrap();
-        assert_eq!(
-            fields
-                .iter()
-                .map(|field| field.header_name())
-                .collect::<Vec<_>>(),
-            [
-                "query acc.",
-                "query acc.ver",
-                "subject acc.",
-                "subject acc.ver"
-            ]
-        );
-    }
-
-    #[test]
-    fn test_parse_blastp_tabular_fields_expands_std_and_dedups() {
-        let fields = parse_blastp_tabular_fields("std qlen qaccver").expect("parsed fields");
-        assert_eq!(fields[0], BlastpTabularField::QueryAccessionVersion);
-        assert_eq!(fields[1], BlastpTabularField::SubjectAccessionVersion);
-        assert!(fields.contains(&BlastpTabularField::QueryLength));
-        assert_eq!(
-            fields
-                .iter()
-                .filter(|field| **field == BlastpTabularField::QueryAccessionVersion)
-                .count(),
-            1
-        );
-    }
-
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:985-1027
-    // ```c
-    // if (num_matches > 0) {
-    //     btop_string += NStr::Int8ToString(num_matches);
-    //     num_matches = 0;
-    // }
-    // btop_string += m_QuerySeq[i];
-    // btop_string += m_SubjectSeq[i];
-    // ```
-    #[test]
-    fn test_build_btop_matches_ncbi_style_match_run_encoding() {
-        assert_eq!(build_btop("AB-C", "ABDC"), "2-D1");
-    }
-
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-    // ```c
-    // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-    //     // Add tab in front of field, except for the first field.
-    //     if (iter != m_FieldsToShow.begin())
-    //         m_Ostream << m_FieldDelimiter;
-    //     x_PrintField(*iter);
-    // }
-    // ```
-    #[test]
-    fn test_blastp_tabular_field_text_renders_requested_metadata() {
-        let pairwise_hit = make_pairwise_hit();
-        assert_eq!(
-            blastp_tabular_field_text(
-                BlastpTabularField::QueryAccessionVersion,
-                &pairwise_hit,
-                b"query1",
-                SubjectIdFields::same(b"subject1"),
-                blastp_subject_stitle(&[], 0),
-            ),
-            b"query1"
-        );
-        // A record of a FASTA subject set has no BLAST definition line.
-        assert_eq!(
-            blastp_tabular_field_text(
-                BlastpTabularField::SubjectTitle,
-                &pairwise_hit,
-                b"query1",
-                SubjectIdFields::same(b"subject1"),
-                blastp_subject_stitle(&[], 0),
-            ),
-            b"N/A"
-        );
-        assert_eq!(
-            blastp_tabular_field_text(
-                BlastpTabularField::Btop,
-                &pairwise_hit,
-                b"query1",
-                SubjectIdFields::same(b"subject1"),
-                blastp_subject_stitle(&[], 0),
-            ),
-            b"2-D1"
-        );
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:426-434
-    // ```c++
-    // 			if(defline.front()->IsSetTitle())
-    // 			{
-    // 				if(defline.front()->GetTitle().empty())
-    // 					m_Ostream << NA;
-    // 				else
-    // 					m_Ostream << defline.front()->GetTitle();
-    // 			}
-    // 			else
-    // 				m_Ostream << NA;
-    // ```
-    #[test]
-    fn stitle_is_the_stored_title_of_a_database_sequence_or_na() {
-        let stitles: Vec<Arc<[u8]>> = vec![
-            Arc::from(&b"sp|P1|A_HUMAN first protein"[..]),
-            Arc::from(&b""[..]),
-        ];
-        assert_eq!(
-            blastp_subject_stitle(&stitles, 0),
-            b"sp|P1|A_HUMAN first protein"
-        );
-        // An empty stored title.
-        assert_eq!(blastp_subject_stitle(&stitles, 1), b"N/A");
-        // A subject without a definition line (a FASTA subject set gives no titles).
-        assert_eq!(blastp_subject_stitle(&[], 3), b"N/A");
-        let pairwise_hit = make_pairwise_hit();
-        assert_eq!(
-            blastp_tabular_field_text(
-                BlastpTabularField::SubjectTitle,
-                &pairwise_hit,
-                b"query1",
-                SubjectIdFields::same(b"sp|P1|A_HUMAN"),
-                blastp_subject_stitle(&stitles, 0),
-            ),
-            b"sp|P1|A_HUMAN first protein"
-        );
-    }
-
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-    // ```c
-    // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-    //     // Add tab in front of field, except for the first field.
-    //     if (iter != m_FieldsToShow.begin())
-    //         m_Ostream << m_FieldDelimiter;
-    //     x_PrintField(*iter);
-    // }
-    // ```
-    #[test]
-    fn test_blastp_hsp_tabular_field_matches_pairwise_metadata_without_alignment_text() {
-        let mut pairwise_hit = make_pairwise_hit();
-        pairwise_hit.gaps = Some(pairwise_hit.hit.gap_letters());
-        let hsp = BlastpHsp::from_hit(pairwise_hit.hit.clone());
-        let fields = [
-            BlastpTabularField::QueryAccessionVersion,
-            BlastpTabularField::SubjectAccessionVersion,
-            BlastpTabularField::QueryLength,
-            BlastpTabularField::SubjectLength,
-            BlastpTabularField::Positives,
-            BlastpTabularField::Gaps,
-            BlastpTabularField::PercentPositives,
-            BlastpTabularField::Frames,
-            BlastpTabularField::SubjectTitle,
-        ];
-
-        for field in fields {
-            let mut rendered = Vec::new();
-            write_blastp_hsp_tabular_field(
-                &mut rendered,
-                field,
-                &hsp,
-                b"query1",
-                SubjectIdFields::same(b"subject1"),
-                b"N/A",
-                30,
-            )
-            .expect("tabular field writes");
-            assert_eq!(
-                rendered,
-                blastp_tabular_field_text(
-                    field,
-                    &pairwise_hit,
-                    b"query1",
-                    SubjectIdFields::same(b"subject1"),
-                    b"N/A"
-                )
-            );
-        }
-    }
-
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_options.c:1163-1169
     // ```c
     // if ((program_number == eBlastTypeTblastn ||
@@ -13834,7 +13145,8 @@ mod tests {
             500,
             BlastpCompositionMode::NoCompositionBasedStats,
             &gapped,
-            &gumbel,
+            Some(&gumbel),
+            0,
         );
         let cutoff_with_cbs = blastp_cutoff_score_max(
             expect_value,
@@ -13842,7 +13154,8 @@ mod tests {
             500,
             BlastpCompositionMode::CompositionMatrixAdjust,
             &gapped,
-            &gumbel,
+            Some(&gumbel),
+            0,
         );
 
         assert!(cutoff_with_cbs <= cutoff_without_cbs);
@@ -14089,6 +13402,57 @@ mod tests {
         assert_eq!(hits_by_query[1][1].subject_start, 130);
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:119-132
+    // ```c
+    //          query_index = Blast_GetQueryIndexFromContext(hsp->context, program);
+    // ...
+    //          Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
+    // ```
+    // LOSAT_X_BPHITSFLAT: the counting order lists each query's HSPs as the per-query vectors do,
+    // for random contexts, including a query index past `num_queries` (left out by both).
+    #[test]
+    fn x_hits_flat_order_matches_the_per_query_vectors() {
+        let contexts: Vec<QueryContext> = (0..5u32)
+            .map(|q| make_query_context(q, q as i32 * 1000))
+            .collect();
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % n
+        };
+        let mut order = Vec::new();
+        let mut starts = Vec::new();
+        for round in 0..200 {
+            let len = next(40) as usize;
+            let hits: Vec<BlastpPreliminaryHsp> = (0..len)
+                .map(|index| {
+                    let mut hsp = make_preliminary_hsp(
+                        index as u32,
+                        index as i32,
+                        index as i32 + 10,
+                        round,
+                        round + 10,
+                        next(100) as i32,
+                    );
+                    hsp.query_context = next(5) as i32;
+                    hsp
+                })
+                .collect();
+            let num_queries = 1 + (round as usize % 5);
+            x_hits_flat::order_by_query(&hits, &contexts, num_queries, &mut order, &mut starts);
+            let by_query = split_preliminary_hits_by_query(hits.clone(), &contexts, num_queries);
+            assert_eq!(starts.len(), num_queries + 1);
+            for (q, expected) in by_query.iter().enumerate().take(num_queries) {
+                let run = &order[starts[q] as usize..starts[q + 1] as usize];
+                let got: Vec<u32> = run.iter().map(|&i| hits[i as usize].q_idx).collect();
+                let want: Vec<u32> = expected.iter().map(|hsp| hsp.q_idx).collect();
+                assert_eq!(got, want, "round {round} query {q}");
+            }
+        }
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:289-318
     // ```c
     // hit_list = results->hitlist_array[index];
@@ -14269,7 +13633,8 @@ mod tests {
                 100,
                 BlastpCompositionMode::CompositionMatrixAdjust,
                 &gapped,
-                &gumbel,
+                Some(&gumbel),
+                0,
             ),
             i32::MAX
         );

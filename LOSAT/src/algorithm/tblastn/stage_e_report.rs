@@ -141,6 +141,24 @@ pub(super) fn is_structured_xml(outfmt: &str) -> bool {
     format_number(outfmt) == 5 || xml2_kind(outfmt).is_some()
 }
 
+/// Whether the reports `outfmts` (with `hits`, the caller's hit records) read the letters of the
+/// subjects: outfmt 0 and the hit records (`pairwise_hits`), the XML family
+/// (`blast_xml::XmlReport::write`) and the tabular rows (`tabular::reads_rows`). The Seq-aligns
+/// and the archive (8, 9, 11, 12) and the other tabular reports (`write_tabular`, the default
+/// rows of 6 and 7, has no spec) read the lengths alone: their counts are the search's. A value
+/// that this does not know reads them.
+pub(super) fn reads_subject_letters<'a>(
+    hits: bool,
+    mut outfmts: impl Iterator<Item = &'a str>,
+) -> bool {
+    hits || outfmts.any(|outfmt| match format_number(outfmt) {
+        8 | 9 | 11 | 12 => false,
+        6 | 7 | 10 | 20 => super::tabular::tabular_spec(outfmt)
+            .map_or(false, |spec| super::tabular::reads_rows(&spec)),
+        _ => true,
+    })
+}
+
 /// The ranges of a search as the reports use them: where the searched letters of each
 /// query and subject lie in its record (`-query_loc`, `-subject_loc`), and whether the
 /// reports end with the epilog (a search that stops at a query batch writes none).
@@ -546,7 +564,7 @@ fn write_tabular(
             //                                             kTabularFormat, rid);
             // ```
             // The title's bytes (`write_outfmt7_query_line`).
-            crate::report::outfmt6::write_outfmt7_query_line(writer, query.title())?;
+            crate::report::outfmt6::write_outfmt7_query_line(writer, &query.query_line())?;
             writeln!(writer, "# Database: {}", shown.name())?;
             if hit_count > 0 {
                 writeln!(writer, "# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score")?;
@@ -790,6 +808,52 @@ mod tests {
     use crate::api::local_blast::{FormatOutput, OutputSink};
     use crate::utils::seg::SegParams;
 
+    // The reports that read no letters of the reported database sequences: a value read wrongly
+    // here reaches `SubjectLetters::Lengths::nt`, which panics.
+    #[test]
+    fn only_the_reports_that_show_letters_read_the_subjects() {
+        let reads = |outfmt: &str| reads_subject_letters(false, std::iter::once(outfmt));
+        for outfmt in [
+            "0",
+            "5",
+            "13",
+            "14",
+            "15",
+            "16",
+            "6 sseq",
+            "6 qseq",
+            "6 btop",
+            "6 positive",
+            "6 ppos",
+            "7 std sseq",
+            "10 sseq",
+            "20 btop",
+            // Alone in the counts' block, `nident` reads the rows of some HSPs.
+            "6 nident",
+            "not a format",
+        ] {
+            assert!(reads(outfmt), "{outfmt}");
+        }
+        for outfmt in [
+            "6",
+            "7",
+            "10",
+            "20",
+            "6 std",
+            "6 qseqid sseqid slen evalue",
+            "6 nident pident",
+            "8",
+            "9",
+            "11",
+            "12",
+        ] {
+            assert!(!reads(outfmt), "{outfmt}");
+        }
+        assert!(reads_subject_letters(true, std::iter::once("6")));
+        assert!(!reads_subject_letters(false, std::iter::empty()));
+        assert!(reads_subject_letters(false, ["6", "0"].into_iter()));
+    }
+
     // Outfmt 5 and the XML2 and JSON documents (16 and 15) take the structured-XML path of
     // `render`; no other format does.
     #[test]
@@ -918,6 +982,8 @@ mod tests {
                     gapped: true,
                     cbs: 2,
                     db_gencode: 1,
+                    identity_warned: 0,
+                    filtered_empty: false,
                 },
                 Default::default(),
                 None,
@@ -1202,8 +1268,10 @@ fn write_pairwise(
         ),
     };
     // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`).
-    let gumbel = lookup_protein_gumbel_params(&spec, subject_set.gumbel_db_length(total_nt as u64))
-        .context("TBLASTN pairwise Spouge parameters are unavailable")?;
+    let gumbel = subject_set.gumbel_block(&spec, total_nt as u64);
+    if gumbel.is_none() && subject_set.searchsp.is_none() {
+        anyhow::bail!("TBLASTN pairwise Spouge parameters are unavailable");
+    }
     let report = BlastpPairwiseReport {
         version: "2.17.0+".into(),
         database_name: shown.name(),
@@ -1257,7 +1325,7 @@ fn write_pairwise(
         .collect();
     let query_titles: Vec<Arc<[u8]>> = query_records
         .iter()
-        .map(|record| Arc::from(record.title()))
+        .map(|record| Arc::from(record.query_line().as_ref()))
         .collect();
     let subject_titles: Vec<Arc<[u8]>> = subject_records
         .iter()

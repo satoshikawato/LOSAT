@@ -219,6 +219,17 @@ pub struct CompressedNeighborInfo {
 //                                   word_size) + 1;
 // lookup->backbone = calloc(lookup->backbone_size, sizeof(...));
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1292
+// ```c
+//     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
+// ```
+/// The threshold of a compressed table in NCBI's matrix units, for a caller of the builders that
+/// take it converted (BLASTX, `blastx/seed.rs`).
+pub(crate) fn x_compressed_scaled_threshold(threshold: f64) -> i32 {
+    // `(Int4)` as the x86-64 build converts it (`INT_MIN` past `Int4`).
+    crate::core::blast_util::ncbi_int4_from_double(100.0 * threshold)
+}
+
 impl BlastCompressedAaLookupTable {
     pub fn new(word_size: usize, threshold: f64) -> Option<Self> {
         let (compressed_alphabet_size, reciprocal_alphabet_size) =
@@ -232,7 +243,7 @@ impl BlastCompressedAaLookupTable {
             .checked_add(1)?;
 
         Some(Self {
-            threshold: (100.0 * threshold) as i32,
+            threshold: x_compressed_scaled_threshold(threshold),
             word_length: word_size as i32,
             alphabet_size: BLASTAA_SIZE as i32,
             compressed_alphabet_size: compressed_alphabet_size as i32,
@@ -1317,21 +1328,41 @@ pub fn build_blosum62_compressed_score_matrix(
 //                                 query, locations);
 // s_CompressedLookupFinalize(lookup);
 // ```
+// `Some(Err(()))` when the words fill NCBI's overflow banks (`s_CompressedListGetNewCell`),
+// past which NCBI writes beyond `overflow_banks`.
 pub fn build_blosum62_compressed_lookup(
     word_size: usize,
     threshold: f64,
     query: &[u8],
     locations: &[(i32, i32)],
-) -> Option<BlastCompressedAaLookupTable> {
+) -> Option<Result<BlastCompressedAaLookupTable, ()>> {
+    build_blosum62_compressed_lookup_with_capacity(
+        word_size,
+        threshold,
+        query,
+        locations,
+        NCBI_OVERFLOW_CELL_CAPACITY,
+    )
+}
+
+// `build_blosum62_compressed_lookup` with `overflow_cell_capacity` overflow cells (a parameter
+// for the tests).
+fn build_blosum62_compressed_lookup_with_capacity(
+    word_size: usize,
+    threshold: f64,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    overflow_cell_capacity: usize,
+) -> Option<Result<BlastCompressedAaLookupTable, ()>> {
     let mut lookup = BlastCompressedAaLookupTable::new(word_size, threshold)?;
+    lookup.overflow_cell_capacity = overflow_cell_capacity;
     let matrix = build_blosum62_compressed_score_matrix(lookup.compressed_alphabet_size as usize)?;
     lookup.add_neighboring_words(&matrix, query, locations);
-    assert!(
-        !lookup.overflow_banks_exhausted,
-        "NCBI BLAST compressed overflow bank capacity exceeded"
-    );
+    if lookup.overflow_banks_exhausted {
+        return Some(Err(()));
+    }
     lookup.finalize();
-    Some(lookup)
+    Some(Ok(lookup))
 }
 
 /// The table of `build_blosum62_compressed_lookup` for a threshold already in NCBI's
@@ -2320,6 +2351,36 @@ mod tests {
     //         backbone_cell->payload.overflow_list.head = new_cell;
     //     }
     // ```
+    // `(Int4)(kMatrixScale * opt->threshold)` past `Int4` is `INT_MIN` (every word is a
+    // neighbor); words past the overflow banks make the table `Err` (NCBI writes past its banks).
+    #[test]
+    fn a_threshold_past_int4_takes_every_word_up_to_the_banks() {
+        assert_eq!(
+            BlastCompressedAaLookupTable::new(5, 19.3)
+                .unwrap()
+                .threshold,
+            1930
+        );
+        for threshold in [21_474_836.48, 1e10, f64::INFINITY] {
+            let lookup = BlastCompressedAaLookupTable::new(5, threshold).unwrap();
+            assert_eq!(lookup.threshold, i32::MIN, "{threshold}");
+        }
+        let query = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0];
+        let words = 15usize.pow(5);
+        let lookup = build_blosum62_compressed_lookup(5, 1e10, &query, &[(1, 6)])
+            .unwrap()
+            .expect("two offsets take no overflow cell");
+        let offsets: i32 = lookup.backbone.iter().map(|cell| cell.num_used).sum();
+        assert_eq!(offsets as usize, 2 * words);
+        assert!(lookup.overflow_cells.is_empty());
+        // Seven offsets take one overflow cell in each backbone cell.
+        assert!(
+            build_blosum62_compressed_lookup_with_capacity(5, 1e10, &query, &[(1, 11)], 1000)
+                .unwrap()
+                .is_err()
+        );
+    }
+
     #[test]
     fn compressed_word_hit_overflow_matches_ncbi_scan_order() {
         let mut lookup = BlastCompressedAaLookupTable::new(5, 19.3).expect("compressed lookup");

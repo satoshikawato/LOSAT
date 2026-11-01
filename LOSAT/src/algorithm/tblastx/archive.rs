@@ -33,15 +33,16 @@ use std::ops::Range;
 use anyhow::Result;
 
 use super::blast_engine::{TblastxHsp, TblastxQueryStats};
-use super::ncbi_cutoffs::try_compute_eff_lengths_tblastx;
 use super::report::SubjectLetters;
 use super::seqalign::{query_records_of, SeqalignSubjects};
 use super::subjects::SubjectSetNumbers;
 use super::TblastxArgs;
+use crate::algorithm::tblastn::archive::lowercase_runs;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::blastinput::value_parsers::SegSpec;
+use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
@@ -57,20 +58,32 @@ use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 /// The recorded options of a TBLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
 /// always sets it (`S/DESIGN_OF8.md` 2.2). TBLASTX has one task, and the options it does not
-/// accept (`-strand`, `-lcase_masking`, ...) are never recorded.
+/// accept (`-strand`, ...) are never recorded.
 pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Tblastx, "tblastx");
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     // `-evalue` replaces the handle's value in place: the same list whether it was given.
     inputs.evalue = Some(args.evalue);
     inputs.word_size = args.word_size;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps.map(|count| count as i32);
     // `-matrix` is recorded as typed when given; `-threshold` is read as a double and recorded as
-    // an `int` (`static_cast<int>`). Without `-threshold` and `-window_size` the list holds the
-    // matrix's suggestions (`report::archive::options`).
+    // an `int` (`static_cast<int>`), converted as the x86-64 build does (`INT_MIN` past `Int4`,
+    // as the lookup table takes it: `ncbi_int4_from_double`). Without `-threshold` and
+    // `-window_size` the list holds the matrix's suggestions (`report::archive::options`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
+    // ```c++
+    // CBlastOptions::SetWordThreshold(double w)
+    // {
+    //     ...
+    //     if (m_Remote) {
+    //         m_Remote->SetValue(eBlastOpt_WordThreshold, static_cast<int>(w));
+    //     }
+    // }
+    // ```
     inputs.matrix = args.matrix.clone();
-    inputs.threshold = args.threshold.map(|threshold| threshold as i32);
+    inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
     // ```c++
     //     if (args[kArgLookupTableMaskingOnly]) {
@@ -168,6 +181,7 @@ fn query_results_masks(
                 .collect();
             (!intervals.is_empty()).then(|| MaskEntry {
                 id: query.local_id.clone(),
+                best: query.believed().map(|ids| ids.best.clone()),
                 frame: frame_of(frame),
                 intervals,
             })
@@ -193,6 +207,8 @@ pub(super) struct ArchiveData<'a> {
     pub numbers: &'a SubjectSetNumbers,
     /// The queries of each batch written, in order.
     pub spans: &'a [Range<usize>],
+    /// `-lcase_masking`.
+    pub lcase_masking: bool,
 }
 
 /// The Seq-aligns of one batch: the elements of outfmt 8, one query at a time.
@@ -231,7 +247,7 @@ impl<'a> AlignSource for TblastxAligns<'a> {
             )?;
             let query = &data.queries[q_idx];
             let query = QueryRecord {
-                id: SeqId::Local(&query.local_id),
+                id: query.seq_id(),
                 searched_length: i32::try_from(query.seq().len())?,
                 offset: i32::try_from(data.query_placements.offset(q_idx))?,
             };
@@ -277,6 +293,8 @@ pub(super) fn write_tblastx_archives(
         .zip(&subject_deflines)
         .map(|(record, defline)| BioseqInput {
             id: &record.local_id,
+            ids: record.believed().map(|ids| ids.ids.as_slice()),
+            seq_loc: None,
             defline,
             title: &record.title,
             letters: record.archive_letters(),
@@ -299,6 +317,8 @@ pub(super) fn write_tblastx_archives(
             .zip(&deflines)
             .map(|(record, defline)| BioseqInput {
                 id: &record.local_id,
+                ids: record.believed().map(|ids| ids.ids.as_slice()),
+                seq_loc: record.archive_seq_loc(),
                 defline,
                 title: &record.title,
                 letters: record.archive_letters(),
@@ -338,13 +358,10 @@ pub(super) fn write_tblastx_archives(
         let stats = &data.query_stats[first];
         let (ka_blocks, search_space, length_adjustment) = match &stats.karlin {
             Some(karlin) => {
-                let adjustment = try_compute_eff_lengths_tblastx(
-                    stats.aa_len as i64,
-                    data.numbers.effective_length(),
-                    data.numbers.count,
-                    karlin,
-                )
-                .map_or(0, |lengths| lengths.length_adjustment);
+                let adjustment = data
+                    .numbers
+                    .context_lengths(stats.aa_len as i64, karlin)
+                    .map_or(0, |lengths| lengths.length_adjustment);
                 (
                     [ka_block(karlin, false), KaBlock::missing(true)],
                     stats.eff_searchsp,
@@ -353,11 +370,28 @@ pub(super) fn write_tblastx_archives(
             }
             None => ([KaBlock::missing(false), KaBlock::missing(true)], 0, 0),
         };
+        // `-lcase_masking`: the `LCaseMask` parameters of the request are the lower-case runs of
+        // each whole query record, each one for both strands (as BLASTX's `lcase_masks`).
+        let mut lcase_masks: Vec<MaskEntry> = Vec::new();
+        if data.lcase_masking {
+            for record in records {
+                for run in lowercase_runs(record.archive_letters()) {
+                    for frame in [Frame::Plus1, Frame::Minus1] {
+                        lcase_masks.push(MaskEntry {
+                            id: record.local_id.clone(),
+                            best: record.believed().map(|ids| ids.best.clone()),
+                            frame,
+                            intervals: vec![run],
+                        });
+                    }
+                }
+            }
+        }
         let batch = BatchArchive {
             queries: &queries,
             subjects: &subjects_input,
             required,
-            lcase_masks: &[],
+            lcase_masks: &lcase_masks,
             masks: &results_masks,
             ka_blocks,
             search_space,
@@ -474,6 +508,7 @@ mod tests {
                     ParamValue::Boolean(false) => "boolean:False".to_string(),
                     ParamValue::Real(value) => format!("real:{}", posix(*value)),
                     ParamValue::Str(value) => format!("string:{value}"),
+                    ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
                 };
                 format!("{}={value}", param.name)
             })
@@ -522,6 +557,37 @@ mod tests {
             }
         }
         Some(inputs)
+    }
+
+    // A `-threshold` past `Int4` (2147483648, 1e10, +inf, 1e999) is recorded as `INT_MIN`, as
+    // NCBI BLAST+ 2.17.0 converts it (the lookup table takes the same value). NCBI's build writes
+    // it as `-8` in the archive, from a signed overflow that LOSAT does not reproduce
+    // (`report/serial/asn_text.rs` `itoa_i32`).
+    #[test]
+    fn a_threshold_past_int4_is_recorded_as_int_min() {
+        let inputs =
+            |value: &str| inputs_of(&["-threshold", value]).unwrap_or_else(|| panic!("{value}"));
+        let listed = |threshold: &str| {
+            let case = CASES
+                .iter()
+                .find(|case| case.0 == "opt_thr_frac_sub")
+                .expect("opt_thr_frac_sub");
+            case.2.replace(
+                "WordThreshold=integer:11",
+                &format!("WordThreshold=integer:{threshold}"),
+            )
+        };
+        for value in ["2147483648", "1e10", "+inf", "1e999"] {
+            assert_eq!(
+                render(&algorithm_options(&inputs(value))),
+                listed("-2147483648"),
+                "{value}"
+            );
+        }
+        assert_eq!(
+            render(&algorithm_options(&inputs("2147483647.5"))),
+            listed("2147483647")
+        );
     }
 
     #[test]

@@ -1,0 +1,1 @@
+- The gapped stage's interval tree keeps its side grid between subjects and resets only the cells it touched, instead of writing up to 262 KiB of zeros for every subject with an HSP: `blastn` megablast of 1e5 to 1e6 reads against 16S is 8 % faster at one thread and 1 to 2 % faster at 16, with the same output and memory.

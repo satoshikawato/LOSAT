@@ -448,6 +448,28 @@ pub fn ncbi_integer_at_least(value: &str, at_least: i32) -> Result<i32, String> 
     Ok(n)
 }
 
+/// A non-negative `Int8` argument (`CArg_Int8` with `CArgAllowValuesGreaterThanOrEqual(0)`):
+/// `-searchsp`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+/// ```c
+///     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+///                             "Effective length of the search space",
+///                             CArgDescriptions::eInt8);
+///     arg_desc.SetConstraint(kArgEffSearchSpace,
+///                            new CArgAllowValuesGreaterThanOrEqual(0));
+/// ```
+pub fn nonnegative_ncbi_int8(value: &str) -> Result<i64, String> {
+    if value.eq_ignore_ascii_case("0x") {
+        return Err("Illegal value".into());
+    }
+    let n = ncbi_int8(value)?;
+    if n < 0 {
+        return Err("expected an integer >= 0".into());
+    }
+    Ok(n)
+}
+
 /// A non-negative integer argument (`CArg_Integer` with `CArgAllowValuesGreaterThanOrEqual(0)`),
 /// such as `-culling_limit`.
 ///
@@ -877,6 +899,11 @@ pub fn tblastx_real(value: &str) -> Result<f64, String> {
     ncbi_double(value, "TBLASTX")
 }
 
+/// A real argument of BLASTN (`ncbi_double`).
+pub fn blastn_real(value: &str) -> Result<f64, String> {
+    ncbi_double(value, "BLASTN")
+}
+
 /// A `-threshold` value: NCBI's constraint reads it again with `NStr::StringToDouble` and
 /// requires at least 0 (a NaN fails it).
 ///
@@ -900,6 +927,11 @@ fn ncbi_threshold(value: &str, program: &str) -> Result<f64, String> {
 /// A BLASTP `-threshold` value (`ncbi_threshold`).
 pub fn blastp_threshold(value: &str) -> Result<f64, String> {
     ncbi_threshold(value, "BLASTP")
+}
+
+/// A BLASTX `-threshold` value (`ncbi_threshold`).
+pub fn blastx_threshold(value: &str) -> Result<f64, String> {
+    ncbi_threshold(value, "BLASTX")
 }
 
 /// A PSIBLAST `-threshold` value (`ncbi_threshold`).

@@ -104,17 +104,22 @@ pub(crate) fn query_records_of<'a>(
                     id: SeqId::Local(&records[s_idx].local_id),
                     searched_length: i32::try_from(subject_letters.length(s_idx))?,
                     offset: i32::try_from(placements.offset(s_idx))?,
+                    use_this_seqid: &[],
                 },
                 SeqalignSubjects::Database {
                     ordinals, parsed, ..
-                } => SubjectRecord {
-                    id: match parsed.get(s_idx).and_then(Option::as_deref) {
-                        Some(subject) => SeqId::Db(subject.alignment_id()),
-                        None => SeqId::BlOrdId(ordinals[s_idx]),
-                    },
-                    searched_length: i32::try_from(subject_letters.length(s_idx))?,
-                    offset: 0,
-                },
+                } => {
+                    let subject = parsed.get(s_idx).and_then(Option::as_deref);
+                    SubjectRecord {
+                        id: match subject {
+                            Some(subject) => SeqId::Db(subject.alignment_id()),
+                            None => SeqId::BlOrdId(ordinals[s_idx]),
+                        },
+                        searched_length: i32::try_from(subject_letters.length(s_idx))?,
+                        offset: 0,
+                        use_this_seqid: crate::report::db_subject::use_this_seqid(subject),
+                    }
+                }
             });
         }
         hsp_records.push(HspRecord {
@@ -183,7 +188,7 @@ pub(crate) fn write_tblastx_seqalign(
             &mut hsp_records,
         )?;
         let query_record = QueryRecord {
-            id: SeqId::Local(&query.local_id),
+            id: query.seq_id(),
             searched_length: i32::try_from(query.seq().len())?,
             offset: i32::try_from(query_placements.offset(q_idx))?,
         };

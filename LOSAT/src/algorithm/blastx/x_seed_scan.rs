@@ -157,7 +157,7 @@ pub(crate) fn x_bxscan_byte() -> XScanByte {
 /// sparse (`tblastn/x_scan_byte.rs` `x_table_presence`), built the first time the direct loop scans
 /// with the table on presence bytes; `None` inside for a table they do not fit. It also carries the
 /// table's build number (`build`), which names the table for the choice of the loop
-/// (LOSAT_X_BXDIAGMIN, `x_seed_diag.rs`): a table built from pooled vectors (LOSAT_X_BXLUTPOOL)
+/// (LOSAT_X_BXDIAGMIN, `x_seed_diag.rs`): a table built from pooled vectors
 /// can sit at the address of the one dropped before it, with the same backbone vector; and whether
 /// the table was built pooled (`pooled`), so that its vectors go back to the pool when it is
 /// dropped (LOSAT_X_BXPOOLN1 builds a one-thread search's tables without the pool).
@@ -214,16 +214,14 @@ impl Lookup {
     }
 }
 
-/// The `[X_SHADOW]` summaries of the BXDIAG, BXUNGAPSENT, BXSUBJFLOW, BXDBSTREAM and BXEVALEMPTY
-/// switches (printed by `main` at exit, one line per switch that ran in shadow mode).
+/// The `[X_SHADOW]` summaries of the BXDIAG, BXUNGAPSENT and BXSUBJFLOW switches (printed by `main`
+/// at exit, one line per switch that ran in shadow mode).
 // No NCBI counterpart: prints the shadow-mode counters; it does not change any value NCBI computes.
 pub fn print_shadow_stats() {
     super::x_seed_diag::x_print_shadow_summary();
     super::x_ungap_sent::print_shadow_stats();
     #[cfg(feature = "parallel")]
     super::super::search::x_subject_flow::x_print_shadow_summary();
-    crate::algorithm::blastx::x_db_stream::x_print_shadow_summary();
-    crate::algorithm::blastx::statistics::x_print_eval_empty_summary();
 }
 
 thread_local! {
@@ -484,7 +482,7 @@ where
     let window = options.window_size;
     let lookup_word = match lookup {
         Lookup::Standard(l, _) => l.word_length,
-        Lookup::Compressed(l) => l.word_length,
+        Lookup::Compressed(l) => x_compressed_word_length(l),
     };
     let ranges = [(0, length as i32)];
     let mut range = [0, 0, length as i32 - lookup_word];
@@ -533,7 +531,7 @@ where
                     x_scan_one_range_bf(l, scanned, pairs, array_size, &mut range)
                 }
                 (Lookup::Compressed(l), _) => {
-                    l.scan_subject(scanned, &ranges, pairs, array_size, &mut range)
+                    x_compressed_scan(l, scanned, &ranges, pairs, array_size, &mut range)
                 }
             };
             for pair in &pairs[..n as usize] {

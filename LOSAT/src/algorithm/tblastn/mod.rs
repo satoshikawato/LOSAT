@@ -5,7 +5,7 @@ mod tblastn_app;
 // for (context=first_context; context<=last_context; context++) {
 //     status = s_BlastSearchEngineOneContext(...);
 // }
-mod search_seed;
+pub(crate) mod search_seed;
 // The lookup scan without a branch on the presence vector.
 pub(crate) mod x_scan_bf;
 // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the lookup scan on presence bytes, a block of indexes at once
@@ -18,7 +18,7 @@ pub(crate) mod x_scan_byte;
 mod x_subject_translate;
 // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects held packed, their letters made when read.
 mod x_subject_store;
-// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `-db` sequences read where they are searched.
+// `-db` sequences read where they are searched.
 mod x_db_stream;
 // NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234:
 // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
@@ -70,7 +70,7 @@ mod blast_xml;
 mod tabular;
 // NCBI c++/src/app/blast/tblastn_app.cpp:295 (`WriteArchive`): TBLASTN's BLAST archive (outfmt 11),
 // one Blast4-archive per query batch.
-mod archive;
+pub(crate) mod archive;
 // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
 mod seqalign;

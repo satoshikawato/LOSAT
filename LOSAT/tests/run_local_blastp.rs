@@ -238,8 +238,9 @@ fn unsupported_formats_fail_before_searching() {
     let subjects = subjects(&inputs.subject);
     // NCBI blast_args.cpp:2845-2851 and tabular.cpp:70-99: a custom specification of
     // outfmt 0 and a token that is not a field name are ignored ("0 qseqid", "6 nosuchfield"
-    // run as "0" and "6"); a field that LOSAT's BLASTP does not write is rejected.
-    for outfmt in ["10", "6 sallseqid", "6 delim=, std"] {
+    // run as "0" and "6"); a format that LOSAT's BLASTP does not write is rejected, and a
+    // delimiter that a field uses between its entries is NCBI's error (blast_args.cpp:2753-2792).
+    for outfmt in ["1", "6 delim=; qseqid staxids", "abc"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![
@@ -264,6 +265,45 @@ fn unsupported_formats_fail_before_searching() {
             valid.is_empty() && invalid.is_empty(),
             "nothing is written when a requested format is invalid"
         );
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
+// ```c++
+//     if (m_FormatType == CFormattingArgs::eTabular ||
+//         m_FormatType == CFormattingArgs::eTabularWithComments ||
+//         m_FormatType == CFormattingArgs::eCommaSeparatedValues ||
+//         m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
+// ```
+// The tabular reports with a field list or a delimiter, and outfmt 10 and 20 (line CLI C2,
+// `algorithm::blastp::tabular`), of one search: each equals its run alone and the CLI run of
+// that format, beside the default 6.
+#[test]
+fn custom_tabular_formats_of_one_search_match_the_cli_run_of_that_format() {
+    const TABULAR: [&str; 5] = [
+        "6",
+        "7 std qcovs qcovus qcovhsp sstrand staxid slen stitle",
+        "10 qseqid sseqid qseq sseq btop nident positive ppos mismatch gaps",
+        "20 delim=| qseqid sallseqid sacc salltitles frames qlen",
+        "6 delim=, std",
+    ];
+    let inputs = Inputs::new(8);
+    for extra in [&[][..], &["-num_threads", "2"][..]] {
+        let together = run(&inputs, &TABULAR, extra, false);
+        for (index, outfmt) in TABULAR.iter().enumerate() {
+            assert!(!together.outputs[index].is_empty(), "outfmt {outfmt:?}");
+            let alone = run(&inputs, &[outfmt], extra, false);
+            assert!(
+                together.outputs[index] == alone.outputs[0],
+                "run_local outfmt {outfmt:?} {extra:?}"
+            );
+            let (cli_output, cli_stderr) = cli(&inputs, outfmt, extra);
+            assert!(
+                together.outputs[index] == cli_output,
+                "CLI outfmt {outfmt:?} {extra:?}"
+            );
+            assert_eq!(together.diagnostics, cli_stderr, "{outfmt:?} {extra:?}");
+        }
     }
 }
 

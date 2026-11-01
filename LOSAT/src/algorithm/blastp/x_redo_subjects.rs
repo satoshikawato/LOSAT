@@ -1,15 +1,13 @@
-//! EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the composition redo of a `-db` search reads the subject of
-//! each match from the database when it redoes the match, as NCBI does, instead of a copy of every
-//! listed subject made before the redo.
+//! The composition redo of a `-db` search reads the subject of each match from the database when
+//! it redoes the match, as NCBI does, instead of a copy of every listed subject made before the
+//! redo (graduated 2026-10-27; the switch was `LOSAT_X_BPREDODBSUBJ`). A copy of the residues of
+//! every subject of the preliminary hit lists (the listed subjects) would, with the UniRef50
+//! database, list 70,701 subjects of 50.8 MB of residues for the first query batch (91 queries) of
+//! 100 at 32 threads, all in the main heap until the batch's reports end, where the search reaches
+//! its peak of anonymous memory (v4-D12 s3 probe, workstation); the final hit lists hold 38,230 of
+//! those subjects.
 //!
-//! Without the switch, `database::ListedSubjects::read` copies the residues of every subject of the
-//! preliminary hit lists (the listed subjects) into an `EncodedProtein` before the redo, and the
-//! redo and the reports read the copies. With the UniRef50 database, the first query batch (91
-//! queries) of 100 at 32 threads lists 70,701 subjects of 50.8 MB of residues, all in the main heap
-//! until the batch's reports end, where the search reaches its peak of anonymous memory (v4-D12 s3
-//! probe, workstation); the final hit lists hold 38,230 of those subjects.
-//!
-//! With the switch on, `ListedSubjects::x_list` keeps the ordinal ids and the lengths of the listed
+//! `ListedSubjects::x_list` keeps the ordinal ids and the lengths of the listed
 //! subjects (read from the index: the estimate of `LOSAT_X_BPREDOLPT`, `x_job_costs`, reads the
 //! lengths before a window's matches are redone). Every redo path (the one-thread loop, the two
 //! query-parallel paths and `x_redo_par.rs`) and the first Newton problems of the Newton lanes
@@ -47,11 +45,9 @@
 //! `ListedSubjects::read`: NCBI's redo fetches each match's sequence from the database in the
 //! encoding of the search.
 //!
-//! `LOSAT_X_BPREDODBSUBJ` is a switch of the strict set: on unless it is `0`.
 //! It acts for every task of BLASTP with `-db`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
 
 use anyhow::Result;
 
@@ -63,29 +59,17 @@ use crate::seqdb::{SeqDb, SequenceBlock};
 const STORED_O: u8 = 26;
 const STORED_GAP: u8 = 0;
 
-// No NCBI counterpart: reads the LOSAT_X_BPREDODBSUBJ switch once; it does not change any value
-// NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a strict-set switch, on unless it is `0`: the redo of a
-/// `-db` search reads its subjects from the database per match (`ListedSubjects::x_list`), not
-/// from the copy of every listed subject (`ListedSubjects::read`).
-pub(crate) fn x_bp_redo_db_subj() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPREDODBSUBJ"))
-}
-
 // No NCBI counterpart: how LOSAT's redo reaches its subjects.
 /// The subjects that the redo reads, by the index that its hit lists name them with.
 #[derive(Clone, Copy)]
 pub(crate) enum XRedoSubjects<'a> {
-    /// The encoded subject set (`-subject`), or the copy of a database's listed subjects
-    /// (`database::ListedSubjects::encoded`).
+    /// The encoded subject set (`-subject`).
     Encoded(&'a [EncodedProtein]),
-    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a database's listed subjects, by rank, read when a match
-    /// is redone.
+    /// A database's listed subjects, by rank, read when a match is redone.
     Database(XDbSubjects<'a>),
 }
 
-/// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a database's listed subjects as the redo reads them.
+/// A database's listed subjects as the redo reads them.
 #[derive(Clone, Copy)]
 pub(crate) struct XDbSubjects<'a> {
     pub(crate) db: &'a SeqDb,
@@ -104,7 +88,7 @@ pub(crate) struct XDbSubjects<'a> {
 /// A subject as the redo reads it: its residues, without the sentinels.
 pub(crate) enum XRedoSubject<'a> {
     Encoded(&'a [u8]),
-    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the sequence read from the database.
+    /// The sequence read from the database.
     Read(SequenceBlock),
 }
 
@@ -154,7 +138,7 @@ impl<'a> XRedoSubjects<'a> {
 impl XDbSubjects<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385, quoted above
     // `ListedSubjects::read`: the redo fetches each match's sequence from the database.
-    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): reads the subject of rank `rank`.
+    /// Reads the subject of rank `rank`.
     #[inline(never)]
     fn read(&self, rank: u32) -> Result<SequenceBlock> {
         let ordinal = self.ordinals[rank as usize];

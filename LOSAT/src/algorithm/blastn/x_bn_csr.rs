@@ -1,6 +1,7 @@
 //! EXPERIMENT (LOSAT_X_BNCSR, in the strict set: default ON since 2026-10-25, off with
 //! `LOSAT_X_BNCSR=0`): the chains of a contiguous table of `build_mb_lookup` (the two-stage table
-//! of `blastn`'s word sizes 9 to 11, `lut_word_length` 8 to 11) laid out as CSR (compressed sparse
+//! of `blastn`'s word sizes 9 to 11, `lut_word_length` 8 to 11, and with LOSAT_X_MBCSR megablast's
+//! tables of `lut_word_length` 12 above its size rule) laid out as CSR (compressed sparse
 //! rows) instead of NCBI's `hashtable` / `next_pos`, as LOSAT_X_DCCSR lays out a discontiguous
 //! table (`x_dc_csr.rs`, whose `Csr`, sum pass and scan `Ring` this module uses): `offsets[cell] ..
 //! offsets[cell + 1]` indexes `qs`, which holds the cell's 1-based query offsets in the order its
@@ -36,8 +37,8 @@
 //! A count pass adds 1 to the count of the word's cell, a sum pass (`x_dc_csr::sum_cells`) turns
 //! the counts into inclusive running sums (the end of each cell's run), and a place pass, in the
 //! loop's order again, writes each word into its cell's run. The two orders of a chain:
-//! - newest first (`ascending_cells == false`, the megablast-type table, `-task blastn`'s table of
-//!   word size 11 and its tables of 4^9 to 4^11 cells): the fill puts each word at the head of its
+//! - newest first (`ascending_cells == false`, the megablast-type table, also of 4^12 cells with
+//!   LOSAT_X_MBCSR, `-task blastn`'s table of word size 11 and its tables of 4^9 to 4^11 cells): the fill puts each word at the head of its
 //!   cell's chain, so a chain lists its words in reverse reading order. The count of `cell` is
 //!   `offsets[cell]`; the place pass writes each word at `--offsets[cell]`, so the first word read
 //!   lands at the end of the run and the last at its start, and `offsets[cell]` is left at the
@@ -64,7 +65,8 @@
 //!
 //! Scope (`plan`): a table without database word counts (the fill's `kDbFilter` path) and without
 //! BLEMIR_DEBUG (whose counters the serial loop makes), of `lut_word_length` 8 to 11 (`MIN_LUT`,
-//! `MAX_LUT`; megablast's tables of 4^12 cells keep their chains: v4-R R11 found no gain there),
+//! `MAX_LUT`; megablast's tables of 4^12 cells keep their chains, v4-R R11 found no gain with a
+//! subject of 5 Mb, unless LOSAT_X_MBCSR's size rule takes them: `X_MB12_LETTERS_PER_POSITION`),
 //! whose word loop reads at least a quarter as many positions as the table has cells (the size rule
 //! of `x_dc_csr`, `wanted`; below it the chains fit the caches and the CSR saves no miss). With
 //! NCBI's choice of table (`choose_na_lookup_table`) that is: word size 11 (the default) with the
@@ -72,7 +74,7 @@
 //! strands); word size 10 with its 4^10-cell table from 262,144 positions; word size 9 with its
 //! 4^9-cell table from 65,536 and its 4^8-cell table (reading order) from 16,384. Word sizes 12 and
 //! above build 4^11-cell tables only for fewer positions than that (NCBI moves to 4^12 cells
-//! first), so their tables keep the chains. EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head (every
+//! first), so their tables keep the chains unless LOSAT_X_MBCSR takes them. EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head (every
 //! table of the scope but the reading-order one) has no size rule, so these tables (and megablast's
 //! of 4^11 cells or fewer, for small query batches) are packed too. Its build writes one byte per
 //! cell and two words per 64 cells (5 MiB at 4^11 cells, in `qs` and its bits) where the chains
@@ -84,7 +86,7 @@
 //! are then empty: the CSR replaces them (`offsets` has two elements more than `hashtable`, `qs`
 //! one element per word where `next_pos` has one per query position), so the table takes no more
 //! memory. The batch loop's keep (LOSAT_X_MBLUTKEEP) holds no CSR: `offsets` is allocated by each
-//! build and freed with the table (LOSAT_X_BNLUTDROP frees it before the traceback), and a build
+//! build and freed with the table (BNLUTDROP, graduated, frees it before the traceback), and a build
 //! laid out as CSR frees the table the keep holds, so the loop never holds a kept table beside it.
 //! Every reader of the chains of a contiguous table goes through `MbLookupTable::x_csr`: the strip
 //! scan of PAIRPAR (`x_pair_seed.rs`, `scan_strip_csr`), the reference scan of `search_query_batch`
@@ -167,21 +169,67 @@ pub(super) fn print_summary() {
 }
 
 /// No NCBI counterpart: the `lut_word_length` range of the tables laid out as CSR (module
-/// comment, scope).
+/// comment, scope), besides LOSAT_X_MBCSR's 12 (`x_in_scope`).
 const MIN_LUT: usize = 8;
 const MAX_LUT: usize = 11;
 
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_MBCSR, in the strict set: on unless it is `0`) megablast's
+/// tables of 4^12 cells are laid out as CSR too, with a packed head, when the search scans at least
+/// `X_MB12_LETTERS_PER_POSITION` subject letters per position of the word loop and one per cell. It
+/// chooses between two LOSAT layouts of the same chains and changes no value NCBI computes. Not on
+/// wasm32: `prefetch` does nothing there, and the untouched pages of the table's offsets are still
+/// linear memory.
+pub(super) fn x_mb12_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| !cfg!(target_arch = "wasm32") && crate::utils::xswitch::on("LOSAT_X_MBCSR"))
+}
+
+/// No NCBI counterpart: LOSAT_X_MBCSR's size rule. At one thread on the workstation the CSR's build
+/// costs 13-22 ns more per position of the word loop than the chains' fill, and its scan saves
+/// about 3.2 ns per subject letter (draft200 x one 4 Gnt volume of ref_prok_rep_genomes, x0.72;
+/// 1.5 Gnt of plasmids, x0.74), so the two meet at about 6 letters per position. A build also costs
+/// about 40 ms whatever its positions (its cells, and the batch loop's kept table it frees: draft200's
+/// batch of 832,276 positions x an 8.7 MB database, x1.06 without this term), the gain of 12.5 M
+/// letters; the rule asks for one letter per cell, 16.8 M.
+const X_MB12_LETTERS_PER_POSITION: u64 = 8;
+
+/// No NCBI counterpart: whether a table of `lut_word_length` is in the scope (`MIN_LUT`, `MAX_LUT`;
+/// LOSAT_X_MBCSR: 12 too, when its head is packed and the search scans enough letters).
+/// `scan_letters`: the letters of the search's subjects, `None` when the caller does not say.
+fn x_in_scope(words: &Words<'_>, cells: usize, scan_letters: Option<u64>) -> bool {
+    if (MIN_LUT..=MAX_LUT).contains(&words.lut_word_length) {
+        return true;
+    }
+    if words.lut_word_length != 12 || !x_will_pack(words.ascending_cells) || !x_mb12_on() {
+        return false;
+    }
+    let taken = scan_letters.is_some_and(|letters| {
+        letters
+            >= (positions(words) as u64)
+                .saturating_mul(X_MB12_LETTERS_PER_POSITION)
+                .saturating_add(cells as u64)
+    });
+    crate::utils::xreach::x_reach!("LOSAT_X_MBCSR", taken);
+    taken
+}
+
 /// No NCBI counterpart: whether `build_mb_lookup` lays out a table of `cells` cells over `words`
 /// as CSR (module comment, scope). `db_word_counts`: the table is built with database word counts;
-/// `debug`: BLEMIR_DEBUG.
-pub(super) fn plan(words: &Words<'_>, cells: usize, db_word_counts: bool, debug: bool) -> bool {
+/// `debug`: BLEMIR_DEBUG; `scan_letters`: as in `x_in_scope`.
+pub(super) fn plan(
+    words: &Words<'_>,
+    cells: usize,
+    db_word_counts: bool,
+    debug: bool,
+    scan_letters: Option<u64>,
+) -> bool {
     if !on() {
         return false;
     }
     // EXPERIMENT (LOSAT_X_BNCSRPACK): a packed head has no size rule (module comment).
     let csr = !db_word_counts
         && !debug
-        && (MIN_LUT..=MAX_LUT).contains(&words.lut_word_length)
+        && x_in_scope(words, cells, scan_letters)
         && (x_will_pack(words.ascending_cells) || wanted(positions(words), cells));
     crate::utils::xreach::x_reach!("LOSAT_X_BNCSR", csr);
     csr
@@ -802,14 +850,21 @@ pub(super) mod tests {
     #[test]
     fn the_packed_head_lists_the_chains_too() {
         let mut rng = Lcg(0xB4C5_0002);
-        for lut in MIN_LUT..=MAX_LUT {
-            for (n, len, repeats) in [
-                (1, 6, false),
-                (3, 300, false),
-                (5, 6000, false),
-                (40, 3000, false),
-                (2, 500, true),
-            ] {
+        for lut in MIN_LUT..=12 {
+            // LOSAT_X_MBCSR's 4^12 cells: words past a byte's count, and the batch of 800,000 table
+            // entries or more whose presence vector has half the words.
+            let cases: &[(usize, usize, bool)] = if lut == 12 {
+                &[(40, 3000, false), (2, 500, true), (1, 900_000, false)]
+            } else {
+                &[
+                    (1, 6, false),
+                    (3, 300, false),
+                    (5, 6000, false),
+                    (40, 3000, false),
+                    (2, 500, true),
+                ]
+            };
+            for &(n, len, repeats) in cases {
                 let mut case = random_case(&mut rng, n, len);
                 if repeats {
                     x_with_repeats(&mut case, lut);
@@ -906,19 +961,70 @@ pub(super) mod tests {
                 masks: vec![Vec::new()],
             };
             let refs = big.refs();
-            assert!(plan(&big.words(&refs, 9, 8, true), 1 << 16, false, false));
-            assert!(!plan(&big.words(&refs, 9, 8, true), 1 << 16, true, false));
-            assert!(!plan(&big.words(&refs, 9, 8, true), 1 << 16, false, true));
-            assert!(!plan(&big.words(&refs, 9, 7, true), 1 << 14, false, false));
+            assert!(plan(
+                &big.words(&refs, 9, 8, true),
+                1 << 16,
+                false,
+                false,
+                None
+            ));
+            assert!(!plan(
+                &big.words(&refs, 9, 8, true),
+                1 << 16,
+                true,
+                false,
+                None
+            ));
+            assert!(!plan(
+                &big.words(&refs, 9, 8, true),
+                1 << 16,
+                false,
+                true,
+                None
+            ));
+            assert!(!plan(
+                &big.words(&refs, 9, 7, true),
+                1 << 14,
+                false,
+                false,
+                None
+            ));
             assert!(!plan(
                 &big.words(&refs, 13, 12, false),
                 1 << 24,
                 false,
-                false
+                false,
+                None
+            ));
+            // LOSAT_X_MBCSR: 4^12 cells with a search of at least 8 letters per position and one
+            // per cell.
+            let positions = big.refs()[0].len() as u64;
+            assert_eq!(
+                plan(
+                    &big.words(&refs, 13, 12, false),
+                    1 << 24,
+                    false,
+                    false,
+                    Some(positions * X_MB12_LETTERS_PER_POSITION + (1 << 24))
+                ),
+                x_will_pack(false) && x_mb12_on()
+            );
+            assert!(!plan(
+                &big.words(&refs, 13, 12, false),
+                1 << 24,
+                false,
+                false,
+                Some(positions * X_MB12_LETTERS_PER_POSITION + (1 << 24) - 1)
             ));
             // below the rule: chains, unless the head is packed (LOSAT_X_BNCSRPACK has no rule)
             assert_eq!(
-                plan(&big.words(&refs, 11, 11, false), 1 << 22, false, false),
+                plan(
+                    &big.words(&refs, 11, 11, false),
+                    1 << 22,
+                    false,
+                    false,
+                    None
+                ),
                 x_will_pack(false)
             );
         }

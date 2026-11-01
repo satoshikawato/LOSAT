@@ -33,6 +33,7 @@ use super::TblastnArgs;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::value_parsers::SegSpec;
+use crate::core::blast_util::ncbi_int4_from_double;
 use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
 use crate::report::archive::options::{Filter, OptionInputs};
@@ -53,6 +54,7 @@ use crate::utils::seg::SegParams;
 pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Tblastn, &args.task);
     inputs.dbsize = args.dbsize;
+    inputs.searchsp = args.searchsp;
     inputs.evalue = args.evalue;
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
@@ -64,8 +66,20 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.max_hsps = args.max_hsps.map(|count| count as i32);
     inputs.culling_limit = args.culling_limit;
     inputs.sum_stats = args.sum_stats;
-    // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`).
-    inputs.threshold = args.threshold.map(|threshold| threshold as i32);
+    // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`), converted
+    // as the x86-64 build does (`INT_MIN` past `Int4`, as the lookup table takes it:
+    // `ncbi_int4_from_double`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
+    // ```c++
+    // CBlastOptions::SetWordThreshold(double w)
+    // {
+    //     ...
+    //     if (m_Remote) {
+    //         m_Remote->SetValue(eBlastOpt_WordThreshold, static_cast<int>(w));
+    //     }
+    // }
+    // ```
+    inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     inputs.window_size = args.window_size;
     inputs.ungapped = args.ungapped;
     inputs.soft_masking = args.soft_masking;
@@ -138,10 +152,12 @@ struct FirstContext {
     /// The effective search space and length adjustment of that context (0 without one).
     search_space: i64,
     length_adjustment: i64,
+    /// The `EffectiveSearchSpace` option: `-searchsp` in an invalid context too.
+    context0_space: i64,
 }
 
 /// The runs of lower-case letters of a record (inclusive 0-based positions).
-fn lowercase_runs(letters: &[u8]) -> Vec<(i32, i32)> {
+pub(crate) fn lowercase_runs(letters: &[u8]) -> Vec<(i32, i32)> {
     let mut runs = Vec::new();
     let mut start = None;
     for (index, letter) in letters.iter().enumerate() {
@@ -233,7 +249,7 @@ impl<'a> AlignSource for TblastnAligns<'a> {
             }
             let query = &self.queries[q_idx];
             let query = QueryRecord {
-                id: SeqId::Local(&query.local_id),
+                id: query.seq_id(),
                 searched_length: i32::try_from(query.seq().len())?,
                 offset: i32::try_from(self.ranges.queries.offset(q_idx))?,
             };
@@ -297,6 +313,8 @@ pub(super) fn write_tblastn_archives(
             .zip(&subject_deflines)
             .map(|(record, defline)| BioseqInput {
                 id: &record.local_id,
+                ids: record.believed().map(|ids| ids.ids.as_slice()),
+                seq_loc: None,
                 defline,
                 title: &record.title,
                 letters: record.archive_letters(),
@@ -322,6 +340,8 @@ pub(super) fn write_tblastn_archives(
             .zip(&deflines)
             .map(|(record, defline)| BioseqInput {
                 id: &record.local_id,
+                ids: record.believed().map(|ids| ids.ids.as_slice()),
+                seq_loc: record.archive_seq_loc(),
                 defline,
                 title: &record.title,
                 letters: record.archive_letters(),
@@ -357,6 +377,7 @@ pub(super) fn write_tblastn_archives(
                 if !intervals.is_empty() {
                     results_masks.push(MaskEntry {
                         id: records[offset].local_id.clone(),
+                        best: records[offset].believed().map(|ids| ids.best.clone()),
                         frame: Frame::NotSet,
                         intervals,
                     });
@@ -372,6 +393,7 @@ pub(super) fn write_tblastn_archives(
                 if !runs.is_empty() {
                     lcase_masks.push(MaskEntry {
                         id: record.local_id.clone(),
+                        best: record.believed().map(|ids| ids.best.clone()),
                         frame: Frame::NotSet,
                         intervals: runs,
                     });
@@ -385,12 +407,14 @@ pub(super) fn write_tblastn_archives(
                 karlin: Some((data.ungapped_karlin[first].clone(), data.gapped.clone())),
                 search_space: length.eff_searchsp,
                 length_adjustment: length.length_adjustment,
+                context0_space: length.eff_searchsp,
             }
         } else {
             FirstContext {
                 karlin: None,
                 search_space: 0,
                 length_adjustment: 0,
+                context0_space: data.parameters.lengths[first].eff_searchsp,
             }
         };
         let ka_blocks = match &context.karlin {
@@ -406,7 +430,7 @@ pub(super) fn write_tblastn_archives(
             ka_blocks,
             search_space: context.search_space,
             length_adjustment: context.length_adjustment,
-            searched_space: searched.then_some(context.search_space),
+            searched_space: searched.then_some(context.context0_space),
         };
         let mut aligns = TblastnAligns {
             run: RunRecord {
@@ -539,6 +563,7 @@ mod tests {
                     ParamValue::Boolean(false) => "boolean:False".to_string(),
                     ParamValue::Real(value) => format!("real:{}", posix(*value)),
                     ParamValue::Str(value) => format!("string:{value}"),
+                    ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
                 };
                 format!("{}={value}", param.name)
             })
@@ -582,6 +607,37 @@ mod tests {
             }
         }
         Some(inputs)
+    }
+
+    // A `-threshold` past `Int4` (2147483648, 1e10, +inf, 1e999) is recorded as `INT_MIN`, as
+    // NCBI BLAST+ 2.17.0 converts it (the lookup table takes the same value). NCBI's build writes
+    // it as `-8` in the archive, from a signed overflow that LOSAT does not reproduce
+    // (`report/serial/asn_text.rs` `itoa_i32`).
+    #[test]
+    fn a_threshold_past_int4_is_recorded_as_int_min() {
+        let inputs =
+            |value: &str| inputs_of(&["-threshold", value]).unwrap_or_else(|| panic!("{value}"));
+        let listed = |threshold: &str| {
+            let case = CASES
+                .iter()
+                .find(|case| case.0 == "opt_thr_frac")
+                .expect("opt_thr_frac");
+            case.2.replace(
+                "WordThreshold=integer:11",
+                &format!("WordThreshold=integer:{threshold}"),
+            )
+        };
+        for value in ["2147483648", "1e10", "+inf", "1e999"] {
+            assert_eq!(
+                render(&algorithm_options(&inputs(value))),
+                listed("-2147483648"),
+                "{value}"
+            );
+        }
+        assert_eq!(
+            render(&algorithm_options(&inputs("2147483647.5"))),
+            listed("2147483647")
+        );
     }
 
     #[test]

@@ -174,7 +174,12 @@ pub(super) fn chosen(
 ) -> Option<usize> {
     // Dispatch point (LOSAT_X_BXCAPFILL, in the strict set): inside the capped batch flow, tasks of
     // fewer subjects (x_bx_mem::flow_subjects_per_task).
-    let k = super::x_bx_mem::flow_subjects_per_task(pool, subjects.len(), subjects_per_task()?);
+    let k = super::x_bx_mem::flow_subjects_per_task(
+        pool,
+        options,
+        subjects.len(),
+        subjects_per_task()?,
+    );
     let own = fits(k, pool, diagnostics, options, subjects);
     crate::utils::xreach::x_reach!("LOSAT_X_BXSUBJFLOW", own);
     own.then_some(k)
@@ -359,8 +364,8 @@ fn search_task(
 ) -> Task {
     let mut kept = Vec::new();
     let (first, end) = (range.start, range.end);
-    // EXPERIMENT (LOSAT_X_BXDBSTREAM): the task's subjects, read at once when the subjects are read
-    // in blocks; an error stops the flow at the task's first subject.
+    // The task's subjects, read at once when the subjects are read in blocks; an error stops the
+    // flow at the task's first subject.
     let x_block = match subjects.x_read_range(first, end) {
         Ok(block) => block,
         Err(error) => return (kept, Some((first, error))),

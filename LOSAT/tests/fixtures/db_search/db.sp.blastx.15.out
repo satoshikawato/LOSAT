@@ -1,0 +1,1046 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "m_fam MelaMJNV 26001-31000",
+          "query_len": 5000,
+          "query_masking": [
+            {
+              "from": 39,
+              "to": 69
+            },
+            {
+              "from": 129,
+              "to": 153
+            },
+            {
+              "from": 270,
+              "to": 300
+            },
+            {
+              "from": 1044,
+              "to": 1086
+            },
+            {
+              "from": 1275,
+              "to": 1332
+            },
+            {
+              "from": 2949,
+              "to": 2973
+            },
+            {
+              "from": 3135,
+              "to": 3207
+            },
+            {
+              "from": 3363,
+              "to": 3420
+            },
+            {
+              "from": 3435,
+              "to": 3474
+            },
+            {
+              "from": 3486,
+              "to": 3522
+            },
+            {
+              "from": 3735,
+              "to": 3795
+            },
+            {
+              "from": 4428,
+              "to": 4470
+            },
+            {
+              "from": 4647,
+              "to": 4692
+            },
+            {
+              "from": 343,
+              "to": 388
+            },
+            {
+              "from": 952,
+              "to": 973
+            },
+            {
+              "from": 1147,
+              "to": 1180
+            },
+            {
+              "from": 1987,
+              "to": 2029
+            },
+            {
+              "from": 3127,
+              "to": 3190
+            },
+            {
+              "from": 3214,
+              "to": 3250
+            },
+            {
+              "from": 3412,
+              "to": 3445
+            },
+            {
+              "from": 3733,
+              "to": 3766
+            },
+            {
+              "from": 3787,
+              "to": 3844
+            },
+            {
+              "from": 3886,
+              "to": 3931
+            },
+            {
+              "from": 4312,
+              "to": 4360
+            },
+            {
+              "from": 4654,
+              "to": 4693
+            },
+            {
+              "from": 4903,
+              "to": 4945
+            },
+            {
+              "from": 164,
+              "to": 197
+            },
+            {
+              "from": 299,
+              "to": 344
+            },
+            {
+              "from": 998,
+              "to": 1082
+            },
+            {
+              "from": 1250,
+              "to": 1319
+            },
+            {
+              "from": 1739,
+              "to": 1790
+            },
+            {
+              "from": 1916,
+              "to": 1961
+            },
+            {
+              "from": 2714,
+              "to": 2732
+            },
+            {
+              "from": 3152,
+              "to": 3179
+            },
+            {
+              "from": 3422,
+              "to": 3449
+            },
+            {
+              "from": 3464,
+              "to": 3500
+            },
+            {
+              "from": 3734,
+              "to": 3806
+            }
+          ],
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|32",
+                  "accession": "32",
+                  "title": "BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 577,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 288.115,
+                  "score": 736,
+                  "evalue": 1.09345e-78,
+                  "identity": 183,
+                  "positive": 272,
+                  "query_from": 1325,
+                  "query_to": 2707,
+                  "query_frame": -2,
+                  "hit_from": 4,
+                  "hit_to": 577,
+                  "align_len": 580,
+                  "gaps": 125,
+                  "qseq": "SSPGCMFAQNLYSLEDLNKYCKPP----QIHKTFIKYARDTLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLFEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKP-------------------------PKQTKSPLLDYIGIFEYNISSVRFKRDTFEKRLASF-KDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFIDNIQ------LKISENTLYESFD-------------------EMDLLMELDIVRCIVSIGYSINDAKCILKKHVTETGWPYLSIEPYV------------------------------LDINQMILKRPVRIIPKPP-------SIIRHLVSERMKsllsisesassSTTVEGTDNTISQKT--LPEADNMETLTSQEIVPEADNTETFTSQEIYLPEA-------------------------KNAETSTSLKQSHEHMYEDRICKVCMSNEARVVYFPCTHMIACEDCTLALESCPICRKDINYVVRPIIS",
+                  "hseq": "SHPNSFLQQEEYRLTTFSEHETSPIDTTRVYRNMPFVSYDCLRYEEKRLGTFIDWPHEWLKPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQGNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPECRGSP--DETGLYQHS-GPKRSDFTTLDSRLKSYVEGWP-ILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTASTTIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGYPSCIVRACLKDRVEQTGEPYFVIEPCLEDVIHRMSVTENRVADNCSESTEREPSYGGTDISSSIFQQQAPIFPSTSETMGNRVASIQSLPSESTE--VELLSQQQQVSILPSTPEIIRQQASIFPTAPLNTTLSSSSSSSERENTETEANHILQIVEEIISQVSEEEKEGYEEKEGYEEKEEFKSRQSYEQLKEELERMREDRTCKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQCPICRRDIKHVCRAIVS",
+                  "midline": "S P     Q  Y L   +++   P    ++++     + D L YE+ RL TF DWPH+++ P ELAADGFY+L+K DH  C+FC GI+G +E  D  R +H+  FP C F+RG  T N+P V+ NI  +L   +                           P+   SP  D  G+++++    R    T + RL S+ + WP  L    +DLAEAGF+YCGLSDHV CF+C  G+ NW  +DIPW EHA++YP C ++ L KG+++I+ +Q       + +  T+Y   D                   E+DLLM LD+V+C++ +GY     +  LK  V +TG PY  IEP +                               DI+  I ++   I P          + I+ L SE  +  + +       + +  T   I Q+    P A    TL+S     E +NTET  +  + + E                          K+ ++   LK+  E M EDR CKVCM +E  +V+ PC+HM+ C  C ++L  CPICR+DI +V R I+S"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 138.658,
+                  "score": 348,
+                  "evalue": 1.155e-33,
+                  "identity": 74,
+                  "positive": 106,
+                  "query_from": 4450,
+                  "query_to": 4992,
+                  "query_frame": -3,
+                  "hit_from": 168,
+                  "hit_to": 357,
+                  "align_len": 191,
+                  "gaps": 11,
+                  "qseq": "RITNNNYGILEHHTSKHEHYLDIEKRLESF-KGWPHWLVQKPQDLAEAGFFYEGPNDSVRCFHCSGNIFNWEKEDIPWNMHAKWHPNCTYVLLKKGADFIYRNNQE--TYEKN-SEKLYHTWQGINSNVSHMSTLILT------EFLMDLDIVKCVVSMGYPISIAKVSLVMHVEEKGWPFLRIDEYIDDM",
+                  "hseq": "RGSPDETGLYQHSGPKRSDFTTLDSRLKSYVEGWP-ILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTASTTIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGYPSCIVRACLKDRVEQTGEPYFVIEPCLEDV",
+                  "midline": "R + +  G+ +H   K   +  ++ RL+S+ +GWP  L    +DLAEAGFFY G +D VRCFHC   + NW   DIPW  HA+W+P C +VLL KG D+I    QE   Y +  S  +Y       S  S+  T + +      + LM LD+VKCV+ MGYP  I +  L   VE+ G P+  I+  ++D+"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 62.003,
+                  "score": 149,
+                  "evalue": 1.10596e-10,
+                  "identity": 29,
+                  "positive": 38,
+                  "query_from": 4723,
+                  "query_to": 4923,
+                  "query_frame": -3,
+                  "hit_from": 49,
+                  "hit_to": 114,
+                  "align_len": 68,
+                  "gaps": 3,
+                  "qseq": "EKRLESFKGWPH-WLVQKPQDLAEAGFFYEGPNDSVRCFHCSGNIFNWEKEDIPWNMHAKWHPNCTYV",
+                  "hseq": "EKRLGTFIDWPHEWL--KPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFI",
+                  "midline": "EKRL +F  WPH WL  KP +LA  GF+Y   +D   C  C G +  WEK D P   H +  P+C ++"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 41.9726,
+                  "score": 97,
+                  "evalue": 0.000133111,
+                  "identity": 57,
+                  "positive": 97,
+                  "query_from": 2270,
+                  "query_to": 2914,
+                  "query_frame": -2,
+                  "hit_from": 45,
+                  "hit_to": 288,
+                  "align_len": 259,
+                  "gaps": 59,
+                  "qseq": "IHLEQRRVETFINQFKENIDESLPIHYRLLAKAGFFYMKKDVIACFCCKLQIDVKTLRTSDDIIMIHKKSSPGCMFAQNLYS----LEDLNKYCKPPQIHKTF--------------------------IKYARDTLIYEQH-------------RLETFAD-WPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLFEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKPPKQTKSPLLDYIGI",
+                  "hseq": "LRYEEKRLGTFIDWPHEWLKPSE------LAADGFYYLRKD-DHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQGNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPECRGSPDETGLYQHSGPKRSDFTTLDSRLKSYVEGWPILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTK-------GQDYINEVQQEHPPYTRTASTTI-YSGI",
+                  "midline": "+  E++R+ TFI+   E +  S       LA  GF+Y++KD   C C   +  V     +D     H++  P C F +   +    +   N   + P +H +                            + + D     QH             RL+++ + WP   +   +LA  GF++    DHV C  C   L  +   DI  ++H   +P C FV   K        ++   ++  E+ P  +T S  + Y GI"
+                },
+                {
+                  "num": 5,
+                  "bit_score": 36.965,
+                  "score": 84,
+                  "evalue": 0.00384186,
+                  "identity": 15,
+                  "positive": 23,
+                  "query_from": 4075,
+                  "query_to": 4188,
+                  "query_frame": -3,
+                  "hit_from": 530,
+                  "hit_to": 568,
+                  "align_len": 39,
+                  "gaps": 1,
+                  "qseq": "CKKCMITDALVAVFPCRH-VLCEACALVSKDCPKCKKWI",
+                  "hseq": "CKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQCPICRRDI",
+                  "midline": "CK CM ++  +   PC H V C +CA+  + CP C++ I"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|31",
+                  "accession": "31",
+                  "title": "BDT61961.1 hypothetical protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 207,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 248.054,
+                  "score": 632,
+                  "evalue": 1.16326e-66,
+                  "identity": 147,
+                  "positive": 172,
+                  "query_from": 377,
+                  "query_to": 985,
+                  "query_frame": -2,
+                  "hit_from": 1,
+                  "hit_to": 207,
+                  "align_len": 207,
+                  "gaps": 4,
+                  "qseq": "MREYGNIYYSSMGGLLNALTEAGYSISKNDLSKRDNIESSYGDNGVILSHASEEalcltlycalglLIEKGITVNLSKSN-ADYLLNFPAVRIEIRPNRENNTIVRGRVYKKDN-ITIGDY-VNVNDIHNGGKEYPYPSKTQYSYGD-TLRSIIIESKGRGLKAHDILSTVLYIDSYDRSRLSDIIADIANYPLKFFRAIILRGKRL",
+                  "hseq": "MREYGKIYYSSMVGLLNALTEAGYPISIHDLSDRDGIKSSYRDDGVIITHASEEALCLTLYCALGLLMEKGITVNLKRSNAAEYLLHFPTVKVEVRPNCETNTIVRGRIQRNDDRVAIGEEPVNTSDIYNGGKAYVYQNKALYSHSSGHLKTVIIESKGRGHTANDTLSTVLYIDSYDRSRLPDIIEDIAKYPLKFFRAIILRGKLL",
+                  "midline": "MREYG IYYSSM GLLNALTEAGY IS +DLS RD I+SSY D+GVI++HASEEALCLTLYCALGLL+EKGITVNL +SN A+YLL+FP V++E+RPN E NTIVRGR+ + D+ + IG+  VN +DI+NGGK Y Y +K  YS+    L+++IIESKGRG  A+D LSTVLYIDSYDRSRL DII DIA YPLKFFRAIILRGK L"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|34",
+                  "accession": "34",
+                  "title": "BDT61964.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 719,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 186.808,
+                  "score": 473,
+                  "evalue": 2.87936e-48,
+                  "identity": 118,
+                  "positive": 180,
+                  "query_from": 1829,
+                  "query_to": 2851,
+                  "query_frame": -2,
+                  "hit_from": 37,
+                  "hit_to": 396,
+                  "align_len": 371,
+                  "gaps": 41,
+                  "qseq": "SLPIHYRLLAKAGFF---YMKKDVIACFCCKLQIDVKTLRTSDDIIMIHKKSSPGCMFAQNLYSLEDLNKYCKPPQIHKTFIKYARD-------TLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGL-FEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKPPKQTKSPLLDYIGIFEY-NISSVRFKR--------DTFEKRLASFKDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFIDNIQLKISENTLYE---------SFDEMDLLMELDIV-RCIVSIGYSINDAKCILKKHVTETGWPY",
+                  "hseq": "SYVINPKILAKAGFMRCGLSSKQYIVCVDCHLYIDIDTIMPWDDIVKIHKDKNPLCLLARNL-----------PPLPRSKIFENRFDPATGLPADLRYEIKRLETFIDWPNKVVQAKDLAAAGFFYTRDTTCCICFSCHKYMNFSYDKPIVIRDMHLKKSPNCKFAQGKSVGNIPIRMSNILNSIVNQKRVAVTSATATATATATVDQEDLIKTRYEYAGPLHDYYKTTQSRLESFLNWPHRHRQKIEALVEAGFYYLGISDHVQCFHCGACLRNWEEDDDPWRVHAEWYPECYYVQLKKGKEFIDKVRLEVSRIPMWRHSSSTSQDTSEHDWNILLGLDYTKRLILVQGFPVVAVRDALCEQILQTGIPF",
+                  "midline": "S  I+ ++LAKAGF       K  I C  C L ID+ T+   DDI+ IHK  +P C+ A+NL           PP       +   D        L YE  RLETF DWP+  V   +LAA GF++ +     +C  C   +   ++   ++R+ H    P C F +G    NIP    NI   + ++ +    + +         +  ++   R++          T + RL SF +WP    QK + L EAGFYY G+SDHV CF+C   + NWE +D PW  HA++YP C Y+ LKKGK FID ++L++S   ++          S  + ++L+ LD   R I+  G+ +   +  L + + +TG P+"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 114.39,
+                  "score": 285,
+                  "evalue": 1.94147e-26,
+                  "identity": 62,
+                  "positive": 90,
+                  "query_from": 4474,
+                  "query_to": 4962,
+                  "query_frame": -3,
+                  "hit_from": 242,
+                  "hit_to": 398,
+                  "align_len": 176,
+                  "gaps": 32,
+                  "qseq": "EHHTSKHEHYLDIEKRLESFKGWPHWLVQKPQDLAEAGFFYEGPNDSVRCFHCSGNIFNWEKEDIPWNMHAKWHPNCTYVLLKKGADFI------------YRNNQETYEKNSEKLYHTWQGINSNVSHMSTLILTEFLMDLDIVK-CVVSMGYPISIAKVSLVMHVEEKGWPFLR",
+                  "hseq": "EYAGPLHDYYKTTQSRLESFLNWPHRHRQKIEALVEAGFYYLGISDHVQCFHCGACLRNWEEDDDPWRVHAEWYPECYYVQLKKGKEFIDKVRLEVSRIPMWRHSSSTSQDTSE---HDWN----------------ILLGLDYTKRLILVQGFPVVAVRDALCEQILQTGIPFSR",
+                  "midline": "E+    H++Y   + RLESF  WPH   QK + L EAGF+Y G +D V+CFHC   + NWE++D PW +HA+W+P C YV LKKG +FI            +R++  T +  SE   H W                  L+ LD  K  ++  G+P+   + +L   + + G PF R"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 53.5286,
+                  "score": 127,
+                  "evalue": 4.68684e-08,
+                  "identity": 28,
+                  "positive": 39,
+                  "query_from": 4723,
+                  "query_to": 4920,
+                  "query_frame": -3,
+                  "hit_from": 126,
+                  "hit_to": 191,
+                  "align_len": 67,
+                  "gaps": 2,
+                  "qseq": "KRLESFKGWPHWLVQKPQDLAEAGFFYEGPNDSVRCFHCSGNI-FNWEKEDIPWNMHAKWHPNCTYV",
+                  "hseq": "KRLETFIDWPNKVVQA-KDLAAAGFFYTRDTTCCICFSCHKYMNFSYDKPIVIRDMHLKKSPNCKFA",
+                  "midline": "KRLE+F  WP+ +VQ  +DLA AGFFY        CF C   + F+++K  +  +MH K  PNC + "
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|33",
+                  "accession": "33",
+                  "title": "BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 728,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 142.895,
+                  "score": 359,
+                  "evalue": 4.92999e-35,
+                  "identity": 104,
+                  "positive": 164,
+                  "query_from": 1910,
+                  "query_to": 2839,
+                  "query_frame": -2,
+                  "hit_from": 39,
+                  "hit_to": 387,
+                  "align_len": 369,
+                  "gaps": 79,
+                  "qseq": "HYRLLAKAGFFYMKKDVIACFCCKLQIDVKTLRTSDDIIMIHKKSSPGCMFAQNLYSLEDLNKYCKPPQIHKTFIKYARDTLIYEQHRLETFADWP-HDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLFE-------------MGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKL----------------------------------SHEYKPPKQTKSPLLDYIGIFEYNISSVRFKRDTFE---KRLASFKDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFID------NIQLK--ISENTLYESFDEMDLLMELDIVR",
+                  "hseq": "HPKIMAKAGFYELDKRLI-CFRCGLNIDIDDIGKTDDIVEVHQTKRPSCVFARNL------------PSLPRSRLVVASD-LRYETKRLETFIDWPLGEVIEARDLAAAGFFYSRRNVECIC-FCCKVRISFKPCTRHGCCARHASTSQYITEKHLNS-AYCDFAMEKVTGNVPIRINKIISKIIGHQETDNEKNSCGNNEGRSRGASGEEDGGDSRESENDSSSRISAGNILSEMGIESYSGP----EHENFVTPISRKYTYDDWPLGDIMLPKKLIAAGFFYSGYGDHVNCFHCGVGIRNWEKGDDPWTQHAMWNPECHYVRTLMGQTFIDTAKTVKNVLFRKPTRERTYSVTDEDWNAVMGLDITK",
+                  "midline": "H +++AKAGF+ + K +I CF C L ID+  +  +DDI+ +H+   P C+FA+NL            P + ++ +  A D L YE  RLETF DWP  + +   +LAA GF++ ++    +C FC  +   F+                 + EKH ++   C F     T N+P     I  K+                                  S      + +   +L  +GI  Y+      + + F     R  ++ DWP   +  P+ L  AGF+Y G  DHV CF+C  GI NWE+ D PW +HA + P C+Y+    G+ FID      N+  +    E T   + ++ + +M LDI +"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 85.5001,
+                  "score": 210,
+                  "evalue": 9.03418e-18,
+                  "identity": 39,
+                  "positive": 49,
+                  "query_from": 4696,
+                  "query_to": 4971,
+                  "query_frame": -3,
+                  "hit_from": 259,
+                  "hit_to": 350,
+                  "align_len": 92,
+                  "gaps": 0,
+                  "qseq": "GILEHHTSKHEHYLDIEKRLESFKGWPHWLVQKPQDLAEAGFFYEGPNDSVRCFHCSGNIFNWEKEDIPWNMHAKWHPNCTYVLLKKGADFI",
+                  "hseq": "GIESYSGPEHENFVTPISRKYTYDDWPLGDIMLPKKLIAAGFFYSGYGDHVNCFHCGVGIRNWEKGDDPWTQHAMWNPECHYVRTLMGQTFI",
+                  "midline": "GI  +   +HE+++    R  ++  WP   +  P+ L  AGFFY G  D V CFHC   I NWEK D PW  HA W+P C YV    G  FI"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 57.3806,
+                  "score": 137,
+                  "evalue": 3.01093e-09,
+                  "identity": 24,
+                  "positive": 42,
+                  "query_from": 1328,
+                  "query_to": 1531,
+                  "query_frame": -2,
+                  "hit_from": 660,
+                  "hit_to": 728,
+                  "align_len": 69,
+                  "gaps": 1,
+                  "qseq": "KNAETSTSLKQSHEHMYEDR-ICKVCMSNEARVVYFPCTHMIACEDCTLALESCPICRKDINYVVRPII",
+                  "hseq": "EDEERSSEIKEAPDSVIGDRYLCKICLNSCVKTVTLPCRHMSCCGNCIVTQTKCPICRKKIKYTLEPYL",
+                  "midline": "++ E S+ +K++ + +  DR +CK+C+++  + V  PC HM  C +C +    CPICRK I Y + P +"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 53.5286,
+                  "score": 127,
+                  "evalue": 3.86844e-08,
+                  "identity": 44,
+                  "positive": 70,
+                  "query_from": 2102,
+                  "query_to": 2587,
+                  "query_frame": -2,
+                  "hit_from": 23,
+                  "hit_to": 150,
+                  "align_len": 164,
+                  "gaps": 38,
+                  "qseq": "EQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLFEMG--DIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKPPKQTKSPLLDYIGIFEYNISSVRFKRDTFEKRLASFKDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCE",
+                  "hseq": "ETHRANTYGDYDQYVHHPKIMAKAGFYELDKR--LICFRCGLNIDIDDIGKTDDIVEVHQTKRPSCVFAR-----NLPSLPRSRL-------------------------VVASDLRYE----TKRLETFIDWPLGEVIEARDLAAAGFFYSRRNVECICFCCK",
+                  "midline": "E HR  T+ D+      P  +A  GFY L K+  ++C  C   + + ++G  D + E H+   P C F R     N+P++ ++                              S +R++     KRL +F DWP   V + +DLA AGF+Y   +    CF C+"
+                },
+                {
+                  "num": 5,
+                  "bit_score": 42.3578,
+                  "score": 98,
+                  "evalue": 9.85739e-05,
+                  "identity": 21,
+                  "positive": 24,
+                  "query_from": 4792,
+                  "query_to": 4920,
+                  "query_frame": -3,
+                  "hit_from": 111,
+                  "hit_to": 153,
+                  "align_len": 43,
+                  "gaps": 0,
+                  "qseq": "KRLESFKGWPHWLVQKPQDLAEAGFFYEGPNDSVRCFHCSGNI",
+                  "hseq": "KRLETFIDWPLGEVIEARDLAAAGFFYSRRNVECICFCCKVRI",
+                  "midline": "KRLE+F  WP   V + +DLA AGFFY   N    CF C   I"
+                },
+                {
+                  "num": 6,
+                  "bit_score": 40.817,
+                  "score": 94,
+                  "evalue": 0.000266058,
+                  "identity": 23,
+                  "positive": 35,
+                  "query_from": 2750,
+                  "query_to": 2929,
+                  "query_frame": -2,
+                  "hit_from": 101,
+                  "hit_to": 156,
+                  "align_len": 61,
+                  "gaps": 6,
+                  "qseq": "ICPKHIHLEQRRVETFINQFKENIDESLPIHYRLLAKAGFFYMKKDV-IACFCCKLQIDVK",
+                  "hseq": "VVASDLRYETKRLETFIDWPLGEVIEA-----RDLAAAGFFYSRRNVECICFCCKVRISFK",
+                  "midline": "+    +  E +R+ETFI+     + E+     R LA AGFFY +++V   CFCCK++I  K"
+                },
+                {
+                  "num": 7,
+                  "bit_score": 33.113,
+                  "score": 74,
+                  "evalue": 0.0554764,
+                  "identity": 18,
+                  "positive": 25,
+                  "query_from": 4075,
+                  "query_to": 4245,
+                  "query_frame": -3,
+                  "hit_from": 663,
+                  "hit_to": 720,
+                  "align_len": 58,
+                  "gaps": 1,
+                  "qseq": "EALSETKTMESNINISHPKCKKCMITDALVAVFPCRHV-LCEACALVSKDCPKCKKWI",
+                  "hseq": "ERSSEIKEAPDSVIGDRYLCKICLNSCVKTVTLPCRHMSCCGNCIVTQTKCPICRKKI",
+                  "midline": "E  SE K    ++      CK C+ +       PCRH+  C  C +    CP C+K I"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|9",
+                  "accession": "9",
+                  "title": "BDT61876.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 181,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 95.9005,
+                  "score": 237,
+                  "evalue": 6.85379e-21,
+                  "identity": 42,
+                  "positive": 52,
+                  "query_from": 4690,
+                  "query_to": 4944,
+                  "query_frame": -3,
+                  "hit_from": 80,
+                  "hit_to": 164,
+                  "align_len": 85,
+                  "gaps": 0,
+                  "qseq": "HEHYLDIEKRLESFKGWPHWLVQKPQDLAEAGFFYEGPNDSVRCFHCSGNIFNWEKEDIPWNMHAKWHPNCTYVLLKKGADFIYR",
+                  "hseq": "HQEYVMHQRRLETFRWWPKETAQSPHKLAEAGFVSSGLGDTVYCFHCGVYLEQWEKNDMPWKEHAKWSPRCRYVKMVKGDKFIIR",
+                  "midline": "H+ Y+  ++RLE+F+ WP    Q P  LAEAGF   G  D+V CFHC   +  WEK D+PW  HAKW P C YV + KG  FI R"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 87.8113,
+                  "score": 216,
+                  "evalue": 2.16893e-18,
+                  "identity": 37,
+                  "positive": 49,
+                  "query_from": 1997,
+                  "query_to": 2224,
+                  "query_frame": -2,
+                  "hit_from": 87,
+                  "hit_to": 162,
+                  "align_len": 76,
+                  "gaps": 0,
+                  "qseq": "EKRLASFKDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFI",
+                  "hseq": "QRRLETFRWWPKETAQSPHKLAEAGFVSSGLGDTVYCFHCGVYLEQWEKNDMPWKEHAKWSPRCRYVKMVKGDKFI",
+                  "midline": "++RL +F+ WP+   Q P  LAEAGF   GL D V CF+C   +  WE+ND+PW EHAK+ P C Y+ + KG  FI"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 42.743,
+                  "score": 99,
+                  "evalue": 7.80369e-05,
+                  "identity": 31,
+                  "positive": 43,
+                  "query_from": 2375,
+                  "query_to": 2641,
+                  "query_frame": -2,
+                  "hit_from": 76,
+                  "hit_to": 160,
+                  "align_len": 93,
+                  "gaps": 12,
+                  "qseq": "PPQIHKTFIKYARDTLIYEQHRLETFADWPHDFV-SPIELAADGFYFLKKQDHVMCVFCVGILGLFEMGDIVREKHKHAFPGCAF---VRGDK",
+                  "hseq": "PNPIHQEYVMHQR--------RLETFRWWPKETAQSPHKLAEAGFVSSGLGDTVYCFHCGVYLEQWEKNDMPWKEHAKWSPRCRYVKMVKGDK",
+                  "midline": "P  IH+ ++ + R        RLETF  WP +   SP +LA  GF      D V C  C   L  +E  D+  ++H    P C +   V+GDK"
+                }
+              ]
+            },
+            {
+              "num": 6,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|29",
+                  "accession": "29",
+                  "title": "BDT61959.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 261,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 85.1149,
+                  "score": 209,
+                  "evalue": 1.18979e-17,
+                  "identity": 72,
+                  "positive": 118,
+                  "query_from": 1838,
+                  "query_to": 2599,
+                  "query_frame": -2,
+                  "hit_from": 10,
+                  "hit_to": 239,
+                  "align_len": 266,
+                  "gaps": 48,
+                  "qseq": "TLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFCVGIL-------GLFEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEY--KPPKQTKSPLLDYIGIFEYNISSVRFKRDTFEKRLASFKDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFIDNIQLKISENTLYESFDEMDLLMELDIVRCIVSIG---YSINDAKCILKKHVTETG",
+                  "hseq": "SLRYESERLLTFINWPFGSLAK-SLAWNGFY-RKCPDDLVCYFC-GICINVEDYSSLIEKGSGYINMKNIHYRSCPFIYGNSSMNVTREQEILISEMMRRYCKRYAKRTRTLY------------------KTPKKRFLSFTNFPNRYCNVNR-MAESGFYFTGELDAVRCFSCQIDIYGWQHNDDPISVHAQWSPDCEYIQAIVDDNFIDSVRDK-----------RYDTLIDPNVYQTLKDCGIPDYIIRHAH---RKHIIQSG",
+                  "midline": "+L YE  RL TF +WP   ++   LA +GFY  K  D ++C FC GI         L E G          +  C F+ G+ + N+   ++ +  ++   Y  +  K+T++                     T +KR  SF ++P       + +AE+GFY+ G  D V CF C+  I  W+ ND P   HA++ P C Y+      NFID+++ K             D L++ ++ + +   G   Y I  A    +KH+ ++G"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 64.6994,
+                  "score": 156,
+                  "evalue": 2.033e-11,
+                  "identity": 28,
+                  "positive": 46,
+                  "query_from": 4696,
+                  "query_to": 4923,
+                  "query_frame": -3,
+                  "hit_from": 123,
+                  "hit_to": 197,
+                  "align_len": 76,
+                  "gaps": 1,
+                  "qseq": "EKRLESFKGWPHWLVQKPQDLAEAGFFYEGPNDSVRCFHCSGNIFNWEKEDIPWNMHAKWHPNCTYVLLKKGADFI",
+                  "hseq": "KKRFLSFTNFPNRYCNVNR-MAESGFYFTGELDAVRCFSCQIDIYGWQHNDDPISVHAQWSPDCEYIQAIVDDNFI",
+                  "midline": "+KR  SF  +P+      + +AE+GF++ G  D+VRCF C  +I+ W+  D P ++HA+W P+C Y+      +FI"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 46.595,
+                  "score": 109,
+                  "evalue": 5.54121e-06,
+                  "identity": 49,
+                  "positive": 81,
+                  "query_from": 2381,
+                  "query_to": 2920,
+                  "query_frame": -2,
+                  "hit_from": 9,
+                  "hit_to": 190,
+                  "align_len": 196,
+                  "gaps": 30,
+                  "qseq": "KHIHLEQRRVETFINQFKENIDESLPIHYRLLAKAGFFYMKKDVIACFCCKLQIDVKTL-----RTSDDIIM--IHKKSSP--------GCMFAQNLYSLEDLNKYCKPPQIHKTFIKYARDTLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFC-VGILGLFEMGDIVREKHKHAFPGCAFVRG",
+                  "hseq": "KSLRYESERLLTFINWPFGSLAKSL-------AWNGFYRKCPDDLVCYFCGICINVEDYSSLIEKGSGYINMKNIHYRSCPFIYGNSSMNVTREQEILISEMMRRYCK------RYAKRTRTLYKTPKKRFLSFTNFPNRYCNVNRMAESGFYFTGELDAVRCFSCQIDIYG-WQHNDDPISVHAQWSPDCEYIQA",
+                  "midline": "K +  E  R+ TFIN    ++ +SL       A  GF+    D + C+ C + I+V+       + S  I M  IH +S P             Q +   E + +YCK       + K  R      + R  +F ++P+ + +   +A  GFYF  + D V C  C + I G ++  D     H    P C +++ "
+                }
+              ]
+            },
+            {
+              "num": 7,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|30",
+                  "accession": "30",
+                  "title": "BDT61960.1 hypothetical protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 492,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 62.3882,
+                  "score": 150,
+                  "evalue": 1.00897e-10,
+                  "identity": 32,
+                  "positive": 45,
+                  "query_from": 73,
+                  "query_to": 258,
+                  "query_frame": -3,
+                  "hit_from": 1,
+                  "hit_to": 63,
+                  "align_len": 63,
+                  "gaps": 1,
+                  "qseq": "IYDHTNYKVLFFDKDVYQDIKTIRDRVSFIINHMNN-QSGDNLLFLKNKAYSVDNIMKLASCT",
+                  "hseq": "MYDYIDYKLLFFGEDVIHRILQIRNQALFVINGIKKVQEHDNLLFSKEKIYTVNNVMELASCT",
+                  "midline": "+YD+ +YK+LFF +DV   I  IR++  F+IN +   Q  DNLLF K K Y+V+N+M+LASCT"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 66,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "m_mix MelaMJNV 56001-61600",
+          "query_len": 5600,
+          "query_masking": [
+            {
+              "from": 57,
+              "to": 102
+            },
+            {
+              "from": 162,
+              "to": 201
+            },
+            {
+              "from": 258,
+              "to": 315
+            },
+            {
+              "from": 564,
+              "to": 633
+            },
+            {
+              "from": 831,
+              "to": 906
+            },
+            {
+              "from": 909,
+              "to": 942
+            },
+            {
+              "from": 1026,
+              "to": 1065
+            },
+            {
+              "from": 1074,
+              "to": 1116
+            },
+            {
+              "from": 1149,
+              "to": 1203
+            },
+            {
+              "from": 2274,
+              "to": 2322
+            },
+            {
+              "from": 3054,
+              "to": 3102
+            },
+            {
+              "from": 3144,
+              "to": 3168
+            },
+            {
+              "from": 3183,
+              "to": 3210
+            },
+            {
+              "from": 3219,
+              "to": 3264
+            },
+            {
+              "from": 3318,
+              "to": 3381
+            },
+            {
+              "from": 3480,
+              "to": 3516
+            },
+            {
+              "from": 3567,
+              "to": 3633
+            },
+            {
+              "from": 3762,
+              "to": 3816
+            },
+            {
+              "from": 4005,
+              "to": 4056
+            },
+            {
+              "from": 4158,
+              "to": 4197
+            },
+            {
+              "from": 4773,
+              "to": 4803
+            },
+            {
+              "from": 4911,
+              "to": 4965
+            },
+            {
+              "from": 5007,
+              "to": 5055
+            },
+            {
+              "from": 5364,
+              "to": 5445
+            },
+            {
+              "from": 5553,
+              "to": 5595
+            },
+            {
+              "from": 31,
+              "to": 91
+            },
+            {
+              "from": 133,
+              "to": 187
+            },
+            {
+              "from": 229,
+              "to": 283
+            },
+            {
+              "from": 319,
+              "to": 358
+            },
+            {
+              "from": 517,
+              "to": 562
+            },
+            {
+              "from": 589,
+              "to": 634
+            },
+            {
+              "from": 1024,
+              "to": 1060
+            },
+            {
+              "from": 1084,
+              "to": 1120
+            },
+            {
+              "from": 1162,
+              "to": 1216
+            },
+            {
+              "from": 2290,
+              "to": 2323
+            },
+            {
+              "from": 3061,
+              "to": 3076
+            },
+            {
+              "from": 3769,
+              "to": 3817
+            },
+            {
+              "from": 4105,
+              "to": 4156
+            },
+            {
+              "from": 5197,
+              "to": 5215
+            },
+            {
+              "from": 5464,
+              "to": 5527
+            },
+            {
+              "from": 56,
+              "to": 98
+            },
+            {
+              "from": 143,
+              "to": 194
+            },
+            {
+              "from": 239,
+              "to": 290
+            },
+            {
+              "from": 434,
+              "to": 467
+            },
+            {
+              "from": 515,
+              "to": 557
+            },
+            {
+              "from": 590,
+              "to": 635
+            },
+            {
+              "from": 1028,
+              "to": 1118
+            },
+            {
+              "from": 1889,
+              "to": 1928
+            },
+            {
+              "from": 1964,
+              "to": 2009
+            },
+            {
+              "from": 2123,
+              "to": 2153
+            },
+            {
+              "from": 2687,
+              "to": 2726
+            },
+            {
+              "from": 3062,
+              "to": 3080
+            },
+            {
+              "from": 3122,
+              "to": 3170
+            },
+            {
+              "from": 3452,
+              "to": 3518
+            },
+            {
+              "from": 3617,
+              "to": 3665
+            },
+            {
+              "from": 3773,
+              "to": 3809
+            },
+            {
+              "from": 3974,
+              "to": 4010
+            },
+            {
+              "from": 4124,
+              "to": 4166
+            },
+            {
+              "from": 4976,
+              "to": 4991
+            },
+            {
+              "from": 5072,
+              "to": 5120
+            },
+            {
+              "from": 5147,
+              "to": 5177
+            },
+            {
+              "from": 5351,
+              "to": 5420
+            }
+          ],
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|5",
+                  "accession": "5",
+                  "title": "BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 731,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 747.273,
+                  "score": 1928,
+                  "evalue": 0,
+                  "identity": 427,
+                  "positive": 538,
+                  "query_from": 3411,
+                  "query_to": 5525,
+                  "query_frame": -1,
+                  "hit_from": 19,
+                  "hit_to": 725,
+                  "align_len": 712,
+                  "gaps": 12,
+                  "qseq": "SISVFEEAVKNISIYLLEEAERGSWGDEQSVESKNGLNERPKASDREKDMENKNLGLYVPAEINLDAWRVGDPLQIFKDAYTARLIVNITFHHNKIAEIIYMLISELLLILRTNINE-GKKQLQEYGRVEPMSINEIVKSLEGIIKEKKIEVDLQRFREIINQLETELINYDRESRLSDYFLDNIQKSYSTNLSYNSDTTKLIPNDGCLHIIDDDIPFSIETISSIFPSTRRKRPLKNIIGnppdkndkddPWVKEREQTGYSIDSFHSIWMSEFADYPINLVNKIIEDILSKYIIPLKDVFHICLHIKAHLKCARSIKSTWYDNVTCVYELPPIYSMQDTWLELENILNIYAYVAKVFLNIYELFSSSNKL--QDDWTHTKEIYINTMELLESIPVFLFDTKWMDEHIYSWPYTKRLIHQLPIKDYLSENYLLKTALIVPPNTLNPITEIESKDGIIIRLKIKAIERIIQLRTTIHDIFDDGFVTVVNDTHKttrtsctsdstTKHDTDVndldiniliDGPLKNNPYIVHPLYNLKVIHQ-DNLSTPGLASLEEWDARYYLSSENGVLsssvt-nknvnnnnnnnnntnSHSPWFWRsl-plfkpsllknsssslpcKFWETALCQICNSQ-YDYNQRSYSKNTEILENMIMKIESTESLKEQNKIKDIETIVIQDKQLESYEKQEERRSRNVERSIFITILCKNLLTTL",
+                  "hseq": "SIAAFEEAVKNISIYLLEEAERGSWGDDQN-KLKDLYDGKSEADGLEEDTENKNLGLYVPAGIDMRAWRAGDALGDYKNAYAARLIVNITFHHNKIAEILYTLIAELLLLLEDNINDDGKTQLQEYGRLKPASVNETVKSLENVIREKNIEVDLKRFREIVLRLENDSRNFDRESRLSDWLLDNIQERYPAGGG--TTTTTTTSNNEYLCTIDDTTPLSTDTILSTLPSARRERPVRNIVGESSSAPPDRP-WEDEREQTGYSIFSFRSVWMSEYGDYPINLVNAIIERLLLRYVVPLRDVFHVCFHLKAHLTCARNVNATWYENATFAYGLPPVYSMRDTWLELENLLNVYACVAKLFLNMYDLLSSSSHGFHQSDLTRTKEAYINTIELLECMPMYLFDSKWMDENFYSWPYTRRGVRQLPVRNYLSENYLLRTVLVIPPNGIHPITKRKNNSGILMRLKVKAVEYITHLRTDMREIFDDGFVTIVKDNLQ-KTTNTTPRSDSRNINGMNDFEARILCDSTFENNPYVVHPLYHLKIAHRPSNWSGKGLASIEEWDARYHLASESGTLSSSVTNKNNNNNNNNNNNNNNNRSSWFWRSLPLFKPSLLKDSSSDSLPYKFWEAALRHIHSHQEFDRPMMNYSKNTEALEIMIKMVEVTEASTEKKKKSDIEDILVQDKQLESYEKQEERRLRNVERSIFLTILCKNMLTTL",
+                  "midline": "SI+ FEEAVKNISIYLLEEAERGSWGD+Q+ + K+  + + +A   E+D ENKNLGLYVPA I++ AWR GD L  +K+AY ARLIVNITFHHNKIAEI+Y LI+ELLL+L  NIN+ GK QLQEYGR++P S+NE VKSLE +I+EK IEVDL+RFREI+ +LE +  N+DRESRLSD+ LDNIQ+ Y       + TT    N+  L  IDD  P S +TI S  PS RR+RP++NI+G           W  EREQTGYSI SF S+WMSE+ DYPINLVN IIE +L +Y++PL+DVFH+C H+KAHL CAR++ +TWY+N T  Y LPP+YSM+DTWLELEN+LN+YA VAK+FLN+Y+L SSS+    Q D T TKE YINT+ELLE +P++LFD+KWMDE+ YSWPYT+R + QLP+++YLSENYLL+T L++PPN ++PIT+ ++  GI++RLK+KA+E I  LRT + +IFDDGFVT+V D  +   T+ T  S +++   +ND +  IL D   +NNPY+VHPLY+LK+ H+  N S  GLAS+EEWDARY+L+SE+G LSSSVT   N NNNNNNNNN N+ S WFWRSL       L  +SS SLP KFWE AL  I + Q +D    +YSKNTE LE MI  +E TE+  E+ K  DIE I++QDKQLESYEKQEERR RNVERSIF+TILCKN+LTTL"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|2",
+                  "accession": "2",
+                  "title": "BDT61861.1 wsv206-like protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 234,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 186.037,
+                  "score": 471,
+                  "evalue": 5.80339e-48,
+                  "identity": 92,
+                  "positive": 121,
+                  "query_from": 1370,
+                  "query_to": 1885,
+                  "query_frame": 2,
+                  "hit_from": 20,
+                  "hit_to": 196,
+                  "align_len": 178,
+                  "gaps": 7,
+                  "qseq": "YQLIDGDIFDLTFRKPNVCICQQCNCVALKTHGLSKDIADMFGLYANSYARRKGKHT--NIADPQSRGVPGSLEFCKGTPCVANLFSQYMYGKPG--QYNVSVK--DDDLMKGITLDTYDTREEYMRTCLDNLLEILANNHADIDTVVFPYKIGCGLAGGNWTRYVEMINNFADKFMK",
+                  "hseq": "YHIIEGDIFADRFRKKNICICQQCNCITLKPHGLSADIVKHFGEYANSYGRRRAKPNTINTATLETRAEPGTVDFCEGTPCVANLFAQFFYGSSSNVQY-LSRKYLDPHIRKGVDNDTAEKRLMYFRSCLNNLMFDLRNKYTYIDTVVFPHRIGCGMAGGSWADYQNVLLQFADRLSE",
+                  "midline": "Y +I+GDIF   FRK N+CICQQCNC+ LK HGLS DI   FG YANSY RR+ K    N A  ++R  PG+++FC+GTPCVANLF+Q+ YG     QY +S K  D  + KG+  DT + R  Y R+CL+NL+  L N +  IDTVVFP++IGCG+AGG+W  Y  ++  FAD+  +"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 67,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

@@ -242,7 +242,7 @@ mod tests {
                         &lengths,
                         subject_nt,
                         &params,
-                        &gumbel,
+                        Some(&gumbel),
                         &link,
                     )
                 };

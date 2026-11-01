@@ -580,10 +580,10 @@ struct Runtime<'a> {
     observer: &'a mut dyn RuntimeObserver,
     options: &'a ResolvedOptions,
     subjects: Subjects<'a>,
-    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the lengths that the sink reads of a database read in
+    /// The lengths that the sink reads of a database read in
     /// blocks.
     x_cursor: Option<super::x_db_stream::XCursor<'a>>,
-    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the residues that the `-ungapped` sink reads of a database
+    /// The residues that the `-ungapped` sink reads of a database
     /// read in blocks.
     x_residues: Option<super::x_db_stream::XPass<'a>>,
     db_length: i64,
@@ -594,7 +594,7 @@ struct Runtime<'a> {
 }
 
 impl Runtime<'_> {
-    /// The length of subject `oid`, read in the sink's order (`LOSAT_X_BXDBSTREAM`: from the
+    /// The length of subject `oid`, read in the sink's order (for a `-db`: from the
     /// index, `x_db_stream::XCursor`).
     fn subject_length(&mut self, oid: usize) -> Result<usize> {
         match &mut self.x_cursor {
@@ -994,7 +994,7 @@ impl PreliminarySink for Runtime<'_> {
         //          }
         // ```
         if !self.options.gapped {
-            // EXPERIMENT (LOSAT_X_BXDBSTREAM): with the database read in blocks, the length from
+            // With the database read in blocks, the length from
             // the index (`XCursor`), and the residues, which only `identity_and_positive` reads,
             // only of a subject with HSPs, from the sink's own pass (`XPass`).
             let x_length = if self.x_cursor.is_some() {
@@ -1087,7 +1087,7 @@ impl PreliminarySink for Runtime<'_> {
             // /** The core of the BLAST search: comparison between the (concatenated)
             // ```
             let reap_cutoff = self.options.evalue
-                * if self.options.composition > 0 {
+                * if self.options.composition > 0 && !self.options.old_fsc {
                     5.0
                 } else {
                     1.0
@@ -1460,7 +1460,7 @@ impl PreliminarySink for Runtime<'_> {
             &mut full,
             self.options,
             self.db_length,
-            self.subjects.len() as i64,
+            self.subjects.statistics_len() as i64,
             self.subjects.shortest_length(),
             None,
         )?;

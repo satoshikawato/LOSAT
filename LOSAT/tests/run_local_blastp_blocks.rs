@@ -1,17 +1,17 @@
 #![allow(warnings, clippy::all)]
 
 //! The blastp search in blocks of whole query batches (`LOSAT_X_BPQBLOCK`) for a `run_local` call
-//! with several outputs, the hit records and an observer (`LOSAT_X_BPQBLOCKWEB`, ABI v2 of the Web
-//! build; `src/algorithm/blastp/x_query_blocks.rs`).
+//! with several outputs, the hit records and an observer (ABI v2 of the Web build;
+//! `src/algorithm/blastp/x_query_blocks.rs`).
 //!
-//! The switches are read once per process, so every search runs in a child process: this test
+//! The switch is read once per process, so every search runs in a child process: this test
 //! binary again, running only `child_search` with the variables of its arm (`BATCH_SIZE` makes
 //! small batches and `LOSAT_X_BPQBLOCK=1` closes a block at every batch end, so the fixture pair has
 //! three blocks or more). The child writes what the call wrote (each output, the warnings, the hit
 //! records as `Debug` text and the observer's ranges) to files and checks the observer's ranges
 //! against the outputs and the records (`assert_observer_ranges`, with each record's `q_idx`
 //! against the `qseqid` of its row). The parent compares the block search with the search of all
-//! queries (`LOSAT_X_BPQBLOCKWEB=0`) and with the CLI run of each format, and counts the
+//! queries (`LOSAT_X_BPQBLOCK=0`) and with the CLI run of each format, and counts the
 //! `[TIMING] blastp_total` lines (one per search of a query set) to tell whether the blocks ran.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-295
@@ -45,7 +45,7 @@ const WEB: [&str; 3] = ["0", "6", "7"];
 const EIGHT: [&str; 8] = ["0", "6", "7", CUSTOM, "8", "9", "12", "5"];
 const BATCH: (&str, &str) = ("BATCH_SIZE", "3000");
 const BLOCK_PER_BATCH: (&str, &str) = ("LOSAT_X_BPQBLOCK", "1");
-const WEB_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKWEB", "0");
+const BLOCK_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCK", "0");
 
 /// The child's instructions (set only in a child process).
 const CHILD: &str = "QBLOCK_WEB_CHILD";
@@ -420,7 +420,7 @@ fn child_search() {
 
 /// The block search of outfmt 0, 6 and 7 (ABI v2 of the Web build) and of eight formats, with the
 /// hit records and the observer, at 1 and 4 threads: the same outputs, warnings, records and
-/// ranges as the search of all queries (`LOSAT_X_BPQBLOCKWEB=0`), and each output the CLI run of
+/// ranges as the search of all queries (`LOSAT_X_BPQBLOCK=0`), and each output the CLI run of
 /// its format.
 #[test]
 fn outputs_records_and_ranges_of_the_blocks_are_those_of_all_queries() {
@@ -441,7 +441,7 @@ fn outputs_records_and_ranges_of_the_blocks_are_those_of_all_queries() {
                 formats,
                 Observe::Both,
                 threads,
-                &[BATCH, BLOCK_PER_BATCH, WEB_OFF],
+                &[BATCH, BLOCK_OFF],
                 &format!("all_{tag}"),
             );
             assert!(
@@ -449,7 +449,7 @@ fn outputs_records_and_ranges_of_the_blocks_are_those_of_all_queries() {
                 "{tag}: three blocks or more, got {} searches",
                 blocks.searches
             );
-            assert_eq!(all.searches, 1, "{tag}: LOSAT_X_BPQBLOCKWEB=0");
+            assert_eq!(all.searches, 1, "{tag}: LOSAT_X_BPQBLOCK=0");
             for name in ["diagnostics", "hits", "ranges"]
                 .into_iter()
                 .map(str::to_string)
@@ -499,18 +499,17 @@ fn calls_the_block_search_takes_and_does_not() {
         );
     }
     // An observer without the hit records; several outputs that are not the caller's writers; an
-    // output the block search does not write (outfmt 15 and 16); the switch off
-    // (`LOSAT_X_BPQBLOCKWEB=0`; one outfmt 6 output with the records and the observer, which only
-    // `LOSAT_X_BPQBLOCKWEB` takes); the block search off.
+    // output the block search does not write (outfmt 15 and 16); the block search off (with one
+    // outfmt 6 output with the records and the observer, and with three outputs).
     for (formats, observe, extra) in [
         (&WEB[..], Observe::ObserverOnly, None),
         (&WEB[..], Observe::Files, None),
         (&["0", "6", "7", "15", "16"][..], Observe::Both, None),
-        (&WEB[1..2], Observe::Both, Some(WEB_OFF)),
-        (&WEB[..], Observe::Both, Some(("LOSAT_X_BPQBLOCK", "0"))),
+        (&WEB[1..2], Observe::Both, Some(BLOCK_OFF)),
+        (&WEB[..], Observe::Both, Some(BLOCK_OFF)),
     ] {
         let mut vars = vec![BATCH];
-        if extra != Some(("LOSAT_X_BPQBLOCK", "0")) {
+        if extra != Some(BLOCK_OFF) {
             vars.push(BLOCK_PER_BATCH);
         }
         vars.extend(extra);
@@ -520,10 +519,10 @@ fn calls_the_block_search_takes_and_does_not() {
 }
 
 /// A call of two outputs (outfmt 6 and 16, both writers of the caller) over queries that make four
-/// blocks does not take the block search, whichever of `LOSAT_X_BPQBLOCKXML2` and
-/// `LOSAT_X_BPQBLOCKWEB` is on: one search, and the bytes are those of the run with the block
-/// search off. (The outfmt 16 run-level frame was checked for a call of one output only.) The CLI's
-/// one-output outfmt 16 run takes the blocks and writes the same document.
+/// blocks does not take the block search with `LOSAT_X_BPQBLOCK` on: one search, and the bytes are
+/// those of the run with the block search off. (The outfmt 16 run-level frame was checked for a
+/// call of one output only.) The CLI's one-output outfmt 16 run takes the blocks and writes the
+/// same document.
 #[test]
 fn outfmt_16_in_a_call_of_several_outputs_is_not_blocked() {
     let inputs = Inputs::new();

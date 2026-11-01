@@ -186,7 +186,8 @@ pub struct BlastpPairwiseReport {
     pub word_threshold: f64,
     pub window_size: i32,
     pub gapped_karlin: KarlinParams,
-    pub gumbel: BlastGumbelBlk,
+    /// None with `-searchsp` (`PrintKAParameters` without `gbp`).
+    pub gumbel: Option<BlastGumbelBlk>,
     /// Subjects in the description table and with alignments, per query (NCBI's
     /// `m_NumDescriptions` and `m_NumAlignments`).
     pub num_descriptions: usize,
@@ -507,7 +508,20 @@ fn write_database_subject_alignments_part<'h, W: Write>(
 #[derive(Clone, Copy)]
 pub enum DatabaseHeading<'a> {
     Title(&'a [u8]),
-    Parsed(&'a crate::report::db_subject::ParsedSubject),
+    /// With whether every definition line is shown (`ParsedSubject::heading`).
+    Parsed(&'a crate::report::db_subject::ParsedSubject, bool),
+}
+
+impl<'a> DatabaseHeading<'a> {
+    /// The heading of a subject with parsed Seq-ids and `hsps` HSPs in a search that is
+    /// `gapped` or not (`ParsedSubject::heading`).
+    fn parsed(
+        subject: &'a crate::report::db_subject::ParsedSubject,
+        gapped: bool,
+        hsps: usize,
+    ) -> Self {
+        DatabaseHeading::Parsed(subject, !gapped && hsps > 1)
+    }
 }
 
 impl<'a> From<&'a [u8]> for DatabaseHeading<'a> {
@@ -540,8 +554,8 @@ fn write_database_subject_heading<'h, W: Write>(
 ) -> io::Result<()> {
     let title = match title.into() {
         DatabaseHeading::Title(title) => title,
-        DatabaseHeading::Parsed(subject) => {
-            writer.write_all(&subject.heading(protein))?;
+        DatabaseHeading::Parsed(subject, every_line) => {
+            writer.write_all(&subject.heading(protein, every_line))?;
             if let Some(length) = length {
                 writeln!(writer, "Length={length}")?;
             }
@@ -1888,10 +1902,19 @@ fn write_blastp_query_footer_spacing<W: Write>(
     writer: &mut W,
     ungapped_karlin: KarlinParams,
     gapped_karlin: KarlinParams,
-    gumbel: BlastGumbelBlk,
+    gumbel: Option<BlastGumbelBlk>,
     effective_search_space: i64,
     trailing: bool,
 ) -> io::Result<()> {
+    let Some(gumbel) = gumbel else {
+        return write_nucleotide_query_footer_spacing(
+            writer,
+            Some((ungapped_karlin, gapped_karlin)),
+            true,
+            effective_search_space,
+            trailing,
+        );
+    };
     writeln!(writer)?;
     writeln!(writer, "Lambda      K        H        a         alpha")?;
     write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;
@@ -2030,7 +2053,7 @@ fn write_final_database_report<W: Write>(
 // display.DisplaySeqalign(m_Outfile);
 // x_PrintOneQueryFooter(*results.GetAncillaryData());
 // ```
-/// The report of `queries`: the prolog when `prolog` is set (EXPERIMENT (LOSAT_X_BPQBLOCKFMT):
+/// The report of `queries`: the prolog when `prolog` is set (EXPERIMENT (LOSAT_X_BPQBLOCK):
 /// false for the query blocks after the first of blastp's block search, whose first block wrote
 /// it), each query's section, and the epilog when `epilog` is set.
 pub fn write_blastp_pairwise_report<W: Write>(
@@ -2232,7 +2255,9 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         let config = self.config;
         if self.database.is_some() {
             let heading = match parsed_subject(self.parsed_subjects, s_idx) {
-                Some(subject) => DatabaseHeading::Parsed(subject),
+                Some(subject) => {
+                    DatabaseHeading::parsed(subject, true, group.subject_hits[&s_idx].len())
+                }
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
             return write_database_subject_alignments_part(
@@ -2325,6 +2350,9 @@ pub struct BlastnPairwiseReport {
     pub zero_gap_extension_formula: bool,
     /// The two-hit window (`options.GetWindowSize()`): 40 for dc-megablast.
     pub window_size: usize,
+    /// A gapped search (`options.GetGappedMode()`); an ungapped (`-ungapped`) search has no
+    /// Gapped Karlin block in a query's footer and no `Gap Penalties` line in the epilog.
+    pub gapped: bool,
     /// Subjects in the description table and with alignments, per query.
     pub num_descriptions: usize,
     pub num_alignments: usize,
@@ -2691,6 +2719,7 @@ fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io:
 fn write_nucleotide_query_footer_spacing<W: Write>(
     writer: &mut W,
     karlin: Option<(KarlinParams, KarlinParams)>,
+    gapped: bool,
     effective_search_space: i64,
     trailing: bool,
 ) -> io::Result<()> {
@@ -2703,12 +2732,18 @@ fn write_nucleotide_query_footer_spacing<W: Write>(
         writeln!(writer)?;
     }
     writeln!(writer)?;
-    if let Some((_, gapped)) = karlin {
+    // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1130-1159
+    // ```c++
+    //     if (kbp_ungap) ... PrintKAParameters(kbp_ungap->Lambda, kbp_ungap->K, kbp_ungap->H, ...,  false)
+    //     if (kbp_gap) ... PrintKAParameters(..., true)   ("Gapped")
+    // ```
+    // An ungapped search has no gapped Karlin block (`kbp_gap` is not made).
+    if let Some((_, gapped_block)) = karlin.filter(|_| gapped) {
         writeln!(writer, "Gapped")?;
         writeln!(writer, "Lambda      K        H")?;
-        write_ncbi_ka_field(writer, gapped.lambda)?;
-        write_ncbi_ka_field(writer, gapped.k)?;
-        write_ncbi_ka_field(writer, gapped.h)?;
+        write_ncbi_ka_field(writer, gapped_block.lambda)?;
+        write_ncbi_ka_field(writer, gapped_block.k)?;
+        write_ncbi_ka_field(writer, gapped_block.h)?;
         writeln!(writer)?;
     }
     writeln!(writer)?;
@@ -2795,11 +2830,13 @@ fn write_blastn_final_footer<W: Write>(
     } else {
         f64::from(report.gap_extend)
     };
-    writeln!(
-        writer,
-        "Gap Penalties: Existence: {}, Extension: {}",
-        report.gap_open, gap_extension
-    )?;
+    if report.gapped {
+        writeln!(
+            writer,
+            "Gap Penalties: Existence: {}, Extension: {}",
+            report.gap_open, gap_extension
+        )?;
+    }
     if report.window_size != 0 {
         writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
     }
@@ -2977,6 +3014,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
                 write_nucleotide_query_footer_spacing(
                     writer,
                     query.karlin,
+                    report.gapped,
                     query.effective_search_space,
                     false,
                 )?;
@@ -3017,7 +3055,11 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         // of the definition lines of one with parsed Seq-ids.
         if self.report.database.is_some() {
             let heading = match parsed_subject(&self.report.parsed_subjects, s_idx) {
-                Some(subject) => DatabaseHeading::Parsed(subject),
+                Some(subject) => DatabaseHeading::parsed(
+                    subject,
+                    self.report.gapped,
+                    group.subject_hits[&s_idx].len(),
+                ),
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
             return write_database_subject_alignments_part(
@@ -3055,6 +3097,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         write_nucleotide_query_footer_spacing(
             writer,
             query.karlin,
+            self.report.gapped,
             query.effective_search_space,
             false,
         )
@@ -3683,7 +3726,9 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         // with parsed Seq-ids.
         if self.database.is_some() {
             let heading = match parsed_subject(&self.report.parsed_subjects, s_idx) {
-                Some(subject) => DatabaseHeading::Parsed(subject),
+                Some(subject) => {
+                    DatabaseHeading::parsed(subject, false, group.subject_hits[&s_idx].len())
+                }
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
             return write_database_subject_alignments_part(
@@ -4258,6 +4303,7 @@ mod tests {
             gap_extend: 0,
             zero_gap_extension_formula: true,
             window_size: 0,
+            gapped: true,
             num_descriptions: 500,
             num_alignments: 250,
             unsearched: vec![false; queries.len()],
@@ -4562,7 +4608,9 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             // parsed Seq-ids.
             if database.is_some() {
                 let heading = match parsed_subject(parsed_subjects, s_idx) {
-                    Some(subject) => DatabaseHeading::Parsed(subject),
+                    Some(subject) => {
+                        DatabaseHeading::parsed(subject, true, subject_hits[&s_idx].len())
+                    }
                     None => DatabaseHeading::Title(&subject_titles[&s_idx]),
                 };
                 write_database_subject_alignments(
@@ -5036,7 +5084,9 @@ pub fn write_blastx_pairwise_report<W: Write>(
                     Some((_, titles, parsed)) => write_database_subject_heading(
                         &mut writer,
                         match parsed_subject(parsed, *oid) {
-                            Some(subject) => DatabaseHeading::Parsed(subject),
+                            Some(subject) => {
+                                DatabaseHeading::parsed(subject, options.gapped, shits.len())
+                            }
                             None => DatabaseHeading::Title(&titles[*oid as usize]),
                         },
                         true,
@@ -5203,10 +5253,11 @@ pub fn write_blastx_epilog(
         )?;
     }
     if options.word_threshold != 0.0 {
+        // `GetWordThreshold()` is a double, written with the stream's default format.
         writeln!(
             writer,
             "Neighboring words threshold: {}",
-            options.word_threshold
+            cpp_default_double(options.word_threshold)
         )?;
     }
     if report.window_size != 0 {

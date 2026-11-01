@@ -1,0 +1,1 @@
+- `-seqidlist`, `-taxids` and `-taxidlist` searches now write NCBI's `use_this_seqid` on each Seq-align of outfmt 8, 9, 11 and 12, the outfmt 0 alignment heading shows only the definition lines it names, the outfmt 11 `TaxidList` holds the taxids the database has, the missing-taxonomy warning comes before the formatting warnings, and the XML archive writes `PDB-mol-id`.

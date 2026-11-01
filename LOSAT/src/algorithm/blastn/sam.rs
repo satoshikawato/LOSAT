@@ -91,6 +91,7 @@ pub(crate) fn add_blastn_sam(
                     id,
                     searched_length: (lengths.searched)(s_idx) as i32,
                     offset,
+                    use_this_seqid: &[],
                 }),
                 key,
                 index: s_idx,
@@ -117,7 +118,12 @@ pub(crate) fn add_blastn_sam(
                 });
             }
         }
-        let query_record = queries.record(q_idx);
+        let mut query_record = queries.record(q_idx);
+        if let Some(ids) = queries.records[q_idx].believed() {
+            query_record.id = SeqId::Db(crate::report::db_subject::forced_accession(
+                &ids.best, &ids.ids,
+            ));
+        }
         let query = SamSequence {
             record: SamId::Query(query_record),
             key: (queries_before + q_idx) as u64,

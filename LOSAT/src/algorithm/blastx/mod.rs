@@ -342,7 +342,7 @@ mod x_seg_memo;
 // Diagnostic (LOSAT_TIMING): the stage times of a BLASTX run. No NCBI counterpart.
 mod x_timing;
 
-// EXPERIMENT (LOSAT_X_BXDBSTREAM): `-db` read in blocks where it is searched, instead of a copy of
+// `-db` read in blocks where it is searched, instead of a copy of
 // the whole database.
 pub(crate) mod x_db_stream;
 
@@ -453,6 +453,9 @@ pub mod report;
 mod archive;
 mod blast_xml;
 mod seqalign;
+// NCBI c++/src/objtools/align_format/tabular.cpp (CBlastTabularInfo): the tabular reports with a
+// field list or a delimiter, and outfmt 10 and 20, through the shared writer (`report::tabular`).
+mod tabular;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
 // ```c++

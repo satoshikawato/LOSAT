@@ -297,6 +297,13 @@ fn outfmt_0_refuses_one_record_with_masks_only() {
             [(lcase, lower_letters.as_str(), true), (lcase, lcase, false)]
         {
             for option in [true, false] {
+                let with_option = [off, "no", "-lcase_masking"];
+                let without_option = [off, "no"];
+                let extra: &[&str] = if option {
+                    &with_option
+                } else {
+                    &without_option
+                };
                 let (status, _, stderr) = run_with(
                     "selflc",
                     program,
@@ -305,11 +312,7 @@ fn outfmt_0_refuses_one_record_with_masks_only() {
                     &["same1 a"],
                     &["same1 a"],
                     "0",
-                    if option {
-                        &[off, "no", "-lcase_masking"]
-                    } else {
-                        &[off, "no"]
-                    },
+                    extra,
                 );
                 let refused = masked && option;
                 assert_eq!(status, i32::from(refused), "{program}: {stderr}");

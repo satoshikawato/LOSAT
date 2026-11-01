@@ -22,7 +22,7 @@ use std::collections::HashSet;
 use crate::report::archive::bioseq::{QuerySeqLoc, SeqLocStrand};
 use crate::seqid::accguide::{identify_seq_id, parse_flags, GENERAL, LOCAL};
 use crate::seqid::defline_set::{scope_keys, tabular_id, TabularId};
-use crate::seqid::id_scope::{version_keys, SharedRecord};
+use crate::seqid::id_scope::{name_keys, version_keys, SharedRecord};
 use crate::seqid::label;
 use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best, text_score};
@@ -257,6 +257,16 @@ pub(crate) fn duplicate_id(
             ));
         }
     }
+    for id in ids {
+        // NCBI stops with `Cannot resolve gim|n` (probe of the review of DECISIONS 15).
+        if matches!(id, ParsedSeqId::Giim(_)) {
+            return Some(anyhow::anyhow!(
+                "the {role} Seq-id {} of -parse_deflines is a Geninfo import id, which NCBI BLAST+ \
+                 cannot resolve; this is not supported by LOSAT's {program}",
+                fasta(id)
+            ));
+        }
+    }
     let mut keys = Vec::new();
     for id in ids {
         keys.clear();
@@ -278,6 +288,17 @@ pub(crate) fn duplicate_id(
             });
         }
         seen.extend(keys.iter().copied());
+        if let Some((own, other)) = name_keys(id) {
+            if seen.contains(&other) {
+                return Some(anyhow::anyhow!(
+                    "two {role} records have the name of {} with and without an accession under \
+                     -parse_deflines (NCBI BLAST+ shows them as one sequence); this is not \
+                     supported by LOSAT's {program}",
+                    fasta(id)
+                ));
+            }
+            seen.insert(own);
+        }
         if program == "BLASTN" || role == "subject" {
             if let Some((own, other)) = version_keys(id) {
                 if seen.contains(&other) {
@@ -556,6 +577,8 @@ mod tests {
             b">abc a\nACGT\n>ABC b\nACGT\n",
             b">gb|AB000001.1| a\nACGT\n>emb|AB000001.1| b\nACGT\n",
             b">gi|5|ref|NM_000001.1| a\nACGT\n>gi|5 b\nACGT\n",
+            b">gb|AAA00007.1|NAMEA a\nACGT\n>gb||NAMEA b\nACGT\n",
+            b">gb||NAMEA a\nACGT\n>gb|AAA00007.1|NAMEA b\nACGT\n",
         ] {
             let error = read(fasta, false).unwrap_err();
             assert!(error.contains("two query records"), "{error}");
@@ -568,6 +591,7 @@ mod tests {
         for fasta in [
             &b">NM_000001.1 a\nACGT\n>NM_000001.2 b\nACGT\n"[..],
             b">pdb|1ABC|A a\nACGT\n>pdb|1ABC|B b\nACGT\n",
+            b">gb|AAA00007.1|NAMEA a\nACGT\n>gb|AAA00008.1|NAMEA b\nACGT\n",
             b">sp|P12345.2|NAME_X a\nACGT\n>sp|Q99999.1|NAME_X b\nACGT\n",
         ] {
             read(fasta, false).unwrap();
@@ -605,6 +629,12 @@ mod tests {
             .starts_with("FASTA-Reader: Ignoring invalid protein residues"));
         assert!(message(b">plain x\nACGTACGTAC!GTACGTACGT\n", false)
             .starts_with("FASTA-Reader: Ignoring invalid residues"));
+    }
+
+    #[test]
+    fn a_geninfo_import_id_is_refused() {
+        let error = read(b">gim|123 a\nACGT\n", false).unwrap_err();
+        assert!(error.contains("Geninfo import id"), "{error}");
     }
 
     #[test]
@@ -674,7 +704,8 @@ mod tests {
     #[test]
     fn a_query_and_a_subject_share_an_id_only_as_one_record() {
         const QUERY: &[u8] =
-            b">q1 t\nACGT\n>NM_000001 t\nACGT\n>ref|NM_000002.1| t\nACGT\n>NM_000003.1 t\nACGT\n";
+            b">q1 t\nACGT\n>NM_000001 t\nACGT\n>ref|NM_000002.1| t\nACGT\n>NM_000003.1 t\nACGT\n\
+              >gb|AAA00007.1|NAMEA t\nACGT\n>gb||NAMEB t\nACGT\n";
         for (subject, refused) in [
             (&b">s1 t\nACGT\n"[..], false),
             (b">NM_000002.2 t\nACGT\n", false),
@@ -691,6 +722,11 @@ mod tests {
             (b">NM_000002 t\nACGT\n", true),
             (b">NM_000002.1 t\nACGT\n", true),
             (b">NM_000003 t\nACGT\n", true),
+            (b">gb|AAA00007.1|NAMEA t\nACGT\n", false),
+            (b">gb||NAMEB t\nACGT\n", false),
+            (b">gb|AAA00008.1|NAMEA t\nACGT\n", false),
+            (b">gb||NAMEA t\nACGT\n", true),
+            (b">gb|AAA00009.1|NAMEB t\nACGT\n", true),
         ] {
             let scope = std::sync::Arc::new(IdScope::default());
             read_in(&scope, "query", "BLASTN", false, QUERY).unwrap();

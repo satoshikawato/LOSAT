@@ -105,9 +105,12 @@ impl IdScope {
             keys.clear();
             scope_keys(id, &mut keys);
             let versions = version_keys(id);
+            let names = name_keys(id);
             let found = keys.iter().find_map(|key| other.get(key));
-            // The same accession with and without a version is another id, whatever the record.
-            let other_kind = versions.is_some_and(|(_, kind)| other.contains_key(&kind));
+            // The same accession with and without a version, or name with and without an
+            // accession, is another id, whatever the record.
+            let other_kind = versions.is_some_and(|(_, kind)| other.contains_key(&kind))
+                || names.is_some_and(|(_, kind)| other.contains_key(&kind));
             if found.is_some() || other_kind {
                 let copy = found
                     .copied()
@@ -130,6 +133,7 @@ impl IdScope {
             }
             own.extend(keys.iter().map(|&key| (key, mark)));
             own.extend(versions.map(|(kind, _)| (kind, mark)));
+            own.extend(names.map(|(kind, _)| (kind, mark)));
         }
         Ok(shared)
     }
@@ -144,6 +148,22 @@ impl IdScope {
             .unwrap_or_else(|error| error.into_inner());
         keys.iter().any(|key| records[0].contains_key(key))
     }
+}
+
+/// For a text Seq-id with a name, the key of its name with its kind (with or without an accession)
+/// and the key of the other kind. NCBI's scope finds `gb|AAA00007.1|NAMEA` by `gb||NAMEA`, though
+/// `scope_keys` tells them apart and `gb|AAA00008.1|NAMEA` is another sequence (probe of the review
+/// of DECISIONS 15, 2026-11-02).
+pub(crate) fn name_keys(id: &ParsedSeqId) -> Option<(u64, u64)> {
+    let text = id.textseq()?;
+    let name = text.name.as_ref()?.to_ascii_uppercase();
+    let key = |accession: bool| {
+        let mut hasher = DefaultHasher::new();
+        (b"name kind", accession, &name).hash(&mut hasher);
+        hasher.finish()
+    };
+    let accession = text.accession.is_some();
+    Some((key(accession), key(!accession)))
 }
 
 /// For a text Seq-id with an accession, the key of its accession with its kind of version (with or

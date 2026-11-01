@@ -886,7 +886,6 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
 //                              m_Config.GetLocalIdPrefix()));
 //     m_InputReader->SetIDGenerator(*idgen);
 // ```
-/// A defline under `-parse_deflines` (`fasta_reader::believed`).
 /// How `-parse_deflines` reads: the strand of a query's Seq-loc, and the search's ids of the other
 /// role's records (`FastaStream::id_scope`).
 #[derive(Clone, Copy)]
@@ -895,6 +894,7 @@ struct BelievedRead<'a> {
     id_scope: Option<&'a crate::seqid::id_scope::IdScope>,
 }
 
+/// A defline under `-parse_deflines` (`fasta_reader::believed`).
 struct BelievedLine {
     title_search: usize,
     ids: std::sync::Arc<crate::blastinput::fasta_reader::believed::BelievedIds>,

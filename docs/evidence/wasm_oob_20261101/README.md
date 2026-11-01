@@ -245,9 +245,9 @@ and `memory.copy` only. Arms in turn, in one run.
 | Case | Before | After | P(0/N at the rate before) |
 |---|---:|---:|---:|
 | ubuntu-24.04-arm, Node 24.21.0, real blastp, 16 threads, N=100 | 100/100 | **0/100** | 0 |
-| ubuntu-24.04-arm, Node 26.8.2, real blastp, 16 threads, N=100 | 76/100 | **0/100** | 3e-62 |
+| ubuntu-24.04-arm, Node 26.8.2, real blastp, 16 threads, N=100 | 76/100 | **0/100** | 1e-62 |
 | ubuntu-24.04-arm, both Nodes, real blastn, 16 threads, N=100 | 0/100, 0/100 | 0/100, 0/100 | no information |
-| x64, Node 26.8.2, widened module, blastp, 16 threads, N=40 | 34/40 | **0/40** | 7e-34 |
+| x64, Node 26.8.2, widened module, blastp, 16 threads, N=40 | 34/40 | **0/40** | 1e-33 |
 | x64, Node 26.8.2, widened module, dc-megablast, 16 threads, N=40 | 1/40 | 0/40 | 0.36 (at the earlier 7/40: 5e-4) |
 
 (`results/clear_arm/`, run 41358045153; `results/clear_x64_runs.tsv`, `scripts/wo_clear.sh`, 8 cores of

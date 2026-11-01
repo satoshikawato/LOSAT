@@ -1097,7 +1097,7 @@ pub(crate) fn apply_dust_masking<L: QueryLetters + ?Sized>(
         // NCBI constructs a fresh CSymDustMasker for each query, which
         // resets the converter's CRandom state before scanning that query.
         // `DustMasker::new(..).mask_sequence(..)` is that, once per query. EXPERIMENT
-        // (LOSAT_X_QDUSTPAR): the queries are masked on the search pool, in query order
+        // (LOSAT_X_QPREPPAR): the queries are masked on the search pool, in query order
         // (`x_query_dust_par.rs`: the mask of a query is a function of its letters and the three
         // parameters only, so the results are the serial ones); without the switch, or without a
         // pool of two or more threads, the same map runs serially.

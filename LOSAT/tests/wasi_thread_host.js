@@ -23,9 +23,13 @@ const WORKER_FILE = require.resolve("./wasi_thread_worker");
 // generation may reach 2 GiB gets its own copy of V8's embedded builtins in its code range
 // (--short-builtin-calls), 1.8 MiB of RSS per worker: a process with the 15 idle workers of a
 // 16-thread command held 323 MiB on ws with no limit or 2048 MiB, 296 MiB with 2047 or 1024 MiB.
+// Their young generations stay at 1 MiB, which V8 would grow from 2.25 to 4 MiB once a worker
+// allocates (up to 3 MiB of RSS per worker); after its start a worker allocates only the small
+// views of its file calls (sharedFileImports). At 16 threads on ws the peak RSS of 9 commands
+// fell by 13 to 32 MiB with the old limit alone and by 40 to 76 MiB with both; none was slower.
 // A worker's heap holds its WASI context and its instance; the guest's memory is the shared
 // memory, outside it.
-const WORKER_LIMITS = Object.freeze({ maxOldGenerationSizeMb: 2047 });
+const WORKER_LIMITS = Object.freeze({ maxOldGenerationSizeMb: 2047, maxYoungGenerationSizeMb: 1 });
 
 const WORKER_START_TIMEOUT_MS = parsePositiveIntEnv(
   "LOSAT_WASI_THREADS_START_TIMEOUT_MS",

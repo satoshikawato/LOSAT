@@ -23,4 +23,5 @@ test('the site serves the threaded engine module with the shared-memory guard', 
   expect(bytes.equals(Buffer.from(ENGINE!.threads.bytes))).toBe(true);
   const record = guard.verifyGuarded(bytes);
   expect(record.fill + record.copy).toBeGreaterThan(0);
+  expect(record.atomic).toBeGreaterThan(0);
 });

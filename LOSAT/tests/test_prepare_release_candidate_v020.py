@@ -1033,7 +1033,7 @@ class ThreadedGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseFailure, "no verified shared-memory guard"):
             release.threaded_guard_record("node", REPO_ROOT, self.raw)
         record = release.threaded_guard_record("node", REPO_ROOT, self.guarded)
-        self.assertEqual((record["version"], record["fill"], record["copy"]), (1, 1, 0))
+        self.assertEqual((record["version"], record["fill"], record["copy"]), (2, 1, 0))
         self.assertEqual(record["sha256"], hashlib.sha256(self.guarded.read_bytes()).hexdigest())
 
     def test_assembly_refuses_an_unguarded_threaded_artifact(self) -> None:

@@ -153,6 +153,16 @@ and fill. If a range exceeds the instance's cached memory length, it executes
 This requests no additional pages; real invalid accesses still trap. Normal
 optimizing compilation and threading remain enabled. No extra flags are needed.
 
+Atomic memory instructions (loads, stores, read-modify-writes, compare-exchanges,
+`memory.atomic.wait32/64`, `memory.atomic.notify`) get the same guard, through one
+helper per opcode and memarg. V8's baseline compiler
+[checks each atomic access](https://github.com/nodejs/node/blob/v26.8.2/deps/v8/src/wasm/baseline/liftoff-compiler.cc)
+against the same per-instance bound, where it leaves plain accesses to the trap
+handler: a rayon worker trapped at its first `Stealer::steal`, in `Arc::clone`, on
+memory that existed (1 of 483 runs; `docs/evidence/wasm_oob_20261101/`). A plain
+multi-byte store has the same check on ARM64 outside macOS, and the guard does not
+cover it (the same evidence directory says what was measured there).
+
 The build applies the same guard to the threaded artifacts, so that hosts other
 than this runner (browsers) get guarded bytes too (release v0.2.0 DECISIONS 52):
 `build_wasi_artifacts.py` writes `losat-threaded-command.wasm` and

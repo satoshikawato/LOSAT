@@ -1,0 +1,36 @@
+probe (macos-14, node 24.21.0): node v24.21.0 v8 13.6.233.17-node.53 darwin arm64, 20 rounds per kind, 30
+probe (macos-14, node 24.21.0): plain i32.store: ok x20
+probe (macos-14, node 24.21.0): atomic rmw.add: memory access out of bounds x3, ok x17
+probe (macos-14, node 24.21.0): atomic rmw.add after memory.grow(0): ok x20
+probe (macos-14, node 24.21.0): plain i32.load: ok x20
+probe (macos-14, node 24.21.0): plain i32.store8: ok x20
+probe (ubuntu-24.04, node 24.21.0): node v24.21.0 v8 13.6.233.17-node.53 linux x64, 20 rounds per kind, 3
+probe (ubuntu-24.04, node 24.21.0): plain i32.store: ok x20
+probe (ubuntu-24.04, node 24.21.0): atomic rmw.add: memory access out of bounds x4, ok x16
+probe (ubuntu-24.04, node 24.21.0): atomic rmw.add after memory.grow(0): ok x20
+probe (ubuntu-24.04, node 24.21.0): plain i32.load: ok x20
+probe (ubuntu-24.04, node 24.21.0): plain i32.store8: ok x20
+probe (ubuntu-24.04-arm, node 24.21.0): node v24.21.0 v8 13.6.233.17-node.53 linux arm64, 20 rounds per k
+probe (ubuntu-24.04-arm, node 24.21.0): plain i32.store: memory access out of bounds x20
+probe (ubuntu-24.04-arm, node 24.21.0): atomic rmw.add: memory access out of bounds x6, ok x14
+probe (ubuntu-24.04-arm, node 24.21.0): atomic rmw.add after memory.grow(0): ok x20
+probe (ubuntu-24.04-arm, node 24.21.0): plain i32.load: ok x20
+probe (ubuntu-24.04-arm, node 24.21.0): plain i32.store8: memory access out of bounds x20
+probe (macos-14, node 26.8.2): node v26.8.2 v8 14.6.202.34-node.28 darwin arm64, 20 rounds per kind, 3000
+probe (macos-14, node 26.8.2): plain i32.store: ok x20
+probe (macos-14, node 26.8.2): atomic rmw.add: memory access out of bounds x3, ok x17
+probe (macos-14, node 26.8.2): atomic rmw.add after memory.grow(0): ok x20
+probe (macos-14, node 26.8.2): plain i32.load: ok x20
+probe (macos-14, node 26.8.2): plain i32.store8: ok x20
+probe (ubuntu-24.04-arm, node 26.8.2): node v26.8.2 v8 14.6.202.34-node.28 linux arm64, 20 rounds per kin
+probe (ubuntu-24.04-arm, node 26.8.2): plain i32.store: memory access out of bounds x20
+probe (ubuntu-24.04-arm, node 26.8.2): atomic rmw.add: memory access out of bounds x5, ok x15
+probe (ubuntu-24.04-arm, node 26.8.2): atomic rmw.add after memory.grow(0): ok x20
+probe (ubuntu-24.04-arm, node 26.8.2): plain i32.load: ok x20
+probe (ubuntu-24.04-arm, node 26.8.2): plain i32.store8: ok x20
+probe (ubuntu-24.04, node 26.8.2): node v26.8.2 v8 14.6.202.34-node.28 linux x64, 20 rounds per kind, 300
+probe (ubuntu-24.04, node 26.8.2): plain i32.store: ok x20
+probe (ubuntu-24.04, node 26.8.2): atomic rmw.add: memory access out of bounds x5, ok x15
+probe (ubuntu-24.04, node 26.8.2): atomic rmw.add after memory.grow(0): ok x20
+probe (ubuntu-24.04, node 26.8.2): plain i32.load: ok x20
+probe (ubuntu-24.04, node 26.8.2): plain i32.store8: ok x20

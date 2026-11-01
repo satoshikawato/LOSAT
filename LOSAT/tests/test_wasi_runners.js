@@ -443,7 +443,7 @@ test("the host runs an artifact guarded at build time as it is, without a guard 
     const result = runThreaded(built, [], { LOSAT_WASI_GUARD_CACHE: cache, LOSAT_WASI_THREADS_DEBUG: "1" });
     assert.equal(result.status, 3, result.stderr);
     assert.equal(result.stdout, reference.stdout);
-    assert.match(result.stderr, /shared-memory guards: 1 fills, 1 copies \(guarded at build time\)/);
+    assert.match(result.stderr, /shared-memory guards: 1 fills, 1 copies, \d+ atomics \(guarded at build time\)/);
     assert.doesNotMatch(result.stderr, /guard cache (miss|hit|invalid)/);
     assert.equal(fs.existsSync(cache), false);
     // A second run finds no index either (none was written).
@@ -641,6 +641,17 @@ test("LOSAT_WASI_GUARD_CACHE's index compiles the cached bytes at once and keeps
 // repeated or misdirected start changes stdout or the status. `bulk` adds a memory.fill
 // and a memory.copy for the shared-memory guard. The host options under test change
 // when workers boot, never this output.
+// A module on the shared memory with no instruction for the shared-memory guard.
+function nothingToGuard() {
+  return Buffer.from([
+    0, 97, 115, 109, 1, 0, 0, 0,
+    ...section(1, [1, 0x60, 0, 0]),
+    ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, 4]])),
+    ...section(3, [1, 0]),
+    ...section(10, vector([body([])])),
+  ]);
+}
+
 function spawner(spawns, { bulk = false } = {}) {
   const types = vector([
     [0x60, 1, 0x7f, 0],                          // proc_exit(i32)
@@ -904,15 +915,17 @@ test("LOSAT_WASI_GUARD_CACHE returns the guard's bytes and rebuilds a bad entry"
   const saved = process.env.LOSAT_WASI_GUARD_CACHE;
   try {
     const cache = process.env.LOSAT_WASI_GUARD_CACHE = path.join(directory, "cache");
-    for (const [bytes, guards] of [[spawner(1, { bulk: true }), [1, 1]], [spawner(1), [0, 0]]]) {
+    // Bulk and atomic instructions; atomic instructions only; nothing to guard.
+    for (const [bytes, bulk] of [[spawner(1, { bulk: true }), [1, 1]], [spawner(1), [0, 0]], [nothingToGuard(), [0, 0]]]) {
       const expected = guardSharedMemory(bytes);
-      assert.deepEqual([expected.fill, expected.copy], guards);
-      assert.equal(expected.bytes.equals(bytes), guards[0] + guards[1] === 0);
+      assert.deepEqual([expected.fill, expected.copy], bulk);
+      const guards = expected.fill + expected.copy + expected.atomic;
+      assert.equal(expected.bytes.equals(bytes), guards === 0);
       const check = (state) => {
         const result = guardSharedMemoryCached(bytes);
         assert.equal(result.cache, state);
         assert.ok(result.bytes.equals(expected.bytes), state);
-        assert.deepEqual([result.fill, result.copy], [expected.fill, expected.copy], state);
+        assert.deepEqual([result.fill, result.copy, result.atomic], [expected.fill, expected.copy, expected.atomic], state);
       };
       check("miss");
       check("hit");
@@ -933,7 +946,8 @@ test("LOSAT_WASI_GUARD_CACHE returns the guard's bytes and rebuilds a bad entry"
         () => fs.writeFileSync(sidecar, "null"),
         () => fs.writeFileSync(sidecar, JSON.stringify({ ...record, fill: record.fill + 1 })),
         () => fs.writeFileSync(sidecar, JSON.stringify({ ...record, copy: record.copy + 1 })),
-        () => resealed({ fill: guards[0] + guards[1] === 0 ? 1 : 0, copy: 0 }),
+        () => resealed({ fill: guards === 0 ? 1 : 0, copy: 0, atomic: 0 }),
+        () => resealed({ atomic: -1 }),
         () => resealed({ fill: -1 }),
         () => resealed({ output_bytes: record.output_bytes + 1 }),
         () => resealed({ input_sha256: "0".repeat(64) }),

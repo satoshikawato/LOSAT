@@ -3,7 +3,7 @@
 //! one sequence, and a database sequence with the id of a query shows as that query
 //! (`dropin-survey-20261029/DI7/DECISIONS.md` 8, 12).
 //!
-//! A record given as both query and subject (its ids, title and letters: `RecordMark`) is one
+//! A record given as both query and subject (its defline and letters: `RecordMark`) is one
 //! sequence to the scope too, and the reports are those of two records, except where outfmt 0
 //! draws its masks (`DECISIONS.md` 15, 19). A record of a nucleotide and of a protein reader never
 //! is one record: NCBI stops with an exception when it reports such a hit (`eBadAlignment`).
@@ -19,7 +19,8 @@ use super::model::ParsedSeqId;
 /// What tells a record from another of the same ids, taken while it is read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecordMark {
-    /// Of its molecule, its ids, its title and its letters in upper case (`U` as `T` in a
+    /// Of its molecule, its defline as written (the archive shows the query's for both: `>a` and
+    /// `>lcl|a` are one id, not one record) and its letters in upper case (`U` as `T` in a
     /// nucleotide record: NCBI's packed letters do not tell them apart).
     digest: u64,
     /// Whether it has lower-case letters.
@@ -27,25 +28,18 @@ pub struct RecordMark {
 }
 
 impl RecordMark {
-    /// The mark of the record with the ids `ids` and the title `title`, whose letters are
-    /// `letters` in upper case and `gaps` (position, length) between them.
+    /// The mark of the record with the defline `defline`, whose letters are `letters` in upper case
+    /// and `gaps` (position, length) between them.
     pub fn new(
-        ids: &[ParsedSeqId],
+        defline: &[u8],
         protein: bool,
-        title: &[u8],
         letters: &[u8],
         gaps: impl Iterator<Item = (u32, u32)>,
         lowercase: bool,
     ) -> Self {
         let mut hasher = DefaultHasher::new();
         protein.hash(&mut hasher);
-        let mut text = Vec::new();
-        for id in ids {
-            text.clear();
-            label::fasta(id, &mut text);
-            text.hash(&mut hasher);
-        }
-        title.hash(&mut hasher);
+        defline.hash(&mut hasher);
         for gap in gaps {
             gap.hash(&mut hasher);
         }

@@ -670,7 +670,7 @@ mod tests {
     }
 
     // A query and a subject share no id, nor one accession with and without a version, unless they
-    // are one record: ids, title and letters (DECISIONS 12, 15, 19).
+    // are one record: defline and letters (DECISIONS 12, 15, 19).
     #[test]
     fn a_query_and_a_subject_share_an_id_only_as_one_record() {
         const QUERY: &[u8] =
@@ -679,8 +679,9 @@ mod tests {
             (&b">s1 t\nACGT\n"[..], false),
             (b">NM_000002.2 t\nACGT\n", false),
             (b">q1 t\nACGT\n", false),
-            (b">lcl|q1 t\nACGT\n", false),
             (b">ref|NM_000002.1| t\nACGT\n", false),
+            (b">lcl|q1 t\nACGT\n", true),
+            (b">q1  t\nACGT\n", true),
             (b">q1 t\nAC\nGT\n", false),
             (b">q1 t\nacgu\n", false),
             (b">q1 other\nACGT\n", true),
@@ -688,7 +689,7 @@ mod tests {
             (b">q1 t\nACGA\n", true),
             (b">NM_000001.1 t\nACGT\n", true),
             (b">NM_000002 t\nACGT\n", true),
-            (b">NM_000002.1 t\nACGT\n", false),
+            (b">NM_000002.1 t\nACGT\n", true),
             (b">NM_000003 t\nACGT\n", true),
         ] {
             let scope = std::sync::Arc::new(IdScope::default());

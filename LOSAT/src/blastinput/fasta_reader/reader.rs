@@ -515,8 +515,9 @@ pub(crate) struct FastaReader<R: Read> {
     believed_keys: std::collections::HashSet<u64>,
     /// The ids of the other role's records of the search (`set_id_scope`).
     id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
-    /// Whether the ids of the record were generated (`IdScope`'s records without a mark).
-    believed_generated: bool,
+    /// The defline of the record, as written, when its ids are too (`IdScope`'s records without a
+    /// mark have generated ids).
+    believed_written: Vec<u8>,
     /// The defline line as read, kept when the configuration asks for it
     /// (`ReaderConfig::keep_defline`).
     defline: Vec<u8>,
@@ -568,7 +569,7 @@ impl<R: Read> FastaReader<R> {
             believed_molecule: None,
             believed_keys: std::collections::HashSet::new(),
             id_scope: None,
-            believed_generated: false,
+            believed_written: Vec::new(),
             defline: Vec::new(),
             bad_positions: Vec::new(),
             x_pack: false,
@@ -1087,7 +1088,10 @@ impl<R: Read> FastaReader<R> {
             )));
         }
         self.believed_molecule = named_molecule(&parsed.ids);
-        self.believed_generated = parsed.ids.is_empty() || parsed.range;
+        self.believed_written.clear();
+        if self.id_scope.is_some() && !parsed.ids.is_empty() && !parsed.range {
+            self.believed_written.extend_from_slice(defline);
+        }
         let ids = if parsed.ids.is_empty() || parsed.range {
             generated_ids(&self.generate_id())
         } else {
@@ -2077,11 +2081,10 @@ impl<R: Read> FastaReader<R> {
         let (Some(scope), Some(believed)) = (&self.id_scope, &mut self.believed) else {
             return Ok(());
         };
-        let mark = (!self.believed_generated && !believed.subject_local()).then(|| {
+        let mark = (!self.believed_written.is_empty() && !believed.subject_local()).then(|| {
             RecordMark::new(
-                &believed.ids,
+                &self.believed_written,
                 self.config.protein,
-                &self.title,
                 &self.seq_data,
                 self.gaps.iter().map(|gap| (gap.position, gap.length)),
                 !self.mask.is_empty(),

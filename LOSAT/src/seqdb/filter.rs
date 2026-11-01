@@ -970,12 +970,21 @@ impl LmdbEntry {
         &self,
         f: impl FnOnce(&Env<DbFile>) -> Result<T, SeqDbError>,
     ) -> Result<T, SeqDbError> {
-        let file = DbFile::open(&self.lmdb)?;
-        let env = Env::open(&file).map_err(|message| SeqDbError::Format {
+        let file = self.open_file()?;
+        f(&self.open_env(&file)?)
+    }
+
+    /// The LMDB file, opened for lookups (`with_env`, `lookup::SeqidLookup`).
+    pub(super) fn open_file(&self) -> Result<DbFile, SeqDbError> {
+        DbFile::open(&self.lmdb)
+    }
+
+    /// The LMDB environment over `file`, this entry's file (`open_file`).
+    pub(super) fn open_env<'f>(&self, file: &'f DbFile) -> Result<Env<'f, DbFile>, SeqDbError> {
+        Env::open(file).map_err(|message| SeqDbError::Format {
             path: self.lmdb.clone(),
             message,
-        })?;
-        f(&env)
+        })
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:81-113
@@ -1071,9 +1080,12 @@ impl LmdbEntry {
     // H107): LOSAT reads every duplicate (`PD-LOSAT-NCBI-DEFECTS` exception 6).
     /// All the OIDs of the key `acc` in the LMDB file, in LMDB's order.
     pub(super) fn oids(&self, acc: &[u8]) -> Result<Vec<u32>, SeqDbError> {
-        self.with_env(|env| {
-            tax_files::acc_oids(env, acc).map_err(|message| self.lookup_error(message))
-        })
+        self.with_env(|env| self.oids_in(env, acc))
+    }
+
+    /// `oids` in the entry's LMDB file opened as `env` (`open_env`).
+    pub(super) fn oids_in(&self, env: &Env<DbFile>, acc: &[u8]) -> Result<Vec<u32>, SeqDbError> {
+        tax_files::acc_oids(env, acc).map_err(|message| self.lookup_error(message))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:153-157
@@ -1614,6 +1626,15 @@ impl SeqDb {
         match &self.filter {
             Some(filter) => filter.select(ordinal),
             None => ordinal,
+        }
+    }
+
+    /// The ordinal id of the OID `oid`, one the database's list includes (`oid` itself unless
+    /// the database is restricted): the inverse of [`SeqDb::oid`].
+    pub fn ordinal_of(&self, oid: u32) -> u32 {
+        match &self.filter {
+            Some(filter) => filter.rank(oid),
+            None => oid,
         }
     }
 
@@ -2608,6 +2629,51 @@ mod tests {
                     .collect()
             })
             .collect()
+    }
+
+    #[test]
+    fn the_seq_align_id_lookup_finds_the_sequence_ncbi_finds_first() {
+        // tests/db_search/ids/make_ids.py (line DBID N1, probe R/accoid/p1 with NCBI 2.17.0):
+        // the Seq-align id of the second record of pairs 1 to 3 finds the first record, those of
+        // pairs 4 and 5 find their own records; version 5 through the LMDB key, version 4 the
+        // ISAM.
+        // `pdup_ab` and `pdup_ac` are aliases of two databases (two LMDB files): the second's
+        // record finds the first's.
+        let pairs = [0, 0, 2, 2, 4, 4, 6, 7, 8, 9].map(Some);
+        for (name, seqtype, want) in [
+            ("pfound_v5", SeqType::Protein, &pairs[..]),
+            ("pfound_v4", SeqType::Protein, &pairs[..]),
+            ("nfound_v5", SeqType::Nucleotide, &pairs[..2]),
+            ("nfound_v4", SeqType::Nucleotide, &pairs[..2]),
+            ("pdup_ab", SeqType::Protein, &pairs[..2]),
+            ("pdup_ac", SeqType::Protein, &pairs[..2]),
+        ] {
+            let db = ids_db(name, seqtype);
+            let lookup = db.seqid_lookup().unwrap();
+            let found: Vec<Option<u32>> = (0..db.num_seqs())
+                .map(|ordinal| {
+                    let set = db.defline_set(ordinal).unwrap();
+                    lookup.seqid_to_oid(set.alignment_id().unwrap()).unwrap()
+                })
+                .collect();
+            assert_eq!(found, want, "{name}");
+        }
+        // A list that leaves the first record out: `gb|AAA00001|` finds its own record, as
+        // NCBI's lookup through `x_CheckOrFindOID` (row db.id.blastp.found.neg.6; version 4
+        // keeps every OID here and refuses such a list when the search reads the volume).
+        let mut db = ids_db("pfound_v5", SeqType::Protein);
+        db.restrict(
+            &DbList::Seqids(list_of(b"AAA00001.1\n", true)),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!((db.oid(0), db.ordinal_of(1)), (1, 0));
+        let lookup = db.seqid_lookup().unwrap();
+        let set = db.defline_set(0).unwrap();
+        assert_eq!(
+            lookup.seqid_to_oid(set.alignment_id().unwrap()).unwrap(),
+            Some(1)
+        );
     }
 
     #[test]

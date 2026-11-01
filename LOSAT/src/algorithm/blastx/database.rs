@@ -277,6 +277,7 @@ impl ReportedSubjects {
         // up before it filters the HSPs); only the reported ones have their titles read.
         let mut listed: BTreeMap<usize, Option<Arc<[u8]>>> = BTreeMap::new();
         let mut parsed: BTreeMap<usize, Arc<ParsedSubject>> = BTreeMap::new();
+        let headers = shared::HeaderReader::new(&database.db);
         for batch in batches.iter() {
             for (qidx, lists) in batch.queries.iter().enumerate() {
                 for list in lists {
@@ -292,7 +293,7 @@ impl ReportedSubjects {
                     }
                     let ordinal = u32::try_from(list.oid)?;
                     match shared::read_header(
-                        &database.db,
+                        &headers,
                         ordinal,
                         batch.query_ordinal + qidx,
                         PROGRAM,

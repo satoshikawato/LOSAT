@@ -1138,6 +1138,7 @@ pub(super) fn read_titles(
     hit_lists: &[Option<BlastnHitList>],
     titles: &mut DatabaseTitles,
 ) -> Result<()> {
+    let headers = shared::HeaderReader::new(&database.db);
     for (query, hit_list) in hit_lists.iter().enumerate() {
         let Some(hit_list) = hit_list else {
             continue;
@@ -1147,7 +1148,7 @@ pub(super) fn read_titles(
             if titles.contains_key(&hsp_list.oid) {
                 continue;
             }
-            let title = shared::read_header(&database.db, hsp_list.oid, query, PROGRAM)?;
+            let title = shared::read_header(&headers, hsp_list.oid, query, PROGRAM)?;
             titles.insert(hsp_list.oid, title);
         }
     }

@@ -1111,6 +1111,12 @@ fn x_target_list(
     out.into_boxed_slice()
 }
 
+// `charsize` of the alphabet (`ilog2(alphabet_size) + 1`, cited at `get_charsize`). The T(s)
+// enumeration below takes the alphabet as constants: its loops are the lean build's hottest code,
+// and as arguments from two call sites (the pool's ranges, the serial pass) they cost BUSCO's
+// eukaryota set against a 108 kb database 0.88 G instructions of 14.7 G at one thread.
+const X_LEAN_CHARSIZE: usize = LOOKUP_ALPHABET_SIZE.ilog2() as usize + 1;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-563,580-582,600-604 (cited
 // at `x_record_neighbors`). The statements of `x_record_neighbors`, for `x_build_lean` only (so that
 // the other programs' builders keep their code).
@@ -1118,10 +1124,8 @@ fn x_target_list(
 fn x_lean_neighbors(
     query_word: &[u8],
     subject_word: &mut [u8; 32],
-    alphabet_size: usize,
     wordsize: usize,
-    charsize: usize,
-    row_max: &[i32],
+    row_max: &[i32; LOOKUP_ALPHABET_SIZE],
     threshold: i32,
     matrix: ScoringMatrix,
     score: i32,
@@ -1131,25 +1135,23 @@ fn x_lean_neighbors(
     let query_residue = query_word[current_pos] as usize;
     let score = score - row_max[query_residue];
     if current_pos == wordsize - 1 {
-        for residue in 0..alphabet_size {
+        for residue in 0..LOOKUP_ALPHABET_SIZE {
             let residue_score = lookup_matrix_score(matrix, query_residue, residue);
             if score + residue_score >= threshold {
                 subject_word[current_pos] = residue as u8;
-                out.push(x_word_index(subject_word, wordsize, charsize));
+                out.push(x_word_index(subject_word, wordsize, X_LEAN_CHARSIZE));
             }
         }
         return;
     }
-    for residue in 0..alphabet_size {
+    for residue in 0..LOOKUP_ALPHABET_SIZE {
         let residue_score = lookup_matrix_score(matrix, query_residue, residue);
         if score + residue_score >= threshold {
             subject_word[current_pos] = residue as u8;
             x_lean_neighbors(
                 query_word,
                 subject_word,
-                alphabet_size,
                 wordsize,
-                charsize,
                 row_max,
                 threshold,
                 matrix,
@@ -1167,10 +1169,8 @@ fn x_lean_neighbors(
 #[allow(clippy::too_many_arguments)]
 fn x_lean_target_list(
     query_word: &[u8],
-    alphabet_size: usize,
     wordsize: usize,
-    charsize: usize,
-    row_max: &[i32],
+    row_max: &[i32; LOOKUP_ALPHABET_SIZE],
     threshold: i32,
     matrix: ScoringMatrix,
     out: &mut Vec<u16>,
@@ -1182,7 +1182,7 @@ fn x_lean_target_list(
         self_score += lookup_matrix_score(matrix, residue, residue);
     }
     if threshold == 0 || self_score < threshold {
-        out.push(x_word_index(query_word, wordsize, charsize));
+        out.push(x_word_index(query_word, wordsize, X_LEAN_CHARSIZE));
     }
     if threshold != 0 {
         let mut max_score = row_max[query_word[0] as usize];
@@ -1193,9 +1193,7 @@ fn x_lean_target_list(
         x_lean_neighbors(
             query_word,
             &mut subject_word,
-            alphabet_size,
             wordsize,
-            charsize,
             row_max,
             threshold,
             matrix,
@@ -1633,7 +1631,7 @@ pub(super) fn x_build_lean_in(
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
     let alphabet_size = LOOKUP_ALPHABET_SIZE;
-    let charsize = ilog2(alphabet_size) + 1;
+    let charsize = X_LEAN_CHARSIZE;
     if diagnostics_enabled() || word_length * charsize > 16 || word_length > 32 {
         return Err(prepared);
     }
@@ -1660,6 +1658,11 @@ pub(super) fn x_build_lean_in(
                 .unwrap_or(i32::MIN)
         })
         .collect();
+
+    let x_row_max: &[i32; LOOKUP_ALPHABET_SIZE] = row_max
+        .as_slice()
+        .try_into()
+        .expect("row_max has one entry per letter of the alphabet");
 
     // The exact backbone (blast_aalookup.c:448-456): source i's offsets, in chain order, are
     // `offsets[starts[i]..starts[i + 1]]`, the sources in ascending cell order.
@@ -1728,10 +1731,8 @@ pub(super) fn x_build_lean_in(
                         .expect("NCBI BLAST query offset must fit");
                     x_lean_target_list(
                         &concat_query[first..],
-                        alphabet_size,
                         word_length,
-                        charsize,
-                        &row_max,
+                        x_row_max,
                         threshold,
                         matrix,
                         &mut targets,
@@ -1775,10 +1776,8 @@ pub(super) fn x_build_lean_in(
             let first = usize::try_from(offsets[start]).expect("NCBI BLAST query offset must fit");
             x_lean_target_list(
                 &concat_query[first..],
-                alphabet_size,
                 word_length,
-                charsize,
-                &row_max,
+                x_row_max,
                 threshold,
                 matrix,
                 &mut targets,

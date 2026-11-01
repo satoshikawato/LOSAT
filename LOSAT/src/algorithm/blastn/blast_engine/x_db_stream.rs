@@ -251,7 +251,12 @@ where
     let floor = threads.saturating_mul(X_BNDBSTREAM_BLOCKS_PER_THREAD);
     let wide = x_bn_db_wide();
     let window = if wide {
-        threads.saturating_mul(X_BNDBWIDE_BLOCKS_PER_THREAD)
+        // PROBE (v4-D12 s29, not for merge): another window.
+        let per_thread = std::env::var("LOSAT_PROBE_S29WIDE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(X_BNDBWIDE_BLOCKS_PER_THREAD);
+        threads.saturating_mul(per_thread)
     } else {
         floor
     };

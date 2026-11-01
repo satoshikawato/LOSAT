@@ -360,12 +360,14 @@ export LOSAT_X_BXCAPFILL=4
 export LOSAT_X_BXCHUNKCROSS=1
 export LOSAT_X_BXCHUNKFLOW=1
 export LOSAT_X_BXCLUTCAP=3
+export LOSAT_X_BXCLUTPOOL=1
 export LOSAT_X_BXCROSS=1
 export LOSAT_X_BXCROSSDEFER=1
 export LOSAT_X_BXCTXONCE=1
 export LOSAT_X_BXDEFER=1
 export LOSAT_X_BXDIAG=1
 export LOSAT_X_BXDIAGKEEP=1
+export LOSAT_X_BXENDMEM=1
 export LOSAT_X_BXFLOW=1
 export LOSAT_X_BXHITBF=1
 export LOSAT_X_BXKAONCE=1
@@ -6443,6 +6445,36 @@ Scheduling (each value computed by one thread with the original function; order 
   EDL933 x AMRProt 16 threads 484 vs 124 MiB. BLASTX without `-word_size 5`: 8 pairs, cycles 0.9971 (byte copy of dev
   1.0005) on 60 Trinity transcripts x Swiss-Prot at one thread, instructions x1.00001, `Lookup::Compressed` keeps one
   variant so that the standard table's loops keep their match (a separate variant cost x1.003 to x1.006 there).
+- `LOSAT_X_BXCLUTPOOL=1` (BLASTX `-task blastx-fast` and `-word_size 5`, memory; in the strict set from the pull
+  request that added it, 2026-11-01: on unless `=0` or `LOSAT_X_DEFAULT=0`): the flat compressed lookup tables are
+  built on vectors kept between builds: a table's starts, hits and pv when the table is dropped
+  (`blastx::seed::Lookup`'s drop): the pv cleared and zero-filled as calloc gives it, the starts and hits only sized,
+  since the bucket fill writes each of their entries before any is read (zero-filling them again cost the small
+  searches 1-5 % of their user cycles); the hits grow to n + n/4 where short (`tblastx/lookup/x_clut_direct.rs`).
+  A split query builds a table per chunk on whichever thread needs it, and each of those threads kept a table's worth
+  and the build's record of the appends in its glibc arena after they were freed, about 20 MiB per thread
+  (`MALLOC_ARENA_MAX=1` removed it). A set comes back only against one lent to a pooled build, so a table built
+  without the pool (`LOSAT_X_BPFFILL=0`, a fill declined before it took a set) adds nothing, and the pool holds at
+  most as many sets as pooled tables were alive at once (unit test `the_flat_pool_keeps_only_sets_it_lent`). The
+  record of the appends is not kept (three builds side by side would hold three records through the search): on
+  Linux with glibc its capacity is above glibc's largest mmap threshold, so it is always mapped and unmapped when
+  dropped, and only the pages written are resident. Those pages are faulted in again on each build: EDL933 x AMRProt
+  at one thread 873k minor faults against dev's 57k, sys +1.4 s, time x1.024 (user x0.988); keeping one record
+  between builds removed the faults but raised ABRicate's call x AMRProt at 8 and 16 threads above dev (43.4 and
+  45.6 against 40.0 and 39.5 MiB), so it was not taken. The table equals the unpooled one in every field (unit test
+  `pooled_flat_tables_equal_the_unpooled_ones_on_kept_vectors`); reports: `tests/blastx_fast_flat.rs`.
+- `LOSAT_X_BXENDMEM=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-11-01: on unless
+  `=0` or `LOSAT_X_DEFAULT=0`): at the end of a query batch, no table of word hashes per context for the
+  near-identical test of composition-based statistics (8 bytes per letter of six frames: 84 MiB for a 5.6 Mb query)
+  and no copy of the batch's residues in its results, which the report does not read (21 MiB). The test reads the
+  same words from the context's residues: a hash is its word's letters in 5 bits each and residues are below 32, so
+  two hashes are equal exactly where the 8 letters are; the table's last entry stays 0 as NCBI's loop leaves it
+  (`redo_alignment::x_test_near_identical_on_residues`; unit test
+  `near_identical_on_residues_equals_the_table`, also at ranges not starting at 0, where NCBI reads the table at the
+  range's offsets). Other programs keep the table: their queries are proteins of a few thousand letters. With
+  `LOSAT_X_BXCLUTPOOL`, EDL933 (5.6 Mb) x AMRProt, ABRicate's call, peak `RssAnon` at 1 / 4 / 8 / 16 threads
+  151 / 224 / 312 / 466 -> 71 / 102 / 127 / 168 MiB (NCBI 111 / 124 / 124 / 124), time x1.024 / 0.976 / 0.991 / 0.995
+  (ws node 1, 3 rounds, binary c31d3d586 against dev 88bd1240d).
 - `LOSAT_X_BXCAPFILL=1` or `=f` (BLASTX, memory with few subjects; in the strict set from the pull request that
   added it, 2026-10-25: on unless `=0` or `LOSAT_X_DEFAULT=0`; a value switch, f from 2 to 64 tasks per thread,
   otherwise 4; acts where `LOSAT_X_BXUNITCAP` caps): the capped units keep the threads busy with few subjects

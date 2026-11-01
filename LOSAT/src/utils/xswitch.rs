@@ -210,6 +210,12 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BXCLUTCAP` (BLASTX's units with a compressed lookup table searched at most K at a time,
 /// `blastx/x_bx_mem.rs`) joined the set in the pull request that added it, after it was verified
 /// and timed with it on and off.
+/// `LOSAT_X_BXCLUTPOOL` (BLASTX's flat compressed lookup tables built on vectors kept between
+/// builds, `tblastx/lookup/x_clut_direct.rs`) joined the set in the pull request that added it,
+/// after it was verified and timed with it on and off.
+/// `LOSAT_X_BXENDMEM` (BLASTX's end of a query batch without a table of word hashes per context and
+/// without a copy of the residues, `blastx/x_bx_mem.rs`) joined the set in the pull request that
+/// added it, after it was verified and timed with it on and off.
 /// `LOSAT_X_BXBUILDPAR` (BLASTX's lookup table of a capped unit built on the threads the cap
 /// leaves it, in parts by ranges of source cells, `blastx/x_bx_mem.rs`,
 /// `tblastx/lookup/x_lut_direct.rs`)
@@ -324,12 +330,14 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXCHUNKCROSS",
     "LOSAT_X_BXCHUNKFLOW",
     "LOSAT_X_BXCLUTCAP",
+    "LOSAT_X_BXCLUTPOOL",
     "LOSAT_X_BXCROSS",
     "LOSAT_X_BXCROSSDEFER",
     "LOSAT_X_BXCTXONCE",
     "LOSAT_X_BXDEFER",
     "LOSAT_X_BXDIAG",
     "LOSAT_X_BXDIAGKEEP",
+    "LOSAT_X_BXENDMEM",
     "LOSAT_X_BXFLOW",
     "LOSAT_X_BXHITBF",
     "LOSAT_X_BXKAONCE",

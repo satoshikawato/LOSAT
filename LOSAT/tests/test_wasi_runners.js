@@ -426,6 +426,26 @@ test("the default guard cache directory follows each platform's convention", () 
   assert.equal(defaultGuardCacheDir({}, "win32"), path.join(home, "AppData", "Local", "losat", "wasi-guard"));
 });
 
+// prepareThreadHost frees the module's bytes once the compile has copied them (freeBytes): a view
+// of a whole ArrayBuffer is detached at once; a part of Node's Buffer pool or of a larger buffer
+// is left as it is.
+test("freeBytes frees only a view of a whole ArrayBuffer", () => {
+  const { freeBytes } = require("./wasi_thread_host");
+  const whole = Buffer.allocUnsafeSlow(1 << 20).fill(1);
+  freeBytes(whole);
+  assert.equal(whole.length, 0);
+  assert.equal(whole.buffer.byteLength, 0);
+  freeBytes(whole);
+  const pooled = Buffer.from("abc");
+  assert.ok(pooled.buffer.byteLength > pooled.length);
+  freeBytes(pooled);
+  assert.equal(pooled.toString(), "abc");
+  const part = Buffer.allocUnsafeSlow(4096).fill(2).subarray(0, 100);
+  freeBytes(part);
+  assert.equal(part.length, 100);
+  assert.equal(part.buffer.byteLength, 4096);
+});
+
 test("the guard cache keeps the entries used last", () => {
   const { guardSharedMemoryCached } = require("./wasi_thread_host");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-keep-"));

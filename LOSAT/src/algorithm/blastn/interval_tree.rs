@@ -405,10 +405,33 @@ impl XTreeIndex {
     /// The index follows `reset_with_bounds`: new ranges, empty index; the grid is sized
     /// from the ranges (on the first HSP, in the allocation kept from earlier ranges).
     fn set_bounds(&mut self, q_min: i32, q_max: i32, s_min: i32, s_max: i32) {
+        self.set_bounds_cells(q_min, q_max, s_min, s_max, X_MAX_CELLS);
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:166-170
+    /// ```c
+    ///     tree->s_min = s_start;
+    ///     tree->s_max = s_end;
+    ///
+    ///     /* The first structure in tree->nodes is the root */
+    ///     s_IntervalRootNodeInit(tree, q_start, q_end, &retval);
+    /// ```
+    /// `set_bounds` with the grid limited to `max_cells` cells. A coarser grid still lists, in
+    /// the cell of a start point, every leaf whose box holds that point (and more leaves to
+    /// test), so the index answers the same.
+    #[inline(always)]
+    fn set_bounds_cells(
+        &mut self,
+        q_min: i32,
+        q_max: i32,
+        s_min: i32,
+        s_max: i32,
+        max_cells: usize,
+    ) {
         let q_span = (q_max as i64 - q_min as i64).max(0) as usize;
         let s_span = (s_max as i64 - s_min as i64).max(0) as usize;
         let mut shift = 6u32;
-        while ((q_span >> shift) + 1).saturating_mul((s_span >> shift) + 1) > X_MAX_CELLS {
+        while ((q_span >> shift) + 1).saturating_mul((s_span >> shift) + 1) > max_cells {
             shift += 1;
         }
         self.shift = shift;
@@ -630,6 +653,43 @@ impl BlastIntervalTree {
         // ```
         // Re-initialisation point: the side indexes are rebuilt for the new ranges.
         self.x.set_bounds(q_min, q_max, s_min, s_max);
+    }
+
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:146-170
+    /// ```c
+    /// Blast_IntervalTreeInit(Int4 q_start, Int4 q_end,
+    ///                        Int4 s_start, Int4 s_end)
+    /// ...
+    /// tree->s_min = s_start;
+    /// tree->s_max = s_end;
+    /// s_IntervalRootNodeInit(tree, q_start, q_end, &retval);
+    /// ```
+    /// `reset_with_bounds` with the grid index limited to `max_cells` cells (`X_MAX_CELLS`
+    /// there). The tree is the same; the grid only answers the walk's question, so its size
+    /// changes the time and memory of the answer, not the answer.
+    pub fn reset_with_bounds_cells(
+        &mut self,
+        q_min: i32,
+        q_max: i32,
+        s_min: i32,
+        s_max: i32,
+        max_cells: usize,
+    ) {
+        self.s_min = s_min;
+        self.s_max = s_max;
+        self.nodes.clear();
+        self.nodes.push(IntervalNode::new_internal(q_min, q_max));
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:166-170
+        // ```c
+        //     tree->s_min = s_start;
+        //     tree->s_max = s_end;
+        //
+        //     /* The first structure in tree->nodes is the root */
+        //     s_IntervalRootNodeInit(tree, q_start, q_end, &retval);
+        // ```
+        // Re-initialisation point: the side indexes are rebuilt for the new ranges.
+        self.x
+            .set_bounds_cells(q_min, q_max, s_min, s_max, max_cells.max(1));
     }
 
     /// Allocate a new internal node

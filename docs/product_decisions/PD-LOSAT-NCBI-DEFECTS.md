@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.8
+- Version: 1.9
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -10,7 +10,8 @@
   1.6 2026-10-30 (exception 6, an accession stored under more than about 500 sequences of a
   version 5 database, and the seqid-list items of rules 2 and 3, line DI-8b);
   1.7 2026-10-31 (exception 6 also for the id lookups of `losat blastdbcmd`, line BDC's BDC2b);
-  1.8 2026-11-01 (a version 5 database list that mixes databases with and without accession
+  1.8 2026-11-01 (exception 5 also for `losat blastdbcmd -taxids`, line BDC's BDC3a);
+  1.9 2026-11-01 (a version 5 database list that mixes databases with and without accession
   tables, and a negative seqid list that excludes a sequence of a volume the database does
   not hold, rule 3, line DI-8f)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
@@ -185,6 +186,13 @@ maintainer to accept it.
    (`LOSAT/tests/db_taxid_root.rs`, rows `db.tf.bp.root.6` and `db.tf.tbn.root.6` of
    `LOSAT/tests/db_search_manifest.tsv`, BLASTP and TBLASTN) and fewer than the whole
    database, whose two taxids outside the file are not descendants.
+   Version 1.8 (line BDC's BDC3a, the same standing delegation): `losat blastdbcmd -taxids`
+   and `-taxidlist` expand their taxids with the same walk. NCBI's `blastdbcmd -db
+   18S_fungal_sequences -taxids 1` writes nothing in 120 s (line BDC's probe J120, and K13 on
+   a small taxonomy); LOSAT writes NCBI's bytes of the same run with the explicit list of
+   every taxid that taxid 1 reaches and `-no_taxid_expansion` (K01, K25:
+   `dropin-survey-20261029/BDC/probe/make_expected.py`, `LOSAT/tests/blastdbcmd_discovery.rs`
+   case `K13`).
 
 ## Approved exception (`-seqidlist` and `-negative_seqidlist` with `-db`, version 1.6)
 
@@ -277,7 +285,7 @@ defects are fixed and presented as differences); its PR (DI-8b) asks the maintai
   info.` (exit 2), after the outfmt 0 header and the earlier batches. Without such a hit, and
   for outfmt 11, NCBI runs to the end; a taxid list stops it up front. LOSAT refuses the list
   before the search (`the databases mix version 5 files with the accession table of
-  makeblastdb -parse_seqids ... and without it`; version 1.8, line DI-8 `DECISIONS.md` 31,
+  makeblastdb -parse_seqids ... and without it`; version 1.9, line DI-8 `DECISIONS.md` 31,
   probe DI-8f F42, P14, H09, H15-H19): whether NCBI fails depends on the hits, and
   reproducing that would need the lookup before every batch's reports in every program.
 
@@ -288,7 +296,7 @@ defects are fixed and presented as differences); its PR (DI-8b) asks the maintai
   `kSeqDBEntryNotFound`, and NCBI clears bit -1 of its OID mask and crashes (SIGSEGV, exit
   139; review of line DI-8f, fixture row `db.mdb.bn.negpartial.6`). LOSAT dropped the OID
   and searched; it now refuses the list (`the negative seqid list excludes sequence N of the
-  LMDB file, in a volume that the database does not hold`; version 1.8). A positive list on
+  LMDB file, in a volume that the database does not hold`; version 1.9). A positive list on
   such a database is NCBI's and LOSAT's alike.
 
 ## Ported (rule 4)

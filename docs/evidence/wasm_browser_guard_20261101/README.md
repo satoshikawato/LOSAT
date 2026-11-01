@@ -39,12 +39,15 @@ OV-2369). The arms of a round run in one browser process, in alternating order.
   `BlastpSubjectScratch::new`, `x_hits_flat::x_lists_by_query`) and 1 `memory.copy`
   (`encode_query_frame`), 66-359 ms after the WASI thread started; `gshipped` all in the
   `memory.copy` of `blastp::blast_engine::fasta_id` (the parallel FASTA id parse).
-- Outputs: one SHA-256 per job across all passes and both `dev` arms.
+- Outputs: one SHA-256 per job across all passes and both `dev` arms
+  (`results/command_harness_outputs.tsv`). gbdraw's host runs a trapped job again (up to 2 retries),
+  so the output of a trapped job comes from its retry.
 - The `dev` command declares 43 initial pages (gbdraw's host passes 21) and takes NCBI-style
   options (`-query`, `-num_threads`; gbdraw's host writes `--query`, `--num-threads`): the
   harness takes the initial size from the module and rewrites the options for the `dev` arms
   only.
-- System load 16-95 (other sessions); per-pass rows in `results/command_harness_passes.tsv`.
+- System load 16-96 when a pass started (other sessions); per-pass rows, with that load, in
+  `results/command_harness_passes.tsv`.
 
 ### LOSAT Web, reactor ABI v2 (`web/app/tests/e2e/guard-measure.spec.ts`)
 
@@ -114,12 +117,22 @@ blocked in Wasm. The shipped runner does not catch it. The script now lets the p
 records the search as failed and goes on with the next round in a new process.
 
 
+## What the guard does not cover
+
+- It wraps `memory.fill` and `memory.copy` only. Each threaded module keeps 4 `memory.init`
+  instructions (`__wasm_init_memory` 3, `__wasm_init_tls` 1), and none of the 12 traps above was
+  one. LOSAT's hosts refresh the bounds before a thread starts (`wasi_thread_worker.js`,
+  `web/app/src/infra/reactor/instance.ts`); gbdraw's host at 900992caf does not.
+- Atomic accesses are not guarded. Line WO (`release-v020`, 2026-11-01) reports a trap of the same
+  kind at Liftoff's atomics in V8 and plans to widen the guard on top of this change.
+
 ## Not checked
 
 - Firefox and WebKit (the traps are a V8 behaviour; the guard runs there, but no trap counts).
 - Node 24.21.0 (the release toolchain): local runs used Node 26.8.2; the release assembly was
   run locally with the toolchain capture mocked and `--allow-unfilled-lineage` (guarded: `WASM_ARTIFACT_READY`, smoke 5/5;
-  unguarded: refused with "no verified shared-memory guard").
+  unguarded: refused with "no verified shared-memory guard"; `verify_release_archive_v020.py`
+  passes the guarded archive).
 - `release-readiness-v020.yml` on GitHub. `wasm-threading.yml` passed on the branch at aaf15116a
   (run 41303426863); both threaded artifacts of that run verify (`losat-threaded-command.wasm`
   `eb75215caf76f336...`, `losat-threaded-reactor.wasm` `5d113fa43ffd2d5f...`).
@@ -132,6 +145,7 @@ records the search as failed and goes on with the next round in a new process.
 
 - `results/command_harness_passes.tsv`, `results/command_harness_traps.tsv`: the gbdraw-type
   harness, one row per pass and per trap.
+- `results/command_harness_outputs.tsv`: the same harness, the output hash of each job.
 - `results/losat_web_rounds.tsv`: LOSAT Web, one row per arm and round.
 - `results/node_ab_summary.tsv`, `results/node_ab_guarded_vs_raw.jsonl`, `results/node_ab_null.jsonl`,
   `results/node_ab_tblastn_guarded_vs_raw.jsonl`, `results/node_ab_tblastn_null.jsonl`: the timing
@@ -139,5 +153,5 @@ records the search as failed and goes on with the next round in a new process.
 - `results/node_ab_first_run_trap.jsonl`, `results/node_ab_first_run_trap.log`: the first attempt,
   with the trap.
 - `scripts/`: the harnesses as run (`serve.py`, `run.py`, `rounds.sh`, `harness.html` from
-  gbdraw's evidence, `losat_web_guard_measure.sh`) and the timing (`wasm_guard_ab.js`,
+  gbdraw's evidence, `losat_web_guard_measure.sh`, `command_harness_tables.py`) and the timing (`wasm_guard_ab.js`,
   `run_ab.sh`, `summarize_ab.py`); paths point at the session's scratch directories.

@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use super::column::{self, Column, MASK_DATA_TITLE};
 use super::file::DbFile;
 use super::filter::{DeflineList, DeflineRule};
 use super::header::{decode_defline_taxids, decode_deflines_as, decode_full, Defline};
@@ -19,6 +20,8 @@ pub struct Volume {
     hdr: OnceLock<DbFile>,
     /// The definition lines a taxid list keeps (`SeqDb::restrict_taxids`), none without one.
     defline_rule: Option<std::sync::Arc<DeflineRule>>,
+    /// The column files (`.?xa`...), opened on first use (`m_HaveColumns`).
+    columns: OnceLock<Vec<Column>>,
 }
 
 /// File name of `base` with the three-letter extension `{p|n}{ext}`.
@@ -69,6 +72,23 @@ impl Volume {
         seqtype: SeqType,
         mode: XDbIdxRead,
     ) -> Result<Self, SeqDbError> {
+        Self::open_with(base, seqtype, mode, false)
+    }
+
+    /// Like [`Volume::open`], but a volume with column files (the mask data of
+    /// `makeblastdb -mask_data`) is kept instead of rejected; its columns are read by
+    /// [`Volume::columns`].
+    pub(super) fn open_keeping_columns(base: &Path, seqtype: SeqType) -> Result<Self, SeqDbError> {
+        Self::open_with(base, seqtype, super::x_dbidxread(), true)
+    }
+
+    /// `open_as`; `keep_columns` says whether column files are read (true) or rejected.
+    fn open_with(
+        base: &Path,
+        seqtype: SeqType,
+        mode: XDbIdxRead,
+        keep_columns: bool,
+    ) -> Result<Self, SeqDbError> {
         let index_path = with_extension(base, seqtype, "in");
         let index_file = DbFile::open(&index_path)?;
         let index = match mode {
@@ -81,9 +101,30 @@ impl Volume {
             seq: OnceLock::new(),
             hdr: OnceLock::new(),
             defline_rule: None,
+            columns: OnceLock::new(),
         };
-        volume.reject_column_files()?;
+        if !keep_columns {
+            volume.reject_column_files()?;
+        }
         Ok(volume)
+    }
+
+    /// The columns of the volume, opened on first use (`CSeqDBVol::x_OpenAllColumns`); none
+    /// for a volume without column files. A failed open is repeated by the next call.
+    pub fn columns(&self) -> Result<&[Column], SeqDbError> {
+        if let Some(columns) = self.columns.get() {
+            return Ok(columns);
+        }
+        let columns = column::open_all(&self.base, self.index.seqtype, self.index.num_oids)?;
+        Ok(self.columns.get_or_init(|| columns))
+    }
+
+    /// The column titled `BlastDb/MaskData` (`CSeqDBVol::GetColumnId`), if the volume has one.
+    pub fn mask_column(&self) -> Result<Option<&Column>, SeqDbError> {
+        Ok(self
+            .columns()?
+            .iter()
+            .find(|column| column.title() == MASK_DATA_TITLE))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3333-3343
@@ -101,8 +142,8 @@ impl Volume {
     //         if (CSeqDBColumn::ColumnExists(m_VolName, ei, m_Atlas)) {
     // ```
     // Column files hold per-sequence data such as the masks of
-    // `makeblastdb -mask_data`. LOSAT does not read them, so a volume that has
-    // any is rejected instead of being searched without them.
+    // `makeblastdb -mask_data`. LOSAT's searches do not read them, so a volume
+    // that has any is rejected instead of being searched without them.
     fn reject_column_files(&self) -> Result<(), SeqDbError> {
         for letter in b'a'..=b'z' {
             let ext = [letter, b'a'];
@@ -112,7 +153,7 @@ impl Volume {
                 return Err(SeqDbError::Unsupported {
                     path,
                     message: "the volume has column data (for example the masks of makeblastdb \
-                              -mask_data); LOSAT does not read column files"
+                              -mask_data); LOSAT's searches do not read column files"
                         .to_string(),
                 });
             }

@@ -10,7 +10,10 @@
 // (LOSAT/tests/wasi_shared_memory.js, applied by LOSAT/tests/wasi_thread_host.js before it
 // compiles the module): V8 (Node, and Chromium in S09) can run a bulk memory operation
 // against stale bounds after another thread grew the shared memory. The guard is the same
-// function, so the browsers run the bytes that V-ABI runs; it changes no search code.
+// function, so the browsers run the bytes that V-ABI runs; it changes no search code. The
+// build stops rather than serve an unguarded threaded module: the guard throws on an encoding
+// that it declines, and a module in which it finds nothing to guard is refused here. An
+// artifact that is guarded already (it carries the guard's record) is served as it is.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -18,8 +21,17 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
 
+interface Guarded {
+  readonly bytes: Uint8Array;
+  /** The operations that this call guarded (0 for an artifact that is guarded already). */
+  readonly fill: number;
+  readonly copy: number;
+  /** The guard's record in the module, or null when it found nothing to guard. */
+  readonly record: { readonly version: number; readonly fill: number; readonly copy: number } | null;
+}
+
 /** The guard of LOSAT/tests/wasi_shared_memory.js, loaded only for a build with the engine. */
-function guardSharedMemory(bytes: Uint8Array): { bytes: Uint8Array; fill: number; copy: number } {
+function guardSharedMemory(bytes: Uint8Array): Guarded {
   const guard = createRequire(import.meta.url)('../../../LOSAT/tests/wasi_shared_memory.js') as {
     guardSharedMemory: typeof guardSharedMemory;
   };
@@ -70,13 +82,15 @@ export function findReactors(env: NodeJS.ProcessEnv = process.env): Reactors | u
       return { name: `engine/losat-web-serial-${artifactSha256.slice(0, 16)}.wasm`, bytes: artifact, sha256: artifactSha256, artifactSha256 };
     }
     const guarded = guardSharedMemory(artifact);
+    if (guarded.record === null) throw new Error(`${path}: the shared-memory guard found no memory.fill or memory.copy to guard`);
+    const where = guarded.fill + guarded.copy === 0 ? 'in the artifact' : 'LOSAT/tests/wasi_shared_memory.js';
     const sha256 = sha256Hex(guarded.bytes);
     return {
       name: `engine/losat-web-threads-${sha256.slice(0, 16)}.wasm`,
       bytes: guarded.bytes,
       sha256,
       artifactSha256,
-      transform: `shared-memory guard (LOSAT/tests/wasi_shared_memory.js: ${guarded.fill} fills, ${guarded.copy} copies)`,
+      transform: `shared-memory guard (${where}: ${guarded.record.fill} fills, ${guarded.record.copy} copies)`,
     };
   };
   return { dir, serial: file('serial'), threads: file('threads') };

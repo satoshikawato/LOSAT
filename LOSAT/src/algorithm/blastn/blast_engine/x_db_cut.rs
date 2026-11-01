@@ -57,6 +57,15 @@
 //! the threads claim the cut's blocks in ordinal order and the results are handed over in that
 //! order.
 //!
+//! EXPERIMENT (LOSAT_X_BNDBSMALL, a switch of the strict set: on unless it is `0`): the cut's largest
+//! block is `X_BNDBSMALL_BLOCK_BYTES` (256 KiB) instead of `BLOCK_BYTES`. A thread holds the block it
+//! reads and the results of the blocks that wait for the owner, and those go on its arena when the
+//! search starts, before the owner has handed anything over. Where most sequences hit most queries,
+//! 1 MiB of 16S genes gave about 1 MiB of preliminary HSPs (`v4-D12/STATE.md`, s29). The reports do not
+//! change, for the reasons above, which hold for any cut. The window keeps its bytes
+//! (`x_db_stream.rs` `x_wide_blocks_per_thread`): 16 blocks per thread of 256 KiB are shorter than a
+//! slow block, and core_nt took x1.16 at 128 KiB without that.
+//!
 //! `LOSAT_X_BNDBCUT` is a switch of the strict set: on unless it is `0`.
 //! It acts for every BLASTN task with `-db` (megablast, blastn, dc-megablast,
 //! blastn-short).
@@ -91,16 +100,31 @@ pub(super) const X_BLOCKS_PER_THREAD: u64 = 4;
 /// sequences.
 pub(super) const X_MIN_BLOCK_BYTES: u64 = 4 << 10;
 
+// No NCBI counterpart: reads the LOSAT_X_BNDBSMALL switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BNDBSMALL): a strict-set switch, on unless it is `0`.
+fn x_bn_db_small() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNDBSMALL"))
+}
+
+// No NCBI counterpart: as `X_BLOCKS_PER_THREAD`.
+/// The largest block of the cut with LOSAT_X_BNDBSMALL. Measured with 1,000 amplicons against
+/// SILVA at 16 threads, peak anonymous memory: 94 MiB with 1 MiB, 32 with 256 KiB, 27 with 128 KiB;
+/// 128 KiB took x1.03 on ref_prok_rep_genomes at 32 threads and x1.009 on core_nt (module
+/// documentation).
+const X_BNDBSMALL_BLOCK_BYTES: u64 = 256 << 10;
+
 // No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
 /// The block size of a search with `threads` threads of a database of `sequence_bytes`:
 /// `BLOCK_BYTES` at one thread, else `sequence_bytes / (X_BLOCKS_PER_THREAD x threads)` between
-/// `X_MIN_BLOCK_BYTES` and `BLOCK_BYTES`.
-pub(super) fn x_cut_block_bytes(sequence_bytes: u64, threads: usize) -> u64 {
+/// `X_MIN_BLOCK_BYTES` and `largest`.
+pub(super) fn x_cut_block_bytes(sequence_bytes: u64, threads: usize, largest: u64) -> u64 {
     if threads <= 1 {
         return BLOCK_BYTES;
     }
     let parts = X_BLOCKS_PER_THREAD.saturating_mul(threads as u64);
-    (sequence_bytes / parts).clamp(X_MIN_BLOCK_BYTES, BLOCK_BYTES)
+    (sequence_bytes / parts).clamp(X_MIN_BLOCK_BYTES, largest)
 }
 
 // No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
@@ -117,7 +141,12 @@ pub(super) fn x_sequence_bytes(db: &SeqDb) -> u64 {
 /// rounds on the pool (`parallel`), else `BLOCK_BYTES`.
 pub(super) fn x_db_cut_block_bytes(db: &SeqDb, pool: &SearchPool<'_>, parallel: bool) -> u64 {
     let threads = if parallel { pool.threads() } else { 1 };
-    x_cut_block_bytes(x_sequence_bytes(db), threads)
+    let sequence_bytes = x_sequence_bytes(db);
+    let cut = x_cut_block_bytes(sequence_bytes, threads, BLOCK_BYTES);
+    let small = x_bn_db_small().then_some(X_BNDBSMALL_BLOCK_BYTES);
+    let block_bytes = x_cut_block_bytes(sequence_bytes, threads, small.unwrap_or(BLOCK_BYTES));
+    crate::utils::xreach::x_reach!("LOSAT_X_BNDBSMALL", block_bytes < cut);
+    block_bytes
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1426
@@ -273,6 +302,7 @@ mod tests {
     // between 4 KiB and 1 MiB.
     #[test]
     fn the_cut_is_a_quarter_of_the_bytes_per_thread_between_4_kib_and_1_mib() {
+        let x_cut_block_bytes = |bytes, threads| x_cut_block_bytes(bytes, threads, BLOCK_BYTES);
         for bytes in [0u64, 1, 812, 10_300_000, 64 << 20, u64::MAX] {
             assert_eq!(x_cut_block_bytes(bytes, 0), BLOCK_BYTES, "{bytes}");
             assert_eq!(x_cut_block_bytes(bytes, 1), BLOCK_BYTES, "{bytes}");
@@ -301,5 +331,15 @@ mod tests {
                 previous = cut;
             }
         }
+    }
+
+    // LOSAT_X_BNDBSMALL: the largest block only. One thread keeps `BLOCK_BYTES`, a smaller cut stays.
+    #[test]
+    fn small_blocks_only_lower_the_largest_cut() {
+        let small = X_BNDBSMALL_BLOCK_BYTES;
+        assert_eq!(x_cut_block_bytes(u64::MAX, 1, small), BLOCK_BYTES);
+        assert_eq!(x_cut_block_bytes(344_000_000, 16, small), small);
+        assert_eq!(x_cut_block_bytes(10_300_000, 16, small), 160_937);
+        assert_eq!(x_cut_block_bytes(0, 2, small), X_MIN_BLOCK_BYTES);
     }
 }

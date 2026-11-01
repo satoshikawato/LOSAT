@@ -310,6 +310,7 @@ count of the set anywhere, so that two pull requests that each add a switch do n
 export LOSAT_X_BNCSR=1
 export LOSAT_X_BNCSRPACK=1
 export LOSAT_X_BNDBCUT=1
+export LOSAT_X_BNDBSMALL=1
 export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNDBWIDE=1
 export LOSAT_X_BNDCONE=1

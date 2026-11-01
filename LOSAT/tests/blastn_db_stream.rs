@@ -287,6 +287,52 @@ fn reports_with_the_wide_window_are_the_reports_with_the_narrow_one() {
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
 
+// `LOSAT_X_BNDBSMALL` (a largest block of 256 KiB) changes no report. Pieces of two genomes, about
+// 2.5 MiB of sequence file: above 256 KiB per block at 2 threads (its own side), below it at 4 (its
+// reference side), and at one thread the blocks are those of 1 MiB.
+#[test]
+fn reports_with_small_blocks_are_the_reports_with_large_ones() {
+    const SMALL_OFF: (&str, &str) = ("LOSAT_X_BNDBSMALL", "0");
+    let dir = temp_dir("small");
+    let mut fasta = Vec::new();
+    for (name, letters) in [
+        ("k12", genome("MG1655.fna")),
+        ("sakai", genome("Sakai.fna")),
+    ] {
+        for (index, piece) in letters.chunks(5_000).enumerate() {
+            fasta.extend(format!(">{name}{index}\n").bytes());
+            fasta.extend_from_slice(piece);
+            fasta.push(b'\n');
+        }
+    }
+    let input = dir.join("two.fna");
+    std::fs::write(&input, fasta).unwrap();
+    let db = dir.join("two");
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
+        .arg("makeblastdb")
+        .arg("-in")
+        .arg(&input)
+        .args(["-dbtype", "nucl"])
+        .arg("-out")
+        .arg(&db)
+        .output()
+        .expect("run LOSAT makeblastdb");
+    assert!(output.status.success(), "makeblastdb failed");
+    let one_thread = blastn("megablast", &db, 1, &[], "6");
+    assert!(!one_thread.stdout.is_empty());
+    for (threads, sides) in [(2u32, (true, false)), (4, (false, true))] {
+        let what = format!("threads {threads}");
+        let off = blastn("megablast", &db, threads, &[SMALL_OFF], "6");
+        assert!(off.stdout == one_thread.stdout, "{what}: off differs");
+        let reach = reach_support::Reach::new("bndbsmall");
+        let on = blastn("megablast", &db, threads, &[reach.var()], "6");
+        assert!(on.stdout == one_thread.stdout, "{what}: on differs");
+        assert_eq!(on.stderr, off.stderr, "{what}: standard error differs");
+        assert_eq!(reach.sides("LOSAT_X_BNDBSMALL"), sides, "{what}");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 // At one thread the blocks are searched one after another: the switch's decision takes its
 // reference side only.
 #[test]

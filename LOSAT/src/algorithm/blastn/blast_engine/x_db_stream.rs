@@ -81,7 +81,7 @@ use crate::seqdb::{BlockRange, SeqDb};
 use crate::utils::threading::SearchPool;
 
 use super::super::x_bnstream::{search_in_order_bounded, WaitingBound};
-use super::{block_subject, search_read_error, BlastnSubjectRef, XWaitingBytes};
+use super::{block_subject, search_read_error, BlastnSubjectRef, XWaitingBytes, BLOCK_BYTES};
 
 /// No NCBI counterpart (scheduling only): whether LOSAT_X_BNDBSTREAM is on (a strict-set switch:
 /// on unless it is `0`).
@@ -107,6 +107,16 @@ const X_BNDBSTREAM_BLOCKS_PER_THREAD: usize = 2;
 /// 10.7 ms at the median, 54 ms at p99): 32 blocks are about 24 ms of the wall clock at 16 threads,
 /// less than one slow block; 256 are about 190 ms (module documentation).
 const X_BNDBWIDE_BLOCKS_PER_THREAD: usize = 16;
+
+// No NCBI counterpart (scheduling only): as the window.
+/// Blocks per thread of the window with LOSAT_X_BNDBWIDE: as many bytes of the sequence file as
+/// `X_BNDBWIDE_BLOCKS_PER_THREAD` blocks of `BLOCK_BYTES`, so that smaller blocks
+/// (LOSAT_X_BNDBSMALL) do not bring back a window shorter than a slow block. `Window::new` holds
+/// it to the list's length.
+fn x_wide_blocks_per_thread(block_bytes: u64) -> usize {
+    let blocks = (BLOCK_BYTES / block_bytes.max(1)).max(1);
+    X_BNDBWIDE_BLOCKS_PER_THREAD.saturating_mul(usize::try_from(blocks).unwrap_or(usize::MAX))
+}
 
 // No NCBI counterpart (scheduling only): as the window.
 /// Bytes of waiting results per thread above which LOSAT_X_BNDBWIDE's window narrows to
@@ -178,7 +188,7 @@ where
             return Ok(());
         };
         next_ordinal = last.end_ordinal();
-        search_window(db, pool, &blocks, new_scratch, search, merge)?;
+        search_window(db, pool, &blocks, block_bytes, new_scratch, search, merge)?;
     }
 }
 
@@ -218,6 +228,7 @@ fn search_window<T, R, I, K, M>(
     db: &SeqDb,
     pool: &SearchPool<'_>,
     blocks: &[BlockRange],
+    block_bytes: u64,
     new_scratch: &I,
     search: &K,
     merge: &mut M,
@@ -251,7 +262,7 @@ where
     let floor = threads.saturating_mul(X_BNDBSTREAM_BLOCKS_PER_THREAD);
     let wide = x_bn_db_wide();
     let window = if wide {
-        threads.saturating_mul(X_BNDBWIDE_BLOCKS_PER_THREAD)
+        threads.saturating_mul(x_wide_blocks_per_thread(block_bytes))
     } else {
         floor
     };
@@ -323,8 +334,19 @@ mod tests {
         .unwrap_or_else(|error| panic!("{name}: {error:#}"))
     }
 
+    // LOSAT_X_BNDBSMALL: the window keeps its bytes.
+    #[test]
+    fn the_wide_window_keeps_its_bytes() {
+        assert_eq!(x_wide_blocks_per_thread(BLOCK_BYTES), 16);
+        assert_eq!(x_wide_blocks_per_thread(BLOCK_BYTES - 1), 16);
+        assert_eq!(x_wide_blocks_per_thread(256 << 10), 64);
+        assert_eq!(x_wide_blocks_per_thread(1), 16 << 20);
+        assert_eq!(x_wide_blocks_per_thread(0), 16 << 20);
+    }
+
     // Uneven work per sequence, so that the blocks end out of order.
     // The bytes that wait are the results' lists and the list of the block's kept results.
+
     #[test]
     fn the_kept_bytes_are_the_capacities_of_the_lists() {
         let mut kept: Vec<(u32, Vec<u64>)> = Vec::with_capacity(3);

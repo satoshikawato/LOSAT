@@ -1403,7 +1403,7 @@ impl ReportedSubjects {
 /// `HEADER_RANGE_SEQS` sequences (`SeqDb::visit_deflines`, `SeqDb::visit_ambiguity`, the same
 /// results as `read_title` and `SeqDb::check_ambiguity`) instead of one sequence at a time.
 /// A database with parsed Seq-ids (`BlastnDatabase::parsed`; the readers above read ordinal ids
-/// alone): `x_parsed_refusal` with `X_PARSED_CHECK_SEQUENCES_MAX`.
+/// alone): `x_parsed_refusal` with `shared::PARSED_CHECK_SEQUENCES_MAX` (`Off::LargeParsed`).
 pub(super) fn x_streaming_refusal(
     database: &BlastnDatabase,
     shown: ParsedShown,
@@ -1413,7 +1413,13 @@ pub(super) fn x_streaming_refusal(
     use super::x_rpt_stream::Off;
     let db = &database.db;
     if database.parsed {
-        return x_parsed_refusal(database, shown, taxids, pool, X_PARSED_CHECK_SEQUENCES_MAX);
+        return x_parsed_refusal(
+            database,
+            shown,
+            taxids,
+            pool,
+            shared::PARSED_CHECK_SEQUENCES_MAX,
+        );
     }
     let title_allowed = |ordinal: u32, stored: Result<shared::StoredTitle>| -> bool {
         match stored {
@@ -1464,16 +1470,6 @@ pub(super) fn x_streaming_refusal(
     }
     x_ambiguity_refusal(db, pool).or_else(|| x_taxonomy_refusal(database, taxids))
 }
-
-// No NCBI counterpart: bounds LOSAT's own check before the search (`x_parsed_refusal`).
-/// EXPERIMENT (LOSAT_X_RPTSTREAM): the most sequences of a database with parsed Seq-ids whose
-/// headers `x_streaming_refusal` reads before the search. `shared::reports_may_refuse` decodes each
-/// header (2.3-5.6 us at one thread with tblastx's 18S, line DBID ID4t fix 2b) and keeps 16 bytes
-/// per join key with outfmt 0, so this bounds the pass to a few seconds and some tens of MiB; a
-/// larger database (NCBI's `nt` and `core_nt`) keeps its reports after the loop, as before the
-/// stream took databases with parsed Seq-ids (`Off::LargeParsed`). The volumes' sequences count,
-/// also under a taxid list: the range walks decode a range's excluded sequences too.
-const X_PARSED_CHECK_SEQUENCES_MAX: u32 = 1 << 20;
 
 /// EXPERIMENT (LOSAT_X_RPTSTREAM): `x_streaming_refusal` of a database with parsed Seq-ids: with at
 /// most `max_sequences` sequences, its headers read and checked as the reports `shown` read and
@@ -2486,8 +2482,8 @@ mod tests {
     }
 
     // Line DBID: the check of a database with parsed Seq-ids reads at most `max_sequences`
-    // sequences (`X_PARSED_CHECK_SEQUENCES_MAX`; a larger one keeps the reports after the loop,
-    // also where a taxid list leaves fewer: the walk decodes the excluded ones too),
+    // sequences (`shared::PARSED_CHECK_SEQUENCES_MAX`; a larger one keeps the reports after the
+    // loop, also where a taxid list leaves fewer: the walk decodes the excluded ones too),
     // reads the stored titles of an alias's volumes without parsed Seq-ids as the reports read
     // them, and reads the ambiguity data of every sequence: `nambig_v4`'s second sequence with
     // its ambiguity count raised by one (the traceback's decoding refuses it), at one thread and

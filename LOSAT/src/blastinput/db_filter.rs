@@ -344,6 +344,9 @@ impl DbFilterArgs {
         settings: &ApplicationSettings,
         warnings: &mut dyn Write,
     ) -> Result<Option<DbList>> {
+        if self.seqid_list().is_none() && self.list().is_none() {
+            return Ok(None);
+        }
         // The registry's errors are the database's: `open_search_database` reports them.
         let registry = settings.blastdb.clone().unwrap_or(None);
         let path = SearchPath::from_environment(registry.as_deref())

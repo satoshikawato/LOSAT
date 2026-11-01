@@ -25,8 +25,7 @@
 //! of `tests/fasta/MelaMJNV.fasta`, forward and reverse complement in turn (one long subject),
 //! and the genome once more (a short one, whose plan keeps its frames). A `-db` search of the
 //! same subjects (`losat makeblastdb`) reads the long one before its plan when it reads each database
-//! sequence where it is searched (`LOSAT_X_TBNDBSTREAM`), and translates it in its units as the
-//! search on the copy of the database (`LOSAT_X_TBNDBSTREAM=0`) does.
+//! sequence where it is searched, and translates it in its units as the `-subject` search does.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -229,11 +228,10 @@ fn database() -> &'static PathBuf {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812 (above). A `-db`
-// search gives the report of `=0` with the stream (`LOSAT_X_TBNDBSTREAM`, by default) and on the
-// copy of the database (`LOSAT_X_TBNDBSTREAM=0`) at one and four threads; in both, the long
-// sequence's plan has no residues and its six units translate their frames.
+// search gives the report of `=0` at one and four threads; the long sequence's plan has no
+// residues and its six units translate their frames.
 #[test]
-fn a_database_search_translates_in_its_units_with_and_without_the_copy() {
+fn a_database_search_translates_in_its_units() {
     let long = inputs().2;
     let db = ["-db".as_ref(), database().as_os_str()];
     let (expected, _) = tblastn_of(db, 1, &[OFF]);
@@ -243,17 +241,14 @@ fn a_database_search_translates_in_its_units_with_and_without_the_copy() {
             .any(|line| line.split('\t').nth(1) == Some("long")),
         "the search must report hits in the long sequence"
     );
-    const COPY: (&str, &str) = ("LOSAT_X_TBNDBSTREAM", "0");
     for threads in [1, 4] {
-        for read in [&[][..], &[COPY][..]] {
-            let (report, stderr) = tblastn_of(db, threads, read);
-            assert!(report == expected, "{threads} threads {read:?}: the report");
-            assert_eq!(
-                stats(&stderr),
-                Some([1, 6, unit_residues(long)]),
-                "{threads} threads {read:?}"
-            );
-            assert_buffers_freed(&stderr, threads, &format!("{threads} threads {read:?}"));
-        }
+        let (report, stderr) = tblastn_of(db, threads, &[]);
+        assert!(report == expected, "{threads} threads: the report");
+        assert_eq!(
+            stats(&stderr),
+            Some([1, 6, unit_residues(long)]),
+            "{threads} threads"
+        );
+        assert_buffers_freed(&stderr, threads, &format!("{threads} threads"));
     }
 }

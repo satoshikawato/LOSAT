@@ -1139,7 +1139,7 @@ impl SeqDb {
         })
     }
 
-    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the block of the sequences `first_ordinal..end_ordinal`
+    /// The block of the sequences `first_ordinal..end_ordinal`
     /// that the volume of `first_ordinal` holds (to `end_ordinal` or to the end of the volume),
     /// found without reading the index (`next_block` reads it to cut by bytes). `None` when the
     /// range is empty or `first_ordinal` is past the last sequence.
@@ -1160,7 +1160,7 @@ impl SeqDb {
         })
     }
 
-    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the numbers of residues of the proteins of
+    /// The numbers of residues of the proteins of
     /// `x_block_range(first_ordinal, end_ordinal)`, from the index alone
     /// (`Volume::x_protein_lengths`).
     pub fn x_protein_lengths(
@@ -1189,7 +1189,7 @@ impl SeqDb {
         volume.read_block(range.first, range.end, range.first_ordinal)
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the length and the ambiguity data that
+    /// The length and the ambiguity data that
     /// `read_block(range)` gives the one nucleotide of `range`, read without its 2-bit data, with
     /// the errors of `read_block` (`Volume::x_nucleotide_check`).
     pub fn x_nucleotide_check(

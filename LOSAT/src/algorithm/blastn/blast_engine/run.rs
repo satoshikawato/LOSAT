@@ -163,7 +163,7 @@ mod x_few_subj;
 #[path = "x_bnstream.rs"]
 mod x_bnstream;
 
-// EXPERIMENT (LOSAT_X_BNLUTDROP): a query batch's lookup tables dropped when its preliminary stage
+// LOSAT_X_BNLUTDROP (graduated 2026-10-27): a query batch's lookup tables dropped when its preliminary stage
 // ends, before its traceback, as NCBI's traceback stage drops its table.
 #[path = "x_lut_drop.rs"]
 mod x_lut_drop;
@@ -270,7 +270,7 @@ pub fn x_tb_range_print_summary() {
     database::x_tb_range_print_summary();
 }
 
-/// EXPERIMENT (LOSAT_X_BNLUTDROP): the summary line `main` prints at exit (LOSAT_TIMING). No NCBI
+/// LOSAT_X_BNLUTDROP (graduated 2026-10-27): the summary line `main` prints at exit (LOSAT_TIMING). No NCBI
 /// counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_lut_drop_print_summary() {
     x_lut_drop::print_summary();
@@ -4496,17 +4496,10 @@ struct QueryContextIndex {
     // length it would have. Four bytes per query base become a few words.
     x_ranges: Vec<(usize, usize, u32)>,
     x_total_len: usize,
-    // EXPERIMENT (LOSAT_X_CTXO1): what `direct_map` holds, in constant time from the layout of the
-    // contexts (`x_ctx_o1.rs`). When it is built it answers the offsets the table covers, the runs
+    // LOSAT_X_CTXO1 (graduated 2026-10-27, always on): what `direct_map` holds, in constant time
+    // from the layout of the contexts (`x_ctx_o1.rs`). When it is built it answers the offsets the table covers, the runs
     // only those of its crowded blocks, and the table is not built.
     x_o1: Option<x_ctx_o1::CtxO1>,
-}
-
-/// No NCBI counterpart: reads the LOSAT_X_CTXO1 switch once (`x_ctx_o1.rs`).
-fn x_ctx_o1_on() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_CTXO1"))
 }
 
 impl QueryContextIndex {
@@ -4567,13 +4560,11 @@ impl QueryContextIndex {
         // `x_mode` 1: the runs answer and the table is not built; 0: the table answers (overlapping
         // runs).
         let mut x_mode = 1u8;
-        // EXPERIMENT (LOSAT_X_CTXO1): the constant-time form, where the layout allows it. It takes
-        // the place of the runs (kept only for the offsets of its crowded blocks) and of the table.
-        let x_o1 = if x_ctx_o1_on() {
-            x_ctx_o1::CtxO1::build(contexts, total_len)
-        } else {
-            None
-        };
+        // LOSAT_X_CTXO1 (graduated 2026-10-27, always on): the constant-time form, where the layout
+        // allows it (`build` answers `None` otherwise: a rule of the layout and not a switch). It
+        // takes the place of the runs (kept only for the offsets of its crowded blocks) and of the
+        // table.
+        let x_o1 = x_ctx_o1::CtxO1::build(contexts, total_len);
         // the runs answer what the form leaves (offsets in a crowded block of `x_ctx_o1.rs`)
         let x_o1_alone = x_o1.as_ref().is_some_and(|o1| !o1.needs_runs());
         let mut x_ranges: Vec<(usize, usize, u32)> = Vec::new();
@@ -4660,7 +4651,7 @@ impl QueryContextIndex {
     /// ```c
     /// Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
     /// ```
-    /// The context of query offset `n`. EXPERIMENT (LOSAT_X_CTXO1): the constant-time form answers
+    /// The context of query offset `n`. LOSAT_X_CTXO1 (graduated 2026-10-27): the constant-time form answers
     /// here, inlined into the seed loops; any other form is the out-of-line `x_context_for_offset_ref`.
     #[inline(always)]
     fn context_for_offset(&self, n: usize) -> usize {
@@ -4679,7 +4670,7 @@ impl QueryContextIndex {
     // ...
     // return b;
     // ```
-    // The forms besides LOSAT_X_CTXO1, out of line as `context_for_offset` was.
+    // The forms besides the constant-time one (LOSAT_X_CTXO1), out of line as `context_for_offset` was.
     #[inline(never)]
     fn x_context_for_offset_ref(&self, n: usize) -> usize {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243
@@ -7102,8 +7093,8 @@ pub fn run(
     //         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
     //                                              mol_type));
     // ```
-    // With `-db` the handler of the database arguments only keeps the name: the database
-    // is opened after every option handler has run (`search_cli`). With `-subject` it
+    // With `-db` the handler of the database arguments keeps the name and reads the list: the
+    // database is opened after every option handler has run (`search_cli`). With `-subject` it
     // reads the subjects here, before the query and the output are opened.
     let archive = args.archive.clone();
     let mut stderr = std::io::stderr();
@@ -7114,6 +7105,22 @@ pub fn run(
             &mut archive_tee
         }
         None => &mut stderr,
+    };
+    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
+    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
+    // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
+    // and before `CStdCmdLineArgs`, which opens the query and the output: its warning before
+    // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
+    // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
+    let list = match args.database_name() {
+        Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
+            Ok(list) => list,
+            Err(error) => {
+                write_run_error_archive(&args, archive.as_ref(), &error);
+                return Err(error);
+            }
+        },
+        None => None,
     };
     let cli_subjects = if args.db.is_some() {
         None
@@ -7181,6 +7188,7 @@ pub fn run(
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut *diagnostics);
         search_cli(
             args,
+            list,
             query_file,
             cli_subjects.as_ref().map(|read| {
                 (
@@ -7257,6 +7265,10 @@ fn write_run_error_archive(
     let Some(handle) = archive else {
         return;
     };
+    // `-outfmt "11 qseqid"`: NCBI's `PrintErrorArchive` stops at the number before it opens `-out`.
+    if !handle.error_archive_enabled() {
+        return;
+    }
     let Some(lines) = archive::error_lines(error, true) else {
         return;
     };
@@ -7401,24 +7413,17 @@ fn read_cli_subjects(
 /// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`,
 /// `-window_masker_db`), the
 /// processing of the options, the opening of the database of `-db`, `Query is Empty!`, the
-/// reading of the queries and the search. `subjects` are those of `-subject` (`None` with
-/// `-db`).
+/// reading of the queries and the search. `list` is the taxid or seqid list of `-db`, read
+/// before the output is opened; `subjects` are those of `-subject` (`None` with `-db`).
 fn search_cli(
     mut args: BlastnArgs,
+    list: Option<crate::seqdb::DbList>,
     query_file: std::fs::File,
     subjects: Option<(Subjects<'_>, SubjectRanges<'_>)>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
-    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
-    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
-    // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65),
-    // so its warning before theirs (probe F04 of line DI-8).
-    let list = match args.database_name() {
-        Some(_) => args.db_filter.resolve(&settings, outputs.diagnostics)?,
-        None => None,
-    };
     args.resolve_dust()?;
     args.resolve_window_masker()?;
     let query_range = parse_query_range(&args)?;
@@ -11999,7 +12004,7 @@ fn search_query_batch<const UNGAPPED: bool>(
                            subject_hits: &mut Option<Vec<BlastnHsp>>,
                            prelim_out: &mut Vec<PrelimHit>| {
         // The batch's lookup tables: the preliminary stage's calls pass them, the traceback's
-        // (`prelim_source` set) pass `None` and do not scan (LOSAT_X_BNLUTDROP, `x_lut_drop.rs`).
+        // (`prelim_source` set) pass `None` and do not scan (LOSAT_X_BNLUTDROP, graduated; `x_lut_drop.rs`).
         let two_stage_lookup_ref = lookups.and_then(|tables| tables.two_stage_lookup.as_ref());
         let pv_direct_lookup_ref = lookups.and_then(|tables| tables.pv_direct_lookup.as_ref());
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:131-156
@@ -19127,10 +19132,10 @@ fn search_query_batch<const UNGAPPED: bool>(
     if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
-    // Dispatch point of LOSAT_X_BNLUTDROP: the traceback reads the kept HSPs only, so the tables
-    // are dropped here (NCBI's traceback stage, traceback_stage.cpp:208-211); with `=0` they are
-    // held until the batch returns (`x_lut_drop.rs`).
-    let _x_kept_lookup_tables = x_lut_drop::after_prelim(lookup_tables);
+    // LOSAT_X_BNLUTDROP (graduated 2026-10-27, always on): the traceback reads the kept HSPs only,
+    // so the tables are dropped here (NCBI's traceback stage, traceback_stage.cpp:208-211)
+    // (`x_lut_drop.rs`).
+    x_lut_drop::after_prelim(lookup_tables);
     let hit_lists = match subjects {
         SubjectSource::Prepared(_) => {
             let kept = prelim_hits_by_subject(prelim_lists, subject_records_ref.len());
@@ -19604,7 +19609,7 @@ mod tests {
     }
 
     // QueryContextIndex answers the value of `direct_map` at every offset, through whichever form
-    // the switches choose (by default LOSAT_X_CTXO1: division, or the block table, here with the
+    // the layout allows (LOSAT_X_CTXO1: division, or the block table, here with the
     // runs for its crowded blocks in the second case: a query of 3 letters among 500 of 300).
     #[test]
     fn the_context_index_answers_the_table_at_every_offset() {

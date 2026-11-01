@@ -166,6 +166,53 @@ fn a_database_keeps_the_weak_hits_of_its_shortest_length() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+// seqdbimpl.cpp `x_ScanTotals` (DI-8b): with a list NCBI scans the shortest sequence, so the
+// cutoff is that of `-subject`, not the 10 of a whole database. The same pair as above with every
+// sequence listed: NCBI BLAST+ 2.17.0 keeps 226 rows (229 without the list).
+#[test]
+fn a_listed_database_reads_its_scanned_shortest_length() {
+    let dir = temp_dir("d1list");
+    let faa = fasta("PemoMJNVA.faa");
+    let db = dir.join("pemo").to_str().unwrap().to_string();
+    let made = losat()
+        .arg("makeblastdb")
+        .arg("-in")
+        .arg(&faa)
+        .args(["-dbtype", "prot", "-parse_seqids", "-out", &db])
+        .output()
+        .expect("run losat makeblastdb");
+    assert!(
+        made.status.success(),
+        "makeblastdb: {}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+    let ids: String = std::fs::read_to_string(&faa)
+        .unwrap()
+        .lines()
+        .filter_map(|line| line.strip_prefix('>'))
+        .map(|title| format!("{}\n", title.split_whitespace().next().unwrap()))
+        .collect();
+    let list = dir.join("all.ids");
+    std::fs::write(&list, ids).unwrap();
+    let query = fasta("MelaMJNV.fasta");
+    // Not `blastx()`: a text list has NCBI's warning on stderr.
+    let listed = losat()
+        .arg("blastx")
+        .arg("-query")
+        .arg(&query)
+        .args(["-db", &db, "-seqidlist", list.to_str().unwrap()])
+        .args(["-outfmt", "6", "-num_threads", "1"])
+        .output()
+        .expect("run LOSAT");
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert_eq!(rows(&listed.stdout), 226);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 // local_blast.cpp:177-224 (`CheckInternalData`): NCBI does not search a query batch without a
 // valid context, so the sequence file is read by the first batch with one. On a database
 // without its `.psq`, NCBI BLAST+ 2.17.0 reports a first batch of one query of N bases (no

@@ -66,6 +66,19 @@ const PROGRAM: &str = "TBLASTN";
 /// The `# TBLASTN 2.17.0+` line of outfmt 7 (`NStr::ToUpper(m_Program) + " " + version`).
 const PROGRAM_VERSION: &str = "TBLASTN 2.17.0+";
 
+/// Whether `nident` is the only field of the counts' block of `spec`, which reads the rows of some
+/// HSPs (`write_tblastn_tabular`).
+fn nident_alone(spec: &TabularSpec) -> bool {
+    spec.has(TabularField::NumIdentical)
+        && !spec.fields.iter().any(|field| COUNTS_BLOCK.contains(field))
+}
+
+/// Whether a report of `spec` can read the rows of an HSP (`write_tblastn_tabular`: the letters of
+/// its subject): its fields read them, or `nident_alone`.
+pub(super) fn reads_rows(spec: &TabularSpec) -> bool {
+    spec.needs().rows || nident_alone(spec)
+}
+
 /// What the custom tabular reports of a run need beyond `render`'s other inputs, made by the
 /// search before the reports.
 #[derive(Default)]
@@ -90,7 +103,8 @@ pub(super) struct TblastnTabular<'a> {
     pub inputs: &'a TabularInputs,
     /// The queries (their searched letters, which the rows read).
     pub queries: &'a [FastaRecord],
-    /// The letters of the subjects by subject index (`-subject`) or rank (`-db`).
+    /// The letters of the subjects by subject index (`-subject`) or rank (`-db`; their lengths
+    /// alone where `reads_rows` is false).
     pub letters: SubjectLetters<'a>,
     /// The default report's tabular subject ids (`sseqid`, `sacc`, `saccver`), by subject index
     /// or rank (`stage_e_report::tabular_subject_ids`, `ReportedSubjects::tabular_subject_ids`).
@@ -181,7 +195,7 @@ pub(super) fn write_tblastn_tabular(
     );
     let spec = tab.spec;
     let needs = spec.needs();
-    let counts_block = spec.fields.iter().any(|field| COUNTS_BLOCK.contains(field));
+    let nident_alone = nident_alone(spec);
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
     // ```c++
     //        		const CBioseq_Handle& subject_bh =
@@ -387,7 +401,6 @@ pub(super) fn write_tblastn_tabular(
                 // they are given: where the engine's identities are positive and the report's
                 // are 0, the rows are read and `num_ident` is the engine's.
                 let engine_ident = usize::try_from(payload.num_ident).unwrap_or(0);
-                let nident_alone = spec.has(TabularField::NumIdentical) && !counts_block;
                 let rows_read = needs.rows
                     || (nident_alone && engine_ident > 0 && payload.report_num_ident == 0);
                 if rows_read {

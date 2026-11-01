@@ -276,7 +276,7 @@ pub enum Lookup {
     Compressed(XCompressedLookup),
 }
 
-// No NCBI counterpart: buffer reuse only (LOSAT_X_BXLUTPOOL, tblastx/lookup/x_lut_direct.rs): a
+// No NCBI counterpart: buffer reuse only (the pooled build, tblastx/lookup/x_lut_direct.rs): a
 // dropped table's vectors are kept for the next build instead of freed, where the table was built
 // pooled (not in diagnostics mode, whose reference builder makes the tables, nor with
 // LOSAT_X_BXPOOLN1 in a search on one thread) and no panic unwinds.

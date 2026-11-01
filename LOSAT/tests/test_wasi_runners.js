@@ -488,6 +488,7 @@ test("LOSAT_WASI_GUARD_CACHE's index compiles the cached bytes at once and keeps
       assert.equal(result.stdout, expected.stdout, label);
       for (const pattern of patterns) assert.match(result.stderr, pattern, label);
       assert.match(result.stderr, /shared-memory guards: 1 fills, 1 copies/, label);
+      return result;
     };
     const indexOf = (file) => {
       const stat = fs.statSync(file, { bigint: true });
@@ -514,7 +515,12 @@ test("LOSAT_WASI_GUARD_CACHE's index compiles the cached bytes at once and keeps
     const { atime, mtime } = fs.statSync(fixture);
     fs.writeFileSync(fixture, b);
     fs.utimesSync(fixture, atime, mtime);
-    run(fixture, refB, [/guard cache hit: /], "rewritten in place");
+    // The old index (or, where the timestamps are coarse, the same name with the old input's
+    // SHA-256) does not serve the new input: this run takes the entry without the index and then
+    // writes the index of the file as it is now.
+    const rewritten = run(fixture, refB, [/guard cache hit: /], "rewritten in place");
+    assert.doesNotMatch(rewritten.stderr, /guard cache index hit: /, "rewritten in place");
+    assert.ok(fs.existsSync(indexOf(fixture)), "index of the rewritten file");
     run(fixture, refB, [/guard cache index hit: /], "rewritten in place, indexed");
     fs.writeFileSync(indexOf(fixture), "{");
     run(fixture, refB, [/guard cache index not used /, /guard cache hit: /], "index not JSON");
@@ -741,14 +747,19 @@ for (const [fault, message] of [
 ]) {
   test(`fault ${fault} has the same result with LOSAT_WASI_PRESPAWN`, () => {
     // The last run starts the guest after its standby worker waits, so its spawn returns without
-    // the start confirmation (startStandby) where the worker gets that far.
+    // the start confirmation (startStandby): a `ready` event with `waiting: true` shows that path.
     for (const [env, startDelayMs] of [[{ LOSAT_WASI_PRESPAWN: "0" }], [{}], [{ LOSAT_WASI_PRESPAWN: "auto" }],
       [{ LOSAT_WASI_PRESPAWN: "3" }], [{}, 1500]]) {
-      const result = runThreaded(spawner(1), ["-num_threads", "2"], env, { fault, startTimeoutMs: 1000, startDelayMs });
+      const noWait = startDelayMs && (fault === "trap" || fault === "abnormal-exit");
+      const result = runThreaded(spawner(1), ["-num_threads", "2"], noWait ? { ...env, LOSAT_WASI_THREADS_DEBUG: "1" } : env,
+        { fault, startTimeoutMs: 1000, startDelayMs });
       const label = `${fault} ${JSON.stringify(env)} ${startDelayMs ?? 0}`;
       assert.equal(result.signal, "SIGTERM", `${label}\n${result.stderr}`);
       assert.equal(result.stdout, "", label);
       assert.match(result.stderr, message, label);
+      if (noWait) {
+        assert.ok(hostEvents(result.stderr).some((e) => e.event === "ready" && e.waiting && e.tid === 1), label);
+      }
     }
   });
 }

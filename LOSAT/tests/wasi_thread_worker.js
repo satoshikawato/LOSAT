@@ -1,9 +1,9 @@
 "use strict";
 // The thread worker of the threaded WASI host (wasi_thread_host.js), and what a guest thread
 // needs from the host: the WASI context, the imports and the instance on the shared memory. A
-// Node worker loads only this file (and the file table, wasi_files.js), not the host: every
-// worker of a 16-thread command boots at the same time, and what each one loads and compiles
-// adds to the time until the command's threads can start.
+// Node worker loads only this file (and wasi_artifact.js and the file table, wasi_files.js), not
+// the host: every worker of a 16-thread command boots at the same time, and what each one loads
+// and compiles adds to the time until the command's threads can start.
 const { isMainThread, parentPort, workerData } = require("worker_threads");
 const { WASI } = require("wasi");
 const fs = require("fs");
@@ -15,7 +15,8 @@ const DEBUG = process.env.LOSAT_WASI_THREADS_DEBUG === "1";
 
 function debug(message) {
   if (DEBUG) {
-    fs.writeSync(2, `[losat-wasi-threads] ${message}\n`);
+    // A failing diagnostic write must never end a worker or stop the SIGTERM of failWorker.
+    try { fs.writeSync(2, `[losat-wasi-threads] ${message}\n`); } catch { /* diagnostics only */ }
   }
 }
 
@@ -34,14 +35,13 @@ function writeError(err) {
 // this command process from the failing worker after flushing its diagnostic;
 // process.exit() in a Node Worker would terminate only that worker.
 function failWorker(err) {
-  writeError(err);
-  process.kill(process.pid, "SIGTERM");
+  try { writeError(err); } finally { process.kill(process.pid, "SIGTERM"); }
 }
 
 // Control words shared with a thread worker: the start confirmation (every worker); for a
 // worker that waits for its thread (a LOSAT_WASI_PRESPAWN standby worker, or a reactor's
 // worker whose earlier thread returned, LOSAT_WASI_RECYCLE), the start order with the tid and
-// startArg; and for a recycled worker, whether it waits for a thread (SLOT_STATE).
+// startArg; and for a standby or recycled worker, whether it waits for a thread (SLOT_STATE).
 const START_STATE = 0, START_ORDER = 1, START_TID = 2, START_ARG = 3, SLOT_STATE = 4, START_WORDS = 5;
 // SLOT_STATE: a thread runs (or the worker boots for its first thread), the worker waits for a
 // thread, the host gave it one, or its thread returned and it instantiates the module again.

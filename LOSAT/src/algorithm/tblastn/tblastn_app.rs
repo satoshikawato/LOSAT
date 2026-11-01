@@ -223,12 +223,7 @@ impl TblastnArgs {
                 // batch, which the packed stores do not keep (they hold the interval of a
                 // `-subject_loc` and no letters), so a run that writes it reads the records
                 // as the switch's `=0` side does.
-                // Under `-parse_deflines` the reader compares each record's letters
-                // (`believed::scope_clash`).
-                if super::x_subject_store::x_tbn_store()
-                    && archive.is_none()
-                    && !args.parse_deflines
-                {
+                if super::x_subject_store::x_tbn_store() && archive.is_none() {
                     let (records, stores, placements) =
                         super::x_subject_store::x_read_subject_stores(
                             &mut subject_source,

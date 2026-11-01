@@ -7383,7 +7383,7 @@ fn read_cli_subjects(
     let (read_subjects, stores) = {
         let mut warn = |message: &[u8]| std::io::Write::write_all(&mut *diagnostics, message);
         // The archive writes the subjects' letters from the records, not from a packed store.
-        if x_bnstore() && subject_range.is_none() && !keep_deflines && !args.parse_deflines {
+        if x_bnstore() && subject_range.is_none() && !keep_deflines {
             x_read_subject_stores(&mut subject_source, &mut warn)?
         } else {
             (
@@ -7570,9 +7570,7 @@ fn search_cli(
             hit_records: outputs.hits.is_some(),
         }
         .acts();
-    // Under `-parse_deflines` the reader compares each record's letters (`believed::scope_clash`).
-    let x_pack =
-        !args.parse_deflines && x_query_drop::packs(x_drop_rule, x_file_bytes, x_batch_letters);
+    let x_pack = x_query_drop::packs(x_drop_rule, x_file_bytes, x_batch_letters);
     if x_drop_rule && x_query_drop::pack_on() {
         crate::utils::xreach::x_reach!("LOSAT_X_BNQPACK", x_pack);
     }

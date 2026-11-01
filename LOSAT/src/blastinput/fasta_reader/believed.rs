@@ -299,10 +299,14 @@ pub(crate) fn duplicate_id(
         if program == "BLASTN" || role == "subject" {
             if let Some((own, other)) = version_keys(id) {
                 if seen.contains(&other) {
+                    let why = if role == "query" {
+                        "NCBI BLAST+'s BLASTN writes a warning of its scope"
+                    } else {
+                        "NCBI BLAST+ shows them as one sequence"
+                    };
                     return Some(anyhow::anyhow!(
                         "two {role} records have the accession of {} with and without a version \
-                         under -parse_deflines (NCBI BLAST+'s BLASTN writes a warning of its \
-                         scope); this is not supported by LOSAT's BLASTN",
+                         under -parse_deflines ({why}); this is not supported by LOSAT's {program}",
                         fasta(id)
                     ));
                 }
@@ -314,16 +318,19 @@ pub(crate) fn duplicate_id(
     if cfg!(test) {
         return None;
     }
-    let (own, other) = if role == "query" {
-        (&QUERY_KEYS, &SUBJECT_KEYS)
-    } else {
-        (&SUBJECT_KEYS, &QUERY_KEYS)
+    // The two sets are always locked in one order (queries, then subjects).
+    let lock = |keys: &'static OnceLock<Mutex<HashSet<u64>>>| {
+        keys.get_or_init(Mutex::default)
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
     };
-    let other = other.get_or_init(Mutex::default);
-    let other = other.lock().unwrap_or_else(|error| error.into_inner());
-    let own = own.get_or_init(Mutex::default);
-    let mut own = own.lock().unwrap_or_else(|error| error.into_inner());
-    shared_with_other_role(ids, &mut own, &other, program)
+    let mut queries = lock(&QUERY_KEYS);
+    let mut subjects = lock(&SUBJECT_KEYS);
+    if role == "query" {
+        shared_with_other_role(ids, &mut queries, &subjects, program)
+    } else {
+        shared_with_other_role(ids, &mut subjects, &queries, program)
+    }
 }
 
 /// LOSAT's refusal of ids `ids` of a record when a record of the other role has one of them

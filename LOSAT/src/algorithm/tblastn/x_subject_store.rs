@@ -70,6 +70,18 @@ impl<'a> SubjectLetters<'a> {
         (0..self.count()).map(|oid| self.length(oid))
     }
 
+    /// The number of letters of the longest subject and of all the subjects (saturated): a `-db`
+    /// database does not walk its lengths for them, once per search or per query batch.
+    pub(super) fn longest_and_total(&self) -> (usize, usize) {
+        if let Self::Stream(stream) = self {
+            let (longest, total) = stream.longest_and_total();
+            return (longest, usize::try_from(total).unwrap_or(usize::MAX));
+        }
+        self.lengths().fold((0, 0), |(longest, total), length| {
+            (usize::max(longest, length), total.saturating_add(length))
+        })
+    }
+
     /// `f` of the letters of subject `oid`, made in a buffer that the thread keeps between
     /// subjects (a buffer above `X_KEPT_BUFFER` is freed after use, so that a thread does not keep
     /// a chromosome's letters). Re-entrant: a nested call (a pool thread that takes another

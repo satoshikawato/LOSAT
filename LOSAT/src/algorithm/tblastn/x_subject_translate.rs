@@ -1009,7 +1009,7 @@ pub(super) fn x_packed_subject_plan(
 }
 
 /// [`x_packed_subject_plan`] of a database sequence's packed
-/// bytes and length, read in a block of the sequence file (`XDbStream::plan_with`), without its
+/// bytes and length, read in a block of the sequence file (`XDbStream::with_block`), without its
 /// store: the plan reads nothing else of a packed subject.
 pub(super) fn x_packed_bytes_plan(
     packed: &[u8],

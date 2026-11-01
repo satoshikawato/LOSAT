@@ -537,8 +537,8 @@ fn x_searched_side_by_side(subjects: SubjectLetters<'_>, batches: usize, threads
         if threads < 2 {
             return false;
         }
-        let fits = super::search_seed::XSubjectSide::all_fit(subjects.lengths());
-        let bases = subjects.lengths().fold(0usize, usize::saturating_add);
+        let (_, bases) = subjects.longest_and_total();
+        let fits = super::search_seed::XSubjectSide::all_fit(bases, subjects.count());
         let side_by_side = x_side_by_side_batches(bases, subjects.count(), batches, threads, fits);
         side_by_side > 0
             || x_own_pool_batches(batches - side_by_side, bases, subjects.count(), threads) > 0
@@ -679,7 +679,10 @@ pub(super) fn x_search_batches<'p>(
     let x_ssided_layout = ranges.len() >= super::search_seed::XSubjectSide::KEEP_FROM_BATCHES;
     let x_keep = ranges.len() < super::search_seed::XSubjectSide::KEEP_FROM_BATCHES
         || !super::search_seed::XSubjectSide::keep_few()
-        || super::search_seed::XSubjectSide::kept_within_threads(subjects.lengths(), threads)
+        || {
+            let (longest, total) = subjects.longest_and_total();
+            super::search_seed::XSubjectSide::kept_within_threads(longest, total, threads)
+        }
         || x_searched_side_by_side(subjects, ranges.len(), threads);
     // The plans are dropped (the switch's own path) or kept as before.
     if ranges.len() >= super::search_seed::XSubjectSide::KEEP_FROM_BATCHES
@@ -744,8 +747,8 @@ pub(super) fn x_search_batches<'p>(
         // would fit and at least one batch per thread, the batches are searched side by side, each
         // as the one-thread search, and the reports are returned in batch order.
         if pool.enabled() {
-            let fits = super::search_seed::XSubjectSide::all_fit(subjects.lengths());
-            let bases = subjects.lengths().fold(0usize, usize::saturating_add);
+            let (_, bases) = subjects.longest_and_total();
+            let fits = super::search_seed::XSubjectSide::all_fit(bases, subjects.count());
             let side_by_side = x_side_by_side_batches(
                 bases,
                 subjects.count(),
@@ -6299,7 +6302,13 @@ mod tests {
             })
             .collect();
         let lengths = || subjects.iter().map(Vec::len);
-        assert!(!super::super::search_seed::XSubjectSide::kept_within_threads(lengths(), 2));
+        assert!(
+            !super::super::search_seed::XSubjectSide::kept_within_threads(
+                lengths().max().unwrap(),
+                lengths().sum(),
+                2
+            )
+        );
         assert!(
             x_searched_side_by_side(SubjectLetters::Records(&subject_slices(&subjects)), 4, 2)
                 || !x_tbn_batch_rule()

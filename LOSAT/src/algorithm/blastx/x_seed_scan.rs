@@ -203,6 +203,17 @@ impl XKeptPresence {
     }
 }
 
+/// PROBE (line SF S3 s4): `f` with the per-thread offset pairs, `room` of them and eight more.
+pub(super) fn x_with_pairs<R>(room: usize, f: impl FnOnce(&mut [OffsetPair]) -> R) -> R {
+    X_PAIRS.with(|buffer| {
+        let mut buffer = buffer.borrow_mut();
+        if buffer.len() < room + 8 {
+            buffer.resize(room + 8, OffsetPair::default());
+        }
+        f(&mut buffer[..room + 8])
+    })
+}
+
 impl Default for XKeptPresence {
     fn default() -> Self {
         Self::new()

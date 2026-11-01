@@ -1699,6 +1699,124 @@ unsafe fn x_scan_cells_avx2_cross_byte<const SHORT: bool, const DEFER: bool, con
     X_CROSS_STAGE.set(stage);
 }
 
+/// PROBE (line SF S3 s4): the direct loop's scan on presence bytes and its offset pairs, the pairs
+/// tested by the cross-cell drain.
+#[cfg(target_arch = "x86_64")]
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+pub(crate) fn x_scan_pairs_cross<F>(
+    defer: bool,
+    lookup: &BlastAaLookupTable,
+    presence: &[u8],
+    scanned: &[u8],
+    pairs: &mut [crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+    array_size: i32,
+    range: &mut [i32; 3],
+    diag_array: &mut [DiagStruct],
+    diag_mask: i32,
+    diag_offset: i32,
+    window: i32,
+    word_size: i32,
+    mut candidate: F,
+) -> [u64; 4]
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let test = XDiagTest {
+        diag_offset,
+        window,
+        word_size,
+        prefetch: X_PREFETCH_DISTANCE,
+    };
+    let table = &mut XDiagTable::new(diag_array, diag_mask);
+    assert!(x_cross_available());
+    assert!((0..=i64::from(table.mask) + 1).contains(&i64::from(lookup.query_length)));
+    let mut counts = XCrossCounts::default();
+    // SAFETY: as x_scan_cells_cross; the caller's `pairs` holds eight entries past every count.
+    unsafe {
+        if defer {
+            x_pairs_cross_avx2::<true, X_CROSS_CHUNK, F>(
+                lookup, presence, scanned, pairs, array_size, range, table, test, &mut candidate,
+                &mut counts,
+            );
+        } else {
+            x_pairs_cross_avx2::<false, X_CROSS_CHUNK, F>(
+                lookup, presence, scanned, pairs, array_size, range, table, test, &mut candidate,
+                &mut counts,
+            );
+        }
+    }
+    let XDiagCounts {
+        cells,
+        hits,
+        candidates,
+    } = counts.diag;
+    [cells, hits, candidates, counts.splits]
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,popcnt")]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn x_pairs_cross_avx2<const DEFER: bool, const CHUNK: usize, F>(
+    lookup: &BlastAaLookupTable,
+    presence: &[u8],
+    scanned: &[u8],
+    pairs: &mut [crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+    array_size: i32,
+    range: &mut [i32; 3],
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    counts: &mut XCrossCounts,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    use crate::algorithm::tblastn::x_scan_byte::{x_scan_one_range_byte, XScanByte};
+    use std::arch::x86_64::*;
+    let mut stage = X_CROSS_STAGE.take();
+    {
+        let cross = XCross::<CHUNK>::new::<DEFER>(&mut stage);
+        let mut staged = 0usize;
+        let mask = _mm256_set1_epi32(table.mask);
+        while range[1] <= range[2] {
+            let n = x_scan_one_range_byte(
+                XScanByte::On { avx2: true },
+                lookup,
+                presence,
+                scanned,
+                pairs,
+                array_size,
+                range,
+            ) as usize;
+            counts.diag.hits += n as u64;
+            let mut i = 0usize;
+            while i < n {
+                // Eight pairs from pair i (those past `n` are stale and never read as hits).
+                let a = _mm256_loadu_ps(pairs.as_ptr().add(i).cast());
+                let b = _mm256_loadu_ps(pairs.as_ptr().add(i + 4).cast());
+                let q = _mm256_castps_si256(_mm256_shuffle_ps::<0x88>(a, b));
+                let s = _mm256_castps_si256(_mm256_shuffle_ps::<0xDD>(a, b));
+                let q = _mm256_permute4x64_epi64::<0xD8>(q);
+                let s = _mm256_permute4x64_epi64::<0xD8>(s);
+                let coords = _mm256_and_si256(_mm256_sub_epi32(q, s), mask);
+                _mm256_storeu_si256(cross.coord().add(staged).cast(), coords);
+                _mm256_storeu_si256(cross.subject().add(staged).cast(), s);
+                let k = (n - i).min(X_DIAG_LANES);
+                staged += k;
+                i += k;
+                if staged >= CHUNK {
+                    staged = x_cross_drain::<DEFER, CHUNK, F>(
+                        cross, staged, false, table, test, candidate, counts,
+                    );
+                }
+            }
+        }
+        x_cross_drain::<DEFER, CHUNK, F>(cross, staged, true, table, test, candidate, counts);
+    }
+    X_CROSS_STAGE.set(stage);
+}
+
 /// PROBE: x_cross_cell for a cell of at most eight hits: one register.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,popcnt")]

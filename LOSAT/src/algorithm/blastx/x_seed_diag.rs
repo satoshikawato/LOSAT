@@ -692,6 +692,38 @@ where
     #[cfg(target_arch = "x86_64")]
     if let XCellTest::Cross { defer } = mode {
         let probe = x_probe_byte();
+        if probe == 3 {
+            if let Some(presence) = kept.x_bytes_of(table) {
+                // Lookup::scan's set-up, as x_word_finder_direct_with.
+                let mut range = [0, 0, length as i32 - table.word_length];
+                if range[2] < range[1] {
+                    range[2] = range[1];
+                }
+                let mut pad = Vec::new();
+                let scanned = x_scan_bytes(subject, range[2], table.word_length, &mut pad);
+                let capacity = 4096 + table.longest_chain as usize;
+                return super::x_seed_scan::x_with_pairs(
+                    capacity + crate::algorithm::tblastn::x_scan_byte::X_SCAN_BYTE_SLACK,
+                    |pairs| {
+                        crate::algorithm::blastp::x_seed_fused::x_scan_pairs_cross(
+                            defer,
+                            table,
+                            presence,
+                            scanned,
+                            pairs,
+                            capacity as i32,
+                            &mut range,
+                            entries,
+                            mask,
+                            offset,
+                            window,
+                            word,
+                            candidate,
+                        )
+                    },
+                );
+            }
+        }
         if probe != 0 {
             if let Some(presence) = kept.x_bytes_of(table) {
                 return crate::algorithm::blastp::x_seed_fused::x_scan_two_hit_cross_byte(

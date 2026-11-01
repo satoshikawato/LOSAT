@@ -168,6 +168,11 @@ mod x_bnstream;
 #[path = "x_lut_drop.rs"]
 mod x_lut_drop;
 
+// EXPERIMENT (LOSAT_X_BNHITCUT): at two threads or more, a `-db` search's thread drops the HSPs
+// that the query's hit list would refuse, before they wait for the owner of the window.
+#[path = "x_hit_cut.rs"]
+mod x_hit_cut;
+
 // EXPERIMENT (LOSAT_X_BNQPACK): the query records read before the search held packed in a store,
 // each batch's letters made again when the loop takes it and dropped once the batch has encoded
 // them, where no report reads them.
@@ -4043,7 +4048,7 @@ fn x_bnhitgroup() -> bool {
 /// The preliminary hit lists of a batch filled one subject at a time, in OID order
 /// (`collect_prelim_hit_lists`), so that only the HSP lists the hit lists keep stay in memory
 /// instead of those of every subject.
-struct PrelimHitCollector {
+struct PrelimHitCollector<'a> {
     hit_lists: PrelimHitLists,
     prelim_hitlist_size: usize,
     /// LOSAT_X_BNHITGROUP: one empty list per query from the first subject with an HSP, and the
@@ -4052,9 +4057,11 @@ struct PrelimHitCollector {
     x_touched: Vec<u32>,
     /// LOSAT_X_BNHITGROUP: the HSPs of each query in the subject being added (0 between calls).
     x_counts: Vec<usize>,
+    /// LOSAT_X_BNHITCUT: where the worst list of each full hit list is published.
+    x_cuts: Option<&'a x_hit_cut::HitCuts>,
 }
 
-impl PrelimHitCollector {
+impl PrelimHitCollector<'_> {
     fn new(num_queries: usize, prelim_hitlist_size: usize) -> Self {
         let mut hit_lists: PrelimHitLists = Vec::with_capacity(num_queries);
         hit_lists.resize_with(num_queries, || None);
@@ -4064,6 +4071,7 @@ impl PrelimHitCollector {
             x_slots: Vec::new(),
             x_touched: Vec::new(),
             x_counts: Vec::new(),
+            x_cuts: None,
         }
     }
 
@@ -4128,13 +4136,17 @@ impl PrelimHitCollector {
 
     fn update(&mut self, query: usize, oid: usize, hsps: Vec<PrelimHit>) {
         let prelim_hitlist_size = self.prelim_hitlist_size;
-        self.hit_lists[query]
-            .get_or_insert_with(|| HitList::new(prelim_hitlist_size))
-            .update(PrelimHspList {
-                oid: oid as u32,
-                hsps,
-                best_evalue: 0.0,
-            });
+        let hit_list = self.hit_lists[query].get_or_insert_with(|| HitList::new(prelim_hitlist_size));
+        hit_list.update(PrelimHspList {
+            oid: oid as u32,
+            hsps,
+            best_evalue: 0.0,
+        });
+        if let Some(cuts) = self.x_cuts {
+            if hit_list.heapified {
+                cuts.publish(query, hit_list.hsplist_array[0].best_evalue);
+            }
+        }
     }
 }
 
@@ -4338,6 +4350,8 @@ struct SubjectScratch {
     // }
     // ```
     offset_pairs: Vec<OffsetPair>,
+    // No NCBI counterpart (LOSAT_X_BNHITCUT): a bit per query of the batch, `HitCuts::cut`'s.
+    x_cut_seen: Vec<u64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:146-170
     // ```c
     // Blast_IntervalTreeInit(Int4 q_start, Int4 q_end,
@@ -4433,6 +4447,7 @@ impl SubjectScratch {
                 };
                 offset_array_size
             ],
+            x_cut_seen: Vec::new(),
             // No NCBI counterpart: every user sets the subject's ranges first (`reset_with_bounds`).
             x_tree: BlastIntervalTree::new(0, 1, 0, 1),
         }
@@ -19130,7 +19145,11 @@ fn search_query_batch<const UNGAPPED: bool>(
             SubjectSource::Database(database) => {
                 // The subjects come one at a time in the order of their ordinal ids
                 // (`database::search_blocks`), as the subject set's come in OID order.
+                let x_cuts = (!UNGAPPED && use_parallel && x_hit_cut::x_bn_hit_cut())
+                    .then(|| x_hit_cut::HitCuts::new(queries_ref.len()));
+                crate::utils::xreach::x_reach!("LOSAT_X_BNHITCUT", x_cuts.is_some());
                 let mut collector = PrelimHitCollector::new(queries_ref.len(), prelim_hitlist_size);
+                collector.x_cuts = x_cuts.as_ref();
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
                 // ```c
                 //     int status = m_PrelimSearch->CheckInternalData();
@@ -19188,6 +19207,9 @@ fn search_query_batch<const UNGAPPED: bool>(
                                     &mut subject_hits,
                                     &mut prelim_hits,
                                 );
+                                if let Some(cuts) = x_cuts.as_ref() {
+                                    cuts.cut(&mut prelim_hits, &mut subject_scratch.x_cut_seen);
+                                }
                                 (!prelim_hits.is_empty()).then_some(prelim_hits)
                             },
                             &mut add,
@@ -20588,6 +20610,61 @@ mod tests {
                 assert_eq!(a.is_some(), b.is_some());
             }
         }
+    }
+
+    // `LOSAT_X_BNHITCUT`: each subject's HSPs cut with the values published when it was searched, up
+    // to `window` subjects before they reach the collector, leave every hit list as it is without
+    // the cut (ties of e-value and of score, and e-values below NCBI's epsilon, which compare
+    // equal).
+    #[test]
+    fn hit_cuts_leave_the_hit_lists_as_they_are() {
+        const EVALUES: [f64; 7] = [0.0, 1e-200, 1e-190, 1e-50, 1e-10, 1.0, 5.0];
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |below: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % below
+        };
+        let mut dropped = 0usize;
+        for _ in 0..300 {
+            let num_queries = 1 + next(70) as usize;
+            let size = 1 + next(6) as usize;
+            let window = next(5) as usize;
+            let cuts = x_hit_cut::HitCuts::new(num_queries);
+            let mut plain = PrelimHitCollector::new(num_queries, size);
+            let mut cut = PrelimHitCollector::new(num_queries, size);
+            cut.x_cuts = Some(&cuts);
+            let mut seen = Vec::new();
+            let mut waiting = std::collections::VecDeque::new();
+            for oid in 0..60 {
+                let mut hits = Vec::new();
+                for _ in 0..next(12) {
+                    let score = 10 + next(3) as i32;
+                    hits.push(PrelimHit {
+                        prelim_evalue: EVALUES[next(EVALUES.len() as u64) as usize],
+                        ..query_prelim_hit(next(num_queries as u64) as u32, score)
+                    });
+                }
+                plain.add(oid, hits.clone());
+                let before = hits.len();
+                cuts.cut(&mut hits, &mut seen);
+                dropped += before - hits.len();
+                assert!(seen.iter().all(|&bits| bits == 0));
+                waiting.push_back((oid, hits));
+                while waiting.len() > window {
+                    let (oid, hits) = waiting.pop_front().unwrap();
+                    cut.add(oid, hits);
+                }
+            }
+            for (oid, hits) in waiting {
+                cut.add(oid, hits);
+            }
+            for (a, b) in plain.hit_lists.iter().zip(&cut.hit_lists) {
+                assert_eq!(a.as_ref().map(prelim_scores), b.as_ref().map(prelim_scores));
+            }
+        }
+        assert!(dropped > 1000, "the cut dropped only {dropped} HSPs");
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2163-2210

@@ -1,0 +1,56 @@
+qp1	ref|XP_000001.1|	ref|XP_000001.1|;sp|P99999.2|TEST_HUMAN;gb|AAA00001.1|	0	0;0;0	XP_000001	XP_000001;P99999;AAA00001	XP_000001.1	alpha protein [Homo sapiens]	alpha protein [Homo sapiens]<>alpha-like protein<>hypothetical protein, partial	9606	9606;10090
+qp1	gi|9002|emb|CAA90002.1|	ref|XP_900001.1|;gi|9002|emb|CAA90002.1|;sp|P90003.1|NAME3_HUMAN	9002	0;9002;0	CAA90002	XP_900001;CAA90002;P90003	CAA90002.1	first defline without a gi	first defline without a gi<>second defline with a gi<>third defline swissprot	N/A	0
+qp1	gi|123456|ref|NP_000002.1|	gi|123456|ref|NP_000002.1|	123456	123456	NP_000002	NP_000002	NP_000002.1	gi plus ref protein	gi plus ref protein	10116	10116
+qp1	ref|XP_910001.1|	ref|XP_910001.1|;ref|XP_910002.1|;ref|XP_910003.1|;ref|XP_910004.1|;ref|XP_910005.1|;ref|XP_910006.1|;ref|XP_910007.1|;ref|XP_910008.1|;ref|XP_910009.1|;ref|XP_910010.1|;ref|XP_910011.1|;ref|XP_910012.1|	0	0;0;0;0;0;0;0;0;0;0;0;0	XP_910001	XP_910001;XP_910002;XP_910003;XP_910004;XP_910005;XP_910006;XP_910007;XP_910008;XP_910009;XP_910010;XP_910011;XP_910012	XP_910001.1	long title number 01 with many words so that it is longer than sixty characters in total	long title number 01 with many words so that it is longer than sixty characters in total<>long title number 02 with many words so that it is longer than sixty characters in total<>long title number 03 with many words so that it is longer than sixty characters in total<>long title number 04 with many words so that it is longer than sixty characters in total<>long title number 05 with many words so that it is longer than sixty characters in total<>long title number 06 with many words so that it is longer than sixty characters in total<>long title number 07 with many words so that it is longer than sixty characters in total<>long title number 08 with many words so that it is longer than sixty characters in total<>long title number 09 with many words so that it is longer than sixty characters in total<>long title number 10 with many words so that it is longer than sixty characters in total<>long title number 11 with many words so that it is longer than sixty characters in total<>long title number 12 with many words so that it is longer than sixty characters in total	N/A	0
+qp1	sp|Q00003|ABC_MOUSE	sp|Q00003|ABC_MOUSE	0	0	Q00003	Q00003	Q00003	swissprot without version	swissprot without version	N/A	0
+qp1	emb|CAA00005.1|	emb|CAA00005.1|	0	0	CAA00005	CAA00005	CAA00005.1	emb protein	emb protein	N/A	0
+qp1	ref|XP_920001.1|	ref|XP_920001.1|;emb|CAA92002.1|;dbj|BAA92003.1|	0	0;0;0	XP_920001	XP_920001;CAA92002;BAA92003	XP_920001.1	has a title	has a title<>N/A<>third has a title	N/A	0
+qp1	tr|A0A000|A0A000_YEAST	tr|A0A000|A0A000_YEAST	0	0	A0A000	A0A000	A0A000	trembl entry	trembl entry	N/A	0
+qp1	pdb|1ABC|A	pdb|1ABC|A	0	0	1ABC_A	1ABC_A	1ABC_A	Chain A, test structure	Chain A, test structure	N/A	0
+qp1	dbj|BAA00006.1|	dbj|BAA00006.1|	0	0	BAA00006	BAA00006	BAA00006.1	dbj protein	dbj protein	N/A	0
+qp1	pir||S00007	pir||S00007	0	0	S00007	S00007	S00007	pir protein	pir protein	N/A	0
+qp1	prf||0008123A	prf||0008123A	0	0	0008123A	0008123A	0008123A	prf protein	prf protein	N/A	0
+qp1	myprot9	myprot9	0	0	myprot9	myprot9	myprot9	local id protein	local id protein	N/A	0
+qp1	gnl|mydb|prot10	gnl|mydb|prot10	0	0	mydb:prot10	mydb:prot10	mydb:prot10	general id protein	general id protein	N/A	0
+qp1	ref|XP_000011.2|	ref|XP_000011.2|	0	0	XP_000011	XP_000011	XP_000011.2	bare refseq accession	bare refseq accession	N/A	0
+qp1	sp|P00012|	sp|P00012|	0	0	P00012	P00012	P00012	bare uniprot-like accession	bare uniprot-like accession	N/A	0
+qp1	myprot_13	myprot_13	0	0	myprot_13	myprot_13	myprot_13	bare non-accession word	bare non-accession word	N/A	0
+qp1	gb|AAA00017.1|LOCUS17	gb|AAA00017.1|LOCUS17	0	0	AAA00017	AAA00017	AAA00017.1	gb with a locus name	gb with a locus name	N/A	0
+qp1	gi|1818|gb|AAA00018.1|	gi|1818|gb|AAA00018.1|;gi|1819|emb|CAA00019.1|;gi|1820|ref|XP_000020.1|	1818	1818;1819;1820	AAA00018	AAA00018;CAA00019;XP_000020	AAA00018.1	N/A	N/A<>second defline<>third defline	562	562;9606
+qp1	tpg|DAA00016.1|	tpg|DAA00016.1|	0	0	DAA00016	DAA00016	DAA00016.1	third-party protein	third-party protein	N/A	0
+qp1	sp|P00019.3|NAME_HUMAN	sp|P00019.3|NAME_HUMAN	0	0	P00019	P00019	P00019.3	with taxid	with taxid	9606	9606
+qp1	unnamed	unnamed;tpg|DAA10016.1|	0	0;0	unnamed	unnamed;DAA10016	unnamed	N/A	N/A<>tpa second	N/A	0
+qp1	pdb|5ABC|D	pdb|5ABC|D;ref|XP_100015.1|	0	0;0	5ABC_D	5ABC_D;XP_100015	5ABC_D	N/A	N/A<>second	N/A	0
+qp1	ref|WP_100014.1|	ref|WP_100014.1|	0	0	WP_100014	WP_100014	WP_100014.1	N/A	N/A	N/A	0
+qp1	ref|NC_100013.1|	ref|NC_100013.1|	0	0	NC_100013	NC_100013	NC_100013.1	N/A	N/A	N/A	0
+qp1	tpe|BK100012.1|	tpe|BK100012.1|	0	0	BK100012	BK100012	BK100012.1	tpe titled	tpe titled	N/A	0
+qp1	pdb|4ABC| 	pdb|4ABC| ;pdb|4ABC|AA	0	0;0	4ABC	4ABC;4ABC_AA	4ABC	no chain four	no chain four<>two chain four	N/A	0
+qp1	unnamed	unnamed	0	0	unnamed	unnamed	unnamed	N/A	N/A	N/A	0
+qp1	pdb|3ABC|C	pdb|3ABC|C	0	0	3ABC_C	3ABC_C	3ABC_C	N/A	N/A	N/A	0
+qp1	tpg|DAA10008.1|	tpg|DAA10008.1|	0	0	DAA10008	DAA10008	DAA10008.1	tpa with subject	tpa with subject	N/A	0
+qp1	subject	subject	0	0	subject	subject	subject	subject seven title	subject seven title	N/A	0
+qp1	ref|NP_100006.1|	ref|NP_100006.1|	0	0	NP_100006	NP_100006	NP_100006.1	N/A	N/A	N/A	0
+qp1	pat|US|7654321|3	pat|US|7654321|3	0	0	US7654321_3	US7654321_3	US7654321_3	N/A	N/A	N/A	0
+qp1	pdb|2XYY| 	pdb|2XYY| 	0	0	2XYY	2XYY	2XYY	N/A	N/A	N/A	0
+qp1	pdb|2XYZ|B	pdb|2XYZ|B	0	0	2XYZ_B	2XYZ_B	2XYZ_B	N/A	N/A	N/A	0
+qp1	tpg|DAA10002.1|	tpg|DAA10002.1|	0	0	DAA10002	DAA10002	DAA10002.1	N/A	N/A	N/A	0
+qp1	tpg|DAA10001.1|	tpg|DAA10001.1|	0	0	DAA10001	DAA10001	DAA10001.1	tpa titled protein	tpa titled protein	N/A	0
+qp1	sp|P11111.1|ONE_HUMAN	sp|P11111.1|ONE_HUMAN;titled	0	0;0	P11111	P11111;titled	P11111.1	titled first	titled first<>second line	N/A	0
+qp1	unnamed	unnamed	0	0	unnamed	unnamed	unnamed	N/A	N/A	N/A	0
+qp1	subject	subject	0	0	subject	subject	subject	subject seven	subject seven	N/A	0
+qp1	pat|EP|0238993|7	pat|EP|0238993|7	0	0	EP0238993_7	EP0238993_7	EP0238993_7	pre-grant patent	pre-grant patent	N/A	0
+qp1	prf|ABC|DEF	prf|ABC|DEF	0	0	ABC	ABC	ABC	prf two fields	prf two fields	N/A	0
+qp1	pat|EP|0123456A1|7	pat|EP|0123456A1|7	0	0	EP0123456A1_7	EP0123456A1_7	EP0123456A1_7	patent with letters	patent with letters	N/A	0
+qp1	pat|US|RE33188|1	pat|US|RE33188|1	0	0	USRE33188_1	USRE33188_1	USRE33188_1	patent reissue	patent reissue	N/A	0
+qp1	gnl|ti|123	gnl|ti|123	0	0	ti:123	ti:123	ti:123	trace id	trace id	N/A	0
+qp1	long1	long1	0	0	long1	long1	long1	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	N/A	0
+qp1	gi|3000000000|gb|AAA00100.1|	gi|3000000000|gb|AAA00100.1|	3000000000	3000000000	AAA00100	AAA00100	AAA00100.1	big gi	big gi	N/A	0
+qp1	bbm|123	bbm|123	0	0	123	123	123	gibbmt	gibbmt	N/A	0
+qp1	gpp|GPP123|	gpp|GPP123|	0	0	GPP123	GPP123	GPP123	genome pipeline	genome pipeline	N/A	0
+qp1	tpd|BK000013.1|	tpd|BK000013.1|	0	0	BK000013	BK000013	BK000013.1	third party ddbj	third party ddbj	N/A	0
+qp1	tpe|BK000012.1|	tpe|BK000012.1|	0	0	BK000012	BK000012	BK000012.1	third party embl	third party embl	N/A	0
+qp2	gnl|mydb|prot10	gnl|mydb|prot10	0	0	mydb:prot10	mydb:prot10	mydb:prot10	general id protein	general id protein	N/A	0
+qp2	gnl|mydb|prot10	gnl|mydb|prot10	0	0	mydb:prot10	mydb:prot10	mydb:prot10	general id protein	general id protein	N/A	0
+qp2	pir||S00007	pir||S00007	0	0	S00007	S00007	S00007	pir protein	pir protein	N/A	0
+qp2	sp|P00012|	sp|P00012|	0	0	P00012	P00012	P00012	bare uniprot-like accession	bare uniprot-like accession	N/A	0
+qp2	sp|P00019.3|NAME_HUMAN	sp|P00019.3|NAME_HUMAN	0	0	P00019	P00019	P00019.3	with taxid	with taxid	9606	9606

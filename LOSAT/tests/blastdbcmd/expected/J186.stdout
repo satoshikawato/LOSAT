@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "pm12",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "prot_ids",
+  "number-of-letters": 2603,
+  "number-of-sequences": 19,
+  "last-updated": "2026-10-29T12:13:00",
+  "number-of-volumes": 1,
+  "bytes-total": 5888,
+  "bytes-to-cache": 2847,
+  "files": [
+    "pm12.phr",
+    "pm12.pin",
+    "pm12.pjs",
+    "pm12.pnd",
+    "pm12.pni",
+    "pm12.pog",
+    "pm12.psd",
+    "pm12.psi",
+    "pm12.psq"
+  ]
+}

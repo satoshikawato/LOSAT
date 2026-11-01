@@ -1,0 +1,104 @@
+Error: [blastdbcmd] Entry not found: NP_000002.2
+Error: [blastdbcmd] Skipped NP_000002.2
+Error: [blastdbcmd] Entry not found: np_000002.2
+Error: [blastdbcmd] Skipped np_000002.2
+Error: [blastdbcmd] Entry not found: NP_000002.1234
+Error: [blastdbcmd] Skipped NP_000002.1234
+Error: [blastdbcmd] Entry not found: NP_000002.a
+Error: [blastdbcmd] Skipped NP_000002.a
+Error: [blastdbcmd] Entry not found: NP_000002.
+Error: [blastdbcmd] Skipped NP_000002.
+Error: [blastdbcmd] Entry not found: NP_000002.1.1
+Error: [blastdbcmd] Skipped NP_000002.1.1
+Error: [blastdbcmd] Entry not found: .1
+Error: [blastdbcmd] Skipped .1
+Error: [blastdbcmd] Entry not found: ref|NP_000002.2|
+Error: [blastdbcmd] Skipped ref|NP_000002.2|
+Error: [blastdbcmd] Entry not found: ref|np_000002.2|
+Error: [blastdbcmd] Skipped ref|np_000002.2|
+Error: [blastdbcmd] Entry not found: sp|P99999.3|
+Error: [blastdbcmd] Skipped sp|P99999.3|
+Error: [blastdbcmd] Entry not found: sp|P99999.3|TEST_HUMAN
+Error: [blastdbcmd] Skipped sp|P99999.3|TEST_HUMAN
+Error: [blastdbcmd] Entry not found: P99999.3
+Error: [blastdbcmd] Skipped P99999.3
+Error: [blastdbcmd] Entry not found: gb|AAA00017.9|LOCUS17
+Error: [blastdbcmd] Skipped gb|AAA00017.9|LOCUS17
+Error: [blastdbcmd] Entry not found: AAA00017.2
+Error: [blastdbcmd] Skipped AAA00017.2
+Error: [blastdbcmd] Entry not found: mydb:prot10
+Error: [blastdbcmd] Skipped mydb:prot10
+Error: [blastdbcmd] Entry not found: MYDB:PROT10
+Error: [blastdbcmd] Skipped MYDB:PROT10
+Error: [blastdbcmd] Entry not found: gnl|mydb|10
+Error: [blastdbcmd] Skipped gnl|mydb|10
+Error: [blastdbcmd] Entry not found: CDD:123
+Error: [blastdbcmd] Skipped CDD:123
+Error: [blastdbcmd] Entry not found: cdd:123
+Error: [blastdbcmd] Skipped cdd:123
+Error: [blastdbcmd] Entry not found: gnl|CDD|123
+Error: [blastdbcmd] Skipped gnl|CDD|123
+Error: [blastdbcmd] Entry not found: SRA:1
+Error: [blastdbcmd] Skipped SRA:1
+Error: [blastdbcmd] Entry not found: TSA:1
+Error: [blastdbcmd] Skipped TSA:1
+Error: [blastdbcmd] Entry not found: GNOMON:5
+Error: [blastdbcmd] Skipped GNOMON:5
+Error: [blastdbcmd] Entry not found: gnl|GNOMON|5
+Error: [blastdbcmd] Skipped gnl|GNOMON|5
+Error: [blastdbcmd] Entry not found: UNKNOWN:5
+Error: [blastdbcmd] Skipped UNKNOWN:5
+Error: [blastdbcmd] Entry not found: gi|0
+Error: [blastdbcmd] Skipped gi|0
+Error: [blastdbcmd] Entry not found: gnl|PIG|5
+Error: [blastdbcmd] Skipped gnl|PIG|5
+Error: [blastdbcmd] Entry not found: gnl|pig|5
+Error: [blastdbcmd] Skipped gnl|pig|5
+Error: [blastdbcmd] Entry not found: gnl|ti|5
+Error: [blastdbcmd] Skipped gnl|ti|5
+Error: [blastdbcmd] Entry not found: gnl|TI|5
+Error: [blastdbcmd] Skipped gnl|TI|5
+Error: [blastdbcmd] Entry not found: lcl|3
+Error: [blastdbcmd] Skipped lcl|3
+Error: [blastdbcmd] Entry not found: pdb|1ABC|
+Error: [blastdbcmd] Skipped pdb|1ABC|
+Error: [blastdbcmd] Entry not found: pdb|1ABC
+Error: [blastdbcmd] Skipped pdb|1ABC
+Error: [blastdbcmd] Entry not found: 1ABCA
+Error: [blastdbcmd] Skipped 1ABCA
+Error: [blastdbcmd] Entry not found: 1abca
+Error: [blastdbcmd] Skipped 1abca
+Error: [blastdbcmd] Entry not found: 1ABC_
+Error: [blastdbcmd] Skipped 1ABC_
+Error: [blastdbcmd] Entry not found: 1ABC_AA
+Error: [blastdbcmd] Skipped 1ABC_AA
+Error: [blastdbcmd] Entry not found: _
+Error: [blastdbcmd] Skipped _
+Error: [blastdbcmd] Entry not found: .
+Error: [blastdbcmd] Skipped .
+Error: [blastdbcmd] Entry not found: -
+Error: [blastdbcmd] Skipped -
+Error: [blastdbcmd] Entry not found: +
+Error: [blastdbcmd] Skipped +
+Error: [blastdbcmd] Entry not found: :
+Error: [blastdbcmd] Skipped :
+Error: [blastdbcmd] Entry not found: ;
+Error: [blastdbcmd] Skipped ;
+Error: [blastdbcmd] Entry not found: 0
+Error: [blastdbcmd] Skipped 0
+Error: [blastdbcmd] Entry not found: 00
+Error: [blastdbcmd] Skipped 00
+Error: [blastdbcmd] Entry not found: -5
+Error: [blastdbcmd] Skipped -5
+Error: [blastdbcmd] Entry not found: 1819.0
+Error: [blastdbcmd] Skipped 1819.0
+Error: [blastdbcmd] Entry not found: 1e3
+Error: [blastdbcmd] Skipped 1e3
+Error: [blastdbcmd] Entry not found: 99999999999
+Error: [blastdbcmd] Skipped 99999999999
+Error: [blastdbcmd] Entry not found: 99999999999999999999
+Error: [blastdbcmd] Skipped 99999999999999999999
+Error: [blastdbcmd] Entry not found: NOSUCH9
+Error: [blastdbcmd] Skipped NOSUCH9
+Error: [blastdbcmd] Entry not found: é
+Error: [blastdbcmd] Skipped é

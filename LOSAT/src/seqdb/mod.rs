@@ -472,6 +472,10 @@ pub struct SeqDb {
     positive_list: bool,
     /// `SeqDb::list_taxids`.
     list_taxids: Vec<i32>,
+    /// The LMDB files of a version 5 database for `SeqDb::seqid_lookup`, opened at its first use.
+    lookup_files: OnceLock<lookup::LookupFiles>,
+    /// The ISAMs of the volumes for `SeqDb::seqid_lookup`, each opened at its first use.
+    lookup_isams: OnceLock<lookup::VolumeIsams>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1093-1102
@@ -511,7 +515,7 @@ impl SeqDb {
     /// separate names, double quotes keep one name together), of which LOSAT
     /// accepts one name; it carries no file extension.
     ///
-    /// A database that stores parsed Seq-ids opens; `check_ordinal_ids` tells
+    /// A database that stores parsed Seq-ids opens; `has_parsed_seqids` tells
     /// it from one that holds only the ordinal ids.
     pub fn open_in(name: &str, seqtype: SeqType, path: &SearchPath) -> Result<Self, SeqDbError> {
         let mut db = Self::open_tree(alias::resolve_in(name, seqtype, path)?, name, seqtype)?;
@@ -587,6 +591,35 @@ impl SeqDb {
         path: &SearchPath,
     ) -> Result<Vec<String>, SeqDbError> {
         alias::info_volumes(name, seqtype, path)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-934
+    // ```c++
+    // void CSeqDBAliasNode::FindVolumePaths(vector<string> & vols, vector<string> * alias, bool recursive) const
+    // {
+    //
+    //     set<string> volset;
+    //     set<string> aliset;
+    //
+    //     if (recursive) {
+    //         x_FindVolumePaths(volset, aliset);
+    // ```
+    /// `FindVolumePaths(paths, alias, true)` of the database that [`SeqDb::open_in`] opens
+    /// with the same arguments: every volume path (without extension) and every alias file
+    /// of its alias tree, each once, sorted. No volume file is opened.
+    pub fn volume_and_alias_paths(
+        name: &str,
+        seqtype: SeqType,
+        path: &SearchPath,
+    ) -> Result<(Vec<String>, Vec<String>), SeqDbError> {
+        let tree = alias::resolve_in(name, seqtype, path)?;
+        let volumes: std::collections::BTreeSet<String> = tree.volumes.into_iter().collect();
+        let mut alias_files = std::collections::BTreeSet::new();
+        alias::collect_alias_files(&tree.root, &mut alias_files);
+        Ok((
+            volumes.into_iter().collect(),
+            alias_files.into_iter().collect(),
+        ))
     }
 
     /// The number of the volume that holds `ordinal` (`CSeqDBVolSet::FindVol`).
@@ -851,6 +884,8 @@ impl SeqDb {
             reports_show_gis: false,
             positive_list: false,
             list_taxids: Vec::new(),
+            lookup_files: OnceLock::new(),
+            lookup_isams: OnceLock::new(),
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
@@ -878,29 +913,13 @@ impl SeqDb {
     // (`x_GetHdrAsn1Binary`, seqdbvol.cpp:2302-2310): a search program reads
     // the first one after its search, so a header file that is missing or
     // cannot be opened fails there, not here (`Volume::lazy_file`).
-    /// Checks that the database holds the ordinal ids of a database built without
-    /// `-parse_seqids`: the first header of every volume is decoded with the
-    /// ordinal-id decoder (`deflines`), whose error for any other Seq-id is
-    /// `SeqDbError::Unsupported`; the first error is returned. A volume whose
-    /// header file cannot be opened (missing, or an `open` that fails) is not
-    /// checked: NCBI opens a header file at its first read, and the error comes
-    /// there. A search program that reads only ordinal ids calls this right
-    /// after opening the database.
-    pub fn check_ordinal_ids(&self) -> Result<(), SeqDbError> {
-        for (at, volume) in self.volumes.iter().enumerate() {
-            if volume.num_oids() > 0 {
-                match self.first_deflines(at) {
-                    Ok(_) | Err(SeqDbError::NotFound(_) | SeqDbError::Open { .. }) => {}
-                    Err(error) => return Err(error),
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// `check_ordinal_ids` of a program that reads parsed Seq-ids too: `Ok(true)` when the first
-    /// header of some volume holds parsed Seq-ids, any other error as `check_ordinal_ids` gives
-    /// it.
+    /// Whether the database holds parsed Seq-ids, which a search program asks right after
+    /// opening it: the first header of every volume is decoded with the ordinal-id decoder
+    /// (`deflines`), whose error for any other Seq-id is `SeqDbError::Unsupported`
+    /// (`SeqDbError::is_parsed_seqids`). `Ok(true)` when some volume's first header holds
+    /// parsed Seq-ids; any other error of a first header is returned. A volume whose header
+    /// file cannot be opened (missing, or an `open` that fails) is not checked: NCBI opens a
+    /// header file at its first read, and the error comes there.
     pub fn has_parsed_seqids(&self) -> Result<bool, SeqDbError> {
         let mut parsed = false;
         for (at, volume) in self.volumes.iter().enumerate() {

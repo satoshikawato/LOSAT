@@ -295,13 +295,14 @@ pub(crate) fn read_titles(
     first_query: usize,
     titles: &mut DatabaseTitles,
 ) -> Result<()> {
+    let headers = shared::HeaderReader::new(&database.db);
     for hsp in ordered {
         let ordinal = hsp.hit.s_idx;
         if titles.contains_key(&ordinal) {
             continue;
         }
         let title = shared::read_header(
-            &database.db,
+            &headers,
             ordinal,
             first_query + hsp.hit.q_idx as usize,
             PROGRAM,

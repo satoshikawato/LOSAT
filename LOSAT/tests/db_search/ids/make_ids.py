@@ -49,6 +49,19 @@ find no sequence by the Seq-align id `gi|777`). `njoined_a.*` and `njoined_b.*` 
 `nambig_v4.*` (version 4) from `nambig.fna` (the sequence of the first record of `nucl.fna`, and a copy of it
 with runs of N, an R and a Y, so with ambiguity data; the unit test of blastn's report stream raises its
 ambiguity count, `x_streaming_refusal`).
+
+Seq-align ids that NCBI's lookup finds in another record (line DBID N1; the FASTA comes from
+`make_found_fasta.py`): `pfound_v5.*` and `pfound_v4.*` from `pfound.faa`, five pairs of unrelated proteins, the
+second record of each pair its first's sequence with three substitutions (the query `pfound_q<k>.faa` of pair k
+hits both; `pfound_q1.fna` and `pfound_q4.fna` back-translations): `gb|AAA00001.1|` then `gb|AAA00001|` (NCBI
+finds the first by `gb|AAA00001|`), `gb|BBB00002.1|` then `emb|BBB00002.1|` (the first by `emb|BBB00002.1|`),
+`gb|CCC00003.1|` then `lcl|CCC00003` (no Bioseq by `lcl|CCC00003`), `gb|DDD00004|` then `gb|DDD00004.1|` and
+`pdb|2XYZ|` then `pdb|2XYZ|AA` (each finds itself; their Seq-align ids match, so NCBI's XML and outfmt 0 join
+them). `pdup_a.*` and `pdup_b.*` (version 5) from `pdup.faa`, the same record `gb|EEE00005.1|` (query
+`pdup_q.faa`), read through the alias `pdup_ab.pal`: NCBI finds the first copy by the second's id, which shows the
+same; `pdup_c.*` from `pdup_c.faa`, the record with another title, read with `pdup_a` through `pdup_ac.pal`.
+`nfound_v5.*` and `nfound_v4.*` from `nfound.fna`: the sequence of `njoined_a.fna` as `gb|AF000050.1|`, then a
+copy with three substitutions as `gb|AF000050|`.
 """
 import argparse
 import subprocess
@@ -119,6 +132,22 @@ def main() -> int:
              "-dbtype", "nucl", "-parse_seqids", "-blastdb_version", str(version), "-title", title,
              "-out", str(args.out / name)],
             check=True, stdout=subprocess.DEVNULL)
+    for name, dbtype, extension in (("pfound", "prot", "faa"), ("nfound", "nucl", "fna")):
+        for version in (5, 4):
+            subprocess.run(
+                [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.{extension}"),
+                 "-dbtype", dbtype, "-parse_seqids", "-blastdb_version", str(version),
+                 "-title", f"{name}_v{version} (parsed Seq-ids)", "-out", str(args.out / f"{name}_v{version}")],
+                check=True, stdout=subprocess.DEVNULL)
+    for name, fasta in (("pdup_a", "pdup.faa"), ("pdup_b", "pdup.faa"), ("pdup_c", "pdup_c.faa")):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / fasta), "-dbtype", "prot", "-parse_seqids",
+             "-blastdb_version", "5", "-title", name, "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+    for alias, second in (("pdup_ab", "pdup_b"), ("pdup_ac", "pdup_c")):
+        (args.out / f"{alias}.pal").write_text(
+            f"#\n# Alias file of line DBID, N1\n#\nTITLE {alias} (two databases, parsed Seq-ids)\n"
+            f"DBLIST pdup_a {second}\n")
     (args.out / "njoined.nal").write_text(
         "#\n# Alias file of line DBID, ID2b\n#\nTITLE njoined (two volumes, parsed Seq-ids)\n"
         "DBLIST njoined_a njoined_b\n")

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.7
+- Version: 1.8
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -9,7 +9,8 @@
   1.5 2026-10-30 (exception 5, the expansion of a taxid whose ancestors form a cycle, line DI-8a);
   1.6 2026-10-30 (exception 6, an accession stored under more than about 500 sequences of a
   version 5 database, and the seqid-list items of rules 2 and 3, line DI-8b);
-  1.7 2026-10-31 (exception 6 also for the id lookups of `losat blastdbcmd`, line BDC's BDC2b)
+  1.7 2026-10-31 (exception 6 also for the id lookups of `losat blastdbcmd`, line BDC's BDC2b);
+  1.8 2026-11-01 (exception 5 also for `losat blastdbcmd -taxids`, line BDC's BDC3a)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -182,6 +183,13 @@ maintainer to accept it.
    (`LOSAT/tests/db_taxid_root.rs`, rows `db.tf.bp.root.6` and `db.tf.tbn.root.6` of
    `LOSAT/tests/db_search_manifest.tsv`, BLASTP and TBLASTN) and fewer than the whole
    database, whose two taxids outside the file are not descendants.
+   Version 1.8 (line BDC's BDC3a, the same standing delegation): `losat blastdbcmd -taxids`
+   and `-taxidlist` expand their taxids with the same walk. NCBI's `blastdbcmd -db
+   18S_fungal_sequences -taxids 1` writes nothing in 120 s (line BDC's probe J120, and K13 on
+   a small taxonomy); LOSAT writes NCBI's bytes of the same run with the explicit list of
+   every taxid that taxid 1 reaches and `-no_taxid_expansion` (K01, K25:
+   `dropin-survey-20261029/BDC/probe/make_expected.py`, `LOSAT/tests/blastdbcmd_discovery.rs`
+   case `K13`).
 
 ## Approved exception (`-seqidlist` and `-negative_seqidlist` with `-db`, version 1.6)
 

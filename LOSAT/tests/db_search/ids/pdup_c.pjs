@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "pdup_c",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pdup_c",
+  "number-of-letters": 220,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-01T12:29:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49651,
+  "bytes-to-cache": 318,
+  "files": [
+    "pdup_c.pdb",
+    "pdup_c.phr",
+    "pdup_c.pin",
+    "pdup_c.pog",
+    "pdup_c.pos",
+    "pdup_c.pot",
+    "pdup_c.psq",
+    "pdup_c.ptf",
+    "pdup_c.pto"
+  ]
+}

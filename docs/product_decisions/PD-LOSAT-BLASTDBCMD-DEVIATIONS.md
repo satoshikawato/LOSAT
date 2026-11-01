@@ -1,9 +1,12 @@
 # Product Decision: blastdbcmd outputs that NCBI gets wrong
 
 - Decision ID: `PD-LOSAT-BLASTDBCMD-DEVIATIONS`
-- Version: 1.0
+- Version: 1.2
 - Date: 2026-10-30 (this record; items 1 and 2 served by `losat blastdbcmd` from the pull
-  request of line BDC's BDC2a). The deviations were approved by the Owner on 2026-10-29
+  request of line BDC's BDC2a). 1.1, 2026-11-01 (BDC2c): the evidence of items 1 and 2 on
+  version 4 databases with parsed ids, whose ids `losat blastdbcmd` now looks up; the
+  decision is unchanged. 1.2, 2026-11-01 (BDC3a: the taxonomy, the lists, the metadata and
+  the IPGs): the explicit rejections of the scope; the four items are unchanged. The deviations were approved by the Owner on 2026-10-29
   ("これはあえて直してお出しするのは？TBLASTX みたいに", drop-in survey `DECISIONS.md` 12), as
   the TBLASTX local-subject genetic code was
   ([`PD-TBLASTX-LOCAL-SUBJECT-GENCODE`](PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md)).
@@ -21,7 +24,16 @@ rejection ("... is not supported by LOSAT's BLASTDBCMD"). NCBI's deterministic e
 the same inputs (an exception text, an exit status) are reproduced, not excepted
 ([`PD-LOSAT-NCBI-DEFECTS`](PD-LOSAT-NCBI-DEFECTS.md) rule 2); its crash on `-range ""`
 (exit status 139) and the `-taxids abc` exception that prints NCBI's build path (exit
-status 255) are explicit rejections.
+status 255) are explicit rejections. So are (BDC3a, probes J and K of the same directory)
+the other exceptions that print NCBI's build path (a `-taxids` / `-taxidlist` id that is
+empty, blank, too large or not a number: J101, J102, J107, J108, J131; a database date that
+NCBI's `CTime` does not read, for `-metadata`: J189, J190), NCBI's crash on an empty index
+file of `-list` with `%t` (J168), the reversed protein letters NCBI writes for `-strand
+minus` on a protein database read with a taxid list and `-dbtype guess` (J114: NCBI then
+takes the database as nucleotide for the strand), `-ipg` / `-ipg_batch` on a database
+without PIG files, where NCBI writes an OID it never set (J204, J205, J212, J214), and
+`-ipg_batch` on a database opened with `-target_only` and a taxid list (K38). `-taxids
+1` follows [`PD-LOSAT-NCBI-DEFECTS`](PD-LOSAT-NCBI-DEFECTS.md) exception 5.
 
 ## Decision
 
@@ -42,7 +54,9 @@ not reach the defect, so that the test oracle stays NCBI's binary.
    resolves the id to the ordinal `n` without reading a file and then adds `n` to the first
    ordinal of every volume, keeping each sum that falls inside the database: `-entry
    'gnl|BL_ORD_ID|3'` on a database of four volumes writes four sequences (probe S01, and
-   D57 with `-entry_batch -get_dups`), while `%a` names the sequence `BL_ORD_ID:3` once.
+   D57 with `-entry_batch -get_dups`; an alias of two databases, a partial alias and a
+   database with parsed ids alike: I795, I816, I830, I849), while `%a` names the sequence
+   `BL_ORD_ID:3` once.
    LOSAT writes the one sequence `n` of the whole database, as a database of one volume
    gives it. Expected bytes: the first record of NCBI's output (S01), or NCBI's run of the
    same batch without `-get_dups`, whose bulk lookup keeps the first ordinal alone (S02 for
@@ -57,8 +71,9 @@ not reach the defect, so that the test oracle stays NCBI's binary.
 
 ## Evidence
 
-- Line BDC's frozen probe (NCBI 2.17.0 on the workstation, 2026-10-29 and 2026-10-30):
-  `dropin-survey-20261029/BDC/probe/out/{S01,S02,S18,S31,S32,M03,M04,D16,D57,D82,D83,D87,D88,D97,D101}.*`,
+- Line BDC's frozen probe (NCBI 2.17.0 on the workstation, 2026-10-29, 2026-10-30 and
+  2026-11-01):
+  `dropin-survey-20261029/BDC/probe/out/{S01,S02,S18,S31,S32,M03,M04,D16,D57,D82,D83,D87,D88,D97,D101,I771,I795,I816,I830,I849}.*`,
   the code reading in `dropin-survey-20261029/BDC/notes/B_fasta_outfmt.md` (ORACLE 1 and 3)
   and `notes/A_id_resolution.md` (§2).
 - The tests of items 1 and 2: `LOSAT/tests/blastdbcmd_retrieve.rs`

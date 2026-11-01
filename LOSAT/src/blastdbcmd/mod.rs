@@ -1,26 +1,31 @@
 //! `losat blastdbcmd`: NCBI BLAST+ 2.17.0 blastdbcmd, of which LOSAT serves `-info` (the
 //! information of a database: `-db`, `-dbtype`, `-exact_length`, `-out`, `-logfile`), the
-//! retrieval of sequences (`retrieve`: `-entry all`, `-entry`, `-entry_batch`, every
-//! `-outfmt` but the ASN.1 texts, `-range`, `-strand`, `-line_length`, `-ctrl_a`,
-//! `-target_only`, `-get_dups`, `-long_seqids`), `-h`, `-help` and `-version`. Its command
-//! line is NCBI's (`args`, NCBI's argument reader), not clap's: `main` hands it the words
-//! after `blastdbcmd`. The other uses of the program (`-list`, taxonomy, metadata, IPGs)
-//! are refused, and so are the lookups of an accession or GI in the tables of a version 4
-//! database built with `-parse_seqids` (line BDC's BDC2c) and a database that LOSAT does
-//! not read (the masks of `makeblastdb -mask_data`, several names in `-db`).
+//! retrieval of sequences (`retrieve`: `-entry all`, `-entry`, `-entry_batch`, `-ipg`,
+//! `-ipg_batch`, `-taxids`, `-taxidlist`, every `-outfmt` but the ASN.1 texts, `-range`,
+//! `-strand`, `-line_length`, `-ctrl_a`, `-target_only`, `-get_dups`, `-long_seqids`), the
+//! taxids of a database (`taxonomy`: `-tax_info`), its metadata (`metadata`: `-metadata`,
+//! `-metadata_output_prefix`), the databases of a directory (`list`: `-list`,
+//! `-list_outfmt`, `-recursive`, `-remove_redundant_dbs`), `-show_blastdb_search_path`, `-h`,
+//! `-help` and `-version`. Its command line is NCBI's (`args`, NCBI's argument reader), not
+//! clap's: `main` hands it the words after `blastdbcmd`. A database that LOSAT does not read
+//! (the masks of `makeblastdb -mask_data`, several names in `-db`) is refused, and so is
+//! `-mask_sequence_with` on it.
 
 mod args;
 mod fasta;
 mod format;
 mod letters;
+mod list;
+mod metadata;
 mod range;
 mod retrieve;
+mod taxonomy;
 
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 
-use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
+use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
 
 use args::{Args, ArgsError};
 
@@ -159,6 +164,12 @@ impl Diag<'_> {
     fn err_post_bytes(&mut self, message: &[u8]) {
         let mut line = b"Error: [blastdbcmd] ".to_vec();
         line.extend_from_slice(message);
+        self.post_bytes(&line);
+    }
+
+    /// `post` of a line that is not UTF-8.
+    fn post_bytes(&mut self, message: &[u8]) {
+        let mut line = message.to_vec();
         line.push(b'\n');
         match &mut self.target {
             DiagTarget::File(file) => {
@@ -449,9 +460,6 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
     if dryrun {
         return diag.refuse(&unsupported_option("-dryrun"));
     }
-    if let Some(reason) = unserved_use(&args) {
-        return diag.refuse(&reason);
-    }
     let settings =
         match crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastdbcmd") {
             Ok(settings) => settings,
@@ -504,13 +512,84 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         Ok(path) => path,
         Err(error) => return database_error(&mut diag, error),
     };
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1181-1184
+    // ```c++
+    //         if (args["show_blastdb_search_path"]) {
+    //             out << CSeqDB::GenerateSearchPath() << NcbiEndl;
+    //             return status;
+    // ```
+    if args.given("show_blastdb_search_path") {
+        let _ = writeln!(out, "{}", path.as_str());
+        let _ = out.flush();
+        return 0;
+    }
+    if args.given("list") {
+        return list::list(&args, &path, &mut diag, out);
+    }
     let name = args.value("db").unwrap_or("nr");
-    let (db, volumes) = match open_database(name, args.value("dbtype").unwrap_or("guess"), &path) {
+    let dbtype = args.value("dbtype").unwrap_or("guess");
+    let selected = ["info", "metadata", "tax_info"]
+        .into_iter()
+        .any(|selector| args.given(selector));
+    if !selected && (args.given("taxids") || args.given("taxidlist")) {
+        // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:358-369
+        // ```c++
+        //     CSeqDB::ESeqType seqtype = ParseMoleculeTypeString(args[kArgDbType].AsString());
+        //     m_DbIsProtein = static_cast<bool>(seqtype == CSeqDB::eProtein);
+        //     m_TargetOnly = args["target_only"];
+        //    	if(m_TargetOnly) {
+        //     	CRef<CSeqDBGiList> taxid_list(new CSeqDBGiList());
+        //     	taxid_list->AddTaxIds(m_TaxIdList);
+        //    		m_BlastDb.Reset(new CSeqDBExpert(args[kArgDb].AsString(), seqtype, taxid_list.GetPointer()));
+        //     }
+        //    	else {
+        //    		m_BlastDb.Reset(new CSeqDBExpert(args[kArgDb].AsString(), seqtype));
+        //    	}
+        // ```
+        // With `-target_only` the list's errors are those of the open, inside NCBI's guess
+        // of the type: a protein database the list fails on is then looked for as a
+        // nucleotide one (probe J111 of line BDC: `No alias or index file found for
+        // nucleotide database [db/p4]`).
+        let tax_ids = match taxonomy::tax_id_list(&args, &path, &mut diag) {
+            Ok(tax_ids) => tax_ids,
+            Err(taxonomy::Ended(status)) => return status,
+        };
+        let target_only = args.given("target_only");
+        let list = TaxidList::Positive(tax_ids.clone());
+        let restrict = |db: &mut SeqDb| -> Result<(), SeqDbError> {
+            if target_only {
+                db.restrict_taxids(&list)?;
+            }
+            Ok(())
+        };
+        let (db, _) = match open_database(name, dbtype, &path, &restrict) {
+            Ok(opened) => opened,
+            Err(error) => return database_error(&mut diag, error),
+        };
+        let dbtype_protein = dbtype == "prot";
+        return retrieve::process(
+            &db,
+            &args,
+            &path,
+            &mut diag,
+            out,
+            Some(&tax_ids),
+            dbtype_protein,
+        );
+    }
+    let (db, volumes) = match open_database(name, dbtype, &path, &|_| Ok(())) {
         Ok(opened) => opened,
         Err(error) => return database_error(&mut diag, error),
     };
     if !args.given("info") {
-        return retrieve::process(&db, &args, &path, &mut diag, out);
+        if args.given("metadata") {
+            return metadata::metadata(&db, name, &args, &path, &mut diag, out);
+        }
+        if args.given("tax_info") {
+            return taxonomy::tax_info(&db, &args, &path, &mut diag, out);
+        }
+        let protein = db.seqtype() == SeqType::Protein;
+        return retrieve::process(&db, &args, &path, &mut diag, out, None, protein);
     }
     // NCBI prints the date bytes of the index file; the reader keeps them as text
     // (`SeqDb::date`), with U+FFFD for bytes that are not UTF-8.
@@ -535,56 +614,6 @@ fn unsupported_option(word: &str) -> String {
 /// LOSAT's refusal of a database (`algorithm::common::database::refusal`).
 fn refusal(reason: &str) -> String {
     crate::algorithm::common::database::refusal(reason, PROGRAM).to_string()
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1180-1232
-// ```c++
-//         if (args["show_blastdb_search_path"]) {
-//             ...
-//         } else if (args["list"]) {
-//             ...
-//         }
-//
-//         if (args["info"]) {
-//         	x_InitBlastDB();
-//             x_PrintBlastDatabaseInformation();
-//         }
-//         else if (args["metadata"]) {
-//             ...
-//         else if (args["tax_info"]) {
-//             ...
-//         else if(args[kArgTaxIdList].HasValue() ||
-//                 args[kArgTaxIdListFile].HasValue()) {
-//             ...
-//         else {
-//         	x_InitBlastDB();
-//        		status = x_ProcessSearchRequest();
-//     	}
-// ```
-/// LOSAT's refusal of a use of blastdbcmd other than `-info` and the retrieval of sequences
-/// (`-entry`, `-entry_batch`), named by the option that selects it in NCBI's `Run` (line
-/// BDC's BDC3: the lists, the taxonomy, the metadata, the IPGs). With `-info`, NCBI's reader
-/// refuses every option the information does not use but `-line_length`,
-/// `-mask_sequence_with`, `-ipg` and `-ipg_batch`, which NCBI then ignores, and so does
-/// LOSAT. Without a selector NCBI opens the database and then asks for one
-/// (`retrieve`).
-fn unserved_use(args: &Args) -> Option<String> {
-    if args.given("info") {
-        return None;
-    }
-    [
-        "show_blastdb_search_path",
-        "list",
-        "metadata",
-        "tax_info",
-        "taxids",
-        "taxidlist",
-        "ipg",
-        "ipg_batch",
-    ]
-    .into_iter()
-    .find(|name| args.given(name))
-    .map(|name| unsupported_option(&format!("-{name}")))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:110-153
@@ -619,13 +648,15 @@ fn unserved_use(args: &Args) -> Option<String> {
 // ```
 /// Opens the database `name` (the `-db` value as given: blastdbcmd does not trim it) of the
 /// type `dbtype` (`prot`, `nucl`, or `guess`: protein first, then nucleotide), with the list of
-/// its volumes for `-info`. With `guess`, an error that NCBI raises too (`ncbi_message`) moves
+/// its volumes for `-info`, and `prepare`s it (the taxid list of `-target_only`, which NCBI's
+/// constructor applies). With `guess`, an error that NCBI raises too (`ncbi_message`) moves
 /// on to the nucleotide database, and the nucleotide error is the one reported; an error of
 /// LOSAT's is reported at once, since NCBI may open that protein database.
 fn open_database(
     name: &str,
     dbtype: &str,
     path: &SearchPath,
+    prepare: &dyn Fn(&mut SeqDb) -> Result<(), SeqDbError>,
 ) -> Result<(SeqDb, Vec<String>), SeqDbError> {
     let types: &[SeqType] = match dbtype {
         "prot" => &[SeqType::Protein],
@@ -637,8 +668,9 @@ fn open_database(
         let Some(&seqtype) = types.next() else {
             unreachable!("at least one sequence type is tried");
         };
-        let opened = SeqDb::open_in(name, seqtype, path).and_then(|db| {
+        let opened = SeqDb::open_in(name, seqtype, path).and_then(|mut db| {
             let volumes = SeqDb::info_volumes(name, seqtype, path)?;
+            prepare(&mut db)?;
             Ok((db, volumes))
         });
         match opened {

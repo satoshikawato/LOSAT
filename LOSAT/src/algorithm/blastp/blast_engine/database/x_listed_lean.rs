@@ -68,6 +68,7 @@ impl ListedSubjects {
         let mut replaced_title_bytes = vec![false; ranks];
         let mut read = vec![false; ranks];
         let mut parsed = ParsedSubjects::default();
+        let headers = crate::algorithm::common::database::HeaderReader::new(&database.db);
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
                 continue;
@@ -79,7 +80,7 @@ impl ListedSubjects {
                     continue;
                 }
                 let (title, replaced) =
-                    parsed.read(database, rank, self.ordinals[rank], query, ranks)?;
+                    parsed.read(database, &headers, rank, self.ordinals[rank], query, ranks)?;
                 titles[rank] = Arc::from(title);
                 replaced_title_bytes[rank] = replaced;
             }
@@ -89,6 +90,7 @@ impl ListedSubjects {
             shown: ListedShown::Lean(titles),
             replaced_title_bytes,
             parsed: parsed.by_rank,
+            program: database.program,
         })
     }
 }

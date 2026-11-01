@@ -44,17 +44,19 @@
 //! cell's candidates after its batches) with the lanes' entry coordinates from scalar loads and the
 //! last batch of fewer than eight hits as a masked AVX2 batch; the argument that the calls, their
 //! order and the table are the per-hit loop's is in `x_seed_fused`'s module header. It runs only with
-//! a value of `LOSAT_X_BXDIAG` where LOSAT_X_BXCROSS's cell test does not (`LOSAT_X_BXCROSS=0`, or a
-//! CPU without POPCNT). Until 2026-11-02 it had a switch and a rule of its own (LOSAT_X_BXDEFER,
+//! a value of `LOSAT_X_BXDIAG` or `LOSAT_X_BXDIAGSHADOW` where LOSAT_X_BXCROSS's cell test does not
+//! (`LOSAT_X_BXCROSS=0`, or a CPU without POPCNT). Until 2026-11-02 it had a switch and a rule of its own (LOSAT_X_BXDEFER,
 //! LOSAT_X_BXDEFERMIN at 7 hits per used cell), and those places fused tables from 9 hits per used
 //! cell; no default table reached the rule, as 9 is above 7, and every CPU with AVX2 has POPCNT.
 //!
 //! A query batch whose lookup table has fewer hits per used backbone cell than
 //! `LOSAT_X_BXDIAGMIN` (hundredths, built-in 670; `0` fuses every batch) is scanned by the direct
 //! loop instead: with few hits per cell the fused loop's per-cell work costs more than the copy it
-//! saves. With LOSAT_X_BXCROSS's cell test they break even near 6.7 (about 6.46 against the fly
-//! proteome, 6.95 against Swiss-Prot; the cross test against the direct loop: 4.05 x1.13, 5.34 x1.06,
-//! 6.33 x1.01, 6.63 x0.99, 7.34 x0.95, 8.38 x0.90), hence 670. No one form wins on both sides: on the
+//! saves. With LOSAT_X_BXCROSS's cell test they broke even near 6.7 on 2026-10-24 (about 6.46 against
+//! the fly proteome, 6.95 against Swiss-Prot; the cross test against the direct loop: 4.05 x1.13, 5.34
+//! x1.06, 6.33 x1.01, 6.63 x0.99, 7.34 x0.95, 8.38 x0.90), hence 670. LOSAT_X_BXSCANBYTE then made the
+//! direct loop faster, and on 2026-11-01 they break even near 6.9 and 7.5 (fly 6.33 x1.03, 6.77 x1.01,
+//! 7.34 x0.96; Swiss-Prot 6.33 x1.09, 6.77 x1.05, 7.34 x1.01); the value was not moved. No one form wins on both sides: on the
 //! same inputs the fused loop reads x1.77 at 1.76 hits per used cell and the direct loop x1/0.78 at
 //! 13.32; the fused loop on presence bytes with one register for a short cell, and the direct loop's
 //! pairs tested by the cross-cell batches, still read x1.43 and x1.37 at 1.76
@@ -78,10 +80,11 @@
 //! (`x_seed_fused::x_scan_cells_cross` asserts it per subject). A
 //! switch of the strict set (since 2026-10-23): on unless it is `0`. On, it is the cell test
 //! of every table the fused loop takes where the CPU has AVX2 and POPCNT; `LOSAT_X_BXCROSS=0`, or a
-//! CPU without POPCNT, leaves the direct loop on every table (with a value of `LOSAT_X_BXDIAG`, the
-//! masked AVX2 batch above). `LOSAT_X_BXDIAGMIN` still chooses the tables (above), and `LOSAT_X_BXDIAGSHADOW`
+//! CPU without POPCNT, leaves the direct loop on every table (with a value of `LOSAT_X_BXDIAG` or
+//! `LOSAT_X_BXDIAGSHADOW`, the masked AVX2 batch above). `LOSAT_X_BXDIAGMIN` still chooses the tables (above), and `LOSAT_X_BXDIAGSHADOW`
 //! compares it with the reference like the other cell tests. The batches run at 1,024 staged
-//! hits. The timing line names `mode=avx2-cross` and ends with `cross_splits=N` (the windows of
+//! hits. The timing line names `mode=avx2-cross` (`mode=avx2-cross-defer` with
+//! LOSAT_X_BXCROSSDEFER, below) and ends with `cross_splits=N` (the windows of
 //! eight staged hits with a repeated entry, tested in parts; counted per subject scan like the
 //! other counts).
 //!
@@ -337,7 +340,7 @@ pub(crate) fn x_shared_table_ratio(lookup: &Lookup, options: &ResolvedOptions) -
     let Lookup::Standard(table, kept) = lookup else {
         return None;
     };
-    if x_bxdiag_mode() == 0 || options.window_size <= 0 {
+    if x_bxdiag_mode() != 1 || options.window_size <= 0 {
         return None;
     }
     let (ratio, first) = x_table_ratio(table, kept.build);

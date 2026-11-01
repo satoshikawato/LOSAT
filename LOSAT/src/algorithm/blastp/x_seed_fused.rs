@@ -67,8 +67,8 @@
 //! It acts only where the AVX2 batch runs (`LOSAT_X_BPDIAG` with AVX2, not
 //! with `LOSAT_X_BPDIAG_SIMD=0`).
 //!
-//! The masked batch: blastx's fused loop (`blastx/x_seed_diag.rs`), with a value of LOSAT_X_BXDIAG
-//! where LOSAT_X_BXCROSS's cell test does not run, takes LOSAT_X_BPDEFER's deferred calls with two
+//! The masked batch: blastx's fused loop (`blastx/x_seed_diag.rs`), with a value of LOSAT_X_BXDIAG or
+//! LOSAT_X_BXDIAGSHADOW where LOSAT_X_BXCROSS's cell test does not run, takes LOSAT_X_BPDEFER's deferred calls with two
 //! changes of the batches
 //! ([`x_cell_avx2_defer_masked`]): a batch of eight computes its lanes' entry coordinates from
 //! scalar loads of its hits instead of taking them out of the hits' register, which starts the
@@ -139,7 +139,7 @@
 //! `LOSAT_X_BXCROSS` is a switch of the strict set (since 2026-10-23): on unless it is `0`; on,
 //! it is the cell test of every table blastx's fused loop takes where the CPU has AVX2 and POPCNT
 //! (`blastx/x_seed_diag.rs`); off, or without POPCNT, blastx takes the direct loop, or with a value
-//! of LOSAT_X_BXDIAG the masked batch. blastp's loops never take it: it is not a cell test of
+//! of LOSAT_X_BXDIAG or LOSAT_X_BXDIAGSHADOW the masked batch. blastp's loops never take it: it is not a cell test of
 //! [`XDiagMode`], the choice that blastp's loops share ([`x_scan_two_hit_in_with`]), but blastx's
 //! [`XCellTest::Cross`], which blastx's [`x_scan_two_hit_with`] runs, and every function of it is
 //! its own. The chunk is a constant of each instance; the program runs
@@ -518,7 +518,8 @@ pub(crate) enum XDiagMode {
     Avx2Defer,
     /// LOSAT_X_BPDIAG with AVX2, LOSAT_X_BPDEFER and LOSAT_X_BPMASKED, on tables with at least
     /// LOSAT_X_BPMASKEDMIN hits per used cell (and blastx's fused loop, [`x_cell_test`], with a
-    /// value of LOSAT_X_BXDIAG and LOSAT_X_BXCROSS off or no POPCNT): [`XDiagMode::Avx2Defer`] with
+    /// value of LOSAT_X_BXDIAG or LOSAT_X_BXDIAGSHADOW and LOSAT_X_BXCROSS off or no POPCNT):
+    /// [`XDiagMode::Avx2Defer`] with
     /// the lanes' entry coordinates from scalar loads of the hits and a cell's last batch of fewer
     /// than eight hits as one masked AVX2 batch ([`x_cell_avx2_defer_masked`]).
     #[cfg(target_arch = "x86_64")]
@@ -1368,7 +1369,7 @@ unsafe fn x_scan_cells_avx2_defer<const BRANCH_FREE: bool, K: XCell, F>(
 }
 
 /// [`x_scan_cells_avx2`] with [`x_cell_avx2_defer_masked`] (LOSAT_X_BPMASKED in blastp's fused
-/// loop, and blastx's fused loop with a value of LOSAT_X_BXDIAG). Never inlined, and its cell test is a function of its own,
+/// loop, and blastx's fused loop with a value of LOSAT_X_BXDIAG or LOSAT_X_BXDIAGSHADOW). Never inlined, and its cell test is a function of its own,
 /// so the loops of LOSAT_X_BPDEFER (`LOSAT_X_BPMASKED=0`) keep their code.
 ///
 /// # Safety

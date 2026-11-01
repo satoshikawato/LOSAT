@@ -7,13 +7,13 @@
 //! each volume ([`super::column`]): its metadata maps the volume's algorithm ids to
 //! descriptions; the blob of a sequence holds, per algorithm, a list of ranges.
 //!
-//! Nothing in LOSAT's searches calls this yet; a database is opened with
-//! [`SeqDb::open_with_masks`] to read it.
+//! The reader of `losat blastdbcmd`; LOSAT's searches do not call it. A database is opened with
+//! [`SeqDb::open_in_with_masks`] to read it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use super::column::Blob;
+use super::column::{Blob, MASK_DATA_TITLE};
 use super::volume::Volume;
 use super::{SeqDb, SeqDbError};
 
@@ -491,6 +491,7 @@ impl MaskAlgorithms {
         for volume in volumes {
             volume.columns()?;
         }
+        refuse_other_first_columns(volumes)?;
         let mut table = Self::new();
         for (index, volume) in volumes.iter().enumerate() {
             let Some(column) = volume.mask_column()? else {
@@ -852,6 +853,52 @@ impl MaskAlgorithms {
 // ```
 /// `s_ReadRanges<SReadInt4>`: the ranges of `vol_algo` in a mask blob. The pairs are
 /// little-endian `u32` (the `.?xc` file). Every read is checked against the blob.
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3276-3292
+// ```c++
+// void CSeqDBVol::GetColumnBlob(int              col_id,
+//                               int              oid,
+//                               CBlastDbBlob   & blob,
+//                               bool             keep,
+//                               CSeqDBLockHold & locked)
+// {
+//     if (! m_HaveColumns) {
+//         x_OpenAllColumns(locked);
+//     }
+//
+//     if ((int)m_Columns.size() == 0 || m_Columns[col_id].Empty())
+// 	return;
+//
+//     _ASSERT(col_id >= 0);
+//
+//     m_Columns[col_id]->GetBlob(oid, blob, keep, & locked);
+// }
+// ```
+// `col_id` is the database's number of the mask column (0), not the volume's: NCBI reads
+// the first column of a volume as its masks. `makeblastdb` writes the mask column alone.
+/// Refuses a database with masks that has a volume whose first column is another one.
+fn refuse_other_first_columns(volumes: &[Volume]) -> Result<(), SeqDbError> {
+    let mut masked = false;
+    for volume in volumes {
+        masked |= volume.mask_column()?.is_some();
+    }
+    if !masked {
+        return Ok(());
+    }
+    for volume in volumes {
+        if let Some(first) = volume.columns()?.first() {
+            if first.title() != MASK_DATA_TITLE {
+                return Err(SeqDbError::Unsupported {
+                    path: first.index_path().to_path_buf(),
+                    message: "the first column of the volume is not its mask data, which NCBI \
+                              reads as the masks"
+                        .to_string(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 fn read_ranges(blob: &[u8], vol_algo: i32, path: &Path) -> Result<Vec<(u32, u32)>, SeqDbError> {
     let format = |message: String| SeqDbError::Format {
         path: path.to_path_buf(),
@@ -891,7 +938,7 @@ impl SeqDb {
     /// The filtering algorithms of the database, built from the mask columns of its
     /// volumes the first time they are asked for (`x_BuildMaskAlgorithmList`). Empty for a
     /// database without mask data. A database opened with [`SeqDb::open`] has no columns;
-    /// open it with [`SeqDb::open_with_masks`].
+    /// open it with [`SeqDb::open_in_with_masks`].
     pub fn mask_algorithms(&self) -> Result<&MaskAlgorithms, SeqDbError> {
         if let Some(table) = self.mask_algorithms.get() {
             return Ok(table);

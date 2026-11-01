@@ -8,6 +8,8 @@
 mod blastdbcmd_discovery;
 #[path = "../blastdbcmd_info.rs"]
 mod blastdbcmd_info;
+#[path = "../blastdbcmd_masks.rs"]
+mod blastdbcmd_masks;
 #[path = "../blastdbcmd_retrieve.rs"]
 mod blastdbcmd_retrieve;
 #[path = "../cli_smoke.rs"]

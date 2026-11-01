@@ -6,10 +6,12 @@ What NCBI BLAST+ 2.17.0 blastdbcmd printed for `-info`, its argument errors, `-o
 `-target_only`, `-get_dups`, `-long_seqids`: `LOSAT/tests/blastdbcmd_retrieve.rs`), and for
 the taxonomy, the metadata, the lists of databases and the search path (`-taxids`,
 `-taxidlist`, `-tax_info`, `-metadata`, `-list`, `-show_blastdb_search_path`, `-ipg`:
-`LOSAT/tests/blastdbcmd_discovery.rs`). Frozen on
+`LOSAT/tests/blastdbcmd_discovery.rs`), and on databases with masks (`-info`,
+`-mask_sequence_with`, `%m`: `LOSAT/tests/blastdbcmd_masks.rs`). Frozen on
 2026-10-29 and 2026-10-30 by line BDC's probe on the workstation (cases `I01`-`I38`,
 `B01`-`B61`, `C01`-`C20`, `F01`-`F34`, `S01`-`S46`, `D01`-`D112`, on 2026-10-31 `H01`-`H119`,
-on 2026-11-01 `I101`-`I1195`, `J101`-`J222` and `K01`-`K39`; NCBI was not run on this tree).
+on 2026-11-01 `I101`-`I1195`, `J101`-`J222`, `K01`-`K39` and `M101`-`M933`; NCBI was not run
+on this tree).
 
 - `db/`: databases of that probe. `p5` (version 5, `-parse_seqids`) and `p4` (version 4)
   are proteins with every Seq-id type, `n5` / `n4` the nucleotides, `p5n` / `p4n` / `n5n` /
@@ -19,7 +21,10 @@ on 2026-11-01 `I101`-`I1195`, `J101`-`J222` and `K01`-`K39`; NCBI was not run on
   and `pm5` (blastdb_aliastool), `d5` a version 5 database whose accessions `XP_800001` and
   `XP_800002` repeat on OIDs 1 and 256, 9 and 10 (the order of LMDB's duplicates), `e5` one
   whose `XP_900001` is on 600 sequences and `XP_900002` on 300, `d5b` the same FASTA as `d5`,
-  `h_dd`, `h_p5p5n`, `h_p5np5` alias files over two LMDB files. Version 4 with parsed ids
+  `h_dd`, `h_p5p5n`, `h_p5np5` alias files over two LMDB files, `nm5` and `nm4` nucleotides
+  with the dust masks 11 and 12, `m/nms4` the FASTA of `nm4` with masks 12 on one of its
+  sequences, `m/pmg` proteins with GIs and seg masks whose `.ppi` and `.ppd` are copies of
+  their `.pni` and `.pnd` (an index of PIGs). Version 4 with parsed ids
   besides `p4` and `n4`: `d4` (the FASTA of `d5`: the OIDs of a key in the text order of the
   ISAM, `10` before `9`), `i4` (pdb ids of four digits that read as GIs, an EMBL and a GenBank
   id in one definition line, CDD, GNOMON, PIG and trace ids as general ids, versions of one
@@ -43,7 +48,10 @@ on 2026-11-01 `I101`-`I1195`, `J101`-`J222` and `K01`-`K39`; NCBI was not run on
   (`dropin-survey-20261029/BDC/probe/make_expected.py`). `H09` the same difference on a
   parsed database. `H107`, `H108` and `H109` are neither: NCBI stops on the accession of 600
   sequences (`PD-LOSAT-NCBI-DEFECTS` exception 6), and the expected bytes are the OIDs in the
-  order NCBI gives a key of fewer sequences (`H110`).
+  order NCBI gives a key of fewer sequences (`H110`). The stdout of the cases of the approved
+  differences 3 to 6 in the table of `blastdbcmd_masks.rs` is not NCBI's either: NCBI's
+  headers with the letters of NCBI's `-outfmt %s` run of the same words, or, for two `%m`, the
+  runs with one `%m` each (`make_expected.py`, `PD-LOSAT-BLASTDBCMD-DEVIATIONS`).
 - `j/`: whole copies (every file but the build logs; no line-end conversion, `j/.gitattributes`:
   the sizes are in `-list %U` and `-metadata`) of probe J's databases: `j/lst` holds `n4`,
   `n5`, `p4`, `p5`, `p5n`, `dv4` (three volumes and their alias file) and `pal`

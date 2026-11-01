@@ -217,7 +217,7 @@ impl std::error::Error for SeqDbError {
 /// The texts of `SeqDbError::Format` that are NCBI's own: the errors NCBI
 /// raises for the same file with the same words. Every other format error is
 /// LOSAT's (a damaged file that NCBI reads past the end of its mapping).
-const NCBI_FORMAT_MESSAGES: [&str; 4] = [
+const NCBI_FORMAT_MESSAGES: [&str; 8] = [
     // seqdbfile.cpp:181-185
     "Error: Not a valid version 4 or 5 database.",
     // seqdbfile.cpp:222-226
@@ -226,6 +226,18 @@ const NCBI_FORMAT_MESSAGES: [&str; 4] = [
     "DB list contains both Version 4 and Version 5 dbs",
     // seqdbalias.cpp:810-814
     "Illegal configuration: DB alias files are mutually recursive.",
+    // seqdbcol.cpp:220-238
+    "Column file uses unknown format_version.",
+    "Column file uses unknown data type.",
+    "Column file uses unsupported offset size.",
+    // seqdbimpl.cpp:2361-2363
+    "Error in stored mask algorithm description data.",
+];
+
+/// seqdbvol.cpp:3369-3385; the title or the counts follow.
+const NCBI_COLUMN_MESSAGE_PREFIXES: [&str; 2] = [
+    "Error: duplicate column title [",
+    "Error: column has wrong #oids [",
 ];
 
 /// seqdbalias.cpp:740-754; the name of the alias file follows.
@@ -275,7 +287,10 @@ impl SeqDbError {
             SeqDbError::NotFound(message) => Some(message.clone()),
             SeqDbError::Format { message, .. } => (NCBI_FORMAT_MESSAGES
                 .contains(&message.as_str())
-                || message.starts_with(NCBI_EMPTY_DBLIST_PREFIX))
+                || message.starts_with(NCBI_EMPTY_DBLIST_PREFIX)
+                || NCBI_COLUMN_MESSAGE_PREFIXES
+                    .iter()
+                    .any(|prefix| message.starts_with(prefix)))
             .then(|| message.clone()),
             SeqDbError::Open { path, source } => {
                 let code = source.raw_os_error()?;

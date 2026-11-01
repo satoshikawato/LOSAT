@@ -39,10 +39,13 @@ def declared_maximum_pages(rustflags):
 # (wasi_shared_memory.js), so that every host, browsers included, runs guarded bytes (release
 # v0.2.0 DECISIONS 52). The guard exits 1, and the build fails, when it declines an encoding,
 # finds nothing to guard or cannot verify its output; nothing unguarded is written.
-def guard_threaded(node, built, destination):
-    """Writes the guarded module of `built` to `destination`; returns the guard's record."""
-    return json.loads(subprocess.check_output(
-        [node, str(CRATE / "tests/wasi_shared_memory.js"), "guard", str(built), str(destination)], text=True))
+def write_artifact(node, kind, built, destination):
+    """Writes the artifact of `kind` to `destination`; returns the guard's record of a threaded one, else None."""
+    if kind.startswith("threaded-"):
+        return json.loads(subprocess.check_output(
+            [node, str(CRATE / "tests/wasi_shared_memory.js"), "guard", str(built), str(destination)], text=True))
+    shutil.copyfile(built, destination)
+    return None
 
 
 # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -90,9 +93,7 @@ def main():
         # A reactor is the cdylib of the library crate `LOSAT`; a command is the `losat` binary.
         built = target / kind / triple / "release" / ("LOSAT.wasm" if kind.endswith("reactor") else "losat.wasm")
         destination = out / f"losat-{kind}.wasm"
-        guard = guard_threaded(args.node, built, destination) if kind.startswith("threaded-") else None
-        if guard is None:
-            shutil.copyfile(built, destination)
+        guard = write_artifact(args.node, kind, built, destination)
         # The identity is the written artifact's (the guard keeps the imports, exports and memory).
         identity = json.loads(subprocess.check_output([args.node, str(CRATE / "tests/wasi_artifact.js"), str(destination), kind], text=True))
         expected_maximum = declared_maximum_pages(config["target"][triple]["rustflags"])

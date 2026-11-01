@@ -13,7 +13,8 @@
 // function, so the browsers run the bytes that V-ABI runs; it changes no search code. The
 // build stops rather than serve an unguarded threaded module: the guard throws on an encoding
 // that it declines, and a module in which it finds nothing to guard is refused here. An
-// artifact that is guarded already (it carries the guard's record) is served as it is.
+// artifact that is guarded already (it carries the guard's record) is served as it is, once
+// that guard verifies.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -34,8 +35,12 @@ interface Guarded {
 function guardSharedMemory(bytes: Uint8Array): Guarded {
   const guard = createRequire(import.meta.url)('../../../LOSAT/tests/wasi_shared_memory.js') as {
     guardSharedMemory: typeof guardSharedMemory;
+    verifyGuarded(bytes: Uint8Array): unknown;
   };
-  return guard.guardSharedMemory(bytes);
+  const guarded = guard.guardSharedMemory(bytes);
+  // The guard returns an artifact that carries its record as it is, so the record is checked here.
+  if (guarded.record !== null) guard.verifyGuarded(guarded.bytes);
+  return guarded;
 }
 
 export const REACTORS_ENV = 'LOSAT_WEB_REACTORS';

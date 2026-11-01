@@ -449,6 +449,38 @@ def threaded_guard_record(node: str, repo_root: Path, binary: Path) -> dict[str,
     return json.loads(result.stdout)
 
 
+# The contract's build command writes the unguarded module. The artifact must be the guard's
+# output of that module, and the sidecar names both, so that the bytes trace back to the command.
+def threaded_guard_lineage(
+    node: str, repo_root: Path, binary: Path, unguarded: Path | None
+) -> dict[str, object]:
+    record = threaded_guard_record(node, repo_root, binary)
+    if unguarded is None:
+        raise ReleaseFailure(
+            "the threaded Wasm artifact needs --unguarded-binary, the output of the contract's build command"
+        )
+    with tempfile.TemporaryDirectory(prefix="losat-rc-guard-") as temp_dir:
+        result = subprocess.run(
+            [
+                node,
+                str(repo_root / "LOSAT/tests/wasi_shared_memory.js"),
+                "guard",
+                str(unguarded),
+                str(Path(temp_dir) / "guarded.wasm"),
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    if result.returncode:
+        raise ReleaseFailure(f"cannot guard {unguarded}: {result.stderr.strip()}")
+    guard = json.loads(result.stdout)
+    if guard["guarded_before"] or guard["output_sha256"] != record["sha256"]:
+        raise ReleaseFailure(f"the threaded Wasm artifact is not the guard's output of {unguarded}")
+    return {**record, "unguarded_sha256": guard["input_sha256"], "guard_sha256": guard["guard_sha256"]}
+
+
 def assemble_binary(args: argparse.Namespace, kind: str) -> None:
     repo_root = args.repo_root.resolve()
     output_dir = args.output_dir.resolve()
@@ -511,7 +543,9 @@ def assemble_binary(args: argparse.Namespace, kind: str) -> None:
             )
         wasm_identity = json.loads(inspection.stdout)
         if args.target == "wasm32-wasip1-threads":
-            guard_record = threaded_guard_record(args.node, repo_root, binary)
+            guard_record = threaded_guard_lineage(
+                args.node, repo_root, binary, getattr(args, "unguarded_binary", None)
+            )
         observed_architecture = "wasm32"
         command_prefix = wasm_command_prefix(args.node, runner, binary)
 
@@ -794,6 +828,11 @@ def aggregate(args: argparse.Namespace) -> None:
             raise ReleaseFailure(f"artifact metadata checksum mismatch for {filename}")
         if metadata.get("certification_lineage") != contract["certification_lineage"]:
             raise ReleaseFailure(f"artifact metadata lineage mismatch for {filename}")
+        if spec["target"] == "wasm32-wasip1-threads":
+            binary_metadata = metadata.get("binary")
+            guard = binary_metadata.get("shared_memory_guard") if isinstance(binary_metadata, dict) else None
+            if not isinstance(guard, dict) or guard.get("sha256") != binary_metadata.get("sha256"):
+                raise ReleaseFailure(f"{filename} does not record the shared-memory guard of its binary")
         smoke_holder = (
             metadata.get("clean_install")
             if spec["kind"] == "source"
@@ -869,6 +908,12 @@ def build_parser() -> argparse.ArgumentParser:
     wasm.add_argument("--target", default="wasm32-wasip1")
     wasm.add_argument("--binary", type=Path, required=True)
     wasm.add_argument("--node", default="node")
+    wasm.add_argument(
+        "--unguarded-binary",
+        type=Path,
+        default=None,
+        help="wasm32-wasip1-threads: the build command's output, of which --binary is the guarded form",
+    )
     wasm.add_argument(
         "--runner",
         type=Path,

@@ -453,6 +453,10 @@ test("the host runs an artifact guarded at build time as it is, without a guard 
     assert.equal(fs.existsSync(cache), false);
     const cached = guardSharedMemoryCached(built);
     assert.deepEqual([cached.cache, cached.bytes, cached.fill, cached.copy], ["guarded", built, 0, 0]);
+    // The variable is checked as for any other module.
+    const invalid = runThreaded(built, [], { LOSAT_WASI_GUARD_CACHE: "" });
+    assert.notEqual(invalid.status, 3);
+    assert.match(invalid.stderr, /LOSAT_WASI_GUARD_CACHE must name a directory or be 0/);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

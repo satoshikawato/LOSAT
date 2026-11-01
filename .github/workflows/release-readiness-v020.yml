@@ -313,6 +313,9 @@ jobs:
       # guard fails this step, and writes nothing, on an encoding that it declines.
       - name: Guard the threaded-Wasm release artifact
         run: |
+          # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+          # TBlastThreads the_threads(GetNumberOfThreads()); (*thread)->Run(); (*thread)->Join(&result);
+          # The guard is host compatibility only; it implements no BLAST behavior.
           mkdir -p .tmp/release-readiness/threaded-guarded
           node LOSAT/tests/wasi_shared_memory.js guard \
             LOSAT/target/wasm32-wasip1-threads/release/losat.wasm \
@@ -328,6 +331,7 @@ jobs:
             --candidate-sha "$CANDIDATE_SHA" \
             --target wasm32-wasip1-threads \
             --binary .tmp/release-readiness/threaded-guarded/losat.wasm \
+            --unguarded-binary LOSAT/target/wasm32-wasip1-threads/release/losat.wasm \
             --output-dir .tmp/release-readiness/threaded-wasm
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

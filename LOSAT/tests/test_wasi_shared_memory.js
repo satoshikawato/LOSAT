@@ -275,6 +275,17 @@ test("the guarded module carries its record and is returned as it is when guarde
 
 test("verifyGuarded rejects unguarded, forged, partly guarded and miscounted modules", () => {
   assert.throws(() => verifyGuarded(fixture()), /no losat\.shared_memory_guard section/);
+  const functions = (...types) => Buffer.from([
+    0, 0x61, 0x73, 0x6d, 1, 0, 0, 0,
+    ...section(1, vector([[0x60, 0, 0]])),
+    ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, 4]])),
+    ...section(3, vector(types.map((type) => [type]))),
+    ...section(10, vector(types.map(() => body([])))),
+    ...marker({ version: 1, fill: 1, copy: 0 }),
+  ]);
+  assert.ok(WebAssembly.validate(functions(0)));
+  assert.throws(() => verifyGuarded(functions(0)), /the guard's helpers are missing/);
+  assert.throws(() => verifyGuarded(functions(0, 0)), /do not have the guard's type/);
   assert.throws(() => verifyGuarded(Buffer.concat([fixture(), marker({ version: 1, fill: 1, copy: 1 })])),
     /not the guard's bodies/);
   const original = fixture({ extra: [[...args, 0xfc, 10, 0, 0]] });

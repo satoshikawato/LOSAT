@@ -159,6 +159,10 @@ than this runner (browsers) get guarded bytes too (release v0.2.0 DECISIONS 52):
 `losat-threaded-reactor.wasm` guarded (their JSON records the unguarded SHA-256
 under `shared_memory_guard`), the release workflow guards the threaded release
 artifact, and LOSAT Web's build guards its threaded reactor (`web/app/build/reactors.ts`).
+`prepare_release_candidate_v020.py wasm` takes the threaded artifact with
+`--unguarded-binary`, refuses it unless it is the guard's output of that module,
+and records both hashes in the sidecar; `verify_release_archive_v020.py` and
+`aggregate` refuse a threaded archive without a guard.
 The command line is
 `node wasi_shared_memory.js guard <input.wasm> <output.wasm>` and
 `node wasi_shared_memory.js verify <file.wasm>`; both print a JSON record. A
@@ -168,7 +172,9 @@ module that has it as it is (it is not guarded twice and not written to the
 guard cache). `guard` exits 1 and writes nothing when the reader declines an
 instruction encoding, when the module has no `memory.fill` or `memory.copy`, or
 when its output does not verify; `verify` exits 1 unless the two helpers, the
-call sites and the counts are the guard's own. Adapter parsing
+call sites and the counts are the guard's own. `memory.init` is not guarded: only
+`__wasm_init_memory` and `__wasm_init_tls` use it, and this runner refreshes the
+bounds before a thread starts. Adapter parsing
 and compilation are included in the measured startup time. Keep `run_losat_wasi_threads.js`,
 `wasi_thread_host.js`, `wasi_thread_worker.js`, `wasi_artifact.js`,
 `wasi_shared_memory.js`, and `wasi_files.js` together when copying the runner; set

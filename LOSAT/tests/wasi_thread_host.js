@@ -257,11 +257,11 @@ function guardCacheDir() {
 }
 
 function guardSharedMemoryCached(bytes, inputSha256 = sha256(bytes)) {
+  const named = process.env.LOSAT_WASI_GUARD_CACHE;
+  const dir = guardCacheDir();
   // An artifact guarded at build time (`wasi_shared_memory.js guard`) runs as it is: there is
   // nothing to compute, and nothing is written to the cache.
   if (guardRecord(bytes) !== null) return { ...guardSharedMemory(bytes), cache: "guarded" };
-  const named = process.env.LOSAT_WASI_GUARD_CACHE;
-  const dir = guardCacheDir();
   if (dir === null) return { ...guardSharedMemory(bytes), cache: "off" };
   // The default directory may be unusable (no home, read-only, a file in the way).
   const unusable = (err) => {

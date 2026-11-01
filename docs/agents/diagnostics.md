@@ -1907,6 +1907,32 @@ Rebuilding less:
   (`=0` x0.9984); 16 threads (node 1 CPUs 32-47 warmed 3 s, 8 rounds) Swiss-Prot q100 instructions x1.0005, cycles
   x0.9980 (8 of 8 below 1; `=0` x0.9963), wall x0.9966; human instructions x1.0003, cycles x0.9972 (`=0` x0.9966), wall
   x0.9956.
+- `LOSAT_X_BPTREECELLS=1` (BLASTP, memory, every task, `-subject` and `-db`; in the strict set from the pull request that
+  added it (perf/bp-tree-cells, v4-D12 s28): on unless it is `0`) the grid index of blastp's preliminary interval tree
+  takes at most 1 << 14 cells per subject (`X_BP_TREE_MAX_CELLS` in `blastp/blast_engine.rs`, through
+  `BlastIntervalTree::reset_with_bounds_cells`) instead of the tree's own limit of 1 << 16 (`X_MAX_CELLS` in
+  `blastn/interval_tree.rs`; blastn keeps it through the unchanged `reset_with_bounds`). The grid is LOSAT's side index
+  of the tree (ITREEFAST); NCBI walks the tree (`BlastIntervalTreeContainsHSP`, `blast_itree.c`) and has no grid. The
+  subject scratch keeps the tree, and the grid's per-cell heads (4 bytes each) stay as large as the largest grid the
+  thread has needed, so the limit bounds them at 64 KiB per thread instead of 256 KiB. A grid that would exceed the
+  limit gets cells twice as wide in both offsets, as often as needed; the cell of a start point still lists every leaf
+  whose box holds that point, and the unchanged predicate tests them, so the index answers as before (lib test
+  `x_side_indexes_agree_with_tree_walk_on_random_hsps` runs the grid at 1 << 16, 1 << 14 and 64 cells against the walk).
+  Subjects whose grid had fewer than 1 << 14 cells keep the same grid (probe exp/d12s27-tree-hist, 8 threads, subjects
+  with HSPs: human x `BlastDBSpecies6` 89.6 %, Swiss-Prot q100 98.0 %, UniRef50 q100 `-evalue 0.001` 87.95 %, q100
+  against a third of UniRef50 100 %). Every report is unchanged.
+  Evidence 2026-11-01 (v4-D12 s28, workstation, head b20c3448 on dev b94e9844f; arms default, `=0`, and the dev base
+  built the same way, rotated, peak RssAnon from 2 ms samples; every report identical across arms): UniRef50 q100
+  `-evalue 0.001` at 32 threads (node 1, membind 1, 4 rounds) 119.0 [117.7-119.9] MiB against the dev base 131.3
+  [129.6-133.7] and `=0` 131.1 [130.3-133.2] (11.9-13.9 MiB lower in 4 of 4 rounds; wall x0.9960); 3,000 human x
+  `BlastDBSpecies6` at 16 threads (8 rounds) 35.5 [35.3-35.6] against 37.7 [37.2-38.3] and `=0` 37.5 [37.2-37.9]
+  (1.7-3.0 MiB lower in 8 of 8); one thread (node 0, 8 rounds) human 12.9 against 13.0, OrthoFinder Blast0_6 19.1
+  against 19.3 MiB (8 of 8 lower in both).
+  Time: one thread (`perf stat` `:u`, node 0, 8 rounds) instructions human x0.99997 of the dev base (`=0` x1.00000),
+  Blast0_6 x0.99999 (`=0` x1.00001), cycles human x0.9943 (`=0` x0.9941), Blast0_6 x0.9985 (`=0` x0.9982); 16 threads
+  (node 1 CPUs 32-47 warmed 3 s, 8 rounds) Swiss-Prot q100 instructions x1.0000, cycles x0.9961 (`=0` x0.9964), wall
+  x0.9949; human instructions x0.99997, cycles x0.9966 (`=0` x0.9962), wall x0.9955. blastn megablast Sakai x MG1655
+  at one thread: instructions of the branch and the dev base within 1,200 of 4.52 G (the run-to-run spread).
 - `LOSAT_X_BPLK16=1` (BLASTP, memory; in the strict set from the pull request that added it (perf/bp-lk16, v4-D12 s19-s20,
   `DECISIONS` 59-61): on unless it is `0`; recorded for `LOSAT_X_REACH` once per table, taken where the table has 16-bit
   hits): exact blastp's block tables (`-task blastp`, the table built

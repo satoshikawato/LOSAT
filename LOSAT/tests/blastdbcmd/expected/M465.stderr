@@ -1,0 +1,3 @@
+Error: [blastdbcmd] Invalid filtering algorithm ID: 99
+Error: [blastdbcmd] Skipped IPG : 1002
+Error: [blastdbcmd] Skipped IPG: 9999

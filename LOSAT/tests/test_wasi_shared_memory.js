@@ -1,9 +1,13 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { execFileSync, spawnSync } = require("node:child_process");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { Worker } = require("node:worker_threads");
 const { test } = require("node:test");
-const { guardSharedMemory } = require("./wasi_shared_memory");
+const { guardSharedMemory, guardRecord, verifyGuarded, GUARD_SECTION } = require("./wasi_shared_memory");
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
@@ -222,3 +226,112 @@ for (const [operation, parameters] of [
     }
   });
 }
+
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
+// Build step (`wasi_shared_memory.js guard`, release v0.2.0 DECISIONS 52): the guarded module
+// carries its record, is never guarded twice, verifies, and a module that cannot be guarded
+// fails the build without an output.
+const marker = (record) => Buffer.from(section(0, [...name(GUARD_SECTION), ...Buffer.from(JSON.stringify(record))]));
+// A module with shared memory and no memory.fill or memory.copy.
+const plain = () => Buffer.from([
+  0, 97, 115, 109, 1, 0, 0, 0,
+  ...section(1, [1, 0x60, 0, 0]),
+  ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, 4]])),
+  ...section(3, [1, 0]),
+  ...section(10, vector([body([])])),
+]);
+// The code section of `bytes` with function `index` (of the defined ones) replaced by `replacement`.
+function replaceBody(bytes, index, replacement) {
+  const leb = (at) => { let value = 0, shift = 0, b; do { b = bytes[at.pos++]; value |= (b & 127) << shift; shift += 7; } while (b & 128); return value; };
+  const at = { pos: 8 };
+  const parts = [bytes.subarray(0, 8)];
+  while (at.pos < bytes.length) {
+    const start = at.pos, id = bytes[at.pos++], size = leb(at), end = at.pos + size;
+    if (id !== 10) { parts.push(bytes.subarray(start, end)); at.pos = end; continue; }
+    const count = leb(at), bodies = [];
+    for (let i = 0; i < count; i += 1) { const length = leb(at); bodies.push(bytes.subarray(at.pos, at.pos + length)); at.pos += length; }
+    bodies[index] = Buffer.from(replacement);
+    const code = [...uleb(count), ...bodies.flatMap((b) => [...uleb(b.length), ...b])];
+    parts.push(Buffer.from(section(10, code)));
+  }
+  return Buffer.concat(parts);
+}
+
+test("the guarded module carries its record and is returned as it is when guarded again", () => {
+  const guarded = guardSharedMemory(fixture());
+  assert.deepEqual(guarded.record, { version: 1, fill: 1, copy: 1 });
+  assert.deepEqual(guardRecord(guarded.bytes), guarded.record);
+  assert.deepEqual(guarded.bytes.subarray(-marker(guarded.record).length), marker(guarded.record));
+  assert.equal(guardRecord(fixture()), null);
+  const again = guardSharedMemory(guarded.bytes);
+  assert.equal(again.bytes, guarded.bytes);
+  assert.deepEqual([again.fill, again.copy, again.record], [0, 0, guarded.record]);
+  assert.deepEqual(verifyGuarded(guarded.bytes), guarded.record);
+  // Nothing to guard: the input comes back without a record.
+  const unchanged = guardSharedMemory(plain());
+  assert.deepEqual([unchanged.bytes, unchanged.record], [plain(), null]);
+});
+
+test("verifyGuarded rejects unguarded, forged, partly guarded and miscounted modules", () => {
+  assert.throws(() => verifyGuarded(fixture()), /no losat\.shared_memory_guard section/);
+  const functions = (...types) => Buffer.from([
+    0, 0x61, 0x73, 0x6d, 1, 0, 0, 0,
+    ...section(1, vector([[0x60, 0, 0]])),
+    ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, 4]])),
+    ...section(3, vector(types.map((type) => [type]))),
+    ...section(10, vector(types.map(() => body([])))),
+    ...marker({ version: 1, fill: 1, copy: 0 }),
+  ]);
+  assert.ok(WebAssembly.validate(functions(0)));
+  assert.throws(() => verifyGuarded(functions(0)), /the guard's helpers are missing/);
+  assert.throws(() => verifyGuarded(functions(0, 0)), /do not have the guard's type/);
+  assert.throws(() => verifyGuarded(Buffer.concat([fixture(), marker({ version: 1, fill: 1, copy: 1 })])),
+    /not the guard's bodies/);
+  const original = fixture({ extra: [[...args, 0xfc, 10, 0, 0]] });
+  const guarded = guardSharedMemory(original);
+  assert.deepEqual(guarded.record, { version: 1, fill: 1, copy: 2 });
+  // extra0 (defined function 3) with its original memory.copy instead of the helper call.
+  const partly = replaceBody(guarded.bytes, 3, body([...args, 0xfc, 10, 0, 0]).slice(1));
+  assert.ok(WebAssembly.validate(partly));
+  assert.throws(() => verifyGuarded(partly), /function 4 has an unguarded memory\.copy/);
+  const tail = marker(guarded.record).length;
+  const recount = (record) => Buffer.concat([guarded.bytes.subarray(0, -tail), marker(record)]);
+  assert.throws(() => verifyGuarded(recount({ version: 1, fill: 2, copy: 2 })), /record counts 2 fills and 2 copies/);
+  assert.throws(() => guardSharedMemory(recount({ version: 2, fill: 1, copy: 2 })), /unsupported losat\.shared_memory_guard record/);
+  assert.throws(() => guardSharedMemory(recount({ version: 1, fill: 0, copy: 0 })), /unsupported losat\.shared_memory_guard record/);
+});
+
+test("the guard command writes a verified module; a decline or nothing to guard exits 1 without output", () => {
+  const command = require.resolve("./wasi_shared_memory");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "losat-guard-command-"));
+  const file = (name) => path.join(dir, name);
+  const json = (...argv) => JSON.parse(execFileSync(process.execPath, [command, ...argv], { encoding: "utf8" }));
+  const fails = (argv, pattern) => {
+    const result = spawnSync(process.execPath, [command, ...argv], { encoding: "utf8" });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, pattern);
+    assert.equal(result.stdout, "");
+  };
+  try {
+    fs.writeFileSync(file("in.wasm"), fixture());
+    const written = json("guard", file("in.wasm"), file("out.wasm"));
+    assert.deepEqual([written.version, written.fill, written.copy, written.guarded_before], [1, 1, 1, false]);
+    assert.deepEqual(fs.readFileSync(file("out.wasm")), guardSharedMemory(fixture()).bytes);
+    assert.equal(json("verify", file("out.wasm")).sha256, written.output_sha256);
+    // A guarded input is written as it is.
+    const again = json("guard", file("out.wasm"), file("again.wasm"));
+    assert.deepEqual([again.guarded_before, again.output_sha256, again.fill], [true, written.output_sha256, 1]);
+    // An instruction that the reader declines (GC ref.i31), and a module with nothing to guard.
+    fs.writeFileSync(file("gc.wasm"), fixture({ extra: [[0x41, 0, 0xfb, 0x1c, 0x1a]] }));
+    assert.ok(WebAssembly.validate(fs.readFileSync(file("gc.wasm"))));
+    fails(["guard", file("gc.wasm"), file("gc-out.wasm")], /unsupported Wasm opcode 0xfb/);
+    fs.writeFileSync(file("plain.wasm"), plain());
+    fails(["guard", file("plain.wasm"), file("plain-out.wasm")], /no memory\.fill or memory\.copy to guard/);
+    fails(["verify", file("in.wasm")], /no losat\.shared_memory_guard section/);
+    fails(["guard", file("in.wasm")], /usage/);
+    assert.deepEqual(fs.readdirSync(dir).sort(), ["again.wasm", "gc.wasm", "in.wasm", "out.wasm", "plain.wasm"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

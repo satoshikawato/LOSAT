@@ -100,7 +100,12 @@ pub(super) fn x_cut_block_bytes(sequence_bytes: u64, threads: usize) -> u64 {
         return BLOCK_BYTES;
     }
     let parts = X_BLOCKS_PER_THREAD.saturating_mul(threads as u64);
-    (sequence_bytes / parts).clamp(X_MIN_BLOCK_BYTES, BLOCK_BYTES)
+    // PROBE (v4-D12 s29, not for merge): another largest block.
+    let largest = std::env::var("LOSAT_PROBE_S29BLOCK")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(BLOCK_BYTES);
+    (sequence_bytes / parts).clamp(X_MIN_BLOCK_BYTES, largest)
 }
 
 // No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.

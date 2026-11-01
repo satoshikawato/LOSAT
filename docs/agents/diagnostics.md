@@ -6721,15 +6721,15 @@ Scheduling (each value computed by one thread with the original function; order 
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is `LOSAT_X_BXCROSS`'s (an x86-64 CPU with AVX2 and POPCNT;
   `LOSAT_X_BXCROSS=0` or no POPCNT leaves the direct loop on every table), `=0` turns it
-  off; set to a value it runs with any cell test (`LOSAT_X_BXCROSS`'s where that runs, otherwise the masked AVX2
-  batch on a CPU with AVX2 and the per-hit loop elsewhere); acts
+  off; set to a value (or with `LOSAT_X_BXDIAGSHADOW`) it runs with any cell test (`LOSAT_X_BXCROSS`'s where that
+  runs, otherwise the masked AVX2 batch on a CPU with AVX2 and the per-hit loop elsewhere); acts
   in the two-hit stage with the standard lookup table,
   `-word_size 3`, when no diagnostic stage traces the seeds)
   the subject scan and the two-hit diagonal test in one loop, with the hits of one lookup cell tested in
   batches of eight (`blastx/x_seed_diag.rs`, exactness argument in its header): blastx calls blastp's
   fused scan of BPSEED with the cell test of `LOSAT_X_BPDIAG` (the AVX2 batch on an x86-64 CPU
   with AVX2, in the form of `LOSAT_X_BXCROSS` where the CPU also has POPCNT, otherwise (with a value of
-  `LOSAT_X_BXDIAG`) the masked batch of 2026-11-02's fold, below; the per-hit loop elsewhere), and the
+  `LOSAT_X_BXDIAG` or `LOSAT_X_BXDIAGSHADOW`) the masked batch of 2026-11-02's fold, below; the per-hit loop elsewhere), and the
   hits that
   pass the test go to the reference's context
   check, extension, save and entry update unchanged (the context from blastp's `XContextTable`, made once
@@ -6770,8 +6770,12 @@ Scheduling (each value computed by one thread with the original function; order 
   setup, dev 0030a116, load 8-33; one cDNA or two of the 50 x the fly proteome, 8 rounds): 4.05 x1.135, 4.73
   x1.120, 5.34 x1.063, 5.79 x1.050, 6.33 x1.011, 6.63 x0.986, 6.77 x0.978, 7.34 x0.947, 7.64 x0.928, 8.38
   x0.902; against Swiss-Prot (4 rounds): 4.73 x1.157, 5.34 x1.109, 5.79 x1.079, 6.33 x1.040, 6.77 x1.013,
-  7.64 x0.951. They break even at about 6.46 against the fly proteome and 6.95 against Swiss-Prot; 670 lies
-  between, within 2 % of the faster loop on either side. Against dev's default (0030a116, the same setup, load
+  7.64 x0.951. They broke even (measured 2026-10-24) at about 6.46 against the fly proteome and 6.95 against
+  Swiss-Prot; 670 lies between, within 2 % of the faster loop on either side. Measured again on 2026-11-01 (the
+  same setup: one core, user-space cycles, the fused loop against the direct loop, 6 rounds against the fly
+  proteome and 3 against Swiss-Prot; plan line SF S3 s4), after `LOSAT_X_BXSCANBYTE` made the direct loop faster:
+  fly proteome 6.33 x1.03, 6.77 x1.01, 7.34 x0.96; Swiss-Prot 6.33 x1.09, 6.77 x1.05, 7.34 x1.01, so the two
+  loops break even near 6.9 and 7.5; the built-in value was not moved. Against dev's default (0030a116, the same setup, load
   7-28; every output the same bytes), 1 thread, cycles: 6.77 x0.979 (0.578 -> 0.565 s), 7.34 x0.949, 7.64
   x0.927, 8.38 x0.898 (0.738 -> 0.663 s), 8.63 x0.885 (0.886 -> 0.784 s); against Swiss-Prot 6.77 x1.013, 7.64
   x0.953, 8.38 x0.920 (7.17 -> 6.61 s); at 8 threads (node 1, 8 physical cores, 5 rounds) 6.77 x0.994, 7.34
@@ -6804,12 +6808,15 @@ Scheduling (each value computed by one thread with the original function; order 
   250 G against 185 G); one 2.1-kb cDNA (4.6 hits per cell) 123.9-125.4 s against 140.4-140.7 s.
 - `LOSAT_X_BXDEFER` and `LOSAT_X_BXDEFERMIN` (BLASTX; folded on 2026-11-02, line SF S3 family bx-seed-loop: both
   variables are gone, the timing line lost `defer_min_hits_per_cell=` and `tables_avx2=`, and
-  `LOSAT_X_BXDIAGMIN` has one built-in value, 670, for every cell test; default results and paths did not
-  change). Why: since the built-in `LOSAT_X_BXDIAGMIN` became 900 (and 670 with `LOSAT_X_BXCROSS`'s cell test) the
+  `LOSAT_X_BXDIAGMIN` has one built-in value, 670, for every cell test). Results do not change anywhere, and
+  paths do not change on x86-64 with AVX2 and POPCNT; what changes is that `LOSAT_X_BXCROSS=0`, or an AVX2 CPU
+  without POPCNT, now takes the direct loop on every table when `LOSAT_X_BXDIAG` is not set, and that
+  `LOSAT_X_BXDIAG=<value>` with `LOSAT_X_BXCROSS=0` has the cutoff 670 instead of 900. Why: since the built-in `LOSAT_X_BXDIAGMIN` became 900 (and 670 with `LOSAT_X_BXCROSS`'s cell test) the
   places this cell test acted fused tables from 9 hits per used cell, above its own rule's 7, so no default table
   reached the rule, and every CPU with AVX2 has POPCNT, so `LOSAT_X_BXCROSS`'s cell test took every default
   table. The masked AVX2 batch (`XDiagMode::Avx2DeferMasked`, `mode=avx2-defer-masked`) stays: with a value of
-  `LOSAT_X_BXDIAG` and `LOSAT_X_BXCROSS=0` (or no POPCNT) the fused loop takes it on every table it fuses; with
+  `LOSAT_X_BXDIAG` or with `LOSAT_X_BXDIAGSHADOW`, and `LOSAT_X_BXCROSS=0` (or no POPCNT), the fused loop takes it
+  on every table it fuses; with
   `LOSAT_X_BXDIAG` not set and `LOSAT_X_BXCROSS=0` the direct loop scans every table. The plain AVX2 batch
   (`mode=avx2`, what `LOSAT_X_BXDEFER=0` gave) is no longer reachable from blastx (blastp has it). History of the
   switch (in the strict set from the pull request that added it, 2026-10-22; acted only where
@@ -6849,7 +6856,7 @@ Scheduling (each value computed by one thread with the original function; order 
   `blastx_diag` line named `mode=avx2-defer-masked` (`mode=avx2` with `=0`) and gave
   `defer_min_hits_per_cell=` and `tables_avx2=` (the fused tables that took the AVX2 batch). Shadow:
   `LOSAT_X_BXDIAGSHADOW=1` compares the cell test each table takes with the reference for every subject (every
-  table through the fused loop); `tests/blastx_diag.rs` runs the masked batch (a value of `LOSAT_X_BXDIAG` with
+  table through the fused loop); `tests/blastx_diag.rs` runs the masked batch (a value of `LOSAT_X_BXDIAG`, or the shadow, with
   `LOSAT_X_BXCROSS=0`) with every search and the shadow; its cases of the switch and the rule's two ends went
   with the fold.
   Measured (history) 2026-10-22/23 on the workstation (perf stat, user-space cycles; one physical core of node 0 for 1 thread
@@ -6881,7 +6888,7 @@ Scheduling (each value computed by one thread with the original function; order 
   default (it was an opt-in prototype the same day; v4-A14 DECISIONS 14): `=0` turns it off; acts where
   `LOSAT_X_BXDIAG`'s fused loop runs an AVX2 cell test on an x86-64 CPU with AVX2 and POPCNT, on every table
   that loop takes; off, or without POPCNT, `LOSAT_X_BXDIAG` not set leaves the direct loop on every table, and
-  with a value the fused loop takes the masked AVX2 batch (`mode=avx2-defer-masked`; until 2026-11-02 the default
+  with a value (or `LOSAT_X_BXDIAGSHADOW`) the fused loop takes the masked AVX2 batch (`mode=avx2-defer-masked`; until 2026-11-02 the default
   took `LOSAT_X_BXDEFER`'s choice there).
   Which query batches the fused loop takes is `LOSAT_X_BXDIAGMIN`'s rule, a separate cutoff against the direct
   loop, whose built-in value is 670 (900 without this cell test until 2026-11-02)) the cell test of blastx's fused seed loop cuts its batches of eight

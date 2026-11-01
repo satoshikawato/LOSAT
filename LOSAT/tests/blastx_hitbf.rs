@@ -24,8 +24,8 @@
 //! init HSPs (the module's argument), so the property under test is that the report does not
 //! depend on it. That reports equal NCBI's is the business of the BLASTX fixtures. The searches set
 //! `LOSAT_X_BXDIAG=0`, so that the direct loop scans every subject (the default where the CPU has no
-//! AVX2: aarch64, WebAssembly), besides the default. At the one-hit window and at a window equal to
-//! the word size the loop keeps its statements, so the reports must not depend on the switch there
+//! AVX2 or POPCNT: aarch64, WebAssembly; also with `LOSAT_X_BXCROSS=0`), besides the default. At
+//! the one-hit window and at a window equal to the word size the loop keeps its statements, so the reports must not depend on the switch there
 //! either.
 //!
 //! The queries are 6 pieces of AP027131 of 1,500 to 3,900 letters each; the subjects are the first

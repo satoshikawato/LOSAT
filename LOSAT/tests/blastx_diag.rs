@@ -229,12 +229,12 @@ fn the_fused_seed_loop_gives_the_reports_of_the_reference() {
         // LOSAT_X_BXDIAGMIN=0 makes every batch take the fused loop; the built-in value and one
         // above every table's hits per cell (no batch fused) give the same report. An empty value
         // is the default (the switch on, with LOSAT_X_BXCROSS's cell test only, where the CPU has
-        // POPCNT). LOSAT_X_BXCROSS=0 gives the direct loop with the default and the masked AVX2
-        // batch with a value.
+        // POPCNT). LOSAT_X_BXCROSS=0 gives the masked AVX2 batch with a value (with the default it
+        // is the direct loop, the reference's own path: the other test checks that no fused subject
+        // runs).
         for (value, min, cross) in [
             ("", "", ""),
             ("", "0", ""),
-            ("", "0", "0"),
             ("1", "0", "0"),
             ("1", "0", ""),
             ("per-hit", "0", ""),
@@ -268,7 +268,15 @@ fn the_shadow_compares_every_subject_and_the_timing_line_names_the_cell_test() {
     let reference = blastx(&args, &[OFF]);
     // The shadow compares every table: with LOSAT_X_BXCROSS=0 the masked AVX2 batch (the default
     // takes LOSAT_X_BXCROSS's cell test).
-    for (value, cross) in [("1", ""), ("1", "0"), ("per-hit", ""), ("scalar", "")] {
+    // (an empty LOSAT_X_BXDIAG is not set: the shadow alone, with LOSAT_X_BXCROSS=0, also runs the
+    // masked batch).
+    for (value, cross) in [
+        ("1", ""),
+        ("1", "0"),
+        ("", "0"),
+        ("per-hit", ""),
+        ("scalar", ""),
+    ] {
         let what = format!("{value} LOSAT_X_BXCROSS={cross}");
         let run = blastx(
             &args,
@@ -354,6 +362,17 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
     let (least, most): (u64, u64) = (least.parse().unwrap(), most.parse().unwrap());
     assert!(0 < least && least <= most, "{all}");
     let avx2 = masked_mode() != "per-hit";
+    // The most hits per cell as the minimum (the cutoff is `>=`): the tables with fewer take the
+    // direct loop and the others the fused one, in one search.
+    assert!(
+        least < most,
+        "the tables need different hits per cell: {all}"
+    );
+    let both = timing(&most.to_string());
+    assert_eq!(field(&both, "min_hits_per_cell"), most, "{both}");
+    assert!(field(&both, "tables_fused") > 0, "{both}");
+    assert!(field(&both, "tables_other") > 0, "{both}");
+    assert!(field(&both, "subjects") > 0, "{both}");
     // A minimum above every table's: no subject went through the fused loop.
     let none = timing(&(most + 1).to_string());
     assert_eq!(field(&none, "tables_fused"), 0, "{none}");
@@ -455,8 +474,7 @@ fn diag_line(run: &Run) -> Option<&str> {
 // every table fused; the timing line names `avx2-cross-defer` (LOSAT_X_BXCROSSDEFER, the default)
 // or, with `LOSAT_X_BXCROSSDEFER=0`, `avx2-cross`. With every table fused, the batches are cut
 // short before repeated entries (`cross_splits=`: the hits of a diagonal in consecutive cells, the
-// two-hit pairs of these related sequences). `LOSAT_X_BXCROSS=0` gives the same reports with the
-// direct loop (`LOSAT_X_BXDIAG` not set: no timing line).
+// two-hit pairs of these related sequences).
 #[test]
 fn the_cross_cell_batches_give_the_reports_of_the_reference() {
     let inputs = Inputs::new();
@@ -470,8 +488,6 @@ fn the_cross_cell_batches_give_the_reports_of_the_reference() {
             ("1", "0", ""),
             ("", "0", "0"),
             ("", "", "0"),
-            ("0", "0", ""),
-            ("0", "", ""),
         ] {
             let run = blastx(
                 &args,
@@ -493,10 +509,7 @@ fn the_cross_cell_batches_give_the_reports_of_the_reference() {
             let expected = cross_mode(cross_defer);
             match diag_line(&run) {
                 Some(line) => {
-                    assert!(
-                        cross != "0" && expected.starts_with("avx2-cross"),
-                        "{what}: {line}"
-                    );
+                    assert!(expected.starts_with("avx2-cross"), "{what}: {line}");
                     assert!(
                         line.contains(&format!("mode={expected} ")),
                         "{what}: {line}"
@@ -513,7 +526,7 @@ fn the_cross_cell_batches_give_the_reports_of_the_reference() {
                     }
                 }
                 None => assert!(
-                    cross == "0" || !expected.starts_with("avx2-cross"),
+                    !expected.starts_with("avx2-cross"),
                     "{what}: no timing line: {}",
                     run.stderr
                 ),

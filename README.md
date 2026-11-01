@@ -397,7 +397,6 @@ LOSAT stops with an error for each option and value below; it does not run somet
 
 **Query and subject**
 - `-query_loc` and `-subject_loc`: `blastx`.
-- `-parse_deflines` with `-subject`: all five programs (with `-db` it works).
 
 **Databases**
 - `-db_soft_mask` and `-db_hard_mask`: all five programs.

@@ -1,0 +1,12 @@
+Error: [blastdbcmd] Skipped NP_000002.2
+Error: [blastdbcmd] Skipped np_000002.2
+Error: [blastdbcmd] Skipped NP_000002.1234
+Error: [blastdbcmd] Skipped NP_000002.a
+Error: [blastdbcmd] Skipped NP_000002.
+Error: [blastdbcmd] Skipped NP_000002.1.1
+Error: [blastdbcmd] Skipped .1
+Error: [blastdbcmd] Skipped ref|NP_000002.2|
+Error: [blastdbcmd] Skipped ref|np_000002.2|
+Error: [blastdbcmd] Skipped sp|P99999.3|
+Error: [blastdbcmd] Skipped sp|P99999.3|TEST_HUMAN
+Error: [blastdbcmd] Failed to find target id TEST_HUMAN

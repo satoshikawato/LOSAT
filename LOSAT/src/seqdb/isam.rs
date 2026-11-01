@@ -108,8 +108,9 @@
 //!   index of such a volume; its result is never used and is not computed.
 //! - The warnings that `CSeq_id` posts while parsing a user's id (`ERR_POST` to the diagnostics
 //!   stream) are dropped.
-//! - Exceptions of `SeqDB_SimplifyAccession` that are not NCBI's text (an out-of-range number in
-//!   a `ti` tag, a string tag of `BL_ORD_ID`) are [`SimplifyError::Exception`] with LOSAT's text.
+//! - Exceptions of `SeqDB_SimplifyAccession` that are not a `CSeqIdException` (a `ti` tag that is
+//!   not a number, a string tag of `BL_ORD_ID` or `PIG`) are [`SimplifyError::Exception`] with
+//!   the message NCBI's exception holds.
 //! - The functions assume the C locale (`tolower`, `toupper`, `isdigit`, `atoi`).
 
 use std::path::{Path, PathBuf};
@@ -121,6 +122,7 @@ use crate::seqid::label;
 use crate::seqid::model::{ObjectId, ParsedSeqId, TextseqId};
 use crate::seqid::parse::{parse_ids, seq_id_from_text, which_inverse_seq_id, SeqIdError};
 use crate::seqid::rank::{best_rank_score, find_best};
+use crate::writedb::data_size::printable_string;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:45-55
 // ```c++
@@ -455,6 +457,8 @@ pub struct StringIsam {
     /// `m_FirstKey` and `m_LastKey` (lower-cased), set when the index is initialised.
     first_key: Option<Vec<u8>>,
     last_key: Option<Vec<u8>>,
+    /// The bytes of the index file, where the ISAM keeps them (`keep_index`).
+    index_bytes: Option<Vec<u8>>,
 }
 
 impl StringIsam {
@@ -628,6 +632,7 @@ impl StringIsam {
             max_line_size: 0,
             first_key: None,
             last_key: None,
+            index_bytes: None,
         };
         if let Some(header) = isam.init_search()? {
             isam.num_terms = header.num_terms;
@@ -839,8 +844,35 @@ impl StringIsam {
     /// The four bytes at `at` of the index file.
     fn index_u32(&self, at: u64) -> Result<u32, SeqDbError> {
         let mut bytes = [0u8; 4];
-        self.index.read_exact_at(&mut bytes, at)?;
+        self.read_index(&mut bytes, at)?;
         Ok(u32::from_be_bytes(bytes))
+    }
+
+    /// The ISAM with the bytes of its index file kept in memory, which the binary search over
+    /// the samples then reads (NCBI maps the file): for the search programs, which look up
+    /// every reported sequence. No NCBI counterpart beyond the mapping.
+    pub fn keep_index(mut self) -> Result<Self, SeqDbError> {
+        self.index_bytes = Some(self.index.read_all()?);
+        Ok(self)
+    }
+
+    /// `buf` from `at` of the index file (`DbFile::read_exact_at`, from the kept bytes where
+    /// there are some, with the same error past the end).
+    fn read_index(&self, buf: &mut [u8], at: u64) -> Result<(), SeqDbError> {
+        let Some(bytes) = &self.index_bytes else {
+            return self.index.read_exact_at(buf, at);
+        };
+        let range = usize::try_from(at)
+            .ok()
+            .and_then(|start| Some(start..start.checked_add(buf.len())?))
+            .filter(|range| range.end <= bytes.len());
+        match range {
+            Some(range) => {
+                buf.copy_from_slice(&bytes[range]);
+                Ok(())
+            }
+            None => self.index.read_exact_at(buf, at),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:899-923
@@ -1168,8 +1200,7 @@ impl StringIsam {
         }
         let mut window = vec![0u8; term_in.len() + 1];
         let readable = window.len().min((file_length - offset_begin) as usize);
-        self.index
-            .read_exact_at(&mut window[..readable], key_offset)?;
+        self.read_index(&mut window[..readable], key_offset)?;
         let dc_result = diff_char(term_in, &window, true);
         if dc_result != -1 {
             return Ok((dc_result, window));
@@ -3188,8 +3219,8 @@ pub struct SimplifiedAccession {
 pub enum SimplifyError {
     /// A `CSeqIdException` of `CSeq_id(element)` or of the `db:tag` id.
     SeqId(SeqIdError),
-    /// Another exception (LOSAT's text): a string tag read as a number, an integer read from a
-    /// string tag.
+    /// Another exception, with its message: a string tag read as a number, an integer read from
+    /// a string tag.
     Exception(String),
 }
 
@@ -3225,12 +3256,51 @@ fn string_to_int8(s: &[u8]) -> Option<i64> {
     i64::try_from(n).ok()
 }
 
-/// `CObject_id::GetId()`.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:845-860
+// ```c++
+//     Int8 limdiv = kMax_I8 / base;
+//     Int8 limoff = kMax_I8 % base + (sign ? 1 : 0);
+//     ...
+//     while (char ch = str[pos]) {
+//         int delta;  // corresponding numeric value of 'ch'
+//         // Check digit
+//         if (!s_IsGoodCharForRadix(ch, base, &delta)) {
+//             break;
+//         }
+//         // Check for overflow
+//         if (n >= limdiv  &&  (n > limdiv  ||  delta > limoff)) {
+//             S2N_CONVERSION_ERROR(int8_t, kEmptyStr, ERANGE, pos);
+//         }
+// ```
+/// Whether `NStr::StringToInt8(s)` fails with its ", overflow" message: the digits after an
+/// optional sign overflow before the first other byte (which fails without it).
+fn int8_digits_overflow(s: &[u8]) -> bool {
+    let negative = s.first() == Some(&b'-');
+    let digits = match s.first() {
+        Some(b'-' | b'+') => &s[1..],
+        _ => s,
+    };
+    let limdiv = i64::MAX / 10;
+    let limoff = i64::MAX % 10 + i64::from(negative);
+    let mut n: i64 = 0;
+    for &c in digits.iter().take_while(|c| c.is_ascii_digit()) {
+        let delta = i64::from(c - b'0');
+        if n >= limdiv && (n > limdiv || delta > limoff) {
+            return true;
+        }
+        n = n * 10 + delta;
+    }
+    false
+}
+
+/// `CObject_id::GetId()`: a string tag is NCBI's `CInvalidChoiceSelection` (probe D11 of line
+/// BDC).
 fn object_id_id(tag: &ObjectId) -> Result<i64, SimplifyError> {
     match tag {
         ObjectId::Id(n) => Ok(i64::from(*n)),
         ObjectId::Str(_) => Err(SimplifyError::Exception(
-            "Object-id::GetId: wrong choice selection (str)".to_string(),
+            "CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str"
+                .to_string(),
         )),
     }
 }
@@ -3408,8 +3478,8 @@ fn fasta_string(id: &ParsedSeqId) -> Vec<u8> {
 // }
 //
 // ```
-/// `SeqDB_SimplifySeqid(bestid, &acc, num_id, str_id, simpler)` (the call with `acc == NULL`,
-/// made by `CSeqDBGiList::FindId`, is not ported).
+/// `SeqDB_SimplifySeqid(bestid, &acc, num_id, str_id, simpler)` (the call with `acc == NULL` is
+/// [`seqdb_simplify_seqid`]).
 fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccession, SimplifyError> {
     let mut out = SimplifiedAccession {
         id_type: SeqDbIdType::String,
@@ -3448,8 +3518,13 @@ fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccessio
                 out.num_id = match &dbt.tag {
                     ObjectId::Str(text) => string_to_int8(text).ok_or_else(|| {
                         SimplifyError::Exception(format!(
-                            "Cannot convert string '{}' to Int8",
-                            String::from_utf8_lossy(text)
+                            "Cannot convert string '{}' to Int8{}",
+                            printable_string(text),
+                            if int8_digits_overflow(text) {
+                                ", overflow"
+                            } else {
+                                ""
+                            }
                         ))
                     })?,
                     ObjectId::Id(n) => i64::from(*n),
@@ -3523,6 +3598,29 @@ fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccessio
         }
     }
     Ok(out)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2805-2817
+// ```c++
+// void CSeqDBVol::SeqidToOids(CSeq_id              & seqid,
+//                             vector<int>          & oids,
+//                             CSeqDBLockHold       & locked) const
+// {
+//     Int8   ident   (-1);
+//     string str_id;
+//     bool   simpler (false);
+//
+//     ESeqDBIdType id_type = SeqDB_SimplifySeqid(seqid, 0, ident, str_id, simpler);
+//
+//     x_StringToOids(seqid.AsFastaString(), id_type, ident, str_id, simpler, oids);
+//
+// }
+// ```
+/// `SeqDB_SimplifySeqid(seqid, 0, num_id, str_id, simpler)` of `CSeqDBVol::SeqidToOids`: what a
+/// volume looks up for the Seq-id `seqid`. Without `acc`, NCBI's default case labels the Seq-id
+/// itself (`GetLabel` with `eFasta`), which is its FASTA string, the `acc` given here.
+pub fn seqdb_simplify_seqid(seqid: &ParsedSeqId) -> Result<SimplifiedAccession, SimplifyError> {
+    simplify_seqid(seqid, &fasta_string(seqid))
 }
 
 /// `WhichInverseSeqId(portion.c_str())`: the text up to its first NUL.

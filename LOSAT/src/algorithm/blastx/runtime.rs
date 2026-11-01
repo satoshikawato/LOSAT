@@ -631,7 +631,7 @@ impl PreliminarySink for Runtime<'_> {
         self.output.push(BatchResults {
             query_ordinal: ordinal,
             queries: vec![Vec::new(); batch.original_lengths.len()],
-            prepared: batch.clone(),
+            prepared: batch.x_for_results(),
             parameters: params.to_vec(),
             search_skipped: true,
         });
@@ -2538,7 +2538,7 @@ impl PreliminarySink for Runtime<'_> {
         self.output.push(BatchResults {
             query_ordinal: self.ordinal,
             queries: queries.into_iter().map(|q| q.lists).collect(),
-            prepared: batch.clone(),
+            prepared: batch.x_for_results(),
             parameters: full,
             search_skipped: false,
         });

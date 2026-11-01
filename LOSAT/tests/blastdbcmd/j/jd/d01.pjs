@@ -1,0 +1,23 @@
+{
+  "version": "1.2",
+  "dbname": "p4",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "prot_ids",
+  "number-of-letters": 2603,
+  "number-of-sequences": 19,
+  "last-updated": "2026-10-29T19:13:00",
+  "number-of-volumes": 1,
+  "bytes-total": 5473,
+  "bytes-to-cache": 2847,
+  "files": [
+    "p4.phr",
+    "p4.pin",
+    "p4.pnd",
+    "p4.pni",
+    "p4.pog",
+    "p4.psd",
+    "p4.psi",
+    "p4.psq"
+  ]
+}

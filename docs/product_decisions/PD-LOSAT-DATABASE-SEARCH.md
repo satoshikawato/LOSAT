@@ -1,8 +1,10 @@
 # Product Decision: database search (`-db`)
 
 - Decision ID: `PD-LOSAT-DATABASE-SEARCH`
-- Version: 1.1
-- Date: 2026-10-13 (version 1.0: 2026-10-12)
+- Version: 1.2
+- Date: 2026-11-01 (version 1.0: 2026-10-12; 1.1: 2026-10-13; 1.2: several databases in one
+  `-db`, P4, line DI-8f, decided under the maintainer's standing delegation; its PR asks the
+  maintainer to accept it)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -93,6 +95,18 @@ files that filter or replace the statistics, and several databases in one `-db` 
 second step. Until then LOSAT rejects them explicitly; it never searches such a database
 with part of its data ignored.
 
+Version 1.2 (line DI-8f): several databases in one `-db` (`-db "a b"`, `-db '"a b" c'`) are
+searched as one database, as NCBI's top alias node does: the names are resolved in order
+(the first that is not found is NCBI's error), their volumes are opened in NCBI's order (by
+base name, then path; independent of the order of the names), and a volume that two names
+give is opened and searched once. The reports show one record per name, each the database
+of that name opened alone (NCBI's `GetBlastDbInfo`): the outfmt 0 header joins the titles
+with `; ` and sums the counts, the epilog has one block per name, a name given twice shows
+twice. Refused: a list in which a volume is reached through an alias file and again (NCBI
+counts it twice in the statistics of a search that reads it once), and a version 5 list that
+mixes databases with and without the accession table of `makeblastdb -parse_seqids`
+(`PD-LOSAT-NCBI-DEFECTS`, rule 3). `losat blastdbcmd` keeps one database per `-db`.
+
 ## Not part of this document
 
 - LOSAT Web taking a database as engine input (accepted on the same day) is written into
@@ -114,8 +128,8 @@ is an explicit error of `LOSAT/src/seqdb`:
 | A header with a Seq-id other than `gnl|BL_ORD_ID|n` | parsed Seq-ids (P4); checked on the first sequence of every volume when the database is opened, and at every header read after that |
 | Alias keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `OID_MASK_TYPE`, `FIRST_OID`, `LAST_OID`, `MEMB_BIT`, `MASKLIST`, `VDBLIST` | filters (P4) |
 | Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | they replace the values behind the statistics (second step). `NSEQ` and `LENGTH` equal to those sums, as `blastdb_aliastool -dblist` writes them, change nothing in NCBI and are read (since stage DB-3) |
-| A name that lists several databases | one database per search (P4) |
-| A volume listed more than once, a group alias file (`index.alx`) in a directory, two volumes of one name in different directories | NCBI derives counts or the volume order from them in ways the reader does not reproduce |
+| A name that lists several databases | one database per search (P4); searched since version 1.2 |
+| A volume listed more than once, a group alias file (`index.alx`) in a directory, two volumes of one name in different directories | NCBI derives counts or the volume order from them in ways the reader does not reproduce; since version 1.2 two volumes of one name in different directories are read (NCBI orders them by base name, then path) |
 | Column files of a volume (mask data of `makeblastdb -mask_data`) | not read |
 
 Two errors are NCBI's own and are reproduced: volumes of version 4 and of version 5 in one
@@ -127,7 +141,7 @@ LMDB file's volume list with the volumes; the reader does not). Since stage DB-3
 name is looked up along NCBI's search path (the current directory, then `BLASTDB`, then
 `[BLAST] BLASTDB` of `.ncbirc`), with NCBI's texts when it is not found. Not ported, each an
 error or a difference that a test records: group alias files (`index.alx`), several names
-in one `-db`, index files cut short, NCBI's threshold of open files and its warning at
+in one `-db` (searched since version 1.2), index files cut short, NCBI's threshold of open files and its warning at
 1,024 links, escapes in registry values.
 
 ## What `losat makeblastdb` of stage DB-2 writes and rejects

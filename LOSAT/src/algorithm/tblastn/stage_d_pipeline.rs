@@ -771,14 +771,14 @@ pub(super) fn x_search_batches<'p>(
                 crate::utils::xreach::x_reach!("LOSAT_X_TBNOWNPOOLS", own_pools > 0);
             }
             if crate::utils::threading::diagnostics_enabled() {
-                eprintln!(
-                    "[losat-thread-stage] program=tblastn stage=query_batches batches={} threads={} side_by_side={} one_after_another={} own_pools={}",
+                crate::utils::threading::write_diagnostic_line(format!(
+                    "[losat-thread-stage] program=tblastn stage=query_batches batches={} threads={} side_by_side={} one_after_another={} own_pools={}\n",
                     ranges.len(),
                     pool.threads(),
                     side_by_side,
                     ranges.len() - side_by_side - own_pools,
                     own_pools
-                );
+                ));
             }
             let (ranges, rest) = ranges.split_at(side_by_side);
             let (rest, own) = rest.split_at(rest.len() - own_pools);
@@ -2930,10 +2930,10 @@ fn run_preliminary_subjects_into(
                 flow.peak_waiting()
             )
         });
-        eprintln!(
-            "[losat-thread-activity] program=tblastn stage=subject_core work_items={} worker_slots={:?} peak_active={} pool_entries=1{}",
+        crate::utils::threading::write_diagnostic_line(format!(
+            "[losat-thread-activity] program=tblastn stage=subject_core work_items={} worker_slots={:?} peak_active={} pool_entries=1{}\n",
             subjects.count(), workers, peak.load(Ordering::SeqCst), x_flow_fields
-        );
+        ));
     }
     Ok(())
 }

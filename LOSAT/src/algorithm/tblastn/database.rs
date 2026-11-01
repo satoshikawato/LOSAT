@@ -147,7 +147,7 @@ impl TblastnDatabase {
     /// What the `Database:` lines of the pairwise report show
     /// (`algorithm::common::database::pairwise_database`).
     pub(super) fn pairwise_database(&self) -> PairwiseDatabase {
-        shared::pairwise_database(&self.db, &self.name)
+        shared::pairwise_database(&self.db)
     }
 
     /// The Blast-def-line taxid of each reported sequence by rank and what the taxonomy
@@ -281,13 +281,14 @@ pub(super) fn read_titles(
     first_query: usize,
     titles: &mut DatabaseTitles,
 ) -> Result<()> {
+    let headers = shared::HeaderReader::new(&database.db);
     for (index, hitlist) in hitlists.iter().enumerate() {
         for list in hitlist.lists() {
             let ordinal = u32::try_from(list.oid).context("negative TBLASTN subject OID")?;
             if titles.contains_key(&ordinal) {
                 continue;
             }
-            let title = shared::read_header(&database.db, ordinal, first_query + index, PROGRAM)?;
+            let title = shared::read_header(&headers, ordinal, first_query + index, PROGRAM)?;
             titles.insert(ordinal, title);
         }
     }
@@ -514,7 +515,12 @@ mod tests {
             SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
         let path = tests.join("db_search").join(name);
         TblastnDatabase {
-            db: SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap(),
+            db: {
+                let mut db =
+                    SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+                db.read_name_records(path.to_str().unwrap()).unwrap();
+                db
+            },
             name: name.to_string(),
             taxdb: shared::TaxdbRun::default(),
         }

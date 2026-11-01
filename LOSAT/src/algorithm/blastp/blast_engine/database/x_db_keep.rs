@@ -69,8 +69,8 @@ use super::super::super::hsp::BlastpHspList;
 use super::super::super::x_prelim_compact::XPrelimHsp;
 use super::x_db_cut::x_sequence_bytes;
 use super::{
-    block_subject, diag_offset_after, prepare_search_block, search_read_error, BlastpDatabase,
-    BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, PrelimSink,
+    block_subject, diag_offset_after, prepare_search_block, BlastpDatabase, BlastpSubjectRef,
+    BlastpSubjectResult, BlastpSubjectScratch, PrelimSink,
 };
 
 // No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
@@ -140,12 +140,17 @@ pub(super) fn x_bp_db_keep() -> bool {
     crate::seqdb::x_bp_db_keep()
 }
 
-/// `read_search_block` with the bytes in `buf`.
-fn x_read_search_block_into(db: &SeqDb, range: BlockRange, buf: Vec<u8>) -> Result<SequenceBlock> {
+/// `read_search_block` with the bytes in `buf`; the errors name `program`.
+fn x_read_search_block_into(
+    db: &SeqDb,
+    range: BlockRange,
+    buf: Vec<u8>,
+    program: &str,
+) -> Result<SequenceBlock> {
     let mut block = db
         .x_read_block_into(range, buf)
-        .map_err(search_read_error)?;
-    prepare_search_block(&mut block)?;
+        .map_err(|error| crate::algorithm::common::database::search_read_error(error, program))?;
+    prepare_search_block(&mut block, program)?;
     Ok(block)
 }
 
@@ -162,6 +167,7 @@ struct XKit {
 /// `first_diag_offset`, and the results of the sequences with HSP lists.
 fn x_search_block<K>(
     db: &SeqDb,
+    program: &str,
     range: BlockRange,
     first_diag_offset: i32,
     kit: &mut XKit,
@@ -170,7 +176,7 @@ fn x_search_block<K>(
 where
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
 {
-    let block = x_read_search_block_into(db, range, std::mem::take(&mut kit.bytes))?;
+    let block = x_read_search_block_into(db, range, std::mem::take(&mut kit.bytes), program)?;
     kit.scratch.prepare_independent_subject(first_diag_offset);
     let mut with_hits = Vec::new();
     let mut subject_result = BlastpSubjectResult::new(0);
@@ -283,6 +289,7 @@ impl<P> Drop for XStopOnPanic<'_, '_, P> {
 /// when no block is left or the search stopped.
 fn x_window_worker<S, K, P>(
     db: &SeqDb,
+    program: &str,
     window: i32,
     block_bytes: u64,
     shared: &XShared<'_, P>,
@@ -321,7 +328,7 @@ fn x_window_worker<S, K, P>(
             scratch: new_scratch(),
             bytes: Vec::new(),
         });
-        let found = x_search_block(db, range, first_diag_offset, kit, process_subject);
+        let found = x_search_block(db, program, range, first_diag_offset, kit, process_subject);
         let bytes = x_kept_bytes(&found);
         state = shared.lock();
         if state.stopped {
@@ -361,7 +368,7 @@ fn x_window_worker<S, K, P>(
 /// one task per worker, in the window `size` (module header).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn x_search_window<S, K, P>(
-    db: &SeqDb,
+    database: &BlastpDatabase,
     pool: &SearchPool<'_>,
     window: i32,
     block_bytes: u64,
@@ -375,6 +382,8 @@ where
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
     P: PrelimSink + Send,
 {
+    let db = &database.db;
+    let program = database.program;
     let workers = pool.threads().max(1);
     let shared = XShared {
         window: Mutex::new(XWindow {
@@ -400,6 +409,7 @@ where
                     scope.spawn(move |_| {
                         x_window_worker(
                             db,
+                            program,
                             window,
                             block_bytes,
                             shared,
@@ -468,7 +478,7 @@ where
             );
         }
         return x_search_window(
-            db,
+            database,
             pool,
             window,
             block_bytes,
@@ -488,7 +498,8 @@ where
     let mut bytes = Vec::new();
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, block_bytes) {
-        let block = x_read_search_block_into(db, range, std::mem::take(&mut bytes))?;
+        let block =
+            x_read_search_block_into(db, range, std::mem::take(&mut bytes), database.program)?;
         for i in 0..block.len() {
             process_subject(
                 &mut scratch,

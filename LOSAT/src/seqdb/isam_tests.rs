@@ -893,6 +893,31 @@ fn user_ids_that_are_numbers() {
         seqdb_simplify_accession(b"gnl|ti|123").unwrap().id_type,
         SeqDbIdType::Ti
     );
+    // `NStr::StringToInt8` of a string tag of `ti` (probes I187, I189 of line BDC): an overflow
+    // of the leading digits is reported before a byte that is not one.
+    let ti_error = |id: &[u8]| seqdb_simplify_accession(id).unwrap_err().to_string();
+    assert_eq!(
+        ti_error(b"gnl|ti|abc"),
+        "Cannot convert string 'abc' to Int8"
+    );
+    assert_eq!(
+        ti_error(b"gnl|ti|99999999999999999999"),
+        "Cannot convert string '99999999999999999999' to Int8, overflow"
+    );
+    assert_eq!(
+        ti_error(b"gnl|ti|99999999999999999999x"),
+        "Cannot convert string '99999999999999999999x' to Int8, overflow"
+    );
+    assert_eq!(
+        ti_error(b"gnl|ti|12x"),
+        "Cannot convert string '12x' to Int8"
+    );
+    assert_eq!(
+        seqdb_simplify_accession(b"gnl|ti|-9223372036854775808")
+            .unwrap()
+            .num_id,
+        i64::MIN
+    );
     assert_eq!(simplify_accession_for_isam(b"gi|1414").unwrap(), b"");
     assert_eq!(
         simplify_accession_for_isam(b"gnl|BL_ORD_ID|1").unwrap(),

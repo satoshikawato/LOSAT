@@ -682,6 +682,15 @@ impl<R: Read> FastaInputSource<R> {
     /// counter unchanged, so a further call reads from the next line, as NCBI's next
     /// `ReadOneSeq` does. The programs stop at the rejection (`read_all`, `read_queries`),
     /// where NCBI skips a query it cannot fetch and fails on such a subject.
+    /// The search whose records this source reads under `-parse_deflines`: a query and a subject
+    /// with one id are compared (`crate::seqid::id_scope::IdScope`).
+    pub fn set_id_scope(
+        &mut self,
+        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
+    ) {
+        self.reader.set_id_scope(id_scope);
+    }
+
     /// EXPERIMENT (LOSAT_X_BNQPACK): pack the letters of the nucleotide records read from now on;
     /// a record whose letters packed has an empty `sequence`, and `x_take_packed` gives them.
     pub fn x_pack_letters(&mut self) {

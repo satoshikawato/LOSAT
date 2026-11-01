@@ -18,11 +18,11 @@
 //! sequence with the id of a query as that query (probe of 2026-10-30).
 
 use std::collections::HashSet;
-use std::sync::{Mutex, OnceLock};
 
 use crate::report::archive::bioseq::{QuerySeqLoc, SeqLocStrand};
 use crate::seqid::accguide::{identify_seq_id, parse_flags, GENERAL, LOCAL};
 use crate::seqid::defline_set::{scope_keys, tabular_id, TabularId};
+use crate::seqid::id_scope::{version_keys, SharedRecord};
 use crate::seqid::label;
 use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best, text_score};
@@ -45,6 +45,9 @@ pub struct BelievedIds {
     pub local: bool,
     /// The strand of the record's Seq-loc.
     pub strand: SeqLocStrand,
+    /// Whether the record is one that a reader of the other role read before it
+    /// (`crate::seqid::id_scope::IdScope::add_record`).
+    pub shared: Option<SharedRecord>,
 }
 
 impl BelievedIds {
@@ -88,6 +91,7 @@ impl BelievedIds {
             warning_id,
             local,
             strand,
+            shared: None,
         }
     }
 
@@ -134,28 +138,6 @@ impl BelievedIds {
         }
         String::from_utf8_lossy(&out).into_owned()
     }
-}
-
-/// The keys of every query id read in this process under `-parse_deflines` (`scope_keys`, and
-/// `version_keys`' own key).
-static QUERY_KEYS: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
-
-/// `QUERY_KEYS` of the `-subject` records.
-static SUBJECT_KEYS: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
-
-/// Whether a query was read under `-parse_deflines`.
-pub(crate) fn query_keys_kept() -> bool {
-    QUERY_KEYS.get().is_some()
-}
-
-/// Whether a query read so far has an id with one of the keys `keys`. NCBI would show a database
-/// sequence with such an id as the query (`report::db_subject::ParsedSubject`). A query of another
-/// batch counts too, though NCBI's scope holds one batch: a refusal, not another report.
-pub(crate) fn query_has_key(keys: &[u64]) -> bool {
-    QUERY_KEYS.get().is_some_and(|seen| {
-        let seen = seen.lock().unwrap_or_else(|error| error.into_inner());
-        keys.iter().any(|key| seen.contains(key))
-    })
 }
 
 /// A record's defline as `-parse_deflines` reads it: where its title starts, and its ids.
@@ -250,11 +232,11 @@ pub(crate) fn parse_believed_defline(
     })
 }
 
-/// LOSAT's refusal of the ids of a record, or `None`: a `gnl|BL_ORD_ID|n` id, an id that a record
-/// of the role read before has, and an id that a record of the other role has (a query and a
-/// subject: `dropin-survey-20261029/DI7/DECISIONS.md` 12). An accession with a version and the
-/// same accession without one count as one id for two subjects, a query and a subject, and in
-/// BLASTN two queries (DECISIONS 11, 12). Adds the keys of the ids.
+/// LOSAT's refusal of the ids of a record, or `None`: a `gnl|BL_ORD_ID|n` id and an id that a record
+/// of the role read before has. An accession with a version and the same accession without one
+/// count as one id for two subjects, and in BLASTN two queries (`dropin-survey-20261029/DI7/
+/// DECISIONS.md` 11, 12). Adds the keys of the ids. A record of the other role is
+/// `crate::seqid::id_scope::IdScope::add_record`'s.
 pub(crate) fn duplicate_id(
     ids: &[ParsedSeqId],
     seen: &mut HashSet<u64>,
@@ -314,72 +296,44 @@ pub(crate) fn duplicate_id(
             }
         }
     }
-    // A unit test's ids must not reach the searches of the other tests of the process.
-    if cfg!(test) {
-        return None;
-    }
-    // The two sets are always locked in one order (queries, then subjects).
-    let lock = |keys: &'static OnceLock<Mutex<HashSet<u64>>>| {
-        keys.get_or_init(Mutex::default)
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-    };
-    let mut queries = lock(&QUERY_KEYS);
-    let mut subjects = lock(&SUBJECT_KEYS);
-    if role == "query" {
-        shared_with_other_role(ids, &mut queries, &subjects, program)
-    } else {
-        shared_with_other_role(ids, &mut subjects, &queries, program)
-    }
-}
-
-/// LOSAT's refusal of ids `ids` of a record when a record of the other role has one of them
-/// (`other`: its `scope_keys` and `version_keys`' own keys), or `None`; adds the keys of `ids` to
-/// `own`. NCBI keeps queries and subjects in one scope: a subject with the id of a query is shown
-/// with the query's title, and a record given as both shows the query's masks at the subject's
-/// places (probe `DI7/ws/pd_sub.py`, 2026-11-01).
-fn shared_with_other_role(
-    ids: &[ParsedSeqId],
-    own: &mut HashSet<u64>,
-    other: &HashSet<u64>,
-    program: &str,
-) -> Option<anyhow::Error> {
-    let mut keys = Vec::new();
-    for id in ids {
-        keys.clear();
-        scope_keys(id, &mut keys);
-        let versions = version_keys(id);
-        if keys.iter().any(|key| other.contains(key))
-            || versions.is_some_and(|(_, kind)| other.contains(&kind))
-        {
-            let mut fasta = Vec::new();
-            label::fasta(id, &mut fasta);
-            return Some(anyhow::anyhow!(
-                "a query and a subject record have the Seq-id {} under -parse_deflines (NCBI \
-                 BLAST+ shows them as one sequence); this is not supported by LOSAT's {program}",
-                String::from_utf8_lossy(&fasta)
-            ));
-        }
-        own.extend(keys.iter().copied());
-        own.extend(versions.map(|(kind, _)| kind));
-    }
     None
 }
 
-/// For a text Seq-id with an accession, the key of its accession with its kind of version (with or
-/// without one) and the key of the other kind. NCBI's BLASTN writes `CScope::GetSynonyms: ... is
-/// resolved to another Bioseq` for the pair (probe `db.pd.blastn.ver`, 2026-10-31).
-fn version_keys(id: &ParsedSeqId) -> Option<(u64, u64)> {
-    use std::hash::{Hash, Hasher};
-    let text = id.textseq()?;
-    let accession = text.accession.as_ref()?.to_ascii_uppercase();
-    let key = |versioned: bool| {
-        let mut hasher = std::hash::DefaultHasher::new();
-        (b"version kind", versioned, &accession).hash(&mut hasher);
-        hasher.finish()
-    };
-    let versioned = text.version.is_some();
-    Some((key(versioned), key(!versioned)))
+/// With outfmt 0, LOSAT's refusal of a query that is also a subject (`BelievedIds::shared`) and has
+/// masks (`masked`, by query; with `-lcase_masking` the lower-case letters of either copy too):
+/// `CDisplaySeqalign::x_FillLocList` finds a mask's row by its id, and the two rows have one id, so
+/// it draws the mask at the other row's places (`dropin-survey-20261029/DI7/DECISIONS.md` 19).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4292-4306
+/// ```c++
+/// void CDisplaySeqalign::x_FillLocList(TSAlnSeqlocInfoList& loc_list,
+///                                      const list< CRef<CSeqLocInfo> >*  masks) const
+/// ```
+pub(crate) fn refuse_shared_masks(
+    queries: &[super::FastaRecord],
+    masked: impl Fn(usize) -> bool,
+    lcase_masking: bool,
+    program: &str,
+) -> anyhow::Result<()> {
+    for (index, record) in queries.iter().enumerate() {
+        let Some(ids) = record.believed() else {
+            continue;
+        };
+        let Some(shared) = ids.shared else {
+            continue;
+        };
+        if masked(index) || (lcase_masking && shared.lowercase) {
+            let mut fasta = Vec::new();
+            label::fasta(&ids.best, &mut fasta);
+            anyhow::bail!(
+                "the record {} is both a query and a subject under -parse_deflines and has masks \
+                 (NCBI BLAST+ draws them at the other record's places in outfmt 0); this is not \
+                 supported by LOSAT's {program}",
+                String::from_utf8_lossy(&fasta)
+            );
+        }
+    }
+    Ok(())
 }
 
 /// `CFastaReader::xSetSeqMol`: whether the first id whose accession names a molecule names a
@@ -493,6 +447,7 @@ pub(crate) fn generated_ids(id: &str) -> Vec<ParsedSeqId> {
 mod tests {
     use super::super::{read_all, FastaInputSource, ReaderConfig};
     use super::*;
+    use crate::seqid::id_scope::IdScope;
 
     fn read(fasta: &[u8], protein: bool) -> Result<Vec<super::super::FastaRecord>, String> {
         let config = ReaderConfig::query("BLASTN", protein, false).with_parse_deflines(true);
@@ -696,35 +651,132 @@ mod tests {
         assert_eq!((loc.from, loc.to), (2, 5));
     }
 
-    // A query and a subject share no id, nor one accession with and without a version
-    // (`shared_with_other_role`, DECISIONS 12).
-    #[test]
-    fn a_query_and_a_subject_do_not_share_an_id() {
-        let ids = |text: &str| {
-            read(format!(">{text} t\nACGT\n").as_bytes(), false).unwrap()[0]
-                .believed()
-                .unwrap()
-                .ids
-                .clone()
+    /// The records of `fasta` read by the reader of `role` of `program` in the search `scope`.
+    fn read_in(
+        scope: &std::sync::Arc<IdScope>,
+        role: &str,
+        program: &'static str,
+        protein: bool,
+        fasta: &[u8],
+    ) -> Result<Vec<super::super::FastaRecord>, String> {
+        let config = if role == "query" {
+            ReaderConfig::query(program, protein, false)
+        } else {
+            ReaderConfig::subject(program, protein, false)
         };
-        let mut queries = HashSet::new();
-        let mut subjects = HashSet::new();
-        for query in ["q1", "NM_000001", "ref|NM_000002.1|"] {
-            assert!(
-                shared_with_other_role(&ids(query), &mut queries, &subjects, "BLASTN").is_none()
-            );
-        }
+        let mut source = FastaInputSource::from_bytes(fasta, config.with_parse_deflines(true));
+        source.set_id_scope(Some(scope.clone()));
+        read_all(&mut source, &mut |_| Ok(())).map_err(|error| format!("{error:#}"))
+    }
+
+    // A query and a subject share no id, nor one accession with and without a version, unless they
+    // are one record: ids, title and letters (DECISIONS 12, 15, 19).
+    #[test]
+    fn a_query_and_a_subject_share_an_id_only_as_one_record() {
+        const QUERY: &[u8] =
+            b">q1 t\nACGT\n>NM_000001 t\nACGT\n>ref|NM_000002.1| t\nACGT\n>NM_000003.1 t\nACGT\n";
         for (subject, refused) in [
-            ("s1", false),
-            ("NM_000002.2", false),
-            ("lcl|q1", true),
-            ("NM_000001.1", true),
-            ("NM_000002", true),
-            ("NM_000002.1", true),
+            (&b">s1 t\nACGT\n"[..], false),
+            (b">NM_000002.2 t\nACGT\n", false),
+            (b">q1 t\nACGT\n", false),
+            (b">lcl|q1 t\nACGT\n", false),
+            (b">ref|NM_000002.1| t\nACGT\n", false),
+            (b">q1 t\nAC\nGT\n", false),
+            (b">q1 t\nacgu\n", false),
+            (b">q1 other\nACGT\n", true),
+            (b">q1\nACGT\n", true),
+            (b">q1 t\nACGA\n", true),
+            (b">NM_000001.1 t\nACGT\n", true),
+            (b">NM_000002 t\nACGT\n", true),
+            (b">NM_000002.1 t\nACGT\n", false),
+            (b">NM_000003 t\nACGT\n", true),
         ] {
-            let refusal = shared_with_other_role(&ids(subject), &mut subjects, &queries, "BLASTN");
-            assert_eq!(refusal.is_some(), refused, "{subject}");
+            let scope = std::sync::Arc::new(IdScope::default());
+            read_in(&scope, "query", "BLASTN", false, QUERY).unwrap();
+            let read = read_in(&scope, "subject", "BLASTN", false, subject);
+            let text = String::from_utf8_lossy(subject).into_owned();
+            assert_eq!(read.is_err(), refused, "{text}");
+            if refused {
+                assert!(
+                    read.unwrap_err().contains("a query and a subject"),
+                    "{text}"
+                );
+            }
         }
+    }
+
+    // The order of the readers does not change it, and the second reader's record knows.
+    #[test]
+    fn one_record_is_marked_with_the_lower_case_of_either_copy() {
+        for (first, second, lowercase) in [
+            (&b">q1 t\nACGT\n"[..], &b">q1 t\nACGT\n"[..], false),
+            (b">q1 t\nacGT\n", b">q1 t\nACGT\n", true),
+            (b">q1 t\nACGT\n", b">q1 t\nacGT\n", true),
+        ] {
+            let scope = std::sync::Arc::new(IdScope::default());
+            let subjects = read_in(&scope, "subject", "BLASTN", false, first).unwrap();
+            assert_eq!(ids_of(&subjects[0]).shared, None);
+            let queries = read_in(&scope, "query", "BLASTN", false, second).unwrap();
+            assert_eq!(ids_of(&queries[0]).shared, Some(SharedRecord { lowercase }));
+        }
+    }
+
+    // BLASTX and TBLASTN: a nucleotide and a protein reader never read one record (DECISIONS 19).
+    #[test]
+    fn a_nucleotide_and_a_protein_reader_do_not_read_one_record() {
+        let scope = std::sync::Arc::new(IdScope::default());
+        read_in(&scope, "query", "TBLASTN", true, b">q1 t\nACGT\n").unwrap();
+        let error = read_in(&scope, "subject", "TBLASTN", false, b">q1 t\nACGT\n").unwrap_err();
+        assert!(error.contains("a query and a subject"), "{error}");
+    }
+
+    // DECISIONS 16: the ids belong to one search, not to the process.
+    #[test]
+    fn the_ids_of_a_search_do_not_reach_the_next_search() {
+        let first = std::sync::Arc::new(IdScope::default());
+        read_in(&first, "query", "BLASTN", false, b">kept1 t\nACGT\n").unwrap();
+        read_in(&first, "subject", "BLASTN", false, b">kept1 u\nACGT\n").unwrap_err();
+        let second = std::sync::Arc::new(IdScope::default());
+        read_in(&second, "subject", "BLASTN", false, b">kept1 u\nACGT\n").unwrap();
+        let mut keys = Vec::new();
+        for id in read_in(&first, "subject", "BLASTN", false, b">s t\nACGT\n").unwrap()[0]
+            .believed()
+            .unwrap()
+            .ids
+            .iter()
+        {
+            scope_keys(id, &mut keys);
+        }
+        assert!(!first.query_has_key(&keys));
+        keys.clear();
+        scope_keys(
+            &ParsedSeqId::Local(ObjectId::Str(b"kept1".to_vec())),
+            &mut keys,
+        );
+        assert!(first.query_has_key(&keys));
+        assert!(!second.query_has_key(&keys));
+    }
+
+    // Masks of a shared query: the masks of the query, or with `-lcase_masking` the lower case of
+    // either copy (DECISIONS 19).
+    #[test]
+    fn outfmt_0_refuses_the_masks_of_a_shared_record_only() {
+        let scope = std::sync::Arc::new(IdScope::default());
+        read_in(&scope, "subject", "BLASTN", false, b">same1 t\nACgt\n").unwrap();
+        let queries = read_in(
+            &scope,
+            "query",
+            "BLASTN",
+            false,
+            b">other1 t\nACGT\n>same1 t\nACGT\n",
+        )
+        .unwrap();
+        let refused = |masked: usize, lcase: bool| {
+            refuse_shared_masks(&queries, |index| index == masked, lcase, "BLASTN").is_err()
+        };
+        assert!(!refused(0, false));
+        assert!(refused(1, false));
+        assert!(refused(0, true));
     }
 
     // NCBI BLAST+ 2.17.0 (probe `DI7/ws/pd_sub.py` `subjname`, `noid`): a `-subject` record with a

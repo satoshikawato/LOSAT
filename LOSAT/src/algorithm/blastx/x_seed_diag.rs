@@ -489,15 +489,7 @@ pub(crate) fn x_word_finder_diag(
         |_| {},
     )?;
     let (fused, counts) = x_word_finder_fused_or_sent(
-        mode,
-        batch,
-        parameters,
-        options,
-        subject,
-        table,
-        kept,
-        diagonals,
-        sent,
+        mode, batch, parameters, options, subject, table, kept, diagonals, sent,
     )?;
     x_add_counts(counts);
     if fused != reference {

@@ -611,7 +611,7 @@ fn damaged_isam_files_of_version_4_are_missed_or_refused() {
         let db = dir.0.join(case);
         copy_db("p4", &db);
         change(&db);
-        format!("{}/p4", db.display())
+        db.join("p4").display().to_string()
     };
     let set_byte = |db: &Path, file: &str, at: usize, value: u8| {
         let mut bytes = fs::read(db.join(file)).unwrap();

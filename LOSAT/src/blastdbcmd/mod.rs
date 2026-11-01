@@ -7,9 +7,8 @@
 //! `-metadata_output_prefix`), the databases of a directory (`list`: `-list`,
 //! `-list_outfmt`, `-recursive`, `-remove_redundant_dbs`), `-show_blastdb_search_path`, `-h`,
 //! `-help` and `-version`. Its command line is NCBI's (`args`, NCBI's argument reader), not
-//! clap's: `main` hands it the words after `blastdbcmd`. A database that LOSAT does not read
-//! (the masks of `makeblastdb -mask_data`, several names in `-db`) is refused, and so is
-//! `-mask_sequence_with` on it.
+//! clap's: `main` hands it the words after `blastdbcmd`. The masks of `makeblastdb -mask_data`
+//! are read (`-info`, `-mask_sequence_with`, `%m`); a `-db` of several names is refused.
 
 mod args;
 mod fasta;
@@ -599,11 +598,28 @@ pub(crate) fn run_with(words: &[OsString], out: &mut dyn Write, err: &mut dyn Wr
         )));
     }
     let mut text = Vec::new();
-    write_info(&mut text, &db, &volumes);
+    write_info_head(&mut text, &db);
+    let masks = db
+        .mask_algorithms()
+        .and_then(|algorithms| algorithms.descriptions());
+    let tail = match &masks {
+        Ok(masks) => {
+            text.extend_from_slice(masks.as_bytes());
+            write_info_volumes(&mut text, &volumes);
+            None
+        }
+        Err(error) => Some(error),
+    };
     // NCBI's stream ignores a failed write (no exception is enabled on it), so does this.
-    let _ = out.write_all(&text);
-    let _ = out.flush();
-    0
+    // The lines before a bad mask column are written when the error is NCBI's own.
+    if tail.is_none_or(|error| error.ncbi_message().is_some()) {
+        let _ = out.write_all(&text);
+        let _ = out.flush();
+    }
+    match masks {
+        Ok(_) => 0,
+        Err(error) => database_error(&mut diag, error),
+    }
 }
 
 /// LOSAT's refusal of the option `word`.
@@ -678,7 +694,7 @@ fn open_database(
         let Some(&seqtype) = types.next() else {
             unreachable!("at least one sequence type is tried");
         };
-        let opened = SeqDb::open_in(name, seqtype, path).and_then(|mut db| {
+        let opened = SeqDb::open_in_with_masks(name, seqtype, path).and_then(|mut db| {
             let volumes = SeqDb::info_volumes(name, seqtype, path)?;
             prepare(&mut db)?;
             Ok((db, volumes))
@@ -767,14 +783,12 @@ fn with_commas(n: u64) -> String {
 //         out << "\t" << *file_name << endl;
 //     }
 // ```
-/// The text of `-info` for `db`, whose `Volumes:` are `volumes`.
+/// The text of `-info` for `db` up to its filtering algorithms.
 ///
 /// `-exact_length` changes nothing here: NCBI's exact total differs from the total only when
 /// its totals are counted over a filtered list of sequences (an alias file with `GILIST`,
-/// `SEQIDLIST`, `OIDLIST`, ..., seqdbimpl.cpp:104-131), which LOSAT's reader refuses. The
-/// filtering algorithms are never listed: LOSAT's reader refuses the volumes that have them
-/// (column files).
-fn write_info(out: &mut Vec<u8>, db: &SeqDb, volumes: &[String]) {
+/// `SEQIDLIST`, `OIDLIST`, ..., seqdbimpl.cpp:104-131), which LOSAT's reader refuses.
+fn write_info_head(out: &mut Vec<u8>, db: &SeqDb) {
     let letters = match db.seqtype() {
         SeqType::Protein => "residues",
         SeqType::Nucleotide => "bases",
@@ -785,13 +799,18 @@ fn write_info(out: &mut Vec<u8>, db: &SeqDb, volumes: &[String]) {
     let _ = write!(
         out,
         "\t{} sequences; {} total {letters}\n\nDate: {}\tLongest sequence: {} {letters}\n\n\
-         BLASTDB Version: {}\n\nVolumes:\n",
+         BLASTDB Version: {}\n",
         with_commas(u64::from(db.num_seqs())),
         with_commas(db.total_length()),
         db.date(),
         with_commas(u64::from(db.max_length())),
         if db.is_version5() { "5" } else { "4" },
     );
+}
+
+/// The text of `-info` after the filtering algorithms: the `Volumes:` are `volumes`.
+fn write_info_volumes(out: &mut Vec<u8>, volumes: &[String]) {
+    out.extend_from_slice(b"\nVolumes:\n");
     for volume in volumes {
         let _ = writeln!(out, "\t{volume}");
     }

@@ -164,6 +164,20 @@ pub(super) fn hash_text(hash: u32) -> String {
     }
 }
 
+/// The ranges `masks` (the end exclusive) of a sequence in lower case, in `letters`, which are
+/// the sequence's `range` (`from`, `to` inclusive) or all of it: a mask is clipped to them, and
+/// one that ends before it starts is empty.
+pub(super) fn apply_masks(letters: &mut [u8], masks: &[(u32, u32)], range: Option<(u32, u32)>) {
+    let from = range.map_or(0, |(from, _)| from) as usize;
+    for &(first, second) in masks {
+        let start = (first as usize).max(from);
+        let end = (second as usize).min(from + letters.len());
+        if start < end {
+            letters[start - from..end - from].make_ascii_lowercase();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,5 +208,18 @@ mod tests {
         assert_eq!(sequence_hash(b"1234\n56789"), !0xCBF4_3926);
         assert_eq!(hash_text(0), "0");
         assert_eq!(hash_text(0x9E5E_1FA), "0X9E5E1FA");
+    }
+
+    #[test]
+    fn masks_are_lower_case_inside_the_letters() {
+        let masked = |length: usize, masks: &[(u32, u32)], range| {
+            let mut letters = vec![b'A'; length];
+            apply_masks(&mut letters, masks, range);
+            String::from_utf8(letters).unwrap()
+        };
+        assert_eq!(masked(10, &[(2, 4), (8, 10)], None), "AAaaAAAAaa");
+        assert_eq!(masked(6, &[(2, 4), (8, 10)], Some((3, 8))), "aAAAAa");
+        assert_eq!(masked(5, &[(2, 4)], Some((4, 8))), "AAAAA");
+        assert_eq!(masked(4, &[(2, 100), (3, 2), (1, 1)], None), "AAaa");
     }
 }

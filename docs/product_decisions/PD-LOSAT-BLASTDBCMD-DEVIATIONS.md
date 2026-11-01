@@ -1,21 +1,23 @@
 # Product Decision: blastdbcmd outputs that NCBI gets wrong
 
 - Decision ID: `PD-LOSAT-BLASTDBCMD-DEVIATIONS`
-- Version: 1.2
+- Version: 1.3
 - Date: 2026-10-30 (this record; items 1 and 2 served by `losat blastdbcmd` from the pull
   request of line BDC's BDC2a). 1.1, 2026-11-01 (BDC2c): the evidence of items 1 and 2 on
   version 4 databases with parsed ids, whose ids `losat blastdbcmd` now looks up; the
   decision is unchanged. 1.2, 2026-11-01 (BDC3a: the taxonomy, the lists, the metadata and
-  the IPGs): the explicit rejections of the scope; the four items are unchanged. The deviations were approved by the Owner on 2026-10-29
+  the IPGs): the explicit rejections of the scope; the four items are unchanged. 1.3,
+  2026-11-01 (BDC3b, the masks): items 3 and 4 served, items 5 and 6 added on the same rule. The
+  deviations of items 1 to 4 were approved by the Owner on 2026-10-29
   ("これはあえて直してお出しするのは？TBLASTX みたいに", drop-in survey `DECISIONS.md` 12), as
   the TBLASTX local-subject genetic code was
-  ([`PD-TBLASTX-LOCAL-SUBJECT-GENCODE`](PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md)).
-- Status: Accepted (approved deviations). Items 3 and 4 are approved and will be served with
-  the masks (line BDC's BDC3); until then those inputs are rejected.
+  ([`PD-TBLASTX-LOCAL-SUBJECT-GENCODE`](PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md)), and those of
+  items 5 and 6 on 2026-11-01 ("差 5・6 の承認: 承認します", drop-in survey `DECISIONS.md` 33).
+- Status: Accepted (approved deviations).
 
 ## Scope
 
-`losat blastdbcmd` only. Four outputs of NCBI BLAST+ 2.17.0 `blastdbcmd` whose content is
+`losat blastdbcmd` only. Six outputs of NCBI BLAST+ 2.17.0 `blastdbcmd` whose content is
 wrong (the letters or the sequences do not belong to the header or the id asked for),
 confirmed with NCBI's binary (line BDC's frozen probe, `dropin-survey-20261029/BDC/probe`).
 Everything else `losat blastdbcmd` writes equals NCBI's bytes, under the root
@@ -32,7 +34,15 @@ file of `-list` with `%t` (J168), the reversed protein letters NCBI writes for `
 minus` on a protein database read with a taxid list and `-dbtype guess` (J114: NCBI then
 takes the database as nucleotide for the strand), `-ipg` / `-ipg_batch` on a database
 without PIG files, where NCBI writes an OID it never set (J204, J205, J212, J214), and
-`-ipg_batch` on a database opened with `-target_only` and a taxid list (K38). `-taxids
+`-ipg_batch` on a database opened with `-target_only` and a taxid list (K38). So are (BDC3b,
+probe M) the exceptions of a damaged column file that print NCBI's build path (M701, M712,
+M854, M864), `%m` digits that overflow NCBI's `int` (M143, M144, M145), `-mask_sequence_with`
+below -1, which NCBI looks up with an uninitialised id (M225, M227), a sequence whose volume of
+an alias has masks but not the algorithm, where NCBI reads the masks of the volume's id before
+or an uninitialised one (M180-M184, M255-M270), a volume with the big-endian data file of a
+column alone, whose offsets NCBI reads as little-endian (M784), another column before the masks,
+which NCBI reads as the masks (M824), and `-outfmt %s` without a range on a stored mask outside
+the sequence, where NCBI crashes (M786, M886, M896). `-taxids
 1` follows [`PD-LOSAT-NCBI-DEFECTS`](PD-LOSAT-NCBI-DEFECTS.md) exception 5.
 
 ## Decision
@@ -61,21 +71,40 @@ not reach the defect, so that the test oracle stays NCBI's binary.
    gives it. Expected bytes: the first record of NCBI's output (S01), or NCBI's run of the
    same batch without `-get_dups`, whose bulk lookup keeps the first ordinal alone (S02 for
    D57).
-3. **`-mask_sequence_with` with `-strand minus` in FASTA (BDC3).** NCBI maps the mask to
+3. **`-mask_sequence_with` with `-strand minus` in FASTA (served).** NCBI maps the mask to
    forward coordinates and lower-cases the output positions of the reversed letters (probe
-   M04, S31); its own `-outfmt %s` path masks first and reverse-complements after (S32).
-   LOSAT will mask and then reverse-complement, as `%s` does.
-4. **Two or more `%m` in `-outfmt` (BDC3).** NCBI reads the algorithm id of the first `%m`
-   only and leaves the digits of the second in the text (probe M03). LOSAT will write each
-   `%m<id>` with its own algorithm, as the runs with one `%m` each give.
+   M04, S31, M348-M392); its own `-outfmt %s` path masks first and reverse-complements after
+   (S32, M349-M393). LOSAT masks and then reverse-complements, as `%s` does, with
+   `-long_seqids` too (M395-M406, with item 1). Expected bytes: NCBI's headers with the
+   letters of NCBI's `%s` run of the same words.
+4. **Two or more `%m` in `-outfmt` (served).** NCBI reads the algorithm id of the first `%m`
+   only and leaves the digits of the second in the text (probe M03, M130). LOSAT writes each
+   `%m<id>` with its own algorithm, as the runs with one `%m` each give; a `%m` without digits
+   has the first one's, as in NCBI (M131), and an unknown id of a later `%m` is the error of
+   its own run (M133, as M128). The first `%m` of the text may be the literal of `%%m<digits>`,
+   where NCBI reads the id for the `%m` after it (M137: LOSAT writes `%%m11 %m12` with the
+   masks of 12). Expected bytes: the runs with one `%m` each (M125, M126).
+5. **`-mask_sequence_with` on a protein in FASTA without a range (served).** NCBI's mapper
+   for a whole sequence (`sequence.cpp` `x_GetMaskingStates`) keeps the masks in the first third
+   of a protein: `XP_100002.1` (190 residues), masked at 50-70, is lower-case at 50-64, and
+   `P10001.1` (225 residues), masked at 80-105 and 165-186, not at all (probe M05, M285). The
+   same sequences with a range are masked in full (M290), and so is `-outfmt %s` (M286). LOSAT
+   masks the whole length. Expected bytes: NCBI's headers with the letters of NCBI's `%s` run.
+6. **A batch line without masks after one with masks of the same sequence (served).** NCBI's
+   FASTA formatter sets its mask only when the sequence has masks of the algorithm, so that
+   `NM_100001.1 12`, which has none, is written with the masks of the line `NM_100001.1 11`
+   before it (probe M415, M418). LOSAT writes it without masks, as the run of that line alone
+   (M414) and `-outfmt %s` (M417) do. Expected bytes: NCBI's headers with the letters of
+   NCBI's `%s` run.
 
 ## Evidence
 
 - Line BDC's frozen probe (NCBI 2.17.0 on the workstation, 2026-10-29, 2026-10-30 and
   2026-11-01):
-  `dropin-survey-20261029/BDC/probe/out/{S01,S02,S18,S31,S32,M03,M04,D16,D57,D82,D83,D87,D88,D97,D101,I771,I795,I816,I830,I849}.*`,
+  `dropin-survey-20261029/BDC/probe/out/{S01,S02,S18,S31,S32,M03,M04,M05,M125,M126,M128,M130,M133,M137,M285,M286,M290,M414,M415,M417,D16,D57,D82,D83,D87,D88,D97,D101,I771,I795,I816,I830,I849}.*`,
   the code reading in `dropin-survey-20261029/BDC/notes/B_fasta_outfmt.md` (ORACLE 1 and 3)
   and `notes/A_id_resolution.md` (§2).
 - The tests of items 1 and 2: `LOSAT/tests/blastdbcmd_retrieve.rs`
   (`long_ids_on_the_minus_strand_write_the_reverse_complement`,
-  `ordinal_ids_of_a_database_in_volumes_are_database_wide`).
+  `ordinal_ids_of_a_database_in_volumes_are_database_wide`); of items 3 to 6:
+  `LOSAT/tests/blastdbcmd_masks.rs` (`masks_are_ncbi_s_bytes`).

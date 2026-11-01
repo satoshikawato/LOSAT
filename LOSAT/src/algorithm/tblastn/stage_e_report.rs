@@ -1441,8 +1441,10 @@ fn aligned_sequences(
         display.residue(nucleotides, frame, (base + s as isize) as usize - first)
     };
     const NCBISTDAA_TO_AA: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
-    let mut query_string = String::new();
-    let mut subject_string = String::new();
+    // The rows live in a `PairwiseHit` while the reports are written: their exact size.
+    let columns = script.iter().map(|op| op.num() as usize).sum();
+    let mut query_string = String::with_capacity(columns);
+    let mut subject_string = String::with_capacity(columns);
     for &op in script {
         for _ in 0..op.num() {
             match op {

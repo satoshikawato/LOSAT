@@ -6184,18 +6184,11 @@ fn search(
                     drop(block_outputs);
                     if let Some(records) = x_records.as_mut() {
                         for found in x_found {
-                            // The block has ended, its reports hold no row: the rows move here,
-                            // to stay until the last block at their exact size.
+                            // The block has ended, its reports hold no row: the rows move here.
                             let found = std::sync::Arc::try_unwrap(found)
                                 .unwrap_or_else(|shared| shared.as_ref().clone());
                             records.extend(found.into_iter().map(|mut record| {
                                 record.hit.q_idx += x_first_query;
-                                if let Some(row) = record.query_seq.as_mut() {
-                                    row.shrink_to_fit();
-                                }
-                                if let Some(row) = record.subject_seq.as_mut() {
-                                    row.shrink_to_fit();
-                                }
                                 record
                             }));
                         }

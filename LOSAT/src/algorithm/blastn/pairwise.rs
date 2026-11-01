@@ -280,7 +280,7 @@ fn displayed_rows(
     subject_letters: impl FnOnce(usize, usize) -> Vec<u8>,
 ) -> Result<(Vec<u8>, Vec<u8>)> {
     let (mut query_row, mut subject_row) = (Vec::new(), Vec::new());
-    context_rows_into(
+    displayed_rows_into(
         hsp,
         query,
         subject_length,
@@ -288,14 +288,6 @@ fn displayed_rows(
         &mut query_row,
         &mut subject_row,
     )?;
-    // The rows live in a `PairwiseHit` until the query is written: a minus-strand HSP's are
-    // the exact-size reverse complements, not the grown buffers (outfmt 0's max RSS).
-    if hsp.query_frame < 0 {
-        return Ok((
-            reverse_complement(&query_row),
-            reverse_complement(&subject_row),
-        ));
-    }
     Ok((query_row, subject_row))
 }
 
@@ -351,7 +343,8 @@ fn context_rows_into(
     let ungapped = [GapEditOp::Sub((qe - qs) as u32)];
     let ops = hsp.gap_info.as_deref().unwrap_or(&ungapped);
     // The rows live in a `PairwiseHit` while the reports are written: their exact size, not
-    // what growing leaves (a third more on the alignments of the BLASTN hit records).
+    // what growing leaves (a third more on the alignments of the BLASTN hit records). A
+    // reused buffer keeps its capacity.
     let columns = ops.iter().map(|op| op.num() as usize).sum();
     query_row.reserve_exact(columns);
     subject_row.reserve_exact(columns);

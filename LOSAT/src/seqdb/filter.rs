@@ -2438,6 +2438,22 @@ impl SeqDb {
         Ok(())
     }
 
+    /// The database restricted to the OIDs that `keep` takes, as a list that names them does:
+    /// a test's list on a fixture without the ids or taxids of one (several volumes).
+    #[cfg(test)]
+    pub(crate) fn x_keep_oids(&mut self, keep: impl Fn(u32) -> bool) {
+        let num_oids = self
+            .volumes
+            .iter()
+            .map(|volume| volume.num_oids())
+            .sum::<u32>();
+        let mut words = vec![0u64; (num_oids as usize).div_ceil(64)];
+        for oid in (0..num_oids).filter(|&oid| keep(oid)) {
+            words[(oid / 64) as usize] |= 1 << (oid % 64);
+        }
+        self.apply_filter(words, num_oids, None).unwrap();
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1569-1590
     // ```c++
     //     for(int oid = 0; x_CheckOrFindOID(oid, locked); oid++) {

@@ -20,8 +20,8 @@
 //!   subject makes what it needs from the bytes of its block, without a store
 //!   (`XDbStream::with_block`): each thread keeps the last block it used, and a block that another
 //!   thread holds or reads is not read again. The threads that hand out the sequences one at a
-//!   time read each block about once, and the text of a failed read, which holds the block's
-//!   bytes, does not depend on the threads or their order.
+//!   time read each block about once, and the error of a failed read (the text of a damaged block
+//!   names the block's bytes) does not depend on the threads or their order.
 //! - A long sequence (a block of its own) is read once while anything holds it: the stages and
 //!   the query batches that run at the same time share it, and a thread that asks for it while
 //!   another reads it waits for that read (`XDbStream::read_shared`). With more than one thread
@@ -393,6 +393,14 @@ mod tests {
         db
     }
 
+    /// The database of several volumes without every third OID: runs of two OIDs, some across
+    /// the end of a volume.
+    fn volumes_and_list() -> SeqDb {
+        let mut db = nucleotides("nucl_mv");
+        db.x_keep_oids(|oid| oid % 3 != 2);
+        db
+    }
+
     /// `db`'s stream with the blocks of `max_bytes`: the fixtures are smaller than a block of the
     /// search.
     fn stream_of(db: &SeqDb, threads: usize, max_bytes: u64) -> XDbStream<'_> {
@@ -436,6 +444,13 @@ mod tests {
             }
             check_grid(&listed(), max_bytes, "listed");
             check_grid(&taxids(), max_bytes, "taxids");
+            check_grid(&volumes_and_list(), max_bytes, "volumes and list");
+            // A volume without sequences, first in the order.
+            check_grid(
+                &fixture("seqdb/db/alias_emptyvol", SeqType::Protein),
+                max_bytes,
+                "empty volume",
+            );
         }
         // Every volume of several starts a block, and with no limit on the bytes its last sequence
         // is in the block of its volume; with a tight one that sequence is alone.
@@ -453,6 +468,36 @@ mod tests {
         );
         assert_eq!(whole.len(), 2);
         assert_eq!(check_grid(&listed(), u64::MAX, "listed").len(), 3);
+        // With several volumes and a list, a block ends where its run of OIDs or its volume does.
+        let db = volumes_and_list();
+        let mut starts = Vec::new();
+        let mut volume_start = 0;
+        for volume in db.volumes() {
+            starts.push(volume_start);
+            volume_start += volume.num_oids();
+        }
+        let oids: Vec<u32> = (0..db.num_seqs()).map(|ordinal| db.oid(ordinal)).collect();
+        let want: Vec<u32> = (0..db.num_seqs())
+            .filter(|&ordinal| {
+                let oid = oids[ordinal as usize];
+                ordinal == 0 || oids[ordinal as usize - 1] + 1 != oid || starts.contains(&oid)
+            })
+            .chain([db.num_seqs()])
+            .collect();
+        assert!(want.len() > 2);
+        assert_eq!(check_grid(&db, u64::MAX, "volumes and list"), want);
+        // The empty volume adds no block.
+        let empty = fixture("seqdb/db/alias_emptyvol", SeqType::Protein);
+        assert_eq!(
+            check_grid(&empty, u64::MAX, "empty volume"),
+            [0, empty.num_seqs()]
+        );
+        // The stream's blocks are the search's.
+        let db = nucleotides("nucl_mv");
+        assert_eq!(
+            XDbStream::new(&db, 1, "TBLASTN").unwrap().grid,
+            x_block_grid(&db, PLAN_BLOCK_BYTES)
+        );
         assert_eq!(check_grid(&taxids(), u64::MAX, "taxids"), [0, 3, 6, 7, 10]);
     }
 
@@ -465,6 +510,7 @@ mod tests {
             nucleotides("nucl_v5"),
             nucleotides("nucl_mv"),
             listed(),
+            volumes_and_list(),
         ] {
             for max_bytes in [0, 64, 256, u64::MAX] {
                 let stream = stream_of(&db, 1, max_bytes);
@@ -493,13 +539,14 @@ mod tests {
     fn a_nested_call_does_not_disturb_the_block_of_the_outer_one() {
         let db = nucleotides("nucl_mv");
         let stream = stream_of(&db, 1, u64::MAX);
-        let (first, last) = (0, stream.count() - 1);
-        assert!(stream.grid[1] as usize <= last, "two blocks");
+        let blocks: Vec<&[u32]> = stream.grid.windows(2).filter(|b| b[1] - b[0] > 1).collect();
+        assert!(blocks.len() > 1, "two blocks of several sequences");
+        let (first, other) = (blocks[0][0] as usize, blocks[1][0] as usize);
         let (packed, _) = stored(&stream, first);
-        let (inner, _) = stored(&stream, last);
+        let (inner, _) = stored(&stream, other);
         stream
             .with_block(first, |bytes, _| {
-                stream.with_block(last, |nested, _| {
+                stream.with_block(other, |nested, _| {
                     assert_eq!(nested, inner);
                     Ok(())
                 })?;
@@ -551,17 +598,22 @@ mod tests {
             let next = AtomicUsize::new(0);
             std::thread::scope(|scope| {
                 for _ in 0..4 {
-                    scope.spawn(|| loop {
-                        let oid = next.fetch_add(1, Ordering::Relaxed);
-                        if oid >= stream.count() {
-                            break;
+                    scope.spawn(|| {
+                        loop {
+                            let oid = next.fetch_add(1, Ordering::Relaxed);
+                            if oid >= stream.count() {
+                                break;
+                            }
+                            stream
+                                .with_block(oid, |bytes, length| {
+                                    assert_eq!((bytes, length), (&*stores[oid].0, stores[oid].1));
+                                    Ok(())
+                                })
+                                .unwrap();
                         }
-                        stream
-                            .with_block(oid, |bytes, length| {
-                                assert_eq!((bytes, length), (&*stores[oid].0, stores[oid].1));
-                                Ok(())
-                            })
-                            .unwrap();
+                        // `scope` can return before the destructors of its threads' locals run: the
+                        // block goes now, so that no thread's block serves the next pass.
+                        drop(X_PLAN_BLOCK.with(std::cell::Cell::take));
                     });
                 }
             });
@@ -638,6 +690,27 @@ mod tests {
         }));
         assert!(unwound.is_err());
         assert_eq!(*reads.read_once(2, || Ok(2)).unwrap(), 2);
+    }
+
+    /// A thread that waits for a read that fails makes the read itself, whenever it comes.
+    #[test]
+    fn a_failed_read_wakes_the_thread_that_waits_for_it() {
+        let reads = XSharedReads::<u32>::new();
+        let started = Barrier::new(2);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let error = reads
+                    .read_once(1, || {
+                        started.wait();
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                        anyhow::bail!("no")
+                    })
+                    .unwrap_err();
+                assert_eq!(error.to_string(), "no");
+            });
+            started.wait();
+            assert_eq!(*reads.read_once(1, || Ok(9)).unwrap(), 9);
+        });
     }
 
     /// Dead entries do not pile up in the table of a long pass over a database.

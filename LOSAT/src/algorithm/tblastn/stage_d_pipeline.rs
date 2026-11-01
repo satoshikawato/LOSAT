@@ -537,7 +537,7 @@ fn x_searched_side_by_side(subjects: SubjectLetters<'_>, batches: usize, threads
         if threads < 2 {
             return false;
         }
-        let (_, bases) = subjects.longest_and_total();
+        let bases = subjects.total_bases();
         let fits = super::search_seed::XSubjectSide::all_fit(bases, subjects.count());
         let side_by_side = x_side_by_side_batches(bases, subjects.count(), batches, threads, fits);
         side_by_side > 0
@@ -680,8 +680,12 @@ pub(super) fn x_search_batches<'p>(
     let x_keep = ranges.len() < super::search_seed::XSubjectSide::KEEP_FROM_BATCHES
         || !super::search_seed::XSubjectSide::keep_few()
         || {
-            let (longest, total) = subjects.longest_and_total();
-            super::search_seed::XSubjectSide::kept_within_threads(longest, total, threads)
+            let (longest, _) = subjects.longest_and_total();
+            super::search_seed::XSubjectSide::kept_within_threads(
+                longest,
+                subjects.total_bases(),
+                threads,
+            )
         }
         || x_searched_side_by_side(subjects, ranges.len(), threads);
     // The plans are dropped (the switch's own path) or kept as before.
@@ -747,7 +751,7 @@ pub(super) fn x_search_batches<'p>(
         // would fit and at least one batch per thread, the batches are searched side by side, each
         // as the one-thread search, and the reports are returned in batch order.
         if pool.enabled() {
-            let (_, bases) = subjects.longest_and_total();
+            let bases = subjects.total_bases();
             let fits = super::search_seed::XSubjectSide::all_fit(bases, subjects.count());
             let side_by_side = x_side_by_side_batches(
                 bases,
@@ -1868,10 +1872,7 @@ fn x_oid_chunk_bases(threads: usize, largest_file: u64) -> u64 {
 /// ceil(bases of all subjects / 4).
 #[cfg(feature = "parallel")]
 fn x_subject_file_size(subjects: SubjectLetters<'_>) -> u64 {
-    let bases = subjects.lengths().fold(0u64, |sum, length| {
-        sum.saturating_add(u64::try_from(length).unwrap_or(u64::MAX))
-    });
-    bases.div_ceil(4)
+    subjects.longest_and_total().1.div_ceil(4)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:697-707

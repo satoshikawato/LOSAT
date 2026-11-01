@@ -1144,6 +1144,7 @@ fn run_local_search_with_pool(
         },
         options_searchsp.as_ref().map(std::slice::from_ref),
         true,
+        pool,
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
     // ```c
@@ -1246,6 +1247,7 @@ fn run_local_search_with_pool(
         None => run_preliminary_subjects(
             &PreliminaryInputs {
                 queries: &query_refs,
+                frames: &working_frames,
                 genetic_code: profile.genetic_code,
                 search,
                 link,
@@ -2234,7 +2236,7 @@ fn split_preliminary_hitlists(
             })
             .collect();
         // A chunk's setup is inside `search` (the common line marks only the batch's own).
-        let setup = query_set_setup(&parts, inputs, Some(&batch_eff_searchsp), false)?;
+        let setup = query_set_setup(&parts, inputs, Some(&batch_eff_searchsp), false, pool)?;
         if !setup.valid_contexts.iter().any(|&valid| valid) {
             continue;
         }
@@ -2247,6 +2249,7 @@ fn split_preliminary_hitlists(
         let chunk_lists = run_preliminary_subjects(
             &PreliminaryInputs {
                 queries: &part_refs,
+                frames: &setup.working_frames,
                 genetic_code: inputs.profile.genetic_code,
                 search: preliminary_profile(
                     inputs.profile,
@@ -2326,7 +2329,23 @@ fn query_set_setup(
     inputs: QuerySetInputs<'_>,
     eff_searchsp_override: Option<&[i64]>,
     marked: bool,
+    pool: Option<&SearchPool<'_>>,
 ) -> Result<QuerySetSetup> {
+    // No NCBI counterpart (scheduling only): NCBI masks the queries of a batch and computes their
+    // contexts' Karlin blocks one after the other on the thread that sets the batch up. Each reads
+    // its own query alone, so a batch searched with a pool of two or more threads inside it (one
+    // after another, `run_local_for_report_threads`) makes them on the pool's threads, where they
+    // would otherwise hold the others idle; a batch searched side by side runs them on its thread.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let x_pool = pool.filter(|pool| pool.enabled() && pool.threads() > 1);
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    let _ = pool;
     // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803;
     // c++/src/algo/blast/core/blast_setup.c:770-847:
     // if (Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]))
@@ -2335,33 +2354,46 @@ fn query_set_setup(
     // Reuse the Stage C score-frequency calculation on the query bytes after
     // BlastSetUp_MaskQuery, which precedes BlastSetup_ScoreBlkInit at
     // pinned blast_setup.c:614-654.
-    let working_frames: Vec<_> = queries
-        .iter()
-        .map(|query| {
-            // Diagnostic (LOSAT_TIMING): with `marked`, the query's encoding and SEG go to the
-            // common line (utils/xtiming.rs). No NCBI counterpart.
-            let frame = if inputs.profile.soft_masking {
-                if marked {
-                    encode_protein_query_frame_with_seg_timed(query, None)
-                } else {
-                    encode_protein_query_frame_with_seg(query, None)
-                }
-            } else if marked {
-                super::search_seed::encode_tblastn_lookup_query_timed(
-                    query,
-                    inputs.profile.seg,
-                    inputs.profile.mask_lowercase,
-                )
+    let encode = |query: &Vec<u8>| {
+        // Diagnostic (LOSAT_TIMING): with `marked`, the query's encoding and SEG go to the
+        // common line (utils/xtiming.rs). No NCBI counterpart.
+        let frame = if inputs.profile.soft_masking {
+            if marked {
+                encode_protein_query_frame_with_seg_timed(query, None)
             } else {
-                super::search_seed::encode_tblastn_lookup_query(
-                    query,
-                    inputs.profile.seg,
-                    inputs.profile.mask_lowercase,
-                )
-            };
-            vec![frame]
-        })
-        .collect();
+                encode_protein_query_frame_with_seg(query, None)
+            }
+        } else if marked {
+            super::search_seed::encode_tblastn_lookup_query_timed(
+                query,
+                inputs.profile.seg,
+                inputs.profile.mask_lowercase,
+            )
+        } else {
+            super::search_seed::encode_tblastn_lookup_query(
+                query,
+                inputs.profile.seg,
+                inputs.profile.mask_lowercase,
+            )
+        };
+        vec![frame]
+    };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let working_frames: Vec<_> = match x_pool {
+        Some(pool) => {
+            use rayon::prelude::*;
+            pool.install(|| queries.par_iter().map(encode).collect())
+        }
+        None => queries.iter().map(encode).collect(),
+    };
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    let working_frames: Vec<_> = queries.iter().map(encode).collect();
     // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803;
     // c++/src/algo/blast/core/lookup_wrap.c:91-100:
     // Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
@@ -2387,12 +2419,36 @@ fn query_set_setup(
     } else {
         None
     };
-    let mut contexts = match crate::algorithm::tblastx::lookup::x_lookup_contexts_for_profile(
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let x_contexts = match x_pool {
+        Some(pool) => crate::algorithm::tblastx::lookup::x_lookup_contexts_for_profile_in_pool(
+            &working_frames,
+            false,
+            inputs.scoring.matrix,
+            inputs.scoring.word_size,
+            pool,
+        ),
+        None => crate::algorithm::tblastx::lookup::x_lookup_contexts_for_profile(
+            &working_frames,
+            false,
+            inputs.scoring.matrix,
+            inputs.scoring.word_size,
+        ),
+    };
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    let x_contexts = crate::algorithm::tblastx::lookup::x_lookup_contexts_for_profile(
         &working_frames,
         false,
         inputs.scoring.matrix,
         inputs.scoring.word_size,
-    ) {
+    );
+    let mut contexts = match x_contexts {
         Some(contexts) => contexts,
         // The compressed table (word sizes 5 to 7, BLOSUM62 only: `args::search_settings`) is not
         // the standard table that the diagnostics count; the contexts are the same.
@@ -2497,6 +2553,8 @@ fn query_set_setup(
 // or one query chunk of a split batch).
 struct PreliminaryInputs<'a> {
     queries: &'a [&'a [u8]],
+    /// The queries' frames, masked by the setup of the query set (`query_set_setup`).
+    frames: &'a [Vec<crate::algorithm::tblastx::translation::QueryFrame>],
     genetic_code: u8,
     search: PreliminaryProfile<'a>,
     link: Option<super::stage_d_stats::LocalLinkParameters>,
@@ -2668,8 +2726,9 @@ fn run_preliminary_subjects_into(
         let _ = subject;
         unit_pool
     };
-    // The query frames and lookup table of this query set, built by the first subject that
-    // needs them.
+    // The lookup table of this query set, built by the first subject that needs it, from the
+    // query frames the setup masked (`query_set_setup`; NCBI masks the batch's query once, in
+    // BLAST_MainSetUp).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
     // ```c
     //        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
@@ -2680,7 +2739,15 @@ fn run_preliminary_subjects_into(
     // ```
     // NCBI builds the lookup table once per query batch; this value lets the subjects of the batch
     // share the query frames and the table (`XQuerySide`).
-    let x_query_side = super::search_gapped::XQuerySide::new();
+    let x_query_side =
+        super::search_gapped::XQuerySide::x_with_frames(inputs.frames, inputs.queries)?;
+    // A batch searched with a pool of two or more threads inside it builds its table before its
+    // subjects, on the pool (`XQuerySide::x_build_lookup_on`): the subjects would otherwise wait
+    // while the first one builds it on its thread. A batch on one thread (side by side, or `-num_threads 1`)
+    // builds it at its first subject that needs it. Scheduling only.
+    if let Some(pool) = pool.filter(|pool| pool.enabled() && pool.threads() > 1) {
+        x_query_side.x_build_lookup_on(inputs.search, pool);
+    }
     // The subject plans (was LOSAT_X_TBNSSIDE) the owner of the search
     // attached to the pool; `subjects` is its subject list.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775

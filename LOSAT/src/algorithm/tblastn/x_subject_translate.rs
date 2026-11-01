@@ -1732,6 +1732,7 @@ mod tests {
                             &lookup,
                             &Default::default(),
                             None,
+                            None,
                         )
                         .unwrap();
                         assert_eq!(scan.is_some(), length >= 11);
@@ -1812,6 +1813,7 @@ mod tests {
                 3,
                 &lookup,
                 &Default::default(),
+                None,
                 None,
             )
             .unwrap()
@@ -1949,6 +1951,7 @@ mod tests {
                         &lookup,
                         &Default::default(),
                         None,
+                        None,
                     )
                     .unwrap();
                     assert_eq!(scan.is_some(), length >= 11);
@@ -1976,6 +1979,7 @@ mod tests {
                 3,
                 &lookup,
                 &Default::default(),
+                None,
                 None,
             )
         };

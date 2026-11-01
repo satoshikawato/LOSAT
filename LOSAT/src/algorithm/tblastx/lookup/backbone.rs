@@ -1075,6 +1075,64 @@ pub(crate) fn x_lookup_contexts_for_profile(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803 (cited at
+// `x_context_karlin`)
+// NCBI computes the contexts' Karlin blocks one after the other; each reads only its own context's
+// letters (`x_context_karlin`), so computing them on several threads gives each context the same
+// block (as `x_prepare_blosum62_lookup_query_in_pool`). Scheduling only.
+/// `x_lookup_contexts_for_profile` with the contexts' Karlin blocks computed on `pool`'s threads;
+/// the same contexts.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) fn x_lookup_contexts_for_profile_in_pool(
+    queries: &[Vec<QueryFrame>],
+    check_ideal: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> Option<Vec<QueryContext>> {
+    use rayon::prelude::*;
+    if diagnostics_enabled() {
+        return None;
+    }
+    let bounds = if matrix == ScoringMatrix::Blosum62 {
+        (-4, 11)
+    } else {
+        matrix_score_bounds(matrix)
+    };
+    let ideal_params = ideal_karlin_params_for_matrix(matrix, bounds);
+    let std_comp = compute_std_aa_composition();
+    let mut contexts = x_prepare_lookup_query(
+        queries,
+        ideal_params,
+        &std_comp,
+        word_length,
+        check_ideal,
+        matrix,
+        bounds,
+        false,
+    )
+    .contexts;
+    // The frames in the order of the contexts (`x_prepare_lookup_query`'s loops).
+    let frames: Vec<&QueryFrame> = queries.iter().flatten().collect();
+    let karlin: Vec<(bool, KarlinParams)> = pool.install(|| {
+        frames
+            .par_iter()
+            .map(|frame| {
+                x_context_karlin(frame, &std_comp, bounds, matrix, check_ideal, ideal_params)
+            })
+            .collect()
+    });
+    assert_eq!(karlin.len(), contexts.len());
+    for (context, (is_valid, karlin_params)) in contexts.iter_mut().zip(karlin) {
+        context.is_valid = is_valid;
+        context.karlin_params = karlin_params;
+    }
+    Some(contexts)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
 // ```c
 // BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
@@ -1097,6 +1155,18 @@ pub(crate) fn x_lookup_table_for_profile(
     matrix: ScoringMatrix,
     word_length: usize,
 ) -> BlastAaLookupTable {
+    x_lookup_table_for_profile_in(queries, threshold, matrix, word_length, None)
+}
+
+/// `x_lookup_table_for_profile`, the lean build's lists made on `pool`'s threads when it has two or
+/// more (`x_lut_direct::x_build_lean_in`); the same table.
+pub(crate) fn x_lookup_table_for_profile_in(
+    queries: &[Vec<QueryFrame>],
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
+) -> BlastAaLookupTable {
     let bounds = if matrix == ScoringMatrix::Blosum62 {
         (-4, 11)
     } else {
@@ -1116,7 +1186,7 @@ pub(crate) fn x_lookup_table_for_profile(
     // temporary freed by the build (`x_lut_direct::x_build_lean`); in diagnostics mode, whose prints
     // read the chains, and with `=0`, the chain builder.
     let prepared = if x_tbn_lut_lean() {
-        match x_lut_direct::x_build_lean(prepared, threshold, matrix, word_length) {
+        match x_lut_direct::x_build_lean_in(prepared, threshold, matrix, word_length, pool) {
             Ok(table) => {
                 x_count_tbn_lut(0);
                 return table;
@@ -2630,6 +2700,77 @@ mod tests {
             aa_len: seq.len(),
             orig_len: seq.len(),
             seg_masks,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803 (cited at
+    // `x_context_karlin`)
+    // The contexts of a query set with their Karlin blocks computed on a pool's threads
+    // (`x_lookup_contexts_for_profile_in_pool`) are those of the one-thread computation: every
+    // field, a context whose block fails (letters X only) included, for each matrix's bounds.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn contexts_in_pool_equal_the_one_thread_contexts() {
+        let mut seed = 0x5eed_u64;
+        let mut residue = || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            1 + ((seed >> 33) % 22) as u8
+        };
+        let mut queries: Vec<Vec<QueryFrame>> = (0..37)
+            .map(|i| {
+                let seq: Vec<u8> = (0..(5 + i * 13)).map(|_| residue()).collect();
+                vec![make_query_frame(seq, vec![(1, 3)])]
+            })
+            .collect();
+        queries.push(vec![make_poly_a_query_frame()]);
+        // Only negative scores: no Karlin block (NCBI's `is_valid = FALSE`).
+        queries.push(vec![make_query_frame(vec![ncbistdaa::X; 20], vec![])]);
+        for matrix in [
+            ScoringMatrix::Blosum62,
+            ScoringMatrix::Blosum45,
+            ScoringMatrix::Pam30,
+        ] {
+            let one = x_lookup_contexts_for_profile(&queries, false, matrix, 3).unwrap();
+            let pooled = crate::utils::threading::with_search_pool(4, "tblastn", |pool| {
+                Ok(x_lookup_contexts_for_profile_in_pool(
+                    &queries, false, matrix, 3, pool,
+                ))
+            })
+            .unwrap()
+            .unwrap();
+            assert_eq!(one.len(), pooled.len());
+            assert!(one.iter().any(|context| !context.is_valid));
+            for (a, b) in one.iter().zip(&pooled) {
+                assert_eq!(
+                    (
+                        a.q_idx,
+                        a.f_idx,
+                        a.frame,
+                        a.aa_len,
+                        a.orig_len,
+                        a.frame_base
+                    ),
+                    (
+                        b.q_idx,
+                        b.f_idx,
+                        b.frame,
+                        b.aa_len,
+                        b.orig_len,
+                        b.frame_base
+                    )
+                );
+                assert_eq!((&a.aa_seq, &a.aa_seq_nomask), (&b.aa_seq, &b.aa_seq_nomask));
+                assert_eq!(a.is_valid, b.is_valid);
+                assert_eq!(
+                    format!("{:?}", a.karlin_params),
+                    format!("{:?}", b.karlin_params)
+                );
+            }
         }
     }
 

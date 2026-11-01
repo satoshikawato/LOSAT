@@ -907,6 +907,10 @@ pub(super) fn x_scan_plan(
     x_compressed: &XCompressedSide,
     // The search's subject plans and this subject's index among them.
     x_subject: Option<(&XSubjectSide, usize)>,
+    // The query set's frames as the table's query (`encode_tblastn_lookup_query` of each query
+    // with `seg` and `mask_lowercase`), made once for the batch (`XQuerySide`), when the caller
+    // has them.
+    x_frames: Option<&[QueryFrame]>,
 ) -> Result<Option<XScanPlan>> {
     // An unknown genetic code is refused before the subject length is looked at.
     GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
@@ -1051,11 +1055,14 @@ pub(super) fn x_scan_plan(
     // lookup->word_length = opt->word_size;
     // lookup->threshold = (Int4)opt->threshold;
     let x_build_lookup = || {
-        let query_frames: Vec<_> = queries
-            .iter()
-            // NCBI blast_filter.c:1241-1255 merges lowercase query and SEG masks.
-            .map(|query| vec![encode_tblastn_lookup_query(query, seg, mask_lowercase)])
-            .collect();
+        let query_frames: Vec<_> = match x_frames {
+            Some(frames) => frames.iter().map(|frame| vec![frame.clone()]).collect(),
+            None => queries
+                .iter()
+                // NCBI blast_filter.c:1241-1255 merges lowercase query and SEG masks.
+                .map(|query| vec![encode_tblastn_lookup_query(query, seg, mask_lowercase)])
+                .collect(),
+        };
         std::sync::Arc::new(
             crate::algorithm::tblastx::lookup::x_lookup_table_for_profile(
                 &query_frames,
@@ -1549,6 +1556,7 @@ mod tests {
                     &std::sync::OnceLock::new(),
                     &Default::default(),
                     None,
+                    None,
                 )
                 .unwrap()
                 .unwrap()
@@ -1706,6 +1714,7 @@ mod tests {
             &std::sync::OnceLock::new(),
             &Default::default(),
             None,
+            None,
         )
         .unwrap()
         .unwrap();
@@ -1785,6 +1794,7 @@ mod tests {
                 3,
                 &std::sync::OnceLock::new(),
                 &Default::default(),
+                None,
                 None,
             )
             .unwrap()
@@ -2515,6 +2525,7 @@ mod tests {
                             &std::sync::OnceLock::new(),
                             &Default::default(),
                             Some((&side, 0)),
+                            None,
                         )
                         .unwrap()
                         .unwrap()
@@ -2564,6 +2575,7 @@ mod tests {
                 &std::sync::OnceLock::new(),
                 &Default::default(),
                 side.map(|side| (side, 0)),
+                None,
             )
             .unwrap()
             .unwrap()
@@ -2716,6 +2728,7 @@ mod tests {
             &std::sync::OnceLock::new(),
             &Default::default(),
             Some((&side, 0)),
+            None,
         )
         .unwrap()
         .is_none());
@@ -2748,6 +2761,7 @@ mod tests {
                 &std::sync::OnceLock::new(),
                 &Default::default(),
                 side.map(|side| (side, 0)),
+                None,
             )
             .unwrap()
             .unwrap()
@@ -3002,6 +3016,7 @@ mod tests {
                 word,
                 &std::sync::OnceLock::new(),
                 &compressed,
+                None,
                 None,
             )
             .unwrap()

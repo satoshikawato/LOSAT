@@ -231,13 +231,28 @@ impl<'a> XDbStream<'a> {
             })
         };
         if !held(&kept) {
-            kept = None;
+            // PROBE (LOSAT_PROBE_PLANCUT bit 2): the last block's buffer takes the next block.
+            let bytes = if x_probe_plan() & 4 != 0 {
+                let bytes = kept.take().map(|kept| kept.block.x_into_data());
+                Some(bytes.unwrap_or_else(|| Vec::with_capacity(PLAN_BLOCK_BYTES as usize + 64)))
+            } else {
+                kept = None;
+                None
+            };
             match self.db.next_block(ordinal, PLAN_BLOCK_BYTES) {
-                Some(range) if range.len() > 1 => {
-                    let block = self
-                        .db
-                        .read_block(range)
-                        .map_err(|error| XReadError(shared::search_read_error(error, PROGRAM)))?;
+                Some(mut range) if range.len() > 1 => {
+                    // PROBE (LOSAT_PROBE_PLANCUT bit 1): the block stops at the end of the chunk.
+                    if x_probe_plan() & 2 != 0 {
+                        let end = X_PLAN_END.with(std::cell::Cell::get);
+                        if end > ordinal && end < range.end_ordinal() {
+                            range.end = range.first + (end - ordinal);
+                        }
+                    }
+                    let block = match bytes {
+                        Some(bytes) => self.db.x_read_block_into(range, bytes),
+                        None => self.db.read_block(range),
+                    }
+                    .map_err(|error| XReadError(shared::search_read_error(error, PROGRAM)))?;
                     kept = Some(XPlanBlock {
                         stream: self.id,
                         first: range.first_ordinal,
@@ -310,6 +325,37 @@ struct XPlanBlock {
 thread_local! {
     /// This thread's block for the plans.
     static X_PLAN_BLOCK: std::cell::Cell<Option<XPlanBlock>> = const { std::cell::Cell::new(None) };
+    /// PROBE: the ordinal id after the last subject of this thread's chunk.
+    static X_PLAN_END: std::cell::Cell<u32> = const { std::cell::Cell::new(u32::MAX) };
+}
+
+/// PROBE: `LOSAT_PROBE_PLANCUT` bits: 1 = the block dropped at the end of the chunk, 2 = the block
+/// cut at the end of the chunk, 4 = the last block's buffer reused.
+fn x_probe_plan() -> u8 {
+    static V: OnceLock<u8> = OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("LOSAT_PROBE_PLANCUT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    })
+}
+
+/// PROBE: this thread searches a chunk of subjects that ends before `end`, until it is dropped.
+pub(super) struct XPlanChunk(u32);
+
+pub(super) fn x_plan_chunk(end: usize) -> XPlanChunk {
+    let end = u32::try_from(end).unwrap_or(u32::MAX);
+    XPlanChunk(X_PLAN_END.with(|cell| cell.replace(end)))
+}
+
+impl Drop for XPlanChunk {
+    fn drop(&mut self) {
+        X_PLAN_END.with(|cell| cell.set(self.0));
+        if x_probe_plan() & 1 != 0 {
+            let _ = X_PLAN_BLOCK.try_with(std::cell::Cell::take);
+        }
+    }
 }
 
 // No NCBI counterpart: reads the LOSAT_X_TBNSTAGEDROP variable once; it does not change any value

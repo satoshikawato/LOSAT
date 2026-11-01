@@ -216,6 +216,9 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BXENDMEM` (BLASTX's end of a query batch without a table of word hashes per context and
 /// without a copy of the residues, `blastx/x_bx_mem.rs`) joined the set in the pull request that
 /// added it, after it was verified and timed with it on and off.
+/// `LOSAT_X_BXCHUNKSLICE` (BLASTX's chunks of a split query prepared without a copy of the whole
+/// query, `blastx/split.rs`) joined the set in the pull request that added it, after it was verified
+/// and timed with it on and off.
 /// `LOSAT_X_BXBUILDPAR` (BLASTX's lookup table of a capped unit built on the threads the cap
 /// leaves it, in parts by ranges of source cells, `blastx/x_bx_mem.rs`,
 /// `tblastx/lookup/x_lut_direct.rs`)
@@ -329,6 +332,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXCAPFILL",
     "LOSAT_X_BXCHUNKCROSS",
     "LOSAT_X_BXCHUNKFLOW",
+    "LOSAT_X_BXCHUNKSLICE",
     "LOSAT_X_BXCLUTCAP",
     "LOSAT_X_BXCLUTPOOL",
     "LOSAT_X_BXCROSS",

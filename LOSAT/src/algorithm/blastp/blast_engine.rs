@@ -4650,6 +4650,7 @@ pub fn run(
     mut args: BlastpArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
+    args.id_scope = args.parse_deflines.then(Default::default);
     use crate::blastinput::app;
     use crate::blastinput::input_files;
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:128-133
@@ -4983,6 +4984,7 @@ fn read_cli_subjects(
             .with_defline(keep_deflines)
             .with_parse_deflines(args.parse_deflines),
     );
+    subject_source.set_id_scope(args.id_scope.clone());
     // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
     // counterpart.
     let t_read_fasta = crate::utils::xtiming::clock();
@@ -5081,7 +5083,8 @@ fn search_cli(
                 list.as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .in_id_scope(args.id_scope.clone());
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
@@ -5172,6 +5175,7 @@ fn search_cli(
             .with_defline(args.archive.is_some())
             .with_parse_deflines(args.parse_deflines),
     );
+    query_source.set_id_scope(args.id_scope.clone());
     if !shared_standard_input && query_source.stream_is_empty() {
         // psiblast_app.cpp:461-464 is the same test, with psiblast's prefix.
         writeln!(
@@ -11254,6 +11258,19 @@ fn run_resolved_in_pool(
             }
         }
     }
+    if args.parse_deflines
+        && format_plans
+            .iter()
+            .any(|outfmt| matches!(outfmt, BlastpReport::Text(OutputFormat::Pairwise)))
+    {
+        let masks = query_record_masks(&query_frames, &ranges.query_input.placements);
+        crate::blastinput::fasta_reader::believed::refuse_shared_masks(
+            query_records,
+            |query| masks.get(query).is_some_and(|m| !m.is_empty()),
+            args.lcase_masking,
+            args.app.name(),
+        )?;
+    }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
     // search's IDs made once for all blocks, with the same check (`x_tabular_subject_ids_cached`).
@@ -12323,6 +12340,7 @@ mod tests {
             dbsize: None,
             show_gis: false,
             parse_deflines: false,
+            id_scope: None,
             searchsp: None,
             task: "blastp".to_string(),
             evalue: None,

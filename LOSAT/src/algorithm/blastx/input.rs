@@ -419,7 +419,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     lowercase: bool,
     batch_size: usize,
     keep_defline: bool,
-    parse_deflines: Option<crate::report::archive::bioseq::SeqLocStrand>,
+    parse_deflines: Option<BelievedRead<'_>>,
     deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
     warn: &mut dyn FnMut(&InputWarning) -> Result<()>,
 ) -> Result<Vec<FastaRecord>> {
@@ -644,10 +644,10 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             //             if( NStr::StartsWith(next_line, ">?") ) {
             // ```
             let believed = match parse_deflines {
-                Some(strand) => Some(read_believed_defline(
+                Some(read) => Some(read_believed_defline(
                     line,
                     protein,
-                    strand,
+                    read,
                     keep_defline,
                     line_index as u64 + 1,
                     &mut believed_keys,
@@ -886,6 +886,14 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
 //                              m_Config.GetLocalIdPrefix()));
 //     m_InputReader->SetIDGenerator(*idgen);
 // ```
+/// How `-parse_deflines` reads: the strand of a query's Seq-loc, and the search's ids of the other
+/// role's records (`FastaStream::id_scope`).
+#[derive(Clone, Copy)]
+struct BelievedRead<'a> {
+    strand: crate::report::archive::bioseq::SeqLocStrand,
+    id_scope: Option<&'a crate::seqid::id_scope::IdScope>,
+}
+
 /// A defline under `-parse_deflines` (`fasta_reader::believed`).
 struct BelievedLine {
     title_search: usize,
@@ -897,7 +905,7 @@ struct BelievedLine {
 fn read_believed_defline(
     line: &[u8],
     protein: bool,
-    strand: crate::report::archive::bioseq::SeqLocStrand,
+    read: BelievedRead<'_>,
     keep_defline: bool,
     line_number: u64,
     keys: &mut std::collections::HashSet<u64>,
@@ -938,9 +946,13 @@ fn read_believed_defline(
     if let Some(refusal) = duplicate_id(&ids, keys, role, "BLASTX") {
         return Err(refusal);
     }
+    // A nucleotide query and a protein subject are never one record (`RecordMark`).
+    if let Some(scope) = read.id_scope {
+        scope.add_record(&ids, None, role, "BLASTX")?;
+    }
     Ok(BelievedLine {
         title_search: parsed.title_search,
-        ids: std::sync::Arc::new(BelievedIds::new(ids, strand)),
+        ids: std::sync::Arc::new(BelievedIds::new(ids, read.strand)),
         molecule,
     })
 }
@@ -1506,6 +1518,8 @@ pub(crate) struct FastaStream<R: Read> {
     pub(crate) parse_deflines: bool,
     /// `-strand`, read with `-parse_deflines`.
     pub(crate) strand: crate::report::archive::bioseq::SeqLocStrand,
+    /// The search whose records this stream reads under `-parse_deflines`.
+    pub(crate) id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
 // ```c++
@@ -1572,6 +1586,7 @@ impl<R: Read> FastaStream<R> {
             backend_available: None,
             no_position: false,
             parse_deflines: false,
+            id_scope: None,
             strand: crate::report::archive::bioseq::SeqLocStrand::Both,
         }
     }
@@ -2242,7 +2257,11 @@ pub(crate) fn parse_fasta_stream_keeping<R: Read>(
     if stream.at_eof() {
         return Ok(Vec::new());
     }
-    let parse_deflines = stream.parse_deflines.then_some(stream.strand);
+    let id_scope = stream.id_scope.clone();
+    let parse_deflines = stream.parse_deflines.then_some(BelievedRead {
+        strand: stream.strand,
+        id_scope: id_scope.as_deref(),
+    });
     let records = parse_fasta_lines(
         stream,
         protein,

@@ -1,25 +1,21 @@
 //! The retrieval of sequences: NCBI's `x_ProcessSearchRequest` (the configuration of
 //! `-outfmt`, `-strand`, `-ctrl_a`, `-mask_sequence_with`, `-range`), its dispatch
-//! (`-entry all`, `-entry`, `-entry_batch` with and without `-get_dups`), the ids
-//! of a version 5 database (the LMDB table of accessions, the ISAM of GIs), and those LOSAT
-//! resolves in a version 4 database without the lookup files: `gnl|BL_ORD_ID|n`, and the
-//! answers of a database built without `-parse_seqids`. The lookup of an accession or a GI in
-//! a version 4 database built with `-parse_seqids` (ISAM) is line BDC's BDC2c: refused here.
+//! (`-entry all`, `-entry`, `-entry_batch` with and without `-get_dups`), and the lookup of
+//! ids: in a version 5 database the LMDB table of accessions and the ISAM of GIs, in a version
+//! 4 database `SeqDB_SimplifyAccession` and the ISAMs of its volumes (strings, GIs, PIGs), with
+//! `gnl|BL_ORD_ID|n` read without a file, and the answers of a database built without
+//! `-parse_seqids`.
 
 use std::io::{BufWriter, Write};
 
-use crate::seqdb::lookup::IdLookup;
+use crate::seqdb::isam::{seqdb_simplify_accession, SimplifyError};
+use crate::seqdb::lookup::{IdLookup, ID_OVERFLOWS};
 use crate::seqdb::tax_files::NO_ACCESSION_INFO;
 use crate::seqdb::taxdb::{LazyTaxDb, TaxNames};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::seqid::accguide::parse_flags::{ANY_LOCAL, DEFAULT, PARTIAL_OK, RAW_TEXT};
-use crate::seqid::accguide::SEQID_NOT_SET;
 use crate::seqid::label::{content, fasta};
-use crate::seqid::model::{Dbtag, ObjectId};
-use crate::seqid::parse::{
-    parse_ids, seq_id_from_text, string_to_non_negative_int, which_inverse_seq_id,
-};
-use crate::seqid::rank::{best_rank_score, find_best};
+use crate::seqid::parse::{seq_id_from_text, string_to_non_negative_int};
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
 use super::args::{self, Args};
@@ -577,46 +573,29 @@ fn init_search_request(
     Ok((config, kind))
 }
 
-/// What the database's files say about looking ids up: which lookups LOSAT answers.
+/// The lookup tables of the database, when the request looks ids up (the volume lists LOSAT
+/// refuses do not stop `-entry all`).
 struct DbIds<'a> {
-    /// The tables of a version 5 database, when the request looks ids up (the volume lists
-    /// LOSAT refuses do not stop `-entry all`).
     lookup: Option<IdLookup<'a>>,
-    /// Version 4: a volume has the numeric ISAM of GIs (`.pni`/`.nni`).
-    gi_isam: bool,
-    /// Version 4: a volume has the string ISAM (`.psi`/`.nsi`).
-    str_isam: bool,
+    /// `GetBlastDbVersion() == eBDB_Version5`.
+    version5: bool,
     num_seqs: u32,
 }
 
 impl<'a> DbIds<'a> {
     fn of(source: &Source<'a>, args: &Args) -> Result<Self, Stop> {
         let db = source.db;
-        let mut ids = DbIds {
-            lookup: None,
-            gi_isam: false,
-            str_isam: false,
+        let looks_up =
+            args.given("entry_batch") || args.value("entry").is_some_and(|entry| entry != "all");
+        Ok(DbIds {
+            lookup: if looks_up {
+                Some(db.id_lookup()?)
+            } else {
+                None
+            },
+            version5: db.is_version5(),
             num_seqs: db.num_seqs(),
-        };
-        if db.is_version5() {
-            let looks_up = args.given("entry_batch")
-                || args.value("entry").is_some_and(|entry| entry != "all");
-            if looks_up {
-                ids.lookup = Some(db.id_lookup()?);
-            }
-        } else {
-            let letter = if source.protein { "p" } else { "n" };
-            for volume in db.volumes() {
-                let file = |extension: &str| {
-                    let mut name = volume.base().as_os_str().to_os_string();
-                    name.push(format!(".{letter}{extension}"));
-                    std::fs::metadata(name).is_ok_and(|meta| meta.is_file())
-                };
-                ids.gi_isam |= file("ni");
-                ids.str_isam |= file("si");
-            }
-        }
-        Ok(ids)
+        })
     }
 }
 
@@ -682,74 +661,6 @@ fn preprocess_accession_for_v5(id: &str) -> String {
     id.to_ascii_uppercase()
 }
 
-/// What `SeqDB_SimplifyAccession` makes of an id of a version 4 database, as far as the
-/// lookup that follows it: an ordinal id (no file read), the exception of a `BL_ORD_ID`
-/// whose tag is a string, or a key of the ISAM files.
-enum Simplified {
-    Oid(i32),
-    StringTag,
-    IsamKey,
-    ParseError(String),
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2535-2548
-// ```c++
-// ESeqDBIdType SeqDB_SimplifyAccession(const string & acc,
-//                                      Int8         & num_id,
-//                                      string       & str_id,
-//                                      bool         & simpler)
-// {
-//     ESeqDBIdType result = eStringId;
-//     num_id = (Uint4)-1;
-//
-//     vector< CRef< CSeq_id > > seqid_set;
-//
-//     if (s_SeqDB_ParseSeqIDs(acc, seqid_set)) {
-//         // Something like SeqIdFindBest()
-//         CRef<CSeq_id> bestid =
-//             FindBestChoice(seqid_set, CSeq_id::BestRank);
-//
-//         result = SeqDB_SimplifySeqid(*bestid, & acc, num_id, str_id, simpler);
-//     } else {
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2286-2296
-// ```c++
-//     case CSeq_id::e_General:
-//         {
-//             const CDbtag & dbt = bestid.GetGeneral();
-//
-//             if (dbt.CanGetDb()) {
-//                 if (dbt.GetDb() == "BL_ORD_ID") {
-//                     simpler = true;
-//                     num_id = dbt.GetTag().GetId();
-//                     result = eOID;
-//                     break;
-//                 }
-// ```
-/// `s_SeqDB_ParseSeqIDs` reads ids only from a text that starts with a Seq-id tag before
-/// its first `|`; the best by `BestRank` goes to `SeqDB_SimplifySeqid`.
-fn simplify_v4(acc: &str) -> Simplified {
-    let Some(bar) = acc.find('|') else {
-        return Simplified::IsamKey;
-    };
-    if which_inverse_seq_id(acc[..bar].as_bytes()) == SEQID_NOT_SET {
-        return Simplified::IsamKey;
-    }
-    let ids: Vec<ParsedSeqId> = match parse_ids(acc.as_bytes(), DEFAULT, &mut |_| {}) {
-        Ok(ids) => ids.into_iter().flatten().collect(),
-        Err(error) => return Simplified::ParseError(error.message),
-    };
-    match find_best(&ids, best_rank_score) {
-        Some(ParsedSeqId::General(Dbtag { db, tag })) if db == b"BL_ORD_ID" => match tag {
-            ObjectId::Id(n) => Simplified::Oid(*n),
-            // `CObject_id::GetId()` of a string tag: `CInvalidChoiceSelection`, whose message
-            // the request reports (probe D11, D51-D55: the tags `0`, `-1`, `abc`, `03`).
-            ObjectId::Str(_) => Simplified::StringTag,
-        },
-        _ => Simplified::IsamKey,
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:183-210
 // ```c++
 // bool
@@ -781,44 +692,12 @@ fn simplify_v4(acc: &str) -> Simplified {
 // 	return true;
 // }
 // ```
-/// `x_GetOids(id)` as LOSAT answers it. A version 5 database looks the key up in its tables
-/// (`get_oids_v5`); `gnl|BL_ORD_ID|n` of a version 4 database is the ordinal id `n` with no
-/// file read (line BDC DECISIONS 12: the one sequence `n` of the whole database, where NCBI
-/// adds `n` to the start of every volume); the other ids of a version 4 database are not
-/// found when it has no lookup files. The lookups in its files are refused.
+/// `x_GetOids(id)`: the tables of the database (none for `-entry all`, which looks nothing up).
 fn get_oids(ids: &DbIds, id: &str) -> Lookup {
-    if let Some(lookup) = &ids.lookup {
-        return get_oids_v5(lookup, id);
-    }
-    let refused = |what: &str| {
-        Lookup::Stop(Stop::Refused(super::refusal(&format!(
-            "the lookup of {what} in a database built with -parse_seqids (-entry {id}) is not \
-             served"
-        ))))
-    };
-    if numeric_target(id).is_some() && ids.gi_isam {
-        return refused("a GI");
-    }
-    match simplify_v4(id) {
-        Simplified::Oid(n) => {
-            if u32::try_from(n).is_ok_and(|n| n < ids.num_seqs) {
-                Lookup::Oids(vec![n as u32])
-            } else {
-                Lookup::NotFound(id.to_string())
-            }
-        }
-        Simplified::StringTag => Lookup::Stop(Stop::Ncbi(
-            "CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str"
-                .to_string(),
-        )),
-        Simplified::ParseError(message) => Lookup::Stop(Stop::Ncbi(message)),
-        Simplified::IsamKey => {
-            if ids.str_isam {
-                refused("an accession")
-            } else {
-                Lookup::NotFound(id.to_string())
-            }
-        }
+    match &ids.lookup {
+        Some(lookup) if ids.version5 => get_oids_v5(lookup, id),
+        Some(lookup) => get_oids_v4(lookup, id),
+        None => Lookup::NotFound(id.to_string()),
     }
 }
 
@@ -838,6 +717,66 @@ fn get_oids_v5(lookup: &IdLookup, id: &str) -> Lookup {
         Ok(oids) => Lookup::Oids(oids),
         Err(error) => Lookup::Stop(error.into()),
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:870-893
+// ```c++
+// void CSeqDB::AccessionToOids(const string & acc, vector<int> & oids) const
+// {
+//     ////m_Impl->Verify();
+//     m_Impl->AccessionToOids(acc, oids);
+//
+//     // If we have a numeric ID and the search failed, try to look it
+//     // up as a GI (but not as a PIG or TI).  Due to the presence of
+//     // PDB ids like "pdb|1914|a", the faster GitToOid is not done
+//     // first (unless the caller does so.)
+//
+//     if (oids.empty()) {
+//         try {
+//             TGi gi = NStr::StringToNumeric<TGi>(acc, NStr::fConvErr_NoThrow);
+//             int oid(-1);
+//
+//             if (gi > ZERO_GI  &&  m_Impl->GiToOidwFilterCheck(gi, oid)) {
+//                     oids.push_back(oid);
+//             }
+//         }
+//         catch(...) {
+//         }
+//     }
+//
+//     ////m_Impl->Verify();
+// }
+// ```
+/// `x_GetOids(id)` of a version 4 database: a GI first when the id is a number, then the ISAMs
+/// of the volumes. (The GI that `CSeqDB::AccessionToOids` tries when they find nothing is the
+/// lookup `x_GetOids` has made before for a number, and finds nothing for any other text.)
+fn get_oids_v4(lookup: &IdLookup, id: &str) -> Lookup {
+    if let Some(gi) = numeric_target(id) {
+        match lookup.gi_to_oid(gi) {
+            Ok(Some(oid)) => return Lookup::Oids(vec![oid]),
+            Ok(None) => {}
+            Err(error) => return Lookup::Stop(error.into()),
+        }
+    }
+    match accession_to_oids_v4(lookup, id) {
+        Ok(oids) if oids.is_empty() => Lookup::NotFound(id.to_string()),
+        Ok(oids) => Lookup::Oids(oids),
+        Err(stop) => Lookup::Stop(stop),
+    }
+}
+
+/// `CSeqDBImpl::AccessionToOids(id)` of a version 4 database, with the exceptions of
+/// `SeqDB_SimplifyAccession` and of the volumes as the request reports them.
+fn accession_to_oids_v4(lookup: &IdLookup, id: &str) -> Result<Vec<u32>, Stop> {
+    let simplified = seqdb_simplify_accession(id.as_bytes()).map_err(|error| {
+        Stop::Ncbi(match error {
+            SimplifyError::SeqId(error) => error.message,
+            SimplifyError::Exception(message) => message,
+        })
+    })?;
+    lookup
+        .accession_to_oids_v4(id.as_bytes(), &simplified)?
+        .ok_or_else(|| Stop::Ncbi(ID_OVERFLOWS.to_string()))
 }
 
 /// The lines of an `-entry_batch` file: the id and the rest of the line
@@ -883,20 +822,6 @@ impl Run<'_, '_> {
     fn write(&mut self, oid: u32, config: &Config, target: Option<&str>) -> Result<(), Stop> {
         self.formatter
             .write(self.source, oid, config, target, self.out)
-    }
-
-    /// Refuses before any output when an id of `ids` would need a lookup LOSAT does not do
-    /// (in a version 4 database).
-    fn refuse_lookups(&self, ids: impl Iterator<Item = impl AsRef<str>>) -> Result<(), Stop> {
-        if self.ids.lookup.is_some() {
-            return Ok(());
-        }
-        for id in ids {
-            if let Lookup::Stop(Stop::Refused(reason)) = get_oids(self.ids, id.as_ref()) {
-                return Err(Stop::Refused(reason));
-            }
-        }
-        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:411-416
@@ -959,7 +884,6 @@ impl Run<'_, '_> {
         } else {
             vec![entry]
         };
-        self.refuse_lookups(queries.iter())?;
         let mut err_found = 0;
         for query in &queries {
             match get_oids(self.ids, query) {
@@ -1043,22 +967,25 @@ impl Run<'_, '_> {
     // ```
     /// `-entry_batch` without `-get_dups`: one sequence per id, the ids resolved all at once
     /// first (the exception of a version 5 database without `acc2oid` is swallowed there:
-    /// the ids keep what the LMDB files before it answered), a GI after that.
+    /// the ids keep what the LMDB files before it answered; in a version 4 database the first
+    /// OID of each id), a GI after that.
     fn batch_entry_no_dup(&mut self, file: &str, config: &mut Config) -> Result<bool, Stop> {
         let lines = read_batch(file)?;
         let ids: Vec<String> = lines
             .iter()
             .map(|(id, _)| {
-                if self.ids.lookup.is_some() {
+                if self.ids.version5 {
                     preprocess_accession_for_v5(id)
                 } else {
                     id.clone()
                 }
             })
             .collect();
-        self.refuse_lookups(ids.iter())?;
         let mut oids = Vec::with_capacity(ids.len());
-        if let Some(lookup) = &self.ids.lookup {
+        let Some(lookup) = &self.ids.lookup else {
+            unreachable!("a batch looks ids up");
+        };
+        if self.ids.version5 {
             let keys: Vec<Vec<u8>> = ids.iter().map(|id| id.as_bytes().to_vec()).collect();
             if let Err(error) = lookup.accessions_to_oids(&keys, &mut oids) {
                 let swallowed = error
@@ -1069,18 +996,29 @@ impl Run<'_, '_> {
                 }
             }
         } else {
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1362-1376
+            // ```c++
+            //     else {
+            //     	for(unsigned int i=0; i < accs.size(); i++) {
+            //     		vector<blastdb::TOid> tmp;
+            //     		AccessionToOids(accs[i], tmp);
+            //     		if(tmp.empty()) {
+            //     			oids[i] = kSeqDBEntryNotFound;
+            //     		}
+            //     		else {
+            //     			oids[i] = tmp[0];
+            //     		}
+            //     	}
+            //     }
+            // ```
             for id in &ids {
-                oids.push(match get_oids(self.ids, id) {
-                    Lookup::Oids(found) => Some(found[0]),
-                    Lookup::NotFound(_) => None,
-                    Lookup::Stop(stop) => return Err(stop),
-                });
+                oids.push(accession_to_oids_v4(lookup, id)?.first().copied());
             }
         }
         let mut err_found = false;
         for (i, id) in ids.iter().enumerate() {
             let mut oid = oids[i];
-            if let (None, Some(lookup), Some(gi)) = (oid, &self.ids.lookup, numeric_target(id)) {
+            if let (None, Some(gi)) = (oid, numeric_target(id)) {
                 oid = lookup.gi_to_oid(gi)?;
             }
             let Some(oid) = oid else {
@@ -1142,7 +1080,6 @@ impl Run<'_, '_> {
     /// `-entry_batch -get_dups`: line by line, every sequence of each id.
     fn batch_entry(&mut self, file: &str, config: &mut Config) -> Result<bool, Stop> {
         let lines = read_batch(file)?;
-        self.refuse_lookups(lines.iter().map(|(id, _)| id))?;
         let mut err_found = false;
         for (id, format) in &lines {
             if self.modify_config_for_batch_entry(format, config) != 0 {
@@ -1250,20 +1187,32 @@ mod tests {
         assert_eq!(key("mydb:prot10"), "MYDB:PROT10");
     }
 
+    /// The answers of `x_GetOids` in the fixture database `name` (version 4) of
+    /// `tests/blastdbcmd/db`.
+    fn v4_oids(name: &str) -> impl Fn(&str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/blastdbcmd/db")
+            .join(name);
+        let db = SeqDb::open(path.to_str().unwrap(), SeqType::Protein).unwrap();
+        assert!(!db.is_version5());
+        move |id: &str| {
+            let ids = DbIds {
+                lookup: Some(db.id_lookup().unwrap()),
+                version5: false,
+                num_seqs: db.num_seqs(),
+            };
+            match get_oids(&ids, id) {
+                Lookup::Oids(oids) => format!("oids {oids:?}"),
+                Lookup::NotFound(acc) => format!("not found {acc}"),
+                Lookup::Stop(Stop::Ncbi(message)) => format!("error {message}"),
+                Lookup::Stop(stop) => format!("{stop:?}"),
+            }
+        }
+    }
+
     #[test]
     fn ordinal_ids_of_version4_are_read_without_files() {
-        let ids = DbIds {
-            lookup: None,
-            gi_isam: false,
-            str_isam: false,
-            num_seqs: 20,
-        };
-        let oids = |id: &str| match get_oids(&ids, id) {
-            Lookup::Oids(oids) => format!("oids {oids:?}"),
-            Lookup::NotFound(acc) => format!("not found {acc}"),
-            Lookup::Stop(Stop::Ncbi(message)) => format!("error {message}"),
-            Lookup::Stop(stop) => format!("{stop:?}"),
-        };
+        let oids = v4_oids("p4n");
         assert_eq!(oids("gnl|BL_ORD_ID|3"), "oids [3]");
         assert_eq!(oids("gnl|BL_ORD_ID|3|"), "oids [3]");
         assert_eq!(oids("gnl|BL_ORD_ID|3\r"), "oids [3]");
@@ -1279,23 +1228,17 @@ mod tests {
                 "error CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str"
             );
         }
-        let parsed = DbIds {
-            gi_isam: true,
-            str_isam: true,
-            ..ids
-        };
-        assert!(matches!(
-            get_oids(&parsed, "gnl|BL_ORD_ID|3"),
-            Lookup::Oids(_)
-        ));
-        assert!(matches!(
-            get_oids(&parsed, "3"),
-            Lookup::Stop(Stop::Refused(_))
-        ));
-        assert!(matches!(
-            get_oids(&parsed, "XP_000020.1"),
-            Lookup::Stop(Stop::Refused(_))
-        ));
+    }
+
+    #[test]
+    fn ids_of_a_parsed_version4_database_are_looked_up_in_its_isams() {
+        let oids = v4_oids("p4");
+        assert_eq!(oids("gnl|BL_ORD_ID|3"), "oids [3]");
+        assert_eq!(oids("XP_000020.1"), oids("xp_000020.1"));
+        assert!(oids("XP_000020.1").starts_with("oids ["));
+        assert_eq!(oids("1819"), oids("gi|1819"));
+        assert!(oids("1819").starts_with("oids ["));
+        assert_eq!(oids("NOSUCH9"), "not found NOSUCH9");
     }
 
     #[test]

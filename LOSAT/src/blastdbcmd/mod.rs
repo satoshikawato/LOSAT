@@ -5,9 +5,8 @@
 //! `-target_only`, `-get_dups`, `-long_seqids`), `-h`, `-help` and `-version`. Its command
 //! line is NCBI's (`args`, NCBI's argument reader), not clap's: `main` hands it the words
 //! after `blastdbcmd`. The other uses of the program (`-list`, taxonomy, metadata, IPGs)
-//! are refused, and so are the lookups of an accession or GI in the tables of a version 4
-//! database built with `-parse_seqids` (line BDC's BDC2c) and a database that LOSAT does
-//! not read (the masks of `makeblastdb -mask_data`, several names in `-db`).
+//! are refused, and so is a database that LOSAT does not read (the masks of `makeblastdb
+//! -mask_data`, several names in `-db`).
 
 mod args;
 mod fasta;

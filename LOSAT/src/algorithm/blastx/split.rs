@@ -942,20 +942,39 @@ pub fn merge_chunk_hsps(
 
 #[cfg(test)]
 mod x_chunk_record_tests {
-    use super::{x_chunk_record, x_chunk_record_from_copy, FastaRecord};
+    use super::{
+        prepare_queries, split_queries, x_chunk_record, x_chunk_record_from_copy, FastaRecord,
+    };
+    use crate::algorithm::blastx::input::InputWarning;
+    use crate::blastinput::fasta_reader::RecordSource;
+
+    /// A query of 30,000 letters of no repeat in its frames, with masks at the chunks' borders.
+    fn whole() -> FastaRecord {
+        FastaRecord {
+            internal_id: "Query_1".to_string(),
+            title: "long query".to_string(),
+            sequence: (0..30_000u32)
+                .map(|k| b"ACGT"[(k.wrapping_mul(2_654_435_761) >> 30) as usize])
+                .collect(),
+            lowercase_masks: vec![(0, 9), (100, 299), (9_990, 10_010), (29_990, 29_999)],
+            warnings: vec![InputWarning {
+                line: 3,
+                kind: "defline_id",
+                positions: vec![7],
+                text: b"a warning".to_vec(),
+            }],
+            source: Some(Box::new(RecordSource {
+                defline: b">long query".to_vec(),
+                ..RecordSource::default()
+            })),
+        }
+    }
 
     // LOSAT_X_BXCHUNKSLICE: the record without the copy equals the one from the copy in every
     // field, at ranges that hold, cross and miss the masks.
     #[test]
     fn a_chunks_record_equals_the_one_cut_from_a_copy() {
-        let whole = FastaRecord {
-            internal_id: "Query_1".to_string(),
-            title: "long query".to_string(),
-            sequence: (0..30_000u32).map(|k| b"ACGT"[k as usize % 4]).collect(),
-            lowercase_masks: vec![(0, 9), (100, 299), (9_990, 10_010), (29_990, 29_999)],
-            warnings: Vec::new(),
-            source: None,
-        };
+        let whole = whole();
         for (start, end) in [
             (0, 10_002),
             (9_705, 19_707),
@@ -968,6 +987,31 @@ mod x_chunk_record_tests {
             let old = x_chunk_record_from_copy(&whole, start, end);
             assert_eq!(format!("{new:?}"), format!("{old:?}"), "{start}..{end}");
             assert_eq!(new.sequence.len(), end - start);
+        }
+    }
+
+    // LOSAT_X_BXCHUNKSLICE: `split_queries` does split this query, and each chunk holds what a
+    // record cut from a copy prepares, masks included.
+    #[test]
+    fn a_split_querys_chunks_are_prepared_as_from_a_copy() {
+        let whole = whole();
+        let options = super::super::stage_c_tests::options();
+        let records = std::slice::from_ref(&whole);
+        let full = prepare_queries(records, &options).unwrap();
+        let chunks = split_queries(records, &full, &options).unwrap();
+        assert!(chunks.len() > 1, "{} chunks", chunks.len());
+        for chunk in &chunks {
+            let (start, end) = (chunk.range.start, chunk.range.end);
+            let old = x_chunk_record_from_copy(&whole, start, end);
+            let old = prepare_queries(&[old], &options).unwrap();
+            let new = &chunk.prepared;
+            assert_eq!(new.original_lengths, old.original_lengths, "{start}..{end}");
+            assert_eq!(new.sequence_start, old.sequence_start, "{start}..{end}");
+            assert_eq!(
+                new.sequence_start_nomask, old.sequence_start_nomask,
+                "{start}..{end}"
+            );
+            assert_eq!(new.lookup_segments, old.lookup_segments, "{start}..{end}");
         }
     }
 }

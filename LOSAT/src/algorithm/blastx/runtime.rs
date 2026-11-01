@@ -330,8 +330,8 @@ fn x_kappa_workers(threads: usize, matches: usize) -> usize {
 }
 
 // No NCBI counterpart: a placement of the same value. Boxed because a result slot of a speculative
-// batch holds it: inline, each slot of `batch_end`'s `speculated` took 3.2 KiB, one batch's 512
-// slots at 16 threads 1.6 MiB, and a slot written at each 3.2 KiB touches every page of the block.
+// batch holds it: inline, each slot of `batch_end`'s `speculated` took 3.1 KiB, one batch's 512
+// slots at 16 threads 1.6 MiB, and a slot written at each 3.1 KiB touches every page of the block.
 // That block stayed resident in the glibc arena of each thread that ends a batch.
 /// The matrix a match leaves for the match after it.
 type XMatrixLeft = Box<crate::core::composition_adjustment::adjust_scores::AdjustedProteinMatrix>;

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The compatibility outputs of a run, byte for byte as the engine wrote them, with the CLI
 // command of each format and their export (plan §5.8; the view filters never apply here).
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { toShellCommand } from '../domain/argv';
 import { outputChunks } from '../domain/output-chunks';
@@ -13,6 +13,26 @@ const text = ref('');
 /** Which run and format `text` shows ("<number>:<format>"), once it is read. */
 const shown = ref('');
 const chunks = computed(() => outputChunks(text.value));
+/** A new output has new blocks: a block remembers the height it was last laid out with. */
+const generation = ref(0);
+const view = ref<HTMLElement>();
+/**
+ * A selection over more than one block lays out every block until it ends: a browser leaves text
+ * that it did not lay out out of the selection (Firefox 151: 1 % of the output on select all).
+ */
+const selecting = ref(false);
+
+function onSelectionChange(): void {
+  const selection = document.getSelection();
+  selecting.value =
+    selection !== null &&
+    !selection.isCollapsed &&
+    view.value !== undefined &&
+    selection.containsNode(view.value, true) &&
+    !(selection.anchorNode === selection.focusNode && selection.anchorNode?.nodeType === Node.TEXT_NODE);
+}
+onMounted(() => document.addEventListener('selectionchange', onSelectionChange));
+onUnmounted(() => document.removeEventListener('selectionchange', onSelectionChange));
 
 watch(
   [() => props.run, format],
@@ -22,6 +42,7 @@ watch(
     // A later selection may have been read first.
     if (run !== props.run || fmt !== format.value) return;
     text.value = value;
+    generation.value++;
     shown.value = `${run.snapshot.number}:${fmt}`;
   },
   { immediate: true },
@@ -45,7 +66,7 @@ watch(
     <p class="command">
       Command: <code data-testid="result-command">{{ toShellCommand(run.snapshot.argv, format) }}</code>
     </p>
-    <pre class="output" data-testid="result-output" :data-shown="shown"><span v-for="(chunk, index) in chunks" :key="index" class="output-chunk" :style="{ '--output-chunk-lines': chunk.lines }">{{ chunk.text }}</span></pre>
+    <pre ref="view" class="output" :class="{ 'output-selecting': selecting }" data-testid="result-output" :data-shown="shown"><span v-for="(chunk, index) in chunks" :key="`${generation}:${index}`" class="output-chunk" :style="{ '--output-chunk-lines': chunk.lines }">{{ chunk.text }}</span></pre>
     <button data-testid="export-output" @click="coordinator.exportOutput(run.snapshot.runId, format)">
       Export outfmt {{ format }}
     </button>

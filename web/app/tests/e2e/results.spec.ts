@@ -1641,3 +1641,40 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
   await expect(page.getByTestId('results-outputs')).toBeVisible();
   await expect(heading).toBeInViewport({ ratio: 1 });
 });
+
+test('the Outputs view lays out blocks of lines, and shows and selects every line of each output', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, 'an output of many lines');
+  await openSearch(page);
+  await program(page, 'tblastx');
+  await openFiles(page, 'query', [{ name: 'q.fasta', text: fasta('small_test.fasta') }]);
+  await openFiles(page, 'subject', [{ name: 's.fasta', text: fasta('small_test.fasta') }]);
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await page.getByTestId('tab-results').click();
+  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
+  await page.getByTestId('results-view-outputs').click();
+  // Outfmt 6 after 0: the blocks of one output do not keep the heights of the other's.
+  for (const format of [0, 6, 0] as const) {
+    await page.getByTestId(`format-${format}`).click();
+    await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', `1:${format}`);
+    const view = await page.getByTestId('result-output').evaluate(async (element) => {
+      const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const text = element.textContent ?? '';
+      await frame();
+      const first = element.children[0]!;
+      const lineHeight = first.getBoundingClientRect().height / first.textContent!.split('\n').slice(0, -1).length;
+      const padding = element.scrollHeight - element.clientHeight > 0 ? 16 : 0;
+      const contentHeight = element.scrollHeight - padding;
+      const selection = document.getSelection()!;
+      selection.selectAllChildren(element);
+      await frame();
+      await frame();
+      const selected = selection.toString();
+      selection.removeAllRanges();
+      return { blocks: element.children.length, lines: text.split('\n').length - 1, lineHeight, contentHeight, chars: text.trimEnd().length, selected: selected.trimEnd().length };
+    });
+    if (format === 0) expect(view.blocks).toBeGreaterThan(1);
+    expect(Math.round(view.contentHeight / view.lineHeight)).toBe(view.lines);
+    expect(view.selected).toBe(view.chars);
+  }
+});

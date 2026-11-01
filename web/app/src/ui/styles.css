@@ -976,6 +976,10 @@ pre.output {
   contain-intrinsic-block-size: auto calc(var(--output-chunk-lines) * 1lh);
 }
 
+.output-selecting .output-chunk {
+  content-visibility: visible;
+}
+
 /* Results screen (S13) */
 
 .small {

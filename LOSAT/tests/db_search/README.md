@@ -398,6 +398,20 @@ no hit. TBLASTN and TBLASTX run with `-max_hsps 1` to keep the frozen files smal
 Rows `db.id.blastn.stream.q25.*` (line DBID, blastn's report stream of these databases): the 25 records of
 `ids/nucl.fna` as queries in batches of `BATCH_SIZE=1500`, each batch with hits.
 
+Seq-align ids by which NCBI's formatters find another sequence (line DBID N1; rows `db.id.*.found.*`):
+`make_ids.py` writes, from the FASTA of `ids/make_found_fasta.py`, `ids/pfound_v5` and `ids/pfound_v4` from
+`ids/pfound.faa` (five pairs of unrelated proteins, each hit by its query `ids/pfound_q<k>.faa`;
+`ids/pfound_q1.fna` and `ids/pfound_q4.fna` for BLASTX), `ids/nfound_v5` and `ids/nfound_v4` from
+`ids/nfound.fna` (`gb|AF000050.1|`, then `gb|AF000050|`; queries `qnucl.fa` and `qprot.fa`), and the aliases
+`ids/pdup_ab.pal` (two databases with the same record `gb|EEE00005.1|`) and `ids/pdup_ac.pal` (the second
+copy with another title). NCBI looks the Seq-align id of a reported sequence up again in the database and
+takes the first sequence the lookup gives: by `gb|AAA00001|` it finds `gb|AAA00001.1|` before it, by
+`emb|BBB00002.1|` the `gb|BBB00002.1|` before it, by `lcl|CCC00003` the `gb|CCC00003.1|` before it (whose ids
+do not compare equal, so NCBI finds no sequence); `gb|DDD00004|` before `gb|DDD00004.1|` and `pdb|2XYZ|` before
+`pdb|2XYZ|AA` each find their own. LOSAT refuses such a sequence in the formats that read its Bioseq, unless the
+sequence found holds the same definition lines and letters (`pdup_ab`); `-negative_seqidlist
+seqidlist/sl_pfound_neg.txt` leaves `gb|AAA00001.1|` out of the search, and NCBI's lookup with it.
+
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 
 Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTDB=tests/seqdb/taxdb/offset_last_past_end`

@@ -281,13 +281,14 @@ pub(super) fn read_titles(
     first_query: usize,
     titles: &mut DatabaseTitles,
 ) -> Result<()> {
+    let headers = shared::HeaderReader::new(&database.db);
     for (index, hitlist) in hitlists.iter().enumerate() {
         for list in hitlist.lists() {
             let ordinal = u32::try_from(list.oid).context("negative TBLASTN subject OID")?;
             if titles.contains_key(&ordinal) {
                 continue;
             }
-            let title = shared::read_header(&database.db, ordinal, first_query + index, PROGRAM)?;
+            let title = shared::read_header(&headers, ordinal, first_query + index, PROGRAM)?;
             titles.insert(ordinal, title);
         }
     }

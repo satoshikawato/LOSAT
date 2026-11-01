@@ -472,6 +472,10 @@ pub struct SeqDb {
     positive_list: bool,
     /// `SeqDb::list_taxids`.
     list_taxids: Vec<i32>,
+    /// The LMDB files of a version 5 database for `SeqDb::seqid_lookup`, opened at its first use.
+    lookup_files: OnceLock<lookup::LookupFiles>,
+    /// The ISAMs of the volumes for `SeqDb::seqid_lookup`, each opened at its first use.
+    lookup_isams: OnceLock<lookup::VolumeIsams>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1093-1102
@@ -851,6 +855,8 @@ impl SeqDb {
             reports_show_gis: false,
             positive_list: false,
             list_taxids: Vec::new(),
+            lookup_files: OnceLock::new(),
+            lookup_isams: OnceLock::new(),
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.

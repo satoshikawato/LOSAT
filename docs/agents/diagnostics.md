@@ -398,6 +398,7 @@ export LOSAT_X_MBHITPF=1
 export LOSAT_X_MBLUTKEEP=1
 export LOSAT_X_MBLUTONCE=1
 export LOSAT_X_MBLUTPREFAULT=1
+export LOSAT_X_NEWTONBATCH=1
 export LOSAT_X_NEWTONDROP=1
 export LOSAT_X_PAIRPARDISC=1
 export LOSAT_X_PAIRPARDISCARR=1
@@ -5424,6 +5425,39 @@ Scheduling (each value computed by one thread with the original function; order 
   `=0` in the PR's binary): AP027131 `-subject` at 1 / 16 / 32 threads x0.9992 / x1.0000 / x0.9956 (8, 6, 7 of 12
   faster), against `=0` x0.9992 / x1.0000 / x1.0043; `dmel_b4.faa` at 1 / 8 / 16 / 32 x0.9998 / x0.9989 / x1.0006 /
   x1.0011 (5 of 8, 7, 5, 5 of 12 faster), against `=0` x0.9984 / x0.9983 / x0.9986 / x0.9989.
+- `LOSAT_X_NEWTONBATCH=1` blastp, tblastn (memory; in the strict set from the pull request that added it, 2026-11-01;
+  `=0` turns it off; `core/composition_adjustment/x_newton_lanes.rs` `prefetch` / `take`): with NEWTONDROP the results
+  a thread solved ahead are the ones of its last prefetch only, so a prefetch keeps them in the input and output
+  vectors they were solved in (one batch a thread; `take` searches it from the first result not taken, and the batch
+  goes when its last result is taken or at the next prefetch) instead of copying each into a box of the store (6,736
+  bytes a result). The copies held the caller's inputs, the outputs and the boxes at once at the end of every prefetch
+  (about 13.2 KiB a problem; TBLASTN's redo solves the problems of the coming windows of a match until 32 or more are
+  gathered), and this transient set the high water of most threads' heaps in the redo. The results taken are the
+  same (`[X_STATS] NEWTONLANES prefetched= hits= misses=` and `[X_STATS] NEWTONDROP dropped=` equal with and without
+  the switch, unless one prefetch solves more than the 512 results the store holds: the store keeps the last 512 of
+  them, the batch all, and more are taken; `[X_STATS] NEWTONBATCH kept=` counts the prefetches kept as their batch);
+  with `LOSAT_X_NEWTONDROP=0` the results are stored (the batch holds one prefetch). The search of the batch and its comparison of an input are
+  functions of their own: inlined into `composition_matrix_adjust` they changed its code on every path (one-thread
+  instructions x1.001 with the switch off), and the comparison inlined into the search kept the index of its loop
+  over `q` on the stack (twice the instructions of the store's search). Unit tests
+  `x_newton_batch_gives_each_result_once_and_goes_when_all_are_taken` (any order, a repeated input, the store empty,
+  the batch gone with its last result) and `x_newton_drop_empties_the_store_at_the_next_prefetch` (both forms in one
+  process); `tests/tblastn_newton_drop.rs`: the same report as `=0` at one and four threads, the same counts of
+  results solved ahead, taken and dropped, batches kept by default and none with `=0` or `LOSAT_X_NEWTONDROP=0`.
+  Always: every prefetch (where NEWTONLANES runs, with NEWTONDROP).
+  Measured 2026-11-01 on the workstation (2x Xeon Gold 6338; base dev 7a835d1f; every output of a case the same
+  bytes in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16
+  CPUs for every run, medians in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): `dmel_b4.faa` x zebrafish
+  cDNAs (`-db`, `-evalue 1e-5 -max_target_seqs 5`) at 16 / 32 / 40 / 48 threads 55 / 84 / 96 / 110 -> 54 / 81 / 92 /
+  106 MiB (x0.981 / x0.966 / x0.959 / x0.963, 16 rounds, lower in 13, 15, 16, 16; NCBI 128 / 139 / 145 / 151); the
+  595 proteins of AP027131 x AP027133 (`-db_gencode 4`) `-subject` at 1 / 16 / 32 / 40 / 48 x0.998 / x0.992 / x1.002 /
+  x1.002 / x0.989 (8 rounds; 74 MiB at 48, NCBI 81 at one thread), `-db` at 48 x0.994 (93 MiB, NCBI 114); BLASTP WSSV
+  x PajaWSV `-subject` at 16 x0.992; `=0` in the same binary x0.999-1.005 of the base. At one thread x0.99922 of the
+  instructions (AP027131 `-subject`) and x0.99999 (`dmel_b4.faa`); BLASTP x0.99960, BLASTX and TBLASTX x1.00000.
+  Time (node 1, cores warmed 3 s before each run, arms alternating in order; the PR's binary against the base, and
+  `=0` in the PR's binary): AP027131 `-subject` at 1 / 16 / 32 threads x0.9954 / x0.9942 / x0.9941 (12, 6, 8 of 12
+  faster), against `=0` x0.9961 / x0.9986 / x1.0015; `dmel_b4.faa` at 1 / 8 / 16 / 32 x0.9992 / x0.9984 / x1.0008 /
+  x0.9992 (5 of 8, 10, 6, 6 of 12 faster), against `=0` x1.0003 / x0.9999 / x1.0001 / x1.0004.
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

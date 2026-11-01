@@ -1,8 +1,8 @@
 # Inputs of the drop-in corpus
 
 Used by `LOSAT/tests/dropin_corpus.py` and `LOSAT/tests/dropin_corpus_manifest.tsv`: the command lines that downstream
-tools run. `dropin_corpus.py` links every file here into the directory of each run. The rows name them relatively, as a
-tool would. A row may write next to the links but must not write through one, so no row writes to a name listed here.
+tools run and the common forms of each program. `dropin_corpus.py` links every file here into the directory of each run. The rows name them relatively, as a
+tool would. A row may write next to the links but must not write through one; a run that changes an input differs.
 
 FASTA files:
 
@@ -27,9 +27,9 @@ frozen `.nin`):
     makeblastdb -in tq.fna -dbtype nucl -out tdbp -parse_seqids -taxid 9606
     makeblastdb -in pq.faa -dbtype prot -out pdbp -parse_seqids -taxid 9606
     makeblastdb -in gapdb.faa -dbtype prot -out gapdb
-    makeblastdb -in brig_ref.fna -dbtype nucl
 
-`brig_ref.fna` is a copy of `ns.fna` under the name BRIG gives its database (row N26).
+`brig_ref.fna` is a copy of `ns.fna` under the name BRIG gives its database (row N26), built from the parent directory
+of these files: `makeblastdb -in fx/brig_ref.fna -dbtype nucl`, so its title holds `fx/`.
 
 To change a row or an input: edit the manifest or the file, then, from `LOSAT/`,
 `python3 tests/dropin_corpus.py freeze --ncbi-bin <NCBI bin directory> --only <row id prefix>`.

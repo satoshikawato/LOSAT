@@ -18,8 +18,8 @@ selected program the FASTA-input fixtures of fasta_input_fixtures.py (`check --r
 hashes, and LOSAT's explicit rejections where it rejects an input or option); for BLASTP,
 BLASTN, TBLASTN, BLASTX, TBLASTX and PSIBLAST the `-db` fixtures of db_search_fixtures.py (`check --program <program>`: stdout,
 stderr and exit status against the frozen NCBI `<program> -db -num_threads 1` bytes, at 1 and
-4 threads); and, whenever a program is selected, the command lines of the downstream tools
-(dropin_corpus.py `check`: every row).
+4 threads); and, whenever a program is selected, the command lines of the downstream tools and
+the common forms of each program (dropin_corpus.py `check`: every row).
 
 Programs are selected from the changed paths (--changed-from): a program's own
 directory selects it and every program that imports it; any other engine or
@@ -278,6 +278,8 @@ def run_fixtures(losat: Path, programs: set[str], out: Path) -> list[str]:
                              "--out", str(log)], capture_output=True, text=True)
     if result.returncode != 0:
         failures += [f"drop-in corpus {line}" for line in result.stdout.splitlines() if "\tdiffers\t" in line][:20]
+        if result.stderr.strip():
+            failures.append(f"drop-in corpus raised: {result.stderr.strip().splitlines()[-1]}")
         failures.append(f"drop-in corpus differs: see {log.name}")
     return failures
 

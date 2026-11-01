@@ -18,11 +18,11 @@ def field(text: bytes) -> bytes:
     return len(text).to_bytes(4, "big") + text
 
 
-def index(version: int, date: bytes, rest: bytes = b"offsets") -> bytes:
+def index(version: int, date: bytes = b"Nov 1, 2026  9:05 AM", rest: bytes = b"offsets", aligned: bool = True) -> bytes:
     head = version.to_bytes(4, "big") + bytes(4)
-    if version >= 5:
-        return head + bytes(4) + field(b"title") + field(b"db.ndb") + field(date) + rest
-    return head + field(b"title") + field(date) + rest
+    head += bytes(4) + field(b"title") + field(b"db.ndb") if version >= 5 else field(b"title")
+    date += bytes(-(len(head) + 4 + len(date)) % 8 + (0 if aligned else 1))
+    return head + field(date) + rest
 
 
 def row(check: str = "bytes", **cells: str) -> dict[str, str]:
@@ -31,29 +31,54 @@ def row(check: str = "bytes", **cells: str) -> dict[str, str]:
 
 
 class DatabaseBytes(unittest.TestCase):
+    def index_of(self, data: bytes) -> bytes:
+        return corpus.database_bytes("db.nin", {"db.nin": data})
+
     def test_the_index_drops_only_the_date_in_both_versions(self):
         for version in (4, 5):
-            one, two = index(version, b"Nov 1, 2026  9:05 AM\0\0\0\0"), index(version, b"Nov 11, 2026  10:05 PM\0\0")
-            self.assertEqual(corpus.database_bytes("db.nin", one), corpus.database_bytes("db.pin", two))
-            self.assertNotEqual(corpus.database_bytes("db.nin", index(version, b"d", b"other")),
-                                corpus.database_bytes("db.nin", index(version, b"d")))
-            self.assertNotIn(b"2026", corpus.database_bytes("db.nin", one))
+            self.assertEqual(self.index_of(index(version)), self.index_of(index(version, b"Nov 11, 2026  10:05 PM")))
+            self.assertNotEqual(self.index_of(index(version)), self.index_of(index(version, rest=b"other")))
+            self.assertNotIn(b"2026", self.index_of(index(version)))
 
-    def test_the_json_manifest_drops_the_time_and_the_sizes(self):
-        one = {"dbname": "db", "last-updated": "a", "bytes-total": 1, "bytes-to-cache": 2}
-        two = {"dbname": "db", "last-updated": "b", "bytes-total": 9, "bytes-to-cache": 8}
-        self.assertEqual(corpus.database_bytes("db.njs", json.dumps(one).encode()),
-                         corpus.database_bytes("db.pjs", json.dumps(two).encode()))
-        self.assertNotEqual(corpus.database_bytes("db.njs", json.dumps(one).encode()),
-                            corpus.database_bytes("db.njs", json.dumps(one | {"dbname": "x"}).encode()))
+    def test_another_date_form_or_a_lost_alignment_keeps_the_file_whole(self):
+        for version in (4, 5):
+            for bad in (index(version, b"2026-11-01T09:05:00"), index(version, b""), index(version, aligned=False)):
+                self.assertEqual(self.index_of(bad), bad)
+
+    def test_the_json_manifest_drops_the_time_and_compares_the_sizes(self):
+        files = {"db.nin": b"12", "db.nsq": b"345", "db.not": b"6789"}
+
+        def manifest(total=9, cache=5, time=b"2026-11-01T22:00:00", order=False):
+            head = b'"dbname": "db",\n  "last-updated": "%s",\n' % time
+            sizes = b'  "bytes-total": %d,\n  "bytes-to-cache": %d,\n' % (total, cache)
+            listing = b'  "files": ["db.nin", "db.nsq", "db.not"]\n'
+            return b"{\n  " + (sizes + b"  " + head if order else head + sizes) + listing + b"}\n"
+
+        def view(data):
+            return corpus.database_bytes("db.njs", files | {"db.njs": data})
+
+        same = view(manifest())
+        self.assertEqual(view(manifest(time=b"2027-01-02T03:04:05")), same)
+        grown = files | {"db.nin": b"12" + bytes(8)}
+        self.assertEqual(corpus.database_bytes("db.pjs", grown | {"db.pjs": manifest(total=17, cache=13)}), same)
+        self.assertNotEqual(view(manifest(total=10)), same)
+        self.assertNotEqual(view(manifest(cache=6)), same)
+        self.assertNotEqual(view(manifest(order=True)), same)
+        self.assertNotEqual(view(manifest(time=b"Nov 1, 2026")), same)
+        self.assertEqual(view(b"not json"), b"not json")
 
     def test_other_files_are_compared_whole(self):
-        self.assertEqual(corpus.database_bytes("db.nsq", b"Nov 1"), b"Nov 1")
+        self.assertEqual(corpus.database_bytes("db.nsq", {"db.nsq": b"Nov 1"}), b"Nov 1")
 
-    def test_a_logfile_counts_by_name_in_a_database_row_only(self):
-        run = corpus.Run(0, b"", b"", {"mk.log": b"time"})
-        self.assertEqual(corpus.files_cell(row(command="makeblastdb -in a -dbtype nucl"), run), "mk.log:-")
-        self.assertEqual(corpus.files_cell(row(), run), f"mk.log:{corpus.sha256(b'time')}")
+    def test_a_logfile_is_the_report_without_the_time_and_the_path(self):
+        files = {"mk.log": b"\nBuilding a new DB, current time: x\nNew DB name:   /tmp/x\nNew DB title:  t\n"}
+        self.assertEqual(corpus.database_bytes("mk.log", files), b"\nNew DB title:  t\n")
+        database = row(command="makeblastdb -in a -dbtype nucl")
+        filled = corpus.files_cell(database, corpus.Run(0, b"", b"", files))
+        self.assertNotEqual(corpus.files_cell(database, corpus.Run(0, b"", b"", {"mk.log": b""})), filled)
+
+    def test_a_search_row_compares_a_log_named_file_whole(self):
+        self.assertEqual(corpus.files_cell(row(), corpus.Run(0, b"", b"", {"a.log": b"x"})), f"a.log:{corpus.sha256(b'x')}")
 
 
 class Compare(unittest.TestCase):
@@ -79,6 +104,10 @@ class Compare(unittest.TestCase):
         self.assertIn("a.tsv", corpus.compare(self.bytes_row, corpus.Run(0, b"one\ntwo\n", b"", {"a.tsv": b"other"})))
         self.assertIn("files", corpus.compare(self.bytes_row, corpus.Run(0, b"one\ntwo\n", b"", {})))
 
+    def test_a_run_that_changes_an_input_differs(self):
+        run = corpus.Run(0, b"one\ntwo\n", b"", {"a.tsv": b"row"}, ["ns.fna"])
+        self.assertIn("ns.fna", corpus.compare(self.bytes_row, run))
+
     def test_stderr_is_allowed_where_ncbi_writes_some(self):
         quiet = self.bytes_row | {"stderr_empty": "no"}
         self.assertEqual(corpus.compare(quiet, corpus.Run(0, b"one\ntwo\n", b"Warning", {"a.tsv": b"row"})), "")
@@ -90,8 +119,8 @@ class Compare(unittest.TestCase):
     def test_line1_wants_ncbis_first_line_and_one_more(self):
         one = row("line1", stdout_sha256=corpus.sha256(b"one\ntwo\n"))
         self.assertEqual(corpus.compare(one, corpus.Run(0, b"one\nnames LOSAT\n", b"", {})), "")
-        self.assertTrue(corpus.compare(one, corpus.Run(0, b"other\nnames LOSAT\n", b"", {})))
-        self.assertTrue(corpus.compare(one, corpus.Run(0, b"one\n", b"", {})))
+        for stdout in (b"other\nnames LOSAT\n", b"one\n", b"one\nnames NCBI\n", b"one\nLOSAT\nmore\n"):
+            self.assertTrue(corpus.compare(one, corpus.Run(0, stdout, b"", {})), stdout)
 
     def test_contains_wants_every_text(self):
         one = row("contains:-num_threads |-mt_mode ")

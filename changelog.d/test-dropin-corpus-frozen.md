@@ -1,1 +1,1 @@
-- Tests: the 210 command lines of the downstream tools (Prokka, ABRicate, AMRFinderPlus, mlst, BlobToolKit, Galaxy, nf-core and others) are frozen against NCBI BLAST+ 2.17.0 and run in the pull-request and nightly regressions (`LOSAT/tests/dropin_corpus.py`).
+- Tests: 210 command lines, those of the downstream tools (Prokka, ABRicate, AMRFinderPlus, mlst, BlobToolKit, Galaxy, nf-core and others) and the common forms of each program, are frozen against NCBI BLAST+ 2.17.0 and run in the pull-request and nightly regressions (`LOSAT/tests/dropin_corpus.py`).

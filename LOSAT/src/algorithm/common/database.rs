@@ -291,11 +291,12 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
 /// The checks of `read_nucleotide_stores` without the copy (TBLASTN's `-db` search, which reads
 /// its subjects where it searches them, `x_read_nucleotide_store`). The
 /// database is read in the same blocks, and every sequence's length and ambiguity runs are read
-/// with the same errors in the same order; only the lengths are kept, by ordinal id. The search
+/// with the same errors in the same order; only the lengths are kept, by ordinal id (a length
+/// that does not fit a signed 32-bit integer is an error of the read). The search
 /// fails the query batch that the copy would fail, with the same text. A block of one sequence (one longer than
 /// a block, or the last of its volume) is checked without its 2-bit data
 /// (`SeqDb::x_nucleotide_check`): a human chromosome is not read here only to be dropped.
-pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<usize>> {
+pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<u32>> {
     let mut lengths = Vec::with_capacity(db.num_seqs() as usize);
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, STORE_BLOCK_BYTES) {
@@ -313,7 +314,7 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec
                     program,
                 )
             })?;
-            lengths.push(length);
+            lengths.push(length as u32);
             next_ordinal = range.end_ordinal();
             continue;
         }
@@ -322,7 +323,7 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
             let (length, _) = stored_parts(&block, i, range.first_ordinal + i as u32, program)?;
-            lengths.push(length);
+            lengths.push(length as u32);
         }
         next_ordinal = range.end_ordinal();
     }

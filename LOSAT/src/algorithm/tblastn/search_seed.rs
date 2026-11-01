@@ -649,15 +649,7 @@ impl XSubjectSide {
     /// and took 0.980-0.994 of the time at 4, 8 and 16 threads (workstation, 2026-10-19:
     /// translating a packed subject again, `LOSAT_X_TBNXLATESIMD`, costs less than holding its
     /// plan; with the frame reuse 0.998 at one thread).
-    pub(super) fn kept_within_threads(
-        subject_lengths: impl IntoIterator<Item = usize>,
-        threads: usize,
-    ) -> bool {
-        let (mut total, mut longest) = (0usize, 0usize);
-        for length in subject_lengths {
-            total = total.saturating_add(length);
-            longest = longest.max(length);
-        }
+    pub(super) fn kept_within_threads(longest: usize, total: usize, threads: usize) -> bool {
         total <= longest.saturating_mul(threads.max(1))
     }
 
@@ -743,12 +735,11 @@ impl XSubjectSide {
     /// True when the plans of subjects of these lengths are all kept: a plan
     /// has six frames of at most `length / 3` residues and two sentinels, so
     /// `2 * length + 12` bounds `plan_bytes`.
-    pub(super) fn all_fit(subject_lengths: impl IntoIterator<Item = usize>) -> bool {
-        let mut total = 0usize;
-        for length in subject_lengths {
-            total = total.saturating_add(length.saturating_mul(2).saturating_add(12));
-        }
-        total <= Self::KEEP_LIMIT
+    pub(super) fn all_fit(total: usize, subjects: usize) -> bool {
+        total
+            .saturating_mul(2)
+            .saturating_add(subjects.saturating_mul(12))
+            <= Self::KEEP_LIMIT
     }
 
     /// Size of the plans held, for tests.
@@ -979,7 +970,7 @@ pub(super) fn x_scan_plan(
         match subject {
             // The plan is made from the sequence's bytes, read
             // for it (a database sequence has no lower-case letters).
-            XPrelimSubject::Stream(stream, oid) => stream.plan_with(oid, |packed, length| {
+            XPrelimSubject::Stream(stream, oid) => stream.with_block(oid, |packed, length| {
                 super::x_subject_translate::x_packed_bytes_plan(packed, length, db_gencode)
             }),
             XPrelimSubject::Nt(SubjectNt::Letters(letters)) => {
@@ -2596,7 +2587,13 @@ mod tests {
     #[test]
     fn x_subject_plans_are_kept_within_the_threads() {
         fn within(lengths: impl IntoIterator<Item = usize>, threads: usize) -> bool {
-            XSubjectSide::kept_within_threads(lengths, threads)
+            let (longest, total) =
+                lengths
+                    .into_iter()
+                    .fold((0usize, 0usize), |(longest, total), length| {
+                        (usize::max(longest, length), total.saturating_add(length))
+                    });
+            XSubjectSide::kept_within_threads(longest, total, threads)
         }
         assert!(within([4_700_000usize], 1));
         assert!(within([4_700_000usize], 32));
@@ -2641,12 +2638,16 @@ mod tests {
             usize::MAX
         ));
 
-        assert!(XSubjectSide::all_fit([1_000_000usize; 100]));
-        assert!(XSubjectSide::all_fit([(XSubjectSide::KEEP_LIMIT - 12) / 2]));
-        assert!(!XSubjectSide::all_fit([(XSubjectSide::KEEP_LIMIT - 12)
-            / 2
-            + 1]));
-        assert!(!XSubjectSide::all_fit([usize::MAX, 1]));
+        assert!(XSubjectSide::all_fit(100_000_000, 100));
+        assert!(XSubjectSide::all_fit(
+            (XSubjectSide::KEEP_LIMIT - 12) / 2,
+            1
+        ));
+        assert!(!XSubjectSide::all_fit(
+            (XSubjectSide::KEEP_LIMIT - 12) / 2 + 1,
+            1
+        ));
+        assert!(!XSubjectSide::all_fit(usize::MAX, 2));
 
         let side = XSubjectSide::new(1, 1, false);
         let slot = side.slot(0, 1, false).unwrap();

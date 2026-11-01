@@ -1,9 +1,11 @@
 # Product Decision: blastdbcmd outputs that NCBI gets wrong
 
 - Decision ID: `PD-LOSAT-BLASTDBCMD-DEVIATIONS`
-- Version: 1.0
+- Version: 1.1
 - Date: 2026-10-30 (this record; items 1 and 2 served by `losat blastdbcmd` from the pull
-  request of line BDC's BDC2a). The deviations were approved by the Owner on 2026-10-29
+  request of line BDC's BDC2a). 1.1, 2026-11-01 (BDC2c): the evidence of items 1 and 2 on
+  version 4 databases with parsed ids, whose ids `losat blastdbcmd` now looks up; the
+  decision is unchanged. The deviations were approved by the Owner on 2026-10-29
   ("これはあえて直してお出しするのは？TBLASTX みたいに", drop-in survey `DECISIONS.md` 12), as
   the TBLASTX local-subject genetic code was
   ([`PD-TBLASTX-LOCAL-SUBJECT-GENCODE`](PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md)).
@@ -42,7 +44,9 @@ not reach the defect, so that the test oracle stays NCBI's binary.
    resolves the id to the ordinal `n` without reading a file and then adds `n` to the first
    ordinal of every volume, keeping each sum that falls inside the database: `-entry
    'gnl|BL_ORD_ID|3'` on a database of four volumes writes four sequences (probe S01, and
-   D57 with `-entry_batch -get_dups`), while `%a` names the sequence `BL_ORD_ID:3` once.
+   D57 with `-entry_batch -get_dups`; an alias of two databases, a partial alias and a
+   database with parsed ids alike: I795, I816, I830, I849), while `%a` names the sequence
+   `BL_ORD_ID:3` once.
    LOSAT writes the one sequence `n` of the whole database, as a database of one volume
    gives it. Expected bytes: the first record of NCBI's output (S01), or NCBI's run of the
    same batch without `-get_dups`, whose bulk lookup keeps the first ordinal alone (S02 for
@@ -57,8 +61,9 @@ not reach the defect, so that the test oracle stays NCBI's binary.
 
 ## Evidence
 
-- Line BDC's frozen probe (NCBI 2.17.0 on the workstation, 2026-10-29 and 2026-10-30):
-  `dropin-survey-20261029/BDC/probe/out/{S01,S02,S18,S31,S32,M03,M04,D16,D57,D82,D83,D87,D88,D97,D101}.*`,
+- Line BDC's frozen probe (NCBI 2.17.0 on the workstation, 2026-10-29, 2026-10-30 and
+  2026-11-01):
+  `dropin-survey-20261029/BDC/probe/out/{S01,S02,S18,S31,S32,M03,M04,D16,D57,D82,D83,D87,D88,D97,D101,I771,I795,I816,I830,I849}.*`,
   the code reading in `dropin-survey-20261029/BDC/notes/B_fasta_outfmt.md` (ORACLE 1 and 3)
   and `notes/A_id_resolution.md` (§2).
 - The tests of items 1 and 2: `LOSAT/tests/blastdbcmd_retrieve.rs`

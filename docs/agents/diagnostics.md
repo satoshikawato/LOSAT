@@ -6575,13 +6575,17 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_BXCLUTPOOL`, EDL933 (5.6 Mb) x AMRProt, ABRicate's call, peak `RssAnon` at 1 / 4 / 8 / 16 threads
   151 / 224 / 312 / 466 -> 71 / 102 / 127 / 168 MiB (NCBI 111 / 124 / 124 / 124), time x1.024 / 0.976 / 0.991 / 0.995
   (ws node 1, 3 rounds, binary c31d3d586 against dev 88bd1240d).
-- `LOSAT_X_BXCHUNKSLICE=1` (BLASTX, memory and time on a long query; in the strict set from the pull request that
+- `LOSAT_X_BXCHUNKSLICE=1` (BLASTX, memory on a long query; in the strict set from the pull request that
   added it, 2026-11-02: on unless `=0` or `LOSAT_X_DEFAULT=0`): a chunk of a split query is prepared from a record
   holding the chunk's letters alone, instead of a copy of the whole record cut down to them (for a 5.5 Mb query, 569
   copies of 5.3 MiB, 3 GiB of copying). The copy was the largest block each thread that prepared chunks ever held in
   its glibc arena, and the arena kept that much resident through the search after the block was freed. The record
-  equals the one cut from a copy in every field (unit test `a_chunks_record_equals_the_one_cut_from_a_copy`); reports:
-  `tests/blastx_fast_flat.rs`.
+  equals the one cut from a copy in every field (unit tests `a_chunks_record_equals_the_one_cut_from_a_copy`,
+  `a_split_querys_chunks_are_prepared_as_from_a_copy`); reports: `tests/blastx_fast_flat.rs`. EDL933 (5.5 Mb) x AMRProt,
+  ABRicate's call, peak `RssAnon` at 1 / 4 / 8 / 16 threads 72.6 / 102.3 / 124.2 / 167.8 -> 69.2 / 91.2 / 94.5 / 102.0
+  MiB (NCBI 111.2 / 124.4 / 124.4 / 124.4), time x0.964 / 0.999 / 1.001 / 0.998 (`=0` at 4 / 8 / 16 threads: 101.5 /
+  123.2 / 166.6 MiB; ws, 3 rounds, binary f68040d47 against dev d2ef1913f; 1 thread on node 0, the others on node 1).
+  A query that is not split does not reach this path.
 - `LOSAT_X_BXCAPFILL=1` or `=f` (BLASTX, memory with few subjects; in the strict set from the pull request that
   added it, 2026-10-25: on unless `=0` or `LOSAT_X_DEFAULT=0`; a value switch, f from 2 to 64 tasks per thread,
   otherwise 4; acts where `LOSAT_X_BXUNITCAP` caps): the capped units keep the threads busy with few subjects

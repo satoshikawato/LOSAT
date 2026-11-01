@@ -14,6 +14,7 @@ use super::stage_e_report::{render, ShownSubjects};
 use super::x_subject_store::SubjectLetters;
 use crate::algorithm::blastn::blast_engine::{QueryReading, NO_DATA_MESSAGE};
 use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
+use crate::algorithm::common::x_db_stream::XReadError;
 use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::blastinput::fasta_reader::FastaRecord;
 
@@ -22,8 +23,8 @@ use crate::blastinput::fasta_reader::FastaRecord;
 /// context: a reader error of NCBI's own is the engine error; LOSAT's refusal (and any other
 /// error) is returned as `Err` to stop the run.
 fn x_read_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
-    let error = match error.downcast::<super::x_db_stream::XReadError>() {
-        Ok(super::x_db_stream::XReadError(read)) => read,
+    let error = match error.downcast::<XReadError>() {
+        Ok(XReadError(read)) => read,
         Err(error) => return Err(error),
     };
     match error.downcast::<PreliminaryReadError>() {
@@ -1162,7 +1163,7 @@ fn search(
         );
         let mut x_searched = match x_searched_ahead {
             Ok(searched) => searched.map(Vec::into_iter),
-            Err(error) if error.is::<super::x_db_stream::XReadError>() => None,
+            Err(error) if error.is::<XReadError>() => None,
             Err(error) => return Err(error),
         };
         for range in query_input
@@ -1693,7 +1694,6 @@ mod tests {
     // with LOSAT's refusal or any other error, as the check's error does.
     #[test]
     fn a_read_failed_in_the_search_fails_as_the_check_s_error() {
-        use super::super::x_db_stream::XReadError;
         let engine = x_read_failure(
             XReadError(PreliminaryReadError("Database memory map file error").into()).into(),
         )

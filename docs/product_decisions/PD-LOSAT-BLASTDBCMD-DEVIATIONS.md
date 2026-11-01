@@ -7,13 +7,13 @@
   version 4 databases with parsed ids, whose ids `losat blastdbcmd` now looks up; the
   decision is unchanged. 1.2, 2026-11-01 (BDC3a: the taxonomy, the lists, the metadata and
   the IPGs): the explicit rejections of the scope; the four items are unchanged. 1.3,
-  2026-11-01 (BDC3b, the masks): items 3 and 4 served, items 5 and 6 added on the same rule
-  (they wait for the Owner's approval with the pull request of BDC3b). The deviations of items
-  1 to 4 were approved by the Owner on 2026-10-29
+  2026-11-01 (BDC3b, the masks): items 3 and 4 served, items 5 and 6 added on the same rule. The
+  deviations of items 1 to 4 were approved by the Owner on 2026-10-29
   ("これはあえて直してお出しするのは？TBLASTX みたいに", drop-in survey `DECISIONS.md` 12), as
   the TBLASTX local-subject genetic code was
-  ([`PD-TBLASTX-LOCAL-SUBJECT-GENCODE`](PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md)).
-- Status: Accepted (approved deviations), items 5 and 6 proposed.
+  ([`PD-TBLASTX-LOCAL-SUBJECT-GENCODE`](PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md)), and those of
+  items 5 and 6 on 2026-11-01 ("差 5・6 の承認: 承認します", drop-in survey `DECISIONS.md` 33).
+- Status: Accepted (approved deviations).
 
 ## Scope
 
@@ -84,13 +84,13 @@ not reach the defect, so that the test oracle stays NCBI's binary.
    its own run (M133, as M128). The first `%m` of the text may be the literal of `%%m<digits>`,
    where NCBI reads the id for the `%m` after it (M137: LOSAT writes `%%m11 %m12` with the
    masks of 12). Expected bytes: the runs with one `%m` each (M125, M126).
-5. **`-mask_sequence_with` on a protein in FASTA without a range (proposed).** NCBI's mapper
+5. **`-mask_sequence_with` on a protein in FASTA without a range (served).** NCBI's mapper
    for a whole sequence (`sequence.cpp` `x_GetMaskingStates`) keeps the masks in the first third
    of a protein: `XP_100002.1` (190 residues), masked at 50-70, is lower-case at 50-64, and
    `P10001.1` (225 residues), masked at 80-105 and 165-186, not at all (probe M05, M285). The
    same sequences with a range are masked in full (M290), and so is `-outfmt %s` (M286). LOSAT
    masks the whole length. Expected bytes: NCBI's headers with the letters of NCBI's `%s` run.
-6. **A batch line without masks after one with masks of the same sequence (proposed).** NCBI's
+6. **A batch line without masks after one with masks of the same sequence (served).** NCBI's
    FASTA formatter sets its mask only when the sequence has masks of the algorithm, so that
    `NM_100001.1 12`, which has none, is written with the masks of the line `NM_100001.1 11`
    before it (probe M415, M418). LOSAT writes it without masks, as the run of that line alone

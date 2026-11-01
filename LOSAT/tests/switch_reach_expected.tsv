@@ -103,6 +103,7 @@ LOSAT_X_MBHITPF	blastn	conditional	required	gap	search_query_batch's loop over t
 LOSAT_X_MBLUTKEEP	blastn	conditional	required	required	only batch loop with several query batches, contiguous or one-template discontiguous table (hashtable, chain heads or CSR offsets)
 LOSAT_X_MBLUTONCE	blastn	conditional	required	required	only where PAIRPAR fills contiguous megablast table on pool of 2+ threads; not -limit_lookup; wins mainly for large query sets
 LOSAT_X_MBLUTPREFAULT	blastn	conditional	required	required	only with read-once pool fill (2+ threads); first chunk >=8 positions per 1,024 cells; Linux evidence
+LOSAT_X_NEWTONDROP	blastp,tblastn	always			acts wherever NEWTONLANES's prefetch runs (its sides are NEWTONLANES's): a prefetch drops this thread's results of earlier prefetches not taken (their windows or matches were walked)
 LOSAT_X_NEWTONLANES	blastp,tblastn	conditional	required	gap	blastp: not single-query match-parallel redo; tblastn: only >=32 coming problems; reuse only if inputs bit-equal; ref gap: blastp: only the match-parallel redo (BPREDOPAR=0); tblastn: -comp_based_stats 0
 LOSAT_X_NEWTONLANES8	blastp,tblastn	platform			aarch64 only, batches of 5+ problems; ignored on x86/Wasm
 LOSAT_X_PAIRLUT	tblastx	conditional	required	required	only while PAIRPAR unit path runs (gated by query size / guard); reference builder otherwise

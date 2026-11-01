@@ -398,6 +398,7 @@ export LOSAT_X_MBHITPF=1
 export LOSAT_X_MBLUTKEEP=1
 export LOSAT_X_MBLUTONCE=1
 export LOSAT_X_MBLUTPREFAULT=1
+export LOSAT_X_NEWTONDROP=1
 export LOSAT_X_PAIRPARDISC=1
 export LOSAT_X_PAIRPARDISCARR=1
 export LOSAT_X_PAIRPARFOLD=1
@@ -5391,6 +5392,38 @@ Scheduling (each value computed by one thread with the original function; order 
   `=0` in the PR's binary): AP027131 `-subject` at 1 / 16 / 32 threads x0.9949 / x0.9986 / x0.9840 (11, 7, 10 of 12
   faster), against `=0` x0.9937 / x0.9957 / x0.9844; `dmel_b4.faa` at 1 / 8 / 16 / 32 x0.9986 / x0.9963 / x0.9965 /
   x0.9946 (6 of 8, 11, 9, 11 of 12 faster), against `=0` x0.9989 / x0.9987 / x0.9984 / x0.9919.
+- `LOSAT_X_NEWTONDROP=1` blastp, tblastn (memory; in the strict set from the pull request that added it, 2026-11-01;
+  `=0` turns it off; `core/composition_adjustment/x_newton_lanes.rs` `prefetch`): the Newton lanes (NEWTONLANES)
+  keep the results they solve ahead in a store of the thread (6,736 bytes a result: its input, matched by bits, and
+  its final iterate), and a result not taken stayed there until the store held 512 (3.3 MiB). A prefetch comes after
+  the windows (TBLASTN: the coming windows of a match) or the matches (BLASTP: the next 16 matches of a query, or a
+  job's matches in the windowed redo) of the thread's earlier prefetches were walked, so their results not taken are
+  not asked for again; with the switch a prefetch drops them first. TBLASTN leaves such results for the HSPs its redo
+  finds contained (their problems are solved ahead with the others): 1,667 of the 50,620 results solved ahead for
+  `dmel_b4.faa` x zebrafish cDNAs (`-db`, 10.7 MiB of stores when four or more threads share them; one thread keeps
+  512 at most), and 44 of 40,738 for AP027131 x AP027133; BLASTP left none (WSSV x PajaWSV, 3,000 SwissProt proteins
+  x Species6 `-db`). A dropped result asked for after all would be solved by its
+  call with the same bits (`take` returns none), so the report cannot change; the results taken are the same
+  (`[X_STATS] NEWTONLANES prefetched= hits= misses=` equal with and without the switch; `[X_STATS] NEWTONDROP
+  dropped=` counts the results dropped). Unit test `x_newton_drop_empties_the_store_at_the_next_prefetch` (both sides
+  in one process: the same results taken, the earlier ones not taken dropped or kept);
+  `tests/tblastn_newton_drop.rs`: the same report as `=0` at one and four threads, the same counts of results solved
+  ahead and taken, some results dropped by default and none with `=0`. Always: every prefetch (where NEWTONLANES
+  runs).
+  Measured 2026-11-01 on the workstation (2x Xeon Gold 6338; base dev b94e9844; every output of a case the same
+  bytes in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16
+  CPUs for every run, medians in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): `dmel_b4.faa` x zebrafish
+  cDNAs (`-db`, `-evalue 1e-5 -max_target_seqs 5`) at 16 / 32 / 40 / 48 threads 61 / 90 / 102 / 116 -> 54 / 85 / 96 /
+  111 MiB (x0.890 / x0.943 / x0.940 / x0.953, 16 rounds, lower in every pair; NCBI 128 / 140 / 145 / 152; the 10 ms
+  RssAnon series lower from 40 % of the run on); the 595 proteins of AP027131 x AP027133 (`-db_gencode 4`) `-subject`
+  at 1 / 16 / 32 / 40 / 48 x1.000 / x0.990 / x0.992 / x0.998 / x0.997 (8 rounds; 75 MiB at 48, NCBI 81 at one
+  thread), `-db` at 48 x0.996 (16 rounds, lower in 9; 93 MiB, NCBI 113); BLASTP WSSV x PajaWSV `-subject` at 16
+  x0.995; `=0` in the same binary x1.000-1.012 of the base. At one thread x0.9998 of the instructions (AP027131
+  `-subject`) and x0.9996 (`dmel_b4.faa`); BLASTP x1.00002, BLASTX and TBLASTX x1.00000.
+  Time (node 1, cores warmed 3 s before each run, arms alternating in order; the PR's binary against the base, and
+  `=0` in the PR's binary): AP027131 `-subject` at 1 / 16 / 32 threads x0.9992 / x1.0000 / x0.9956 (8, 6, 7 of 12
+  faster), against `=0` x0.9992 / x1.0000 / x1.0043; `dmel_b4.faa` at 1 / 8 / 16 / 32 x0.9998 / x0.9989 / x1.0006 /
+  x1.0011 (5 of 8, 7, 5, 5 of 12 faster), against `=0` x0.9984 / x0.9983 / x0.9986 / x0.9989.
 - TBNLINKWIN (graduated 2026-10-26, in the set since 2026-10-17, by the Owner's rule of that day that a
   speed-up lands on by default, on the timings below; no variable; always on) tblastn (speed;
   `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

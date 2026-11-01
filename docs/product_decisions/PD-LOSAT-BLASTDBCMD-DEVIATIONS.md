@@ -43,9 +43,11 @@ M854, M864), `%m` digits that overflow NCBI's `int` (M143, M144, M145), `-mask_s
 below -1, which NCBI looks up with an uninitialised id (M225, M227), a sequence whose volume of
 an alias has masks but not the algorithm, where NCBI reads the masks of the volume's id before
 or an uninitialised one (M180-M184, M255-M270; on a list of names, probe N: N1269, N1306, N1313),
-a list of names in which an alias and another name give the same volume, whose sequences NCBI's
-`-info` and `-metadata` count twice, 39 for 21 (BDC4: N389, N393, N1627; the search programs
-refuse it too), a volume with the big-endian data file of a
+a list of names in which an alias and another name give the same volume, refused for every option
+as the search programs refuse it: NCBI's `-info` and `-metadata` count its sequences twice, 39 for
+21 (BDC4: N389, N393, N1627), while its other options answer (N391, N395), a list whose volumes
+carry different dates, one of which NCBI's `CTime` does not read, where NCBI ends with an exception
+that prints its build path after what it wrote (BDC4: N525-N548), a volume with the big-endian data file of a
 column alone, whose offsets NCBI reads as little-endian (M784), another column before the masks,
 which NCBI reads as the masks (M824), and `-outfmt %s` without a range on a stored mask outside
 the sequence, where NCBI crashes (M786, M886, M896). `-taxids

@@ -1,6 +1,6 @@
 //! `losat blastdbcmd -db "a b"`: a `-db` of several names, read as one database, against NCBI
 //! BLAST+ 2.17.0 blastdbcmd. The expected bytes are NCBI's, frozen by line BDC's probe N on ws
-//! (`tests/blastdbcmd/README.md`), but for the approved differences 2, 3, 5 and 6 of
+//! (`tests/blastdbcmd/README.md`), but for the differences 2, 3, 5 and 6 of
 //! `PD-LOSAT-BLASTDBCMD-DEVIATIONS`. `{R}` stands for the directory of the probe's runs (here
 //! `tests/blastdbcmd`, the current directory of each run). NCBI is not run here.
 
@@ -107,7 +107,8 @@ fn holds_root(text: &[u8]) -> bool {
 /// has not; `mask_nucl_ids` and `mask_nucl_y` give one algorithm the ids 101 and 100. Approved differences (expected bytes from NCBI's own neighbouring
 /// run, line BDC's `probe/make_expected.py`): 2, `gnl|BL_ORD_ID|n` (`N846`); 3, a mask and
 /// `-strand minus` in FASTA (`N1214`); 5, a mask on a protein in FASTA (`N1359`); 6, the mask of
-/// the record before, on one accession of two sequences (`N1742`).
+/// the record before, on one accession of two sequences (`N1742`; this widening of item 6 is
+/// proposed in version 1.4 of the record).
 #[rustfmt::skip]
 const CASES: &[(&str, &[&str], i32)] = &[
     ("I37", &["-db", "db/p5 db/n5", "-info"], 2),
@@ -177,8 +178,9 @@ fn several_names_are_ncbi_s_bytes() {
     }
 }
 
-/// What NCBI does not answer on a list, with the lines written before the refusal: a volume that
-/// an alias and a name both give, of which `-info` counts the sequences twice (39 for 21); `-ipg`
+/// What LOSAT refuses on a list, with the lines written before the refusal: a volume that an alias
+/// and a name both give, for every option, as the search programs do (NCBI's `-info` counts its
+/// sequences twice, 39 for 21; its `-entry` answers); `-ipg`
 /// without PIG files, where NCBI writes an OID it never set; an algorithm that the volume of a
 /// sequence does not know, where NCBI reads the masks of another one.
 #[rustfmt::skip]

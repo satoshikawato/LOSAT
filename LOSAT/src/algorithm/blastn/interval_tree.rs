@@ -2029,7 +2029,8 @@ mod tests {
     /// The test feeds the same random HSPs to a tree that uses the walk and a tree that uses the
     /// side indexes. Every containment answer must agree, and the trees must end up with the
     /// same nodes and the same number of unlinked HSPs. The HSPs are generated so that
-    /// containment, shared start points, shared end points and replacements all occur.
+    /// containment, shared start points, shared end points and replacements all occur. The
+    /// indexed tree's grid limit changes between trials (`reset_with_bounds_cells`).
     #[test]
     fn x_side_indexes_agree_with_tree_walk_on_random_hsps() {
         struct Rng(u64);
@@ -2062,7 +2063,14 @@ mod tests {
             let mut walk = BlastIntervalTree::new(0, 2 * q_len + 1, 0, s_len + 1);
             // The walk answers while the index is dropped (as when tracing is on).
             walk.x.usable = false;
-            indexed.reset_with_bounds(0, 2 * q_len + 1, 0, s_len + 1);
+            // The grid at its own limit, at blastp's limit under LOSAT_X_BPTREECELLS, and coarse.
+            let cells = [X_MAX_CELLS, 1 << 14, 64][(trial / 16) % 3];
+            if cells == X_MAX_CELLS {
+                indexed.reset_with_bounds(0, 2 * q_len + 1, 0, s_len + 1);
+            } else {
+                indexed.reset_with_bounds_cells(0, 2 * q_len + 1, 0, s_len + 1, cells);
+            }
+            assert!(indexed.x.nq * indexed.x.ns <= cells, "trial {trial}");
             let mut added: Vec<(TreeHsp, i32)> = Vec::new();
             let count = 200 + rng.below(1500) as usize;
             for _ in 0..count {

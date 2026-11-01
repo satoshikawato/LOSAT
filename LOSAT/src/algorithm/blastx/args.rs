@@ -1,6 +1,6 @@
 //! BLASTX options and native serial local-subject search/report dispatch.
 use crate::blastinput::value_parsers::{
-    blastx_query_coverage, genetic_code, ncbi_int8, nonnegative_f64, report_count,
+    blastx_query_coverage, blastx_threshold, genetic_code, ncbi_int8, report_count,
 };
 use anyhow::{bail, Result};
 use clap::Args;
@@ -235,14 +235,16 @@ pub struct BlastxArgs {
     // ```
     #[arg(long)]
     pub matrix: Option<String>,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:578-581
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:578-583
     // ```c++
     //     arg_desc.AddOptionalKey(kArgWordScoreThreshold, "float_value",
     //                  "Minimum word score such that the word is added to the "
     //                  "BLAST lookup table",
     //                  CArgDescriptions::eDouble);
+    //     arg_desc.SetConstraint(kArgWordScoreThreshold,
+    //                            new CArgAllowValuesGreaterThanOrEqual(0));
     // ```
-    #[arg(long, value_parser = nonnegative_f64)]
+    #[arg(long, value_parser = blastx_threshold)]
     pub threshold: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:475-478
     // ```c++

@@ -393,7 +393,10 @@ from their Seq-ids), `ids/nrefuse_v5` from `ids/nrefuse.fna` (`lcl|777` before `
 formatters do not find again) and the two volumes `ids/njoined_a` and `ids/njoined_b` of the alias
 `ids/njoined.nal` (`gb|AF000040|` and `gb|AF000040.1|`, whose hits NCBI's XML and outfmt 0 join). Queries:
 `LOSAT/tests/seqid/fasta/qnucl.fa` (BLASTN, TBLASTX) and `qprot.fa` (TBLASTN); the second query of each has
-no hit. TBLASTN and TBLASTX run with `-max_hsps 1` to keep the frozen files small.
+no hit. TBLASTN and TBLASTX run with `-max_hsps 1` to keep the frozen files small. `ids/nambig_v4` (from
+`ids/nambig.fna`: a record with ambiguity data) has no row; the unit test of blastn's report stream reads it.
+Rows `db.id.blastn.stream.q25.*` (line DBID, blastn's report stream of these databases): the 25 records of
+`ids/nucl.fna` as queries in batches of `BATCH_SIZE=1500`, each batch with hits.
 
 ## The taxonomy database's prefetch messages (line DBID, item T, review 1)
 
@@ -444,6 +447,17 @@ programs. `taxfilter/` holds the inputs and what `make_taxfilter.py MAKEBLASTDB 
 The `v4` rows search `x16_taxid` and `x16_ntaxid` (version 4 databases with taxids, above).
 
 ## Seqid lists (DI-8b)
+
+Rows `db.sa8.*`: the `ext` `use_this_seqid` of a positive list on the Seq-align formats and what it limits, on
+`taxfilter/tfp`, `taxfilter/tfn` and `useseqid/`. `useseqid/` holds `p5m`, `p5mt` (protein, version 5, the records of
+`p_m.fa`: a text id and a local id on one OID, a GI that is the Seq-align id, a local id first, a PRF name, PDB ids) and
+`n5m` (nucleotide, `n_m.fa`), written by NCBI BLAST+ 2.17.0:
+`makeblastdb -in p_m.fa -dbtype prot -out p5m -parse_seqids -blastdb_version 5 -taxid 9606 -title p5m`,
+`makeblastdb -in p_m.fa -dbtype prot -out p5mt -parse_seqids -blastdb_version 5 -taxid_map p_m.map -title p5mt`,
+`makeblastdb -in n_m.fa -dbtype nucl -out n5m -parse_seqids -blastdb_version 5 -taxid 562 -title n5m`;
+`makeblastdb -in n_l.fa -dbtype nucl -out n5l -parse_seqids -blastdb_version 5 -taxid 562 -title n5l` (a local id and a
+text id on one OID). `q.faa`, `q.fna`, `qx.fna` are the queries, `qnn.fna`, `qxx.fna` the queries with two copies apart (two
+ungapped HSPs per subject), and `sl_m.txt` a seqid list.
 
 Rows `db.sl.*`: `-seqidlist` and `-negative_seqidlist` with `-db`, five programs, on `taxfilter/tfp`, `taxfilter/tfn`
 (two volumes), `ids/prot_v5`, `ids/nucl_v5` (version 5) and `ids/prot_v4`, `ids/nucl_v4` (version 4, string ISAM).

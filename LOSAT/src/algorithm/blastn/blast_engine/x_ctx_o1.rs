@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_CTXO1, a strict-set switch): the context of a query offset in constant time,
+//! LOSAT_X_CTXO1 (graduated 2026-10-27, always on): the context of a query offset in constant time,
 //! from the layout of the concatenated query, instead of a binary search over the contexts (the
 //! runs of `QueryContextIndex`) or a table of four bytes per query letter (`direct_map`).
 //!

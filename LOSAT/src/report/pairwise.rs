@@ -508,7 +508,20 @@ fn write_database_subject_alignments_part<'h, W: Write>(
 #[derive(Clone, Copy)]
 pub enum DatabaseHeading<'a> {
     Title(&'a [u8]),
-    Parsed(&'a crate::report::db_subject::ParsedSubject),
+    /// With whether every definition line is shown (`ParsedSubject::heading`).
+    Parsed(&'a crate::report::db_subject::ParsedSubject, bool),
+}
+
+impl<'a> DatabaseHeading<'a> {
+    /// The heading of a subject with parsed Seq-ids and `hsps` HSPs in a search that is
+    /// `gapped` or not (`ParsedSubject::heading`).
+    fn parsed(
+        subject: &'a crate::report::db_subject::ParsedSubject,
+        gapped: bool,
+        hsps: usize,
+    ) -> Self {
+        DatabaseHeading::Parsed(subject, !gapped && hsps > 1)
+    }
 }
 
 impl<'a> From<&'a [u8]> for DatabaseHeading<'a> {
@@ -541,8 +554,8 @@ fn write_database_subject_heading<'h, W: Write>(
 ) -> io::Result<()> {
     let title = match title.into() {
         DatabaseHeading::Title(title) => title,
-        DatabaseHeading::Parsed(subject) => {
-            writer.write_all(&subject.heading(protein))?;
+        DatabaseHeading::Parsed(subject, every_line) => {
+            writer.write_all(&subject.heading(protein, every_line))?;
             if let Some(length) = length {
                 writeln!(writer, "Length={length}")?;
             }
@@ -2040,7 +2053,7 @@ fn write_final_database_report<W: Write>(
 // display.DisplaySeqalign(m_Outfile);
 // x_PrintOneQueryFooter(*results.GetAncillaryData());
 // ```
-/// The report of `queries`: the prolog when `prolog` is set (EXPERIMENT (LOSAT_X_BPQBLOCKFMT):
+/// The report of `queries`: the prolog when `prolog` is set (EXPERIMENT (LOSAT_X_BPQBLOCK):
 /// false for the query blocks after the first of blastp's block search, whose first block wrote
 /// it), each query's section, and the epilog when `epilog` is set.
 pub fn write_blastp_pairwise_report<W: Write>(
@@ -2243,7 +2256,9 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         let parsed = parsed_subject(self.parsed_subjects, s_idx);
         if self.database.is_some() || parsed.is_some() {
             let heading = match parsed {
-                Some(subject) => DatabaseHeading::Parsed(subject),
+                Some(subject) => {
+                    DatabaseHeading::parsed(subject, true, group.subject_hits[&s_idx].len())
+                }
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
             return write_database_subject_alignments_part(
@@ -3046,7 +3061,11 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
         if self.report.database.is_some() || parsed.is_some() {
             let heading = match parsed {
-                Some(subject) => DatabaseHeading::Parsed(subject),
+                Some(subject) => DatabaseHeading::parsed(
+                    subject,
+                    self.report.gapped,
+                    group.subject_hits[&s_idx].len(),
+                ),
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
             return write_database_subject_alignments_part(
@@ -3714,7 +3733,9 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
         if self.database.is_some() || parsed.is_some() {
             let heading = match parsed {
-                Some(subject) => DatabaseHeading::Parsed(subject),
+                Some(subject) => {
+                    DatabaseHeading::parsed(subject, false, group.subject_hits[&s_idx].len())
+                }
                 None => DatabaseHeading::Title(&group.subject_titles[&s_idx]),
             };
             return write_database_subject_alignments_part(
@@ -4595,7 +4616,9 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             let parsed = parsed_subject(parsed_subjects, s_idx);
             if database.is_some() || parsed.is_some() {
                 let heading = match parsed {
-                    Some(subject) => DatabaseHeading::Parsed(subject),
+                    Some(subject) => {
+                        DatabaseHeading::parsed(subject, true, subject_hits[&s_idx].len())
+                    }
                     None => DatabaseHeading::Title(&subject_titles[&s_idx]),
                 };
                 write_database_subject_alignments(
@@ -5070,7 +5093,9 @@ pub fn write_blastx_pairwise_report<W: Write>(
                     Some((_, titles, parsed)) => write_database_subject_heading(
                         &mut writer,
                         match parsed_subject(parsed, *oid) {
-                            Some(subject) => DatabaseHeading::Parsed(subject),
+                            Some(subject) => {
+                                DatabaseHeading::parsed(subject, options.gapped, shits.len())
+                            }
                             None => DatabaseHeading::Title(&titles[*oid as usize]),
                         },
                         true,
@@ -5079,7 +5104,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
                     None => match parsed_subject(records_parsed, *oid) {
                         Some(subject) => write_database_subject_heading(
                             &mut writer,
-                            DatabaseHeading::Parsed(subject),
+                            DatabaseHeading::parsed(subject, options.gapped, shits.len()),
                             true,
                             first.subject_length,
                         )?,
@@ -5245,10 +5270,11 @@ pub fn write_blastx_epilog(
         )?;
     }
     if options.word_threshold != 0.0 {
+        // `GetWordThreshold()` is a double, written with the stream's default format.
         writeln!(
             writer,
             "Neighboring words threshold: {}",
-            options.word_threshold
+            cpp_default_double(options.word_threshold)
         )?;
     }
     if report.window_size != 0 {

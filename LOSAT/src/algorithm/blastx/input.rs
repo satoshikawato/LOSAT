@@ -811,7 +811,10 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             }
             let upper = c.to_ascii_uppercase();
             let allowed = if protein {
-                b"ABCDEFGHIJKLMNOPQRSTUVWXYZ*".contains(&upper)
+                // The letters `ABCDEFGHIJKLMNOPQRSTUVWXYZ*`, tested without a table in memory:
+                // `contains` on a static table first steps byte by byte to an aligned address,
+                // so its cost per letter depended on where the linker placed the table.
+                matches!(upper, b'A'..=b'Z' | b'*')
             } else {
                 b"ABCDGHKMNRSTUVWY".contains(&upper)
             };

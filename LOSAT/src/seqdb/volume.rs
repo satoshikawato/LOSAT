@@ -30,6 +30,16 @@ pub(super) fn with_extension(base: &Path, seqtype: SeqType, ext: &str) -> PathBu
     PathBuf::from(name)
 }
 
+/// The header of a sequence of a volume, with its ordinal ids still relative to the volume
+/// (`Volume::header`, `SeqDb::read_header`).
+#[derive(Debug)]
+pub enum VolumeHeader {
+    /// A record whose only Seq-ids are `gnl|BL_ORD_ID|n` (`Volume::deflines`).
+    Ordinal(Vec<Defline>),
+    /// A record with parsed Seq-ids (`Volume::defline_set`).
+    Parsed(crate::seqid::DeflineSet),
+}
+
 impl Volume {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:104-109
     // ```c++
@@ -379,7 +389,7 @@ impl Volume {
         Ok(block)
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): what `read_block(first, end, first_ordinal)` of one
+    /// What `read_block(first, end, first_ordinal)` of one
     /// nucleotide (`end == first + 1`) gives `nucleotide_len(0)` and `ambiguity_runs(0)`, without
     /// its 2-bit data: the index reads and checks of `read_block` in its order and the checks of
     /// the file range it reads (`DbFile::x_check_range`), then the last byte of the 2-bit data and
@@ -425,7 +435,7 @@ impl Volume {
         Ok((length as usize, ambiguity))
     }
 
-    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the numbers of residues of the proteins `first..end`
+    /// The numbers of residues of the proteins `first..end`
     /// (volume-relative, non-empty), read from the index alone with one read of their offsets:
     /// `read_block(first, end, _)`'s `protein(i).len()`.
     pub fn x_protein_lengths(&self, first: u32, end: u32) -> Result<Vec<u32>, SeqDbError> {
@@ -473,6 +483,17 @@ impl Volume {
         self.hdr_file()?.read_range(start, end)
     }
 
+    /// The header of the sequence `oid` (volume-relative) from one read of its record
+    /// (`SeqDb::read_header`).
+    pub fn header(&self, oid: u32) -> Result<VolumeHeader, SeqDbError> {
+        let record = self.header_bytes(oid)?;
+        self.decode_header(
+            oid,
+            &record,
+            &with_extension(&self.base, self.index.seqtype, "hr"),
+        )
+    }
+
     /// The `taxid` of each definition line of the sequence `oid` (volume-relative), 0 for none.
     pub fn defline_taxids(&self, oid: u32) -> Result<Vec<i32>, SeqDbError> {
         let record = self.header_bytes(oid)?;
@@ -516,6 +537,23 @@ impl Volume {
             .ok_or_else(|| self.no_line_kept(oid))?;
         decoded.retain_lines(&keep);
         Ok(decoded)
+    }
+
+    /// The header of the sequence `oid` (volume-relative) in the bytes `record` (`header`).
+    fn decode_header(
+        &self,
+        oid: u32,
+        record: &[u8],
+        path: &Path,
+    ) -> Result<VolumeHeader, SeqDbError> {
+        match decode_deflines_as(record, path, false) {
+            Err(error) if error.is_parsed_seqids() => self
+                .decode_kept_set(oid, record, path)
+                .map(VolumeHeader::Parsed),
+            read => self
+                .kept_lines(oid, record, path, read)
+                .map(VolumeHeader::Ordinal),
+        }
     }
 
     /// LOSAT's refusal of the sequence `oid` (volume-relative) whose every definition line
@@ -861,6 +899,24 @@ impl Volume {
         )
     }
 
+    /// `visit_deflines` for `header`: the same pieces and fallbacks, with its decoder.
+    pub(super) fn visit_sequence_headers(
+        &self,
+        first: u32,
+        end: u32,
+        piece_bytes: u64,
+        visit: &mut dyn FnMut(u32, Result<VolumeHeader, SeqDbError>) -> bool,
+    ) -> bool {
+        self.visit_headers(
+            first,
+            end,
+            piece_bytes,
+            &|oid| self.header(oid),
+            &|oid, record, path| self.decode_header(oid, record, path),
+            visit,
+        )
+    }
+
     /// The shared walk of `visit_deflines` and `visit_defline_taxids`: `single(oid)` is the
     /// one-sequence read that gives the result for a sequence that is not read in a piece,
     /// `decode(oid, record, path)` decodes a record read in a piece.
@@ -1143,6 +1199,21 @@ const NCBINA8_TO_BLASTNA8: [u8; 16] = [15, 0, 1, 6, 2, 4, 9, 13, 3, 8, 5, 12, 7,
 /// `NCBI4NA_TO_IUPACNA` (c++/src/algo/blast/core/blast_encoding.c:80-83).
 const NCBI4NA_TO_IUPAC: [u8; 16] = *b"-ACMGRSVTWYHKDBN";
 
+/// The four bases of each stored 2-bit byte, from the high bits down, as IUPAC letters.
+const PACKED_TO_IUPAC: [[u8; 4]; 256] = {
+    let mut table = [[0u8; 4]; 256];
+    let mut byte = 0;
+    while byte < 256 {
+        let mut base = 0;
+        while base < 4 {
+            table[byte][base] = b"ACGT"[(byte >> (6 - 2 * base)) & 3];
+            base += 1;
+        }
+        byte += 1;
+    }
+    table
+};
+
 /// Sentinel byte NCBI puts before and after a BLASTNA sequence.
 pub const BLASTNA_SENTINEL: u8 = 15;
 
@@ -1199,7 +1270,7 @@ impl SequenceBlock {
         self.data
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the bytes of a block of one nucleotide cut to its 2-bit
+    /// The bytes of a block of one nucleotide cut to its 2-bit
     /// data (`nucleotide_packed(0)`, which starts the block), in the block's buffer with its
     /// capacity. No NCBI counterpart: only where the bytes are kept.
     pub fn x_into_nucleotide_packed(mut self) -> Vec<u8> {
@@ -1480,6 +1551,42 @@ impl SequenceBlock {
     /// buffer NCBI's traceback gets): `len + 2` bytes.
     pub fn nucleotide_blastna(&self, i: usize) -> Result<Vec<u8>, SeqDbError> {
         self.nucleotide_blastna_in(i, false)
+    }
+
+    // No NCBI counterpart: the formatter's letters of a database sequence (`CSeqVector`) as
+    // `nucleotide_blastna` gives them, without the BLASTNA buffer in between.
+    /// The IUPAC letters of nucleotide `i`, the letters of [`Self::nucleotide_blastna`] without
+    /// its sentinels (the same runs in the same order, the same errors), made from each stored
+    /// byte's four bases at once.
+    pub fn nucleotide_iupac(&self, i: usize) -> Result<Vec<u8>, SeqDbError> {
+        let packed = self.nucleotide_packed(i);
+        let base_length = self.nucleotide_len(i)?;
+        if base_length < 1 {
+            return Err(self.format(i, "Error: could not get sequence or range."));
+        }
+        let mut letters = vec![0u8; base_length];
+        for (bases, &byte) in letters.chunks_mut(4).zip(packed) {
+            bases.copy_from_slice(&PACKED_TO_IUPAC[usize::from(byte)][..bases.len()]);
+        }
+        let region_end = base_length as i64;
+        for run in self.ambiguity_runs(i)? {
+            let mut position = i64::from(run.offset as i32);
+            let row_len = i64::from(run.length);
+            if position + row_len <= 0 {
+                continue;
+            }
+            if position >= region_end {
+                break;
+            }
+            let letter = NCBI4NA_TO_IUPAC[usize::from(run.ncbi4na & 0xF)];
+            for _ in 0..row_len {
+                if position >= 0 && position < region_end {
+                    letters[position as usize] = letter;
+                }
+                position += 1;
+            }
+        }
+        Ok(letters)
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `nucleotide_blastna` in a buffer taken from or sized

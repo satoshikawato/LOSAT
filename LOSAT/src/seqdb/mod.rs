@@ -40,7 +40,9 @@ pub mod filter;
 pub mod header;
 pub mod index;
 pub mod isam;
+pub mod isam_num;
 pub mod lmdb_read;
+pub mod lookup;
 pub mod seqidlist;
 pub mod tax_files;
 pub mod tax_sqlite;
@@ -63,7 +65,8 @@ use crate::seqid::{DeflineSet, ParsedSeqId};
 pub use alias::SearchPath;
 pub use header::Defline;
 pub use volume::{
-    AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, BLASTNA_SENTINEL, FENCE_SENTRY,
+    AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, VolumeHeader, BLASTNA_SENTINEL,
+    FENCE_SENTRY,
 };
 
 /// EXPERIMENT (LOSAT_X_DBIDXREAD): how the volumes read their index files.
@@ -465,6 +468,10 @@ pub struct SeqDb {
     search_path: Option<SearchPath>,
     /// `-show_gis` of the search that reads the headers for its reports.
     reports_show_gis: bool,
+    /// Whether the database was opened with a positive list (`SeqDb::restrict`).
+    positive_list: bool,
+    /// `SeqDb::list_taxids`.
+    list_taxids: Vec<i32>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1093-1102
@@ -529,6 +536,29 @@ impl SeqDb {
     /// Sets `reports_show_gis`.
     pub fn set_reports_show_gis(&mut self, show_gis: bool) {
         self.reports_show_gis = show_gis;
+    }
+
+    /// Whether the database was opened with a positive list (`CSeqDB::GetGiList` is set), whatever
+    /// the list then selects: a list of GIs alone also searches the whole database of version 5.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:87-90
+    /// ```c++
+    /// bool CSeqDbSeqInfoSrc::HasGiList() const
+    /// {
+    ///     return !! m_iSeqDb->GetGiList();
+    /// }
+    /// ```
+    pub fn has_positive_list(&self) -> bool {
+        self.positive_list
+    }
+
+    /// The taxids of the search's list object after the volumes opened, ascending, which the
+    /// BLAST archive writes (`DbFilterArgs::archive_parameter`): of a positive list those the
+    /// database holds (`CSeqDBLMDBSet::TaxIdsToOids`, `tax_ids.swap(rv_tax_ids)`), of a negative
+    /// list all (`CSearchDatabase::x_InitializeDb` opens the database with a copy of it). Empty
+    /// without a taxid list.
+    pub fn list_taxids(&self) -> &[i32] {
+        &self.list_taxids
     }
 
     /// The search path the database was opened with (`open_in`), none for a database opened
@@ -762,8 +792,7 @@ impl SeqDb {
         // ```
         // NCBI opens the LMDB file of a version 5 database when it opens the
         // database (seqdblmdbset.cpp:235-262, 35-74) and compares the file's
-        // volume list with the volumes. LOSAT requires the file, in the
-        // volume's directory, and does not read it.
+        // volume list with the volumes: below, `lmdb_entries`.
         for volume in &volumes {
             if !names_lmdb(volume) {
                 continue;
@@ -820,7 +849,17 @@ impl SeqDb {
             filter: None,
             search_path: None,
             reports_show_gis: false,
+            positive_list: false,
+            list_taxids: Vec::new(),
         };
+        // A volume list that NCBI opens and whose OIDs it then gets wrong
+        // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
+        if db.is_version5() {
+            match db.lmdb_entries() {
+                Ok(_) | Err(SeqDbError::Unsupported { .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
         Ok(db)
     }
 
@@ -1100,7 +1139,7 @@ impl SeqDb {
         })
     }
 
-    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the block of the sequences `first_ordinal..end_ordinal`
+    /// The block of the sequences `first_ordinal..end_ordinal`
     /// that the volume of `first_ordinal` holds (to `end_ordinal` or to the end of the volume),
     /// found without reading the index (`next_block` reads it to cut by bytes). `None` when the
     /// range is empty or `first_ordinal` is past the last sequence.
@@ -1121,7 +1160,7 @@ impl SeqDb {
         })
     }
 
-    /// EXPERIMENT (LOSAT_X_BXDBSTREAM): the numbers of residues of the proteins of
+    /// The numbers of residues of the proteins of
     /// `x_block_range(first_ordinal, end_ordinal)`, from the index alone
     /// (`Volume::x_protein_lengths`).
     pub fn x_protein_lengths(
@@ -1150,7 +1189,7 @@ impl SeqDb {
         volume.read_block(range.first, range.end, range.first_ordinal)
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the length and the ambiguity data that
+    /// The length and the ambiguity data that
     /// `read_block(range)` gives the one nucleotide of `range`, read without its 2-bit data, with
     /// the errors of `read_block` (`Volume::x_nucleotide_check`).
     pub fn x_nucleotide_check(
@@ -1321,11 +1360,24 @@ impl SeqDb {
     /// (`deflines`), or every member and Seq-id (`defline_set`) of a record with parsed
     /// Seq-ids. A record without parsed Seq-ids is read as before, with the same errors.
     pub fn read_header(&self, ordinal: u32) -> Result<SequenceHeader, SeqDbError> {
-        match self.deflines(ordinal) {
-            Err(error) if error.is_parsed_seqids() => {
-                self.defline_set(ordinal).map(SequenceHeader::Parsed)
-            }
-            read => read.map(SequenceHeader::Ordinal),
+        let (volume, oid) = self.find_volume(ordinal)?;
+        self.sequence_header(volume, ordinal, self.volumes[volume].header(oid))
+    }
+
+    /// The `SequenceHeader` of the header `header` of the sequence `ordinal` in `volume`.
+    fn sequence_header(
+        &self,
+        volume: usize,
+        ordinal: u32,
+        header: Result<VolumeHeader, SeqDbError>,
+    ) -> Result<SequenceHeader, SeqDbError> {
+        match header? {
+            VolumeHeader::Ordinal(deflines) => self
+                .ordinal_deflines(volume, ordinal, Ok(deflines))
+                .map(SequenceHeader::Ordinal),
+            VolumeHeader::Parsed(set) => self
+                .ordinal_set(volume, ordinal, set)
+                .map(SequenceHeader::Parsed),
         }
     }
 
@@ -1335,7 +1387,18 @@ impl SeqDb {
     /// stored number plus the first ordinal id of the volume).
     pub fn defline_set(&self, ordinal: u32) -> Result<DeflineSet, SeqDbError> {
         let (volume, oid) = self.find_volume(ordinal)?;
-        let mut set = self.volumes[volume].defline_set(oid)?;
+        let set = self.volumes[volume].defline_set(oid)?;
+        self.ordinal_set(volume, ordinal, set)
+    }
+
+    /// `set`, the definition lines of the sequence `ordinal` in `volume`, with the tag of a
+    /// `general` id `BL_ORD_ID` made its database ordinal id (`defline_set`).
+    fn ordinal_set(
+        &self,
+        volume: usize,
+        ordinal: u32,
+        mut set: DeflineSet,
+    ) -> Result<DeflineSet, SeqDbError> {
         let volume_start = self.volume_starts[volume];
         if volume_start == 0 {
             return Ok(set);
@@ -1603,6 +1666,36 @@ impl SeqDb {
             header_piece_bytes(),
             &mut |oid, taxids| match self.range_ordinal(range, oid) {
                 Some(ordinal) => visit(ordinal, taxids),
+                None => true,
+            },
+        )
+    }
+
+    /// `visit(ordinal, self.read_header(ordinal))` for the sequences of `range` in order until
+    /// `visit` returns false; returns whether every call returned true. The headers of the range
+    /// are read as [`SeqDb::visit_deflines`] reads them (one read of the index file and one read
+    /// of the header file per MiB).
+    pub fn visit_sequence_headers(
+        &self,
+        range: BlockRange,
+        mut visit: impl FnMut(u32, Result<SequenceHeader, SeqDbError>) -> bool,
+    ) -> bool {
+        let Some(vol) = self.volumes.get(range.volume) else {
+            return range.is_empty().then_some(true).unwrap_or_else(|| {
+                visit(range.first_ordinal, Err(volume_range_error(range, self)))
+            });
+        };
+        if self.excludes_all(range) {
+            return true;
+        }
+        vol.visit_sequence_headers(
+            range.first,
+            range.end,
+            header_piece_bytes(),
+            &mut |oid, header| match self.range_ordinal(range, oid) {
+                Some(ordinal) => {
+                    visit(ordinal, self.sequence_header(range.volume, ordinal, header))
+                }
                 None => true,
             },
         )

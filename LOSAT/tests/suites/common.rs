@@ -20,6 +20,8 @@ mod db_seqidlist;
 mod db_taxid_root;
 #[path = "../default_bundle.rs"]
 mod default_bundle;
+#[path = "../entry_names.rs"]
+mod entry_names;
 #[path = "../newton_lanes8_default.rs"]
 mod newton_lanes8_default;
 #[path = "../outfmt11_blastn.rs"]

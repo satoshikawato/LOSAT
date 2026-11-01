@@ -132,6 +132,9 @@ pub struct SubjectRecord<'a> {
     /// The start of the `-subject_loc` interval in the record (0 without one, and always 0
     /// for `-db`), which `s_RemapToSubjectLoc` adds to the subject row.
     pub offset: i32,
+    /// The strings of the Seq-aligns' `use_this_seqid` (`ParsedSubject::use_this_seqid`), empty
+    /// when they have none: every search but a `-db` search with a positive list.
+    pub use_this_seqid: &'a [Vec<u8>],
 }
 
 /// What a whole search contributes to every document.
@@ -210,17 +213,22 @@ impl<'a> SubjectNames<'a> {
                 id: records[index].seq_id(),
                 searched_length: records[index].seq().len() as i32,
                 offset: offset as i32,
+                use_this_seqid: &[],
             },
             SubjectNames::Database {
                 ordinals, parsed, ..
-            } => SubjectRecord {
-                id: match parsed.get(index).and_then(Option::as_deref) {
-                    Some(subject) => SeqId::Db(subject.alignment_id()),
-                    None => SeqId::BlOrdId(ordinals[index]),
-                },
-                searched_length: database_length,
-                offset: 0,
-            },
+            } => {
+                let subject = parsed.get(index).and_then(Option::as_deref);
+                SubjectRecord {
+                    id: match subject {
+                        Some(subject) => SeqId::Db(subject.alignment_id()),
+                        None => SeqId::BlOrdId(ordinals[index]),
+                    },
+                    searched_length: database_length,
+                    offset: 0,
+                    use_this_seqid: crate::report::db_subject::use_this_seqid(subject),
+                }
+            }
         }
     }
 }

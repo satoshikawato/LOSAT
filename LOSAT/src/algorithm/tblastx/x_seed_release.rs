@@ -114,6 +114,7 @@
 
 use super::x_pair_par::XPairPar;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
+use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -155,17 +156,17 @@ pub fn print_summary() {
 // (x_pair_par.rs), read while the units of a subject run. Nothing after the seed stage reads
 // either, and nothing after a subject's units reads the second.
 /// The seed-stage tables of one query batch.
-pub(super) struct XSeedBatch {
+pub(super) struct XSeedBatch<M: TbxScore = Blosum62Score> {
     /// The batch's lookup table.
     pub(super) lookup: XSeedState<BlastAaLookupTable>,
     /// The unit path of the batch (`None`: the reference frame loop takes every subject).
-    pub(super) units: XSeedState<Option<XPairPar>>,
+    pub(super) units: XSeedState<Option<XPairPar<M>>>,
     /// The unit path takes every subject of the batch: the reference frame
     /// loop, the only reader of a worker's diagonal table, runs for no subject.
     units_only: bool,
 }
 
-impl XSeedBatch {
+impl<M: TbxScore> XSeedBatch<M> {
     // No NCBI counterpart: whether the reference frame loop can run for this batch is read
     // from the unit path before it moves into its holder (dispatch point 2 of PAIRPAR in
     // run_impl.rs: the loop runs zero times exactly when the unit path exists). One batch is
@@ -174,7 +175,7 @@ impl XSeedBatch {
     /// The holders of a batch of `subjects` subjects.
     pub(super) fn new(
         lookup: BlastAaLookupTable,
-        pair_par: Option<XPairPar>,
+        pair_par: Option<XPairPar<M>>,
         subjects: usize,
     ) -> Self {
         let units_only = pair_par.is_some();
@@ -638,7 +639,7 @@ mod tests {
     fn the_two_holders_of_a_batch_count_their_stages_apart() {
         // A batch without a unit path (the reference frame loop takes every subject): its
         // workers keep their diagonal table.
-        let batch = XSeedBatch::new(empty_lookup(), None, 2);
+        let batch = XSeedBatch::<Blosum62Score>::new(empty_lookup(), None, 2);
         assert_eq!(batch.worker_table_cells(64), 64);
 
         // First subject: the units stage ends first, then the lookup stage.
@@ -663,7 +664,7 @@ mod tests {
         expected = "the seed-stage tables of the batch were released before the seed stage of subject 1 started"
     )]
     fn a_unit_stage_after_the_release_of_the_unit_holder_stops_the_run() {
-        let batch = XSeedBatch::new(empty_lookup(), None, 1);
+        let batch = XSeedBatch::<Blosum62Score>::new(empty_lookup(), None, 1);
         let lookup_stage = batch.lookup.enter(0);
         assert!(batch.units.enter(0).end());
         // The lookup holder still serves the open stage, and would serve a new one.

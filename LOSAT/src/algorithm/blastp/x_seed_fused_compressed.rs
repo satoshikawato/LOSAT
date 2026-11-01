@@ -794,7 +794,8 @@ mod tests {
                 query.push(0);
             }
             let lookup = build_blosum62_compressed_lookup(word_size, threshold, &query, &locations)
-                .expect("compressed lookup");
+                .expect("compressed lookup")
+                .expect("within the overflow banks");
             assert!(lookup.longest_chain > 5, "cells with overflow lists");
             let longest = lookup.longest_chain as usize;
             let mut subjects = Vec::new();

@@ -132,18 +132,21 @@ pub(super) fn query_records<'a>(
         }
         let subject_index = subject_records.len() as u32;
         let subject = &subjects[list.oid];
+        let parsed = match names {
+            SeqalignSubjects::Records => None,
+            SeqalignSubjects::Database { reported, .. } => reported.parsed_subject(list.oid),
+        };
         subject_records.push(SubjectRecord {
             id: match names {
                 SeqalignSubjects::Records => subject.seq_id(),
-                SeqalignSubjects::Database { reported, .. } => {
-                    match reported.parsed_subject(list.oid) {
-                        Some(subject) => SeqId::Db(subject.alignment_id()),
-                        None => SeqId::BlOrdId(reported.ordinal(list.oid)),
-                    }
-                }
+                SeqalignSubjects::Database { reported, .. } => match parsed {
+                    Some(subject) => SeqId::Db(subject.alignment_id()),
+                    None => SeqId::BlOrdId(reported.ordinal(list.oid)),
+                },
             },
             searched_length: i32::try_from(subject.sequence.len())?,
             offset: 0,
+            use_this_seqid: crate::report::db_subject::use_this_seqid(parsed),
         });
         for hsp in &list.hsps {
             hsp_records.push(HspRecord {

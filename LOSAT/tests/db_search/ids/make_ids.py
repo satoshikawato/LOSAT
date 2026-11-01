@@ -46,6 +46,9 @@ GI-only record `gi|1111`. `nrefuse_v5.*` from `nrefuse.fna` (`lcl|777` before `g
 find no sequence by the Seq-align id `gi|777`). `njoined_a.*` and `njoined_b.*` (version 4) from
 `njoined_a.fna` and `njoined_b.fna`, read through the alias `njoined.nal`: `gb|AF000040.1|` and
 `gb|AF000040|` follow each other in the hits, and NCBI's XML and outfmt 0 take them for one sequence.
+`nambig_v4.*` (version 4) from `nambig.fna` (the sequence of the first record of `nucl.fna`, and a copy of it
+with runs of N, an R and a Y, so with ambiguity data; the unit test of blastn's report stream raises its
+ambiguity count, `x_streaming_refusal`).
 """
 import argparse
 import subprocess
@@ -109,7 +112,8 @@ def main() -> int:
         fasta.unlink()
     work.rmdir()
     for name, version, title in (("nrefuse_v5", 5, "nrefuse_v5 (parsed Seq-ids)"),
-                                 ("njoined_a", 4, "njoined_a"), ("njoined_b", 4, "njoined_b")):
+                                 ("njoined_a", 4, "njoined_a"), ("njoined_b", 4, "njoined_b"),
+                                 ("nambig_v4", 4, "nambig_v4")):
         subprocess.run(
             [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / (name.split("_v")[0] + ".fna")),
              "-dbtype", "nucl", "-parse_seqids", "-blastdb_version", str(version), "-title", title,

@@ -65,8 +65,8 @@ fn engine(message: impl fmt::Display) -> anyhow::Error {
     .into()
 }
 
-/// The error of the database's sequences (`BlastxDatabase::read_stores`, or a read of
-/// `LOSAT_X_BXDBSTREAM`): NCBI's engine error of a reader error, or LOSAT's refusal as it is.
+/// The error of the database's sequences (`BlastxDatabase::x_check_stores`, or a read of
+/// `x_db_stream.rs`): NCBI's engine error of a reader error, or LOSAT's refusal as it is.
 fn database_error(kept: anyhow::Error) -> anyhow::Error {
     match kept.downcast::<PreliminaryReadError>() {
         Ok(PreliminaryReadError(text)) => engine(text),
@@ -372,6 +372,28 @@ fn run_inner(
         }
         None => Box::new(io::stderr()),
     };
+    // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
+    // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the formatting handler and before
+    // `CStdCmdLineArgs`, which opens the query and the output: its warning before theirs (probe
+    // F04 of line DI-8), and a list error leaves no `-out`, only the error archive that NCBI's
+    // `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8). NCBI's application layer
+    // has read its environment and registry files by then; LOSAT reads them for `-db` (the
+    // registry's `BLASTDB`), as its other programs with `-db`, and leaves `-subject`'s path as it
+    // was.
+    let db_settings = match args.database_name() {
+        Some(_) => Some(
+            crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
+                .map_err(anyhow::Error::msg)?,
+        ),
+        None => None,
+    };
+    let list = match &db_settings {
+        Some(settings) => args
+            .db_filter
+            .resolve(settings, &mut stderr)
+            .map_err(early_archive_error)?,
+        None => None,
+    };
     // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
     // counterpart.
     let x_t_read_fasta = crate::utils::xtiming::clock();
@@ -499,24 +521,15 @@ fn run_inner(
     // ```
     // The database of `-db` opens after the arguments (the query and output files) and the
     // options are processed and before the query is read, as NCBI's `InitializeSubject`.
-    // NCBI's application layer has read its environment and registry files by then; LOSAT
-    // reads them for `-db` (the registry's `BLASTDB`), as its other programs with `-db`, and
-    // leaves `-subject`'s path as it was.
-    let database = match args.database_name() {
-        Some(name) => {
-            let settings =
-                crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
-                    .map_err(anyhow::Error::msg)?;
-            // The taxid list (line DI-8) is read and expanded first: NCBI's handler of the
-            // database arguments reads it (`s_GetTaxIDList`) before the database opens.
-            let list = args.db_filter.resolve(&settings, &mut stderr)?;
+    let database = match (args.database_name(), &db_settings) {
+        (Some(name), Some(settings)) => {
             let database =
-                BlastxDatabase::open_restricted(name, &settings, list.as_ref(), &mut stderr)?
+                BlastxDatabase::open_restricted(name, settings, list.as_ref(), &mut stderr)?
                     .showing_gis(args.show_gis);
             crate::algorithm::common::database::note_archive_database_filter(
                 archive.as_ref(),
                 &args.db_filter,
-                list.as_ref(),
+                database.list_taxids(),
                 database.filtered_empty(),
                 args.searchsp.is_some_and(|space| space > 0),
                 args.dbsize.is_some_and(|size| size > 0),
@@ -524,7 +537,7 @@ fn run_inner(
             )?;
             Some(database)
         }
-        None => None,
+        _ => None,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1093-1104
     // ```c++
@@ -772,60 +785,33 @@ fn run_inner(
     writer.flush().map_err(output_error)?;
     super::x_timing::run(XRun::Prolog, x_t);
     let x_t = super::x_timing::lap();
-    // The database's sequences, read once for every batch; an error belongs to the first
-    // batch with a valid context (`Subjects::Unreadable`, `search_error`).
-    // EXPERIMENT (LOSAT_X_BXDBSTREAM): with the switch, the sequences are checked once here and
-    // read in blocks where they are searched (`x_db_stream.rs`); the copy is made only in its
-    // shadow mode. No NCBI counterpart: NCBI maps the volume files.
-    let x_stream_bytes = database
-        .as_ref()
-        .and_then(|_| super::x_db_stream::x_block_bytes());
-    let (stores, x_longest, unreadable) = match (&database, x_stream_bytes) {
-        (None, _) => (None, None, None),
-        (Some(database), None) => match database.read_stores() {
-            Ok(stores) => (Some(stores), None, None),
-            Err(error) => (None, None, Some(error)),
+    // The database's sequences, checked once here and read in blocks where they are searched
+    // (`x_db_stream.rs`); an error belongs to the first batch with a valid context
+    // (`Subjects::Unreadable`, `search_error`). No NCBI counterpart for the blocks: NCBI maps the
+    // volume files.
+    let (x_longest, unreadable) = match &database {
+        None => (None, None),
+        Some(database) => match database.x_check_stores() {
+            Ok(longest) => (Some(longest), None),
+            Err(error) => (None, Some(error)),
         },
-        (Some(database), Some(_)) => {
-            let checked = database.x_check_stores();
-            let copy = super::x_db_stream::x_shadow().then(|| database.read_stores());
-            if let Some(copy) = &copy {
-                let says = |result: Result<(), &anyhow::Error>| {
-                    result.map_or_else(|error| format!("error {error}"), |()| "read".to_string())
-                };
-                let (of_check, of_copy) = (
-                    says(checked.as_ref().map(|_| ())),
-                    says(copy.as_ref().map(|_| ())),
-                );
-                super::x_db_stream::x_shadow_assert(of_check == of_copy, || {
-                    format!("the check gives {of_check:?}, the copy {of_copy:?}")
-                });
-            }
-            match checked {
-                Ok(longest) => (copy.and_then(Result::ok), Some(longest), None),
-                Err(error) => (None, None, Some(error)),
-            }
-        }
     };
-    let x_stream = match (&database, x_stream_bytes, x_longest) {
-        (Some(database), Some(bytes), Some(longest)) => Some(super::x_db_stream::XStreamDb::new(
+    let x_stream = match (&database, x_longest) {
+        (Some(database), Some(longest)) => Some(super::x_db_stream::XStreamDb::new(
             database.x_seqdb(),
             longest,
-            bytes,
-            stores.as_ref(),
         )),
         _ => None,
     };
     super::x_timing::run(XRun::ReadStores, x_t);
     let unreadable = std::cell::RefCell::new(unreadable);
-    let search_subjects = match (&database, &x_stream, &stores) {
-        (None, _, _) => Subjects::Fasta(&subjects),
-        (Some(_), Some(stream), _) => Subjects::Stream(super::x_db_stream::XStream {
+    let search_subjects = match (&database, &x_stream) {
+        (None, _) => Subjects::Fasta(&subjects),
+        (Some(_), Some(stream)) => Subjects::Stream(super::x_db_stream::XStream {
             db: stream,
             block: None,
         }),
-        (Some(_), None, Some(stores)) => Subjects::Database(stores),
-        (Some(_), None, None) => Subjects::Unreadable,
+        (Some(_), None) => Subjects::Unreadable,
     };
     let search_error = |error: anyhow::Error| -> anyhow::Error {
         // LOSAT's refusal, not an error of NCBI's engine.
@@ -839,7 +825,7 @@ fn run_inner(
                 .expect("the database's error, raised once");
             return database_error(kept);
         }
-        // EXPERIMENT (LOSAT_X_BXDBSTREAM): a read of the database that failed during the search,
+        // A read of the database that failed during the search,
         // reported as the check's error for the same read.
         match error.downcast::<super::x_db_stream::XReadError>() {
             Ok(super::x_db_stream::XReadError(kept)) => database_error(kept),
@@ -952,7 +938,7 @@ fn run_inner(
                         let reported = reported
                             .map_err(|error| match error.downcast::<HeaderReadError>() {
                                 Ok(header) => header.error,
-                                // EXPERIMENT (LOSAT_X_BXDBSTREAM): a failed read of a record's residues.
+                                // A failed read of a record's residues.
                                 Err(error) => {
                                     match error.downcast::<super::x_db_stream::XReadError>() {
                                         Ok(super::x_db_stream::XReadError(kept)) => {
@@ -1598,8 +1584,8 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     result
 }
 
-/// The error archive of a run that stopped in `Run` before its output was opened (the files of
-/// `-subject` and `-query`, the subjects): into `-out`, or standard output; nothing when that
+/// The error archive of a run that stopped in `Run` before its output was opened (the taxid or
+/// seqid list, the files of `-subject` and `-query`, the subjects): into `-out`, or standard output; nothing when that
 /// cannot be opened (NCBI's call swallows that).
 fn write_run_error_archive(
     args: &BlastxArgs,
@@ -1609,6 +1595,10 @@ fn write_run_error_archive(
     let Some(handle) = archive else {
         return;
     };
+    // `-outfmt "11 qseqid"`: NCBI's `PrintErrorArchive` stops at the number before it opens `-out`.
+    if !handle.error_archive_enabled() {
+        return;
+    }
     let Some(lines) = archive::error_lines(error, true) else {
         return;
     };

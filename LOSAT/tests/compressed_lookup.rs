@@ -112,8 +112,9 @@ fn compressed_neighbor_lookup_builds_representative_blosum62_word() {
         ncbistdaa::G,
         ncbistdaa::W,
     ];
-    let lookup =
-        build_blosum62_compressed_lookup(5, 19.3, &query, &[(0, 4)]).expect("compressed lookup");
+    let lookup = build_blosum62_compressed_lookup(5, 19.3, &query, &[(0, 4)])
+        .expect("compressed lookup")
+        .expect("within the overflow banks");
     let matrix = build_blosum62_compressed_score_matrix(15).expect("compressed matrix");
     let total_hits: i32 = lookup.backbone.iter().map(|cell| cell.num_used).sum();
 

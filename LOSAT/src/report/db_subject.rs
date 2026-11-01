@@ -47,6 +47,18 @@ pub struct ParsedSubject {
     /// Whether it is a record that the reports show as a record without `-parse_deflines`
     /// (`BelievedIds::subject_local`): only its tabular ids are its own (`shown_as_record`).
     local_record: bool,
+    /// The strings of the Seq-aligns' `use_this_seqid` (`under_positive_list`); empty without a
+    /// positive list.
+    use_this_seqid: Vec<Vec<u8>>,
+    /// `tabular_saccver`, kept for the reports of later query batches.
+    saccver: std::sync::OnceLock<std::sync::Arc<[u8]>>,
+}
+
+/// The `use_this_seqid` strings of a database subject, `subject` when it has parsed Seq-ids: a
+/// sequence without them has a `general` id of `BL_ORD_ID`, which is neither a text Seq-id nor a
+/// GI (`ParsedSubject::under_positive_list`).
+pub fn use_this_seqid(subject: Option<&ParsedSubject>) -> &[Vec<u8>] {
+    subject.map_or(&[], ParsedSubject::use_this_seqid)
 }
 
 /// `AdjustSeqIdType` with `eGetId_ForceAcc` (`ParsedSubject::sam_id`) of a Bioseq with the ids
@@ -141,6 +153,8 @@ impl ParsedSubject {
             show_gis: false,
             record: false,
             local_record: false,
+            use_this_seqid: Vec::new(),
+            saccver: std::sync::OnceLock::new(),
         })
     }
 
@@ -182,6 +196,8 @@ impl ParsedSubject {
             show_gis: false,
             record: true,
             local_record: ids.subject_local(),
+            use_this_seqid: Vec::new(),
+            saccver: std::sync::OnceLock::new(),
         }
     }
 
@@ -206,6 +222,88 @@ impl ParsedSubject {
     pub fn showing_gis(mut self, show_gis: bool) -> Self {
         self.show_gis = show_gis;
         self
+    }
+
+    /// The subject as a database with a positive list (`positive_list`,
+    /// `SeqDb::has_positive_list`) reports it: its Seq-aligns name the ids of the definition
+    /// lines the list keeps. `use_gi` is whether the Seq-align id is a GI.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqinfosrc_aux.cpp:113-150
+    /// ```c++
+    /// void GetFilteredRedundantSeqids(const IBlastSeqInfoSrc & seqinfo_src,
+    ///                              int                      oid,
+    ///                              vector<string>            & seqids,
+    /// 			     bool			use_gi)
+    /// {
+    ///     seqids.resize(0);
+    ///
+    ///     if (! seqinfo_src.HasGiList()) {
+    ///         return;
+    ///     }
+    ///
+    ///     list< CRef<CSeq_id> > seqid_list = seqinfo_src.GetId(oid);
+    ///
+    ///     ITERATE(list< CRef<CSeq_id> >, id, seqid_list) {
+    /// 	if (use_gi)
+    /// 	{
+    ///         	if ((**id).IsGi())
+    /// 		{
+    /// 			string sid_string = "gi:" + (*id)->GetSeqIdString(true);
+    /// 			seqids.push_back(sid_string);
+    /// 		}
+    /// 	}
+    /// 	else
+    /// 	{
+    /// 		const CTextseq_id* tsid = (*id)->GetTextseq_Id();
+    /// 		if (tsid && tsid->IsSetAccession())
+    /// 		{
+    /// 			string sid_string = "seqid:" + (*id)->GetSeqIdString(true);
+    /// 			seqids.push_back(sid_string);
+    /// 		}
+    /// 		else if ((*id)->IsPdb())
+    /// 		{
+    /// 			string sid_string = "seqid:" + (*id)->GetSeqIdString(true);
+    /// 			seqids.push_back(sid_string);
+    /// 		}
+    /// 	}
+    ///     }
+    /// }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1604-1605
+    /// ```c++
+    ///         // Get SeqIds for entrez query restriction.
+    /// 	vector<string> seqid_list;
+    ///         GetFilteredRedundantSeqids(*seqinfo_src, hsp_list->oid, seqid_list, subject_id->IsGi());
+    /// ```
+    pub fn under_positive_list(mut self, positive_list: bool) -> Self {
+        if !positive_list {
+            return self;
+        }
+        let use_gi = self.alignment_id.gi().is_some();
+        for id in self.set.ids() {
+            let prefix: &[u8] = if use_gi {
+                if id.gi().is_none() {
+                    continue;
+                }
+                b"gi:"
+            } else {
+                if !(id.textseq().is_some_and(|text| text.accession.is_some())
+                    || matches!(id, ParsedSeqId::Pdb(_)))
+                {
+                    continue;
+                }
+                b"seqid:"
+            };
+            let mut string = prefix.to_vec();
+            crate::seqid::label::content(id, true, &mut string);
+            self.use_this_seqid.push(string);
+        }
+        self
+    }
+
+    /// The strings of the Seq-aligns' `use_this_seqid` (`under_positive_list`).
+    pub fn use_this_seqid(&self) -> &[Vec<u8>] {
+        &self.use_this_seqid
     }
 
     /// `Err` for a subject whose sequence NCBI's formatters cannot find by its Seq-align id
@@ -420,6 +518,22 @@ impl ParsedSubject {
         ])
     }
 
+    /// The `saccver` of `tabular_ids`, made once for a subject (`protein` is its database's).
+    pub fn tabular_saccver(&self, protein: bool) -> Result<std::sync::Arc<[u8]>, &'static str> {
+        if let Some(saccver) = self.saccver.get() {
+            return Ok(std::sync::Arc::clone(saccver));
+        }
+        let [_, _, saccver] = self.tabular_ids(protein)?;
+        Ok(std::sync::Arc::clone(
+            self.saccver.get_or_init(|| std::sync::Arc::from(saccver)),
+        ))
+    }
+
+    /// `Err` as `tabular_ids`', which it does not make.
+    pub fn check_tabular_ids(&self, protein: bool) -> Result<(), &'static str> {
+        self.title_word(protein).map(drop)
+    }
+
     /// The tabular `sgi`: the first GI of the subject Bioseq's ids (`FindGi`; `seq_id_list` only
     /// replaces ids that are no GI), 0 for none.
     pub fn tabular_gi(&self) -> i64 {
@@ -494,6 +608,24 @@ impl ParsedSubject {
     /// its title: `GenerateDefline` of the subject Bioseq with `fLeavePrefixSuffix` (`Unknown`
     /// where NCBI's `HtmlDecode` throws), after two spaces where `gi|N|` was written.
     pub fn description(&self, protein: bool) -> (Vec<u8>, Defline) {
+        let (start, wrote_gi) = self.description_id();
+        let mut title = self.bioseq_title(protein, true).unwrap_or(Defline {
+            text: b"Unknown".to_vec(),
+            reads_past_end: false,
+        });
+        if wrote_gi {
+            title.text.splice(0..0, *b"  ");
+        }
+        (start, title)
+    }
+
+    /// The start of the outfmt 0 description line (`description`).
+    pub fn description_start(&self) -> Vec<u8> {
+        self.description_id().0
+    }
+
+    /// `description`'s start and whether `gi|N|` was written.
+    fn description_id(&self) -> (Vec<u8>, bool) {
         let mut start = Vec::new();
         let mut wrote_gi = false;
         if let Some(shown) = self.set.display_defline(&self.alignment_id) {
@@ -503,14 +635,7 @@ impl ParsedSubject {
                 wrote_gi = description_id(id, gi, self.show_gis, &mut start);
             }
         }
-        let mut title = self.bioseq_title(protein, true).unwrap_or(Defline {
-            text: b"Unknown".to_vec(),
-            reads_past_end: false,
-        });
-        if wrote_gi {
-            title.text.splice(0..0, *b"  ");
-        }
-        (start, title)
+        (start, wrote_gi)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2380-2384, 2451-2461
@@ -536,19 +661,48 @@ impl ParsedSubject {
     // ```
     // `out` holds the heading of this subject only; the title of a definition line is its own,
     // or the subject Bioseq's generated title when it is empty (`x_FillDispParams`).
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3166-3180
+    // ```c++
+    //     ITERATE(CSeq_align_set::Tdata, iter, alnset.Get()){
+    //         const CSeq_align::TSegs& seg = (*iter)->GetSegs();
+    //         if(seg.Which() == CSeq_align::C_Segs::e_Std){
+    //             if(seg.GetStd().size() > 1){
+    //                 //has more than one stdseg. Need to seperate as each
+    //                 //is a distinct HSP
+    //                 ITERATE (CSeq_align::C_Segs::TStd, iterStdseg, seg.GetStd()){
+    //                     CRef<CSeq_align> aln(new CSeq_align);
+    //                     if((*iterStdseg)->IsSetScores()){
+    //                         aln->SetScore() = (*iterStdseg)->GetScores();
+    //                     }
+    //                     aln->SetSegs().SetStd().push_back(*iterStdseg);
+    //                     alnSetRef->Set().push_back(aln);
+    //                 }
+    //
+    //             } else {
+    //                 alnSetRef->Set().push_back(*iter);
+    //             }
+    // ```
     /// The definition-line lines of the outfmt 0 alignment of the subject (each ending with a
-    /// newline; `Length=` follows): every definition line, the first after `>` and the others
-    /// after a space, with its id (`alignment_line_id`) and its title wrapped at 60 bytes.
-    pub fn heading(&self, protein: bool) -> Vec<u8> {
+    /// newline; `Length=` follows): the definition lines (`heading_shows`), the first after `>`
+    /// and the others after a space, with its id (`alignment_line_id`) and its title wrapped at
+    /// 60 bytes. `every_line`: the Seq-align has no `ext` when the report is made, so nothing
+    /// limits the lines: a Seq-align of an ungapped search with two or more HSPs, which the
+    /// formatter splits into new ones (`PrepareBlastUngappedSeqalign` above).
+    pub fn heading(&self, protein: bool, every_line: bool) -> Vec<u8> {
         let mut out = Vec::new();
         let mut generated = None;
-        for (i, defline) in self.set.deflines.iter().enumerate() {
+        let mut first = true;
+        for defline in &self.set.deflines {
+            if !every_line && !self.heading_shows(defline) {
+                continue;
+            }
             let start = out.len();
-            out.push(if i == 0 { b'>' } else { b' ' });
+            out.push(if first { b'>' } else { b' ' });
             alignment_line_id(defline, self.show_gis, &mut out);
-            if i > 0 || out.len() - start > 1 {
+            if !first || out.len() - start > 1 {
                 out.push(b' ');
             }
+            first = false;
             let title = match defline.title.as_deref() {
                 Some(title) if !title.is_empty() && !self.record => title,
                 _ => generated.get_or_insert_with(|| {
@@ -563,8 +717,6 @@ impl ParsedSubject {
         out
     }
 
-    /// The XML `Hit_id` and `Hit_accession` of a `-subject` record (`of_record`; `Hit_def` is the
-    /// generated title, `bioseq_title`).
     /// Whether the `Score`-best id of the subject Bioseq is a local id (XML2 then writes no
     /// accession of a `-subject` record, `SubjectNames::of_believed`).
     pub fn has_local_best_id(&self) -> bool {
@@ -574,6 +726,8 @@ impl ParsedSubject {
         )
     }
 
+    /// The XML `Hit_id` and `Hit_accession` of a `-subject` record (`of_record`; `Hit_def` is the
+    /// generated title, `bioseq_title`).
     pub fn record_xml_ids(&self) -> (Vec<u8>, Vec<u8>) {
         let mut id = Vec::new();
         label::seqid_list_string(&self.target().ids, true, &mut id);
@@ -582,6 +736,58 @@ impl ParsedSubject {
             label::format_label(best, false, &mut accession);
         }
         (id, accession)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2196-2202
+    // ```c++
+    //     CRef<CSeq_id> wid = FindBestChoice(ids, CSeq_id::WorstRank);
+    //     TGi gi_in_use_this_gi = ZERO_GI;
+    //     bool isGiList = false;
+    //     bool match = CAlignFormatUtil::MatchSeqInSeqList(gi, wid, use_this_seqid,&isGiList);
+    //     if(match && isGiList) gi_in_use_this_gi = gi;
+    //
+    //     if(use_this_seqid.empty() || match) {
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4648-4664
+    // ```c++
+    // bool CAlignFormatUtil::MatchSeqInSeqList(TGi cur_gi, CRef<CSeq_id> &seqID, list<string> &use_this_seq,bool *isGiList)
+    // {
+    //     bool found = false;
+    //     bool isGi = false;
+    //
+    //     string curSeqID = CAlignFormatUtil::GetLabel(seqID,true); //uses GetSeqIdString(true)
+    //     ITERATE(list<string>, iter_seq, use_this_seq){
+    //         isGi = false;
+    //         string useThisSeq = s_UseThisSeqToTextSeqID(*iter_seq, isGi);
+    //         if((isGi && cur_gi == NStr::StringToNumeric<TGi>((useThisSeq))) || (!isGi && curSeqID == useThisSeq)){
+    //             found = true;
+    //             break;
+    //          }
+    //     }
+    // ```
+    /// Whether the outfmt 0 alignment heading shows `defline`: under a positive list only a line
+    /// that `use_this_seqid` names (a line of a local id alone is not shown, nor one without a
+    /// GI when the strings are GIs; probe G05 of line DI-8).
+    fn heading_shows(&self, defline: &BlastDefline) -> bool {
+        if self.use_this_seqid.is_empty() {
+            return true;
+        }
+        // `CAlignFormatUtil::GetLabel`: the tag of a `general` id, else `GetSeqIdString(true)`.
+        let mut label_of_id = Vec::new();
+        match defline.display_id() {
+            Some(id @ ParsedSeqId::General(_)) => {
+                label::content_general_db_is_content(id, &mut label_of_id);
+            }
+            Some(id) => label::content(id, true, &mut label_of_id),
+            None => {}
+        }
+        let gi = defline.gi().to_string();
+        self.use_this_seqid
+            .iter()
+            .any(|string| match string.strip_prefix(b"gi:") {
+                Some(value) => value == gi.as_bytes(),
+                None => string.strip_prefix(b"seqid:") == Some(label_of_id.as_slice()),
+            })
     }
 
     /// The outfmt 5 `Hit_id` and `Hit_def` (`DeflineSet::hit_id_and_def` with the GIs shown;
@@ -941,6 +1147,9 @@ mod tests {
         assert!(check_shown_parsed_subject(&accession, true, false, 0, "BLASTP").is_err());
         let local = subject(ParsedSeqId::Local(ObjectId::Str(b"Subject_51".to_vec())));
         assert!(local.tabular_ids(true).is_err());
+        assert!(local.tabular_saccver(true).is_err());
+        assert!(local.check_tabular_ids(true).is_err());
+        assert!(local.check_tabular_ids(false).is_ok());
         let [id, _, _] = local.tabular_ids(false).unwrap();
         let word = stored.text.split(|&byte| byte == b' ').next().unwrap();
         assert_eq!(id, word);
@@ -1013,7 +1222,7 @@ mod tests {
             "DAA10002.1 unnamed protein product"
         );
         assert_eq!(
-            text(&subject("tpg|DAA10002.1|").heading(true)),
+            text(&subject("tpg|DAA10002.1|").heading(true, false)),
             ">DAA10002.1 TPA: unnamed protein product\n"
         );
         assert_eq!(description("pdb|2XYZ|B"), "2XYZ_B Chain B");
@@ -1024,7 +1233,7 @@ mod tests {
         );
         assert_eq!(description("ref|NC_100013.1|"), "NC_100013.1 ");
         assert_eq!(
-            text(&subject("ref|NC_100013.1|").heading(true)),
+            text(&subject("ref|NC_100013.1|").heading(true, false)),
             ">NC_100013.1 \n"
         );
         assert_eq!(
@@ -1033,16 +1242,16 @@ mod tests {
         );
         assert_eq!(description("lcl|Subject_27"), "subject seven title");
         assert_eq!(
-            text(&subject("lcl|Subject_30").heading(true)),
+            text(&subject("lcl|Subject_30").heading(true, false)),
             ">Subject_30 unnamed protein product\n"
         );
         assert_eq!(description("pdb|5ABC|D"), "5ABC_D Chain D");
         assert_eq!(
-            text(&subject("pdb|5ABC|D").heading(true)),
+            text(&subject("pdb|5ABC|D").heading(true, false)),
             ">5ABC_D Chain D\n XP_100015.1 second\n"
         );
         assert_eq!(
-            text(&subject("lcl|Subject_36").heading(true)),
+            text(&subject("lcl|Subject_36").heading(true, false)),
             ">Subject_36 unnamed protein product\n DAA10016.1 tpa second\n"
         );
         // A title from the source: the taxonomy database would name its organism.
@@ -1066,6 +1275,15 @@ mod tests {
             ["tpg|DAA10008.1|", "DAA10008", "DAA10008.1"]
         );
         assert_eq!(ids("lcl|Subject_29"), ["pdb|3ABC|C", "3ABC_C", "3ABC_C"]);
+        assert!(subject("lcl|Subject_29").check_tabular_ids(true).is_ok());
+        // The `saccver`, made once.
+        let once = subject("lcl|Subject_28");
+        let first = once.tabular_saccver(true).unwrap();
+        assert_eq!(&*first, b"DAA10008.1");
+        assert!(std::sync::Arc::ptr_eq(
+            &first,
+            &once.tabular_saccver(true).unwrap()
+        ));
     }
 
     fn one_defline(ids: Vec<ParsedSeqId>) -> DeflineSet {
@@ -1076,6 +1294,83 @@ mod tests {
                 ..BlastDefline::default()
             }],
         }
+    }
+
+    fn gb(accession: &str, version: i32) -> ParsedSeqId {
+        ParsedSeqId::Genbank(crate::seqid::model::TextseqId {
+            accession: Some(accession.as_bytes().to_vec()),
+            version: Some(version),
+            ..Default::default()
+        })
+    }
+
+    fn lines(lines: Vec<Vec<ParsedSeqId>>) -> ParsedSubject {
+        let deflines = lines
+            .into_iter()
+            .map(|ids| BlastDefline {
+                title: Some(b"t".to_vec()),
+                ids,
+                ..BlastDefline::default()
+            })
+            .collect();
+        ParsedSubject::new(DeflineSet { deflines }, true).unwrap()
+    }
+
+    fn strings(subject: &ParsedSubject) -> Vec<String> {
+        subject
+            .use_this_seqid()
+            .iter()
+            .map(|string| String::from_utf8(string.clone()).unwrap())
+            .collect()
+    }
+
+    // Probes G01, G05 of line DI-8 (`GetFilteredRedundantSeqids`, `x_FillAlnDispParams`).
+    #[test]
+    fn a_positive_list_names_the_text_ids_or_the_gis() {
+        let local = || ParsedSeqId::Local(ObjectId::Str(b"loc".to_vec()));
+        // Text ids of every line, whichever comes first; a local id is not named.
+        let subject = lines(vec![vec![local()], vec![gb("AF000001", 1)]]);
+        assert!(subject.use_this_seqid().is_empty());
+        let subject = subject.under_positive_list(true);
+        assert_eq!(strings(&subject), ["seqid:AF000001.1"]);
+        // The heading leaves out the line the strings do not name, and `>` goes to the next.
+        assert_eq!(subject.heading(true, false), b">AF000001.1 t\n");
+        // An ungapped Seq-align of two HSPs reaches the report without the strings.
+        assert_eq!(subject.heading(true, true), b">loc t\n AF000001.1 t\n");
+        // A local id alone: no string, every line in the heading.
+        let subject = lines(vec![vec![local()]]).under_positive_list(true);
+        assert!(subject.use_this_seqid().is_empty());
+        assert_eq!(subject.heading(true, false), b">loc t\n");
+        // A Seq-align id that is a GI: only GIs are named, and a line without one is left out.
+        let subject = lines(vec![
+            vec![ParsedSeqId::Gi(888), gb("GG000001", 1)],
+            vec![gb("GG000002", 1)],
+            vec![ParsedSeqId::Gi(890), gb("GG000003", 1)],
+        ])
+        .under_positive_list(true);
+        assert_eq!(strings(&subject), ["gi:888", "gi:890"]);
+        assert_eq!(
+            subject.heading(true, false),
+            b">GG000001.1 t\n GG000003.1 t\n"
+        );
+        // A name without an accession is not named; a PDB id is.
+        let name_only = ParsedSeqId::Prf(crate::seqid::model::TextseqId {
+            name: Some(b"NAME".to_vec()),
+            ..Default::default()
+        });
+        let pdb = ParsedSeqId::Pdb(crate::seqid::model::PdbSeqId {
+            mol: b"3DEF".to_vec(),
+            chain: None,
+            rel: None,
+            chain_id: Some(b"B".to_vec()),
+        });
+        let subject = lines(vec![vec![name_only], vec![pdb]]).under_positive_list(true);
+        assert_eq!(strings(&subject), ["seqid:3DEF_B"]);
+        // Without a positive list nothing changes.
+        let subject =
+            lines(vec![vec![local()], vec![gb("AF000001", 1)]]).under_positive_list(false);
+        assert!(subject.use_this_seqid().is_empty());
+        assert_eq!(subject.heading(true, false), b">loc t\n AF000001.1 t\n");
     }
 
     #[test]
@@ -1231,7 +1526,7 @@ mod tests {
             assert_eq!(text(&all_ids[0].id), all, "{defline}");
             assert_eq!(subject.shown_as_record(), local, "{defline}");
             if !local {
-                assert_eq!(text(&subject.heading(protein)), heading, "{defline}");
+                assert_eq!(text(&subject.heading(protein, false)), heading, "{defline}");
                 assert!(subject.first_title().is_empty() || defline.contains(' '));
             }
         }

@@ -240,7 +240,7 @@ impl BlastpDatabase {
     /// (`algorithm::common::database::pairwise_database`): the title (the name as given
     /// for an empty title), the date and the real totals, also with `-dbsize`.
     pub(super) fn pairwise_database(&self) -> PairwiseDatabase {
-        shared::pairwise_database(&self.db, &self.name)
+        shared::pairwise_database(&self.db)
     }
 
     /// The names of the taxonomy database that the rows of the custom tabular report `spec`
@@ -1882,7 +1882,7 @@ mod tests {
         assert_eq!(database.total_letters_usize().unwrap(), 801);
         let shown = database.pairwise_database();
         assert_eq!(shown.definition, b"protein in volumes");
-        assert_eq!(shown.date, "Oct 12, 2026  4:12 PM");
+        assert_eq!(shown.databases[0].date, "Oct 12, 2026  4:12 PM");
         assert_eq!((shown.num_sequences, shown.total_letters), (10, 801));
         // The name is the `-db` value as given.
         assert_eq!(database.name(), fixture("prot_mv"));

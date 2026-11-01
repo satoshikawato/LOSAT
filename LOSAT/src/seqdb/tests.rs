@@ -876,14 +876,39 @@ fn alias_lines_are_read_as_ncbi_reads_them() {
         ]
     );
     assert_eq!(
-        test_split_quoted(b"one \"two words\"  three\"four\" five"),
+        test_split_quoted(b"one \"two words\"  three\"four\" five", false),
         [b"one".as_slice(), b"two words", b"three", b"four", b"five"]
     );
-    assert!(test_split_quoted(b"  ").is_empty());
+    assert!(test_split_quoted(b"  ", false).is_empty());
     assert_eq!(
-        test_split_quoted(b"\"open quote"),
+        test_split_quoted(b"\"open quote", false),
         [b"open quote".as_slice()]
     );
+    // The reports keep the quotes (`SeqDB_SplitQuoted(..., true)`), and NCBI's `i++` past a
+    // closing quote also skips the byte after it.
+    assert_eq!(
+        test_split_quoted(b"\"a b\" \"c\"", true),
+        [b"\"a b\"".as_slice(), b"\"c\""]
+    );
+    assert_eq!(
+        test_split_quoted(b"\"a\"b c", true),
+        [b"\"a\"".as_slice(), b"c"]
+    );
+    assert_eq!(
+        test_split_quoted(b"x\"open", true),
+        [b"x".as_slice(), b"\"open"]
+    );
+    // The names the reports open alone: white space at their ends dropped, empty ones left
+    // out (probe DI-8f K01, K02: `<db>` of XML2).
+    assert_eq!(
+        super::alias::report_names(" db/n5t  db/nc5 "),
+        ["db/n5t", "db/nc5"]
+    );
+    assert_eq!(
+        super::alias::report_names("\"db/n5t\" \"db/nc5\""),
+        ["\"db/n5t\"", "\"db/nc5\""]
+    );
+    assert_eq!(super::alias::report_names("a\t b"), ["a", "b"]);
 }
 
 /// BER bytes of one `Blast-def-line-set` with one definition line.
@@ -1102,13 +1127,44 @@ fn a_name_is_a_list_as_for_ncbi() {
         SeqDb::open(&quoted, SeqType::Protein).unwrap().num_seqs(),
         10
     );
-    // Two names: several databases in one search are not supported.
-    let two = format!("{prot_v4} {}", db_name("prot_old"));
-    let error = SeqDb::open(&two, SeqType::Protein).unwrap_err();
-    assert!(
-        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("several databases")),
-        "{error}"
-    );
+    // Two names: the databases of both are searched as one, and the reports keep one record
+    // per name in the order of the list (DI-8 DECISIONS 29).
+    let prot_old = db_name("prot_old");
+    let alone = |name: &str| {
+        let mut db = SeqDb::open(name, SeqType::Protein).unwrap();
+        db.read_name_records(name).unwrap();
+        db
+    };
+    let (v4, old) = (alone(&prot_v4), alone(&prot_old));
+    for (list, first, second) in [
+        (format!("{prot_v4} {prot_old}"), &v4, &old),
+        (format!("{prot_old} {prot_v4}"), &old, &v4),
+    ] {
+        let both = alone(&list);
+        assert_eq!(both.num_seqs(), v4.num_seqs() + old.num_seqs(), "{list}");
+        assert_eq!(
+            both.total_length(),
+            v4.total_length() + old.total_length(),
+            "{list}"
+        );
+        assert_eq!(
+            both.name_records(),
+            [
+                first.name_records()[0].clone(),
+                second.name_records()[0].clone()
+            ],
+            "{list}"
+        );
+    }
+    // The same name twice: its volume is opened (and searched) once, the reports show it
+    // twice (probe DI-8f P25, F38).
+    let twice = alone(&format!("{prot_v4} {prot_v4}"));
+    assert_eq!(twice.num_seqs(), v4.num_seqs());
+    assert_eq!(twice.name_records().len(), 2);
+    assert_eq!(twice.name_records()[1], v4.name_records()[0]);
+    // A quoted name keeps its quotes in its record (`GetBlastDbInfo` splits with them).
+    let quoted_db = alone(&quoted);
+    assert_eq!(quoted_db.name_records()[0].name, quoted);
     let error = SeqDb::open("  ", SeqType::Protein).unwrap_err();
     assert!(
         matches!(&error, SeqDbError::NotFound(message)

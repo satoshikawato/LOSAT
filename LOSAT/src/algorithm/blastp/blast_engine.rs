@@ -5484,10 +5484,13 @@ impl<'a> BlastpSubjectSource<'a> {
                 records.len(),
                 records.iter().map(|record| record.seq().len()).sum(),
             ),
-            Self::Database(database) => (
-                database.printed_num_sequences() as usize,
-                usize::try_from(database.printed_total_letters()).unwrap_or(usize::MAX),
-            ),
+            Self::Database(database) => {
+                let shown = database.pairwise_database();
+                (
+                    usize::try_from(shown.num_sequences).unwrap_or(usize::MAX),
+                    usize::try_from(shown.total_letters).unwrap_or(usize::MAX),
+                )
+            }
         }
     }
 }
@@ -10866,15 +10869,17 @@ fn run_resolved_in_pool(
         subject_label.to_string()
     };
     let subject_input_label = blastp_subject_tag(&args, subject_label);
-    // The number of sequences that the `Database:` lines show: the real count of the
-    // database, or the records of the subject set. With a taxid list the reports show the
-    // whole database's totals and the statistics read the list's (line DI-8).
-    let shown_num_sequences = match database {
-        Some(database) => database.printed_num_sequences() as usize,
+    // The number of sequences that the `Database:` lines show: the sums over the names of the
+    // `-db` list (`PairwiseDatabase`, a name given twice twice), or the records of the subject
+    // set. With a taxid list the reports show the whole database's totals and the statistics
+    // read the list's (line DI-8).
+    let shown_database = database.map(|database| database.pairwise_database());
+    let shown_num_sequences = match &shown_database {
+        Some(shown) => usize::try_from(shown.num_sequences).unwrap_or(usize::MAX),
         None => subject_records.len(),
     };
-    let shown_total_letters = match database {
-        Some(database) => usize::try_from(database.printed_total_letters()).unwrap_or(usize::MAX),
+    let shown_total_letters = match &shown_database {
+        Some(shown) => usize::try_from(shown.total_letters).unwrap_or(usize::MAX),
         None => total_db_len,
     };
     let context = ReportContext {

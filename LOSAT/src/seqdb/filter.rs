@@ -1184,7 +1184,9 @@ impl LmdbEntry {
     // }
     // ```
     // An excluded OID of a volume the database does not hold becomes `kSeqDBEntryNotFound`,
-    // which NCBI then clears as a bit (`ClearBit(-1)`, undefined); LOSAT drops it.
+    // which NCBI then clears as a bit (`ClearBit(-1)`, undefined): NCBI crashes (SIGSEGV,
+    // exit 139, review of DI-8f: `-db mv/m.00`, or `-db "d1/m d2/m"` whose volumes
+    // interleave). LOSAT refuses the list (PD-LOSAT-NCBI-DEFECTS, rule 3).
     /// The database OIDs that the negative list `ids` excludes in this entry: those whose
     /// every id of the `.nos`/`.pos` file is covered by the listed ids that have them as
     /// first OID.
@@ -1232,10 +1234,20 @@ impl LmdbEntry {
                 excluded.push(current_oid);
             }
         }
-        Ok(excluded
+        excluded
             .into_iter()
-            .filter_map(|oid| self.database_oid(oid))
-            .collect())
+            .map(|oid| {
+                self.database_oid(oid)
+                    .ok_or_else(|| SeqDbError::Unsupported {
+                        path: self.lmdb.clone(),
+                        message: format!(
+                            "the negative seqid list excludes sequence {oid} of the LMDB file, in \
+                         a volume that the database does not hold; NCBI BLAST+ then clears \
+                         bit -1 of its OID mask and crashes"
+                        ),
+                    })
+            })
+            .collect()
     }
 }
 
@@ -1641,6 +1653,83 @@ impl SeqDb {
     /// Whether the database is restricted by a list ([`SeqDb::restrict`]).
     pub fn is_restricted(&self) -> bool {
         self.filter.is_some()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:275-286
+    // ```c++
+    // void CSeqDBLMDBSet::AccessionToOids(const string & acc, vector<TOid>  & oids)const
+    // {
+    // 	m_LMDBEntrySet[0]->AccessionToOids(acc, oids);
+    // 	vector <TOid> tmp;
+    // 	for(unsigned int i=1; i < m_LMDBEntrySet.size(); i++) {
+    // 		m_LMDBEntrySet[i]->AccessionToOids(acc, tmp);
+    // ```
+    // Called from c++/src/app/blast/blast_app_util.cpp:756 `BlastFormatter_PreFetchSequenceData`
+    // (through `CBlastDbDataLoader::GetBlobId`, `CSeqDB::SeqidToOid`): before NCBI
+    // writes a batch's reports (all formats but the archive), its BlastDb data loader looks
+    // each reported Seq-id up in every LMDB file of the database; a file made without
+    // `-parse_seqids` has no `acc2oid` table, and the lookup of a parsed Seq-id stops the run
+    // with "DB contains no accession info." (probe DI-8f F42, P14, H19; H15-H18 run: no hit
+    // with a parsed Seq-id, or `-outfmt 11`). A taxid list stops at the lookup up front (H09).
+    /// Refuses, for a search, a version 5 database whose LMDB files mix files with and without
+    /// the accession table (`-db "parsed unparsed"`, or an alias file of such databases):
+    /// NCBI BLAST+ searches it and then fails at its reports whenever a hit has a parsed
+    /// Seq-id. A database of one LMDB file, or of files that all have the table or all lack
+    /// it, passes.
+    pub fn check_accession_tables(&self) -> Result<(), SeqDbError> {
+        if !self.is_version5() {
+            return Ok(());
+        }
+        // One LMDB file (one database, or an alias of the volumes of one): nothing to mix, and
+        // nothing opened.
+        let lmdb_path = |volume: &super::volume::Volume| {
+            let name = volume.index().lmdb_file.as_deref().unwrap_or_default();
+            volume
+                .base()
+                .with_file_name(String::from_utf8_lossy(name).as_ref())
+        };
+        let first = lmdb_path(&self.volumes[0]);
+        if self.volumes[1..]
+            .iter()
+            .all(|volume| lmdb_path(volume) == first)
+        {
+            return Ok(());
+        }
+        // A volume list that the LMDB files do not describe is refused by the lookups.
+        let Ok(entries) = self.lmdb_entries() else {
+            return Ok(());
+        };
+        let mut with_table = None;
+        let mut without_table = None;
+        for entry in &entries {
+            let file = DbFile::open(&entry.lmdb).map_err(lmdb_file_error)?;
+            let env = Env::open(&file).map_err(|message| lmdb_open_error(&file, message))?;
+            let has_table = env
+                .open_db(b"acc2oid")
+                .map_err(|message| SeqDbError::Format {
+                    path: entry.lmdb.clone(),
+                    message,
+                })?
+                .is_some();
+            let slot = if has_table {
+                &mut with_table
+            } else {
+                &mut without_table
+            };
+            slot.get_or_insert_with(|| entry.lmdb.clone());
+        }
+        match (with_table, without_table) {
+            (Some(parsed), Some(unparsed)) => Err(SeqDbError::Unsupported {
+                path: unparsed,
+                message: format!(
+                    "the databases mix version 5 files with the accession table of \
+                     makeblastdb -parse_seqids ({}) and without it; NCBI BLAST+ stops with \
+                     \"DB contains no accession info.\" when it reports a hit of the parsed ones",
+                    parsed.display()
+                ),
+            }),
+            _ => Ok(()),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:216-262

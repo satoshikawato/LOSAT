@@ -1,0 +1,4 @@
+Error: [blastdbcmd] Skipped mydb:prot10
+Error: [blastdbcmd] Invalid filtering algorithm ID: 21
+Error: [blastdbcmd] Skipped P99999
+Error: [blastdbcmd] Skipped NOSUCH9

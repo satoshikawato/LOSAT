@@ -6504,8 +6504,10 @@ Scheduling (each value computed by one thread with the original function; order 
   since the bucket fill writes each of their entries before any is read (zero-filling them again cost the small
   searches 1-5 % of their user cycles); the hits grow to n + n/4 where short (`tblastx/lookup/x_clut_direct.rs`). A split query builds a table per chunk on
   whichever thread needs it, and each of those threads kept a table's worth and the build's record of the appends in
-  its glibc arena after they were freed, about 20 MiB per thread (`MALLOC_ARENA_MAX=1` removed it). The pool holds as
-  many sets as tables were alive at once. The record of the appends is not kept (three builds side by side would hold
+  its glibc arena after they were freed, about 20 MiB per thread (`MALLOC_ARENA_MAX=1` removed it). A set comes back
+  only against one lent to a pooled build, so a table built without the pool (`LOSAT_X_BPFFILL=0`, a fill declined
+  before it took a set) adds nothing, and the pool holds at most as many sets as pooled tables were alive at once
+  (unit test `the_flat_pool_keeps_only_sets_it_lent`). The record of the appends is not kept (three builds side by side would hold
   three records through the search): on Linux with glibc its capacity is above glibc's largest mmap threshold, so it is
   always mapped and unmapped when dropped, and only the pages written are resident.
   The table equals the unpooled one in every field (unit test

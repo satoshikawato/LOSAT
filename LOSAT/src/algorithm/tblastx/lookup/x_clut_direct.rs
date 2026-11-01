@@ -1235,8 +1235,40 @@ struct XFlatTableVectors {
     pv: Vec<u32>,
 }
 
-// No NCBI counterpart: the pool holds as many sets as tables were alive at once.
-static X_FLAT_TABLES: Mutex<Vec<XFlatTableVectors>> = Mutex::new(Vec::new());
+// No NCBI counterpart: the kept sets and the number of sets lent to pooled builds whose tables have
+// not come back. A set comes back only against one lent, so a table built without the pool
+// (`LOSAT_X_BPFFILL=0`, a fill declined before it took a set) adds nothing, and the pool never holds
+// more sets than pooled builds and their tables were alive at once.
+struct XFlatPool {
+    kept: Vec<XFlatTableVectors>,
+    lent: usize,
+}
+
+impl XFlatPool {
+    fn lend(&mut self) -> XFlatTableVectors {
+        self.lent += 1;
+        self.kept.pop().unwrap_or_default()
+    }
+
+    /// Keeps `vectors` against a set lent; with none lent they are refused (and dropped by the caller).
+    fn take_back(&mut self, vectors: XFlatTableVectors) -> Result<(), XFlatTableVectors> {
+        if self.lent == 0 {
+            return Err(vectors);
+        }
+        self.lent -= 1;
+        self.kept.push(vectors);
+        Ok(())
+    }
+}
+
+static X_FLAT_TABLES: Mutex<XFlatPool> = Mutex::new(XFlatPool {
+    kept: Vec::new(),
+    lent: 0,
+});
+
+fn x_flat_pool() -> std::sync::MutexGuard<'static, XFlatPool> {
+    X_FLAT_TABLES.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 // No NCBI counterpart for the size: the record of a bucket fill's appends, one entry per hit of the
 // table, is needed only during the build. Kept between builds, three builds side by side held three
@@ -1286,17 +1318,20 @@ fn x_sized_on<T: Copy + Default>(mut vector: Vec<T>, n: usize, slack: bool) -> V
 }
 
 // No NCBI counterpart: buffer reuse (LOSAT_X_BXCLUTPOOL); NCBI frees the vectors.
-/// Keeps the vectors of a flat `table` for the next pooled build (the table is left empty).
+/// Keeps the vectors of a flat `table` for the next pooled build (the table is left empty), if a set
+/// is lent ([`XFlatPool`]); otherwise the table keeps them.
 pub(crate) fn x_give_back_flat(table: &mut XFlatCompressedLookup) {
+    let mut pool = x_flat_pool();
+    if pool.lent == 0 {
+        return;
+    }
     let vectors = XFlatTableVectors {
         starts: std::mem::take(&mut table.starts),
         hits: std::mem::take(&mut table.hits),
         pv: std::mem::take(&mut table.pv),
     };
-    X_FLAT_TABLES
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .push(vectors);
+    let kept = pool.take_back(vectors);
+    debug_assert!(kept.is_ok());
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (see
@@ -1341,11 +1376,7 @@ fn x_buckets_on(
     // after the partition (they bound the list of a cell's offsets moved to the scan order: a query
     // offset appends to a cell at most twice).
     let kept = if pooled {
-        X_FLAT_TABLES
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .pop()
-            .unwrap_or_default()
+        x_flat_pool().lend()
     } else {
         XFlatTableVectors::default()
     };
@@ -1364,10 +1395,10 @@ fn x_buckets_on(
     // The kept vectors taken go back to the pool at a refusal.
     let give_back = |starts: Vec<u32>, hits: Vec<i32>, pv: Vec<u32>| {
         if pooled {
-            X_FLAT_TABLES
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(XFlatTableVectors { starts, hits, pv });
+            let refused = x_flat_pool()
+                .take_back(XFlatTableVectors { starts, hits, pv })
+                .err();
+            drop(refused);
         }
     };
     for (range, is_table) in ranges {
@@ -3396,5 +3427,35 @@ mod tests {
         if let Some(mut kept) = alive {
             x_give_back_flat(&mut kept);
         }
+    }
+
+    // LOSAT_X_BXCLUTPOOL: a set comes back only against one lent, so tables built without the pool
+    // do not grow it; it holds at most as many sets as were lent at once.
+    #[test]
+    fn the_flat_pool_keeps_only_sets_it_lent() {
+        let set = |n: usize| XFlatTableVectors {
+            starts: vec![0; n],
+            hits: Vec::new(),
+            pv: Vec::new(),
+        };
+        let mut pool = XFlatPool {
+            kept: Vec::new(),
+            lent: 0,
+        };
+        assert!(pool.take_back(set(1)).is_err(), "nothing lent");
+        assert!(pool.kept.is_empty());
+        let first = pool.lend();
+        let second = pool.lend();
+        assert!(first.starts.is_empty() && second.starts.is_empty());
+        assert!(pool.take_back(set(2)).is_ok());
+        assert!(pool.take_back(set(3)).is_ok());
+        assert!(pool.take_back(set(4)).is_err(), "both sets are back");
+        assert_eq!(pool.kept.len(), 2);
+        assert_eq!(
+            pool.lend().starts.len(),
+            3,
+            "the last one back goes out first"
+        );
+        assert_eq!((pool.kept.len(), pool.lent), (1, 1));
     }
 }

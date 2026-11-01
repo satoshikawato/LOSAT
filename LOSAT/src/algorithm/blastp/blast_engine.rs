@@ -11985,6 +11985,7 @@ fn run_resolved_in_pool(
                         taxonomy: &taxonomy,
                     },
                     _ => super::tabular::TabularSubjects::Records {
+                        records: subject_records,
                         ids: &subject_ids,
                         accessions: &subject_accessions,
                         parsed: listed_parsed,

@@ -101,6 +101,7 @@ pub(super) enum TabularSubjects<'a> {
     /// default report's), the length of its record, and of the records whose ids `-parse_deflines`
     /// read their `sacc` and `saccver` and ids (both empty without the option).
     Records {
+        records: &'a [FastaRecord],
         ids: &'a [Arc<[u8]>],
         accessions: &'a [Option<[Arc<[u8]>; 2]>],
         parsed: &'a [Option<Arc<ParsedSubject>>],
@@ -156,6 +157,7 @@ impl<'a> TabularSubjects<'a> {
             // A FASTA subject has no definition lines: its `sall*` are its own ids, its title
             // and taxonomy are empty (`N/A`).
             TabularSubjects::Records {
+                records,
                 ids,
                 accessions,
                 parsed,
@@ -191,12 +193,25 @@ impl<'a> TabularSubjects<'a> {
                         taxonomy: Cow::Owned(TabularTaxonomy::default()),
                     });
                 }
+                // A record without a title: its `sseqid` is the first word of its generated title
+                // (`unnamed`, `report::defline::tabular_subject_id`), its `sall*` its local id
+                // (`s_ReplaceLocalId`).
+                let all_ids = match records.get(s_idx) {
+                    Some(record) if needs.all_deflines && record.title.is_empty() => {
+                        vec![DeflineIds {
+                            id: record.local_id.as_bytes().to_vec(),
+                            gi: 0,
+                            accession: record.local_id.as_bytes().to_vec(),
+                        }]
+                    }
+                    _ => Vec::new(),
+                };
                 Ok(SubjectValues {
                     id,
                     accession: id,
                     accession_version: id,
                     gi: 0,
-                    all_ids: Vec::new(),
+                    all_ids,
                     titles: None,
                     length: if shows_length { length(s_idx) } else { 0 },
                     taxonomy: Cow::Owned(TabularTaxonomy::default()),
@@ -730,6 +745,7 @@ mod tests {
             range_length: None,
             database: "User specified sequence set (Input: s.faa)",
             subjects: TabularSubjects::Records {
+                records: &[],
                 ids: &ids,
                 accessions: &[],
                 parsed: &[],

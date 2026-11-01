@@ -3,7 +3,7 @@
 // of every line: about 250 bytes for each character in Chromium 149, 3.9 GiB for the outfmt 6 of
 // 15 MB of a TBLASTX search (v4-W results/s29browser).
 
-/** Lines of one block: about two screens of the view (60vh). */
+/** Lines of one block: a few screens of the view (60vh). */
 export const OUTPUT_CHUNK_LINES = 128;
 
 export interface OutputChunk {

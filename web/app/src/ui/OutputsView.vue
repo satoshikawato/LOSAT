@@ -16,22 +16,32 @@ const chunks = computed(() => outputChunks(text.value));
 /** A new output has new blocks: a block remembers the height it was last laid out with. */
 const generation = ref(0);
 const view = ref<HTMLElement>();
-/**
- * A selection over more than one block lays out every block until it ends: a browser leaves text
- * that it did not lay out out of the selection (Firefox 151: 1 % of the output on select all).
- */
-const selecting = ref(false);
+let marked = false;
 
+/**
+ * The blocks that a selection over more than one text spans are laid out while it lasts: a browser
+ * may leave text that it did not lay out out of the selection (Firefox 151: 1 % of the output on
+ * select all). A selection inside one text needs none: its block is laid out already.
+ */
 function onSelectionChange(): void {
   const selection = document.getSelection();
-  selecting.value =
-    selection !== null &&
-    !selection.isCollapsed &&
-    view.value !== undefined &&
-    selection.containsNode(view.value, true) &&
-    !(selection.anchorNode === selection.focusNode && selection.anchorNode?.nodeType === Node.TEXT_NODE);
+  const ranges: Range[] = [];
+  for (let i = 0; i < (selection?.rangeCount ?? 0); i++) {
+    const range = selection!.getRangeAt(i);
+    const oneText = range.startContainer === range.endContainer && range.startContainer.nodeType === Node.TEXT_NODE;
+    if (!range.collapsed && !oneText) ranges.push(range);
+  }
+  if (ranges.length === 0 && !marked) return;
+  marked = false;
+  for (const block of view.value?.children ?? []) {
+    const selected = ranges.some((range) => range.intersectsNode(block));
+    block.classList.toggle('output-chunk-selected', selected);
+    marked ||= selected;
+  }
 }
 onMounted(() => document.addEventListener('selectionchange', onSelectionChange));
+// The blocks of a new output may come inside a selection, which then does not change.
+watch(generation, onSelectionChange, { flush: 'post' });
 onUnmounted(() => document.removeEventListener('selectionchange', onSelectionChange));
 
 watch(
@@ -66,7 +76,7 @@ watch(
     <p class="command">
       Command: <code data-testid="result-command">{{ toShellCommand(run.snapshot.argv, format) }}</code>
     </p>
-    <pre ref="view" class="output" :class="{ 'output-selecting': selecting }" data-testid="result-output" :data-shown="shown"><span v-for="(chunk, index) in chunks" :key="`${generation}:${index}`" class="output-chunk" :style="{ '--output-chunk-lines': chunk.lines }">{{ chunk.text }}</span></pre>
+    <pre ref="view" class="output" data-testid="result-output" :data-shown="shown"><span v-for="(chunk, index) in chunks" :key="`${generation}:${index}`" class="output-chunk" :style="{ '--output-chunk-lines': chunk.lines }">{{ chunk.text }}</span></pre>
     <button data-testid="export-output" @click="coordinator.exportOutput(run.snapshot.runId, format)">
       Export outfmt {{ format }}
     </button>

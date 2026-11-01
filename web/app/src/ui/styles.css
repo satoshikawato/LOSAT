@@ -976,7 +976,7 @@ pre.output {
   contain-intrinsic-block-size: auto calc(var(--output-chunk-lines) * 1lh);
 }
 
-.output-selecting .output-chunk {
+.output-chunk-selected {
   content-visibility: visible;
 }
 

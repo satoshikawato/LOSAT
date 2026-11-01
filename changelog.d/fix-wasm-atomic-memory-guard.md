@@ -5,4 +5,4 @@
   was run). Each atomic instruction now refreshes a stale bound, and `memory.grow` records the new size so
   that the next atomic read of every thread sees it. The guard's record has version 3 and counts the atomics and
   grows; a module guarded by an older version must be rebuilt. No output change. Blastx at 1 thread runs about 4 % more
-  instructions (1-2 % more cycles); the other modes are within 0.7 %.
+  instructions (1-2 % more cycles); the other modes are within 0.8 %.

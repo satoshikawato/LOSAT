@@ -17,7 +17,7 @@ python3 $W/scripts/cpuguard.py "$CPUS" --timed || { rm -f "$M"; echo GUARD_REFUS
 TSV=$OUT/runs.tsv
 [ -f "$TSV" ] || printf 'time\tcase\tround\tarm\twall\tuser\tsys\tmaxrss_kb\trc\tsha16\tload1\n' > $TSV
 ARMS=(dev null fix)
-host() { case $1 in dev) echo $W/hostclean_wg ;; null) echo $W/hostclean_null2 ;; fix) echo $W/hostclean_fix ;; esac; }
+host() { case $1 in dev) echo $W/hostclean_wg ;; null) echo $W/hostclean_null2 ;; fix) echo $W/hostclean_cell ;; esac; }
 for ((r = 0; r < ROUNDS; r++)); do
   for c in $CASELIST; do
     for ((k = 0; k < 3; k++)); do

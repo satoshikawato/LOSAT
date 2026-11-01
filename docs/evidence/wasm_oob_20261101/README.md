@@ -178,7 +178,8 @@ an otherwise idle node), dev's host without this guard, modules 9e519214 and 74b
 | 9e519214 | 1,000 | 0 | 1 |
 | 74bbd3c7e | 1,000 | 0 | 1 |
 
-So on this machine, in these conditions, the rate is below 0.15 % per run (95 %); the first trap
+Another line's process filled the machine's memory around 01:00-01:04, during this run; only traps
+are read here. So on this machine, in these conditions, the rate is below 0.15 % per run (95 %); the first trap
 was 1 of 42 such runs on record, and P(0/2000 | 1/42) is about 1e-21, so that sighting's conditions
 were not these. It is too rare for a natural run to show a fix on x64: 0/2000 after the fix could
 not be told from 0/2000 before it. The tests that do separate the arms are the widened module
@@ -198,4 +199,53 @@ Blastx: cycles x1.009-1.017 for its x1.041 instructions; 72 % of its cycles are 
 `x_word_finder_direct_sent` (`LOSAT/src/algorithm/blastx/x_seed_scan.rs`), where an atomic load
 sits in the hot path (read as a `Once` check, not confirmed).
 
-TIMING_PENDING (`results/ab2_runs.tsv`, 9 cases at 8 threads, a null arm, 8 pairs; base = #693's host).
+Time and max RSS at 8 threads, in one run with the arms in turn, x64, Node 26.8.2 (`results/ab2_runs.tsv`,
+`scripts/wo_ab2.sh`): this branch's guard and a null arm (the same host again) against the host of
+#693, 8 CPUs of an otherwise idle node, each arm with its own guard cache, round 0 not used, output
+hashes equal in all. Another line's process filled the machine's memory around 01:59-02:02, inside
+round 1, so that round is left out: 7 triples per case. Keeping it changes the wall means by 0.0004
+at most, and moves the null arm's RSS mean from x1.007 to x1.001.
+
+| Case | dev s | wall, fix/dev | wall, null/dev | RSS, fix/dev | RSS, null/dev |
+|---|---:|---:|---:|---:|---:|
+| blastp | 11.10 | x0.998 | x1.005 | x1.001 | x1.007 |
+| blastp-fast | 14.29 | x1.006 | x0.999 | x1.018 | x1.003 |
+| megablast | 11.08 | x1.007 | x1.001 | x1.018 | x1.035 |
+| blastn | 14.77 | x1.008 | x1.000 | x1.010 | x0.996 |
+| dc-megablast | 3.99 | x1.003 | x1.018 | x1.025 | x1.008 |
+| blastn-short | 4.60 | x1.000 | x1.000 | x1.009 | x1.007 |
+| tblastn | 3.42 | x0.994 | x1.006 | x0.990 | x0.999 |
+| blastx | 2.25 | x1.009 | x0.996 | x1.005 | x0.998 |
+| tblastx | 14.41 | x1.010 | x0.999 | x0.983 | x1.013 |
+| geometric mean | | x1.004 | x1.003 | x1.007 | x1.007 |
+
+The geometric means match the null arm. Single cases differ by up to about 1 % in time; megablast's
+7 fix/dev ratios are all above 1 (x1.002-1.018), so that one is likely a real small cost.
+
+## Every mode, window widened
+
+The widened module of 74bbd3c7e, 16 threads, 16 logical CPUs of node 0 shared with other lines' runs,
+10 runs per arm per mode, arms in turn; no time read (`results/modes_runs.tsv`, `scripts/wo_modes.sh`):
+
+| Case | blastp | blastp-fast | megablast | blastn | dc-megablast | blastn-short | tblastn | blastx | tblastx | all |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| #693's host, trapped | 8 | 0 | 0 | 1 | 0 | 4 | 0 | 0 | 0 | 13/90 |
+| this branch, trapped | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/90 |
+
+One-sided Fisher p = 8e-5. Every run that finished wrote one output per mode. The widening sits in one
+function, on the path that the first trap took; a mode at 0 does not show that mode is free of
+the race without it, since dc-megablast trapped 7/40 in an earlier run on other CPUs.
+
+## What users see
+
+- **Command on Node:** `RuntimeError: memory access out of bounds` with a Wasm stack on stderr, exit
+  143, no output. On dev: on ARM64 Linux, most blastp runs at 16 threads; on x64, rarely (above).
+- **Chromium:** the same trap. In gbdraw's host the widened real module printed "running the pair
+  again" 30 times in 48 jobs, and 2 of 6 passes failed. On ARM64 the V8-level page trapped 76/80.
+- **LOSAT Web:** read from the code, not run on a trap: a trap in a thread ends the engine and the
+  search fails with "The engine stopped: memory access out of bounds"
+  (`web/app/src/infra/engine-worker/`, `reactor/abi.ts`).
+- **Firefox 151:** no trap on the V8-level page. **WebKit:** did not start here, so unknown.
+- **With this branch:** none of these in the runs above. A real search in a browser on ARM64
+  and any Android device have not been run.
+

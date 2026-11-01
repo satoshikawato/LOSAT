@@ -12,7 +12,7 @@ TSV=$OUT/runs.tsv
 for ((r = 0; r < ROUNDS; r++)); do
   for c in $CASES; do
     for a in $([ $((r % 2)) = 0 ] && echo base fix || echo fix base); do
-      H=$W/hostclean_wg; [ $a = fix ] && H=$W/hostclean_fix
+      H=$W/hostclean_wg; [ $a = fix ] && H=$W/hostclean_cell
       env -i HOME="$HOME" PATH="$PATH" XDG_CACHE_HOME=$W/wcache_m$a NODE_NO_WARNINGS=1 taskset -c $CPUS numactl --membind=$MEMNODE \
         /usr/bin/time -o $OUT/t -f '%e %M' $NODE $H/run_losat_wasi_threads.js $W/bin/d41amp100k.wasm $(largs $c) -num_threads 16 -out $OUT/o 2> $OUT/e
       RC=$?

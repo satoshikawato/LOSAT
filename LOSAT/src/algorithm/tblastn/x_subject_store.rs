@@ -6,6 +6,7 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
+use crate::algorithm::common::x_db_stream::XDbStream;
 use crate::sequence::packed_subject::{PackedNucleotide, SubjectNt};
 
 // No NCBI counterpart: reads the LOSAT_X_TBNSTORE variable once; it does not change any value NCBI
@@ -36,8 +37,8 @@ pub(super) enum SubjectLetters<'a> {
     /// EXPERIMENT (LOSAT_X_TBNSTORE): packed subjects, the letters of one made when it is read.
     Packed(&'a [PackedNucleotide]),
     /// The sequences of a `-db` database, each read where it is
-    /// searched (`x_db_stream.rs`).
-    Stream(&'a super::x_db_stream::XDbStream<'a>),
+    /// searched (`common/x_db_stream.rs`).
+    Stream(&'a XDbStream<'a>),
     /// The numbers of bases alone, of the reported sequences of a `-db` search whose reports read
     /// no letters (`database::reported_subjects`).
     Lengths(&'a [usize]),
@@ -141,7 +142,7 @@ impl<'a> SubjectLetters<'a> {
 #[derive(Clone, Copy)]
 pub(super) enum XPrelimSubject<'a> {
     Nt(SubjectNt<'a>),
-    Stream(&'a super::x_db_stream::XDbStream<'a>, usize),
+    Stream(&'a XDbStream<'a>, usize),
 }
 
 impl XPrelimSubject<'_> {

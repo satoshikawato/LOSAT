@@ -15,8 +15,9 @@
 //! `=0` they stay in the thread's store until it holds 512. By default a prefetch's results stay in
 //! its vectors (one batch a thread), with `LOSAT_X_NEWTONBATCH=0` one box each in the store. These
 //! tests compare the reports and read the `[X_STATS] NEWTONLANES`, `[X_STATS] NEWTONDROP` and
-//! `[X_STATS] NEWTONBATCH` lines (`LOSAT_X_STATS=1`): the same results taken in every arm, only the
-//! default and `LOSAT_X_NEWTONBATCH=0` drop any, and only the default keeps batches.
+//! `[X_STATS] NEWTONBATCH` lines (`LOSAT_X_STATS=1`): the same results taken in every arm (no
+//! prefetch here solves more than the 512 results the store holds; the batch keeps all of one that
+//! does), only the default and `LOSAT_X_NEWTONBATCH=0` drop any, and only the default keeps batches.
 //!
 //! The queries are the 115 proteins of `tests/fasta/PemoMJNVA.faa`; the subject is
 //! `tests/fasta/MelaMJNV.fasta` (63 of the 2,999 results computed ahead are not taken).

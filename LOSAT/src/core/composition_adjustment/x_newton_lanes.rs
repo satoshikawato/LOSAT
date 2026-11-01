@@ -1527,8 +1527,10 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
 /// solved, without it they stay until the store holds `STORE_CAPACITY` results. A dropped result
 /// asked for after all would be solved by the caller with the same bits (`take` returns `None`).
 /// With `drop` and `batch` the results stay in the vectors they were solved in (one batch a
-/// thread) instead of one box each in the store: no copy, and the caller's inputs are not freed
-/// while their copies are made.
+/// thread) instead of one box each in the store: no copy, so the caller's inputs, the outputs and
+/// the boxes are never held at once. The batch keeps every result of a prefetch; the store keeps
+/// the last `STORE_CAPACITY` of one that solves more (then more of them are taken from the batch,
+/// with the same bits).
 #[inline]
 fn x_prefetch(inputs: Vec<NewtonInput>, drop: bool, batch: bool) {
     if drop {
@@ -1669,7 +1671,7 @@ fn same_bits(a: &[f64], b: &[f64]) -> bool {
 // No NCBI counterpart: looks up a result computed ahead for exactly this input (relative entropy,
 // column and row probabilities, q compared by bits); on a hit `x` receives the stored final iterate
 // and the stored status is returned. It does not change any value NCBI computes.
-/// The stored result for this input, if any (removed from the store): this thread's kept batch
+/// The stored result for this input, if any (each result is given once): this thread's kept batch
 /// (LOSAT_X_NEWTONBATCH) first, then its store (empty while a batch is kept).
 pub(crate) fn take(
     x: &mut [f64],
@@ -2077,8 +2079,17 @@ mod tests {
         for (drop, batch) in [(true, true), (true, false), (false, true), (false, false)] {
             x_prefetch(Vec::new(), true, true);
             x_prefetch(problems[..5].to_vec(), drop, batch);
+            assert_eq!(
+                BATCH.with(|kept| kept.borrow().is_some()),
+                drop && batch,
+                "a batch is kept only with drop, drop {drop} batch {batch}"
+            );
             for i in [0usize, 2, 4] {
-                assert_eq!(take_at(&mut x, i), Some(want[i].status), "drop {drop}");
+                assert_eq!(
+                    take_at(&mut x, i),
+                    Some(want[i].status),
+                    "drop {drop} batch {batch}"
+                );
                 assert!(same_bits(&x, &want[i].x));
             }
             x_prefetch(problems[5..8].to_vec(), drop, batch);
@@ -2086,31 +2097,44 @@ mod tests {
             for i in [1usize, 3] {
                 let kept = take_at(&mut x, i);
                 if drop {
-                    assert_eq!(kept, None, "problem {i} dropped");
+                    assert_eq!(kept, None, "problem {i} dropped, batch {batch}");
                 } else {
-                    assert_eq!(kept, Some(want[i].status), "problem {i} kept with =0");
+                    assert_eq!(
+                        kept,
+                        Some(want[i].status),
+                        "problem {i} kept with =0, batch {batch}"
+                    );
                     assert!(same_bits(&x, &want[i].x));
                 }
             }
             for i in 5..8 {
-                assert_eq!(take_at(&mut x, i), Some(want[i].status), "drop {drop}");
+                assert_eq!(
+                    take_at(&mut x, i),
+                    Some(want[i].status),
+                    "drop {drop} batch {batch}"
+                );
                 assert!(same_bits(&x, &want[i].x));
             }
             // an empty prefetch drops what is left as well
             x_prefetch(problems[..2].to_vec(), drop, batch);
-            assert_eq!(take_at(&mut x, 0), Some(want[0].status), "drop {drop}");
+            assert_eq!(
+                take_at(&mut x, 0),
+                Some(want[0].status),
+                "drop {drop} batch {batch}"
+            );
             x_prefetch(Vec::new(), drop, batch);
             assert_eq!(
                 take_at(&mut x, 1).is_none(),
                 drop,
-                "problem 1 after an empty prefetch, drop {drop}"
+                "problem 1 after an empty prefetch, drop {drop} batch {batch}"
             );
         }
     }
 
     // No NCBI counterpart: LOSAT_X_NEWTONBATCH; the kept batch gives each result once, in any order,
-    // to the call with its input's bits (also a repeated input), stays out of the store, and goes
-    // when its last result is taken; it does not change any value NCBI computes.
+    // to the call with its input's bits (also a repeated input), searches on from its first result
+    // not taken, stays out of the store, and goes when its last result is taken; it does not change
+    // any value NCBI computes.
     #[test]
     fn x_newton_batch_gives_each_result_once_and_goes_when_all_are_taken() {
         let problems = test_problems();
@@ -2129,18 +2153,23 @@ mod tests {
             STORE.with(|store| store.borrow().is_empty()),
             "the store stays empty"
         );
-        for i in [3usize, 0, 2, 5, 4] {
+        let next = || BATCH.with(|kept| kept.borrow().as_ref().map(|batch| batch.next));
+        for i in [1usize, 2, 3] {
             assert_eq!(take_at(&mut x, i), Some(want[i].status), "problem {i}");
             assert!(same_bits(&x, &want[i].x));
-            assert!(
-                BATCH.with(|kept| kept.borrow().is_some()),
-                "one result is left"
-            );
+            assert_eq!(next(), Some(0), "problem 0 is not taken yet");
         }
-        // the input of problem 2 has no result left
-        assert_eq!(take_at(&mut x, 2), None);
-        assert_eq!(take_at(&mut x, 1), Some(want[1].status));
-        assert!(same_bits(&x, &want[1].x));
+        // results 0 to 3 taken: the search starts at 4
+        assert_eq!(take_at(&mut x, 0), Some(want[0].status));
+        assert!(same_bits(&x, &want[0].x));
+        assert_eq!(next(), Some(4));
+        // the second call with the bits of problem 2 gets the repeated one
+        assert_eq!(take_at(&mut x, 5), Some(want[5].status));
+        assert!(same_bits(&x, &want[5].x));
+        assert_eq!(take_at(&mut x, 2), None, "no result of problem 2 is left");
+        assert_eq!(next(), Some(4), "problem 4 is left");
+        assert_eq!(take_at(&mut x, 4), Some(want[4].status));
+        assert!(same_bits(&x, &want[4].x));
         assert!(
             BATCH.with(|kept| kept.borrow().is_none()),
             "the batch goes with its last result"

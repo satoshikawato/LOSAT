@@ -5431,11 +5431,12 @@ Scheduling (each value computed by one thread with the original function; order 
   vectors they were solved in (one batch a thread; `take` searches it from the first result not taken, and the batch
   goes when its last result is taken or at the next prefetch) instead of copying each into a box of the store (6,736
   bytes a result). The copies held the caller's inputs, the outputs and the boxes at once at the end of every prefetch
-  (about 13.4 KiB a problem; TBLASTN's redo solves the problems of the coming windows of a match until 32 or more are
+  (about 13.2 KiB a problem; TBLASTN's redo solves the problems of the coming windows of a match until 32 or more are
   gathered), and this transient set the high water of most threads' heaps in the redo. The results taken are the
   same (`[X_STATS] NEWTONLANES prefetched= hits= misses=` and `[X_STATS] NEWTONDROP dropped=` equal with and without
-  the switch; `[X_STATS] NEWTONBATCH kept=` counts the prefetches kept as their batch); with `LOSAT_X_NEWTONDROP=0`
-  the results are stored (the batch holds one prefetch). The search of the batch and its comparison of an input are
+  the switch, unless one prefetch solves more than the 512 results the store holds: the store keeps the last 512 of
+  them, the batch all, and more are taken; `[X_STATS] NEWTONBATCH kept=` counts the prefetches kept as their batch);
+  with `LOSAT_X_NEWTONDROP=0` the results are stored (the batch holds one prefetch). The search of the batch and its comparison of an input are
   functions of their own: inlined into `composition_matrix_adjust` they changed its code on every path (one-thread
   instructions x1.001 with the switch off), and the comparison inlined into the search kept the index of its loop
   over `q` on the stack (twice the instructions of the store's search). Unit tests

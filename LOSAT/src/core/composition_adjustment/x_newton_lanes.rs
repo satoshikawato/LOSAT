@@ -1595,12 +1595,7 @@ fn x_take_batch(
         let mut cell = cell.borrow_mut();
         let found = cell.as_mut().and_then(|batch| {
             let i = (batch.next..batch.inputs.len()).find(|&i| {
-                let input = &batch.inputs[i];
-                !batch.taken[i]
-                    && input.relative_entropy.to_bits() == relative_entropy.to_bits()
-                    && same_bits(&input.col, col)
-                    && same_bits(&input.row, row)
-                    && same_bits(&input.q, q)
+                !batch.taken[i] && x_same_input(&batch.inputs[i], q, row, col, relative_entropy)
             })?;
             x.copy_from_slice(&batch.outputs[i].x);
             batch.taken[i] = true;
@@ -1624,6 +1619,23 @@ fn x_take_batch(
             }
         }
     })
+}
+
+// No NCBI counterpart (probe): whether `input` is this input by bits (relative entropy, column and
+// row probabilities, q). Not inlined: inlined into `take`'s caller, the loop over `q` keeps its index
+// on the stack (2x the instructions of the store's search, whose closure is its own function).
+#[inline(never)]
+fn x_same_input(
+    input: &NewtonInput,
+    q: &[f64],
+    row: &[f64; N],
+    col: &[f64; N],
+    relative_entropy: f64,
+) -> bool {
+    input.relative_entropy.to_bits() == relative_entropy.to_bits()
+        && same_bits(&input.col, col)
+        && same_bits(&input.row, row)
+        && same_bits(&input.q, q)
 }
 
 // No NCBI counterpart (memory only; the results kept are the ones `prefetch` solved):

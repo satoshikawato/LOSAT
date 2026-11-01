@@ -52,16 +52,17 @@
 //! A query batch whose lookup table has fewer hits per used backbone cell than
 //! `LOSAT_X_BXDIAGMIN` (hundredths, built-in 670; `0` fuses every batch) is scanned by the direct
 //! loop instead: with few hits per cell the fused loop's per-cell work costs more than the copy it
-//! saves. With LOSAT_X_BXCROSS's cell test they broke even near 6.7 on 2026-10-24 (about 6.46 against
-//! the fly proteome, 6.95 against Swiss-Prot; the cross test against the direct loop: 4.05 x1.13, 5.34
-//! x1.06, 6.33 x1.01, 6.63 x0.99, 7.34 x0.95, 8.38 x0.90), hence 670. LOSAT_X_BXSCANBYTE then made the
-//! direct loop faster, and on 2026-11-01 they break even near 6.9 and 7.5 (fly 6.33 x1.03, 6.77 x1.01,
-//! 7.34 x0.96; Swiss-Prot 6.33 x1.09, 6.77 x1.05, 7.34 x1.01); the value was not moved. No one form wins on both sides: on the
-//! same inputs the fused loop reads x1.77 at 1.76 hits per used cell and the direct loop x1/0.78 at
-//! 13.32; the fused loop on presence bytes with one register for a short cell, and the direct loop's
-//! pairs tested by the cross-cell batches, still read x1.43 and x1.37 at 1.76
-//! (line SF S3 s4, family bx-seed-loop). Both loops give the reference's hits
-//! and table, so the choice changes only the speed; it is made once per thread and table build
+//! saves. With LOSAT_X_BXCROSS's cell test they broke even near 6.7 on 2026-10-24 (about 6.46
+//! against the fly proteome, 6.95 against Swiss-Prot; the cross test against the direct loop: 4.05
+//! x1.13, 5.34 x1.06, 6.33 x1.01, 6.63 x0.99, 7.34 x0.95, 8.38 x0.90), hence 670. LOSAT_X_BXSCANBYTE
+//! then made the direct loop faster, and on 2026-11-01 they break even near 6.9 and 7.5 (fly 6.33
+//! x1.03, 6.77 x1.01, 7.34 x0.96; Swiss-Prot 6.33 x1.09, 6.77 x1.05, 7.34 x1.01); the value was not
+//! moved. No one form wins on both sides: against the fly proteome the fused loop reads x1.77 at
+//! 1.76 hits per used cell and the direct loop x1.28 at 13.32; the fused loop on presence bytes with
+//! one register for a short cell, and the direct loop's pairs tested by the cross-cell batches,
+//! still read x1.43 and x1.37 at 1.76 (line SF S3 s4, family bx-seed-loop). Both loops give the
+//! reference's hits and table, so the choice changes only the speed; it is made once per thread and
+//! table build
 //! ([`x_fused_pays`]; a table built from the pooled vectors of the one before is a new build),
 //! and once for all the threads that search one table's subjects in tasks
 //! ([`x_shared_table_ratio`]). The timing line then also gives `min_hits_per_cell=` (the cutoff),

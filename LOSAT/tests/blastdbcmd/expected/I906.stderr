@@ -1,0 +1,4 @@
+Error: [blastdbcmd] Skipped NP_400001.3
+Error: [blastdbcmd] Skipped NOSUCH
+Error: [blastdbcmd] Invalid filtering algorithm ID: 21
+Error: [blastdbcmd] Skipped U10002.1

@@ -3,7 +3,8 @@
 // uvwasi: the threaded host (wasi_thread_host.js, every thread of a command) and the serial runner
 // (run_losat_wasi.js).
 const fs = require("fs");
-const tty = require("tty");
+// node:tty is loaded at its first use (an open that the table takes).
+const tty = { isatty: descriptor => require("tty").isatty(descriptor) };
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:114-127
 // ```c++

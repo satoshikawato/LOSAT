@@ -1511,9 +1511,17 @@ fn x_prefetch(inputs: Vec<NewtonInput>, drop: bool) {
             DROPPED.fetch_add(store.len() as u64, Ordering::Relaxed);
             store.clear();
         });
+        XBATCH.with(|batch| {
+            if let Some(old) = batch.borrow_mut().take() {
+                DROPPED.fetch_add(old.left as u64, Ordering::Relaxed);
+            }
+        });
     }
     if inputs.is_empty() {
         return;
+    }
+    if drop && x_probe_nlbatch() {
+        return x_prefetch_batch(inputs);
     }
     let mut outputs = vec![NewtonOutput::new(); inputs.len()];
     solve_batch(&inputs, &mut outputs);
@@ -1531,6 +1539,91 @@ fn x_prefetch(inputs: Vec<NewtonInput>, drop: bool) {
             }));
         }
     });
+}
+
+// No NCBI counterpart (probe D14 s6, exp branch only): LOSAT_PROBE_NLBATCH=1 (with NEWTONDROP) keeps
+// the one batch a thread solved ahead as its input and output vectors (no box per result, no copy);
+// it does not change any value NCBI computes.
+fn x_probe_nlbatch() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_PROBE_NLBATCH").is_some_and(|v| v == "1"))
+}
+
+// No NCBI counterpart (probe): the batch of this thread's last prefetch; `taken` marks the results
+// taken, `next` is the first one not taken, `left` how many are not taken.
+struct XBatch {
+    inputs: Vec<NewtonInput>,
+    outputs: Vec<NewtonOutput>,
+    taken: Vec<bool>,
+    next: usize,
+    left: usize,
+}
+
+// No NCBI counterpart (probe): per-thread batch computed ahead (NEWTONDROP drops it at the next
+// prefetch); it does not change any value NCBI computes.
+thread_local! {
+    static XBATCH: RefCell<Option<XBatch>> = const { RefCell::new(None) };
+}
+
+// No NCBI counterpart (probe): `prefetch` with the batch kept as it was solved.
+fn x_prefetch_batch(inputs: Vec<NewtonInput>) {
+    let n = inputs.len();
+    let mut outputs = vec![NewtonOutput::new(); n];
+    solve_batch(&inputs, &mut outputs);
+    PREFETCHED.fetch_add(n as u64, Ordering::Relaxed);
+    XBATCH.with(|batch| {
+        *batch.borrow_mut() = Some(XBatch {
+            inputs,
+            outputs,
+            taken: vec![false; n],
+            next: 0,
+            left: n,
+        });
+    });
+}
+
+// No NCBI counterpart (probe): `take` from the kept batch: the first result not taken, from `next`
+// on, whose input equals this one by bits; the batch goes when its last result is taken.
+fn x_take_batch(
+    x: &mut [f64],
+    q: &[f64],
+    row: &[f64; N],
+    col: &[f64; N],
+    relative_entropy: f64,
+) -> Option<i32> {
+    XBATCH.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        let found = cell.as_mut().and_then(|batch| {
+            let i = (batch.next..batch.inputs.len()).find(|&i| {
+                let input = &batch.inputs[i];
+                !batch.taken[i]
+                    && input.relative_entropy.to_bits() == relative_entropy.to_bits()
+                    && same_bits(&input.col, col)
+                    && same_bits(&input.row, row)
+                    && same_bits(&input.q, q)
+            })?;
+            x.copy_from_slice(&batch.outputs[i].x);
+            batch.taken[i] = true;
+            batch.left -= 1;
+            while batch.next < batch.taken.len() && batch.taken[batch.next] {
+                batch.next += 1;
+            }
+            Some((batch.outputs[i].status, batch.left == 0))
+        });
+        match found {
+            Some((status, last)) => {
+                if last {
+                    *cell = None;
+                }
+                HITS.fetch_add(1, Ordering::Relaxed);
+                Some(status)
+            }
+            None => {
+                MISSES.fetch_add(1, Ordering::Relaxed);
+                None
+            }
+        }
+    })
 }
 
 // No NCBI counterpart (memory only; the results kept are the ones `prefetch` solved):
@@ -1568,6 +1661,9 @@ pub(crate) fn take(
     col: &[f64; N],
     relative_entropy: f64,
 ) -> Option<i32> {
+    if x_probe_nlbatch() && x_newton_drop() {
+        return x_take_batch(x, q, row, col, relative_entropy);
+    }
     STORE.with(|store| {
         let mut store = store.borrow_mut();
         let position = store.iter().position(|entry| {

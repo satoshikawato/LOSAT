@@ -105,5 +105,18 @@ fn dropping_results_not_taken_keeps_the_report() {
             [0],
             "=0 drops none"
         );
+        // probe D14 s6 (exp branch only): the batch kept as its vectors gives the same report and counts
+        let (batch, batch_err) = tblastn(threads, &[("LOSAT_PROBE_NLBATCH", "1")]);
+        assert_eq!(batch, keep, "{threads} threads: NLBATCH report differs");
+        assert_eq!(
+            counts(&batch_err, "[X_STATS] NEWTONLANES ", lanes),
+            [prefetched, hits, misses, unused],
+            "{threads} threads: NLBATCH counts differ"
+        );
+        assert_eq!(
+            counts(&batch_err, "[X_STATS] NEWTONDROP ", ["dropped"]),
+            [dropped],
+            "{threads} threads: NLBATCH drops the same"
+        );
     }
 }

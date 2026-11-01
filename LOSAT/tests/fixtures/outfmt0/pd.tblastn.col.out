@@ -1,0 +1,17 @@
+qp1	ref|NM_000003.1|	NM_000003	NM_000003.1	0	ref|NM_000003.1|	0	NM_000003	270	N/A	N/A	N/A	196
+qp1	ref|NC_000013.1|NC13	NC_000013	NC_000013.1	0	ref|NC_000013.1|NC13	0	NC_000013	270	N/A	N/A	N/A	196
+qp1	tpg|BK000001.1|	BK000001	BK000001.1	0	tpg|BK000001.1|	0	BK000001	270	N/A	N/A	N/A	194
+qp1	gi|5|ref|NM_000005.1|	NM_000005	NM_000005.1	5	gi|5|ref|NM_000005.1|	5	NM_000005	270	N/A	N/A	N/A	193
+qp1	gi|5|ref|NM_000005.1|	NM_000005	NM_000005.1	5	gi|5|ref|NM_000005.1|	5	NM_000005	270	N/A	N/A	N/A	15.8
+qp1	plain1	plain1	plain1	0	plain1	0	plain1	270	N/A	N/A	N/A	192
+qp1	plain1	plain1	plain1	0	plain1	0	plain1	270	N/A	N/A	N/A	15.4
+qp1	l2	l2	l2	0	l2	0	l2	270	N/A	N/A	N/A	190
+qp1	written	written	written	0	Subject_7	0	Subject_7	270	N/A	N/A	N/A	16.9
+qp1	written	written	written	0	Subject_7	0	Subject_7	270	N/A	N/A	N/A	16.2
+qp2	written	written	written	0	Subject_7	0	Subject_7	270	N/A	N/A	N/A	193
+qp2	9012	9012	9012	0	9012	0	9012	270	N/A	N/A	N/A	193
+qp2	ref|NM_000002.1|	NM_000002	NM_000002.1	0	ref|NM_000002.1|	0	NM_000002	270	N/A	N/A	N/A	193
+qp2	Subject_1	Subject_1	Subject_1	0	Subject_1	0	Subject_1	270	N/A	N/A	N/A	192
+qp2	s1	s1	s1	0	s1	0	s1	270	N/A	N/A	N/A	192
+qp2	gnl|db|tag5	db:tag5	db:tag5	0	gnl|db|tag5	0	db:tag5	270	N/A	N/A	N/A	191
+qp2	ref|NM_000003.1|	NM_000003	NM_000003.1	0	ref|NM_000003.1|	0	NM_000003	270	N/A	N/A	N/A	16.5

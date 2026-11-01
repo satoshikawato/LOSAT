@@ -32,38 +32,38 @@ On certified pairwise profiles and fixtures, LOSAT is checked against declared N
 
 | Program | Supported Tasks | Output Formats (`-outfmt`) | Description |
 |:---|:---|:---|:---|
-| **`blastn`** | `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16`, `17` (see [Output formats](#output-formats)) | Nucleotide vs. nucleotide alignment |
-| **`blastx`** | `blastx`; native and Wasm entry points | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
-| **`blastp`** | `blastp` (default), `blastp-fast` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Protein vs. protein alignment |
-| **`tblastx`** | `tblastx` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
-| **`tblastn`** | `tblastn` (default) | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `13`, `14`, `15`, `16` (see [Output formats](#output-formats)) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
+| **`blastn`** | `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` | `0`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `17`, `20` (see [Output formats](#output-formats)) | Nucleotide vs. nucleotide alignment |
+| **`blastx`** | `blastx` (default), `blastx-fast`; native and Wasm entry points | `0`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `20` (see [Output formats](#output-formats)) | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
+| **`blastp`** | `blastp` (default), `blastp-fast` | `0`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `20` (see [Output formats](#output-formats)) | Protein vs. protein alignment |
+| **`tblastx`** | `tblastx` | `0`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `20` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
+| **`tblastn`** | `tblastn` (default), `tblastn-fast` | `0`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `13`, `14`, `15`, `16`, `20` (see [Output formats](#output-formats)) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
 | **`psiblast`** | the first round (`-num_iterations 1`, the default) | `0`, `6`, `7`, `10`, `20` | Position-Specific Iterated BLAST: the first round, blastp's search with psiblast's report (see [section 7](#7-psi-blast-psiblast-first-round)) |
 
-> **Not supported**: `-task blastp-short` is rejected at the command line with an error message.
->
-> **Note**: Tabular output (`-outfmt 6` and `7`) writes the 12 standard BLAST fields:  
+> **Note**: Tabular output (`-outfmt 6`, `7`, `10` and `20`) writes the 12 standard BLAST fields by default:  
 > `qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore`.  
-> BLASTP and BLASTX also accept a custom field list (for example `-outfmt "6 qseqid sseqid evalue"`); BLASTN, TBLASTN and TBLASTX write the standard fields only. `delim=` is rejected.
+> All five programs and `psiblast` also accept a custom field list (for example `-outfmt "6 qseqid sseqid evalue"`) and `delim=`.
+>
+> LOSAT refuses an NCBI option or value it does not implement with an error; see [Scope & Differences](#scope--differences-from-ncbi-blast) for the list.
 
 ---
 
 ## Output formats
 
-The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`) write; `19` and `21` belong to igblastn and magicblast. Every LOSAT program reads `-outfmt` as NCBI does and gives NCBI's error for a value that NCBI rejects. A format that NCBI writes and LOSAT does not write yet is rejected with "output format N is not supported by LOSAT's PROGRAM" before the inputs are read. The default is `0`.
+The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`) write; `19` and `21` belong to igblastn and magicblast. Every LOSAT program reads `-outfmt` as NCBI does and gives NCBI's error for a value that NCBI rejects. A format that NCBI writes and LOSAT does not write is rejected with "output format N is not supported by LOSAT's PROGRAM" before the inputs are read. The default is `0`.
 
 | `-outfmt` | NCBI name | NCBI programs that write it | LOSAT |
 |:---|:---|:---|:---|
 | `0` | Pairwise | all five | all five programs |
-| `1` | Query-anchored showing identities | all five | not yet |
-| `2` | Query-anchored no identities | all five | not yet |
-| `3` | Flat query-anchored showing identities | all five | not yet |
-| `4` | Flat query-anchored no identities | all five | not yet |
+| `1` | Query-anchored showing identities | all five | not written |
+| `2` | Query-anchored no identities | all five | not written |
+| `3` | Flat query-anchored showing identities | all five | not written |
+| `4` | Flat query-anchored no identities | all five | not written |
 | `5` | BLAST XML | all five | all five programs (with `-subject` and `-db`) |
 | `6` | Tabular | all five | all five programs |
 | `7` | Tabular with comment lines | all five | all five programs |
 | `8` | Seqalign (Text ASN.1) | all five | all five programs |
 | `9` | Seqalign (Binary ASN.1) | all five | all five programs |
-| `10` | Comma-separated values | all five | not yet |
+| `10` | Comma-separated values | all five | all five programs |
 | `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | all five | every program (with `-subject` and `-db`; `ARCHIVE_FORMAT` unset: ASN.1 text, `bin...`: ASN.1 binary, `xml`: XML (`Blast4-archive`), any case, as NCBI reads it) |
 | `12` | Seqalign (JSON) | all five | all five programs |
 | `13` | Multiple-file BLAST JSON | all five, with `-out FILE` only | all five programs (with `-subject` and `-db`) |
@@ -71,8 +71,8 @@ The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blas
 | `15` | Single-file BLAST JSON | all five | all five (with `-subject` and `-db`) |
 | `16` | Single-file BLAST XML2 | all five | all five (with `-subject` and `-db`) |
 | `17` | Sequence Alignment/Map (SAM) | `blastn` only | `blastn` (with `-subject` and `-db`; `SQ` and `SR` as in NCBI) |
-| `18` | Organism Report | all five | not yet |
-| `20` | Comma-separated values with header lines | all five | not yet |
+| `18` | Organism Report | all five | not written |
+| `20` | Comma-separated values with header lines | all five | all five programs |
 
 Outfmt `17` (SAM, `blastn` only) is NCBI's document byte for byte except the `CL:` tag of its `@PG` line, which holds LOSAT's own command line (every argument followed by one space, as NCBI writes its own); a run without a command line (the library) has no `CL:` tag. NCBI writes the whole document when the search ends, and so does LOSAT, which holds the records as text until then. `-outfmt "17 SQ"` writes the target's letters in SEQ and `-outfmt "17 SR"` makes the subject the reference; other words are ignored, as in NCBI.
 
@@ -238,7 +238,7 @@ losat blastx \
 
 `blastp -db`, `blastn -db` (megablast, blastn, dc-megablast), `tblastn -db`, `blastx -db` and `tblastx -db` search a protein or nucleotide database written by `losat makeblastdb` or by `makeblastdb` without `-parse_seqids` (format versions 4 and 5, several volumes, alias files); every program also searches a database built with `-parse_seqids` (NCBI's distributed databases such as swissprot, pdbaa and the RefSeq nucleotide databases), with NCBI's subject ids and titles in every format it writes, found as NCBI finds it (the current directory, `BLASTDB`, `.ncbirc`). The output is that of NCBI BLAST+ 2.17.0 `blastp -db`, `blastn -db`, `tblastn -db`, `blastx -db` or `tblastx -db` run with `-num_threads 1`, for outfmt 0, 6 and 7, and it is the same at every `-num_threads`. A database search differs from `-subject` on the same sequences as it does in NCBI BLAST+ (the statistics see the database and the `Database:` lines differ; the random bases that stand for ambiguous letters in a nucleotide database are the ones `-subject` draws, but a database stores a hyphen as `N` where `-subject` drops it). `-dbsize` and `-searchsp` are accepted with `-db` and `-subject`, the taxid and seqid lists (`-taxids`, `-taxidlist`, `-seqidlist` and their negative forms) with `-db`; `-db` may name several databases (`-db "a b"`, a name with spaces between double quotes), which are searched as one database as NCBI BLAST+ searches them. See [PD-LOSAT-DATABASE-SEARCH](docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md) for what is rejected.
 
-`losat blastdbcmd -db NAME -info` prints what NCBI BLAST+ 2.17.0 `blastdbcmd -info` prints for the database (title, number of sequences, total length, date, longest sequence, format version, volumes), found as the search programs find it, with NCBI's error messages and exit codes, `-dbtype`, `-exact_length`, `-out`, `-logfile`, `-h`, `-help` and `-version`; its command line is read as NCBI reads it. `losat blastdbcmd -db NAME -entry all` writes the database as FASTA (or as the lines of `-outfmt "%a %l %T"` and every other `%` specifier but the ASN.1 texts `%d` and `%b`), and `-entry` / `-entry_batch` retrieve sequences by accession, name, local id or GI in a database built with `-parse_seqids`, of version 5 (NCBI's distributed databases such as swissprot and pdbaa) or version 4 (the ISAM files of its volumes, PIGs included), by `gnl|BL_ORD_ID|n` in any version 4 database, and answer as NCBI does for a database built without `-parse_seqids`, with `-range`, `-strand`, `-line_length`, `-ctrl_a`, `-target_only`, `-get_dups` and `-long_seqids`, byte for byte as NCBI writes them (two outputs NCBI gets wrong are written correctly: `-long_seqids` with `-range` on the minus strand gives the reverse complement, and `gnl|BL_ORD_ID|n` of a database in volumes is the one sequence `n`; an accession on more than about 500 sequences, on which NCBI stops with an error, is looked up like any other). `-outfmt %d` / `%b`, `-list`, the taxonomy options, `-metadata`, `-ipg`, databases with the masks of `makeblastdb -mask_data` and several names in one `-db` are rejected.
+`losat blastdbcmd -db NAME -info` prints what NCBI BLAST+ 2.17.0 `blastdbcmd -info` prints for the database (title, number of sequences, total length, date, longest sequence, format version, volumes), found as the search programs find it, with NCBI's error messages and exit codes, `-dbtype`, `-exact_length`, `-out`, `-logfile`, `-h`, `-help` and `-version`; its command line is read as NCBI reads it. `losat blastdbcmd -db NAME -entry all` writes the database as FASTA (or as the lines of `-outfmt "%a %l %T"` and every other `%` specifier but the ASN.1 texts `%d` and `%b`), and `-entry` / `-entry_batch` retrieve sequences by accession, name, local id or GI in a database built with `-parse_seqids`, of version 5 (NCBI's distributed databases such as swissprot and pdbaa) or version 4 (the ISAM files of its volumes, PIGs included), by `gnl|BL_ORD_ID|n` in any version 4 database, and answer as NCBI does for a database built without `-parse_seqids`, with `-range`, `-strand`, `-line_length`, `-ctrl_a`, `-target_only`, `-get_dups` and `-long_seqids`, byte for byte as NCBI writes them (the outputs NCBI gets wrong are written correctly: [`PD-LOSAT-BLASTDBCMD-DEVIATIONS`](docs/product_decisions/PD-LOSAT-BLASTDBCMD-DEVIATIONS.md); an accession on more than about 500 sequences, on which NCBI stops with an error, is looked up like any other). It also serves `-list`, the taxonomy options, `-metadata`, `-ipg`, and the masks of `makeblastdb -mask_data` (the filtering algorithms of `-info`, `-mask_sequence_with`, `-outfmt %m<id>`, the mask id of a batch line). `-outfmt %d` / `%b` and several names in one `-db` are rejected.
 
 ### 7. PSI-BLAST (psiblast), first round
 ```bash
@@ -248,7 +248,7 @@ losat psiblast \
   -outfmt 6
 ```
 
-`losat psiblast` runs the first round of NCBI BLAST+ 2.17.0 `psiblast` (`-num_iterations 1`, the default), with `-subject` or `-db` (databases built with `-parse_seqids` too, with blastp's subject ids, titles and refusals; section 6): the search of each query with blastp's options, one query at a time, and psiblast's report (the `PSIBLAST` header and references, `Results from round 1`, `# Iteration: 1`). It takes blastp's options without `-task` and `-ungapped` (`-soft_masking` included), and `-inclusion_ethresh` and `-pseudocount`. More rounds, the PSSM files (`-out_pssm`, `-out_ascii_pssm`, `-save_*`, `-in_pssm`), `-in_msa`, `-phi_pattern`, `-gap_trigger` and `-sum_stats` are rejected for now, as are the output formats other than `0`, `6`, `7`, `10` and `20`.
+`losat psiblast` runs the first round of NCBI BLAST+ 2.17.0 `psiblast` (`-num_iterations 1`, the default), with `-subject` or `-db` (databases built with `-parse_seqids` too, with blastp's subject ids, titles and refusals; section 6): the search of each query with blastp's options, one query at a time, and psiblast's report (the `PSIBLAST` header and references, `Results from round 1`, `# Iteration: 1`). It takes blastp's options without `-task` and `-ungapped`, and `-inclusion_ethresh` and `-pseudocount`. The options and values it refuses (more rounds, the PSSM files, `-in_msa`, `-phi_pattern`, the database filters, and others) are listed under [Scope & Differences](#scope--differences-from-ncbi-blast).
 
 ---
 
@@ -261,7 +261,7 @@ losat psiblast \
 | `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX, PSIBLAST; section 6) |
 | `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp` or `blastp-fast` (for `blastp`); `blastx` or `blastx-fast` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`). `blastp-short` is not supported |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
-| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `11`=BLAST archive (every program), `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out` (every program), `15`=BLAST JSON and `16`=BLAST XML2 (every program), `17`=SAM (BLASTN only); custom tabular fields in BLASTP and BLASTX only |
+| `-outfmt <spec>` | Integer, or `6`/`7`/`10`/`20` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `10`=CSV, `11`=BLAST archive, `12`=Seq-align (JSON), `13`=BLAST JSON and `14`=BLAST XML2 as files next to `-out`, `15`=BLAST JSON and `16`=BLAST XML2, `17`=SAM (BLASTN only), `20`=CSV with header lines; custom tabular fields and `delim=` with `6`, `7`, `10` and `20` in every program. `1` to `4` and `18` are not written |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |
 | `-max_target_seqs <int>`| Integer | `500` | Maximum number of aligned target sequences to keep |
 | `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |
@@ -368,10 +368,59 @@ The `LOSAT_X_*` environment variables, `LOSAT_TIMING`, `LOSAT_X_STATS`, `LOSAT_X
 
 ## Scope & Differences from NCBI BLAST+
 
-- **Intended Use Case**: LOSAT is engineered for local pairwise sequence comparisons (`-query` vs `-subject`).
-- **Database searches**: LOSAT searches `-subject` FASTA files and BLAST databases (`-db`, section 6) written by `makeblastdb` (also with `-parse_seqids`) or by `losat makeblastdb`; `-db` gives NCBI BLAST+ 2.17.0 `-db -num_threads 1` output at every thread count. Taxonomy and id filters and several databases in one `-db` are not supported; use NCBI BLAST+ for those.
+- **Intended Use Case**: LOSAT compares a `-query` file with a `-subject` FASTA file, or searches a BLAST database with `-db`.
+- **Database searches**: LOSAT searches `-subject` FASTA files and BLAST databases (`-db`, section 6) written by `makeblastdb` (also with `-parse_seqids`) or by `losat makeblastdb`; `-db` gives NCBI BLAST+ 2.17.0 `-db -num_threads 1` output at every thread count. In `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`, `-db` may name several databases (`-db "a b"`) and take the filters `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist` and `-no_taxid_expansion`. `psiblast` takes several names in `-db` but none of the filters.
 - **TBLASTX Subject Genetic Code**: In NCBI BLAST+, local `-subject` searches inadvertently default to genetic code 1 (Standard) regardless of command-line flags. LOSAT correctly translates the subject according to `-db_gencode`. See [PD-TBLASTX-LOCAL-SUBJECT-GENCODE](docs/product_decisions/PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md).
 - **Fail-Fast Configuration**: Unsupported flags and tasks fail fast with clear error messages rather than silently falling back to uncertified defaults.
+
+### What LOSAT refuses
+
+LOSAT stops with an error for each option and value below; it does not run something else in its place. Use NCBI BLAST+ for them. "All five programs" means `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
+
+**Output**
+- `-outfmt 1`, `2`, `3`, `4` and `18`: all five programs.
+- `-html`, `-line_length`, `-sorthits`, `-sorthsps`: all five programs.
+
+**Scoring and search settings**
+- `-matrix` and gap costs: `blastp` and `blastx` accept only BLOSUM62 with `-gapopen 11 -gapextend 1`; `tblastn` and `tblastx` accept every matrix.
+- `-comp_based_stats 1` and `3`: `blastp`, `blastx`, `tblastn` (`0` and `2` work).
+- `-word_size` other than 3 and 5: `blastp`, `blastx`. Other than 3: `tblastx`. `tblastn` takes 2 to 7.
+- `-task blastp-short`: `blastp`. `-task rmblastn`: `blastn`.
+- `-use_sw_tback`: `blastp`, `blastx`.
+- `-max_intron_length`: `tblastn`.
+- `-window_size 0`: `tblastn`, `tblastx`.
+- `-xdrop_ungap`: `blastp`, `blastx`, `tblastn`, `tblastx`. `-xdrop_gap` and `-xdrop_gap_final`: `blastp`, `blastx`.
+- `-ungapped`: `blastp`, `tblastn`.
+- `-strand` and `-sum_stats`: `tblastx`.
+- `-best_hit_overhang` and `-best_hit_score_edge`: all five programs.
+- `-subject_besthit`: `blastp`, `tblastn`, `tblastx`.
+
+**Query and subject**
+- `-query_loc` and `-subject_loc`: `blastx`.
+
+**Databases**
+- `-db_soft_mask` and `-db_hard_mask`: all five programs.
+- `-filtering_db`, `-window_masker_taxid`, `-use_index true` and `-index_name`: `blastn`.
+- Alias-file keys `FIRST_OID`, `LAST_OID`, `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `MEMB_BIT`, `MASKLIST`, `VDBLIST`, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH` and `OID_MASK_TYPE` (they select or re-count sequences). `TITLE`, `DBLIST`, `NSEQ` and `LENGTH` work.
+
+**Strategy files**
+- `-import_search_strategy` and `-export_search_strategy`: all five programs.
+
+**psiblast** runs the first round only.
+- Refused: `-num_iterations` above 1, `-in_pssm`, `-out_pssm`, `-out_ascii_pssm`, `-save_each_pssm`, `-save_pssm_after_last_round`, `-in_msa`, `-msa_master_idx`, `-ignore_msa_master`, `-phi_pattern`, `-gap_trigger`, `-sum_stats`, `-culling_limit`, `-lcase_masking`, `-searchsp`, `-show_gis`, `-parse_deflines`, `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist`, `-no_taxid_expansion`, and `-outfmt` other than 0, 6, 7, 10 and 20.
+- It also refuses the `blastp` entries above that apply to it, and `-comp_based_stats 0`, `-word_size 2` and `4`, and every matrix and gap cost but BLOSUM62 with 11/1.
+
+**makeblastdb**
+- `-randomize`, `-mask_data`, `-mask_id`, `-mask_desc`, `-gi_mask`, `-gi_mask_name`, `-oid_masks`, `-metadata_output_prefix`.
+- `-input_type blastdb`, `asn1_txt` and `asn1_bin` (`fasta` works).
+
+**Programs LOSAT does not provide**
+- `rpsblast`, `rpstblastn`, `deltablast`, `makeprofiledb`, `blast_formatter`, `blastdb_aliastool`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`.
+
+**Out of scope** (they need NCBI's servers or its GI / IPG databases)
+- `-remote` and `-entrez_query`: all programs.
+- `-gilist` and `-negative_gilist`: all five programs.
+- `-ipglist` and `-negative_ipglist`: `blastp`, `blastx`, `psiblast`.
 
 ---
 

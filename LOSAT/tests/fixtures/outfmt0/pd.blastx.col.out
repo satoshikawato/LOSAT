@@ -1,0 +1,17 @@
+qn1	ref|NP_000003.1|	NP_000003	NP_000003.1	0	ref|NP_000003.1|	0	NP_000003	90	N/A	N/A	N/A	196
+qn1	pdb|2DEF|B	2DEF_B	2DEF_B	0	pdb|2DEF|B	0	2DEF_B	90	N/A	N/A	N/A	195
+qn1	sp|P12345.1|ABC_X	P12345	P12345.1	0	sp|P12345.1|ABC_X	0	P12345	90	N/A	N/A	N/A	194
+qn1	gi|6|ref|NP_000006.1|	NP_000006	NP_000006.1	6	gi|6|ref|NP_000006.1|	6	NP_000006	90	N/A	N/A	N/A	193
+qn1	gi|6|ref|NP_000006.1|	NP_000006	NP_000006.1	6	gi|6|ref|NP_000006.1|	6	NP_000006	90	N/A	N/A	N/A	16.2
+qn1	prf||123456A	123456A	123456A	0	prf||123456A	0	123456A	90	N/A	N/A	N/A	192
+qn1	l2	l2	l2	0	l2	0	l2	90	N/A	N/A	N/A	192
+qn1	l2	l2	l2	0	l2	0	l2	90	N/A	N/A	N/A	15.4
+qn1	written	written	written	0	Subject_7	0	Subject_7	90	N/A	N/A	N/A	16.9
+qn1	unnamed	unnamed	unnamed	0	Subject_1	0	Subject_1	90	N/A	N/A	N/A	16.5
+qn2	written	written	written	0	Subject_7	0	Subject_7	90	N/A	N/A	N/A	193
+qn2	unnamed	unnamed	unnamed	0	Subject_1	0	Subject_1	90	N/A	N/A	N/A	193
+qn2	ref|NP_000002.1|	NP_000002	NP_000002.1	0	ref|NP_000002.1|	0	NP_000002	90	N/A	N/A	N/A	193
+qn2	plain1	plain1	plain1	0	plain1	0	plain1	90	N/A	N/A	N/A	192
+qn2	emb|CAA12345.1|	CAA12345	CAA12345.1	0	emb|CAA12345.1|	0	CAA12345	90	N/A	N/A	N/A	192
+qn2	gnl|db|tag6	db:tag6	db:tag6	0	gnl|db|tag6	0	db:tag6	90	N/A	N/A	N/A	191
+qn2	gi|6|ref|NP_000006.1|	NP_000006	NP_000006.1	6	gi|6|ref|NP_000006.1|	6	NP_000006	90	N/A	N/A	N/A	16.5

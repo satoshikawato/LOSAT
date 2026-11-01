@@ -8,6 +8,8 @@
 mod blastdbcmd_discovery;
 #[path = "../blastdbcmd_info.rs"]
 mod blastdbcmd_info;
+#[path = "../blastdbcmd_masks.rs"]
+mod blastdbcmd_masks;
 #[path = "../blastdbcmd_retrieve.rs"]
 mod blastdbcmd_retrieve;
 #[path = "../cli_smoke.rs"]
@@ -62,6 +64,8 @@ mod outfmt5_tblastn;
 mod outfmt5_tblastx;
 #[path = "../pairwise_par.rs"]
 mod pairwise_par;
+#[path = "../parse_deflines_subject.rs"]
+mod parse_deflines_subject;
 #[path = "../redo_contain_idx.rs"]
 mod redo_contain_idx;
 #[path = "../report_counts_cli.rs"]

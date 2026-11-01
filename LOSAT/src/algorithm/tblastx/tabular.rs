@@ -180,10 +180,25 @@ pub(super) fn write_tblastx_tabular(
         }
         _ => Vec::new(),
     };
+    // The records of a subject set whose ids `-parse_deflines` read, by subject index.
+    let records_parsed = if run.args.parse_deflines && run.database.is_none() {
+        crate::report::db_subject::parsed_records(
+            run.subjects
+                .iter()
+                .map(|record| (record.believed(), record.title.as_slice())),
+            run.args.show_gis,
+            false,
+            false,
+            "TBLASTX",
+        )?
+    } else {
+        Vec::new()
+    };
     let subjects = match &run.database {
         None => TabularSubjects::Records {
             ids: tab.subject_ids,
             length: &record_length,
+            parsed: &records_parsed,
         },
         Some(database) => TabularSubjects::Database {
             ids: tab.subject_ids,

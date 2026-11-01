@@ -13,10 +13,18 @@ use crate::run::Program;
 /// Options that the adapter or the host sets itself or refuses (`run::parse`): the output
 /// file and format (a run writes every format of the program) and the thread count, and the
 /// options of NCBI's command line that the application has no control for (`-mt_mode`,
-/// which needs `-num_threads` and has no effect; `-use_index`, whose only value is false).
+/// which needs `-num_threads` and has no effect; `-use_index`, whose only value is false;
+/// `-parse_deflines`, since a record is read before the options of a run are known).
 /// `-num_descriptions` and `-num_alignments` are described: a run searches once for each
 /// distinct hit list size of its formats (`run::search_groups`).
-const ADAPTER_OWNED: [&str; 5] = ["out", "outfmt", "num_threads", "mt_mode", "use_index"];
+const ADAPTER_OWNED: [&str; 6] = [
+    "out",
+    "outfmt",
+    "num_threads",
+    "mt_mode",
+    "use_index",
+    "parse_deflines",
+];
 
 /// Genetic codes are small integers; every accepted one is below this bound.
 const GENETIC_CODE_PROBE: u32 = 64;
@@ -122,7 +130,7 @@ mod tests {
     fn options_the_adapter_owns_or_refuses_are_not_described() {
         for program in ["blastp", "tblastn", "blastn", "tblastx"] {
             let described = describe(program).unwrap();
-            for flag in ["outfmt", "out", "num_threads", "mt_mode", "use_index"] {
+            for flag in ADAPTER_OWNED {
                 assert!(
                     !described.contains(&format!("\"-{flag}\"")),
                     "{program} lists -{flag}"

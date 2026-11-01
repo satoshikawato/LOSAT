@@ -2332,8 +2332,9 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         part: std::ops::Range<usize>,
     ) -> io::Result<()> {
         let config = self.config;
-        if self.database.is_some() {
-            let heading = match parsed_subject(self.parsed_subjects, s_idx) {
+        let parsed = parsed_subject(self.parsed_subjects, s_idx);
+        if self.database.is_some() || parsed.is_some() {
+            let heading = match parsed {
                 Some(subject) => {
                     DatabaseHeading::parsed(subject, true, group.subject_hits[&s_idx].len())
                 }
@@ -2662,12 +2663,16 @@ fn write_description_table<W: Write>(
     writeln!(writer)
 }
 
-/// The subject of `s_idx` among `parsed` when it has parsed Seq-ids.
+/// The subject of `s_idx` among `parsed` when it has parsed Seq-ids (not a `-subject` record shown
+/// as one without `-parse_deflines`, `ParsedSubject::shown_as_record`).
 fn parsed_subject(
     parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     s_idx: u32,
 ) -> Option<&crate::report::db_subject::ParsedSubject> {
-    parsed.get(s_idx as usize).and_then(Option::as_deref)
+    parsed
+        .get(s_idx as usize)
+        .and_then(Option::as_deref)
+        .filter(|subject| !subject.shown_as_record())
 }
 
 /// The description-table label of a database sequence (before the cut to the line): the title
@@ -3132,8 +3137,9 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         // A database sequence's heading is its stored title after `>` (a `BL_ORD_ID`
         // id is not shown), as BLASTP's (`write_database_subject_alignments`), or the lines
         // of the definition lines of one with parsed Seq-ids.
-        if self.report.database.is_some() {
-            let heading = match parsed_subject(&self.report.parsed_subjects, s_idx) {
+        let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
+        if self.report.database.is_some() || parsed.is_some() {
+            let heading = match parsed {
                 Some(subject) => DatabaseHeading::parsed(
                     subject,
                     self.report.gapped,
@@ -3803,8 +3809,9 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         // A database sequence's heading is its stored title after `>` (as BLASTP's,
         // BLASTN's and TBLASTN's `-db` reports), or the lines of the definition lines of one
         // with parsed Seq-ids.
-        if self.database.is_some() {
-            let heading = match parsed_subject(&self.report.parsed_subjects, s_idx) {
+        let parsed = parsed_subject(&self.report.parsed_subjects, s_idx);
+        if self.database.is_some() || parsed.is_some() {
+            let heading = match parsed {
                 Some(subject) => {
                     DatabaseHeading::parsed(subject, false, group.subject_hits[&s_idx].len())
                 }
@@ -4685,8 +4692,9 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             // A database sequence's heading is its stored title after `>` (as BLASTP's
             // and BLASTN's `-db` reports), or the lines of the definition lines of one with
             // parsed Seq-ids.
-            if database.is_some() {
-                let heading = match parsed_subject(parsed_subjects, s_idx) {
+            let parsed = parsed_subject(parsed_subjects, s_idx);
+            if database.is_some() || parsed.is_some() {
+                let heading = match parsed {
                     Some(subject) => {
                         DatabaseHeading::parsed(subject, true, subject_hits[&s_idx].len())
                     }
@@ -5097,6 +5105,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
         &[Arc<[u8]>],
         &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     )>,
+    records_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
 ) -> io::Result<()> {
     let mut writer = io::BufWriter::new(writer);
     let mut by_query: Vec<Vec<&PairwiseHit>> = vec![Vec::new(); queries.len()];
@@ -5171,12 +5180,20 @@ pub fn write_blastx_pairwise_report<W: Write>(
                         true,
                         first.subject_length,
                     )?,
-                    None => write_subject_header(
-                        &mut writer,
-                        subject_ids[*oid as usize].as_bytes(),
-                        first.subject_title.as_deref().map(str::as_bytes),
-                        first.subject_length,
-                    )?,
+                    None => match parsed_subject(records_parsed, *oid) {
+                        Some(subject) => write_database_subject_heading(
+                            &mut writer,
+                            DatabaseHeading::parsed(subject, options.gapped, shits.len()),
+                            true,
+                            first.subject_length,
+                        )?,
+                        None => write_subject_header(
+                            &mut writer,
+                            subject_ids[*oid as usize].as_bytes(),
+                            first.subject_title.as_deref().map(str::as_bytes),
+                            first.subject_length,
+                        )?,
+                    },
                 }
                 for hit in shits {
                     write_tblastn_hsp_info(&mut writer, hit)?;

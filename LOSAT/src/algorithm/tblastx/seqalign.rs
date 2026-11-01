@@ -101,7 +101,7 @@ pub(crate) fn query_records_of<'a>(
                     records,
                     placements,
                 } => SubjectRecord {
-                    id: SeqId::Local(&records[s_idx].local_id),
+                    id: records[s_idx].seq_id(),
                     searched_length: i32::try_from(subject_letters.length(s_idx))?,
                     offset: i32::try_from(placements.offset(s_idx))?,
                     use_this_seqid: &[],

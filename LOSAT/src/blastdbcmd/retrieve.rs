@@ -13,7 +13,7 @@ use crate::seqdb::isam::{seqdb_simplify_accession, SimplifyError};
 use crate::seqdb::lookup::{IdLookup, ID_OVERFLOWS};
 use crate::seqdb::tax_files::NO_ACCESSION_INFO;
 use crate::seqdb::taxdb::{LazyTaxDb, TaxNames};
-use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
+use crate::seqdb::{MaskRanges, SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::seqid::accguide::parse_flags::{ANY_LOCAL, DEFAULT, PARTIAL_OK, RAW_TEXT};
 use crate::seqid::label::{content, fasta};
 use crate::seqid::parse::{seq_id_from_text, string_to_non_negative_int};
@@ -47,7 +47,7 @@ impl Stop {
         Stop::Io
     }
 
-    fn refused(reason: String) -> Stop {
+    pub fn refused(reason: String) -> Stop {
         Stop::Refused(super::refusal(&reason))
     }
 }
@@ -64,8 +64,8 @@ impl From<SeqDbError> for Stop {
     }
 }
 
-/// `CBlastDB_FormatterConfig`, the part LOSAT serves (`m_FiltAlgoId` and `m_FmtAlgoId`
-/// never reach a formatter: a database without masks refuses every mask algorithm).
+/// `CBlastDB_FormatterConfig`. `m_FmtAlgoId` is in the `%` formatter, one id per `%m`
+/// (line BDC DECISIONS 12).
 #[derive(Clone, Debug)]
 pub(super) struct Config {
     /// `m_SeqRange`.
@@ -74,6 +74,8 @@ pub(super) struct Config {
     pub strand_minus: bool,
     /// `m_UseCtrlA`.
     pub ctrl_a: bool,
+    /// `m_FiltAlgoId`: the filtering algorithm whose masks are in lower case, -1 for none.
+    pub filt_algo: i32,
 }
 
 impl Default for Config {
@@ -82,6 +84,7 @@ impl Default for Config {
             range: NO_RANGE,
             strand_minus: false,
             ctrl_a: false,
+            filt_algo: -1,
         }
     }
 }
@@ -161,6 +164,34 @@ impl<'a> Source<'a> {
             None => (0, self.db.nucleotide_length(oid)?),
         };
         Ok(self.db.nucleotide_iupac_range(oid, from, to)?)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2234-2242
+    // ```c++
+    // int CSeqDB_IdRemapper::GetVolAlgo(int vol_idx, int algo_id)
+    // {
+    //     if (algo_id != m_CacheRealAlgo || vol_idx != m_CacheVolIndex) {
+    //         m_CacheVolIndex = vol_idx;
+    //         m_CacheRealAlgo = algo_id;
+    //         m_CacheVolAlgo = RealToVol(vol_idx, algo_id);
+    //     }
+    //     return m_CacheVolAlgo;
+    // }
+    // ```
+    // `RealToVol` throws for an algorithm the volume does not know, after the cache's key was
+    // written, and `GetMaskData` catches it: that sequence has no masks, and the next one of
+    // the volume reads the masks of the id cached before, or of an uninitialised one.
+    /// `GetMaskData(oid, algo)`: the stored ranges of the sequence, or the refusal of a volume
+    /// that has masks but not this algorithm (line NP's M/DECISIONS 9).
+    pub fn masks(&self, oid: u32, algo: i32) -> Result<Vec<(u32, u32)>, Stop> {
+        match self.db.mask_ranges(oid, algo)? {
+            MaskRanges::Ranges(ranges) => Ok(ranges),
+            MaskRanges::AlgorithmNotInVolume { volume } => Err(Stop::refused(format!(
+                "filtering algorithm {algo} in {}, a volume of an alias with masks of other \
+                 algorithms (NCBI reads the masks of another algorithm there)",
+                volume.display()
+            ))),
+        }
     }
 
     /// `CSeqDB::GetTaxInfo(taxid)`: the names of the taxonomy database on the search path,
@@ -342,7 +373,7 @@ fn request(
         OutputKind::Bioseq => Formatter::Refused(super::refusal(
             "-outfmt %b (the Bioseq as ASN.1 text) is not served",
         )),
-        OutputKind::Fields(spec) => match FormatSpec::parse(&spec) {
+        OutputKind::Fields(spec, mask_algos) => match FormatSpec::parse(&spec, mask_algos) {
             Ok(spec) if spec.asks_asn_text() => Formatter::Refused(super::refusal(
                 "-outfmt %d (the definition lines as ASN.1 text) is not served",
             )),
@@ -428,7 +459,8 @@ fn request(
 enum OutputKind {
     Fasta,
     Bioseq,
-    Fields(String),
+    /// The format text without the digits of its `%m`, and the algorithm of each `%m`.
+    Fields(String, Vec<i32>),
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:736-816
@@ -532,9 +564,87 @@ enum OutputKind {
 // 	return true;
 // }
 // ```
-/// `x_InitSearchRequest`: the configuration and the kind of output. Every mask algorithm id
-/// is invalid: LOSAT's reader refuses the databases that have masks (the column files), so
-/// the database here has none, and NCBI's answers for it are reproduced.
+/// `s_IsMaskAlgoIdValid`: whether the database has the algorithm `id` (a negative id is not
+/// looked up), with NCBI's error line for one it does not have.
+fn is_mask_algo_id_valid(source: &Source, id: i32, diag: &mut Diag) -> Result<bool, Stop> {
+    if id < 0 || source.db.mask_algorithms()?.ids().contains(&id) {
+        return Ok(true);
+    }
+    diag.err_post(&format!("Invalid filtering algorithm ID: {id}"));
+    Ok(false)
+}
+
+/// The number of the digits at `at` of `outfmt` (`None` without a digit), which it removes.
+/// NCBI adds them up in an `int` and overflows; LOSAT refuses a number that does not fit.
+fn take_mask_algo_id(outfmt: &mut String, at: usize) -> Result<Option<i32>, Stop> {
+    let end = outfmt[at..]
+        .find(|c: char| !c.is_ascii_digit())
+        .map_or(outfmt.len(), |len| at + len);
+    if end == at {
+        return Ok(None);
+    }
+    let id = outfmt[at..end].bytes().try_fold(0i32, |id, digit| {
+        id.checked_mul(10)?.checked_add(i32::from(digit - b'0'))
+    });
+    let Some(id) = id else {
+        return Err(Stop::refused(format!(
+            "-outfmt %m{} (an algorithm id that overflows NCBI's int)",
+            &outfmt[at..end]
+        )));
+    };
+    outfmt.replace_range(at..end, "");
+    Ok(Some(id))
+}
+
+/// The algorithm of each `%m` of `outfmt`, whose digits it removes. NCBI reads the first
+/// `%m` of the text only, also inside `%%m`, and takes its algorithm for every `%m`; the
+/// digits of the others stay in the text. Each `%m<digits>` has its own algorithm here, as
+/// in the runs with one `%m` each (line BDC DECISIONS 12,
+/// `PD-LOSAT-BLASTDBCMD-DEVIATIONS` item 4); a `%m` without digits has the first one's.
+fn read_mask_specifiers(
+    outfmt: &mut String,
+    source: &Source,
+    diag: &mut Diag,
+) -> Result<Vec<i32>, Stop> {
+    let Some(first_at) = outfmt.find("%m") else {
+        return Ok(Vec::new());
+    };
+    let invalid = || Stop::Ncbi("Invalid filtering algorithm ID for outfmt %m.".to_string());
+    let Some(first) = take_mask_algo_id(outfmt, first_at + 2)? else {
+        return Err(Stop::Ncbi(
+            "The option '-outfmt %m' is not followed by a masking algo ID.".to_string(),
+        ));
+    };
+    if !is_mask_algo_id_valid(source, first, diag)? {
+        return Err(invalid());
+    }
+    let mut algos = Vec::new();
+    let mut at = 0;
+    while at < outfmt.len() {
+        let percent = at;
+        if outfmt.as_bytes()[percent] != b'%' {
+            at += 1;
+            continue;
+        }
+        at += 2;
+        if outfmt.as_bytes().get(percent + 1) != Some(&b'm') {
+            continue;
+        }
+        if percent == first_at {
+            algos.push(first);
+        } else if let Some(id) = take_mask_algo_id(outfmt, at)? {
+            if !is_mask_algo_id_valid(source, id, diag)? {
+                return Err(invalid());
+            }
+            algos.push(id);
+        } else {
+            algos.push(first);
+        }
+    }
+    Ok(algos)
+}
+
+/// `x_InitSearchRequest`: the configuration and the kind of output.
 fn init_search_request(
     args: &Args,
     source: &Source,
@@ -552,7 +662,7 @@ fn init_search_request(
                 "The %f, %b, %d output format options cannot be specified together.".to_string(),
             ));
         }
-        kind = OutputKind::Fields(String::new());
+        kind = OutputKind::Fields(String::new(), Vec::new());
         if has(&outfmt, "%b") {
             outfmt = "%b".to_string();
             kind = OutputKind::Bioseq;
@@ -564,31 +674,10 @@ fn init_search_request(
         if has(&outfmt, "%d") {
             outfmt = "%d".to_string();
         }
-        if let Some(at) = outfmt.find("%m") {
-            let digits_start = at + 2;
-            let digits_end = outfmt[digits_start..]
-                .find(|c: char| !c.is_ascii_digit())
-                .map_or(outfmt.len(), |len| digits_start + len);
-            if digits_end == digits_start {
-                return Err(Stop::Ncbi(
-                    "The option '-outfmt %m' is not followed by a masking algo ID.".to_string(),
-                ));
-            }
-            let algo_id = outfmt[digits_start..digits_end]
-                .bytes()
-                .fold(0i64, |id, digit| {
-                    id.wrapping_mul(10).wrapping_add(i64::from(digit - b'0'))
-                });
-            outfmt.replace_range(digits_start..digits_end, "");
-            if algo_id >= 0 {
-                diag.err_post(&format!("Invalid filtering algorithm ID: {algo_id}"));
-                return Err(Stop::Ncbi(
-                    "Invalid filtering algorithm ID for outfmt %m.".to_string(),
-                ));
-            }
-        }
-        if let OutputKind::Fields(text) = &mut kind {
+        let mask_algos = read_mask_specifiers(&mut outfmt, source, diag)?;
+        if let OutputKind::Fields(text, algos) = &mut kind {
             *text = outfmt;
+            *algos = mask_algos;
         }
     }
     if !source.dbtype_protein && args.value("strand") == Some("minus") {
@@ -596,34 +685,36 @@ fn init_search_request(
     }
     config.ctrl_a = args.given("ctrl_a");
     if let Some(value) = args.value("mask_sequence_with") {
-        match args::string_to_int8_message(value)
+        let id = args::string_to_int8_message(value)
             .ok()
-            .and_then(|id| i32::try_from(id).ok())
-        {
-            Some(id) if id >= 0 => {
-                diag.err_post(&format!("Invalid filtering algorithm ID: {id}"));
-                return Err(Stop::Ncbi(
-                    "Invalid filtering algorithm ID for mask_sequence_with.".to_string(),
-                ));
-            }
-            Some(id) => {
-                return Err(Stop::refused(format!(
-                    "-mask_sequence_with {id} (a negative algorithm id, which NCBI accepts \
-                     and then looks up) is not served"
-                )));
-            }
-            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2219-2224
-            // ```c++
-            //     if (algo_id_map.find(algo_name) == algo_id_map.end()) {
-            //         NCBI_THROW(CSeqDBException, eArgErr, "Cannot find string algorithm id in algorithm map.");
-            //     }
-            // ```
-            None => {
-                return Err(Stop::Ncbi(
-                    "Cannot find string algorithm id in algorithm map.".to_string(),
-                ));
-            }
+            .and_then(|id| i32::try_from(id).ok());
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2261-2267
+        // ```c++
+        // int CSeqDB_IdRemapper::GetAlgoId(const string & id)
+        // {
+        //     if (! s_Contains(m_DescToId, id)) {
+        //         NCBI_THROW(CSeqDBException, eArgErr,
+        //                    "Cannot find string algorithm id in algorithm map.");
+        //     }
+        // ```
+        let id = match id {
+            Some(id) => id,
+            None => source.db.mask_algorithms()?.id_of(value).ok_or_else(|| {
+                Stop::Ncbi("Cannot find string algorithm id in algorithm map.".to_string())
+            })?,
+        };
+        if !is_mask_algo_id_valid(source, id, diag)? {
+            return Err(Stop::Ncbi(
+                "Invalid filtering algorithm ID for mask_sequence_with.".to_string(),
+            ));
         }
+        if id < -1 {
+            return Err(Stop::refused(format!(
+                "-mask_sequence_with {id} (a negative algorithm id, which NCBI accepts \
+                 and then looks up) is not served"
+            )));
+        }
+        config.filt_algo = id;
     }
     if let Some(value) = args.value("range") {
         if value.is_empty() {
@@ -1107,7 +1198,7 @@ impl Run<'_, '_> {
                 self.diag.err_post(&format!("Skipped {id}"));
                 continue;
             };
-            if self.modify_config_for_batch_entry(&lines[i].1, config) != 0 {
+            if self.modify_config_for_batch_entry(&lines[i].1, config)? != 0 {
                 err_found = true;
                 self.diag.err_post(&format!("Skipped {id}"));
                 continue;
@@ -1163,7 +1254,7 @@ impl Run<'_, '_> {
         let lines = read_batch("entry_batch", file)?;
         let mut err_found = false;
         for (id, format) in &lines {
-            if self.modify_config_for_batch_entry(format, config) != 0 {
+            if self.modify_config_for_batch_entry(format, config)? != 0 {
                 err_found = true;
                 self.diag.err_post(&format!("Skipped {id}"));
                 continue;
@@ -1268,7 +1359,7 @@ impl Run<'_, '_> {
         let lines = read_batch("ipg_batch", file)?;
         let mut err_found = false;
         for (id, format) in &lines {
-            if self.modify_config_for_batch_entry(format, config) != 0 {
+            if self.modify_config_for_batch_entry(format, config)? != 0 {
                 err_found = true;
                 self.diag.err_post(&format!("Skipped IPG : {id}"));
                 continue;
@@ -1363,14 +1454,19 @@ impl Run<'_, '_> {
     // }
     // ```
     /// The range, strand and mask algorithm of a batch line (`id [range] [minus] [algo]`):
-    /// 1 when the algorithm id is invalid (every one is, in a database without masks; a word
-    /// that is not a number is the id -1, which NCBI does not check).
-    fn modify_config_for_batch_entry(&mut self, format: &str, config: &mut Config) -> i32 {
+    /// 1 when the algorithm id is invalid (a word that is not a number is the id -1, which
+    /// NCBI does not check).
+    fn modify_config_for_batch_entry(
+        &mut self,
+        format: &str,
+        config: &mut Config,
+    ) -> Result<i32, Stop> {
         let mut status = 0;
         if !self.source.dbtype_protein {
             config.strand_minus = false;
         }
         config.range = NO_RANGE;
+        config.filt_algo = -1;
         for token in format.split([' ', '\t']).filter(|token| !token.is_empty()) {
             if token.contains('-') {
                 if let Ok(range) = parse_sequence_range_open_end(token) {
@@ -1379,15 +1475,13 @@ impl Run<'_, '_> {
             } else if !self.source.dbtype_protein && token.eq_ignore_ascii_case("minus") {
                 config.strand_minus = true;
             } else {
-                let algo_id = string_to_non_negative_int(token.as_bytes());
-                if algo_id >= 0 {
-                    self.diag
-                        .err_post(&format!("Invalid filtering algorithm ID: {algo_id}"));
+                config.filt_algo = string_to_non_negative_int(token.as_bytes());
+                if !is_mask_algo_id_valid(self.source, config.filt_algo, self.diag)? {
                     status = 1;
                 }
             }
         }
-        status
+        Ok(status)
     }
 }
 

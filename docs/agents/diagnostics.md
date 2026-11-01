@@ -3604,8 +3604,15 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_BNSTORE` does with the subjects'); with `=0` there is no store: every record keeps its letters until the
   search ends. Since 2026-11-01 (line SF S3, family bn-query-read) this one switch holds what two did: `LOSAT_X_BNQDROP`
   (the store and the drop; in the strict set from 2026-10-25) and this switch (the packing, only for a query file of at
-  least two of the task's largest batches and not for standard input); below two batches packing read the same time and
-  memory, so small files and `-query -` are packed too. <EVIDENCE-S3-PACK> Earlier evidence of the drop alone
+  least two of the task's largest batches and not for standard input); below two batches packing reads the same time
+  with less memory, so small files and `-query -` are packed too. Evidence of the fold (workstation, 2026-11-01; dev
+  afe173946 against the fold, 8 pairs in alternating order at one thread on node 0 and at 16 on node 1, max RSS = 2 ms
+  `VmHWM`; outputs identical in every arm and equal to NCBI's `-num_threads 1`): of the files packed now, megablast of
+  9.5 MB of cDNAs max RSS x0.955 at one thread (x0.979 at 16), 20 MB of them from standard input x0.922 (x0.926),
+  dc-megablast of 4 and 9.5 MB x0.976 and x0.949 (x0.989, x0.954), blastn of 1 and 1.9 MB x0.988 and x0.967 (x0.991,
+  x1.008), one record (E. coli Sakai) and 100 queries against 16S x0.999-1.001 (x1.001, x1.022: 70-76 MiB in every arm
+  at 16 threads, the store of those queries is 0.15 MB); time x0.994-1.004 at one thread and x0.981-1.018 at 16; user
+  instructions at one thread x1.0003-1.0054 (after the merge of dev 803b3c23e). Earlier evidence of the drop alone
   (perf/mb-query-letters, 2026-10-25): megablast of E. coli Sakai against MG1655 `RssAnon` 131.6 -> 126.4 MiB at one
   thread and 135.2 -> 129.9 at 16, 31,168 cDNAs at one thread 219.7 -> 215.3 MiB, time x0.98-1.00, outputs identical.
   The rule (class conditional, `x_reach!("LOSAT_X_BNQPACK", store_rule_acts)` recorded in `search_cli`): every output
@@ -4749,11 +4756,10 @@ Scheduling (each value computed by one thread with the original function; order 
   records from its caller. Where
   `LOSAT_X_RPTSTREAM` is on but keeps the reports after the loop for a search (its `off=` reasons),
   the records of every batch are kept for them (the memory of the records read before the search).
-  Since 2026-11-01 (line SF S3, family bn-query-read) the first reading is read in parts wherever the switch acts, at
-  two threads or more on a `unix` build with the `parallel` feature (formerly `LOSAT_X_QSCANPAR`, in the strict set
-  from 2026-10-26, with a minimum of 4 MiB set by `LOSAT_X_QSCANPARMIN`; both are gone, and the switch acts only for a
-  file of two of the task's largest batches or more, about 2 MB for blastn and 10 MB for dc-megablast, less with
-  `BATCH_SIZE`, `blastn/blast_engine/x_query_scan_par.rs`). The
+  Since 2026-11-01 (line SF S3, family bn-query-read) the first reading is read in parts wherever the switch acts on a
+  file of 4 MiB or more after the reader's start (`LOSAT_X_QSCANPARMIN`, tuning, sets the minimum), at two threads or
+  more on a `unix` build with the `parallel` feature (formerly a switch of its own, `LOSAT_X_QSCANPAR`, in the strict
+  set from 2026-10-26, `blastn/blast_engine/x_query_scan_par.rs`). The
   bytes from the reader's start to the end of the file are cut at targets at most 256 KiB apart (at least four parts per
   thread); a part runs from the first record start at or after its target (a `>` that begins a line, not followed by
   `?`) to the next part's, and a new reader with the same configuration reads it with the loop of `scan` on the calling
@@ -4763,7 +4769,12 @@ Scheduling (each value computed by one thread with the original function; order 
   `\r` or a `>?` anywhere in the file, a record start not within 256 KiB after a target, a byte of a part not read, a
   part whose reading ends otherwise than at the end of its bytes (an `eEOF`, a reader error or LOSAT's rejection of a
   Seq-id line), and for the BLAST archive,
-  other targets than `unix` (WebAssembly, Windows) and one thread. <EVIDENCE-S3-SCAN> Earlier evidence of the parts
+  other targets than `unix` (WebAssembly, Windows), one thread and a file below the minimum. The minimum stays
+  (2026-11-01): forced below it (`LOSAT_X_QSCANPARMIN=0`), blastn of 2.1 and 4.0 MB at two threads on the
+  workstation's node 1 (an idle socket, cores warmed) ran 0.07-0.32 s longer in 11 of 32 runs, against 1 of 32 with
+  the one-thread reading (medians x0.999-1.056), while at 16 threads the parts read x0.969-0.998, and on a loaded node
+  0 the two-thread runs had the same user cycles and 0.04 % more user instructions in every arm; the cause is not
+  known. Earlier evidence of the parts
   against one thread (workstation node 1, 16 threads, outputs identical and NCBI's): the first reading of 31,168 cDNAs
   (96 MB) 0.123 -> 0.009 s on the local i9, dc-megablast of them x0.932 wall at 16 threads (20 of 20 rounds) and x0.964
   at 8, blastn x0.972 (`-subject`) and x0.983 (`-db`), a file below 4 MiB within noise, max RSS unchanged. In the stats

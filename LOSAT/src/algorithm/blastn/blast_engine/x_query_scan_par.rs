@@ -1,12 +1,12 @@
 //! The first reading of LOSAT_X_QSTREAM (`x_query_stream::scan`, which keeps each query record's
 //! length and how the reading ends) cut into parts at record starts and read on `-num_threads`
 //! threads (the calling thread and scoped helpers, before the search pool exists), each part by a
-//! reader of its own. It is the form of that reading wherever LOSAT_X_QSTREAM acts: it had its own
-//! switch, LOSAT_X_QSCANPAR, and a minimum of 4 MiB (`LOSAT_X_QSCANPARMIN`) until 2026-11-01, when
-//! both were folded into LOSAT_X_QSTREAM (line SF S3, family bn-query-read): LOSAT_X_QSTREAM acts
-//! only on files of two of the task's largest batches or more (about 2 MB for blastn and 10 MB for
-//! dc-megablast; `BATCH_SIZE` sets the batch), and below 4 MiB the parts read the same time as one
-//! thread or less (2.1 and 4.0 MB at 2, 16 and 32 threads).
+//! reader of its own. It is the form of that reading wherever LOSAT_X_QSTREAM acts on a file of
+//! `MIN_BYTES` or more: it had its own switch, LOSAT_X_QSCANPAR, until 2026-11-01, when the switch
+//! was folded into LOSAT_X_QSTREAM (line SF S3, family bn-query-read). The minimum stays: forced
+//! below it, blastn files of 2.1 and 4.0 MB at two threads on the workstation's idle socket ran
+//! 0.07 to 0.32 s longer in 11 of 32 runs (against 1 of 32 with the one-thread reading); the cause
+//! is not known.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
 //! ```c++
@@ -54,8 +54,8 @@
 //! no part has moved: the parts read with `read_at`, which leaves the file position alone): one
 //! thread; a target without `unix` file reads at an offset or without the `parallel` feature
 //! (WebAssembly, Windows); the BLAST archive (its title check, `check_titles_for`, comes from the
-//! first reading); an empty file after the reader's start; and, found while the parts are read, a
-//! `\r` anywhere in
+//! first reading); a file of fewer than `MIN_BYTES` bytes after the reader's start
+//! (`LOSAT_X_QSCANPARMIN`, tuning, sets it); and, found while the parts are read, a `\r` anywhere in
 //! the file, a `>?` anywhere in it (a gap line, whose length becomes that many `N`s, or a `>?_`
 //! defline), a target with no record start within `MAX_REACH` bytes after it (a record that long
 //! would take that much memory in every thread that reads one), a part whose bytes cannot all be
@@ -78,12 +78,26 @@ use std::sync::OnceLock;
 
 use crate::blastinput::fasta_reader::ReaderConfig;
 
+/// The bytes after the reader's start below which the first reading stays on one thread: about
+/// 4 ms of it on the workstation.
+const MIN_BYTES: u64 = 4 << 20;
 /// The most bytes between two targets.
 const MAX_SPAN: u64 = 256 << 10;
 /// The most bytes after a target searched for a record start.
 const MAX_REACH: u64 = 256 << 10;
 /// The parts per thread, at least.
 const PARTS_PER_THREAD: u64 = 4;
+
+/// `LOSAT_X_QSCANPARMIN` (tuning): the bytes below which the first reading stays on one thread.
+fn min_bytes() -> u64 {
+    static MIN: OnceLock<u64> = OnceLock::new();
+    *MIN.get_or_init(|| {
+        std::env::var("LOSAT_X_QSCANPARMIN")
+            .ok()
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .unwrap_or(MIN_BYTES)
+    })
+}
 
 /// The lengths of the query records from byte `start` of `file` to its end, read in parts by
 /// `threads` threads, or `None` where the first reading runs as before (the module's header).
@@ -95,7 +109,7 @@ pub(super) fn lengths(
     threads: usize,
 ) -> Option<Vec<usize>> {
     debug_assert!(!config.keep_defline);
-    lengths_with(file, start, config, threads, Limits::DEFAULT)
+    lengths_with(file, start, config, threads, min_bytes(), Limits::DEFAULT)
 }
 
 /// The sizes of the parts (tests make them small).
@@ -120,6 +134,7 @@ fn lengths_with(
     _start: u64,
     _config: ReaderConfig,
     _threads: usize,
+    _min_bytes: u64,
     _limits: Limits,
 ) -> Option<Vec<usize>> {
     None
@@ -131,6 +146,7 @@ fn lengths_with(
     start: u64,
     config: ReaderConfig,
     threads: usize,
+    min_bytes: u64,
     limits: Limits,
 ) -> Option<Vec<usize>> {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -138,7 +154,7 @@ fn lengths_with(
 
     let end = file.metadata().ok()?.len();
     let bytes = end.checked_sub(start)?;
-    if threads < 2 || bytes == 0 {
+    if threads < 2 || bytes == 0 || bytes < min_bytes {
         return None;
     }
     let parts = bytes
@@ -386,7 +402,7 @@ mod tests {
         limits: Limits,
     ) -> Option<Vec<usize>> {
         let (path, file) = file_of(bytes, "p");
-        let lengths = lengths_with(&file, start, config, threads, limits);
+        let lengths = lengths_with(&file, start, config, threads, 0, limits);
         let _ = std::fs::remove_file(path);
         lengths
     }
@@ -614,9 +630,12 @@ mod tests {
             }
         }
         assert!(!serial(b"; one\n; two\n\n", config).1);
-        // One thread, or no byte after the reader's start.
+        // One thread, no byte after the reader's start, or fewer bytes than the minimum.
         assert_eq!(parallel(&good, 0, config, 1, SMALL), None);
         assert_eq!(parallel(&good, good.len() as u64, config, 4, SMALL), None);
+        let (path, file) = file_of(&good, "min");
+        assert_eq!(lengths_with(&file, 0, config, 4, 1 << 20, SMALL), None);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

@@ -75,10 +75,21 @@ Windows on ARM64 too; only Linux was run.
 The atomic counts below 20/20 on the runners are read as the function tiering up to Turboshaft
 during the rounds, where atomics have no compare; this was not checked.
 
-The real module, unwidened, on GitHub runners, blastp and blastn, AP027131 pairs, 16 threads, 100
-runs per cell with the two arms in turn (`results/arm_v2_v3/`, `scripts/arm_rate.py`). v2 = the
-guard with the compare before each atomic and nothing else; v3 = this branch. P(0/100 | 0.11) is
-about 9e-6; 0/100 alone bounds the rate at 3 % (95 %).
+The real module, unwidened, on GitHub runners, AP027131 pairs, 16 threads, 100 runs per cell with
+the arms in turn (`scripts/arm_rate.py`), this branch against dev's guard, which covers `memory.fill`
+and `memory.copy` only (`results/arm_dev_fix/`, run 41326262707, the fix branch at 7b4fe6132, dev at
+d2ef1913f):
+
+| Runner, Node | blastp dev | blastp this branch | blastn dev | blastn this branch |
+|---|---:|---:|---:|---:|
+| ubuntu-24.04-arm, 24.21.0 | **100/100** | **0/100** | 0/100 | 0/100 |
+| ubuntu-24.04-arm, 26.8.2 | **64/100** | **0/100** | 0/100 | 0/100 |
+
+P(0/100 | 0.64) is about 1e-44; 0/100 alone bounds the rate at 3 % (95 %). So on ARM64 Linux
+threaded blastp at 16 threads mostly did not finish on dev: the runs that trapped wrote no output.
+
+The same with two guards (`results/arm_v2_v3/`, run 41318924971). v2 = the compare before each
+atomic and nothing else (more function entries, so more stack checks); v3 = this branch's guard.
 
 | Runner, Node | blastp v2 | blastp v3 | blastn v2 | blastn v3 |
 |---|---:|---:|---:|---:|
@@ -86,7 +97,7 @@ about 9e-6; 0/100 alone bounds the rate at 3 % (95 %).
 | ubuntu-24.04-arm, 26.8.2 | 11/100 | **0/100** | 0/100 | 0/100 |
 | ubuntu-24.04, 26.8.2 | 0/100 | 0/100 | 0/100 | 0/100 |
 
-The first frame of the v2 traps is `dlmalloc` (one `dlfree`). Medians of wall time and max RSS of the
+The first frame of the traps is `dlmalloc` (one `dlfree` at v2). Medians of wall time and max RSS of the
 runs that finished are the same to 0.01 s and 1 MiB in each cell; every run that did not trap wrote the same output.
 An earlier run with 40 runs per cell (run 41314393510) trapped 10/40 and 3/40 at v2 with the same
 frames; megablast and dc-megablast 0/40; blastn traps nowhere. Declaring a 1 GiB initial memory
@@ -130,8 +141,10 @@ the unguarded module with the bulk sites, 0.8 s to guard (cached by the runner).
 `GROWN_PAGES` is address 16. rustc links this target with `--stack-first`, so the low addresses
 are the deep end of the main thread's stack: the stack pointer starts at 1,048,576. 7 real runs (blastp twice, blastn, megablast, dc-megablast,
 tblastn, blastx; `results/low_memory_after_runs.txt`): the deepest stack was 207,504 bytes, bytes
-0-15 stayed zero, and the cell held the final page count in each. A main stack that came within
-20 bytes of overflowing would overlap the cell.
+0-15 stayed zero, and the cell held the final page count in each. The threaded reactor, the same
+way (`results/low_memory_reactor.txt`, `scripts/reactor_low_memory.js`; blastn, megablast, blastp,
+blastx; its Web API has no dc-megablast or tblastn): deepest stack 166,016 bytes, the same two
+readings. A main stack that came within 20 bytes of overflowing would overlap the cell.
 
 On V8 a helper's own entry stack check usually handles the pending interrupt first, so a test
 of the guard must run with `--no-wasm-stack-checks` and `--liftoff-only` to reach the compare.
@@ -156,7 +169,20 @@ messages compared at addresses in bounds, at the edge, past it, misaligned and w
 
 ## Natural rate
 
-RATE_PENDING (`results/rate1_runs.tsv`).
+x64, Node 26.8.2, the first trap's form (dc-megablast, 16 threads, AP027131 x AP027132, 16 CPUs of
+an otherwise idle node), dev's host without this guard, modules 9e519214 and 74bbd3c7e in turn
+(`results/rate1_runs.tsv`):
+
+| Module | Runs | Trapped | Output hashes |
+|---|---:|---:|---:|
+| 9e519214 | 1,000 | 0 | 1 |
+| 74bbd3c7e | 1,000 | 0 | 1 |
+
+So on this machine, in these conditions, the rate is below 0.15 % per run (95 %); the first trap
+was 1 of 42 such runs on record, and P(0/2000 | 1/42) is about 1e-21, so that sighting's conditions
+were not these. It is too rare for a natural run to show a fix on x64: 0/2000 after the fix could
+not be told from 0/2000 before it. The tests that do separate the arms are the widened module
+(7/40 against 0/40) and ARM64's real blastp (above).
 
 ## Time and memory
 

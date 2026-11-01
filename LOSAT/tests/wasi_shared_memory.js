@@ -34,8 +34,8 @@
 //
 // V8 compares plain multi-byte stores too on ARM64 outside macOS, in both tiers
 // (wasm/compilation-environment.h, kPartialOOBWritesAreNoops): real blastp at 16 threads trapped
-// in dlmalloc in 11 and 29 of 100 runs on ubuntu-24.04-arm (Node 26.8.2, 24.21) with the atomics
-// guarded and nothing else. A module has
+// in dlmalloc in 64 and 100 of 100 runs on ubuntu-24.04-arm (Node 26.8.2, 24.21) with only the bulk
+// instructions guarded, 11 and 29 with the atomics guarded too. A module has
 // about 200,000 such stores, too many to wrap. But a thread learns an address in pages that
 // another thread grew only from what that thread wrote, and an atomic read (a lock, or the atomic
 // that published the address) is what orders the two. So memory.grow also raises GROWN_PAGES,

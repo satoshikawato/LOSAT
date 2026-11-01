@@ -163,8 +163,8 @@ memory that existed (dc-megablast at 16 threads, 1 of the 483 threaded runs on r
 `docs/evidence/wasm_oob_20261101/`).
 
 On ARM64 outside macOS V8 checks plain multi-byte stores against that bound too: real
-blastp at 16 threads, with the atomics guarded and nothing else, trapped in `dlmalloc` in 11
-and 29 of 100 runs on `ubuntu-24.04-arm`.
+blastp at 16 threads trapped in `dlmalloc` in 64 and 100 of 100 runs on `ubuntu-24.04-arm`
+(Node 26.8.2, 24.21) with only the bulk instructions guarded, 11 and 29 with the atomics too.
 A module has about 200,000 such stores, so they stay as they are. Instead `memory.grow`
 goes through a helper that records the new size in low memory, and each atomic instruction
 that reads memory (all but the stores and notify) compares `memory.size` with the

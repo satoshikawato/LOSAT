@@ -6,12 +6,13 @@ What NCBI BLAST+ 2.17.0 blastdbcmd printed for `-info`, its argument errors, `-o
 `-target_only`, `-get_dups`, `-long_seqids`: `LOSAT/tests/blastdbcmd_retrieve.rs`), and for
 the taxonomy, the metadata, the lists of databases and the search path (`-taxids`,
 `-taxidlist`, `-tax_info`, `-metadata`, `-list`, `-show_blastdb_search_path`, `-ipg`:
-`LOSAT/tests/blastdbcmd_discovery.rs`), and on databases with masks (`-info`,
-`-mask_sequence_with`, `%m`: `LOSAT/tests/blastdbcmd_masks.rs`). Frozen on
+`LOSAT/tests/blastdbcmd_discovery.rs`), on databases with masks (`-info`,
+`-mask_sequence_with`, `%m`: `LOSAT/tests/blastdbcmd_masks.rs`), and on several names in `-db`
+(`LOSAT/tests/blastdbcmd_several_names.rs`). Frozen on
 2026-10-29 and 2026-10-30 by line BDC's probe on the workstation (cases `I01`-`I38`,
 `B01`-`B61`, `C01`-`C20`, `F01`-`F34`, `S01`-`S46`, `D01`-`D112`, on 2026-10-31 `H01`-`H119`,
 `M01`-`M07` on 2026-10-29, on 2026-11-01 `I101`-`I1195`, `J101`-`J222`, `K01`-`K39` and
-`M101`-`M1003`; NCBI was not run on this tree).
+`M101`-`M1003`, on 2026-11-02 `N101`-`N1968`; NCBI was not run on this tree).
 
 - `db/`: databases of that probe. `p5` (version 5, `-parse_seqids`) and `p4` (version 4)
   are proteins with every Seq-id type, `n5` / `n4` the nucleotides, `p5n` / `p4n` / `n5n` /
@@ -35,7 +36,8 @@ the taxonomy, the metadata, the lists of databases and the search path (`-taxids
   databases (whose presence makes a version 4 database one with parsed ids).
 - `in/`: the `-entry_batch` files of the probe (`i_p_all.txt`, `i_p_safe.txt`: every spelling
   of an id of `p4`, the second without the ids that stop the batch; `i_i_all.txt`,
-  `i_i_range.txt`: those of `i4`).
+  `i_i_range.txt`: those of `i4`; `n_p.txt`: accessions of `p5` and `pm5` with one that neither
+  holds).
 - `expected/ID.stdout`, `expected/ID.stderr`: NCBI's bytes for case `ID`, with `{R}` for the
   directory the probe ran in (here `tests/blastdbcmd`, the current directory of the runs) and
   `{T}` for the repository's `LOSAT/tests/` (the probe's copy of the seqdb fixtures).

@@ -217,7 +217,7 @@ impl std::error::Error for SeqDbError {
 /// The texts of `SeqDbError::Format` that are NCBI's own: the errors NCBI
 /// raises for the same file with the same words. Every other format error is
 /// LOSAT's (a damaged file that NCBI reads past the end of its mapping).
-const NCBI_FORMAT_MESSAGES: [&str; 8] = [
+const NCBI_FORMAT_MESSAGES: [&str; 13] = [
     // seqdbfile.cpp:181-185
     "Error: Not a valid version 4 or 5 database.",
     // seqdbfile.cpp:222-226
@@ -230,14 +230,24 @@ const NCBI_FORMAT_MESSAGES: [&str; 8] = [
     "Column file uses unknown format_version.",
     "Column file uses unknown data type.",
     "Column file uses unsupported offset size.",
-    // seqdbimpl.cpp:2361-2363
+    // seqdbcol.cpp:267-269, 288-290, 316-318
+    "CSeqDBColumn: File format error.",
+    // seqdbcol.cpp:300-302
+    "CSeqDBColumn: Error; duplicate metadata key.",
+    // seqdbblob.cpp:112-114, 193-195, 220-222
+    "CBlastDbBlob::ReadVarInt: eof while reading integer.",
+    "CBlastDbBlob::ReadString: Unterminated string.",
+    "CBlastDbBlob::x_ReadRaw: hit end of data",
+    // seqdbimpl.cpp:2375-2376
     "Error in stored mask algorithm description data.",
 ];
 
-/// seqdbvol.cpp:3369-3385; the title or the counts follow.
-const NCBI_COLUMN_MESSAGE_PREFIXES: [&str; 2] = [
+/// seqdbvol.cpp:3365-3382 (the title or the counts follow), seqdbimpl.cpp:2456-2459 (the volume
+/// and the value follow).
+const NCBI_COLUMN_MESSAGE_PREFIXES: [&str; 3] = [
     "Error: duplicate column title [",
     "Error: column has wrong #oids [",
+    "Error: volume (",
 ];
 
 /// seqdbalias.cpp:740-754; the name of the alias file follows.

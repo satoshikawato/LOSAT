@@ -171,15 +171,16 @@ impl<'a> Source<'a> {
     // int CSeqDB_IdRemapper::GetVolAlgo(int vol_idx, int algo_id)
     // {
     //     if (algo_id != m_CacheRealAlgo || vol_idx != m_CacheVolIndex) {
-    //         m_CacheRealAlgo = algo_id;
     //         m_CacheVolIndex = vol_idx;
+    //         m_CacheRealAlgo = algo_id;
     //         m_CacheVolAlgo = RealToVol(vol_idx, algo_id);
     //     }
     //     return m_CacheVolAlgo;
     // }
     // ```
     // `RealToVol` throws for an algorithm the volume does not know, after the cache's key was
-    // written: NCBI then reads the masks of the volume's id before, or an uninitialised id.
+    // written, and `GetMaskData` catches it: that sequence has no masks, and the next one of
+    // the volume reads the masks of the id cached before, or of an uninitialised one.
     /// `GetMaskData(oid, algo)`: the stored ranges of the sequence, or the refusal of a volume
     /// that has masks but not this algorithm (line NP's M/DECISIONS 9).
     pub fn masks(&self, oid: u32, algo: i32) -> Result<Vec<(u32, u32)>, Stop> {
@@ -619,9 +620,13 @@ fn read_mask_specifiers(
     }
     let mut algos = Vec::new();
     let mut at = 0;
-    while let Some(next) = outfmt[at..].find('%') {
-        let percent = at + next;
-        at = percent + 2;
+    while at < outfmt.len() {
+        let percent = at;
+        if outfmt.as_bytes()[percent] != b'%' {
+            at += 1;
+            continue;
+        }
+        at += 2;
         if outfmt.as_bytes().get(percent + 1) != Some(&b'm') {
             continue;
         }
@@ -634,9 +639,6 @@ fn read_mask_specifiers(
             algos.push(id);
         } else {
             algos.push(first);
-        }
-        if at >= outfmt.len() {
-            break;
         }
     }
     Ok(algos)
@@ -686,10 +688,13 @@ fn init_search_request(
         let id = args::string_to_int8_message(value)
             .ok()
             .and_then(|id| i32::try_from(id).ok());
-        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2219-2224
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2261-2267
         // ```c++
-        //     if (algo_id_map.find(algo_name) == algo_id_map.end()) {
-        //         NCBI_THROW(CSeqDBException, eArgErr, "Cannot find string algorithm id in algorithm map.");
+        // int CSeqDB_IdRemapper::GetAlgoId(const string & id)
+        // {
+        //     if (! s_Contains(m_DescToId, id)) {
+        //         NCBI_THROW(CSeqDBException, eArgErr,
+        //                    "Cannot find string algorithm id in algorithm map.");
         //     }
         // ```
         let id = match id {

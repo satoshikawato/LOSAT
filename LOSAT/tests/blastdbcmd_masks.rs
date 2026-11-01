@@ -81,9 +81,17 @@ fn blastdbcmd(words: &[&str], config: &Path) -> (Vec<u8>, Vec<u8>, i32) {
 /// The frozen file `name` of `tests/blastdbcmd/expected`, with `{R}` placed.
 fn expected(name: &str) -> Vec<u8> {
     let text = fs::read(run_dir().join("expected").join(name)).unwrap();
-    let text = String::from_utf8(text).unwrap();
-    text.replace("{R}", run_dir().to_str().unwrap())
-        .into_bytes()
+    let root = run_dir();
+    let root = root.to_str().unwrap().as_bytes();
+    let mut placed = Vec::with_capacity(text.len());
+    let mut rest = &text[..];
+    while let Some(at) = rest.windows(3).position(|window| window == b"{R}") {
+        placed.extend_from_slice(&rest[..at]);
+        placed.extend_from_slice(root);
+        rest = &rest[at + 3..];
+    }
+    placed.extend_from_slice(rest);
+    placed
 }
 
 /// The probe's cases: id, words, exit status. `db/nm5` and `db/nm4` have the dust masks 11 and
@@ -255,6 +263,13 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("M465", &["-db", "db/m/pmg", "-ipg_batch", "in/m_b4.txt"], 1),
     ("M466", &["-db", "db/m/pmg", "-ipg_batch", "in/m_b4.txt", "-outfmt", "%o %s"], 1),
     ("M467", &["-db", "db/m/pmg", "-ipg_batch", "in/m_b4.txt", "-outfmt", "%o %m21"], 1),
+    ("M941", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%m11%"], 1),
+    ("M942", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%o %m11 %"], 1),
+    ("M943", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%%m11%"], 1),
+    ("M944", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%m11%é"], 1),
+    ("M945", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%é%m11"], 1),
+    ("M946", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%m11%%"], 0),
+    ("M947", &["-db", "db/nm5", "-entry", "all", "-outfmt", "%é %m11 %m12"], 1),
 ];
 
 #[test]
@@ -266,15 +281,24 @@ fn masks_are_ncbi_s_bytes() {
             continue;
         }
         let (stdout, stderr, code) = blastdbcmd(words, &config.0);
+        let (want_out, want_err) = (
+            expected(&format!("{id}.stdout")),
+            expected(&format!("{id}.stderr")),
+        );
         assert_eq!(
             String::from_utf8_lossy(&stdout),
-            String::from_utf8_lossy(&expected(&format!("{id}.stdout"))),
+            String::from_utf8_lossy(&want_out),
             "{id} {words:?}: stdout"
         );
         assert_eq!(
             String::from_utf8_lossy(&stderr),
-            String::from_utf8_lossy(&expected(&format!("{id}.stderr"))),
+            String::from_utf8_lossy(&want_err),
             "{id} {words:?}: stderr"
+        );
+        // `-outfmt %é` puts one byte of the letter in NCBI's message.
+        assert!(
+            stdout == want_out && stderr == want_err,
+            "{id} {words:?}: bytes"
         );
         assert_eq!(code, status, "{id} {words:?}: exit status");
     }
@@ -368,6 +392,12 @@ fn a_damaged_mask_column_is_ncbi_s_error() {
             &[0, 0, 0, 5],
             "Error: column has wrong #oids [5 vs 4].",
         ),
+        (
+            "metastart",
+            24,
+            &[0, 0, 0, 77],
+            "CSeqDBColumn: File format error.",
+        ),
     ];
     for &(name, at, bytes, message) in wrong {
         let dir = TestDir::new(name);
@@ -411,6 +441,74 @@ fn a_damaged_mask_column_is_ncbi_s_error() {
         assert!(stderr.is_empty(), "{name}");
         assert_eq!(code, 0, "{name}");
     }
+}
+
+/// The errors of what follows the fixed fields (M948-M954, M955-M961) and of a mask that runs
+/// past its data (M992, M994), with NCBI's text.
+#[test]
+fn damaged_metadata_and_masks_are_ncbi_s_errors() {
+    let config = TestDir::new("metadata-config");
+    let dir = TestDir::new("dupkey");
+    let db = copy_of_nm4(&dir.0);
+    let index = dir.0.join("b.naa");
+    let data = fs::read(&index).unwrap();
+    let value = data
+        .windows(12)
+        .position(|window| window == b"10:window=32")
+        .unwrap();
+    let key = data[..value]
+        .windows(2)
+        .rposition(|window| window == b"12")
+        .unwrap();
+    let mut patched = data.clone();
+    patched[key..key + 2].copy_from_slice(b"11");
+    fs::write(&index, patched).unwrap();
+    let (_, stderr, code) = blastdbcmd(&["-db", &db, "-info"], &config.0);
+    assert_eq!(
+        String::from_utf8_lossy(&stderr),
+        "BLAST Database error: CSeqDBColumn: Error; duplicate metadata key.\n"
+    );
+    assert_eq!(code, 2);
+
+    let mut patched = data;
+    let same = b"10:window=64; level=20; linker=1";
+    patched[value..value + same.len()].copy_from_slice(same);
+    fs::write(&index, patched).unwrap();
+    let (_, stderr, code) = blastdbcmd(
+        &["-db", &db, "-entry", "all", "-outfmt", "%o %m11"],
+        &config.0,
+    );
+    let stderr = String::from_utf8_lossy(&stderr);
+    assert!(
+        stderr.starts_with("Error: [blastdbcmd] Error: volume (")
+            && stderr
+                .ends_with(") mask data has duplicates value (10:window=64; level=20; linker=1)\n"),
+        "{stderr}"
+    );
+    assert_eq!(code, 1);
+
+    let dir = TestDir::new("npairs");
+    let db = copy_of_nm4(&dir.0);
+    let data_file = dir.0.join("b.nac");
+    let data = fs::read(&data_file).unwrap();
+    let pair = offsets(&[120, 161]);
+    let at = data
+        .windows(pair.len())
+        .position(|window| window == pair.as_slice())
+        .unwrap();
+    let mut patched = data;
+    patched[at - 4..at].copy_from_slice(&1000i32.to_be_bytes());
+    fs::write(&data_file, patched).unwrap();
+    let (stdout, stderr, code) = blastdbcmd(
+        &["-db", &db, "-entry", "all", "-outfmt", "%o %m11"],
+        &config.0,
+    );
+    assert!(stdout.is_empty());
+    assert_eq!(
+        String::from_utf8_lossy(&stderr),
+        "Error: [blastdbcmd] CBlastDbBlob::x_ReadRaw: hit end of data\n"
+    );
+    assert_eq!(code, 1);
 }
 
 /// A column without its data files is no column (M772, M774); one with the big-endian data file

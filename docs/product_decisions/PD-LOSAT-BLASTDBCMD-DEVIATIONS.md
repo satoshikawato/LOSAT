@@ -81,7 +81,9 @@ not reach the defect, so that the test oracle stays NCBI's binary.
    only and leaves the digits of the second in the text (probe M03, M130). LOSAT writes each
    `%m<id>` with its own algorithm, as the runs with one `%m` each give; a `%m` without digits
    has the first one's, as in NCBI (M131), and an unknown id of a later `%m` is the error of
-   its own run (M133, as M128). Expected bytes: the runs with one `%m` each (M125, M126).
+   its own run (M133, as M128). The first `%m` of the text may be the literal of `%%m<digits>`,
+   where NCBI reads the id for the `%m` after it (M137: LOSAT writes `%%m11 %m12` with the
+   masks of 12). Expected bytes: the runs with one `%m` each (M125, M126).
 5. **`-mask_sequence_with` on a protein in FASTA without a range (proposed).** NCBI's mapper
    for a whole sequence (`sequence.cpp` `x_GetMaskingStates`) keeps the masks in the first third
    of a protein: `XP_100002.1` (190 residues), masked at 50-70, is lower-case at 50-64, and
@@ -99,9 +101,10 @@ not reach the defect, so that the test oracle stays NCBI's binary.
 
 - Line BDC's frozen probe (NCBI 2.17.0 on the workstation, 2026-10-29, 2026-10-30 and
   2026-11-01):
-  `dropin-survey-20261029/BDC/probe/out/{S01,S02,S18,S31,S32,M03,M04,D16,D57,D82,D83,D87,D88,D97,D101,I771,I795,I816,I830,I849}.*`,
+  `dropin-survey-20261029/BDC/probe/out/{S01,S02,S18,S31,S32,M03,M04,M05,M125,M126,M128,M130,M133,M137,M285,M286,M290,M414,M415,M417,D16,D57,D82,D83,D87,D88,D97,D101,I771,I795,I816,I830,I849}.*`,
   the code reading in `dropin-survey-20261029/BDC/notes/B_fasta_outfmt.md` (ORACLE 1 and 3)
   and `notes/A_id_resolution.md` (§2).
 - The tests of items 1 and 2: `LOSAT/tests/blastdbcmd_retrieve.rs`
   (`long_ids_on_the_minus_strand_write_the_reverse_complement`,
-  `ordinal_ids_of_a_database_in_volumes_are_database_wide`).
+  `ordinal_ids_of_a_database_in_volumes_are_database_wide`); of items 3 to 6:
+  `LOSAT/tests/blastdbcmd_masks.rs` (`masks_are_ncbi_s_bytes`).

@@ -374,9 +374,6 @@ impl FormatSpec {
 // 	}
 // }
 // ```
-/// The letters of `%s`: the range's (the whole sequence when the range is empty once
-/// clipped), reverse-complemented for `-strand minus` (nucleotide databases: `Config` never
-/// holds the minus strand for a protein one).
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:1077-1088
 // ```c++
 // string CBlastSeqUtil::GetMasksString(const CSeqDB::TSequenceRanges & masks)
@@ -400,7 +397,7 @@ fn masks_string(masks: &[(u32, u32)]) -> String {
         .collect()
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:284-313
+// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:282-313
 // ```c++
 // void CBlastDB_SeqFormatter::x_GetSeq(CSeqDB::TOID oid, const CBlastDB_FormatterConfig & config, string & seq)
 // {
@@ -451,6 +448,10 @@ fn masks_string(masks: &[(u32, u32)]) -> String {
 // Without a range the stored offsets index the string as they are: a range past the end, or
 // one that ends before it starts, runs off the string (NCBI crashed, probes M786, M886, M896
 // of line BDC). LOSAT refuses those.
+/// The letters of `%s`: the range's (the whole sequence when the range is empty once
+/// clipped), with the masks of `-mask_sequence_with` in lower case, reverse-complemented for
+/// `-strand minus` (nucleotide databases: `Config` never holds the minus strand for a protein
+/// one).
 fn x_get_seq(source: &Source, oid: u32, config: &Config) -> Result<Vec<u8>, Stop> {
     let range = config.range.clipped(source.length(oid)?);
     let mut seq = source.string_letters(oid, range)?;

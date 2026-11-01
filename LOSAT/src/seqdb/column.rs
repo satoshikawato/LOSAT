@@ -778,8 +778,8 @@ pub(super) fn open_all(
             return Err(SeqDbError::Unsupported {
                 path: big_path,
                 message: format!(
-                    "the mask column has no little-endian data file {name}; NCBI would read \
-                     big-endian ranges as little-endian"
+                    "the column has no little-endian data file {name}; NCBI would read \
+                     big-endian offsets as little-endian"
                 ),
             });
         }

@@ -751,8 +751,8 @@ impl MaskAlgorithms {
     //     return CNcbiOstrstreamToString(retval);
     // }
     // ```
-    /// `GetAvailableMaskAlgorithmDescriptions`: the table `blastdbcmd -list`-style tools
-    /// print; empty when the database has no mask data.
+    /// `GetAvailableMaskAlgorithmDescriptions`: the table of `blastdbcmd -info`; empty when
+    /// the database has no mask data.
     pub fn descriptions(&self) -> Result<String, SeqDbError> {
         let ids = self.ids();
         if ids.is_empty() {
@@ -851,8 +851,6 @@ impl MaskAlgorithms {
 //     }
 // }
 // ```
-/// `s_ReadRanges<SReadInt4>`: the ranges of `vol_algo` in a mask blob. The pairs are
-/// little-endian `u32` (the `.?xc` file). Every read is checked against the blob.
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3276-3292
 // ```c++
 // void CSeqDBVol::GetColumnBlob(int              col_id,
@@ -899,6 +897,8 @@ fn refuse_other_first_columns(volumes: &[Volume]) -> Result<(), SeqDbError> {
     Ok(())
 }
 
+/// `s_ReadRanges<SReadInt4>`: the ranges of `vol_algo` in a mask blob. The pairs are
+/// little-endian `u32` (the `.?xc` file). Every read is checked against the blob.
 fn read_ranges(blob: &[u8], vol_algo: i32, path: &Path) -> Result<Vec<(u32, u32)>, SeqDbError> {
     let format = |message: String| SeqDbError::Format {
         path: path.to_path_buf(),

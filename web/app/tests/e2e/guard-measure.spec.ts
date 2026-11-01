@@ -118,4 +118,7 @@ test('guard: traps of the threaded engine with and without the shared-memory gua
   for (const sample of samples) {
     for (const run of sample.runs) if (run.error === undefined) expect(run.runtime?.path).toBe('threaded');
   }
+  // The module as the build serves it never stops a search; the unguarded one may.
+  const guardedStops = samples.filter((sample) => sample.arm === 'guarded').flatMap((sample) => sample.runs.filter((run) => run.error !== undefined));
+  expect(guardedStops.map((run) => `${run.id}: ${run.error}`)).toEqual([]);
 });

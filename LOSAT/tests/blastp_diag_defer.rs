@@ -3,8 +3,8 @@
 //! AVX2 batches are called after the cell's last batch of eight instead of at the end of each batch
 //! (`LOSAT_X_BPDEFER`), and with `LOSAT_X_BPMASKED` the batches take their entry coordinates from
 //! scalar loads of the hits and a cell's last batch of fewer than eight hits is one masked AVX2
-//! batch whose candidates join the buffer (`x_cell_avx2_defer_masked`, `LOSAT_X_BXDEFER`'s cell
-//! test in blastx).
+//! batch whose candidates join the buffer (`x_cell_avx2_defer_masked`, the masked batch of
+//! `LOSAT_X_BXDIAG` in blastx).
 //!
 //! Both switches are in the strict set (`src/utils/xswitch.rs`), `LOSAT_X_BPDEFER` since
 //! 2026-10-17 and `LOSAT_X_BPMASKED` since 2026-10-24: on unless `=0`. `LOSAT_X_BPDEFER` acts only

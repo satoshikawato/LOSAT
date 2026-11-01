@@ -61,6 +61,7 @@ impl TblastnArgs {
         use crate::blastinput::input_files;
         use crate::blastinput::seq_range;
         let mut args = self;
+        args.id_scope = args.parse_deflines.then(Default::default);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
         // ```c
         //     if (GetExportSearchStrategyStream(args) ||
@@ -198,6 +199,7 @@ impl TblastnArgs {
                     .with_defline(archive.is_some())
                     .with_parse_deflines(args.parse_deflines),
             );
+            subject_source.set_id_scope(args.id_scope.clone());
             // EXPERIMENT (LOSAT_X_TBNSTORE): each record's letters packed as it is read
             // (`x_read_subject_stores`), with a subject range after the record is cut to its
             // interval (the record `cut_subjects` makes).
@@ -468,7 +470,8 @@ fn search_cli(
                 list.as_ref(),
                 outputs.diagnostics,
             )?
-            .showing_gis(args.show_gis);
+            .showing_gis(args.show_gis)
+            .in_id_scope(args.id_scope.clone());
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 &args.db_filter,
@@ -574,6 +577,7 @@ fn search_cli(
             .with_defline(args.archive.is_some())
             .with_parse_deflines(args.parse_deflines),
     );
+    query_source.set_id_scope(args.id_scope.clone());
     if !shared_standard_input && query_source.stream_is_empty() {
         outputs
             .diagnostics

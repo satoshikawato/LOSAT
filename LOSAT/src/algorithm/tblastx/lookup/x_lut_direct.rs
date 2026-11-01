@@ -1111,6 +1111,12 @@ fn x_target_list(
     out.into_boxed_slice()
 }
 
+// `charsize` of the alphabet (`ilog2(alphabet_size) + 1`, cited at `get_charsize`). The T(s)
+// enumeration below takes the alphabet as constants: its loops are the lean build's hottest code,
+// and as arguments from two call sites (the pool's ranges, the serial pass) they cost BUSCO's
+// eukaryota set against a 108 kb database 0.88 G instructions of 14.7 G at one thread.
+const X_LEAN_CHARSIZE: usize = LOOKUP_ALPHABET_SIZE.ilog2() as usize + 1;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-563,580-582,600-604 (cited
 // at `x_record_neighbors`). The statements of `x_record_neighbors`, for `x_build_lean` only (so that
 // the other programs' builders keep their code).
@@ -1118,10 +1124,8 @@ fn x_target_list(
 fn x_lean_neighbors(
     query_word: &[u8],
     subject_word: &mut [u8; 32],
-    alphabet_size: usize,
     wordsize: usize,
-    charsize: usize,
-    row_max: &[i32],
+    row_max: &[i32; LOOKUP_ALPHABET_SIZE],
     threshold: i32,
     matrix: ScoringMatrix,
     score: i32,
@@ -1131,25 +1135,23 @@ fn x_lean_neighbors(
     let query_residue = query_word[current_pos] as usize;
     let score = score - row_max[query_residue];
     if current_pos == wordsize - 1 {
-        for residue in 0..alphabet_size {
+        for residue in 0..LOOKUP_ALPHABET_SIZE {
             let residue_score = lookup_matrix_score(matrix, query_residue, residue);
             if score + residue_score >= threshold {
                 subject_word[current_pos] = residue as u8;
-                out.push(x_word_index(subject_word, wordsize, charsize));
+                out.push(x_word_index(subject_word, wordsize, X_LEAN_CHARSIZE));
             }
         }
         return;
     }
-    for residue in 0..alphabet_size {
+    for residue in 0..LOOKUP_ALPHABET_SIZE {
         let residue_score = lookup_matrix_score(matrix, query_residue, residue);
         if score + residue_score >= threshold {
             subject_word[current_pos] = residue as u8;
             x_lean_neighbors(
                 query_word,
                 subject_word,
-                alphabet_size,
                 wordsize,
-                charsize,
                 row_max,
                 threshold,
                 matrix,
@@ -1167,10 +1169,8 @@ fn x_lean_neighbors(
 #[allow(clippy::too_many_arguments)]
 fn x_lean_target_list(
     query_word: &[u8],
-    alphabet_size: usize,
     wordsize: usize,
-    charsize: usize,
-    row_max: &[i32],
+    row_max: &[i32; LOOKUP_ALPHABET_SIZE],
     threshold: i32,
     matrix: ScoringMatrix,
     out: &mut Vec<u16>,
@@ -1182,7 +1182,7 @@ fn x_lean_target_list(
         self_score += lookup_matrix_score(matrix, residue, residue);
     }
     if threshold == 0 || self_score < threshold {
-        out.push(x_word_index(query_word, wordsize, charsize));
+        out.push(x_word_index(query_word, wordsize, X_LEAN_CHARSIZE));
     }
     if threshold != 0 {
         let mut max_score = row_max[query_word[0] as usize];
@@ -1193,9 +1193,7 @@ fn x_lean_target_list(
         x_lean_neighbors(
             query_word,
             &mut subject_word,
-            alphabet_size,
             wordsize,
-            charsize,
             row_max,
             threshold,
             matrix,
@@ -1589,11 +1587,12 @@ fn x_build_direct_in<C: XVec>(
 // at `x_build_direct`): the appends of s_AddWordHits for s ascending, then BlastAaLookupFinalize's
 // layout. No NCBI counterpart for the form (memory only): the passes of `x_build_direct_in` with
 // every temporary freed by the build. TBLASTN builds the table of each query batch on the thread
-// of the batch's first subject, the batches side by side; a thread's glibc arena keeps the high
-// water of what the thread allocated, so the reference build's chains, exact backbone and cell
-// vectors (3.4 MiB for 18,000 query letters) stayed in each building thread's arena under what
-// its search allocated later. Here the exact backbone is the counting sort of
-// `x_for_each_exact_word`'s words (as `x_counted_sources`: the sources in ascending cell order,
+// of the batch's first subject (the batches side by side), or on the batch's pool before its
+// subjects (`x_build_lean_in`); a thread's glibc arena keeps the high water of what the thread
+// allocated, so the reference build's chains, exact backbone and cell vectors (3.4 MiB for 18,000
+// query letters) stayed in each building thread's arena under what its search allocated later.
+// Here the exact backbone is the counting sort of `x_for_each_exact_word`'s words (as
+// `x_counted_sources`: the sources in ascending cell order,
 // each one's offsets in chain order), the lists T(s) of the present sources are made once, in
 // source order, into one vector (no memo outlives the build), the count pass runs as each list is
 // made, and the counts become the cells' fill cursors once the layout has read them (a cell of
@@ -1606,6 +1605,7 @@ fn x_build_direct_in<C: XVec>(
 /// memo, every temporary freed by the build (TBLASTN). `Err(prepared)` where `x_build_direct`
 /// declines (diagnostics mode, whose prints read the chains, or a backbone index wider than 16 bits,
 /// which no table of LOSAT's TBLASTN has: word size 3, or 2 with BLOSUM45).
+#[cfg(test)]
 #[inline(never)]
 pub(super) fn x_build_lean(
     prepared: PreparedLookupQuery,
@@ -1613,8 +1613,25 @@ pub(super) fn x_build_lean(
     matrix: ScoringMatrix,
     word_length: usize,
 ) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
+    x_build_lean_in(prepared, threshold, matrix, word_length, None)
+}
+
+// No NCBI counterpart for the parts (scheduling only): NCBI builds a table on one thread. The
+// lists T(s) are each a function of the source word alone (module comment), so the present sources,
+// in ascending order, are cut into contiguous ranges whose lists are made on tasks of `pool`
+// (`x_claimed`); the count and fill passes then read the ranges' lists in range order, which is
+// source order, so the appends are those of the one-thread build, in the same order.
+/// `x_build_lean`, with the lists T(s) made on `pool`'s threads when `pool` has two or more.
+#[inline(never)]
+pub(super) fn x_build_lean_in(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
+) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
     let alphabet_size = LOOKUP_ALPHABET_SIZE;
-    let charsize = ilog2(alphabet_size) + 1;
+    let charsize = X_LEAN_CHARSIZE;
     if diagnostics_enabled() || word_length * charsize > 16 || word_length > 32 {
         return Err(prepared);
     }
@@ -1641,6 +1658,11 @@ pub(super) fn x_build_lean(
                 .unwrap_or(i32::MIN)
         })
         .collect();
+
+    let x_row_max: &[i32; LOOKUP_ALPHABET_SIZE] = row_max
+        .as_slice()
+        .try_into()
+        .expect("row_max has one entry per letter of the alphabet");
 
     // The exact backbone (blast_aalookup.c:448-456): source i's offsets, in chain order, are
     // `offsets[starts[i]..starts[i + 1]]`, the sources in ascending cell order.
@@ -1682,29 +1704,92 @@ pub(super) fn x_build_lean(
     // count[w] = number of appends the reference makes to cell w.
     counts.fill(0);
     let sources = starts.len() - 1;
-    let mut targets: Vec<u16> = Vec::new();
-    let mut ends: Vec<u32> = Vec::with_capacity(sources);
-    for i in 0..sources {
-        let (start, end) = (starts[i] as usize, starts[i + 1] as usize);
-        let from = targets.len();
-        // blast_aalookup.c:490: w = query + offset_list[2];
-        let first = usize::try_from(offsets[start]).expect("NCBI BLAST query offset must fit");
-        x_lean_target_list(
-            &concat_query[first..],
-            alphabet_size,
-            word_length,
-            charsize,
-            &row_max,
-            threshold,
-            matrix,
-            &mut targets,
-        );
-        let k = (end - start) as u32;
-        for &w in &targets[from..] {
-            counts[w as usize] += k;
+    // With a pool, the lists of the sources' ranges, made on its threads (`x_build_lean_in`).
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        allow(unused_labels)
+    )]
+    let (targets, ends) = 'lists: {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        if let Some(pool) = pool.filter(|pool| pool.enabled() && pool.threads() > 1) {
+            let parts = (pool.threads() * 4).min(sources).max(1);
+            let ranges: Vec<std::ops::Range<usize>> = (0..parts)
+                .map(|p| sources * p / parts..sources * (p + 1) / parts)
+                .collect();
+            let lists = |range: std::ops::Range<usize>| {
+                let mut targets: Vec<u16> = Vec::new();
+                let mut ends: Vec<u32> = Vec::with_capacity(range.len());
+                for i in range {
+                    // blast_aalookup.c:490: w = query + offset_list[2];
+                    let first = usize::try_from(offsets[starts[i] as usize])
+                        .expect("NCBI BLAST query offset must fit");
+                    x_lean_target_list(
+                        &concat_query[first..],
+                        word_length,
+                        x_row_max,
+                        threshold,
+                        matrix,
+                        &mut targets,
+                    );
+                    ends.push(targets.len() as u32);
+                }
+                (targets, ends)
+            };
+            let made: Vec<(Vec<u16>, Vec<u32>)> = pool.install(|| x_claimed(ranges, &lists));
+            // The ranges' lists as one (`targets`, `ends`), in source order, counted as they go in.
+            let mut targets: Vec<u16> = Vec::with_capacity(made.iter().map(|(t, _)| t.len()).sum());
+            let mut ends: Vec<u32> = Vec::with_capacity(sources);
+            let mut i = 0usize;
+            for (part_targets, part_ends) in made {
+                let base = targets.len() as u32;
+                let mut from = 0usize;
+                for &end in &part_ends {
+                    let k = starts[i + 1] - starts[i];
+                    for &w in &part_targets[from..end as usize] {
+                        counts[w as usize] += k;
+                    }
+                    from = end as usize;
+                    ends.push(base + end);
+                    i += 1;
+                }
+                targets.extend_from_slice(&part_targets);
+            }
+            break 'lists (targets, ends);
         }
-        ends.push(targets.len() as u32);
-    }
+        #[cfg(not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )))]
+        let _ = pool;
+        let mut targets: Vec<u16> = Vec::new();
+        let mut ends: Vec<u32> = Vec::with_capacity(sources);
+        for i in 0..sources {
+            let (start, end) = (starts[i] as usize, starts[i + 1] as usize);
+            let from = targets.len();
+            // blast_aalookup.c:490: w = query + offset_list[2];
+            let first = usize::try_from(offsets[start]).expect("NCBI BLAST query offset must fit");
+            x_lean_target_list(
+                &concat_query[first..],
+                word_length,
+                x_row_max,
+                threshold,
+                matrix,
+                &mut targets,
+            );
+            let k = (end - start) as u32;
+            for &w in &targets[from..] {
+                counts[w as usize] += k;
+            }
+            ends.push(targets.len() as u32);
+        }
+        (targets, ends)
+    };
 
     // Layout: BlastAaLookupFinalize's rule applied to the counts, which become the fill cursors.
     let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
@@ -1800,7 +1885,8 @@ const X_CLAIM_SPINS: u32 = 1 << 12;
 // short, and a job taken while waiting, such as another batch's search, could hold the caller far
 // longer than the part; the scope's own wait at its end, for a helper that claimed nothing, can
 // still run one). A part that panics still counts as ended, and the scope raises its panic.
-/// EXPERIMENT (LOSAT_X_BXBUILDPAR): `f(part)` for each part, its results in part order.
+/// `f(part)` for each part, its results in part order: the partitioned build of
+/// EXPERIMENT (LOSAT_X_BXBUILDPAR) and TBLASTN's lean build on a pool (`x_build_lean_in`).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -2751,6 +2837,27 @@ mod tests {
                 Err(_) => panic!("the lean builder declined word length {word_length}"),
             };
             x_assert_same_table(&lean, &reference);
+            // The lists made on a pool's threads (`x_build_lean_in`), in ranges of a few sources.
+            #[cfg(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            ))]
+            {
+                let pooled = crate::utils::threading::with_search_pool(4, "tblastn", |pool| {
+                    Ok(x_build_lean_in(
+                        prepared_w(queries, matrix, word_length),
+                        threshold,
+                        matrix,
+                        word_length,
+                        Some(pool),
+                    ))
+                })
+                .unwrap();
+                match pooled {
+                    Ok(table) => x_assert_same_table(&table, &reference),
+                    Err(_) => panic!("the lean builder declined word length {word_length}"),
+                }
+            }
             reference
         };
         for (matrix, word_length, thresholds) in [

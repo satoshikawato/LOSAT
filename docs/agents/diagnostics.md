@@ -426,6 +426,7 @@ export LOSAT_X_TBNLINKSETS=1
 export LOSAT_X_TBNLUTLEAN=1
 export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNPAIRCAP=1
+export LOSAT_X_TBNPLANCUT=1
 export LOSAT_X_TBNREAPIDX=1
 export LOSAT_X_TBNREDOLPT=1
 export LOSAT_X_TBNSCANBYTE=1
@@ -5297,6 +5298,34 @@ Scheduling (each value computed by one thread with the original function; order 
   every subject, about 800), the 16S set 134 -> 19 and 152 -> 38 MiB (NCBI 9 and 11), the 5,000
   cDNAs at 8 threads 70 -> 37 MiB (NCBI 16). Before (dev 23db0a4f, `TBNSSIDE=0` (a variable that graduated 2026-10-22) against the
   default, 38 pairs): x0.980-0.994 at 4, 8 and 16 threads on the two large sets, no pair slower.
+- `LOSAT_X_TBNPLANCUT=1` tblastn (memory; in the strict set from the pull request that added it, 2026-11-01; `=0`
+  turns it off; `common/x_db_stream.rs` `x_plan_chunk`, `XDbStream::plan_with`; `tblastn/x_oid_flow.rs` `search_chunk`):
+  a thread that searches a chunk of subjects of a `-db` stream reads its block of 256 KiB of the sequence file no
+  further than the chunk, and the block goes when the chunk is searched. A chunk holds the file's bytes / (16 x the
+  threads), about 40 KiB at 48 threads on a 30 MB sequence file, and a thread's next chunk is about a sixteenth of the file
+  further on: past 4 MiB of file it is outside the block, so the rest of the block was read for nothing, and below that
+  the next chunk now reads what the block held. The last block also stayed in the thread's heap through the redo (48
+  threads: 11 MiB live at the peak; in the recorder the block raised the heaps' summed high water by 21 MiB).
+  The sequences are the same bytes wherever the block ends, so no report changes; outside a chunk (one thread, one
+  subject) nothing changes. Unit test `a_block_ends_with_the_chunk_of_its_thread_and_goes_with_it`;
+  `tests/tblastn_db_stream.rs` `a_block_that_ends_with_its_chunk_gives_the_same_reports`.
+  Reach: `-db` with 2+ threads and several subjects, the block reads of a chunk.
+  Measured 2026-11-02 on the workstation (2x Xeon Gold 6338; base dev 71837aa5; every output of a case the same
+  bytes in every arm). Peak memory (max of `/usr/bin/time` %M and a 2 ms VmHWM sample, node 0, untimed, at most 16
+  CPUs for every run, medians of the pairs in rotating order, NCBI BLAST+ 2.17.0 in the same rounds): `dmel_b4.faa` x
+  zebrafish cDNAs (30 MB sequence file, `-db`, `-evalue 1e-5 -max_target_seqs 5`) at 4 / 8 / 16 / 32 / 40 / 48 threads
+  31 / 38 / 54 / 81 / 93 / 108 -> 30 / 37 / 51 / 75 / 84 / 96 MiB (x0.974 / x0.953 / x0.962 / x0.921 / x0.903 / x0.891,
+  16 rounds, lower in 12, 15, 15, 16, 16, 16; NCBI 120 to 151); at 2 threads x1.019 (7 lower), repeated x0.984 (8 lower;
+  the same binary spans 24 to 31 MiB); a 2 MB cut of those cDNAs at 16 / 48 x0.885 / x0.815 (8 rounds, 59 MiB at 48, NCBI
+  109), 81 KB of `abr_genes` at 16 x0.949; no change where no block is read: AP027131 x AP027133 `-db` at 48 x0.996,
+  `-subject` at 16 / 48 x0.997 / x0.995, C. elegans genome `-db` at 16 x1.000. `=0` in the same binary x0.988-1.013 of
+  the base. At one thread x0.99997 of the instructions (`dmel_b4.faa`) and x1.00002 (AP027131); BLASTP x0.99998, BLASTX
+  and TBLASTX x1.00000; at 81 KB, where each chunk now reads for itself, x1.00085 / x1.00134 at 8 / 32 threads.
+  Time (node 1, cores warmed 3 s before each run, arms alternating in order; the PR's binary against the base, 12
+  rounds; one thread on one idle core of node 0): `dmel_b4.faa` at 1 / 8 / 16 / 32 x0.9980 / x0.9979 / x0.9993 / x0.9957
+  (5 of 8, 10, 8, 9 faster); the 2 MB cut at 8 / 16 / 32 x0.9913 / x0.9955 / x0.9754; `abr_genes` at 8 / 32 x0.9999 /
+  x0.9941; AP027131 `-subject`, which does not run this code, at 1 / 16 / 32 x0.9994 / x1.0007 / x1.0072 (`=0` x0.9983 /
+  x0.9979 / x1.0115; cycles x0.9986 / x0.9983 / x1.0004).
 - `LOSAT_X_TBNPAIRCAP=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-26;
   `=0` turns it off; `tblastn/search_seed.rs` `x_scan_plan`, `X_PAIR_ROOM`): the offset-pair array that a unit's scan
   calls fill (one per running unit; the units a thread runs one after another share theirs, `XUnitBuffers`) holds

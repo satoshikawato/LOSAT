@@ -1,7 +1,7 @@
 # Product Decision: blastdbcmd outputs that NCBI gets wrong
 
 - Decision ID: `PD-LOSAT-BLASTDBCMD-DEVIATIONS`
-- Version: 1.3
+- Version: 1.4
 - Date: 2026-10-30 (this record; items 1 and 2 served by `losat blastdbcmd` from the pull
   request of line BDC's BDC2a). 1.1, 2026-11-01 (BDC2c): the evidence of items 1 and 2 on
   version 4 databases with parsed ids, whose ids `losat blastdbcmd` now looks up; the
@@ -13,7 +13,10 @@
   the TBLASTX local-subject genetic code was
   ([`PD-TBLASTX-LOCAL-SUBJECT-GENCODE`](PD-TBLASTX-LOCAL-SUBJECT-GENCODE.md)), and those of
   items 5 and 6 on 2026-11-01 ("差 5・6 の承認: 承認します", drop-in survey `DECISIONS.md` 33).
-- Status: Accepted (approved deviations).
+  1.4, 2026-11-02 (BDC4, several names in `-db`, drop-in survey `DECISIONS.md` 34): the items hold
+  on a list of names; item 6 covers one accession on two sequences. **That widening of item 6
+  is proposed and waits for the Owner's approval.**
+- Status: Accepted (approved deviations); the widening of item 6 in 1.4 proposed.
 
 ## Scope
 
@@ -39,7 +42,12 @@ probe M) the exceptions of a damaged column file that print NCBI's build path (M
 M854, M864), `%m` digits that overflow NCBI's `int` (M143, M144, M145), `-mask_sequence_with`
 below -1, which NCBI looks up with an uninitialised id (M225, M227), a sequence whose volume of
 an alias has masks but not the algorithm, where NCBI reads the masks of the volume's id before
-or an uninitialised one (M180-M184, M255-M270), a volume with the big-endian data file of a
+or an uninitialised one (M180-M184, M255-M270; on a list of names, probe N: N1269, N1306, N1313),
+a list of names in which an alias and another name give the same volume, refused for every option
+as the search programs refuse it: NCBI's `-info` and `-metadata` count its sequences twice, 39 for
+21 (BDC4: N389, N393, N1627), while its other options answer (N391, N395), a list whose volumes
+carry different dates, one of which NCBI's `CTime` does not read, where NCBI ends with an exception
+that prints its build path after what it wrote (BDC4: N525-N548), a volume with the big-endian data file of a
 column alone, whose offsets NCBI reads as little-endian (M784), another column before the masks,
 which NCBI reads as the masks (M824), and `-outfmt %s` without a range on a stored mask outside
 the sequence, where NCBI crashes (M786, M886, M896). `-taxids
@@ -65,7 +73,8 @@ not reach the defect, so that the test oracle stays NCBI's binary.
    ordinal of every volume, keeping each sum that falls inside the database: `-entry
    'gnl|BL_ORD_ID|3'` on a database of four volumes writes four sequences (probe S01, and
    D57 with `-entry_batch -get_dups`; an alias of two databases, a partial alias and a
-   database with parsed ids alike: I795, I816, I830, I849), while `%a` names the sequence
+   database with parsed ids alike: I795, I816, I830, I849; a list of names: N846, N890), while
+   `%a` names the sequence
    `BL_ORD_ID:3` once.
    LOSAT writes the one sequence `n` of the whole database, as a database of one volume
    gives it. Expected bytes: the first record of NCBI's output (S01), or NCBI's run of the
@@ -95,16 +104,20 @@ not reach the defect, so that the test oracle stays NCBI's binary.
    `NM_100001.1 12`, which has none, is written with the masks of the line `NM_100001.1 11`
    before it (probe M415, M418). LOSAT writes it without masks, as the run of that line alone
    (M414) and `-outfmt %s` (M417) do. Expected bytes: NCBI's headers with the letters of
-   NCBI's `%s` run.
+   NCBI's `%s` run. The formatter's mask stays for the same Seq-id on another sequence as well:
+   `-db "db/nm5 db/m/nms" -entry NM_100001.1 -mask_sequence_with 12` writes the second sequence,
+   which has no masks of 12, with the masks of the first (probe N, N1813; N1702 in a batch; 1.4).
+   LOSAT writes it without masks, as `%s` does (N1814).
 
 ## Evidence
 
 - Line BDC's frozen probe (NCBI 2.17.0 on the workstation, 2026-10-29, 2026-10-30 and
   2026-11-01):
-  `dropin-survey-20261029/BDC/probe/out/{S01,S02,S18,S31,S32,M03,M04,M05,M125,M126,M128,M130,M133,M137,M285,M286,M290,M414,M415,M417,D16,D57,D82,D83,D87,D88,D97,D101,I771,I795,I816,I830,I849}.*`,
+  `dropin-survey-20261029/BDC/probe/out/{S01,S02,S18,S31,S32,M03,M04,M05,M125,M126,M128,M130,M133,M137,M285,M286,M290,M414,M415,M417,D16,D57,D82,D83,D87,D88,D97,D101,I771,I795,I816,I830,I849,N389,N846,N890,N1702,N1703,N1813,N1814}.*`,
   the code reading in `dropin-survey-20261029/BDC/notes/B_fasta_outfmt.md` (ORACLE 1 and 3)
   and `notes/A_id_resolution.md` (§2).
 - The tests of items 1 and 2: `LOSAT/tests/blastdbcmd_retrieve.rs`
   (`long_ids_on_the_minus_strand_write_the_reverse_complement`,
   `ordinal_ids_of_a_database_in_volumes_are_database_wide`); of items 3 to 6:
-  `LOSAT/tests/blastdbcmd_masks.rs` (`masks_are_ncbi_s_bytes`).
+  `LOSAT/tests/blastdbcmd_masks.rs` (`masks_are_ncbi_s_bytes`); on a list of names:
+  `LOSAT/tests/blastdbcmd_several_names.rs` (`several_names_are_ncbi_s_bytes`).

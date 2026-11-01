@@ -105,6 +105,9 @@ pub struct TblastxArgs {
         help = "Should the query and subject defline(s) be parsed?"
     )]
     pub parse_deflines: bool,
+    /// The ids of the search's records under `-parse_deflines` (`run`).
+    #[arg(skip)]
+    pub id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
     // ```c++
     //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",

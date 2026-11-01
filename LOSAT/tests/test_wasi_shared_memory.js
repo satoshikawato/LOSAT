@@ -260,7 +260,7 @@ function replaceBody(bytes, index, replacement) {
 
 test("the guarded module carries its record and is returned as it is when guarded again", () => {
   const guarded = guardSharedMemory(fixture());
-  assert.deepEqual(guarded.record, { version: 1, fill: 1, copy: 1 });
+  assert.deepEqual(guarded.record, { version: 3, fill: 1, copy: 1, grow: 0, atomic: 0, atomic_helpers: 0 });
   assert.deepEqual(guardRecord(guarded.bytes), guarded.record);
   assert.deepEqual(guarded.bytes.subarray(-marker(guarded.record).length), marker(guarded.record));
   assert.equal(guardRecord(fixture()), null);
@@ -281,25 +281,26 @@ test("verifyGuarded rejects unguarded, forged, partly guarded and miscounted mod
     ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, 4]])),
     ...section(3, vector(types.map((type) => [type]))),
     ...section(10, vector(types.map(() => body([])))),
-    ...marker({ version: 1, fill: 1, copy: 0 }),
+    ...marker({ version: 3, fill: 1, copy: 0, grow: 0, atomic: 0, atomic_helpers: 0 }),
   ]);
   assert.ok(WebAssembly.validate(functions(0)));
   assert.throws(() => verifyGuarded(functions(0)), /the guard's helpers are missing/);
-  assert.throws(() => verifyGuarded(functions(0, 0)), /do not have the guard's type/);
-  assert.throws(() => verifyGuarded(Buffer.concat([fixture(), marker({ version: 1, fill: 1, copy: 1 })])),
+  assert.throws(() => verifyGuarded(functions(0, 0)), /the guard's helpers are missing/);
+  assert.throws(() => verifyGuarded(functions(0, 0, 0)), /do not have the guard's type/);
+  assert.throws(() => verifyGuarded(Buffer.concat([fixture(), marker({ version: 3, fill: 1, copy: 1, grow: 0, atomic: 0, atomic_helpers: 0 })])),
     /not the guard's bodies/);
   const original = fixture({ extra: [[...args, 0xfc, 10, 0, 0]] });
   const guarded = guardSharedMemory(original);
-  assert.deepEqual(guarded.record, { version: 1, fill: 1, copy: 2 });
+  assert.deepEqual(guarded.record, { version: 3, fill: 1, copy: 2, grow: 0, atomic: 0, atomic_helpers: 0 });
   // extra0 (defined function 3) with its original memory.copy instead of the helper call.
   const partly = replaceBody(guarded.bytes, 3, body([...args, 0xfc, 10, 0, 0]).slice(1));
   assert.ok(WebAssembly.validate(partly));
   assert.throws(() => verifyGuarded(partly), /function 4 has an unguarded memory\.copy/);
   const tail = marker(guarded.record).length;
   const recount = (record) => Buffer.concat([guarded.bytes.subarray(0, -tail), marker(record)]);
-  assert.throws(() => verifyGuarded(recount({ version: 1, fill: 2, copy: 2 })), /record counts 2 fills and 2 copies/);
-  assert.throws(() => guardSharedMemory(recount({ version: 2, fill: 1, copy: 2 })), /unsupported losat\.shared_memory_guard record/);
-  assert.throws(() => guardSharedMemory(recount({ version: 1, fill: 0, copy: 0 })), /unsupported losat\.shared_memory_guard record/);
+  assert.throws(() => verifyGuarded(recount({ version: 3, fill: 2, copy: 2, grow: 0, atomic: 0, atomic_helpers: 0 })), /record counts 2 fills, 2 copies, 0 grows and 0 atomics/);
+  assert.throws(() => guardSharedMemory(recount({ version: 2, fill: 1, copy: 2, atomic: 0, atomic_helpers: 0 })), /unsupported losat\.shared_memory_guard record/);
+  assert.throws(() => guardSharedMemory(recount({ version: 3, fill: 0, copy: 0, grow: 0, atomic: 0, atomic_helpers: 0 })), /unsupported losat\.shared_memory_guard record/);
 });
 
 test("the guard command writes a verified module; a decline or nothing to guard exits 1 without output", () => {
@@ -316,7 +317,7 @@ test("the guard command writes a verified module; a decline or nothing to guard 
   try {
     fs.writeFileSync(file("in.wasm"), fixture());
     const written = json("guard", file("in.wasm"), file("out.wasm"));
-    assert.deepEqual([written.version, written.fill, written.copy, written.guarded_before], [1, 1, 1, false]);
+    assert.deepEqual([written.version, written.fill, written.copy, written.guarded_before], [3, 1, 1, false]);
     assert.deepEqual(fs.readFileSync(file("out.wasm")), guardSharedMemory(fixture()).bytes);
     assert.equal(json("verify", file("out.wasm")).sha256, written.output_sha256);
     // A guarded input is written as it is.
@@ -327,11 +328,273 @@ test("the guard command writes a verified module; a decline or nothing to guard 
     assert.ok(WebAssembly.validate(fs.readFileSync(file("gc.wasm"))));
     fails(["guard", file("gc.wasm"), file("gc-out.wasm")], /unsupported Wasm opcode 0xfb/);
     fs.writeFileSync(file("plain.wasm"), plain());
-    fails(["guard", file("plain.wasm"), file("plain-out.wasm")], /no memory\.fill or memory\.copy to guard/);
+    fails(["guard", file("plain.wasm"), file("plain-out.wasm")], /no memory\.fill, memory\.copy, memory\.grow or atomic instruction to guard/);
     fails(["verify", file("in.wasm")], /no losat\.shared_memory_guard section/);
     fails(["guard", file("in.wasm")], /usage/);
     assert.deepEqual(fs.readdirSync(dir).sort(), ["again.wasm", "gc.wasm", "in.wasm", "out.wasm", "plain.wasm"]);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
+// Atomic memory instructions: the guarded helper is the original instruction, and refreshes a
+// stale bound first (the header of wasi_shared_memory.js).
+const I32 = 0x7f, I64 = 0x7e;
+const WIDTHS = [[I32, 4], [I64, 8], [I32, 1], [I32, 2], [I64, 1], [I64, 2], [I64, 4]];
+const ATOMICS = [
+  { sub: 0, values: [I32], result: [I32], size: 4, name: "memory.atomic.notify" },
+  { sub: 1, values: [I32, I64], result: [I32], size: 4, name: "memory.atomic.wait32" },
+  { sub: 2, values: [I64, I64], result: [I32], size: 8, name: "memory.atomic.wait64" },
+  ...WIDTHS.flatMap(([type, size], k) => [
+    { sub: 0x10 + k, values: [], result: [type], size, name: `load ${k}` },
+    { sub: 0x17 + k, values: [type], result: [], size, name: `store ${k}` },
+    ...[0x1e, 0x25, 0x2c, 0x33, 0x3a, 0x41].map((base) => ({ sub: base + k, values: [type], result: [type], size, name: `rmw 0x${base.toString(16)} ${k}` })),
+    { sub: 0x48 + k, values: [type, type], result: [type], size, name: `cmpxchg ${k}` },
+  ]),
+];
+const alignOf = (size) => Math.log2(size);
+
+// One exported function per entry of `ops`: its parameters are the instruction's operands.
+function atomicFixture(ops) {
+  const types = ops.map(({ values, result }) => [0x60, values.length + 1, I32, ...values, result.length, ...result]);
+  return Buffer.from([
+    0, 97, 115, 109, 1, 0, 0, 0,
+    ...section(1, vector(types)),
+    ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, 4]])),
+    ...section(3, vector(ops.map((_, i) => uleb(i)))),
+    ...section(7, vector(ops.map((_, i) => [...name(`op${i}`), 0, ...uleb(i)]))),
+    ...section(10, vector(ops.map(({ sub, values, size, offset }) => body([
+      0x20, 0, ...values.flatMap((_, i) => [0x20, i + 1]),
+      0xfe, ...uleb(sub), alignOf(size), ...uleb(offset),
+    ])))),
+  ]);
+}
+
+function runAtomic(fn, memory, args) {
+  try { return { result: fn(...args), bytes: Buffer.from(new Uint8Array(memory.buffer)).toString("hex") }; }
+  catch (err) { return { trap: err.message, bytes: Buffer.from(new Uint8Array(memory.buffer)).toString("hex") }; }
+}
+
+test("every atomic instruction: guarded results, memory and traps match original Wasm", () => {
+  for (const offset of [0, 8, 65528, 2 ** 32 - 8]) {
+    const ops = ATOMICS.map((op) => ({ ...op, offset }));
+    const original = new WebAssembly.Module(atomicFixture(ops));
+    const guardedResult = guardSharedMemory(atomicFixture(ops));
+    assert.equal(guardedResult.atomic, ops.length);
+    assert.equal(guardedResult.record.atomic_helpers, ops.length);
+    assert.ok(verifyGuarded(guardedResult.bytes));
+    const guarded = new WebAssembly.Module(guardedResult.bytes);
+    ops.forEach((op, i) => {
+      const value = (type, v) => (type === I64 ? BigInt(v) : v);
+      // A timed wait returns at once: not-equal when the operand differs, timed-out at 0 ns.
+      const operands = op.sub === 1 || op.sub === 2
+        ? [[value(op.values[0], 7), 0n], [value(op.values[0], 0), 0n]]
+        : [op.values.map((type, k) => value(type, 3 + k))];
+      const top = 65536 - op.size - offset;
+      // In bounds, the last address in bounds, one page and one step past it, misaligned, wrapped.
+      const addresses = [offset >= 65528 ? 0 : 16, top, top + op.size, 2 ** 31 - op.size, -op.size,
+        ...(op.size > 1 ? [1] : [])];
+      for (const args of operands) {
+        for (const address of addresses) {
+          const make = (module) => {
+            const memory = new WebAssembly.Memory({ initial: 1, maximum: 4, shared: true });
+            new Uint8Array(memory.buffer).fill(0);
+            const view = new DataView(memory.buffer);
+            for (let at = 0; at < 65536; at += 4096) view.setUint32(at, at + 1, true);
+            return { memory, fn: new WebAssembly.Instance(module, { env: { memory } }).exports[`op${i}`] };
+          };
+          const a = make(original);
+          const b = make(guarded);
+          assert.deepEqual(runAtomic(b.fn, b.memory, [address, ...args]), runAtomic(a.fn, a.memory, [address, ...args]),
+            `${op.name} offset ${offset} address ${address}`);
+        }
+      }
+    });
+  }
+});
+
+test("helpers are shared by opcode and memarg, and the guard adds no import or export", () => {
+  const op = { sub: 0x1e, values: [I32], result: [I32], size: 4 };
+  const ops = [{ ...op, offset: 0 }, { ...op, offset: 0 }, { ...op, offset: 8 }, { ...ATOMICS[3], offset: 0 }];
+  const { record, bytes } = guardSharedMemory(atomicFixture(ops));
+  assert.deepEqual([record.atomic, record.atomic_helpers], [4, 3]);
+  const before = new WebAssembly.Module(atomicFixture(ops));
+  const after = new WebAssembly.Module(bytes);
+  assert.deepEqual(WebAssembly.Module.imports(after), WebAssembly.Module.imports(before));
+  assert.deepEqual(WebAssembly.Module.exports(after), WebAssembly.Module.exports(before));
+});
+
+test("atomic.fence is not rewritten", () => {
+  const fence = [0xfe, 3, 0];
+  const original = fixture({ extra: [[...fence]] });
+  const guarded = guardSharedMemory(original);
+  assert.equal(guarded.atomic, 0);
+  assert.ok(verifyGuarded(guarded.bytes));
+});
+
+test("verifyGuarded rejects an unguarded atomic, a forged helper and a wrong atomic count", () => {
+  const add = { sub: 0x1e, values: [I32], result: [I32], size: 4, offset: 8 };
+  const ops = [add, { ...add, offset: 0 }];
+  const guarded = guardSharedMemory(atomicFixture(ops));
+  assert.deepEqual(verifyGuarded(guarded.bytes), guarded.record);
+  const original = [0x20, 0, 0x20, 1, 0xfe, 0x1e, 2, 8];
+  const partly = replaceBody(guarded.bytes, 0, body(original).slice(1));
+  assert.ok(WebAssembly.validate(partly));
+  assert.throws(() => verifyGuarded(partly), /function 0 has an unguarded atomic instruction 0xfe 30/);
+  // The first atomic helper without its bound check is the same operation, and is not the guard's.
+  const forged = replaceBody(guarded.bytes, 5, body(original).slice(1));
+  assert.ok(WebAssembly.validate(forged));
+  assert.throws(() => verifyGuarded(forged), /not the guard's bodies/);
+  const tail = marker(guarded.record).length;
+  const recount = (record) => Buffer.concat([guarded.bytes.subarray(0, -tail), marker(record)]);
+  assert.throws(() => verifyGuarded(recount({ ...guarded.record, atomic: 3 })), /0 fills, 0 copies, 0 grows and 3 atomics/);
+  assert.throws(() => guardSharedMemory(recount({ ...guarded.record, atomic_helpers: 3 })), /unsupported losat\.shared_memory_guard record/);
+});
+
+// The stale bound itself, on the engine, for every atomic instruction. On V8 a helper's own entry
+// stack check usually handles the pending growth first, and a tier-up check in a loop may too, so
+// this runs in a child process that stays in Liftoff with stack checks off (--liftoff-only
+// --no-wasm-stack-checks): only the helper's compares and memory.grow(0) can refresh the bound.
+// Each probe tells the main thread that it entered, waits in a plain-load loop until the main
+// thread has grown the memory through the module and published an address in the new page, and
+// returns memory.size, the same bound. That the original Wasm is stale here (or traps) is
+// reported, not asserted: an engine may refresh the bound itself. A failure ends in the child's
+// timeout, never in a hung test process.
+const STALE_CHILD = `
+  const { Worker } = require("node:worker_threads");
+  const module = new WebAssembly.Module(require("node:fs").readFileSync(process.argv[1]));
+  const memory = new WebAssembly.Memory({ initial: 1, maximum: 256, shared: true });
+  const view = new Int32Array(memory.buffer);
+  const { grow, ...probes } = new WebAssembly.Instance(module, { env: { memory } }).exports;
+  const worker = new Worker(\`
+    const { workerData, parentPort } = require("node:worker_threads");
+    const { module, memory } = workerData;
+    const view = new Int32Array(memory.buffer);
+    const { grow, ...probes } = new WebAssembly.Instance(module, { env: { memory } }).exports;
+    const outcomes = {};
+    for (const [label, probe] of Object.entries(probes)) {
+      try { outcomes[label] = probe(); } catch (err) { outcomes[label] = err.message; }
+      Atomics.store(view, 1, 0);
+    }
+    parentPort.postMessage(outcomes);
+  \`, { eval: true, workerData: { module, memory } });
+  worker.once("message", (outcomes) => { console.log(JSON.stringify(outcomes)); process.exit(0); });
+  worker.once("error", (err) => { console.log("worker error: " + err.message); process.exit(1); });
+  for (const _ of Object.keys(probes)) {
+    while (Atomics.load(view, 0) === 0) Atomics.wait(view, 0, 0, 10);
+    Atomics.store(view, 0, 0);
+    const old = grow(1);
+    Atomics.store(view, 1, old * 65536 + 64);
+  }
+`;
+
+function runStaleChild(bytes, directory, label) {
+  const file = path.join(directory, `${label}.wasm`);
+  fs.writeFileSync(file, bytes);
+  const result = spawnSync(process.execPath, ["--liftoff-only", "--no-wasm-stack-checks", "-e", STALE_CHILD, file],
+    { encoding: "utf8", timeout: 30000 });
+  assert.equal(result.status, 0, `${label}: status ${result.status} signal ${result.signal}: ${result.stderr}`);
+  return JSON.parse(result.stdout);
+}
+
+// The atomic instructions that read memory: all but the stores and notify.
+const readsMemory = ({ sub }) => sub !== 0 && !(sub >= 0x17 && sub <= 0x1d);
+
+// probes: { label: [ops of the function] }, called in this order, one page grown for each.
+function staleProbes(probes) {
+  const entered = 0, pointer = 4;
+  const labels = Object.keys(probes);
+  return Buffer.from([
+    0, 97, 115, 109, 1, 0, 0, 0,
+    ...section(1, vector([[0x60, 0, 1, I32], [0x60, 1, I32, 1, I32]])),
+    ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, ...uleb(256)]])),
+    ...section(3, vector([...labels.map(() => [0]), [1]])),
+    ...section(7, vector([...labels.map((label, i) => [...name(label), 0, i]), [...name("grow"), 0, labels.length]])),
+    ...section(10, vector([...labels.map((label) => body([
+      0x41, entered, 0x41, 1, 0xfe, 0x17, 2, 0,
+      0x41, entered, 0x41, 1, 0xfe, 0, 2, 0, 0x1a,
+      0x03, 0x40, 0x41, pointer, 0x28, 2, 0, 0x45, 0x0d, 0, 0x0b,
+      ...probes[label],
+      0x3f, 0,
+    ])), body([0x20, 0, 0x40, 0])])),
+  ]);
+}
+
+const published = [0x41, 4, 0x28, 2, 0];
+// An instruction whose expected values differ from the memory: wait returns at once.
+const atomicOn = (address, { sub, values, result, size }, offset = 0) => [
+  ...address, ...values.flatMap((type) => (type === I64 ? [0x42, 1] : [0x41, 1])),
+  0xfe, ...uleb(sub), alignOf(size), ...uleb(offset), ...(result.length ? [0x1a] : []),
+];
+
+test("another isolate grows memory through the module: every atomic instruction refreshes a stale bound", { timeout: 90000 }, (t) => {
+  const probes = {};
+  // Before the instruction: the address itself is in the new page, in the operand or in the memarg.
+  probes.offset = atomicOn([0x41, 0], ATOMICS[6 + 3], 65536 + 64);
+  ATOMICS.forEach((op) => { probes[`before ${op.name}`] = atomicOn(published, op); });
+  // After it: the instruction reads memory elsewhere, then a plain store uses the published address.
+  // V8 checks that store against the stale bound on ARM64 outside macOS.
+  const store = [...published, 0x41, 7, 0x36, 2, 0];
+  ATOMICS.filter(readsMemory).forEach((op) => { probes[`after ${op.name}`] = [...atomicOn([0x41, 32], op), ...store]; });
+  const original = staleProbes(probes);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-guard-stale-"));
+  try {
+    const outcomes = runStaleChild(guardSharedMemory(original).bytes, directory, "guarded");
+    const expected = Object.fromEntries(Object.keys(probes).map((label, i) => [label, i + 2]));
+    assert.deepEqual(outcomes, expected);
+    const stale = Object.entries(runStaleChild(original, directory, "original")).filter(([label, value]) => value !== expected[label]);
+    t.diagnostic(`original Wasm: ${stale.length} of ${Object.keys(probes).length} probes stale or trapped`);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// One exported memory.grow, the record's only count.
+const growFixture = () => Buffer.from([
+  0, 97, 115, 109, 1, 0, 0, 0,
+  ...section(1, vector([[0x60, 1, I32, 1, I32]])),
+  ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, 4]])),
+  ...section(3, vector([[0]])),
+  ...section(7, vector([[...name("grow"), 0, 0]])),
+  ...section(10, vector([body([0x20, 0, 0x40, 0])])),
+]);
+
+test("memory.grow: guarded results and size match original Wasm, and the largest grown size is recorded", () => {
+  const CELL = 16 / 4;
+  const run = (bytes, start = 0) => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 4, shared: true });
+    new Int32Array(memory.buffer)[CELL] = start;
+    const { grow } = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: { memory } }).exports;
+    return [99, 1, 0, 2, 1, 0x7fffffff].map((pages) => {
+      const result = grow(pages);
+      return [result, memory.buffer.byteLength, new Int32Array(memory.buffer)[CELL]];
+    });
+  };
+  const guarded = guardSharedMemory(growFixture());
+  assert.deepEqual(guarded.record, { version: 3, fill: 0, copy: 0, grow: 1, atomic: 0, atomic_helpers: 0 });
+  assert.deepEqual(verifyGuarded(guarded.bytes), guarded.record);
+  const page = 65536;
+  // A failed grow writes nothing; a grow by 0 records the size too; the original leaves the cell alone.
+  assert.deepEqual(run(guarded.bytes), [[-1, page, 0], [1, 2 * page, 2], [2, 2 * page, 2], [2, 4 * page, 4], [-1, 4 * page, 4], [-1, 4 * page, 4]]);
+  assert.deepEqual(run(growFixture()).map(([result, bytes]) => [result, bytes]), run(guarded.bytes).map(([result, bytes]) => [result, bytes]));
+  // A larger size that another thread recorded stays.
+  assert.deepEqual(run(guarded.bytes, 100).map((row) => row[2]), [100, 100, 100, 100, 100, 100]);
+});
+
+test("verifyGuarded rejects an unguarded memory.grow, a forged helper and a wrong grow count", () => {
+  const guarded = guardSharedMemory(growFixture());
+  const original = body([0x20, 0, 0x40, 0]).slice(1);
+  const partly = replaceBody(guarded.bytes, 0, original);
+  assert.ok(WebAssembly.validate(partly));
+  assert.throws(() => verifyGuarded(partly), /function 0 has an unguarded memory\.grow/);
+  // The helper without the record of the size is the same operation, and is not the guard's.
+  const forged = replaceBody(guarded.bytes, 3, original);
+  assert.ok(WebAssembly.validate(forged));
+  assert.throws(() => verifyGuarded(forged), /not the guard's bodies/);
+  const tail = marker(guarded.record).length;
+  const recount = (record) => Buffer.concat([guarded.bytes.subarray(0, -tail), marker(record)]);
+  assert.throws(() => verifyGuarded(recount({ ...guarded.record, grow: 2 })), /0 fills, 0 copies, 2 grows and 0 atomics/);
+  assert.throws(() => guardSharedMemory(recount({ version: 3, fill: 0, copy: 0, atomic: 0, atomic_helpers: 0 })), /unsupported losat\.shared_memory_guard record/);
 });

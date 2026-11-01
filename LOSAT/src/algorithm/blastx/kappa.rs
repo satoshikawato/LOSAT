@@ -80,7 +80,8 @@ pub fn query_infos(
                 // ```
                 composition: BlastAminoAcidComposition::empty(),
                 eff_search_space: p.search_space as f64,
-                words: Some(build_query_word_hashes(query)),
+                // EXPERIMENT (LOSAT_X_BXENDMEM): no table; `get_range` reads the context's words.
+                words: (!x_end_mem()).then(|| build_query_word_hashes(query)),
             }
         })
         .collect()
@@ -322,7 +323,19 @@ fn get_range<'a>(
     if params.uses_composition_based_stats()
         && biased
         && (!should_test
-            || !test_near_identical(&subject, 0, &query, query_range.begin, words, align))
+            || !match words {
+                Some(_) => {
+                    test_near_identical(&subject, 0, &query, query_range.begin, words, align)
+                }
+                None => x_test_near_identical_on_residues(
+                    &subject,
+                    0,
+                    &query,
+                    query_range.begin,
+                    orig_query.data(),
+                    align,
+                ),
+            })
     {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
         // ```c
@@ -1444,6 +1457,15 @@ impl KappaState {
 //     for ( ;  iwrite < old_hspcnt;  iwrite++) {
 //         hsp_array[iwrite] = NULL;
 // ```
+// No NCBI counterpart: reads the switch; it changes no value NCBI computes (`x_bx_mem.rs`, whose
+// module is compiled only with threads, has the switch's comment).
+/// EXPERIMENT (LOSAT_X_BXENDMEM): whether a batch's end makes no word-hash table and no copy of the
+/// residues.
+pub(crate) fn x_end_mem() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXENDMEM"))
+}
+
 #[cfg(test)]
 mod contained_reap_tests {
     use super::*;

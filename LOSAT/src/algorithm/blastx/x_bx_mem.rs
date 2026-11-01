@@ -72,6 +72,11 @@
 //!   x1.59 and 68 MiB; this switch x0.98 and 71 MiB (NCBI `-subject`, one thread: 6.0 s, 80 MiB);
 //!   200 proteins x0.74. With `LOSAT_TIMING` the preparation ahead is not in the batch's
 //!   `QuerySetup` clock.
+//! - `LOSAT_X_BXENDMEM`: at the end of a query batch, no table of the word hashes of each context
+//!   for the near-identical test (8 bytes per letter, 84 MiB for a 5.6 Mb query) and no copy of the
+//!   batch's residues in its results (21 MiB; the report reads the contexts alone). NCBI makes the
+//!   table for each query (`s_CreateWordArray`, blast_kappa.c:2235-2272); the test reads the same
+//!   words from the residues (`redo_alignment::x_test_near_identical_on_residues`).
 //! - `LOSAT_X_BXBUILDPAR` (acts where `LOSAT_X_BXUNITCAP` caps): the lookup table of a capped unit
 //!   is built on `ceil(threads / K)` tasks of the pool (the threads a unit is left), its passes by
 //!   ranges of source cells (`tblastx/lookup/x_lut_direct.rs` `x_partitioned_passes`, which gives

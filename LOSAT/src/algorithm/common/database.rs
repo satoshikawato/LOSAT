@@ -15,7 +15,7 @@ use anyhow::{bail, Result};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
-use crate::report::pairwise::PairwiseDatabase;
+use crate::report::pairwise::{DatabaseInfo, PairwiseDatabase};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::sequence::packed_subject::PackedNucleotide;
 
@@ -64,7 +64,14 @@ pub(crate) fn open_search_database(
         Err(reason) => return Err(DatabaseOpenError::Registry(reason.clone())),
     };
     let path = SearchPath::from_environment(registry).map_err(DatabaseOpenError::Reader)?;
-    SeqDb::open_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)
+    let mut db = SeqDb::open_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)?;
+    db.check_accession_tables()
+        .map_err(DatabaseOpenError::Reader)?;
+    // What the reports show of each name of the list (NCBI's formatter opens them again
+    // before the search; `pairwise_database`).
+    db.read_name_records(name)
+        .map_err(DatabaseOpenError::Reader)?;
+    Ok(db)
 }
 
 /// Why `open_search_database` could not open a database.
@@ -192,15 +199,6 @@ pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error 
         .into(),
         None => refusal(&error.to_string(), program),
     }
-}
-
-/// LOSAT's refusal of a database with parsed Seq-ids (`SeqDb::check_ordinal_ids`), which
-/// `program` does not search: psiblast calls it right after it opens its database
-/// (`open_database`), so the refusal comes where the reader gave it before; the five search
-/// programs read such a database (`check_seqids`, line DBID ID2a and ID2b).
-pub(crate) fn refuse_parsed_seqids(db: &SeqDb, program: &str) -> Result<()> {
-    db.check_ordinal_ids()
-        .map_err(|error| database_error(error, program))
 }
 
 /// LOSAT's refusal of a database that `program` does not search as NCBI does.
@@ -436,22 +434,25 @@ impl std::error::Error for HeaderReadError {}
 //     info.total_length = seqdb->GetTotalLength();
 //     info.number_seqs = seqdb->GetNumSeqs();
 // ```
-/// What the `Database:` lines of the pairwise report show of the database `db` opened by
-/// the name `name`: the title (the name as given for an empty title), the date and the
-/// real totals, also with `-dbsize`.
-pub(crate) fn pairwise_database(db: &SeqDb, name: &str) -> PairwiseDatabase {
-    let title = db.title();
-    PairwiseDatabase {
-        definition: if title.is_empty() {
-            name.as_bytes().to_vec()
-        } else {
-            title.to_vec()
-        },
-        date: db.date().to_string(),
-        // The whole database's, also with a taxid list (`SeqDb::printed_num_seqs`).
-        num_sequences: u64::from(db.printed_num_seqs()),
-        total_letters: db.printed_total_length(),
-    }
+/// What the `Database:` lines of the pairwise report show of the database `db`: for each
+/// name of its `-db` list (`SeqDb::name_records`), that database's title (its name for an
+/// empty title), date and real totals, also with `-dbsize` or a list.
+pub(crate) fn pairwise_database(db: &SeqDb) -> PairwiseDatabase {
+    PairwiseDatabase::new(
+        db.name_records()
+            .iter()
+            .map(|record| DatabaseInfo {
+                definition: if record.title.is_empty() {
+                    record.name.as_bytes().to_vec()
+                } else {
+                    record.title.clone()
+                },
+                date: record.date.clone(),
+                num_sequences: u64::from(record.num_seqs),
+                total_letters: record.total_length,
+            })
+            .collect(),
+    )
 }
 
 /// The stored title of a database sequence, as the reports read it (`read_title`).
@@ -550,37 +551,141 @@ impl ReportedHeader {
     }
 }
 
+/// The reader of the headers of a search's reported database sequences (`read_header`): the
+/// database, with NCBI's lookup of the Seq-align ids of those with parsed Seq-ids
+/// (`SeqDb::seqid_lookup`), made at the first of them and kept for the reader's other reads.
+pub(crate) struct HeaderReader<'a> {
+    db: &'a SeqDb,
+    lookup: std::cell::OnceCell<crate::seqdb::lookup::SeqidLookup<'a>>,
+}
+
+impl<'a> HeaderReader<'a> {
+    /// The reader of the headers of `db`.
+    pub(crate) fn new(db: &'a SeqDb) -> Self {
+        Self {
+            db,
+            lookup: std::cell::OnceCell::new(),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:213-221
+    // ```c++
+    //             // Try to open the BLAST database even for remote searches, as if
+    //             // it is available locally, it will be better to fetch the
+    //             // sequence data for formatting from this (local) source
+    //             CRef<CSeqDB> seqdb = search_db->GetSeqDb();
+    //             db_adapter.Reset(new CLocalDbAdapter(*search_db));
+    //             dl = RegisterOMDataLoader(seqdb);
+    //             scope->AddDataLoader(dl);
+    // ```
+    /// What NCBI's lookup of the Seq-align id of the sequence `ordinal`, `subject`, finds in the
+    /// database where that is not the sequence (`ParsedSubject::found_instead`): NCBI's
+    /// formatters look it up in the search's own database, list included
+    /// (`SeqidLookup::seqid_to_oid`). Another sequence that holds the same definition lines and
+    /// letters is shown as the subject itself (the same record in two volumes or two databases
+    /// of an alias). A lookup that fails is kept for the formats that read the Bioseq; the
+    /// others never look the id up. A subject that no lookup finds (`unfetchable`) is not
+    /// looked up.
+    fn found_instead(
+        &self,
+        subject: &crate::report::db_subject::ParsedSubject,
+        ordinal: u32,
+    ) -> Option<crate::report::db_subject::FoundInstead> {
+        use crate::report::db_subject::FoundInstead;
+        if subject.unfetchable() {
+            return None;
+        }
+        let failed = |error: SeqDbError| {
+            Some(FoundInstead::Failed(
+                error.ncbi_message().unwrap_or_else(|| error.to_string()),
+            ))
+        };
+        let lookup = match self.lookup.get() {
+            Some(lookup) => lookup,
+            None => match self.db.seqid_lookup() {
+                Ok(lookup) => {
+                    let _ = self.lookup.set(lookup);
+                    self.lookup.get().expect("set above")
+                }
+                Err(error) => return failed(error),
+            },
+        };
+        match lookup.seqid_to_oid(subject.alignment_id()) {
+            Ok(Some(oid)) if oid == self.db.oid(ordinal) => None,
+            Ok(Some(oid)) => {
+                let other = self.db.ordinal_of(oid);
+                (!self.same_record(ordinal, other)).then_some(FoundInstead::Sequence(other))
+            }
+            Ok(None) => Some(FoundInstead::Nothing),
+            Err(error) => failed(error),
+        }
+    }
+
+    /// Whether the sequences `a` and `b` hold the same definition lines, as the reports read
+    /// them, and the same letters: NCBI's formatters then show `b` for `a` as `a` itself.
+    fn same_record(&self, a: u32, b: u32) -> bool {
+        let (Ok(header_a), Ok(header_b)) = (self.db.read_header(a), self.db.read_header(b)) else {
+            return false;
+        };
+        if header_a != header_b {
+            return false;
+        }
+        let (Ok(block_a), Ok(block_b)) = (self.db.read_sequence(a), self.db.read_sequence(b))
+        else {
+            return false;
+        };
+        if self.db.seqtype() == SeqType::Protein {
+            return block_a.protein(0) == block_b.protein(0);
+        }
+        matches!(
+            (block_a.nucleotide_iupac(0), block_b.nucleotide_iupac(0)),
+            (Ok(letters_a), Ok(letters_b)) if letters_a == letters_b
+        )
+    }
+}
+
 /// `read_title` of a program that also reads databases with parsed Seq-ids: the header of the
 /// sequence `ordinal`, read as `read_title` reads it, or with every Seq-id where the record has
-/// parsed ones (`SeqDb::read_header`). A parsed subject that LOSAT does not write as NCBI
-/// (`ParsedSubject::new`) is LOSAT's refusal.
+/// parsed ones (`SeqDb::read_header`), with what NCBI's lookup of its Seq-align id finds
+/// (`HeaderReader`). A parsed subject that LOSAT does not write as NCBI (`ParsedSubject::new`)
+/// is LOSAT's refusal.
 pub(crate) fn read_header(
-    db: &SeqDb,
+    headers: &HeaderReader<'_>,
     ordinal: u32,
     query: usize,
     program: &str,
 ) -> Result<ReportedHeader> {
-    reported_header(db, db.read_header(ordinal), ordinal, query, program)
+    reported_header(
+        headers,
+        headers.db.read_header(ordinal),
+        ordinal,
+        query,
+        program,
+    )
 }
 
-/// The `read_header` of the header `header` of the sequence `ordinal` of `db`.
+/// The `read_header` of the header `header` of the sequence `ordinal` of the database of
+/// `headers`.
 fn reported_header(
-    db: &SeqDb,
+    headers: &HeaderReader<'_>,
     header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>,
     ordinal: u32,
     query: usize,
     program: &str,
 ) -> Result<ReportedHeader> {
+    let db = headers.db;
     match header {
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set, db.is_version5())
                 .map_err(|reason| parsed_refusal(ordinal, &reason, program))
                 .and_then(|subject| {
                     refuse_id_of_a_query(&subject, ordinal, program)?;
+                    let found = headers.found_instead(&subject, ordinal);
                     Ok(ReportedHeader::Parsed(std::sync::Arc::new(
                         subject
                             .showing_gis(db.reports_show_gis())
-                            .under_positive_list(db.has_positive_list()),
+                            .under_positive_list(db.has_positive_list())
+                            .found_instead(found),
                     )))
                 })
         }
@@ -639,9 +744,9 @@ pub(crate) fn parsed_refusal(ordinal: u32, reason: &str, program: &str) -> anyho
     )))
 }
 
-/// `refuse_parsed_seqids` of a program that searches databases with parsed Seq-ids too: the
-/// first header of each volume is read right after the database is opened, as before, and only
-/// a header with parsed Seq-ids is let through (`SeqDb::has_parsed_seqids`). Returns whether the
+/// The check of a search program's database right after it is opened: the first header of
+/// each volume is read, as before line DBID, and only a header with parsed Seq-ids is let
+/// through (`SeqDb::has_parsed_seqids`; every search program reads such a database). Returns whether the
 /// database has parsed Seq-ids; such a database is LOSAT's refusal where a variable changes
 /// NCBI's choice of its Seq-ids (`ApplicationSettings::seq_id_rank_variable`).
 pub(crate) fn check_seqids(
@@ -670,19 +775,64 @@ pub(crate) fn refuse_joined_hits<'a>(
     subjects: impl IntoIterator<Item = Option<(u32, &'a crate::report::db_subject::ParsedSubject)>>,
     program: &str,
 ) -> Result<()> {
+    match first_joined(subjects) {
+        Some((before, ordinal)) => Err(anyhow::Error::new(ParsedRefusal(format!(
+            "database sequences {before} and {ordinal} follow each other in the hits of query {} and have Seq-align ids that NCBI BLAST+ takes for one sequence (its XML and outfmt 0 reports show their alignments as one hit); this is not supported by LOSAT's {program}",
+            query + 1
+        )))),
+        None => Ok(()),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1025-1033
+// ```c++
+//         } else {
+//             subid = &((*iter)->GetSeq_id(1));
+//             if(is_first_aln || (!is_first_aln && !subid->Match(*previous_id))){
+//                 ++num_align;
+//             }
+//
+//             if(num_align > number) {
+//                  break;
+//             }
+// ```
+/// LOSAT's refusal of the cut of a hit list longer than `max_target_seqs` (query `query`) to
+/// its first `max_target_seqs` subjects where two of its first `max_target_seqs + 1` HSP lists
+/// (`subjects`, as `refuse_joined_hits` takes them) are parsed subjects that follow each other
+/// with matching Seq-align ids: NCBI's formatter counts their Seq-aligns as those of one
+/// subject (`PruneSeqalign`) and keeps one subject more. psiblast cuts its traceback hit lists
+/// so, which are longer than `-max_target_seqs`.
+pub(crate) fn refuse_joined_cut<'a>(
+    query: usize,
+    max_target_seqs: usize,
+    subjects: impl IntoIterator<Item = Option<(u32, &'a crate::report::db_subject::ParsedSubject)>>,
+    program: &str,
+) -> Result<()> {
+    match first_joined(subjects.into_iter().take(max_target_seqs.saturating_add(1))) {
+        Some((before, ordinal)) => Err(anyhow::Error::new(ParsedRefusal(format!(
+            "database sequences {before} and {ordinal} follow each other in the first {} hits of query {} and have Seq-align ids that NCBI BLAST+ takes for one sequence (it counts them as one of the -max_target_seqs {max_target_seqs} sequences and keeps one more); this is not supported by LOSAT's {program}",
+            max_target_seqs.saturating_add(1),
+            query + 1
+        )))),
+        None => Ok(()),
+    }
+}
+
+/// The ordinal ids of the first two parsed subjects of `subjects` that follow each other and
+/// whose Seq-align ids match (`report::db_subject::joined_in_reports`).
+fn first_joined<'a>(
+    subjects: impl IntoIterator<Item = Option<(u32, &'a crate::report::db_subject::ParsedSubject)>>,
+) -> Option<(u32, u32)> {
     let mut previous: Option<(u32, &crate::report::db_subject::ParsedSubject)> = None;
     for subject in subjects {
         if let (Some((before, a)), Some((ordinal, b))) = (previous, subject) {
             if crate::report::db_subject::joined_in_reports(a, b) {
-                return Err(anyhow::Error::new(ParsedRefusal(format!(
-                    "database sequences {before} and {ordinal} follow each other in the hits of query {} and have Seq-align ids that NCBI BLAST+ takes for one sequence (its XML and outfmt 0 reports show their alignments as one hit); this is not supported by LOSAT's {program}",
-                    query + 1
-                ))));
+                return Some((before, ordinal));
             }
         }
         previous = subject;
     }
-    Ok(())
+    None
 }
 
 /// LOSAT's refusal of a parsed subject whose outfmt 0 title NCBI makes from the source
@@ -908,10 +1058,11 @@ pub(crate) fn reports_may_refuse(
         }
     }
     let check = |kept: &mut Kept,
+                 headers: &HeaderReader<'_>,
                  ordinal: u32,
                  header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>|
      -> std::result::Result<(), ReportRefusal> {
-        match reported_header(db, header, ordinal, 0, program) {
+        match reported_header(headers, header, ordinal, 0, program) {
             Ok(ReportedHeader::Stored(stored)) => {
                 check_reported_title(stored.replaced_bytes, ordinal, program)
                     .map_err(|_| ReportRefusal::Headers)?;
@@ -953,13 +1104,17 @@ pub(crate) fn reports_may_refuse(
     let check_range = |mut kept: Kept,
                        range: &crate::seqdb::BlockRange|
      -> std::result::Result<Kept, ReportRefusal> {
+        let headers = HeaderReader::new(db);
         let mut refusal = None;
         db.visit_sequence_headers(*range, |ordinal, header| {
-            refusal = check(&mut kept, ordinal, header).err();
+            refusal = check(&mut kept, &headers, ordinal, header).err();
             refusal.is_none()
         });
         refusal.map_or(Ok(kept), Err)
     };
+    // The database's lookup files, opened once before the ranges look the ids up in parallel
+    // (`HeaderReader`); an error comes again at the first lookup.
+    let _ = db.seqid_lookup();
     let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
     let all = || -> std::result::Result<Kept, ReportRefusal> {
         #[cfg(all(
@@ -983,6 +1138,7 @@ pub(crate) fn reports_may_refuse(
         Err(refusal) => return Some(refusal),
     };
     kept.keys.sort_unstable();
+    let headers = HeaderReader::new(db);
     for shared_key in kept.keys.chunk_by(|a, b| a.0 == b.0) {
         let mut ordinals: Vec<u32> = shared_key.iter().map(|&(_, ordinal)| ordinal).collect();
         ordinals.dedup();
@@ -991,7 +1147,7 @@ pub(crate) fn reports_may_refuse(
         }
         let mut subjects = Vec::with_capacity(ordinals.len());
         for ordinal in ordinals {
-            match read_header(db, ordinal, 0, program) {
+            match read_header(&headers, ordinal, 0, program) {
                 Ok(ReportedHeader::Parsed(subject)) => subjects.push(subject),
                 _ => return Some(ReportRefusal::Headers),
             }
@@ -2269,6 +2425,38 @@ mod taxdb_prepass_tests {
         let search = SearchPath::new(cwd, taxdb.map(Path::as_os_str), None).unwrap();
         let path = root().join("db_search").join(name);
         SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap()
+    }
+
+    #[test]
+    fn a_reported_sequence_whose_seq_align_id_finds_another_record_first() {
+        // tests/db_search/ids/make_ids.py (line DBID N1): the second database of an alias holds
+        // the record of the first, which NCBI shows for it (`pdup_ab`), or the record with another
+        // title, which it shows in its place (`pdup_ac`).
+        let cwd = empty_cwd("found_instead");
+        for (name, want) in [
+            ("ids/pdup_ab", None),
+            (
+                "ids/pdup_ac",
+                Some("lookup gives database sequence 0 first"),
+            ),
+            (
+                "ids/pfound_v5",
+                Some("lookup gives database sequence 0 first"),
+            ),
+        ] {
+            let db = db_search(name, None, &cwd);
+            let headers = HeaderReader::new(&db);
+            let ReportedHeader::Parsed(subject) = read_header(&headers, 1, 0, "BLASTP").unwrap()
+            else {
+                panic!("{name}: a sequence with parsed Seq-ids");
+            };
+            match (subject.fetched(), want) {
+                (Ok(()), None) => {}
+                (Err(error), Some(text)) => assert!(error.contains(text), "{name}: {error}"),
+                (got, _) => panic!("{name}: {got:?}"),
+            }
+        }
+        std::fs::remove_dir_all(&cwd).unwrap();
     }
 
     #[test]

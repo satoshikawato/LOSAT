@@ -457,6 +457,8 @@ pub struct StringIsam {
     /// `m_FirstKey` and `m_LastKey` (lower-cased), set when the index is initialised.
     first_key: Option<Vec<u8>>,
     last_key: Option<Vec<u8>>,
+    /// The bytes of the index file, where the ISAM keeps them (`keep_index`).
+    index_bytes: Option<Vec<u8>>,
 }
 
 impl StringIsam {
@@ -630,6 +632,7 @@ impl StringIsam {
             max_line_size: 0,
             first_key: None,
             last_key: None,
+            index_bytes: None,
         };
         if let Some(header) = isam.init_search()? {
             isam.num_terms = header.num_terms;
@@ -841,8 +844,35 @@ impl StringIsam {
     /// The four bytes at `at` of the index file.
     fn index_u32(&self, at: u64) -> Result<u32, SeqDbError> {
         let mut bytes = [0u8; 4];
-        self.index.read_exact_at(&mut bytes, at)?;
+        self.read_index(&mut bytes, at)?;
         Ok(u32::from_be_bytes(bytes))
+    }
+
+    /// The ISAM with the bytes of its index file kept in memory, which the binary search over
+    /// the samples then reads (NCBI maps the file): for the search programs, which look up
+    /// every reported sequence. No NCBI counterpart beyond the mapping.
+    pub fn keep_index(mut self) -> Result<Self, SeqDbError> {
+        self.index_bytes = Some(self.index.read_all()?);
+        Ok(self)
+    }
+
+    /// `buf` from `at` of the index file (`DbFile::read_exact_at`, from the kept bytes where
+    /// there are some, with the same error past the end).
+    fn read_index(&self, buf: &mut [u8], at: u64) -> Result<(), SeqDbError> {
+        let Some(bytes) = &self.index_bytes else {
+            return self.index.read_exact_at(buf, at);
+        };
+        let range = usize::try_from(at)
+            .ok()
+            .and_then(|start| Some(start..start.checked_add(buf.len())?))
+            .filter(|range| range.end <= bytes.len());
+        match range {
+            Some(range) => {
+                buf.copy_from_slice(&bytes[range]);
+                Ok(())
+            }
+            None => self.index.read_exact_at(buf, at),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:899-923
@@ -1170,8 +1200,7 @@ impl StringIsam {
         }
         let mut window = vec![0u8; term_in.len() + 1];
         let readable = window.len().min((file_length - offset_begin) as usize);
-        self.index
-            .read_exact_at(&mut window[..readable], key_offset)?;
+        self.read_index(&mut window[..readable], key_offset)?;
         let dc_result = diff_char(term_in, &window, true);
         if dc_result != -1 {
             return Ok((dc_result, window));
@@ -3449,8 +3478,8 @@ fn fasta_string(id: &ParsedSeqId) -> Vec<u8> {
 // }
 //
 // ```
-/// `SeqDB_SimplifySeqid(bestid, &acc, num_id, str_id, simpler)` (the call with `acc == NULL`,
-/// made by `CSeqDBGiList::FindId`, is not ported).
+/// `SeqDB_SimplifySeqid(bestid, &acc, num_id, str_id, simpler)` (the call with `acc == NULL` is
+/// [`seqdb_simplify_seqid`]).
 fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccession, SimplifyError> {
     let mut out = SimplifiedAccession {
         id_type: SeqDbIdType::String,
@@ -3569,6 +3598,29 @@ fn simplify_seqid(bestid: &ParsedSeqId, acc: &[u8]) -> Result<SimplifiedAccessio
         }
     }
     Ok(out)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2805-2817
+// ```c++
+// void CSeqDBVol::SeqidToOids(CSeq_id              & seqid,
+//                             vector<int>          & oids,
+//                             CSeqDBLockHold       & locked) const
+// {
+//     Int8   ident   (-1);
+//     string str_id;
+//     bool   simpler (false);
+//
+//     ESeqDBIdType id_type = SeqDB_SimplifySeqid(seqid, 0, ident, str_id, simpler);
+//
+//     x_StringToOids(seqid.AsFastaString(), id_type, ident, str_id, simpler, oids);
+//
+// }
+// ```
+/// `SeqDB_SimplifySeqid(seqid, 0, num_id, str_id, simpler)` of `CSeqDBVol::SeqidToOids`: what a
+/// volume looks up for the Seq-id `seqid`. Without `acc`, NCBI's default case labels the Seq-id
+/// itself (`GetLabel` with `eFasta`), which is its FASTA string, the `acc` given here.
+pub fn seqdb_simplify_seqid(seqid: &ParsedSeqId) -> Result<SimplifiedAccession, SimplifyError> {
+    simplify_seqid(seqid, &fasta_string(seqid))
 }
 
 /// `WhichInverseSeqId(portion.c_str())`: the text up to its first NUL.

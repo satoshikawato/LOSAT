@@ -21,7 +21,7 @@ use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
 use crate::report::serial::encoder::Encoder;
 use crate::report::serial::json::JsonEncoder;
-use crate::seqdb::{SeqDb, SeqDbError, SeqType};
+use crate::seqdb::{SeqDb, SeqType};
 
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -124,13 +124,7 @@ fn check_deflines(name: &str, sets: &[(u32, DeflineSet)], expected: &[Vec<String
 fn every_definition_line_reads_as_ncbis_blastdbcmd_reads_it() {
     for (name, seqtype) in DATABASES {
         let db = open(name, seqtype);
-        let error = db
-            .check_ordinal_ids()
-            .expect_err("a database with parsed Seq-ids");
-        assert!(
-            matches!(error, SeqDbError::Unsupported { .. }),
-            "{name}: {error}"
-        );
+        assert!(db.has_parsed_seqids().unwrap(), "{name}");
         let sets: Vec<(u32, DeflineSet)> = sets(&db)
             .into_iter()
             .zip(0..)
@@ -200,7 +194,7 @@ fn the_whole_distributed_18s_database_reads_as_ncbis_blastdbcmd_reads_it() {
         .map(|line| line.splitn(7, '%').map(str::to_string).collect())
         .collect();
     let db = SeqDb::open(&base, SeqType::Nucleotide).unwrap();
-    assert!(db.check_ordinal_ids().is_err());
+    assert!(db.has_parsed_seqids().unwrap());
     let sets: Vec<(u32, DeflineSet)> = sets(&db)
         .into_iter()
         .zip(0..)

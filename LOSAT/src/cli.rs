@@ -568,7 +568,6 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "html"
             | "import_search_strategy"
             | "ipglist"
-            | "lcase_masking"
             | "line_length"
             | "negative_gilist"
             | "negative_ipglist"
@@ -610,6 +609,8 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
             | "ignore_msa_master"
             | "in_msa"
             | "in_pssm"
+            // Line NP ported it to BLASTP's search, not to PSIBLAST's rounds.
+            | "lcase_masking"
             | "msa_master_idx"
             | "out_ascii_pssm"
             | "out_pssm"

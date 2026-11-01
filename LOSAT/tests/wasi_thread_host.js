@@ -21,6 +21,17 @@ const WORKER_FILE = require.resolve("./wasi_thread_worker");
 // Thread workers share this process's environment (SHARE_ENV) instead of each copying it at its
 // creation, which this thread does for every worker (15 workers: 14 instead of 18 ms on ws). They
 // only read it (createWasi).
+// Their V8 heaps may grow to just under 2 GiB, not to V8's default: an isolate whose old
+// generation may reach 2 GiB gets its own copy of V8's embedded builtins in its code range
+// (--short-builtin-calls), 1.8 MiB of RSS per worker: a process with the 15 idle workers of a
+// 16-thread command held 323 MiB on ws with no limit or 2048 MiB, 296 MiB with 2047 or 1024 MiB.
+// Their young generations stay at 1 MiB, which V8 would grow from 2.25 to 4 MiB once a worker
+// allocates (up to 3 MiB of RSS per worker); after its start a worker allocates only the small
+// views of its file calls (sharedFileImports). At 16 threads on ws the peak RSS of 9 commands
+// fell by 13 to 32 MiB with the old limit alone and by 40 to 76 MiB with both; none was slower.
+// A worker's heap holds its WASI context and its instance; the guest's memory is the shared
+// memory, outside it.
+const WORKER_LIMITS = Object.freeze({ maxOldGenerationSizeMb: 2047, maxYoungGenerationSizeMb: 1 });
 
 const WORKER_START_TIMEOUT_MS = parsePositiveIntEnv(
   "LOSAT_WASI_THREADS_START_TIMEOUT_MS",
@@ -190,6 +201,16 @@ function readInto(file, into) {
   }
 }
 
+// Frees the memory of `view` at once, not at a garbage collection, which the main thread of a
+// command may not run before it exits. Only a view of a whole ArrayBuffer is freed (never a part
+// of Node's Buffer pool); the ArrayBuffer is detached (ArrayBuffer.prototype.transfer), and a
+// later read of the view sees 0 bytes.
+function freeBytes(view) {
+  const buffer = view.buffer;
+  if (view.byteOffset === 0 && view.byteLength === buffer.byteLength && buffer.byteLength > 0
+    && typeof buffer.transfer === "function") buffer.transfer(0);
+}
+
 function writeAtomic(file, data) {
   const temp = `${file}.${process.pid}.${crypto().randomBytes(6).toString("hex")}.tmp`;
   try {
@@ -344,9 +365,20 @@ function writeGuardIndex(stat, inputSha256) {
   }
 }
 
-// The module compiled from the cached guarded bytes that the input's index names, with the input
-// and its SHA-256, or null when there is no index, no entry, or a check fails. `compileStarted`
-// runs once the compile has started (createThreadHost's early workers).
+// The buffer that compileIndexedGuard reads the module into is freed once the compile has copied
+// the bytes (V8 keeps its own copy with the module) and the identity is read; it used to stay to
+// the end of a command (10 MB of RSS). It is at least 33 MiB, of which only the module's pages
+// are touched: glibc's free() of a mapped block of up to 32 MiB raises the mmap threshold to that
+// size, and later blocks below it come from the arenas and stay there once freed. On ws (16
+// threads on 4 CPUs, 2 runs each) the peak RSS of a blastx, blastp, megablast and tblastx command
+// rose by 7, 12, 22 and 30 MiB with a 10 MB buffer freed, and fell by 9, 11 and 13 MiB (tblastx:
+// within its spread) with the buffer at 33 MiB.
+const INDEX_BUFFER_BYTES = 33 << 20;
+
+// The module compiled from the cached guarded bytes that the input's index names, with the input,
+// the buffer it was read into (INDEX_BUFFER_BYTES) and its SHA-256, or null when there is no
+// index, no entry, or a check fails. `compileStarted` runs once the compile has started
+// (createThreadHost's early workers).
 async function compileIndexedGuard(wasmPath, compileStarted) {
   let dir, stat, index, stem, record, buffer, cached;
   try {
@@ -363,7 +395,7 @@ async function compileIndexedGuard(wasmPath, compileStarted) {
       || record.output_bytes > 2 * Number(stat.size) + 65536) return null;
     // One buffer for the cached bytes and then the input: V8 copies the bytes when the compile
     // starts, and a new 10 MB buffer costs its page faults (about 6 ms on ws).
-    buffer = Buffer.allocUnsafe(Math.max(record.output_bytes, Number(stat.size)));
+    buffer = Buffer.allocUnsafeSlow(Math.max(record.output_bytes, Number(stat.size), INDEX_BUFFER_BYTES));
     cached = readInto(`${stem}.wasm`, buffer);
   } catch (err) {
     debug(`guard cache index not used (${err.message})`);
@@ -400,7 +432,7 @@ async function compileIndexedGuard(wasmPath, compileStarted) {
     fs.utimesSync(guardIndexFile(dir, stat), now, now);
   } catch { /* only the order of pruning */ }
   debug(`guard cache index hit: ${stem}.wasm`);
-  return { module, input, inputSha256, fill: record.fill, copy: record.copy };
+  return { module, buffer, input, inputSha256, fill: record.fill, copy: record.copy };
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
@@ -487,7 +519,7 @@ function bootEarlyWorkers(count, fault) {
     const control = new SharedArrayBuffer(4 * START_WORDS);
     let worker;
     try {
-      worker = new Worker(WORKER_FILE, { env: SHARE_ENV, workerData: { control, standby: index, early: true, fault: fault || null } });
+      worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { control, standby: index, early: true, fault: fault || null } });
     } catch { break; }
     worker.unref();
     early.push({ worker, control });
@@ -509,6 +541,7 @@ async function prepareThreadHost(wasmPath, kind, compiling = () => {}) {
   const indexed = await compileIndexedGuard(wasmPath, compileStarted);
   if (indexed) {
     const identity = prepareArtifact(indexed.input, kind, indexed.module, indexed.inputSha256).identity;
+    freeBytes(indexed.buffer);
     const timings = { read_and_hash_seconds: 0, guard_seconds: 0, guarded_compile_seconds: (performance.now()-start)/1000 };
     debug(`shared-memory guards: ${indexed.fill} fills, ${indexed.copy} copies`);
     const { module } = indexed;
@@ -614,7 +647,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   };
   const recycledWorker = (data) => {
     const control = new SharedArrayBuffer(4 * START_WORDS);
-    const worker = new Worker(WORKER_FILE, { env: SHARE_ENV, workerData: { module, wasmPath, args, memory: mainMemory,
+    const worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
       control, files, fault: options.fault || null, recycle: true, ...data } });
     const slot = { index: nextSlot++, worker, control, state: new Int32Array(control), tid: data.tid ?? null };
     if (data.tid === undefined) Atomics.store(slot.state, SLOT_STATE, SLOT_PREPARING);
@@ -685,7 +718,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     const control = new SharedArrayBuffer(4 * START_WORDS), view = new Int32Array(control);
     let worker;
     try {
-      worker = new Worker(WORKER_FILE, { env: SHARE_ENV, workerData: { module, wasmPath, args, memory: mainMemory,
+      worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
         startArg, tid, control, files, fault: options.fault || null } });
     } catch (err) { event("spawn_rejected", { tid, error: String(err) }); return -1; }
     workers.add(worker); event("spawned", { tid });
@@ -726,7 +759,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
           worker = early.worker;
           worker.postMessage({ module, wasmPath, args, memory: mainMemory, files });
         } else {
-          worker = new Worker(WORKER_FILE, { env: SHARE_ENV, workerData: { module, wasmPath, args, memory: mainMemory,
+          worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
             control, files, standby: index, fault: options.fault || null } });
         }
       } catch (err) { event("standby_rejected", { standby: index, error: String(err) }); return; }
@@ -782,4 +815,4 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     },
   };
 }
-module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir };
+module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir, freeBytes };

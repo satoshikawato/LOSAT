@@ -158,6 +158,10 @@ def cases(program: str, tables: dict[str, list[tuple[int, int]]]) -> dict[str, l
         sets["mask"] += [["-seg", "yes", "-soft_masking", value] for value in ("true", "false")]
         sets["mask"] += [["-seg", "yes", "-soft_masking", "true", "-comp_based_stats", value] for value in ("0", "1", "3")]
         sets["mask"] += [["-task", task, "-seg", "yes", "-soft_masking", "true"] for task in ("blastp-fast", "blastp-short")]
+        # -lcase_masking (blast_filter.c:1239-1256): the lower-case runs join the SEG intervals (line NP, SM-L).
+        sets["mask"] += [["-lcase_masking"], ["-lcase_masking", "-seg", "yes"], ["-lcase_masking", "-soft_masking", "true"],
+                         ["-lcase_masking", "-seg", "yes", "-soft_masking", "true"],
+                         ["-task", "blastp-fast", "-lcase_masking"], ["-task", "blastp-short", "-lcase_masking"]]
     if program == "tblastn":
         sets["task"] = [["-task", task] for task in ("tblastn", "tblastn-fast", "TBLASTN", "tblastx")]
         sets["task"] += [["-task", "tblastn-fast", "-word_size", value] for value in ("3", "5", "6")]

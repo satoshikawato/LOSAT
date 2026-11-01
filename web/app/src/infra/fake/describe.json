@@ -20,7 +20,7 @@
    },
    {
     "flag": "-db",
-    "help": "BLAST database name (a nucleotide database without parsed Seq-ids)",
+    "help": "BLAST database name (a nucleotide database, with or without parsed Seq-ids)",
     "takes_value": true
    },
    {
@@ -473,6 +473,15 @@
     "takes_value": true
    },
    {
+    "flag": "-lcase_masking",
+    "help": "",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
     "flag": "-use_sw_tback",
     "help": "",
     "takes_value": false,
@@ -514,7 +523,7 @@
    },
    {
     "flag": "-db",
-    "help": "BLAST database name (a nucleotide database without parsed Seq-ids)",
+    "help": "BLAST database name (a nucleotide database, with or without parsed Seq-ids)",
     "takes_value": true
    },
    {
@@ -783,7 +792,7 @@
    },
    {
     "flag": "-db",
-    "help": "BLAST database name (a nucleotide database without parsed Seq-ids)",
+    "help": "BLAST database name (a nucleotide database, with or without parsed Seq-ids)",
     "takes_value": true
    },
    {

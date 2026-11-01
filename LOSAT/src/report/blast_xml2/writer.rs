@@ -206,9 +206,20 @@ where
     string_member(enc, "reference", 2, run.reference.as_bytes());
     enc.member("search-target", 3);
     match params.target {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:157-169
+        // ```c++
+        // 	ITERATE(vector<CBlastFormatUtil::SDbInfo>, i, dbsInfo) {
+        // 		if(i != dbsInfo.begin()) {
+        // 			m_DbName += " " ;
+        // 		}
+        // 		m_DbName += i->name;
+        // ```
+        // `i->name` is each name of the `-db` list as the reports open it alone
+        // (`seqdb::alias::report_names`): quotes kept, one space between names.
         Xml2Target::Database => {
             enc.variant("Target", "db", 0);
-            enc.visible_str(run.db_name);
+            let names = crate::seqdb::alias::report_names(&String::from_utf8_lossy(run.db_name));
+            enc.visible_str(names.join(" ").as_bytes());
             enc.end_variant();
         }
         Xml2Target::Subjects(count) => {

@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "am12",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "prot_ids",
+  "number-of-letters": 2603,
+  "number-of-sequences": 19,
+  "last-updated": "2026-10-29T00:13:00",
+  "number-of-volumes": 1,
+  "bytes-total": 5888,
+  "bytes-to-cache": 2847,
+  "files": [
+    "am12.phr",
+    "am12.pin",
+    "am12.pjs",
+    "am12.pnd",
+    "am12.pni",
+    "am12.pog",
+    "am12.psd",
+    "am12.psi",
+    "am12.psq"
+  ]
+}

@@ -171,6 +171,11 @@ that reads memory (all but the stores and notify) compares `memory.size` with th
 record afterwards and refreshes a stale bound. A thread that takes a lock or reads a
 published address therefore has the new bound before it uses the address.
 
+A host of a guarded module must not write bytes 16-19 of the shared memory (the record), and
+must not grow the memory by more than 0 pages while a search runs: `memory.grow(0)` is always
+safe, and so is growing before the first instance exists. The guard changes no import, export
+or memory limit.
+
 The build applies the same guard to the threaded artifacts, so that hosts other
 than this runner (browsers) get guarded bytes too (release v0.2.0 DECISIONS 52):
 `build_wasi_artifacts.py` writes `losat-threaded-command.wasm` and

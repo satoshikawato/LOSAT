@@ -1,0 +1,1 @@
+- BLASTX `-lcase_masking` with SEG: the masks that `-outfmt 11` and `-outfmt 16` report match NCBI BLAST+ 2.17.0 when a lower-case run falls on the first letter of a SEG interval (SEG's intervals come first, as in NCBI, so the run joins the interval instead of being listed apart). The masked letters and the hits did not change.

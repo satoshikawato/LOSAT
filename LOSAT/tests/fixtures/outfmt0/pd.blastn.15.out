@@ -1,0 +1,485 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "subjects": [
+          "NM_000003.1",
+          "NC_000013.1",
+          "gi|5",
+          "BK000001.1",
+          "l2",
+          "plain1",
+          "9012",
+          "Subject_1",
+          "Subject_7",
+          "NM_000002.1",
+          "s1",
+          "db:tag5"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "qn1",
+            "query_title": "first half",
+            "query_len": 1620,
+            "query_masking": [
+              {
+                "from": 1297,
+                "to": 1304
+              },
+              {
+                "from": 1416,
+                "to": 1422
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "plain1",
+                    "title": "plain title"
+                  }
+                ],
+                "len": 270,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 499.716,
+                    "score": 270,
+                    "evalue": 1.82718e-144,
+                    "identity": 270,
+                    "query_from": 1351,
+                    "query_to": 1620,
+                    "query_strand": "Plus",
+                    "hit_from": 1,
+                    "hit_to": 270,
+                    "hit_strand": "Plus",
+                    "align_len": 270,
+                    "gaps": 0,
+                    "qseq": "CATGTGGAACAAATGAATTGGCGTCTGGAAAGCAATACCGGTGAACGTCAACAAAGCGGTATTTATaaaaaaaGCCAAGAAATGATGCTGGAATATACCACCCGTGTGAGCAAACCGCCGTGTGCTGCTGGTCTGCATAATTATATGTTTACCTATACCCGTCAATGGGCTAAAATTGTGATGCTGTATGCTTGGACCGGTTGTCTGTTTGAACGTATGAAATTTATTGCTGATAAAAAAGGTTGGCGTACCTGTGGTGATCCGCTGGTG",
+                    "hseq": "CATGTGGAACAAATGAATTGGCGTCTGGAAAGCAATACCGGTGAACGTCAACAAAGCGGTATTTATAAAAAAAGCCAAGAAATGATGCTGGAATATACCACCCGTGTGAGCAAACCGCCGTGTGCTGCTGGTCTGCATAATTATATGTTTACCTATACCCGTCAATGGGCTAAAATTGTGATGCTGTATGCTTGGACCGGTTGTCTGTTTGAACGTATGAAATTTATTGCTGATAAAAAAGGTTGGCGTACCTGTGGTGATCCGCTGGTG",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "l2",
+                    "title": "local two"
+                  }
+                ],
+                "len": 270,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 499.716,
+                    "score": 270,
+                    "evalue": 1.82718e-144,
+                    "identity": 270,
+                    "query_from": 1081,
+                    "query_to": 1350,
+                    "query_strand": "Plus",
+                    "hit_from": 1,
+                    "hit_to": 270,
+                    "hit_strand": "Plus",
+                    "align_len": 270,
+                    "gaps": 0,
+                    "qseq": "ATGAGCTGGCAACAAATGCGTAATTGGCATCGTCAAAGCGCTACCTTTCGTTGTTGGGGTGAAGATCGTGATCGTGAAGAAGCTAAAACCACCCCGATTAGCGCTATTATGAATGAACCGGATTTTGCTACCTATGATGAACAATGTGATCATGAAGTGGTGCAAACCGCTAATTGGATGAATCTGCAAGTGGCTCGTGATGCTTATGCTTGTGCTCaaaaaaaaGTGCTGGCTAATCGTCTGTGTGAACCGCTGAAAATGGATAATTGT",
+                    "hseq": "ATGAGCTGGCAACAAATGCGTAATTGGCATCGTCAAAGCGCTACCTTTCGTTGTTGGGGTGAAGATCGTGATCGTGAAGAAGCTAAAACCACCCCGATTAGCGCTATTATGAATGAACCGGATTTTGCTACCTATGATGAACAATGTGATCATGAAGTGGTGCAAACCGCTAATTGGATGAATCTGCAAGTGGCTCGTGATGCTTATGCTTGTGCTCAAAAAAAAGTGCTGGCTAATCGTCTGTGTGAACCGCTGAAAATGGATAATTGT",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "tpg|BK000001.1|",
+                    "accession": "BK000001",
+                    "title": "TPA: third party"
+                  }
+                ],
+                "len": 270,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 499.716,
+                    "score": 270,
+                    "evalue": 1.82718e-144,
+                    "identity": 270,
+                    "query_from": 811,
+                    "query_to": 1080,
+                    "query_strand": "Plus",
+                    "hit_from": 1,
+                    "hit_to": 270,
+                    "hit_strand": "Plus",
+                    "align_len": 270,
+                    "gaps": 0,
+                    "qseq": "GGTTGGACCCATAAAAGCCCGACCGGTAAAGAAACCAATTTTGAACAACTGACCAAAGAATTTTGGACCCCGTGTCCGTGGCGTCGTGTGAGCGTGGAAGCTAGCAGCGATCTGGAACATCGTGATGTGCAAAGCTTTGGTAATGCTGATAAAATGTGTGATGTGATGGGTGCTAATCATATGGAACAACGTTGTGCTGATATTGAACATTATCATATTTGTCCGTGTGAAGAACTGGCTGATTATACCATTAAAAAACCGTATGGTGGT",
+                    "hseq": "GGTTGGACCCATAAAAGCCCGACCGGTAAAGAAACCAATTTTGAACAACTGACCAAAGAATTTTGGACCCCGTGTCCGTGGCGTCGTGTGAGCGTGGAAGCTAGCAGCGATCTGGAACATCGTGATGTGCAAAGCTTTGGTAATGCTGATAAAATGTGTGATGTGATGGGTGCTAATCATATGGAACAACGTTGTGCTGATATTGAACATTATCATATTTGTCCGTGTGAAGAACTGGCTGATTATACCATTAAAAAACCGTATGGTGGT",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 4,
+                "description": [
+                  {
+                    "id": "gi|5|ref|NM_000005.1|",
+                    "accession": "NM_000005",
+                    "title": "with gi"
+                  }
+                ],
+                "len": 270,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 499.716,
+                    "score": 270,
+                    "evalue": 1.82718e-144,
+                    "identity": 270,
+                    "query_from": 541,
+                    "query_to": 810,
+                    "query_strand": "Plus",
+                    "hit_from": 1,
+                    "hit_to": 270,
+                    "hit_strand": "Plus",
+                    "align_len": 270,
+                    "gaps": 0,
+                    "qseq": "TGGTTTATTCATATTTGTGATAAAAGCAAAGATAGCATGTTTATGATTGCTCATAGCTTTCTGTGGCGTCTGAGCCGTCTGGTGAGCGTGTATCAACAAACCTGGGATCATTATTTTTATGCTGAAGATATTCATCATTATACCTGTAAAGGTAGCCGTCAACTGGATATGCGTCGTAAAAGCTTTGAAATGAATATGAATGAACCGCGTATGCTGCATATTCGTGGTAATCTGCAAATTTGGCTGACCTGTGGTCTGTTTTTTCATTTT",
+                    "hseq": "TGGTTTATTCATATTTGTGATAAAAGCAAAGATAGCATGTTTATGATTGCTCATAGCTTTCTGTGGCGTCTGAGCCGTCTGGTGAGCGTGTATCAACAAACCTGGGATCATTATTTTTATGCTGAAGATATTCATCATTATACCTGTAAAGGTAGCCGTCAACTGGATATGCGTCGTAAAAGCTTTGAAATGAATATGAATGAACCGCGTATGCTGCATATTCGTGGTAATCTGCAAATTTGGCTGACCTGTGGTCTGTTTTTTCATTTT",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 5,
+                "description": [
+                  {
+                    "id": "ref|NC_000013.1|NC13",
+                    "accession": "NC_000013",
+                    "title": "chromosome"
+                  }
+                ],
+                "len": 270,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 499.716,
+                    "score": 270,
+                    "evalue": 1.82718e-144,
+                    "identity": 270,
+                    "query_from": 271,
+                    "query_to": 540,
+                    "query_strand": "Plus",
+                    "hit_from": 1,
+                    "hit_to": 270,
+                    "hit_strand": "Plus",
+                    "align_len": 270,
+                    "gaps": 0,
+                    "qseq": "CGTTGGTGTTTTGCTGAAGAATTTGCTATGGAAGTGAGCAAACGTATGCCGGATTGTGATCATCCGCATTGGCCGAAATATTGGCAAATGCCGAATTGTGGTGTGGGTCATTGTATTCTGATTAATCATCATCCGCCGATTTGTCGTACCTGTGAAGCTGCTGTGTATACCACCACCGAATGGAATAAAATTTTTCGTCCGTTTATTGCTGAAATTGAATGGTATCAACATCCGCAAGAAGCTGGTCCGGAAATGATGAAAGTGTTTGTG",
+                    "hseq": "CGTTGGTGTTTTGCTGAAGAATTTGCTATGGAAGTGAGCAAACGTATGCCGGATTGTGATCATCCGCATTGGCCGAAATATTGGCAAATGCCGAATTGTGGTGTGGGTCATTGTATTCTGATTAATCATCATCCGCCGATTTGTCGTACCTGTGAAGCTGCTGTGTATACCACCACCGAATGGAATAAAATTTTTCGTCCGTTTATTGCTGAAATTGAATGGTATCAACATCCGCAAGAAGCTGGTCCGGAAATGATGAAAGTGTTTGTG",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 6,
+                "description": [
+                  {
+                    "id": "ref|NM_000003.1|",
+                    "accession": "NM_000003",
+                    "title": "mRNA one"
+                  }
+                ],
+                "len": 270,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 499.716,
+                    "score": 270,
+                    "evalue": 1.82718e-144,
+                    "identity": 270,
+                    "query_from": 1,
+                    "query_to": 270,
+                    "query_strand": "Plus",
+                    "hit_from": 1,
+                    "hit_to": 270,
+                    "hit_strand": "Plus",
+                    "align_len": 270,
+                    "gaps": 0,
+                    "qseq": "TGTCTGTTTCGTAATGAACGTTATAGCTATGCTACCCAATGGAATTATGTGCAACCGGGTTGTGAAGAACCGTTTGAAGGTACCAGCTTTCCGTATACCAAATGGGGTCCGGATTGTTGGTGTGGTTGTGGTCTGAAAGATACCTATGAATGGTGTGAATATCGTATGATGACCCGTGGTTTTGATATGTGTTGGAAAAATGGTTATGATGTGGAACTGAGCAATCAATGTAGCCAATATGATAATTTTGATTTTTGGCTGGAAGTGCAA",
+                    "hseq": "TGTCTGTTTCGTAATGAACGTTATAGCTATGCTACCCAATGGAATTATGTGCAACCGGGTTGTGAAGAACCGTTTGAAGGTACCAGCTTTCCGTATACCAAATGGGGTCCGGATTGTTGGTGTGGTTGTGGTCTGAAAGATACCTATGAATGGTGTGAATATCGTATGATGACCCGTGGTTTTGATATGTGTTGGAAAAATGGTTATGATGTGGAACTGAGCAATCAATGTAGCCAATATGATAATTTTGATTTTTGGCTGGAAGTGCAA",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 15,
+              "eff_space": 4911300,
+              "kappa": 0.46,
+              "lambda": 1.28,
+              "entropy": 0.85
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "subjects": [
+          "NM_000003.1",
+          "NC_000013.1",
+          "gi|5",
+          "BK000001.1",
+          "l2",
+          "plain1",
+          "9012",
+          "Subject_1",
+          "Subject_7",
+          "NM_000002.1",
+          "s1",
+          "db:tag5"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "qn2",
+            "query_title": "second half",
+            "query_len": 1620,
+            "query_masking": [
+              {
+                "from": 588,
+                "to": 594
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "gnl|db|tag5",
+                    "accession": "tag5",
+                    "title": "general"
+                  }
+                ],
+                "len": 270,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 499.716,
+                    "score": 270,
+                    "evalue": 1.82718e-144,
+                    "identity": 270,
+                    "query_from": 1351,
+                    "query_to": 1620,
+                    "query_strand": "Plus",
+                    "hit_from": 1,
+                    "hit_to": 270,
+                    "hit_strand": "Plus",
+                    "align_len": 270,
+                    "gaps": 0,
+                    "qseq": "ATGCATGATCAAATTGTGAAAGTGGGTGTGATTCCGCCGGAAAATAAACGTTGGATTCCGAAACCGCCGAAACTGGAAGAATTTAGCAATTGTGAACGTCTGAATTGTCGTTGGTGTGTGGTGCGTAATTGTATGGTGATGCATCAAGGTACCCTGTGGGTGTGTATGAATCTGTGGGCTCATTGGTTTGCTTGGCAAATGAGCGCTCCGGATCATGCTGAATATGCTTGTGTGGGTCGTGCTAGCCAACATGCTAAATGGGATAAAATG",
+                    "hseq": "ATGCATGATCAAATTGTGAAAGTGGGTGTGATTCCGCCGGAAAATAAACGTTGGATTCCGAAACCGCCGAAACTGGAAGAATTTAGCAATTGTGAACGTCTGAATTGTCGTTGGTGTGTGGTGCGTAATTGTATGGTGATGCATCAAGGTACCCTGTGGGTGTGTATGAATCTGTGGGCTCATTGGTTTGCTTGGCAAATGAGCGCTCCGGATCATGCTGAATATGCTTGTGTGGGTCGTGCTAGCCAACATGCTAAATGGGATAAAATG",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": ""
+                  }
+                ],
+                "len": 270,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 499.716,
+                    "score": 270,
+                    "evalue": 1.82718e-144,
+                    "identity": 270,
+                    "query_from": 1081,
+                    "query_to": 1350,
+                    "query_strand": "Plus",
+                    "hit_from": 1,
+                    "hit_to": 270,
+                    "hit_strand": "Plus",
+                    "align_len": 270,
+                    "gaps": 0,
+                    "qseq": "GCTTGGCAATGGTGGTGTGAAGCTGGTCTGAGCAATGTGATTCATGATACCAATATGGATTATGATGCTGGTAGCAATCCGGGTACCGGTATGGCTTGTGCTGAATTTAATTGGACCGATGATAAATATCATACCGGTGAAGCTTGGGTGCAATGGCATCTGTGTATGAAAACCGATTATCAACCGTTTGCTGCTTGGGAACGTGGTGAATGGGATACCTGTCGTGATTATATTGAAGCTTGTGTGAGCGGTTGTCTGGGTCTGACCGTG",
+                    "hseq": "GCTTGGCAATGGTGGTGTGAAGCTGGTCTGAGCAATGTGATTCATGATACCAATATGGATTATGATGCTGGTAGCAATCCGGGTACCGGTATGGCTTGTGCTGAATTTAATTGGACCGATGATAAATATCATACCGGTGAAGCTTGGGTGCAATGGCATCTGTGTATGAAAACCGATTATCAACCGTTTGCTGCTTGGGAACGTGGTGAATGGGATACCTGTCGTGATTATATTGAAGCTTGTGTGAGCGGTTGTCTGGGTCTGACCGTG",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "ref|NM_000002.1|",
+                    "accession": "NM_000002",
+                    "title": ""
+                  }
+                ],
+                "len": 270,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 499.716,
+                    "score": 270,
+                    "evalue": 1.82718e-144,
+                    "identity": 270,
+                    "query_from": 811,
+                    "query_to": 1080,
+                    "query_strand": "Plus",
+                    "hit_from": 1,
+                    "hit_to": 270,
+                    "hit_strand": "Plus",
+                    "align_len": 270,
+                    "gaps": 0,
+                    "qseq": "CATCATCCGCAAGAATGGTTTTGGTGGAATCCGCATGGTGCTATTGATGAACCGTGTTGGGCTCGTAATTTTATTCTGGAACCGTGTTGTCTGCCGAATATTTTTAAAATTCGTTGTGCTAAAAGCGAAGCTATGCATTGGCATCGTATGGTGTGGGGTACCGCTACCCTGACCGAAACCCCGAGCCTGTATGATCTGTTTATTAATAATAGCCAAGAATATGCTCGTGCTTTTAGCCGTAAAACCAATCCGCAACAACTGTGTACCAGC",
+                    "hseq": "CATCATCCGCAAGAATGGTTTTGGTGGAATCCGCATGGTGCTATTGATGAACCGTGTTGGGCTCGTAATTTTATTCTGGAACCGTGTTGTCTGCCGAATATTTTTAAAATTCGTTGTGCTAAAAGCGAAGCTATGCATTGGCATCGTATGGTGTGGGGTACCGCTACCCTGACCGAAACCCCGAGCCTGTATGATCTGTTTATTAATAATAGCCAAGAATATGCTCGTGCTTTTAGCCGTAAAACCAATCCGCAACAACTGTGTACCAGC",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 4,
+                "description": [
+                  {
+                    "id": "written",
+                    "title": "written subject"
+                  }
+                ],
+                "len": 270,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 499.716,
+                    "score": 270,
+                    "evalue": 1.82718e-144,
+                    "identity": 270,
+                    "query_from": 541,
+                    "query_to": 810,
+                    "query_strand": "Plus",
+                    "hit_from": 1,
+                    "hit_to": 270,
+                    "hit_strand": "Plus",
+                    "align_len": 270,
+                    "gaps": 0,
+                    "qseq": "GCTGTGCAAGCTGCTTGGCTGGAAGGTACCTGTCCGCATCCGCGTACCtttttttATCGTACCCATGATGGTATTGTGAAAGATGATGGTCTGAAAAGCCTGACCGCTCGTAATTGTAATGATGAAGCTCTGGATTGGATTAAATGGGCTAAACAACATGCTGAACATATGTATTATCGTCATACCAAAATGTGTAAAGATAGCGCTATTATGTATCATAAACCGCCGTATCAATGTCTGCGTAAACAAGAATATGAATGTCGTCAAATG",
+                    "hseq": "GCTGTGCAAGCTGCTTGGCTGGAAGGTACCTGTCCGCATCCGCGTACCTTTTTTTATCGTACCCATGATGGTATTGTGAAAGATGATGGTCTGAAAAGCCTGACCGCTCGTAATTGTAATGATGAAGCTCTGGATTGGATTAAATGGGCTAAACAACATGCTGAACATATGTATTATCGTCATACCAAAATGTGTAAAGATAGCGCTATTATGTATCATAAACCGCCGTATCAATGTCTGCGTAAACAAGAATATGAATGTCGTCAAATG",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 5,
+                "description": [
+                  {
+                    "id": "Subject_1",
+                    "title": ""
+                  }
+                ],
+                "len": 270,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 499.716,
+                    "score": 270,
+                    "evalue": 1.82718e-144,
+                    "identity": 270,
+                    "query_from": 271,
+                    "query_to": 540,
+                    "query_strand": "Plus",
+                    "hit_from": 1,
+                    "hit_to": 270,
+                    "hit_strand": "Plus",
+                    "align_len": 270,
+                    "gaps": 0,
+                    "qseq": "ACCATTGAAAAAGCTCGTGAAATTATGAGCTATCAAGTGAATAATGATCAACTGATTAATTATCAAAGCTGGGATTATTGTCATGAACCGCTGCATCAACGTGGTTATACCGATAATGGTGCTCGTATTGCTGTGATGCCGATGGGTAGCCAAGGTCGTGTGTGTGAACGTTGTCAAGCTCTGGTGCGTAAATTTATGATTAAACCGGTGTATTGGAATACCTATCCGGAAATGCTGAATTTTAATGTGCGTCGTACCTATGCTTGGGGT",
+                    "hseq": "ACCATTGAAAAAGCTCGTGAAATTATGAGCTATCAAGTGAATAATGATCAACTGATTAATTATCAAAGCTGGGATTATTGTCATGAACCGCTGCATCAACGTGGTTATACCGATAATGGTGCTCGTATTGCTGTGATGCCGATGGGTAGCCAAGGTCGTGTGTGTGAACGTTGTCAAGCTCTGGTGCGTAAATTTATGATTAAACCGGTGTATTGGAATACCTATCCGGAAATGCTGAATTTTAATGTGCGTCGTACCTATGCTTGGGGT",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 6,
+                "description": [
+                  {
+                    "id": "9012",
+                    "title": "numeric"
+                  }
+                ],
+                "len": 270,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 499.716,
+                    "score": 270,
+                    "evalue": 1.82718e-144,
+                    "identity": 270,
+                    "query_from": 1,
+                    "query_to": 270,
+                    "query_strand": "Plus",
+                    "hit_from": 1,
+                    "hit_to": 270,
+                    "hit_strand": "Plus",
+                    "align_len": 270,
+                    "gaps": 0,
+                    "qseq": "TATTTTACCAATGATAATTATCGTAATGATAGCTGGGATGAATTTTTTAGCCAACTGAATAAATGTCCGTTTCGTTATTGGTGGAATATGTGGGCTTTTATTGGTATGGATGTGCGTGCTCCGATGCTGACCGGTATTCATCAAGTGTGGACCCCGATGATTATTATGATTAGCGATCTGATGGAAAGCATGGAACCGTGTGCTCTGATGCATCTGGCTCCGTGGTGTTGGATGTGTTGTAGCCCGGAAATTTTTTGTTGGCAAAATGAT",
+                    "hseq": "TATTTTACCAATGATAATTATCGTAATGATAGCTGGGATGAATTTTTTAGCCAACTGAATAAATGTCCGTTTCGTTATTGGTGGAATATGTGGGCTTTTATTGGTATGGATGTGCGTGCTCCGATGCTGACCGGTATTCATCAAGTGTGGACCCCGATGATTATTATGATTAGCGATCTGATGGAAAGCATGGAACCGTGTGCTCTGATGCATCTGGCTCCGTGGTGTTGGATGTGTTGTAGCCCGGAAATTTTTTGTTGGCAAAATGAT",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 15,
+              "eff_space": 4911300,
+              "kappa": 0.46,
+              "lambda": 1.28,
+              "entropy": 0.85
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

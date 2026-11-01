@@ -1,0 +1,1 @@
+- tblastx no longer reads every header of a very large `-db` database built with `-parse_seqids` before the search: as blastn does, a database of more than 1,048,576 sequences (such as `nt` or `core_nt`) keeps its reports after the search, and only smaller ones have each query batch's reports written as the batch is searched. Reports do not change.

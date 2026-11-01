@@ -259,11 +259,10 @@ fn archives_equal_ncbis_at_one_and_four_threads() {
     }
 }
 
-/// The query-block search takes outfmt 11 under the switch of outfmt 8, 9 and 12
-/// (`LOSAT_X_BPQBLOCKSA`) and writes the same bytes: with a block of one query letter, every
-/// batch is a block of its own (the reach rows of the run show that the block search took the
-/// archive: `LOSAT_X_REACH`, `tests/reach_support`); `LOSAT_X_BPQBLOCKSA=0` keeps the search of
-/// all queries.
+/// The query-block search takes outfmt 11 (`LOSAT_X_BPQBLOCK`) and writes the same bytes: with a
+/// block of one query letter, every batch is a block of its own (the reach rows of the run show
+/// that the block search took the archive: `LOSAT_X_REACH`, `tests/reach_support`);
+/// `LOSAT_X_BPQBLOCK=0` keeps the search of all queries.
 #[test]
 fn query_blocks_do_not_change_the_archives() {
     // Only these cases run more than one batch to a searched end: the others have one batch, or
@@ -272,19 +271,13 @@ fn query_blocks_do_not_change_the_archives() {
         for threads in ["1", "4"] {
             let reach = reach_support::Reach::new("outfmt11_bp");
             check(case, &[("LOSAT_X_BPQBLOCK", "1"), reach.var()], threads);
-            for switch in ["LOSAT_X_BPQBLOCK", "LOSAT_X_BPQBLOCKSA"] {
-                let sides = reach.sides(switch);
-                assert!(
-                    sides.0,
-                    "{} threads {threads}: {switch} did not take the block search: {sides:?}",
-                    case.name
-                );
-            }
-            check(
-                case,
-                &[("LOSAT_X_BPQBLOCK", "1"), ("LOSAT_X_BPQBLOCKSA", "0")],
-                threads,
+            let sides = reach.sides("LOSAT_X_BPQBLOCK");
+            assert!(
+                sides.0,
+                "{} threads {threads}: LOSAT_X_BPQBLOCK did not take the block search: {sides:?}",
+                case.name
             );
+            check(case, &[("LOSAT_X_BPQBLOCK", "0")], threads);
         }
     }
 }

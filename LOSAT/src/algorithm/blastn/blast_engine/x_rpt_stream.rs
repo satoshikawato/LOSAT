@@ -72,7 +72,7 @@
 //!   reports read without a refusal: every definition line (as blastp's block search does; with
 //!   parsed Seq-ids every header as the reports read and check it, and no two sequences that
 //!   outfmt 0 would join, `common::database::reports_may_refuse`, line DBID, for a database of at
-//!   most `database::X_PARSED_CHECK_SEQUENCES_MAX` sequences, `Off::LargeParsed`) and the
+//!   most `common::database::PARSED_CHECK_SEQUENCES_MAX` sequences, `Off::LargeParsed`) and the
 //!   ambiguity data of every sequence, which the preliminary stage does not read
 //!   (`database::x_streaming_refusal`; one pass over the database's sequences before the search,
 //!   in the pool). With one batch (the first batch takes every query record) nothing can come
@@ -193,7 +193,7 @@ pub(super) enum Off {
     /// (`shared::refuse_joined_hits`, `database::x_streaming_refusal`).
     Joined,
     /// A database with parsed Seq-ids of more sequences than its check before the search reads
-    /// (`database::X_PARSED_CHECK_SEQUENCES_MAX`).
+    /// (`common::database::PARSED_CHECK_SEQUENCES_MAX`).
     LargeParsed,
     /// A database sequence whose ambiguity data the traceback cannot decode (outfmt 17 streams
     /// all the same).

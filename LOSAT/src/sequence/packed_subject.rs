@@ -275,7 +275,7 @@ impl PackedNucleotide {
         Self::from_stored_box(packed.into(), length, runs)
     }
 
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): `from_stored` of the packed bytes held in `packed`, a
+    /// `from_stored` of the packed bytes held in `packed`, a
     /// buffer of a database read cut to them (`seqdb::SequenceBlock::x_into_nucleotide_packed`):
     /// the store keeps the buffer instead of a copy (glibc shrinks a mapped buffer in place, and
     /// the pages beyond the packed bytes go back). No NCBI counterpart: only where the bytes are
@@ -863,7 +863,7 @@ mod tests {
                     assert_eq!(out, &blastna[1..=length], "{name} {i}: blastna");
                     let codes = ncbi_letters(packed, length, &runs);
                     assert_stored_forms(&store, packed, &codes, &format!("{name} {i}"));
-                    // EXPERIMENT (LOSAT_X_TBNDBSTREAM): the store of the sequence read alone, in
+                    // The store of the sequence read alone, in
                     // the buffer of its read, is the same.
                     let alone = db
                         .x_read_sequence_mapped(range.first_ordinal + i as u32)

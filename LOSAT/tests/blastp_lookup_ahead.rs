@@ -12,7 +12,7 @@
 //! (printed with `LOSAT_X_STATS`, when a counter is not zero) at exit: `blocks` (blocks searched
 //! where the switch acts), `prebuilt` (blocks that took values built ahead), `dropped` (builds
 //! ahead that gave none). That the values built ahead are the values the block builds itself is a
-//! unit test of `x_lookup_ahead.rs`. Every run states `LOSAT_X_BPQBLOCK`, and
+//! unit test of `x_lookup_ahead.rs`. Every run but one case of the built-in block states `LOSAT_X_BPQBLOCK`, and
 //! `LOSAT_X_BPCLUT` and `LOSAT_X_BPLKPFLAT` (blastp-fast),
 //! itself, so that the tests do not depend on the defaults of the strict set. Each test writes its
 //! files to a directory of its own.
@@ -45,7 +45,6 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPLKPAHEAD", "0"),
     ("LOSAT_X_BPREDOLPT", "0"),
     ("LOSAT_X_BPREDOPAR", "0"),
-    ("LOSAT_X_BPSUBJMETA", "0"),
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
@@ -328,8 +327,7 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
             assert_eq!(counts["dropped"], dropped, "{what}: {counts:?}");
         }
     }
-    // Exact blastp's pairwise report written in blocks (`LOSAT_X_BPQBLOCKFMT`): the build ahead
-    // beside the block's report.
+    // Exact blastp's pairwise report written in blocks: the build ahead beside the block's report.
     let base = with(&EXACT_ACTS, &[("LOSAT_X_BPQBLOCK", "1")]);
     let (off, on) = same_runs(&dir, "blastp", &four, &subject, 4, &base, &["-outfmt", "0"]);
     assert_eq!(off.searches(), 4, "blastp -outfmt 0");
@@ -389,8 +387,9 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
 }
 
 // One block (blocks larger than the queries): the block plan takes the search of all queries for it
-// (`x_query_block_plan`), as for `LOSAT_X_BPQBLOCK=0` and for a pairwise report with
-// `LOSAT_X_BPQBLOCKFMT=0` (not written in blocks): one search, nothing built ahead, nothing counted.
+// (`x_query_block_plan`), as for `LOSAT_X_BPQBLOCK=0` and for the built-in block (50,000 letters,
+// above the four queries' 2,539; the block switch stays on, `BATCH_SIZE` does not change the block
+// size) with a pairwise report: one search, nothing built ahead, nothing counted.
 // The last block of a block search builds nothing ahead either (`assert_built_ahead`: blocks - 1
 // builds). The three are refusals of `x_query_block_plan`, which does not read the task, and the
 // switch's state is made in the block loop only (`XLookupAhead::new`): each runs once, the tasks
@@ -410,12 +409,7 @@ fn one_block_and_the_search_of_all_queries_build_nothing_ahead() {
             &[][..],
         ),
         (exact, exact_acts, &[("LOSAT_X_BPQBLOCK", "0")][..], &[][..]),
-        (
-            fast,
-            fast_acts,
-            &[("LOSAT_X_BPQBLOCK", "1"), ("LOSAT_X_BPQBLOCKFMT", "0")][..],
-            &["-outfmt", "0"][..],
-        ),
+        (fast, fast_acts, &[][..], &["-outfmt", "0"][..]),
     ] {
         let base = with(acts, blocks);
         let (off, on) = same_runs(&dir, task, &queries, &subject, 4, &base, extra);

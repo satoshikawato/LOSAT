@@ -71,8 +71,6 @@ mod blastn_subject_store;
 mod blastn_subject_stream;
 #[path = "../blastn_tab_par.rs"]
 mod blastn_tab_par;
-#[path = "../blastn_ungap_count.rs"]
-mod blastn_ungap_count;
 #[path = "../blastn_window_masker.rs"]
 mod blastn_window_masker;
 #[path = "../megablast_xdrop.rs"]

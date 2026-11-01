@@ -1,21 +1,20 @@
-//! EXPERIMENT (LOSAT_X_TBNDBSTREAM / LOSAT_X_TBNDBSTREAMSHADOW): a `-db` search of TBLASTN reads
-//! each database sequence where it searches it, instead of a copy of the whole database made
+//! A `-db` search of TBLASTN reads each database sequence where it searches it (graduated
+//! 2026-10-27; the switch was `LOSAT_X_TBNDBSTREAM`), instead of a copy of the whole database made
 //! before the first query batch.
 //!
-//! Without the switch, `TblastnDatabase::read_stores` packs every sequence of the database
-//! (`common::database::read_nucleotide_stores`) into anonymous memory before the first query
-//! batch, and every stage reads the copy until the reports: 23.9 MiB for the 100 Mb of the
-//! C. elegans genome, 32.2 MiB for a zebrafish cDNA set, alive at the peak of every thread count
-//! (v4-D12 s8 probe, workstation), where NCBI maps the sequence file. The reports then cloned the
-//! packed sequences they show (`database::reported_subjects`).
+//! The copy (`read_stores`, deleted) packed every sequence of the database into anonymous memory
+//! before the first query batch, and every stage read the copy until the reports: 23.9 MiB for
+//! the 100 Mb of the C. elegans genome, 32.2 MiB for a zebrafish cDNA set, alive at the peak of
+//! every thread count (v4-D12 s8 probe, workstation), where NCBI maps the sequence file. The
+//! reports then cloned the packed sequences they show (`database::reported_subjects`).
 //!
-//! With the switch on:
+//! The stream:
 //!
-//! - `XDbStream::new` reads the database once in the blocks of `read_nucleotide_stores`, with its
-//!   checks in its order (`common::database::x_check_nucleotide_stores`), and keeps the length of
-//!   every sequence. A block of one sequence (a long one) is checked without its 2-bit data: its
-//!   last 2-bit byte and its ambiguity data only (`SeqDb::x_nucleotide_check`). Its error is the
-//!   error of `read_stores`, which fails the same query batch with the same text.
+//! - `XDbStream::new` reads the database once in blocks of `STORE_BLOCK_BYTES`, with the checks
+//!   of the copy in its order (`common::database::x_check_nucleotide_stores`), and keeps the
+//!   length of every sequence. A block of one sequence (a long one) is checked without its 2-bit
+//!   data: its last 2-bit byte and its ambiguity data only (`SeqDb::x_nucleotide_check`). Its
+//!   error is the error that the copy gave, which fails the same query batch with the same text.
 //! - The preliminary stage of a subject reads its sequence when it makes the subject's plan
 //!   (`search_seed::x_scan_plan`, `XPrelimSubject::Stream`) and drops it once the plan is made:
 //!   the frames are translated from it and the stage reads nothing else of the sequence. A plan
@@ -26,7 +25,8 @@
 //! - The composition redo and the traceback of `-comp_based_stats 0` read a subject of their
 //!   lists when they first align it and hold it until the stage has done its last match
 //!   (`XStageSubjects`, LOSAT_X_TBNSTAGEDROP; with `=0` until the stage ends); the reports read
-//!   the sequences they show (`database::reported_subjects`), one read each.
+//!   the sequences they show, one read each, when a report reads their letters
+//!   (`database::reported_subjects`; the other reports read the lengths of the stream).
 //! - A long sequence (a block of its own) is read once while anything holds it: the stages and
 //!   the query batches that run at the same time share it, and a thread that asks for it while
 //!   another reads it waits for that read (`XDbStream::read_shared`). With more than one thread
@@ -49,9 +49,9 @@
 //!   pool: the stores read for the plans of 8 and 16 threads, made at once, would stay idle across
 //!   the peak. When the last stream of the process closes, the idle buffers are freed.
 //!
-//! Every read packs the stored bytes as the copy does (`common::database::x_nucleotide_store_in`,
-//! `x_read_nucleotide_store`: the packing of `PackedNucleotide::from_stored`), so every stage
-//! computes the same values on the same subjects in the same order. A read that fails during the
+//! Every read packs the stored bytes as the copy did (`common::database::x_read_nucleotide_store`:
+//! the packing of `PackedNucleotide::from_stored`), so every stage computes the same values on the
+//! same subjects in the same order. A read that fails during the
 //! search (a database changed or damaged after the check, an error of the file system) is an
 //! `XReadError` holding the error that the check gives for the same read: the search of the
 //! batches is then made again one batch at a time, so that the batch that reads it fails after the
@@ -74,16 +74,11 @@
 //!         if (BlastSeqSrcGetSequence(seqSrc, &seq_info->seq_arg) >= 0) {
 //! ```
 //!
-//! `LOSAT_X_TBNDBSTREAM` is a switch of the strict set: on unless it is `0`. It acts for every
-//! TBLASTN search with `-db`.
-//!
-//! `LOSAT_X_TBNDBSTREAMSHADOW=1` (shadow mode, with the switch on): `read_stores` makes the copy
-//! too; the check's lengths and error, and every read sequence, are compared with it. The first
-//! difference stops the run (panic) after printing the line that is otherwise printed at exit:
-//! `[X_SHADOW] TBNDBSTREAM sequences= reads= bases= identical`.
+//! It acts for every TBLASTN search with `-db`. The shadow mode (`LOSAT_X_TBNDBSTREAMSHADOW=1`,
+//! which compared the check and every read with the copy) went with the copy.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 
 use anyhow::Result;
@@ -93,56 +88,7 @@ use crate::algorithm::common::database as shared;
 use crate::seqdb::SeqDb;
 use crate::sequence::packed_subject::{PackedNucleotide, SubjectNt};
 
-// No NCBI counterpart: reads the LOSAT_X_TBNDBSTREAM variable once; it does not change any value
-// NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): a switch of the strict set (`utils/xswitch.rs`).
-pub(super) fn x_tbn_db_stream() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNDBSTREAM"))
-}
-
-// No NCBI counterpart: reads the LOSAT_X_TBNDBSTREAMSHADOW variable once; it does not change any
-// value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAMSHADOW): shadow mode, with `LOSAT_X_TBNDBSTREAM` on.
-pub(super) fn x_shadow() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        x_tbn_db_stream()
-            && std::env::var("LOSAT_X_TBNDBSTREAMSHADOW").is_ok_and(|value| value == "1")
-    })
-}
-
-static SHADOW_RAN: AtomicBool = AtomicBool::new(false);
-static SHADOW_SEQUENCES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_READS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_BASES: AtomicU64 = AtomicU64::new(0);
-
-/// The shadow line, printed at exit (`x_print_shadow_summary`) or before the panic of a difference.
-fn shadow_line() -> String {
-    format!(
-        "[X_SHADOW] TBNDBSTREAM sequences={} reads={} bases={} identical",
-        SHADOW_SEQUENCES.load(Ordering::Relaxed),
-        SHADOW_READS.load(Ordering::Relaxed),
-        SHADOW_BASES.load(Ordering::Relaxed),
-    )
-}
-
-/// Stops the run at a difference of the shadow mode.
-fn shadow_assert(same: bool, what: impl FnOnce() -> String) {
-    if !same {
-        eprintln!("{}", shadow_line());
-        panic!("LOSAT_X_TBNDBSTREAMSHADOW: {}", what());
-    }
-}
-
-/// Prints the shadow line once, if the shadow mode compared anything in this run.
-pub(super) fn x_print_shadow_summary() {
-    if SHADOW_RAN.swap(false, Ordering::Relaxed) {
-        eprintln!("{}", shadow_line());
-    }
-}
-
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): a read of the database that failed during the search, with
+/// A read of the database that failed during the search, with
 /// the error that the check (`XDbStream::new`) gives for the same read.
 #[derive(Debug)]
 pub(super) struct XReadError(pub(super) anyhow::Error);
@@ -155,7 +101,7 @@ impl std::fmt::Display for XReadError {
 
 impl std::error::Error for XReadError {}
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the sequences of `XDbStream::read_shared`.
+/// The sequences of `XDbStream::read_shared`.
 #[derive(Default)]
 struct XShared {
     /// The stores that something holds, by ordinal id.
@@ -164,7 +110,7 @@ struct XShared {
     reading: HashSet<usize>,
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the read of a sequence by `XDbStream::read_shared`; dropped
+/// The read of a sequence by `XDbStream::read_shared`; dropped
 /// (the read made, failed or unwound), the sequence is no longer read and the waiters wake.
 struct XReading<'s, 'a> {
     stream: &'s XDbStream<'a>,
@@ -180,7 +126,7 @@ impl Drop for XReading<'_, '_> {
     }
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the database of a `-db` search, read where it is searched.
+/// The database of a `-db` search, read where it is searched.
 pub(super) struct XDbStream<'a> {
     db: &'a SeqDb,
     /// A number of its own in the process (`XPlanBlock::stream`).
@@ -196,52 +142,14 @@ pub(super) struct XDbStream<'a> {
     shared: Mutex<XShared>,
     /// Woken when a read of `read_shared` ends.
     read_done: Condvar,
-    /// The copy of the shadow mode.
-    copy: Option<Vec<PackedNucleotide>>,
 }
 
 impl<'a> XDbStream<'a> {
-    /// Checks `db` as `read_nucleotide_stores` reads it and keeps the lengths; in the shadow mode
-    /// also makes the copy (`read_stores`) and compares the check's result with it.
-    pub(super) fn new(
-        db: &'a SeqDb,
-        threads: usize,
-        read_stores: impl FnOnce() -> Result<Vec<PackedNucleotide>>,
-    ) -> Result<Self> {
-        let checked = shared::x_check_nucleotide_stores(db, PROGRAM);
-        let copy = if x_shadow() {
-            SHADOW_RAN.store(true, Ordering::Relaxed);
-            for counter in [&SHADOW_SEQUENCES, &SHADOW_READS, &SHADOW_BASES] {
-                counter.store(0, Ordering::Relaxed);
-            }
-            let copy = read_stores();
-            match (&checked, &copy) {
-                (Ok(lengths), Ok(copy)) => {
-                    shadow_assert(
-                        lengths.len() == copy.len()
-                            && lengths
-                                .iter()
-                                .zip(copy)
-                                .all(|(&length, store)| length == store.len()),
-                        || "the lengths of the check differ from the copy's".to_string(),
-                    );
-                    SHADOW_SEQUENCES.store(lengths.len() as u64, Ordering::Relaxed);
-                }
-                (Err(check), Err(copy)) => {
-                    shadow_assert(format!("{check:#}") == format!("{copy:#}"), || {
-                        format!("the check's error ({check:#}) differs from the copy's ({copy:#})")
-                    })
-                }
-                _ => shadow_assert(false, || {
-                    "the check and the copy differ in success".to_string()
-                }),
-            }
-            copy.ok()
-        } else {
-            None
-        };
+    /// Checks `db` as the copy of the database was read (`common::database::x_check_nucleotide_stores`)
+    /// and keeps the lengths.
+    pub(super) fn new(db: &'a SeqDb, threads: usize) -> Result<Self> {
         static STREAMS: AtomicU64 = AtomicU64::new(0);
-        let lengths = checked?;
+        let lengths = shared::x_check_nucleotide_stores(db, PROGRAM)?;
         X_OPEN_STREAMS.fetch_add(1, Ordering::Relaxed);
         Ok(Self {
             db,
@@ -250,7 +158,6 @@ impl<'a> XDbStream<'a> {
             mapped: threads > 1,
             shared: Mutex::new(XShared::default()),
             read_done: Condvar::new(),
-            copy,
         })
     }
 
@@ -264,12 +171,11 @@ impl<'a> XDbStream<'a> {
         self.lengths[oid]
     }
 
-    /// Sequence `oid`, packed as the copy packs it, with one read (`XReadError` if it fails).
+    /// Sequence `oid`, packed as the copy of the database packed it, with one read (`XReadError` if it fails).
     pub(super) fn read(&self, oid: usize) -> Result<PackedNucleotide> {
         let ordinal = u32::try_from(oid).expect("a database ordinal id fits Uint4");
-        let store = shared::x_read_nucleotide_store(self.db, ordinal, PROGRAM, self.mapped)
-            .map_err(XReadError)?;
-        Ok(self.checked(oid, store))
+        shared::x_read_nucleotide_store(self.db, ordinal, PROGRAM, self.mapped)
+            .map_err(|error| XReadError(error).into())
     }
 
     /// Sequence `oid` (`read`), shared with whatever holds it already: a stage or a query batch
@@ -354,33 +260,15 @@ impl<'a> XDbStream<'a> {
     }
 
     /// The length of sequence `oid`, sequence `i` of `block`, with the errors of its store
-    /// (`XReadError`); the shadow mode packs the store and compares it with the copy.
+    /// (`XReadError`).
     fn length_in(
         &self,
         block: &crate::seqdb::SequenceBlock,
         i: usize,
         oid: usize,
     ) -> Result<usize> {
-        let ordinal = oid as u32;
-        if self.copy.is_some() {
-            let store =
-                shared::x_nucleotide_store_in(block, i, ordinal, PROGRAM).map_err(XReadError)?;
-            return Ok(self.checked(oid, store).len());
-        }
-        shared::x_nucleotide_length_in(block, i, ordinal, PROGRAM)
+        shared::x_nucleotide_length_in(block, i, oid as u32, PROGRAM)
             .map_err(|error| XReadError(error).into())
-    }
-
-    /// `store`, read for sequence `oid`, after the shadow mode's comparison with the copy.
-    fn checked(&self, oid: usize, store: PackedNucleotide) -> PackedNucleotide {
-        if let Some(copy) = &self.copy {
-            shadow_assert(store == copy[oid], || {
-                format!("database sequence {oid} differs from the copy")
-            });
-            SHADOW_READS.fetch_add(1, Ordering::Relaxed);
-            SHADOW_BASES.fetch_add(store.len() as u64, Ordering::Relaxed);
-        }
-        store
     }
 }
 
@@ -398,7 +286,7 @@ impl Drop for XDbStream<'_> {
 /// The streams open in the process (`XDbStream::new` to its drop).
 static X_OPEN_STREAMS: AtomicUsize = AtomicUsize::new(0);
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): whether a `-db` stream is open in the process: then the large
+/// Whether a `-db` stream is open in the process: then the large
 /// frames of a dropped subject plan go to `utils::x_mapped::X_BYTES`, from which the next frames
 /// and reads take them (module header). A `-subject` search that runs at the same time (library
 /// use) pools its frames too; a frame taken from the pool is zero-filled before it is written, so
@@ -420,7 +308,7 @@ struct XPlanBlock {
 }
 
 thread_local! {
-    /// EXPERIMENT (LOSAT_X_TBNDBSTREAM): this thread's block for the plans.
+    /// This thread's block for the plans.
     static X_PLAN_BLOCK: std::cell::Cell<Option<XPlanBlock>> = const { std::cell::Cell::new(None) };
 }
 
@@ -433,7 +321,7 @@ pub(super) fn x_tbn_stage_drop() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNSTAGEDROP"))
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the subjects that a stage after the preliminary search reads
+/// The subjects that a stage after the preliminary search reads
 /// (the composition redo, the traceback of `-comp_based_stats 0`): with a `-db` stream, each
 /// subject of the stage's lists read when the stage first aligns it (`XDbStream::read_shared`)
 /// and held until the stage has passed its last match (LOSAT_X_TBNSTAGEDROP, `done`) or, with

@@ -126,6 +126,7 @@ pub(super) fn query_records_of<'a>(
             searched_length: i32::try_from(subject_letters.length(oid))?,
             // A database's sequences have no subject remap (`RunRecord::remaps_subjects`).
             offset: i32::try_from(ranges.subjects.offset(oid))?,
+            use_this_seqid: crate::report::db_subject::use_this_seqid(shown.parsed_subject(oid)),
         });
         for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
             let hsp = &linked.hsp;

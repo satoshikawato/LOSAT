@@ -14,8 +14,8 @@
 //! The switch is in the strict set (on unless it is `0`).
 //! The path gives the reference extension's result (the module's argument), so the property under
 //! test is that the report does not depend on it, for subjects read from FASTA (`-subject`) and
-//! from a database (`-db`, read in blocks and, with `LOSAT_X_BXDBSTREAM=0`, from the store), whose
-//! buffers carry the sentinel before the residues in different ways, in the fused loop and in the
+//! from a database (`-db`, read in blocks), whose buffers carry the sentinel before the residues
+//! differently, in the fused loop and in the
 //! direct loop (`LOSAT_X_BXDIAG=0`, with and without `LOSAT_X_BXHITBF`). That reports equal NCBI's
 //! is the business of the BLASTX fixtures. The shadow (`LOSAT_X_BXUNGAPSENTSHADOW`) runs both
 //! extensions on every candidate the path takes and panics on a difference; its line must show
@@ -35,7 +35,6 @@ const OFF: (&str, &str) = ("LOSAT_X_BXUNGAPSENT", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_BXUNGAPSENTSHADOW", "1");
 const DIRECT: (&str, &str) = ("LOSAT_X_BXDIAG", "0");
 const NO_HITBF: (&str, &str) = ("LOSAT_X_BXHITBF", "0");
-const NO_STREAM: (&str, &str) = ("LOSAT_X_BXDBSTREAM", "0");
 /// The fused loop on every CPU and every table (the per-hit cell test without AVX2).
 const FUSED: [(&str, &str); 2] = [("LOSAT_X_BXDIAG", "1"), ("LOSAT_X_BXDIAGMIN", "0")];
 
@@ -266,9 +265,6 @@ fn reports_do_not_depend_on_the_sentinel_extension() {
                     ("shadow direct", &[SHADOW, DIRECT][..]),
                     ("shadow direct no-bf", &[SHADOW, DIRECT, NO_HITBF][..]),
                 ]);
-                if source == "-db" {
-                    arms.push(("shadow store", &[SHADOW, NO_STREAM][..]));
-                }
             }
             for (label, env) in arms {
                 let (run, reach) = blastx_reach(&args, env);

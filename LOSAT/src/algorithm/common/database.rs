@@ -3,8 +3,9 @@
 //! as the command line reports them, the `Database:` lines of the pairwise report, and the
 //! rules for the stored titles of the reported sequences. BLASTP (stage DB-3), BLASTN
 //! (stage DB-4) and TBLASTN (stage DB-5) use them with their own name in LOSAT's refusals;
-//! TBLASTN also reads a nucleotide database whole into packed subjects
-//! (`read_nucleotide_stores`).
+//! TBLASTX reads a nucleotide database whole into packed subjects
+//! (`read_nucleotide_stores`), and TBLASTN each sequence where it searches it
+//! (`x_read_nucleotide_store`).
 //!
 //! The reader (`crate::seqdb`) knows nothing of the command line; this module maps its
 //! errors to NCBI's application errors (`crate::cli::NativeError`) and to LOSAT's
@@ -129,7 +130,7 @@ pub(crate) fn restrict_database(
 pub(crate) fn note_archive_database_filter(
     archive: Option<&crate::report::archive::ArchiveHandle>,
     filter: &crate::blastinput::db_filter::DbFilterArgs,
-    list: Option<&crate::seqdb::DbList>,
+    list_taxids: &[i32],
     filtered_empty: bool,
     searchsp: bool,
     dbsize: bool,
@@ -143,7 +144,10 @@ pub(crate) fn note_archive_database_filter(
             "-dbsize with -outfmt 11 and a list that keeps no sequence of the database is not supported by LOSAT's {program}"
         );
     }
-    handle.set_database_filter(filter.archive_parameter(list), filtered_empty && !searchsp);
+    handle.set_database_filter(
+        filter.archive_parameter(list_taxids),
+        filtered_empty && !searchsp,
+    );
     Ok(())
 }
 
@@ -286,11 +290,11 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
     Ok(stores)
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the checks of `read_nucleotide_stores` without the copy. The
+/// The checks of `read_nucleotide_stores` without the copy (TBLASTN's `-db` search, which reads
+/// its subjects where it searches them, `x_read_nucleotide_store`). The
 /// database is read in the same blocks, and every sequence's length and ambiguity runs are read
-/// with the same errors in the same order; only the lengths are kept, by ordinal id. A search
-/// that reads its subjects where it searches them (`x_read_nucleotide_store`) fails the query
-/// batch that the copy would fail, with the same text. A block of one sequence (one longer than
+/// with the same errors in the same order; only the lengths are kept, by ordinal id. The search
+/// fails the query batch that the copy would fail, with the same text. A block of one sequence (one longer than
 /// a block, or the last of its volume) is checked without its 2-bit data
 /// (`SeqDb::x_nucleotide_check`): a human chromosome is not read here only to be dropped.
 pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<usize>> {
@@ -327,7 +331,7 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec
     Ok(lengths)
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): sequence `ordinal` of `db` as `read_nucleotide_stores` packs
+/// Sequence `ordinal` of `db` as `read_nucleotide_stores` packs
 /// it (`PackedNucleotide::from_stored` of the stored 2-bit data, length and ambiguity runs), read
 /// with one read of the sequence file. The errors are those of `read_nucleotide_stores` for the
 /// same sequence. With `mapped`, the bytes are read into a buffer that glibc maps from 1 MiB on,
@@ -358,24 +362,8 @@ pub(crate) fn x_read_nucleotide_store(
     ))
 }
 
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): sequence `i` of `block` (ordinal id `ordinal`), a block of
-/// `SeqDb::read_block`, as `read_nucleotide_stores` packs it, with its errors.
-pub(crate) fn x_nucleotide_store_in(
-    block: &crate::seqdb::SequenceBlock,
-    i: usize,
-    ordinal: u32,
-    program: &str,
-) -> Result<PackedNucleotide> {
-    let (length, runs) = stored_parts(block, i, ordinal, program)?;
-    Ok(PackedNucleotide::from_stored(
-        block.nucleotide_packed(i),
-        length,
-        &runs,
-    ))
-}
-
-/// EXPERIMENT (LOSAT_X_TBNDBSTREAM): the length of sequence `i` of `block` (ordinal id
-/// `ordinal`), with the errors of `x_nucleotide_store_in`, without the store.
+/// The length of sequence `i` of `block` (ordinal id
+/// `ordinal`), with the errors of the sequence's store (`x_read_nucleotide_store`), without the store.
 pub(crate) fn x_nucleotide_length_in(
     block: &crate::seqdb::SequenceBlock,
     i: usize,
@@ -590,7 +578,9 @@ fn reported_header(
                 .and_then(|subject| {
                     refuse_id_of_a_query(&subject, ordinal, program)?;
                     Ok(ReportedHeader::Parsed(std::sync::Arc::new(
-                        subject.showing_gis(db.reports_show_gis()),
+                        subject
+                            .showing_gis(db.reports_show_gis())
+                            .under_positive_list(db.has_positive_list()),
                     )))
                 })
         }
@@ -855,6 +845,17 @@ pub(crate) fn tabular_subject_ids(
         )
         .collect()
 }
+
+// No NCBI counterpart: bounds LOSAT's own check before the search (`reports_may_refuse`).
+/// The most sequences of a database with parsed Seq-ids whose headers a program's check before
+/// the search reads with `reports_may_refuse` (blastn's `x_parsed_refusal`, tblastx's
+/// `report_stream::check`). The check decodes each header (2.3-5.6 us at one thread with
+/// tblastx's 18S, line DBID ID4t fix 2b) and keeps 16 bytes per join key with outfmt 0, so this
+/// bounds the pass to a few seconds and some tens of MiB; a larger database (NCBI's `nt` and
+/// `core_nt`) keeps its reports after the batch loop, as before the stream took databases with
+/// parsed Seq-ids. The volumes' sequences count (`SeqDb::printed_num_seqs`), also under a taxid
+/// list: the range walks decode the excluded sequences of every range they read.
+pub(crate) const PARSED_CHECK_SEQUENCES_MAX: u32 = 1 << 20;
 
 /// Why a report of some sequence of a database could be refused (`reports_may_refuse`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1172,121 +1173,21 @@ pub(crate) fn check_protein_sequence(
     Ok(())
 }
 
-/// Bytes of the sequence file that one read of `read_protein_stores` holds at most
+/// Bytes of the sequence file that one read of `x_check_protein_stores` holds at most
 /// (`SeqDb::next_block`). No NCBI counterpart: NCBI maps the volume files. The size
 /// changes nothing but the number of reads.
 const PROTEIN_STORE_BLOCK_BYTES: u64 = 1 << 20;
 
-/// The sequences of a protein database as its sequence files store them: NCBIstdaa
-/// bytes, each sequence followed by the sentinel byte 0 (and the first preceded by
-/// one), in ordinal order, with the totals of the index files. NCBI searches these
-/// bytes in place (blast_engine.c:1404, `eBlastEncodingProtein`), and its traceback and
-/// composition redo read them again; a program that holds them all searches, redoes and
-/// shows the bytes NCBI does.
-#[derive(Debug)]
-pub(crate) struct StoredProteins {
-    /// The sentinel, then each sequence and the sentinel after it.
-    bytes: Vec<u8>,
-    /// Where each sequence's residues start in `bytes`, and one more entry: sequence
-    /// `i` is `bytes[starts[i]..starts[i + 1] - 1]`.
-    starts: Vec<usize>,
-    /// The total length of the index files (`CSeqDB::GetTotalLength`).
-    total_length: u64,
-    /// The scanned shortest length with a list (`SeqDb::min_length`, line DI-8), `None`
-    /// for a whole database.
-    min_length: Option<u32>,
-}
-
-impl StoredProteins {
-    /// The number of sequences.
-    pub(crate) fn len(&self) -> usize {
-        self.starts.len() - 1
-    }
-
-    /// Whether the database holds no sequence.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// The length of sequence `ordinal`.
-    pub(crate) fn length(&self, ordinal: usize) -> usize {
-        self.starts[ordinal + 1] - self.starts[ordinal] - 1
-    }
-
-    /// The residues of sequence `ordinal` followed by the sentinel byte 0.
-    pub(crate) fn residues_with_sentinel(&self, ordinal: usize) -> &[u8] {
-        &self.bytes[self.starts[ordinal]..self.starts[ordinal + 1]]
-    }
-
-    /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): `residues_with_sentinel` with the sentinel before the
-    /// residues (the store's first byte, or the sentinel after the sequence before).
-    pub(crate) fn x_residues_with_sentinels(&self, ordinal: usize) -> &[u8] {
-        &self.bytes[self.starts[ordinal] - 1..self.starts[ordinal + 1]]
-    }
-
-    /// The total length of the index files.
-    pub(crate) fn total_length(&self) -> u64 {
-        self.total_length
-    }
-
-    /// The scanned shortest length with a list (`CSeqDB::GetMinLength`), `None` for a whole
-    /// database (which answers `BLAST_SEQSRC_MINLENGTH`).
-    pub(crate) fn min_length(&self) -> Option<u32> {
-        self.min_length
-    }
-
-    /// The length of the longest sequence (0 for an empty database).
-    pub(crate) fn max_length(&self) -> usize {
-        (0..self.len()).map(|i| self.length(i)).max().unwrap_or(0)
-    }
-}
-
 /// Reads every sequence of the protein database `db` once, in blocks of
-/// `PROTEIN_STORE_BLOCK_BYTES` in ordinal order, as its sequence files store them. A
-/// reader error is NCBI's error of the preliminary search (`search_read_error`: NCBI
-/// reads every sequence there); a sequence `program` cannot search as NCBI does is
-/// LOSAT's refusal (`check_protein_sequence`).
-pub(crate) fn read_protein_stores(db: &SeqDb, program: &str) -> Result<StoredProteins> {
-    let sequences = db.num_seqs() as usize;
-    let mut bytes = Vec::with_capacity(
-        usize::try_from(db.total_length())
-            .unwrap_or(0)
-            .saturating_add(sequences + 1),
-    );
-    let mut starts = Vec::with_capacity(sequences + 1);
-    bytes.push(NCBISTDAA_GAP);
-    let mut next_ordinal = 0u32;
-    while let Some(range) = db.next_block(next_ordinal, PROTEIN_STORE_BLOCK_BYTES) {
-        let block = db
-            .read_block(range)
-            .map_err(|error| search_read_error(error, program))?;
-        for i in 0..block.len() {
-            let with_sentinels = block.protein_with_sentinels(i);
-            check_protein_sequence(
-                with_sentinels,
-                u64::from(range.first_ordinal) + i as u64,
-                program,
-            )?;
-            starts.push(bytes.len());
-            bytes.extend_from_slice(&with_sentinels[1..]);
-        }
-        next_ordinal = range.end_ordinal();
-    }
-    starts.push(bytes.len());
-    Ok(StoredProteins {
-        bytes,
-        starts,
-        total_length: db.statistics_numbers().0,
-        min_length: db.min_length(),
-    })
-}
-
-/// EXPERIMENT (LOSAT_X_BXDBSTREAM): `read_protein_stores` without the store: the same reads in
-/// the same blocks and the same checks in the same order, with the same errors, the number of
-/// residues of each sequence handed to `each` (ordinal id, residues) and its bytes dropped with
-/// its block. A search that reads the sequences again later (BLASTX's passes,
-/// `blastx/x_db_stream.rs`) knows from it that they read, and what the store's
-/// `max_length` would be.
+/// `PROTEIN_STORE_BLOCK_BYTES` in ordinal order, as its sequence files store them, and checks
+/// them: a reader error is NCBI's error of the preliminary search (`search_read_error`: NCBI
+/// reads every sequence there); a sequence `program` cannot search as NCBI does is LOSAT's
+/// refusal (`check_protein_sequence`). The number of residues of each sequence is handed to
+/// `each` (ordinal id, residues) and its bytes are dropped with its block. A search that reads
+/// the sequences again later (BLASTX's passes, `blastx/x_db_stream.rs`) knows from it that they
+/// read, and the length of the longest. NCBI searches the stored bytes in place
+/// (blast_engine.c:1404, `eBlastEncodingProtein`) and its traceback and composition redo read
+/// them again; the passes read the bytes NCBI does.
 pub(crate) fn x_check_protein_stores(
     db: &SeqDb,
     program: &str,

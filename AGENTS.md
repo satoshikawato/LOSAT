@@ -91,7 +91,7 @@ authoritative, current guidance for agent behavior in LOSAT.
      reproduced, not excepted; NCBI failures without a checkable valid result
      are explicit rejections. A sequence that a seqid list keeps without a
      definition line (NCBI drops its hits from every report without notice)
-     is an explicit rejection too (PD-LOSAT-NCBI-DEFECTS 1.6).
+     is an explicit rejection too (PD-LOSAT-NCBI-DEFECTS 1.7).
 
 4. NCBI code comments are mandatory for modifications.
    - Every code change must include NCBI C/C++ reference comments with file path

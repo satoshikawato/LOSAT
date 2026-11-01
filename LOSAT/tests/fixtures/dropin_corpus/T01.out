@@ -1,0 +1,431 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: tq.fna
+           3 sequences; 16,405 total letters
+
+
+
+Query= BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplasma
+vulgare]
+
+Length=409
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+h_slice AP027133 106001-121000 with ambiguity codes and an N block    516     2e-169
+h_mut_10pct AP027133 118901-120300 with substitutions and indels      348     5e-120
+
+
+>h_slice AP027133 106001-121000 with ambiguity codes and an N 
+block
+Length=15000
+
+ Score = 516 bits (1329),  Expect = 2e-169, Method: Compositional matrix adjust.
+ Identities = 253/382 (66%), Positives = 307/382 (80%), Gaps = 0/382 (0%)
+ Frame = +1
+
+Query  1      MEDKKVEKLINNEEKRQMDFVQLIASENFVSKDVMKATGSVFTNKYAEGYPNARYYGGCE  60
+              M D+++EKLI  E+KRQ   ++LIASENFVS D+++ATGS+ TNKYAEGYPNARYY GCE
+Sbjct  13045  MRDREIEKLILLEKKRQDKEIELIASENFVSNDILEATGSILTNKYAEGYPNARYYEGCE  13224
+
+Query  61     NVDKLEELAIERLKKIFNAKFANVQPHSGAQANIAAYNAILKPGDKILSMSLNSGGHLTH  120
+              NVDK+E LAIERLKK+FNAK+ANVQPHSG QAN+AAYNA+LKPG KIL +SL+SGGHL+H
+Sbjct  13225  NVDKIETLAIERLKKLFNAKYANVQPHSGTQANLAAYNALLKPGAKILGLSLSSGGHLSH  13404
+
+Query  121    GHFVSIVGKFYKIFSYEVNKETEQLDYEEIRKIAKEVKPNLIICGASAYSRIIDFKKFVA  180
+              G  ++I G FYK ++YEV+ +T  LDY+ I +  K+VKP+LIICG SAY RIIDFKKF A
+Sbjct  13405  GFKITISGTFYKSYTYEVDPKTNLLDYDNILQXXKKVKPDLIICGYSAYPRIIDFKKFRA  13584
+
+Query  181    IAKEVNAYLLADIAHIAGLIVADLHPNPLNDGVDIVTSTTHKTLRGARGGIILTNNPELA  240
+              IA  V AYLLADIAHIAGL+ A LHPNPL+ GVDIVTSTTHKTLRG RGGIILTN  E+ 
+Sbjct  13585  IADTVGAYLLADIAHIAGLVAAKLHPNPLDFGVDIVTSTTHKTLRGPRGGIILTNKEEIF  13764
+
+Query  241    ILLDKSVFPGTQGGPLMNVIAGKTVSFYEASLPSFKEYQKNIISNANVMANFFIQKGVKI  300
+                ++ SVFP +QGGPLM+VIA K V+FYEA   SF  YQK +I NA V+AN  I+  VKI
+Sbjct  13765  KKINSSVFPASQGGPLMHVIAAKAVAFYEALDKSFISYQKQVIENAKVLANRLIEHNVKI  13944
+
+Query  301    ISGGTDNHLLMINTKKSFNKTGKEAEEILYKVNIIVNKNAIPFDEERPIVTSGIRIGTPA  360
+               + GTDNHLL+++ KKSFN TG EAE+IL K +I VNKNAIPFD+  P + SGIR+GT A
+Sbjct  13945  TTNGTDNHLLLVDVKKSFNLTGAEAEKILKKHHITVNKNAIPFDKLSPKIASGIRLGTAA  14124
+
+Query  361    MTTLGWRNKEFLKIAEVIYNVL  382
+              MTT G +  +F+K+A+ IY +L
+Sbjct  14125  MTTKG*KEADFIKLADKIYQLL  14190
+
+
+ Score = 20.8 bits (42),  Expect = 1.3, Method: Compositional matrix adjust.
+ Identities = 10/29 (34%), Positives = 14/29 (48%), Gaps = 0/29 (0%)
+ Frame = +2
+
+Query  148    EEIRKIAKEVKPNLIICGASAYSRIIDFK  176
+              E+ +   KE+    I+ G   Y  I DFK
+Sbjct  10070  EDTKHFRKEIFEQEILMGRITYESIKDFK  10156
+
+
+ Score = 17.7 bits (34),  Expect = 9.8, Method: Compositional matrix adjust.
+ Identities = 9/31 (29%), Positives = 18/31 (58%), Gaps = 4/31 (13%)
+ Frame = -2
+
+Query  105    DKILSMSLNSGGHLTHGHFVSIVGKFYKIFS  135
+              + IL ++L+ G        ++++  F+KIFS
+Sbjct  14099  EAILGLNLSKG----IAFLLTVI*CFFKIFS  14019
+
+
+>h_mut_10pct AP027133 118901-120300 with substitutions and indels
+Length=1397
+
+ Score = 348 bits (892),  Expect = 5e-120, Method: Compositional matrix adjust.
+ Identities = 198/383 (52%), Positives = 254/383 (66%), Gaps = 5/383 (1%)
+ Frame = +1
+
+Query  2     EDKKVEKLINNEEKRQMDFVQLIASENFVSKDVMKATGSVFTNKYAEGYPNA--RYYGGC  59
+              D ++EKLI  E +RQ   ++LIASEN VS D++++TGS  TN  A+GYPNA   +Y GC
+Sbjct  148   RDGEIEKLILLETQRQDKEIELIASENVVSNDMLESTGSFLTN--AQGYPNA*NIHYEGC  321
+
+Query  60    ENVDKLEELAIERLKKIFNAKFANVQPHSGAQANIAAYNAILKPGDKILSMSLNSGGHLT  119
+               V K+E LA +R KK+FNAK+A V PHSG QAN+AAYNA+LKP  K L  SL+SG HL+
+Sbjct  322   *TVGKIETLAFDRFKKLFNAKYAAVHPHSGTQANLAAYNALLKPRAKTLG*SLSSGRHLS  501
+
+Query  120   HGHFVSIVGKFYKIFSYEVNKETEQLDYEEIRKIAKEVKPNLIICGASAYSRIIDFKKFV  179
+              G  ++I G F+K ++ EV+  T  L Y+ I  IAK+VK +L++CG SA  RIIDFK F 
+Sbjct  502   LGFTITISGTFHKSYT*EVDPNTNLLGYDNIL-IAKKVKLDLLLCGYSA*PRIIDFKPFT  678
+
+Query  180   AIAKEVNAYLLADIAHIAGLIVADLHPNPLNDGVDIVTSTTHKTLRGARGGIILTNNPEL  239
+             AIA  V AYLLADIAHIAGL  A LHPNPL+ GVD VTSTTHKTLRG RG II+TN  E 
+Sbjct  679   AIADSVGAYLLADIAHIAGLGAAKLHPNPLDFGVDFVTSTTHKTLRGTRGVIIVTNKGEK  858
+
+Query  240   AILLDKSVFPGTQGGPLMNVIAGKTVSFYEASLPSFKEYQKNIISNANVMANFFIQKGVK  299
+                 + SVFP +Q GPLM+ +A K V+FY      F    +  I NA V+AN  ++  VK
+Sbjct  859   VKKFNSSVFPASQRGPLMHGLAAKAVAFYVVLDQ*FNSNLEQFIENAKVLANGLLEHNVK  1038
+
+Query  300   IISGGTDNHLLMINTKKSFNKTGKEAEEILYKVNIIVNKNAIPFDEERPIVTSGIRIGTP  359
+             I   GT N LL+++ KK FN TG E E IL K +I +N++AI F +  P      R+ T 
+Sbjct  1039  ITPNGTVNQLLLVDVKKGFNLTGAEPEIILRKHHITINEHAISFRKLSPKNAY*NRL*TA  1218
+
+Query  360   AMTTLGWRNKEFLKIAEVIYNVL  382
+             A T  G  + +F+K+A+ IY +L
+Sbjct  1219  AWTAKG*MDADFVKLADEIYQLL  1287
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.135    0.379    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1909162
+
+
+Query= BDV02159.1 uracil phosphoribosyltransferase [Candidatus Hepatoplasma
+vulgare]
+
+Length=210
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+h_slice AP027133 106001-121000 with ambiguity codes and an N block    248     4e-79
+
+
+>h_slice AP027133 106001-121000 with ambiguity codes and an N 
+block
+Length=15000
+
+ Score = 248 bits (632),  Expect = 4e-79, Method: Compositional matrix adjust.
+ Identities = 120/207 (58%), Positives = 163/207 (79%), Gaps = 1/207 (0%)
+ Frame = +1
+
+Query  4      INLIEHPLAQDKLASLRSEETSSKEFREYLEELSVLIAYEVFKDLKVKEEKIITPLSKTT  63
+              I +I H L Q KL  LR++ T++K+FREYL E+S L+A+EV +D+K+K+ +I TP+ KT 
+Sbjct  14218  IKIINHSLIQHKLTLLRNKNTNAKDFREYLNEISRLLAFEVLRDIKLKQIEIETPIQKTK  14397
+
+Query  64     GKKINEEINLFPILRAGQGFVSGFLNVVPKARVGHIGLYRDEKTLKPVQYLFKYPKNKNI  123
+               K +NE+INLFPILRAGQG V GFL VVP A++GHIGLYRDEKT K  +YLFK+PK+   
+Sbjct  14398  AKVLNEKINLFPILRAGQGMVEGFLGVVPNAKIGHIGLYRDEKTFKAKKYLFKFPKDAK-  14574
+
+Query  124    EKTYNILLDPIIATGGSIRAALKILENINLKNIKVVAIISVKDTIEKLAKDYPNINFYLI  183
+              E++ NI+LDP+IATGGS   A+K L+  N+KNIK V+I++V++ I K+ + +P++     
+Sbjct  14575  EESLNIILDPMIATGGSAIEAIKFLKKENIKNIKFVSIVTVEEAINKINQKFPDVELITC  14754
+
+Query  184    AIDKKLDKKGYIIPGLGDAGDRIYGTK  210
+              A+D+KL++KGYIIPGLGDAGDRIYGTK
+Sbjct  14755  AVDQKLNQKGYIIPGLGDAGDRIYGTK  14835
+
+
+ Score = 17.3 bits (33),  Expect = 6.6, Method: Compositional matrix adjust.
+ Identities = 6/11 (55%), Positives = 7/11 (64%), Gaps = 0/11 (0%)
+ Frame = -1
+
+Query  115   FKYPKNKNIEK  125
+             FK+P N NI  
+Sbjct  8778  FKFPSNINISS  8746
+
+
+ Score = 16.9 bits (32),  Expect = 7.4, Method: Compositional matrix adjust.
+ Identities = 12/30 (40%), Positives = 16/30 (53%), Gaps = 2/30 (7%)
+ Frame = +2
+
+Query  142   RAALKILENINLKNIKVVAIISVKDTIEKL  171
+             R  LK L + N  NIK+     +KD I K+
+Sbjct  3533  RVELKNLNSFN--NIKLALEAEIKDQIVKI  3616
+
+
+ Score = 16.9 bits (32),  Expect = 9.7, Method: Compositional matrix adjust.
+ Identities = 6/14 (43%), Positives = 9/14 (64%), Gaps = 0/14 (0%)
+ Frame = -2
+
+Query  102   YRDEKTLKPVQYLF  115
+             +  E  L P+QYL+
+Sbjct  4136  FDSEIILIPLQYLY  4095
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.139    0.382    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 885776
+
+
+Query= BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus
+Hepatoplasma vulgare]
+
+Length=442
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+h_slice AP027133 106001-121000 with ambiguity codes and an N block    424     7e-137
+h_mut_10pct AP027133 118901-120300 with substitutions and indels      18.1    9.1   
+
+
+>h_slice AP027133 106001-121000 with ambiguity codes and an N 
+block
+Length=15000
+
+ Score = 424 bits (1090),  Expect = 7e-137, Method: Compositional matrix adjust.
+ Identities = 224/374 (60%), Positives = 283/374 (76%), Gaps = 1/374 (0%)
+ Frame = +3
+
+Query  68    NFVPEKDATIAICLSGGVDSSVSAYLLKKQGYKLKAFFMRNWDSTlnneenlnlneneIC  127
+             +F P+K A IAI LSGGVDS+ SAYLLKK GY+LKAFFM N DST+N+E N  L ++E+C
+Sbjct  4572  DFKPKKGAKIAIALSGGVDSATSAYLLKKAGYQLKAFFMVN*DSTINSELNYILTDDEVC  4751
+
+Query  128   EQEKDYNDAKKVADQLGIELIKLNFVNEYWDFVFKRFLNELEEGLTPNPDIFCNKYIKFD  187
+             +Q KDY DAKKVAD LGIELI++NF+ +Y D VF++FL E++ G+TPNPDIFCNKYIKF 
+Sbjct  4752  QQTKDYIDAKKVADFLGIELIRINFIKQY*DLVFQKFLREIKMGITPNPDIFCNKYIKFK  4931
+
+Query  188   HFVKYISKNFPEIDYIATGHYAKIKIKEGKAYLFKAKDEIKDQTYFLSEINKDVLNKLFF  247
+              F  YI KN+PEI+Y+ATGHYA IK K  + +L +A D  KDQTYFLSEI++++L+K++F
+Sbjct  4932  EFTDYIFKNYPEIEYVATGHYAAIKEKNNQFFLAQAIDNFKDQTYFLSEIDQNILSKIYF  5111
+
+Query  248   PLANKMKSEVRSIAKEANLYTKDKKDSTGICFIGKRNFSSFIENYFKKEEGNIIDEKSNK  307
+             PLAN  KSEVR +A +ANL T  KKDSTGICFIGKRNF  FI NY K++EG+I+D+K+NK
+Sbjct  5112  PLANFKKSEVRKMALKANLPTATKKDSTGICFIGKRNFPDFIANYLKEKEGDIVDQKTNK  5291
+
+Query  308   IIGKHQGVKFYTIGQRRGLGLSGFNEPYFVSNKNIKNNILYVSYDTEkylyknklktnnf  367
+             ++G+H+GV FYT+GQR+GL L G   PYFVS K+IK NILYV+ +       +       
+Sbjct  5292  VLGRHRGVLFYTLGQRKGLNLGGQEYPYFVSKKDIKKNILYVATEKNPEYLYSNYIETEN  5471
+
+Query  368   kfltEEDILSKNKQVRIKTRHSEIIYNGIIKSIEKKDDLFMINLETKEKIKAITPGQEVV  427
+               L     L K+  V IKTRHSEIIY   I  + KK+D   + L+TKE IKA+TPGQEVV
+Sbjct  5472  FNLLASLELLKD-DV*IKTRHSEIIYEATILDVTKKNDKIKVILKTKEDIKAVTPGQEVV  5648
+
+Query  428   IYDHELCVGGGQIA  441
+             IY H+LC+GGGQI+
+Sbjct  5649  IYKHKLCLGGGQIS  5690
+
+
+ Score = 20.0 bits (40),  Expect = 2.4, Method: Compositional matrix adjust.
+ Identities = 7/18 (39%), Positives = 10/18 (56%), Gaps = 0/18 (0%)
+ Frame = -2
+
+Query  180    CNKYIKFDHFVKYISKNF  197
+              C  + +FD F+K I   F
+Sbjct  12962  CRSFFRFDFFIKTIDLKF  12909
+
+
+>h_mut_10pct AP027133 118901-120300 with substitutions and indels
+Length=1397
+
+ Score = 18.1 bits (35),  Expect = 9.1, Method: Compositional matrix adjust.
+ Identities = 7/13 (54%), Positives = 9/13 (69%), Gaps = 0/13 (0%)
+ Frame = -3
+
+Query  181  NKYIKFDHFVKYI  193
+            N+ IKF HF+  I
+Sbjct  882  NRTIKFFHFLSLI  844
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.138    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2084656
+
+
+Query= BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasma
+vulgare]
+
+Length=354
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+h_slice AP027133 106001-121000 with ambiguity codes and an N block    332     4e-106
+
+
+>h_slice AP027133 106001-121000 with ambiguity codes and an N 
+block
+Length=15000
+
+ Score = 332 bits (851),  Expect = 4e-106, Method: Compositional matrix adjust.
+ Identities = 184/350 (53%), Positives = 255/350 (73%), Gaps = 8/350 (2%)
+ Frame = +2
+
+Query  1      MEKQILDKLIQIENEYLEIER----KINDPNIFSNIEKLKLLNSLFKKYKPIYEEYNKYK  56
+              MEKQI++KL +I+ +YLEIE+    KI D N F+ I+KL    +  KKY+  Y+ Y KY 
+Sbjct  10544  MEKQIIEKLEKIKAKYLEIEKTFFEKIKD-NDFNEIKKL---TTEQKKYQLTYDLYKKYL  10711
+
+Query  57     SLTKDINDLHSIIKSETNKDSIDSYRnllkenfekeeeIYQNILDLLVEKDPNDEKNAII  116
+              +L  +I D  +I+++E++K   +  + L+  N ++   + + +LD L+EKDP D+ NA I
+Sbjct  10712  NLVDEIRDSENILQTESDKKLSEQLKKLINSNKKEILNLEEKLLDSLIEKDPIDDYNAFI  10891
+
+Query  117    EIKGRVGGEEANLFAANIFEMYKKYALKQNYELEVIDSNVSEQGGYSSITFFAIGRDAYG  176
+              EIKG  GG EAN+FA ++  MY KYA + N++ ++ID   SE+ G S + F   G  AYG
+Sbjct  10892  EIKGAAGGLEANIFANDLLNMYLKYAQRLNFKTKIIDLQESEKKGISYVNFKISGEGAYG  11071
+
+Query  177    KFKYESGTHRVQRVPKTESQDKLQTSTVSVYVIPENDELNIEINPNDLRIDTYRSSGAGG  236
+              KFKYE+G HRVQR+P+TES  ++ TST +V VIPE D+L ++IN +DLRIDTYRSSGAGG
+Sbjct  11072  KFKYEAGVHRVQRIPETESNGRVHTSTATVSVIPELDDLELKINKSDLRIDTYRSSGAGG  11251
+
+Query  237    QHVNKTDSAVRITHIPTGLSVSSQDGRSQHDNKDKAMKTLISKINNLQLeeereketetk  296
+              QHVNKTDSAVRI HIPTG+ VSSQ+GRSQHDNKD+AM+TL +KI   ++ +E+E   + K
+Sbjct  11252  QHVNKTDSAVRILHIPTGIVVSSQNGRSQHDNKDRAMQTLRNKIYQQKIAQEQEDLNKVK  11431
+
+Query  297    rkILSSSERSEKIRTYNYPENRVTDHRINLKLKKLDQVLNGNLDEFIDAL  346
+              ++ + + +RSEKIRTYNY +NRVTDHR N+ LKKLD ++NG+LDE ++ L
+Sbjct  11432  KEAVGTGDRSEKIRTYNYQQNRVTDHRANITLKKLDLIINGDLDELLNLL  11581
+
+
+ Score = 21.6 bits (44),  Expect = 0.66, Method: Compositional matrix adjust.
+ Identities = 17/55 (31%), Positives = 28/55 (51%), Gaps = 2/55 (4%)
+ Frame = -2
+
+Query  192    KTESQDKLQTSTVSVYVIPENDELNIEINPNDLRIDTYRSSGAGGQHVNKTDSAV  246
+              KTE    L  S++ V +IP    L + +   ++ I T +SSG  G ++  T  A+
+Sbjct  13787  KTELLIFLNISSLFVRIIPPLGPLKV-L*VVEVTISTPKSSGL-GCNLAATSPAI  13629
+
+
+
+Lambda      K        H        a         alpha
+   0.311    0.132    0.355    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1622905
+
+
+Query= BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A
+[Candidatus Hepatoplasma vulgare]
+
+Length=430
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+h_slice AP027133 106001-121000 with ambiguity codes and an N block    254     4e-78
+
+
+>h_slice AP027133 106001-121000 with ambiguity codes and an N 
+block
+Length=15000
+
+ Score = 254 bits (649),  Expect = 4e-78, Method: Compositional matrix adjust.
+ Identities = 187/417 (45%), Positives = 256/417 (61%), Gaps = 5/417 (1%)
+ Frame = +1
+
+Query  14    NKIKKNKVQPLKNMTFALKDNFAVRNIPTTGGTKLLENFKITYNSTVYEKLIKAGAKPIT  73
+             N  K  K   L N+ FA+KDN++++N  TT GT LL +FK    STV+EK +  GA P+ 
+Sbjct  1621  NDFKIAKEGKLSNIPFAIKDNYSIKNXNTTAGTTLLSDFKPLTFSTVFEKXLSEGAIPLF  1800
+
+Query  74    KANLDELAMGFSGLTSGFGVVLNPYDgskiiggsssgsAYLIANKEVDFSIGSDTGDSVR  133
+             KANLDELAMG SG TS + +V NP+  + IIGGSSSG  YL+A   V FS+GSDTGDSVR
+Sbjct  1801  KANLDELAMG*SGXTSHYKIVNNPFYKNLIIGGSSSGXVYLVARDIVPFSLGSDTGDSVR  1980
+
+Query  134   KPAWYVGITAFKPTWGIVSRYGLFDFSPSWDTVGWFSKNVDDSALLLDVLQGKDEKDFTS  193
+             K A Y  +  FKPT G+VSRYGLF F+PS DTVG F+K +D S LLLD L+G D +D TS
+Sbjct  1981  KXAVYGNVIGFKPT*GLVSRYGLFXFAPS*DTVG*FTKTIDQSVLLLDXLKGYDFRDQTS  2160
+
+Query  194   LNSREKDFLKDINNIK-KEDVKLGYIKSflddikdkdilnkfndlILKLKKDGFNIVEID  252
+                 E++F    N  K K+++ +GY    LD+IK+  I   +   + K ++ G+ + ++ 
+Sbjct  2161  -KKIEQNFSYLDNXYKDKKNLVVGYFSEILDEIKNDXIKKTYLKFLNKYQQKGYKLKKLK  2337
+
+Query  253   LDLKLFKTILTVYRIISSVngfssnsnltsflfgnfELENDEFKNEITRIRS-NFVYEVK  311
+              +L+L   I  VY +ISS    S  SNL  FLFGN   ++  +   I   R  NFVYEVK
+Sbjct  2338  XNLELLSLISIVYDVISSTESLSCXSNLQGFLFGNGYDQDKSYLEAIXAARGDNFVYEVK  2517
+
+Query  312   KRFLLSSEVFLNKKNLYNKARKIRHLYINALSDLFAKIDAIIMPPAGNYAPSIKDAFNAV  371
+             KRFL ++      + +YN+AR+IRHL    L  +F + DA+++P   ++AP  K A    
+Sbjct  2518  KRFLFAAYSISXHEKIYNQARRIRHLINKELDKIFXQADALVLPAVMDFAPEKKIAQQXK  2697
+
+Query  372   KYNS--IMDEYLGIFNANGSPSLNIPILKNIEKPFSVNIATAPFNDKKCLQIGKLLE  426
+               NS  + D +L +FN+NGSPS ++PI     +   +NIAT P +D  C +I K+ E
+Sbjct  2698  TRNSRTLADNFLTLFNSNGSPSXSLPITNEKAESVFINIATKPNDDLSCFRIAKIFE  2868
+
+
+ Score = 20.4 bits (41),  Expect = 1.7, Method: Compositional matrix adjust.
+ Identities = 17/49 (35%), Positives = 28/49 (57%), Gaps = 6/49 (12%)
+ Frame = -3
+
+Query  307   VYEVKKRFLL---SSEVFLNKKNLYNKARKIRHLYINALSDLFAKIDAI  352
+             ++ V K F L   S+E FL  K+  N+   +++LY N +S+   KID +
+Sbjct  7099  IFGVSKTFNLLNSSNENFLTVKSFNNQ---LKNLYFNLISEKV*KIDEL  6962
+
+
+ Score = 18.5 bits (36),  Expect = 5.9, Method: Compositional matrix adjust.
+ Identities = 12/36 (33%), Positives = 20/36 (56%), Gaps = 0/36 (0%)
+ Frame = +2
+
+Query  173   VDDSALLLDVLQGKDEKDFTSLNSREKDFLKDINNI  208
+             +++   +L V +  DEK   ++  REK  LK+ N I
+Sbjct  3614  IENGEKILKVTKKFDEKRGKTVFIREKTSLKEYNYI  3721
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.137    0.393    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2020840
+
+
+  Database: tq.fna
+    Posted date:  Oct 29, 2026  6:29 PM
+  Number of letters in database: 16,405
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

@@ -338,26 +338,30 @@ fn file_length(path: &str) -> Option<i64> {
 //     sort(db_files.begin(), db_files.end());
 // }
 // ```
-// makeblastdb gives no `-metadata_output_prefix` here (LOSAT refuses the option), so
-// `user_path` is empty. `lmdb` is the one LMDB file of a version 5 database that
-// makeblastdb wrote (`GetLMDBFileNames` of a database whose volumes name one LMDB
-// file), `<db>.pdb`; `file.GetDir() + file.GetBase()` is then `<db>`. A file the
-// earlier database of the same name left (a `<db>.pjs` that the removal of a database
+// `volumes` and `alias_files` are `FindVolumePaths(paths, alias, true)`: each path once.
+// makeblastdb gives no `-metadata_output_prefix` (LOSAT refuses the option), so its
+// `user_path` is empty, and its `lmdbs` is the one LMDB file of the version 5 database it
+// wrote, `<db>.pdb`; blastdbcmd's are those of its `-metadata_output_prefix` and the LMDB
+// files of the database's volumes (`GetLMDBFileNames`, one per `CSeqDBLMDBEntry`).
+// `file.GetDir() + file.GetBase()` is the LMDB file's path without its extension. A file
+// the earlier database of the same name left (a `<db>.pjs` that the removal of a database
 // of several volumes does not take) is listed and counted as NCBI lists it.
 /// `x_GetDBFilesMetaData`: the bytes of the database's files, the bytes of its index
-/// and sequence files, and the sorted names of its files.
+/// and sequence files, and the sorted names of its files, each after `user_path`.
 pub(crate) fn db_files_metadata(
     volumes: &[String],
     alias_files: &[String],
-    lmdb: Option<&str>,
+    lmdbs: &[String],
     is_protein: bool,
+    user_path: &str,
 ) -> (i64, i64, Vec<String>) {
     let mut db_files = Vec::new();
     let mut disk_bytes = 0i64;
     let mut cached_bytes = 0i64;
+    let listed = |name: &str| format!("{user_path}{}", file_name(name));
     for alias in alias_files {
         if let Some(length) = file_length(alias) {
-            db_files.push(file_name(alias).to_string());
+            db_files.push(listed(alias));
             disk_bytes += length;
         }
     }
@@ -366,7 +370,7 @@ pub(crate) fn db_files_metadata(
         for ext in VOLUME_EXTENSIONS {
             let file = format!("{path}.{mol}{ext}");
             if let Some(length) = file_length(&file) {
-                db_files.push(file_name(&file).to_string());
+                db_files.push(listed(&file));
                 disk_bytes += length;
                 if ext == "in" || ext == "sq" {
                     cached_bytes += length;
@@ -374,15 +378,15 @@ pub(crate) fn db_files_metadata(
             }
         }
     }
-    if let Some(lmdb) = lmdb {
+    for lmdb in lmdbs {
         if let Some(length) = file_length(lmdb) {
-            db_files.push(file_name(lmdb).to_string());
+            db_files.push(listed(lmdb));
             disk_bytes += length;
-            let base = lmdb.rfind('.').map_or(lmdb, |dot| &lmdb[..dot]);
+            let base = lmdb.rfind('.').map_or(lmdb.as_str(), |dot| &lmdb[..dot]);
             for ext in ["os", "ot", "tf", "to"] {
                 let file = format!("{base}.{mol}{ext}");
                 if let Some(length) = file_length(&file) {
-                    db_files.push(file_name(&file).to_string());
+                    db_files.push(listed(&file));
                     disk_bytes += length;
                 }
             }

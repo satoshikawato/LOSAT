@@ -943,6 +943,28 @@ impl LmdbEntry {
         Ok(found)
     }
 
+    /// Every taxid key of the entry's `.ntf` (`CSeqDBLMDBEntry::GetDBTaxIds`, the keys of
+    /// `CSeqDBLMDB::GetDBTaxIds`, quoted at `tax_files::get_db_tax_ids`), with the errors of
+    /// `tax_oids`.
+    fn db_tax_ids(&self) -> Result<Vec<i32>, SeqDbError> {
+        let ntf_path = self.lookup_file("tf");
+        if !ntf_path.is_file() {
+            return Err(missing_file(&ntf_path));
+        }
+        let ntf_file = DbFile::open(&ntf_path)?;
+        let ntf = Env::open(&ntf_file).map_err(|message| SeqDbError::Format {
+            path: ntf_path.clone(),
+            message,
+        })?;
+        tax_files::get_db_tax_ids(&ntf).map_err(|error| match error {
+            tax_files::TaxError::Data(message) => SeqDbError::Format {
+                path: ntf_path.clone(),
+                message,
+            },
+            other => SeqDbError::NotFound(other.message(&Self::base_name(&ntf_path))),
+        })
+    }
+
     /// The LMDB file opened for a lookup, handed to `f`.
     fn with_env<T>(
         &self,
@@ -1439,6 +1461,155 @@ fn bad_lookup_oid(lmdb: &Path, oid: u32, num_oids: u32) -> SeqDbError {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1300-1303
+// ```c++
+//     else {
+//     	NCBI_THROW(CSeqDBException, eArgErr,
+//     			           "Taxonomy list is not supported in v4 BLAST db");
+//     }
+// ```
+/// NCBI's text for a taxid lookup (`TaxIdsToOids`, `GetDBTaxIds`) on a version 4 database
+/// opened without a list (the list's own text is `V4_TAXID_ERROR`).
+const V4_TAXID_LIST_ERROR: &str = "Taxonomy list is not supported in v4 BLAST db";
+
+/// The OIDs of `tax_ids` in the LMDB entries `entries` (`negative`: the OIDs the list
+/// excludes) entry after entry, each entry's ascending, and the taxids of `tax_ids` the
+/// entries hold (`CSeqDBLMDBSet::TaxIdsToOids`; the found taxids are their union, see
+/// `restrict_taxids`).
+fn entries_tax_oids(
+    entries: &[LmdbEntry],
+    negative: bool,
+    tax_ids: &BTreeSet<i32>,
+) -> Result<(Vec<u32>, BTreeSet<i32>), SeqDbError> {
+    let mut oids = Vec::new();
+    let mut found = BTreeSet::new();
+    for entry in entries {
+        let part = entry.tax_oids(negative, tax_ids)?;
+        oids.extend(part.oids);
+        found.extend(part.tax_ids_found);
+    }
+    Ok((oids, found))
+}
+
+/// NCBI's text when a taxid list selects no OID of `entries` (`CSeqDBLMDBSet::TaxIdsToOids`,
+/// quoted at `SeqDb::restrict_taxids`).
+fn tax_ids_not_found(entries: &[LmdbEntry]) -> String {
+    let names: Vec<String> = entries
+        .iter()
+        .map(|entry| LmdbEntry::base_name(&entry.lmdb))
+        .collect();
+    format!(
+        "Taxonomy ID(s) not found in the {} database{}.",
+        names.join(" "),
+        if entries.len() > 1 { "s" } else { "" }
+    )
+}
+
+/// The taxid lookup files of a version 5 database opened without a list, for the lookups
+/// of `losat blastdbcmd` (`-taxids` without `-target_only`, `-tax_info`): NCBI's
+/// `CSeqDBImpl::TaxIdsToOids` and `GetDBTaxIds` over the database's `CSeqDBLMDBSet`.
+pub struct TaxIdLookup<'a> {
+    db: &'a SeqDb,
+    entries: Vec<LmdbEntry>,
+}
+
+impl SeqDb {
+    /// The taxid lookup files of this database ([`TaxIdLookup`]); the LMDB files are read
+    /// here. Errors: NCBI's for a version 4 database (`Taxonomy list is not supported in v4
+    /// BLAST db`) and for the LMDB files ([`SeqDb::restrict_taxids`]).
+    pub fn tax_id_lookup(&self) -> Result<TaxIdLookup<'_>, SeqDbError> {
+        if !self.is_version5() {
+            return Err(SeqDbError::NotFound(V4_TAXID_LIST_ERROR.to_string()));
+        }
+        Ok(TaxIdLookup {
+            db: self,
+            entries: self.lmdb_entries()?,
+        })
+    }
+}
+
+impl TaxIdLookup<'_> {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1285-1299
+    // ```c++
+    // void CSeqDBImpl::TaxIdsToOids(set<TTaxId>& tax_ids, vector<blastdb::TOid>& rv)
+    // {
+    //     CHECK_MARKER();
+    //     rv.clear();
+    //     vector<blastdb::TOid> oids;
+    //     if (m_LMDBSet.IsBlastDBVersion5()) {
+    //     	m_LMDBSet.TaxIdsToOids(tax_ids,oids);
+    //     	CSeqDBLockHold locked(m_Atlas);
+    //     	for(unsigned int i=0; i < oids.size(); i++) {
+    //     		blastdb::TOid oid2 = oids[i];
+    //     		if (x_CheckOrFindOID(oid2, locked) && (oids[i] == oid2)) {
+    //     			rv.push_back(oids[i]);
+    //     		}
+    //     	}
+    //     }
+    // ```
+    /// `TaxIdsToOids(tax_ids)`: the OIDs of the sequences that carry one of `tax_ids`,
+    /// ascending (the entries cover ascending ranges of OIDs). Errors: NCBI's when no OID
+    /// carries one (`Taxonomy ID(s) not found in the <names> database[s].`), and for the
+    /// lookup files ([`SeqDb::restrict_taxids`]).
+    pub fn tax_ids_to_oids(&self, tax_ids: &BTreeSet<i32>) -> Result<Vec<u32>, SeqDbError> {
+        let (oids, _) = entries_tax_oids(&self.entries, false, tax_ids)?;
+        if oids.is_empty() {
+            return Err(SeqDbError::NotFound(tax_ids_not_found(&self.entries)));
+        }
+        let num_oids = self.db.volume_starts[self.db.volumes.len()];
+        if let Some(&oid) = oids.iter().find(|&&oid| oid >= num_oids) {
+            return Err(SeqDbError::Format {
+                path: self.entries[0].lmdb.clone(),
+                message: format!(
+                    "the taxid lookup gives OID {oid} of a database of {num_oids} sequences"
+                ),
+            });
+        }
+        Ok(oids)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1307-1323
+    // ```c++
+    // void CSeqDBImpl::GetDBTaxIds(set<TTaxId> & tax_ids)
+    // {
+    //     ...
+    //     tax_ids.clear();
+    //     if (m_LMDBSet.IsBlastDBVersion5()) {
+    //     	if(m_OIDList.NotEmpty()){
+    //     		...
+    //     	}
+    //     	else {
+    //     		m_LMDBSet.GetDBTaxIds(tax_ids);
+    //     	}
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:356-366
+    // ```c++
+    // void CSeqDBLMDBSet::GetDBTaxIds(set<TTaxId> & tax_ids) const
+    // {
+    // 	vector<TTaxId> t;
+    // 	m_LMDBEntrySet[0]->GetDBTaxIds(t);
+    // 	tax_ids.insert(t.begin(), t.end());
+    // 	for(unsigned int i=1; i < m_LMDBEntrySet.size(); i++) {
+    // 		t.clear();
+    // 		m_LMDBEntrySet[i]->GetDBTaxIds(t);
+    // 		tax_ids.insert(t.begin(), t.end());
+    // 	}
+    // }
+    // ```
+    // A database LOSAT opens has no OID list (the alias keys of lists are refused), so the
+    // taxids are every key of every entry's `.ntf`, also those of the volumes an alias of
+    // some volumes leaves out.
+    /// `GetDBTaxIds`: every taxid of the database's taxid lookup files, ascending.
+    pub fn db_tax_ids(&self) -> Result<BTreeSet<i32>, SeqDbError> {
+        let mut tax_ids = BTreeSet::new();
+        for entry in &self.entries {
+            tax_ids.extend(entry.db_tax_ids()?);
+        }
+        Ok(tax_ids)
+    }
+}
+
 /// The OIDs of the sequences `first..end` of a volume read per window of the index.
 const SCAN_WINDOW: u32 = 1 << 16;
 
@@ -1513,8 +1684,9 @@ impl SeqDb {
     // NCBI opens these entries with the database, LOSAT only for a taxid list. A volume of
     // the database that the LMDB file does not list, or lists with another number of OIDs,
     // leaves NCBI's OIDs off by the difference; LOSAT refuses such a database.
-    /// The LMDB files of a version 5 database with the volumes each one lists.
-    pub(super) fn lmdb_entries(&self) -> Result<Vec<LmdbEntry>, SeqDbError> {
+    /// The LMDB file of each run of volumes that name the same one, with the volumes of the
+    /// run (`CSeqDBLMDBSet`'s grouping, quoted above).
+    fn lmdb_groups(&self) -> Vec<(PathBuf, std::ops::Range<usize>)> {
         let mut groups: Vec<(PathBuf, std::ops::Range<usize>)> = Vec::new();
         for (at, volume) in self.volumes.iter().enumerate() {
             let name = volume.index().lmdb_file.as_deref().unwrap_or_default();
@@ -1526,6 +1698,35 @@ impl SeqDb {
                 _ => groups.push((lmdb, at..at + 1)),
             }
         }
+        groups
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:399-405
+    // ```c++
+    // void CSeqDBLMDBSet::GetLMDBFileNames(vector<string> & lmdb_list) const
+    // {
+    // 	lmdb_list.clear();
+    // 	for(unsigned int i=0; i < m_LMDBEntrySet.size(); i++) {
+    // 		lmdb_list.push_back(m_LMDBEntrySet[i]->GetLMDBFileName());
+    // 	}
+    // }
+    // ```
+    /// `GetLMDBFileNames`: the LMDB file of each run of volumes of a version 5 database that
+    /// name the same one, in the order of the volumes (a file twice when two runs name it);
+    /// none for version 4. The files are not read.
+    pub fn lmdb_file_names(&self) -> Vec<String> {
+        if !self.is_version5() {
+            return Vec::new();
+        }
+        self.lmdb_groups()
+            .into_iter()
+            .map(|(path, _)| path.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    /// The LMDB files of a version 5 database with the volumes each one lists.
+    pub(super) fn lmdb_entries(&self) -> Result<Vec<LmdbEntry>, SeqDbError> {
+        let groups = self.lmdb_groups();
         let mut entries = Vec::with_capacity(groups.len());
         for (lmdb, range) in groups {
             let file = DbFile::open(&lmdb).map_err(lmdb_file_error)?;
@@ -1667,24 +1868,10 @@ impl SeqDb {
             return Err(SeqDbError::NotFound(V4_TAXID_ERROR.to_string()));
         }
         let entries = self.lmdb_entries()?;
-        let mut oids = Vec::new();
-        let mut found = BTreeSet::new();
-        for entry in &entries {
-            let part = entry.tax_oids(negative, tax_ids)?;
-            oids.extend(part.oids);
-            found.extend(part.tax_ids_found);
-        }
+        let (oids, found) = entries_tax_oids(&entries, negative, tax_ids)?;
         let mut warning = None;
         if oids.is_empty() {
-            let names: Vec<String> = entries
-                .iter()
-                .map(|entry| LmdbEntry::base_name(&entry.lmdb))
-                .collect();
-            let text = format!(
-                "Taxonomy ID(s) not found in the {} database{}.",
-                names.join(" "),
-                if entries.len() > 1 { "s" } else { "" }
-            );
+            let text = tax_ids_not_found(&entries);
             if !negative {
                 return Err(SeqDbError::NotFound(text));
             }

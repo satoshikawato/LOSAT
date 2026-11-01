@@ -424,6 +424,68 @@ impl IdLookup<'_> {
     //     return false;
     // }
     // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1111-1122
+    // ```c++
+    // bool CSeqDBImpl::PigToOid(int pig, int & oid) const
+    // {
+    //     CHECK_MARKER();
+    //
+    //     for(int i = 0; i < m_VolSet.GetNumVols(); i++) {
+    //         if (m_VolSet.GetVol(i)->PigToOid(pig, oid)) {
+    //             oid += m_VolSet.GetVolOIDStart(i);
+    //             return true;
+    //         }
+    //     }
+    //
+    //     return false;
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2413-2422
+    // ```c++
+    // bool CSeqDBVol::PigToOid(int pig, int & oid) const
+    // {
+    // 	bool rv = false;
+    //     x_OpenPigFile();
+    //     if (m_IsamPig.NotEmpty()) {
+    //     	rv = m_IsamPig->PigToOid(pig, oid);
+    //     	x_UnleasePigFile();
+    //     }
+    //     return rv;
+    // }
+    // ```
+    // A volume's ISAM sets `oid` to -1 when it does not hold the PIG (`x_IdentToOid`); a
+    // volume without PIG files (`x_OpenPigFile` opens none for an empty volume) leaves it
+    // as it was, which in blastdbcmd is uninitialised (`CSeqDB::TOID oid;`). No list filters
+    // the OID.
+    /// The OID of the PIG `pig`: `Some(Some(oid))` from the first volume whose PIG file has
+    /// it, `Some(None)` when a volume has PIG files and none holds it (NCBI's -1), `None` when
+    /// no volume has PIG files (NCBI's OID is then never set).
+    pub fn pig_to_oid(&self, pig: i32) -> Result<Option<Option<u32>>, SeqDbError> {
+        let mut searched = false;
+        for (at, volume) in self.db.volumes.iter().enumerate() {
+            if volume.num_oids() == 0 {
+                continue;
+            }
+            let isam = opened(&self.pig_isams[at], || {
+                NumericIsam::open_pig_volume(volume.base(), self.db.seqtype)
+            })?;
+            let Some(isam) = isam else {
+                continue;
+            };
+            searched = true;
+            if let Some(oid) = isam.id_to_oid(i64::from(pig))? {
+                let oid = i64::from(oid) + i64::from(self.db.volume_starts[at]);
+                return u32::try_from(oid).map(|oid| Some(Some(oid))).map_err(|_| {
+                    SeqDbError::Format {
+                        path: volume.base().to_path_buf(),
+                        message: format!("the PIG file gives PIG {pig} the OID {oid}"),
+                    }
+                });
+            }
+        }
+        Ok(searched.then_some(None))
+    }
+
     /// The OID of the GI `gi`: the first volume whose file has it.
     pub fn gi_to_oid(&self, gi: i64) -> Result<Option<u32>, SeqDbError> {
         for at in 0..self.db.volumes.len() {

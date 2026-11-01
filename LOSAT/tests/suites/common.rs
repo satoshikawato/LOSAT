@@ -4,6 +4,8 @@
 //! two lines in its suite (`common` for the command line, the output formats and shared parts;
 //! `tests/suite_layout.rs` checks that every file is in exactly one test binary).
 
+#[path = "../blastdbcmd_discovery.rs"]
+mod blastdbcmd_discovery;
 #[path = "../blastdbcmd_info.rs"]
 mod blastdbcmd_info;
 #[path = "../blastdbcmd_retrieve.rs"]

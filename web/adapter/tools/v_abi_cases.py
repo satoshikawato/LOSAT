@@ -103,6 +103,9 @@ def outfmt0_fixtures() -> list[dict]:
         # SAM (outfmt 17) is not a format of ABI v1 (DECISIONS 10 of the outfmt line).
         if run_oracle.is_sam_outfmt(outfmt):
             continue
+        # -parse_deflines works in the CLI only: the adapter refuses it (`run::parse`).
+        if "-parse_deflines" in argv:
+            continue
         assert argv[-2:] == ["-outfmt", outfmt], row["fixture_id"]
         key = (row["program"], tuple(argv[:-2]))
         search = searches.setdefault(key, {"program": row["program"], "argv": [row["program"], *argv[:-2]],

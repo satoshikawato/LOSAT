@@ -98,8 +98,8 @@ pub(crate) struct XDbStream<'a> {
     lengths: Vec<usize>,
     /// Whether a sequence is read into a buffer that glibc maps (`x_read_nucleotide_store`): with
     /// more than one thread. The freed stores of the workers stayed resident in their arenas; at
-    /// one thread the heap's freed store serves the next read without faults (C. elegans genome:
-    /// 19 reads of its 7 sequences, against one read of the copy).
+    /// one thread the heap's freed store serves the next read without faults (TBLASTN, C. elegans
+    /// genome: 19 reads of its 7 sequences, against one read of the copy).
     mapped: bool,
     /// The sequences that something holds or a thread reads (`read_shared`).
     shared: Mutex<XShared>,

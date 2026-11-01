@@ -16,7 +16,9 @@
 //!   the frames are translated from it and the stage reads nothing else of the sequence. A plan
 //!   that the search keeps between query batches (`XSubjectSide`) is not made again, and its
 //!   sequence is not read again. The plans of short subjects are made from the bytes of the block
-//!   that each thread keeps (`XDbStream::plan_with`), without a store.
+//!   that each thread keeps (`XDbStream::plan_with`), without a store: the preliminary stage asks
+//!   for the subjects of a range in ascending order on each thread, so most short subjects come
+//!   without a read or a copy.
 //! - The composition redo and the traceback of `-comp_based_stats 0` read a subject of their
 //!   lists when they first align it and hold it until the stage has done its last match
 //!   (`XStageSubjects`, LOSAT_X_TBNSTAGEDROP; with `=0` until the stage ends); the reports read

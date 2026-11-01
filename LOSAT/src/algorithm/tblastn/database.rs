@@ -39,7 +39,7 @@ use super::stage_d_pipeline::DatabaseNumbers;
 use super::stage_d_results::KappaResultHitList;
 
 /// The program that LOSAT's refusals name.
-pub(super) const PROGRAM: &str = "TBLASTN";
+const PROGRAM: &str = "TBLASTN";
 
 /// The database of a `-db` search: the opened database and its name as NCBI keeps it
 /// (`TblastnArgs::database_name`: the `-db` value without white space at its ends).

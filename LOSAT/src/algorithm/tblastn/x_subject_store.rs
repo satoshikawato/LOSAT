@@ -37,7 +37,7 @@ pub(super) enum SubjectLetters<'a> {
     /// EXPERIMENT (LOSAT_X_TBNSTORE): packed subjects, the letters of one made when it is read.
     Packed(&'a [PackedNucleotide]),
     /// The sequences of a `-db` database, each read where it is
-    /// searched (`x_db_stream.rs`).
+    /// searched (`common/x_db_stream.rs`).
     Stream(&'a XDbStream<'a>),
     /// The numbers of bases alone, of the reported sequences of a `-db` search whose reports read
     /// no letters (`database::reported_subjects`).

@@ -19,7 +19,7 @@ use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::blastinput::fasta_reader::FastaRecord;
 
 /// The failure of the batch whose search a read of the database
-/// failed (`x_db_stream::XReadError`), as the check's error fails the first batch with a valid
+/// failed (`common::x_db_stream::XReadError`), as the check's error fails the first batch with a valid
 /// context: a reader error of NCBI's own is the engine error; LOSAT's refusal (and any other
 /// error) is returned as `Err` to stop the run.
 fn x_read_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
@@ -1051,7 +1051,7 @@ fn search(
         // after the reports of the batches before, which are searched without sequences; a run
         // without such a batch never reads the file. The
         // database is checked as NCBI's first read would fail, with the same error, and each
-        // sequence is read where it is searched (`x_db_stream.rs`).
+        // sequence is read where it is searched (`common/x_db_stream.rs`).
         let mut x_stream = None;
         let (database_stores, mut stores_error) = match database {
             Some(database) => {

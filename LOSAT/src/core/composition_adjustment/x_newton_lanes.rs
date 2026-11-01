@@ -1584,6 +1584,9 @@ fn x_prefetch_batch(inputs: Vec<NewtonInput>) {
 
 // No NCBI counterpart (probe): `take` from the kept batch: the first result not taken, from `next`
 // on, whose input equals this one by bits; the batch goes when its last result is taken.
+// Not inlined: inlined into `take`'s caller (`composition_matrix_adjust`) it changes that function's
+// code on every path (one-thread instructions x1.001 with the switch off).
+#[inline(never)]
 fn x_take_batch(
     x: &mut [f64],
     q: &[f64],

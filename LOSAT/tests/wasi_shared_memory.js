@@ -50,7 +50,11 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 
 const GUARD_SECTION = "losat.shared_memory_guard";
-const GUARD_VERSION = 2;
+const GUARD_VERSION = 3;
+// The last memory size that a thread of the guest grew the memory to, in pages (0 = none yet).
+// LLVM leaves addresses below 1024 unused (wasm-ld's global base); a wrong value here costs one
+// more memory.grow(0) or leaves the bound check of the helpers as the only refresh.
+const GROWN_PAGES = 16;
 const WASM_HEADER = Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]);
 
 function uleb(value) {
@@ -122,7 +126,8 @@ function instruction(r) {
     const count = r.uint();
     for (let i = 0; i < count; i += 1) r.type();
   } else if (op >= 0x28 && op <= 0x3e) r.memarg();
-  else if (op === 0x3f || op === 0x40) r.memory();
+  else if (op === 0x3f) r.memory();
+  else if (op === 0x40) { r.memory(); return "grow"; }
   else if (op === 0x43 || op === 0x44) r.take(op === 0x43 ? 4 : 8);
   else if (op === 0xfc) {
     const sub = r.uint();
@@ -205,17 +210,49 @@ function signedLeb(value) {
   }
 }
 
+// The instructions that can observe another thread's write: everything but a store and a notify.
+const atomicAcquires = (sub) => sub !== 0 && !(sub >= 0x17 && sub <= 0x1d);
+
 function atomicBody({ sub, align, offset }) {
-  // (param address i32) (param values...) (local bytes i64)
-  const { values, size } = atomicShape(sub);
+  // (param address i32) (param values...) (local bytes i64) (local result)
+  const { values, result, size } = atomicShape(sub);
   const bytes = values.length + 1;
+  const kept = bytes + 1;
+  const after = atomicAcquires(sub) ? [
+    0x3f, 0, 0x41, GROWN_PAGES, 0xfe, 0x10, 2, 0, 0x49, // memory.size < GROWN_PAGES
+    0x04, 0x40, 0x41, 0, 0x40, 0, 0x1a, 0x0b,
+  ] : [];
   return Buffer.from([
-    1, 1, 0x7e,
+    ...(result.length ? [2, 1, 0x7e, 1, result[0]] : [1, 1, 0x7e]),
     0x3f, 0, 0xad, 0x42, 16, 0x86, 0x21, bytes, // bytes = u64(memory.size) << 16
     0x20, 0, 0xad, 0x42, ...signedLeb(offset + size), 0x7c, 0x20, bytes, 0x56, // address + offset + size > bytes
     0x04, 0x40, 0x41, 0, 0x40, 0, 0x1a, 0x0b, // if outside: grow(0); drop
     0x20, 0, ...values.flatMap((_, i) => [0x20, i + 1]),
-    0xfe, ...uleb(sub), ...uleb(align), ...uleb(offset), 0x0b,
+    0xfe, ...uleb(sub), ...uleb(align), ...uleb(offset),
+    ...(result.length ? [0x21, kept] : []),
+    ...after,
+    ...(result.length ? [0x20, kept] : []),
+    0x0b,
+  ]);
+}
+
+// memory.grow, then GROWN_PAGES = max(GROWN_PAGES, memory.size) when it succeeded.
+const GROW_TYPE = Buffer.from([0x60, 1, 0x7f, 1, 0x7f]);
+function growBody() {
+  // (param pages i32) (local old i32) (local seen i32)
+  return Buffer.from([
+    1, 2, 0x7f,
+    0x20, 0, 0x40, 0, 0x22, 1, 0x41, 0x7f, 0x47, // (old = memory.grow(pages)) != -1
+    0x04, 0x40,
+    0x03, 0x40,
+    0x41, GROWN_PAGES, 0xfe, 0x10, 2, 0, 0x22, 2, // seen = GROWN_PAGES
+    0x3f, 0, 0x49, // seen < memory.size
+    0x04, 0x40,
+    0x41, GROWN_PAGES, 0x20, 2, 0x3f, 0, 0xfe, 0x48, 2, 0, 0x20, 2, 0x47, 0x0d, 1, // cmpxchg failed: again
+    0x0b,
+    0x0b,
+    0x0b,
+    0x20, 1, 0x0b,
   ]);
 }
 
@@ -234,7 +271,7 @@ function sectionsOf(bytes) {
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Host compatibility only. The record of a module that guardSharedMemory wrote:
-// { version, fill, copy, atomic, atomic_helpers }, or null. A module whose encoding cannot be read has none
+// { version, fill, copy, grow, atomic, atomic_helpers }, or null. A module whose encoding cannot be read has none
 // (guardSharedMemory then rejects it as invalid).
 function guardRecord(bytes) {
   let payload = null;
@@ -252,11 +289,11 @@ function guardRecord(bytes) {
   try { record = JSON.parse(Buffer.from(payload).toString("utf8")); } catch { record = null; }
   const count = (value) => Number.isSafeInteger(value) && value >= 0;
   if (record === null || typeof record !== "object" || record.version !== GUARD_VERSION
-      || !count(record.fill) || !count(record.copy) || !count(record.atomic) || !count(record.atomic_helpers)
-      || record.fill + record.copy + record.atomic === 0 || record.atomic_helpers > record.atomic) {
+      || !count(record.fill) || !count(record.copy) || !count(record.grow) || !count(record.atomic) || !count(record.atomic_helpers)
+      || record.fill + record.copy + record.grow + record.atomic === 0 || record.atomic_helpers > record.atomic) {
     throw new Error(`unsupported ${GUARD_SECTION} record: ${Buffer.from(payload).toString("utf8").slice(0, 80)}`);
   }
-  return { version: record.version, fill: record.fill, copy: record.copy, atomic: record.atomic,
+  return { version: record.version, fill: record.fill, copy: record.copy, grow: record.grow, atomic: record.atomic,
     atomic_helpers: record.atomic_helpers };
 }
 
@@ -325,7 +362,7 @@ function layout(bytes) {
 }
 
 // Calls `visit(guarded, before, after)` for every instruction of a function body, after its
-// locals; `guarded` is "fill", "copy", an atomic instruction's { sub, align, offset }, or null.
+// locals; `guarded` is "fill", "copy", "grow", an atomic instruction's { sub, align, offset }, or null.
 function walk(body, visit) {
   const r = new Reader(body);
   const locals = r.uint();
@@ -341,12 +378,12 @@ const GUARD_TYPE = Buffer.from([0x60, 3, 0x7f, 0x7f, 0x7f, 0]);
 function guardSharedMemory(bytes) {
   // A module that this guard wrote is returned as it is (nothing guarded by this call).
   const record = guardRecord(bytes);
-  if (record !== null) return { bytes, fill: 0, copy: 0, atomic: 0, record };
+  if (record !== null) return { bytes, fill: 0, copy: 0, grow: 0, atomic: 0, record };
   if (!WebAssembly.validate(bytes)) throw new Error("invalid input Wasm module");
   const m = layout(bytes);
   const { types, typeCount, functions, functionCount, functionEntries, code, imports } = m;
-  const counts = { fill: 0, copy: 0, atomic: 0 };
-  // The defined functions keep their indices; then fill, copy, and one helper per atomic
+  const counts = { fill: 0, copy: 0, grow: 0, atomic: 0 };
+  // The defined functions keep their indices; then fill, copy, grow, and one helper per atomic
   // opcode and memarg, in the order of their first use.
   const helpers = new Map();
   const bodies = m.bodies.map((body) => {
@@ -356,11 +393,11 @@ function guardSharedMemory(bytes) {
       if (!guarded) return;
       let target;
       if (typeof guarded === "string") {
-        target = imports + functionCount + (guarded === "copy" ? 1 : 0);
+        target = imports + functionCount + ["fill", "copy", "grow"].indexOf(guarded);
         counts[guarded] += 1;
       } else {
         const key = `${guarded.sub}/${guarded.align}/${guarded.offset}`;
-        if (!helpers.has(key)) helpers.set(key, { ...guarded, index: imports + functionCount + 2 + helpers.size });
+        if (!helpers.has(key)) helpers.set(key, { ...guarded, index: imports + functionCount + 3 + helpers.size });
         target = helpers.get(key).index;
         counts.atomic += 1;
       }
@@ -370,7 +407,7 @@ function guardSharedMemory(bytes) {
     chunks.push(body.subarray(start));
     return sized(Buffer.concat(chunks));
   });
-  if (counts.fill + counts.copy + counts.atomic === 0) return { bytes, ...counts, record: null };
+  if (counts.fill + counts.copy + counts.grow + counts.atomic === 0) return { bytes, ...counts, record: null };
   const originalTypes = new Reader(types.bytes);
   originalTypes.uint();
   const atomicHelpers = [...helpers.values()];
@@ -378,16 +415,16 @@ function guardSharedMemory(bytes) {
   const helperTypes = atomicHelpers.map((helper) => {
     const type = atomicType(helper);
     const key = type.toString("hex");
-    if (!newTypes.has(key)) newTypes.set(key, { type, index: typeCount + 1 + newTypes.size });
+    if (!newTypes.has(key)) newTypes.set(key, { type, index: typeCount + 2 + newTypes.size });
     return newTypes.get(key).index;
   });
-  types.bytes = Buffer.concat([uleb(typeCount + 1 + newTypes.size), types.bytes.subarray(originalTypes.pos), GUARD_TYPE,
+  types.bytes = Buffer.concat([uleb(typeCount + 2 + newTypes.size), types.bytes.subarray(originalTypes.pos), GUARD_TYPE, GROW_TYPE,
     ...[...newTypes.values()].map((entry) => entry.type)]);
-  const total = functionCount + 2 + atomicHelpers.length;
+  const total = functionCount + 3 + atomicHelpers.length;
   functions.bytes = Buffer.concat([uleb(total), functionEntries,
-    uleb(typeCount), uleb(typeCount), ...helperTypes.map(uleb)]);
+    uleb(typeCount), uleb(typeCount), uleb(typeCount + 1), ...helperTypes.map(uleb)]);
   code.bytes = Buffer.concat([uleb(total), ...bodies,
-    sized(guardedBody(false)), sized(guardedBody(true)), ...atomicHelpers.map((helper) => sized(atomicBody(helper)))]);
+    sized(guardedBody(false)), sized(guardedBody(true)), sized(growBody()), ...atomicHelpers.map((helper) => sized(atomicBody(helper)))]);
   const written = { version: GUARD_VERSION, ...counts, atomic_helpers: atomicHelpers.length };
   const marker = section(0, Buffer.concat([sized(Buffer.from(GUARD_SECTION)), Buffer.from(JSON.stringify(written))]));
   const guarded = Buffer.concat([m.header, ...m.sections.map((s) => section(s.id, s.bytes)), marker]);
@@ -410,7 +447,7 @@ function verifyGuarded(bytes) {
   if (!WebAssembly.validate(bytes)) throw new Error("invalid Wasm module");
   const m = layout(bytes);
   const n = m.functionCount;
-  const fill = n - 2 - record.atomic_helpers;
+  const fill = n - 3 - record.atomic_helpers;
   if (fill < 0) throw new Error("the guard's helpers are missing");
   const typeOf = (i) => Buffer.from(m.typeEntries[m.functionTypes[i]]);
   if (!GUARD_TYPE.equals(typeOf(fill)) || !GUARD_TYPE.equals(typeOf(fill + 1))) {
@@ -419,15 +456,17 @@ function verifyGuarded(bytes) {
   if (!Buffer.from(m.bodies[fill]).equals(guardedBody(false)) || !Buffer.from(m.bodies[fill + 1]).equals(guardedBody(true))) {
     throw new Error("the guard's helpers are not the guard's bodies");
   }
-  for (let i = fill + 2; i < n; i += 1) {
+  if (!GROW_TYPE.equals(typeOf(fill + 2))) throw new Error("the guard's helpers do not have the guard's type");
+  if (!Buffer.from(m.bodies[fill + 2]).equals(growBody())) throw new Error("the guard's helpers are not the guard's bodies");
+  for (let i = fill + 3; i < n; i += 1) {
     const found = [];
-    walk(m.bodies[i], (guarded) => { if (guarded) found.push(guarded); });
-    if (found.length !== 1 || typeof found[0] === "string" || !Buffer.from(m.bodies[i]).equals(atomicBody(found[0]))) {
+    walk(m.bodies[i], (guarded) => { if (guarded && typeof guarded !== "string") found.push(guarded); });
+    if (found.length === 0 || !Buffer.from(m.bodies[i]).equals(atomicBody(found[0]))) {
       throw new Error("the guard's helpers are not the guard's bodies");
     }
     if (!atomicType(found[0]).equals(typeOf(i))) throw new Error("the guard's helpers do not have the guard's type");
   }
-  const calls = [0, 0, 0];
+  const calls = [0, 0, 0, 0];
   for (let i = 0; i < fill; i += 1) {
     const body = m.bodies[i];
     walk(body, (guarded, before) => {
@@ -437,10 +476,10 @@ function verifyGuarded(bytes) {
       const r = new Reader(body);
       r.pos = before + 1;
       const target = r.uint() - m.imports - fill;
-      if (target >= 0) calls[Math.min(target, 2)] += 1;
+      if (target >= 0) calls[Math.min(target, 3)] += 1;
     });
   }
-  if (calls[0] !== record.fill || calls[1] !== record.copy || calls[2] !== record.atomic) {
+  if (calls[0] !== record.fill || calls[1] !== record.copy || calls[2] !== record.grow || calls[3] !== record.atomic) {
     throw new Error(`the record counts ${record.fill} fills, ${record.copy} copies and ${record.atomic} atomics, the code calls the helpers ${calls.join(", ")} times`);
   }
   return record;
@@ -473,7 +512,7 @@ function main(argv) {
       throw err;
     }
     return { input_sha256: sha256(bytes), output_sha256: sha256(result.bytes), output_bytes: result.bytes.length,
-      ...result.record, guarded_before: result.fill + result.copy + result.atomic === 0, guard_sha256: sha256(fs.readFileSync(__filename)) };
+      ...result.record, guarded_before: result.fill + result.copy + result.grow + result.atomic === 0, guard_sha256: sha256(fs.readFileSync(__filename)) };
   }
   if (command === "verify" && input && argv.length === 2) {
     const bytes = fs.readFileSync(input);

@@ -5270,13 +5270,14 @@ Scheduling (each value computed by one thread with the original function; order 
   turns it off; `common/x_db_stream.rs` `x_plan_chunk`, `XDbStream::plan_with`; `tblastn/x_oid_flow.rs` `search_chunk`):
   a thread that searches a chunk of subjects of a `-db` stream reads its block of 256 KiB of the sequence file no
   further than the chunk, and the block goes when the chunk is searched. A chunk holds the file's bytes / (16 x the
-  threads), about 40 KiB at 48 threads on a 30 MB sequence file, and a thread's next chunk is about the number of threads
-  chunks further on, so the rest of the block was read for nothing and the last block stayed in the thread's heap through
-  the redo (48 threads: 11 MiB live at the peak; in the recorder the block raised the heaps' summed high water by 21 MiB).
+  threads), about 40 KiB at 48 threads on a 30 MB sequence file, and a thread's next chunk is about a sixteenth of the file
+  further on: past 4 MiB of file it is outside the block, so the rest of the block was read for nothing, and below that
+  the next chunk now reads what the block held. The last block also stayed in the thread's heap through the redo (48
+  threads: 11 MiB live at the peak; in the recorder the block raised the heaps' summed high water by 21 MiB).
   The sequences are the same bytes wherever the block ends, so no report changes; outside a chunk (one thread, one
   subject) nothing changes. Unit test `a_block_ends_with_the_chunk_of_its_thread_and_goes_with_it`;
   `tests/tblastn_db_stream.rs` `a_block_that_ends_with_its_chunk_gives_the_same_reports`.
-  Always: every chunk of a `-db` search on the pool.
+  Reach: `-db` with 2+ threads and several subjects, the block reads of a chunk.
 - `LOSAT_X_TBNPAIRCAP=1` tblastn (memory; in the strict set from the pull request that added it, 2026-10-26;
   `=0` turns it off; `tblastn/search_seed.rs` `x_scan_plan`, `X_PAIR_ROOM`): the offset-pair array that a unit's scan
   calls fill (one per running unit; the units a thread runs one after another share theirs, `XUnitBuffers`) holds

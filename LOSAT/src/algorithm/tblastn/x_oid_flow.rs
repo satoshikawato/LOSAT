@@ -278,9 +278,9 @@ impl<T: Send> XOidFlow<T> {
             }
         }
         let _failed = Failed(self);
-        let _plan = crate::algorithm::common::x_db_stream::x_plan_chunk(self.chunks[index].end);
+        let plan = crate::algorithm::common::x_db_stream::x_plan_chunk(self.chunks[index].end);
         let lists: Vec<T> = self.chunks[index].clone().map(search).collect();
-        drop(_plan);
+        drop(plan);
         let mut state = self.lock();
         state.finished.insert(index, lists);
         state.peak_waiting = state.peak_waiting.max(state.finished.len());

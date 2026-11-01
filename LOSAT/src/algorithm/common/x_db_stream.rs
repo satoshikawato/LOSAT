@@ -180,7 +180,8 @@ impl<'a> XDbStream<'a> {
     /// asked for) and gives the next sequences of the block from its bytes, with the errors of
     /// their stores but without the stores: a search that asks for the subjects of a range in
     /// ascending order on each thread gets most short subjects without a read or a copy. A block
-    /// of one sequence (a long one) is read alone and shared (`read_shared`).
+    /// of one sequence (a long one) is read alone and shared (`read_shared`); a block that a chunk
+    /// cuts to one short sequence (`x_plan_chunk`) is an ordinary block.
     pub(crate) fn plan_with<R>(
         &self,
         oid: usize,
@@ -200,6 +201,7 @@ impl<'a> XDbStream<'a> {
                 Some(mut range) if range.len() > 1 => {
                     // LOSAT_X_TBNPLANCUT: nothing after this thread's chunk is read.
                     let end = X_PLAN_END.with(std::cell::Cell::get);
+                    crate::utils::xreach::x_reach!("LOSAT_X_TBNPLANCUT", end != u32::MAX);
                     if end > ordinal && end < range.end_ordinal() {
                         range.end = range.first + (end - ordinal);
                     }
@@ -305,8 +307,10 @@ impl Drop for XPlanChunk {
 
 /// The calling thread searches a chunk of subjects that ends before ordinal id `end`, until the
 /// value returned is dropped: its next blocks (`XDbStream::plan_with`) stop at `end`, and the block
-/// it holds then goes with the chunk. The next chunk a thread takes is another thread's distance
-/// away in the file, so the rest of a block was read for nothing, and a thread kept the last
+/// it holds then goes with the chunk. A chunk holds about a sixteenth of the sequence file over the
+/// threads and a thread's next chunk is about a sixteenth of the file further on, so past 4 MiB of
+/// file the next chunk is outside the block and the rest of the block was read for nothing;
+/// below that the next chunk reads what the block held. Without this a thread also kept its last
 /// block through the later stages of the search. Chunks nest when a thread that waits runs another
 /// flow's loop (query batches side by side): the inner one's end lets the outer block go, and the
 /// outer chunk reads its next sequence again. `None` with `LOSAT_X_TBNPLANCUT=0`.
@@ -335,7 +339,7 @@ mod tests {
         let db = SeqDb::open(path.to_str().unwrap(), SeqType::Nucleotide).unwrap();
         let stream = XDbStream::new(&db, 2, "TBLASTN").unwrap();
         let count = stream.count();
-        assert!(count >= 3, "{count} sequences");
+        assert!(count >= 4, "{count} sequences");
         let bytes = |oid| {
             stream
                 .plan_with(oid, |packed, length| Ok((packed.to_vec(), length)))
@@ -349,6 +353,13 @@ mod tests {
         let Some(chunk) = x_plan_chunk(2) else {
             return;
         };
+        // A chunk of one short sequence holds a block of one.
+        {
+            let _one = x_plan_chunk(1);
+            assert_eq!(bytes(0), whole[0]);
+            assert_eq!(held(), Some((0, 1)));
+        }
+        assert_eq!(held(), None);
         assert_eq!(bytes(0), whole[0]);
         assert_eq!(held(), Some((0, 2)));
         assert_eq!(bytes(1), whole[1]);

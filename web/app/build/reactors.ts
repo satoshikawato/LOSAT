@@ -27,9 +27,10 @@ interface Guarded {
   /** The operations that this call guarded (0 for an artifact that is guarded already). */
   readonly fill: number;
   readonly copy: number;
+  readonly grow: number;
   readonly atomic: number;
   /** The guard's record in the module, or null when it found nothing to guard. */
-  readonly record: { readonly version: number; readonly fill: number; readonly copy: number; readonly atomic: number } | null;
+  readonly record: { readonly version: number; readonly fill: number; readonly copy: number; readonly grow: number; readonly atomic: number } | null;
 }
 
 /** The guard of LOSAT/tests/wasi_shared_memory.js, loaded only for a build with the engine. */
@@ -88,8 +89,8 @@ export function findReactors(env: NodeJS.ProcessEnv = process.env): Reactors | u
       return { name: `engine/losat-web-serial-${artifactSha256.slice(0, 16)}.wasm`, bytes: artifact, sha256: artifactSha256, artifactSha256 };
     }
     const guarded = guardSharedMemory(artifact);
-    if (guarded.record === null) throw new Error(`${path}: the shared-memory guard found no memory.fill, memory.copy or atomic instruction to guard`);
-    const where = guarded.fill + guarded.copy + guarded.atomic === 0 ? 'in the artifact' : 'LOSAT/tests/wasi_shared_memory.js';
+    if (guarded.record === null) throw new Error(`${path}: the shared-memory guard found no memory.fill, memory.copy, memory.grow or atomic instruction to guard`);
+    const where = guarded.fill + guarded.copy + guarded.grow + guarded.atomic === 0 ? 'in the artifact' : 'LOSAT/tests/wasi_shared_memory.js';
     const sha256 = sha256Hex(guarded.bytes);
     return {
       name: `engine/losat-web-threads-${sha256.slice(0, 16)}.wasm`,

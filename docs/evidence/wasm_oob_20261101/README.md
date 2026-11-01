@@ -77,7 +77,8 @@ during the rounds, where atomics have no compare; this was not checked.
 
 The real module, unwidened, on GitHub runners, blastp and blastn, AP027131 pairs, 16 threads, 100
 runs per cell with the two arms in turn (`results/arm_v2_v3/`, `scripts/arm_rate.py`). v2 = the
-guard with the compare before each atomic; v3 = this branch.
+guard with the compare before each atomic and nothing else; v3 = this branch. P(0/100 | 0.11) is
+about 9e-6; 0/100 alone bounds the rate at 3 % (95 %).
 
 | Runner, Node | blastp v2 | blastp v3 | blastn v2 | blastn v3 |
 |---|---:|---:|---:|---:|
@@ -91,8 +92,16 @@ An earlier run with 40 runs per cell (run 41314393510) trapped 10/40 and 3/40 at
 frames; megablast and dc-megablast 0/40; blastn traps nowhere. Declaring a 1 GiB initial memory
 did not help (7/40, 6/40): wasi-libc's `sbrk` calls `memory.grow` whatever the host's initial size.
 
-Not run: a real search in a browser on ARM64, and any Android device. `scripts/browser/refresh.html`
-is the V8-level check in Chromium on ARM64 (see below).
+Chromium 156 on `ubuntu-24.04-arm`, V8 only (`scripts/browser/refresh.html`, a plain store to an
+address in grown memory after an atomic read of another address, 2 jobs x 20 rounds per arm,
+`results/arm_check_run_41324130443.txt`):
+
+| Flags | Original | Through the guard |
+|---|---:|---:|
+| stack checks off | trap 40/40 | trap 0/40 |
+| default | trap 36/40 | trap 0/40 |
+
+Not run: a real search in a browser on ARM64, and any Android device.
 
 ## The fix
 
@@ -109,7 +118,11 @@ Plain stores stay as they are: a module has about 200,000 multi-byte ones. They 
 wrapping, because a thread can only have an address in pages another thread grew through
 something that thread wrote, and the atomic read that orders the two (a lock, or the published
 address) now brings the bound up to date. `memory.size` reads the same per-instance bound as the
-compare, so `memory.size < GROWN_PAGES` means exactly "this instance is behind".
+compare (Turboshaft does not cache the size of a shared growable memory, `InstanceCache` in
+`turboshaft-graph-interface.cc`), so with all growth going through the helper, `memory.size <
+GROWN_PAGES` means that this instance is behind. The hosts grow only with `memory.grow(0)`, and by
+one page when they create the memory, before any instance exists. Should a compiler reuse an
+earlier read of the size, that read is smaller or equal, which costs one more `memory.grow(0)`.
 
 dev 74bbd3c7e: 28,725 atomic sites, 1,412 helpers, 1 `memory.grow` site; 39,016 bytes more than
 the unguarded module with the bulk sites, 0.8 s to guard (cached by the runner).
@@ -121,16 +134,22 @@ tblastn, blastx; `results/low_memory_after_runs.txt`): the deepest stack was 207
 20 bytes of overflowing would overlap the cell.
 
 On V8 a helper's own entry stack check usually handles the pending interrupt first, so a test
-of the guard must run with `--no-wasm-stack-checks` to reach the compare. With the flag, these
-mutants of the guard fail the tests of `test_wasi_shared_memory.js` on Node 24.21.0 and 26.8.2
+of the guard must run with `--no-wasm-stack-checks` and `--liftoff-only` to reach the compare.
+With the flags, these mutants of the guard fail the tests of `test_wasi_shared_memory.js` on Node 24.21.0 and 26.8.2
 (`scripts/mutants_v3.sh`):
 
-| Mutant | Tests that fail |
+| Mutant | Fails |
 |---|---|
-| no compare before the atomic | the 4 "before" tests |
-| no refresh after the atomic | the 4 "refreshes the bound" tests |
-| `memory.grow` does not raise the cell | those 4 and the `memory.grow` test |
+| no compare before the atomic; before a store of one width; before the instructions with two operands; offset left out of the compare | the every-opcode test |
+| no refresh after the atomic; after wait64; after i64 results; after one cmpxchg | the every-opcode test |
+| `memory.grow` does not raise the cell | the every-opcode test, the `memory.grow` test |
 | the cell is overwritten whatever its value | the `memory.grow` test |
+| no retry when the compare-exchange of the raise lost | **no test** |
+
+The last mutant survives: losing the race needs another thread between two instructions of the
+helper, which a test cannot force, and a stress test of 4 threads over 300 rounds did not hit it.
+A lost raise leaves the cell too small until the next `memory.grow`, so threads go without the
+refresh for that long.
 
 A differential test covers all 66 atomic opcodes against original Wasm, with results, memory and trap
 messages compared at addresses in bounds, at the edge, past it, misaligned and wrapped.
@@ -141,13 +160,13 @@ RATE_PENDING (`results/rate1_runs.tsv`).
 
 ## Time and memory
 
-One thread, instructions and cycles, output hashes equal in all (`results/cost1_runs.tsv`: v2
-against dev's host, 2 pairs; `results/cost2_runs.tsv`: v3 against v2, 3 pairs, tblastx 1):
+One thread, instructions, output hashes equal in all, round 0 not used: 2 pairs per case
+(`results/cost1_runs.tsv`: v2 against dev's host; `results/cost2_runs.tsv`: v3 against v2):
 
 | Case | blastp | blastp-fast | megablast | blastn | dc-megablast | blastn-short | tblastn | blastx | tblastx |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | v2 / dev, instructions | x1.0015 | x1.0005 | x1.0008 | x1.0010 | x1.0003 | x0.9978 | x0.9934 | x1.0414 | x1.0034 |
-| v3 / v2, instructions | x0.9990 | x1.0002 | x1.0010 | x1.0002 | x1.0003 | x1.0001 | x0.9984 | x1.0006 | x1.0032 |
+| v3 / v2, instructions | x0.9990 | x1.0002 | x1.0011 | x1.0003 | x1.0002 | x1.0001 | x0.9984 | x1.0007 | x1.0031 |
 
 Blastx: cycles x1.009-1.017 for its x1.041 instructions; 72 % of its cycles are in
 `x_word_finder_direct_sent` (`LOSAT/src/algorithm/blastx/x_seed_scan.rs`), where an atomic load

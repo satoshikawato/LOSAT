@@ -159,10 +159,12 @@ helper per opcode and memarg. V8's baseline compiler
 [checks each atomic access](https://github.com/nodejs/node/blob/v26.8.2/deps/v8/src/wasm/baseline/liftoff-compiler.cc)
 against the same per-instance bound, where it leaves plain accesses to the trap
 handler: a rayon worker trapped at its first `Stealer::steal`, in `Arc::clone`, on
-memory that existed (1 of 483 runs; `docs/evidence/wasm_oob_20261101/`).
+memory that existed (dc-megablast at 16 threads, 1 of the 483 threaded runs on record;
+`docs/evidence/wasm_oob_20261101/`).
 
 On ARM64 outside macOS V8 checks plain multi-byte stores against that bound too: real
-blastp at 16 threads trapped in `dlmalloc` in 11 and 29 of 100 runs on `ubuntu-24.04-arm`.
+blastp at 16 threads, with the atomics guarded and nothing else, trapped in `dlmalloc` in 11
+and 29 of 100 runs on `ubuntu-24.04-arm`.
 A module has about 200,000 such stores, so they stay as they are. Instead `memory.grow`
 goes through a helper that records the new size in low memory, and each atomic instruction
 that reads memory (all but the stores and notify) compares `memory.size` with the
@@ -186,9 +188,9 @@ guarded module carries a custom section `losat.shared_memory_guard` with the
 guard's version and counts. The runner, and the guard function itself, use a
 module that has it as it is (it is not guarded twice and not written to the
 guard cache). `guard` exits 1 and writes nothing when the reader declines an
-instruction encoding, when the module has no `memory.fill` or `memory.copy`, or
-when its output does not verify; `verify` exits 1 unless the two helpers, the
-call sites and the counts are the guard's own. `memory.init` is not guarded: only
+instruction encoding, when the module has no `memory.fill`, `memory.copy`,
+`memory.grow` or atomic instruction, or when its output does not verify; `verify`
+exits 1 unless the helpers, the call sites and the counts are the guard's own. `memory.init` is not guarded: only
 `__wasm_init_memory` (the module's start) and `__wasm_init_tls` (the spawning
 thread, from `pthread_create`) use it. Adapter parsing
 and compilation are included in the measured startup time. Keep `run_losat_wasi_threads.js`,
@@ -196,7 +198,7 @@ and compilation are included in the measured startup time. Keep `run_losat_wasi_
 `wasi_shared_memory.js`, and `wasi_files.js` together when copying the runner; set
 `LOSAT_WASI_THREADS_DEBUG=1` to log the number of guarded instructions.
 Unsupported module encodings fail explicitly. This guard addresses the observed
-copy/fill bounds race; it does not suppress other memory faults or fix OOM.
+stale-bound traps; it does not suppress other memory faults or fix OOM.
 
 Run the host regression checks with
 `"$NODE_BIN" --test test_wasi_runners.js test_wasi_shared_memory.js`

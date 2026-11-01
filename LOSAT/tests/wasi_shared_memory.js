@@ -24,8 +24,9 @@
 // growth reaches the instance's size only when its isolate handles the growth interrupt, at a
 // stack check or a tier-up check, and Liftoff::Loop has no stack check under dynamic tiering.
 // So a thread that reads a pointer into memory grown by another thread can trap on it although
-// the memory is there: rayon's first Stealer::steal at Arc::clone of crossbeam's Collector,
-// 1 of 483 runs of dc-megablast at 16 threads (2026-11-01, docs/evidence/wasm_oob_20261101/).
+// the memory is there: rayon's first Stealer::steal at Arc::clone of crossbeam's Collector, in
+// dc-megablast at 16 threads, 1 of the 483 threaded runs on record (2026-11-01,
+// docs/evidence/wasm_oob_20261101/).
 // Each atomic instruction becomes a call of a helper with the same bound check as the bulk
 // helpers, one helper per opcode and memarg, whose only effect is that refresh (on V8 the
 // helper's entry stack check usually handles the interrupt first; the compare does not depend
@@ -33,7 +34,8 @@
 //
 // V8 compares plain multi-byte stores too on ARM64 outside macOS, in both tiers
 // (wasm/compilation-environment.h, kPartialOOBWritesAreNoops): real blastp at 16 threads trapped
-// in dlmalloc in 11 and 29 of 100 runs on ubuntu-24.04-arm (Node 26.8.2, 24.21). A module has
+// in dlmalloc in 11 and 29 of 100 runs on ubuntu-24.04-arm (Node 26.8.2, 24.21) with the atomics
+// guarded and nothing else. A module has
 // about 200,000 such stores, too many to wrap. But a thread learns an address in pages that
 // another thread grew only from what that thread wrote, and an atomic read (a lock, or the atomic
 // that published the address) is what orders the two. So memory.grow also raises GROWN_PAGES,

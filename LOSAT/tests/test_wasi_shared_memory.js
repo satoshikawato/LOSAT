@@ -453,105 +453,103 @@ test("verifyGuarded rejects an unguarded atomic, a forged helper and a wrong ato
   assert.throws(() => guardSharedMemory(recount({ ...guarded.record, atomic_helpers: 3 })), /unsupported losat\.shared_memory_guard record/);
 });
 
-// The stale bound itself, on the engine. On V8 a helper's own entry stack check usually handles
-// the pending growth first, so this runs in a child process with stack checks off
-// (--no-wasm-stack-checks): only the helper's compare and memory.grow(0) can refresh the bound.
-// The worker enters probe, waits in Wasm (fences, then a plain-load loop) until the main thread
-// has grown the memory and published an address in the new page, then uses that address. A
-// failure ends in the child's timeout, never in a hung test process. Original Wasm traps here on
-// V8 13.6 and 14.6; that is reported, not asserted: an engine may refresh the bound itself.
+// The stale bound itself, on the engine, for every atomic instruction. On V8 a helper's own entry
+// stack check usually handles the pending growth first, and a tier-up check in a loop may too, so
+// this runs in a child process that stays in Liftoff with stack checks off (--liftoff-only
+// --no-wasm-stack-checks): only the helper's compares and memory.grow(0) can refresh the bound.
+// Each probe tells the main thread that it entered, waits in a plain-load loop until the main
+// thread has grown the memory through the module and published an address in the new page, and
+// returns memory.size, the same bound. That the original Wasm is stale here (or traps) is
+// reported, not asserted: an engine may refresh the bound itself. A failure ends in the child's
+// timeout, never in a hung test process.
 const STALE_CHILD = `
   const { Worker } = require("node:worker_threads");
   const module = new WebAssembly.Module(require("node:fs").readFileSync(process.argv[1]));
-  const memory = new WebAssembly.Memory({ initial: 1, maximum: 4, shared: true });
+  const memory = new WebAssembly.Memory({ initial: 1, maximum: 256, shared: true });
   const view = new Int32Array(memory.buffer);
+  const { grow, ...probes } = new WebAssembly.Instance(module, { env: { memory } }).exports;
   const worker = new Worker(\`
     const { workerData, parentPort } = require("node:worker_threads");
     const { module, memory } = workerData;
-    const instance = new WebAssembly.Instance(module, { env: { memory } });
-    let outcome = "ok";
-    try { outcome = instance.exports.probe() ?? outcome; } catch (err) { outcome = err.message; }
-    parentPort.postMessage(outcome);
+    const view = new Int32Array(memory.buffer);
+    const { grow, ...probes } = new WebAssembly.Instance(module, { env: { memory } }).exports;
+    const outcomes = {};
+    for (const [label, probe] of Object.entries(probes)) {
+      try { outcomes[label] = probe(); } catch (err) { outcomes[label] = err.message; }
+      Atomics.store(view, 1, 0);
+    }
+    parentPort.postMessage(outcomes);
   \`, { eval: true, workerData: { module, memory } });
-  worker.once("message", (outcome) => { console.log(String(outcome)); process.exit(0); });
+  worker.once("message", (outcomes) => { console.log(JSON.stringify(outcomes)); process.exit(0); });
   worker.once("error", (err) => { console.log("worker error: " + err.message); process.exit(1); });
-  while (Atomics.load(view, 0) === 0) Atomics.wait(view, 0, 0, 10);
-  const old = new WebAssembly.Instance(module, { env: { memory } }).exports.grow(1);
-  Atomics.store(view, 1, old * 65536 + 64);
+  for (const _ of Object.keys(probes)) {
+    while (Atomics.load(view, 0) === 0) Atomics.wait(view, 0, 0, 10);
+    Atomics.store(view, 0, 0);
+    const old = grow(1);
+    Atomics.store(view, 1, old * 65536 + 64);
+  }
 `;
-
-// Exports probe, and grow, the module's own memory.grow, which the main thread calls.
-function staleProbe(operands, opcode, resultDrop, { results = [], after = [] } = {}) {
-  const line = Array.from({ length: 60000 }, () => [0xfe, 3, 0]).flat();
-  const entered = 0, pointer = 4;
-  return Buffer.from([
-    0, 97, 115, 109, 1, 0, 0, 0,
-    ...section(1, vector([[0x60, 0, results.length, ...results], [0x60, 1, I32, 1, I32]])),
-    ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, 4]])),
-    ...section(3, vector([[0], [1]])),
-    ...section(7, vector([[...name("probe"), 0, 0], [...name("grow"), 0, 1]])),
-    ...section(10, vector([body([
-      0x41, entered, 0x41, 1, 0xfe, 0x17, 2, 0,
-      0x41, entered, 0x41, 1, 0xfe, 0, 2, 0, 0x1a,
-      ...line,
-      0x03, 0x40, 0x41, pointer, 0x28, 2, 0, 0x45, 0x0d, 0, 0x0b,
-      ...operands, ...opcode, ...resultDrop,
-      ...after,
-    ]), body([0x20, 0, 0x40, 0])])),
-  ]);
-}
 
 function runStaleChild(bytes, directory, label) {
   const file = path.join(directory, `${label}.wasm`);
   fs.writeFileSync(file, bytes);
-  const result = spawnSync(process.execPath, ["--no-wasm-stack-checks", "-e", STALE_CHILD, file],
+  const result = spawnSync(process.execPath, ["--liftoff-only", "--no-wasm-stack-checks", "-e", STALE_CHILD, file],
     { encoding: "utf8", timeout: 30000 });
   assert.equal(result.status, 0, `${label}: status ${result.status} signal ${result.signal}: ${result.stderr}`);
-  return result.stdout.trim();
+  return JSON.parse(result.stdout);
 }
 
-for (const [label, opcode, operands, resultDrop] of [
-  ["i32.atomic.rmw.add", [0xfe, 0x1e, 2, 0], [0x41, 7], [0x1a]],
-  ["i32.atomic.store", [0xfe, 0x17, 2, 0], [0x41, 7], []],
-  ["i32.atomic.load", [0xfe, 0x10, 2, 0], [], [0x1a]],
-  ["memory.atomic.notify", [0xfe, 0, 2, 0], [0x41, 0], [0x1a]],
-]) {
-  test(`another isolate grows memory before ${label}, with stack checks off`, { timeout: 90000 }, (t) => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-guard-stale-"));
-    try {
-      const probe = staleProbe([0x41, 4, 0x28, 2, 0, ...operands], opcode, resultDrop);
-      const guarded = guardSharedMemory(probe);
-      assert.ok(guarded.atomic >= 3);
-      assert.equal(runStaleChild(guarded.bytes, directory, "guarded"), "ok");
-      t.diagnostic(`original Wasm: ${runStaleChild(probe, directory, "original")}`);
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true });
-    }
-  });
+// The atomic instructions that read memory: all but the stores and notify.
+const readsMemory = ({ sub }) => sub !== 0 && !(sub >= 0x17 && sub <= 0x1d);
+
+// probes: { label: [ops of the function] }, called in this order, one page grown for each.
+function staleProbes(probes) {
+  const entered = 0, pointer = 4;
+  const labels = Object.keys(probes);
+  return Buffer.from([
+    0, 97, 115, 109, 1, 0, 0, 0,
+    ...section(1, vector([[0x60, 0, 1, I32], [0x60, 1, I32, 1, I32]])),
+    ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, ...uleb(256)]])),
+    ...section(3, vector([...labels.map(() => [0]), [1]])),
+    ...section(7, vector([...labels.map((label, i) => [...name(label), 0, i]), [...name("grow"), 0, labels.length]])),
+    ...section(10, vector([...labels.map((label) => body([
+      0x41, entered, 0x41, 1, 0xfe, 0x17, 2, 0,
+      0x41, entered, 0x41, 1, 0xfe, 0, 2, 0, 0x1a,
+      0x03, 0x40, 0x41, pointer, 0x28, 2, 0, 0x45, 0x0d, 0, 0x0b,
+      ...probes[label],
+      0x3f, 0,
+    ])), body([0x20, 0, 0x40, 0])])),
+  ]);
 }
 
-// A plain store, which V8 checks against the stale bound on ARM64 outside macOS, after an atomic
-// instruction that read memory, on another address than the published one: only the refresh
-// after that instruction can help. memory.size reads the same bound, so this asserts on every
-// architecture; the original Wasm's store traps on Linux ARM64 and passes elsewhere.
-for (const [label, operands, opcode, resultDrop] of [
-  ["i32.atomic.load", [0x41, 8], [0xfe, 0x10, 2, 0], [0x1a]],
-  ["i32.atomic.rmw.add", [0x41, 8, 0x41, 1], [0xfe, 0x1e, 2, 0], [0x1a]],
-  ["i32.atomic.rmw.cmpxchg", [0x41, 8, 0x41, 1, 0x41, 2], [0xfe, 0x48, 2, 0], [0x1a]],
-  ["memory.atomic.wait32", [0x41, 8, 0x41, 1, 0x42, 0], [0xfe, 1, 2, 0], [0x1a]],
-]) {
-  test(`after another isolate grows memory through the module, ${label} refreshes the bound for a plain store`, { timeout: 90000 }, (t) => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-guard-refresh-"));
-    try {
-      const after = [0x41, 4, 0x28, 2, 0, 0x41, 7, 0x36, 2, 0, 0x3f, 0];
-      const probe = staleProbe(operands, opcode, resultDrop, { results: [I32], after });
-      assert.equal(runStaleChild(guardSharedMemory(probe).bytes, directory, "guarded"), "2");
-      t.diagnostic(`original Wasm: ${runStaleChild(probe, directory, "original")}`);
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true });
-    }
-  });
-}
+const published = [0x41, 4, 0x28, 2, 0];
+// An instruction whose expected values differ from the memory: wait returns at once.
+const atomicOn = (address, { sub, values, result, size }, offset = 0) => [
+  ...address, ...values.flatMap((type) => (type === I64 ? [0x42, 1] : [0x41, 1])),
+  0xfe, ...uleb(sub), alignOf(size), ...uleb(offset), ...(result.length ? [0x1a] : []),
+];
+
+test("another isolate grows memory through the module: every atomic instruction refreshes a stale bound", { timeout: 90000 }, (t) => {
+  const probes = {};
+  // Before the instruction: the address itself is in the new page, in the operand or in the memarg.
+  probes.offset = atomicOn([0x41, 0], ATOMICS[6 + 3], 65536 + 64);
+  ATOMICS.forEach((op) => { probes[`before ${op.name}`] = atomicOn(published, op); });
+  // After it: the instruction reads memory elsewhere, then a plain store uses the published address.
+  // V8 checks that store against the stale bound on ARM64 outside macOS.
+  const store = [...published, 0x41, 7, 0x36, 2, 0];
+  ATOMICS.filter(readsMemory).forEach((op) => { probes[`after ${op.name}`] = [...atomicOn([0x41, 32], op), ...store]; });
+  const original = staleProbes(probes);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-guard-stale-"));
+  try {
+    const outcomes = runStaleChild(guardSharedMemory(original).bytes, directory, "guarded");
+    const expected = Object.fromEntries(Object.keys(probes).map((label, i) => [label, i + 2]));
+    assert.deepEqual(outcomes, expected);
+    const stale = Object.entries(runStaleChild(original, directory, "original")).filter(([label, value]) => value !== expected[label]);
+    t.diagnostic(`original Wasm: ${stale.length} of ${Object.keys(probes).length} probes stale or trapped`);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 // One exported memory.grow, the record's only count.
 const growFixture = () => Buffer.from([

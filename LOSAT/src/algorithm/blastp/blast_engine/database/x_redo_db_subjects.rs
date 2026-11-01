@@ -6,10 +6,11 @@ use std::sync::atomic::Ordering;
 use anyhow::Result;
 
 use super::{
-    database_error, encoded_stored, listed_ordinals, rename_to_ranks, BlastpDatabase,
-    BlastpHitList, EncodedProtein, ListedSubjects, XPrelimHsp, PROGRAM,
+    encoded_stored, listed_ordinals, rename_to_ranks, BlastpDatabase, BlastpHitList,
+    EncodedProtein, ListedSubjects, XPrelimHsp,
 };
 use crate::algorithm::blastp::x_redo_subjects::{XDbSubjects, XRedoSubjects};
+use crate::algorithm::common::database::database_error;
 
 /// The residues that the reports of a search read
 /// (`ListedSubjects::x_read_shown`).
@@ -38,7 +39,12 @@ impl ListedSubjects {
         let ordinals = listed_ordinals(hit_lists, x_compact_hit_lists);
         let x_lengths = ordinals
             .iter()
-            .map(|&ordinal| database.db.protein_length(ordinal).map_err(database_error))
+            .map(|&ordinal| {
+                database
+                    .db
+                    .protein_length(ordinal)
+                    .map_err(|error| database_error(error, database.program))
+            })
             .collect::<Result<Vec<u32>>>()?;
         rename_to_ranks(&ordinals, hit_lists, x_compact_hit_lists);
         Ok(Self {
@@ -59,7 +65,7 @@ impl ListedSubjects {
             ordinals: &self.ordinals,
             lengths: &self.x_lengths,
             recounted: &self.x_recounted,
-            program: PROGRAM,
+            program: database.program,
         })
     }
 
@@ -108,7 +114,10 @@ impl ListedSubjects {
                 encoded.push(length_only);
                 continue;
             }
-            let stored = database.db.read_sequence(ordinal).map_err(database_error)?;
+            let stored = database
+                .db
+                .read_sequence(ordinal)
+                .map_err(|error| database_error(error, database.program))?;
             let stored = stored.protein(0);
             encoded.push(encoded_stored(stored));
         }

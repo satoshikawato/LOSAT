@@ -19,6 +19,8 @@ mod tblastn_link_ctx;
 mod tblastn_link_window;
 #[path = "../tblastn_lut_lean.rs"]
 mod tblastn_lut_lean;
+#[path = "../tblastn_newton_drop.rs"]
+mod tblastn_newton_drop;
 #[path = "../tblastn_oid_chunk.rs"]
 mod tblastn_oid_chunk;
 #[path = "../tblastn_reap_idx.rs"]

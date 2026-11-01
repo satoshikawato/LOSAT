@@ -81,8 +81,7 @@ impl HeaderError {
 
 pub(super) const PARSED_SEQIDS: &str =
     "the database stores parsed Seq-ids (makeblastdb -parse_seqids, or a \
-     database distributed by NCBI); LOSAT's search programs read them, its psiblast reads \
-     databases built without -parse_seqids only";
+     database distributed by NCBI), which the decoder of the ordinal ids does not read";
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2218
 // ```c++

@@ -124,7 +124,7 @@ pub struct BlastnArgs {
         long,
         value_name = "NAME",
         conflicts_with_all = ["subject", "subject_loc"],
-        help = "BLAST database name (a nucleotide database without parsed Seq-ids)"
+        help = "BLAST database name (a nucleotide database, with or without parsed Seq-ids)"
     )]
     pub db: Option<String>,
     /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and

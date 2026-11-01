@@ -164,10 +164,10 @@ pub(super) fn x_count_blocks(db: &SeqDb, block_bytes: u64) -> u64 {
 /// The error that the search of `db` with blocks of `BLOCK_BYTES` returns, found by reading and
 /// preparing those blocks in order; `error` (the cut's) when every block reads (an error that does
 /// not come back on a second read).
-pub(super) fn x_one_thread_error(db: &SeqDb, error: anyhow::Error) -> anyhow::Error {
+pub(super) fn x_one_thread_error(db: &SeqDb, program: &str, error: anyhow::Error) -> anyhow::Error {
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, BLOCK_BYTES) {
-        if let Err(first) = read_search_block(db, range) {
+        if let Err(first) = read_search_block(db, range, program) {
             return first;
         }
         next_ordinal = range.end_ordinal();
@@ -242,7 +242,7 @@ where
         if block_bytes == BLOCK_BYTES {
             error
         } else {
-            x_one_thread_error(db, error)
+            x_one_thread_error(db, database.program, error)
         }
     })
 }
